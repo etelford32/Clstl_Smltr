@@ -1,0 +1,56 @@
+name: Deploy Star Simulation
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Pygbag
+        run: |
+          python -m pip install --upgrade pip
+          pip install pygbag
+
+      - name: Build web version
+        run: |
+          pygbag --build main.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./build/web
+          cname: star-sim.yourdomain.com  # Optional: your custom domain
+
+  build-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKER_USERNAME }}/star-simulation:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/star-simulation:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/star-simulation:buildcache,mode=max

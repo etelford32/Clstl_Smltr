@@ -2,6 +2,32 @@
 
 A beautiful 3D star simulation built with Pygame and OpenGL, featuring shader effects and particle-based solar wind animations.
 
+## 🚀 Quick Deploy
+
+**Want to run it live right now?**
+
+```bash
+# Option 1: Run in browser (web version)
+pip install pygbag
+pygbag main.py
+# Opens at http://localhost:8000
+
+# Option 2: Run with Docker + VNC
+docker-compose up
+# Opens at http://localhost:8080
+
+# Option 3: Run locally (full 3D)
+pip install -r requirements.txt
+python star_simulation.py
+```
+
+**Or use the deployment script:**
+```bash
+./deploy.sh
+```
+
+📖 **Full deployment guide**: See [DEPLOYMENT.md](DEPLOYMENT.md) for all deployment options including GitHub Pages, cloud hosting, and more!
+
 ## Features
 
 - **3D Rendered Star**: A fully 3D sphere representing a star with proper lighting and shading

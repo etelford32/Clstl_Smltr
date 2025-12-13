@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Star Simulation - Solar Wind</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+            animation: fadeIn 1s ease-in;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #aaa;
+            font-size: 1.1rem;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            max-width: 1300px;
+            width: 100%;
+        }
+
+        .game-container {
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(255, 140, 0, 0.3);
+            margin-bottom: 20px;
+        }
+
+        #game-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .control-card {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .control-card h3 {
+            color: #ffd700;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .control-card ul {
+            list-style: none;
+        }
+
+        .control-card li {
+            padding: 5px 0;
+            color: #ddd;
+        }
+
+        .control-card kbd {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-family: monospace;
+            margin-right: 5px;
+        }
+
+        .features {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(255, 140, 0, 0.1);
+            border-radius: 10px;
+            border-left: 4px solid #ff8c00;
+        }
+
+        .features h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+        }
+
+        .features ul {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 10px;
+        }
+
+        .features li:before {
+            content: "⭐ ";
+            margin-right: 5px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #ffd700;
+            font-size: 1.2rem;
+        }
+
+        .loading::after {
+            content: "...";
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: "."; }
+            40% { content: ".."; }
+            60%, 100% { content: "..."; }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        footer {
+            margin-top: 30px;
+            text-align: center;
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        a {
+            color: #ffd700;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .deployment-options {
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(100, 100, 255, 0.1);
+            border-radius: 10px;
+            border-left: 4px solid #6666ff;
+        }
+
+        .deployment-options h3 {
+            color: #66ccff;
+            margin-bottom: 15px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 5px;
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🌟 3D Star Simulation</h1>
+        <p class="subtitle">Solar Wind Particle System with OpenGL Shaders</p>
+    </header>
+
+    <div class="container">
+        <div class="game-container">
+            <div id="loading" class="loading">Loading Star Simulation</div>
+            <canvas id="game-canvas" width="1200" height="800" style="display:none;"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-card">
+                <h3>🎮 Controls (3D Version)</h3>
+                <ul>
+                    <li><kbd>←</kbd> <kbd>→</kbd> Rotate horizontally</li>
+                    <li><kbd>↑</kbd> <kbd>↓</kbd> Rotate vertically</li>
+                    <li><kbd>W</kbd> / <kbd>S</kbd> Zoom in/out</li>
+                    <li><kbd>R</kbd> Reset view</li>
+                    <li><kbd>ESC</kbd> Exit</li>
+                </ul>
+            </div>
+
+            <div class="control-card">
+                <h3>🖱️ Controls (2D Web Version)</h3>
+                <ul>
+                    <li>Click and drag to move the star</li>
+                    <li>Watch particles emit from the surface</li>
+                    <li>Particles change color with distance</li>
+                </ul>
+            </div>
+
+            <div class="control-card">
+                <h3>📊 Technical Specs</h3>
+                <ul>
+                    <li>Up to 2,000 particles</li>
+                    <li>60 FPS rendering</li>
+                    <li>GLSL shader effects (desktop)</li>
+                    <li>Real-time physics</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="features">
+            <h3>✨ Features</h3>
+            <ul>
+                <li>3D rendered star sphere with proper lighting</li>
+                <li>Custom GLSL shaders for glow effects</li>
+                <li>Particle-based solar wind simulation</li>
+                <li>Dynamic color gradients (yellow → white → blue)</li>
+                <li>Interactive camera controls</li>
+                <li>Optimized OpenGL rendering</li>
+            </ul>
+        </div>
+
+        <div class="deployment-options">
+            <h3>🚀 Deployment Options</h3>
+            <p>This simulation can be deployed in multiple ways:</p>
+            <br>
+            <a href="#" class="btn" onclick="alert('Install Docker and run: docker-compose up')">🐳 Docker + VNC</a>
+            <a href="https://github.com/etelford32/Clstl_Smltr" class="btn">📦 Download Desktop Version</a>
+            <a href="#" class="btn" onclick="showInstallInstructions()">💻 Local Installation</a>
+        </div>
+    </div>
+
+    <footer>
+        <p>Created with Pygame + OpenGL | <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a></p>
+    </footer>
+
+    <script>
+        // Pygbag will inject the game here when built
+        // For now, show instructions
+
+        function showInstallInstructions() {
+            alert(`Local Installation:
+
+1. Clone the repository:
+   git clone https://github.com/etelford32/Clstl_Smltr.git
+
+2. Install dependencies:
+   pip install -r requirements.txt
+
+3. Run the simulation:
+   python star_simulation.py
+
+For web version with Pygbag:
+   pip install pygbag
+   pygbag main.py
+   # Then open http://localhost:8000`);
+        }
+
+        // Hide loading when canvas is ready
+        window.addEventListener('load', function() {
+            const canvas = document.getElementById('game-canvas');
+            const loading = document.getElementById('loading');
+
+            // For demonstration, show the canvas after a delay
+            setTimeout(() => {
+                loading.style.display = 'none';
+                canvas.style.display = 'block';
+                loading.textContent = 'Canvas ready! The Pygbag build will load the game here.';
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

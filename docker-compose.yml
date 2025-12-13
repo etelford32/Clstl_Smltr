@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  star-simulation:
+    build: .
+    ports:
+      - "5900:5900"  # VNC port
+    environment:
+      - DISPLAY=:99
+    restart: unless-stopped
+    container_name: star-simulation
+
+  # Optional: web-based VNC viewer
+  novnc:
+    image: theasp/novnc:latest
+    ports:
+      - "8080:8080"  # Web VNC viewer
+    environment:
+      - DISPLAY_WIDTH=1200
+      - DISPLAY_HEIGHT=800
+      - RUN_XTERM=no
+    depends_on:
+      - star-simulation
+    links:
+      - star-simulation:vnc
+    command: --vnc star-simulation:5900 --listen 8080
