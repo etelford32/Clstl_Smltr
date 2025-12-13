@@ -6,6 +6,9 @@ Create and explore beautiful cosmic objects! Features both a full 3D star simula
 
 **Design your own stars, black holes, nebula, planets, and moons!**
 
+### 🌐 **[Try it Live in Your Browser!](https://etelford32.github.io/Clstl_Smltr/)** 🌐
+
+Or run locally:
 ```bash
 python celestial_studio.py
 ```

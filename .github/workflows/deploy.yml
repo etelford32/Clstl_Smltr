@@ -1,36 +1,54 @@
-name: Deploy Star Simulation
+name: Deploy Celestial Studio to GitHub Pages
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 jobs:
-  build-web:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install Pygbag
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pygbag
 
-      - name: Build web version
+      - name: Build Celestial Studio (web version)
         run: |
-          pygbag --build main.py
+          pygbag --build celestial_studio.py
+
+      - name: Create index page
+        run: |
+          cat > build/web/README.md << 'EOF'
+          # Celestial Object Creator Studio
+
+          Live interactive creator for designing cosmic objects!
+
+          Visit the studio at: https://etelford32.github.io/Clstl_Smltr/
+          EOF
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/web
-          cname: star-sim.yourdomain.com  # Optional: your custom domain
+          user_name: 'github-actions[bot]'
+          user_email: 'github-actions[bot]@users.noreply.github.com'
+          commit_message: 'Deploy Celestial Studio to GitHub Pages'
 
   build-docker:
     runs-on: ubuntu-latest
