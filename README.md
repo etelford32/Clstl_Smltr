@@ -1,4 +1,27 @@
-# 3D Star Simulation with Solar Wind
+# Celestial Simulator
+
+Create and explore beautiful cosmic objects! Features both a full 3D star simulation and an interactive creator studio.
+
+## 🎨 NEW: Celestial Object Creator Studio
+
+**Design your own stars, black holes, nebula, planets, and moons!**
+
+```bash
+python celestial_studio.py
+```
+
+Create custom celestial objects with:
+- ⭐ **Stars** with adjustable temperature, glow, and solar wind
+- 🕳️ **Black Holes** with accretion disks and gravitational effects
+- 🌌 **Nebula** with flowing particle clouds
+- 🌍 **Planets** with atmospheres and rings
+- 🌙 **Moons** and more!
+
+📖 **Full studio guide**: See [STUDIO_GUIDE.md](STUDIO_GUIDE.md)
+
+---
+
+## 🌟 3D Star Simulation
 
 A beautiful 3D star simulation built with Pygame and OpenGL, featuring shader effects and particle-based solar wind animations.
 

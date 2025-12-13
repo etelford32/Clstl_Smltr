@@ -35,3 +35,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Saved scenes
+celestial_scene.json
+*.scene.json
