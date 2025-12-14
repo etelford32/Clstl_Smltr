@@ -3,7 +3,13 @@ use bevy::app::AppExit;
 use bevy::input::Input;
 use bevy::pbr::NotShadowCaster;
 use bevy::render::mesh::shape::UVSphere;
+
+// Use different RNG for native vs WASM
+#[cfg(not(target_arch = "wasm32"))]
 use rand::Rng;
+
+#[cfg(target_arch = "wasm32")]
+use std::f32::consts::{PI, TAU};
 
 // Constants for the star simulation
 const STAR_RADIUS: f32 = 2.0;
@@ -172,15 +178,31 @@ fn spawn_particles(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut spawner: ResMut<ParticleSpawner>,
 ) {
-    let mut rng = rand::thread_rng();
-
     // Spawn particles up to the limit
     let to_spawn = PARTICLE_SPAWN_RATE.min(MAX_PARTICLES - spawner.particle_count);
 
     for _ in 0..to_spawn {
         // Random position on sphere surface
-        let theta = rng.gen_range(0.0..std::f32::consts::TAU);
-        let phi = rng.gen_range(0.0..std::f32::consts::PI);
+        #[cfg(not(target_arch = "wasm32"))]
+        let (theta, phi, speed, lifetime) = {
+            let mut rng = rand::thread_rng();
+            (
+                rng.gen_range(0.0..std::f32::consts::TAU),
+                rng.gen_range(0.0..std::f32::consts::PI),
+                rng.gen_range(1.5..3.0),
+                rng.gen_range(2.0..PARTICLE_LIFETIME),
+            )
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let (theta, phi, speed, lifetime) = {
+            (
+                fastrand::f32() * TAU,
+                fastrand::f32() * PI,
+                1.5 + fastrand::f32() * 1.5,
+                2.0 + fastrand::f32() * (PARTICLE_LIFETIME - 2.0),
+            )
+        };
 
         let x = STAR_RADIUS * phi.sin() * theta.cos();
         let y = STAR_RADIUS * phi.sin() * theta.sin();
@@ -189,12 +211,8 @@ fn spawn_particles(
         let position = Vec3::new(x, y, z);
         let direction = position.normalize();
 
-        // Random outward velocity
-        let speed = rng.gen_range(1.5..3.0);
+        // Outward velocity
         let velocity = direction * speed;
-
-        // Random lifetime
-        let lifetime = rng.gen_range(2.0..PARTICLE_LIFETIME);
 
         // Create particle mesh (small sphere)
         let particle_mesh = meshes.add(
