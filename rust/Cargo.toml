@@ -4,26 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.12", default-features = false, features = [
+bevy = { version = "0.17", default-features = false, features = [
     "bevy_winit",
     "bevy_core_pipeline",
     "bevy_pbr",
     "bevy_render",
     "bevy_asset",
-    "bevy_scene",
     "png",
     "tonemapping_luts",
+    "zstd_rust",
 ] }
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-bevy = { version = "0.12", default-features = false, features = ["x11"] }
+bevy = { version = "0.17", default-features = false, features = ["x11"] }
 rand = "0.8"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 web-sys = "0.3"
-bevy = { version = "0.12", default-features = false, features = ["webgl2"] }
+bevy = { version = "0.17", default-features = false, features = ["webgl2"] }
 fastrand = "2.0"
 
 # Optimize for better performance in dev builds
