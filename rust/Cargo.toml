@@ -14,21 +14,17 @@ bevy = { version = "0.12", default-features = false, features = [
     "png",
     "tonemapping_luts",
 ] }
-rand = "0.8"
 
 # Platform-specific dependencies
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 bevy = { version = "0.12", default-features = false, features = ["x11"] }
+rand = "0.8"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 web-sys = "0.3"
 bevy = { version = "0.12", default-features = false, features = ["webgl2"] }
-
-# Enable WASM support for random number generation
-# Force specific versions with proper WASM support
-getrandom = { version = "0.2", features = ["js"] }
-rand = { version = "0.8", features = ["getrandom"] }
+fastrand = "2.0"
 
 # Optimize for better performance in dev builds
 [profile.dev]

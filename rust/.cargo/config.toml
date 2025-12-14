@@ -5,5 +5,8 @@
 # The wasm_js cfg flag enables getrandom's JS backend
 rustflags = [
     "--cfg=web_sys_unstable_apis",
-    "--cfg=wasm_js",
 ]
+
+# Force all dependencies to use JavaScript-compatible getrandom
+[env]
+CARGO_BUILD_RUSTFLAGS = "--cfg=getrandom_backend=\"js\""
