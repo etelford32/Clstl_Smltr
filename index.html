@@ -252,16 +252,39 @@
     <!-- Python Version Container -->
     <div id="python-version" class="container version-container active">
         <div class="game-container">
-            <div id="loading" class="loading">Loading Star Simulation</div>
-            <canvas id="game-canvas" width="1200" height="800" style="display:none;"></canvas>
+            <div style="padding: 60px 40px; text-align: center; background: rgba(0,0,0,0.7); border-radius: 10px;">
+                <h2 style="color: #ffd700; margin-bottom: 20px;">🐍 Python 3D Star Simulation</h2>
+                <p style="font-size: 1.2em; margin-bottom: 30px; color: #ddd;">
+                    This version runs natively on your desktop with full OpenGL support
+                </p>
+                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 8px; border-left: 4px solid #ffd700; margin: 20px 0;">
+                    <h3 style="color: #ffd700; margin-bottom: 15px;">✨ What You Get</h3>
+                    <ul style="list-style: none; text-align: left; max-width: 600px; margin: 0 auto;">
+                        <li style="padding: 8px 0;"><strong>🎨 GLSL Shaders:</strong> Custom vertex & fragment shaders for realistic glow</li>
+                        <li style="padding: 8px 0;"><strong>⚡ 2,000 Particles:</strong> Real-time solar wind simulation at 60 FPS</li>
+                        <li style="padding: 8px 0;"><strong>🎮 Interactive:</strong> Full 3D camera controls (orbit, zoom, reset)</li>
+                        <li style="padding: 8px 0;"><strong>🌈 Dynamic Colors:</strong> Particles transition from yellow → white → blue</li>
+                    </ul>
+                </div>
+                <div style="margin-top: 30px;">
+                    <a href="https://github.com/etelford32/Clstl_Smltr/archive/refs/heads/main.zip" class="btn" style="margin: 10px;">📥 Download Source Code</a>
+                    <a href="https://github.com/etelford32/Clstl_Smltr" target="_blank" class="btn" style="margin: 10px;">📖 View on GitHub</a>
+                </div>
+                <div style="margin-top: 30px; padding: 20px; background: rgba(100,100,255,0.1); border-radius: 8px; border-left: 4px solid #6666ff;">
+                    <h4 style="color: #66ccff; margin-bottom: 10px;">Quick Start</h4>
+                    <pre style="text-align: left; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 0.9em;"><code style="color: #4ade80;">git clone https://github.com/etelford32/Clstl_Smltr.git
+cd Clstl_Smltr
+pip install -r requirements.txt
+python star_simulation.py</code></pre>
+                </div>
+            </div>
         </div>
 
         <div class="controls">
             <div class="control-card">
-                <h3>🎮 Controls (3D Version)</h3>
+                <h3>🎮 Desktop Controls</h3>
                 <ul>
-                    <li><kbd>←</kbd> <kbd>→</kbd> Rotate horizontally</li>
-                    <li><kbd>↑</kbd> <kbd>↓</kbd> Rotate vertically</li>
+                    <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> Rotate camera</li>
                     <li><kbd>W</kbd> / <kbd>S</kbd> Zoom in/out</li>
                     <li><kbd>R</kbd> Reset view</li>
                     <li><kbd>ESC</kbd> Exit</li>
@@ -269,44 +292,23 @@
             </div>
 
             <div class="control-card">
-                <h3>🖱️ Controls (2D Web Version)</h3>
+                <h3>📦 Available Versions</h3>
                 <ul>
-                    <li>Click and drag to move the star</li>
-                    <li>Watch particles emit from the surface</li>
-                    <li>Particles change color with distance</li>
+                    <li><strong>Desktop (Full 3D):</strong> Download and run locally</li>
+                    <li><strong>Docker:</strong> Run via docker-compose up</li>
+                    <li><strong>Creator Studio:</strong> python celestial_studio.py</li>
                 </ul>
             </div>
 
             <div class="control-card">
                 <h3>📊 Technical Specs</h3>
                 <ul>
-                    <li>Up to 2,000 particles</li>
+                    <li>2,000+ particles</li>
                     <li>60 FPS rendering</li>
-                    <li>GLSL shader effects (desktop)</li>
+                    <li>GLSL shader effects</li>
                     <li>Real-time physics</li>
                 </ul>
             </div>
-        </div>
-
-        <div class="features">
-            <h3>✨ Features</h3>
-            <ul>
-                <li>3D rendered star sphere with proper lighting</li>
-                <li>Custom GLSL shaders for glow effects</li>
-                <li>Particle-based solar wind simulation</li>
-                <li>Dynamic color gradients (yellow → white → blue)</li>
-                <li>Interactive camera controls</li>
-                <li>Optimized OpenGL rendering</li>
-            </ul>
-        </div>
-
-        <div class="deployment-options">
-            <h3>🚀 Deployment Options</h3>
-            <p>This simulation can be deployed in multiple ways:</p>
-            <br>
-            <a href="#" class="btn" onclick="alert('Install Docker and run: docker-compose up')">🐳 Docker + VNC</a>
-            <a href="https://github.com/etelford32/Clstl_Smltr" class="btn">📦 Download Desktop Version</a>
-            <a href="#" class="btn" onclick="showInstallInstructions()">💻 Local Installation</a>
         </div>
     </div>
 
@@ -363,7 +365,14 @@
     </div>
 
     <footer>
-        <p>Created with Pygame + OpenGL | <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a></p>
+        <p>
+            Python: Pygame + OpenGL | Rust: Bevy + WASM |
+            <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a> |
+            <a href="https://github.com/etelford32/Clstl_Smltr/issues">Report Issues</a>
+        </p>
+        <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
+            Deployed on Vercel | Auto-deploys on every commit
+        </p>
     </footer>
 
     <script>
@@ -386,38 +395,10 @@
             event.target.classList.add('active');
         }
 
-        // Pygbag will inject the game here when built
-        // For now, show instructions
-
-        function showInstallInstructions() {
-            alert(`Local Installation:
-
-1. Clone the repository:
-   git clone https://github.com/etelford32/Clstl_Smltr.git
-
-2. Install dependencies:
-   pip install -r requirements.txt
-
-3. Run the simulation:
-   python star_simulation.py
-
-For web version with Pygbag:
-   pip install pygbag
-   pygbag main.py
-   # Then open http://localhost:8000`);
-        }
-
-        // Hide loading when canvas is ready
-        window.addEventListener('load', function() {
-            const canvas = document.getElementById('game-canvas');
-            const loading = document.getElementById('loading');
-
-            // For demonstration, show the canvas after a delay
-            setTimeout(() => {
-                loading.style.display = 'none';
-                canvas.style.display = 'block';
-                loading.textContent = 'Canvas ready! The Pygbag build will load the game here.';
-            }, 1000);
+        // Analytics - track version switches
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Celestial Simulator loaded successfully');
+            console.log('Available versions: Python (Desktop), Rust/WASM (Coming Soon)');
         });
     </script>
 </body>

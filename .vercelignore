@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+
+# Rust
+rust/target/
+rust/Cargo.lock
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile
+docker-compose.yml
+
+# Tests
+test_*.py
+*_test.py
+
+# Documentation (optional - comment out if you want to deploy docs)
+# *.md
+# DEPLOYMENT.md
+# QUICK_START.md
