@@ -11,11 +11,24 @@ bevy = { version = "0.12", default-features = false, features = [
     "bevy_render",
     "bevy_asset",
     "bevy_scene",
-    "x11",
     "png",
     "tonemapping_luts",
 ] }
 rand = "0.8"
+
+# Platform-specific dependencies
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy = { version = "0.12", default-features = false, features = ["x11"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+web-sys = "0.3"
+bevy = { version = "0.12", default-features = false, features = ["webgl2"] }
+
+# Enable WASM support for random number generation
+# Force specific versions with proper WASM support
+getrandom = { version = "0.2", features = ["js"] }
+rand = { version = "0.8", features = ["getrandom"] }
 
 # Optimize for better performance in dev builds
 [profile.dev]
@@ -24,3 +37,9 @@ opt-level = 1
 # Fast compile times in development
 [profile.dev.package."*"]
 opt-level = 3
+
+# Optimize for WASM release builds
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = "thin"        # Enable link-time optimization
+codegen-units = 1   # Better optimization, slower compile

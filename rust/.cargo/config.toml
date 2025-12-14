@@ -1,0 +1,9 @@
+# Cargo configuration for WASM builds
+
+[target.wasm32-unknown-unknown]
+# Enable JavaScript support for random number generation in WASM
+# The wasm_js cfg flag enables getrandom's JS backend
+rustflags = [
+    "--cfg=web_sys_unstable_apis",
+    "--cfg=wasm_js",
+]
