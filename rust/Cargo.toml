@@ -1,0 +1,26 @@
+[package]
+name = "star_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.12", default-features = false, features = [
+    "bevy_winit",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_render",
+    "bevy_asset",
+    "bevy_scene",
+    "x11",
+    "png",
+    "tonemapping_luts",
+] }
+rand = "0.8"
+
+# Optimize for better performance in dev builds
+[profile.dev]
+opt-level = 1
+
+# Fast compile times in development
+[profile.dev.package."*"]
+opt-level = 3
