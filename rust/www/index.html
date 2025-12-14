@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Celestial Star Renderer - Rust/WASM</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0f0f1e 100%);
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        header {
+            text-align: center;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            width: 100%;
+            backdrop-filter: blur(10px);
+            border-bottom: 2px solid rgba(255, 215, 0, 0.3);
+        }
+
+        h1 {
+            font-size: 2.5em;
+            background: linear-gradient(90deg, #ffd700, #ffed4e, #ffd700);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+        }
+
+        .subtitle {
+            font-size: 1.2em;
+            color: #a0a0a0;
+            margin-bottom: 15px;
+        }
+
+        #canvas-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            outline: none;
+            box-shadow: 0 0 40px rgba(255, 215, 0, 0.3);
+            border: 2px solid rgba(255, 215, 0, 0.2);
+            border-radius: 8px;
+            max-width: 95vw;
+            max-height: 70vh;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 40px;
+            border-radius: 12px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+        }
+
+        #loading.hidden {
+            display: none;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 215, 0, 0.1);
+            border-top: 4px solid #ffd700;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .controls {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            margin: 20px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 215, 0, 0.2);
+            max-width: 800px;
+            backdrop-filter: blur(10px);
+        }
+
+        .controls h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            font-size: 0.95em;
+        }
+
+        .control-item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            background: rgba(255, 215, 0, 0.05);
+            border-radius: 4px;
+        }
+
+        .key {
+            background: #2a2a3a;
+            padding: 5px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-weight: bold;
+            color: #ffd700;
+            margin-right: 12px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .tech-badge {
+            display: inline-block;
+            background: rgba(255, 215, 0, 0.1);
+            color: #ffd700;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-left: 8px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+        }
+
+        footer {
+            padding: 15px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            background: rgba(0, 0, 0, 0.3);
+            width: 100%;
+        }
+
+        footer a {
+            color: #ffd700;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>✨ Celestial Star Renderer ✨</h1>
+        <div class="subtitle">
+            High-Performance 3D Graphics in Your Browser
+            <span class="tech-badge">Rust</span>
+            <span class="tech-badge">WebAssembly</span>
+            <span class="tech-badge">Bevy Engine</span>
+        </div>
+    </header>
+
+    <div id="canvas-container">
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>Loading stellar renderer...</p>
+            <p style="font-size: 0.85em; color: #888; margin-top: 10px;">
+                Compiling WebAssembly module
+            </p>
+        </div>
+        <canvas id="bevy-canvas"></canvas>
+    </div>
+
+    <div class="controls">
+        <h3>🎮 Controls</h3>
+        <div class="control-grid">
+            <div class="control-item">
+                <span class="key">← → ↑ ↓</span>
+                <span>Rotate Camera</span>
+            </div>
+            <div class="control-item">
+                <span class="key">W / S</span>
+                <span>Zoom In/Out</span>
+            </div>
+            <div class="control-item">
+                <span class="key">R</span>
+                <span>Reset View</span>
+            </div>
+            <div class="control-item">
+                <span class="key">ESC</span>
+                <span>Exit (Desktop)</span>
+            </div>
+        </div>
+        <p style="margin-top: 15px; font-size: 0.9em; color: #aaa;">
+            ⭐ Watch the solar wind particles flowing from the star's surface
+        </p>
+    </div>
+
+    <footer>
+        <p>
+            Part of the <a href="https://github.com/etelford32/Clstl_Smltr" target="_blank">Clstl_Smltr</a> project
+            | Built with Rust 🦀 + Bevy 🕊️
+        </p>
+    </footer>
+
+    <script type="module">
+        import init from './star_renderer.js';
+
+        async function run() {
+            try {
+                await init();
+                document.getElementById('loading').classList.add('hidden');
+            } catch (error) {
+                console.error('Failed to initialize WASM:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div style="color: #ff6b6b;">
+                        <h3>❌ Failed to load</h3>
+                        <p style="margin-top: 10px;">Error: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        run();
+    </script>
+</body>
+</html>

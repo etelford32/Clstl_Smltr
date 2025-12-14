@@ -2,6 +2,12 @@
 /target/
 Cargo.lock
 
+# WASM build outputs (keep index.html template)
+www/*.wasm
+www/*.js
+www/snippets/
+www/.gitignore
+
 # IDE files
 .vscode/
 .idea/
