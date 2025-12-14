@@ -241,72 +241,46 @@
 <body>
     <header>
         <h1>🌟 Celestial Simulator</h1>
-        <p class="subtitle">Interactive 3D Star Simulations - Python & Rust/WASM</p>
+        <p class="subtitle">Interactive 3D Star Simulations - Three.js & Rust/WASM</p>
     </header>
 
     <div class="version-selector" style="text-align: center; margin-bottom: 30px;">
-        <button class="version-btn active" onclick="showVersion('python')">🐍 Python Version</button>
+        <button class="version-btn active" onclick="showVersion('python')">⚡ Three.js Version</button>
         <button class="version-btn" onclick="showVersion('rust')">🦀 Rust/WASM Version</button>
     </div>
 
     <!-- Python Version Container -->
     <div id="python-version" class="container version-container active">
         <div class="game-container">
-            <div style="padding: 60px 40px; text-align: center; background: rgba(0,0,0,0.7); border-radius: 10px;">
-                <h2 style="color: #ffd700; margin-bottom: 20px;">🐍 Python 3D Star Simulation</h2>
-                <p style="font-size: 1.2em; margin-bottom: 30px; color: #ddd;">
-                    This version runs natively on your desktop with full OpenGL support
-                </p>
-                <div style="background: rgba(255,215,0,0.1); padding: 20px; border-radius: 8px; border-left: 4px solid #ffd700; margin: 20px 0;">
-                    <h3 style="color: #ffd700; margin-bottom: 15px;">✨ What You Get</h3>
-                    <ul style="list-style: none; text-align: left; max-width: 600px; margin: 0 auto;">
-                        <li style="padding: 8px 0;"><strong>🎨 GLSL Shaders:</strong> Custom vertex & fragment shaders for realistic glow</li>
-                        <li style="padding: 8px 0;"><strong>⚡ 2,000 Particles:</strong> Real-time solar wind simulation at 60 FPS</li>
-                        <li style="padding: 8px 0;"><strong>🎮 Interactive:</strong> Full 3D camera controls (orbit, zoom, reset)</li>
-                        <li style="padding: 8px 0;"><strong>🌈 Dynamic Colors:</strong> Particles transition from yellow → white → blue</li>
-                    </ul>
-                </div>
-                <div style="margin-top: 30px;">
-                    <a href="https://github.com/etelford32/Clstl_Smltr/archive/refs/heads/main.zip" class="btn" style="margin: 10px;">📥 Download Source Code</a>
-                    <a href="https://github.com/etelford32/Clstl_Smltr" target="_blank" class="btn" style="margin: 10px;">📖 View on GitHub</a>
-                </div>
-                <div style="margin-top: 30px; padding: 20px; background: rgba(100,100,255,0.1); border-radius: 8px; border-left: 4px solid #6666ff;">
-                    <h4 style="color: #66ccff; margin-bottom: 10px;">Quick Start</h4>
-                    <pre style="text-align: left; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 0.9em;"><code style="color: #4ade80;">git clone https://github.com/etelford32/Clstl_Smltr.git
-cd Clstl_Smltr
-pip install -r requirements.txt
-python star_simulation.py</code></pre>
-                </div>
-            </div>
+            <iframe src="star3d.html" title="Three.js 3D Star Renderer" style="width: 100%; height: 800px;"></iframe>
         </div>
 
         <div class="controls">
             <div class="control-card">
-                <h3>🎮 Desktop Controls</h3>
+                <h3>🎮 Browser Controls</h3>
                 <ul>
-                    <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> Rotate camera</li>
-                    <li><kbd>W</kbd> / <kbd>S</kbd> Zoom in/out</li>
-                    <li><kbd>R</kbd> Reset view</li>
-                    <li><kbd>ESC</kbd> Exit</li>
+                    <li><strong>Click + Drag:</strong> Rotate camera</li>
+                    <li><strong>Scroll:</strong> Zoom in/out</li>
+                    <li><strong>Auto-rotating:</strong> Star slowly spins</li>
                 </ul>
             </div>
 
             <div class="control-card">
-                <h3>📦 Available Versions</h3>
+                <h3>✨ Features</h3>
                 <ul>
-                    <li><strong>Desktop (Full 3D):</strong> Download and run locally</li>
-                    <li><strong>Docker:</strong> Run via docker-compose up</li>
-                    <li><strong>Creator Studio:</strong> python celestial_studio.py</li>
+                    <li><strong>Three.js WebGL:</strong> Hardware-accelerated 3D</li>
+                    <li><strong>2,000 Particles:</strong> Solar wind simulation</li>
+                    <li><strong>Color Gradients:</strong> Yellow → White → Blue</li>
+                    <li><strong>Pulsing Glow:</strong> Dynamic emission</li>
                 </ul>
             </div>
 
             <div class="control-card">
-                <h3>📊 Technical Specs</h3>
+                <h3>📦 Also Available</h3>
                 <ul>
-                    <li>2,000+ particles</li>
-                    <li>60 FPS rendering</li>
-                    <li>GLSL shader effects</li>
-                    <li>Real-time physics</li>
+                    <li><a href="https://github.com/etelford32/Clstl_Smltr" style="color: #ffd700;">Desktop Version</a> (Python + OpenGL)</li>
+                    <li><a href="https://github.com/etelford32/Clstl_Smltr" style="color: #ffd700;">Creator Studio</a> (Design objects)</li>
+                    <li><strong>Rust/WASM:</strong> Coming soon! →</li>
                 </ul>
             </div>
         </div>
@@ -366,12 +340,12 @@ python star_simulation.py</code></pre>
 
     <footer>
         <p>
-            Python: Pygame + OpenGL | Rust: Bevy + WASM |
+            Three.js WebGL | Rust + Bevy + WASM | Python Desktop Version Available |
             <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a> |
             <a href="https://github.com/etelford32/Clstl_Smltr/issues">Report Issues</a>
         </p>
         <p style="margin-top: 10px; font-size: 0.85em; color: #666;">
-            Deployed on Vercel | Auto-deploys on every commit
+            Deployed on Vercel | Auto-deploys on every commit | v1.0
         </p>
     </footer>
 

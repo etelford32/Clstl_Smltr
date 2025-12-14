@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Star Simulator</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            height: 100vh;
+            background: linear-gradient(135deg, #000000 0%, #0a0a1a 50%, #000510 100%);
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #ffd700;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+            z-index: 100;
+        }
+        #info h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        #info p {
+            margin: 5px 0;
+            color: #ddd;
+        }
+        kbd {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="info">
+        <h3>🌟 3D Star Simulator</h3>
+        <p><kbd>Click + Drag</kbd> Rotate camera</p>
+        <p><kbd>Scroll</kbd> Zoom in/out</p>
+        <p><strong>Particles:</strong> <span id="particle-count">0</span>/2000</p>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Camera position
+        camera.position.set(0, 5, 15);
+
+        // Orbit controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 5;
+        controls.maxDistance = 50;
+
+        // Star setup
+        const STAR_RADIUS = 2;
+        const starGeometry = new THREE.SphereGeometry(STAR_RADIUS, 64, 64);
+        const starMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffaa00,
+            emissive: 0xffaa00,
+            emissiveIntensity: 2,
+            roughness: 0.5,
+            metalness: 0.3
+        });
+        const star = new THREE.Mesh(starGeometry, starMaterial);
+        scene.add(star);
+
+        // Star glow
+        const glowGeometry = new THREE.SphereGeometry(STAR_RADIUS * 1.15, 32, 32);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffdd66,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.BackSide
+        });
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        scene.add(glow);
+
+        // Point light at star center
+        const pointLight = new THREE.PointLight(0xffaa00, 3, 100);
+        pointLight.position.set(0, 0, 0);
+        scene.add(pointLight);
+
+        // Ambient light
+        const ambientLight = new THREE.AmbientLight(0x333366, 0.3);
+        scene.add(ambientLight);
+
+        // Particle system
+        const MAX_PARTICLES = 2000;
+        const SPAWN_RATE = 10;
+        const particles = [];
+
+        class Particle {
+            constructor() {
+                // Random position on sphere surface
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+
+                this.position = new THREE.Vector3(
+                    STAR_RADIUS * Math.sin(phi) * Math.cos(theta),
+                    STAR_RADIUS * Math.sin(phi) * Math.sin(theta),
+                    STAR_RADIUS * Math.cos(phi)
+                );
+
+                // Velocity away from star
+                this.velocity = this.position.clone().normalize().multiplyScalar(0.02 + Math.random() * 0.03);
+
+                // Lifetime
+                this.maxLife = 2 + Math.random() * 1;
+                this.life = this.maxLife;
+
+                // Visual
+                const particleGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+                const particleMaterial = new THREE.MeshBasicMaterial({
+                    color: 0xffffaa,
+                    transparent: true,
+                    opacity: 1
+                });
+                this.mesh = new THREE.Mesh(particleGeometry, particleMaterial);
+                this.mesh.position.copy(this.position);
+                scene.add(this.mesh);
+            }
+
+            update(delta) {
+                this.life -= delta;
+
+                if (this.life <= 0) {
+                    scene.remove(this.mesh);
+                    return false;
+                }
+
+                // Update position
+                this.position.add(this.velocity.clone().multiplyScalar(delta * 60));
+                this.mesh.position.copy(this.position);
+
+                // Update color and opacity based on life
+                const lifeRatio = this.life / this.maxLife;
+                if (lifeRatio > 0.7) {
+                    this.mesh.material.color.setHex(0xffffaa); // Yellow-white
+                } else if (lifeRatio > 0.3) {
+                    this.mesh.material.color.setHex(0xeeeeff); // White-blue
+                } else {
+                    this.mesh.material.color.setHex(0x9999ff); // Blue
+                }
+                this.mesh.material.opacity = lifeRatio;
+
+                return true;
+            }
+        }
+
+        // Spawn particles
+        function spawnParticles() {
+            const toSpawn = Math.min(SPAWN_RATE, MAX_PARTICLES - particles.length);
+            for (let i = 0; i < toSpawn; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        // Animation loop
+        const clock = new THREE.Clock();
+        let time = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+            time += delta;
+
+            // Rotate star slowly
+            star.rotation.y += delta * 0.1;
+            glow.rotation.y += delta * 0.15;
+
+            // Pulse star glow
+            const pulse = Math.sin(time * 2) * 0.3 + 1.0;
+            starMaterial.emissiveIntensity = 1.5 * pulse;
+            glowMaterial.opacity = 0.2 * pulse;
+
+            // Spawn new particles
+            spawnParticles();
+
+            // Update particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                if (!particles[i].update(delta)) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Update particle count display
+            document.getElementById('particle-count').textContent = particles.length;
+
+            // Update controls
+            controls.update();
+
+            // Render
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation
+        animate();
+
+        console.log('🌟 3D Star Simulator loaded!');
+        console.log('Controls: Click+Drag to rotate, Scroll to zoom');
+    </script>
+</body>
+</html>
