@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 use bevy::app::AppExit;
-use bevy::input::Input;
-use bevy::pbr::NotShadowCaster;
-use bevy::render::mesh::shape::UVSphere;
+use bevy::input::ButtonInput;
+use bevy::window::WindowResolution;
 
 // Use different RNG for native vs WASM
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,7 +12,7 @@ use std::f32::consts::{PI, TAU};
 
 // Constants for the star simulation
 const STAR_RADIUS: f32 = 2.0;
-const STAR_COLOR: Color = Color::rgb(1.0, 0.9, 0.3); // Yellow-orange star
+const STAR_COLOR: Color = Color::srgb(1.0, 0.9, 0.3); // Yellow-orange star
 const MAX_PARTICLES: usize = 2000;
 const PARTICLE_SPAWN_RATE: usize = 10; // Particles per frame
 const PARTICLE_LIFETIME: f32 = 3.0; // Seconds
@@ -23,12 +22,12 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Celestial Star Renderer - Rust PoC".to_string(),
-                resolution: (1280.0, 720.0).into(),
+                resolution: WindowResolution::new(1280, 720),
                 ..default()
             }),
             ..default()
         }))
-        .insert_resource(ClearColor(Color::rgb(0.01, 0.01, 0.02)))
+        .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .insert_resource(ParticleSpawner::default())
         .add_systems(Startup, setup)
         .add_systems(Update, (
@@ -72,45 +71,40 @@ struct ParticleSpawner {
     particle_count: usize,
 }
 
+// Component to store material handle
+#[derive(Component)]
+struct MaterialHandle(Handle<StandardMaterial>);
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Create the star sphere
-    let star_mesh = meshes.add(
-        UVSphere {
-            radius: STAR_RADIUS,
-            sectors: 64,
-            stacks: 32,
-        }
-        .into(),
-    );
+    let star_mesh = meshes.add(Sphere::new(STAR_RADIUS).mesh().uv(64, 32));
 
     // Star material with emissive glow
     let star_material = materials.add(StandardMaterial {
         base_color: STAR_COLOR,
-        emissive: STAR_COLOR * 2.0,
+        emissive: LinearRgba::from(STAR_COLOR) * 2.0,
         ..default()
     });
 
-    // Spawn the star
+    // Spawn the star with new required components system
     commands.spawn((
-        PbrBundle {
-            mesh: star_mesh,
-            material: star_material,
-            transform: Transform::from_xyz(0.0, 0.0, 0.0),
-            ..default()
-        },
+        Mesh3d(star_mesh),
+        MeshMaterial3d(star_material.clone()),
+        Transform::from_xyz(0.0, 0.0, 0.0),
         Star {
             pulse_speed: 2.0,
             base_intensity: 2.0,
         },
+        MaterialHandle(star_material),
     ));
 
     // Add a point light at the star's center
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
+    commands.spawn((
+        PointLight {
             intensity: 500_000.0,
             color: STAR_COLOR,
             range: 100.0,
@@ -118,23 +112,21 @@ fn setup(
             shadows_enabled: false,
             ..default()
         },
-        transform: Transform::from_xyz(0.0, 0.0, 0.0),
-        ..default()
-    });
+        Transform::from_xyz(0.0, 0.0, 0.0),
+    ));
 
     // Add ambient light
     commands.insert_resource(AmbientLight {
-        color: Color::rgb(0.1, 0.1, 0.15),
-        brightness: 0.3,
+        color: Color::srgb(0.1, 0.1, 0.15),
+        brightness: 300.0,
+        affects_lightmapped_meshes: false,
     });
 
     // Create the camera with controller
     commands.spawn((
-        Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 5.0, 15.0)
-                .looking_at(Vec3::ZERO, Vec3::Y),
-            ..default()
-        },
+        Camera3d::default(),
+        Transform::from_xyz(0.0, 5.0, 15.0)
+            .looking_at(Vec3::ZERO, Vec3::Y),
         CameraController {
             rotation_speed: 2.0,
             zoom_speed: 10.0,
@@ -159,14 +151,14 @@ fn setup(
 // Update star glow with pulsing effect
 fn update_star_glow(
     time: Res<Time>,
-    mut query: Query<(&Star, &Handle<StandardMaterial>)>,
+    mut query: Query<(&Star, &MaterialHandle)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (star, material_handle) in query.iter_mut() {
-        if let Some(material) = materials.get_mut(material_handle) {
-            let pulse = (time.elapsed_seconds() * star.pulse_speed).sin() * 0.3 + 1.0;
+    for (star, mat_handle) in query.iter_mut() {
+        if let Some(material) = materials.get_mut(&mat_handle.0) {
+            let pulse = (time.elapsed_secs() * star.pulse_speed).sin() * 0.3 + 1.0;
             let intensity = star.base_intensity * pulse;
-            material.emissive = STAR_COLOR * intensity;
+            material.emissive = LinearRgba::from(STAR_COLOR) * intensity;
         }
     }
 }
@@ -215,37 +207,27 @@ fn spawn_particles(
         let velocity = direction * speed;
 
         // Create particle mesh (small sphere)
-        let particle_mesh = meshes.add(
-            UVSphere {
-                radius: 0.05,
-                sectors: 8,
-                stacks: 4,
-            }
-            .into(),
-        );
+        let particle_mesh = meshes.add(Sphere::new(0.05).mesh().uv(8, 4));
 
         // Particle material with emissive glow
-        let particle_color = Color::rgb(1.0, 0.95, 0.7);
+        let particle_color = Color::srgb(1.0, 0.95, 0.7);
         let particle_material = materials.add(StandardMaterial {
             base_color: particle_color,
-            emissive: particle_color * 3.0,
+            emissive: LinearRgba::from(particle_color) * 3.0,
             unlit: true,
             ..default()
         });
 
         commands.spawn((
-            PbrBundle {
-                mesh: particle_mesh,
-                material: particle_material,
-                transform: Transform::from_translation(position),
-                ..default()
-            },
+            Mesh3d(particle_mesh),
+            MeshMaterial3d(particle_material.clone()),
+            Transform::from_translation(position),
             Particle {
                 velocity,
                 lifetime,
                 max_lifetime: lifetime,
             },
-            NotShadowCaster,
+            MaterialHandle(particle_material),
         ));
 
         spawner.particle_count += 1;
@@ -257,12 +239,12 @@ fn update_particles(
     mut commands: Commands,
     time: Res<Time>,
     mut spawner: ResMut<ParticleSpawner>,
-    mut query: Query<(Entity, &mut Transform, &mut Particle, &Handle<StandardMaterial>)>,
+    mut query: Query<(Entity, &mut Transform, &mut Particle, &MaterialHandle)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let delta = time.delta_seconds();
+    let delta = time.delta_secs();
 
-    for (entity, mut transform, mut particle, material_handle) in query.iter_mut() {
+    for (entity, mut transform, mut particle, mat_handle) in query.iter_mut() {
         // Update lifetime
         particle.lifetime -= delta;
 
@@ -278,57 +260,57 @@ fn update_particles(
 
         // Fade out based on remaining lifetime
         let life_ratio = particle.lifetime / particle.max_lifetime;
-        if let Some(material) = materials.get_mut(material_handle) {
+        if let Some(material) = materials.get_mut(&mat_handle.0) {
             // Color gradient: yellow -> white -> blue as particles age
             let color = if life_ratio > 0.7 {
-                Color::rgb(1.0, 0.95, 0.7) // Yellow-white
+                Color::srgb(1.0, 0.95, 0.7) // Yellow-white
             } else if life_ratio > 0.3 {
-                Color::rgb(0.9, 0.95, 1.0) // White-blue
+                Color::srgb(0.9, 0.95, 1.0) // White-blue
             } else {
-                Color::rgb(0.6, 0.7, 1.0) // Blue
+                Color::srgb(0.6, 0.7, 1.0) // Blue
             };
 
-            material.base_color = color.with_a(life_ratio);
-            material.emissive = color * (3.0 * life_ratio);
+            material.base_color = color.with_alpha(life_ratio);
+            material.emissive = LinearRgba::from(color) * (3.0 * life_ratio);
         }
     }
 }
 
 // Camera controller system
 fn camera_controller(
-    keyboard: Res<Input<KeyCode>>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut query: Query<(&mut Transform, &mut CameraController)>,
 ) {
     for (mut transform, mut controller) in query.iter_mut() {
-        let delta = time.delta_seconds();
+        let delta = time.delta_secs();
 
         // Rotation with arrow keys
-        if keyboard.pressed(KeyCode::Left) {
+        if keyboard.pressed(KeyCode::ArrowLeft) {
             controller.angle_x -= controller.rotation_speed * delta;
         }
-        if keyboard.pressed(KeyCode::Right) {
+        if keyboard.pressed(KeyCode::ArrowRight) {
             controller.angle_x += controller.rotation_speed * delta;
         }
-        if keyboard.pressed(KeyCode::Up) {
+        if keyboard.pressed(KeyCode::ArrowUp) {
             controller.angle_y = (controller.angle_y + controller.rotation_speed * delta)
                 .min(std::f32::consts::FRAC_PI_2 - 0.1);
         }
-        if keyboard.pressed(KeyCode::Down) {
+        if keyboard.pressed(KeyCode::ArrowDown) {
             controller.angle_y = (controller.angle_y - controller.rotation_speed * delta)
                 .max(-std::f32::consts::FRAC_PI_2 + 0.1);
         }
 
         // Zoom with W/S
-        if keyboard.pressed(KeyCode::W) {
+        if keyboard.pressed(KeyCode::KeyW) {
             controller.distance = (controller.distance - controller.zoom_speed * delta).max(5.0);
         }
-        if keyboard.pressed(KeyCode::S) {
+        if keyboard.pressed(KeyCode::KeyS) {
             controller.distance = (controller.distance + controller.zoom_speed * delta).min(50.0);
         }
 
         // Reset with R
-        if keyboard.just_pressed(KeyCode::R) {
+        if keyboard.just_pressed(KeyCode::KeyR) {
             controller.angle_x = 0.0;
             controller.angle_y = 0.3;
             controller.distance = 15.0;
@@ -346,10 +328,10 @@ fn camera_controller(
 
 // Exit handler
 fn handle_exit(
-    keyboard: Res<Input<KeyCode>>,
-    mut exit: EventWriter<AppExit>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     if keyboard.just_pressed(KeyCode::Escape) {
-        exit.send(AppExit);
+        exit.write(AppExit::Success);
     }
 }
