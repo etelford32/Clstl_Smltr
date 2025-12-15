@@ -1,12 +1,25 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": null,
+  "buildCommand": "bash build-wasm.sh",
   "outputDirectory": ".",
   "framework": null,
-  "installCommand": null,
+  "installCommand": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source $HOME/.cargo/env",
   "headers": [
     {
-      "source": "/rust/www/(.*\\.wasm)",
+      "source": "/rust/www/(.*)",
+      "headers": [
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "require-corp"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)\\.(wasm)",
       "headers": [
         {
           "key": "Content-Type",
@@ -19,11 +32,20 @@
       ]
     },
     {
-      "source": "/rust/www/(.*\\.js)",
+      "source": "/rust/www/(.*)\\.(js|mjs)",
       "headers": [
         {
           "key": "Content-Type",
-          "value": "application/javascript"
+          "value": "application/javascript; charset=utf-8"
+        }
+      ]
+    },
+    {
+      "source": "/rust/www/(.*)\\.(html)",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/html; charset=utf-8"
         }
       ]
     }
