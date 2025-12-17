@@ -1,0 +1,67 @@
+name: Build and Deploy WASM
+
+on:
+  push:
+    branches: [ main, claude/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32-unknown-unknown
+
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: rust/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build WASM
+      run: |
+        cd rust
+        cargo build --release --target wasm32-unknown-unknown
+        cp target/wasm32-unknown-unknown/release/star_renderer.wasm www/star_renderer_bg.wasm
+        ls -lh www/
+
+    - name: Upload WASM artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: wasm-files
+        path: |
+          rust/www/*.wasm
+          rust/www/*.js
+
+    - name: Commit WASM files
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      run: |
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git config --local user.name "github-actions[bot]"
+        git add -f rust/www/*.wasm rust/www/*.js || true
+        git diff --staged --quiet || git commit -m "Auto-build: Update WASM files [skip ci]"
+
+    - name: Push changes
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: ad-m/github-push-action@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        branch: ${{ github.ref }}

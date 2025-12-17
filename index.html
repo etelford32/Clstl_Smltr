@@ -241,16 +241,17 @@
 <body>
     <header>
         <h1>🌟 Celestial Simulator</h1>
-        <p class="subtitle">Interactive 3D Star Simulations - Three.js & Rust/WASM</p>
+        <p class="subtitle">Interactive Star Simulations - 2D Modeler, Three.js 3D & Rust/WASM 3D</p>
     </header>
 
     <div class="version-selector" style="text-align: center; margin-bottom: 30px;">
-        <button class="version-btn active" onclick="showVersion('python')">⚡ Three.js Version</button>
-        <button class="version-btn" onclick="showVersion('rust')">🦀 Rust/WASM Version</button>
+        <button class="version-btn active" onclick="showVersion('threejs')">⚡ Three.js 3D</button>
+        <button class="version-btn" onclick="showVersion('canvas2d')">🎨 2D Star Modeler</button>
+        <button class="version-btn" onclick="showVersion('rust')">🦀 Rust/WASM 3D</button>
     </div>
 
-    <!-- Python Version Container -->
-    <div id="python-version" class="container version-container active">
+    <!-- Three.js Version Container -->
+    <div id="threejs-version" class="container version-container active">
         <div class="game-container">
             <iframe src="star3d.html" title="Three.js 3D Star Renderer" style="width: 100%; height: 800px;"></iframe>
         </div>
@@ -281,6 +282,54 @@
                     <li><a href="https://github.com/etelford32/Clstl_Smltr" style="color: #ffd700;">Desktop Version</a> (Python + OpenGL)</li>
                     <li><a href="https://github.com/etelford32/Clstl_Smltr" style="color: #ffd700;">Creator Studio</a> (Design objects)</li>
                     <li><strong>Rust/WASM:</strong> Coming soon! →</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2D Canvas Version Container -->
+    <div id="canvas2d-version" class="container version-container">
+        <div class="game-container">
+            <iframe src="star2d.html" title="2D Star Modeler" style="width: 100%; height: 900px;"></iframe>
+        </div>
+
+        <div class="controls">
+            <div class="control-card">
+                <h3>🎨 2D Star Features</h3>
+                <ul>
+                    <li><strong>12 Star Types:</strong> O, B, A, F, G, K, M classes + giants & remnants</li>
+                    <li><strong>Real Classifications:</strong> Based on actual stellar taxonomy</li>
+                    <li><strong>Live Parameters:</strong> Adjust size, brightness, particles, speed</li>
+                    <li><strong>Scientific Data:</strong> Accurate temperatures, masses, lifespans</li>
+                </ul>
+            </div>
+
+            <div class="control-card">
+                <h3>⭐ Available Star Types</h3>
+                <ul>
+                    <li><strong>O-Type:</strong> Blue giant (30,000 K)</li>
+                    <li><strong>B-Type:</strong> Blue-white (15,000 K)</li>
+                    <li><strong>A-Type:</strong> White like Sirius (8,500 K)</li>
+                    <li><strong>F-Type:</strong> Yellow-white (6,500 K)</li>
+                    <li><strong>G-Type:</strong> Sun-like yellow (5,500 K)</li>
+                    <li><strong>K-Type:</strong> Orange (4,500 K)</li>
+                    <li><strong>M-Type:</strong> Red dwarf (3,000 K)</li>
+                    <li><strong>Red Giant:</strong> Expanded dying star</li>
+                    <li><strong>Blue Supergiant:</strong> Massive evolved star</li>
+                    <li><strong>White Dwarf:</strong> Dense remnant</li>
+                    <li><strong>Neutron Star:</strong> Ultra-dense core</li>
+                    <li><strong>Black Hole:</strong> With accretion disk</li>
+                </ul>
+            </div>
+
+            <div class="control-card">
+                <h3>🎮 Controls</h3>
+                <ul>
+                    <li><strong>Star Type Selector:</strong> Choose from 12 classifications</li>
+                    <li><strong>Size Slider:</strong> Adjust star radius</li>
+                    <li><strong>Brightness:</strong> Control luminosity</li>
+                    <li><strong>Particles:</strong> 50-500 solar wind particles</li>
+                    <li><strong>Speed:</strong> Particle velocity multiplier</li>
                 </ul>
             </div>
         </div>
@@ -372,7 +421,7 @@
         // Analytics - track version switches
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Celestial Simulator loaded successfully');
-            console.log('Available versions: Python (Desktop), Rust/WASM (Coming Soon)');
+            console.log('Available versions: Three.js 3D, 2D Star Modeler (12 star types), Rust/WASM 3D');
         });
     </script>
 </body>
