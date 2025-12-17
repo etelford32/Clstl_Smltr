@@ -18,6 +18,71 @@
             min-height: 100vh;
             display: flex;
             flex-direction: column;
+        }
+
+        nav {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .nav-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .nav-brand {
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .nav-link {
+            padding: 0.5rem 1rem;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            color: #fff;
+            text-decoration: none;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: #ffd700;
+        }
+
+        .nav-link.active {
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            border-color: #ffd700;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .page-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
             align-items: center;
             padding: 20px;
         }
@@ -218,7 +283,22 @@
     </style>
 </head>
 <body>
-    <header>
+    <nav>
+        <div class="nav-container">
+            <a href="index.html" class="nav-brand">🌟 Celestial Simulator</a>
+            <div class="nav-links">
+                <a href="index.html" class="nav-link">Home</a>
+                <a href="threejs.html" class="nav-link">Three.js 3D</a>
+                <a href="star2d.html" class="nav-link">2D Star</a>
+                <a href="star2d-advanced.html" class="nav-link active">Advanced 2D</a>
+                <a href="solar-fluid.html" class="nav-link">Fluid Sim</a>
+                <a href="rust.html" class="nav-link">Rust/WASM</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="page-content">
+        <header>
         <h1>⭐ Advanced Solar Physics Simulator</h1>
         <p class="subtitle">Parker Spirals • Fluid Dynamics • CMEs & Solar Flares</p>
     </header>
@@ -885,5 +965,6 @@
         console.log('🌊 Advanced Solar Physics Simulator loaded!');
         console.log('Features: Parker Spirals, CMEs, Solar Flares, Fluid Dynamics');
     </script>
+    </div>
 </body>
 </html>
