@@ -11,27 +11,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
       with:
         targets: wasm32-unknown-unknown
 
+    - name: Install binaryen (wasm-opt)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y binaryen
+
     - name: Cache cargo registry
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Cache cargo index
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.cargo/git
         key: ${{ runner.os }}-cargo-git-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Cache cargo build
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: rust/target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
@@ -40,11 +45,12 @@ jobs:
       run: |
         cd rust
         cargo build --release --target wasm32-unknown-unknown
-        cp target/wasm32-unknown-unknown/release/star_renderer.wasm www/star_renderer_bg.wasm
+        wasm-opt -Oz target/wasm32-unknown-unknown/release/star_renderer.wasm -o target/star_renderer_opt.wasm
+        cp target/star_renderer_opt.wasm www/star_renderer_bg.wasm
         ls -lh www/
 
     - name: Upload WASM artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: wasm-files
         path: |
