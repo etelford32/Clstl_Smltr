@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2D Star Modeler - Stellar Classification</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #ffd700, #ff8c00, #ff4500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #aaa;
+            font-size: 1.1rem;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1400px;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .canvas-container {
+            flex: 1;
+            min-width: 600px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(255, 140, 0, 0.3);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            background: #000;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+
+        .controls {
+            flex: 0 0 350px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            height: fit-content;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .control-group:last-child {
+            border-bottom: none;
+        }
+
+        .control-group h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ddd;
+            font-size: 0.95rem;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+
+        select {
+            cursor: pointer;
+            height: 40px;
+        }
+
+        select option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+
+        input[type="range"] {
+            padding: 0;
+            height: 30px;
+            cursor: pointer;
+        }
+
+        .value-display {
+            text-align: right;
+            color: #ffd700;
+            font-weight: bold;
+            margin-top: -5px;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .star-info {
+            background: rgba(255, 215, 0, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #ffd700;
+            margin-top: 15px;
+        }
+
+        .star-info h4 {
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+
+        .star-info p {
+            color: #ddd;
+            line-height: 1.6;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+        }
+
+        .info-label {
+            color: #aaa;
+        }
+
+        .info-value {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .stat-label {
+            color: #aaa;
+            font-size: 0.8rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            color: #ffd700;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>⭐ 2D Star Modeler</h1>
+        <p class="subtitle">Explore Different Stellar Classifications</p>
+    </header>
+
+    <div class="container">
+        <div class="canvas-container">
+            <canvas id="starCanvas" width="800" height="600"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <h3>🌟 Stellar Classification</h3>
+                <label for="starType">Star Type:</label>
+                <select id="starType">
+                    <option value="o-type">O-Type (Blue Giant)</option>
+                    <option value="b-type">B-Type (Blue-White)</option>
+                    <option value="a-type">A-Type (White)</option>
+                    <option value="f-type">F-Type (Yellow-White)</option>
+                    <option value="g-type" selected>G-Type (Yellow - Sun-like)</option>
+                    <option value="k-type">K-Type (Orange)</option>
+                    <option value="m-type">M-Type (Red Dwarf)</option>
+                    <option value="red-giant">Red Giant</option>
+                    <option value="blue-supergiant">Blue Supergiant</option>
+                    <option value="white-dwarf">White Dwarf</option>
+                    <option value="neutron-star">Neutron Star</option>
+                    <option value="black-hole">Black Hole</option>
+                </select>
+
+                <div class="star-info" id="starInfo">
+                    <h4>G-Type Star (Sun-like)</h4>
+                    <p>Main sequence star with moderate temperature and size.</p>
+                    <div class="info-row">
+                        <span class="info-label">Temperature:</span>
+                        <span class="info-value">~5,500 K</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Mass:</span>
+                        <span class="info-value">0.8-1.2 M☉</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Lifespan:</span>
+                        <span class="info-value">~10 billion years</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>⚙️ Parameters</h3>
+
+                <label for="size">Star Size:</label>
+                <input type="range" id="size" min="10" max="200" value="80">
+                <div class="value-display" id="sizeValue">80 px</div>
+
+                <label for="brightness">Brightness:</label>
+                <input type="range" id="brightness" min="0" max="100" value="70">
+                <div class="value-display" id="brightnessValue">70%</div>
+
+                <label for="particles">Particle Count:</label>
+                <input type="range" id="particles" min="50" max="500" value="200">
+                <div class="value-display" id="particlesValue">200</div>
+
+                <label for="speed">Particle Speed:</label>
+                <input type="range" id="speed" min="1" max="10" value="3">
+                <div class="value-display" id="speedValue">3x</div>
+            </div>
+
+            <div class="control-group">
+                <h3>📊 Statistics</h3>
+                <div class="stats">
+                    <div class="stat-box">
+                        <div class="stat-label">FPS</div>
+                        <div class="stat-value" id="fps">60</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Active Particles</div>
+                        <div class="stat-value" id="activeParticles">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Temperature</div>
+                        <div class="stat-value" id="temp">5500 K</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Luminosity</div>
+                        <div class="stat-value" id="luminosity">1.0 L☉</div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="resetBtn">Reset to Defaults</button>
+        </div>
+    </div>
+
+    <script>
+        // Star type configurations
+        const starTypes = {
+            'o-type': {
+                name: 'O-Type Star (Blue Giant)',
+                color: { r: 150, g: 150, b: 255 },
+                temperature: 30000,
+                mass: '16-150 M☉',
+                lifespan: '1-10 million years',
+                description: 'Extremely hot and massive blue stars. Very rare and short-lived.',
+                defaultSize: 120,
+                luminosity: 30000
+            },
+            'b-type': {
+                name: 'B-Type Star (Blue-White)',
+                color: { r: 170, g: 191, b: 255 },
+                temperature: 15000,
+                mass: '2.1-16 M☉',
+                lifespan: '10-100 million years',
+                description: 'Hot blue-white stars like Rigel and Spica.',
+                defaultSize: 100,
+                luminosity: 25
+            },
+            'a-type': {
+                name: 'A-Type Star (White)',
+                color: { r: 213, g: 224, b: 255 },
+                temperature: 8500,
+                mass: '1.4-2.1 M☉',
+                lifespan: '1-3 billion years',
+                description: 'White stars like Sirius and Vega.',
+                defaultSize: 90,
+                luminosity: 5.4
+            },
+            'f-type': {
+                name: 'F-Type Star (Yellow-White)',
+                color: { r: 248, g: 247, b: 255 },
+                temperature: 6500,
+                mass: '1.04-1.4 M☉',
+                lifespan: '3-7 billion years',
+                description: 'Yellow-white stars like Procyon.',
+                defaultSize: 85,
+                luminosity: 2.5
+            },
+            'g-type': {
+                name: 'G-Type Star (Sun-like)',
+                color: { r: 255, g: 230, b: 77 },
+                temperature: 5500,
+                mass: '0.8-1.04 M☉',
+                lifespan: '10 billion years',
+                description: 'Yellow stars like our Sun.',
+                defaultSize: 80,
+                luminosity: 1.0
+            },
+            'k-type': {
+                name: 'K-Type Star (Orange)',
+                color: { r: 255, g: 178, b: 71 },
+                temperature: 4500,
+                mass: '0.45-0.8 M☉',
+                lifespan: '15-30 billion years',
+                description: 'Orange stars like Arcturus.',
+                defaultSize: 70,
+                luminosity: 0.4
+            },
+            'm-type': {
+                name: 'M-Type Star (Red Dwarf)',
+                color: { r: 255, g: 102, b: 51 },
+                temperature: 3000,
+                mass: '0.08-0.45 M☉',
+                lifespan: '100+ billion years',
+                description: 'Cool red dwarfs. Most common star type.',
+                defaultSize: 50,
+                luminosity: 0.04
+            },
+            'red-giant': {
+                name: 'Red Giant',
+                color: { r: 255, g: 69, b: 0 },
+                temperature: 3500,
+                mass: '0.8-8 M☉',
+                lifespan: 'Late stage',
+                description: 'Expanded dying star with cool surface.',
+                defaultSize: 150,
+                luminosity: 1000
+            },
+            'blue-supergiant': {
+                name: 'Blue Supergiant',
+                color: { r: 135, g: 206, b: 250 },
+                temperature: 20000,
+                mass: '10-70 M☉',
+                lifespan: '10 million years',
+                description: 'Massive evolved star like Rigel.',
+                defaultSize: 180,
+                luminosity: 100000
+            },
+            'white-dwarf': {
+                name: 'White Dwarf',
+                color: { r: 255, g: 255, b: 255 },
+                temperature: 8000,
+                mass: '0.6 M☉',
+                lifespan: 'Remnant',
+                description: 'Dense stellar remnant, no fusion.',
+                defaultSize: 30,
+                luminosity: 0.001
+            },
+            'neutron-star': {
+                name: 'Neutron Star',
+                color: { r: 200, g: 220, b: 255 },
+                temperature: 600000,
+                mass: '1.4-2 M☉',
+                lifespan: 'Remnant',
+                description: 'Ultra-dense stellar core, rapid rotation.',
+                defaultSize: 15,
+                luminosity: 0.0001
+            },
+            'black-hole': {
+                name: 'Black Hole',
+                color: { r: 0, g: 0, b: 0 },
+                temperature: 0,
+                mass: '3+ M☉',
+                lifespan: 'Remnant',
+                description: 'Collapsed star with extreme gravity. Accretion disk visible.',
+                defaultSize: 40,
+                luminosity: 0
+            }
+        };
+
+        // Canvas setup
+        const canvas = document.getElementById('starCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // State
+        let currentStarType = 'g-type';
+        let starSize = 80;
+        let brightness = 70;
+        let maxParticles = 200;
+        let particleSpeed = 3;
+        let particles = [];
+        let time = 0;
+        let fps = 0;
+        let lastFrameTime = Date.now();
+
+        // Particle class
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                const config = starTypes[currentStarType];
+                const angle = Math.random() * Math.PI * 2;
+                const distance = starSize * 0.5;
+
+                this.x = canvas.width / 2 + Math.cos(angle) * distance;
+                this.y = canvas.height / 2 + Math.sin(angle) * distance;
+                this.vx = Math.cos(angle) * particleSpeed * 0.5;
+                this.vy = Math.sin(angle) * particleSpeed * 0.5;
+                this.life = 1.0;
+                this.maxLife = 2 + Math.random() * 2;
+                this.size = 2 + Math.random() * 2;
+                this.color = { ...config.color };
+            }
+
+            update(dt) {
+                this.x += this.vx * dt * 60;
+                this.y += this.vy * dt * 60;
+                this.life -= dt / this.maxLife;
+
+                if (this.life <= 0) {
+                    this.reset();
+                }
+            }
+
+            draw() {
+                const alpha = this.life * (brightness / 100);
+                const fadeColor = currentStarType === 'black-hole'
+                    ? { r: 135, g: 206, b: 250 }  // Blue for accretion disk
+                    : this.color;
+
+                ctx.fillStyle = `rgba(${fadeColor.r}, ${fadeColor.g}, ${fadeColor.b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Initialize particles
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < maxParticles; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        // Draw star
+        function drawStar() {
+            const config = starTypes[currentStarType];
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Pulsing effect
+            const pulse = Math.sin(time * 2) * 0.1 + 1;
+            const currentSize = starSize * pulse;
+
+            if (currentStarType === 'black-hole') {
+                // Draw event horizon (black circle)
+                ctx.fillStyle = '#000';
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, currentSize * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw accretion disk
+                const gradient = ctx.createRadialGradient(
+                    centerX, centerY, currentSize * 0.5,
+                    centerX, centerY, currentSize
+                );
+                gradient.addColorStop(0, 'rgba(135, 206, 250, 0)');
+                gradient.addColorStop(0.5, `rgba(135, 206, 250, ${brightness / 100})`);
+                gradient.addColorStop(1, 'rgba(135, 206, 250, 0)');
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, currentSize, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (currentStarType === 'neutron-star') {
+                // Draw neutron star with beams
+                const gradient = ctx.createRadialGradient(
+                    centerX, centerY, 0,
+                    centerX, centerY, currentSize * 2
+                );
+                gradient.addColorStop(0, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, ${brightness / 100})`);
+                gradient.addColorStop(0.5, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, ${brightness / 200})`);
+                gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, currentSize * 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Core
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, currentSize, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                // Normal star with glow
+                const gradient = ctx.createRadialGradient(
+                    centerX, centerY, 0,
+                    centerX, centerY, currentSize
+                );
+                gradient.addColorStop(0, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, ${brightness / 100})`);
+                gradient.addColorStop(0.5, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, ${brightness / 150})`);
+                gradient.addColorStop(1, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, currentSize, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Animation loop
+        function animate() {
+            const now = Date.now();
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+            lastFrameTime = now;
+
+            // Calculate FPS
+            fps = Math.round(1 / dt);
+
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Update time
+            time += dt;
+
+            // Draw star
+            drawStar();
+
+            // Update and draw particles
+            particles.forEach(p => {
+                p.update(dt);
+                p.draw();
+            });
+
+            // Update stats
+            document.getElementById('fps').textContent = fps;
+            document.getElementById('activeParticles').textContent = particles.length;
+
+            requestAnimationFrame(animate);
+        }
+
+        // Update star info
+        function updateStarInfo() {
+            const config = starTypes[currentStarType];
+            const infoDiv = document.getElementById('starInfo');
+
+            infoDiv.innerHTML = `
+                <h4>${config.name}</h4>
+                <p>${config.description}</p>
+                <div class="info-row">
+                    <span class="info-label">Temperature:</span>
+                    <span class="info-value">${config.temperature.toLocaleString()} K</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Mass:</span>
+                    <span class="info-value">${config.mass}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Lifespan:</span>
+                    <span class="info-value">${config.lifespan}</span>
+                </div>
+            `;
+
+            document.getElementById('temp').textContent = `${config.temperature.toLocaleString()} K`;
+            document.getElementById('luminosity').textContent = `${config.luminosity} L☉`;
+        }
+
+        // Event listeners
+        document.getElementById('starType').addEventListener('change', (e) => {
+            currentStarType = e.target.value;
+            const config = starTypes[currentStarType];
+            starSize = config.defaultSize;
+            document.getElementById('size').value = starSize;
+            document.getElementById('sizeValue').textContent = `${starSize} px`;
+            updateStarInfo();
+            initParticles();
+        });
+
+        document.getElementById('size').addEventListener('input', (e) => {
+            starSize = parseInt(e.target.value);
+            document.getElementById('sizeValue').textContent = `${starSize} px`;
+        });
+
+        document.getElementById('brightness').addEventListener('input', (e) => {
+            brightness = parseInt(e.target.value);
+            document.getElementById('brightnessValue').textContent = `${brightness}%`;
+        });
+
+        document.getElementById('particles').addEventListener('input', (e) => {
+            maxParticles = parseInt(e.target.value);
+            document.getElementById('particlesValue').textContent = maxParticles;
+            initParticles();
+        });
+
+        document.getElementById('speed').addEventListener('input', (e) => {
+            particleSpeed = parseInt(e.target.value);
+            document.getElementById('speedValue').textContent = `${particleSpeed}x`;
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            const config = starTypes[currentStarType];
+            starSize = config.defaultSize;
+            brightness = 70;
+            maxParticles = 200;
+            particleSpeed = 3;
+
+            document.getElementById('size').value = starSize;
+            document.getElementById('sizeValue').textContent = `${starSize} px`;
+            document.getElementById('brightness').value = brightness;
+            document.getElementById('brightnessValue').textContent = `${brightness}%`;
+            document.getElementById('particles').value = maxParticles;
+            document.getElementById('particlesValue').textContent = maxParticles;
+            document.getElementById('speed').value = particleSpeed;
+            document.getElementById('speedValue').textContent = `${particleSpeed}x`;
+
+            initParticles();
+        });
+
+        // Initialize
+        updateStarInfo();
+        initParticles();
+        animate();
+
+        console.log('🌟 2D Star Modeler loaded!');
+        console.log('Select different star types to see their characteristics');
+    </script>
+</body>
+</html>
