@@ -11,8 +11,6 @@ bevy = { version = "0.17", default-features = false, features = [
     "bevy_render",
     "bevy_asset",
     "png",
-    "tonemapping_luts",
-    "zstd_rust",
 ] }
 
 # Platform-specific dependencies
