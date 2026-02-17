@@ -813,31 +813,62 @@
 
             // Update and draw particles
             particles.forEach(p => {
-                // In Sirius mode, emit from Sirius A's position
                 if (siriusMode && siriusPositions) {
-                    // Override particle origin to Sirius A
+                    // Respawn dead particles from either star
                     if (p.life <= 0.01) {
                         const angle = Math.random() * Math.PI * 2;
-                        const distance = starSize * 0.5;
-                        p.x = siriusPositions.axPos.x + Math.cos(angle) * distance;
-                        p.y = siriusPositions.axPos.y + Math.sin(angle) * distance;
-                        p.vx = Math.cos(angle) * particleSpeed * 0.5;
-                        p.vy = Math.sin(angle) * particleSpeed * 0.5;
+                        // 80% from Sirius A, 20% from Sirius B (white dwarf has weaker mass loss)
+                        const fromB = Math.random() < 0.2;
+                        if (fromB) {
+                            const sizeB = Math.max(starSize * 0.12, 5);
+                            p.x = siriusPositions.bxPos.x + Math.cos(angle) * sizeB;
+                            p.y = siriusPositions.bxPos.y + Math.sin(angle) * sizeB;
+                            // WD wind is faster
+                            p.vx = Math.cos(angle) * particleSpeed * 1.2;
+                            p.vy = Math.sin(angle) * particleSpeed * 1.2;
+                            p.color = { ...SIRIUS.B.color };
+                            p._origin = 'B';
+                        } else {
+                            const distance = starSize * 0.5;
+                            p.x = siriusPositions.axPos.x + Math.cos(angle) * distance;
+                            p.y = siriusPositions.axPos.y + Math.sin(angle) * distance;
+                            p.vx = Math.cos(angle) * particleSpeed * 0.5;
+                            p.vy = Math.sin(angle) * particleSpeed * 0.5;
+                            p.color = { ...SIRIUS.A.color };
+                            p._origin = 'A';
+                        }
                         p.life = 1.0;
-                        p.color = { ...SIRIUS.A.color };
                     }
 
-                    // Gravitational deflection toward Sirius B
-                    const dx = siriusPositions.bxPos.x - p.x;
-                    const dy = siriusPositions.bxPos.y - p.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist < 80 && dist > 3) {
-                        const grav = 0.8 / (dist * dist + 10);
-                        p.vx += (dx / dist) * grav * dt * 60;
-                        p.vy += (dy / dist) * grav * dt * 60;
-                        // Heat color shift near B
-                        if (dist < 30) {
-                            const heat = 1 - dist / 30;
+                    // Gravitational attraction toward Sirius A (2.06 M☉)
+                    const dxA = siriusPositions.axPos.x - p.x;
+                    const dyA = siriusPositions.axPos.y - p.y;
+                    const distA = Math.sqrt(dxA * dxA + dyA * dyA);
+                    const captureA = starSize * 0.35;
+                    if (distA < captureA && distA > 0) {
+                        // Captured by star A — recycle
+                        p.life = 0;
+                    } else if (distA < 120 && distA > 3) {
+                        const gravA = 1.0 / (distA * distA + 10);
+                        p.vx += (dxA / distA) * gravA * dt * 60;
+                        p.vy += (dyA / distA) * gravA * dt * 60;
+                    }
+
+                    // Gravitational attraction toward Sirius B (1.018 M☉)
+                    const dxB = siriusPositions.bxPos.x - p.x;
+                    const dyB = siriusPositions.bxPos.y - p.y;
+                    const distB = Math.sqrt(dxB * dxB + dyB * dyB);
+                    const captureB = Math.max(starSize * 0.08, 4);
+                    if (distB < captureB && distB > 0) {
+                        // Captured by star B — recycle
+                        p.life = 0;
+                    } else if (distB < 80 && distB > 3) {
+                        const gravB = 0.5 / (distB * distB + 10);
+                        p.vx += (dxB / distB) * gravB * dt * 60;
+                        p.vy += (dyB / distB) * gravB * dt * 60;
+                        // Heat color shift near B (X-ray heating from 25,000 K surface)
+                        if (distB < 30) {
+                            const heat = 1 - distB / 30;
                             p.color = {
                                 r: Math.round(162 + heat * 40),
                                 g: Math.round(199 + heat * 30),

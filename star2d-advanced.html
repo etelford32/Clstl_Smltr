@@ -970,29 +970,66 @@
             let totalSpeed = 0;
             let totalDensity = 0;
             particles.forEach(p => {
-                // In Sirius mode, redirect particle origin to Sirius A and add B interaction
-                if (siriusMode && siriusPos && p.life <= 0.01) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const dist = starSize * 0.5;
-                    p.x = siriusPos.axP.x + Math.cos(angle) * dist;
-                    p.y = siriusPos.axP.y + Math.sin(angle) * dist;
-                    const dir = { x: Math.cos(angle), y: Math.sin(angle) };
-                    p.vx = dir.x * windSpeed * 0.5;
-                    p.vy = dir.y * windSpeed * 0.5;
-                    p.life = 1.0;
-                    p.maxLife = 2 + Math.random() * 2;
-                    p.color = { ...SIRIUS.A.color };
-                }
+                // In Sirius mode: dual emission + mutual gravitational attraction
                 if (siriusMode && siriusPos) {
-                    const dx = siriusPos.bxP.x - p.x;
-                    const dy = siriusPos.bxP.y - p.y;
-                    const d = Math.sqrt(dx * dx + dy * dy);
-                    if (d < 80 && d > 3) {
-                        const grav = 0.8 / (d * d + 10);
-                        p.vx += (dx / d) * grav * dt * 60;
-                        p.vy += (dy / d) * grav * dt * 60;
-                        if (d < 30) {
-                            p.color = { r: 162, g: 199, b: 255 };
+                    // Respawn dead particles from either star
+                    if (p.life <= 0.01) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const fromB = Math.random() < 0.2;
+                        if (fromB) {
+                            // Emit from Sirius B (white dwarf)
+                            const sizeB = Math.max(starSize * 0.12, 5);
+                            p.x = siriusPos.bxP.x + Math.cos(angle) * sizeB;
+                            p.y = siriusPos.bxP.y + Math.sin(angle) * sizeB;
+                            p.vx = Math.cos(angle) * windSpeed * 1.2;
+                            p.vy = Math.sin(angle) * windSpeed * 1.2;
+                            p.color = { ...SIRIUS.B.color };
+                            p._origin = 'B';
+                        } else {
+                            // Emit from Sirius A
+                            const dist = starSize * 0.5;
+                            p.x = siriusPos.axP.x + Math.cos(angle) * dist;
+                            p.y = siriusPos.axP.y + Math.sin(angle) * dist;
+                            p.vx = Math.cos(angle) * windSpeed * 0.5;
+                            p.vy = Math.sin(angle) * windSpeed * 0.5;
+                            p.color = { ...SIRIUS.A.color };
+                            p._origin = 'A';
+                        }
+                        p.life = 1.0;
+                        p.maxLife = 2 + Math.random() * 2;
+                    }
+
+                    // Gravitational attraction toward Sirius A (2.06 M☉)
+                    const dxA = siriusPos.axP.x - p.x;
+                    const dyA = siriusPos.axP.y - p.y;
+                    const dA = Math.sqrt(dxA * dxA + dyA * dyA);
+                    const captureA = starSize * 0.35;
+                    if (dA < captureA && dA > 0) {
+                        p.life = 0;
+                    } else if (dA < 120 && dA > 3) {
+                        const gravA = 1.0 / (dA * dA + 10);
+                        p.vx += (dxA / dA) * gravA * dt * 60;
+                        p.vy += (dyA / dA) * gravA * dt * 60;
+                    }
+
+                    // Gravitational attraction toward Sirius B (1.018 M☉)
+                    const dxB = siriusPos.bxP.x - p.x;
+                    const dyB = siriusPos.bxP.y - p.y;
+                    const dB = Math.sqrt(dxB * dxB + dyB * dyB);
+                    const captureB = Math.max(starSize * 0.08, 4);
+                    if (dB < captureB && dB > 0) {
+                        p.life = 0;
+                    } else if (dB < 80 && dB > 3) {
+                        const gravB = 0.5 / (dB * dB + 10);
+                        p.vx += (dxB / dB) * gravB * dt * 60;
+                        p.vy += (dyB / dB) * gravB * dt * 60;
+                        if (dB < 30) {
+                            const heat = 1 - dB / 30;
+                            p.color = {
+                                r: Math.round(162 + heat * 40),
+                                g: Math.round(199 + heat * 30),
+                                b: 255
+                            };
                         }
                     }
                 }

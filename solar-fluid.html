@@ -481,6 +481,7 @@
         const STM = SIRIUS_F.A.mass + SIRIUS_F.B.mass;
         let siriusMode = false;
         let siriusEpoch = 2026.0;
+        let siriusAPos = { x: 0, y: 0 };
         let siriusBPos = { x: 0, y: 0 };
 
         function solveKF(M, e) {
@@ -578,6 +579,36 @@
                 const star = STARS[state.starType];
                 const mode = state.emissionMode;
 
+                // In Sirius mode, emit from either star A or B
+                if (siriusMode) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const fromB = Math.random() < 0.2;
+                    if (fromB) {
+                        const sizeB = Math.max(state.starSize * 0.1, 4);
+                        this.x = siriusBPos.x + Math.cos(angle) * sizeB;
+                        this.y = siriusBPos.y + Math.sin(angle) * sizeB;
+                        const speed = state.windSpeed / 10 * 2.5;
+                        this.vx = Math.cos(angle) * speed;
+                        this.vy = Math.sin(angle) * speed;
+                        this.color = SIRIUS_F.B.color;
+                        this._origin = 'B';
+                    } else {
+                        const r = state.starSize * 0.5;
+                        this.x = siriusAPos.x + Math.cos(angle) * r;
+                        this.y = siriusAPos.y + Math.sin(angle) * r;
+                        const speed = state.windSpeed / 10;
+                        this.vx = Math.cos(angle) * speed;
+                        this.vy = Math.sin(angle) * speed;
+                        this.color = SIRIUS_F.A.color;
+                        this._origin = 'A';
+                    }
+                    this.life = 1.0;
+                    this.maxLife = 2 + Math.random() * 3;
+                    this.size = 1.5 + Math.random();
+                    this.trail = [];
+                    return;
+                }
+
                 // Position on star surface
                 let angle = Math.random() * Math.PI * 2;
                 if (mode === 'hole') angle = Math.PI * 0.5 + (Math.random() - 0.5) * 0.5;
@@ -615,17 +646,40 @@
                     }
                 }
 
-                // Sirius B gravitational deflection
+                // Sirius binary: mutual gravitational attraction + capture
                 if (siriusMode) {
-                    const dx = siriusBPos.x - this.x;
-                    const dy = siriusBPos.y - this.y;
-                    const d = Math.sqrt(dx * dx + dy * dy);
-                    if (d < 60 && d > 2) {
-                        const grav = 0.6 / (d * d + 8);
-                        this.vx += (dx / d) * grav * dt * 60;
-                        this.vy += (dy / d) * grav * dt * 60;
-                        if (d < 25) {
-                            this.color = SIRIUS_F.B.color;
+                    // Gravity from Sirius A (2.06 M☉)
+                    const dxA = siriusAPos.x - this.x;
+                    const dyA = siriusAPos.y - this.y;
+                    const dA = Math.sqrt(dxA * dxA + dyA * dyA);
+                    const captureA = state.starSize * 0.35;
+                    if (dA < captureA && dA > 0) {
+                        this.life = 0; // captured
+                    } else if (dA < 100 && dA > 2) {
+                        const gravA = 0.8 / (dA * dA + 8);
+                        this.vx += (dxA / dA) * gravA * dt * 60;
+                        this.vy += (dyA / dA) * gravA * dt * 60;
+                    }
+
+                    // Gravity from Sirius B (1.018 M☉)
+                    const dxB = siriusBPos.x - this.x;
+                    const dyB = siriusBPos.y - this.y;
+                    const dB = Math.sqrt(dxB * dxB + dyB * dyB);
+                    const captureB = Math.max(state.starSize * 0.07, 3);
+                    if (dB < captureB && dB > 0) {
+                        this.life = 0; // captured
+                    } else if (dB < 60 && dB > 2) {
+                        const gravB = 0.4 / (dB * dB + 8);
+                        this.vx += (dxB / dB) * gravB * dt * 60;
+                        this.vy += (dyB / dB) * gravB * dt * 60;
+                        // X-ray heating near white dwarf
+                        if (dB < 25) {
+                            const heat = 1 - dB / 25;
+                            this.color = [
+                                Math.round(162 + heat * 40),
+                                Math.round(199 + heat * 30),
+                                255
+                            ];
                         }
                     }
                 }
@@ -838,6 +892,7 @@
                 const qB = SIRIUS_F.A.mass / STM;
                 const scale = 3.0;
                 axPos = { x: cx - pos.x * qA * scale, y: cy - pos.y * qA * scale };
+                siriusAPos = { x: axPos.x, y: axPos.y };
                 siriusBPos = { x: cx + pos.x * qB * scale, y: cy + pos.y * qB * scale };
 
                 // Draw orbital paths (faint)
