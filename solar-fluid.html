@@ -301,6 +301,24 @@
 
         <div id="controls">
             <div class="section">
+                <div class="section-title">🔭 PRESET</div>
+                <div class="section-content">
+                    <div class="control">
+                        <label>MODE</label>
+                        <select id="presetSelect">
+                            <option value="default" selected>Default</option>
+                            <option value="sirius">Sirius System</option>
+                        </select>
+                    </div>
+                    <div id="siriusInfo" style="display:none;padding:4px;margin:4px 0;border:1px solid rgba(162,199,255,0.3);font-size:9px;color:#7ec8e3;line-height:1.4">
+                        Sirius A: A1V 9940K 2.06M☉<br>
+                        Sirius B: DA2 WD 25000K<br>
+                        P=50.13yr e=0.5914 d=8.6ly
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
                 <div class="section-title">⚙ STELLAR [1]</div>
                 <div class="section-content">
                     <div class="control">
@@ -454,6 +472,40 @@
             n: { name: 'Neutron', color: [200, 220, 255], temp: 600000, rot: 10.0 }
         };
 
+        // ── SIRIUS DATA ──
+        const SIRIUS_F = {
+            A: { color: [206, 216, 255], temp: 9940, mass: 2.06 },
+            B: { color: [162, 199, 255], temp: 25000, mass: 1.018 },
+            orbit: { period: 50.13, a: 20.0, e: 0.5914, inc: 136.3, T0: 1994.5715 }
+        };
+        const STM = SIRIUS_F.A.mass + SIRIUS_F.B.mass;
+        let siriusMode = false;
+        let siriusEpoch = 2026.0;
+        let siriusBPos = { x: 0, y: 0 };
+
+        function solveKF(M, e) {
+            let E = M + e * Math.sin(M);
+            for (let i = 0; i < 30; i++) {
+                const d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= d;
+                if (Math.abs(d) < 1e-9) break;
+            }
+            return E;
+        }
+
+        function getSiriusPosFluid(epoch) {
+            const o = SIRIUS_F.orbit;
+            let M = 2 * Math.PI * ((epoch - o.T0) / o.period);
+            M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const E = solveKF(M, o.e);
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + o.e) * Math.sin(E / 2),
+                Math.sqrt(1 - o.e) * Math.cos(E / 2));
+            const r = o.a * (1 - o.e * Math.cos(E));
+            const cosI = Math.cos(o.inc * Math.PI / 180);
+            return { x: r * Math.cos(nu), y: r * Math.sin(nu) * cosI, r };
+        }
+
         // Canvas setup
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -560,6 +612,21 @@
                         const omega = state.rotation / 100 * (state.starSize / r);
                         this.vx += -dy / r * omega * dt * 60;
                         this.vy += dx / r * omega * dt * 60;
+                    }
+                }
+
+                // Sirius B gravitational deflection
+                if (siriusMode) {
+                    const dx = siriusBPos.x - this.x;
+                    const dy = siriusBPos.y - this.y;
+                    const d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < 60 && d > 2) {
+                        const grav = 0.6 / (d * d + 8);
+                        this.vx += (dx / d) * grav * dt * 60;
+                        this.vy += (dy / d) * grav * dt * 60;
+                        if (d < 25) {
+                            this.color = SIRIUS_F.B.color;
+                        }
                     }
                 }
 
@@ -756,20 +823,61 @@
 
         // Drawing functions
         function drawStar() {
-            const star = STARS[state.starType];
+            const star = siriusMode ? { color: SIRIUS_F.A.color } : STARS[state.starType];
             const cx = canvas.width / 2;
             const cy = canvas.height / 2;
             const pulse = Math.sin(state.time * 2) * 0.1 + 1;
             const size = state.starSize * pulse;
 
-            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size);
+            // In Sirius mode, offset star A from center
+            let axPos = { x: cx, y: cy };
+            if (siriusMode) {
+                siriusEpoch += 0.016 * 1.5;
+                const pos = getSiriusPosFluid(siriusEpoch);
+                const qA = SIRIUS_F.B.mass / STM;
+                const qB = SIRIUS_F.A.mass / STM;
+                const scale = 3.0;
+                axPos = { x: cx - pos.x * qA * scale, y: cy - pos.y * qA * scale };
+                siriusBPos = { x: cx + pos.x * qB * scale, y: cy + pos.y * qB * scale };
+
+                // Draw orbital paths (faint)
+                ctx.strokeStyle = 'rgba(206,216,255,0.06)';
+                ctx.lineWidth = 0.5;
+                ctx.beginPath();
+                for (let i = 0; i <= 120; i++) {
+                    const t = SIRIUS_F.orbit.T0 + (i / 120) * SIRIUS_F.orbit.period;
+                    const p = getSiriusPosFluid(t);
+                    const px = cx + p.x * qB * scale;
+                    const py = cy + p.y * qB * scale;
+                    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+
+                // Draw Sirius B
+                const sB = SIRIUS_F.B.color;
+                const sizeB = Math.max(state.starSize * 0.1, 4);
+                const pB = Math.sin(state.time * 3) * 0.15 + 1;
+                const gB = ctx.createRadialGradient(siriusBPos.x, siriusBPos.y, 0, siriusBPos.x, siriusBPos.y, sizeB * 2 * pB);
+                gB.addColorStop(0, `rgba(${sB[0]},${sB[1]},${sB[2]},1.0)`);
+                gB.addColorStop(0.3, `rgba(${sB[0]},${sB[1]},${sB[2]},0.5)`);
+                gB.addColorStop(1, `rgba(${sB[0]},${sB[1]},${sB[2]},0)`);
+                ctx.fillStyle = gB;
+                ctx.beginPath();
+                ctx.arc(siriusBPos.x, siriusBPos.y, sizeB * 2 * pB, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Update HUD temperature
+                document.getElementById('temp').textContent = '9940/25000';
+            }
+
+            const grad = ctx.createRadialGradient(axPos.x, axPos.y, 0, axPos.x, axPos.y, size);
             grad.addColorStop(0, `rgba(${star.color[0]}, ${star.color[1]}, ${star.color[2]}, 0.9)`);
             grad.addColorStop(0.5, `rgba(${star.color[0]}, ${star.color[1]}, ${star.color[2]}, 0.5)`);
             grad.addColorStop(1, `rgba(${star.color[0]}, ${star.color[1]}, ${star.color[2]}, 0)`);
 
             ctx.fillStyle = grad;
             ctx.beginPath();
-            ctx.arc(cx, cy, size, 0, Math.PI * 2);
+            ctx.arc(axPos.x, axPos.y, size, 0, Math.PI * 2);
             ctx.fill();
 
             state.starRotation += state.rotation / 100 * 0.016;
@@ -929,6 +1037,25 @@
                 if (val) val.textContent = format(state[prop]);
             });
         }
+
+        // Sirius preset binding
+        document.getElementById('presetSelect').addEventListener('change', e => {
+            if (e.target.value === 'sirius') {
+                siriusMode = true;
+                siriusEpoch = 2026.0;
+                state.starType = 'g'; // closest base type
+                document.getElementById('starType').value = 'g';
+                document.getElementById('siriusInfo').style.display = 'block';
+                document.getElementById('simMode').textContent = 'SIRIUS';
+                particles = [];
+                initFluidGrid();
+            } else {
+                siriusMode = false;
+                document.getElementById('siriusInfo').style.display = 'none';
+                particles = [];
+                initFluidGrid();
+            }
+        });
 
         bindControl('starType', 'starType');
         bindControl('starSize', 'starSize', 'starSizeVal');

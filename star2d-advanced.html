@@ -310,6 +310,15 @@
 
         <div class="controls">
             <div class="control-group">
+                <h3>🔭 Preset Simulation</h3>
+                <label for="presetSelect">Simulation Mode:</label>
+                <select id="presetSelect">
+                    <option value="default" selected>Default (Single Star)</option>
+                    <option value="sirius">Sirius Binary System</option>
+                </select>
+            </div>
+
+            <div class="control-group">
                 <h3>🌟 Stellar Classification</h3>
                 <label for="starType">Star Type:</label>
                 <select id="starType">
@@ -422,6 +431,43 @@
     </div>
 
     <script>
+        // ── SIRIUS BINARY SYSTEM DATA ──
+        const SIRIUS = {
+            A: { mass: 2.06, radius: 1.713, temperature: 9940, luminosity: 24.7,
+                 color: { r: 206, g: 216, b: 255 }, spectralType: 'A1 V (Am)' },
+            B: { mass: 1.018, radius: 0.0081, temperature: 25000, luminosity: 0.0245,
+                 color: { r: 162, g: 199, b: 255 }, spectralType: 'DA2 White Dwarf' },
+            orbit: { period: 50.13, semiMajorAxis: 20.0, eccentricity: 0.5914,
+                     inclination: 136.3, periastronTime: 1994.5715 }
+        };
+        const SIRIUS_TM = SIRIUS.A.mass + SIRIUS.B.mass;
+
+        function solveKeplerAdv(M, e) {
+            let E = M + e * Math.sin(M);
+            for (let i = 0; i < 30; i++) {
+                const dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= dE;
+                if (Math.abs(dE) < 1e-9) break;
+            }
+            return E;
+        }
+
+        function getSiriusPos2DAdv(epoch) {
+            const o = SIRIUS.orbit;
+            let M = 2 * Math.PI * ((epoch - o.periastronTime) / o.period);
+            M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const E = solveKeplerAdv(M, o.eccentricity);
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + o.eccentricity) * Math.sin(E / 2),
+                Math.sqrt(1 - o.eccentricity) * Math.cos(E / 2));
+            const r = o.semiMajorAxis * (1 - o.eccentricity * Math.cos(E));
+            const cosI = Math.cos(o.inclination * Math.PI / 180);
+            return { x: r * Math.cos(nu), y: r * Math.sin(nu) * cosI, r, nu };
+        }
+
+        let siriusMode = false;
+        let siriusEpoch = 2026.0;
+
         // Star type configurations
         const starTypes = {
             'o-type': { name: 'O-Type', color: { r: 150, g: 150, b: 255 }, temperature: 30000, defaultSize: 100, rotation: 3.0 },
@@ -810,6 +856,87 @@
             }
         }
 
+        // ── SIRIUS BINARY RENDERING (Advanced 2D) ──
+        function drawSiriusBinary(dt) {
+            siriusEpoch += dt * 1.5;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const scale = 4.0;
+
+            const pos = getSiriusPos2DAdv(siriusEpoch);
+            const qA = SIRIUS.B.mass / SIRIUS_TM;
+            const qB = SIRIUS.A.mass / SIRIUS_TM;
+
+            const axP = { x: cx - pos.x * qA * scale, y: cy - pos.y * qA * scale };
+            const bxP = { x: cx + pos.x * qB * scale, y: cy + pos.y * qB * scale };
+
+            // Orbital paths
+            ctx.strokeStyle = 'rgba(206, 216, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i <= 180; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 180) * SIRIUS.orbit.period;
+                const p = getSiriusPos2DAdv(t);
+                const px = cx - p.x * qA * scale;
+                const py = cy - p.y * qA * scale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(162, 199, 255, 0.1)';
+            ctx.beginPath();
+            for (let i = 0; i <= 180; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 180) * SIRIUS.orbit.period;
+                const p = getSiriusPos2DAdv(t);
+                const px = cx + p.x * qB * scale;
+                const py = cy + p.y * qB * scale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // Sirius A glow
+            const sA = SIRIUS.A.color;
+            const pulseA = Math.sin(time * 1.5) * 0.08 + 1;
+            const sizeA = starSize * pulseA;
+            const gradA = ctx.createRadialGradient(axP.x, axP.y, 0, axP.x, axP.y, sizeA);
+            gradA.addColorStop(0, `rgba(${sA.r},${sA.g},${sA.b},0.9)`);
+            gradA.addColorStop(0.5, `rgba(${sA.r},${sA.g},${sA.b},0.5)`);
+            gradA.addColorStop(1, `rgba(${sA.r},${sA.g},${sA.b},0)`);
+            ctx.fillStyle = gradA;
+            ctx.beginPath();
+            ctx.arc(axP.x, axP.y, sizeA, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Sirius B glow
+            const sB = SIRIUS.B.color;
+            const sizeB = Math.max(starSize * 0.12, 5);
+            const pulseB = Math.sin(time * 3) * 0.15 + 1;
+            const gradB = ctx.createRadialGradient(bxP.x, bxP.y, 0, bxP.x, bxP.y, sizeB * 2.5 * pulseB);
+            gradB.addColorStop(0, `rgba(${sB.r},${sB.g},${sB.b},1.0)`);
+            gradB.addColorStop(0.3, `rgba(${sB.r},${sB.g},${sB.b},0.6)`);
+            gradB.addColorStop(1, `rgba(${sB.r},${sB.g},${sB.b},0)`);
+            ctx.fillStyle = gradB;
+            ctx.beginPath();
+            ctx.arc(bxP.x, bxP.y, sizeB * 2.5 * pulseB, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Labels
+            ctx.font = '11px Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(206,216,255,0.7)';
+            ctx.fillText('Sirius A (A1V, 9940 K)', axP.x, axP.y - sizeA - 6);
+            ctx.fillStyle = 'rgba(162,199,255,0.7)';
+            ctx.fillText('Sirius B (DA2, 25000 K)', bxP.x, bxP.y - sizeB * 2.5 - 6);
+
+            // Epoch info
+            ctx.fillStyle = 'rgba(255,215,0,0.5)';
+            ctx.font = '12px Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('Epoch: ' + siriusEpoch.toFixed(1) + ' CE  |  Sep: ' + pos.r.toFixed(2) + ' AU', 10, canvas.height - 14);
+
+            return { axP, bxP };
+        }
+
         // Animation loop
         function animate() {
             const now = Date.now();
@@ -831,12 +958,45 @@
             // Draw visualizations
             drawDensityHeatmap();
             drawMagneticFieldLines();
-            drawStar();
+
+            let siriusPos = null;
+            if (siriusMode) {
+                siriusPos = drawSiriusBinary(dt);
+            } else {
+                drawStar();
+            }
 
             // Update and draw particles
             let totalSpeed = 0;
             let totalDensity = 0;
             particles.forEach(p => {
+                // In Sirius mode, redirect particle origin to Sirius A and add B interaction
+                if (siriusMode && siriusPos && p.life <= 0.01) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = starSize * 0.5;
+                    p.x = siriusPos.axP.x + Math.cos(angle) * dist;
+                    p.y = siriusPos.axP.y + Math.sin(angle) * dist;
+                    const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+                    p.vx = dir.x * windSpeed * 0.5;
+                    p.vy = dir.y * windSpeed * 0.5;
+                    p.life = 1.0;
+                    p.maxLife = 2 + Math.random() * 2;
+                    p.color = { ...SIRIUS.A.color };
+                }
+                if (siriusMode && siriusPos) {
+                    const dx = siriusPos.bxP.x - p.x;
+                    const dy = siriusPos.bxP.y - p.y;
+                    const d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < 80 && d > 3) {
+                        const grav = 0.8 / (d * d + 10);
+                        p.vx += (dx / d) * grav * dt * 60;
+                        p.vy += (dy / d) * grav * dt * 60;
+                        if (d < 30) {
+                            p.color = { r: 162, g: 199, b: 255 };
+                        }
+                    }
+                }
+
                 p.update(dt);
                 p.draw();
                 totalSpeed += Math.sqrt(p.vx * p.vx + p.vy * p.vy);
@@ -854,9 +1014,36 @@
             requestAnimationFrame(animate);
         }
 
+        // ── SIRIUS PRESET SWITCHING ──
+        document.getElementById('presetSelect').addEventListener('change', (e) => {
+            if (e.target.value === 'sirius') {
+                siriusMode = true;
+                siriusEpoch = 2026.0;
+                currentStarType = 'a-type';
+                document.getElementById('starType').value = 'a-type';
+                const config = starTypes['a-type'];
+                starSize = config.defaultSize;
+                rotationSpeed = 1.0; // Sirius A slow rotator (v sin i = 16 km/s)
+                document.getElementById('size').value = starSize;
+                document.getElementById('sizeValue').textContent = starSize + ' px';
+                document.getElementById('rotationSpeed').value = rotationSpeed;
+                document.getElementById('rotationValue').textContent = rotationSpeed.toFixed(1) + ' rad/s';
+                document.getElementById('modeIndicator').textContent = 'Sirius Binary System';
+                initParticles();
+            } else {
+                siriusMode = false;
+                document.getElementById('modeIndicator').textContent = 'Parker Spiral';
+                initParticles();
+            }
+        });
+
         // Event listeners
         document.getElementById('starType').addEventListener('change', (e) => {
             currentStarType = e.target.value;
+            if (siriusMode) {
+                siriusMode = false;
+                document.getElementById('presetSelect').value = 'default';
+            }
             const config = starTypes[currentStarType];
             starSize = config.defaultSize;
             rotationSpeed = config.rotation;
