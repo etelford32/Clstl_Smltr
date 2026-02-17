@@ -306,6 +306,15 @@
 
         <div class="controls">
             <div class="control-group">
+                <h3>🔭 Preset Simulation</h3>
+                <label for="presetSelect">Simulation Mode:</label>
+                <select id="presetSelect">
+                    <option value="default" selected>Default (Single Star)</option>
+                    <option value="sirius">Sirius Binary System</option>
+                </select>
+            </div>
+
+            <div class="control-group">
                 <h3>🌟 Stellar Classification</h3>
                 <label for="starType">Star Type:</label>
                 <select id="starType">
@@ -388,6 +397,50 @@
     </div>
 
     <script>
+        // ── SIRIUS BINARY SYSTEM DATA ──
+        const SIRIUS = {
+            A: { mass: 2.06, radius: 1.713, temperature: 9940, luminosity: 24.7,
+                 color: { r: 206, g: 216, b: 255 }, spectralType: 'A1 V (Am)',
+                 metallicity: '+0.50', vsini: '16 km/s' },
+            B: { mass: 1.018, radius: 0.0081, temperature: 25000, luminosity: 0.0245,
+                 color: { r: 162, g: 199, b: 255 }, spectralType: 'DA2 White Dwarf',
+                 coolingAge: '~126 Myr', logG: '8.57' },
+            orbit: { period: 50.13, semiMajorAxis: 20.0, eccentricity: 0.5914,
+                     inclination: 136.3, periastronTime: 1994.5715 },
+            system: { distance: '8.6 ly', radialVel: '-5.5 km/s', age: '~242 Myr' }
+        };
+        const SIRIUS_TOTAL_MASS = SIRIUS.A.mass + SIRIUS.B.mass;
+
+        function solveKepler2D(M, e) {
+            let E = M + e * Math.sin(M);
+            for (let i = 0; i < 30; i++) {
+                const dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= dE;
+                if (Math.abs(dE) < 1e-9) break;
+            }
+            return E;
+        }
+
+        function getSiriusOrbitPos2D(epoch) {
+            const o = SIRIUS.orbit;
+            let M = 2 * Math.PI * ((epoch - o.periastronTime) / o.period);
+            M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const E = solveKepler2D(M, o.eccentricity);
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + o.eccentricity) * Math.sin(E / 2),
+                Math.sqrt(1 - o.eccentricity) * Math.cos(E / 2));
+            const r = o.semiMajorAxis * (1 - o.eccentricity * Math.cos(E));
+            // Project to 2D (simplified inclined view)
+            const cosI = Math.cos(o.inclination * Math.PI / 180);
+            const x = r * Math.cos(nu);
+            const y = r * Math.sin(nu) * cosI;
+            return { x, y, r, nu };
+        }
+
+        let siriusMode = false;
+        let siriusEpoch = 2026.0;
+        const SIRIUS_TIME_SPEED = 1.5; // yr/s
+
         // Star type configurations
         const starTypes = {
             'o-type': {
@@ -646,6 +699,95 @@
             }
         }
 
+        // ── SIRIUS BINARY DRAWING ──
+        function drawSiriusSystem(dt) {
+            siriusEpoch += dt * SIRIUS_TIME_SPEED;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const orbitScale = 4.0; // pixels per AU
+
+            const pos = getSiriusOrbitPos2D(siriusEpoch);
+            const qA = SIRIUS.B.mass / SIRIUS_TOTAL_MASS;
+            const qB = SIRIUS.A.mass / SIRIUS_TOTAL_MASS;
+
+            const axPos = { x: cx - pos.x * qA * orbitScale, y: cy - pos.y * qA * orbitScale };
+            const bxPos = { x: cx + pos.x * qB * orbitScale, y: cy + pos.y * qB * orbitScale };
+
+            // Draw orbital paths
+            ctx.strokeStyle = 'rgba(206, 216, 255, 0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i <= 200; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 200) * SIRIUS.orbit.period;
+                const p = getSiriusOrbitPos2D(t);
+                const px = cx - p.x * qA * orbitScale;
+                const py = cy - p.y * qA * orbitScale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(162, 199, 255, 0.12)';
+            ctx.beginPath();
+            for (let i = 0; i <= 200; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 200) * SIRIUS.orbit.period;
+                const p = getSiriusOrbitPos2D(t);
+                const px = cx + p.x * qB * orbitScale;
+                const py = cy + p.y * qB * orbitScale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // Center of mass marker
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.4)';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Sirius A glow + star
+            const sA = SIRIUS.A.color;
+            const pulseA = Math.sin(time * 1.5) * 0.08 + 1;
+            const sizeA = starSize * pulseA;
+            const gradA = ctx.createRadialGradient(axPos.x, axPos.y, 0, axPos.x, axPos.y, sizeA);
+            gradA.addColorStop(0, `rgba(${sA.r}, ${sA.g}, ${sA.b}, 0.95)`);
+            gradA.addColorStop(0.5, `rgba(${sA.r}, ${sA.g}, ${sA.b}, 0.5)`);
+            gradA.addColorStop(1, `rgba(${sA.r}, ${sA.g}, ${sA.b}, 0)`);
+            ctx.fillStyle = gradA;
+            ctx.beginPath();
+            ctx.arc(axPos.x, axPos.y, sizeA, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Sirius B (white dwarf - small but intense)
+            const sB = SIRIUS.B.color;
+            const sizeB = Math.max(starSize * 0.12, 5);
+            const pulseB = Math.sin(time * 3) * 0.15 + 1;
+            const gradB = ctx.createRadialGradient(bxPos.x, bxPos.y, 0, bxPos.x, bxPos.y, sizeB * 2.5 * pulseB);
+            gradB.addColorStop(0, `rgba(${sB.r}, ${sB.g}, ${sB.b}, 1.0)`);
+            gradB.addColorStop(0.3, `rgba(${sB.r}, ${sB.g}, ${sB.b}, 0.6)`);
+            gradB.addColorStop(1, `rgba(${sB.r}, ${sB.g}, ${sB.b}, 0)`);
+            ctx.fillStyle = gradB;
+            ctx.beginPath();
+            ctx.arc(bxPos.x, bxPos.y, sizeB * 2.5 * pulseB, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Labels
+            ctx.font = '11px Segoe UI, sans-serif';
+            ctx.fillStyle = 'rgba(206, 216, 255, 0.7)';
+            ctx.textAlign = 'center';
+            ctx.fillText('Sirius A (A1V)', axPos.x, axPos.y - sizeA - 6);
+            ctx.fillStyle = 'rgba(162, 199, 255, 0.7)';
+            ctx.fillText('Sirius B (DA2)', bxPos.x, bxPos.y - sizeB * 2.5 - 6);
+
+            // Epoch label
+            ctx.fillStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.font = '12px Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('Epoch: ' + siriusEpoch.toFixed(1) + ' CE', 10, canvas.height - 30);
+            ctx.fillText('Separation: ' + pos.r.toFixed(2) + ' AU', 10, canvas.height - 14);
+
+            // Return positions for particle interaction
+            return { axPos, bxPos, separation: pos.r };
+        }
+
         // Animation loop
         function animate() {
             const now = Date.now();
@@ -662,11 +804,49 @@
             // Update time
             time += dt;
 
-            // Draw star
-            drawStar();
+            let siriusPositions = null;
+            if (siriusMode) {
+                siriusPositions = drawSiriusSystem(dt);
+            } else {
+                drawStar();
+            }
 
             // Update and draw particles
             particles.forEach(p => {
+                // In Sirius mode, emit from Sirius A's position
+                if (siriusMode && siriusPositions) {
+                    // Override particle origin to Sirius A
+                    if (p.life <= 0.01) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const distance = starSize * 0.5;
+                        p.x = siriusPositions.axPos.x + Math.cos(angle) * distance;
+                        p.y = siriusPositions.axPos.y + Math.sin(angle) * distance;
+                        p.vx = Math.cos(angle) * particleSpeed * 0.5;
+                        p.vy = Math.sin(angle) * particleSpeed * 0.5;
+                        p.life = 1.0;
+                        p.color = { ...SIRIUS.A.color };
+                    }
+
+                    // Gravitational deflection toward Sirius B
+                    const dx = siriusPositions.bxPos.x - p.x;
+                    const dy = siriusPositions.bxPos.y - p.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 80 && dist > 3) {
+                        const grav = 0.8 / (dist * dist + 10);
+                        p.vx += (dx / dist) * grav * dt * 60;
+                        p.vy += (dy / dist) * grav * dt * 60;
+                        // Heat color shift near B
+                        if (dist < 30) {
+                            const heat = 1 - dist / 30;
+                            p.color = {
+                                r: Math.round(162 + heat * 40),
+                                g: Math.round(199 + heat * 30),
+                                b: 255
+                            };
+                        }
+                    }
+                }
+
                 p.update(dt);
                 p.draw();
             });
@@ -704,9 +884,54 @@
             document.getElementById('luminosity').textContent = `${config.luminosity} L☉`;
         }
 
+        // ── SIRIUS PRESET SWITCHING ──
+        function activateSiriusMode() {
+            siriusMode = true;
+            siriusEpoch = 2026.0;
+            currentStarType = 'a-type';
+            document.getElementById('starType').value = 'a-type';
+            starSize = 60;
+            document.getElementById('size').value = starSize;
+            document.getElementById('sizeValue').textContent = starSize + ' px';
+
+            const infoDiv = document.getElementById('starInfo');
+            infoDiv.innerHTML = `
+                <h4>Sirius Binary System (\u03B1 Canis Majoris)</h4>
+                <p>The brightest star in Earth's night sky. A binary system at 8.6 light-years.</p>
+                <div class="info-row"><span class="info-label">Sirius A:</span><span class="info-value">A1V (Am), 9,940 K, 2.06 M\u2609</span></div>
+                <div class="info-row"><span class="info-label">Sirius B:</span><span class="info-value">DA2 WD, 25,000 K, 1.018 M\u2609</span></div>
+                <div class="info-row"><span class="info-label">Period:</span><span class="info-value">50.13 yr (e=0.5914)</span></div>
+                <div class="info-row"><span class="info-label">Distance:</span><span class="info-value">2.64 pc (8.6 ly)</span></div>
+                <div class="info-row"><span class="info-label">System Age:</span><span class="info-value">~242 Myr</span></div>
+                <div class="info-row"><span class="info-label">Luminosity A:</span><span class="info-value">24.7 L\u2609</span></div>
+                <div class="info-row"><span class="info-label">Luminosity B:</span><span class="info-value">0.0245 L\u2609</span></div>
+            `;
+            document.getElementById('temp').textContent = '9,940 K (A) / 25,000 K (B)';
+            document.getElementById('luminosity').textContent = '24.7 L\u2609 (A)';
+            initParticles();
+        }
+
+        function deactivateSiriusMode() {
+            siriusMode = false;
+            updateStarInfo();
+            initParticles();
+        }
+
+        document.getElementById('presetSelect').addEventListener('change', (e) => {
+            if (e.target.value === 'sirius') {
+                activateSiriusMode();
+            } else {
+                deactivateSiriusMode();
+            }
+        });
+
         // Event listeners
         document.getElementById('starType').addEventListener('change', (e) => {
             currentStarType = e.target.value;
+            if (siriusMode) {
+                siriusMode = false;
+                document.getElementById('presetSelect').value = 'default';
+            }
             const config = starTypes[currentStarType];
             starSize = config.defaultSize;
             document.getElementById('size').value = starSize;
