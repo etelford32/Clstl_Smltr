@@ -3,54 +3,467 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Star Simulator</title>
+    <title>3D Star Simulator - Sirius Binary System</title>
     <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            margin: 0;
             overflow: hidden;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        #canvas-container {
-            width: 100%;
-            height: 100vh;
-            background: linear-gradient(135deg, #000000 0%, #0a0a1a 50%, #000510 100%);
-        }
-        #info {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            color: #ffd700;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 15px 20px;
-            border-radius: 10px;
-            border: 2px solid rgba(255, 215, 0, 0.3);
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-            z-index: 100;
-        }
-        #info h3 {
-            margin: 0 0 10px 0;
-            font-size: 18px;
-        }
-        #info p {
-            margin: 5px 0;
+            background: #000;
             color: #ddd;
         }
-        kbd {
-            background: rgba(255, 255, 255, 0.2);
-            padding: 2px 6px;
+
+        #app {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: linear-gradient(135deg, #000000 0%, #0a0a1a 50%, #000510 100%);
+        }
+
+        /* --- HUD overlay (top-left) --- */
+        #hud {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            color: #ffd700;
+            background: rgba(0,0,0,0.72);
+            padding: 14px 18px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,215,0,0.25);
+            font-size: 13px;
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            pointer-events: none;
+            line-height: 1.55;
+            max-width: 280px;
+        }
+        #hud h3 { margin: 0 0 6px 0; font-size: 16px; }
+        #hud .val { color: #7ec8e3; }
+        #hud .dim { color: #888; font-size: 11px; }
+        #hud .sep-readout { color: #ffd700; font-size: 14px; font-weight: 600; }
+        #hud kbd {
+            background: rgba(255,255,255,0.15);
+            padding: 1px 5px;
             border-radius: 3px;
             font-family: monospace;
+            font-size: 11px;
+        }
+
+        /* --- Collapsible Sidebar --- */
+        #sidebar {
+            width: 320px;
+            min-width: 320px;
+            background: rgba(8,8,24,0.96);
+            border-left: 1px solid rgba(255,215,0,0.15);
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 14px;
+            transition: margin-right 0.3s ease, opacity 0.3s ease;
+            z-index: 200;
+            font-size: 12px;
+        }
+        #sidebar.collapsed {
+            margin-right: -320px;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #sidebar-toggle {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            z-index: 300;
+            background: rgba(0,0,0,0.7);
+            border: 1px solid rgba(255,215,0,0.3);
+            color: #ffd700;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-family: inherit;
+            backdrop-filter: blur(8px);
+            transition: all 0.2s;
+        }
+        #sidebar-toggle:hover { background: rgba(255,215,0,0.15); }
+        #sidebar.collapsed ~ #sidebar-toggle { right: 16px; }
+
+        /* Sidebar sections */
+        .sb-section {
+            margin-bottom: 12px;
+            border: 1px solid rgba(255,215,0,0.12);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(255,255,255,0.02);
+        }
+        .sb-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: rgba(255,215,0,0.06);
+            color: #ffd700;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .sb-title:hover { background: rgba(255,215,0,0.12); }
+        .sb-body { padding: 10px 12px; }
+        .sb-section.closed .sb-body { display: none; }
+
+        /* Controls */
+        .ctrl-row {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+            gap: 8px;
+        }
+        .ctrl-row label {
+            flex: 0 0 100px;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .ctrl-row select,
+        .ctrl-row input[type="range"] {
+            flex: 1;
+        }
+        .ctrl-row .vdisp {
+            flex: 0 0 52px;
+            text-align: right;
+            color: #7ec8e3;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        select {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,215,0,0.2);
+            color: #fff;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 11px;
+        }
+        select option { background: #111; color: #fff; }
+        input[type="range"] {
+            height: 6px;
+            border-radius: 3px;
+            accent-color: #ffd700;
+        }
+
+        /* Checkbox row */
+        .chk-row {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            gap: 6px;
+        }
+        .chk-row input { accent-color: #ffd700; }
+        .chk-row label { font-size: 11px; color: #bbb; cursor: pointer; }
+
+        /* Buttons */
+        .btn-row {
+            display: flex;
+            gap: 6px;
+            margin: 8px 0;
+        }
+        .btn-row button, .sb-body button {
+            flex: 1;
+            padding: 6px 8px;
+            background: rgba(255,215,0,0.1);
+            border: 1px solid rgba(255,215,0,0.25);
+            color: #ffd700;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            transition: all 0.15s;
+        }
+        .btn-row button:hover, .sb-body button:hover {
+            background: rgba(255,215,0,0.22);
+        }
+        .btn-row button.active {
+            background: rgba(255,215,0,0.3);
+            border-color: #ffd700;
+        }
+
+        /* Data table */
+        .data-tbl {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .data-tbl td {
+            padding: 3px 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .data-tbl td:first-child { color: #999; }
+        .data-tbl td:last-child { color: #7ec8e3; text-align: right; font-weight: 600; }
+        .data-tbl tr.highlight td { color: #ffd700; }
+
+        /* Radio buttons for scale mode */
+        .scale-toggle {
+            display: flex;
+            gap: 4px;
+            margin: 6px 0;
+        }
+        .scale-toggle button {
+            flex: 1;
+            padding: 5px;
+            font-size: 10px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,215,0,0.15);
+            color: #aaa;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .scale-toggle button.active {
+            background: rgba(255,215,0,0.18);
+            border-color: #ffd700;
+            color: #ffd700;
+        }
+
+        /* Epoch display */
+        .epoch-display {
+            text-align: center;
+            padding: 8px;
+            background: rgba(126,200,227,0.06);
+            border-radius: 6px;
+            margin: 6px 0;
+        }
+        .epoch-year {
+            font-size: 20px;
+            font-weight: 700;
+            color: #7ec8e3;
+            letter-spacing: 1px;
+        }
+        .epoch-label {
+            font-size: 10px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        /* Camera preset buttons */
+        .cam-presets {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .cam-presets button {
+            flex: 1;
+            min-width: 80px;
         }
     </style>
 </head>
 <body>
-    <div id="canvas-container"></div>
-    <div id="info">
-        <h3>🌟 3D Star Simulator</h3>
-        <p><kbd>Click + Drag</kbd> Rotate camera</p>
-        <p><kbd>Scroll</kbd> Zoom in/out</p>
-        <p><strong>Particles:</strong> <span id="particle-count">0</span>/2000</p>
+    <div id="app">
+        <div id="canvas-container"></div>
+
+        <div id="sidebar">
+            <!-- Preset Selector -->
+            <div class="sb-section">
+                <div class="sb-title">Preset Simulation</div>
+                <div class="sb-body">
+                    <div class="ctrl-row">
+                        <select id="presetSelect" style="width:100%;flex:1">
+                            <option value="default">Default (Single Star)</option>
+                            <option value="sirius" selected>Sirius Binary System</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Time Controls (Sirius mode) -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">Time Controls <span style="font-size:10px;color:#888">&#9201;</span></div>
+                <div class="sb-body">
+                    <div class="epoch-display">
+                        <div class="epoch-year" id="epochYear">2026.0</div>
+                        <div class="epoch-label">Simulation Epoch (CE)</div>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Speed</label>
+                        <input type="range" id="timeSpeed" min="0" max="100" value="15">
+                        <span class="vdisp" id="timeSpeedVal">1.5 yr/s</span>
+                    </div>
+                    <div class="btn-row">
+                        <button id="btnPlay" class="active">&#9654; Play</button>
+                        <button id="btnPause">&#9646;&#9646; Pause</button>
+                        <button id="btnReset">&#8634; Reset</button>
+                    </div>
+                    <div class="btn-row">
+                        <button id="btnPeriastron">Go to Periastron (1994.6)</button>
+                    </div>
+                    <div class="btn-row">
+                        <button id="btnNow">Go to Now (2026)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View Options -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">View Options <span style="font-size:10px;color:#888">&#128301;</span></div>
+                <div class="sb-body">
+                    <div style="font-size:10px;color:#888;margin-bottom:6px;">Star Size Scale:</div>
+                    <div class="scale-toggle">
+                        <button id="scaleExag" class="active">Exaggerated</button>
+                        <button id="scaleTrue">True Scale</button>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showOrbit" checked>
+                        <label for="showOrbit">Orbital Path</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showWind" checked>
+                        <label for="showWind">Stellar Wind (Sirius A)</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showInteraction" checked>
+                        <label for="showInteraction">Wind-Companion Interaction</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showLabels" checked>
+                        <label for="showLabels">Star Labels</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showAxes">
+                        <label for="showAxes">Reference Axes</label>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin-top:8px;margin-bottom:4px;">Camera:</div>
+                    <div class="cam-presets">
+                        <button id="camOverview">Overview</button>
+                        <button id="camTop">Top-Down</button>
+                        <button id="camSiriusA">Zoom A</button>
+                        <button id="camSiriusB">Zoom B</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stellar Wind Controls -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">Stellar Wind <span style="font-size:10px;color:#888">&#127754;</span></div>
+                <div class="sb-body">
+                    <div class="ctrl-row">
+                        <label>Emission Rate</label>
+                        <input type="range" id="windRate" min="1" max="30" value="12">
+                        <span class="vdisp" id="windRateVal">12/f</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Wind Speed</label>
+                        <input type="range" id="windVel" min="5" max="60" value="25">
+                        <span class="vdisp" id="windVelVal">25</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>B Gravity Scale</label>
+                        <input type="range" id="bGravity" min="0" max="100" value="40">
+                        <span class="vdisp" id="bGravityVal">40</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sirius A Data -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">Sirius A (Primary) <span style="font-size:10px;color:#CED8FF">&#9733;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Spectral Type</td><td>A1 V (Am)</td></tr>
+                        <tr><td>Mass</td><td>2.06 M&#9737;</td></tr>
+                        <tr><td>Radius</td><td>1.713 R&#9737;</td></tr>
+                        <tr><td>Temperature</td><td>9,940 K</td></tr>
+                        <tr><td>Luminosity</td><td>24.7 L&#9737;</td></tr>
+                        <tr><td>log g</td><td>4.33 cgs</td></tr>
+                        <tr><td>[Fe/H]</td><td>+0.50 (super-solar)</td></tr>
+                        <tr><td>v sin i</td><td>16 km/s</td></tr>
+                        <tr><td>App. Mag (V)</td><td>-1.46</td></tr>
+                        <tr><td>Abs. Mag (V)</td><td>+1.43</td></tr>
+                        <tr><td>B-V Color</td><td>+0.00</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Sirius B Data -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">Sirius B (Companion) <span style="font-size:10px;color:#A2C7FF">&#9733;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Classification</td><td>DA2 White Dwarf</td></tr>
+                        <tr><td>Mass</td><td>1.018 M&#9737;</td></tr>
+                        <tr><td>Radius</td><td>0.0081 R&#9737; (&asymp; Earth)</td></tr>
+                        <tr><td>Temperature</td><td>25,000 K</td></tr>
+                        <tr><td>Luminosity</td><td>0.0245 L&#9737;</td></tr>
+                        <tr><td>log g</td><td>8.57 cgs</td></tr>
+                        <tr><td>App. Mag (V)</td><td>+8.44</td></tr>
+                        <tr><td>Abs. Mag (V)</td><td>+11.18</td></tr>
+                        <tr><td>Cooling Age</td><td>~126 Myr</td></tr>
+                        <tr><td>Progenitor Mass</td><td>~5 M&#9737;</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Orbital Parameters -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">Orbital Parameters <span style="font-size:10px;color:#888">&#128208;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Period</td><td>50.13 yr</td></tr>
+                        <tr><td>Semi-major Axis</td><td>7.50&Prime; (20 AU)</td></tr>
+                        <tr><td>Eccentricity</td><td>0.5914</td></tr>
+                        <tr><td>Inclination</td><td>136.3&deg;</td></tr>
+                        <tr><td>&Omega; (asc. node)</td><td>45.4&deg;</td></tr>
+                        <tr><td>&omega; (arg. peri.)</td><td>149.2&deg;</td></tr>
+                        <tr><td>Periastron</td><td>1994.57 CE</td></tr>
+                        <tr><td>Periapsis</td><td>~8.2 AU</td></tr>
+                        <tr><td>Apoapsis</td><td>~31.5 AU</td></tr>
+                    </table>
+                    <table class="data-tbl" style="margin-top:8px;border-top:1px solid rgba(255,215,0,0.1);padding-top:6px">
+                        <tr class="highlight"><td>Current Sep.</td><td id="liveSep">--</td></tr>
+                        <tr class="highlight"><td>Orbital Phase</td><td id="livePhase">--</td></tr>
+                        <tr><td>True Anomaly</td><td id="liveNu">--</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- System Info -->
+            <div class="sb-section sirius-only">
+                <div class="sb-title">System Info <span style="font-size:10px;color:#888">&#128301;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Name</td><td>&alpha; Canis Majoris</td></tr>
+                        <tr><td>Distance</td><td>2.64 pc (8.6 ly)</td></tr>
+                        <tr><td>Parallax</td><td>379.21 mas</td></tr>
+                        <tr><td>Radial Vel.</td><td>&minus;5.5 km/s</td></tr>
+                        <tr><td>Proper Motion</td><td>1.33&Prime;/yr</td></tr>
+                        <tr><td>System Age</td><td>~242 Myr</td></tr>
+                    </table>
+                    <div style="margin-top:10px;padding:8px;background:rgba(255,215,0,0.05);border-radius:5px;font-size:10px;color:#999;line-height:1.5;">
+                        <strong style="color:#ffd700">Sources:</strong> Bond et al. 2017 (ApJ),
+                        Barstow et al. 2005 (MNRAS), Davis et al. 2011 (PASA),
+                        van Leeuwen 2007 (A&amp;A), Gaia DR3, HST/STIS
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button id="sidebar-toggle">&#9776; Panel</button>
+    </div>
+
+    <!-- HUD overlay -->
+    <div id="hud">
+        <h3 id="hudTitle">Sirius Binary System</h3>
+        <div id="hudDefault" style="display:none">
+            <p><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom</p>
+            <p>Particles: <span class="val" id="particle-count">0</span>/2000</p>
+        </div>
+        <div id="hudSirius">
+            <p class="sep-readout">Separation: <span id="hudSep">--</span> AU</p>
+            <p class="dim">Epoch: <span class="val" id="hudEpoch">2026.0</span> &nbsp; Phase: <span class="val" id="hudPhase">--</span></p>
+            <p class="dim">Wind particles: <span class="val" id="hudParts">0</span></p>
+            <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
+        </div>
     </div>
 
     <script type="importmap">
@@ -66,180 +479,822 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        // Scene setup
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        // ──────────────────────────────────────────────
+        // SIRIUS SYSTEM SCIENTIFIC DATA
+        // ──────────────────────────────────────────────
+        const SIRIUS = {
+            A: {
+                mass: 2.06,           // M_sun
+                radius: 1.713,        // R_sun
+                temperature: 9940,    // K
+                luminosity: 24.7,     // L_sun
+                color: 0xCED8FF,      // Blue-white (A1V ~10000K blackbody)
+                emissiveColor: 0xCED8FF,
+            },
+            B: {
+                mass: 1.018,          // M_sun
+                radius: 0.0081,       // R_sun (~0.92 R_earth)
+                temperature: 25000,   // K
+                luminosity: 0.0245,   // L_sun
+                color: 0xA2C7FF,      // Hotter blue-white (DA2 ~25000K)
+                emissiveColor: 0x8AB8FF,
+            },
+            orbit: {
+                period: 50.13,        // years
+                semiMajorAxis: 20.0,  // AU
+                eccentricity: 0.5914,
+                inclination: 136.3 * Math.PI / 180,    // radians
+                ascendingNode: 45.4 * Math.PI / 180,    // radians
+                argPeriastron: 149.2 * Math.PI / 180,    // radians
+                periastronTime: 1994.5715,               // year CE
+            },
+            system: {
+                totalMass: 2.06 + 1.018,    // 3.078 M_sun
+                radialVelocity: -5.5,       // km/s
+            }
+        };
 
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        // Mass fractions for center-of-mass orbit
+        const qA = SIRIUS.B.mass / SIRIUS.system.totalMass;  // A's fraction of semi-major axis
+        const qB = SIRIUS.A.mass / SIRIUS.system.totalMass;  // B's fraction
+
+        // ──────────────────────────────────────────────
+        // KEPLER EQUATION SOLVER
+        // ──────────────────────────────────────────────
+        function solveKepler(M, e, tol = 1e-10) {
+            // Newton-Raphson solution of M = E - e*sin(E)
+            let E = M + e * Math.sin(M); // better initial guess
+            for (let i = 0; i < 50; i++) {
+                const dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= dE;
+                if (Math.abs(dE) < tol) break;
+            }
+            return E;
+        }
+
+        function getOrbitalPosition(epoch, params) {
+            const { period, eccentricity: e, semiMajorAxis: a,
+                    inclination: inc, ascendingNode: Omega,
+                    argPeriastron: omega, periastronTime: T0 } = params;
+
+            // Mean anomaly
+            let M = 2 * Math.PI * ((epoch - T0) / period);
+            M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI); // normalize to [0, 2pi)
+
+            // Eccentric anomaly
+            const E = solveKepler(M, e);
+
+            // True anomaly
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + e) * Math.sin(E / 2),
+                Math.sqrt(1 - e) * Math.cos(E / 2)
+            );
+
+            // Radius
+            const r = a * (1 - e * Math.cos(E));
+
+            // Position in orbital plane
+            const xOrb = r * Math.cos(nu);
+            const yOrb = r * Math.sin(nu);
+
+            // 3D rotation using Euler angles (orbital elements → celestial)
+            const cosO = Math.cos(Omega), sinO = Math.sin(Omega);
+            const cosI = Math.cos(inc),   sinI = Math.sin(inc);
+            const cosW = Math.cos(omega), sinW = Math.sin(omega);
+
+            const x = (cosO * cosW - sinO * sinW * cosI) * xOrb +
+                      (-cosO * sinW - sinO * cosW * cosI) * yOrb;
+            const y = (sinO * cosW + cosO * sinW * cosI) * xOrb +
+                      (-sinO * sinW + cosO * cosW * cosI) * yOrb;
+            const z = (sinW * sinI) * xOrb + (cosW * sinI) * yOrb;
+
+            return { x, y, z, r, nu, M, E };
+        }
+
+        // ──────────────────────────────────────────────
+        // STATE
+        // ──────────────────────────────────────────────
+        let state = {
+            mode: 'sirius',           // 'default' | 'sirius'
+            epoch: 2026.0,
+            timeSpeed: 1.5,           // years per second
+            playing: true,
+            scaleMode: 'exaggerated', // 'exaggerated' | 'true'
+            showOrbit: true,
+            showWind: true,
+            showInteraction: true,
+            showLabels: true,
+            showAxes: false,
+            windRate: 12,
+            windVel: 25,
+            bGravityScale: 40,
+        };
+
+        // Display sizes (in AU, our 3D unit)
+        function getStarDisplayRadius(star, mode) {
+            if (mode === 'true') {
+                // True scale: R_sun ≈ 0.00465 AU
+                return star.radius * 0.00465;
+            }
+            // Exaggerated: make stars visible relative to orbit
+            if (star === SIRIUS.A) return 1.0;   // 1 AU display radius
+            return 0.25; // Sirius B exaggerated
+        }
+
+        // ──────────────────────────────────────────────
+        // THREE.JS SCENE SETUP
+        // ──────────────────────────────────────────────
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, 1, 0.001, 2000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.0;
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
-        // Camera position
-        camera.position.set(0, 5, 15);
-
-        // Orbit controls
+        // Camera & controls
+        camera.position.set(25, 20, 35);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.05;
-        controls.minDistance = 5;
-        controls.maxDistance = 50;
-
-        // Star setup
-        const STAR_RADIUS = 2;
-        const starGeometry = new THREE.SphereGeometry(STAR_RADIUS, 64, 64);
-        const starMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffaa00,
-            emissive: 0xffaa00,
-            emissiveIntensity: 2,
-            roughness: 0.5,
-            metalness: 0.3
-        });
-        const star = new THREE.Mesh(starGeometry, starMaterial);
-        scene.add(star);
-
-        // Star glow
-        const glowGeometry = new THREE.SphereGeometry(STAR_RADIUS * 1.15, 32, 32);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffdd66,
-            transparent: true,
-            opacity: 0.3,
-            side: THREE.BackSide
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        scene.add(glow);
-
-        // Point light at star center
-        const pointLight = new THREE.PointLight(0xffaa00, 3, 100);
-        pointLight.position.set(0, 0, 0);
-        scene.add(pointLight);
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 0.5;
+        controls.maxDistance = 200;
+        controls.target.set(0, 0, 0);
 
         // Ambient light
-        const ambientLight = new THREE.AmbientLight(0x333366, 0.3);
-        scene.add(ambientLight);
+        scene.add(new THREE.AmbientLight(0x334466, 0.15));
 
-        // Particle system
-        const MAX_PARTICLES = 2000;
-        const SPAWN_RATE = 10;
-        const particles = [];
+        // Background stars
+        const bgStarGeo = new THREE.BufferGeometry();
+        const bgStarPositions = [];
+        for (let i = 0; i < 4000; i++) {
+            const r = 400 + Math.random() * 400;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos(2 * Math.random() - 1);
+            bgStarPositions.push(
+                r * Math.sin(phi) * Math.cos(theta),
+                r * Math.sin(phi) * Math.sin(theta),
+                r * Math.cos(phi)
+            );
+        }
+        bgStarGeo.setAttribute('position', new THREE.Float32BufferAttribute(bgStarPositions, 3));
+        const bgStarMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.6, sizeAttenuation: false });
+        scene.add(new THREE.Points(bgStarGeo, bgStarMat));
 
-        class Particle {
+        // ──────────────────────────────────────────────
+        // DEFAULT MODE OBJECTS
+        // ──────────────────────────────────────────────
+        const defaultGroup = new THREE.Group();
+        scene.add(defaultGroup);
+
+        const defaultStarGeo = new THREE.SphereGeometry(2, 64, 64);
+        const defaultStarMat = new THREE.MeshStandardMaterial({
+            color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 2,
+            roughness: 0.5, metalness: 0.3
+        });
+        const defaultStar = new THREE.Mesh(defaultStarGeo, defaultStarMat);
+        defaultGroup.add(defaultStar);
+
+        const defaultGlowGeo = new THREE.SphereGeometry(2 * 1.15, 32, 32);
+        const defaultGlowMat = new THREE.MeshBasicMaterial({
+            color: 0xffdd66, transparent: true, opacity: 0.3, side: THREE.BackSide
+        });
+        defaultGroup.add(new THREE.Mesh(defaultGlowGeo, defaultGlowMat));
+
+        const defaultLight = new THREE.PointLight(0xffaa00, 3, 100);
+        defaultGroup.add(defaultLight);
+
+        // Default mode particles
+        const defaultParticles = [];
+        const DEFAULT_MAX = 2000;
+
+        class DefaultParticle {
             constructor() {
-                // Random position on sphere surface
                 const theta = Math.random() * Math.PI * 2;
                 const phi = Math.random() * Math.PI;
-
                 this.position = new THREE.Vector3(
-                    STAR_RADIUS * Math.sin(phi) * Math.cos(theta),
-                    STAR_RADIUS * Math.sin(phi) * Math.sin(theta),
-                    STAR_RADIUS * Math.cos(phi)
+                    2 * Math.sin(phi) * Math.cos(theta),
+                    2 * Math.sin(phi) * Math.sin(theta),
+                    2 * Math.cos(phi)
+                );
+                this.velocity = this.position.clone().normalize().multiplyScalar(0.02 + Math.random() * 0.03);
+                this.maxLife = 2 + Math.random();
+                this.life = this.maxLife;
+                const geo = new THREE.SphereGeometry(0.05, 6, 6);
+                const mat = new THREE.MeshBasicMaterial({ color: 0xffffaa, transparent: true, opacity: 1 });
+                this.mesh = new THREE.Mesh(geo, mat);
+                this.mesh.position.copy(this.position);
+                defaultGroup.add(this.mesh);
+            }
+            update(dt) {
+                this.life -= dt;
+                if (this.life <= 0) { defaultGroup.remove(this.mesh); return false; }
+                this.position.add(this.velocity.clone().multiplyScalar(dt * 60));
+                this.mesh.position.copy(this.position);
+                const lr = this.life / this.maxLife;
+                this.mesh.material.color.setHex(lr > 0.7 ? 0xffffaa : lr > 0.3 ? 0xeeeeff : 0x9999ff);
+                this.mesh.material.opacity = lr;
+                return true;
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // SIRIUS MODE OBJECTS
+        // ──────────────────────────────────────────────
+        const siriusGroup = new THREE.Group();
+        scene.add(siriusGroup);
+
+        // --- Sirius A ---
+        let siriusAGeo, siriusAMat, siriusAMesh, siriusAGlow, siriusALight;
+        function createSiriusA(radius) {
+            if (siriusAMesh) {
+                siriusGroup.remove(siriusAMesh);
+                siriusGroup.remove(siriusAGlow);
+                siriusGroup.remove(siriusALight);
+                siriusAMesh.geometry.dispose();
+                siriusAGlow.geometry.dispose();
+            }
+            siriusAGeo = new THREE.SphereGeometry(radius, 64, 64);
+            siriusAMat = new THREE.MeshStandardMaterial({
+                color: SIRIUS.A.color,
+                emissive: SIRIUS.A.emissiveColor,
+                emissiveIntensity: 2.5,
+                roughness: 0.4,
+                metalness: 0.1,
+            });
+            siriusAMesh = new THREE.Mesh(siriusAGeo, siriusAMat);
+            siriusGroup.add(siriusAMesh);
+
+            const glowGeo = new THREE.SphereGeometry(radius * 1.25, 32, 32);
+            const glowMat = new THREE.MeshBasicMaterial({
+                color: SIRIUS.A.color, transparent: true, opacity: 0.18, side: THREE.BackSide
+            });
+            siriusAGlow = new THREE.Mesh(glowGeo, glowMat);
+            siriusGroup.add(siriusAGlow);
+
+            siriusALight = new THREE.PointLight(SIRIUS.A.color, 4, 150);
+            siriusGroup.add(siriusALight);
+        }
+
+        // --- Sirius B ---
+        let siriusBGeo, siriusBMat, siriusBMesh, siriusBGlow, siriusBLight;
+        function createSiriusB(radius) {
+            if (siriusBMesh) {
+                siriusGroup.remove(siriusBMesh);
+                siriusGroup.remove(siriusBGlow);
+                siriusGroup.remove(siriusBLight);
+                siriusBMesh.geometry.dispose();
+                siriusBGlow.geometry.dispose();
+            }
+            // Minimum display radius so it's at least a point in true-scale
+            const displayR = Math.max(radius, 0.03);
+            siriusBGeo = new THREE.SphereGeometry(displayR, 32, 32);
+            siriusBMat = new THREE.MeshStandardMaterial({
+                color: SIRIUS.B.color,
+                emissive: SIRIUS.B.emissiveColor,
+                emissiveIntensity: 3.5,
+                roughness: 0.3,
+                metalness: 0.1,
+            });
+            siriusBMesh = new THREE.Mesh(siriusBGeo, siriusBMat);
+            siriusGroup.add(siriusBMesh);
+
+            const glowGeo = new THREE.SphereGeometry(displayR * 2.0, 24, 24);
+            const glowMat = new THREE.MeshBasicMaterial({
+                color: SIRIUS.B.color, transparent: true, opacity: 0.25, side: THREE.BackSide
+            });
+            siriusBGlow = new THREE.Mesh(glowGeo, glowMat);
+            siriusGroup.add(siriusBGlow);
+
+            siriusBLight = new THREE.PointLight(SIRIUS.B.color, 1.5, 40);
+            siriusGroup.add(siriusBLight);
+        }
+
+        // --- Orbital path line ---
+        const orbitPathPoints = [];
+        const ORBIT_SEGMENTS = 360;
+        for (let i = 0; i <= ORBIT_SEGMENTS; i++) {
+            orbitPathPoints.push(new THREE.Vector3(0, 0, 0));
+        }
+        const orbitPathGeoA = new THREE.BufferGeometry().setFromPoints(orbitPathPoints);
+        const orbitPathMatA = new THREE.LineBasicMaterial({ color: 0xCED8FF, transparent: true, opacity: 0.3 });
+        const orbitLineA = new THREE.Line(orbitPathGeoA, orbitPathMatA);
+        siriusGroup.add(orbitLineA);
+
+        const orbitPathGeoB = new THREE.BufferGeometry().setFromPoints(orbitPathPoints.map(p => p.clone()));
+        const orbitPathMatB = new THREE.LineBasicMaterial({ color: 0xA2C7FF, transparent: true, opacity: 0.3 });
+        const orbitLineB = new THREE.Line(orbitPathGeoB, orbitPathMatB);
+        siriusGroup.add(orbitLineB);
+
+        // Center of mass marker
+        const comGeo = new THREE.SphereGeometry(0.08, 8, 8);
+        const comMat = new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.6 });
+        const comMarker = new THREE.Mesh(comGeo, comMat);
+        siriusGroup.add(comMarker);
+
+        // Axes helper
+        const axesHelper = new THREE.AxesHelper(10);
+        axesHelper.visible = false;
+        siriusGroup.add(axesHelper);
+
+        // --- Labels (CSS2D fallback: sprite-based) ---
+        function makeLabel(text, color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 64;
+            const ctx2d = canvas.getContext('2d');
+            ctx2d.font = 'bold 28px Segoe UI, sans-serif';
+            ctx2d.fillStyle = color;
+            ctx2d.textAlign = 'center';
+            ctx2d.fillText(text, 128, 40);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(4, 1, 1);
+            return sprite;
+        }
+
+        const labelA = makeLabel('Sirius A  (A1V, 9940 K)', '#CED8FF');
+        siriusGroup.add(labelA);
+        const labelB = makeLabel('Sirius B  (DA2, 25000 K)', '#A2C7FF');
+        siriusGroup.add(labelB);
+
+        // ──────────────────────────────────────────────
+        // ORBITAL PATH COMPUTATION
+        // ──────────────────────────────────────────────
+        function updateOrbitPaths() {
+            const posArrA = orbitLineA.geometry.attributes.position.array;
+            const posArrB = orbitLineB.geometry.attributes.position.array;
+
+            for (let i = 0; i <= ORBIT_SEGMENTS; i++) {
+                // Sweep a full period
+                const t = SIRIUS.orbit.periastronTime + (i / ORBIT_SEGMENTS) * SIRIUS.orbit.period;
+                const pos = getOrbitalPosition(t, SIRIUS.orbit);
+
+                // Sirius A orbits opposite to B relative to COM
+                posArrA[i * 3]     = -pos.x * qA;
+                posArrA[i * 3 + 1] =  pos.z * qA;  // map z->y for display
+                posArrA[i * 3 + 2] = -pos.y * qA;
+
+                posArrB[i * 3]     = pos.x * qB;
+                posArrB[i * 3 + 1] = -pos.z * qB;
+                posArrB[i * 3 + 2] = pos.y * qB;
+            }
+            orbitLineA.geometry.attributes.position.needsUpdate = true;
+            orbitLineB.geometry.attributes.position.needsUpdate = true;
+        }
+
+        // ──────────────────────────────────────────────
+        // STELLAR WIND PARTICLES (Sirius mode)
+        // ──────────────────────────────────────────────
+        const MAX_WIND = 3000;
+        const windParticles = [];
+        // Use instanced points for performance
+        const windPositions = new Float32Array(MAX_WIND * 3);
+        const windColors = new Float32Array(MAX_WIND * 3);
+        const windSizes = new Float32Array(MAX_WIND);
+        const windGeo = new THREE.BufferGeometry();
+        windGeo.setAttribute('position', new THREE.BufferAttribute(windPositions, 3));
+        windGeo.setAttribute('color', new THREE.BufferAttribute(windColors, 3));
+        windGeo.setAttribute('size', new THREE.BufferAttribute(windSizes, 1));
+
+        // Custom shader for point particles with per-particle size & color
+        const windMaterial = new THREE.PointsMaterial({
+            size: 0.15,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            sizeAttenuation: true,
+        });
+        const windPoints = new THREE.Points(windGeo, windMaterial);
+        siriusGroup.add(windPoints);
+
+        class WindParticle {
+            constructor(originPos) {
+                // Emit from Sirius A's surface
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(2 * Math.random() - 1);
+                const rA = getStarDisplayRadius(SIRIUS.A, state.scaleMode);
+
+                const dir = new THREE.Vector3(
+                    Math.sin(phi) * Math.cos(theta),
+                    Math.sin(phi) * Math.sin(theta),
+                    Math.cos(phi)
                 );
 
-                // Velocity away from star
-                this.velocity = this.position.clone().normalize().multiplyScalar(0.02 + Math.random() * 0.03);
+                this.pos = originPos.clone().add(dir.clone().multiplyScalar(rA * 1.05));
+                this.vel = dir.multiplyScalar((state.windVel / 100) * 0.8 + Math.random() * 0.3);
 
-                // Lifetime
-                this.maxLife = 2 + Math.random() * 1;
-                this.life = this.maxLife;
-
-                // Visual
-                const particleGeometry = new THREE.SphereGeometry(0.05, 8, 8);
-                const particleMaterial = new THREE.MeshBasicMaterial({
-                    color: 0xffffaa,
-                    transparent: true,
-                    opacity: 1
-                });
-                this.mesh = new THREE.Mesh(particleGeometry, particleMaterial);
-                this.mesh.position.copy(this.position);
-                scene.add(this.mesh);
+                this.life = 1.0;
+                this.maxLife = 3.5 + Math.random() * 3;
+                this.baseColor = new THREE.Color(SIRIUS.A.color);
+                this.color = this.baseColor.clone();
+                this.heated = false;
             }
 
-            update(delta) {
-                this.life -= delta;
+            update(dt, siriusBPos) {
+                this.life -= dt / this.maxLife;
+                if (this.life <= 0) return false;
 
-                if (this.life <= 0) {
-                    scene.remove(this.mesh);
-                    return false;
+                // Gravitational interaction with Sirius B
+                if (state.showInteraction && siriusBPos) {
+                    const toB = new THREE.Vector3().subVectors(siriusBPos, this.pos);
+                    const dist = toB.length();
+                    const gravRadius = state.bGravityScale / 10; // adjustable
+
+                    if (dist < gravRadius && dist > 0.05) {
+                        // Gravitational acceleration: a = GM/r^2 scaled for display
+                        const gravStrength = (state.bGravityScale / 40) * 0.15 / (dist * dist + 0.1);
+                        toB.normalize().multiplyScalar(gravStrength * dt * 60);
+                        this.vel.add(toB);
+
+                        // Heating effect near B (X-ray / UV)
+                        if (dist < gravRadius * 0.5) {
+                            this.heated = true;
+                            // Shift color toward blue/UV
+                            const heatFactor = 1 - (dist / (gravRadius * 0.5));
+                            this.color.setRGB(
+                                0.4 - heatFactor * 0.2,
+                                0.5 + heatFactor * 0.2,
+                                1.0
+                            );
+                        }
+                    }
                 }
 
                 // Update position
-                this.position.add(this.velocity.clone().multiplyScalar(delta * 60));
-                this.mesh.position.copy(this.position);
+                this.pos.add(this.vel.clone().multiplyScalar(dt * 60));
 
-                // Update color and opacity based on life
-                const lifeRatio = this.life / this.maxLife;
-                if (lifeRatio > 0.7) {
-                    this.mesh.material.color.setHex(0xffffaa); // Yellow-white
-                } else if (lifeRatio > 0.3) {
-                    this.mesh.material.color.setHex(0xeeeeff); // White-blue
-                } else {
-                    this.mesh.material.color.setHex(0x9999ff); // Blue
+                // Fade color with life if not heated
+                if (!this.heated) {
+                    const lr = this.life;
+                    // Blue-white → dimmer blue
+                    this.color.setRGB(
+                        0.8 * lr,
+                        0.85 * lr,
+                        1.0 * lr
+                    );
                 }
-                this.mesh.material.opacity = lifeRatio;
+
+                // Out of bounds check
+                if (this.pos.length() > 80) return false;
 
                 return true;
             }
         }
 
-        // Spawn particles
-        function spawnParticles() {
-            const toSpawn = Math.min(SPAWN_RATE, MAX_PARTICLES - particles.length);
-            for (let i = 0; i < toSpawn; i++) {
-                particles.push(new Particle());
+        // ──────────────────────────────────────────────
+        // BUILD STARS FOR CURRENT SCALE
+        // ──────────────────────────────────────────────
+        function rebuildStars() {
+            const rA = getStarDisplayRadius(SIRIUS.A, state.scaleMode);
+            const rB = getStarDisplayRadius(SIRIUS.B, state.scaleMode);
+            createSiriusA(rA);
+            createSiriusB(rB);
+            updateOrbitPaths();
+        }
+        rebuildStars();
+
+        // ──────────────────────────────────────────────
+        // MODE SWITCHING
+        // ──────────────────────────────────────────────
+        function setMode(mode) {
+            state.mode = mode;
+            const isSirius = mode === 'sirius';
+            defaultGroup.visible = !isSirius;
+            siriusGroup.visible = isSirius;
+
+            // Toggle sidebar sections
+            document.querySelectorAll('.sirius-only').forEach(el => {
+                el.style.display = isSirius ? '' : 'none';
+            });
+
+            // HUD
+            document.getElementById('hudDefault').style.display = isSirius ? 'none' : '';
+            document.getElementById('hudSirius').style.display = isSirius ? '' : 'none';
+            document.getElementById('hudTitle').textContent = isSirius ? 'Sirius Binary System' : '3D Star Simulator';
+
+            // Reset camera for mode
+            if (isSirius) {
+                camera.position.set(25, 20, 35);
+                controls.target.set(0, 0, 0);
+            } else {
+                camera.position.set(0, 5, 15);
+                controls.target.set(0, 0, 0);
+            }
+
+            // Clean up default particles when leaving default mode
+            if (isSirius) {
+                defaultParticles.forEach(p => defaultGroup.remove(p.mesh));
+                defaultParticles.length = 0;
             }
         }
 
-        // Animation loop
+        // ──────────────────────────────────────────────
+        // ANIMATION LOOP
+        // ──────────────────────────────────────────────
         const clock = new THREE.Clock();
-        let time = 0;
+        let simTime = 0;
+        let posA = new THREE.Vector3();
+        let posB = new THREE.Vector3();
 
         function animate() {
             requestAnimationFrame(animate);
 
-            const delta = clock.getDelta();
-            time += delta;
+            const dt = Math.min(clock.getDelta(), 0.05);
+            simTime += dt;
 
-            // Rotate star slowly
-            star.rotation.y += delta * 0.1;
-            glow.rotation.y += delta * 0.15;
+            controls.update();
+            handleResize();
 
-            // Pulse star glow
-            const pulse = Math.sin(time * 2) * 0.3 + 1.0;
-            starMaterial.emissiveIntensity = 1.5 * pulse;
-            glowMaterial.opacity = 0.2 * pulse;
-
-            // Spawn new particles
-            spawnParticles();
-
-            // Update particles
-            for (let i = particles.length - 1; i >= 0; i--) {
-                if (!particles[i].update(delta)) {
-                    particles.splice(i, 1);
-                }
+            if (state.mode === 'sirius') {
+                animateSirius(dt);
+            } else {
+                animateDefault(dt);
             }
 
-            // Update particle count display
-            document.getElementById('particle-count').textContent = particles.length;
-
-            // Update controls
-            controls.update();
-
-            // Render
             renderer.render(scene, camera);
         }
 
-        // Handle window resize
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        function animateDefault(dt) {
+            // Rotate and pulse default star
+            defaultStar.rotation.y += dt * 0.1;
+            const pulse = Math.sin(simTime * 2) * 0.3 + 1.0;
+            defaultStarMat.emissiveIntensity = 1.5 * pulse;
+            defaultGlowMat.opacity = 0.2 * pulse;
+
+            // Spawn default particles
+            const toSpawn = Math.min(10, DEFAULT_MAX - defaultParticles.length);
+            for (let i = 0; i < toSpawn; i++) {
+                defaultParticles.push(new DefaultParticle());
+            }
+            for (let i = defaultParticles.length - 1; i >= 0; i--) {
+                if (!defaultParticles[i].update(dt)) {
+                    defaultParticles.splice(i, 1);
+                }
+            }
+            document.getElementById('particle-count').textContent = defaultParticles.length;
+        }
+
+        function animateSirius(dt) {
+            // Advance epoch
+            if (state.playing) {
+                state.epoch += dt * state.timeSpeed;
+            }
+
+            // --- Compute orbital positions ---
+            const orbPos = getOrbitalPosition(state.epoch, SIRIUS.orbit);
+
+            // Map to 3D display coordinates (y-up)
+            // A is on opposite side of COM from the relative position vector
+            posA.set(-orbPos.x * qA, orbPos.z * qA, -orbPos.y * qA);
+            posB.set(orbPos.x * qB, -orbPos.z * qB, orbPos.y * qB);
+
+            // Position stars
+            siriusAMesh.position.copy(posA);
+            siriusAGlow.position.copy(posA);
+            siriusALight.position.copy(posA);
+            siriusBMesh.position.copy(posB);
+            siriusBGlow.position.copy(posB);
+            siriusBLight.position.copy(posB);
+
+            // Rotate stars
+            siriusAMesh.rotation.y += dt * 0.3;
+            siriusBMesh.rotation.y += dt * 2.0; // White dwarfs rotate faster
+
+            // Pulse glow
+            const pulseA = Math.sin(simTime * 1.5) * 0.15 + 1.0;
+            siriusAMat.emissiveIntensity = 2.5 * pulseA;
+
+            const pulseB = Math.sin(simTime * 3) * 0.2 + 1.0;
+            siriusBMat.emissiveIntensity = 3.5 * pulseB;
+
+            // Labels
+            labelA.visible = state.showLabels;
+            labelB.visible = state.showLabels;
+            if (state.showLabels) {
+                const rA = getStarDisplayRadius(SIRIUS.A, state.scaleMode);
+                const rB = getStarDisplayRadius(SIRIUS.B, state.scaleMode);
+                labelA.position.copy(posA).add(new THREE.Vector3(0, rA + 1.2, 0));
+                labelB.position.copy(posB).add(new THREE.Vector3(0, rB + 1.2, 0));
+            }
+
+            // Orbital paths
+            orbitLineA.visible = state.showOrbit;
+            orbitLineB.visible = state.showOrbit;
+
+            // Axes
+            axesHelper.visible = state.showAxes;
+
+            // --- Stellar wind ---
+            if (state.showWind) {
+                // Spawn
+                const toSpawn = Math.min(state.windRate, MAX_WIND - windParticles.length);
+                for (let i = 0; i < toSpawn; i++) {
+                    windParticles.push(new WindParticle(posA));
+                }
+            }
+
+            // Update wind particles
+            let activeCount = 0;
+            for (let i = windParticles.length - 1; i >= 0; i--) {
+                if (!windParticles[i].update(dt, posB)) {
+                    windParticles.splice(i, 1);
+                } else {
+                    activeCount++;
+                }
+            }
+
+            // Write to buffer
+            for (let i = 0; i < MAX_WIND; i++) {
+                if (i < windParticles.length) {
+                    const p = windParticles[i];
+                    windPositions[i * 3]     = p.pos.x;
+                    windPositions[i * 3 + 1] = p.pos.y;
+                    windPositions[i * 3 + 2] = p.pos.z;
+                    windColors[i * 3]     = p.color.r;
+                    windColors[i * 3 + 1] = p.color.g;
+                    windColors[i * 3 + 2] = p.color.b;
+                    windSizes[i] = p.life * 0.15;
+                } else {
+                    windPositions[i * 3] = 0;
+                    windPositions[i * 3 + 1] = 0;
+                    windPositions[i * 3 + 2] = 0;
+                    windSizes[i] = 0;
+                }
+            }
+            windGeo.attributes.position.needsUpdate = true;
+            windGeo.attributes.color.needsUpdate = true;
+            windGeo.attributes.size.needsUpdate = true;
+            windGeo.setDrawRange(0, windParticles.length);
+
+            // --- Update HUD & sidebar data ---
+            const separation = orbPos.r;
+            const phase = ((state.epoch - SIRIUS.orbit.periastronTime) / SIRIUS.orbit.period) % 1;
+            const phaseNorm = phase < 0 ? phase + 1 : phase;
+            const nuDeg = (orbPos.nu * 180 / Math.PI + 360) % 360;
+
+            document.getElementById('hudSep').textContent = separation.toFixed(2);
+            document.getElementById('hudEpoch').textContent = state.epoch.toFixed(1);
+            document.getElementById('hudPhase').textContent = phaseNorm.toFixed(3);
+            document.getElementById('hudParts').textContent = activeCount;
+
+            document.getElementById('epochYear').textContent = state.epoch.toFixed(1);
+            document.getElementById('liveSep').textContent = separation.toFixed(2) + ' AU';
+            document.getElementById('livePhase').textContent = phaseNorm.toFixed(3);
+            document.getElementById('liveNu').textContent = nuDeg.toFixed(1) + '\u00B0';
+        }
+
+        // ──────────────────────────────────────────────
+        // RESIZE HANDLING
+        // ──────────────────────────────────────────────
+        let lastW = 0, lastH = 0;
+        function handleResize() {
+            const container = document.getElementById('canvas-container');
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            if (w !== lastW || h !== lastH) {
+                lastW = w; lastH = h;
+                camera.aspect = w / h;
+                camera.updateProjectionMatrix();
+                renderer.setSize(w, h);
+            }
+        }
+
+        // ──────────────────────────────────────────────
+        // UI BINDINGS
+        // ──────────────────────────────────────────────
+        // Preset
+        document.getElementById('presetSelect').addEventListener('change', e => {
+            setMode(e.target.value);
         });
 
-        // Start animation
+        // Sidebar toggle
+        document.getElementById('sidebar-toggle').addEventListener('click', () => {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        });
+
+        // Collapsible sections
+        document.querySelectorAll('.sb-title').forEach(title => {
+            title.addEventListener('click', () => {
+                title.parentElement.classList.toggle('closed');
+            });
+        });
+
+        // Time controls
+        document.getElementById('timeSpeed').addEventListener('input', e => {
+            state.timeSpeed = parseFloat(e.target.value) / 10;
+            document.getElementById('timeSpeedVal').textContent = state.timeSpeed.toFixed(1) + ' yr/s';
+        });
+        document.getElementById('btnPlay').addEventListener('click', () => {
+            state.playing = true;
+            document.getElementById('btnPlay').classList.add('active');
+            document.getElementById('btnPause').classList.remove('active');
+        });
+        document.getElementById('btnPause').addEventListener('click', () => {
+            state.playing = false;
+            document.getElementById('btnPause').classList.add('active');
+            document.getElementById('btnPlay').classList.remove('active');
+        });
+        document.getElementById('btnReset').addEventListener('click', () => {
+            state.epoch = 2026.0;
+            windParticles.length = 0;
+        });
+        document.getElementById('btnPeriastron').addEventListener('click', () => {
+            state.epoch = SIRIUS.orbit.periastronTime;
+            windParticles.length = 0;
+        });
+        document.getElementById('btnNow').addEventListener('click', () => {
+            state.epoch = 2026.0;
+            windParticles.length = 0;
+        });
+
+        // Scale mode
+        document.getElementById('scaleExag').addEventListener('click', () => {
+            state.scaleMode = 'exaggerated';
+            document.getElementById('scaleExag').classList.add('active');
+            document.getElementById('scaleTrue').classList.remove('active');
+            rebuildStars();
+        });
+        document.getElementById('scaleTrue').addEventListener('click', () => {
+            state.scaleMode = 'true';
+            document.getElementById('scaleTrue').classList.add('active');
+            document.getElementById('scaleExag').classList.remove('active');
+            rebuildStars();
+        });
+
+        // View toggles
+        document.getElementById('showOrbit').addEventListener('change', e => { state.showOrbit = e.target.checked; });
+        document.getElementById('showWind').addEventListener('change', e => {
+            state.showWind = e.target.checked;
+            if (!e.target.checked) windParticles.length = 0;
+        });
+        document.getElementById('showInteraction').addEventListener('change', e => { state.showInteraction = e.target.checked; });
+        document.getElementById('showLabels').addEventListener('change', e => { state.showLabels = e.target.checked; });
+        document.getElementById('showAxes').addEventListener('change', e => { state.showAxes = e.target.checked; });
+
+        // Wind controls
+        document.getElementById('windRate').addEventListener('input', e => {
+            state.windRate = parseInt(e.target.value);
+            document.getElementById('windRateVal').textContent = state.windRate + '/f';
+        });
+        document.getElementById('windVel').addEventListener('input', e => {
+            state.windVel = parseInt(e.target.value);
+            document.getElementById('windVelVal').textContent = state.windVel;
+        });
+        document.getElementById('bGravity').addEventListener('input', e => {
+            state.bGravityScale = parseInt(e.target.value);
+            document.getElementById('bGravityVal').textContent = state.bGravityScale;
+        });
+
+        // Camera presets
+        document.getElementById('camOverview').addEventListener('click', () => {
+            camera.position.set(25, 20, 35);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camTop').addEventListener('click', () => {
+            camera.position.set(0, 50, 0.1);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camSiriusA').addEventListener('click', () => {
+            const r = getStarDisplayRadius(SIRIUS.A, state.scaleMode);
+            camera.position.copy(posA).add(new THREE.Vector3(r * 3, r * 2, r * 3));
+            controls.target.copy(posA);
+        });
+        document.getElementById('camSiriusB').addEventListener('click', () => {
+            const r = getStarDisplayRadius(SIRIUS.B, state.scaleMode);
+            const offset = Math.max(r * 5, 1.5);
+            camera.position.copy(posB).add(new THREE.Vector3(offset, offset * 0.7, offset));
+            controls.target.copy(posB);
+        });
+
+        // Keyboard shortcut
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                document.getElementById('sidebar').classList.toggle('collapsed');
+            }
+            if (e.key === ' ') {
+                e.preventDefault();
+                state.playing = !state.playing;
+                document.getElementById('btnPlay').classList.toggle('active', state.playing);
+                document.getElementById('btnPause').classList.toggle('active', !state.playing);
+            }
+        });
+
+        // ──────────────────────────────────────────────
+        // INITIALIZE
+        // ──────────────────────────────────────────────
+        setMode('sirius');
+        handleResize();
         animate();
 
-        console.log('🌟 3D Star Simulator loaded!');
-        console.log('Controls: Click+Drag to rotate, Scroll to zoom');
+        console.log('Sirius Binary System Simulator loaded');
+        console.log('Orbital parameters: P=50.13yr, e=0.5914, a=20AU');
+        console.log('Sirius A: A1V, 9940K, 2.06 M\u2609 | Sirius B: DA2, 25000K, 1.018 M\u2609');
     </script>
 </body>
 </html>
