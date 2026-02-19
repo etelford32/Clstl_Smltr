@@ -272,6 +272,7 @@
                         <select id="presetSelect" style="width:100%;flex:1">
                             <option value="default">Default (Single Star)</option>
                             <option value="sirius" selected>Sirius Binary System</option>
+                            <option value="sun">Sun — Solar System</option>
                         </select>
                     </div>
                 </div>
@@ -446,7 +447,124 @@
                     </div>
                 </div>
             </div>
-        </div>
+
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- SUN-ONLY SECTIONS                               -->
+            <!-- ═══════════════════════════════════════════════ -->
+
+            <!-- Solar Activity -->
+            <div class="sb-section sun-only" style="display:none">
+                <div class="sb-title">Solar Activity <span style="font-size:10px;color:#ff9944">&#9728;</span></div>
+                <div class="sb-body">
+                    <div class="epoch-display" style="background:rgba(255,150,50,0.08)">
+                        <div class="epoch-year" id="solarCycleLabel" style="color:#ff9944;font-size:14px">Solar Minimum</div>
+                        <div class="epoch-label">Cycle Phase &bull; Sunspot Rel. Number: <span id="ssnVal">--</span></div>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Activity Level</label>
+                        <input type="range" id="solarActivity" min="0" max="100" value="40">
+                        <span class="vdisp" id="solarActivityVal">40%</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Parker Spiral</label>
+                        <input type="range" id="parkerSpiral" min="0" max="100" value="65">
+                        <span class="vdisp" id="parkerSpiralVal">65%</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Wind Mode</label>
+                        <select id="solarWindMode" style="flex:1">
+                            <option value="mixed" selected>Mixed — Realistic</option>
+                            <option value="slow">Slow Wind only (~400 km/s)</option>
+                            <option value="fast">Fast Wind only (~750 km/s)</option>
+                        </select>
+                    </div>
+                    <div class="btn-row" style="margin-top:8px">
+                        <button id="btnCME">&#9889; Trigger CME</button>
+                        <button id="btnSolarFlare">&#128293; Solar Flare</button>
+                    </div>
+                    <div id="cmeStatus" style="font-size:10px;color:#ff6633;text-align:center;height:14px;margin-top:4px;"></div>
+                </div>
+            </div>
+
+            <!-- Sun View Options -->
+            <div class="sb-section sun-only" style="display:none">
+                <div class="sb-title">View Options <span style="font-size:10px;color:#888">&#128301;</span></div>
+                <div class="sb-body">
+                    <div class="chk-row">
+                        <input type="checkbox" id="showCorona" checked>
+                        <label for="showCorona">Corona &amp; Chromosphere</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showSolarWind" checked>
+                        <label for="showSolarWind">Solar Wind Particles</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showSunAxes">
+                        <label for="showSunAxes">Reference Axes</label>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin-top:8px;margin-bottom:4px;">Camera:</div>
+                    <div class="cam-presets">
+                        <button id="camSunOverview">Overview</button>
+                        <button id="camSunClose">Close-Up</button>
+                        <button id="camSunPolar">Polar</button>
+                        <button id="camSunEquator">Equator</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sun Wind Controls -->
+            <div class="sb-section sun-only" style="display:none">
+                <div class="sb-title">Wind Controls <span style="font-size:10px;color:#888">&#127754;</span></div>
+                <div class="sb-body">
+                    <div class="ctrl-row">
+                        <label>Emission Rate</label>
+                        <input type="range" id="solarWindRate" min="1" max="30" value="14">
+                        <span class="vdisp" id="solarWindRateVal">14/f</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Wind Speed</label>
+                        <input type="range" id="solarWindSpeed" min="5" max="60" value="28">
+                        <span class="vdisp" id="solarWindSpeedVal">28</span>
+                    </div>
+                    <div style="margin-top:6px;font-size:10px;color:#888;line-height:1.5">
+                        Live: <span class="val" id="sunWindCount">0</span> particles &bull;
+                        CME fired: <span class="val" id="cmeCount">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sun Scientific Data -->
+            <div class="sb-section sun-only" style="display:none">
+                <div class="sb-title">Sol — G2V Main Sequence <span style="font-size:10px;color:#ffcc44">&#9737;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Spectral Type</td><td>G2 V</td></tr>
+                        <tr><td>Mass</td><td>1.000 M&#9737;</td></tr>
+                        <tr><td>Radius</td><td>1.000 R&#9737;</td></tr>
+                        <tr><td>Photosphere T</td><td>5,778 K</td></tr>
+                        <tr><td>Core T</td><td>1.57 &times; 10&#8311; K</td></tr>
+                        <tr><td>Luminosity</td><td>1.000 L&#9737;</td></tr>
+                        <tr><td>log g</td><td>4.44 cgs</td></tr>
+                        <tr><td>Rotation (Eq.)</td><td>25.38 d</td></tr>
+                        <tr><td>Rotation (Pole)</td><td>34.4 d (diff. rot.)</td></tr>
+                        <tr><td>Age</td><td>4.603 Gyr</td></tr>
+                        <tr><td>Slow Wind</td><td>~400 km/s (streamer)</td></tr>
+                        <tr><td>Fast Wind</td><td>~750 km/s (coronal hole)</td></tr>
+                        <tr><td>&#7744; (mass loss)</td><td>~2&times;10&#8315;&#185;&#8308; M&#9737;/yr</td></tr>
+                        <tr><td>Solar Cycle</td><td>~11.0 yr (Schwabe)</td></tr>
+                        <tr><td>App. Mag (V)</td><td>&minus;26.74</td></tr>
+                        <tr><td>Abs. Mag (V)</td><td>+4.83</td></tr>
+                        <tr><td>B&minus;V Color</td><td>+0.65</td></tr>
+                    </table>
+                    <div style="margin-top:10px;padding:8px;background:rgba(255,200,50,0.05);border-radius:5px;font-size:10px;color:#999;line-height:1.5;">
+                        <strong style="color:#ffd700">Sources:</strong> IAU 2015 Nominal Solar Values,
+                        Asplund et al. 2009 (ARA&amp;A), Parker 1958 (ApJ),
+                        McComas et al. 2013 (Science), SOHO/LASCO data
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- end #sidebar -->
 
         <button id="sidebar-toggle">&#9776; Panel</button>
     </div>
@@ -462,6 +580,12 @@
             <p class="sep-readout">Separation: <span id="hudSep">--</span> AU</p>
             <p class="dim">Epoch: <span class="val" id="hudEpoch">2026.0</span> &nbsp; Phase: <span class="val" id="hudPhase">--</span></p>
             <p class="dim">Wind particles: <span class="val" id="hudParts">0</span></p>
+            <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
+        </div>
+        <div id="hudSun" style="display:none">
+            <p class="sep-readout" style="color:#ff9944">&#9728; Solar Activity: <span id="hudSolarActivity">--</span>%</p>
+            <p class="dim">Wind particles: <span class="val" id="hudSunParts">0</span> &nbsp; CME: <span class="val" id="hudCME">Idle</span></p>
+            <p class="dim">Parker &#936;&#8321;&#8321&#8321;: <span class="val" id="hudParker">--</span>&deg;</p>
             <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
         </div>
     </div>
@@ -517,6 +641,25 @@
         // Mass fractions for center-of-mass orbit
         const qA = SIRIUS.B.mass / SIRIUS.system.totalMass;  // A's fraction of semi-major axis
         const qB = SIRIUS.A.mass / SIRIUS.system.totalMass;  // B's fraction
+
+        // ──────────────────────────────────────────────
+        // SUN — SCIENTIFIC DATA (IAU 2015 Nominal Solar Values)
+        // ──────────────────────────────────────────────
+        const SUN = {
+            mass:          1.0,          // M_sun
+            radius:        1.0,          // R_sun
+            temperature:   5778,         // K (photosphere)
+            luminosity:    1.0,          // L_sun
+            color:         0xFFF5E0,     // warm white-yellow (G2V blackbody ~5800 K)
+            emissiveColor: 0xFFCC44,
+            rotationPeriod: 25.38,       // days (equatorial sidereal)
+            solarCycle:     11.0,        // years (Schwabe cycle)
+            age:            4.603,       // Gyr
+            // Parker spiral: Omega_sun / v_wind
+            omegaSun:  2.865e-6,         // rad/s (sidereal rotation, equatorial)
+            windSlow:  400.0,            // km/s
+            windFast:  750.0,            // km/s
+        };
 
         // ──────────────────────────────────────────────
         // KEPLER EQUATION SOLVER
@@ -575,7 +718,7 @@
         // STATE
         // ──────────────────────────────────────────────
         let state = {
-            mode: 'sirius',           // 'default' | 'sirius'
+            mode: 'sirius',           // 'default' | 'sirius' | 'sun'
             epoch: 2026.0,
             timeSpeed: 1.5,           // years per second
             playing: true,
@@ -588,17 +731,30 @@
             windRate: 12,
             windVel: 25,
             bGravityScale: 40,
+            // Sun-mode state
+            solarActivity: 0.40,      // 0–1
+            parkerSpiral:  0.65,      // 0–1 strength multiplier
+            solarWindMode: 'mixed',   // 'slow' | 'fast' | 'mixed'
+            showCorona: true,
+            showSolarWind: true,
+            showSunAxes: false,
+            solarWindRate: 14,
+            solarWindSpeed: 28,
+            cmePending: false,        // one-shot CME burst
+            cmeCount: 0,
+            cmeCooldown: 0,           // seconds until next CME allowed
+            flarePending: false,
         };
 
         // Display sizes (in AU, our 3D unit)
         function getStarDisplayRadius(star, mode) {
             if (mode === 'true') {
-                // True scale: R_sun ≈ 0.00465 AU
-                return star.radius * 0.00465;
+                return star.radius * 0.00465; // R_sun ≈ 0.00465 AU
             }
-            // Exaggerated: make stars visible relative to orbit
-            if (star === SIRIUS.A) return 1.0;   // 1 AU display radius
-            return 0.25; // Sirius B exaggerated
+            if (star === SIRIUS.A) return 1.0;
+            if (star === SIRIUS.B) return 0.25;
+            if (star === SUN)      return 1.2;   // exaggerated Sun (nice framing)
+            return 0.25;
         }
 
         // ──────────────────────────────────────────────
@@ -859,15 +1015,38 @@
         windGeo.setAttribute('color', new THREE.BufferAttribute(windColors, 3));
         windGeo.setAttribute('size', new THREE.BufferAttribute(windSizes, 1));
 
-        // Custom shader for point particles with per-particle size & color
-        const windMaterial = new THREE.PointsMaterial({
-            size: 0.15,
-            vertexColors: true,
-            transparent: true,
-            opacity: 0.85,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            sizeAttenuation: true,
+        // Custom ShaderMaterial so the per-vertex 'size' attribute is actually used.
+        // (PointsMaterial ignores custom 'size' attributes — this was the shader bug.)
+        const WIND_VERT = `
+            attribute float size;
+            attribute vec3 color;
+            varying vec3 vColor;
+            varying float vAlpha;
+            void main() {
+                vColor = color;
+                vAlpha = clamp(size / 0.15, 0.0, 1.0);
+                vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = clamp(size * 380.0 / -mvPos.z, 1.0, 18.0);
+                gl_Position = projectionMatrix * mvPos;
+            }
+        `;
+        const WIND_FRAG = `
+            varying vec3 vColor;
+            varying float vAlpha;
+            void main() {
+                vec2 c = gl_PointCoord - 0.5;
+                float r = length(c) * 2.0;
+                if (r > 1.0) discard;
+                float alpha = pow(1.0 - r, 1.6) * vAlpha * 0.92;
+                gl_FragColor = vec4(vColor, alpha);
+            }
+        `;
+        const windMaterial = new THREE.ShaderMaterial({
+            vertexShader:   WIND_VERT,
+            fragmentShader: WIND_FRAG,
+            transparent:    true,
+            blending:       THREE.AdditiveBlending,
+            depthWrite:     false,
         });
         const windPoints = new THREE.Points(windGeo, windMaterial);
         siriusGroup.add(windPoints);
@@ -995,28 +1174,593 @@
         }
         rebuildStars();
 
-        // ──────────────────────────────────────────────
-        // MODE SWITCHING
+        // ══════════════════════════════════════════════════════════════════════
+        //  SUN MODE — THREE.JS OBJECTS + GLSL SHADERS
+        // ══════════════════════════════════════════════════════════════════════
+        const sunGroup = new THREE.Group();
+        scene.add(sunGroup);
+
+        // ─── GLSL: Photosphere (granulation + limb darkening + sunspots) ─────
+        const PHOT_VERT = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vUv       = uv;
+                vNormal   = normalize(normalMatrix * normal);
+                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const PHOT_FRAG = `
+            precision highp float;
+            uniform float uTime;
+            uniform float uActivity;   // 0–1
+            varying vec2  vUv;
+            varying vec3  vNormal;
+            varying vec3  vWorldPos;
+
+            // ── Pseudo-random hash ──────────────────────────────────────────
+            vec2 hash2(vec2 p) {
+                p = vec2(dot(p, vec2(127.1,311.7)), dot(p, vec2(269.5,183.3)));
+                return fract(sin(p) * 43758.5453);
+            }
+
+            // ── Voronoi (cellular noise) — used for granulation ─────────────
+            float voronoi(vec2 x) {
+                vec2 ip = floor(x);
+                vec2 fp = fract(x);
+                float d = 8.0;
+                for (int j = -1; j <= 1; j++)
+                for (int i = -1; i <= 1; i++) {
+                    vec2 b = vec2(float(i), float(j));
+                    vec2 r = b - fp + hash2(ip + b);
+                    d = min(d, dot(r, r));
+                }
+                return sqrt(d);
+            }
+
+            // ── Value noise ─────────────────────────────────────────────────
+            float vnoise(vec2 p) {
+                vec2 ip = floor(p);
+                vec2 u  = fract(p);
+                u = u*u*(3.0 - 2.0*u);
+                float a = dot(hash2(ip),              vec2(1.0, 0.0));
+                float b = dot(hash2(ip+vec2(1.0,0.0)),vec2(1.0, 0.0));
+                float c = dot(hash2(ip+vec2(0.0,1.0)),vec2(1.0, 0.0));
+                float d = dot(hash2(ip+vec2(1.0,1.0)),vec2(1.0, 0.0));
+                return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
+            }
+            float fbm(vec2 p) {
+                float f = 0.0; float w = 0.5;
+                for (int i = 0; i < 5; i++) { f += w*vnoise(p); p *= 2.1; w *= 0.5; }
+                return f;
+            }
+
+            void main() {
+                // ── Limb darkening (Milne 1921 / Unsöld): I(μ) = 1 − u(1−μ), u≈0.60 ──
+                vec3 viewDir  = normalize(cameraPosition - vWorldPos);
+                float mu      = max(dot(normalize(vNormal), viewDir), 0.0);
+                float limbDrk = 1.0 - 0.60*(1.0 - mu);
+
+                // ── Granulation (convection cells, ~1 Mm scale) ─────────────
+                vec2 gUv  = vUv * 24.0 + vec2(uTime*0.007, uTime*0.003);
+                float gran = voronoi(gUv);
+                gran = smoothstep(0.05, 0.48, gran);         // bright centers / dark lanes
+
+                // ── Supergranulation (larger ~30 Mm) ────────────────────────
+                vec2 sgUv    = vUv * 5.5 - vec2(uTime*0.002, uTime*0.001);
+                float supgran = voronoi(sgUv);
+                supgran = smoothstep(0.1, 0.55, supgran) * 0.22;
+
+                // ── Sunspot latitude belt (realistic ±35°) ──────────────────
+                float latFrac = abs(vUv.y - 0.5) * 2.0;    // 0 equator, 1 pole
+                float latBelt = 1.0 - smoothstep(0.0, 0.65, latFrac);
+
+                // ── Sunspot / active region (activity-gated) ────────────────
+                float spotN   = fbm(vUv * 7.0 + vec2(uTime*0.004, 0.0));
+                float thresh  = 0.74 - uActivity * 0.20;
+                float umbra   = smoothstep(thresh+0.03, thresh,       spotN) * latBelt;
+                float penumbra= smoothstep(thresh+0.09, thresh+0.02,  spotN) * latBelt * (1.0 - umbra);
+
+                // ── Faculae / Plage (bright rings around spots) ─────────────
+                float faculae = smoothstep(thresh+0.13, thresh+0.07, spotN)
+                              * smoothstep(thresh-0.04, thresh+0.13, spotN)
+                              * latBelt * uActivity;
+
+                // ── Colour assembly ─────────────────────────────────────────
+                // 5778 K blackbody peak: warm yellow-white
+                vec3 photBase  = vec3(1.00, 0.88, 0.55);
+                vec3 granHot   = vec3(1.00, 0.92, 0.65);
+                vec3 granCool  = vec3(0.82, 0.53, 0.20);
+                vec3 surface   = mix(granCool, granHot, gran + supgran);
+
+                vec3 umbraCol  = vec3(0.18, 0.10, 0.05);
+                vec3 penCol    = vec3(0.52, 0.30, 0.10);
+
+                surface = mix(surface, penCol,   penumbra * 0.72);
+                surface = mix(surface, umbraCol, umbra    * 0.88);
+                surface += faculae * vec3(0.32, 0.24, 0.08);
+
+                // Apply limb darkening
+                surface *= limbDrk;
+
+                // Emissive factor (HDR tone-mapping handled by renderer)
+                gl_FragColor = vec4(surface * 2.4, 1.0);
+            }
+        `;
+
+        // ─── GLSL: Corona ────────────────────────────────────────────────────
+        const CORONA_VERT = `
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vNormal   = normalize(normalMatrix * normal);
+                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const CORONA_FRAG = `
+            precision highp float;
+            uniform float uTime;
+            uniform float uActivity;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float hash(float n) { return fract(sin(n)*43758.5453); }
+            float noise3(vec3 p) {
+                vec3 ip = floor(p); vec3 f = fract(p);
+                f = f*f*(3.0-2.0*f);
+                float n = ip.x + ip.y*57.0 + ip.z*113.0;
+                return mix(
+                    mix(mix(hash(n),      hash(n+1.0),  f.x),
+                        mix(hash(n+57.0), hash(n+58.0), f.x), f.y),
+                    mix(mix(hash(n+113.0),hash(n+114.0),f.x),
+                        mix(hash(n+170.0),hash(n+171.0),f.x), f.y), f.z);
+            }
+
+            void main() {
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                // For BackSide geometry the normal points inward so use abs()
+                float cosA   = abs(dot(normalize(vNormal), viewDir));
+                float fresnel = pow(1.0 - cosA, 2.2);
+
+                // ── Streamer belt (equatorial) ───────────────────────────────
+                float lat     = dot(normalize(vWorldPos - cameraPosition * 0.0),
+                                    vec3(0.0, 1.0, 0.0));
+                float streamer = exp(-lat*lat * 6.0) * 0.38;
+
+                // ── Polar plumes (stronger at solar minimum) ─────────────────
+                float polar   = smoothstep(0.55, 1.0, abs(lat)) * 0.25
+                              * (1.0 - uActivity * 0.6);
+
+                // ── Texture — dynamic tendrils ───────────────────────────────
+                float n = noise3(vWorldPos * 2.8 + vec3(uTime*0.08, 0.0, uTime*0.05));
+
+                float alpha = (fresnel*0.55 + streamer + polar) * (0.65 + n*0.35)
+                            * (0.75 + uActivity * 0.35);
+                alpha = clamp(alpha * 0.55, 0.0, 0.48);
+
+                // ── Colour: inner warm yellow-white → outer pale blue ────────
+                vec3 inner = vec3(1.00, 0.96, 0.78);
+                vec3 outer = vec3(0.62, 0.82, 1.00);
+                vec3 col   = mix(inner, outer, fresnel * 1.2);
+
+                gl_FragColor = vec4(col, alpha);
+            }
+        `;
+
+        // ─── GLSL: Chromosphere (thin pink/red shell) ────────────────────────
+        const CHROM_FRAG = `
+            precision mediump float;
+            uniform float uTime;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA   = abs(dot(normalize(vNormal), viewDir));
+                float rim    = pow(1.0 - cosA, 4.5) * 0.70;
+                // Spicule flicker
+                float flicker = 0.85 + 0.15 * sin(uTime * 3.7 + vWorldPos.x * 9.0);
+                gl_FragColor  = vec4(1.0, 0.28, 0.12, rim * flicker);
+            }
+        `;
+
+        // ─── Solar wind ShaderMaterial (reuse WIND_VERT / WIND_FRAG) ─────────
+        const solarWindGeo = new THREE.BufferGeometry();
+        const MAX_SOLAR_WIND = 4000;
+        const swPositions = new Float32Array(MAX_SOLAR_WIND * 3);
+        const swColors    = new Float32Array(MAX_SOLAR_WIND * 3);
+        const swSizes     = new Float32Array(MAX_SOLAR_WIND);
+        solarWindGeo.setAttribute('position', new THREE.BufferAttribute(swPositions, 3));
+        solarWindGeo.setAttribute('color',    new THREE.BufferAttribute(swColors,    3));
+        solarWindGeo.setAttribute('size',     new THREE.BufferAttribute(swSizes,     1));
+        const solarWindMat = new THREE.ShaderMaterial({
+            vertexShader:   WIND_VERT,
+            fragmentShader: WIND_FRAG,
+            transparent:    true,
+            blending:       THREE.AdditiveBlending,
+            depthWrite:     false,
+        });
+        const solarWindPoints = new THREE.Points(solarWindGeo, solarWindMat);
+        sunGroup.add(solarWindPoints);
+
+        // ─── Sun sphere, corona, chromosphere ────────────────────────────────
+        let sunMesh, sunCorona, sunChrom, sunLight, sunGlow;
+        const sunAxesHelper = new THREE.AxesHelper(8);
+        sunAxesHelper.visible = false;
+        sunGroup.add(sunAxesHelper);
+
+        function createSun() {
+            // Remove old objects
+            [sunMesh, sunCorona, sunChrom, sunLight, sunGlow].forEach(obj => {
+                if (obj) sunGroup.remove(obj);
+            });
+
+            const R = getStarDisplayRadius(SUN, state.scaleMode);
+
+            // Photosphere
+            const photGeo = new THREE.SphereGeometry(R, 96, 96);
+            const photMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:     { value: 0 },
+                    uActivity: { value: state.solarActivity },
+                },
+                vertexShader:   PHOT_VERT,
+                fragmentShader: PHOT_FRAG,
+            });
+            sunMesh = new THREE.Mesh(photGeo, photMat);
+            sunGroup.add(sunMesh);
+
+            // Chromosphere (~1700 km above photosphere, but visually thin)
+            const chromGeo = new THREE.SphereGeometry(R * 1.018, 48, 48);
+            const chromMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 } },
+                vertexShader:   CORONA_VERT,   // same geometry transform
+                fragmentShader: CHROM_FRAG,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                side: THREE.BackSide,
+            });
+            sunChrom = new THREE.Mesh(chromGeo, chromMat);
+            sunGroup.add(sunChrom);
+
+            // Corona (~2–3 R_sun extent)
+            const coronaGeo = new THREE.SphereGeometry(R * 2.8, 48, 48);
+            const coronaMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:     { value: 0 },
+                    uActivity: { value: state.solarActivity },
+                },
+                vertexShader:   CORONA_VERT,
+                fragmentShader: CORONA_FRAG,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                side: THREE.BackSide,
+            });
+            sunCorona = new THREE.Mesh(coronaGeo, coronaMat);
+            sunGroup.add(sunCorona);
+
+            // Soft outer glow halo
+            const glowGeo = new THREE.SphereGeometry(R * 1.35, 32, 32);
+            const glowMat = new THREE.MeshBasicMaterial({
+                color: 0xFFCC44, transparent: true, opacity: 0.12, side: THREE.BackSide,
+            });
+            sunGlow = new THREE.Mesh(glowGeo, glowMat);
+            sunGroup.add(sunGlow);
+
+            // Point light
+            sunLight = new THREE.PointLight(0xFFF5E0, 5, 200);
+            sunGroup.add(sunLight);
+        }
+        createSun();
+
+        // ═══════════════════════════════════════════════════════════════════════
+        //  SOLAR WIND PARTICLE — Parker spiral + fast/slow/CME physics
+        // ═══════════════════════════════════════════════════════════════════════
+        const solarParticles = [];
+
+        class SolarWindParticle {
+            /**
+             * mode: 'slow' | 'fast' | 'cme'
+             * cmeDir: THREE.Vector3 (unit) for CME burst direction
+             */
+            constructor(sunPos, mode = 'slow', cmeDir = null) {
+                this.mode = mode;
+                this.heated = false;
+
+                // ── Emission direction ─────────────────────────────────────
+                let dir;
+                if (mode === 'fast') {
+                    // Fast wind: high-latitude coronal holes (polar caps ± ~30°)
+                    const polarity = Math.random() < 0.5 ? 1 : -1;
+                    const theta    = polarity * (Math.PI / 2 - Math.random() * 0.6);
+                    const phi      = Math.random() * Math.PI * 2;
+                    dir = new THREE.Vector3(
+                        Math.cos(theta) * Math.cos(phi),
+                        Math.sin(theta),
+                        Math.cos(theta) * Math.sin(phi)
+                    ).normalize();
+                } else if (mode === 'cme') {
+                    // CME: tight cone (~20° half-angle) around cmeDir
+                    const coneAngle = 0.35;
+                    const perp1 = new THREE.Vector3(
+                        Math.random()-0.5, Math.random()-0.5, Math.random()-0.5
+                    ).normalize();
+                    const perp = cmeDir.clone().cross(perp1).normalize();
+                    dir = cmeDir.clone()
+                        .addScaledVector(perp, Math.random() * coneAngle)
+                        .normalize();
+                } else {
+                    // Slow wind: equatorial belt ± ~50°
+                    const theta = (Math.random() - 0.5) * Math.PI * 0.8;
+                    const phi   = Math.random() * Math.PI * 2;
+                    dir = new THREE.Vector3(
+                        Math.cos(theta) * Math.cos(phi),
+                        Math.sin(theta),
+                        Math.cos(theta) * Math.sin(phi)
+                    ).normalize();
+                }
+
+                const R = getStarDisplayRadius(SUN, state.scaleMode);
+                this.pos = sunPos.clone().addScaledVector(dir, R * 1.06);
+
+                // ── Radial velocity (scaled to display AU/frame) ───────────
+                const speedScale = state.solarWindSpeed / 28;
+                const baseSpeed  = mode === 'cme'  ? 0.055 :
+                                   mode === 'fast' ? 0.022 : 0.012;
+                const spd = baseSpeed * speedScale * (0.8 + Math.random() * 0.4);
+                this.vel = dir.clone().multiplyScalar(spd);
+
+                // Store radial direction for Parker spiral rotation
+                this.radDir = dir.clone();
+
+                this.life    = 1.0;
+                this.maxLife = mode === 'cme'  ? 2.5 + Math.random() * 1.5 :
+                               mode === 'fast' ? 3.5 + Math.random() * 2.0 :
+                                                 5.0 + Math.random() * 3.0;
+
+                // ── Base colour ────────────────────────────────────────────
+                if (mode === 'cme') {
+                    this.baseColor = new THREE.Color(1.0, 0.50, 0.15);  // hot orange plasma
+                } else if (mode === 'fast') {
+                    this.baseColor = new THREE.Color(0.45, 0.70, 1.0);  // cool blue (fast)
+                } else {
+                    this.baseColor = new THREE.Color(0.95, 0.80, 0.50); // warm yellow-white
+                }
+                this.color = this.baseColor.clone();
+            }
+
+            update(dt, sunPos) {
+                this.life -= dt / this.maxLife;
+                if (this.life <= 0) return false;
+
+                const R  = getStarDisplayRadius(SUN, state.scaleMode);
+                const toSun = new THREE.Vector3().subVectors(sunPos, this.pos);
+                const dist  = toSun.length();
+
+                if (dist < R * 0.88) return false;   // absorbed at surface
+
+                // ── Solar gravity (1/r²) ───────────────────────────────────
+                if (dist > 0.01) {
+                    const grav = 0.006 / (dist * dist + 0.015);
+                    this.vel.addScaledVector(toSun.normalize(), grav * dt * 60);
+                }
+
+                // ── Parker spiral — azimuthal kick ─────────────────────────
+                // v_φ ≈ Ω_sun * r (corotation), falls off as particle moves out
+                // In display units: spiral strength proportional to 1/dist
+                if (state.parkerSpiral > 0.01) {
+                    const radial   = this.pos.clone().sub(sunPos).normalize();
+                    const up       = new THREE.Vector3(0, 1, 0);
+                    const azimuth  = new THREE.Vector3().crossVectors(up, radial).normalize();
+                    const spiralV  = (state.parkerSpiral * 0.0012) / Math.max(dist, 0.5);
+                    this.vel.addScaledVector(azimuth, spiralV * dt * 60);
+                }
+
+                // ── Position integration ───────────────────────────────────
+                this.pos.addScaledVector(this.vel, dt * 60);
+
+                // ── Colour fade ────────────────────────────────────────────
+                const lr = this.life;
+                this.color.setRGB(
+                    this.baseColor.r * lr,
+                    this.baseColor.g * lr,
+                    this.baseColor.b * lr
+                );
+
+                if (dist > 55) return false;
+                return true;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  animateSun()
+        // ══════════════════════════════════════════════════════════════════════
+        const sunPos = new THREE.Vector3(0, 0, 0); // Sun is fixed at origin
+
+        function animateSun(dt) {
+            if (!sunMesh) return;
+
+            // ── Update shader time & activity uniforms ─────────────────────
+            const act = state.solarActivity;
+            sunMesh.material.uniforms.uTime.value     = simTime;
+            sunMesh.material.uniforms.uActivity.value = act;
+            sunChrom.material.uniforms.uTime.value    = simTime;
+            sunCorona.material.uniforms.uTime.value   = simTime;
+            sunCorona.material.uniforms.uActivity.value = act;
+
+            // ── Sidereal rotation (differential: equator faster than poles) ─
+            sunMesh.rotation.y  += dt * (2 * Math.PI / (25.38 * 86400)) * 6000;
+            sunChrom.rotation.y  = sunMesh.rotation.y * 1.005;
+
+            // ── Glow + light pulse ─────────────────────────────────────────
+            const pulse = Math.sin(simTime * 1.8) * 0.08 + 1.0;
+            if (sunGlow)  sunGlow.material.opacity = (0.09 + act * 0.06) * pulse;
+            if (sunLight) sunLight.intensity = 4.5 * pulse * (1 + act * 0.3);
+
+            // ── Corona / chromosphere visibility ──────────────────────────
+            sunCorona.visible = state.showCorona;
+            sunChrom.visible  = state.showCorona;
+            sunGlow.visible   = state.showCorona;
+
+            // ── Axes ──────────────────────────────────────────────────────
+            sunAxesHelper.visible = state.showSunAxes;
+
+            // ── CME cooldown tick ──────────────────────────────────────────
+            if (state.cmeCooldown > 0) state.cmeCooldown -= dt;
+
+            // ── Spawn solar wind particles ─────────────────────────────────
+            if (state.showSolarWind) {
+                const rate   = state.solarWindRate;
+                const wMode  = state.solarWindMode;
+
+                // Slow wind emission
+                if (wMode === 'slow' || wMode === 'mixed') {
+                    const n = Math.min(Math.ceil(rate * (wMode === 'mixed' ? 0.6 : 1.0)),
+                                       MAX_SOLAR_WIND - solarParticles.length);
+                    for (let i = 0; i < n; i++)
+                        solarParticles.push(new SolarWindParticle(sunPos, 'slow'));
+                }
+                // Fast wind emission (coronal holes)
+                if (wMode === 'fast' || wMode === 'mixed') {
+                    const n = Math.min(Math.ceil(rate * (wMode === 'mixed' ? 0.3 : 1.0)),
+                                       MAX_SOLAR_WIND - solarParticles.length);
+                    for (let i = 0; i < n; i++)
+                        solarParticles.push(new SolarWindParticle(sunPos, 'fast'));
+                }
+                // Activity-driven extra emission
+                if (Math.random() < act * 0.4) {
+                    const n = Math.min(Math.ceil(rate * 0.1 * act),
+                                       MAX_SOLAR_WIND - solarParticles.length);
+                    for (let i = 0; i < n; i++)
+                        solarParticles.push(new SolarWindParticle(sunPos,
+                            Math.random() < 0.5 ? 'slow' : 'fast'));
+                }
+
+                // ── CME burst ─────────────────────────────────────────────
+                if (state.cmePending && state.cmeCooldown <= 0) {
+                    state.cmePending = false;
+                    state.cmeCount++;
+                    state.cmeCooldown = 4.0;    // 4 s between CMEs
+                    // Random equatorial direction for the CME
+                    const cmeAngle = Math.random() * Math.PI * 2;
+                    const cmeDir = new THREE.Vector3(Math.cos(cmeAngle), 0, Math.sin(cmeAngle));
+                    const burst = Math.min(180, MAX_SOLAR_WIND - solarParticles.length);
+                    for (let i = 0; i < burst; i++)
+                        solarParticles.push(new SolarWindParticle(sunPos, 'cme', cmeDir));
+                    document.getElementById('cmeStatus').textContent = '⚡ CME launched!';
+                    setTimeout(() => {
+                        if (document.getElementById('cmeStatus'))
+                            document.getElementById('cmeStatus').textContent = '';
+                    }, 2500);
+                }
+
+                // ── Solar flare (brief isotropic burst) ────────────────────
+                if (state.flarePending) {
+                    state.flarePending = false;
+                    const burst = Math.min(80, MAX_SOLAR_WIND - solarParticles.length);
+                    for (let i = 0; i < burst; i++)
+                        solarParticles.push(new SolarWindParticle(sunPos, 'fast'));
+                    document.getElementById('cmeStatus').textContent = '🔥 Solar Flare!';
+                    setTimeout(() => {
+                        if (document.getElementById('cmeStatus'))
+                            document.getElementById('cmeStatus').textContent = '';
+                    }, 1800);
+                }
+            }
+
+            // ── Update particle pool ───────────────────────────────────────
+            for (let i = solarParticles.length - 1; i >= 0; i--) {
+                if (!solarParticles[i].update(dt, sunPos)) {
+                    solarParticles.splice(i, 1);
+                }
+            }
+
+            // ── Write buffer ───────────────────────────────────────────────
+            for (let i = 0; i < MAX_SOLAR_WIND; i++) {
+                if (i < solarParticles.length) {
+                    const p = solarParticles[i];
+                    swPositions[i*3]   = p.pos.x;
+                    swPositions[i*3+1] = p.pos.y;
+                    swPositions[i*3+2] = p.pos.z;
+                    swColors[i*3]      = p.color.r;
+                    swColors[i*3+1]    = p.color.g;
+                    swColors[i*3+2]    = p.color.b;
+                    swSizes[i]         = p.life * 0.16;
+                } else {
+                    swPositions[i*3] = swPositions[i*3+1] = swPositions[i*3+2] = 0;
+                    swSizes[i] = 0;
+                }
+            }
+            solarWindGeo.attributes.position.needsUpdate = true;
+            solarWindGeo.attributes.color.needsUpdate    = true;
+            solarWindGeo.attributes.size.needsUpdate     = true;
+            solarWindGeo.setDrawRange(0, solarParticles.length);
+            solarWindPoints.visible = state.showSolarWind;
+
+            // ── Parker angle at 1 AU (for HUD display) ─────────────────────
+            // ψ = atan(Ω_sun * 1AU / v_slow)  →  ~45° for 400 km/s
+            const parkerDeg = Math.atan2(
+                state.parkerSpiral * 0.8,   // normalised proxy
+                1.0
+            ) * 180 / Math.PI;
+
+            // ── Solar cycle label ──────────────────────────────────────────
+            const ssn = Math.round(act * 180);  // rough sunspot relative number
+            const cycleLabel = act < 0.2 ? 'Solar Minimum' :
+                               act < 0.5 ? 'Rising Phase'  :
+                               act < 0.75? 'Solar Maximum' : 'Grand Maximum';
+            document.getElementById('solarCycleLabel').textContent = cycleLabel;
+            document.getElementById('ssnVal').textContent = ssn;
+
+            // ── HUD ────────────────────────────────────────────────────────
+            document.getElementById('hudSolarActivity').textContent = Math.round(act * 100);
+            document.getElementById('hudSunParts').textContent      = solarParticles.length;
+            document.getElementById('hudCME').textContent = state.cmeCooldown > 0 ? 'Active' : 'Idle';
+            document.getElementById('hudParker').textContent = parkerDeg.toFixed(1);
+            document.getElementById('sunWindCount').textContent = solarParticles.length;
+            document.getElementById('cmeCount').textContent    = state.cmeCount;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  MODE SWITCHING
         // ──────────────────────────────────────────────
         function setMode(mode) {
             state.mode = mode;
-            const isSirius = mode === 'sirius';
-            defaultGroup.visible = !isSirius;
-            siriusGroup.visible = isSirius;
+            const isSirius  = mode === 'sirius';
+            const isSun     = mode === 'sun';
+            const isDefault = mode === 'default';
+
+            defaultGroup.visible = isDefault;
+            siriusGroup.visible  = isSirius;
+            sunGroup.visible     = isSun;
 
             // Toggle sidebar sections
             document.querySelectorAll('.sirius-only').forEach(el => {
                 el.style.display = isSirius ? '' : 'none';
             });
+            document.querySelectorAll('.sun-only').forEach(el => {
+                el.style.display = isSun ? '' : 'none';
+            });
 
-            // HUD
-            document.getElementById('hudDefault').style.display = isSirius ? 'none' : '';
-            document.getElementById('hudSirius').style.display = isSirius ? '' : 'none';
-            document.getElementById('hudTitle').textContent = isSirius ? 'Sirius Binary System' : '3D Star Simulator';
+            // HUD panels
+            document.getElementById('hudDefault').style.display = isDefault ? '' : 'none';
+            document.getElementById('hudSirius').style.display  = isSirius  ? '' : 'none';
+            document.getElementById('hudSun').style.display     = isSun     ? '' : 'none';
+            document.getElementById('hudTitle').textContent =
+                isSirius  ? 'Sirius Binary System' :
+                isSun     ? 'Sol — Our Sun' :
+                            '3D Star Simulator';
 
-            // Reset camera for mode
+            // Camera defaults per mode
             if (isSirius) {
                 camera.position.set(25, 20, 35);
+                controls.target.set(0, 0, 0);
+            } else if (isSun) {
+                camera.position.set(0, 4, 12);
                 controls.target.set(0, 0, 0);
             } else {
                 camera.position.set(0, 5, 15);
@@ -1024,10 +1768,14 @@
             }
 
             // Clean up default particles when leaving default mode
-            if (isSirius) {
+            if (!isDefault) {
                 defaultParticles.forEach(p => defaultGroup.remove(p.mesh));
                 defaultParticles.length = 0;
             }
+            // Clear solar particles when leaving sun mode
+            if (!isSun) solarParticles.length = 0;
+            // Clear Sirius wind when leaving sirius mode
+            if (!isSirius) windParticles.length = 0;
         }
 
         // ──────────────────────────────────────────────
@@ -1049,6 +1797,8 @@
 
             if (state.mode === 'sirius') {
                 animateSirius(dt);
+            } else if (state.mode === 'sun') {
+                animateSun(dt);
             } else {
                 animateDefault(dt);
             }
@@ -1328,6 +2078,85 @@
         });
 
         // ──────────────────────────────────────────────
+        // SUN UI BINDINGS
+        // ──────────────────────────────────────────────
+
+        // Activity level
+        document.getElementById('solarActivity').addEventListener('input', e => {
+            state.solarActivity = parseInt(e.target.value) / 100;
+            document.getElementById('solarActivityVal').textContent = e.target.value + '%';
+        });
+
+        // Parker spiral strength
+        document.getElementById('parkerSpiral').addEventListener('input', e => {
+            state.parkerSpiral = parseInt(e.target.value) / 100;
+            document.getElementById('parkerSpiralVal').textContent = e.target.value + '%';
+        });
+
+        // Wind mode
+        document.getElementById('solarWindMode').addEventListener('change', e => {
+            state.solarWindMode = e.target.value;
+            solarParticles.length = 0;  // clear on mode switch
+        });
+
+        // CME trigger
+        document.getElementById('btnCME').addEventListener('click', () => {
+            if (state.cmeCooldown <= 0) {
+                state.cmePending = true;
+            } else {
+                document.getElementById('cmeStatus').textContent =
+                    `⏳ CME cooldown: ${state.cmeCooldown.toFixed(1)}s`;
+            }
+        });
+
+        // Solar flare
+        document.getElementById('btnSolarFlare').addEventListener('click', () => {
+            state.flarePending = true;
+        });
+
+        // View toggles
+        document.getElementById('showCorona').addEventListener('change', e => {
+            state.showCorona = e.target.checked;
+        });
+        document.getElementById('showSolarWind').addEventListener('change', e => {
+            state.showSolarWind = e.target.checked;
+            if (!e.target.checked) solarParticles.length = 0;
+        });
+        document.getElementById('showSunAxes').addEventListener('change', e => {
+            state.showSunAxes = e.target.checked;
+        });
+
+        // Wind rate
+        document.getElementById('solarWindRate').addEventListener('input', e => {
+            state.solarWindRate = parseInt(e.target.value);
+            document.getElementById('solarWindRateVal').textContent = e.target.value + '/f';
+        });
+        // Wind speed
+        document.getElementById('solarWindSpeed').addEventListener('input', e => {
+            state.solarWindSpeed = parseInt(e.target.value);
+            document.getElementById('solarWindSpeedVal').textContent = e.target.value;
+        });
+
+        // Camera presets
+        document.getElementById('camSunOverview').addEventListener('click', () => {
+            camera.position.set(0, 4, 12);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camSunClose').addEventListener('click', () => {
+            const R = getStarDisplayRadius(SUN, state.scaleMode);
+            camera.position.set(R * 2.2, R * 1.2, R * 2.2);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camSunPolar').addEventListener('click', () => {
+            camera.position.set(0, 14, 0.1);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camSunEquator').addEventListener('click', () => {
+            camera.position.set(10, 0.1, 0);
+            controls.target.set(0, 0, 0);
+        });
+
+        // ──────────────────────────────────────────────
         // INITIALIZE
         // ──────────────────────────────────────────────
         setMode('sirius');
@@ -1337,6 +2166,7 @@
         console.log('Sirius Binary System Simulator loaded');
         console.log('Orbital parameters: P=50.13yr, e=0.5914, a=20AU');
         console.log('Sirius A: A1V, 9940K, 2.06 M\u2609 | Sirius B: DA2, 25000K, 1.018 M\u2609');
+        console.log('Sun preset loaded — G2V, 5778K, Parker spiral wind physics');
     </script>
 </body>
 </html>
