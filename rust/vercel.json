@@ -2,7 +2,7 @@
   "buildCommand": "./build_wasm.sh",
   "outputDirectory": "www",
   "devCommand": "python3 -m http.server 8080 --directory www",
-  "installCommand": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source $HOME/.cargo/env && rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli",
+  "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli",
   "framework": null,
   "headers": [
     {

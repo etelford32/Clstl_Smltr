@@ -3,7 +3,7 @@
   "buildCommand": "bash build-wasm.sh",
   "outputDirectory": ".",
   "framework": null,
-  "installCommand": "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && source $HOME/.cargo/env",
+  "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown",
   "headers": [
     {
       "source": "/rust/www/(.*)",
