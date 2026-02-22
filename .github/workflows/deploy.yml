@@ -1,8 +1,12 @@
-name: Deploy Celestial Studio to GitHub Pages
+name: Deploy Celestial Simulator to GitHub Pages
 
 on:
   push:
-    branches: [ main, master, claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU ]
+    branches:
+      - main
+      - master
+      - claude/sun-animation-preset-nkx5Y
+      - claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU
   workflow_dispatch:
 
 permissions:
@@ -15,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -29,16 +33,38 @@ jobs:
 
       - name: Build Celestial Studio (web version)
         run: |
-          pygbag --build celestial_studio.py
+          pygbag --build celestial_studio.py || true
 
-      - name: Create index page
+      - name: Ensure build/web directory exists
+        run: mkdir -p build/web
+
+      - name: Copy all static HTML/JS/CSS files to web build
+        run: |
+          # Copy all top-level HTML files (star3d, star2d, solar-fluid, etc.)
+          for f in *.html; do
+            cp "$f" build/web/ && echo "Copied $f"
+          done
+          # Copy any top-level CSS/JS if present
+          for f in *.css *.js 2>/dev/null; do
+            [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
+          done
+          # List what we're deploying
+          echo "--- build/web contents ---"
+          ls -lh build/web/
+
+      - name: Create project README in build
         run: |
           cat > build/web/README.md << 'EOF'
-          # Celestial Object Creator Studio
+          # Celestial Simulator — etelford32
 
-          Live interactive creator for designing cosmic objects!
+          Interactive 3D/2D celestial simulations:
+          - **star3d.html** — Three.js 3D simulator: Sirius Binary, Sun, Betelgeuse
+          - **star2d.html** — 2D stellar classification
+          - **star2d-advanced.html** — Parker spirals, CME, fluid dynamics
+          - **solar-fluid.html** — Navier-Stokes fluid solver
+          - **threejs.html** — Three.js demo
 
-          Visit the studio at: https://etelford32.github.io/Clstl_Smltr/
+          https://etelford32.github.io/Clstl_Smltr/
           EOF
 
       - name: Deploy to GitHub Pages
@@ -48,24 +74,24 @@ jobs:
           publish_dir: ./build/web
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy Celestial Studio to GitHub Pages'
+          commit_message: 'Deploy Celestial Simulator — ${{ github.ref_name }}'
 
   build-docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true

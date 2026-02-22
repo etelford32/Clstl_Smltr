@@ -579,8 +579,13 @@
                     </div>
                     <div class="ctrl-row">
                         <label>Sim Speed</label>
-                        <input type="range" id="btgTimeScale" min="1" max="200" value="50">
-                        <span class="vdisp" id="btgTimeScaleVal">50 d/s</span>
+                        <input type="range" id="btgTimeScale" min="1" max="200" value="15">
+                        <span class="vdisp" id="btgTimeScaleVal">15 d/s</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label title="Betelgeuse is a genuine semiregular pulsating variable — reduce for subtler motion">Pulse Amp</label>
+                        <input type="range" id="btgPulseAmp" min="0" max="100" value="40">
+                        <span class="vdisp" id="btgPulseAmpVal">40%</span>
                     </div>
                     <div class="ctrl-row">
                         <label>V Magnitude</label>
@@ -920,7 +925,8 @@
             cmeCooldown: 0,           // seconds until next CME allowed
             flarePending: false,
             // Betelgeuse-mode state
-            btgTimeScale:   50,      // simulated days per real second
+            btgTimeScale:   15,      // simulated days per real second
+            btgPulseAmp:    0.40,    // scale amplitude multiplier (0=no scale, 1=full ±15%)
             showMolsphere:  true,
             showRSGWind:    true,
             showSiwarha:    true,
@@ -1367,36 +1373,59 @@
         const sunGroup = new THREE.Group();
         scene.add(sunGroup);
 
-        // ─── GLSL: Photosphere (granulation + limb darkening + sunspots) ─────
+        // ─── GLSL: Photosphere (granulation + limb darkening + sunspots +
+        //          nanoflares + magnetic network — LOD via uCameraDist) ─────────
         const PHOT_VERT = `
             varying vec2 vUv;
             varying vec3 vNormal;
             varying vec3 vWorldPos;
+            uniform float uTime;
+            uniform float uCameraDist;
+
+            // 3-D value noise for surface displacement
+            float h1v(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+            float vn3(vec3 p) {
+                vec3 ip = floor(p); vec3 f = fract(p); f = f*f*(3.0-2.0*f);
+                return mix(
+                    mix(mix(h1v(ip),              h1v(ip+vec3(1,0,0)), f.x),
+                        mix(h1v(ip+vec3(0,1,0)),  h1v(ip+vec3(1,1,0)), f.x), f.y),
+                    mix(mix(h1v(ip+vec3(0,0,1)),  h1v(ip+vec3(1,0,1)), f.x),
+                        mix(h1v(ip+vec3(0,1,1)),  h1v(ip+vec3(1,1,1)), f.x), f.y), f.z);
+            }
+
             void main() {
-                vUv       = uv;
-                vNormal   = normalize(normalMatrix * normal);
-                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                vUv     = uv;
+                vNormal = normalize(normalMatrix * normal);
+
+                // Granule surface bumps — only visible when zoomed in close
+                float lodClose = 1.0 - smoothstep(3.0, 9.0, uCameraDist);
+                float disp = (vn3(position * 4.2 + vec3(uTime*0.012, 0.0, uTime*0.008)) * 2.0 - 1.0)
+                           * 0.018 * lodClose;
+                vec3 displaced = position + normal * disp;
+
+                vWorldPos   = (modelMatrix * vec4(displaced, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
             }
         `;
         const PHOT_FRAG = `
             precision highp float;
             uniform float uTime;
-            uniform float uActivity;   // 0–1
+            uniform float uActivity;    // 0–1  solar cycle phase
+            uniform float uCameraDist;  // world-space distance camera→sun centre
             varying vec2  vUv;
             varying vec3  vNormal;
             varying vec3  vWorldPos;
 
-            // ── Pseudo-random hash ──────────────────────────────────────────
+            // ── Hash / noise primitives ─────────────────────────────────────
             vec2 hash2(vec2 p) {
                 p = vec2(dot(p, vec2(127.1,311.7)), dot(p, vec2(269.5,183.3)));
                 return fract(sin(p) * 43758.5453);
             }
+            float hash1(vec2 p) { return hash2(p).x; }
 
-            // ── Voronoi (cellular noise) — used for granulation ─────────────
+            // ── Voronoi (Bowyer–Watson distance to nearest site) ────────────
             float voronoi(vec2 x) {
-                vec2 ip = floor(x);
-                vec2 fp = fract(x);
+                vec2 ip = floor(x), fp = fract(x);
                 float d = 8.0;
                 for (int j = -1; j <= 1; j++)
                 for (int i = -1; i <= 1; i++) {
@@ -1407,15 +1436,12 @@
                 return sqrt(d);
             }
 
-            // ── Value noise ─────────────────────────────────────────────────
+            // ── Smooth value noise + FBM ────────────────────────────────────
             float vnoise(vec2 p) {
-                vec2 ip = floor(p);
-                vec2 u  = fract(p);
-                u = u*u*(3.0 - 2.0*u);
-                float a = dot(hash2(ip),              vec2(1.0, 0.0));
-                float b = dot(hash2(ip+vec2(1.0,0.0)),vec2(1.0, 0.0));
-                float c = dot(hash2(ip+vec2(0.0,1.0)),vec2(1.0, 0.0));
-                float d = dot(hash2(ip+vec2(1.0,1.0)),vec2(1.0, 0.0));
+                vec2 ip = floor(p); vec2 u = fract(p);
+                u = u*u*(3.0-2.0*u);
+                float a = hash1(ip),              b = hash1(ip+vec2(1,0));
+                float c = hash1(ip+vec2(0,1)),    d = hash1(ip+vec2(1,1));
                 return mix(mix(a,b,u.x), mix(c,d,u.x), u.y);
             }
             float fbm(vec2 p) {
@@ -1424,55 +1450,136 @@
                 return f;
             }
 
+            // ── Nanoflares — Parker (1988) magnetic reconnection events ─────
+            // Tiny (~100 km) energy releases at intergranular flux-tube tips.
+            // Revealed only on close zoom (lodClose > 0).
+            // granVal: raw voronoi value — small = intergranular lane
+            float nanoflares(vec2 uv, float granVal, float activity) {
+                vec2 nfUv   = uv * 60.0;            // ~3600 cells across sphere
+                vec2 nfCell = floor(nfUv);
+                vec2 nfFrac = fract(nfUv);
+                float total = 0.0;
+                // 3×3 neighbourhood so Gaussians from adjacent cells bleed in
+                for (int nj = -1; nj <= 1; nj++)
+                for (int ni = -1; ni <= 1; ni++) {
+                    vec2 cell = nfCell + vec2(float(ni), float(nj));
+                    vec2 h    = hash2(cell);
+                    // Nanoflare site inside cell (avoid edges)
+                    vec2 center = vec2(float(ni), float(nj)) + h * 0.70 + 0.15;
+                    // Independent firing frequency & phase per cell
+                    float freq  = 0.25 + hash1(cell + 13.0) * 0.55; // 0.25–0.80 Hz
+                    float phase = hash1(cell + 77.0);
+                    float tN    = fract(uTime * freq + phase);
+                    // Flash profile: fast rise (0–0.10), slow exponential decay (0.10–0.55)
+                    float flash = 0.0;
+                    if (tN < 0.55) {
+                        flash = (tN < 0.10)
+                            ? tN / 0.10
+                            : 1.0 - (tN - 0.10) / 0.45;
+                    }
+                    // Spatial Gaussian — sigma ≈ 0.12 cell widths
+                    float dist = length(nfFrac - center);
+                    float gaus = exp(-dist * dist / 0.014);
+                    // Gate: only fire in cool intergranular lanes & scale with activity
+                    float laneGate = 1.0 - smoothstep(0.0, 0.35, granVal);
+                    float actGate  = 0.3 + activity * 0.7;
+                    total += gaus * flash * laneGate * actGate;
+                }
+                return clamp(total, 0.0, 1.0);
+            }
+
+            // ── Magnetic bright points — concentrated flux tubes ─────────────
+            // Sparse persistent hot dots in intergranular lanes (Dunn & Zirker 1973).
+            float magneticBrightPoints(vec2 uv) {
+                vec2 mpUv   = uv * 40.0;
+                vec2 mpCell = floor(mpUv);
+                vec2 mpFrac = fract(mpUv);
+                float total = 0.0;
+                for (int nj = 0; nj <= 1; nj++)
+                for (int ni = 0; ni <= 1; ni++) {
+                    vec2 cell = mpCell + vec2(float(ni), float(nj));
+                    vec2 h    = hash2(cell + 55.0);
+                    vec2 ctr  = vec2(float(ni), float(nj)) + h * 0.8 + 0.1;
+                    float exists = step(0.72, h.y);         // only ~28% of cells
+                    float dist   = length(mpFrac - ctr);
+                    total += exists * exp(-dist * dist / 0.008);
+                }
+                return clamp(total, 0.0, 1.0);
+            }
+
             void main() {
-                // ── Limb darkening (Milne 1921 / Unsöld): I(μ) = 1 − u(1−μ), u≈0.60 ──
-                vec3 viewDir  = normalize(cameraPosition - vWorldPos);
+                // ── LOD blend weights ────────────────────────────────────────
+                // lodMed  : magnetic network + bright points (medium zoom)
+                // lodClose: nanoflares + penumbral fibril detail (close zoom)
+                float lodMed   = 1.0 - smoothstep(8.0, 18.0, uCameraDist);
+                float lodClose = 1.0 - smoothstep(3.0,  8.0, uCameraDist);
+
+                // ── Limb darkening — Milne/Unsöld: I(μ) = 1 − u(1−μ), u=0.60 ─
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
                 float mu      = max(dot(normalize(vNormal), viewDir), 0.0);
                 float limbDrk = 1.0 - 0.60*(1.0 - mu);
 
-                // ── Granulation (convection cells, ~1 Mm scale) ─────────────
+                // ── Granulation (convective cells, ~1 Mm) ───────────────────
                 vec2 gUv  = vUv * 24.0 + vec2(uTime*0.007, uTime*0.003);
-                float gran = voronoi(gUv);
-                gran = smoothstep(0.05, 0.48, gran);         // bright centers / dark lanes
+                float granRaw  = voronoi(gUv);                      // raw cell distance
+                float granSharp= smoothstep(0.05, 0.48, granRaw);   // bright cell / dark lane
 
-                // ── Supergranulation (larger ~30 Mm) ────────────────────────
-                vec2 sgUv    = vUv * 5.5 - vec2(uTime*0.002, uTime*0.001);
+                // ── Supergranulation (~30 Mm network) ───────────────────────
+                vec2  sgUv   = vUv * 5.5 - vec2(uTime*0.002, uTime*0.001);
                 float supgran = voronoi(sgUv);
                 supgran = smoothstep(0.1, 0.55, supgran) * 0.22;
 
-                // ── Sunspot latitude belt (realistic ±35°) ──────────────────
-                float latFrac = abs(vUv.y - 0.5) * 2.0;    // 0 equator, 1 pole
+                // ── Sunspot latitude belt (Spörer's law ±35°) ───────────────
+                float latFrac = abs(vUv.y - 0.5) * 2.0;
                 float latBelt = 1.0 - smoothstep(0.0, 0.65, latFrac);
 
-                // ── Sunspot / active region (activity-gated) ────────────────
-                float spotN   = fbm(vUv * 7.0 + vec2(uTime*0.004, 0.0));
-                float thresh  = 0.74 - uActivity * 0.20;
-                float umbra   = smoothstep(thresh+0.03, thresh,       spotN) * latBelt;
-                float penumbra= smoothstep(thresh+0.09, thresh+0.02,  spotN) * latBelt * (1.0 - umbra);
+                float spotN  = fbm(vUv * 7.0 + vec2(uTime*0.004, 0.0));
+                float thresh = 0.74 - uActivity * 0.20;
+                float umbra    = smoothstep(thresh+0.03, thresh,      spotN) * latBelt;
+                float penumbra = smoothstep(thresh+0.09, thresh+0.02, spotN) * latBelt * (1.0-umbra);
 
-                // ── Faculae / Plage (bright rings around spots) ─────────────
+                // ── Faculae / plage (bright flux rings around spots) ─────────
                 float faculae = smoothstep(thresh+0.13, thresh+0.07, spotN)
                               * smoothstep(thresh-0.04, thresh+0.13, spotN)
                               * latBelt * uActivity;
 
-                // ── Colour assembly ─────────────────────────────────────────
-                // 5778 K blackbody peak: warm yellow-white
-                vec3 photBase  = vec3(1.00, 0.88, 0.55);
-                vec3 granHot   = vec3(1.00, 0.92, 0.65);
-                vec3 granCool  = vec3(0.82, 0.53, 0.20);
-                vec3 surface   = mix(granCool, granHot, gran + supgran);
+                // ── Magnetic network — intergranular flux concentration ───────
+                // Revealed at medium zoom: cool, red-dark lanes where B is strong.
+                float netwk = (1.0 - smoothstep(0.0, 0.22, granRaw)) * lodMed * 0.45;
 
-                vec3 umbraCol  = vec3(0.18, 0.10, 0.05);
-                vec3 penCol    = vec3(0.52, 0.30, 0.10);
+                // ── Magnetic bright points ────────────────────────────────────
+                float mbp = magneticBrightPoints(vUv + vec2(uTime*0.0008)) * lodMed;
 
+                // ── Nanoflares (Parker 1988) ──────────────────────────────────
+                // Only visible when zoomed in; gated to intergranular lanes
+                float nf = nanoflares(gUv / 24.0, granRaw, uActivity) * lodClose;
+
+                // ── Colour assembly ───────────────────────────────────────────
+                vec3 granHot  = vec3(1.00, 0.92, 0.65);   // cell interior  ~6000 K
+                vec3 granCool = vec3(0.82, 0.53, 0.20);   // cell edge      ~4500 K
+                vec3 laneCol  = vec3(0.62, 0.35, 0.10);   // intergranular  ~3800 K
+                vec3 surface  = mix(granCool, granHot, granSharp + supgran);
+
+                // Magnetic network darkens & reddens lanes
+                surface = mix(surface, laneCol, netwk);
+
+                // Magnetic bright points: narrow hot flux-tube footpoints
+                surface += mbp * vec3(0.90, 0.80, 0.40) * 0.55 * (1.0 - umbra);
+
+                // Sunspot overlays
+                vec3 umbraCol = vec3(0.18, 0.10, 0.05);
+                vec3 penCol   = vec3(0.52, 0.30, 0.10);
                 surface = mix(surface, penCol,   penumbra * 0.72);
                 surface = mix(surface, umbraCol, umbra    * 0.88);
                 surface += faculae * vec3(0.32, 0.24, 0.08);
 
-                // Apply limb darkening
+                // Nanoflares: ~10⁷ K reconnection → blue-white flash
+                vec3 nfCol = vec3(1.00, 0.95, 0.85);
+                surface += nf * nfCol * 1.8 * (1.0 - umbra);
+
+                // Limb darkening applied last
                 surface *= limbDrk;
 
-                // Emissive factor (HDR tone-mapping handled by renderer)
                 gl_FragColor = vec4(surface * 2.4, 1.0);
             }
         `;
@@ -1491,65 +1598,184 @@
             precision highp float;
             uniform float uTime;
             uniform float uActivity;
+            uniform float uCameraDist;
             varying vec3 vNormal;
             varying vec3 vWorldPos;
 
-            float hash(float n) { return fract(sin(n)*43758.5453); }
+            float hashC(float n)  { return fract(sin(n) * 43758.5453); }
+            float hash2C(vec2 p)  { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+
             float noise3(vec3 p) {
                 vec3 ip = floor(p); vec3 f = fract(p);
                 f = f*f*(3.0-2.0*f);
                 float n = ip.x + ip.y*57.0 + ip.z*113.0;
                 return mix(
-                    mix(mix(hash(n),      hash(n+1.0),  f.x),
-                        mix(hash(n+57.0), hash(n+58.0), f.x), f.y),
-                    mix(mix(hash(n+113.0),hash(n+114.0),f.x),
-                        mix(hash(n+170.0),hash(n+171.0),f.x), f.y), f.z);
+                    mix(mix(hashC(n),       hashC(n+1.0),   f.x),
+                        mix(hashC(n+57.0),  hashC(n+58.0),  f.x), f.y),
+                    mix(mix(hashC(n+113.0), hashC(n+114.0), f.x),
+                        mix(hashC(n+170.0), hashC(n+171.0), f.x), f.y), f.z);
+            }
+
+            // ── Switchbacks — kinked/reversed coronal field lines ────────────
+            // Modelled after Parker Solar Probe observations (Bale et al. 2019):
+            // S-shaped Alfvénic structures where the radial field reverses sign.
+            // Each switchback is a sinusoidally-deformed filament in (lon,lat) space.
+            float switchbacks(vec3 pos, float activity, float time) {
+                vec3  n   = normalize(pos);
+                float lon = atan(n.z, n.x);                        // –π … π
+                float lat = asin(clamp(n.y, -0.9999, 0.9999));     // –π/2 … π/2
+                vec2  sph = vec2(lon, lat);
+                float total = 0.0;
+
+                for (int k = 0; k < 6; k++) {
+                    float fk = float(k);
+                    // Random origin for this switchback structure
+                    float sbLon = (hash2C(vec2(fk, 1.0)) * 2.0 - 1.0) * 3.14159;
+                    float sbLat = (hash2C(vec2(fk, 2.0)) * 2.0 - 1.0) * 1.20;
+                    float sbAng = hash2C(vec2(fk, 3.0)) * 6.28318;
+                    float sbLen = 0.35 + hash2C(vec2(fk, 4.0)) * 0.30;  // arc half-length (rad)
+                    float sbAmp = 0.08 + hash2C(vec2(fk, 5.0)) * 0.06;  // reversal amplitude
+
+                    // Life-cycle: form → persist → dissolve (period 6–14 s sim-time)
+                    float period = 6.0 + hash2C(vec2(fk, 6.0)) * 8.0;
+                    float tN     = fract(time / period + hash2C(vec2(fk, 7.0)));
+                    float env    = smoothstep(0.0, 0.18, tN) * smoothstep(1.0, 0.70, tN);
+
+                    // Offset in spherical coords
+                    vec2 dSph = sph - vec2(sbLon, sbLat);
+                    // Wrap longitude to –π … π
+                    dSph.x -= 6.28318 * floor((dSph.x + 3.14159) / 6.28318);
+
+                    // Rotate to local switchback frame
+                    float cs = cos(sbAng), sn = sin(sbAng);
+                    float along = dSph.x*cs + dSph.y*sn;
+                    float perp  = -dSph.x*sn + dSph.y*cs;
+
+                    // Gate by arc length
+                    float lenGate = smoothstep(sbLen, sbLen*0.55, abs(along));
+
+                    // S-shape: perp offset ~ A·sin(2π·t) creates one full reversal
+                    // d(perp)/d(along) < 0 in the middle → field-line U-turn
+                    float t      = (sbLen > 0.001) ? along / sbLen : 0.0;  // –1…1
+                    float drift  = hash2C(vec2(fk, 8.0)) * 0.04;
+                    float shape  = perp - sbAmp * sin(t * 3.14159 * 2.0 + time * drift);
+
+                    // Two-component profile: bright core + faint Alfvénic halo
+                    float wCore = 0.016 + activity * 0.010;
+                    float fil   = exp(-shape*shape / (wCore*wCore));
+                    float halo  = exp(-shape*shape / (wCore*wCore * 9.0)) * 0.22;
+
+                    total += (fil + halo) * lenGate * env;
+                }
+                return clamp(total * (0.5 + activity * 0.7), 0.0, 1.0);
+            }
+
+            // ── Alfvén wave texture — propagating along field lines ──────────
+            float alfven(vec3 pos, float time) {
+                float n1 = noise3(pos * 3.5 + vec3(time*0.12, 0.0,     time*0.07));
+                float n2 = noise3(pos * 7.0 - vec3(0.0,       time*0.18, time*0.09));
+                return n1 * 0.7 + n2 * 0.3;
             }
 
             void main() {
-                vec3 viewDir = normalize(cameraPosition - vWorldPos);
-                // For BackSide geometry the normal points inward so use abs()
-                float cosA   = abs(dot(normalize(vNormal), viewDir));
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA    = abs(dot(normalize(vNormal), viewDir));
                 float fresnel = pow(1.0 - cosA, 2.2);
 
-                // ── Streamer belt (equatorial) ───────────────────────────────
-                float lat     = dot(normalize(vWorldPos - cameraPosition * 0.0),
-                                    vec3(0.0, 1.0, 0.0));
+                // Switchbacks become visible as the camera enters the corona region
+                // Corona sphere radius ≈ 2.8 × 1.2 = 3.36 display units
+                float sbLod = 1.0 - smoothstep(5.0, 16.0, uCameraDist);
+
+                // ── Streamer belt (equatorial current sheet) ─────────────────
+                float lat     = normalize(vWorldPos).y;
                 float streamer = exp(-lat*lat * 6.0) * 0.38;
 
-                // ── Polar plumes (stronger at solar minimum) ─────────────────
-                float polar   = smoothstep(0.55, 1.0, abs(lat)) * 0.25
-                              * (1.0 - uActivity * 0.6);
+                // ── Polar plumes (cooler electrons, minimum-activity) ─────────
+                float polar = smoothstep(0.55, 1.0, abs(lat)) * 0.25
+                            * (1.0 - uActivity * 0.6);
 
-                // ── Texture — dynamic tendrils ───────────────────────────────
-                float n = noise3(vWorldPos * 2.8 + vec3(uTime*0.08, 0.0, uTime*0.05));
+                // ── Alfvén wave tendrils ──────────────────────────────────────
+                float alf = alfven(normalize(vWorldPos), uTime);
 
-                float alpha = (fresnel*0.55 + streamer + polar) * (0.65 + n*0.35)
+                // ── Switchbacks ───────────────────────────────────────────────
+                float sb = switchbacks(vWorldPos, uActivity, uTime) * sbLod;
+
+                float alpha = (fresnel*0.55 + streamer + polar) * (0.65 + alf*0.35)
                             * (0.75 + uActivity * 0.35);
-                alpha = clamp(alpha * 0.55, 0.0, 0.48);
+                alpha += sb * 0.38;                       // switchbacks brighten corona
+                alpha = clamp(alpha * 0.55, 0.0, 0.52);
 
-                // ── Colour: inner warm yellow-white → outer pale blue ────────
-                vec3 inner = vec3(1.00, 0.96, 0.78);
-                vec3 outer = vec3(0.62, 0.82, 1.00);
-                vec3 col   = mix(inner, outer, fresnel * 1.2);
+                // ── Colour: warm inner → pale-blue outer, switchbacks glow amber
+                vec3 inner   = vec3(1.00, 0.96, 0.78);
+                vec3 outer   = vec3(0.62, 0.82, 1.00);
+                vec3 sbColor = vec3(1.00, 0.82, 0.50);   // warm Alfvénic glow
+                vec3 col     = mix(inner, outer, fresnel * 1.2);
+                col          = mix(col, sbColor, sb * 0.55);
 
                 gl_FragColor = vec4(col, alpha);
             }
         `;
 
-        // ─── GLSL: Chromosphere (thin pink/red shell) ────────────────────────
+        // ─── GLSL: Chromosphere (thin pink/red shell + spicule LOD) ─────────
         const CHROM_FRAG = `
             precision mediump float;
             uniform float uTime;
+            uniform float uCameraDist;
             varying vec3 vNormal;
             varying vec3 vWorldPos;
+
+            float hashCh(float n)  { return fract(sin(n)*43758.5453); }
+            float hash2Ch(vec2 p)  { return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+
+            // ── Spicule field — chromospheric jets (~1000 km tall needles) ───
+            // De Pontieu et al. (2007): spicules are ubiquitous, last 3–15 min.
+            // Rendered as dense bright points with individual lifetimes.
+            float spicules(vec3 wPos, float time) {
+                vec3  n   = normalize(wPos);
+                float lon = atan(n.z, n.x) * 0.31831;  // –1 … 1
+                float lat = asin(clamp(n.y,-0.9999,0.9999)) * 0.63662; // –1 … 1
+                vec2  sc  = vec2(lon, lat);
+                vec2  cell= floor(sc * 20.0);
+                vec2  fr  = fract(sc * 20.0);
+                float total = 0.0;
+                for (int j = 0; j <= 1; j++)
+                for (int i = 0; i <= 1; i++) {
+                    vec2  c   = cell + vec2(float(i), float(j));
+                    float h   = hash2Ch(c);
+                    float h2  = hash2Ch(c + 47.0);
+                    vec2  pt  = vec2(float(i), float(j)) + vec2(h, h2) * 0.8 + 0.1;
+                    float d   = length(fr - pt);
+                    // Independent lifetime per spicule: born, rises, fades
+                    float spFreq = 0.08 + hash2Ch(c + 99.0) * 0.12; // slow cycle
+                    float spPh   = hash2Ch(c + 33.0);
+                    float tN     = fract(time * spFreq + spPh);
+                    float life   = smoothstep(0.0, 0.15, tN) * smoothstep(1.0, 0.55, tN);
+                    total += exp(-d*d * 95.0) * life;
+                }
+                return clamp(total, 0.0, 1.0);
+            }
+
             void main() {
-                vec3 viewDir = normalize(cameraPosition - vWorldPos);
-                float cosA   = abs(dot(normalize(vNormal), viewDir));
-                float rim    = pow(1.0 - cosA, 4.5) * 0.70;
-                // Spicule flicker
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA    = abs(dot(normalize(vNormal), viewDir));
+                float rim     = pow(1.0 - cosA, 4.5) * 0.70;
+
+                // LOD gate: spicule structures visible on close approach
+                float lodClose = 1.0 - smoothstep(3.0, 9.0, uCameraDist);
+
+                // Coarse flicker (existing large-scale spicule shimmer)
                 float flicker = 0.85 + 0.15 * sin(uTime * 3.7 + vWorldPos.x * 9.0);
-                gl_FragColor  = vec4(1.0, 0.28, 0.12, rim * flicker);
+
+                // Fine spicule field revealed when zoomed in
+                float spic = spicules(vWorldPos, uTime) * lodClose;
+
+                // Base chromospheric Hα pink/red — spicule tips shift to orange-white
+                vec3 chromCol = vec3(1.00, 0.28, 0.12);
+                vec3 spicCol  = vec3(1.00, 0.58, 0.28);
+                vec3 col      = mix(chromCol, spicCol, spic * 0.65);
+
+                float alpha = rim * flicker + spic * lodClose * 0.40;
+                gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
             }
         `;
 
@@ -1590,8 +1816,9 @@
             const photGeo = new THREE.SphereGeometry(R, 96, 96);
             const photMat = new THREE.ShaderMaterial({
                 uniforms: {
-                    uTime:     { value: 0 },
-                    uActivity: { value: state.solarActivity },
+                    uTime:        { value: 0 },
+                    uActivity:    { value: state.solarActivity },
+                    uCameraDist:  { value: 12.0 },
                 },
                 vertexShader:   PHOT_VERT,
                 fragmentShader: PHOT_FRAG,
@@ -1602,7 +1829,7 @@
             // Chromosphere (~1700 km above photosphere, but visually thin)
             const chromGeo = new THREE.SphereGeometry(R * 1.018, 48, 48);
             const chromMat = new THREE.ShaderMaterial({
-                uniforms: { uTime: { value: 0 } },
+                uniforms: { uTime: { value: 0 }, uCameraDist: { value: 12.0 } },
                 vertexShader:   CORONA_VERT,   // same geometry transform
                 fragmentShader: CHROM_FRAG,
                 transparent: true,
@@ -1617,8 +1844,9 @@
             const coronaGeo = new THREE.SphereGeometry(R * 2.8, 48, 48);
             const coronaMat = new THREE.ShaderMaterial({
                 uniforms: {
-                    uTime:     { value: 0 },
-                    uActivity: { value: state.solarActivity },
+                    uTime:        { value: 0 },
+                    uActivity:    { value: state.solarActivity },
+                    uCameraDist:  { value: 12.0 },
                 },
                 vertexShader:   CORONA_VERT,
                 fragmentShader: CORONA_FRAG,
@@ -1773,11 +2001,17 @@
 
             // ── Update shader time & activity uniforms ─────────────────────
             const act = state.solarActivity;
-            sunMesh.material.uniforms.uTime.value     = simTime;
-            sunMesh.material.uniforms.uActivity.value = act;
-            sunChrom.material.uniforms.uTime.value    = simTime;
-            sunCorona.material.uniforms.uTime.value   = simTime;
+            sunMesh.material.uniforms.uTime.value       = simTime;
+            sunMesh.material.uniforms.uActivity.value   = act;
+            sunChrom.material.uniforms.uTime.value      = simTime;
+            sunCorona.material.uniforms.uTime.value     = simTime;
             sunCorona.material.uniforms.uActivity.value = act;
+
+            // ── Camera distance → LOD uniforms (nanoflares, switchbacks, spicules)
+            const camDist = camera.position.distanceTo(sunGroup.position);
+            sunMesh.material.uniforms.uCameraDist.value   = camDist;
+            sunChrom.material.uniforms.uCameraDist.value  = camDist;
+            sunCorona.material.uniforms.uCameraDist.value = camDist;
 
             // ── Sidereal rotation (differential: equator faster than poles) ─
             sunMesh.rotation.y  += dt * (2 * Math.PI / (25.38 * 86400)) * 6000;
@@ -2000,43 +2234,58 @@
                 //   Ma et al. 2024: one hemisphere upwelling, one downflowing
                 //   → dipolar brightness pattern (not actual rotation)
                 vec3 cp1 = npos + vec3(uCellTime*0.06, uCellTime*0.04, uCellTime*0.03);
-                float v1 = voronoi3D(cp1 * 1.62);   // primary large cells
-                float cell1 = smoothstep(0.0, 0.52, v1);   // 0=dark lane, 1=bright center
+                float v1 = voronoi3D(cp1 * 1.62);   // primary large cells (~3–5 cells)
 
-                // Secondary smaller cells (post-dimming ~200d period convection)
+                // Sharper cell interior (narrow smoothstep = crisper boundary)
+                float cell1     = smoothstep(0.0, 0.28, v1);   // bright interior
+                // Dark intergranular lanes — very narrow transition at cell edges
+                float lanes1    = smoothstep(0.20, 0.0,  v1);  // 1 = dark lane, 0 = interior
+
+                // Secondary smaller cells (mid-scale convection)
                 vec3 cp2 = npos + vec3(-uCellTime*0.025, uCellTime*0.032, -uCellTime*0.018) + 0.7;
                 float v2 = voronoi3D(cp2 * 3.1);
-                float cell2 = smoothstep(0.05, 0.43, v2) * 0.30;
+                float cell2     = smoothstep(0.05, 0.32, v2) * 0.22;
+                float lanes2    = smoothstep(0.18, 0.0,  v2) * 0.18;
 
-                float totalCell = cell1 + cell2;
+                float totalCell  = cell1  + cell2;
+                float totalLanes = lanes1 + lanes2;
 
                 // ── Convective asymmetry — hemispheric dipole ────────────────
                 //   (Ma 2024: convection mimics rotation; one bright hemisphere)
                 float hemiDipole = dot(npos,
                     normalize(vec3(0.65 + 0.2*sin(uCellTime*0.5),
                                    0.25 + 0.1*cos(uCellTime*0.3),
-                                   0.55))) * 0.10;
+                                   0.55))) * 0.12;
 
-                // ── Fine surface granulation (subtle, ~fbm noise) ────────────
-                float fineTex = fbm3(npos * 8.0 + vec3(uTime*0.005)) * 0.08;
+                // ── Fine surface turbulence (slow, tied to sim time) ─────────
+                float fineTex = fbm3(npos * 9.0 + vec3(uCellTime*0.3, uCellTime*0.2, 0.0)) * 0.07;
 
                 // ── Temperature from pulsation ────────────────────────────────
                 //   Teff range 3250–3690 K; uPulseTemp: +1=hot, −1=cool
                 float Trel = clamp(0.5 + uPulseTemp * 0.35, 0.0, 1.0);
 
-                // ── Base colour (blackbody peak 3500K ≈ 830nm, deep orange-red)
-                vec3 hotColor  = vec3(1.00, 0.52, 0.18);  // 3690 K
-                vec3 baseColor = vec3(1.00, 0.39, 0.12);  // 3500 K
-                vec3 coolColor = vec3(1.00, 0.22, 0.05);  // 3250 K (Great Dimming temp)
+                // ── Base colour (blackbody 3500K ≈ 830nm peak, deep orange-red)
+                vec3 hotColor  = vec3(1.00, 0.55, 0.20);  // 3690 K — slightly more yellow
+                vec3 baseColor = vec3(1.00, 0.39, 0.12);  // 3500 K — canonical orange
+                vec3 coolColor = vec3(1.00, 0.22, 0.05);  // 3250 K — dimming temp
+                vec3 laneColor = vec3(0.88, 0.26, 0.07);  // intergranular lane: cooler & redder
                 vec3 surfColor = Trel > 0.5
                     ? mix(baseColor, hotColor, (Trel-0.5)*2.0)
                     : mix(coolColor, baseColor, Trel*2.0);
 
-                // ── Apply convective brightness (±12–13% contrast) ───────────
-                //   Upwelling centers: bright & slightly hotter
-                //   Intergranular lanes: dark & cooler
-                float brightness = 1.0 + (totalCell - 0.55)*0.26 + hemiDipole + fineTex;
-                surfColor *= clamp(brightness, 0.6, 1.5);
+                // ── Convective color gradient ─────────────────────────────────
+                //   Upwelling centers: slightly hotter/yellower
+                //   Intergranular lanes: cooler/redder with strong dimming
+                surfColor = mix(surfColor, hotColor, cell1 * 0.18);
+                surfColor = mix(surfColor, laneColor, totalLanes * 0.65);
+
+                // ── Apply convective brightness (±13% observed contrast) ─────
+                float brightness = 1.0
+                    + (totalCell - 0.45) * 0.38   // cell interior boost
+                    - totalLanes * 0.35            // lane darkening (additive with color)
+                    + hemiDipole
+                    + fineTex;
+                surfColor *= clamp(brightness, 0.42, 1.68);
 
                 // ── Great Dimming (2019–2020 mass ejection + dust cloud) ─────
                 //   ~170 K Teff drop + asymmetric dust shadow on SE quadrant
@@ -2286,13 +2535,15 @@
             const pulse3 = Math.sin(2 * Math.PI * btgSimTime / LP);
 
             // Radius oscillation: ±10% (P1) + ±4% (P2) + ±1% (LSP)
-            const pulseScale = 1.0 + pulse1*0.10 + pulse2*0.04 + pulse3*0.01;
+            // Scaled by btgPulseAmp so user can dial down the jarring heartbeat
+            const amp = state.btgPulseAmp;
+            const pulseScale = 1.0 + amp * (pulse1*0.10 + pulse2*0.04 + pulse3*0.01);
 
             // Temperature: hotter at min radius (adiabatic compression), u ≈ 0.6
-            const pulseTemp = -(pulse1*0.65 + pulse2*0.25 + pulse3*0.10);
+            const pulseTemp = -amp * (pulse1*0.65 + pulse2*0.25 + pulse3*0.10);
 
             // V magnitude: brighter when hotter/larger (combined effect)
-            const Vmag = 0.70 - (pulse1*0.32 + pulse2*0.14) - pulse3*0.05;
+            const Vmag = 0.70 - amp*(pulse1*0.32 + pulse2*0.14) - amp*pulse3*0.05;
             const Teff = 3500 + pulseTemp * 210;
 
             // Apply scale + uniforms
@@ -2855,6 +3106,12 @@
         document.getElementById('btgTimeScale').addEventListener('input', e => {
             state.btgTimeScale = parseInt(e.target.value);
             document.getElementById('btgTimeScaleVal').textContent = e.target.value + ' d/s';
+        });
+
+        // Pulsation amplitude (0–100% of physical ±15% radius variation)
+        document.getElementById('btgPulseAmp').addEventListener('input', e => {
+            state.btgPulseAmp = parseInt(e.target.value) / 100.0;
+            document.getElementById('btgPulseAmpVal').textContent = e.target.value + '%';
         });
 
         // Great Dimming trigger
