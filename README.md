@@ -164,5 +164,4 @@ You can customize various parameters in `star_simulation.py`:
 This project is open source and available for educational purposes.
 
 ## Author
-
-Created with Claude Code
+Elliot Telford
