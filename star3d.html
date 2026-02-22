@@ -273,6 +273,7 @@
                             <option value="default">Default (Single Star)</option>
                             <option value="sirius" selected>Sirius Binary System</option>
                             <option value="sun">Sun — Solar System</option>
+                            <option value="betelgeuse">Betelgeuse &alpha; Ori (M1&ndash;M2 Ia)</option>
                         </select>
                     </div>
                 </div>
@@ -564,6 +565,138 @@
                 </div>
             </div>
 
+            <!-- ═══════════════════════════════════════════════ -->
+            <!-- BETELGEUSE-ONLY SECTIONS                        -->
+            <!-- ═══════════════════════════════════════════════ -->
+
+            <!-- Pulsation + Activity -->
+            <div class="sb-section btg-only" style="display:none">
+                <div class="sb-title">Pulsation &amp; Activity <span style="font-size:10px;color:#FF6B35">&#9733;</span></div>
+                <div class="sb-body">
+                    <div class="epoch-display" style="background:rgba(255,100,30,0.08)">
+                        <div class="epoch-year" id="btgPulseLabel" style="color:#FF6B35;font-size:13px">Expanding</div>
+                        <div class="epoch-label">Pulsation Phase &bull; R: <span id="btgRVal">764</span> R&#9737; &bull; T: <span id="btgTVal">3500</span> K</div>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Sim Speed</label>
+                        <input type="range" id="btgTimeScale" min="1" max="200" value="50">
+                        <span class="vdisp" id="btgTimeScaleVal">50 d/s</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>V Magnitude</label>
+                        <span class="vdisp" id="btgVMag" style="flex:1;text-align:left;padding-left:4px;color:#FF9944">~0.5</span>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin:4px 0">P1: <span class="val" id="btgP1Pct">--</span>% &bull; P2: <span class="val" id="btgP2Pct">--</span>% &bull; LSP: <span class="val" id="btgLSPPct">--</span>%</div>
+                    <div class="btn-row" style="margin-top:8px">
+                        <button id="btnGreatDimming">&#127774; Great Dimming (2020)</button>
+                    </div>
+                    <div id="btgDimmingStatus" style="font-size:10px;color:#ff6633;text-align:center;height:14px;margin-top:4px;"></div>
+                </div>
+            </div>
+
+            <!-- Convection + View -->
+            <div class="sb-section btg-only" style="display:none">
+                <div class="sb-title">View Options <span style="font-size:10px;color:#888">&#128301;</span></div>
+                <div class="sb-body">
+                    <div class="chk-row">
+                        <input type="checkbox" id="showMolsphere" checked>
+                        <label for="showMolsphere">MOLsphere (H&#8322;O, CO, SiO — 1,500 K)</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showRSGWind" checked>
+                        <label for="showRSGWind">RSG Mass-Loss Wind</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showSiwarha" checked>
+                        <label for="showSiwarha">Companion Siwarha (5.94-yr orbit)</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showSiwarhaOrbit" checked>
+                        <label for="showSiwarhaOrbit">Siwarha Orbital Path</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showBtgAxes">
+                        <label for="showBtgAxes">Reference Axes</label>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin-top:8px;margin-bottom:4px;">Camera:</div>
+                    <div class="cam-presets">
+                        <button id="camBtgOverview">Overview</button>
+                        <button id="camBtgClose">Close-Up</button>
+                        <button id="camBtgSystem">System</button>
+                        <button id="camBtgPolar">Polar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wind Controls -->
+            <div class="sb-section btg-only" style="display:none">
+                <div class="sb-title">RSG Wind <span style="font-size:10px;color:#888">&#127766;</span></div>
+                <div class="sb-body">
+                    <div class="ctrl-row">
+                        <label>Emission Rate</label>
+                        <input type="range" id="btgWindRate" min="1" max="25" value="10">
+                        <span class="vdisp" id="btgWindRateVal">10/f</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label>Wind Speed</label>
+                        <input type="range" id="btgWindSpeed" min="5" max="60" value="20">
+                        <span class="vdisp" id="btgWindSpeedVal">20</span>
+                    </div>
+                    <div style="margin-top:6px;font-size:10px;color:#888">
+                        Live: <span class="val" id="btgWindCount">0</span> particles
+                    </div>
+                </div>
+            </div>
+
+            <!-- Betelgeuse Data -->
+            <div class="sb-section btg-only" style="display:none">
+                <div class="sb-title">&alpha; Orionis &mdash; M1&ndash;M2 Ia-ab RSG <span style="font-size:10px;color:#FF6B35">&#9733;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr><td>Spectral Type</td><td>M1&ndash;M2 Ia-ab</td></tr>
+                        <tr><td>Distance</td><td>~168 pc (548 ly)</td></tr>
+                        <tr><td>Radius</td><td>764 R&#9737; (+116/&minus;62)</td></tr>
+                        <tr><td>Radius (AU)</td><td>~3.55 AU (past Mars!)</td></tr>
+                        <tr><td>Mass (current)</td><td>~16&ndash;19 M&#9737;</td></tr>
+                        <tr><td>Initial Mass</td><td>~18&ndash;20 M&#9737; (ZAMS)</td></tr>
+                        <tr><td>Luminosity</td><td>~100,000&ndash;126,000 L&#9737;</td></tr>
+                        <tr><td>T&#7497;&#7497; (mean)</td><td>~3,500 K (&pm;200 K)</td></tr>
+                        <tr><td>T&#7497;&#7497; (range)</td><td>3,250&ndash;3,690 K</td></tr>
+                        <tr><td>log g</td><td>&minus;0.5 to 0.0 cgs</td></tr>
+                        <tr><td>Age</td><td>~8&ndash;14 Myr</td></tr>
+                        <tr><td>v sin i</td><td>~5 km/s</td></tr>
+                        <tr><td>App. Mag (V)</td><td>0.0&ndash;1.7 (semiregular)</td></tr>
+                        <tr><td>Abs. Mag (V)</td><td>&minus;5.6 to &minus;6.0</td></tr>
+                        <tr><td>P1 (fundamental)</td><td>417 &pm; 17 days</td></tr>
+                        <tr><td>P2 (overtone)</td><td>185 &pm; 13.5 days</td></tr>
+                        <tr><td>LSP (companion)</td><td>2,170 &pm; 270 days</td></tr>
+                        <tr><td>Convective cells</td><td>~2&ndash;5 giant cells</td></tr>
+                        <tr><td>Cell size</td><td>&gt;60% of R&#9737; (&gt;460 R&#9737;)</td></tr>
+                        <tr><td>Cell rise v</td><td>22&ndash;40 km/s (upwelling)</td></tr>
+                        <tr><td>Angular diameter</td><td>43.3 mas &pm; 0.06 mas</td></tr>
+                        <tr><td>SN prognosis</td><td>~100,000 yr (consensus)</td></tr>
+                    </table>
+                    <div style="margin-top:8px;font-size:10px;color:#aaa;font-weight:600">Companion Siwarha (Betelgeuse B)</div>
+                    <table class="data-tbl" style="margin-top:4px">
+                        <tr><td>Name</td><td>Siwarha (IAU 2025)</td></tr>
+                        <tr><td>Type</td><td>F/A pre-main sequence</td></tr>
+                        <tr><td>Mass</td><td>~0.9&ndash;1.6 M&#9737;</td></tr>
+                        <tr><td>Orbital distance</td><td>~4&ndash;8.6 AU</td></tr>
+                        <tr><td>Orbital period</td><td>~5.94 years</td></tr>
+                        <tr><td>Sep. (angular)</td><td>52 mas</td></tr>
+                        <tr><td>Discovery</td><td>Gemini/&apos;Alopeke, Jul 2025</td></tr>
+                    </table>
+                    <div style="margin-top:10px;padding:8px;background:rgba(255,100,30,0.05);border-radius:5px;font-size:10px;color:#999;line-height:1.5;">
+                        <strong style="color:#FF9944">Sources:</strong>
+                        Joyce et al. 2020 (ApJ 902, 63),
+                        Goldberg et al. 2024 (CfA/AAS),
+                        Howell et al. 2025 (ApJL 988 L47),
+                        L&oacute;pez Ariste et al. 2022 (A&amp;A),
+                        Ma et al. 2024 (ApJL), AAVSO
+                    </div>
+                </div>
+            </div>
+
         </div><!-- end #sidebar -->
 
         <button id="sidebar-toggle">&#9776; Panel</button>
@@ -586,6 +719,13 @@
             <p class="sep-readout" style="color:#ff9944">&#9728; Solar Activity: <span id="hudSolarActivity">--</span>%</p>
             <p class="dim">Wind particles: <span class="val" id="hudSunParts">0</span> &nbsp; CME: <span class="val" id="hudCME">Idle</span></p>
             <p class="dim">Parker &#936;&#8321;&#8321&#8321;: <span class="val" id="hudParker">--</span>&deg;</p>
+            <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
+        </div>
+        <div id="hudBtg" style="display:none">
+            <p class="sep-readout" style="color:#FF6B35">&#9733; &alpha; Orionis — Betelgeuse</p>
+            <p class="dim">R: <span class="val" id="hudBtgR">764</span> R&#9737; &nbsp; T: <span class="val" id="hudBtgT">3500</span> K</p>
+            <p class="dim">V mag: <span class="val" id="hudBtgMag">0.5</span> &nbsp; P1 phase: <span class="val" id="hudBtgPhase">--</span></p>
+            <p class="dim">Wind: <span class="val" id="hudBtgWind">0</span> particles &nbsp; <span class="val" id="hudBtgDimming"></span></p>
             <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
         </div>
     </div>
@@ -659,6 +799,41 @@
             omegaSun:  2.865e-6,         // rad/s (sidereal rotation, equatorial)
             windSlow:  400.0,            // km/s
             windFast:  750.0,            // km/s
+        };
+
+        // ──────────────────────────────────────────────
+        // BETELGEUSE (α Orionis) — Joyce et al. 2020 + 2025 updates
+        // ──────────────────────────────────────────────
+        const BETELGEUSE = {
+            mass:        17.0,       // M_sun (midpoint 16–19; Joyce 2020)
+            radius:     764.0,       // R_sun (+116/−62 R_sun; Joyce 2020)
+            temperature: 3500,       // K (mean; 3250–3690 K range)
+            luminosity:  126000,     // L_sun (upper Joyce 2020 estimate)
+            color:       0xFF6419,   // deep orange-red (M1-2 Ia, ~3500 K)
+            emissiveColor: 0xFF4400,
+            age:         10.0,       // Myr (midpoint 8–14 Myr)
+            // Pulsation periods (Joyce et al. 2020, Jadlovský et al. 2022)
+            P1:  417,                // days — fundamental radial mode
+            P2:  185,                // days — first radial overtone
+            LSP: 2170,              // days — long secondary (Siwarha orbital)
+            // RSG stellar wind (~20 km/s, Ṁ ~ 10⁻⁶ M☉/yr)
+            windSpeed: 20,           // km/s (slow, dusty RSG wind)
+            // Companion Siwarha (Goldberg 2024, Howell et al. ApJL 2025)
+            siwarha: {
+                mass:        1.1,    // M_sun (estimate; 0.9–1.6 M_sun)
+                radius:      1.5,    // R_sun (F/A pre-main-sequence)
+                temperature: 7000,   // K (young F-type estimate)
+                color:       0xF4EDCC,
+                orbit: {
+                    period:        5.94 * 365.25, // days (= LSP)
+                    semiMajorAxis: 6.5,            // AU (range 4–8.6 AU)
+                    eccentricity:  0.12,
+                    inclination:   43 * Math.PI / 180,
+                    ascendingNode: 115 * Math.PI / 180,
+                    argPeriastron: 78  * Math.PI / 180,
+                    periastronTime: 0,
+                },
+            },
         };
 
         // ──────────────────────────────────────────────
@@ -744,6 +919,17 @@
             cmeCount: 0,
             cmeCooldown: 0,           // seconds until next CME allowed
             flarePending: false,
+            // Betelgeuse-mode state
+            btgTimeScale:   50,      // simulated days per real second
+            showMolsphere:  true,
+            showRSGWind:    true,
+            showSiwarha:    true,
+            showSiwarhaOrbit: true,
+            showBtgAxes:    false,
+            btgWindRate:    10,
+            btgWindSpeed:   20,
+            greatDimming:   0.0,     // 0–1 intensity of Great Dimming dust shadow
+            dimmerFading:   false,
         };
 
         // Display sizes (in AU, our 3D unit)
@@ -751,9 +937,10 @@
             if (mode === 'true') {
                 return star.radius * 0.00465; // R_sun ≈ 0.00465 AU
             }
-            if (star === SIRIUS.A) return 1.0;
-            if (star === SIRIUS.B) return 0.25;
-            if (star === SUN)      return 1.2;   // exaggerated Sun (nice framing)
+            if (star === SIRIUS.A)    return 1.0;
+            if (star === SIRIUS.B)    return 0.25;
+            if (star === SUN)         return 1.2;   // exaggerated (framing)
+            if (star === BETELGEUSE)  return 2.6;   // exaggerated (~764 R☉ ≈ 3.55 AU true)
             return 0.25;
         }
 
@@ -1726,17 +1913,512 @@
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        //  BETELGEUSE MODE — THREE.JS OBJECTS + GLSL SHADERS
+        // ══════════════════════════════════════════════════════════════════════
+        const btgGroup = new THREE.Group();
+        scene.add(btgGroup);
+
+        // ─── GLSL: Betelgeuse Photosphere ─────────────────────────────────────
+        // Key science:
+        //   • 3–5 giant convective cells (Ma et al. 2024, López Ariste 2022)
+        //   • ±12–13% intensity contrast (intensity, not temperature)
+        //   • M-type limb darkening u≈0.75 (stronger than solar)
+        //   • Pulsation-driven temperature/colour shift (P1=417d, P2=185d)
+        //   • Great Dimming: asymmetric dust shadow (SE quadrant, ~170K Teff drop)
+        const BTG_VERT = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vUv       = uv;
+                vNormal   = normalize(normalMatrix * normal);
+                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const BTG_FRAG = `
+            precision highp float;
+            uniform float uTime;       // real seconds
+            uniform float uCellTime;   // slow cell-evolution index
+            uniform float uPulseTemp;  // −1 (cool) to +1 (hot) from pulsation
+            uniform float uGreatDimming; // 0–1
+
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            // ── 3D hash ─────────────────────────────────────────────────────
+            vec3 hash3v(vec3 p) {
+                p = vec3(dot(p, vec3(127.1, 311.7,  74.7)),
+                         dot(p, vec3(269.5, 183.3, 246.1)),
+                         dot(p, vec3(113.5, 271.9, 124.6)));
+                return fract(sin(p) * 43758.5453);
+            }
+
+            // ── 3D Voronoi — gives 3–5 large cells when scale ≈ 1.5–2.0 ────
+            //   Works on the unit sphere direction vector: no UV seams.
+            float voronoi3D(vec3 x) {
+                vec3 ip = floor(x);
+                vec3 fp = fract(x);
+                float d = 10.0;
+                for (int k = -1; k <= 1; k++)
+                for (int j = -1; j <= 1; j++)
+                for (int i = -1; i <= 1; i++) {
+                    vec3 b = vec3(float(i), float(j), float(k));
+                    vec3 r = b - fp + hash3v(ip + b);
+                    d = min(d, dot(r, r));
+                }
+                return sqrt(d);
+            }
+
+            // ── 3D value noise (for fine texture) ───────────────────────────
+            float h1(vec3 p) { return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
+            float n3(vec3 p) {
+                vec3 ip = floor(p); vec3 f = fract(p);
+                f = f*f*(3.0-2.0*f);
+                return mix(
+                    mix(mix(h1(ip),             h1(ip+vec3(1,0,0)), f.x),
+                        mix(h1(ip+vec3(0,1,0)), h1(ip+vec3(1,1,0)), f.x), f.y),
+                    mix(mix(h1(ip+vec3(0,0,1)), h1(ip+vec3(1,0,1)), f.x),
+                        mix(h1(ip+vec3(0,1,1)), h1(ip+vec3(1,1,1)), f.x), f.y), f.z);
+            }
+            float fbm3(vec3 p) {
+                float f=0.0; float w=0.5;
+                for (int i=0;i<4;i++) { f+=w*n3(p); p*=2.1; w*=0.5; }
+                return f;
+            }
+
+            void main() {
+                vec3 npos    = normalize(vWorldPos);   // position on unit sphere
+
+                // ── M-type limb darkening (u ≈ 0.75 — stronger than solar) ──
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                float mu     = max(dot(normalize(vNormal), viewDir), 0.0);
+                float limbDrk= 1.0 - 0.75*(1.0 - mu);
+
+                // ── Giant convective cells (3–5, slowly drifting) ────────────
+                //   Ma et al. 2024: one hemisphere upwelling, one downflowing
+                //   → dipolar brightness pattern (not actual rotation)
+                vec3 cp1 = npos + vec3(uCellTime*0.06, uCellTime*0.04, uCellTime*0.03);
+                float v1 = voronoi3D(cp1 * 1.62);   // primary large cells
+                float cell1 = smoothstep(0.0, 0.52, v1);   // 0=dark lane, 1=bright center
+
+                // Secondary smaller cells (post-dimming ~200d period convection)
+                vec3 cp2 = npos + vec3(-uCellTime*0.025, uCellTime*0.032, -uCellTime*0.018) + 0.7;
+                float v2 = voronoi3D(cp2 * 3.1);
+                float cell2 = smoothstep(0.05, 0.43, v2) * 0.30;
+
+                float totalCell = cell1 + cell2;
+
+                // ── Convective asymmetry — hemispheric dipole ────────────────
+                //   (Ma 2024: convection mimics rotation; one bright hemisphere)
+                float hemiDipole = dot(npos,
+                    normalize(vec3(0.65 + 0.2*sin(uCellTime*0.5),
+                                   0.25 + 0.1*cos(uCellTime*0.3),
+                                   0.55))) * 0.10;
+
+                // ── Fine surface granulation (subtle, ~fbm noise) ────────────
+                float fineTex = fbm3(npos * 8.0 + vec3(uTime*0.005)) * 0.08;
+
+                // ── Temperature from pulsation ────────────────────────────────
+                //   Teff range 3250–3690 K; uPulseTemp: +1=hot, −1=cool
+                float Trel = clamp(0.5 + uPulseTemp * 0.35, 0.0, 1.0);
+
+                // ── Base colour (blackbody peak 3500K ≈ 830nm, deep orange-red)
+                vec3 hotColor  = vec3(1.00, 0.52, 0.18);  // 3690 K
+                vec3 baseColor = vec3(1.00, 0.39, 0.12);  // 3500 K
+                vec3 coolColor = vec3(1.00, 0.22, 0.05);  // 3250 K (Great Dimming temp)
+                vec3 surfColor = Trel > 0.5
+                    ? mix(baseColor, hotColor, (Trel-0.5)*2.0)
+                    : mix(coolColor, baseColor, Trel*2.0);
+
+                // ── Apply convective brightness (±12–13% contrast) ───────────
+                //   Upwelling centers: bright & slightly hotter
+                //   Intergranular lanes: dark & cooler
+                float brightness = 1.0 + (totalCell - 0.55)*0.26 + hemiDipole + fineTex;
+                surfColor *= clamp(brightness, 0.6, 1.5);
+
+                // ── Great Dimming (2019–2020 mass ejection + dust cloud) ─────
+                //   ~170 K Teff drop + asymmetric dust shadow on SE quadrant
+                //   Near-IR largely unaffected; optical dimmed 0.9–1.0 mag
+                if (uGreatDimming > 0.01) {
+                    // Dust shadow — SE quadrant (as observed by Dupree/Levesque)
+                    float shadow = smoothstep(0.25, -0.35,
+                        dot(npos, normalize(vec3(0.6, -0.4, 0.5))));
+                    float dustDim = uGreatDimming * shadow * 0.70;
+                    // Cool spot component (large cool starspot)
+                    float coolSpot = smoothstep(0.0, -0.4,
+                        dot(npos, normalize(vec3(0.3, -0.6, 0.4))));
+                    surfColor *= (1.0 - dustDim);
+                    // Reddening from dust: preferential blue extinction
+                    surfColor.gb *= (1.0 - uGreatDimming * shadow * 0.45);
+                    // Temperature drop on cool spot
+                    surfColor = mix(surfColor, surfColor * vec3(0.72, 0.48, 0.32),
+                                    uGreatDimming * coolSpot * 0.5);
+                }
+
+                // ── Limb darkening + emissive output ─────────────────────────
+                surfColor *= limbDrk;
+                gl_FragColor = vec4(surfColor * 2.0, 1.0);
+            }
+        `;
+
+        // ─── GLSL: MOLsphere (H₂O, CO, SiO, Al₂O₃ at ~1,500 K) ─────────────
+        //   Located ~0.45 R★ above photosphere (≈ 2–3 AU above surface)
+        //   Temperature ~1,500 ± 500 K → very deep orange-brown glow
+        const MOLSPHERE_FRAG = `
+            precision mediump float;
+            uniform float uTime;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float h1m(float n) { return fract(sin(n)*43758.5453); }
+            float n3m(vec3 p) {
+                vec3 ip=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
+                float n=dot(ip,vec3(1.0,57.0,113.0));
+                return mix(mix(mix(h1m(n),h1m(n+1.0),f.x),mix(h1m(n+57.0),h1m(n+58.0),f.x),f.y),
+                           mix(mix(h1m(n+113.0),h1m(n+114.0),f.x),mix(h1m(n+170.0),h1m(n+171.0),f.x),f.y),f.z);
+            }
+
+            void main() {
+                vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA   = abs(dot(normalize(vNormal), viewDir));
+                // Stronger fresnel for MOLsphere rim (thick molecular layer)
+                float rim    = pow(1.0 - cosA, 2.2) * 0.70;
+
+                // Molecular clumping — SiO maser emission is patchy
+                float clump = 0.75 + 0.25 * n3m(normalize(vWorldPos) * 4.0
+                                                 + vec3(uTime*0.15, 0.0, uTime*0.10));
+
+                // ~1,500 K → very deep orange-brown (near-IR peak)
+                vec3 molColor = vec3(0.82, 0.28, 0.05);
+
+                float alpha = rim * clump * 0.60;
+                gl_FragColor = vec4(molColor, clamp(alpha, 0.0, 0.55));
+            }
+        `;
+
+        // ─── Sun group objects for BTG ────────────────────────────────────────
+        let btgMesh, btgMolsphere, btgGlow, btgLight;
+        let siwarhaMesh, siwarhaGlow, siwarhaLight, siwarhaOrbitLine;
+        const btgAxesHelper = new THREE.AxesHelper(12);
+        btgAxesHelper.visible = false;
+        btgGroup.add(btgAxesHelper);
+
+        function createBetelgeuse() {
+            [btgMesh, btgMolsphere, btgGlow, btgLight,
+             siwarhaMesh, siwarhaGlow, siwarhaLight].forEach(o => { if (o) btgGroup.remove(o); });
+            if (siwarhaOrbitLine) btgGroup.remove(siwarhaOrbitLine);
+
+            const R = getStarDisplayRadius(BETELGEUSE, state.scaleMode);
+
+            // ── Photosphere ──────────────────────────────────────────────────
+            const photGeo = new THREE.SphereGeometry(R, 96, 96);
+            const photMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:         { value: 0 },
+                    uCellTime:     { value: 0 },
+                    uPulseTemp:    { value: 0 },
+                    uGreatDimming: { value: 0 },
+                },
+                vertexShader:   BTG_VERT,
+                fragmentShader: BTG_FRAG,
+            });
+            btgMesh = new THREE.Mesh(photGeo, photMat);
+            btgGroup.add(btgMesh);
+
+            // ── MOLsphere (~1.45× photospheric radius; 1,500 K molecules) ──
+            const molGeo = new THREE.SphereGeometry(R * 1.45, 48, 48);
+            const molMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 } },
+                vertexShader:   CORONA_VERT,   // same transform as corona
+                fragmentShader: MOLSPHERE_FRAG,
+                transparent: true,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                side: THREE.BackSide,
+            });
+            btgMolsphere = new THREE.Mesh(molGeo, molMat);
+            btgGroup.add(btgMolsphere);
+
+            // ── Outer circumstellar glow ─────────────────────────────────────
+            const glowGeo = new THREE.SphereGeometry(R * 1.12, 32, 32);
+            const glowMat = new THREE.MeshBasicMaterial({
+                color: 0xFF4400, transparent: true, opacity: 0.08, side: THREE.BackSide,
+            });
+            btgGlow = new THREE.Mesh(glowGeo, glowMat);
+            btgGroup.add(btgGlow);
+
+            // ── Point light ──────────────────────────────────────────────────
+            btgLight = new THREE.PointLight(0xFF6B35, 4.5, 200);
+            btgGroup.add(btgLight);
+
+            // ── Companion Siwarha ────────────────────────────────────────────
+            //   Young F/A pre-main-sequence, ~1.1 M☉, ~7000 K
+            //   Orbits at ~4–8.6 AU (inside Betelgeuse's outer atmosphere!)
+            const swR = 0.12;  // small display radius (true ~1.5 R☉)
+            const swGeo = new THREE.SphereGeometry(swR, 24, 24);
+            const swMat = new THREE.MeshStandardMaterial({
+                color: BETELGEUSE.siwarha.color,
+                emissive: BETELGEUSE.siwarha.color,
+                emissiveIntensity: 2.0, roughness: 0.4, metalness: 0.1,
+            });
+            siwarhaMesh = new THREE.Mesh(swGeo, swMat);
+            btgGroup.add(siwarhaMesh);
+
+            const swGlowGeo = new THREE.SphereGeometry(swR * 2.0, 16, 16);
+            const swGlowMat = new THREE.MeshBasicMaterial({
+                color: BETELGEUSE.siwarha.color, transparent: true, opacity: 0.25, side: THREE.BackSide,
+            });
+            siwarhaGlow = new THREE.Mesh(swGlowGeo, swGlowMat);
+            btgGroup.add(siwarhaGlow);
+
+            siwarhaLight = new THREE.PointLight(BETELGEUSE.siwarha.color, 0.8, 20);
+            btgGroup.add(siwarhaLight);
+
+            // ── Siwarha orbital path ─────────────────────────────────────────
+            const SORB = 360;
+            const sOrbitPts = [];
+            for (let i = 0; i <= SORB; i++) sOrbitPts.push(new THREE.Vector3(0, 0, 0));
+            const sOrbitGeo = new THREE.BufferGeometry().setFromPoints(sOrbitPts);
+            const sOrbitMat = new THREE.LineBasicMaterial({ color: BETELGEUSE.siwarha.color, transparent: true, opacity: 0.25 });
+            siwarhaOrbitLine = new THREE.Line(sOrbitGeo, sOrbitMat);
+            btgGroup.add(siwarhaOrbitLine);
+
+            // Precompute orbit path
+            const sOrb = BETELGEUSE.siwarha.orbit;
+            const sPA = siwarhaOrbitLine.geometry.attributes.position.array;
+            for (let i = 0; i <= SORB; i++) {
+                const t = (i / SORB) * sOrb.period / 365.25;
+                const sp = getOrbitalPosition(t, {
+                    period: sOrb.period / 365.25, semiMajorAxis: sOrb.semiMajorAxis,
+                    eccentricity: sOrb.eccentricity, inclination: sOrb.inclination,
+                    ascendingNode: sOrb.ascendingNode, argPeriastron: sOrb.argPeriastron,
+                    periastronTime: sOrb.periastronTime,
+                });
+                sPA[i*3]   = sp.x;
+                sPA[i*3+1] = sp.z;
+                sPA[i*3+2] = sp.y;
+            }
+            siwarhaOrbitLine.geometry.attributes.position.needsUpdate = true;
+        }
+        createBetelgeuse();
+
+        // ─── RSG Wind particles ────────────────────────────────────────────────
+        //   Red supergiant wind: slow (~20 km/s), dense (Ṁ ~ 10⁻⁶ M☉/yr)
+        //   Deep orange-red, dusty — very different from hot solar wind
+        const btgParticles = [];
+        const MAX_BTG_WIND = 3500;
+        const btgWindGeo  = new THREE.BufferGeometry();
+        const btgWPos     = new Float32Array(MAX_BTG_WIND * 3);
+        const btgWCol     = new Float32Array(MAX_BTG_WIND * 3);
+        const btgWSz      = new Float32Array(MAX_BTG_WIND);
+        btgWindGeo.setAttribute('position', new THREE.BufferAttribute(btgWPos, 3));
+        btgWindGeo.setAttribute('color',    new THREE.BufferAttribute(btgWCol, 3));
+        btgWindGeo.setAttribute('size',     new THREE.BufferAttribute(btgWSz,  1));
+        const btgWindMat = new THREE.ShaderMaterial({
+            vertexShader:   WIND_VERT,
+            fragmentShader: WIND_FRAG,
+            transparent:    true,
+            blending:       THREE.AdditiveBlending,
+            depthWrite:     false,
+        });
+        const btgWindPoints = new THREE.Points(btgWindGeo, btgWindMat);
+        btgGroup.add(btgWindPoints);
+
+        class RSGWindParticle {
+            constructor(btgPos) {
+                const phi   = Math.random() * Math.PI * 2;
+                const theta = Math.acos(2 * Math.random() - 1);
+                const dir   = new THREE.Vector3(
+                    Math.sin(theta)*Math.cos(phi),
+                    Math.sin(theta)*Math.sin(phi),
+                    Math.cos(theta)
+                );
+                const R = getStarDisplayRadius(BETELGEUSE, state.scaleMode);
+                this.pos = btgPos.clone().addScaledVector(dir, R * 1.05);
+
+                // RSG wind: very slow in display AU/frame
+                const spd = (state.btgWindSpeed / 28) * 0.0038 * (0.7 + Math.random() * 0.6);
+                this.vel = dir.clone().multiplyScalar(spd);
+
+                this.life    = 1.0;
+                this.maxLife = 9.0 + Math.random() * 6.0;  // long lifetime (slow wind)
+
+                // Deep orange-red, dusty RSG wind colour
+                this.baseColor = new THREE.Color(
+                    0.90 + Math.random() * 0.10,
+                    0.20 + Math.random() * 0.15,
+                    0.03 + Math.random() * 0.04,
+                );
+                this.color = this.baseColor.clone();
+            }
+            update(dt) {
+                this.life -= dt / this.maxLife;
+                if (this.life <= 0) return false;
+                this.pos.addScaledVector(this.vel, dt * 60);
+                // Fade and redden as dust cools
+                const lr = this.life;
+                this.color.setRGB(
+                    this.baseColor.r * lr * 0.85,
+                    this.baseColor.g * lr * 0.55,
+                    this.baseColor.b * lr * 0.30,
+                );
+                if (this.pos.length() > 52) return false;
+                return true;
+            }
+        }
+
+        // ─── animateBetelgeuse() ─────────────────────────────────────────────
+        let btgSimTime = 0;   // simulated days
+
+        function animateBetelgeuse(dt) {
+            if (!btgMesh) return;
+
+            btgSimTime += dt * state.btgTimeScale;
+
+            // ── Pulsation — three-period model (Joyce et al. 2020) ──────────
+            const P1 = BETELGEUSE.P1;    // 417 d
+            const P2 = BETELGEUSE.P2;    // 185 d
+            const LP = BETELGEUSE.LSP;   // 2170 d
+            const pulse1 = Math.sin(2 * Math.PI * btgSimTime / P1);
+            const pulse2 = Math.sin(2 * Math.PI * btgSimTime / P2);
+            const pulse3 = Math.sin(2 * Math.PI * btgSimTime / LP);
+
+            // Radius oscillation: ±10% (P1) + ±4% (P2) + ±1% (LSP)
+            const pulseScale = 1.0 + pulse1*0.10 + pulse2*0.04 + pulse3*0.01;
+
+            // Temperature: hotter at min radius (adiabatic compression), u ≈ 0.6
+            const pulseTemp = -(pulse1*0.65 + pulse2*0.25 + pulse3*0.10);
+
+            // V magnitude: brighter when hotter/larger (combined effect)
+            const Vmag = 0.70 - (pulse1*0.32 + pulse2*0.14) - pulse3*0.05;
+            const Teff = 3500 + pulseTemp * 210;
+
+            // Apply scale + uniforms
+            btgMesh.scale.setScalar(pulseScale);
+            btgMolsphere.scale.setScalar(pulseScale);
+            btgMesh.material.uniforms.uTime.value         = simTime;
+            btgMesh.material.uniforms.uCellTime.value     = btgSimTime / (365 * 1.5);
+            btgMesh.material.uniforms.uPulseTemp.value    = pulseTemp;
+            btgMesh.material.uniforms.uGreatDimming.value = state.greatDimming;
+            btgMolsphere.material.uniforms.uTime.value    = simTime;
+
+            // ── Great Dimming fade ───────────────────────────────────────────
+            if (state.dimmerFading && state.greatDimming > 0) {
+                state.greatDimming = Math.max(0, state.greatDimming - dt * 0.006);
+                if (state.greatDimming <= 0) state.dimmerFading = false;
+            }
+
+            // ── Differential rotation (v sin i ≈ 5 km/s) ────────────────────
+            btgMesh.rotation.y += dt * 0.012;
+
+            // ── Glow pulse ───────────────────────────────────────────────────
+            const glowPulse = Math.sin(simTime * 1.4) * 0.06 + 1.0;
+            btgGlow.material.opacity  = (0.07 + pulse1 * 0.02) * glowPulse;
+            btgLight.intensity        = 4.0 * pulseScale * glowPulse;
+
+            // ── MOLsphere / axes visibility ──────────────────────────────────
+            btgMolsphere.visible     = state.showMolsphere;
+            btgGlow.visible          = state.showMolsphere;
+            btgAxesHelper.visible    = state.showBtgAxes;
+
+            // ── Siwarha companion position (Kepler) ──────────────────────────
+            const sOrb = BETELGEUSE.siwarha.orbit;
+            if (siwarhaMesh) {
+                siwarhaMesh.visible      = state.showSiwarha;
+                siwarhaGlow.visible      = state.showSiwarha;
+                siwarhaLight.visible     = state.showSiwarha;
+                siwarhaOrbitLine.visible = state.showSiwarha && state.showSiwarhaOrbit;
+
+                if (state.showSiwarha) {
+                    const sPos = getOrbitalPosition(btgSimTime / 365.25, {
+                        period:        sOrb.period / 365.25,
+                        semiMajorAxis: sOrb.semiMajorAxis,
+                        eccentricity:  sOrb.eccentricity,
+                        inclination:   sOrb.inclination,
+                        ascendingNode: sOrb.ascendingNode,
+                        argPeriastron: sOrb.argPeriastron,
+                        periastronTime: sOrb.periastronTime,
+                    });
+                    const swP = new THREE.Vector3(sPos.x, sPos.z, sPos.y);
+                    siwarhaMesh.position.copy(swP);
+                    siwarhaGlow.position.copy(swP);
+                    siwarhaLight.position.copy(swP);
+                }
+            }
+
+            // ── RSG wind emission ─────────────────────────────────────────────
+            if (state.showRSGWind) {
+                const n = Math.min(state.btgWindRate, MAX_BTG_WIND - btgParticles.length);
+                for (let i = 0; i < n; i++)
+                    btgParticles.push(new RSGWindParticle(new THREE.Vector3(0, 0, 0)));
+            }
+            for (let i = btgParticles.length - 1; i >= 0; i--) {
+                if (!btgParticles[i].update(dt)) btgParticles.splice(i, 1);
+            }
+
+            // ── Write wind buffer ─────────────────────────────────────────────
+            for (let i = 0; i < MAX_BTG_WIND; i++) {
+                if (i < btgParticles.length) {
+                    const p = btgParticles[i];
+                    btgWPos[i*3]   = p.pos.x;
+                    btgWPos[i*3+1] = p.pos.y;
+                    btgWPos[i*3+2] = p.pos.z;
+                    btgWCol[i*3]   = p.color.r;
+                    btgWCol[i*3+1] = p.color.g;
+                    btgWCol[i*3+2] = p.color.b;
+                    btgWSz[i]      = p.life * 0.18;
+                } else {
+                    btgWPos[i*3] = btgWPos[i*3+1] = btgWPos[i*3+2] = 0;
+                    btgWSz[i] = 0;
+                }
+            }
+            btgWindGeo.attributes.position.needsUpdate = true;
+            btgWindGeo.attributes.color.needsUpdate    = true;
+            btgWindGeo.attributes.size.needsUpdate     = true;
+            btgWindGeo.setDrawRange(0, btgParticles.length);
+            btgWindPoints.visible = state.showRSGWind;
+
+            // ── HUD + sidebar ─────────────────────────────────────────────────
+            const R_now = (764 * pulseScale).toFixed(0);
+            const P1pct = ((btgSimTime % P1) / P1 * 100).toFixed(0);
+            const P2pct = ((btgSimTime % P2) / P2 * 100).toFixed(0);
+            const LSPpct= ((btgSimTime % LP) / LP * 100).toFixed(0);
+            const pulseLbl = pulse1 > 0.3 ? 'Contracting' : pulse1 < -0.3 ? 'Expanding' : 'Near Extremum';
+
+            document.getElementById('hudBtgR').textContent    = R_now;
+            document.getElementById('hudBtgT').textContent    = Math.round(Teff);
+            document.getElementById('hudBtgMag').textContent  = Vmag.toFixed(2);
+            document.getElementById('hudBtgPhase').textContent= P1pct + '%';
+            document.getElementById('hudBtgWind').textContent = btgParticles.length;
+            document.getElementById('hudBtgDimming').textContent =
+                state.greatDimming > 0.05 ? '⚫ Dimming: ' + (state.greatDimming*100).toFixed(0) + '%' : '';
+
+            document.getElementById('btgPulseLabel').textContent = pulseLbl;
+            document.getElementById('btgRVal').textContent   = R_now;
+            document.getElementById('btgTVal').textContent   = Math.round(Teff);
+            document.getElementById('btgVMag').textContent   = Vmag.toFixed(2);
+            document.getElementById('btgP1Pct').textContent  = P1pct + '%';
+            document.getElementById('btgP2Pct').textContent  = P2pct + '%';
+            document.getElementById('btgLSPPct').textContent = LSPpct + '%';
+            document.getElementById('btgWindCount').textContent = btgParticles.length;
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
         //  MODE SWITCHING
         // ──────────────────────────────────────────────
         function setMode(mode) {
             state.mode = mode;
             const isSirius  = mode === 'sirius';
             const isSun     = mode === 'sun';
+            const isBtg     = mode === 'betelgeuse';
             const isDefault = mode === 'default';
 
             defaultGroup.visible = isDefault;
             siriusGroup.visible  = isSirius;
             sunGroup.visible     = isSun;
+            btgGroup.visible     = isBtg;
 
             // Toggle sidebar sections
             document.querySelectorAll('.sirius-only').forEach(el => {
@@ -1745,14 +2427,19 @@
             document.querySelectorAll('.sun-only').forEach(el => {
                 el.style.display = isSun ? '' : 'none';
             });
+            document.querySelectorAll('.btg-only').forEach(el => {
+                el.style.display = isBtg ? '' : 'none';
+            });
 
             // HUD panels
             document.getElementById('hudDefault').style.display = isDefault ? '' : 'none';
             document.getElementById('hudSirius').style.display  = isSirius  ? '' : 'none';
             document.getElementById('hudSun').style.display     = isSun     ? '' : 'none';
+            document.getElementById('hudBtg').style.display     = isBtg     ? '' : 'none';
             document.getElementById('hudTitle').textContent =
                 isSirius  ? 'Sirius Binary System' :
                 isSun     ? 'Sol — Our Sun' :
+                isBtg     ? '\u03b1 Orionis — Betelgeuse' :
                             '3D Star Simulator';
 
             // Camera defaults per mode
@@ -1762,20 +2449,22 @@
             } else if (isSun) {
                 camera.position.set(0, 4, 12);
                 controls.target.set(0, 0, 0);
+            } else if (isBtg) {
+                camera.position.set(0, 5, 16);
+                controls.target.set(0, 0, 0);
             } else {
                 camera.position.set(0, 5, 15);
                 controls.target.set(0, 0, 0);
             }
 
-            // Clean up default particles when leaving default mode
+            // Particle cleanup
             if (!isDefault) {
                 defaultParticles.forEach(p => defaultGroup.remove(p.mesh));
                 defaultParticles.length = 0;
             }
-            // Clear solar particles when leaving sun mode
-            if (!isSun) solarParticles.length = 0;
-            // Clear Sirius wind when leaving sirius mode
-            if (!isSirius) windParticles.length = 0;
+            if (!isSun)     solarParticles.length = 0;
+            if (!isSirius)  windParticles.length  = 0;
+            if (!isBtg)     btgParticles.length   = 0;
         }
 
         // ──────────────────────────────────────────────
@@ -1799,6 +2488,8 @@
                 animateSirius(dt);
             } else if (state.mode === 'sun') {
                 animateSun(dt);
+            } else if (state.mode === 'betelgeuse') {
+                animateBetelgeuse(dt);
             } else {
                 animateDefault(dt);
             }
@@ -2157,6 +2848,75 @@
         });
 
         // ──────────────────────────────────────────────
+        // BETELGEUSE UI BINDINGS
+        // ──────────────────────────────────────────────
+
+        // Simulation speed (days/s)
+        document.getElementById('btgTimeScale').addEventListener('input', e => {
+            state.btgTimeScale = parseInt(e.target.value);
+            document.getElementById('btgTimeScaleVal').textContent = e.target.value + ' d/s';
+        });
+
+        // Great Dimming trigger
+        document.getElementById('btnGreatDimming').addEventListener('click', () => {
+            state.greatDimming  = 1.0;
+            state.dimmerFading  = true;
+            document.getElementById('btgDimmingStatus').textContent = '⚫ Great Dimming in progress…';
+            setTimeout(() => {
+                if (document.getElementById('btgDimmingStatus'))
+                    document.getElementById('btgDimmingStatus').textContent = '';
+            }, 4000);
+        });
+
+        // View toggles
+        document.getElementById('showMolsphere').addEventListener('change', e => {
+            state.showMolsphere = e.target.checked;
+        });
+        document.getElementById('showRSGWind').addEventListener('change', e => {
+            state.showRSGWind = e.target.checked;
+            if (!e.target.checked) btgParticles.length = 0;
+        });
+        document.getElementById('showSiwarha').addEventListener('change', e => {
+            state.showSiwarha = e.target.checked;
+        });
+        document.getElementById('showSiwarhaOrbit').addEventListener('change', e => {
+            state.showSiwarhaOrbit = e.target.checked;
+        });
+        document.getElementById('showBtgAxes').addEventListener('change', e => {
+            state.showBtgAxes = e.target.checked;
+        });
+
+        // Wind controls
+        document.getElementById('btgWindRate').addEventListener('input', e => {
+            state.btgWindRate = parseInt(e.target.value);
+            document.getElementById('btgWindRateVal').textContent = e.target.value + '/f';
+        });
+        document.getElementById('btgWindSpeed').addEventListener('input', e => {
+            state.btgWindSpeed = parseInt(e.target.value);
+            document.getElementById('btgWindSpeedVal').textContent = e.target.value;
+        });
+
+        // Camera presets
+        document.getElementById('camBtgOverview').addEventListener('click', () => {
+            camera.position.set(0, 5, 16);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camBtgClose').addEventListener('click', () => {
+            const R = getStarDisplayRadius(BETELGEUSE, state.scaleMode);
+            camera.position.set(R * 1.6, R * 0.8, R * 1.6);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camBtgSystem').addEventListener('click', () => {
+            // Show Betelgeuse + Siwarha in frame (~8–10 AU view)
+            camera.position.set(12, 6, 18);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camBtgPolar').addEventListener('click', () => {
+            camera.position.set(0, 18, 0.1);
+            controls.target.set(0, 0, 0);
+        });
+
+        // ──────────────────────────────────────────────
         // INITIALIZE
         // ──────────────────────────────────────────────
         setMode('sirius');
@@ -2167,6 +2927,9 @@
         console.log('Orbital parameters: P=50.13yr, e=0.5914, a=20AU');
         console.log('Sirius A: A1V, 9940K, 2.06 M\u2609 | Sirius B: DA2, 25000K, 1.018 M\u2609');
         console.log('Sun preset loaded — G2V, 5778K, Parker spiral wind physics');
+        console.log('Betelgeuse preset loaded — M1-2 Ia, 3500K, 764 R☉ | Joyce et al. 2020');
+        console.log('  Siwarha companion: 5.94-yr orbit, ~6.5 AU | Howell et al. ApJL 2025');
+        console.log('  Pulsation: P1=417d, P2=185d, LSP=2170d | 3D Voronoi convection GLSL');
     </script>
 </body>
 </html>
