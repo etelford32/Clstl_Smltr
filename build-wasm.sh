@@ -5,11 +5,16 @@ set -e
 
 echo "🦀 Building Rust WASM for deployment..."
 
-# Check if Rust is installed
+# Ensure Rust/cargo is on PATH (pre-installed at ~/.cargo/bin)
+if [ -f "$HOME/.cargo/env" ]; then
+    # shellcheck source=/dev/null
+    source "$HOME/.cargo/env"
+fi
+
+# Verify rustc is available — do NOT attempt internet download
 if ! command -v rustc &> /dev/null; then
-    echo "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source $HOME/.cargo/env
+    echo "ERROR: rustc not found. Install Rust from https://rustup.rs and re-run." >&2
+    exit 1
 fi
 
 # Add wasm32 target if not already added
