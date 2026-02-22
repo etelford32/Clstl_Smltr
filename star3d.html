@@ -579,8 +579,13 @@
                     </div>
                     <div class="ctrl-row">
                         <label>Sim Speed</label>
-                        <input type="range" id="btgTimeScale" min="1" max="200" value="50">
-                        <span class="vdisp" id="btgTimeScaleVal">50 d/s</span>
+                        <input type="range" id="btgTimeScale" min="1" max="200" value="15">
+                        <span class="vdisp" id="btgTimeScaleVal">15 d/s</span>
+                    </div>
+                    <div class="ctrl-row">
+                        <label title="Betelgeuse is a genuine semiregular pulsating variable — reduce for subtler motion">Pulse Amp</label>
+                        <input type="range" id="btgPulseAmp" min="0" max="100" value="40">
+                        <span class="vdisp" id="btgPulseAmpVal">40%</span>
                     </div>
                     <div class="ctrl-row">
                         <label>V Magnitude</label>
@@ -920,7 +925,8 @@
             cmeCooldown: 0,           // seconds until next CME allowed
             flarePending: false,
             // Betelgeuse-mode state
-            btgTimeScale:   50,      // simulated days per real second
+            btgTimeScale:   15,      // simulated days per real second
+            btgPulseAmp:    0.40,    // scale amplitude multiplier (0=no scale, 1=full ±15%)
             showMolsphere:  true,
             showRSGWind:    true,
             showSiwarha:    true,
@@ -2000,43 +2006,58 @@
                 //   Ma et al. 2024: one hemisphere upwelling, one downflowing
                 //   → dipolar brightness pattern (not actual rotation)
                 vec3 cp1 = npos + vec3(uCellTime*0.06, uCellTime*0.04, uCellTime*0.03);
-                float v1 = voronoi3D(cp1 * 1.62);   // primary large cells
-                float cell1 = smoothstep(0.0, 0.52, v1);   // 0=dark lane, 1=bright center
+                float v1 = voronoi3D(cp1 * 1.62);   // primary large cells (~3–5 cells)
 
-                // Secondary smaller cells (post-dimming ~200d period convection)
+                // Sharper cell interior (narrow smoothstep = crisper boundary)
+                float cell1     = smoothstep(0.0, 0.28, v1);   // bright interior
+                // Dark intergranular lanes — very narrow transition at cell edges
+                float lanes1    = smoothstep(0.20, 0.0,  v1);  // 1 = dark lane, 0 = interior
+
+                // Secondary smaller cells (mid-scale convection)
                 vec3 cp2 = npos + vec3(-uCellTime*0.025, uCellTime*0.032, -uCellTime*0.018) + 0.7;
                 float v2 = voronoi3D(cp2 * 3.1);
-                float cell2 = smoothstep(0.05, 0.43, v2) * 0.30;
+                float cell2     = smoothstep(0.05, 0.32, v2) * 0.22;
+                float lanes2    = smoothstep(0.18, 0.0,  v2) * 0.18;
 
-                float totalCell = cell1 + cell2;
+                float totalCell  = cell1  + cell2;
+                float totalLanes = lanes1 + lanes2;
 
                 // ── Convective asymmetry — hemispheric dipole ────────────────
                 //   (Ma 2024: convection mimics rotation; one bright hemisphere)
                 float hemiDipole = dot(npos,
                     normalize(vec3(0.65 + 0.2*sin(uCellTime*0.5),
                                    0.25 + 0.1*cos(uCellTime*0.3),
-                                   0.55))) * 0.10;
+                                   0.55))) * 0.12;
 
-                // ── Fine surface granulation (subtle, ~fbm noise) ────────────
-                float fineTex = fbm3(npos * 8.0 + vec3(uTime*0.005)) * 0.08;
+                // ── Fine surface turbulence (slow, tied to sim time) ─────────
+                float fineTex = fbm3(npos * 9.0 + vec3(uCellTime*0.3, uCellTime*0.2, 0.0)) * 0.07;
 
                 // ── Temperature from pulsation ────────────────────────────────
                 //   Teff range 3250–3690 K; uPulseTemp: +1=hot, −1=cool
                 float Trel = clamp(0.5 + uPulseTemp * 0.35, 0.0, 1.0);
 
-                // ── Base colour (blackbody peak 3500K ≈ 830nm, deep orange-red)
-                vec3 hotColor  = vec3(1.00, 0.52, 0.18);  // 3690 K
-                vec3 baseColor = vec3(1.00, 0.39, 0.12);  // 3500 K
-                vec3 coolColor = vec3(1.00, 0.22, 0.05);  // 3250 K (Great Dimming temp)
+                // ── Base colour (blackbody 3500K ≈ 830nm peak, deep orange-red)
+                vec3 hotColor  = vec3(1.00, 0.55, 0.20);  // 3690 K — slightly more yellow
+                vec3 baseColor = vec3(1.00, 0.39, 0.12);  // 3500 K — canonical orange
+                vec3 coolColor = vec3(1.00, 0.22, 0.05);  // 3250 K — dimming temp
+                vec3 laneColor = vec3(0.88, 0.26, 0.07);  // intergranular lane: cooler & redder
                 vec3 surfColor = Trel > 0.5
                     ? mix(baseColor, hotColor, (Trel-0.5)*2.0)
                     : mix(coolColor, baseColor, Trel*2.0);
 
-                // ── Apply convective brightness (±12–13% contrast) ───────────
-                //   Upwelling centers: bright & slightly hotter
-                //   Intergranular lanes: dark & cooler
-                float brightness = 1.0 + (totalCell - 0.55)*0.26 + hemiDipole + fineTex;
-                surfColor *= clamp(brightness, 0.6, 1.5);
+                // ── Convective color gradient ─────────────────────────────────
+                //   Upwelling centers: slightly hotter/yellower
+                //   Intergranular lanes: cooler/redder with strong dimming
+                surfColor = mix(surfColor, hotColor, cell1 * 0.18);
+                surfColor = mix(surfColor, laneColor, totalLanes * 0.65);
+
+                // ── Apply convective brightness (±13% observed contrast) ─────
+                float brightness = 1.0
+                    + (totalCell - 0.45) * 0.38   // cell interior boost
+                    - totalLanes * 0.35            // lane darkening (additive with color)
+                    + hemiDipole
+                    + fineTex;
+                surfColor *= clamp(brightness, 0.42, 1.68);
 
                 // ── Great Dimming (2019–2020 mass ejection + dust cloud) ─────
                 //   ~170 K Teff drop + asymmetric dust shadow on SE quadrant
@@ -2286,13 +2307,15 @@
             const pulse3 = Math.sin(2 * Math.PI * btgSimTime / LP);
 
             // Radius oscillation: ±10% (P1) + ±4% (P2) + ±1% (LSP)
-            const pulseScale = 1.0 + pulse1*0.10 + pulse2*0.04 + pulse3*0.01;
+            // Scaled by btgPulseAmp so user can dial down the jarring heartbeat
+            const amp = state.btgPulseAmp;
+            const pulseScale = 1.0 + amp * (pulse1*0.10 + pulse2*0.04 + pulse3*0.01);
 
             // Temperature: hotter at min radius (adiabatic compression), u ≈ 0.6
-            const pulseTemp = -(pulse1*0.65 + pulse2*0.25 + pulse3*0.10);
+            const pulseTemp = -amp * (pulse1*0.65 + pulse2*0.25 + pulse3*0.10);
 
             // V magnitude: brighter when hotter/larger (combined effect)
-            const Vmag = 0.70 - (pulse1*0.32 + pulse2*0.14) - pulse3*0.05;
+            const Vmag = 0.70 - amp*(pulse1*0.32 + pulse2*0.14) - amp*pulse3*0.05;
             const Teff = 3500 + pulseTemp * 210;
 
             // Apply scale + uniforms
@@ -2855,6 +2878,12 @@
         document.getElementById('btgTimeScale').addEventListener('input', e => {
             state.btgTimeScale = parseInt(e.target.value);
             document.getElementById('btgTimeScaleVal').textContent = e.target.value + ' d/s';
+        });
+
+        // Pulsation amplitude (0–100% of physical ±15% radius variation)
+        document.getElementById('btgPulseAmp').addEventListener('input', e => {
+            state.btgPulseAmp = parseInt(e.target.value) / 100.0;
+            document.getElementById('btgPulseAmpVal').textContent = e.target.value + '%';
         });
 
         // Great Dimming trigger
