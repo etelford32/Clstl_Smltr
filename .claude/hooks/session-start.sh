@@ -9,19 +9,27 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
     exit 0
 fi
 
-# ── 1. Source the existing Rust installation ──────────────────────────────────
-# rustc/cargo live at /root/.cargo/bin but are not on PATH by default in hooks.
-CARGO_ENV="$HOME/.cargo/env"
-if [ ! -f "$CARGO_ENV" ]; then
-    echo "ERROR: ~/.cargo/env not found — Rust toolchain missing." >&2
+# ── 1. Locate and source the existing Rust installation ──────────────────────
+# Two known layouts:
+#   ~/.cargo/bin  — rustup default (dev / Claude Code web sessions)
+#   /rust/bin     — pre-installed toolchain in Vercel / some cloud images
+RUST_BIN=""
+if [ -f "$HOME/.cargo/env" ]; then
+    # shellcheck source=/dev/null
+    source "$HOME/.cargo/env"
+    RUST_BIN="$HOME/.cargo/bin"
+elif [ -d "/rust/bin" ] && [ -x "/rust/bin/rustc" ]; then
+    export PATH="/rust/bin:$PATH"
+    RUST_BIN="/rust/bin"
+fi
+
+if ! command -v rustc &>/dev/null; then
+    echo "ERROR: rustc not found at ~/.cargo/bin or /rust/bin — Rust toolchain missing." >&2
     exit 1
 fi
 
-# shellcheck source=/dev/null
-source "$CARGO_ENV"
-
-# Persist cargo/bin for the rest of the session (all future tool calls)
-echo "export PATH=\"$HOME/.cargo/bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+# Persist the resolved bin dir for all subsequent tool calls in this session
+echo "export PATH=\"${RUST_BIN}:\$PATH\"" >> "$CLAUDE_ENV_FILE"
 
 echo "✅ Rust $(rustc --version) available"
 

@@ -5,15 +5,21 @@ set -e
 
 echo "🦀 Building Rust WASM for deployment..."
 
-# Ensure Rust/cargo is on PATH (pre-installed at ~/.cargo/bin)
+# Ensure Rust/cargo is on PATH.
+# Handles two layouts:
+#   ~/.cargo/bin  — rustup default (local / Claude Code dev sessions)
+#   /rust/bin     — pre-installed toolchain in Vercel build images
 if [ -f "$HOME/.cargo/env" ]; then
     # shellcheck source=/dev/null
     source "$HOME/.cargo/env"
+elif [ -d "/rust/bin" ]; then
+    export PATH="/rust/bin:$PATH"
 fi
 
 # Verify rustc is available — do NOT attempt internet download
 if ! command -v rustc &> /dev/null; then
-    echo "ERROR: rustc not found. Install Rust from https://rustup.rs and re-run." >&2
+    echo "ERROR: rustc not found at ~/.cargo/bin or /rust/bin." >&2
+    echo "       Install Rust from https://rustup.rs and re-run." >&2
     exit 1
 fi
 
