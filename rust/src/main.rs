@@ -9,6 +9,7 @@ mod simulation;
 use camera::{camera_controller, handle_exit};
 use rendering::star::{setup, update_star_glow};
 use simulation::fluid::{update_velocity_field, VelocityField};
+use simulation::magnetic::{draw_field_lines, update_field_lines, FieldLineSet};
 use simulation::particles::{spawn_particles, update_particles, ParticleSpawner};
 
 pub const STAR_RADIUS: f32 = 2.0;
@@ -27,20 +28,24 @@ fn main() {
         .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .insert_resource(ParticleSpawner::default())
         .insert_resource(VelocityField::new())
+        .insert_resource(FieldLineSet::default())
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
-                // Field must be updated before particles read from it.
+                // 1. Physics tick: velocity field first, then field lines.
                 update_velocity_field,
+                update_field_lines.after(update_velocity_field),
+                // 2. Everything that reads the results of the physics tick.
                 (
                     camera_controller,
                     update_star_glow,
                     spawn_particles,
                     update_particles,
+                    draw_field_lines,
                     handle_exit,
                 )
-                    .after(update_velocity_field),
+                    .after(update_field_lines),
             ),
         )
         .run();

@@ -10,6 +10,7 @@ bevy = { version = "0.17", default-features = false, features = [
     "bevy_pbr",
     "bevy_render",
     "bevy_asset",
+    "bevy_gizmos",
     "png",
 ] }
 
