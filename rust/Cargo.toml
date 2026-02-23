@@ -21,7 +21,10 @@ rand = "0.8"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = "0.3"
+# VideoFrame feature required: .cargo/config.toml sets web_sys_unstable_apis,
+# which activates glow's VideoFrame WebGL code paths; without this feature the
+# tex_image_2d_with_*_video_frame methods on WebGlRenderingContext are absent.
+web-sys = { version = "0.3", features = ["VideoFrame"] }
 bevy = { version = "0.17", default-features = false, features = ["webgl2"] }
 fastrand = "2.0"
 
@@ -38,9 +41,3 @@ opt-level = 3
 opt-level = 'z'     # Optimize for size
 lto = "thin"        # Enable link-time optimization
 codegen-units = 1   # Better optimization, slower compile
-
-# Patch glow to fix VideoFrame WebGL method mismatch with web-sys 0.3.x.
-# glow 0.16.0 calls tex_image_2d_with_*_video_frame methods that don't exist
-# in stable web-sys; the main branch resolves the naming discrepancy.
-[patch.crates-io]
-glow = { git = "https://github.com/grovesNL/glow", branch = "main" }
