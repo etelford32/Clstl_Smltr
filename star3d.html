@@ -1050,33 +1050,304 @@
         // ──────────────────────────────────────────────
         // SIRIUS MODE OBJECTS
         // ──────────────────────────────────────────────
+
+        // ─── GLSL: Sirius A photosphere (A1V, 9940 K) ────────────────────────
+        // Key science:
+        //   • A-type stars have only a thin outer convective shell (≲ 0.01 R★)
+        //     → photosphere is very smooth compared to solar G-type
+        //   • Limb darkening u ≈ 0.45 (Claret 2000) — less than solar (0.60)
+        //   • Fast rotator class, but Sirius A is slow (v sin i ≈ 16 km/s)
+        //   • Subtle p-mode acoustic oscillations (δ Scuti pulsation candidate)
+        //   • Photospheric T_eff 9940 K → peak UV ~292 nm, visual blue-white
+        const SIR_A_VERT = `
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            varying vec2 vUv;
+            void main() {
+                vUv       = uv;
+                vNormal   = normalize(normalMatrix * normal);
+                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+        const SIR_A_FRAG = `
+            precision highp float;
+            uniform float uTime;
+            uniform float uCameraDist;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float h1a(float n) { return fract(sin(n) * 43758.5453); }
+            float n3a(vec3 p) {
+                vec3 ip = floor(p); vec3 f = fract(p); f = f*f*(3.0-2.0*f);
+                float n = dot(ip, vec3(1.0, 57.0, 113.0));
+                return mix(
+                    mix(mix(h1a(n),      h1a(n+1.0),   f.x), mix(h1a(n+57.0),  h1a(n+58.0),  f.x), f.y),
+                    mix(mix(h1a(n+113.0),h1a(n+114.0), f.x), mix(h1a(n+170.0), h1a(n+171.0), f.x), f.y), f.z);
+            }
+            float fbmA(vec3 p) {
+                float f=0.0; float w=0.5;
+                for (int i=0;i<4;i++) { f+=w*n3a(p); p*=2.1; w*=0.5; }
+                return f;
+            }
+
+            void main() {
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                vec3  nrm     = normalize(vNormal);
+                float mu      = max(dot(nrm, viewDir), 0.0);
+
+                // ── Limb darkening u = 0.45 (Claret 2000, A-type) ─────────────
+                float limbDrk = 1.0 - 0.45 * (1.0 - mu);
+
+                // ── LOD: fine texture only visible on close approach ───────────
+                float lodClose = 1.0 - smoothstep(4.0, 14.0, uCameraDist);
+
+                vec3 np = normalize(vWorldPos);
+
+                // ── Thin surface convection — small granulation scale ──────────
+                float granFine   = fbmA(np * 14.0 + vec3(uTime * 0.08, uTime * 0.05, 0.0));
+                float granCoarse = fbmA(np * 5.5  + vec3(-uTime * 0.04, 0.0, uTime * 0.03));
+                float gran = granFine * 0.55 + granCoarse * 0.45;
+
+                // ── p-mode acoustic oscillations (δ Scuti shimmer) ────────────
+                float acoustic = sin(np.x * 18.0 + uTime * 4.2)
+                               * sin(np.y * 14.0 + uTime * 3.7)
+                               * sin(np.z * 16.0 + uTime * 5.1);
+                acoustic = acoustic * 0.04 * lodClose;
+
+                // ── 9940 K blackbody colour ────────────────────────────────────
+                //   Disc centre: uniform hot blue-white
+                //   Limb: cooler, slightly deeper blue (less photospheric depth)
+                vec3 hotColor  = vec3(0.85, 0.92, 1.00);   // bright disc centre
+                vec3 baseColor = vec3(0.81, 0.88, 1.00);   // standard A1V
+                vec3 limbColor = vec3(0.70, 0.80, 1.00);   // cooler at limb
+
+                vec3 surfColor = mix(limbColor, hotColor, mu * 0.8);
+
+                // ── Brightness from granulation & oscillations ─────────────────
+                float brite = 1.0 + (gran - 0.5) * 0.06 * lodClose + acoustic;
+                surfColor *= clamp(brite, 0.88, 1.12);
+
+                surfColor *= limbDrk;
+                gl_FragColor = vec4(surfColor * 2.2, 1.0);
+            }
+        `;
+
+        // ─── GLSL: Sirius A thin hot corona (X-ray / EUV, ROSAT/Chandra) ─────
+        // Sirius A is detected in soft X-rays (L_X ~10²⁷ erg/s).
+        // A-type corona is thinner and less structured than solar.
+        const SIR_A_CORONA_FRAG = `
+            precision mediump float;
+            uniform float uTime;
+            uniform float uCameraDist;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float h1ac(float n) { return fract(sin(n)*43758.5453); }
+            float n3ac(vec3 p) {
+                vec3 ip=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
+                float n=dot(ip,vec3(1.0,57.0,113.0));
+                return mix(mix(mix(h1ac(n),h1ac(n+1.0),f.x),mix(h1ac(n+57.0),h1ac(n+58.0),f.x),f.y),
+                           mix(mix(h1ac(n+113.0),h1ac(n+114.0),f.x),mix(h1ac(n+170.0),h1ac(n+171.0),f.x),f.y),f.z);
+            }
+
+            void main() {
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA    = abs(dot(normalize(vNormal), viewDir));
+                float fresnel = pow(1.0 - cosA, 2.8);
+
+                // Diffuse plasma noise
+                float plasma = 0.75 + 0.25 * n3ac(normalize(vWorldPos) * 4.0
+                                    + vec3(uTime * 0.08, uTime * 0.06, 0.0));
+
+                float alpha = fresnel * plasma * 0.35;
+                alpha = clamp(alpha * 0.45, 0.0, 0.28);
+
+                // Hot A-type corona: blue-white to soft UV
+                vec3 inner = vec3(0.80, 0.88, 1.00);
+                vec3 outer = vec3(0.60, 0.74, 1.00);
+                vec3 col   = mix(inner, outer, fresnel * 1.3);
+
+                gl_FragColor = vec4(col, alpha);
+            }
+        `;
+
+        // ─── GLSL: Sirius B white dwarf photosphere (DA2, 25 200 K) ──────────
+        // Key science:
+        //   • DA2 = pure hydrogen atmosphere (no helium/metals detected)
+        //   • T_eff = 25 200 K → deep UV peak, very blue-white visual
+        //   • log g ≈ 8.57 → extreme surface gravity (≈ 350 000 g_earth)
+        //   • Gravitational redshift: 89 km/s (photons lose energy climbing well)
+        //   • Degenerate interior conducts heat uniformly — almost no temp gradient
+        //   • Crystallizing: Tremblay et al. (2019) confirmed via Gaia HR diagram
+        //     → BCC lattice forming inside, latent heat release slowing cooling
+        //   • Radius ~ 0.0084 R☉ (≈ Earth-sized)
+        const SIR_B_FRAG = `
+            precision highp float;
+            uniform float uTime;
+            uniform float uCameraDist;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float h1b(float n)  { return fract(sin(n)*43758.5453); }
+            float h2b(vec2 p)   { return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+            float h3b(vec3 p)   { return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453); }
+            float n3b(vec3 p) {
+                vec3 ip=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
+                float n=dot(ip,vec3(1.0,57.0,113.0));
+                return mix(mix(mix(h1b(n),h1b(n+1.0),f.x),mix(h1b(n+57.0),h1b(n+58.0),f.x),f.y),
+                           mix(mix(h1b(n+113.0),h1b(n+114.0),f.x),mix(h1b(n+170.0),h1b(n+171.0),f.x),f.y),f.z);
+            }
+
+            // ── BCC crystalline Voronoi (Tremblay 2019: Sirius B is crystallizing)
+            // Body-Centred Cubic: uniform-lattice Voronoi gives hexagonal-like
+            // grain boundary shimmer on the projected disc.
+            float bccVoronoi(vec3 x) {
+                float scale = 10.0;
+                vec3 q  = x * scale;
+                vec3 ip = floor(q);
+                vec3 fp = fract(q);
+                float d = 10.0;
+                for (int k=-1; k<=1; k++)
+                for (int j=-1; j<=1; j++)
+                for (int i=-1; i<=1; i++) {
+                    vec3  b = vec3(float(i), float(j), float(k));
+                    vec3  r = b - fp + vec3(h3b(ip+b+0.0),
+                                            h3b(ip+b+17.0),
+                                            h3b(ip+b+31.0));
+                    d = min(d, dot(r, r));
+                }
+                return sqrt(d);
+            }
+
+            void main() {
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                vec3  nrm     = normalize(vNormal);
+                float mu      = max(dot(nrm, viewDir), 0.0);
+
+                // ── Limb darkening u = 0.35 (hot DA, Koester & Moehler 2014) ──
+                float limbDrk = 1.0 - 0.35 * (1.0 - mu);
+
+                // ── LOD: crystal grain boundary shimmer only when zoomed in ────
+                float lodClose = 1.0 - smoothstep(1.5, 7.0, uCameraDist);
+
+                vec3 np = normalize(vWorldPos);
+
+                // ── BCC crystalline lattice grain-boundary pattern ─────────────
+                float lat = bccVoronoi(np) * lodClose;
+                float cellBright = smoothstep(0.22, 0.55, lat) * 0.06;
+                float cellDark   = smoothstep(0.18, 0.0,  lat) * 0.04;
+
+                // ── Gravitational redshift (89 km/s) — limb reddening ──────────
+                // Surface gravity log g = 8.57 → photons redshifted at limb,
+                // creating subtle warm tint at the edge of the disc.
+                float gravRed = pow(1.0 - mu, 2.0) * 0.14;
+
+                // ── 25 200 K colour ────────────────────────────────────────────
+                //   Disc centre: intense blue-white (deep UV peak)
+                //   Limb: gravitationally reddened → slightly warmer hue
+                vec3 coreColor  = vec3(0.88, 0.93, 1.00);
+                vec3 limbColor  = vec3(0.93, 0.90, 0.98);  // grav-redshifted
+                vec3 surfColor  = mix(coreColor, limbColor, gravRed);
+
+                // ── Brightness modulation from lattice ────────────────────────
+                float brite = 1.0 + cellBright - cellDark;
+                surfColor *= clamp(brite, 0.90, 1.10);
+
+                // ── Thin hydrogen atmosphere micro-turbulence ─────────────────
+                float atm = n3b(np * 22.0 + vec3(uTime * 0.05, uTime * 0.03, 0.0));
+                surfColor *= (1.0 + (atm - 0.5) * 0.022 * lodClose);
+
+                surfColor *= limbDrk;
+                gl_FragColor = vec4(surfColor * 2.8, 1.0);
+            }
+        `;
+
+        // ─── GLSL: Sirius B UV/X-ray halo ────────────────────────────────────
+        // Sirius B is one of the nearest white dwarfs and a strong UV/X-ray
+        // source (ROSAT HRI). Its photosphere emits mainly below 200 nm;
+        // the visible glow is dominated by scattered light in atmosphere.
+        const SIR_B_HALO_FRAG = `
+            precision mediump float;
+            uniform float uTime;
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+
+            float h1bh(float n) { return fract(sin(n)*43758.5453); }
+            float n3bh(vec3 p) {
+                vec3 ip=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
+                float n=dot(ip,vec3(1.0,57.0,113.0));
+                return mix(mix(mix(h1bh(n),h1bh(n+1.0),f.x),mix(h1bh(n+57.0),h1bh(n+58.0),f.x),f.y),
+                           mix(mix(h1bh(n+113.0),h1bh(n+114.0),f.x),mix(h1bh(n+170.0),h1bh(n+171.0),f.x),f.y),f.z);
+            }
+
+            void main() {
+                vec3  viewDir = normalize(cameraPosition - vWorldPos);
+                float cosA    = abs(dot(normalize(vNormal), viewDir));
+                float fresnel = pow(1.0 - cosA, 2.0);
+
+                float plasma = 0.7 + 0.3 * n3bh(normalize(vWorldPos) * 5.0
+                                    + vec3(uTime * 0.12, uTime * 0.08, 0.0));
+
+                // UV/X-ray halo: electric blue-violet rim
+                vec3 uvColor = vec3(0.55, 0.70, 1.00);
+                float alpha  = fresnel * plasma * 0.50;
+                alpha = clamp(alpha * 0.60, 0.0, 0.38);
+
+                gl_FragColor = vec4(uvColor, alpha);
+            }
+        `;
+
         const siriusGroup = new THREE.Group();
         scene.add(siriusGroup);
 
         // --- Sirius A ---
-        let siriusAGeo, siriusAMat, siriusAMesh, siriusAGlow, siriusALight;
+        let siriusAGeo, siriusAMat, siriusAMesh, siriusAGlow, siriusACorona, siriusALight;
         function createSiriusA(radius) {
             if (siriusAMesh) {
                 siriusGroup.remove(siriusAMesh);
                 siriusGroup.remove(siriusAGlow);
+                siriusGroup.remove(siriusACorona);
                 siriusGroup.remove(siriusALight);
                 siriusAMesh.geometry.dispose();
                 siriusAGlow.geometry.dispose();
+                siriusACorona.geometry.dispose();
             }
+
+            // Photosphere — custom A1V GLSL shader
             siriusAGeo = new THREE.SphereGeometry(radius, 64, 64);
-            siriusAMat = new THREE.MeshStandardMaterial({
-                color: SIRIUS.A.color,
-                emissive: SIRIUS.A.emissiveColor,
-                emissiveIntensity: 2.5,
-                roughness: 0.4,
-                metalness: 0.1,
+            siriusAMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:       { value: 0 },
+                    uCameraDist: { value: 12.0 },
+                },
+                vertexShader:   SIR_A_VERT,
+                fragmentShader: SIR_A_FRAG,
             });
             siriusAMesh = new THREE.Mesh(siriusAGeo, siriusAMat);
             siriusGroup.add(siriusAMesh);
 
-            const glowGeo = new THREE.SphereGeometry(radius * 1.25, 32, 32);
+            // Thin hot corona (X-ray / EUV — ROSAT / Chandra detection)
+            const coronaGeo = new THREE.SphereGeometry(radius * 2.2, 32, 32);
+            const coronaMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:       { value: 0 },
+                    uCameraDist: { value: 12.0 },
+                },
+                vertexShader:   SIR_A_VERT,
+                fragmentShader: SIR_A_CORONA_FRAG,
+                transparent: true,
+                blending:    THREE.AdditiveBlending,
+                depthWrite:  false,
+                side:        THREE.BackSide,
+            });
+            siriusACorona = new THREE.Mesh(coronaGeo, coronaMat);
+            siriusGroup.add(siriusACorona);
+
+            // Soft outer glow halo
+            const glowGeo = new THREE.SphereGeometry(radius * 1.30, 32, 32);
             const glowMat = new THREE.MeshBasicMaterial({
-                color: SIRIUS.A.color, transparent: true, opacity: 0.18, side: THREE.BackSide
+                color: SIRIUS.A.color, transparent: true, opacity: 0.15, side: THREE.BackSide,
             });
             siriusAGlow = new THREE.Mesh(glowGeo, glowMat);
             siriusGroup.add(siriusAGlow);
@@ -1086,35 +1357,46 @@
         }
 
         // --- Sirius B ---
-        let siriusBGeo, siriusBMat, siriusBMesh, siriusBGlow, siriusBLight;
+        let siriusBGeo, siriusBMat, siriusBMesh, siriusBHalo, siriusBLight;
         function createSiriusB(radius) {
             if (siriusBMesh) {
                 siriusGroup.remove(siriusBMesh);
-                siriusGroup.remove(siriusBGlow);
+                siriusGroup.remove(siriusBHalo);
                 siriusGroup.remove(siriusBLight);
                 siriusBMesh.geometry.dispose();
-                siriusBGlow.geometry.dispose();
+                siriusBHalo.geometry.dispose();
             }
-            // Minimum display radius so it's at least a point in true-scale
+            // Minimum display radius so it's visible in true-scale mode
             const displayR = Math.max(radius, 0.03);
-            siriusBGeo = new THREE.SphereGeometry(displayR, 32, 32);
-            siriusBMat = new THREE.MeshStandardMaterial({
-                color: SIRIUS.B.color,
-                emissive: SIRIUS.B.emissiveColor,
-                emissiveIntensity: 3.5,
-                roughness: 0.3,
-                metalness: 0.1,
+
+            // Photosphere — DA2 white dwarf GLSL shader
+            siriusBGeo = new THREE.SphereGeometry(displayR, 48, 48);
+            siriusBMat = new THREE.ShaderMaterial({
+                uniforms: {
+                    uTime:       { value: 0 },
+                    uCameraDist: { value: 12.0 },
+                },
+                vertexShader:   SIR_A_VERT,   // same geometry transform
+                fragmentShader: SIR_B_FRAG,
             });
             siriusBMesh = new THREE.Mesh(siriusBGeo, siriusBMat);
             siriusGroup.add(siriusBMesh);
 
-            const glowGeo = new THREE.SphereGeometry(displayR * 2.0, 24, 24);
-            const glowMat = new THREE.MeshBasicMaterial({
-                color: SIRIUS.B.color, transparent: true, opacity: 0.25, side: THREE.BackSide
+            // UV/X-ray halo (ROSAT HRI — Sirius B is a strong UV source)
+            const haloGeo = new THREE.SphereGeometry(displayR * 2.8, 24, 24);
+            const haloMat = new THREE.ShaderMaterial({
+                uniforms: { uTime: { value: 0 } },
+                vertexShader:   SIR_A_VERT,
+                fragmentShader: SIR_B_HALO_FRAG,
+                transparent: true,
+                blending:    THREE.AdditiveBlending,
+                depthWrite:  false,
+                side:        THREE.BackSide,
             });
-            siriusBGlow = new THREE.Mesh(glowGeo, glowMat);
-            siriusGroup.add(siriusBGlow);
+            siriusBHalo = new THREE.Mesh(haloGeo, haloMat);
+            siriusGroup.add(siriusBHalo);
 
+            // Point light — blue-white, tight radius (WD is dim visually)
             siriusBLight = new THREE.PointLight(SIRIUS.B.color, 1.5, 40);
             siriusGroup.add(siriusBLight);
         }
@@ -2782,24 +3064,40 @@
             posA.set(-orbPos.x * qA, orbPos.z * qA, -orbPos.y * qA);
             posB.set(orbPos.x * qB, -orbPos.z * qB, orbPos.y * qB);
 
-            // Position stars
+            // Position stars + associated layers
             siriusAMesh.position.copy(posA);
             siriusAGlow.position.copy(posA);
+            siriusACorona.position.copy(posA);
             siriusALight.position.copy(posA);
             siriusBMesh.position.copy(posB);
-            siriusBGlow.position.copy(posB);
+            siriusBHalo.position.copy(posB);
             siriusBLight.position.copy(posB);
 
-            // Rotate stars
+            // Rotate stars — A slow (v sin i ≈ 16 km/s), B faster
             siriusAMesh.rotation.y += dt * 0.3;
-            siriusBMesh.rotation.y += dt * 2.0; // White dwarfs rotate faster
+            siriusBMesh.rotation.y += dt * 1.8;
 
-            // Pulse glow
+            // ── Update shader uniforms ─────────────────────────────────────────
+            const camDistA = camera.position.distanceTo(posA);
+            const camDistB = camera.position.distanceTo(posB);
+
+            siriusAMat.uniforms.uTime.value       = simTime;
+            siriusAMat.uniforms.uCameraDist.value  = camDistA;
+            siriusACorona.material.uniforms.uTime.value       = simTime;
+            siriusACorona.material.uniforms.uCameraDist.value = camDistA;
+
+            siriusBMat.uniforms.uTime.value       = simTime;
+            siriusBMat.uniforms.uCameraDist.value  = camDistB;
+            siriusBHalo.material.uniforms.uTime.value = simTime;
+
+            // ── Glow pulse (soft outer halo opacity) ──────────────────────────
             const pulseA = Math.sin(simTime * 1.5) * 0.15 + 1.0;
-            siriusAMat.emissiveIntensity = 2.5 * pulseA;
+            siriusAGlow.material.opacity = 0.13 * pulseA;
 
-            const pulseB = Math.sin(simTime * 3) * 0.2 + 1.0;
-            siriusBMat.emissiveIntensity = 3.5 * pulseB;
+            // ── Light pulse ────────────────────────────────────────────────────
+            siriusALight.intensity = 4.0 * pulseA;
+            const pulseB = Math.sin(simTime * 3.0) * 0.2 + 1.0;
+            siriusBLight.intensity = 1.5 * pulseB;
 
             // Labels
             labelA.visible = state.showLabels;
