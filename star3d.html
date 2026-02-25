@@ -272,6 +272,7 @@
                         <select id="presetSelect" style="width:100%;flex:1">
                             <option value="default">Default (Single Star)</option>
                             <option value="sirius" selected>Sirius Binary System</option>
+                            <option value="sirius_planets">Sirius A/B &mdash; Planetary Fantasy</option>
                             <option value="sun">Sun — Solar System</option>
                             <option value="betelgeuse">Betelgeuse &alpha; Ori (M1&ndash;M2 Ia)</option>
                         </select>
@@ -702,6 +703,99 @@
                 </div>
             </div>
 
+            <!-- ═══════════════════════════════════════════════════════════ -->
+            <!-- SIRIUS PLANETARY FANTASY SECTIONS (sp-only)               -->
+            <!-- ═══════════════════════════════════════════════════════════ -->
+
+            <!-- Planet Controls -->
+            <div class="sb-section sp-only" style="display:none">
+                <div class="sb-title">Planet Controls <span style="font-size:10px;color:#88AAFF">&#11088;</span></div>
+                <div class="sb-body">
+                    <div class="chk-row">
+                        <input type="checkbox" id="showPlanets" checked>
+                        <label for="showPlanets">Show Planets</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showBelts" checked>
+                        <label for="showBelts">Debris Belts</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showPlanetOrbits" checked>
+                        <label for="showPlanetOrbits">Orbit Paths</label>
+                    </div>
+                    <div class="chk-row">
+                        <input type="checkbox" id="showPlanetLabels" checked>
+                        <label for="showPlanetLabels">Planet Labels</label>
+                    </div>
+                    <div class="ctrl-row" style="margin-top:8px">
+                        <label>Planet Speed</label>
+                        <input type="range" id="planetOrbitScale" min="0" max="400" value="100">
+                        <span class="vdisp" id="planetOrbitScaleVal">1.0&times;</span>
+                    </div>
+                    <div class="btn-row">
+                        <button id="camPlanetsOverview">Overview</button>
+                        <button id="camPlanetsSysWide">System Wide</button>
+                    </div>
+                    <div style="margin-top:8px;font-size:10px;color:#888;line-height:1.5">
+                        Orbit radii are visually scaled for clarity. Hound displayed at 22&thinsp;AU; true distance 120&thinsp;AU.
+                        Circumbinary stability cliff &approx;&thinsp;79&thinsp;AU.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sirius A — Planet Data -->
+            <div class="sb-section sp-only" style="display:none">
+                <div class="sb-title">Sirius A System <span style="font-size:10px;color:#CED8FF">&#9733;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr style="background:rgba(42,21,6,0.4)"><td colspan="2" style="color:#CC7744;font-weight:600">Cinder &mdash; rocky, 0.12&thinsp;AU</td></tr>
+                        <tr><td>Mass</td><td>0.60 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>10.6 days</td></tr>
+                        <tr><td>Albedo</td><td>0.12 (airless/metal)</td></tr>
+                        <tr style="background:rgba(216,210,188,0.08)"><td colspan="2" style="color:#C8C4A0;font-weight:600">Glass &mdash; super-Earth, 0.32&thinsp;AU</td></tr>
+                        <tr><td>Mass</td><td>2.5 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>46 days</td></tr>
+                        <tr><td>Albedo</td><td>0.18 (silicate)</td></tr>
+                        <tr style="background:rgba(200,136,42,0.12)"><td colspan="2" style="color:#CC9944;font-weight:600">Saffron &mdash; transition, 0.75&thinsp;AU</td></tr>
+                        <tr><td>Mass</td><td>5.0 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>165 days</td></tr>
+                        <tr><td>Albedo</td><td>0.25 (hazy)</td></tr>
+                        <tr style="background:rgba(34,85,170,0.15)"><td colspan="2" style="color:#4488CC;font-weight:600">Bluecoil &mdash; mini-Neptune, 1.60&thinsp;AU</td></tr>
+                        <tr><td>Mass</td><td>10 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>1.41 yr</td></tr>
+                        <tr><td>Albedo</td><td>0.35 (H&#8322;/He haze)</td></tr>
+                        <tr style="background:rgba(136,119,102,0.12)"><td colspan="2" style="color:#AAA;font-weight:600">Clipped Belt &mdash; 1.90&ndash;2.10&thinsp;AU</td></tr>
+                        <tr><td>Dust mass</td><td>0.02 M&#8853;</td></tr>
+                        <tr><td>i&lt;</td><td>3.5&deg; (thin disk)</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Sirius B + Circumbinary Data -->
+            <div class="sb-section sp-only" style="display:none">
+                <div class="sb-title">Sirius B &amp; Circumbinary <span style="font-size:10px;color:#A2C7FF">&#9733;</span></div>
+                <div class="sb-body">
+                    <table class="data-tbl">
+                        <tr style="background:rgba(26,26,26,0.5)"><td colspan="2" style="color:#FF7733;font-weight:600">Ashring &mdash; relic rocky, 0.015&thinsp;AU</td></tr>
+                        <tr><td>Mass</td><td>0.12 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>0.67 days</td></tr>
+                        <tr><td>Notes</td><td>tidal hotspots</td></tr>
+                        <tr style="background:rgba(153,153,187,0.08)"><td colspan="2" style="color:#AAAACC;font-weight:600">Gravebelt &mdash; 0.030&ndash;0.080&thinsp;AU</td></tr>
+                        <tr><td>Dust mass</td><td>0.005 M&#8853;</td></tr>
+                        <tr><td>i&lt;</td><td>6.0&deg; (puffed)</td></tr>
+                        <tr style="background:rgba(139,184,216,0.1)"><td colspan="2" style="color:#8BB8D8;font-weight:600">Hound &mdash; cold Neptune, 120&thinsp;AU (CB)</td></tr>
+                        <tr><td>Mass</td><td>20 M&#8853;</td></tr>
+                        <tr><td>Period</td><td>749 yr</td></tr>
+                        <tr><td>Albedo</td><td>0.50 (ice/H&#8322;)</td></tr>
+                    </table>
+                    <div style="margin-top:8px;font-size:10px;color:#888;line-height:1.5">
+                        Circumbinary P-type stability begins at ~79&thinsp;AU
+                        (Holman &amp; Wiegert 1999 criterion).
+                        Hound shown at 22&thinsp;AU for visual clarity.
+                    </div>
+                </div>
+            </div>
+
         </div><!-- end #sidebar -->
 
         <button id="sidebar-toggle">&#9776; Panel</button>
@@ -724,6 +818,12 @@
             <p class="sep-readout" style="color:#ff9944">&#9728; Solar Activity: <span id="hudSolarActivity">--</span>%</p>
             <p class="dim">Wind particles: <span class="val" id="hudSunParts">0</span> &nbsp; CME: <span class="val" id="hudCME">Idle</span></p>
             <p class="dim">Parker &#936;&#8321;&#8321&#8321;: <span class="val" id="hudParker">--</span>&deg;</p>
+            <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
+        </div>
+        <div id="hudPlanets" style="display:none">
+            <p class="sep-readout" style="color:#88AAFF">&#11088; Sirius Planetary Fantasy</p>
+            <p class="dim">Sep: <span id="hudPlanetSep">--</span> AU &nbsp; Epoch: <span class="val" id="hudPlanetEpoch">2026.0</span></p>
+            <p class="dim">Wind: <span class="val" id="hudPlanetWind">0</span> pts &nbsp; Belts: <span class="val" id="hudPlanetBelts">0</span> pts</p>
             <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
         </div>
         <div id="hudBtg" style="display:none">
@@ -936,6 +1036,12 @@
             btgWindSpeed:   20,
             greatDimming:   0.0,     // 0–1 intensity of Great Dimming dust shadow
             dimmerFading:   false,
+            // Sirius Planetary Fantasy state
+            showPlanets:       true,
+            showBelts:         true,
+            showPlanetOrbits:  true,
+            showPlanetLabels:  true,
+            planetOrbitScale:  1.0,   // speed multiplier for visual orbital motion
         };
 
         // Display sizes (in AU, our 3D unit)
@@ -1650,6 +1756,191 @@
         rebuildStars();
 
         // ══════════════════════════════════════════════════════════════════════
+        //  SIRIUS PLANETARY FANTASY — DATA + THREE.JS OBJECTS
+        // ══════════════════════════════════════════════════════════════════════
+        // Schema: clstl_smltr.system.v1 / sirius_planetary_pack_v1
+        // Ref: stable S-type orbit limit ~2.2 AU around A;
+        //      WD relic/2nd-gen ring ~0.015–0.080 AU around B;
+        //      circumbinary sentinel at 120 AU (displayed at 22 AU for clarity).
+        const _Pkep = (a, M) => Math.sqrt(a * a * a / M); // Kepler P (AU, M☉ → yr)
+
+        const SP_BODIES = [
+            // ─── Sirius A inner system ─────────────────────────────────────
+            {   id:'a1_cinder',  name:'Cinder',   host:'A',
+                a_AU:0.12,  e:0.02, i_deg:0.6,  Omega_deg:10,  omega_deg:40,  M0_deg:0,
+                period_yr: _Pkep(0.12, 2.06),    // ≈ 0.029 yr ≈ 10.6 days
+                color:0x2A1506, emissive:0xFF3300, emissiveI:0.70,
+                dispR:0.07, disp_a:1.8,
+                desc:'Rocky, airless. Metal-vapour dayside.',
+            },
+            {   id:'a2_glass',   name:'Glass',    host:'A',
+                a_AU:0.32,  e:0.03, i_deg:0.7,  Omega_deg:18,  omega_deg:90,  M0_deg:120,
+                period_yr: _Pkep(0.32, 2.06),    // ≈ 0.126 yr ≈ 46 days
+                color:0xD8D2BC, emissive:0x0C0C08, emissiveI:0.05,
+                dispR:0.09, disp_a:3.2,
+                desc:'Super-Earth. Pale silicate surface, glassy albedo.',
+            },
+            {   id:'a3_saffron', name:'Saffron',  host:'A',
+                a_AU:0.75,  e:0.04, i_deg:0.9,  Omega_deg:26,  omega_deg:130, M0_deg:250,
+                period_yr: _Pkep(0.75, 2.06),    // ≈ 0.453 yr ≈ 165 days
+                color:0xCC882A, emissive:0x220E00, emissiveI:0.10,
+                dispR:0.12, disp_a:5.5,
+                desc:'Transition world. High-μ or stripped core, saffron haze.',
+            },
+            {   id:'a4_bluecoil',name:'Bluecoil', host:'A',
+                a_AU:1.60,  e:0.05, i_deg:1.1,  Omega_deg:34,  omega_deg:210, M0_deg:10,
+                period_yr: _Pkep(1.60, 2.06),    // ≈ 1.409 yr ≈ 515 days
+                color:0x2255AA, emissive:0x001133, emissiveI:0.08,
+                dispR:0.15, disp_a:8.5,
+                desc:'Mini-Neptune. Deep-blue H₂/He with photochemical haze.',
+            },
+            // ─── Sirius B system ───────────────────────────────────────────
+            {   id:'b1_ashring', name:'Ashring',  host:'B',
+                a_AU:0.015, e:0.01, i_deg:2.0,  Omega_deg:80,  omega_deg:15,  M0_deg:180,
+                period_yr: _Pkep(0.015, 1.018),  // ≈ 0.00182 yr ≈ 0.665 days
+                color:0x1A1A1A, emissive:0xFF5500, emissiveI:1.50,
+                dispR:0.055, disp_a:0.55,
+                desc:'Relic rocky, sub-Moon mass. Tidal heating + WD irradiation.',
+            },
+            // ─── Circumbinary ──────────────────────────────────────────────
+            {   id:'cb1_hound',  name:'Hound',    host:'CB',
+                a_AU:120,   e:0.08, i_deg:4.0,  Omega_deg:5,   omega_deg:300, M0_deg:0,
+                period_yr: _Pkep(120, 3.078),    // ≈ 749 yr
+                color:0x8BB8D8, emissive:0x002244, emissiveI:0.12,
+                dispR:0.20,  disp_a:22.0,        // visual rescale; true: 120 AU
+                desc:'Cold Neptune sentinel. Displayed at 22 AU; true dist 120 AU.',
+            },
+        ];
+
+        const SP_BELTS = [
+            {   id:'a_belt_clipped', name:'Clipped Belt', host:'A',
+                disp_a_min:10.0, disp_a_max:11.5, e_max:0.15, i_max_deg:3.5,
+                count:1800, color:0x887766, alpha:0.55,
+            },
+            {   id:'b_gravebelt',    name:'Gravebelt',    host:'B',
+                disp_a_min:0.62, disp_a_max:0.95, e_max:0.12, i_max_deg:6.0,
+                count:1400, color:0x9999BB, alpha:0.45,
+            },
+        ];
+
+        // Pre-compute periastron reference time T0 for each body:
+        // M(epoch) = 2π(epoch - T0)/P  →  T0 = 2000 - (M0°/360)*P
+        const _DEG = Math.PI / 180;
+        SP_BODIES.forEach(p => { p._T0 = 2000.0 - (p.M0_deg / 360) * p.period_yr; });
+
+        // ── Build orbit params object for getOrbitalPosition ─────────────────
+        function spOrbit(p) {
+            return {
+                period:          p.period_yr,
+                eccentricity:    p.e,
+                semiMajorAxis:   p.disp_a,   // always use visual scale for 3D
+                inclination:     p.i_deg   * _DEG,
+                ascendingNode:   p.Omega_deg * _DEG,
+                argPeriastron:   p.omega_deg * _DEG,
+                periastronTime:  p._T0,
+            };
+        }
+
+        // ── Orbital position in scene coords (y-up, host at origin) ──────────
+        function spLocalPos(p, epoch) {
+            const op = getOrbitalPosition(epoch, spOrbit(p));
+            return new THREE.Vector3(op.x, op.z, -op.y);
+        }
+
+        // ── THREE.JS OBJECTS ─────────────────────────────────────────────────
+        const planetaryGroup = new THREE.Group();
+        scene.add(planetaryGroup);
+        planetaryGroup.visible = false;
+
+        const sp_meshes  = {};
+        const sp_glows   = {};
+        const sp_orbitGrps = {};  // per-planet group (positioned at host each frame)
+        const sp_labels  = {};
+
+        const _OSEG = 96;  // orbit line segment count
+
+        SP_BODIES.forEach(p => {
+            // ── Photosphere sphere ──────────────────────────────────────────
+            const geo = new THREE.SphereGeometry(p.dispR, 24, 24);
+            const mat = new THREE.MeshStandardMaterial({
+                color:            p.color,
+                emissive:         p.emissive || 0,
+                emissiveIntensity: p.emissiveI || 0,
+                roughness: p.id === 'cb1_hound' ? 0.45 : (p.id.startsWith('b') ? 0.9 : 0.70),
+                metalness: 0.05,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            sp_meshes[p.id] = mesh;
+            planetaryGroup.add(mesh);
+
+            // ── Optional emissive glow ──────────────────────────────────────
+            if (p.emissiveI > 0.4) {
+                const gGeo = new THREE.SphereGeometry(p.dispR * 2.2, 10, 10);
+                const gMat = new THREE.MeshBasicMaterial({
+                    color: p.emissive, transparent: true, opacity: 0.22, side: THREE.BackSide,
+                });
+                sp_glows[p.id] = new THREE.Mesh(gGeo, gMat);
+                planetaryGroup.add(sp_glows[p.id]);
+            }
+
+            // ── Orbit path line (in host-local space) ──────────────────────
+            const grp = new THREE.Group();
+            sp_orbitGrps[p.id] = grp;
+            planetaryGroup.add(grp);
+
+            const orbitPosArr = new Float32Array((_OSEG + 1) * 3);
+            const orbitRef = spOrbit(p);
+            for (let i = 0; i <= _OSEG; i++) {
+                const t  = p._T0 + (i / _OSEG) * p.period_yr;
+                const op = getOrbitalPosition(t, orbitRef);
+                orbitPosArr[i * 3]     =  op.x;
+                orbitPosArr[i * 3 + 1] =  op.z;
+                orbitPosArr[i * 3 + 2] = -op.y;
+            }
+            const oGeo = new THREE.BufferGeometry();
+            oGeo.setAttribute('position', new THREE.BufferAttribute(orbitPosArr, 3));
+            const oMat = new THREE.LineBasicMaterial({
+                color: p.color, transparent: true, opacity: 0.18,
+            });
+            grp.add(new THREE.Line(oGeo, oMat));
+
+            // ── Text label ─────────────────────────────────────────────────
+            const cssHex = '#' + p.color.toString(16).padStart(6, '0');
+            sp_labels[p.id] = makeLabel(p.name, cssHex);
+            planetaryGroup.add(sp_labels[p.id]);
+        });
+
+        // ── Belt particle clouds ──────────────────────────────────────────────
+        const sp_beltGrps = {};
+
+        SP_BELTS.forEach(blt => {
+            const grp  = new THREE.Group();
+            const count = blt.count;
+            const pos   = new Float32Array(count * 3);
+
+            for (let i = 0; i < count; i++) {
+                const a   = blt.disp_a_min + Math.random() * (blt.disp_a_max - blt.disp_a_min);
+                const e   = Math.random() * blt.e_max;
+                const inc = (Math.random() * 2 - 1) * blt.i_max_deg * _DEG;
+                const th  = Math.random() * Math.PI * 2;
+                const r   = a * (1 - e * e) / (1 + e * Math.cos(th));
+                pos[i * 3]     =  r * Math.cos(th);
+                pos[i * 3 + 1] =  r * Math.sin(inc);
+                pos[i * 3 + 2] = -r * Math.sin(th) * Math.cos(inc);
+            }
+
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const mat = new THREE.PointsMaterial({
+                color: blt.color, size: 0.07, transparent: true, opacity: blt.alpha,
+                blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+            });
+            grp.add(new THREE.Points(geo, mat));
+            sp_beltGrps[blt.id] = grp;
+            planetaryGroup.add(grp);
+        });
+
+        // ══════════════════════════════════════════════════════════════════════
         //  SUN MODE — THREE.JS OBJECTS + GLSL SHADERS
         // ══════════════════════════════════════════════════════════════════════
         const sunGroup = new THREE.Group();
@@ -2274,6 +2565,91 @@
         }
 
         // ══════════════════════════════════════════════════════════════════════
+        // ══════════════════════════════════════════════════════════════════════
+        //  animateSiriusPlanets()
+        // ══════════════════════════════════════════════════════════════════════
+        function animateSiriusPlanets(dt) {
+            // Binary stars + wind are handled by the shared Sirius animator
+            animateSirius(dt);
+
+            // ── Scale epoch increment by planet orbit speed slider ──────────
+            // (animateSirius already advanced epoch by dt*timeSpeed; for planets
+            //  we read the same state.epoch — the speed slider just controls how
+            //  fast the planet speeds visually relative to the clock, not epoch)
+            const pSpeedFactor = state.planetOrbitScale;
+
+            // ── Planet positions ────────────────────────────────────────────
+            const _posA  = posA.clone();
+            const _posB  = posB.clone();
+            const _posCB = new THREE.Vector3(0, 0, 0);   // barycenter at origin
+
+            SP_BODIES.forEach(p => {
+                // Effective epoch: scale fast orbits for visual clarity
+                const effectiveEpoch = state.epoch * pSpeedFactor
+                    + p._T0 * (1 - pSpeedFactor);
+
+                const localPos = spLocalPos(p, effectiveEpoch);
+
+                const hostPos = p.host === 'A'  ? _posA
+                              : p.host === 'B'  ? _posB
+                              :                   _posCB;
+
+                const worldPos = hostPos.clone().add(localPos);
+
+                // ── Planet mesh ─────────────────────────────────────────────
+                const mesh = sp_meshes[p.id];
+                mesh.visible = state.showPlanets;
+                if (mesh.visible) {
+                    mesh.position.copy(worldPos);
+                    mesh.rotation.y += dt * 0.8;
+                    // Pulse tidal-heated bodies
+                    if (p.emissiveI > 0.4) {
+                        const tp = Math.sin(simTime * 2.5 + p.M0_deg) * 0.15 + 1.0;
+                        mesh.material.emissiveIntensity = p.emissiveI * tp;
+                    }
+                }
+
+                // ── Emissive glow ───────────────────────────────────────────
+                if (sp_glows[p.id]) {
+                    sp_glows[p.id].visible = state.showPlanets;
+                    sp_glows[p.id].position.copy(worldPos);
+                }
+
+                // ── Orbit path group — placed at host so line is host-local ─
+                const oGrp = sp_orbitGrps[p.id];
+                oGrp.visible = state.showPlanetOrbits;
+                oGrp.position.copy(hostPos);
+
+                // ── Label ───────────────────────────────────────────────────
+                const lbl = sp_labels[p.id];
+                lbl.visible = state.showPlanetLabels && state.showPlanets;
+                if (lbl.visible) {
+                    lbl.position.copy(worldPos)
+                        .add(new THREE.Vector3(0, p.dispR + 0.35, 0));
+                }
+            });
+
+            // ── Debris belts (group follows host star) ──────────────────────
+            SP_BELTS.forEach(blt => {
+                const grp = sp_beltGrps[blt.id];
+                grp.visible = state.showBelts;
+                if (!grp.visible) return;
+
+                const hostPos = blt.host === 'A' ? _posA : _posB;
+                grp.position.copy(hostPos);
+                // Slow differential rotation approximation
+                grp.rotation.y += dt * 0.008;
+            });
+
+            // ── HUD ─────────────────────────────────────────────────────────
+            const orbPos = getOrbitalPosition(state.epoch, SIRIUS.orbit);
+            const totalBeltPts = SP_BELTS.reduce((n, b) => n + b.count, 0);
+            document.getElementById('hudPlanetSep').textContent   = orbPos.r.toFixed(2);
+            document.getElementById('hudPlanetEpoch').textContent = state.epoch.toFixed(1);
+            document.getElementById('hudPlanetWind').textContent  = windParticles.length;
+            document.getElementById('hudPlanetBelts').textContent = state.showBelts ? totalBeltPts : 0;
+        }
+
         //  animateSun()
         // ══════════════════════════════════════════════════════════════════════
         const sunPos = new THREE.Vector3(0, 0, 0); // Sun is fixed at origin
@@ -2943,19 +3319,25 @@
         // ──────────────────────────────────────────────
         function setMode(mode) {
             state.mode = mode;
-            const isSirius  = mode === 'sirius';
-            const isSun     = mode === 'sun';
-            const isBtg     = mode === 'betelgeuse';
-            const isDefault = mode === 'default';
+            const isSirius   = mode === 'sirius';
+            const isSirPlan  = mode === 'sirius_planets';
+            const isSiriusLike = isSirius || isSirPlan;  // any Sirius-binary mode
+            const isSun      = mode === 'sun';
+            const isBtg      = mode === 'betelgeuse';
+            const isDefault  = mode === 'default';
 
-            defaultGroup.visible = isDefault;
-            siriusGroup.visible  = isSirius;
-            sunGroup.visible     = isSun;
-            btgGroup.visible     = isBtg;
+            defaultGroup.visible    = isDefault;
+            siriusGroup.visible     = isSiriusLike;
+            planetaryGroup.visible  = isSirPlan;
+            sunGroup.visible        = isSun;
+            btgGroup.visible        = isBtg;
 
             // Toggle sidebar sections
             document.querySelectorAll('.sirius-only').forEach(el => {
-                el.style.display = isSirius ? '' : 'none';
+                el.style.display = isSiriusLike ? '' : 'none';
+            });
+            document.querySelectorAll('.sp-only').forEach(el => {
+                el.style.display = isSirPlan ? '' : 'none';
             });
             document.querySelectorAll('.sun-only').forEach(el => {
                 el.style.display = isSun ? '' : 'none';
@@ -2965,19 +3347,22 @@
             });
 
             // HUD panels
-            document.getElementById('hudDefault').style.display = isDefault ? '' : 'none';
-            document.getElementById('hudSirius').style.display  = isSirius  ? '' : 'none';
-            document.getElementById('hudSun').style.display     = isSun     ? '' : 'none';
-            document.getElementById('hudBtg').style.display     = isBtg     ? '' : 'none';
+            document.getElementById('hudDefault').style.display  = isDefault  ? '' : 'none';
+            document.getElementById('hudSirius').style.display   = isSirius   ? '' : 'none';
+            document.getElementById('hudPlanets').style.display  = isSirPlan  ? '' : 'none';
+            document.getElementById('hudSun').style.display      = isSun      ? '' : 'none';
+            document.getElementById('hudBtg').style.display      = isBtg      ? '' : 'none';
             document.getElementById('hudTitle').textContent =
-                isSirius  ? 'Sirius Binary System' :
-                isSun     ? 'Sol — Our Sun' :
-                isBtg     ? '\u03b1 Orionis — Betelgeuse' :
-                            '3D Star Simulator';
+                isSirius   ? 'Sirius Binary System' :
+                isSirPlan  ? 'Sirius A/B \u2014 Planetary Fantasy' :
+                isSun      ? 'Sol \u2014 Our Sun' :
+                isBtg      ? '\u03b1 Orionis \u2014 Betelgeuse' :
+                             '3D Star Simulator';
 
             // Camera defaults per mode
-            if (isSirius) {
-                camera.position.set(25, 20, 35);
+            if (isSiriusLike) {
+                const dist = isSirPlan ? 38 : 25;
+                camera.position.set(dist * 0.7, dist * 0.55, dist);
                 controls.target.set(0, 0, 0);
             } else if (isSun) {
                 camera.position.set(0, 4, 12);
@@ -2995,9 +3380,9 @@
                 defaultParticles.forEach(p => defaultGroup.remove(p.mesh));
                 defaultParticles.length = 0;
             }
-            if (!isSun)     solarParticles.length = 0;
-            if (!isSirius)  windParticles.length  = 0;
-            if (!isBtg)     btgParticles.length   = 0;
+            if (!isSun)         solarParticles.length = 0;
+            if (!isSiriusLike)  windParticles.length  = 0;
+            if (!isBtg)         btgParticles.length   = 0;
         }
 
         // ──────────────────────────────────────────────
@@ -3019,6 +3404,8 @@
 
             if (state.mode === 'sirius') {
                 animateSirius(dt);
+            } else if (state.mode === 'sirius_planets') {
+                animateSiriusPlanets(dt);
             } else if (state.mode === 'sun') {
                 animateSun(dt);
             } else if (state.mode === 'betelgeuse') {
@@ -3267,6 +3654,37 @@
         document.getElementById('showInteraction').addEventListener('change', e => { state.showInteraction = e.target.checked; });
         document.getElementById('showLabels').addEventListener('change', e => { state.showLabels = e.target.checked; });
         document.getElementById('showAxes').addEventListener('change', e => { state.showAxes = e.target.checked; });
+
+        // ── Planet controls ─────────────────────────────────────────────────
+        document.getElementById('showPlanets').addEventListener('change', e => {
+            state.showPlanets = e.target.checked;
+        });
+        document.getElementById('showBelts').addEventListener('change', e => {
+            state.showBelts = e.target.checked;
+        });
+        document.getElementById('showPlanetOrbits').addEventListener('change', e => {
+            state.showPlanetOrbits = e.target.checked;
+        });
+        document.getElementById('showPlanetLabels').addEventListener('change', e => {
+            state.showPlanetLabels = e.target.checked;
+        });
+        document.getElementById('planetOrbitScale').addEventListener('input', e => {
+            // Slider 0-400 → speed 0-4×
+            state.planetOrbitScale = parseInt(e.target.value) / 100;
+            document.getElementById('planetOrbitScaleVal').textContent =
+                state.planetOrbitScale.toFixed(1) + '\u00d7';
+        });
+
+        // Planet camera presets
+        document.getElementById('camPlanetsOverview').addEventListener('click', () => {
+            camera.position.set(26, 20, 38);
+            controls.target.set(0, 0, 0);
+        });
+        document.getElementById('camPlanetsSysWide').addEventListener('click', () => {
+            // Zoom out to see Hound's orbit (displayed at 22 AU) + the binary
+            camera.position.set(0, 30, 65);
+            controls.target.set(0, 0, 0);
+        });
 
         // Wind controls
         document.getElementById('windRate').addEventListener('input', e => {
