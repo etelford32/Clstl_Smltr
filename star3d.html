@@ -1769,28 +1769,32 @@
             {   id:'a1_cinder',  name:'Cinder',   host:'A',
                 a_AU:0.12,  e:0.02, i_deg:0.6,  Omega_deg:10,  omega_deg:40,  M0_deg:0,
                 period_yr: _Pkep(0.12, 2.06),    // ≈ 0.029 yr ≈ 10.6 days
-                color:0x2A1506, emissive:0xFF3300, emissiveI:0.70,
+                color:0x2A1506, emissive:0xFF5500, emissiveI:1.10,
+                labelColor:'#FF7744',
                 dispR:0.07, disp_a:1.8,
                 desc:'Rocky, airless. Metal-vapour dayside.',
             },
             {   id:'a2_glass',   name:'Glass',    host:'A',
                 a_AU:0.32,  e:0.03, i_deg:0.7,  Omega_deg:18,  omega_deg:90,  M0_deg:120,
                 period_yr: _Pkep(0.32, 2.06),    // ≈ 0.126 yr ≈ 46 days
-                color:0xD8D2BC, emissive:0x0C0C08, emissiveI:0.05,
+                color:0xD8D2BC, emissive:0xC0BAA0, emissiveI:0.55,
+                labelColor:'#D8D2BC',
                 dispR:0.09, disp_a:3.2,
                 desc:'Super-Earth. Pale silicate surface, glassy albedo.',
             },
             {   id:'a3_saffron', name:'Saffron',  host:'A',
                 a_AU:0.75,  e:0.04, i_deg:0.9,  Omega_deg:26,  omega_deg:130, M0_deg:250,
                 period_yr: _Pkep(0.75, 2.06),    // ≈ 0.453 yr ≈ 165 days
-                color:0xCC882A, emissive:0x220E00, emissiveI:0.10,
+                color:0xCC882A, emissive:0xCC7722, emissiveI:0.65,
+                labelColor:'#EEA040',
                 dispR:0.12, disp_a:5.5,
                 desc:'Transition world. High-μ or stripped core, saffron haze.',
             },
             {   id:'a4_bluecoil',name:'Bluecoil', host:'A',
                 a_AU:1.60,  e:0.05, i_deg:1.1,  Omega_deg:34,  omega_deg:210, M0_deg:10,
                 period_yr: _Pkep(1.60, 2.06),    // ≈ 1.409 yr ≈ 515 days
-                color:0x2255AA, emissive:0x001133, emissiveI:0.08,
+                color:0x2255AA, emissive:0x3366CC, emissiveI:0.60,
+                labelColor:'#6699EE',
                 dispR:0.15, disp_a:8.5,
                 desc:'Mini-Neptune. Deep-blue H₂/He with photochemical haze.',
             },
@@ -1798,7 +1802,8 @@
             {   id:'b1_ashring', name:'Ashring',  host:'B',
                 a_AU:0.015, e:0.01, i_deg:2.0,  Omega_deg:80,  omega_deg:15,  M0_deg:180,
                 period_yr: _Pkep(0.015, 1.018),  // ≈ 0.00182 yr ≈ 0.665 days
-                color:0x1A1A1A, emissive:0xFF5500, emissiveI:1.50,
+                color:0x1A1A1A, emissive:0xFF5500, emissiveI:1.80,
+                labelColor:'#FF7733',
                 dispR:0.055, disp_a:0.55,
                 desc:'Relic rocky, sub-Moon mass. Tidal heating + WD irradiation.',
             },
@@ -1806,8 +1811,9 @@
             {   id:'cb1_hound',  name:'Hound',    host:'CB',
                 a_AU:120,   e:0.08, i_deg:4.0,  Omega_deg:5,   omega_deg:300, M0_deg:0,
                 period_yr: _Pkep(120, 3.078),    // ≈ 749 yr
-                color:0x8BB8D8, emissive:0x002244, emissiveI:0.12,
-                dispR:0.20,  disp_a:22.0,        // visual rescale; true: 120 AU
+                color:0x8BB8D8, emissive:0x5599BB, emissiveI:0.70,
+                labelColor:'#AAD4EE',
+                dispR:0.22,  disp_a:22.0,        // visual rescale; true: 120 AU
                 desc:'Cold Neptune sentinel. Displayed at 22 AU; true dist 120 AU.',
             },
         ];
@@ -1851,6 +1857,12 @@
         const planetaryGroup = new THREE.Group();
         scene.add(planetaryGroup);
         planetaryGroup.visible = false;
+
+        // Dedicated fill light for A-system planets — positioned at posA each frame.
+        // Ensures MeshStandardMaterial planets are always lit even when tone-mapping
+        // compresses the scene.  Color matches Sirius A (9940 K A-type, blue-white).
+        const sp_fillLight = new THREE.PointLight(0xCED8FF, 5.0, 300);
+        planetaryGroup.add(sp_fillLight);
 
         const sp_meshes  = {};
         const sp_glows   = {};
@@ -1900,13 +1912,12 @@
             const oGeo = new THREE.BufferGeometry();
             oGeo.setAttribute('position', new THREE.BufferAttribute(orbitPosArr, 3));
             const oMat = new THREE.LineBasicMaterial({
-                color: p.color, transparent: true, opacity: 0.18,
+                color: p.emissive || p.color, transparent: true, opacity: 0.40,
             });
             grp.add(new THREE.Line(oGeo, oMat));
 
-            // ── Text label ─────────────────────────────────────────────────
-            const cssHex = '#' + p.color.toString(16).padStart(6, '0');
-            sp_labels[p.id] = makeLabel(p.name, cssHex);
+            // ── Text label — use labelColor so it's always legible ─────────
+            sp_labels[p.id] = makeLabel(p.name, p.labelColor || '#CCCCCC');
             planetaryGroup.add(sp_labels[p.id]);
         });
 
@@ -2572,21 +2583,20 @@
             // Binary stars + wind are handled by the shared Sirius animator
             animateSirius(dt);
 
-            // ── Scale epoch increment by planet orbit speed slider ──────────
-            // (animateSirius already advanced epoch by dt*timeSpeed; for planets
-            //  we read the same state.epoch — the speed slider just controls how
-            //  fast the planet speeds visually relative to the clock, not epoch)
             const pSpeedFactor = state.planetOrbitScale;
 
-            // ── Planet positions ────────────────────────────────────────────
+            // ── Host positions (posA/posB set by animateSirius above) ───────
             const _posA  = posA.clone();
             const _posB  = posB.clone();
-            const _posCB = new THREE.Vector3(0, 0, 0);   // barycenter at origin
+            const _posCB = new THREE.Vector3(0, 0, 0);
+
+            // ── Position the planetary fill light at Sirius A ────────────────
+            sp_fillLight.position.copy(_posA);
 
             SP_BODIES.forEach(p => {
-                // Effective epoch: scale fast orbits for visual clarity
-                const effectiveEpoch = state.epoch * pSpeedFactor
-                    + p._T0 * (1 - pSpeedFactor);
+                // effectiveEpoch = T0 + (epoch - T0) * speed  (identical to
+                //                  epoch * speed + T0 * (1-speed) but clearer)
+                const effectiveEpoch = p._T0 + (state.epoch - p._T0) * pSpeedFactor;
 
                 const localPos = spLocalPos(p, effectiveEpoch);
 
@@ -2602,16 +2612,15 @@
                 if (mesh.visible) {
                     mesh.position.copy(worldPos);
                     mesh.rotation.y += dt * 0.8;
-                    // Pulse tidal-heated bodies
-                    if (p.emissiveI > 0.4) {
-                        const tp = Math.sin(simTime * 2.5 + p.M0_deg) * 0.15 + 1.0;
-                        mesh.material.emissiveIntensity = p.emissiveI * tp;
-                    }
+                    // Pulse all planets subtly; tidal bodies pulse harder
+                    const pAmp  = p.emissiveI > 1.0 ? 0.18 : 0.06;
+                    const tp    = Math.sin(simTime * 2.0 + p.M0_deg * 0.02) * pAmp + 1.0;
+                    mesh.material.emissiveIntensity = p.emissiveI * tp;
                 }
 
-                // ── Emissive glow ───────────────────────────────────────────
+                // ── Emissive glow (created for emissiveI > 0.4 at init) ─────
                 if (sp_glows[p.id]) {
-                    sp_glows[p.id].visible = state.showPlanets;
+                    sp_glows[p.id].visible = state.showPlanets && mesh.visible;
                     sp_glows[p.id].position.copy(worldPos);
                 }
 
@@ -2625,7 +2634,7 @@
                 lbl.visible = state.showPlanetLabels && state.showPlanets;
                 if (lbl.visible) {
                     lbl.position.copy(worldPos)
-                        .add(new THREE.Vector3(0, p.dispR + 0.35, 0));
+                        .add(new THREE.Vector3(0, p.dispR + 0.40, 0));
                 }
             });
 
@@ -2637,17 +2646,16 @@
 
                 const hostPos = blt.host === 'A' ? _posA : _posB;
                 grp.position.copy(hostPos);
-                // Slow differential rotation approximation
                 grp.rotation.y += dt * 0.008;
             });
 
             // ── HUD ─────────────────────────────────────────────────────────
-            const orbPos = getOrbitalPosition(state.epoch, SIRIUS.orbit);
-            const totalBeltPts = SP_BELTS.reduce((n, b) => n + b.count, 0);
+            const orbPos    = getOrbitalPosition(state.epoch, SIRIUS.orbit);
+            const beltTotal = SP_BELTS.reduce((n, b) => n + b.count, 0);
             document.getElementById('hudPlanetSep').textContent   = orbPos.r.toFixed(2);
             document.getElementById('hudPlanetEpoch').textContent = state.epoch.toFixed(1);
             document.getElementById('hudPlanetWind').textContent  = windParticles.length;
-            document.getElementById('hudPlanetBelts').textContent = state.showBelts ? totalBeltPts : 0;
+            document.getElementById('hudPlanetBelts').textContent = state.showBelts ? beltTotal : 0;
         }
 
         //  animateSun()
