@@ -289,9 +289,18 @@
                         <div class="epoch-label">Simulation Epoch (CE)</div>
                     </div>
                     <div class="ctrl-row">
-                        <label>Speed</label>
+                        <label>Global Speed</label>
                         <input type="range" id="timeSpeed" min="0" max="100" value="15">
                         <span class="vdisp" id="timeSpeedVal">1.5 yr/s</span>
+                    </div>
+                    <div class="ctrl-row" style="margin-top:4px">
+                        <label>Binary A/B</label>
+                        <input type="range" id="binaryOrbitSpeed" min="0" max="300" value="100">
+                        <span class="vdisp" id="binaryOrbitSpeedVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin:2px 0 6px 0;line-height:1.4">
+                        Global Speed: master clock (yr/s). Binary A/B: Sirius orbital rate multiplier.
+                        Default 1.0&times; = realistic Kepler.
                     </div>
                     <div class="btn-row">
                         <button id="btnPlay" class="active">&#9654; Play</button>
@@ -728,9 +737,12 @@
                         <label for="showPlanetLabels">Planet Labels</label>
                     </div>
                     <div class="ctrl-row" style="margin-top:8px">
-                        <label>Planet Speed</label>
+                        <label>All Planets</label>
                         <input type="range" id="planetOrbitScale" min="0" max="400" value="100">
                         <span class="vdisp" id="planetOrbitScaleVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#888;margin:2px 0 4px 0">
+                        Scales all planet speeds simultaneously.
                     </div>
                     <div class="btn-row">
                         <button id="camPlanetsOverview">Overview</button>
@@ -739,6 +751,95 @@
                     <div style="margin-top:8px;font-size:10px;color:#888;line-height:1.5">
                         Orbit radii are visually scaled for clarity. Hound displayed at 22&thinsp;AU; true distance 120&thinsp;AU.
                         Circumbinary stability cliff &approx;&thinsp;79&thinsp;AU.
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════════════════════════ -->
+            <!-- ORBIT SPEED CONTROLS — per-body speed multipliers          -->
+            <!-- ═══════════════════════════════════════════════════════════ -->
+            <div class="sb-section sp-only" style="display:none">
+                <div class="sb-title">Orbit Speed Controls <span style="font-size:10px;color:#FFD700">&#9883;</span></div>
+                <div class="sb-body">
+                    <div style="font-size:10px;color:#aaa;margin-bottom:8px;line-height:1.5">
+                        Each slider sets that body&rsquo;s individual orbit speed relative to the
+                        global clock &times; All&nbsp;Planets master. Default <strong style="color:#ffd700">1.0&times;</strong>
+                        = true Keplerian rate.
+                    </div>
+
+                    <!-- ── Sirius A Inner System ── -->
+                    <div style="font-size:10px;font-weight:600;color:#CED8FF;margin:6px 0 4px;letter-spacing:0.5px">
+                        &#9733; SIRIUS A INNER SYSTEM
+                    </div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#FF7744">Cinder</label>
+                        <input type="range" id="spd_a1_cinder" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_a1_cinderVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;10.6&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.12&thinsp;AU</div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#C8C4A0">Glass</label>
+                        <input type="range" id="spd_a2_glass" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_a2_glassVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;46&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.32&thinsp;AU</div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#EEA040">Saffron</label>
+                        <input type="range" id="spd_a3_saffron" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_a3_saffronVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;165&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.75&thinsp;AU</div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#6699EE">Bluecoil</label>
+                        <input type="range" id="spd_a4_bluecoil" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_a4_bluecoilVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;1.41&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;1.60&thinsp;AU</div>
+
+                    <!-- ── Sirius B System ── -->
+                    <div style="font-size:10px;font-weight:600;color:#A2C7FF;margin:8px 0 4px;letter-spacing:0.5px">
+                        &#9733; SIRIUS B SYSTEM
+                    </div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#FF7733">Ashring</label>
+                        <input type="range" id="spd_b1_ashring" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_b1_ashringVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;0.67&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.015&thinsp;AU</div>
+
+                    <!-- ── Circumbinary ── -->
+                    <div style="font-size:10px;font-weight:600;color:#AAD4EE;margin:8px 0 4px;letter-spacing:0.5px">
+                        &#11044; CIRCUMBINARY
+                    </div>
+
+                    <div class="ctrl-row">
+                        <label style="color:#AAD4EE">Hound</label>
+                        <input type="range" id="spd_cb1_hound" min="0" max="500" value="100">
+                        <span class="vdisp" id="spd_cb1_houndVal">1.0&times;</span>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;749&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;120&thinsp;AU</div>
+
+                    <!-- ── Reset button ── -->
+                    <div class="btn-row" style="margin-top:10px">
+                        <button id="btnResetSpeeds" style="width:100%;background:rgba(255,215,0,0.08);border-color:rgba(255,215,0,0.3)">
+                            &#8634; Reset All Speeds to 1.0&times;
+                        </button>
+                    </div>
+
+                    <!-- ── Preset buttons ── -->
+                    <div style="font-size:10px;color:#888;margin:8px 0 4px">Speed Presets:</div>
+                    <div class="btn-row">
+                        <button id="btnPresetRealistic" title="All bodies at true Keplerian rates">Realistic</button>
+                        <button id="btnPresetVisual" title="Scale for visual interest: Hound and binary accelerated, fast planets slowed">Visual</button>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin-top:4px;line-height:1.4">
+                        <em>Realistic</em>: all 1.0&times;. &nbsp;
+                        <em>Visual</em>: slows Cinder/Ashring, boosts Hound &amp; binary so all orbits are watchable.
                     </div>
                 </div>
             </div>
@@ -824,6 +925,11 @@
             <p class="sep-readout" style="color:#88AAFF">&#11088; Sirius Planetary Fantasy</p>
             <p class="dim">Sep: <span id="hudPlanetSep">--</span> AU &nbsp; Epoch: <span class="val" id="hudPlanetEpoch">2026.0</span></p>
             <p class="dim">Wind: <span class="val" id="hudPlanetWind">0</span> pts &nbsp; Belts: <span class="val" id="hudPlanetBelts">0</span> pts</p>
+            <p class="dim" id="hudSpeedLine" style="margin-top:2px">
+                Clk: <span class="val" id="hudClkSpd">1.5</span>&thinsp;yr/s &nbsp;
+                Bin: <span class="val" id="hudBinSpd">1.0</span>&times; &nbsp;
+                Planets: <span class="val" id="hudPlnSpd">1.0</span>&times;
+            </p>
             <p class="dim" style="margin-top:4px"><kbd>Drag</kbd> Rotate &nbsp; <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Tab</kbd> Panel</p>
         </div>
         <div id="hudBtg" style="display:none">
@@ -1041,7 +1147,26 @@
             showBelts:         true,
             showPlanetOrbits:  true,
             showPlanetLabels:  true,
-            planetOrbitScale:  1.0,   // speed multiplier for visual orbital motion
+            planetOrbitScale:  1.0,   // global speed multiplier for ALL planets (convenience lever)
+
+            // ── Unified time: per-body speed multipliers ───────────────────
+            // 1.0 = true Keplerian rate relative to global timeSpeed clock.
+            // Effective epoch for a body:
+            //   effectiveEpoch = T0 + (state.epoch - T0) * bodySpeed[id] * scaleOverride
+            binaryOrbitSpeed: 1.0,   // Sirius A/B mutual orbit (default: realistic 1.0×)
+            bodySpeed: {
+                // Sirius A inner system
+                a1_cinder:   1.0,    // P ≈ 10.6 days — rocky, metal-vapour dayside
+                a2_glass:    1.0,    // P ≈ 46 days  — super-Earth, silicate surface
+                a3_saffron:  1.0,    // P ≈ 165 days — transition world, saffron haze
+                a4_bluecoil: 1.0,    // P ≈ 1.41 yr  — mini-Neptune, H₂/He atmosphere
+                // Sirius B system
+                b1_ashring:  1.0,    // P ≈ 0.67 days — relic rocky, tidal heating
+                // Circumbinary
+                cb1_hound:   1.0,    // P ≈ 749 yr   — cold Neptune sentinel
+            },
+            // Internal: computed binary effective epoch (set each frame by animateSirius)
+            _binaryEpoch: 2026.0,
         };
 
         // Display sizes (in AU, our 3D unit)
@@ -2580,10 +2705,16 @@
         //  animateSiriusPlanets()
         // ══════════════════════════════════════════════════════════════════════
         function animateSiriusPlanets(dt) {
-            // Binary stars + wind are handled by the shared Sirius animator
+            // Binary stars + wind are handled by the shared Sirius animator.
+            // animateSirius() advances state.epoch and caches state._binaryEpoch.
             animateSirius(dt);
 
-            const pSpeedFactor = state.planetOrbitScale;
+            // ── All-planets master multiplier × individual body speed ────────
+            // Effective epoch for planet p:
+            //   effectiveEpoch = p._T0 + (state.epoch - p._T0) * (planetOrbitScale * bodySpeed[p.id])
+            // planetOrbitScale = convenience lever (moves all planets together)
+            // bodySpeed[p.id]  = fine-grained individual control (default 1.0 = Keplerian)
+            const pMasterScale = state.planetOrbitScale;
 
             // ── Host positions (posA/posB set by animateSirius above) ───────
             const _posA  = posA.clone();
@@ -2594,9 +2725,9 @@
             sp_fillLight.position.copy(_posA);
 
             SP_BODIES.forEach(p => {
-                // effectiveEpoch = T0 + (epoch - T0) * speed  (identical to
-                //                  epoch * speed + T0 * (1-speed) but clearer)
-                const effectiveEpoch = p._T0 + (state.epoch - p._T0) * pSpeedFactor;
+                // Per-body effective epoch: applies both master scale and individual multiplier
+                const bodyMult = pMasterScale * (state.bodySpeed[p.id] ?? 1.0);
+                const effectiveEpoch = p._T0 + (state.epoch - p._T0) * bodyMult;
 
                 const localPos = spLocalPos(p, effectiveEpoch);
 
@@ -2650,12 +2781,19 @@
             });
 
             // ── HUD ─────────────────────────────────────────────────────────
-            const orbPos    = getOrbitalPosition(state.epoch, SIRIUS.orbit);
+            // Use the binary-effective epoch (state._binaryEpoch) for separation readout
+            // so HUD stays consistent with the actual star positions rendered.
+            const bEpochForHUD = state._binaryEpoch ?? state.epoch;
+            const orbPos    = getOrbitalPosition(bEpochForHUD, SIRIUS.orbit);
             const beltTotal = SP_BELTS.reduce((n, b) => n + b.count, 0);
             document.getElementById('hudPlanetSep').textContent   = orbPos.r.toFixed(2);
             document.getElementById('hudPlanetEpoch').textContent = state.epoch.toFixed(1);
             document.getElementById('hudPlanetWind').textContent  = windParticles.length;
             document.getElementById('hudPlanetBelts').textContent = state.showBelts ? beltTotal : 0;
+            // Speed line: show active multipliers so users can see what's running
+            document.getElementById('hudClkSpd').textContent  = state.timeSpeed.toFixed(1);
+            document.getElementById('hudBinSpd').textContent  = state.binaryOrbitSpeed.toFixed(2);
+            document.getElementById('hudPlnSpd').textContent  = state.planetOrbitScale.toFixed(1);
         }
 
         //  animateSun()
@@ -3446,13 +3584,19 @@
         }
 
         function animateSirius(dt) {
-            // Advance epoch
+            // Advance the unified global epoch (master clock for all bodies)
             if (state.playing) {
                 state.epoch += dt * state.timeSpeed;
             }
 
+            // ── Binary orbit: apply per-body speed multiplier ───────────────────
+            // binaryOrbitSpeed=1.0 → pure Keplerian rate relative to global clock
+            const _bT0 = SIRIUS.orbit.periastronTime;
+            const binaryEpoch = _bT0 + (state.epoch - _bT0) * state.binaryOrbitSpeed;
+            state._binaryEpoch = binaryEpoch;  // cache for HUD & planet mode
+
             // --- Compute orbital positions ---
-            const orbPos = getOrbitalPosition(state.epoch, SIRIUS.orbit);
+            const orbPos = getOrbitalPosition(binaryEpoch, SIRIUS.orbit);
 
             // Map to 3D display coordinates (y-up)
             // A is on opposite side of COM from the relative position vector
@@ -3559,12 +3703,15 @@
             windGeo.setDrawRange(0, windParticles.length);
 
             // --- Update HUD & sidebar data ---
+            // orbPos is computed from binaryEpoch, so separation & phase reflect the binary's
+            // effective speed-multiplied epoch, not the raw simulation epoch.
             const separation = orbPos.r;
-            const phase = ((state.epoch - SIRIUS.orbit.periastronTime) / SIRIUS.orbit.period) % 1;
+            const phase = ((binaryEpoch - SIRIUS.orbit.periastronTime) / SIRIUS.orbit.period) % 1;
             const phaseNorm = phase < 0 ? phase + 1 : phase;
             const nuDeg = (orbPos.nu * 180 / Math.PI + 360) % 360;
 
             document.getElementById('hudSep').textContent = separation.toFixed(2);
+            // HUD epoch shows the simulation (global) epoch
             document.getElementById('hudEpoch').textContent = state.epoch.toFixed(1);
             document.getElementById('hudPhase').textContent = phaseNorm.toFixed(3);
             document.getElementById('hudParts').textContent = activeCount;
@@ -3611,10 +3758,18 @@
             });
         });
 
-        // Time controls
+        // ── Unified time controls ───────────────────────────────────────────
+        // Global master clock: all bodies advance proportionally to this
         document.getElementById('timeSpeed').addEventListener('input', e => {
             state.timeSpeed = parseFloat(e.target.value) / 10;
             document.getElementById('timeSpeedVal').textContent = state.timeSpeed.toFixed(1) + ' yr/s';
+        });
+
+        // Binary orbit speed (Sirius A/B mutual orbit rate, independent of planets)
+        document.getElementById('binaryOrbitSpeed').addEventListener('input', e => {
+            state.binaryOrbitSpeed = parseInt(e.target.value) / 100;
+            document.getElementById('binaryOrbitSpeedVal').textContent =
+                state.binaryOrbitSpeed.toFixed(2) + '\u00d7';
         });
         document.getElementById('btnPlay').addEventListener('click', () => {
             state.playing = true;
@@ -3676,11 +3831,89 @@
         document.getElementById('showPlanetLabels').addEventListener('change', e => {
             state.showPlanetLabels = e.target.checked;
         });
+        // All-planets master multiplier
         document.getElementById('planetOrbitScale').addEventListener('input', e => {
             // Slider 0-400 → speed 0-4×
             state.planetOrbitScale = parseInt(e.target.value) / 100;
             document.getElementById('planetOrbitScaleVal').textContent =
                 state.planetOrbitScale.toFixed(1) + '\u00d7';
+        });
+
+        // ── Per-planet individual speed sliders ─────────────────────────────
+        // Each slider range 0-500 maps to 0.00 – 5.00× speed multiplier.
+        // Value 100 = 1.00× = true Keplerian rate (realistic default).
+        SP_BODIES.forEach(p => {
+            const sliderId = 'spd_' + p.id;
+            const valId    = 'spd_' + p.id + 'Val';
+            const el = document.getElementById(sliderId);
+            if (!el) return;
+            el.addEventListener('input', e => {
+                state.bodySpeed[p.id] = parseInt(e.target.value) / 100;
+                document.getElementById(valId).textContent =
+                    state.bodySpeed[p.id].toFixed(2) + '\u00d7';
+            });
+        });
+
+        // ── Reset all speeds to 1.0× (realistic defaults) ──────────────────
+        document.getElementById('btnResetSpeeds').addEventListener('click', () => {
+            // Reset binary
+            state.binaryOrbitSpeed = 1.0;
+            document.getElementById('binaryOrbitSpeed').value = 100;
+            document.getElementById('binaryOrbitSpeedVal').textContent = '1.00\u00d7';
+            // Reset all-planets master
+            state.planetOrbitScale = 1.0;
+            document.getElementById('planetOrbitScale').value = 100;
+            document.getElementById('planetOrbitScaleVal').textContent = '1.0\u00d7';
+            // Reset each planet
+            SP_BODIES.forEach(p => {
+                state.bodySpeed[p.id] = 1.0;
+                const el = document.getElementById('spd_' + p.id);
+                if (el) el.value = 100;
+                const vEl = document.getElementById('spd_' + p.id + 'Val');
+                if (vEl) vEl.textContent = '1.00\u00d7';
+            });
+        });
+
+        // ── Speed preset: Realistic (all 1.0×) ─────────────────────────────
+        document.getElementById('btnPresetRealistic').addEventListener('click', () => {
+            document.getElementById('btnResetSpeeds').click();  // reuse reset logic
+        });
+
+        // ── Speed preset: Visual (all orbits watchable) ─────────────────────
+        // Strategy: slow ultra-fast inner planets, boost ultra-slow outer ones,
+        // keep the binary and mid-range planets near 1×.
+        // The all-planets master scale is reset to 1× so individual values are
+        // the sole control — more transparent for testing.
+        document.getElementById('btnPresetVisual').addEventListener('click', () => {
+            const VISUAL = {
+                binaryOrbitSpeed: 1.0,    // binary already fast enough at 1.5 yr/s
+                planetOrbitScale: 1.0,    // master stays at 1×; individual handles it
+                bodySpeed: {
+                    a1_cinder:   0.10,    // P=10.6d → slowed so it's watchable (not a blur)
+                    a2_glass:    0.25,    // P=46d   → moderate slow-down
+                    a3_saffron:  0.50,    // P=165d  → slight slow-down
+                    a4_bluecoil: 1.00,    // P=1.41y → already comfortable at 1×
+                    b1_ashring:  0.05,    // P=0.67d → very slow so it's visible
+                    cb1_hound:  50.00,    // P=749y  → boosted so Hound visibly moves
+                },
+            };
+            state.binaryOrbitSpeed = VISUAL.binaryOrbitSpeed;
+            document.getElementById('binaryOrbitSpeed').value = Math.round(VISUAL.binaryOrbitSpeed * 100);
+            document.getElementById('binaryOrbitSpeedVal').textContent =
+                VISUAL.binaryOrbitSpeed.toFixed(2) + '\u00d7';
+
+            state.planetOrbitScale = VISUAL.planetOrbitScale;
+            document.getElementById('planetOrbitScale').value = Math.round(VISUAL.planetOrbitScale * 100);
+            document.getElementById('planetOrbitScaleVal').textContent =
+                VISUAL.planetOrbitScale.toFixed(1) + '\u00d7';
+
+            Object.entries(VISUAL.bodySpeed).forEach(([id, spd]) => {
+                state.bodySpeed[id] = spd;
+                const el = document.getElementById('spd_' + id);
+                if (el) el.value = Math.round(spd * 100);
+                const vEl = document.getElementById('spd_' + id + 'Val');
+                if (vEl) vEl.textContent = spd.toFixed(2) + '\u00d7';
+            });
         });
 
         // Planet camera presets
