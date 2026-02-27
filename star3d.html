@@ -993,6 +993,49 @@
         const qA = SIRIUS.B.mass / SIRIUS.system.totalMass;  // A's fraction of semi-major axis
         const qB = SIRIUS.A.mass / SIRIUS.system.totalMass;  // B's fraction
 
+        // ══════════════════════════════════════════════════════════════════════
+        // CANONICAL COORDINATE HELPERS
+        // ══════════════════════════════════════════════════════════════════════
+        // Standard astrodynamics reference frame:
+        //   x → periapsis direction (in fundamental plane)
+        //   y → 90° ahead in fundamental plane
+        //   z → north pole of fundamental plane
+        //
+        // Three.js Y-up convention mapping:
+        //   threeX = orbX   (right  ≡ reference X)
+        //   threeY = orbZ   (up     ≡ reference north)
+        //   threeZ = −orbY  (depth  ≡ −reference Y, right-hand)
+        //
+        // This single function is used for EVERY body so all positions share
+        // one consistent world-space coordinate system.
+        function orbToThree(ox, oy, oz) {
+            return new THREE.Vector3(ox, oz, -oy);
+        }
+
+        // ── Binary orbital-plane rotation matrix (R₃(−Ω) × R₁(−i)) ──────────
+        // Transforms from the binary's orbital-plane frame to the sky/world
+        // frame.  Planet orbital elements are defined IN the binary plane, so
+        // applying this rotation gives their correct sky-frame position.
+        //
+        // Column vectors (binary-plane axes expressed in sky frame):
+        //   x̂_bin = (cosΩ,  sinΩ,  0)
+        //   ŷ_bin = (−sinΩ cosI,  cosΩ cosI,  sinI)
+        //   ẑ_bin = ( sinΩ sinI, −cosΩ sinI,  cosI)   ← orbital pole
+        //
+        const _BP_cO = Math.cos(SIRIUS.orbit.ascendingNode);
+        const _BP_sO = Math.sin(SIRIUS.orbit.ascendingNode);
+        const _BP_cI = Math.cos(SIRIUS.orbit.inclination);
+        const _BP_sI = Math.sin(SIRIUS.orbit.inclination);
+
+        // Apply the binary-plane rotation: (x,y,z)_binaryPlane → (x,y,z)_sky
+        function applyBinaryPlane(x, y, z) {
+            return {
+                x: _BP_cO * x  -  _BP_sO * _BP_cI * y  +  _BP_sO * _BP_sI * z,
+                y: _BP_sO * x  +  _BP_cO * _BP_cI * y  -  _BP_cO * _BP_sI * z,
+                z:                          _BP_sI * y  +           _BP_cI * z,
+            };
+        }
+
         // ──────────────────────────────────────────────
         // SUN — SCIENTIFIC DATA (IAU 2015 Nominal Solar Values)
         // ──────────────────────────────────────────────
@@ -1690,18 +1733,18 @@
             const posArrB = orbitLineB.geometry.attributes.position.array;
 
             for (let i = 0; i <= ORBIT_SEGMENTS; i++) {
-                // Sweep a full period
-                const t = SIRIUS.orbit.periastronTime + (i / ORBIT_SEGMENTS) * SIRIUS.orbit.period;
+                const t   = SIRIUS.orbit.periastronTime + (i / ORBIT_SEGMENTS) * SIRIUS.orbit.period;
                 const pos = getOrbitalPosition(t, SIRIUS.orbit);
 
-                // Sirius A orbits opposite to B relative to COM
+                // Canonical orbToThree: threeX=orbX, threeY=orbZ, threeZ=−orbY
+                // A orbits opposite to B relative to COM (mass-weighted)
                 posArrA[i * 3]     = -pos.x * qA;
-                posArrA[i * 3 + 1] =  pos.z * qA;  // map z->y for display
-                posArrA[i * 3 + 2] = -pos.y * qA;
+                posArrA[i * 3 + 1] = -pos.z * qA;  // ← canonical: threeY = orbZ, with −qA
+                posArrA[i * 3 + 2] =  pos.y * qA;  // ← canonical: threeZ = −orbY, with −qA
 
-                posArrB[i * 3]     = pos.x * qB;
-                posArrB[i * 3 + 1] = -pos.z * qB;
-                posArrB[i * 3 + 2] = pos.y * qB;
+                posArrB[i * 3]     =  pos.x * qB;
+                posArrB[i * 3 + 1] =  pos.z * qB;  // ← canonical: threeY = orbZ, with +qB
+                posArrB[i * 3 + 2] = -pos.y * qB;  // ← canonical: threeZ = −orbY, with +qB
             }
             orbitLineA.geometry.attributes.position.needsUpdate = true;
             orbitLineB.geometry.attributes.position.needsUpdate = true;
@@ -1889,10 +1932,22 @@
         //      circumbinary sentinel at 120 AU (displayed at 22 AU for clarity).
         const _Pkep = (a, M) => Math.sqrt(a * a * a / M); // Kepler P (AU, M☉ → yr)
 
+        // ── Inclination note ──────────────────────────────────────────────────
+        // All i_deg values below are referenced to the BINARY ORBITAL PLANE,
+        // not to the sky plane.  The binary orbital plane is itself inclined at
+        // 136.3° to the plane of the sky (retrograde orbit).  applyBinaryPlane()
+        // rotates each planet's orbital-frame position into the sky/world frame,
+        // so even modest inclinations (3°–20°) produce clearly tilted 3-D orbits.
+        //
+        // Physical motivation (binary Kozai-Lidov & Laplace plane):
+        //   • S-type planets close to A follow A's equatorial plane, which is
+        //     close to the binary orbital plane but shows some scatter (3°–10°).
+        //   • Ashring (around B, WD) has higher forced inclination from A.
+        //   • Hound (circumbinary) has the widest latitude scatter.
         const SP_BODIES = [
             // ─── Sirius A inner system ─────────────────────────────────────
             {   id:'a1_cinder',  name:'Cinder',   host:'A',
-                a_AU:0.12,  e:0.02, i_deg:0.6,  Omega_deg:10,  omega_deg:40,  M0_deg:0,
+                a_AU:0.12,  e:0.02, i_deg:3.0,  Omega_deg:10,  omega_deg:40,  M0_deg:0,
                 period_yr: _Pkep(0.12, 2.06),    // ≈ 0.029 yr ≈ 10.6 days
                 color:0x2A1506, emissive:0xFF5500, emissiveI:1.10,
                 labelColor:'#FF7744',
@@ -1900,7 +1955,7 @@
                 desc:'Rocky, airless. Metal-vapour dayside.',
             },
             {   id:'a2_glass',   name:'Glass',    host:'A',
-                a_AU:0.32,  e:0.03, i_deg:0.7,  Omega_deg:18,  omega_deg:90,  M0_deg:120,
+                a_AU:0.32,  e:0.03, i_deg:5.5,  Omega_deg:55,  omega_deg:90,  M0_deg:120,
                 period_yr: _Pkep(0.32, 2.06),    // ≈ 0.126 yr ≈ 46 days
                 color:0xD8D2BC, emissive:0xC0BAA0, emissiveI:0.55,
                 labelColor:'#D8D2BC',
@@ -1908,7 +1963,7 @@
                 desc:'Super-Earth. Pale silicate surface, glassy albedo.',
             },
             {   id:'a3_saffron', name:'Saffron',  host:'A',
-                a_AU:0.75,  e:0.04, i_deg:0.9,  Omega_deg:26,  omega_deg:130, M0_deg:250,
+                a_AU:0.75,  e:0.04, i_deg:8.0,  Omega_deg:110, omega_deg:130, M0_deg:250,
                 period_yr: _Pkep(0.75, 2.06),    // ≈ 0.453 yr ≈ 165 days
                 color:0xCC882A, emissive:0xCC7722, emissiveI:0.65,
                 labelColor:'#EEA040',
@@ -1916,7 +1971,7 @@
                 desc:'Transition world. High-μ or stripped core, saffron haze.',
             },
             {   id:'a4_bluecoil',name:'Bluecoil', host:'A',
-                a_AU:1.60,  e:0.05, i_deg:1.1,  Omega_deg:34,  omega_deg:210, M0_deg:10,
+                a_AU:1.60,  e:0.05, i_deg:4.5,  Omega_deg:200, omega_deg:210, M0_deg:10,
                 period_yr: _Pkep(1.60, 2.06),    // ≈ 1.409 yr ≈ 515 days
                 color:0x2255AA, emissive:0x3366CC, emissiveI:0.60,
                 labelColor:'#6699EE',
@@ -1925,7 +1980,7 @@
             },
             // ─── Sirius B system ───────────────────────────────────────────
             {   id:'b1_ashring', name:'Ashring',  host:'B',
-                a_AU:0.015, e:0.01, i_deg:2.0,  Omega_deg:80,  omega_deg:15,  M0_deg:180,
+                a_AU:0.015, e:0.01, i_deg:15.0, Omega_deg:80,  omega_deg:15,  M0_deg:180,
                 period_yr: _Pkep(0.015, 1.018),  // ≈ 0.00182 yr ≈ 0.665 days
                 color:0x1A1A1A, emissive:0xFF5500, emissiveI:1.80,
                 labelColor:'#FF7733',
@@ -1934,7 +1989,7 @@
             },
             // ─── Circumbinary ──────────────────────────────────────────────
             {   id:'cb1_hound',  name:'Hound',    host:'CB',
-                a_AU:120,   e:0.08, i_deg:4.0,  Omega_deg:5,   omega_deg:300, M0_deg:0,
+                a_AU:120,   e:0.08, i_deg:20.0, Omega_deg:5,   omega_deg:300, M0_deg:0,
                 period_yr: _Pkep(120, 3.078),    // ≈ 749 yr
                 color:0x8BB8D8, emissive:0x5599BB, emissiveI:0.70,
                 labelColor:'#AAD4EE',
@@ -1959,23 +2014,63 @@
         const _DEG = Math.PI / 180;
         SP_BODIES.forEach(p => { p._T0 = 2000.0 - (p.M0_deg / 360) * p.period_yr; });
 
+        // ── Apsidal (periapsis) precession from the companion star's gravity ──
+        // Secular perturbation formula (first-order):
+        //   dω/dt ≈ (3/4) · n · (M_companion / M_host) · (a / a_bin)³ / (1−e_bin²)^(3/2)
+        // where n = 2π/P is the planet's mean motion (rad yr⁻¹).
+        // This rotates the ellipse in its own plane, creating rosette orbits.
+        // Rate is stored in rad yr⁻¹ on the body descriptor.
+        {
+            const _e2    = SIRIUS.orbit.eccentricity ** 2;
+            const _aBin  = SIRIUS.orbit.semiMajorAxis;        // 20 AU
+            const _eCorr = Math.pow(1 - _e2, -1.5);           // (1−e²)^(−3/2)
+
+            SP_BODIES.forEach(p => {
+                if (p.host === 'A' || p.host === 'B') {
+                    const companion = p.host === 'A' ? SIRIUS.B.mass : SIRIUS.A.mass;
+                    const hostMass  = p.host === 'A' ? SIRIUS.A.mass : SIRIUS.B.mass;
+                    const n         = 2 * Math.PI / p.period_yr;     // mean motion rad yr⁻¹
+                    const aRatio    = p.a_AU / _aBin;
+                    // Apsidal precession rate (rad yr⁻¹)
+                    p._prec_rad_yr = (3 / 4) * n * (companion / hostMass)
+                                     * Math.pow(aRatio, 3) * _eCorr;
+                } else {
+                    p._prec_rad_yr = 0;  // circumbinary — no single-star forcing
+                }
+            });
+        }
+
         // ── Build orbit params object for getOrbitalPosition ─────────────────
-        function spOrbit(p) {
+        // epoch: simulation epoch (years CE) used to compute current precessed ω.
+        // Passing epoch = undefined uses the J2000 (2000.0) reference value.
+        function spOrbit(p, epoch) {
+            const t = (epoch !== undefined) ? epoch : 2000.0;
+            // Advance argument of periapsis from the J2000 base value
+            const omega_now = p.omega_deg * _DEG + p._prec_rad_yr * (t - 2000.0);
             return {
-                period:          p.period_yr,
-                eccentricity:    p.e,
-                semiMajorAxis:   p.disp_a,   // always use visual scale for 3D
-                inclination:     p.i_deg   * _DEG,
-                ascendingNode:   p.Omega_deg * _DEG,
-                argPeriastron:   p.omega_deg * _DEG,
-                periastronTime:  p._T0,
+                period:         p.period_yr,
+                eccentricity:   p.e,
+                semiMajorAxis:  p.disp_a,   // visual scale for 3-D display
+                inclination:    p.i_deg * _DEG,
+                ascendingNode:  p.Omega_deg * _DEG,
+                argPeriastron:  omega_now,  // ← precesses over time
+                periastronTime: p._T0,
             };
         }
 
-        // ── Orbital position in scene coords (y-up, host at origin) ──────────
+        // ── Orbital position in Three.js world space (host at origin) ────────
+        //
+        // Pipeline:
+        //   1. getOrbitalPosition → (x,y,z) in the binary-plane reference frame
+        //      (planet elements are defined relative to binary's orbital plane)
+        //   2. applyBinaryPlane   → rotate to sky/world frame using Sirius's
+        //      actual (Ω, i) so planets inherit the binary's 136.3° inclination
+        //   3. orbToThree         → canonical sky→Three.js Y-up mapping
+        //
         function spLocalPos(p, epoch) {
-            const op = getOrbitalPosition(epoch, spOrbit(p));
-            return new THREE.Vector3(op.x, op.z, -op.y);
+            const op = getOrbitalPosition(epoch, spOrbit(p, epoch));
+            const w  = applyBinaryPlane(op.x, op.y, op.z);
+            return orbToThree(w.x, w.y, w.z);
         }
 
         // ── THREE.JS OBJECTS ─────────────────────────────────────────────────
@@ -2020,19 +2115,27 @@
                 planetaryGroup.add(sp_glows[p.id]);
             }
 
-            // ── Orbit path line (in host-local space) ──────────────────────
+            // ── Orbit path line (host-local, updated each frame for precession) ─
+            // Buffer is mutable so animateSiriusPlanets can rebuild it per-frame
+            // to track apsidal precession.  We keep a reference on the planet
+            // descriptor (p._orbitBuf / p._orbitGeo) for the update loop.
             const grp = new THREE.Group();
             sp_orbitGrps[p.id] = grp;
             planetaryGroup.add(grp);
 
             const orbitPosArr = new Float32Array((_OSEG + 1) * 3);
-            const orbitRef = spOrbit(p);
-            for (let i = 0; i <= _OSEG; i++) {
-                const t  = p._T0 + (i / _OSEG) * p.period_yr;
-                const op = getOrbitalPosition(t, orbitRef);
-                orbitPosArr[i * 3]     =  op.x;
-                orbitPosArr[i * 3 + 1] =  op.z;
-                orbitPosArr[i * 3 + 2] = -op.y;
+            // Seed with initial orbit shape (proper binary-plane mapping from day 1)
+            {
+                const orbitRef0 = spOrbit(p, 2000.0);
+                for (let i = 0; i <= _OSEG; i++) {
+                    const t  = p._T0 + (i / _OSEG) * p.period_yr;
+                    const op = getOrbitalPosition(t, orbitRef0);
+                    const w  = applyBinaryPlane(op.x, op.y, op.z);
+                    const v  = orbToThree(w.x, w.y, w.z);
+                    orbitPosArr[i * 3]     = v.x;
+                    orbitPosArr[i * 3 + 1] = v.y;
+                    orbitPosArr[i * 3 + 2] = v.z;
+                }
             }
             const oGeo = new THREE.BufferGeometry();
             oGeo.setAttribute('position', new THREE.BufferAttribute(orbitPosArr, 3));
@@ -2040,6 +2143,9 @@
                 color: p.emissive || p.color, transparent: true, opacity: 0.40,
             });
             grp.add(new THREE.Line(oGeo, oMat));
+            // Store refs for per-frame dynamic updates
+            p._orbitBuf = orbitPosArr;
+            p._orbitGeo = oGeo;
 
             // ── Text label — use labelColor so it's always legible ─────────
             sp_labels[p.id] = makeLabel(p.name, p.labelColor || '#CCCCCC');
@@ -2055,14 +2161,34 @@
             const pos   = new Float32Array(count * 3);
 
             for (let i = 0; i < count; i++) {
+                // Random orbital elements for this belt particle
                 const a   = blt.disp_a_min + Math.random() * (blt.disp_a_max - blt.disp_a_min);
                 const e   = Math.random() * blt.e_max;
                 const inc = (Math.random() * 2 - 1) * blt.i_max_deg * _DEG;
-                const th  = Math.random() * Math.PI * 2;
-                const r   = a * (1 - e * e) / (1 + e * Math.cos(th));
-                pos[i * 3]     =  r * Math.cos(th);
-                pos[i * 3 + 1] =  r * Math.sin(inc);
-                pos[i * 3 + 2] = -r * Math.sin(th) * Math.cos(inc);
+                const Omega_p = Math.random() * Math.PI * 2;   // random ascending node
+                const th  = Math.random() * Math.PI * 2;       // true anomaly
+
+                // Correct conic-section radius
+                const r = a * (1 - e * e) / (1 + e * Math.cos(th));
+
+                // Position in the particle's own orbital plane (ω=0, no periapsis rotation)
+                const xOrb = r * Math.cos(th);
+                const yOrb = r * Math.sin(th);
+
+                // Apply inclination and random ascending node  (R₃(−Ω)·R₁(−i))
+                const cO = Math.cos(Omega_p), sO = Math.sin(Omega_p);
+                const cI = Math.cos(inc),     sI = Math.sin(inc);
+                const px = cO * xOrb - sO * cI * yOrb;
+                const py = sO * xOrb + cO * cI * yOrb;
+                const pz =                    sI * yOrb;
+
+                // Rotate from binary-plane frame into sky/world frame,
+                // then into Three.js Y-up coordinates
+                const w = applyBinaryPlane(px, py, pz);
+                const v = orbToThree(w.x, w.y, w.z);
+                pos[i * 3]     = v.x;
+                pos[i * 3 + 1] = v.y;
+                pos[i * 3 + 2] = v.z;
             }
 
             const geo = new THREE.BufferGeometry();
@@ -2755,10 +2881,30 @@
                     sp_glows[p.id].position.copy(worldPos);
                 }
 
-                // ── Orbit path group — placed at host so line is host-local ─
+                // ── Orbit path group ────────────────────────────────────────
+                // The path group is positioned at the host star so that all
+                // orbit-line points (stored in host-local space) render at the
+                // correct world location even as the binary evolves.
                 const oGrp = sp_orbitGrps[p.id];
                 oGrp.visible = state.showPlanetOrbits;
                 oGrp.position.copy(hostPos);
+
+                // Rebuild orbit path each frame so apsidal precession is visible.
+                // Uses the current precessed spOrbit(p, effectiveEpoch) to get the
+                // correct ellipse orientation, sweeping one full period.
+                if (state.showPlanetOrbits && p._orbitBuf && p._orbitGeo) {
+                    const orbitRef = spOrbit(p, effectiveEpoch);
+                    for (let oi = 0; oi <= _OSEG; oi++) {
+                        const ot  = p._T0 + (oi / _OSEG) * p.period_yr;
+                        const oop = getOrbitalPosition(ot, orbitRef);
+                        const ow  = applyBinaryPlane(oop.x, oop.y, oop.z);
+                        const ov  = orbToThree(ow.x, ow.y, ow.z);
+                        p._orbitBuf[oi * 3]     = ov.x;
+                        p._orbitBuf[oi * 3 + 1] = ov.y;
+                        p._orbitBuf[oi * 3 + 2] = ov.z;
+                    }
+                    p._orbitGeo.attributes.position.needsUpdate = true;
+                }
 
                 // ── Label ───────────────────────────────────────────────────
                 const lbl = sp_labels[p.id];
@@ -3598,10 +3744,11 @@
             // --- Compute orbital positions ---
             const orbPos = getOrbitalPosition(binaryEpoch, SIRIUS.orbit);
 
-            // Map to 3D display coordinates (y-up)
-            // A is on opposite side of COM from the relative position vector
-            posA.set(-orbPos.x * qA, orbPos.z * qA, -orbPos.y * qA);
-            posB.set(orbPos.x * qB, -orbPos.z * qB, orbPos.y * qB);
+            // Map to Three.js Y-up via canonical orbToThree:
+            //   threeX = orbX,  threeY = orbZ,  threeZ = −orbY
+            // A orbits opposite to B relative to the system center of mass.
+            posA.set(-orbPos.x * qA, -orbPos.z * qA,  orbPos.y * qA);
+            posB.set( orbPos.x * qB,  orbPos.z * qB, -orbPos.y * qB);
 
             // Position stars + associated layers
             siriusAMesh.position.copy(posA);
