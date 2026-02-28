@@ -1,0 +1,2676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solar MHD · NASA X9.0 Flare · 2024-10-03</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;700&family=Playfair+Display:ital,wght@0,400;1,400&display=swap');
+
+:root {
+  --g: #c8943a;
+  --gd: #5a3e18;
+  --bg: #020108;
+  --pan: rgba(4,2,14,0.94);
+  --bor: rgba(200,148,58,0.2);
+  --tx: #b8a888;
+  --txd: #504030;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--tx);font-family:'IBM Plex Mono',monospace;overflow:hidden;width:100vw;height:100vh;}
+#cv{position:fixed;inset:0;}
+
+/* floating panels */
+.fp{
+  position:fixed;z-index:40;
+  background:var(--pan);
+  border:1px solid var(--bor);
+  backdrop-filter:blur(8px);
+  min-width:60px;min-height:32px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.6);
+}
+.fp-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:5px 10px;
+  background:rgba(200,148,58,0.06);
+  border-bottom:1px solid var(--bor);
+  cursor:move;user-select:none;
+  height:26px;
+}
+.fp-title{font-size:7.5px;letter-spacing:0.28em;text-transform:uppercase;color:var(--g);}
+.fp-acts{display:flex;gap:4px;}
+.fp-btn{
+  width:11px;height:11px;border-radius:50%;border:none;cursor:pointer;
+  font-size:0;padding:0;
+}
+.fp-min{background:#c89a30;}
+.fp-close{background:#cc4030;}
+.fp-body{overflow:hidden;}
+.fp.minimized .fp-body{display:none;}
+.fp.minimized{min-height:0;}
+
+/* telemetry cells */
+#pan-telem{top:12px;right:12px;width:430px;}
+.tcg{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:6px;}
+.tc{background:rgba(200,148,58,0.04);border:1px solid rgba(200,148,58,0.1);padding:5px 6px;}
+.tc .tl{font-size:5.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--txd);line-height:1;}
+.tc .tv{font-size:12px;font-weight:700;color:var(--g);line-height:1.15;margin-top:2px;}
+.tc .tu{font-size:5px;color:#3a2c14;letter-spacing:0.08em;margin-top:1px;}
+
+/* control panel */
+#pan-ctrl{top:12px;left:12px;width:268px;}
+.sh{font-size:6.5px;letter-spacing:0.28em;text-transform:uppercase;color:var(--g);
+  padding:5px 10px 4px;border-bottom:1px solid rgba(200,148,58,0.08);
+  background:rgba(200,148,58,0.04);}
+
+/* slim slider rows */
+.sr{display:grid;grid-template-columns:90px 1fr;align-items:center;gap:6px;
+  padding:3px 10px;border-bottom:1px solid rgba(200,148,58,0.04);}
+.sr:hover{background:rgba(200,148,58,0.03);}
+.sl-lbl{display:flex;flex-direction:column;}
+.sl-lbl .sn{font-size:8px;letter-spacing:0.06em;text-transform:uppercase;color:#7a6844;line-height:1.1;}
+.sl-lbl .sv{font-size:10px;font-weight:700;color:var(--g);margin-top:1px;}
+.sl-lbl .su{font-size:6px;color:var(--txd);}
+input[type=range]{
+  -webkit-appearance:none;width:100%;height:1px;
+  background:rgba(200,148,58,0.25);outline:none;cursor:pointer;border-radius:1px;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:8px;height:8px;
+  border-radius:50%;background:var(--g);
+  box-shadow:0 0 4px rgba(200,148,58,0.5);cursor:pointer;
+}
+
+/* toggle grid */
+.tgg{display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;padding:6px 10px;}
+.tb{
+  font-family:'IBM Plex Mono',monospace;font-size:7px;letter-spacing:0.06em;
+  padding:3px 5px;border:1px solid rgba(200,148,58,0.18);
+  background:transparent;color:var(--txd);cursor:pointer;
+  text-transform:uppercase;transition:all 0.1s;text-align:left;
+  white-space:nowrap;overflow:hidden;pointer-events:all;
+}
+.tb.on{background:rgba(200,148,58,0.1);border-color:rgba(200,148,58,0.45);color:var(--g);}
+.tb::before{content:'';display:inline-block;width:4px;height:4px;border-radius:50%;
+  background:currentColor;margin-right:4px;vertical-align:middle;opacity:0.7;}
+
+/* flare section */
+.fsec{padding:6px 10px 8px;border-top:1px solid rgba(200,148,58,0.08);}
+.frow{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.flbl{font-size:6.5px;letter-spacing:0.22em;text-transform:uppercase;color:#7a4020;}
+#flare-status{font-size:7px;letter-spacing:0.12em;}
+.fbar{height:2px;background:rgba(255,80,0,0.1);margin-bottom:6px;border-radius:1px;}
+#flare-bar{height:100%;background:linear-gradient(to right,#aa1800,#ffcc00);width:0%;border-radius:1px;transition:width 0.3s;}
+#flare-btn{
+  font-family:'IBM Plex Mono',monospace;font-size:7.5px;letter-spacing:0.18em;
+  padding:5px 0;width:100%;border:1px solid rgba(200,148,58,0.3);
+  background:rgba(255,60,0,0.05);color:var(--g);cursor:pointer;
+  text-transform:uppercase;transition:all 0.18s;pointer-events:all;
+}
+#flare-btn:hover{background:rgba(255,80,0,0.14);border-color:rgba(255,80,0,0.5);color:#ff8844;}
+
+/* legend panel */
+#pan-leg{bottom:12px;right:12px;width:250px;}
+.lg{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;padding:6px 10px;}
+.li{display:flex;align-items:center;gap:5px;font-size:6.5px;letter-spacing:0.08em;
+  text-transform:uppercase;color:#5a5040;}
+.ls{width:14px;height:2px;flex-shrink:0;border-radius:1px;}
+.ld{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+
+/* layer depth panel */
+#pan-lay{bottom:12px;left:12px;width:160px;}
+.lai{display:flex;align-items:center;gap:6px;padding:3px 10px;
+  opacity:0.28;transition:opacity 0.35s;}
+.lai.on{opacity:1;}
+.lad{width:4px;height:4px;border-radius:50%;}
+.lal{font-size:6.5px;letter-spacing:0.15em;text-transform:uppercase;}
+
+/* title */
+#title{position:fixed;top:14px;left:296px;pointer-events:none;z-index:35;}
+#title h1{font-family:'Playfair Display',serif;font-style:italic;font-weight:400;
+  font-size:15px;letter-spacing:0.03em;color:#f0e0c0;line-height:1;}
+#title .sub{font-size:6px;letter-spacing:0.3em;text-transform:uppercase;color:var(--gd);margin-top:3px;}
+#title .badge{display:inline-block;margin-top:4px;font-size:6px;letter-spacing:0.18em;
+  text-transform:uppercase;background:rgba(255,60,0,0.12);border:1px solid rgba(255,80,0,0.35);
+  color:#ff8844;padding:2px 6px;}
+
+/* tooltip */
+#tip{position:fixed;pointer-events:none;z-index:60;
+  background:rgba(2,1,10,0.96);border:1px solid rgba(200,148,58,0.4);
+  padding:8px 12px;max-width:220px;display:none;backdrop-filter:blur(6px);}
+#tip .tth{font-size:9px;font-weight:700;color:var(--g);margin-bottom:3px;}
+#tip .ttb{font-size:7.5px;color:#8a7a60;line-height:1.5;}
+#tip .ttv{font-size:7.5px;color:#b8a070;margin-top:4px;}
+
+/* ticker */
+#ticker{position:fixed;bottom:12px;left:175px;right:263px;
+  background:var(--pan);border:1px solid rgba(255,80,0,0.2);
+  padding:4px 10px;font-size:7px;letter-spacing:0.1em;
+  color:#8a6040;z-index:35;pointer-events:none;
+  display:flex;align-items:center;gap:8px;overflow:hidden;}
+.tk-lbl{color:#ff6622;font-size:6px;letter-spacing:0.22em;text-transform:uppercase;flex-shrink:0;}
+#tk-txt{overflow:hidden;white-space:nowrap;}
+
+/* scrollable body */
+.fp-body::-webkit-scrollbar{width:2px;}
+.fp-body::-webkit-scrollbar-thumb{background:var(--gd);border-radius:1px;}
+
+</style>
+</head>
+<body>
+
+<div id="cv"></div>
+
+<div id="title">
+  <h1>Solar MHD · AR3842</h1>
+  <p class="sub">RK4 · Induction · HCS · Alfvén · Flare</p>
+  <span class="badge">NASA X9.0 · 2024-10-03 12:08 UT</span>
+</div>
+
+<!-- Telemetry panel -->
+<div class="fp" id="pan-telem">
+  <div class="fp-bar" data-panel="pan-telem">
+    <span class="fp-title">Live Telemetry</span>
+    <div class="fp-acts">
+      <button class="fp-btn fp-min" onclick="minPanel('pan-telem')" title="minimize"></button>
+      <button class="fp-btn fp-close" onclick="hidePanel('pan-telem')" title="close"></button>
+    </div>
+  </div>
+  <div class="fp-body">
+    <div class="tcg">
+      <div class="tc"><div class="tl">Sim Days</div><div class="tv" id="tTime">0</div><div class="tu">solar days</div></div>
+      <div class="tc"><div class="tl">Max |B|</div><div class="tv" id="tB">—</div><div class="tu">norm G</div></div>
+      <div class="tc"><div class="tl">Helicity</div><div class="tv" id="tH">—</div><div class="tu">A·Wb</div></div>
+      <div class="tc"><div class="tl">RK4 Steps</div><div class="tv" id="tStep">0</div><div class="tu">iter</div></div>
+      <div class="tc"><div class="tl">Plasma β</div><div class="tv" id="tBeta">—</div><div class="tu">ratio</div></div>
+      <div class="tc"><div class="tl">Sonic r_s</div><div class="tv" id="tSonic">—</div><div class="tu">R☉</div></div>
+      <div class="tc"><div class="tl">Alfvén r_A</div><div class="tv" id="tAlfven">—</div><div class="tu">R☉</div></div>
+      <div class="tc"><div class="tl">Sound Spd</div><div class="tv" id="tCs">—</div><div class="tu">km/s</div></div>
+      <div class="tc"><div class="tl">HCS Tilt</div><div class="tv" id="tTilt">25°</div><div class="tu">degrees</div></div>
+      <div class="tc"><div class="tl">Parker Ang</div><div class="tv" id="tParker">—</div><div class="tu">@1AU</div></div>
+      <div class="tc"><div class="tl">Free Energy</div><div class="tv" id="tWfree">—</div><div class="tu">norm</div></div>
+      <div class="tc"><div class="tl">Flare Sites</div><div class="tv" id="tFsites">0</div><div class="tu">high-J</div></div>
+      <div class="tc"><div class="tl">Vorticity</div><div class="tv" id="tVort">—</div><div class="tu">∇×v</div></div>
+      <div class="tc"><div class="tl">∇·B err</div><div class="tv" id="tDivB">—</div><div class="tu">solenoid</div></div>
+      <div class="tc"><div class="tl">IMF Sectors</div><div class="tv" id="tSector">±1</div><div class="tu">polarity</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Controls panel -->
+<div class="fp" id="pan-ctrl">
+  <div class="fp-bar" data-panel="pan-ctrl">
+    <span class="fp-title">MHD Controls</span>
+    <div class="fp-acts">
+      <button class="fp-btn fp-min" onclick="minPanel('pan-ctrl')" title="minimize"></button>
+      <button class="fp-btn fp-close" onclick="hidePanel('pan-ctrl')" title="close"></button>
+    </div>
+  </div>
+  <div class="fp-body" style="overflow-y:auto;max-height:calc(100vh - 130px);">
+    <div class="sh">MHD Physics</div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Diff. Rotation</span><span class="sv" id="vDR">1.00</span><span class="su">× Ω(λ)</span></div><input type="range" id="slDR" min="0" max="4" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Resistivity η</span><span class="sv" id="vEta">0.020</span><span class="su">mag diffus.</span></div><input type="range" id="slEta" min="0.001" max="0.15" step="0.001" value="0.02"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Convection</span><span class="sv" id="vConv">1.00</span><span class="su">zone strength</span></div><input type="range" id="slConv" min="0" max="3" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Buoyancy</span><span class="sv" id="vBuoy">1.00</span><span class="su">Parker β_mag</span></div><input type="range" id="slBuoy" min="0" max="3" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Time Step dt</span><span class="sv" id="vDT">0.50</span><span class="su">RK4 scale</span></div><input type="range" id="slDT" min="0.05" max="2.0" step="0.05" value="0.5"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Corona T</span><span class="sv" id="vTemp">1.5</span><span class="su">× 10⁶ K</span></div><input type="range" id="slTemp" min="0.5" max="5.0" step="0.1" value="1.5"></div>
+    <div class="sh">Heliospheric</div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">HCS Tilt</span><span class="sv" id="vTiltCtrl">25</span><span class="su">° ballerina</span></div><input type="range" id="slTilt" min="2" max="75" step="1" value="25"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Sectors</span><span class="sv" id="vSec">2</span><span class="su">IMF polarity</span></div><input type="range" id="slSec" min="2" max="8" step="2" value="2"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Wind Speed</span><span class="sv" id="vVsw">450</span><span class="su">km/s @1AU</span></div><input type="range" id="slVsw" min="200" max="900" step="10" value="450"></div>
+    <div class="sh">Solar Surface · Spectral</div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">EUV λ</span><span class="sv" id="vWave">171</span><span class="su">Å AIA channel</span></div><input type="range" id="slWave" min="0" max="6" step="1" value="2"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Sunspot Size</span><span class="sv" id="vSpotR">1.00</span><span class="su">umbra scale</span></div><input type="range" id="slSpotR" min="0.1" max="3.0" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Umbra Depth</span><span class="sv" id="vUmbra">0.70</span><span class="su">darkness 0→1</span></div><input type="range" id="slUmbra" min="0.0" max="1.0" step="0.02" value="0.7"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Penumbra</span><span class="sv" id="vPen">0.50</span><span class="su">filament ring</span></div><input type="range" id="slPen" min="0.0" max="1.0" step="0.02" value="0.5"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Faculae</span><span class="sv" id="vFac">0.60</span><span class="su">bright borders</span></div><input type="range" id="slFac" min="0.0" max="2.0" step="0.05" value="0.6"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Granulation</span><span class="sv" id="vGran">1.00</span><span class="su">cell scale</span></div><input type="range" id="slGran" min="0.1" max="3.0" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Supergranule</span><span class="sv" id="vSGran">1.00</span><span class="su">network scale</span></div><input type="range" id="slSGran" min="0.0" max="2.0" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Spicules</span><span class="sv" id="vSpic">0.50</span><span class="su">limb jets</span></div><input type="range" id="slSpic" min="0.0" max="2.0" step="0.05" value="0.5"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Limb Dark</span><span class="sv" id="vLimb">0.60</span><span class="su">exponent u</span></div><input type="range" id="slLimb" min="0.1" max="1.5" step="0.05" value="0.6"></div>
+    <div class="sh">Prominences · Flares</div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Prominence H</span><span class="sv" id="vPromH">1.00</span><span class="su">height R☉</span></div><input type="range" id="slPromH" min="0.1" max="3.0" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Prom. Density</span><span class="sv" id="vPromD">1.00</span><span class="su">count</span></div><input type="range" id="slPromD" min="0.0" max="3.0" step="0.05" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Flare Freq.</span><span class="sv" id="vFlareF">1.00</span><span class="su">spawn rate</span></div><input type="range" id="slFlareF" min="0.0" max="5.0" step="0.1" value="1.0"></div>
+    <div class="sr"><div class="sl-lbl"><span class="sn">Particle Count</span><span class="sv" id="vPCount">180</span><span class="su">plasma flow</span></div><input type="range" id="slPCount" min="50" max="600" step="10" value="180"></div>
+    <div class="sh">Layer Visibility</div>
+    <div class="tgg">
+      <button class="tb on" id="tFL"    onclick="tog('FL')">Field Lines</button>
+      <button class="tb on" id="tMT"    onclick="tog('MT')">Mag Texture</button>
+      <button class="tb on" id="tFT"    onclick="tog('FT')">Flux Tubes</button>
+      <button class="tb on" id="tPF"    onclick="tog('PF')">Plasma Flow</button>
+      <button class="tb on" id="tHCS"   onclick="tog('HCS')">HCS Sheet</button>
+      <button class="tb on" id="tPS"    onclick="tog('PS')">Parker Sprl</button>
+      <button class="tb on" id="tSB"    onclick="tog('SB')">CIR Bounds</button>
+      <button class="tb on" id="tALF"   onclick="tog('ALF')">Alfvén Rings</button>
+      <button class="tb on" id="tWIND"  onclick="tog('WIND')">Wind v(r)</button>
+      <button class="tb on" id="tFLARE" onclick="tog('FLARE')">Flare Sites</button>
+      <button class="tb on" id="tVORT"  onclick="tog('VORT')">Vorticity</button>
+      <button class="tb on" id="tPROM"  onclick="tog('PROM')">Prominences</button>
+      <button class="tb on" id="tSPIC"  onclick="tog('SPIC')">Spicules</button>
+      <button class="tb on" id="tHELM"  onclick="tog('HELM')">Streamers</button>
+      <button class="tb"    id="tPA"    onclick="tog('PA')">⏸ Pause</button>
+    </div>
+    <div class="fsec">
+      <div class="frow"><span class="flbl">Flare Readiness</span><span id="flare-status" style="color:#5a4020;font-size:7px;letter-spacing:0.12em;">MONITORING</span></div>
+      <div class="fbar"><div id="flare-bar"></div></div>
+      <button id="flare-btn" onclick="triggerFlare()">▶ TRIGGER FLARE</button>
+    </div>
+  </div>
+</div>
+
+<!-- Legend panel -->
+<div class="fp" id="pan-leg">
+  <div class="fp-bar" data-panel="pan-leg">
+    <span class="fp-title">Legend</span>
+    <div class="fp-acts">
+      <button class="fp-btn fp-min" onclick="minPanel('pan-leg')" title="minimize"></button>
+      <button class="fp-btn fp-close" onclick="hidePanel('pan-leg')" title="close"></button>
+    </div>
+  </div>
+  <div class="fp-body">
+    <div class="lg">
+      <div class="li"><div class="ls" style="background:linear-gradient(to right,#ff4400,#ffcc00)"></div>Pos B_r</div>
+      <div class="li"><div class="ls" style="background:linear-gradient(to right,#0033cc,#0066ff)"></div>Neg B_r</div>
+      <div class="li"><div class="ls" style="background:#4466bb"></div>Closed field</div>
+      <div class="li"><div class="ls" style="background:#88aaff"></div>Open/polar</div>
+      <div class="li"><div class="ls" style="background:#ffcc44"></div>Flux tubes</div>
+      <div class="li"><div class="ls" style="background:linear-gradient(to right,#cc9900,#ff8800)"></div>HCS skirt</div>
+      <div class="li"><div class="ls" style="background:#ff44aa"></div>CIR boundary</div>
+      <div class="li"><div class="ls" style="background:#9988ff;opacity:0.7"></div>Parker spiral</div>
+      <div class="li"><div class="ld" style="background:#ffcc00"></div>Sonic r_s</div>
+      <div class="li"><div class="ld" style="background:#88aaff"></div>Alfvén r_A</div>
+      <div class="li"><div class="ls" style="background:#ffaa44"></div>Wind v(r)</div>
+      <div class="li"><div class="ld" style="background:#ff2200"></div>Flare site</div>
+      <div class="li"><div class="ls" style="background:#ffdd00;opacity:0.65"></div>Vorticity</div>
+      <div class="li"><div class="ls" style="background:#ffeecc;opacity:0.3"></div>Sub-Alfvén</div>
+      <div class="li"><div class="ls" style="background:#ff6688"></div>Prominence</div>
+      <div class="li"><div class="ls" style="background:#88ddff;opacity:0.6"></div>Spicules</div>
+      <div class="li"><div class="ls" style="background:#ffcc88;opacity:0.5"></div>Helmet str.</div>
+      <div class="li"><div class="ls" style="background:#44aaff;opacity:0.4"></div>EUV corona</div>
+    </div>
+  </div>
+</div>
+
+<!-- Layer depth panel -->
+<div class="fp" id="pan-lay">
+  <div class="fp-bar" data-panel="pan-lay">
+    <span class="fp-title">Depth Layers</span>
+    <div class="fp-acts">
+      <button class="fp-btn fp-min" onclick="minPanel('pan-lay')" title="minimize"></button>
+    </div>
+  </div>
+  <div class="fp-body" style="padding:4px 0;">
+    <div class="lai on" id="ly0"><div class="lad" style="background:#ff5500"></div><span class="lal" style="color:#ff5500">Photosphere</span></div>
+    <div class="lai" id="ly1"><div class="lad" style="background:#ff7733"></div><span class="lal" style="color:#ff7733">Chromosphere</span></div>
+    <div class="lai" id="ly2"><div class="lad" style="background:#ffcc66"></div><span class="lal" style="color:#ffcc66">Trans. Region</span></div>
+    <div class="lai" id="ly3"><div class="lad" style="background:#aaddff"></div><span class="lal" style="color:#aaddff">Corona</span></div>
+    <div class="lai" id="ly4"><div class="lad" style="background:#ffcc00"></div><span class="lal" style="color:#ffcc00">Sonic r_s</span></div>
+    <div class="lai" id="ly5"><div class="lad" style="background:#88aaff"></div><span class="lal" style="color:#88aaff">Alfvén r_A</span></div>
+  </div>
+</div>
+
+<!-- Ticker -->
+<div id="ticker">
+  <span class="tk-lbl">GOES-16</span>
+  <span id="tk-txt">X9.0 Flare · AR3842 · 2024-10-03 12:08 UT · Peak 9.0×10⁻⁴ W/m² · CME v≈2,200 km/s · Kp=9 · β-γ-δ sunspot</span>
+</div>
+
+<!-- Tooltip -->
+<div id="tip">
+  <div class="tth" id="tt-title"></div>
+  <div class="ttb" id="tt-body"></div>
+  <div class="ttv" id="tt-val"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+//  RENDERER + SCENE
+// ═══════════════════════════════════════════════════════════
+const W = window.innerWidth, H = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setClearColor(0x04030a);
+document.getElementById('cv').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(52, W/H, 0.01, 500);
+camera.position.set(0, 1.5, 7.5);
+camera.lookAt(0, 0, 0);
+
+// ═══════════════════════════════════════════════════════════
+//  MHD GRID — spherical shell lattice
+//  We store field B(r,θ,φ) on a NLat × NLon grid
+// ═══════════════════════════════════════════════════════════
+const NLat = 48;
+const NLon = 96;
+const N = NLat * NLon;
+
+// State arrays: Br, Btheta, Bphi, vr, vtheta, vphi, rho, T
+// All flattened [NLat × NLon]
+function makeGrid(fn) {
+  const a = new Float64Array(N);
+  for (let i = 0; i < NLat; i++)
+    for (let j = 0; j < NLon; j++)
+      a[i*NLon+j] = fn(i, j);
+  return a;
+}
+
+function lat(i) { return (i/(NLat-1) - 0.5) * Math.PI; }       // -π/2 to π/2
+function lon(j) { return (j/NLon) * Math.PI * 2; }              // 0 to 2π
+function idx(i,j) { return i*NLon + ((j%NLon+NLon)%NLon); }
+
+// ═══════════════════════════════════════════════════════════
+//  NASA X9.0 FLARE — AR3842 — 2024-10-03 12:08 UT
+//  Source: GOES-16 SUVI + HMI magnetogram data
+//  Peak flux: 9.0×10⁻⁴ W/m²  CME v ≈ 2,200 km/s
+//  AR3842 location: N05W04 (near-central, high geo-impact)
+//  β-γ-δ class: highly non-potential, strong current sheets
+//  We seed the initial dipole with this active region's
+//  observed flux density (≈3,200 G peak in sunspot umbra)
+//  and the pre-flare tilt of AR3842's polarity inversion line.
+// ═══════════════════════════════════════════════════════════
+
+// AR3842 latitude/longitude seed (N05W04 → lat≈+5°, lon≈-4°)
+const AR_LAT = 5 * Math.PI / 180;
+const AR_LON = -4 * Math.PI / 180;
+
+// Initial dipole field + AR3842 flux concentration
+let Br    = makeGrid((i,j) => {
+  const la = lat(i), lo = lon(j);
+  // Background dipole
+  let b = 2.0 * Math.sin(la) * (1 + 0.12*Math.random());
+  // AR3842: bipolar pair centred at (AR_LAT, AR_LON), separation ~7°
+  const sep = 7 * Math.PI / 180;
+  const d1 = Math.sqrt((la-AR_LAT)**2 + (lo-AR_LON-sep/2)**2);
+  const d2 = Math.sqrt((la-AR_LAT)**2 + (lo-AR_LON+sep/2)**2);
+  // Leading spot (positive polarity, stronger — Hale's law)
+  b += 4.8 * Math.exp(-d1*d1/(0.008));
+  // Following spot (negative)
+  b -= 3.2 * Math.exp(-d2*d2/(0.010));
+  return b;
+});
+
+let Bth   = makeGrid((i,j) => {
+  const la=lat(i), lo=lon(j);
+  let b = -Math.cos(la) * 0.5 * (1 + 0.1*Math.random());
+  // AR3842 shear: toroidal component from differential rotation winding
+  const d = Math.sqrt((la-AR_LAT)**2 + (lo-AR_LON)**2);
+  b += 0.8 * Math.exp(-d*d/0.015) * Math.sin(lo - AR_LON);
+  return b;
+});
+
+let Bph   = makeGrid((i,j) => {
+  const la=lat(i), lo=lon(j);
+  let b = 0.1 * Math.sin(2*la) * Math.sin(lo);
+  // AR3842 shear component (non-potential energy storage)
+  const d = Math.sqrt((la-AR_LAT)**2 + (lo-AR_LON)**2);
+  b += 1.2 * Math.exp(-d*d/0.012) * Math.cos(lo - AR_LON) * Math.sign(la - AR_LAT);
+  return b;
+});
+
+// Velocity field (driven externally by differential rotation + convection)
+let Vr    = makeGrid(() => 0);
+let Vth   = makeGrid((i,j) => 0.01 * Math.cos(lat(i)) * Math.sin(lon(j)*2));
+let Vph   = makeGrid((i,j) => {   // differential rotation: Ω(λ) = A - B sin²λ - C sin⁴λ
+  const sinL = Math.sin(lat(i));
+  return (0.18 - 0.027*sinL*sinL - 0.028*sinL*sinL*sinL*sinL); // nHz analogue
+});
+
+let rho   = makeGrid(() => 1.0);
+let T     = makeGrid((i,j) => 1.0 + 0.2*Math.abs(Math.sin(lat(i))));
+
+// Scratch buffers for RK4
+const dBr1=new Float64Array(N),dBth1=new Float64Array(N),dBph1=new Float64Array(N);
+const dBr2=new Float64Array(N),dBth2=new Float64Array(N),dBph2=new Float64Array(N);
+const dBr3=new Float64Array(N),dBth3=new Float64Array(N),dBph3=new Float64Array(N);
+const dBr4=new Float64Array(N),dBth4=new Float64Array(N),dBph4=new Float64Array(N);
+
+// ── Induction equation derivatives ──────────────────────────
+// ∂B/∂t = ∇×(v×B) + η∇²B
+// Discretized on the spherical grid using finite differences
+function computeDerivatives(Br_, Bth_, Bph_, dBr_, dBth_, dBph_, eta, DR, convStr) {
+  const dLat = Math.PI / (NLat-1);
+  const dLon = 2*Math.PI / NLon;
+  const R = 1.0; // normalized solar radius
+
+  for (let i = 1; i < NLat-1; i++) {
+    const la = lat(i);
+    const cosL = Math.cos(la), sinL = Math.sin(la);
+    // Differential rotation velocity (azimuthal)
+    const vphDR = DR * (0.18 - 0.027*sinL*sinL - 0.028*Math.pow(sinL,4));
+
+    for (let j = 0; j < NLon; j++) {
+      const k = idx(i,j);
+      const kN = idx(i-1,j), kS = idx(i+1,j);
+      const kE = idx(i,j+1), kW = idx(i,j-1);
+
+      // Local B
+      const br = Br_[k], bth = Bth_[k], bph = Bph_[k];
+      // Local v (differential rotation + convection)
+      const vr  = Vr[k] * convStr;
+      const vth = Vth[k] * convStr;
+      const vph = vphDR + Vph[k] * convStr * 0.3;
+
+      // v×B (cross product in spherical: e_r, e_th, e_ph components)
+      // (v×B)_r  = v_th*B_ph - v_ph*B_th
+      // (v×B)_th = v_ph*B_r  - v_r*B_ph
+      // (v×B)_ph = v_r*B_th  - v_th*B_r
+      const ExB_r  = vth*bph - vph*bth;
+      const ExB_th = vph*br  - vr*bph;
+      const ExB_ph = vr*bth  - vth*br;
+
+      // ∇×(v×B) — curl in spherical coords (simplified)
+      // (∇×F)_r = (1/sinL) ∂(sinL·F_ph)/∂th - (1/sinL) ∂F_th/∂ph
+      const ExBr_N  = (Vth[kN]*Bph_[kN] - Vph[kN]*Bth_[kN]) * DR;
+      const ExBr_S  = (Vth[kS]*Bph_[kS] - Vph[kS]*Bth_[kS]) * DR;
+      const ExBth_E = (Vph[kE]*Br_[kE]  - Vr[kE]*Bph_[kE])  * DR;
+      const ExBth_W = (Vph[kW]*Br_[kW]  - Vr[kW]*Bph_[kW])  * DR;
+
+      const curlR  = (ExBr_N*Math.cos(lat(i-1)) - ExBr_S*Math.cos(lat(i+1))) / (2*R*dLat*Math.max(0.01,sinL))
+                   - (ExBth_E - ExBth_W) / (2*R*Math.max(0.01,sinL)*dLon);
+
+      const curlTh = (Bph_[kE] - Bph_[kW]) * vphDR / (2*R*Math.max(0.01,sinL)*dLon);
+
+      const curlPh = (br*Math.cos(la) - (Br_[kS] - Br_[kN])/(2*dLat)) * vphDR / R;
+
+      // Laplacian of B (resistive diffusion) — spherical scalar Laplacian
+      const lapBr  = (Br_[kN] - 2*br + Br_[kS])/(dLat*dLat)
+                   + (Br_[kE] - 2*br + Br_[kW])/(dLon*dLon*Math.max(0.01,cosL*cosL));
+      const lapBth = (Bth_[kN] - 2*bth + Bth_[kS])/(dLat*dLat)
+                   + (Bth_[kE] - 2*bth + Bth_[kW])/(dLon*dLon*Math.max(0.01,cosL*cosL));
+      const lapBph = (Bph_[kN] - 2*bph + Bph_[kS])/(dLat*dLat)
+                   + (Bph_[kE] - 2*bph + Bph_[kW])/(dLon*dLon*Math.max(0.01,cosL*cosL));
+
+      dBr_[k]  = curlR  + eta * lapBr;
+      dBth_[k] = curlTh + eta * lapBth;
+      dBph_[k] = curlPh + eta * lapBph;
+    }
+  }
+  // Boundary: poles
+  for (let j = 0; j < NLon; j++) {
+    dBr_[idx(0,j)] = dBr_[idx(1,j)];
+    dBr_[idx(NLat-1,j)] = dBr_[idx(NLat-2,j)];
+    dBth_[idx(0,j)] = 0; dBth_[idx(NLat-1,j)] = 0;
+    dBph_[idx(0,j)] = 0; dBph_[idx(NLat-1,j)] = 0;
+  }
+}
+
+// ── RK4 integrator ──────────────────────────────────────────
+let simTime = 0;
+let rk4Count = 0;
+let params = { DR:1.0, eta:0.02, conv:1.0, buoy:1.0, dt:0.5, A_temp:1.5 };
+
+function rk4Step() {
+  const dt = params.dt * 0.001; // scaled
+  const eta = params.eta;
+  const DR  = params.DR;
+  const conv= params.conv;
+
+  // k1
+  computeDerivatives(Br, Bth, Bph, dBr1, dBth1, dBph1, eta, DR, conv);
+
+  // k2 — advance by dt/2
+  const Br2=new Float64Array(N), Bth2=new Float64Array(N), Bph2=new Float64Array(N);
+  for(let k=0;k<N;k++){Br2[k]=Br[k]+0.5*dt*dBr1[k]; Bth2[k]=Bth[k]+0.5*dt*dBth1[k]; Bph2[k]=Bph[k]+0.5*dt*dBph1[k];}
+  computeDerivatives(Br2,Bth2,Bph2,dBr2,dBth2,dBph2,eta,DR,conv);
+
+  // k3
+  const Br3=new Float64Array(N), Bth3=new Float64Array(N), Bph3=new Float64Array(N);
+  for(let k=0;k<N;k++){Br3[k]=Br[k]+0.5*dt*dBr2[k]; Bth3[k]=Bth[k]+0.5*dt*dBth2[k]; Bph3[k]=Bph[k]+0.5*dt*dBph2[k];}
+  computeDerivatives(Br3,Bth3,Bph3,dBr3,dBth3,dBph3,eta,DR,conv);
+
+  // k4
+  const Br4=new Float64Array(N), Bth4=new Float64Array(N), Bph4=new Float64Array(N);
+  for(let k=0;k<N;k++){Br4[k]=Br[k]+dt*dBr3[k]; Bth4[k]=Bth[k]+dt*dBth3[k]; Bph4[k]=Bph[k]+dt*dBph3[k];}
+  computeDerivatives(Br4,Bth4,Bph4,dBr4,dBth4,dBph4,eta,DR,conv);
+
+  // Combine + Parker buoyancy (flux tube rise: high |B| → positive Vr)
+  const buoy = params.buoy;
+  for(let k=0;k<N;k++){
+    Br[k]  += (dt/6)*(dBr1[k]  + 2*dBr2[k]  + 2*dBr3[k]  + dBr4[k]);
+    Bth[k] += (dt/6)*(dBth1[k] + 2*dBth2[k] + 2*dBth3[k] + dBth4[k]);
+    Bph[k] += (dt/6)*(dBph1[k] + 2*dBph2[k] + 2*dBph3[k] + dBph4[k]);
+
+    // Parker magnetic buoyancy: radial velocity proportional to |B|²
+    const Bmag2 = Br[k]*Br[k] + Bth[k]*Bth[k] + Bph[k]*Bph[k];
+    Vr[k] += buoy * 0.0002 * Bmag2 * dt;
+    Vr[k] *= 0.995; // damping
+
+    // Clamp for stability
+    Br[k]  = Math.max(-8, Math.min(8, Br[k]));
+    Bth[k] = Math.max(-8, Math.min(8, Bth[k]));
+    Bph[k] = Math.max(-8, Math.min(8, Bph[k]));
+  }
+
+  // Slowly add noise to represent convective turbulence
+  if (conv > 0.1 && Math.random() < 0.02) {
+    const ki = Math.floor(1 + Math.random()*(NLat-2));
+    const kj = Math.floor(Math.random()*NLon);
+    const k  = idx(ki,kj);
+    Bph[k] += conv * (Math.random()-0.5) * 0.08;
+    Bth[k] += conv * (Math.random()-0.5) * 0.04;
+  }
+
+  simTime += params.dt * 0.1;
+  rk4Count++;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  THREE.JS OBJECTS
+// ═══════════════════════════════════════════════════════════
+
+// ── Magnetic texture on sphere ───────────────────────────────
+const TEX_W = NLon, TEX_H = NLat;
+const texData = new Uint8Array(TEX_W * TEX_H * 4);
+const magTex = new THREE.DataTexture(texData, TEX_W, TEX_H, THREE.RGBAFormat);
+magTex.needsUpdate = true;
+
+function temperatureToRGB(b, maxB) {
+  // Bipolar magnetogram color: blue=negative, black=neutral, red/yellow=positive
+  const t = b / (maxB + 0.001);
+  if (t > 0) {
+    // Positive: black→red→yellow
+    const s = Math.min(1, t);
+    return [
+      Math.round(255 * Math.sqrt(s)),
+      Math.round(255 * s * s * s),
+      0,
+      255
+    ];
+  } else {
+    // Negative: black→blue→cyan
+    const s = Math.min(1, -t);
+    return [
+      0,
+      Math.round(255 * s * s * s),
+      Math.round(255 * Math.sqrt(s)),
+      255
+    ];
+  }
+}
+
+function updateMagTexture() {
+  let maxB = 0.1;
+  for(let k=0;k<N;k++) maxB = Math.max(maxB, Math.abs(Br[k]));
+
+  for (let i = 0; i < NLat; i++) {
+    for (let j = 0; j < NLon; j++) {
+      const k = idx(i,j);
+      const [r,g,b,a] = temperatureToRGB(Br[k], maxB);
+      const pi = ((NLat-1-i)*NLon + j) * 4; // flip V
+      texData[pi]   = r;
+      texData[pi+1] = g;
+      texData[pi+2] = b;
+      texData[pi+3] = a;
+    }
+  }
+  magTex.needsUpdate = true;
+}
+updateMagTexture();
+
+// Photosphere sphere with mag texture
+const photoGeo = new THREE.SphereGeometry(1.0, 128, 64);
+const photoMat = new THREE.MeshStandardMaterial({
+  map: magTex,
+  emissiveMap: magTex,
+  emissive: new THREE.Color(0.6, 0.25, 0.0),
+  emissiveIntensity: 0.5,
+  roughness: 0.95,
+  metalness: 0.0,
+});
+const photoMesh = new THREE.Mesh(photoGeo, photoMat);
+scene.add(photoMesh);
+
+// Chromosphere shell
+const chromMat = new THREE.MeshStandardMaterial({
+  color: 0xff7722, emissive: 0xff4400, emissiveIntensity: 0.5,
+  transparent: true, opacity: 0.12, side: THREE.FrontSide, depthWrite: false,
+});
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.05, 48, 48), chromMat));
+
+// Transition region
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(1.13, 48, 48),
+  new THREE.MeshStandardMaterial({
+    color: 0xffe066, emissive: 0xffaa44, emissiveIntensity: 0.3,
+    transparent: true, opacity: 0.06, side: THREE.FrontSide, depthWrite: false,
+  })
+));
+
+// Corona glow
+const coronaMat = new THREE.MeshStandardMaterial({
+  color: 0xaaddff, emissive: 0x4488ff, emissiveIntensity: 0.25,
+  transparent: true, opacity: 0.05, side: THREE.BackSide, depthWrite: false,
+});
+const coronaMesh = new THREE.Mesh(new THREE.SphereGeometry(1.55, 48, 48), coronaMat);
+scene.add(coronaMesh);
+
+// Lighting
+const sunLight = new THREE.PointLight(0xff9944, 3.5, 40);
+scene.add(sunLight);
+const ambLight = new THREE.AmbientLight(0x0a0810, 1);
+scene.add(ambLight);
+
+// ── Field Lines (dynamically updated from B grid) ────────────
+const FL_COUNT = 32;
+const FL_STEPS = 80;
+const fieldLines = [];
+const flGroup = new THREE.Group();
+scene.add(flGroup);
+
+function makeFieldLine(lat0, lon0) {
+  const pts = [];
+  let la = lat0, lo = lon0;
+  let r = 1.02;
+
+  for (let s = 0; s < FL_STEPS; s++) {
+    const x = r * Math.cos(la) * Math.cos(lo);
+    const y = r * Math.sin(la);
+    const z = r * Math.cos(la) * Math.sin(lo);
+    pts.push(new THREE.Vector3(x, y, z));
+
+    // Sample field at current position
+    const gi = Math.round((la/Math.PI + 0.5) * (NLat-1));
+    const gj = Math.round((lo / (2*Math.PI)) * NLon) % NLon;
+    const k  = idx(Math.max(0,Math.min(NLat-1,gi)), gj);
+    const br = Br[k], bth = Bth[k], bph = Bph[k];
+    const bmag = Math.sqrt(br*br+bth*bth+bph*bph)+0.001;
+
+    // Step along field direction
+    const step = 0.04;
+    la += step * bth / bmag;
+    lo += step * bph / (bmag * Math.max(0.05, Math.cos(la)));
+    r  += step * br  / bmag * 0.3;
+    r   = Math.max(0.99, Math.min(2.5, r));
+  }
+  return pts;
+}
+
+for (let fl = 0; fl < FL_COUNT; fl++) {
+  const la = (Math.random()-0.5) * Math.PI * 0.8;
+  const lo = (fl / FL_COUNT) * Math.PI * 2;
+  const geo = new THREE.BufferGeometry().setFromPoints(makeFieldLine(la, lo));
+  const polarity = Br[idx(Math.round((la/Math.PI+0.5)*(NLat-1)), Math.round((lo/(2*Math.PI))*NLon)%NLon)];
+  const col = polarity > 0 ? 0xff5522 : 0x4488ff;
+  const mat = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.5 });
+  const line = new THREE.Line(geo, mat);
+  flGroup.add(line);
+  fieldLines.push({ line, la, lo });
+}
+
+// ── Flux Tubes (Parker instability — rising magnetic structures) ──
+const ftGroup = new THREE.Group();
+scene.add(ftGroup);
+const fluxTubes = [];
+
+function spawnFluxTube() {
+  // Find a high-|B| location on the grid
+  let maxK = 0, maxBmag = 0;
+  for (let k = 0; k < N; k++) {
+    const bm = Math.abs(Br[k]);
+    if (bm > maxBmag && Math.random() < 0.1) { maxBmag = bm; maxK = k; }
+  }
+  const i = Math.floor(maxK / NLon), j = maxK % NLon;
+  const la = lat(i), lo = lon(j);
+  const r0 = 1.05;
+
+  // Create a tube as a small toroid path
+  const pts = [];
+  const segments = 40;
+  const tubeRadius = 0.12 + Math.random() * 0.08;
+  for (let s = 0; s <= segments; s++) {
+    const phi = (s / segments) * Math.PI * 2;
+    const x = (r0 + tubeRadius * Math.cos(phi)) * Math.cos(la) * Math.cos(lo + tubeRadius * Math.sin(phi) * 0.4);
+    const y = (r0 + tubeRadius * Math.cos(phi)) * Math.sin(la);
+    const z = (r0 + tubeRadius * Math.cos(phi)) * Math.cos(la) * Math.sin(lo + tubeRadius * Math.sin(phi) * 0.4);
+    pts.push(new THREE.Vector3(x, y, z));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.8, linewidth: 1 });
+  const obj = new THREE.Line(geo, mat);
+  ftGroup.add(obj);
+
+  fluxTubes.push({ obj, la, lo, r: r0, life: 1.0, rise: 0.002 + Math.random()*0.003 });
+}
+
+// ── Plasma flow particles ─────────────────────────────────────
+const pfGroup = new THREE.Group();
+scene.add(pfGroup);
+const plasmaParticles = [];
+const PF_COUNT = 180;
+
+for (let p = 0; p < PF_COUNT; p++) {
+  const la = (Math.random()-0.5)*Math.PI*0.95;
+  const lo = Math.random()*Math.PI*2;
+  const r  = 1.02 + Math.random()*0.6;
+  const geo = new THREE.SphereGeometry(0.009, 4, 4);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.7 });
+  const mesh = new THREE.Mesh(geo, mat);
+  pfGroup.add(mesh);
+  plasmaParticles.push({ mesh, la, lo, r, speed: 0.003+Math.random()*0.004 });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HELIOSPHERIC CURRENT SHEET (HCS) — "Ballerina Skirt"
+//  The HCS is the vast warped surface where B_r changes sign.
+//  It separates the heliosphere into magnetic polarity sectors.
+//  Modeled using the Schulz (1973) / Hoeksema wavy HCS:
+//    θ_HCS(φ,t) = π/2 - α·sin(n·φ - Ω_rot·t)
+//  where α = tilt angle, n = sector number/2
+// ═══════════════════════════════════════════════════════════
+
+const hcsGroup  = new THREE.Group(); scene.add(hcsGroup);
+const psGroup   = new THREE.Group(); scene.add(psGroup);   // Parker spiral
+const sbGroup   = new THREE.Group(); scene.add(sbGroup);   // Sector boundaries / CIR
+const cirGroup  = new THREE.Group(); scene.add(cirGroup);  // CIR flash events
+
+// HCS parameters (driven by sliders later)
+const hcsParams = { tilt: 25, sectors: 2, vsw: 450 };
+
+// ── HCS surface mesh ──────────────────────────────────────────
+// Parametric surface: for each (r, φ) compute the warped latitude
+// then place a vertex there. The result is the famous ballerina skirt.
+
+const HCS_R_STEPS  = 60;  // radial steps from 1.2 to 5 R☉
+const HCS_PHI_STEPS = 180; // azimuthal resolution
+const HCS_R_MIN = 1.22, HCS_R_MAX = 5.0;
+
+const hcsGeo = new THREE.BufferGeometry();
+const hcsPosArr   = new Float32Array(HCS_R_STEPS * HCS_PHI_STEPS * 3);
+const hcsColorArr = new Float32Array(HCS_R_STEPS * HCS_PHI_STEPS * 3);
+hcsGeo.setAttribute('position', new THREE.BufferAttribute(hcsPosArr, 3));
+hcsGeo.setAttribute('color',    new THREE.BufferAttribute(hcsColorArr, 3));
+
+// Build index buffer for triangle strip across (r, phi) grid
+const hcsIdx = [];
+for (let ri = 0; ri < HCS_R_STEPS-1; ri++) {
+  for (let pi = 0; pi < HCS_PHI_STEPS-1; pi++) {
+    const a = ri*HCS_PHI_STEPS + pi;
+    const b = a + 1;
+    const c = a + HCS_PHI_STEPS;
+    const d = c + 1;
+    hcsIdx.push(a,c,b, b,c,d);
+  }
+}
+hcsGeo.setIndex(hcsIdx);
+const hcsMat = new THREE.MeshBasicMaterial({
+  vertexColors: true,
+  transparent: true,
+  opacity: 0.18,
+  side: THREE.DoubleSide,
+  depthWrite: false,
+});
+const hcsMesh = new THREE.Mesh(hcsGeo, hcsMat);
+hcsGroup.add(hcsMesh);
+
+// HCS edge wireframe for the "skirt hem" effect
+const hcsEdgeGeo  = new THREE.BufferGeometry();
+const hcsEdgePts  = new Float32Array(HCS_PHI_STEPS * 3);
+hcsEdgeGeo.setAttribute('position', new THREE.BufferAttribute(hcsEdgePts, 3));
+const hcsEdgeMat  = new THREE.LineBasicMaterial({ color:0xffcc00, transparent:true, opacity:0.7 });
+const hcsEdgeLine = new THREE.LineLoop(hcsEdgeGeo, hcsEdgeMat);
+hcsGroup.add(hcsEdgeLine);
+
+let hcsPhaseOffset = 0; // accumulates with sim time for rotation
+
+function updateHCS(phaseOffset) {
+  const tiltRad = hcsParams.tilt * Math.PI / 180;
+  const n       = hcsParams.sectors / 2; // wave number (2 sectors = 1 full wave)
+  const pos     = hcsGeo.attributes.position.array;
+  const col     = hcsGeo.attributes.color.array;
+
+  for (let ri = 0; ri < HCS_R_STEPS; ri++) {
+    const r = HCS_R_MIN + (ri / (HCS_R_STEPS-1)) * (HCS_R_MAX - HCS_R_MIN);
+    // Parker delay: wave crests lag at larger r due to finite wind travel time
+    const travelDelay = (r - HCS_R_MIN) / (hcsParams.vsw * 0.0001 + 0.1);
+
+    for (let pi = 0; pi < HCS_PHI_STEPS; pi++) {
+      const phi = (pi / HCS_PHI_STEPS) * Math.PI * 2;
+
+      // Wavy HCS latitude: θ_HCS = π/2 + α·sin(n·φ - ωt - delay)
+      // Second harmonic for solar-max complexity
+      const waveArg = n * phi - phaseOffset - travelDelay * 0.05;
+      const thetaHCS = Math.PI/2
+        + tiltRad * Math.sin(waveArg)
+        + tiltRad * 0.3 * Math.sin(2*waveArg + 0.5); // harmonic warping
+
+      const sinT = Math.sin(thetaHCS), cosT = Math.cos(thetaHCS);
+      const sinP = Math.sin(phi),      cosP = Math.cos(phi);
+
+      const x = r * sinT * cosP;
+      const y = r * cosT;
+      const z = r * sinT * sinP;
+
+      const v = ri*HCS_PHI_STEPS + pi;
+      pos[v*3]   = x;
+      pos[v*3+1] = y;
+      pos[v*3+2] = z;
+
+      // Color: gradient gold→amber by radius, bright at inner edge
+      const fade = 1 - ri/(HCS_R_STEPS-1);
+      col[v*3]   = 0.7 + fade*0.3;
+      col[v*3+1] = 0.45 + fade*0.2;
+      col[v*3+2] = 0.0;
+    }
+  }
+
+  // Outer edge ring (r = HCS_R_MAX) — the skirt hem
+  const outerRi = HCS_R_STEPS - 1;
+  const r = HCS_R_MAX;
+  const edgePos = hcsEdgeGeo.attributes.position.array;
+  for (let pi = 0; pi < HCS_PHI_STEPS; pi++) {
+    const phi = (pi / HCS_PHI_STEPS) * Math.PI * 2;
+    const travelDelay = (r - HCS_R_MIN) / (hcsParams.vsw * 0.0001 + 0.1);
+    const waveArg = n * phi - phaseOffset - travelDelay * 0.05;
+    const thetaHCS = Math.PI/2
+      + tiltRad * Math.sin(waveArg)
+      + tiltRad * 0.3 * Math.sin(2*waveArg + 0.5);
+    edgePos[pi*3]   = r * Math.sin(thetaHCS) * Math.cos(phi);
+    edgePos[pi*3+1] = r * Math.cos(thetaHCS);
+    edgePos[pi*3+2] = r * Math.sin(thetaHCS) * Math.sin(phi);
+  }
+
+  hcsGeo.attributes.position.needsUpdate = true;
+  hcsGeo.attributes.color.needsUpdate    = true;
+  hcsEdgeGeo.attributes.position.needsUpdate = true;
+  hcsGeo.computeVertexNormals();
+}
+updateHCS(0);
+
+// ── Parker Spiral IMF lines ───────────────────────────────────
+// Beyond the Alfvén point, the frozen-in field winds into an
+// Archimedean spiral: B_φ/B_r = -Ω_sun·r·sinθ / V_sw
+// Each spiral arm traces a constant-longitude footpoint.
+
+const PS_COUNT  = 16;   // number of spiral arms
+const PS_STEPS  = 80;   // points per arm
+const PS_R_MAX  = 5.2;
+const parkerSpirals = [];
+
+function buildParkerSpiral(phi0, polarity) {
+  const pts = [];
+  const Omega = 2.87e-6; // solar rotation rad/s (normalized)
+  for (let s = 0; s <= PS_STEPS; s++) {
+    const r = 1.3 + (s / PS_STEPS) * (PS_R_MAX - 1.3);
+    // Archimedean spiral: φ(r) = φ0 - (Ω/Vsw)·(r - r0)
+    // Using normalized units: factor ~ 0.8 gives realistic winding
+    const windFactor = 0.9 / (hcsParams.vsw / 450);
+    const phi = phi0 - windFactor * (r - 1.3);
+    // Latitude: slight inclination following HCS tilt
+    const tiltRad = hcsParams.tilt * Math.PI / 180;
+    const la = tiltRad * 0.15 * Math.sin(phi0 * (hcsParams.sectors/2));
+    const x = r * Math.cos(la) * Math.cos(phi);
+    const y = r * Math.sin(la);
+    const z = r * Math.cos(la) * Math.sin(phi);
+    pts.push(new THREE.Vector3(x,y,z));
+  }
+  return pts;
+}
+
+for (let ps = 0; ps < PS_COUNT; ps++) {
+  const phi0  = (ps / PS_COUNT) * Math.PI * 2;
+  const n     = hcsParams.sectors / 2;
+  // Determine polarity sector for this arm
+  const pol   = Math.sin(n * phi0) > 0 ? 1 : -1;
+  const color = pol > 0 ? 0xff6644 : 0x4488ff;
+  const pts   = buildParkerSpiral(phi0, pol);
+  const geo   = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat   = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.35 });
+  const line  = new THREE.Line(geo, mat);
+  psGroup.add(line);
+  parkerSpirals.push({ line, phi0, pol });
+}
+
+// ── Sector Boundary Lines (where B_r = 0 — the HCS intersection) ──
+// At each boundary, a CIR (co-rotating interaction region) forms
+// where fast and slow solar wind streams collide → glowing shock.
+
+const SB_COUNT  = hcsParams.sectors; // one boundary per sector
+const SB_STEPS  = 60;
+const sectorBoundaries = [];
+
+function buildSectorBoundary(phi0) {
+  const pts = [];
+  for (let s = 0; s <= SB_STEPS; s++) {
+    const r = 1.2 + (s/SB_STEPS) * (PS_R_MAX - 1.2);
+    const tiltRad = hcsParams.tilt * Math.PI / 180;
+    const windFactor = 0.9 / (hcsParams.vsw / 450);
+    const phi = phi0 - windFactor * (r - 1.2) * 0.5;
+    const la  = tiltRad * Math.sin(phi0 * hcsParams.sectors/2 + Math.PI/2) * 0.2;
+    pts.push(new THREE.Vector3(
+      r * Math.cos(la) * Math.cos(phi),
+      r * Math.sin(la),
+      r * Math.cos(la) * Math.sin(phi)
+    ));
+  }
+  return pts;
+}
+
+function rebuildSectorBoundaries() {
+  sbGroup.clear();
+  sectorBoundaries.length = 0;
+  for (let sb = 0; sb < hcsParams.sectors; sb++) {
+    const phi0 = (sb / hcsParams.sectors) * Math.PI * 2;
+    const pts  = buildSectorBoundary(phi0);
+    const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+    // Hot pink CIR shock line
+    const mat  = new THREE.LineBasicMaterial({ color:0xff44aa, transparent:true, opacity:0.65 });
+    const line = new THREE.Line(geo, mat);
+    sbGroup.add(line);
+    sectorBoundaries.push({ line, phi0 });
+
+    // CIR glow dots along boundary
+    for (let d = 2; d < SB_STEPS; d += 8) {
+      const p = pts[d];
+      const dg = new THREE.SphereGeometry(0.025, 4, 4);
+      const dm = new THREE.MeshBasicMaterial({ color:0xff88cc, transparent:true, opacity:0.5 });
+      const dot = new THREE.Mesh(dg, dm);
+      dot.position.copy(p);
+      sbGroup.add(dot);
+    }
+  }
+}
+rebuildSectorBoundaries();
+
+// ── HCS Polarity Map on outer corona shell ────────────────────
+// Subtle color overlay showing + / - IMF sectors on corona surface
+const HPMAP_W = 128, HPMAP_H = 64;
+const hpData  = new Uint8Array(HPMAP_W * HPMAP_H * 4);
+const hpTex   = new THREE.DataTexture(hpData, HPMAP_W, HPMAP_H, THREE.RGBAFormat);
+hpTex.needsUpdate = true;
+
+const hpSphereGeo = new THREE.SphereGeometry(2.6, 64, 32);
+const hpSphereMat = new THREE.MeshBasicMaterial({
+  map: hpTex,
+  transparent: true,
+  opacity: 0.07,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const hpSphereMesh = new THREE.Mesh(hpSphereGeo, hpSphereMat);
+hcsGroup.add(hpSphereMesh);
+
+function updatePolarityMap(phaseOffset) {
+  const n       = hcsParams.sectors / 2;
+  const tiltRad = hcsParams.tilt * Math.PI / 180;
+  for (let j = 0; j < HPMAP_H; j++) {
+    for (let i = 0; i < HPMAP_W; i++) {
+      const phi = (i / HPMAP_W) * Math.PI * 2;
+      const lat = (j / HPMAP_H - 0.5) * Math.PI;
+      // HCS divides polarity: sector = sign(lat - HCS_lat(phi))
+      const hcsLat = tiltRad * Math.sin(n * phi - phaseOffset);
+      const polarity = lat > hcsLat ? 1 : -1;
+      const pi = (j * HPMAP_W + i) * 4;
+      if (polarity > 0) {
+        hpData[pi]=180; hpData[pi+1]=60; hpData[pi+2]=20; hpData[pi+3]=180;
+      } else {
+        hpData[pi]=20; hpData[pi+1]=60; hpData[pi+2]=180; hpData[pi+3]=180;
+      }
+    }
+  }
+  hpTex.needsUpdate = true;
+}
+updatePolarityMap(0);
+
+// ── Reconnection events at HCS ────────────────────────────────
+const hcsReconnections = [];
+let hcsReconTimer = 0;
+
+function spawnHCSReconnection() {
+  const phi = Math.random() * Math.PI * 2;
+  const r   = 1.5 + Math.random() * 2.5;
+  const n   = hcsParams.sectors / 2;
+  const tiltRad = hcsParams.tilt * Math.PI / 180;
+  const hcsLat  = tiltRad * Math.sin(n * phi - hcsPhaseOffset);
+  const x = r * Math.cos(hcsLat) * Math.cos(phi);
+  const y = r * Math.sin(hcsLat);
+  const z = r * Math.cos(hcsLat) * Math.sin(phi);
+
+  // X-point geometry: two crossing lines
+  const size = 0.08 + Math.random()*0.06;
+  const pts = [
+    new THREE.Vector3(x-size, y-size, z), new THREE.Vector3(x+size, y+size, z),
+    new THREE.Vector3(x+size, y-size, z), new THREE.Vector3(x-size, y+size, z),
+  ];
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color:0xffee44, transparent:true, opacity:1.0 });
+  const segs = new THREE.LineSegments(geo, mat);
+  cirGroup.add(segs);
+
+  // Energetic particle spray
+  const dotGeo = new THREE.SphereGeometry(0.012,4,4);
+  const dotMat = new THREE.MeshBasicMaterial({ color:0xffdd88, transparent:true, opacity:0.9 });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.position.set(x,y,z);
+  cirGroup.add(dot);
+
+  hcsReconnections.push({ segs, dot, life:1.0, decay: 0.015+Math.random()*0.02 });
+}
+
+// ── Slider bindings for HCS ───────────────────────────────────
+function rebuildParkerSpirals() {
+  psGroup.clear();
+  parkerSpirals.length = 0;
+  for (let ps = 0; ps < PS_COUNT; ps++) {
+    const phi0  = (ps / PS_COUNT) * Math.PI * 2 - hcsPhaseOffset * 0.1;
+    const n     = hcsParams.sectors / 2;
+    const pol   = Math.sin(n * phi0) > 0 ? 1 : -1;
+    const color = pol > 0 ? 0xff6644 : 0x4488ff;
+    const pts   = buildParkerSpiral(phi0, pol);
+    const geo   = new THREE.BufferGeometry().setFromPoints(pts);
+    const mat   = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.35 });
+    const line  = new THREE.Line(geo, mat);
+    psGroup.add(line);
+    parkerSpirals.push({ line, phi0, pol });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ALFVÉN CRITICAL POINT & PARKER TRANSONIC WIND SOLUTION
+//
+//  Parker (1958) showed the solar wind must pass through TWO
+//  critical points on its way to infinity:
+//
+//  1. SONIC POINT r_s: where v_wind = v_sound
+//     r_s = GM☉ / (2·c_s²)
+//     At T_corona ~ 1.5 MK → c_s ~ 150 km/s → r_s ~ 5–8 R☉
+//
+//  2. ALFVÉN POINT r_A: where v_wind = v_Alfvén = B/√(μ₀ρ)
+//     Below r_A: corona magnetically dominated (sub-Alfvénic)
+//     Above r_A: plasma drags field (super-Alfvénic)
+//     Parker Solar Probe first crossed r_A in April 2021!
+//     r_A ~ 10–20 R☉ depending on solar wind conditions
+//
+//  We solve Parker's ODE using RK4 outward integration,
+//  finding v(r) from 1 R☉ to 5 R☉, then overlay both rings.
+// ═══════════════════════════════════════════════════════════
+
+const alfvenGroup = new THREE.Group(); scene.add(alfvenGroup);
+const flareGroup  = new THREE.Group(); scene.add(flareGroup);
+
+// ── Solve Parker wind equation via RK4 ─────────────────────
+// dv/dr = v · (2c_s²/r - GM/r²) / (v² - c_s²)
+// Normalized: GM=1, R☉=1, c_s in units of escape speed
+
+function solveParkerWind(T_MK, B0_norm) {
+  // Physical constants (SI, then normalize)
+  const GM    = 1.327e20;    // m³/s²
+  const R_sun = 6.957e8;     // m
+  const kb    = 1.38e-23;
+  const mp    = 1.67e-27;
+  const mu0   = 4*Math.PI*1e-7;
+
+  const T     = T_MK * 1e6;
+  const cs    = Math.sqrt(2 * kb * T / mp);         // sound speed m/s
+  const r_s   = GM / (2 * cs * cs);                 // sonic radius m
+  const r_s_R = r_s / R_sun;                        // in R☉
+
+  // RK4 integration of Parker ODE in physical units
+  // Start just above 1 R☉, integrate outward to ~25 R☉
+  const N_steps = 400;
+  const r_max   = 25 * R_sun;
+  const dr      = (r_max - R_sun * 1.01) / N_steps;
+
+  // dv/dr = v*(2cs²/r - GM/r²) / (v² - cs²)
+  function dvdr(r, v) {
+    const num = v * (2*cs*cs/r - GM/(r*r));
+    const den = v*v - cs*cs;
+    if (Math.abs(den) < 1e-6 * cs*cs) return 0; // near critical point
+    return num / den;
+  }
+
+  // Start below sonic point with approximate initial condition
+  // v(r_near) from Parker's analytic approximation near r=1 R☉
+  const r0 = R_sun * 1.01;
+  // Far-subsonic approximation: v ≈ cs² * r_s/r at r << r_s
+  let v = cs * cs * r_s / (r0 * cs) * 0.1;
+  v = Math.max(v, 1000); // floor at 1 km/s
+
+  const profile = []; // {r_R: in R☉, v_kms: in km/s, mach: v/cs}
+  let r = r0;
+
+  for (let i = 0; i < N_steps; i++) {
+    profile.push({
+      r_R: r / R_sun,
+      v_kms: v / 1e3,
+      mach: v / cs
+    });
+
+    // RK4
+    const k1 = dvdr(r, v);
+    const k2 = dvdr(r + dr/2, v + dr*k1/2);
+    const k3 = dvdr(r + dr/2, v + dr*k2/2);
+    const k4 = dvdr(r + dr, v + dr*k3);
+    const dv = (dr/6) * (k1 + 2*k2 + 2*k3 + k4);
+
+    if (!isFinite(dv) || Math.abs(dv) > v * 10) break;
+    v += dv;
+    r += dr;
+    if (v > 2000e3) break; // cap at 2000 km/s
+  }
+
+  // Find sonic and Alfvén radii from profile
+  let r_sonic_R = r_s_R; // analytic
+  let r_alfven_R = 15;   // default
+  let alfvenFound = false;
+
+  // ρ(r) ~ ρ0 * (r0/r)² for mass conservation at constant speed (approx)
+  // v_A(r) = B0/R☉² * r² / sqrt(mu0 * rho0 * r0² / r²) ... simplified:
+  // v_A ~ v_A0 * (r0/r) for dipole field ~ 1/r³, rho ~ 1/r²
+  // v_A0 calibrated to B0_norm
+  const v_A0 = B0_norm * 200e3; // Alfvén speed at 1 R☉ in m/s
+
+  for (let i = 1; i < profile.length; i++) {
+    const p  = profile[i];
+    const r_ = p.r_R;
+    // Alfvén speed decreases faster than wind speed increases → crossing
+    const vA = v_A0 / (r_ * r_); // dipole: B~1/r³, rho~1/r²  → vA~1/r²
+    if (!alfvenFound && p.v_kms * 1e3 >= vA) {
+      r_alfven_R = r_;
+      alfvenFound = true;
+    }
+  }
+
+  return { profile, r_sonic_R, r_alfven_R, cs_kms: cs/1e3 };
+}
+
+// ── Wind profile visualization ─────────────────────────────
+// We'll draw a 2D velocity profile graph embedded in 3D space
+// as a glowing curve in the equatorial plane
+
+const WIND_PLOT_PTS = 80;
+const windPlotGeo = new THREE.BufferGeometry();
+const windPlotPos = new Float32Array(WIND_PLOT_PTS * 3);
+windPlotGeo.setAttribute('position', new THREE.BufferAttribute(windPlotPos, 3));
+const windPlotMat = new THREE.LineBasicMaterial({ color:0xffaa44, transparent:true, opacity:0.8 });
+const windPlotLine = new THREE.Line(windPlotGeo, windPlotMat);
+alfvenGroup.add(windPlotLine);
+
+// Alfvén speed profile curve (declines with r)
+const alfPlotGeo = new THREE.BufferGeometry();
+const alfPlotPos = new Float32Array(WIND_PLOT_PTS * 3);
+alfPlotGeo.setAttribute('position', new THREE.BufferAttribute(alfPlotPos, 3));
+const alfPlotLine = new THREE.Line(alfPlotGeo, new THREE.LineBasicMaterial({ color:0xaaddff, transparent:true, opacity:0.6 }));
+alfvenGroup.add(alfPlotLine);
+
+// Sound speed horizontal reference line
+const csLineGeo = new THREE.BufferGeometry();
+const csLinePts = [new THREE.Vector3(-1,0,0), new THREE.Vector3(-1,0.1,0)]; // placeholder, updated below
+csLineGeo.setFromPoints(csLinePts);
+const csLine = new THREE.Line(csLineGeo, new THREE.LineBasicMaterial({ color:0xffcc44, transparent:true, opacity:0.4 }));
+alfvenGroup.add(csLine);
+
+// Sonic ring
+const sonicRingGeo = new THREE.TorusGeometry(1, 0.008, 8, 80);
+const sonicRingMat = new THREE.MeshBasicMaterial({ color:0xffcc00, transparent:true, opacity:0.7 });
+const sonicRingMesh = new THREE.Mesh(sonicRingGeo, sonicRingMat);
+sonicRingMesh.rotation.x = Math.PI/2;
+alfvenGroup.add(sonicRingMesh);
+
+// Alfvén ring — larger, cooler blue
+const alfvenRingGeo = new THREE.TorusGeometry(2, 0.01, 8, 80);
+const alfvenRingMat = new THREE.MeshBasicMaterial({ color:0x88bbff, transparent:true, opacity:0.55 });
+const alfvenRingMesh = new THREE.Mesh(alfvenRingGeo, alfvenRingMat);
+alfvenRingMesh.rotation.x = Math.PI/2;
+alfvenGroup.add(alfvenRingMesh);
+
+// Radial scale: 1 R☉ = 1 unit in scene, but for readability
+// we plot profile in a vertical panel at x = -5.5
+const PLOT_X = -3.8; // position in 3D space
+const PLOT_SCALE_R = 0.28; // r units per scene unit (radial axis → z)
+const PLOT_SCALE_V = 0.008; // km/s per scene unit (velocity axis → y)
+const PLOT_R_MAX   = 25;   // R☉ range shown
+const PLOT_V_MAX   = 800;  // km/s ceiling
+
+// Plot axes
+function buildPlotAxes() {
+  const axGeo = new THREE.BufferGeometry();
+  const axPts = [
+    // Y axis (velocity)
+    new THREE.Vector3(PLOT_X, -1.5, 0),
+    new THREE.Vector3(PLOT_X, -1.5 + PLOT_V_MAX * PLOT_SCALE_V, 0),
+    // Z axis (radius)
+    new THREE.Vector3(PLOT_X, -1.5, 0),
+    new THREE.Vector3(PLOT_X, -1.5, PLOT_R_MAX * PLOT_SCALE_R),
+  ];
+  axGeo.setFromPoints(axPts);
+  const axLine = new THREE.LineSegments(axGeo, new THREE.LineBasicMaterial({ color:0x5a4a2a, transparent:true, opacity:0.6 }));
+  alfvenGroup.add(axLine);
+}
+buildPlotAxes();
+
+// Current wind solution state
+let windSolution = null;
+
+function updateWindSolution() {
+  let maxB = 0.1;
+  for (let k=0; k<N; k++) maxB = Math.max(maxB, Math.abs(Br[k]));
+  const T_MK = 1.2 + params.A_temp * 0.3; // temperature slider
+  windSolution = solveParkerWind(T_MK, maxB);
+
+  // Update velocity profile curve (wind speed)
+  const prof = windSolution.profile;
+  const step = Math.floor(prof.length / WIND_PLOT_PTS);
+  for (let i = 0; i < WIND_PLOT_PTS; i++) {
+    const p = prof[Math.min(i*step, prof.length-1)];
+    windPlotPos[i*3]   = PLOT_X;
+    windPlotPos[i*3+1] = -1.5 + Math.min(p.v_kms, PLOT_V_MAX) * PLOT_SCALE_V;
+    windPlotPos[i*3+2] = Math.min(p.r_R, PLOT_R_MAX) * PLOT_SCALE_R;
+  }
+  windPlotGeo.attributes.position.needsUpdate = true;
+
+  // Update Alfvén speed profile curve (decreasing)
+  const v_A0 = maxB * 200; // km/s at 1 R☉
+  for (let i = 0; i < WIND_PLOT_PTS; i++) {
+    const r_R = 1 + (i / (WIND_PLOT_PTS-1)) * (PLOT_R_MAX - 1);
+    const vA  = Math.min(v_A0 / (r_R * r_R), PLOT_V_MAX);
+    alfPlotPos[i*3]   = PLOT_X;
+    alfPlotPos[i*3+1] = -1.5 + vA * PLOT_SCALE_V;
+    alfPlotPos[i*3+2] = r_R * PLOT_SCALE_R;
+  }
+  alfPlotGeo.attributes.position.needsUpdate = true;
+
+  // Reposition sonic and Alfvén rings in scene space
+  const rs = Math.min(windSolution.r_sonic_R, 6.5); // clamp for visual
+  const ra = Math.min(windSolution.r_alfven_R, 5.0);
+  sonicRingMesh.scale.setScalar(rs);
+  alfvenRingMesh.scale.setScalar(ra);
+
+  // Update HUD
+  document.getElementById('tSonic').textContent  = windSolution.r_sonic_R.toFixed(1);
+  document.getElementById('tAlfven').textContent = windSolution.r_alfven_R.toFixed(1);
+  document.getElementById('tCs').textContent     = windSolution.cs_kms.toFixed(0);
+}
+
+// Glow label markers at critical radii — floating dots on rings
+const sonicMarkerGeo = new THREE.SphereGeometry(0.06, 8, 8);
+const sonicMarker    = new THREE.Mesh(sonicMarkerGeo, new THREE.MeshBasicMaterial({ color:0xffcc00 }));
+alfvenGroup.add(sonicMarker);
+
+const alfvenMarkerGeo = new THREE.SphereGeometry(0.07, 8, 8);
+const alfvenMarker    = new THREE.Mesh(alfvenMarkerGeo, new THREE.MeshBasicMaterial({ color:0x88bbff }));
+alfvenGroup.add(alfvenMarker);
+
+// ── SUB/SUPER ALFVÉNIC ZONE SHELLS ──────────────────────────
+// Faint volume showing magnetically dominated vs plasma-dominated
+const subAlfGeo = new THREE.SphereGeometry(1, 32, 32); // scaled dynamically
+const subAlfMat = new THREE.MeshBasicMaterial({
+  color: 0x2244aa,
+  transparent: true,
+  opacity: 0.025,
+  side: THREE.BackSide,
+  depthWrite: false,
+});
+const subAlfMesh = new THREE.Mesh(subAlfGeo, subAlfMat);
+alfvenGroup.add(subAlfMesh);
+
+// ═══════════════════════════════════════════════════════════
+//  FLARE PREPARATION SYSTEM
+//  A real solar flare requires:
+//  1. A region of high free magnetic energy (W_free)
+//  2. A steep current sheet (high |∇×B| = |J|/μ₀)
+//  3. A triggering instability (torus or kink) when twist exceeds threshold
+//
+//  We pre-compute these quantities each frame on the MHD grid,
+//  mark "flare-ready" zones, and hold them ready for ignition.
+//  The flare trigger button will detonate stored W_free as:
+//    - Impulsive phase: current sheet collapses, X-point forms
+//    - Flash phase: thermal energy release, T→10-30 MK
+//    - Decay phase: post-flare loops, plasmoid ejection
+// ═══════════════════════════════════════════════════════════
+
+const FLARE_THRESHOLD = 3.5;   // |J| threshold for flare-ready marking
+const flareSites      = [];    // current flare-ready sites
+const flareMarkers    = [];    // visual markers for high-J sites
+const flareEvents     = [];    // active flare detonations
+
+// Current density grid J = ∇×B/μ₀ (we store |J| normalized)
+const Jmag = new Float32Array(N);
+
+function computeCurrentDensity() {
+  const dLat = Math.PI / (NLat-1);
+  const dLon = 2*Math.PI / NLon;
+  let maxJ = 0.001;
+
+  for (let i=1; i<NLat-1; i++) {
+    for (let j=0; j<NLon; j++) {
+      const kN = idx(i-1,j), kS = idx(i+1,j);
+      const kE = idx(i,j+1), kW = idx(i,j-1);
+      const k  = idx(i,j);
+
+      // (∇×B)_r ≈ (∂Bph/∂θ - ∂Bth/∂φ) / r
+      const dBphDth = (Bph[kN] - Bph[kS]) / (2*dLat);
+      const dBthDph = (Bth[kE] - Bth[kW]) / (2*dLon);
+      const Jr = dBphDth - dBthDph;
+
+      // (∇×B)_th ≈ ∂Br/∂φ - ∂Bph/∂r (we approximate ∂r as 0 on shell)
+      const Jth = (Br[kE] - Br[kW]) / (2*dLon);
+
+      // (∇×B)_ph ≈ ∂Bth/∂r - ∂Br/∂θ
+      const Jph = -(Br[kN] - Br[kS]) / (2*dLat);
+
+      Jmag[k] = Math.sqrt(Jr*Jr + Jth*Jth + Jph*Jph);
+      if (Jmag[k] > maxJ) maxJ = Jmag[k];
+    }
+  }
+
+  // Normalize and find flare-ready sites
+  flareSites.length = 0;
+  for (let i=1; i<NLat-1; i++) {
+    for (let j=0; j<NLon; j++) {
+      const k = idx(i,j);
+      Jmag[k] /= maxJ;
+      if (Jmag[k] > 0.85) {
+        flareSites.push({ i, j, k, J: Jmag[k] });
+      }
+    }
+  }
+}
+
+// Flare-ready visual markers (pulsing dots on sphere surface)
+const flareMarkerPool = [];
+const FLARE_POOL_SIZE = 20;
+for (let f=0; f<FLARE_POOL_SIZE; f++) {
+  const mg  = new THREE.SphereGeometry(0.022, 6, 6);
+  const mm  = new THREE.MeshBasicMaterial({ color:0xff2200, transparent:true, opacity:0 });
+  const mesh = new THREE.Mesh(mg, mm);
+  flareGroup.add(mesh);
+  flareMarkerPool.push(mesh);
+}
+
+function updateFlareMarkers() {
+  flareMarkerPool.forEach((m,i) => {
+    if (i < flareSites.length && vis.FLARE) {
+      const s  = flareSites[i];
+      const la = lat(s.i), lo = lon(s.j);
+      const r  = 1.015;
+      m.position.set(
+        r * Math.cos(la) * Math.cos(lo + photoMesh.rotation.y),
+        r * Math.sin(la),
+        r * Math.cos(la) * Math.sin(lo + photoMesh.rotation.y)
+      );
+      const pulse = 0.3 + 0.7 * Math.abs(Math.sin(frame * 0.05 + i));
+      m.material.opacity = s.J * pulse * 0.9;
+      m.material.color.setHex(s.J > 0.95 ? 0xff0000 : 0xff6600);
+    } else {
+      m.material.opacity = 0;
+    }
+  });
+}
+
+// Free magnetic energy calculation
+// W_free ~ sum of (Br² + Bth² + Bph²) - potential field contribution
+// Potential field ~ dipole with amplitude = mean(|Br|)
+function computeFreeEnergy() {
+  let Wtotal = 0, Wpot = 0;
+  let meanBr = 0;
+  for (let k=0; k<N; k++) meanBr += Math.abs(Br[k]);
+  meanBr /= N;
+  for (let k=0; k<N; k++) {
+    Wtotal += Br[k]*Br[k] + Bth[k]*Bth[k] + Bph[k]*Bph[k];
+    Wpot   += meanBr * meanBr; // potential field proxy
+  }
+  return Math.max(0, (Wtotal - Wpot) / N);
+}
+
+// ── FLARE TRIGGER ────────────────────────────────────────────
+let flarePrimed    = false;
+let flareEnergy    = 0;
+let flareReadiness = 0; // 0–1, shown in UI
+
+window.triggerFlare = function() {
+  if (!flarePrimed || flareSites.length === 0) {
+    document.getElementById('flare-btn').textContent = 'CHARGING...';
+    flarePrimed = true;
+    return;
+  }
+  // Pick highest-J site
+  const site = flareSites.reduce((a,b) => a.J > b.J ? a : b);
+  const la = lat(site.i), lo = lon(site.j);
+
+  // Inject impulsive energy into field as localized perturbation
+  // This will be the seed for the full flare physics in next build
+  const radius = 3;
+  for (let di=-radius; di<=radius; di++) {
+    for (let dj=-radius; dj<=radius; dj++) {
+      const ii = Math.max(1, Math.min(NLat-2, site.i+di));
+      const jj = site.j + dj;
+      const k  = idx(ii, ((jj%NLon)+NLon)%NLon);
+      const dist = Math.sqrt(di*di+dj*dj);
+      const amp  = flareEnergy * Math.exp(-dist*0.8);
+      // Explosive reconnection: collapse current sheet
+      Br[k]  *= (1 - amp * 0.4);
+      Bph[k] += amp * (Math.random()-0.5) * 2;
+      Bth[k] += amp * (Math.random()-0.5) * 2;
+    }
+  }
+
+  // Spawn visual flare event
+  spawnFlareEvent(la, lo);
+  flarePrimed = false;
+  document.getElementById('flare-btn').textContent = '▶ TRIGGER FLARE EVENT';
+  document.getElementById('flare-btn').style.borderColor = 'rgba(212,164,76,0.35)';
+};
+
+function spawnFlareEvent(la, lo) {
+  // Impulsive flash dome
+  const flashGeo = new THREE.SphereGeometry(0.05, 12, 12);
+  const flashMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:1.0 });
+  const flash    = new THREE.Mesh(flashGeo, flashMat);
+  const r0 = 1.02;
+  flash.position.set(
+    r0*Math.cos(la)*Math.cos(lo), r0*Math.sin(la), r0*Math.cos(la)*Math.sin(lo)
+  );
+  flareGroup.add(flash);
+
+  // Thermal arcade loops — pre-flare loop system that will reconnect
+  const arcPts = [];
+  for (let s=0; s<=40; s++) {
+    const t  = s/40;
+    const h  = Math.sin(t*Math.PI) * 0.25;
+    const r_ = r0 + h;
+    const la2= la + (t-0.5)*0.3;
+    arcPts.push(new THREE.Vector3(
+      r_*Math.cos(la2)*Math.cos(lo), r_*Math.sin(la2), r_*Math.cos(la2)*Math.sin(lo)
+    ));
+  }
+  const arcGeo = new THREE.BufferGeometry().setFromPoints(arcPts);
+  const arcMat = new THREE.LineBasicMaterial({ color:0xff6600, transparent:true, opacity:0.9 });
+  const arc    = new THREE.Line(arcGeo, arcMat);
+  flareGroup.add(arc);
+
+  flareEvents.push({ flash, arc, life:1.0, decay:0.008, la, lo });
+  document.getElementById('flare-status').textContent = 'FLARE ACTIVE';
+  document.getElementById('flare-status').style.color = '#ff4400';
+}
+
+// ═══════════════════════════════════════════════════════════
+//  VORTICITY & DIVERGENCE — fluid dynamics diagnostics
+//  ω = ∇×v (rotation of the plasma flow field)
+//  ∇·B = 0 (solenoidal condition — should stay near zero)
+//  Vorticity tubes form at shear layers between fast/slow
+//  rotation bands — these are the seeds of flux tube kinking.
+// ═══════════════════════════════════════════════════════════
+
+const vortGroup = new THREE.Group(); scene.add(vortGroup);
+const VORT_COUNT = 60;
+const vortParticles = [];
+
+// Compute vorticity at grid point
+function computeVorticityAt(i, j) {
+  const dLat = Math.PI/(NLat-1), dLon = 2*Math.PI/NLon;
+  const kN=idx(i-1,j),kS=idx(i+1,j),kE=idx(i,j+1),kW=idx(i,j-1);
+  // ω_r = ∂Vph/∂θ - ∂Vth/∂φ (simplified)
+  const wr = (Vph[kN]-Vph[kS])/(2*dLat) - (Vth[kE]-Vth[kW])/(2*dLon);
+  // ω_th = ∂Vr/∂φ - ∂Vph/∂r (approx, shell)
+  const wt = (Vr[kE]-Vr[kW])/(2*dLon);
+  // ω_ph = ∂Vth/∂r - ∂Vr/∂θ (approx)
+  const wp = -(Vr[kN]-Vr[kS])/(2*dLat);
+  return Math.sqrt(wr*wr+wt*wt+wp*wp);
+}
+
+// Spawn vorticity tracers as small streamlines at high-shear zones
+for (let v=0; v<VORT_COUNT; v++) {
+  const la = (Math.random()-0.5)*Math.PI*0.85;
+  const lo = Math.random()*Math.PI*2;
+  const r  = 1.03 + Math.random()*0.08;
+  const geo = new THREE.SphereGeometry(0.007, 4, 4);
+  const mat = new THREE.MeshBasicMaterial({ color:0xffdd00, transparent:true, opacity:0.5 });
+  const mesh = new THREE.Mesh(geo, mat);
+  vortGroup.add(mesh);
+  vortParticles.push({ mesh, la, lo, r, trail:[], age:Math.random()*100 });
+}
+
+// Vorticity trail lines
+const vortTrails = [];
+for (let v=0; v<12; v++) {
+  const pts = Array(8).fill(0).map(()=>new THREE.Vector3(0,0,0));
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color:0xffdd00, transparent:true, opacity:0.3 });
+  const line = new THREE.Line(geo, mat);
+  vortGroup.add(line);
+  vortTrails.push({ line, pts });
+}
+
+// ── Starfield ─────────────────────────────────────────────────
+const starGeo = new THREE.BufferGeometry();
+const sp = new Float32Array(3000*3);
+for (let i=0;i<3000;i++){
+  const th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1), r=60+Math.random()*80;
+  sp[i*3]=r*Math.sin(ph)*Math.cos(th); sp[i*3+1]=r*Math.cos(ph); sp[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+}
+starGeo.setAttribute('position',new THREE.BufferAttribute(sp,3));
+scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({color:0xffffff,size:0.1,transparent:true,opacity:0.75})));
+
+// ═══════════════════════════════════════════════════════════
+//  UI STATE & CONTROLS
+// ═══════════════════════════════════════════════════════════
+const vis = { FL:true, MT:true, FT:true, PF:true, HCS:true, PS:true, SB:true, ALF:true, WIND:true, FLARE:true, VORT:true, PA:false };
+window.tog = function(k) {
+  vis[k] = !vis[k];
+  const btn = document.getElementById('t'+k);
+  if (!btn) return;
+  btn.classList.toggle('on', vis[k]);
+  if (k==='FL')    flGroup.visible    = vis.FL;
+  if (k==='MT')    { photoMesh.material.map = vis.MT ? magTex : null; photoMesh.material.needsUpdate=true; }
+  if (k==='FT')    ftGroup.visible    = vis.FT;
+  if (k==='PF')    pfGroup.visible    = vis.PF;
+  if (k==='HCS')   hcsGroup.visible   = vis.HCS;
+  if (k==='PS')    psGroup.visible    = vis.PS;
+  if (k==='SB')    { sbGroup.visible = vis.SB; cirGroup.visible = vis.SB; }
+  if (k==='ALF')   alfvenGroup.visible = vis.ALF;
+  if (k==='WIND')  { windPlotLine.visible = vis.WIND; alfPlotLine.visible = vis.WIND; }
+  if (k==='FLARE') flareGroup.visible = vis.FLARE;
+  if (k==='VORT')  vortGroup.visible  = vis.VORT;
+};
+
+function bindSlider(id, vId, key, fmt) {
+  const sl = document.getElementById(id);
+  if (!sl) return;
+  sl.addEventListener('input', () => {
+    const v = parseFloat(sl.value);
+    params[key] = v;
+    const el = document.getElementById(vId);
+    if (el) el.textContent = fmt ? fmt(v) : v.toFixed(2);
+  });
+}
+bindSlider('slDR',   'vDR',      'DR',   v=>v.toFixed(2));
+bindSlider('slEta',  'vEta',     'eta',  v=>v.toFixed(3));
+bindSlider('slConv', 'vConv',    'conv', v=>v.toFixed(2));
+bindSlider('slBuoy', 'vBuoy',    'buoy', v=>v.toFixed(2));
+bindSlider('slDT',   'vDT',      'dt',   v=>v.toFixed(2));
+
+// Temperature slider
+document.getElementById('slTemp').addEventListener('input', function() {
+  params.A_temp = parseFloat(this.value);
+  document.getElementById('vTemp').textContent = parseFloat(this.value).toFixed(1);
+  updateWindSolution();
+});
+
+// HCS sliders
+document.getElementById('slTilt').addEventListener('input', function() {
+  hcsParams.tilt = parseFloat(this.value);
+  document.getElementById('vTiltCtrl').textContent = this.value;
+  document.getElementById('tTilt').textContent = this.value + '°';
+  updateHCS(hcsPhaseOffset);
+  updatePolarityMap(hcsPhaseOffset);
+  rebuildSectorBoundaries();
+});
+document.getElementById('slSec').addEventListener('input', function() {
+  hcsParams.sectors = parseInt(this.value);
+  document.getElementById('vSec').textContent = this.value;
+  document.getElementById('tSector').textContent = '±' + (parseInt(this.value)/2);
+  rebuildSectorBoundaries();
+  rebuildParkerSpirals();
+  updateHCS(hcsPhaseOffset);
+  updatePolarityMap(hcsPhaseOffset);
+});
+document.getElementById('slVsw').addEventListener('input', function() {
+  hcsParams.vsw = parseFloat(this.value);
+  document.getElementById('vVsw').textContent = this.value;
+  rebuildParkerSpirals();
+  rebuildSectorBoundaries();
+});
+
+// ── TOOLTIP SYSTEM ───────────────────────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse2d   = new THREE.Vector2();
+const tooltip   = document.getElementById('tip');
+const tooltipData = [
+  { obj: photoMesh,    title:'Photosphere', body:'Solar surface, T=5,778K. Magnetogram shows B_r polarity — red=positive (away), blue=negative (toward).', val:()=>`Max |B_r| = ${Math.max(...Array.from(Br).map(Math.abs)).toFixed(2)} G` },
+  { obj: sonicRingMesh, title:'Sonic Critical Point r_s', body:"Parker's transonic wind point. Wind speed = sound speed c_s. Below: subsonic. Above: supersonic. r_s = GM☉/2c_s².", val:()=>windSolution ? `r_s = ${windSolution.r_sonic_R.toFixed(1)} R☉, c_s = ${windSolution.cs_kms.toFixed(0)} km/s` : '' },
+  { obj: alfvenRingMesh, title:'Alfvén Critical Point r_A', body:'Wind speed equals Alfvén speed v_A = B/√(μ₀ρ). Below: magnetically dominated corona. Above: plasma drags field into Parker spiral. PSP crossed this in 2021.', val:()=>windSolution ? `r_A = ${windSolution.r_alfven_R.toFixed(1)} R☉` : '' },
+  { obj: hcsMesh,      title:'Heliospheric Current Sheet', body:'The HCS is the largest structure in the solar system — the warped surface where B_r changes sign. Schulz 1973 "ballerina skirt" geometry. Co-rotates with Sun.', val:()=>`Tilt = ${hcsParams.tilt}° | Sectors = ${hcsParams.sectors}` },
+  { obj: hpSphereMesh, title:'IMF Polarity Hemisphere', body:'Color shows dominant IMF polarity at this heliospheric distance. Red=away, Blue=toward. Driven by the HCS tilt angle and solar cycle phase.', val:()=>'' },
+  { obj: subAlfMesh,   title:'Sub-Alfvénic Corona Volume', body:'The inner corona where magnetic forces dominate. The solar wind is sub-Alfvénic here — field lines co-rotate with the Sun. This region was first explored by Parker Solar Probe in 2021.', val:()=>windSolution ? `Extends to r_A ≈ ${windSolution.r_alfven_R.toFixed(1)} R☉` : '' },
+  { obj: windPlotLine, title:'Solar Wind Velocity Profile v(r)', body:'Parker (1958) transonic solution to dv/dr = v(2c_s²/r - GM/r²)/(v² - c_s²). Orange curve. The crossing with the Alfvén speed curve (blue) gives r_A.', val:()=>windSolution ? `Terminal speed ~${(windSolution.profile[windSolution.profile.length-1]?.v_kms||400).toFixed(0)} km/s` : '' },
+];
+
+const ttObjects = tooltipData.map(d=>d.obj).filter(Boolean);
+
+renderer.domElement.addEventListener('mousemove', e => {
+  mouse2d.x = (e.clientX / window.innerWidth)  * 2 - 1;
+  mouse2d.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+  raycaster.setFromCamera(mouse2d, camera);
+  const hits = raycaster.intersectObjects(ttObjects);
+
+  if (hits.length > 0) {
+    const hit = hits[0];
+    const data = tooltipData.find(d => d.obj === hit.object);
+    if (data) {
+      document.getElementById('tt-title').textContent = data.title;
+      document.getElementById('tt-body').textContent  = data.body;
+      document.getElementById('tt-val').textContent   = data.val();
+      tooltip.style.display = 'block';
+      tooltip.style.left = Math.min(e.clientX + 15, window.innerWidth - 220) + 'px';
+      tooltip.style.top  = Math.min(e.clientY + 15, window.innerHeight - 120) + 'px';
+    }
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+let drag=false, prevX=0, prevY=0;
+let rotX=0.3,rotY=0;
+renderer.domElement.addEventListener('mousedown',e=>{ drag=true; prevX=e.clientX; prevY=e.clientY; });
+window.addEventListener('mouseup',()=>drag=false);
+window.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  rotY+=(e.clientX-prevX)*0.006;
+  rotX+=(e.clientY-prevY)*0.004;
+  rotX=Math.max(-1.3,Math.min(1.3,rotX));
+  prevX=e.clientX;prevY=e.clientY;
+});
+let zoom=7.5;
+window.addEventListener('wheel',e=>{zoom=Math.max(3,Math.min(16,zoom+e.deltaY*0.01));});
+
+// ═══════════════════════════════════════════════════════════
+//  MAIN LOOP
+// ═══════════════════════════════════════════════════════════
+let frame=0, fieldUpdateTimer=0, ftTimer=0;
+const FIELD_REFRESH = 15; // update field lines every N frames
+
+function animate() {
+  requestAnimationFrame(animate);
+  frame++;
+
+  // ── Physics step (skip if paused) ──
+  if (!vis.PA) {
+    rk4Step();
+    rk4Step(); // 2 steps per frame for responsiveness
+  }
+
+  // ── Camera ──
+  camera.position.x = zoom * Math.sin(rotY) * Math.cos(rotX);
+  camera.position.y = zoom * Math.sin(rotX);
+  camera.position.z = zoom * Math.cos(rotY) * Math.cos(rotX);
+  camera.lookAt(0,0,0);
+
+  // ── Differential rotation of visual sphere ──
+  // Equator rotates faster — tilt sphere slightly then rotate
+  photoMesh.rotation.y += params.DR * 0.0004;
+  chromMat.emissiveIntensity = 0.4 + Math.sin(frame*0.017)*0.1;
+
+  // ── Update magnetic texture ──
+  if (vis.MT && frame % 3 === 0) updateMagTexture();
+
+  // ── Update field lines ──
+  fieldUpdateTimer++;
+  if (vis.FL && fieldUpdateTimer >= FIELD_REFRESH) {
+    fieldUpdateTimer = 0;
+    fieldLines.forEach((fl,idx) => {
+      const newPts = makeFieldLine(fl.la, fl.lo);
+      const positions = fl.line.geometry.attributes.position;
+      if (!positions) return;
+      newPts.forEach((p,s) => {
+        if (s < FL_STEPS) {
+          positions.array[s*3]   = p.x;
+          positions.array[s*3+1] = p.y;
+          positions.array[s*3+2] = p.z;
+        }
+      });
+      positions.needsUpdate = true;
+      fl.line.geometry.computeBoundingSphere();
+      // Recolor by local polarity
+      const gi = Math.round((fl.la/Math.PI+0.5)*(NLat-1));
+      const gj = Math.round((fl.lo/(Math.PI*2))*NLon)%NLon;
+      const k  = Math.max(0,Math.min(NLat-1,gi))*NLon+gj;
+      fl.line.material.color.setHex(Br[k]>0 ? 0xff5522 : 0x4488ff);
+    });
+    flGroup.rotation.y = photoMesh.rotation.y; // co-rotate with sun
+  }
+
+  // ── Flux tubes ──
+  ftTimer++;
+  if (vis.FT && ftTimer % 40 === 0 && fluxTubes.length < 12) spawnFluxTube();
+  for (let i=fluxTubes.length-1;i>=0;i--) {
+    const ft = fluxTubes[i];
+    ft.r += ft.rise * params.buoy;
+    ft.life -= 0.003;
+    ft.obj.scale.setScalar(ft.r / 1.05);
+    ft.obj.position.set(
+      (ft.r - 1.05)*Math.cos(ft.la)*Math.cos(ft.lo),
+      (ft.r - 1.05)*Math.sin(ft.la),
+      (ft.r - 1.05)*Math.cos(ft.la)*Math.sin(ft.lo)
+    );
+    ft.obj.material.opacity = Math.max(0, ft.life * 0.8);
+    if (ft.life<=0||ft.r>1.8) { ftGroup.remove(ft.obj); fluxTubes.splice(i,1); }
+  }
+
+  // ── Plasma particles (follow B field) ──
+  if (vis.PF) {
+    plasmaParticles.forEach(p => {
+      const gi = Math.max(0,Math.min(NLat-1,Math.round((p.la/Math.PI+0.5)*(NLat-1))));
+      const gj = ((Math.round((p.lo/(Math.PI*2))*NLon)%NLon)+NLon)%NLon;
+      const k  = gi*NLon+gj;
+      const br=Br[k],bth=Bth[k],bph=Bph[k];
+      const bmag=Math.sqrt(br*br+bth*bth+bph*bph)+0.001;
+
+      p.la += p.speed * bth/bmag * params.DR;
+      p.lo += p.speed * bph/(bmag*Math.max(0.05,Math.cos(p.la)));
+      p.r  += p.speed * br/bmag * 0.2;
+
+      if(p.r>2.4||p.r<0.98||Math.abs(p.la)>Math.PI*0.5) {
+        p.la=(Math.random()-0.5)*Math.PI*0.9;
+        p.lo=Math.random()*Math.PI*2;
+        p.r=1.02+Math.random()*0.5;
+      }
+      p.lo += params.DR * 0.0004; // co-rotate
+
+      const x=p.r*Math.cos(p.la)*Math.cos(p.lo);
+      const y=p.r*Math.sin(p.la);
+      const z=p.r*Math.cos(p.la)*Math.sin(p.lo);
+      p.mesh.position.set(x,y,z);
+
+      // Color by B polarity
+      const col = br>0 ? new THREE.Color(1,0.4,0.2) : new THREE.Color(0.3,0.7,1.0);
+      p.mesh.material.color.lerp(col, 0.1);
+    });
+  }
+
+  // ── Alfvén critical point rings pulse ──
+  if (vis.ALF) {
+    const pulse = 0.5 + 0.5 * Math.sin(frame * 0.04);
+    sonicRingMat.opacity  = 0.4 + pulse * 0.35;
+    alfvenRingMat.opacity = 0.3 + pulse * 0.25;
+    // Drift marker around ring
+    const angle = frame * 0.012;
+    if (windSolution) {
+      const rs = Math.min(windSolution.r_sonic_R, 6.5);
+      const ra = Math.min(windSolution.r_alfven_R, 5.0);
+      sonicMarker.position.set(rs * Math.cos(angle), 0, rs * Math.sin(angle));
+      alfvenMarker.position.set(ra * Math.cos(angle + 1.2), 0, ra * Math.sin(angle + 1.2));
+      // Sub-Alfvénic volume shell
+      subAlfMesh.scale.setScalar(ra);
+    }
+  }
+
+  // Update wind solution and critical points every 60 frames
+  if (frame % 60 === 0) updateWindSolution();
+
+  // ── Flare preparation ──
+  if (frame % 20 === 0) {
+    computeCurrentDensity();
+    flareEnergy = computeFreeEnergy();
+    flareReadiness = Math.min(1, flareSites.length / 15);
+
+    document.getElementById('flare-bar').style.width = (flareReadiness * 100).toFixed(0) + '%';
+    if (flareReadiness > 0.7) {
+      document.getElementById('flare-status').textContent = 'READY';
+      document.getElementById('flare-status').style.color = '#ff2200';
+      document.getElementById('flare-btn').style.borderColor = '#ff4400';
+      document.getElementById('flare-btn').style.color = '#ff8844';
+    } else if (flareReadiness > 0.3) {
+      document.getElementById('flare-status').textContent = 'CHARGING';
+      document.getElementById('flare-status').style.color = '#ff8800';
+    } else {
+      document.getElementById('flare-status').textContent = 'MONITORING';
+      document.getElementById('flare-status').style.color = '#7a6040';
+      document.getElementById('flare-btn').style.borderColor = 'rgba(212,164,76,0.35)';
+      document.getElementById('flare-btn').style.color = '#d4a44c';
+    }
+    document.getElementById('tFsites').textContent = flareSites.length;
+    document.getElementById('tWfree').textContent  = flareEnergy.toFixed(3);
+  }
+
+  updateFlareMarkers();
+
+  // ── Flare event animation ──
+  for (let i=flareEvents.length-1; i>=0; i--) {
+    const fe = flareEvents[i];
+    fe.life -= fe.decay;
+    fe.flash.material.opacity   = Math.max(0, fe.life * 1.2);
+    fe.arc.material.opacity     = Math.max(0, fe.life * 0.9);
+    const s = 1 + (1 - fe.life) * 5;
+    fe.flash.scale.setScalar(s);
+    if (fe.life <= 0) {
+      flareGroup.remove(fe.flash);
+      flareGroup.remove(fe.arc);
+      flareEvents.splice(i, 1);
+      if (flareEvents.length === 0) {
+        document.getElementById('flare-status').textContent = 'POST-FLARE';
+        document.getElementById('flare-status').style.color = '#888888';
+      }
+    }
+  }
+
+  // ── HCS rotation & update ──
+  // HCS co-rotates with the sun at the same differential-rotation rate
+  if (!vis.PA) {
+    hcsPhaseOffset += params.DR * 0.0004;
+  }
+
+  if (vis.HCS && frame % 4 === 0) {
+    updateHCS(hcsPhaseOffset);
+    if (frame % 12 === 0) updatePolarityMap(hcsPhaseOffset);
+  }
+
+  // Slowly rotate Parker spirals with the sun
+  if (vis.PS) {
+    psGroup.rotation.y = photoMesh.rotation.y;
+  }
+  if (vis.SB) {
+    sbGroup.rotation.y = photoMesh.rotation.y;
+  }
+
+  // ── HCS reconnection events ──
+  if (vis.SB) {
+    hcsReconTimer++;
+    if (hcsReconTimer % 55 === 0 && hcsReconnections.length < 15) {
+      spawnHCSReconnection();
+    }
+    for (let i=hcsReconnections.length-1; i>=0; i--) {
+      const rc = hcsReconnections[i];
+      rc.life -= rc.decay;
+      rc.segs.material.opacity = rc.life;
+      rc.dot.material.opacity  = rc.life * 0.8;
+      const s = 1 + (1-rc.life) * 2.5;
+      rc.segs.scale.setScalar(s);
+      if (rc.life <= 0) {
+        cirGroup.remove(rc.segs);
+        cirGroup.remove(rc.dot);
+        hcsReconnections.splice(i,1);
+      }
+    }
+    cirGroup.rotation.y = photoMesh.rotation.y;
+  }
+
+  // ── Vorticity tracer animation ──
+  if (vis.VORT && frame % 2 === 0) {
+    vortParticles.forEach((p, vi) => {
+      p.age++;
+      // Sample vorticity at current position
+      const gi = Math.max(1, Math.min(NLat-2, Math.round((p.la/Math.PI+0.5)*(NLat-1))));
+      const gj = ((Math.round((p.lo/(Math.PI*2))*NLon)%NLon)+NLon)%NLon;
+      const omega = computeVorticityAt(gi, gj);
+
+      // Advect with velocity + vorticity-driven drift
+      const sinL = Math.sin(p.la);
+      const vphDR = params.DR * (0.18 - 0.027*sinL*sinL - 0.028*Math.pow(sinL,4));
+      p.lo += 0.002 * vphDR + 0.001 * (Math.random()-0.5);
+      p.la += 0.0005 * (Math.random()-0.5) * params.conv;
+
+      if (p.age > 200 || Math.abs(p.la) > Math.PI*0.48) {
+        p.la = (Math.random()-0.5)*Math.PI*0.8;
+        p.lo = Math.random()*Math.PI*2;
+        p.age = 0;
+      }
+
+      const r = p.r;
+      p.mesh.position.set(
+        r*Math.cos(p.la)*Math.cos(p.lo),
+        r*Math.sin(p.la),
+        r*Math.cos(p.la)*Math.sin(p.lo)
+      );
+      // Intensity proportional to local vorticity
+      const intensity = Math.min(1, omega * 5);
+      p.mesh.material.opacity = 0.15 + intensity * 0.55;
+      p.mesh.material.color.setHSL(0.38 - intensity*0.1, 1, 0.5 + intensity*0.2);
+    });
+  }
+
+  // ── Telemetry ──
+  if (frame%12===0) {
+    let maxB=0, helicity=0, divBsum=0, vortSum=0;
+    const dLat=Math.PI/(NLat-1), dLon=2*Math.PI/NLon;
+    for(let i=1;i<NLat-1;i++){
+      for(let j=0;j<NLon;j++){
+        const k=idx(i,j);
+        const bm=Math.sqrt(Br[k]*Br[k]+Bth[k]*Bth[k]+Bph[k]*Bph[k]);
+        if(bm>maxB)maxB=bm;
+        helicity+=Br[k]*Vr[k];
+        // ∇·B = ∂Br/∂r + 2Br/r (shell approx) — should be ~0
+        const kN=idx(i-1,j),kS=idx(i+1,j);
+        const divB = (Br[kN]-Br[kS])/(2*dLat) + 2*Br[k];
+        divBsum += Math.abs(divB);
+        vortSum += computeVorticityAt(i,j);
+      }
+    }
+    const beta = (1.2/(maxB*maxB+0.01)).toFixed(2);
+    const parkerAngle = Math.round(Math.atan((2.87e-6 * 1.5e11) / (hcsParams.vsw * 1e3)) * 180/Math.PI);
+    document.getElementById('tTime').textContent    = simTime.toFixed(1);
+    document.getElementById('tB').textContent       = maxB.toFixed(2);
+    document.getElementById('tH').textContent       = (helicity/N).toFixed(3);
+    document.getElementById('tStep').textContent    = rk4Count.toLocaleString();
+    document.getElementById('tBeta').textContent    = beta;
+    document.getElementById('tTilt').textContent    = hcsParams.tilt + '°';
+    document.getElementById('tSector').textContent  = '±' + (hcsParams.sectors/2);
+    document.getElementById('tParker').textContent  = parkerAngle + '°';
+    document.getElementById('tDivB').textContent    = (divBsum/N).toExponential(1);
+    document.getElementById('tVort').textContent    = (vortSum/N).toExponential(1);
+    document.getElementById('tFsites').textContent  = flareSites.length;
+    document.getElementById('tWfree').textContent   = flareEnergy.toFixed(3);
+  }
+
+  // Corona glow pulse
+  coronaMesh.material.opacity = 0.04 + Math.sin(frame*0.008)*0.015;
+
+  renderer.render(scene,camera);
+}
+animate();
+updateWindSolution();
+computeCurrentDensity();
+
+window.addEventListener('resize',()=>{
+  const W=window.innerWidth,H=window.innerHeight;
+  renderer.setSize(W,H);
+  camera.aspect=W/H;
+  camera.updateProjectionMatrix();
+});
+
+// ═══════════════════════════════════════════════════════════
+//  SPECTRAL PARAMETERS — all slider-driven
+// ═══════════════════════════════════════════════════════════
+const surfParams = {
+  wave: 2,        // EUV channel index 0-6
+  spotR: 1.0,     // sunspot umbra scale
+  umbra: 0.70,    // umbra darkness
+  penumbra: 0.50, // penumbra width
+  faculae: 0.60,  // bright border intensity
+  gran: 1.0,      // granulation scale
+  sgran: 1.0,     // supergranulation scale
+  spicules: 0.50, // spicule jet intensity
+  limb: 0.60,     // limb darkening exponent
+  promH: 1.0,     // prominence height
+  promD: 1.0,     // prominence density
+  flareF: 1.0,    // flare frequency
+  pCount: 180,    // plasma particle count
+};
+
+// AIA wavelength channels with real color palettes
+// Based on SDO/AIA instrument calibration data
+const EUV_CHANNELS = [
+  { nm:'94Å',   name:'Fe XVIII 94',   // ~6.3 MK — hot flare plasma
+    col:[0.20,0.80,1.00], emCol:[0.10,0.60,1.00], desc:'Hot flare plasma, 6.3 MK' },
+  { nm:'131Å',  name:'Fe VIII/XXI',   // 0.4 & 10 MK
+    col:[0.60,0.92,0.92], emCol:[0.40,0.80,1.00], desc:'Flare/active region, 10 MK' },
+  { nm:'171Å',  name:'Fe IX 171',     // ~0.6 MK — quiet corona
+    col:[0.60,0.75,1.00], emCol:[0.20,0.40,0.90], desc:'Quiet corona, 0.6 MK' },
+  { nm:'193Å',  name:'Fe XII 193',    // ~1.2 MK — active corona
+    col:[0.90,0.85,0.50], emCol:[0.70,0.60,0.10], desc:'Active corona, 1.2 MK' },
+  { nm:'211Å',  name:'Fe XIV 211',    // ~2.0 MK
+    col:[0.75,0.50,0.90], emCol:[0.60,0.20,0.80], desc:'Active region, 2.0 MK' },
+  { nm:'304Å',  name:'He II 304',     // ~0.05 MK — chromosphere/prominence
+    col:[0.95,0.40,0.20], emCol:[1.00,0.20,0.10], desc:'Chromosphere/prominences, 50 kK' },
+  { nm:'HMI',   name:'Magnetogram',   // line-of-sight B
+    col:[0.90,0.70,0.30], emCol:[0.80,0.50,0.10], desc:'Line-of-sight magnetic field' },
+];
+
+// ═══════════════════════════════════════════════════════════
+//  UNIFIED SUN SHADER — full spectral pipeline
+//  Features:
+//  · EUV multi-wavelength LUT (7 AIA channels)
+//  · Granulation + supergranulation (2-scale convection)
+//  · Sunspot: umbra/penumbra/penumbral filaments
+//  · Faculae: bright magnetic network borders
+//  · Spicule jets at chromospheric limb
+//  · H-alpha chromospheric network (fibrils)
+//  · Limb darkening with wavelength-dependent exponent
+//  · Flare hot-plasma injection via uFlareMap texture
+// ═══════════════════════════════════════════════════════════
+
+const sunUniforms = {
+  uMagTex:    { value: magTex },
+  uTime:      { value: 0.0 },
+  uMaxB:      { value: 4.0 },
+  uChannel:   { value: 2 },        // EUV channel
+  uSpotR:     { value: 1.0 },
+  uUmbra:     { value: 0.70 },
+  uPenumbra:  { value: 0.50 },
+  uFaculae:   { value: 0.60 },
+  uGran:      { value: 1.0 },
+  uSGran:     { value: 1.0 },
+  uSpicules:  { value: 0.50 },
+  uLimb:      { value: 0.60 },
+  uFlareHeat: { value: 0.0 },      // 0→1 during flare
+  uARLat:     { value: AR_LAT },
+  uARLon:     { value: AR_LON },
+  uSunRot:    { value: 0.0 },      // cumulative rotation
+};
+
+const sunVert = `
+  varying vec2 vUv;
+  varying vec3 vNorm;
+  varying vec3 vView;
+  varying vec3 vWorldPos;
+  void main() {
+    vUv = uv;
+    vNorm = normalize(normalMatrix * normal);
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vView = normalize(-mv.xyz);
+    vWorldPos = position;
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const sunFrag = `
+  precision highp float;
+  uniform sampler2D uMagTex;
+  uniform float uTime;
+  uniform float uMaxB;
+  uniform int   uChannel;
+  uniform float uSpotR;
+  uniform float uUmbra;
+  uniform float uPenumbra;
+  uniform float uFaculae;
+  uniform float uGran;
+  uniform float uSGran;
+  uniform float uSpicules;
+  uniform float uLimb;
+  uniform float uFlareHeat;
+  uniform float uARLat;
+  uniform float uARLon;
+  uniform float uSunRot;
+  varying vec2 vUv;
+  varying vec3 vNorm;
+  varying vec3 vView;
+  varying vec3 vWorldPos;
+
+  // ── NOISE LIBRARY ──────────────────────────────────────────
+  float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+  float h31(vec3 p){return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453);}
+
+  float n2(vec2 p){
+    vec2 i=floor(p),f=fract(p);
+    f=f*f*(3.0-2.0*f);
+    return mix(mix(h21(i),h21(i+vec2(1,0)),f.x),
+               mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x),f.y);
+  }
+
+  float fbm2(vec2 p, int oct){
+    float v=0.0,a=0.5;
+    for(int i=0;i<8;i++){
+      if(i>=oct) break;
+      v+=a*n2(p); p*=2.1; a*=0.5;
+    }
+    return v;
+  }
+
+  // Voronoi — for granulation cell structure
+  vec2 voronoi(vec2 p){
+    vec2 b=floor(p), res=vec2(8.0);
+    for(int j=-1;j<=1;j++) for(int i=-1;i<=1;i++){
+      vec2 g=vec2(float(i),float(j));
+      vec2 o=vec2(h21(b+g+vec2(0,100)),h21(b+g+vec2(100,0)));
+      o=0.5+0.5*sin(uTime*0.2+6.2831*o);
+      float d=length(g+o-fract(p));
+      if(d<res.x){res.y=res.x;res.x=d;}
+      else if(d<res.y){res.y=d;}
+    }
+    return res;
+  }
+
+  // ── EUV COLOR LUTS ─────────────────────────────────────────
+  vec3 lut94(float t){  // Fe XVIII — hot blue-white
+    return mix(vec3(0.0,0.0,0.05), mix(vec3(0.1,0.6,1.0),vec3(0.9,1.0,1.0),t*t), t);
+  }
+  vec3 lut131(float t){ // Fe VIII/XXI — cyan-teal
+    return mix(vec3(0.0,0.02,0.04), mix(vec3(0.2,0.7,0.8),vec3(0.8,1.0,1.0),t), t);
+  }
+  vec3 lut171(float t){ // Fe IX — classic SDO blue
+    return mix(vec3(0.0,0.0,0.08), mix(vec3(0.1,0.3,0.85),vec3(0.4,0.6,1.0),t*0.7), t);
+  }
+  vec3 lut193(float t){ // Fe XII — gold-green
+    return mix(vec3(0.05,0.04,0.0), mix(vec3(0.7,0.6,0.1),vec3(1.0,0.95,0.6),t), t);
+  }
+  vec3 lut211(float t){ // Fe XIV — purple-magenta
+    return mix(vec3(0.04,0.0,0.06), mix(vec3(0.6,0.1,0.75),vec3(1.0,0.5,1.0),t), t);
+  }
+  vec3 lut304(float t){ // He II — orange-red prominence
+    return mix(vec3(0.08,0.01,0.0), mix(vec3(0.95,0.25,0.05),vec3(1.0,0.7,0.4),t), t);
+  }
+  vec3 lutHMI(float br){ // Bipolar magnetogram
+    float t=clamp(abs(br),0.0,1.0);
+    if(br>0.0) return mix(vec3(0.08,0.02,0.0),mix(vec3(0.85,0.4,0.03),vec3(1.0,0.95,0.4),t),t);
+    return mix(vec3(0.01,0.01,0.06),mix(vec3(0.04,0.12,0.65),vec3(0.6,0.8,1.0),t),t);
+  }
+
+  // ── GRANULATION ────────────────────────────────────────────
+  // Two-scale: granules (~1 Mm) + supergranules (~30 Mm)
+  // Modeled as Voronoi cells with FBM interior turbulence
+  float granulation(vec2 uv){
+    // Granules: small ~28/uv scale
+    float gScale = 28.0 * uGran;
+    vec2 vr = voronoi(uv * gScale + vec2(uTime*0.08, 0.0));
+    float gran = 1.0 - smoothstep(0.0, 0.12, vr.x);        // bright cell centers
+    float border = smoothstep(0.08,0.18,vr.x) * (1.0-smoothstep(0.18,0.25,vr.x)); // dark lanes
+    float cell = gran * 0.7 + (1.0-border*0.6);
+
+    // Supergranulation network: large cells
+    float sgScale = 3.5 * uSGran;
+    vec2 svr = voronoi(uv * sgScale + vec2(0.0, uTime*0.02));
+    float snet = smoothstep(0.0,0.08,svr.x) * (1.0-smoothstep(0.08,0.15,svr.x));
+    float sgran = 1.0 - snet * 0.35; // network is slightly brighter
+
+    return cell * sgran;
+  }
+
+  // ── CHROMOSPHERIC NETWORK (H-alpha fibrils) ────────────────
+  float chromoNet(vec2 uv, float br){
+    // Fibril alignment follows B field direction (approximated)
+    float angle = atan(br * 2.0) + uTime * 0.05;
+    vec2 rotUv = vec2(uv.x*cos(angle)-uv.y*sin(angle),
+                      uv.x*sin(angle)+uv.y*cos(angle));
+    float fibrils = n2(rotUv * 40.0 + uTime*0.1) * 0.5
+                  + n2(rotUv * 80.0 - uTime*0.07) * 0.3;
+    return fibrils;
+  }
+
+  // ── SUNSPOT ────────────────────────────────────────────────
+  // Given normalized field strength, compute umbra/penumbra/filament
+  vec3 sunspot(float strength, float gran){
+    // Umbra: darkest core
+    float umbStrength = clamp((strength - 0.35) / 0.4, 0.0, 1.0) * uSpotR;
+    float umbraDark   = 1.0 - umbStrength * uUmbra;
+
+    // Penumbra: radial filament ring outside umbra
+    float penWidth  = 0.25 * uPenumbra;
+    float penStart  = 0.35 * uSpotR;
+    float penEnd    = penStart + penWidth;
+    float penFrac   = smoothstep(penStart, penEnd, strength) *
+                      (1.0 - smoothstep(penEnd, penEnd+0.1, strength));
+    // Penumbra has radial fibril texture
+    float fibril    = 0.6 + 0.4 * n2(vec2(strength * 40.0, gran * 8.0) + uTime*0.15);
+    float penDark   = 1.0 - penFrac * 0.45 * fibril;
+
+    // Faculae: bright ring just outside penumbra (strong field + limb effect)
+    float facFrac   = smoothstep(penEnd, penEnd+0.05, strength) *
+                      (1.0-smoothstep(penEnd+0.05, penEnd+0.12, strength));
+    float fac       = 1.0 + facFrac * uFaculae * 0.8;
+
+    return vec3(umbraDark * penDark * fac);
+  }
+
+  // ── SPICULES at limb ────────────────────────────────────────
+  float spicules(vec2 uv, float limbFrac){
+    // Spicules only visible at limb (limbFrac near 0)
+    float limbZone = smoothstep(0.12, 0.0, limbFrac);
+    if(limbZone < 0.01) return 0.0;
+    // Vertical streaks in chromosphere UV
+    float spicPhase = uv.x * 180.0 + uTime * 2.0;
+    float spic = pow(max(0.0, sin(spicPhase)), 6.0) *
+                 n2(uv * vec2(200.0,60.0) + vec2(0.0,uTime*0.5));
+    return spic * limbZone * uSpicules;
+  }
+
+  // ── MAIN ───────────────────────────────────────────────────
+  void main(){
+    // Magnetogram sample — signed Br
+    vec4 magS = texture2D(uMagTex, vUv);
+    float brPos = magS.r, brNeg = magS.b;
+    float br = brPos - brNeg; // -1..1
+    float strength = clamp(abs(br) * 2.0 * uSpotR, 0.0, 1.0);
+
+    // Limb darkening — wavelength-dependent
+    float cosTheta = clamp(dot(vNorm, vView), 0.0, 1.0);
+    float limbExp  = uLimb * (1.0 + float(uChannel) * 0.05);
+    float limbFac  = pow(cosTheta, limbExp);
+    float limbFrac = 1.0 - cosTheta; // 0=disk center, 1=limb edge
+
+    // Granulation (reduced under sunspots — magnetic suppression)
+    float granMask = 1.0 - strength * 0.9;
+    float gran     = granulation(vUv) * granMask;
+
+    // Sunspot modulation
+    vec3 spotMod = sunspot(strength, gran);
+
+    // H-alpha chromospheric fibrils (visible in 304Å and white light)
+    float fibrils = chromoNet(vUv, br) * clamp(strength * 1.5, 0.0, 1.0);
+
+    // Spicule jets at limb
+    float spic = spicules(vUv, limbFrac);
+
+    // ── PER-CHANNEL RENDERING ──────────────────────────────
+    vec3 color;
+    float emissionT;
+
+    if(uChannel == 6){ // HMI Magnetogram
+      color = lutHMI(br) * spotMod;
+      // Show granulation structure faintly beneath
+      color += vec3(0.04,0.03,0.01) * gran;
+
+    } else {
+      // EUV emission: temperature-dependent.
+      // Coronal emission peaks over active regions (high |B|).
+      // Emission measure ∝ n²·dV, proxy: emission ~ |B|² * T_eff
+      float corEmit = strength * strength * (1.0 + uFlareHeat * 8.0);
+      // Quiet corona: base glow from hot loops
+      float quietEmit = 0.12 + fbm2(vUv * 4.0 + uTime * 0.03, 3) * 0.08;
+      emissionT = clamp(quietEmit + corEmit, 0.0, 1.0);
+
+      // Select wavelength channel
+      vec3 euv;
+      if(uChannel==0)      euv = lut94(emissionT);
+      else if(uChannel==1) euv = lut131(emissionT);
+      else if(uChannel==2) euv = lut171(emissionT);
+      else if(uChannel==3) euv = lut193(emissionT);
+      else if(uChannel==4) euv = lut211(emissionT);
+      else                 euv = lut304(emissionT);
+
+      // In 304Å: prominences show as bright loops, chromosphere bright
+      float chromoBright = (uChannel == 5) ? (0.3 + fibrils * 0.5 + spic * 1.5) : 0.0;
+
+      // Photosphere base (visible in white-light composite)
+      vec3 photo = vec3(0.92,0.62,0.22) * gran;
+      float photoBlend = (uChannel >= 3) ? 0.1 : 0.2; // less visible in hot channels
+
+      // Sunspot darkness visible across all channels
+      color = (euv + photo * photoBlend + chromoBright) * spotMod;
+
+      // Facular brightening visible in EUV too
+      float facFrac = smoothstep(0.3,0.35,strength)*(1.0-smoothstep(0.35,0.45,strength));
+      color += vec3(0.1,0.08,0.05) * facFrac * uFaculae;
+    }
+
+    // ── LIMB DARKENING (wavelength-specific) ──────────────
+    // EUV channels have LIMB BRIGHTENING not darkening in emission
+    float limbBoost = (uChannel < 4) ? (1.0 + limbFrac * 0.4) : 0.0;
+    float limbDark  = mix(0.25, 1.0, limbFac);
+    float finalLimb = (uChannel == 6) ? limbDark : mix(limbDark, limbBoost, 0.6);
+    color *= finalLimb;
+
+    // ── FLARE HEATING ─────────────────────────────────────
+    if(uFlareHeat > 0.01){
+      // Hot plasma brightens, shifts toward blue-white
+      float heatBlast = uFlareHeat * strength * 3.0;
+      vec3 hotColor = vec3(0.8, 0.9, 1.0) * heatBlast;
+      color += hotColor;
+      // Kernels: two-ribbon bright patches around AR
+      vec2 arPos = vec2(uARLon / 6.2831, uARLat / 3.1416 + 0.5);
+      float d1 = length(vUv - (arPos + vec2(0.02, 0.0)));
+      float d2 = length(vUv - (arPos - vec2(0.02, 0.0)));
+      float kernel = exp(-d1*d1*800.0) + exp(-d2*d2*800.0);
+      color += vec3(1.0,0.8,0.4) * kernel * uFlareHeat * 4.0;
+    }
+
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
+const sunShaderMat = new THREE.ShaderMaterial({
+  uniforms: sunUniforms,
+  vertexShader: sunVert,
+  fragmentShader: sunFrag,
+});
+photoMesh.material = sunShaderMat;
+
+// ── Shader uniform update loop ────────────────────────────────
+let shaderTime = 0;
+let sunRotAccum = 0;
+setInterval(() => {
+  shaderTime += 0.016;
+  sunRotAccum += params.DR * 0.0004 * 0.5;
+  sunUniforms.uTime.value    = shaderTime;
+  sunUniforms.uSunRot.value  = sunRotAccum;
+  let mxB = 0.1;
+  for(let k=0;k<N;k++) mxB = Math.max(mxB, Math.abs(Br[k]));
+  sunUniforms.uMaxB.value = mxB;
+  updateMagTexture();
+}, 50);
+
+// ── EUV channel label HUD ─────────────────────────────────────
+const euvLabel = document.createElement('div');
+euvLabel.style.cssText = `position:fixed;top:12px;left:50%;transform:translateX(-50%);
+  z-index:45;pointer-events:none;font-family:'IBM Plex Mono',monospace;font-size:9px;
+  letter-spacing:0.25em;text-transform:uppercase;color:#c8943a;
+  background:rgba(4,2,14,0.85);border:1px solid rgba(200,148,58,0.2);
+  padding:3px 12px;`;
+euvLabel.textContent = EUV_CHANNELS[2].nm + ' · ' + EUV_CHANNELS[2].desc;
+document.body.appendChild(euvLabel);
+
+// ═══════════════════════════════════════════════════════════
+//  PROMINENCES — magnetic flux rope arches
+//  Modeled as parametric Bézier arches anchored at high-|B|
+//  footpoints. Two types:
+//  · Quiescent: slow-rise, cool H-alpha plasma (T~8000K)
+//  · Eruptive: fast, triggered by flare events
+// ═══════════════════════════════════════════════════════════
+
+const promGroup = new THREE.Group(); scene.add(promGroup);
+const prominences = [];
+
+function spawnProminence(forced, eruptive) {
+  // Find footpoint: high |Br| site on grid
+  let bestK=0, bestB=0;
+  for(let k=0;k<N;k++){
+    const bm = Math.abs(Br[k]) + (Math.random()<0.1 ? Math.random()*2 : 0);
+    if(bm > bestB){ bestB=bm; bestK=k; }
+  }
+  const fi = Math.floor(bestK/NLon), fj = bestK%NLon;
+  const fla = lat(fi), flo = lon(fj);
+  const fla2 = fla + (Math.random()-0.5)*0.3;
+  const flo2 = flo + (Math.random()-0.5)*0.3;
+
+  const HEIGHT = (0.2 + Math.random()*0.4) * surfParams.promH;
+  const PTS    = 40;
+  const pts    = [];
+
+  for(let s=0; s<=PTS; s++){
+    const t = s/PTS;
+    // Bézier: two footpoints + apex
+    const la = fla*(1-t) + fla2*t + Math.sin(t*Math.PI)*HEIGHT*0.3;
+    const lo = flo*(1-t) + flo2*t;
+    const r  = 1.01 + Math.sin(t*Math.PI)*HEIGHT;
+    // Add sinuous instability
+    const wavy = Math.sin(t*Math.PI*4 + shaderTime*2) * HEIGHT * 0.04;
+    pts.push(new THREE.Vector3(
+      (r+wavy)*Math.cos(la)*Math.cos(lo),
+      (r+wavy)*Math.sin(la),
+      (r+wavy)*Math.cos(la)*Math.sin(lo)
+    ));
+  }
+
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const hue = eruptive ? 0xff3300 : 0xff6688; // orange-red if eruptive, pink if quiescent
+  const mat = new THREE.LineBasicMaterial({ color:hue, transparent:true, opacity: eruptive?0.95:0.7 });
+  const line = new THREE.Line(geo, mat);
+  promGroup.add(line);
+
+  // Plasma blobs along arch
+  const blobs = [];
+  for(let b=0;b<5;b++){
+    const bg = new THREE.SphereGeometry(0.012 + Math.random()*0.01, 5, 5);
+    const bm = new THREE.MeshBasicMaterial({ color:eruptive?0xff6600:0xff4488, transparent:true, opacity:0.8 });
+    const blobMesh = new THREE.Mesh(bg, bm);
+    promGroup.add(blobMesh);
+    blobs.push({ mesh:blobMesh, t:b/4, speed:0.003+Math.random()*0.005, dir:Math.random()>0.5?1:-1 });
+  }
+
+  prominences.push({
+    line, blobs, pts,
+    life: eruptive ? 0.4 : 1.0,
+    decay: eruptive ? 0.005 : 0.0015,
+    eruptive,
+    riseRate: eruptive ? 0.004 : 0.0002,
+    riseAccum: 0,
+    fla, flo, HEIGHT,
+  });
+}
+
+// Seed initial prominences
+for(let p=0;p<3;p++) spawnProminence(true, false);
+
+// ═══════════════════════════════════════════════════════════
+//  HELMET STREAMERS — closed coronal structures
+//  Form above active regions where field loops are large.
+//  Visible in white-light coronagraph. 
+//  Modeled as elongated teardrop shapes.
+// ═══════════════════════════════════════════════════════════
+
+const helmGroup = new THREE.Group(); scene.add(helmGroup);
+
+function buildHelmetStreamer(la, lo, height) {
+  const pts = [];
+  const SIDES = 2;
+  for(let s=0; s<=50; s++){
+    const t = s/50;
+    // Left leg
+    const r = 1.05 + t * height;
+    const spread = t * 0.3 * (1 - t*0.5);
+    pts.push(new THREE.Vector3(
+      r*Math.cos(la+spread)*Math.cos(lo), r*Math.sin(la+spread), r*Math.cos(la+spread)*Math.sin(lo)
+    ));
+  }
+  for(let s=50; s>=0; s--){
+    const t = s/50;
+    const r = 1.05 + t * height;
+    const spread = t * 0.3 * (1 - t*0.5);
+    pts.push(new THREE.Vector3(
+      r*Math.cos(la-spread)*Math.cos(lo), r*Math.sin(la-spread), r*Math.cos(la-spread)*Math.sin(lo)
+    ));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color:0xffcc88, transparent:true, opacity:0.25 });
+  return new THREE.Line(geo, mat);
+}
+
+// Create initial helmet streamers from high-B locations
+function buildHelmets() {
+  helmGroup.clear();
+  let sites = [];
+  for(let i=2;i<NLat-2;i++) for(let j=0;j<NLon;j++){
+    const k=idx(i,j);
+    if(Math.abs(Br[k]) > 2.5) sites.push({i,j,b:Math.abs(Br[k])});
+  }
+  sites.sort((a,b)=>b.b-a.b);
+  sites.slice(0,5).forEach(s=>{
+    const la=lat(s.i), lo=lon(s.j);
+    const h = 0.5 + s.b * 0.15;
+    helmGroup.add(buildHelmetStreamer(la, lo, h));
+  });
+}
+buildHelmets();
+
+// ═══════════════════════════════════════════════════════════
+//  SLIDER WIRING — all new surface/flare sliders
+// ═══════════════════════════════════════════════════════════
+
+function wireSlider(id, valId, key, target, fmt, onchange){
+  const sl = document.getElementById(id);
+  const vl = document.getElementById(valId);
+  if(!sl) return;
+  sl.addEventListener('input', ()=>{
+    const v = parseFloat(sl.value);
+    target[key] = v;
+    if(vl) vl.textContent = fmt ? fmt(v) : v.toFixed(2);
+    sunUniforms['u' + key.charAt(0).toUpperCase() + key.slice(1)] &&
+      (sunUniforms['u' + key.charAt(0).toUpperCase() + key.slice(1)].value = v);
+    if(onchange) onchange(v);
+  });
+}
+
+// EUV channel selector
+const slWave = document.getElementById('slWave');
+if(slWave) slWave.addEventListener('input', ()=>{
+  const ch = parseInt(slWave.value);
+  surfParams.wave = ch;
+  sunUniforms.uChannel.value = ch;
+  const el = document.getElementById('vWave');
+  if(el) el.textContent = EUV_CHANNELS[ch].nm;
+  euvLabel.textContent = EUV_CHANNELS[ch].nm + ' · ' + EUV_CHANNELS[ch].desc;
+});
+
+wireSlider('slSpotR', 'vSpotR', 'spotR',   surfParams, v=>v.toFixed(2));
+wireSlider('slUmbra', 'vUmbra', 'umbra',   surfParams, v=>v.toFixed(2));
+wireSlider('slPen',   'vPen',   'penumbra',surfParams, v=>v.toFixed(2));
+wireSlider('slFac',   'vFac',   'faculae', surfParams, v=>v.toFixed(2));
+wireSlider('slLimb',  'vLimb',  'limb',    surfParams, v=>v.toFixed(2));
+wireSlider('slGran',  'vGran',  'gran',    surfParams, v=>v.toFixed(2));
+wireSlider('slSGran', 'vSGran', 'sgran',   surfParams, v=>v.toFixed(2));
+wireSlider('slSpic',  'vSpic',  'spicules',surfParams, v=>v.toFixed(2));
+
+// Map slider keys to exact uniform names
+const sliderUniformMap = {
+  spotR:    'uSpotR',
+  umbra:    'uUmbra',
+  penumbra: 'uPenumbra',
+  faculae:  'uFaculae',
+  limb:     'uLimb',
+  gran:     'uGran',
+  sgran:    'uSGran',
+  spicules: 'uSpicules',
+};
+// Wire all surface sliders to uniforms properly
+['slSpotR','slUmbra','slPen','slFac','slLimb','slGran','slSGran','slSpic'].forEach(id=>{
+  const sl = document.getElementById(id);
+  if(!sl) return;
+  sl.addEventListener('input', ()=>{
+    const v = parseFloat(sl.value);
+    // Map slider id to uniform
+    const map = {slSpotR:'uSpotR',slUmbra:'uUmbra',slPen:'uPenumbra',
+                 slFac:'uFaculae',slLimb:'uLimb',slGran:'uGran',slSGran:'uSGran',slSpic:'uSpicules'};
+    if(map[id] && sunUniforms[map[id]]) sunUniforms[map[id]].value = v;
+  });
+});
+
+// Prominence sliders
+const slPromH = document.getElementById('slPromH');
+if(slPromH) slPromH.addEventListener('input', ()=>{
+  surfParams.promH = parseFloat(slPromH.value);
+  document.getElementById('vPromH').textContent = surfParams.promH.toFixed(2);
+});
+const slPromD = document.getElementById('slPromD');
+if(slPromD) slPromD.addEventListener('input', ()=>{
+  surfParams.promD = parseFloat(slPromD.value);
+  document.getElementById('vPromD').textContent = surfParams.promD.toFixed(2);
+});
+const slFlareF = document.getElementById('slFlareF');
+if(slFlareF) slFlareF.addEventListener('input', ()=>{
+  surfParams.flareF = parseFloat(slFlareF.value);
+  document.getElementById('vFlareF').textContent = surfParams.flareF.toFixed(2);
+});
+
+// Particle count — dynamically resize pool
+const slPCount = document.getElementById('slPCount');
+if(slPCount) slPCount.addEventListener('input', ()=>{
+  const target = parseInt(slPCount.value);
+  document.getElementById('vPCount').textContent = target;
+  const curr = plasmaParticles.length;
+  if(target > curr){
+    for(let p=curr;p<target;p++){
+      const la=(Math.random()-0.5)*Math.PI*0.95, lo=Math.random()*Math.PI*2, r=1.02+Math.random()*0.6;
+      const geo=new THREE.SphereGeometry(0.009,4,4);
+      const mat=new THREE.MeshBasicMaterial({color:0x88ccff,transparent:true,opacity:0.7});
+      const mesh=new THREE.Mesh(geo,mat);
+      pfGroup.add(mesh);
+      plasmaParticles.push({mesh,la,lo,r,speed:0.003+Math.random()*0.004});
+    }
+  } else {
+    while(plasmaParticles.length > target){
+      const p = plasmaParticles.pop();
+      pfGroup.remove(p.mesh);
+    }
+  }
+});
+
+// ── Flare heat decay in shader ─────────────────────────────────
+// Hook into triggerFlare to heat the shader
+const _origTrigger = window.triggerFlare;
+window.triggerFlare = function(){
+  _origTrigger && _origTrigger();
+  sunUniforms.uFlareHeat.value = 1.0;
+  // Spawn eruptive prominence
+  spawnProminence(true, true);
+  buildHelmets();
+};
+
+// ── Prominence animation ──────────────────────────────────────
+let promTimer = 0;
+function animateProminences(){
+  promTimer++;
+  // Spawn new based on density slider
+  const spawnRate = Math.max(5, Math.floor(300 / (surfParams.promD * surfParams.flareF + 0.1)));
+  if(promTimer % spawnRate === 0 && prominences.length < Math.ceil(8 * surfParams.promD)){
+    spawnProminence(false, false);
+  }
+
+  // Update flare heat decay
+  if(sunUniforms.uFlareHeat.value > 0.001){
+    sunUniforms.uFlareHeat.value *= 0.985;
+  }
+
+  for(let i=prominences.length-1; i>=0; i--){
+    const prom = prominences[i];
+    prom.life -= prom.decay;
+    prom.riseAccum += prom.riseRate;
+
+    // Fade
+    prom.line.material.opacity = Math.max(0, prom.life * (prom.eruptive ? 0.95 : 0.7));
+
+    // Eruptive: rise and expand
+    if(prom.eruptive && prom.riseAccum > 0){
+      const pos = prom.line.geometry.attributes.position;
+      for(let s=0; s<pos.count; s++){
+        const rise = prom.riseAccum * (s/pos.count);
+        const x=pos.getX(s), y=pos.getY(s), z=pos.getZ(s);
+        const r = Math.sqrt(x*x+y*y+z*z);
+        const scale = (r + rise*0.01) / r;
+        pos.setXYZ(s, x*scale, y*scale, z*scale);
+      }
+      pos.needsUpdate = true;
+    }
+
+    // Animate plasma blobs along arch
+    prom.blobs.forEach(blob=>{
+      blob.t = (blob.t + blob.speed * blob.dir + 1) % 1;
+      const idx2 = Math.floor(blob.t * (prom.pts.length-1));
+      const pt = prom.pts[Math.min(idx2, prom.pts.length-1)];
+      if(pt) blob.mesh.position.copy(pt);
+      blob.mesh.material.opacity = prom.line.material.opacity * 0.9;
+    });
+
+    if(prom.life <= 0){
+      promGroup.remove(prom.line);
+      prom.blobs.forEach(b=>promGroup.remove(b.mesh));
+      prominences.splice(i,1);
+    }
+  }
+
+  // Co-rotate with sun
+  promGroup.rotation.y = photoMesh.rotation.y;
+  helmGroup.rotation.y = photoMesh.rotation.y;
+
+  // Rebuild helmets occasionally
+  if(promTimer % 180 === 0) buildHelmets();
+}
+
+// ── Visibility toggles for new layers ────────────────────────
+const _origTog = window.tog;
+window.tog = function(k){
+  _origTog && _origTog(k);
+  if(k==='PROM')  promGroup.visible = !promGroup.visible;
+  if(k==='HELM')  helmGroup.visible = !helmGroup.visible;
+  if(k==='SPIC')  sunUniforms.uSpicules.value = helmGroup.visible ? surfParams.spicules : 0;
+};
+
+// ── Hook prominence animation into setInterval ────────────────
+setInterval(animateProminences, 50);
+
+// ═══════════════════════════════════════════════════════════
+//  DRAGGABLE / MINIMIZABLE PANEL SYSTEM
+// ═══════════════════════════════════════════════════════════
+
+// Set initial positions
+document.getElementById('pan-telem').style.cssText += ';top:12px;right:12px;left:auto;';
+document.getElementById('pan-ctrl').style.cssText  += ';top:12px;left:12px;';
+document.getElementById('pan-leg').style.cssText   += ';bottom:12px;right:12px;left:auto;';
+document.getElementById('pan-lay').style.cssText   += ';bottom:12px;left:12px;';
+
+document.querySelectorAll('.fp').forEach(panel=>{
+  const bar = panel.querySelector('.fp-bar');
+  if(!bar) return;
+  let ox=0,oy=0,px=0,py=0,active=false;
+  bar.addEventListener('mousedown',e=>{
+    if(e.target.tagName==='BUTTON') return;
+    active=true;
+    const r=panel.getBoundingClientRect();
+    px=r.left; py=r.top; ox=e.clientX; oy=e.clientY;
+    panel.style.right='auto'; panel.style.bottom='auto';
+    panel.style.left=px+'px'; panel.style.top=py+'px';
+    panel.style.zIndex=55;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove',e=>{
+    if(!active) return;
+    panel.style.left=Math.max(0,Math.min(window.innerWidth-80,  px+(e.clientX-ox)))+'px';
+    panel.style.top =Math.max(0,Math.min(window.innerHeight-26, py+(e.clientY-oy)))+'px';
+  });
+  window.addEventListener('mouseup',()=>{ active=false; panel.style.zIndex=40; });
+  panel.style.resize='both'; panel.style.overflow='auto';
+});
+
+window.minPanel  = id=>{ const e=document.getElementById(id); if(e) e.classList.toggle('minimized'); };
+window.hidePanel = id=>{ const e=document.getElementById(id); if(e) e.style.display='none'; };
+
+// Ticker scroll
+(()=>{
+  const tk=document.getElementById('tk-txt'); if(!tk)return;
+  let p=0;
+  setInterval(()=>{ p-=0.4; if(p<-tk.scrollWidth) p=window.innerWidth*0.3; tk.style.transform=`translateX(${p}px)`; },16);
+})();
+
+</script>
+</body>
+</html>
