@@ -54,6 +54,10 @@
     {
       "source": "/rust/www/:path*",
       "destination": "/rust/www/:path*"
+    },
+    {
+      "source": "/wr102",
+      "destination": "/wr102.html"
     }
   ]
 }

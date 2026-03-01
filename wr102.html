@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WR-102 — Wolf-Rayet Stellar Wind Simulator</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            color: #ddd;
+        }
+
+        /* ── Nav ── */
+        nav {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 0.6rem 1.5rem;
+            z-index: 500;
+        }
+        .nav-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .nav-brand {
+            font-size: 1.25rem;
+            font-weight: bold;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-decoration: none;
+        }
+        .nav-links { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+        .nav-link {
+            padding: 0.35rem 0.8rem;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 5px;
+            color: #fff;
+            text-decoration: none;
+            transition: all 0.25s;
+            font-size: 0.82rem;
+        }
+        .nav-link:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
+        .nav-link.active {
+            background: linear-gradient(45deg, #8040ff, #4080ff);
+            border-color: #8040ff;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        /* ── App layout ── */
+        #app {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+            padding-top: 44px; /* nav height */
+        }
+
+        #canvas-container {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(ellipse at center, #08001a 0%, #000005 70%, #000000 100%);
+        }
+
+        /* ── HUD (top-left) ── */
+        #hud {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            color: #c8a0ff;
+            background: rgba(0, 0, 0, 0.70);
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid rgba(128, 64, 255, 0.25);
+            font-size: 12px;
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            pointer-events: none;
+            line-height: 1.6;
+            min-width: 220px;
+        }
+        #hud h3 {
+            margin: 0 0 6px 0;
+            font-size: 14px;
+            color: #a060ff;
+            letter-spacing: 0.5px;
+        }
+        #hud .val  { color: #80c8ff; font-weight: 600; }
+        #hud .dim  { color: #666; font-size: 10px; }
+        #hud .sep  { border-top: 1px solid rgba(128,64,255,0.2); margin: 6px 0; }
+        #fps-display { color: #40ff80; font-weight: 600; }
+
+        /* ── Sidebar (right) ── */
+        #sidebar-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 300;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(128, 64, 255, 0.35);
+            color: #a060ff;
+            padding: 5px 11px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-family: inherit;
+            backdrop-filter: blur(8px);
+            transition: all 0.2s;
+        }
+        #sidebar-toggle:hover { background: rgba(128, 64, 255, 0.18); }
+
+        #sidebar {
+            width: 300px;
+            min-width: 300px;
+            background: rgba(6, 4, 20, 0.96);
+            border-left: 1px solid rgba(128, 64, 255, 0.18);
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding: 12px;
+            transition: margin-right 0.3s ease, opacity 0.3s ease;
+            z-index: 200;
+            font-size: 12px;
+        }
+        #sidebar.collapsed {
+            margin-right: -300px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Sidebar sections */
+        .sb-section {
+            margin-bottom: 10px;
+            border: 1px solid rgba(128, 64, 255, 0.15);
+            border-radius: 8px;
+            overflow: hidden;
+            background: rgba(128, 64, 255, 0.03);
+        }
+        .sb-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 11px;
+            background: rgba(128, 64, 255, 0.08);
+            color: #a060ff;
+            font-weight: 600;
+            font-size: 11px;
+            cursor: pointer;
+            user-select: none;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+        .sb-title:hover { background: rgba(128, 64, 255, 0.15); }
+        .sb-body { padding: 10px 12px; }
+        .sb-section.closed .sb-body { display: none; }
+
+        /* Control rows */
+        .ctrl-row {
+            display: flex;
+            align-items: center;
+            margin: 7px 0;
+            gap: 8px;
+        }
+        .ctrl-row label {
+            flex: 0 0 68px;
+            font-size: 11px;
+            color: #999;
+        }
+        .ctrl-row input[type="range"] {
+            flex: 1;
+            height: 5px;
+            border-radius: 3px;
+            accent-color: #8040ff;
+            cursor: pointer;
+        }
+        .ctrl-row .vdisp {
+            flex: 0 0 60px;
+            text-align: right;
+            color: #80c8ff;
+            font-size: 11px;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Data table */
+        .data-tbl {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }
+        .data-tbl td {
+            padding: 3px 4px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            vertical-align: top;
+        }
+        .data-tbl td:first-child { color: #888; width: 48%; }
+        .data-tbl td:last-child  { color: #80c8ff; text-align: right; font-weight: 600; }
+
+        /* Buttons */
+        .btn-row { display: flex; gap: 6px; margin: 8px 0; }
+        .btn-row button {
+            flex: 1;
+            padding: 6px 8px;
+            background: rgba(128, 64, 255, 0.1);
+            border: 1px solid rgba(128, 64, 255, 0.28);
+            color: #a060ff;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            transition: all 0.15s;
+        }
+        .btn-row button:hover { background: rgba(128, 64, 255, 0.22); }
+        .btn-row button.active {
+            background: rgba(128, 64, 255, 0.3);
+            border-color: #8040ff;
+            color: #c080ff;
+        }
+
+        /* Sidebar header */
+        .sb-header {
+            text-align: center;
+            padding: 10px 0 6px;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(128,64,255,0.2);
+        }
+        .sb-header .star-name {
+            font-size: 16px;
+            font-weight: bold;
+            color: #c080ff;
+            letter-spacing: 1px;
+        }
+        .sb-header .star-sub {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+        }
+
+        /* Phase badge */
+        .phase-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            background: rgba(64, 128, 255, 0.15);
+            border: 1px solid rgba(64, 128, 255, 0.35);
+            border-radius: 12px;
+            font-size: 9px;
+            color: #80a0ff;
+            letter-spacing: 0.5px;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Navigation ── -->
+<nav>
+    <div class="nav-container">
+        <a href="index.html" class="nav-brand">&#127775; Celestial Simulator</a>
+        <div class="nav-links">
+            <a href="index.html"         class="nav-link">Home</a>
+            <a href="threejs.html"        class="nav-link">Three.js 3D</a>
+            <a href="star2d.html"         class="nav-link">2D Star</a>
+            <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
+            <a href="solar-fluid.html"    class="nav-link">Fluid Sim</a>
+            <a href="rust.html"           class="nav-link">Rust/WASM</a>
+            <a href="wr102.html"          class="nav-link active">WR-102</a>
+        </div>
+    </div>
+</nav>
+
+<!-- ── App ── -->
+<div id="app">
+
+    <!-- Canvas area -->
+    <div id="canvas-container">
+
+        <!-- HUD overlay -->
+        <div id="hud">
+            <h3>WR 102</h3>
+            <div>Type: <span class="val">WO2</span></div>
+            <div>T<sub>eff</sub>: <span class="val" id="hud-teff">210 000</span> <span class="dim">K</span></div>
+            <div>v<sub>&#8734;</sub>: <span class="val" id="hud-vinf">5000</span> <span class="dim">km/s</span></div>
+            <div>&#946;: <span class="val" id="hud-beta">0.80</span></div>
+            <div>&#7745;: <span class="val" id="hud-mdot">1.00e-5</span> <span class="dim">M&#9737;/yr</span></div>
+            <div class="sep"></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:4px">Drag to orbit &nbsp;|&nbsp; Scroll to zoom</div>
+        </div>
+
+        <!-- Sidebar toggle -->
+        <button id="sidebar-toggle" title="Toggle controls">&#9776; Controls</button>
+
+    </div>
+
+    <!-- Right sidebar -->
+    <div id="sidebar">
+
+        <div class="sb-header">
+            <div class="star-name">WR 102</div>
+            <div class="star-sub">Wolf-Rayet &mdash; WO2 spectral class</div>
+            <div class="phase-badge">Phase 0 &mdash; Scaffold</div>
+        </div>
+
+        <!-- Wind parameters -->
+        <div class="sb-section" id="sec-wind">
+            <div class="sb-title" data-sec="sec-wind">
+                <span>Wind Parameters</span><span>&#9660;</span>
+            </div>
+            <div class="sb-body">
+
+                <div class="ctrl-row">
+                    <label>v<sub>&#8734;</sub></label>
+                    <input type="range" id="sl-vinf"
+                        min="0" max="6000" step="50" value="5000">
+                    <span class="vdisp" id="disp-vinf">5000 km/s</span>
+                </div>
+
+                <div class="ctrl-row">
+                    <label>&#946;</label>
+                    <input type="range" id="sl-beta"
+                        min="0.5" max="2.0" step="0.05" value="0.8">
+                    <span class="vdisp" id="disp-beta">0.80</span>
+                </div>
+
+                <div class="ctrl-row">
+                    <label>&#7745; (log)</label>
+                    <input type="range" id="sl-mdot"
+                        min="-7" max="-4" step="0.05" value="-5">
+                    <span class="vdisp" id="disp-mdot">1.0e-5</span>
+                </div>
+
+                <div class="ctrl-row">
+                    <label>T<sub>eff</sub></label>
+                    <input type="range" id="sl-teff"
+                        min="20000" max="250000" step="1000" value="210000">
+                    <span class="vdisp" id="disp-teff">210 000 K</span>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Camera presets -->
+        <div class="sb-section" id="sec-cam">
+            <div class="sb-title" data-sec="sec-cam">
+                <span>Camera Presets</span><span>&#9660;</span>
+            </div>
+            <div class="sb-body">
+                <div class="btn-row">
+                    <button id="cam-default" class="active">Default</button>
+                    <button id="cam-close">Close-up</button>
+                    <button id="cam-wide">Wide</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Object info -->
+        <div class="sb-section" id="sec-info">
+            <div class="sb-title" data-sec="sec-info">
+                <span>Stellar Parameters</span><span>&#9660;</span>
+            </div>
+            <div class="sb-body">
+                <table class="data-tbl">
+                    <tr><td>Spectral type</td><td>WO2</td></tr>
+                    <tr><td>T<sub>eff</sub></td><td>&#126;210 000 K</td></tr>
+                    <tr><td>Luminosity</td><td>&#126;10<sup>5.45</sup> L&#9737;</td></tr>
+                    <tr><td>Mass</td><td>&#126;17 M&#9737;</td></tr>
+                    <tr><td>R<sub>*</sub></td><td>&#126;0.4 R&#9737;</td></tr>
+                    <tr><td>v<sub>&#8734;</sub></td><td>&#126;5000 km/s</td></tr>
+                    <tr><td>&#7745;</td><td>&#126;10<sup>-5</sup> M&#9737;/yr</td></tr>
+                    <tr><td>Distance</td><td>&#126;4.8 kpc</td></tr>
+                    <tr><td>System</td><td>WR 102</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="sb-section closed" id="sec-notes">
+            <div class="sb-title" data-sec="sec-notes">
+                <span>Phase Notes</span><span>&#9660;</span>
+            </div>
+            <div class="sb-body" style="font-size:10px;color:#666;line-height:1.6;">
+                <p><strong style="color:#a060ff">Phase 0</strong> &mdash; Scaffold only.</p>
+                <p style="margin-top:6px">Stellar core placeholder sphere with flat
+                   #8040FF shader approximating the extreme UV color of a 210,000&#8239;K
+                   blackbody.</p>
+                <p style="margin-top:6px">Phase 1+ will add:</p>
+                <ul style="margin-left:12px;margin-top:4px;list-style:disc;">
+                    <li>&#946;-law wind particle system</li>
+                    <li>Optically-thin line emission</li>
+                    <li>Ionization zone shaders</li>
+                    <li>Dust formation shell</li>
+                </ul>
+            </div>
+        </div>
+
+    </div><!-- /#sidebar -->
+</div><!-- /#app -->
+
+<!-- ── Three.js via importmap (same CDN as star3d.html) ── -->
+<script type="importmap">
+{
+    "imports": {
+        "three":           "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/":   "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE          from 'three';
+import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
+
+// ────────────────────────────────────────────────────────────────
+//  UNIFORMS  — sliders write here; shaders read from here
+// ────────────────────────────────────────────────────────────────
+const uniforms = {
+    u_time:  { value: 0.0 },
+    u_color: { value: new THREE.Color(0x8040FF) },
+    u_vinf:  { value: 5000.0 },    // km/s
+    u_beta:  { value: 0.8 },       // velocity-law exponent
+    u_mdot:  { value: 1e-5 },      // M☉/yr
+    u_teff:  { value: 210000.0 },  // K
+};
+
+// ────────────────────────────────────────────────────────────────
+//  SCENE SETUP
+// ────────────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+
+const camera = new THREE.PerspectiveCamera(55, 1, 0.001, 2000);
+camera.position.set(0, 0, 8);   // Default camera preset
+
+const renderer = new THREE.WebGLRenderer({
+    antialias:       true,
+    powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping        = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+
+const container = document.getElementById('canvas-container');
+container.appendChild(renderer.domElement);
+
+// ── OrbitControls ──
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping  = true;
+controls.dampingFactor  = 0.07;
+controls.minDistance    = 1.5;
+controls.maxDistance    = 80;
+controls.target.set(0, 0, 0);
+
+// ────────────────────────────────────────────────────────────────
+//  BACKGROUND STARS
+// ────────────────────────────────────────────────────────────────
+{
+    const count = 3500;
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+        const r     = 300 + Math.random() * 400;
+        const theta = Math.random() * Math.PI * 2;
+        const phi   = Math.acos(2 * Math.random() - 1);
+        positions[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        positions[i * 3 + 2] = r * Math.cos(phi);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.5, sizeAttenuation: false });
+    scene.add(new THREE.Points(geo, mat));
+}
+
+// ────────────────────────────────────────────────────────────────
+//  WR-102 STELLAR CORE — placeholder IcosphereLike (SphereGeometry)
+//  Colored with flat #8040FF shader approximating 210 000 K blackbody
+// ────────────────────────────────────────────────────────────────
+
+// --- Vertex shader (placeholder, Phase 0) ---
+const coreVS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    void main() {
+        vNormal  = normalize(normalMatrix * normal);
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        vViewDir = normalize(-mvPos.xyz);
+        gl_Position = projectionMatrix * mvPos;
+    }
+`;
+
+// --- Fragment shader — flat colour + Fresnel rim (placeholder, Phase 0) ---
+const coreFS = /* glsl */`
+    uniform float u_time;
+    uniform vec3  u_color;
+
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    void main() {
+        // Fresnel rim
+        float rim    = 1.0 - max(dot(vNormal, vViewDir), 0.0);
+        float fresnel = pow(rim, 2.5);
+
+        // Core pulse — very subtle for Phase 0
+        float pulse = 0.96 + 0.04 * sin(u_time * 1.8);
+
+        vec3 col = u_color * pulse;
+        // Bright UV core centre, slightly hotter rim
+        col = mix(col, col * 1.6 + vec3(0.15, 0.05, 0.3), fresnel * 0.5);
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+const coreGeo = new THREE.SphereGeometry(1.0, 80, 80);  // subdivided, approximates icosphere
+const coreMat = new THREE.ShaderMaterial({
+    vertexShader:   coreVS,
+    fragmentShader: coreFS,
+    uniforms,
+});
+const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+scene.add(coreMesh);
+
+// ── Inner glow (additive shell) ──
+const glowInnerVS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        vNormal  = normalize(normalMatrix * normal);
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        vViewDir = normalize(-mvPos.xyz);
+        gl_Position = projectionMatrix * mvPos;
+    }
+`;
+const glowInnerFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        float rim = 1.0 - max(dot(vNormal, vViewDir), 0.0);
+        float alpha = pow(rim, 1.8) * 0.55;
+        float pulse = 0.9 + 0.1 * sin(u_time * 2.2 + 1.0);
+        gl_FragColor = vec4(0.55, 0.22, 1.0, alpha * pulse);
+    }
+`;
+const glowInnerGeo = new THREE.SphereGeometry(1.22, 32, 32);
+const glowInnerMat = new THREE.ShaderMaterial({
+    vertexShader:   glowInnerVS,
+    fragmentShader: glowInnerFS,
+    uniforms,
+    transparent: true,
+    depthWrite:  false,
+    blending:    THREE.AdditiveBlending,
+    side:        THREE.BackSide,
+});
+scene.add(new THREE.Mesh(glowInnerGeo, glowInnerMat));
+
+// ── Outer corona glow ──
+const glowOuterFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        float rim = 1.0 - max(dot(vNormal, vViewDir), 0.0);
+        float alpha = pow(rim, 3.5) * 0.28;
+        gl_FragColor = vec4(0.35, 0.10, 0.90, alpha);
+    }
+`;
+const glowOuterGeo = new THREE.SphereGeometry(2.0, 24, 24);
+const glowOuterMat = new THREE.ShaderMaterial({
+    vertexShader:   glowInnerVS,   // reuse same VS
+    fragmentShader: glowOuterFS,
+    uniforms,
+    transparent: true,
+    depthWrite:  false,
+    blending:    THREE.AdditiveBlending,
+    side:        THREE.BackSide,
+});
+scene.add(new THREE.Mesh(glowOuterGeo, glowOuterMat));
+
+// ── Point light at core ──
+const coreLight = new THREE.PointLight(0x8040ff, 4, 60);
+scene.add(coreLight);
+
+// ── Ambient fill ──
+scene.add(new THREE.AmbientLight(0x100820, 0.3));
+
+// ────────────────────────────────────────────────────────────────
+//  RESIZE HANDLER
+// ────────────────────────────────────────────────────────────────
+function handleResize() {
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    }
+}
+handleResize();
+
+// ────────────────────────────────────────────────────────────────
+//  FPS COUNTER
+// ────────────────────────────────────────────────────────────────
+let fpsFrames = 0, fpsLast = performance.now();
+const fpsEl   = document.getElementById('fps-display');
+function tickFPS() {
+    fpsFrames++;
+    const now = performance.now();
+    if (now - fpsLast >= 500) {
+        const fps = Math.round(fpsFrames * 1000 / (now - fpsLast));
+        fpsEl.textContent = fps;
+        fpsFrames = 0;
+        fpsLast   = now;
+    }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  ANIMATION LOOP
+// ────────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    const dt  = Math.min(clock.getDelta(), 0.05);
+    uniforms.u_time.value += dt;
+
+    controls.update();
+    handleResize();
+
+    // Very slow rotation of the star
+    coreMesh.rotation.y += dt * 0.08;
+
+    renderer.render(scene, camera);
+    tickFPS();
+}
+
+animate();
+
+// ────────────────────────────────────────────────────────────────
+//  SIDEBAR — COLLAPSIBLE SECTIONS
+// ────────────────────────────────────────────────────────────────
+document.querySelectorAll('.sb-title').forEach(title => {
+    title.addEventListener('click', () => {
+        const sec = title.closest('.sb-section');
+        sec.classList.toggle('closed');
+        const arrow = title.querySelector('span:last-child');
+        if (arrow) arrow.textContent = sec.classList.contains('closed') ? '▶' : '▼';
+    });
+});
+
+// Sidebar toggle
+const sidebar       = document.getElementById('sidebar');
+const toggleBtn     = document.getElementById('sidebar-toggle');
+toggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('collapsed');
+    toggleBtn.textContent = sidebar.classList.contains('collapsed')
+        ? '☰ Controls' : '☰ Controls';
+});
+
+// ────────────────────────────────────────────────────────────────
+//  SLIDER BINDINGS — write to uniforms + update HUD
+// ────────────────────────────────────────────────────────────────
+
+// ── v_inf ──
+const slVinf = document.getElementById('sl-vinf');
+slVinf.addEventListener('input', () => {
+    const val = parseFloat(slVinf.value);
+    uniforms.u_vinf.value = val;
+    document.getElementById('disp-vinf').textContent = val.toFixed(0) + ' km/s';
+    document.getElementById('hud-vinf').textContent  = val.toFixed(0);
+    console.log('[WR102] v_inf =', val, 'km/s');
+});
+
+// ── beta ──
+const slBeta = document.getElementById('sl-beta');
+slBeta.addEventListener('input', () => {
+    const val = parseFloat(slBeta.value);
+    uniforms.u_beta.value = val;
+    document.getElementById('disp-beta').textContent = val.toFixed(2);
+    document.getElementById('hud-beta').textContent  = val.toFixed(2);
+    console.log('[WR102] beta =', val);
+});
+
+// ── mdot (log scale) ──
+const slMdot = document.getElementById('sl-mdot');
+slMdot.addEventListener('input', () => {
+    const logVal = parseFloat(slMdot.value);
+    const val    = Math.pow(10, logVal);
+    uniforms.u_mdot.value = val;
+    const expStr = logVal.toFixed(2);
+    document.getElementById('disp-mdot').textContent = '10^' + expStr;
+    document.getElementById('hud-mdot').textContent  = val.toExponential(2);
+    console.log('[WR102] mdot = 10^' + expStr, '=', val, 'M☉/yr');
+});
+
+// ── T_eff ──
+const slTeff = document.getElementById('sl-teff');
+slTeff.addEventListener('input', () => {
+    const val = parseFloat(slTeff.value);
+    uniforms.u_teff.value = val;
+    // Map temperature to a hue shift for visual feedback (placeholder)
+    // 210 000 K → #8040FF; lower T → redder; higher → bluer/white
+    const t    = (val - 20000) / (250000 - 20000);  // 0..1
+    const r    = THREE.MathUtils.lerp(0.9,  0.3,  t);
+    const g    = THREE.MathUtils.lerp(0.3,  0.2,  t);
+    const b    = THREE.MathUtils.lerp(0.5,  1.0,  t);
+    uniforms.u_color.value.setRGB(r, g, b);
+
+    const kStr = val >= 1000
+        ? (val / 1000).toFixed(0) + ' 000 K'
+        : val + ' K';
+    document.getElementById('disp-teff').textContent = kStr;
+    document.getElementById('hud-teff').textContent  =
+        val.toLocaleString('en-US', { maximumFractionDigits: 0 }).replace(',', ' ');
+    console.log('[WR102] T_eff =', val, 'K');
+});
+
+// ────────────────────────────────────────────────────────────────
+//  CAMERA PRESETS
+// ────────────────────────────────────────────────────────────────
+function setCamPreset(name) {
+    document.querySelectorAll('.btn-row button').forEach(b => b.classList.remove('active'));
+    document.getElementById('cam-' + name).classList.add('active');
+
+    const presets = {
+        default: { pos: [0, 0, 8],  target: [0, 0, 0] },
+        close:   { pos: [0, 0, 2.5],target: [0, 0, 0] },
+        wide:    { pos: [0, 4, 20], target: [0, 0, 0] },
+    };
+    const p = presets[name];
+    if (!p) return;
+
+    camera.position.set(...p.pos);
+    controls.target.set(...p.target);
+    controls.update();
+    console.log('[WR102] Camera preset:', name, p);
+}
+
+document.getElementById('cam-default').addEventListener('click', () => setCamPreset('default'));
+document.getElementById('cam-close').addEventListener('click',   () => setCamPreset('close'));
+document.getElementById('cam-wide').addEventListener('click',    () => setCamPreset('wide'));
+
+// ────────────────────────────────────────────────────────────────
+//  CONSOLE SUMMARY
+// ────────────────────────────────────────────────────────────────
+console.log('%c[WR-102 Simulator — Phase 0]', 'color:#a060ff;font-weight:bold;font-size:14px');
+console.log('  Uniforms:', uniforms);
+console.log('  Three.js r160 | ACESFilmicToneMapping | antialias | powerPreference:high-performance');
+console.log('  Camera default: [0, 0, 8] → origin');
+console.log('  Sliders: v_inf, beta, mdot (log), T_eff — all wired to uniforms object');
+</script>
+
+</body>
+</html>
