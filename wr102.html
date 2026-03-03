@@ -61,6 +61,53 @@
             font-weight: bold;
         }
 
+        /* ── Nav dropdown ── */
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-menu {
+            display: none;
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            background: rgba(6, 2, 18, 0.97);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.13);
+            border-radius: 6px;
+            padding: 4px 0;
+            min-width: 148px;
+            z-index: 600;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu,
+        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a {
+            display: block;
+            padding: 0.38rem 0.9rem;
+            color: #bbb;
+            text-decoration: none;
+            font-size: 0.82rem;
+            white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-dropdown-menu a:hover { background: rgba(255,255,255,0.09); color: #fff; }
+        .nav-dropdown-menu a.active { color: #a080ff; font-weight: bold; }
+        .nav-dropdown-btn {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 5px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 0.82rem;
+            padding: 0.35rem 0.8rem;
+            transition: all 0.25s;
+            font-family: inherit;
+        }
+        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
+        .nav-dropdown-btn.active {
+            background: linear-gradient(45deg, #8040ff, #4080ff);
+            border-color: #8040ff;
+            font-weight: bold;
+        }
+
         /* ── App layout ── */
         #app {
             display: flex;
@@ -269,13 +316,19 @@
     <div class="nav-container">
         <a href="index.html" class="nav-brand">&#127775; Celestial Simulator</a>
         <div class="nav-links">
-            <a href="index.html"         class="nav-link">Home</a>
-            <a href="threejs.html"        class="nav-link">Three.js 3D</a>
-            <a href="star2d.html"         class="nav-link">2D Star</a>
+            <a href="index.html"           class="nav-link">Home</a>
+            <div class="nav-dropdown">
+                <button class="nav-dropdown-btn active">3D Sims &#9662;</button>
+                <div class="nav-dropdown-menu">
+                    <a href="threejs.html">Solar System</a>
+                    <a href="wr102.html"  class="active">WR-102</a>
+                    <a href="vega.html">Vega</a>
+                </div>
+            </div>
+            <a href="star2d.html"          class="nav-link">2D Star</a>
             <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
-            <a href="solar-fluid.html"    class="nav-link">Fluid Sim</a>
-            <a href="rust.html"           class="nav-link">Rust/WASM</a>
-            <a href="wr102.html"          class="nav-link active">WR-102</a>
+            <a href="solar-fluid.html"     class="nav-link">Fluid Sim</a>
+            <a href="rust.html"            class="nav-link">Rust/WASM</a>
         </div>
     </div>
 </nav>
@@ -310,7 +363,7 @@
         <div class="sb-header">
             <div class="star-name">WR 102</div>
             <div class="star-sub">Wolf-Rayet &mdash; WO2 spectral class</div>
-            <div class="phase-badge">Phase 0 &mdash; Scaffold</div>
+            <div class="phase-badge">Phase 1 &mdash; Stellar Core Shader</div>
         </div>
 
         <!-- Wind parameters -->
@@ -391,11 +444,13 @@
                 <span>Phase Notes</span><span>&#9660;</span>
             </div>
             <div class="sb-body" style="font-size:10px;color:#666;line-height:1.6;">
-                <p><strong style="color:#a060ff">Phase 0</strong> &mdash; Scaffold only.</p>
-                <p style="margin-top:6px">Stellar core placeholder sphere with flat
-                   #8040FF shader approximating the extreme UV color of a 210,000&#8239;K
-                   blackbody.</p>
-                <p style="margin-top:6px">Phase 1+ will add:</p>
+                <p><strong style="color:#a060ff">Phase 1</strong> &mdash; Stellar core shader.</p>
+                <p style="margin-top:6px">128&times;128 sphere with full GLSL shader:
+                   piecewise blackbody colour, 6-octave FBM convection, limb darkening
+                   (a=0.4 b=0.6), Fresnel coronal rim, and hotspot flicker.
+                   T<sub>eff</sub> slider shifts colour live from orange (20&thinsp;kK)
+                   to blue-violet (210&thinsp;kK).</p>
+                <p style="margin-top:6px">Phase 2+ will add:</p>
                 <ul style="margin-left:12px;margin-top:4px;list-style:disc;">
                     <li>&#946;-law wind particle system</li>
                     <li>Optically-thin line emission</li>
@@ -426,12 +481,12 @@ import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
 //  UNIFORMS  — sliders write here; shaders read from here
 // ────────────────────────────────────────────────────────────────
 const uniforms = {
-    u_time:  { value: 0.0 },
-    u_color: { value: new THREE.Color(0x8040FF) },
-    u_vinf:  { value: 5000.0 },    // km/s
-    u_beta:  { value: 0.8 },       // velocity-law exponent
-    u_mdot:  { value: 1e-5 },      // M☉/yr
-    u_teff:  { value: 210000.0 },  // K
+    u_time:       { value: 0.0 },
+    u_teff:       { value: 210000.0 },              // K — drives blackbody colour
+    u_resolution: { value: new THREE.Vector2() },   // set by resize handler
+    u_vinf:       { value: 5000.0 },                // km/s
+    u_beta:       { value: 0.8 },                   // velocity-law exponent
+    u_mdot:       { value: 1e-5 },                  // M☉/yr
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -486,51 +541,149 @@ controls.target.set(0, 0, 0);
 //  Colored with flat #8040FF shader approximating 210 000 K blackbody
 // ────────────────────────────────────────────────────────────────
 
-// --- Vertex shader (placeholder, Phase 0) ---
+// --- Vertex shader (Phase 1) ---
 const coreVS = /* glsl */`
     varying vec3 vNormal;
-    varying vec3 vViewDir;
+    varying vec3 vPosition;   // object-space — used for FBM, stays with the mesh
+    varying vec3 vViewDir;    // view-space direction to camera
+    varying vec2 vUv;
 
     void main() {
-        vNormal  = normalize(normalMatrix * normal);
+        vNormal   = normalize(normalMatrix * normal);
+        vPosition = position;
+        vUv       = uv;
         vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-        vViewDir = normalize(-mvPos.xyz);
+        vViewDir   = normalize(-mvPos.xyz);
         gl_Position = projectionMatrix * mvPos;
     }
 `;
 
-// --- Fragment shader — flat colour + Fresnel rim (placeholder, Phase 0) ---
+// --- Fragment shader (Phase 1) ---
+// Implements: blackbody colour, FBM surface turbulence, limb darkening,
+// coronal Fresnel rim glow, and hotspot flicker.
 const coreFS = /* glsl */`
     uniform float u_time;
-    uniform vec3  u_color;
+    uniform float u_teff;
 
     varying vec3 vNormal;
+    varying vec3 vPosition;
     varying vec3 vViewDir;
+    varying vec2 vUv;
+
+    // ── 3D value noise ────────────────────────────────────────────
+    float hash3(vec3 p) {
+        p = fract(p * vec3(127.1, 311.7, 74.7));
+        p += dot(p, p + 19.19);
+        return fract(p.x * p.y * p.z);
+    }
+
+    float vnoise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);  // smoothstep
+        return mix(
+            mix(mix(hash3(i),                     hash3(i + vec3(1,0,0)), u.x),
+                mix(hash3(i + vec3(0,1,0)),        hash3(i + vec3(1,1,0)), u.x), u.y),
+            mix(mix(hash3(i + vec3(0,0,1)),        hash3(i + vec3(1,0,1)), u.x),
+                mix(hash3(i + vec3(0,1,1)),        hash3(i + vec3(1,1,1)), u.x), u.y),
+            u.z
+        );
+    }
+
+    // ── FBM — 6 octaves ───────────────────────────────────────────
+    float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 6; i++) {
+            v += a * vnoise(p);
+            p  = p * 2.1 + vec3(31.41, 17.35, 53.17);  // decorrelate octaves
+            a *= 0.5;
+        }
+        return v;   // range ≈ 0..1
+    }
+
+    // ── Blackbody colour — piecewise linear in log T ──────────────
+    // Output is HDR linear RGB; ACESFilmic handles compression.
+    // At >150 000 K the peak is deep UV; visible light is blue-white/violet.
+    vec3 blackbodyColor(float T) {
+        vec3 col;
+        if (T < 10000.0) {
+            // Warm yellow-orange (solar and cooler)
+            float f = clamp((T - 1000.0) / 9000.0, 0.0, 1.0);
+            col = mix(vec3(1.00, 0.18, 0.02), vec3(1.00, 0.90, 0.72), f);
+        } else if (T < 50000.0) {
+            // White to blue-white
+            float f = clamp((T - 10000.0) / 40000.0, 0.0, 1.0);
+            col = mix(vec3(0.95, 0.90, 1.00), vec3(0.68, 0.78, 1.35), f);
+        } else if (T < 150000.0) {
+            // Blue to blue-violet
+            float f = clamp((T - 50000.0) / 100000.0, 0.0, 1.0);
+            col = mix(vec3(0.62, 0.66, 1.45), vec3(0.50, 0.38, 1.90), f);
+        } else {
+            // Intense blue-white / violet (WR-102 regime, >150 000 K)
+            float f = clamp((T - 150000.0) / 100000.0, 0.0, 1.0);
+            col = mix(vec3(0.58, 0.48, 2.00), vec3(0.72, 0.60, 2.50), f);
+        }
+        return col;
+    }
 
     void main() {
-        // Fresnel rim
-        float rim    = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-        float fresnel = pow(rim, 2.5);
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
 
-        // Core pulse — very subtle for Phase 0
-        float pulse = 0.96 + 0.04 * sin(u_time * 1.8);
+        // ── A: Blackbody base colour ──────────────────────────────
+        vec3 baseColor = blackbodyColor(u_teff);
 
-        vec3 col = u_color * pulse;
-        // Bright UV core centre, slightly hotter rim
-        col = mix(col, col * 1.6 + vec3(0.15, 0.05, 0.3), fresnel * 0.5);
+        // ── B: FBM surface turbulence ─────────────────────────────
+        // Large convection zones (~0.3 frequency, very slow drift)
+        vec3 pConv = vPosition * 0.35
+                   + vec3(u_time * 0.020, u_time * 0.015, u_time * 0.018);
+        float conv = fbm(pConv);
+
+        // Fine surface granulation (~1.8 frequency, slightly faster)
+        vec3 pGran = vPosition * 1.80
+                   + vec3(u_time * 0.040, -u_time * 0.032, u_time * 0.036);
+        float gran = fbm(pGran);
+
+        // Blend layers: convection dominates, granulation adds crispness
+        float surface  = conv * 0.62 + gran * 0.38;
+        float brightMod = 0.76 + surface * 0.48;  // maps 0..1 → 0.76..1.24
+
+        // ── C: Limb darkening — I(μ) = I₀(a + b·μ), a=0.4, b=0.6 ─
+        float mu       = max(dot(nrm, vDir), 0.0);
+        float limbDark = 0.4 + 0.6 * mu;
+
+        // Combine surface texture and limb darkening on base colour
+        vec3 col = baseColor * brightMod * limbDark;
+
+        // ── E: Hotspot flicker — fast high-frequency FBM ──────────
+        // Simulates radiative instabilities at the photosphere
+        vec3 pFlick = vPosition * 3.20 + vec3(u_time * 0.150);
+        float flicker = fbm(pFlick) * 2.0 - 1.0;   // -1..1
+        col *= (1.0 + 0.12 * flicker);
+
+        // ── D: Coronal rim glow — Fresnel at grazing angles ───────
+        // Optically thin corona above photosphere is hotter/more UV
+        float fresnel   = pow(1.0 - max(dot(nrm, vDir), 0.0), 3.0);
+        vec3 coronaCol  = blackbodyColor(u_teff * 1.18) * 2.40;
+        col += coronaCol * fresnel * 0.72;
 
         gl_FragColor = vec4(col, 1.0);
     }
 `;
 
-const coreGeo = new THREE.SphereGeometry(1.0, 80, 80);  // subdivided, approximates icosphere
+// 128×128 gives dense enough normals for the surface shader to look smooth
+const coreGeo = new THREE.SphereGeometry(1.0, 128, 128);
 const coreMat = new THREE.ShaderMaterial({
     vertexShader:   coreVS,
     fragmentShader: coreFS,
     uniforms,
 });
 const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-scene.add(coreMesh);
+coreMesh.layers.enable(1);          // selective bloom layer (UnrealBloomPass, Phase 6+)
+
+const coreGroup = new THREE.Group();
+coreGroup.add(coreMesh);
+scene.add(coreGroup);
 
 // ── Inner glow (additive shell) ──
 const glowInnerVS = /* glsl */`
@@ -545,13 +698,17 @@ const glowInnerVS = /* glsl */`
 `;
 const glowInnerFS = /* glsl */`
     uniform float u_time;
+    uniform float u_teff;
     varying vec3 vNormal;
     varying vec3 vViewDir;
     void main() {
-        float rim = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-        float alpha = pow(rim, 1.8) * 0.55;
-        float pulse = 0.9 + 0.1 * sin(u_time * 2.2 + 1.0);
-        gl_FragColor = vec4(0.55, 0.22, 1.0, alpha * pulse);
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float alpha = pow(rim, 1.6) * 0.62;
+        float pulse = 0.87 + 0.13 * sin(u_time * 2.1 + 0.8);
+        // Chromosphere colour tracks temperature
+        float t   = clamp((u_teff - 20000.0) / 230000.0, 0.0, 1.0);
+        vec3  col = mix(vec3(1.00, 0.48, 0.08), vec3(0.55, 0.35, 1.85), t);
+        gl_FragColor = vec4(col, alpha * pulse);
     }
 `;
 const glowInnerGeo = new THREE.SphereGeometry(1.22, 32, 32);
@@ -566,15 +723,17 @@ const glowInnerMat = new THREE.ShaderMaterial({
 });
 scene.add(new THREE.Mesh(glowInnerGeo, glowInnerMat));
 
-// ── Outer corona glow ──
+// ── Outer corona glow — temperature-responsive ──
 const glowOuterFS = /* glsl */`
-    uniform float u_time;
+    uniform float u_teff;
     varying vec3 vNormal;
     varying vec3 vViewDir;
     void main() {
-        float rim = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-        float alpha = pow(rim, 3.5) * 0.28;
-        gl_FragColor = vec4(0.35, 0.10, 0.90, alpha);
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float alpha = pow(rim, 3.2) * 0.32;
+        float t     = clamp((u_teff - 20000.0) / 230000.0, 0.0, 1.0);
+        vec3  col   = mix(vec3(0.85, 0.28, 0.02), vec3(0.42, 0.15, 1.10), t);
+        gl_FragColor = vec4(col, alpha);
     }
 `;
 const glowOuterGeo = new THREE.SphereGeometry(2.0, 24, 24);
@@ -604,6 +763,7 @@ function handleResize() {
     const h = container.clientHeight;
     if (renderer.domElement.width !== w || renderer.domElement.height !== h) {
         renderer.setSize(w, h, false);
+        uniforms.u_resolution.value.set(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
     }
@@ -634,14 +794,11 @@ const clock = new THREE.Clock();
 function animate() {
     requestAnimationFrame(animate);
 
-    const dt  = Math.min(clock.getDelta(), 0.05);
-    uniforms.u_time.value += dt;
+    clock.getDelta();                   // keep clock ticking for controls
+    uniforms.u_time.value += 0.01;     // fixed tick — surface animation rate
 
     controls.update();
     handleResize();
-
-    // Very slow rotation of the star
-    coreMesh.rotation.y += dt * 0.08;
 
     renderer.render(scene, camera);
     tickFPS();
@@ -711,13 +868,13 @@ const slTeff = document.getElementById('sl-teff');
 slTeff.addEventListener('input', () => {
     const val = parseFloat(slTeff.value);
     uniforms.u_teff.value = val;
-    // Map temperature to a hue shift for visual feedback (placeholder)
-    // 210 000 K → #8040FF; lower T → redder; higher → bluer/white
-    const t    = (val - 20000) / (250000 - 20000);  // 0..1
-    const r    = THREE.MathUtils.lerp(0.9,  0.3,  t);
-    const g    = THREE.MathUtils.lerp(0.3,  0.2,  t);
-    const b    = THREE.MathUtils.lerp(0.5,  1.0,  t);
-    uniforms.u_color.value.setRGB(r, g, b);
+    // Sync point-light colour to blackbody temperature
+    const t = Math.min((val - 20000) / 230000, 1.0);
+    coreLight.color.setRGB(
+        THREE.MathUtils.lerp(1.00, 0.45, t),
+        THREE.MathUtils.lerp(0.45, 0.18, t),
+        THREE.MathUtils.lerp(0.05, 1.00, t)
+    );
 
     const kStr = val >= 1000
         ? (val / 1000).toFixed(0) + ' 000 K'
@@ -756,11 +913,10 @@ document.getElementById('cam-wide').addEventListener('click',    () => setCamPre
 // ────────────────────────────────────────────────────────────────
 //  CONSOLE SUMMARY
 // ────────────────────────────────────────────────────────────────
-console.log('%c[WR-102 Simulator — Phase 0]', 'color:#a060ff;font-weight:bold;font-size:14px');
-console.log('  Uniforms:', uniforms);
-console.log('  Three.js r160 | ACESFilmicToneMapping | antialias | powerPreference:high-performance');
-console.log('  Camera default: [0, 0, 8] → origin');
-console.log('  Sliders: v_inf, beta, mdot (log), T_eff — all wired to uniforms object');
+console.log('%c[WR-102 Simulator — Phase 1]', 'color:#a060ff;font-weight:bold;font-size:14px');
+console.log('  Stellar core: 128×128 SphereGeometry | full GLSL Phase 1 shader');
+console.log('  Shader features: piecewise blackbody · 6-oct FBM turbulence · limb darkening · Fresnel corona · hotspot flicker');
+console.log('  Uniforms active:', Object.keys(uniforms).join(', '));
 </script>
 
 </body>
