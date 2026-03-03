@@ -75,6 +75,35 @@
             font-weight: bold;
         }
 
+        /* ── Nav dropdown ── */
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-menu {
+            display: none; position: absolute; top: calc(100% + 5px); left: 0;
+            background: rgba(0,0,0,0.96); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.13); border-radius: 6px;
+            padding: 4px 0; min-width: 148px; z-index: 600;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu,
+        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a {
+            display: block; padding: 0.38rem 0.9rem; color: #bbb;
+            text-decoration: none; font-size: 0.82rem; white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-dropdown-menu a:hover { background: rgba(255,255,255,0.09); color: #fff; }
+        .nav-dropdown-menu a.active { color: #ffd700; font-weight: bold; }
+        .nav-dropdown-btn {
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.82rem;
+            padding: 0.35rem 0.8rem; transition: all 0.25s; font-family: inherit;
+        }
+        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
+        .nav-dropdown-btn.active {
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            border-color: #ffd700; color: #000; font-weight: bold;
+        }
+
         .page-content {
             flex: 1;
             display: flex;
@@ -277,7 +306,14 @@
             <a href="index.html" class="nav-brand">🌟 Celestial Simulator</a>
             <div class="nav-links">
                 <a href="index.html" class="nav-link">Home</a>
-                <a href="threejs.html" class="nav-link">Three.js 3D</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-btn">3D Sims &#9662;</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="threejs.html">Solar System</a>
+                        <a href="wr102.html">WR-102</a>
+                        <a href="vega.html">Vega</a>
+                    </div>
+                </div>
                 <a href="star2d.html" class="nav-link">2D Star</a>
                 <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
                 <a href="solar-fluid.html" class="nav-link active">Fluid Sim</a>

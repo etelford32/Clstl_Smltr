@@ -58,6 +58,10 @@
     {
       "source": "/wr102",
       "destination": "/wr102.html"
+    },
+    {
+      "source": "/vega",
+      "destination": "/vega.html"
     }
   ]
 }

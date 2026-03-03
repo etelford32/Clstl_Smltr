@@ -79,6 +79,35 @@
             font-weight: bold;
         }
 
+        /* ── Nav dropdown ── */
+        .nav-dropdown { position: relative; }
+        .nav-dropdown-menu {
+            display: none; position: absolute; top: calc(100% + 5px); left: 0;
+            background: rgba(0,0,0,0.96); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.13); border-radius: 6px;
+            padding: 4px 0; min-width: 148px; z-index: 600;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+        }
+        .nav-dropdown:hover .nav-dropdown-menu,
+        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
+        .nav-dropdown-menu a {
+            display: block; padding: 0.38rem 0.9rem; color: #bbb;
+            text-decoration: none; font-size: 0.82rem; white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-dropdown-menu a:hover { background: rgba(255,255,255,0.09); color: #fff; }
+        .nav-dropdown-menu a.active { color: #ffd700; font-weight: bold; }
+        .nav-dropdown-btn {
+            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.82rem;
+            padding: 0.35rem 0.8rem; transition: all 0.25s; font-family: inherit;
+        }
+        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
+        .nav-dropdown-btn.active {
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            border-color: #ffd700; color: #000; font-weight: bold;
+        }
+
         .hero {
             text-align: center;
             padding: 4rem 2rem 2rem;
@@ -286,12 +315,18 @@
             <a href="index.html" class="nav-brand">🌟 Celestial Simulator</a>
             <div class="nav-links">
                 <a href="index.html" class="nav-link active">Home</a>
-                <a href="threejs.html" class="nav-link">Three.js 3D</a>
+                <div class="nav-dropdown">
+                    <button class="nav-dropdown-btn">3D Sims &#9662;</button>
+                    <div class="nav-dropdown-menu">
+                        <a href="threejs.html">Solar System</a>
+                        <a href="wr102.html">WR-102</a>
+                        <a href="vega.html">Vega</a>
+                    </div>
+                </div>
                 <a href="star2d.html" class="nav-link">2D Star</a>
                 <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
                 <a href="solar-fluid.html" class="nav-link">Fluid Sim</a>
                 <a href="rust.html" class="nav-link">Rust/WASM</a>
-                <a href="wr102.html" class="nav-link">WR-102</a>
             </div>
         </div>
     </nav>
@@ -382,6 +417,20 @@
                     <li>ACESFilmic tone-mapped WebGL</li>
                 </ul>
                 <a href="wr102.html" class="card-link">Launch Simulator &rarr;</a>
+            </div>
+
+            <div class="simulator-card">
+                <span class="badge">&#11088; NEW</span>
+                <div class="card-icon">&#11835;</div>
+                <h2 class="card-title">Vega (&#945; Lyrae)</h2>
+                <p class="card-description">Rapid-rotator A0V star simulator — Vega spins so fast its equator bulges 23&thinsp;% wider than its poles, with gravity darkening across the disk.</p>
+                <ul class="card-features">
+                    <li>Oblate spheroid geometry (von&nbsp;Zeipel)</li>
+                    <li>Pole-to-equator gravity darkening</li>
+                    <li>Live oblateness &amp; T<sub>eff</sub> sliders</li>
+                    <li>A0V blackbody surface shader</li>
+                </ul>
+                <a href="vega.html" class="card-link">Launch Simulator &rarr;</a>
             </div>
 
             <div class="simulator-card">
