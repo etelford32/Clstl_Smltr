@@ -14,80 +14,92 @@
             color: #ddd;
         }
 
-        /* ── Nav ── */
+        /* ─── Nav (shared, sticky, 48px) ──────────────────────────── */
         nav {
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            background: rgba(0, 4, 20, 0.80);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(100, 160, 255, 0.12);
-            padding: 0.6rem 1.5rem;
-            z-index: 500;
-        }
-        .nav-container {
-            max-width: 1600px; margin: 0 auto;
-            display: flex; justify-content: space-between; align-items: center;
-            flex-wrap: wrap; gap: 0.5rem;
+            position: relative; z-index: 600;
+            height: 48px; min-height: 48px;
+            background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,255,255,.07);
+            display: flex; align-items: center; padding: 0 14px; gap: 8px;
         }
         .nav-brand {
-            font-size: 1.25rem; font-weight: bold;
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            background-clip: text; text-decoration: none;
+            background-clip: text;
         }
-        .nav-links { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
-        .nav-link {
-            padding: 0.35rem 0.8rem;
-            background: rgba(255,255,255,0.08);
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 5px; color: #fff; text-decoration: none;
-            transition: all 0.25s; font-size: 0.82rem;
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
         }
-        .nav-link:hover { background: rgba(255,255,255,0.18); border-color: #60b0ff; }
-        .nav-link.active {
-            background: linear-gradient(45deg, #2060c0, #60b0ff);
-            border-color: #60b0ff; color: #fff; font-weight: bold;
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-drop { position: relative; }
+        .nav-drop-btn {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+            transition: background .2s, border-color .2s; white-space: nowrap;
         }
-
-        /* ── Nav dropdown ── */
-        .nav-dropdown { position: relative; }
-        .nav-dropdown-menu {
-            display: none; position: absolute; top: calc(100% + 5px); left: 0;
-            background: rgba(0,4,20,0.97); backdrop-filter: blur(12px);
-            border: 1px solid rgba(100,160,255,0.18); border-radius: 6px;
-            padding: 4px 0; min-width: 148px; z-index: 600;
-            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+        .nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+        .nav-drop-btn.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-drop-menu {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0;
+            background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+            padding: 4px 0; min-width: 144px; z-index: 800;
+            box-shadow: 0 6px 24px rgba(0,0,0,.65);
         }
-        .nav-dropdown:hover .nav-dropdown-menu,
-        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
-        .nav-dropdown-menu a {
-            display: block; padding: 0.38rem 0.9rem; color: #bbb;
-            text-decoration: none; font-size: 0.82rem; white-space: nowrap;
-            transition: background 0.15s, color 0.15s;
+        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
+        .nav-drop-menu a {
+            display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
+            font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
         }
-        .nav-dropdown-menu a:hover { background: rgba(100,160,255,0.12); color: #fff; }
-        .nav-dropdown-menu a.active { color: #60b0ff; font-weight: bold; }
-        .nav-dropdown-btn {
-            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.82rem;
-            padding: 0.35rem 0.8rem; transition: all 0.25s; font-family: inherit;
+        .nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+        .nav-drop-menu a.active { color:#a060ff; font-weight:600; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; line-height: 1; transition: background .2s;
         }
-        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #60b0ff; }
-        .nav-dropdown-btn.active {
-            background: linear-gradient(45deg, #2060c0, #60b0ff);
-            border-color: #60b0ff; font-weight: bold;
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 48px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+            .nav-drop-menu {
+                position: static; box-shadow: none; border-radius: 4px;
+                background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0;
+            }
+            .nav-drop-menu a { padding: 10px 22px; }
+            .nav-drop.open .nav-drop-menu { display: block; }
+            .nav-drop:hover .nav-drop-menu { display: none; }
+            .nav-drop.open .nav-drop-menu { display: block !important; }
         }
 
         /* ── App layout ── */
         #app {
-            display: flex; width: 100vw; height: 100vh;
-            padding-top: 44px;
+            position: relative;
+            width: 100%; height: calc(100vh - 48px);
+            overflow: hidden;
         }
 
         #canvas-container {
-            flex: 1; position: relative;
+            position: absolute; inset: 0;
             background: radial-gradient(ellipse at 40% 50%, #020818 0%, #010410 60%, #000000 100%);
         }
+        #canvas-container canvas { display: block; width: 100% !important; height: 100% !important; }
 
         /* ── HUD ── */
         #hud {
@@ -104,49 +116,80 @@
         #hud .dim { color: #556; font-size: 10px; }
         #hud .sep { border-top: 1px solid rgba(100,160,255,0.15); margin: 5px 0; }
 
-        /* ── Sidebar toggle ── */
-        #sidebar-toggle {
-            position: absolute; bottom: 16px; left: 14px;
-            background: rgba(0,4,20,0.82); backdrop-filter: blur(8px);
-            border: 1px solid rgba(100,160,255,0.22); border-radius: 6px;
-            color: #90c8ff; cursor: pointer; font-size: 0.8rem;
-            padding: 0.4rem 0.9rem; transition: all 0.2s; z-index: 100;
+        /* ── Canvas overlay buttons ── */
+        .cv-btn {
+            position: absolute; z-index: 60;
+            background: rgba(0,4,20,.80); backdrop-filter: blur(8px);
+            border: 1px solid rgba(100,160,255,.30); border-radius: 7px;
+            color: #60b0ff; cursor: pointer; font-family: inherit;
+            font-size: 12px; padding: 6px 11px; transition: all .2s;
+            touch-action: manipulation;
         }
-        #sidebar-toggle:hover { background: rgba(32,96,192,0.5); border-color: #60b0ff; }
+        .cv-btn:hover, .cv-btn:active { background: rgba(32,96,192,.25); border-color:#60b0ff; }
+        #btn-panel-open { top:12px; right:12px; }
+        #btn-center     { bottom:16px; right:12px; }
 
-        /* ── Sidebar ── */
-        #sidebar {
-            width: 240px; min-width: 220px;
-            background: rgba(2, 6, 22, 0.96);
-            border-left: 1px solid rgba(100,160,255,0.12);
-            overflow-y: auto; padding-bottom: 1rem;
-            transition: width 0.25s, min-width 0.25s;
+        /* ── Backdrop ── */
+        #backdrop {
+            display:none; position:absolute; inset:0; z-index:25;
+            background: rgba(0,0,0,.45); cursor: pointer;
         }
-        #sidebar.collapsed { width: 0; min-width: 0; overflow: hidden; }
-        .sb-header {
-            padding: 14px 16px 10px;
-            border-bottom: 1px solid rgba(100,160,255,0.12);
+        #backdrop.show { display:block; }
+
+        /* ── Panel ── */
+        #panel {
+            position: absolute; top:0; right:0; bottom:0;
+            width: min(260px, 88vw);
+            background: rgba(2,6,22,.97); backdrop-filter: blur(16px);
+            border-left: 1px solid rgba(100,160,255,.15);
+            z-index: 30;
+            display: flex; flex-direction: column; overflow: hidden;
+            transform: translateX(100%);
+            transition: transform .3s cubic-bezier(.4,0,.2,1);
         }
-        .star-name { font-size: 1.2rem; font-weight: bold; color: #90c8ff; }
-        .star-sub { font-size: 10px; color: #556; margin-top: 2px; }
-        .phase-badge {
-            display: inline-block; margin-top: 6px;
-            background: rgba(32,96,192,0.35);
-            border: 1px solid rgba(100,160,255,0.30);
-            border-radius: 4px; padding: 2px 8px;
-            font-size: 9px; color: #80b8f0; letter-spacing: 0.5px;
+        #panel.open { transform: translateX(0); }
+        #panel-header {
+            flex-shrink: 0;
+            display: flex; align-items: flex-start; justify-content: space-between;
+            padding: 12px 14px 8px;
+            border-bottom: 1px solid rgba(100,160,255,.12);
         }
+        .panel-star  { font-size: 15px; font-weight: 700; color: #90c8ff; letter-spacing: .8px; }
+        .panel-sub   { font-size: 10px; color: #556; margin-top: 2px; }
+        .panel-badge {
+            display: inline-block; margin-top: 5px;
+            padding: 2px 8px; font-size: 9px; letter-spacing: .4px;
+            background: rgba(32,96,192,.18); border: 1px solid rgba(100,160,255,.30);
+            border-radius: 10px; color: #80b8f0;
+        }
+        #btn-panel-close {
+            flex-shrink: 0; margin-left: 8px; margin-top: 2px;
+            background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color: #888; cursor: pointer; font-size: 13px;
+            padding: 4px 8px; line-height: 1; transition: all .2s; touch-action: manipulation;
+        }
+        #btn-panel-close:hover { background: rgba(255,80,80,.15); border-color: rgba(255,80,80,.4); color: #ff6060; }
+        #panel-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px; }
+        #panel-body::-webkit-scrollbar { width: 4px; }
+        #panel-body::-webkit-scrollbar-track { background: rgba(255,255,255,.03); }
+        #panel-body::-webkit-scrollbar-thumb { background: rgba(100,160,255,.35); border-radius: 2px; }
 
         /* ── Collapsible sections ── */
-        .sb-section { border-bottom: 1px solid rgba(100,160,255,0.08); }
+        .sb-section {
+            margin-bottom: 8px; border: 1px solid rgba(100,160,255,.14);
+            border-radius: 7px; overflow: hidden; background: rgba(100,160,255,.02);
+        }
         .sb-title {
             display: flex; justify-content: space-between; align-items: center;
-            padding: 9px 16px; cursor: pointer; user-select: none;
-            font-size: 10px; font-weight: bold; color: #60b0ff;
-            letter-spacing: 0.8px; text-transform: uppercase;
+            padding: 8px 11px; background: rgba(100,160,255,.07);
+            color: #60b0ff; font-weight: 600; font-size: 10px;
+            cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: .7px;
+            touch-action: manipulation;
         }
-        .sb-title:hover { background: rgba(32,96,192,0.12); }
-        .sb-body { padding: 8px 14px 12px; }
+        .sb-title:hover { background: rgba(100,160,255,.14); }
+        .sb-title .arrow { transition: transform .25s; }
+        .sb-section.closed .sb-title .arrow { transform: rotate(-90deg); }
+        .sb-body { padding: 10px 11px; }
         .sb-section.closed .sb-body { display: none; }
 
         /* ── Controls ── */
@@ -173,7 +216,7 @@
             background: rgba(32,96,192,0.20);
             border: 1px solid rgba(100,160,255,0.22);
             border-radius: 4px; color: #90c8ff; cursor: pointer;
-            transition: all 0.2s; min-width: 50px;
+            transition: all 0.2s; min-width: 50px; touch-action: manipulation;
         }
         .btn-row button:hover { background: rgba(32,96,192,0.45); border-color: #60b0ff; }
         .btn-row button.active {
@@ -191,23 +234,22 @@
 
 <!-- ── Navigation ── -->
 <nav>
-    <div class="nav-container">
-        <a href="index.html" class="nav-brand">&#127775; Celestial Simulator</a>
-        <div class="nav-links">
-            <a href="index.html"           class="nav-link">Home</a>
-            <div class="nav-dropdown">
-                <button class="nav-dropdown-btn active">3D Sims &#9662;</button>
-                <div class="nav-dropdown-menu">
-                    <a href="threejs.html">Solar System</a>
-                    <a href="wr102.html">WR-102</a>
-                    <a href="vega.html" class="active">Vega</a>
-                </div>
+    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-3d">
+            <button class="nav-drop-btn active" aria-haspopup="true">3D Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="threejs.html">Solar System</a>
+                <a href="wr102.html">WR-102</a>
+                <a href="vega.html" class="active">Vega</a>
             </div>
-            <a href="star2d.html"          class="nav-link">2D Star</a>
-            <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
-            <a href="solar-fluid.html"     class="nav-link">Fluid Sim</a>
-            <a href="rust.html"            class="nav-link">Rust/WASM</a>
         </div>
+        <a href="star2d.html"          class="nav-item">2D Star</a>
+        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
+        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <a href="rust.html"            class="nav-item">Rust/WASM</a>
     </div>
 </nav>
 
@@ -229,24 +271,31 @@
             <div class="dim" style="margin-top:4px">Drag to orbit &nbsp;|&nbsp; Scroll to zoom</div>
         </div>
 
-        <!-- Sidebar toggle -->
-        <button id="sidebar-toggle" title="Toggle controls">&#9776; Controls</button>
+        <!-- Canvas overlay buttons -->
+        <button class="cv-btn" id="btn-panel-open" title="Open controls">☰ Controls</button>
+        <button class="cv-btn" id="btn-center"     title="Reset camera">⊙</button>
 
     </div>
 
-    <!-- Right sidebar -->
-    <div id="sidebar">
+    <!-- Backdrop -->
+    <div id="backdrop"></div>
 
-        <div class="sb-header">
-            <div class="star-name">Vega &mdash; &alpha; Lyrae</div>
-            <div class="star-sub">A0V &mdash; rapid rotator &mdash; 25 ly</div>
-            <div class="phase-badge">Rapid-Rotator Shader</div>
+    <!-- Side panel -->
+    <div id="panel">
+        <div id="panel-header">
+            <div class="panel-title">
+                <div class="panel-star">Vega — α Lyrae</div>
+                <div class="panel-sub">A0V — rapid rotator — 25 ly</div>
+                <div class="panel-badge">Rapid-Rotator Shader</div>
+            </div>
+            <button id="btn-panel-close" title="Close">✕</button>
         </div>
+        <div id="panel-body">
 
         <!-- Stellar parameters -->
         <div class="sb-section" id="sec-stellar">
             <div class="sb-title" data-sec="sec-stellar">
-                <span>Stellar Parameters</span><span>&#9660;</span>
+                <span>Stellar Parameters</span><span class="arrow">▼</span>
             </div>
             <div class="sb-body">
 
@@ -277,7 +326,7 @@
         <!-- Rotation -->
         <div class="sb-section" id="sec-rot">
             <div class="sb-title" data-sec="sec-rot">
-                <span>Rotation</span><span>&#9660;</span>
+                <span>Rotation</span><span class="arrow">▼</span>
             </div>
             <div class="sb-body">
 
@@ -300,7 +349,7 @@
         <!-- Camera -->
         <div class="sb-section" id="sec-cam">
             <div class="sb-title" data-sec="sec-cam">
-                <span>Camera</span><span>&#9660;</span>
+                <span>Camera</span><span class="arrow">▼</span>
             </div>
             <div class="sb-body">
                 <div class="btn-row">
@@ -318,7 +367,7 @@
         <!-- Star data -->
         <div class="sb-section closed" id="sec-data">
             <div class="sb-title" data-sec="sec-data">
-                <span>Reference Data</span><span>&#9660;</span>
+                <span>Reference Data</span><span class="arrow">▼</span>
             </div>
             <div class="sb-body">
                 <table class="data-table">
@@ -342,7 +391,7 @@
         <!-- Notes -->
         <div class="sb-section closed" id="sec-notes">
             <div class="sb-title" data-sec="sec-notes">
-                <span>Simulation Notes</span><span>&#9660;</span>
+                <span>Simulation Notes</span><span class="arrow">▼</span>
             </div>
             <div class="sb-body" style="font-size:10px;color:#446;line-height:1.6;">
                 <p><strong style="color:#60b0ff">Oblate geometry</strong>: vertex shader
@@ -358,7 +407,8 @@
             </div>
         </div>
 
-    </div><!-- /#sidebar -->
+        </div><!-- /#panel-body -->
+    </div><!-- /#panel -->
 </div><!-- /#app -->
 
 <!-- ── Three.js ── -->
@@ -753,15 +803,58 @@ animate();
 // ────────────────────────────────────────────────────────────────
 document.querySelectorAll('.sb-title').forEach(title => {
     title.addEventListener('click', () => {
-        const sec   = title.closest('.sb-section');
-        sec.classList.toggle('closed');
-        const arrow = title.querySelector('span:last-child');
-        if (arrow) arrow.textContent = sec.classList.contains('closed') ? '▶' : '▼';
+        title.closest('.sb-section').classList.toggle('closed');
     });
 });
-const sidebar   = document.getElementById('sidebar');
-const toggleBtn = document.getElementById('sidebar-toggle');
-toggleBtn.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
+// ────────────────────────────────────────────────────────────────
+//  PANEL state machine
+// ────────────────────────────────────────────────────────────────
+const panel    = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+const btnOpen  = document.getElementById('btn-panel-open');
+const btnClose = document.getElementById('btn-panel-close');
+function openPanel()  { panel.classList.add('open');    backdrop.classList.add('show'); }
+function closePanel() { panel.classList.remove('open'); backdrop.classList.remove('show'); }
+btnOpen.addEventListener('click',  openPanel);
+btnClose.addEventListener('click', closePanel);
+backdrop.addEventListener('click', closePanel);
+let _touchStartX = 0;
+panel.addEventListener('touchstart', e => { _touchStartX = e.touches[0].clientX; }, { passive: true });
+panel.addEventListener('touchend',   e => { if (e.changedTouches[0].clientX - _touchStartX > 60) closePanel(); });
+
+// Camera center button
+document.getElementById('btn-center').addEventListener('click', () => setCamPreset('inclined'));
+
+// ────────────────────────────────────────────────────────────────
+//  NAV — hamburger + touch dropdown
+// ────────────────────────────────────────────────────────────────
+const burger  = document.getElementById('nav-burger');
+const navMenu = document.getElementById('nav-menu');
+burger.addEventListener('click', () => {
+    const open = navMenu.classList.toggle('open');
+    burger.textContent = open ? '✕' : '☰';
+    burger.setAttribute('aria-expanded', open);
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('nav')) {
+        navMenu.classList.remove('open');
+        burger.textContent = '☰';
+        burger.setAttribute('aria-expanded', false);
+    }
+});
+document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const drop = btn.closest('.nav-drop');
+        const opening = !drop.classList.contains('open');
+        document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+        if (opening) drop.classList.add('open');
+    });
+});
+
+// ResizeObserver for canvas
+const ro = new ResizeObserver(handleResize);
+ro.observe(document.getElementById('canvas-container'));
 
 // ────────────────────────────────────────────────────────────────
 //  SLIDER BINDINGS
