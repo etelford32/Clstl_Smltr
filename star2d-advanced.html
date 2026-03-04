@@ -20,92 +20,78 @@
             flex-direction: column;
         }
 
+        /* ─── Nav (shared, sticky, 48px) ──────────────────────────── */
         nav {
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 1rem 2rem;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
+            position: sticky; top: 0; z-index: 600;
+            height: 48px; min-height: 48px;
+            background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,255,255,.07);
+            display: flex; align-items: center; padding: 0 14px; gap: 8px;
         }
-
-        .nav-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
-
         .nav-brand {
-            font-size: 1.5rem;
-            font-weight: bold;
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
             background-clip: text;
-            text-decoration: none;
         }
-
-        .nav-links {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
         }
-
-        .nav-link {
-            padding: 0.5rem 1rem;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            color: #fff;
-            text-decoration: none;
-            transition: all 0.3s;
-            font-size: 0.9rem;
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-drop { position: relative; }
+        .nav-drop-btn {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+            transition: background .2s, border-color .2s; white-space: nowrap;
         }
-
-        .nav-link:hover {
-            background: rgba(255, 255, 255, 0.2);
-            border-color: #ffd700;
+        .nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+        .nav-drop-btn.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-drop-menu {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0;
+            background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+            padding: 4px 0; min-width: 144px; z-index: 800;
+            box-shadow: 0 6px 24px rgba(0,0,0,.65);
         }
-
-        .nav-link.active {
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            border-color: #ffd700;
-            color: #000;
-            font-weight: bold;
+        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
+        .nav-drop-menu a {
+            display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
+            font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
         }
-
-        /* ── Nav dropdown ── */
-        .nav-dropdown { position: relative; }
-        .nav-dropdown-menu {
-            display: none; position: absolute; top: calc(100% + 5px); left: 0;
-            background: rgba(0,0,0,0.96); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.13); border-radius: 6px;
-            padding: 4px 0; min-width: 148px; z-index: 600;
-            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
+        .nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+        .nav-drop-menu a.active { color:#a060ff; font-weight:600; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; line-height: 1; transition: background .2s;
         }
-        .nav-dropdown:hover .nav-dropdown-menu,
-        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
-        .nav-dropdown-menu a {
-            display: block; padding: 0.38rem 0.9rem; color: #bbb;
-            text-decoration: none; font-size: 0.82rem; white-space: nowrap;
-            transition: background 0.15s, color 0.15s;
-        }
-        .nav-dropdown-menu a:hover { background: rgba(255,255,255,0.09); color: #fff; }
-        .nav-dropdown-menu a.active { color: #ffd700; font-weight: bold; }
-        .nav-dropdown-btn {
-            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.82rem;
-            padding: 0.35rem 0.8rem; transition: all 0.25s; font-family: inherit;
-        }
-        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
-        .nav-dropdown-btn.active {
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            border-color: #ffd700; color: #000; font-weight: bold;
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 48px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+            .nav-drop-menu {
+                position: static; box-shadow: none; border-radius: 4px;
+                background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0;
+            }
+            .nav-drop-menu a { padding: 10px 22px; }
+            .nav-drop.open .nav-drop-menu { display: block; }
+            .nav-drop:hover .nav-drop-menu { display: none; }
+            .nav-drop.open .nav-drop-menu { display: block !important; }
         }
 
         .page-content {
@@ -313,23 +299,22 @@
 </head>
 <body>
     <nav>
-        <div class="nav-container">
-            <a href="index.html" class="nav-brand">🌟 Celestial Simulator</a>
-            <div class="nav-links">
-                <a href="index.html" class="nav-link">Home</a>
-                <div class="nav-dropdown">
-                    <button class="nav-dropdown-btn">3D Sims &#9662;</button>
-                    <div class="nav-dropdown-menu">
-                        <a href="threejs.html">Solar System</a>
-                        <a href="wr102.html">WR-102</a>
-                        <a href="vega.html">Vega</a>
-                    </div>
+        <a href="index.html" class="nav-brand">✦ Celestial</a>
+        <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+        <div class="nav-menu" id="nav-menu" role="navigation">
+            <a href="index.html" class="nav-item">Home</a>
+            <div class="nav-drop" id="nav-drop-3d">
+                <button class="nav-drop-btn" aria-haspopup="true">3D Sims ▾</button>
+                <div class="nav-drop-menu">
+                    <a href="threejs.html">Solar System</a>
+                    <a href="wr102.html">WR-102</a>
+                    <a href="vega.html">Vega</a>
                 </div>
-                <a href="star2d.html" class="nav-link">2D Star</a>
-                <a href="star2d-advanced.html" class="nav-link active">Advanced 2D</a>
-                <a href="solar-fluid.html" class="nav-link">Fluid Sim</a>
-                <a href="rust.html" class="nav-link">Rust/WASM</a>
             </div>
+            <a href="star2d.html"          class="nav-item">2D Star</a>
+            <a href="star2d-advanced.html" class="nav-item active">Advanced 2D</a>
+            <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+            <a href="rust.html"            class="nav-item">Rust/WASM</a>
         </div>
     </nav>
 
@@ -1221,6 +1206,33 @@
         // Initialize
         initParticles();
         animate();
+
+        // Nav — hamburger + touch dropdown
+        (function() {
+            var burger  = document.getElementById('nav-burger');
+            var navMenu = document.getElementById('nav-menu');
+            burger.addEventListener('click', function() {
+                var open = navMenu.classList.toggle('open');
+                burger.textContent = open ? '✕' : '☰';
+                burger.setAttribute('aria-expanded', String(open));
+            });
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('nav')) {
+                    navMenu.classList.remove('open');
+                    burger.textContent = '☰';
+                    burger.setAttribute('aria-expanded', 'false');
+                }
+            });
+            document.querySelectorAll('.nav-drop-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var drop = btn.closest('.nav-drop');
+                    var opening = !drop.classList.contains('open');
+                    document.querySelectorAll('.nav-drop').forEach(function(d) { d.classList.remove('open'); });
+                    if (opening) drop.classList.add('open');
+                });
+            });
+        })();
 
         console.log('🌊 Advanced Solar Physics Simulator loaded!');
         console.log('Features: Parker Spirals, CMEs, Solar Flares, Fluid Dynamics');

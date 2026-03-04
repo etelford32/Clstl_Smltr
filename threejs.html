@@ -1,244 +1,737 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js 3D Star - Celestial Simulator</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Solar System — Celestial Simulator</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
 
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
-            color: #fff;
-            min-height: 100vh;
-        }
+/* ─── Nav ────────────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:48px; min-height:48px;
+    background:rgba(4,2,16,.92); backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 14px; gap:8px;
+}
+.nav-brand {
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.nav-item {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s;
+}
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#000; font-weight:600; }
+.nav-drop { position:relative; }
+.nav-drop-btn {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s; white-space:nowrap;
+}
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#000; font-weight:600; }
+.nav-drop-menu {
+    display:none; position:absolute; top:calc(100% + 4px); left:0;
+    background:rgba(4,2,18,.97); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.11); border-radius:6px;
+    padding:4px 0; min-width:144px; z-index:800;
+    box-shadow:0 6px 24px rgba(0,0,0,.65);
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display:block; }
+.nav-drop-menu a {
+    display:block; padding:9px 14px; color:#bbb; text-decoration:none;
+    font-size:.82rem; white-space:nowrap; transition:all .15s;
+}
+.nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#ffd700; font-weight:600; }
+.nav-burger {
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1;
+}
+@media (max-width:768px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:48px; left:0; right:0;
+        background:rgba(3,1,14,.97); backdrop-filter:blur(14px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 12px; gap:4px; z-index:700;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu { position:static; box-shadow:none; background:rgba(255,255,255,.04); }
+    .nav-drop-menu a { padding:10px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none; }
+    .nav-drop.open .nav-drop-menu { display:block !important; }
+}
 
-        nav {
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            padding: 1rem 2rem;
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-        }
+/* ─── App shell ──────────────────────────────────────────────── */
+#app { position:relative; width:100%; height:calc(100vh - 48px); overflow:hidden; }
+#canvas-wrap {
+    position:absolute; inset:0;
+    background:radial-gradient(ellipse at 50% 50%, #01020d 0%, #000105 60%, #000 100%);
+}
+#canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
 
-        .nav-container {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 1rem;
-        }
+/* ─── HUD ────────────────────────────────────────────────────── */
+#hud {
+    position:absolute; top:12px; left:12px; z-index:50;
+    background:rgba(0,0,0,.68); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,200,0,.18); border-radius:8px;
+    padding:10px 14px; font-size:11px; line-height:1.7; pointer-events:none;
+    min-width:170px;
+}
+#hud h3 { font-size:12px; color:#ffd700; margin-bottom:3px; letter-spacing:.5px; }
+#hud .val { color:#80c8ff; font-weight:600; }
+#hud .dim { color:#555; font-size:10px; }
+#hud .sep { border-top:1px solid rgba(255,200,0,.12); margin:5px 0; }
+#fps-display { color:#40ff80; font-weight:600; }
 
-        .nav-brand {
-            font-size: 1.5rem;
-            font-weight: bold;
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            text-decoration: none;
-        }
+/* ─── Canvas buttons ─────────────────────────────────────────── */
+.cv-btn {
+    position:absolute; z-index:60;
+    background:rgba(4,3,16,.80); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,200,0,.25); border-radius:7px;
+    color:#ffd700; cursor:pointer; font-family:inherit;
+    font-size:11px; padding:6px 11px; transition:all .2s;
+    touch-action:manipulation;
+}
+.cv-btn:hover, .cv-btn:active { background:rgba(255,200,0,.12); }
+#btn-panel-open { top:12px; right:12px; }
+#btn-center     { bottom:16px; right:12px; }
+#speed-ctrl     { bottom:16px; left:12px; display:flex; align-items:center; gap:6px; pointer-events:auto; }
+#speed-ctrl label { font-size:10px; color:#888; }
+#speed-ctrl input[type=range] { width:80px; accent-color:#ffd700; }
+#speed-ctrl span { font-size:10px; color:#ffd700; font-weight:600; min-width:28px; }
+#backdrop {
+    display:none; position:absolute; inset:0; z-index:25;
+    background:rgba(0,0,0,.45); cursor:pointer;
+}
+#backdrop.show { display:block; }
 
-        .nav-links {
-            display: flex;
-            gap: 0.5rem;
-            flex-wrap: wrap;
-        }
+/* ─── Side panel ─────────────────────────────────────────────── */
+#panel {
+    position:absolute; top:0; right:0; bottom:0;
+    width:min(286px,88vw);
+    background:rgba(4,3,14,.97); backdrop-filter:blur(16px);
+    border-left:1px solid rgba(255,200,0,.12); z-index:30;
+    display:flex; flex-direction:column; overflow:hidden;
+    transform:translateX(100%);
+    transition:transform .3s cubic-bezier(.4,0,.2,1);
+}
+#panel.open { transform:translateX(0); }
+#panel-hdr {
+    flex-shrink:0; display:flex; align-items:flex-start;
+    justify-content:space-between; padding:12px 14px 8px;
+    border-bottom:1px solid rgba(255,200,0,.10);
+}
+.p-title { font-size:15px; font-weight:700; color:#ffd700; }
+.p-sub   { font-size:10px; color:#555; margin-top:2px; }
+#btn-close {
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12);
+    border-radius:5px; color:#888; cursor:pointer; font-size:13px;
+    padding:4px 8px; line-height:1; margin-left:8px; margin-top:2px;
+    transition:all .2s; touch-action:manipulation;
+}
+#btn-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
+#panel-body { flex:1; overflow-y:auto; padding:8px; }
+#panel-body::-webkit-scrollbar { width:4px; }
+#panel-body::-webkit-scrollbar-thumb { background:rgba(255,200,0,.3); border-radius:2px; }
 
-        .nav-link {
-            padding: 0.5rem 1rem;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
-            color: #fff;
-            text-decoration: none;
-            transition: all 0.3s;
-            font-size: 0.9rem;
-        }
+/* Sections */
+.sec { margin-bottom:8px; border:1px solid rgba(255,200,0,.10); border-radius:7px; overflow:hidden; background:rgba(255,200,0,.01); }
+.sec-hd {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 11px; background:rgba(255,200,0,.06); color:#ffd700;
+    font-weight:600; font-size:10px; cursor:pointer; user-select:none;
+    text-transform:uppercase; letter-spacing:.7px; touch-action:manipulation;
+}
+.sec-hd:hover { background:rgba(255,200,0,.12); }
+.sec-hd .arrow { transition:transform .25s; }
+.sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
+.sec-bd { padding:10px 11px; }
+.sec.closed .sec-bd { display:none; }
 
-        .nav-link:hover {
-            background: rgba(255, 255, 255, 0.2);
-            border-color: #ffd700;
-        }
+/* Controls */
+.ctrl { display:flex; align-items:center; margin:7px 0; gap:6px; }
+.ctrl label { flex:0 0 64px; font-size:11px; color:#888; }
+.ctrl input[type=range] {
+    flex:1; cursor:pointer; height:28px; padding:10px 0;
+    -webkit-appearance:none; background:transparent;
+}
+.ctrl input[type=range]::-webkit-slider-runnable-track { height:3px; background:rgba(255,200,0,.25); border-radius:2px; }
+.ctrl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:18px; height:18px; margin-top:-7.5px;
+    border-radius:50%; background:#ffd700; cursor:pointer;
+}
+.vdisp { flex:0 0 56px; text-align:right; color:#ffd700; font-size:10px; font-weight:600; }
+.dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
+.dtbl td:first-child { color:#777; width:46%; }
+.dtbl td:last-child  { color:#80c8ff; text-align:right; font-weight:600; }
+.btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
+.btn-row button {
+    flex:1; padding:8px 4px; min-width:54px;
+    background:rgba(255,200,0,.07); border:1px solid rgba(255,200,0,.20);
+    border-radius:5px; color:#cc9900; cursor:pointer; font-family:inherit;
+    font-size:10px; transition:all .15s; touch-action:manipulation;
+}
+.btn-row button:hover { background:rgba(255,200,0,.18); }
+.btn-row button.active { background:rgba(255,200,0,.25); border-color:#ffd700; color:#ffd700; }
 
-        .nav-link.active {
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            border-color: #ffd700;
-            color: #000;
-            font-weight: bold;
-        }
-
-        /* ── Nav dropdown ── */
-        .nav-dropdown { position: relative; }
-        .nav-dropdown-menu {
-            display: none; position: absolute; top: calc(100% + 5px); left: 0;
-            background: rgba(0,0,0,0.96); backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.13); border-radius: 6px;
-            padding: 4px 0; min-width: 148px; z-index: 600;
-            box-shadow: 0 8px 28px rgba(0,0,0,0.7);
-        }
-        .nav-dropdown:hover .nav-dropdown-menu,
-        .nav-dropdown:focus-within .nav-dropdown-menu { display: block; }
-        .nav-dropdown-menu a {
-            display: block; padding: 0.38rem 0.9rem; color: #bbb;
-            text-decoration: none; font-size: 0.82rem; white-space: nowrap;
-            transition: background 0.15s, color 0.15s;
-        }
-        .nav-dropdown-menu a:hover { background: rgba(255,255,255,0.09); color: #fff; }
-        .nav-dropdown-menu a.active { color: #ffd700; font-weight: bold; }
-        .nav-dropdown-btn {
-            background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.82rem;
-            padding: 0.35rem 0.8rem; transition: all 0.25s; font-family: inherit;
-        }
-        .nav-dropdown-btn:hover { background: rgba(255,255,255,0.18); border-color: #ffd700; }
-        .nav-dropdown-btn.active {
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            border-color: #ffd700; color: #000; font-weight: bold;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 2rem auto;
-            padding: 0 2rem;
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 1rem;
-            font-size: 2rem;
-            background: linear-gradient(45deg, #ffd700, #ff8c00);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .subtitle {
-            text-align: center;
-            color: #aaa;
-            margin-bottom: 2rem;
-        }
-
-        .viewer {
-            background: #000;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 0 50px rgba(255, 140, 0, 0.3);
-            margin-bottom: 2rem;
-        }
-
-        iframe {
-            width: 100%;
-            height: 800px;
-            border: none;
-            display: block;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1rem;
-            margin-top: 2rem;
-        }
-
-        .info-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 1.5rem;
-        }
-
-        .info-card h3 {
-            color: #ffd700;
-            margin-bottom: 1rem;
-        }
-
-        .info-card ul {
-            list-style: none;
-        }
-
-        .info-card li {
-            padding: 0.5rem 0;
-            color: #ddd;
-        }
-
-        .info-card li:before {
-            content: "⭐ ";
-            margin-right: 0.5rem;
-        }
-    </style>
+/* Planet colour dots in panel */
+.planet-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+</style>
 </head>
 <body>
-    <nav>
-        <div class="nav-container">
-            <a href="index.html" class="nav-brand">🌟 Celestial Simulator</a>
-            <div class="nav-links">
-                <a href="index.html" class="nav-link">Home</a>
-                <div class="nav-dropdown">
-                    <button class="nav-dropdown-btn active">3D Sims &#9662;</button>
-                    <div class="nav-dropdown-menu">
-                        <a href="threejs.html" class="active">Solar System</a>
-                        <a href="wr102.html">WR-102</a>
-                        <a href="vega.html">Vega</a>
+
+<!-- ═══ NAV ═══ -->
+<nav>
+    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu">☰</button>
+    <div class="nav-menu" id="nav-menu">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-3d">
+            <button class="nav-drop-btn active">3D Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="threejs.html" class="active">Solar System</a>
+                <a href="wr102.html">WR-102</a>
+                <a href="vega.html">Vega</a>
+            </div>
+        </div>
+        <a href="star2d.html"          class="nav-item">2D Star</a>
+        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
+        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <a href="rust.html"            class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
+
+<!-- ═══ APP ═══ -->
+<div id="app">
+    <div id="canvas-wrap">
+        <!-- HUD -->
+        <div id="hud">
+            <h3 id="hud-name">Solar System</h3>
+            <div>Selected: <span class="val" id="hud-body">—</span></div>
+            <div>Sim year: <span class="val" id="hud-year">0.00</span></div>
+            <div>Speed: <span class="val" id="hud-speed">1.0×</span></div>
+            <div class="sep"></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:3px">Drag · Scroll · Click planet</div>
+        </div>
+
+        <!-- Overlay buttons -->
+        <button class="cv-btn" id="btn-panel-open">☰ Info</button>
+        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+
+        <!-- Speed slider -->
+        <div class="cv-btn" id="speed-ctrl">
+            <label>Speed</label>
+            <input type="range" id="sl-speed" min="0" max="50" step="0.5" value="1">
+            <span id="disp-speed">1×</span>
+        </div>
+
+        <div id="backdrop"></div>
+    </div>
+
+    <!-- Panel -->
+    <aside id="panel">
+        <div id="panel-hdr">
+            <div>
+                <div class="p-title" id="panel-planet-name">Solar System</div>
+                <div class="p-sub" id="panel-planet-type">Inner Solar System</div>
+            </div>
+            <button id="btn-close">✕</button>
+        </div>
+        <div id="panel-body">
+
+            <!-- Camera presets -->
+            <div class="sec" id="sec-cam">
+                <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row">
+                        <button id="cam-top" class="active">Top</button>
+                        <button id="cam-iso">Isometric</button>
+                        <button id="cam-sun">Sun View</button>
+                        <button id="cam-earth">Earth View</button>
                     </div>
                 </div>
-                <a href="star2d.html" class="nav-link">2D Star</a>
-                <a href="star2d-advanced.html" class="nav-link">Advanced 2D</a>
-                <a href="solar-fluid.html" class="nav-link">Fluid Sim</a>
-                <a href="rust.html" class="nav-link">Rust/WASM</a>
             </div>
+
+            <!-- Selected planet data -->
+            <div class="sec" id="sec-planet">
+                <div class="sec-hd"><span>Selected Body</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl" id="planet-table">
+                        <tr><td colspan="2" style="color:#555;font-style:italic">Click a planet to select</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Planets quick-select -->
+            <div class="sec" id="sec-select">
+                <div class="sec-hd"><span>Bodies</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row" id="planet-btns"></div>
+                </div>
+            </div>
+
+            <!-- About -->
+            <div class="sec closed" id="sec-about">
+                <div class="sec-hd"><span>About</span><span class="arrow">▼</span></div>
+                <div class="sec-bd" style="font-size:10px;color:#555;line-height:1.6;">
+                    <p>Inner Solar System simulation with logarithmically-scaled orbits
+                    (true scale would make planets invisible). Orbital periods are accurate.
+                    Click any body to see its data.</p>
+                    <p style="margin-top:5px">Sun shader uses the same FBM + piecewise
+                    blackbody pipeline as WR-102, tuned for G2V (T=5778 K).</p>
+                </div>
+            </div>
+
         </div>
-    </nav>
+    </aside>
+</div>
 
-    <div class="container">
-        <h1>⚡ Three.js 3D Star Renderer</h1>
-        <p class="subtitle">Hardware-accelerated WebGL visualization with preset simulation modes</p>
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-        <div class="viewer">
-            <iframe src="star3d.html" title="Three.js 3D Star Renderer" style="height:900px"></iframe>
-        </div>
+// ── Nav hamburger + touch dropdown ──
+const burger  = document.getElementById('nav-burger');
+const navMenu = document.getElementById('nav-menu');
+burger.addEventListener('click', () => {
+    const o = navMenu.classList.toggle('open');
+    burger.textContent = o ? '✕' : '☰';
+    burger.setAttribute('aria-expanded', o);
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('nav')) {
+        navMenu.classList.remove('open'); burger.textContent='☰';
+    }
+});
+document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const drop = btn.closest('.nav-drop');
+        const opening = !drop.classList.contains('open');
+        document.querySelectorAll('.nav-drop').forEach(d=>d.classList.remove('open'));
+        if (opening) drop.classList.add('open');
+    });
+});
 
-        <div class="info-grid">
-            <div class="info-card">
-                <h3>🎮 Controls</h3>
-                <ul>
-                    <li><strong>Click + Drag:</strong> Rotate camera</li>
-                    <li><strong>Scroll:</strong> Zoom in/out</li>
-                    <li><strong>Tab:</strong> Toggle sidebar panel</li>
-                    <li><strong>Space:</strong> Play/pause simulation</li>
-                </ul>
-            </div>
+// ── Panel state ──
+const panel    = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+const btnOpen  = document.getElementById('btn-panel-open');
+const btnClose = document.getElementById('btn-close');
+function openPanel()  { panel.classList.add('open');    backdrop.classList.add('show');    }
+function closePanel() { panel.classList.remove('open'); backdrop.classList.remove('show'); }
+btnOpen.addEventListener('click',  openPanel);
+btnClose.addEventListener('click', closePanel);
+backdrop.addEventListener('click', closePanel);
+let tSX = 0;
+panel.addEventListener('touchstart', e=>{ tSX=e.touches[0].clientX; }, {passive:true});
+panel.addEventListener('touchend',   e=>{ if(e.changedTouches[0].clientX-tSX>60) closePanel(); }, {passive:true});
 
-            <div class="info-card">
-                <h3>✨ Sirius Binary System</h3>
-                <ul>
-                    <li><strong>Keplerian Orbit:</strong> Real orbital mechanics (P=50.13yr, e=0.5914)</li>
-                    <li><strong>Sirius A:</strong> A1V main-sequence, 9,940 K, 2.06 M&#9737;</li>
-                    <li><strong>Sirius B:</strong> DA2 white dwarf, 25,000 K, 1.018 M&#9737;</li>
-                    <li><strong>Stellar Wind:</strong> Wind-companion gravitational interaction</li>
-                    <li><strong>Scale Toggle:</strong> Exaggerated vs. true-scale view</li>
-                </ul>
-            </div>
+// ── Accordion ──
+document.querySelectorAll('.sec-hd').forEach(hd=>{
+    hd.addEventListener('click',()=>hd.closest('.sec').classList.toggle('closed'));
+});
 
-            <div class="info-card">
-                <h3>🚀 Features</h3>
-                <ul>
-                    <li><strong>60+ FPS:</strong> Optimized particle buffer system</li>
-                    <li><strong>Preset Modes:</strong> Default star or Sirius binary</li>
-                    <li><strong>Scientific Data:</strong> Full spectral & orbital parameters</li>
-                    <li><strong>Time Controls:</strong> Epoch scrubbing, periastron jumps</li>
-                </ul>
-            </div>
-        </div>
-    </div>
+// ═══════════════════════════════════════════════════════
+//  SCENE
+// ═══════════════════════════════════════════════════════
+const scene    = new THREE.Scene();
+const camera   = new THREE.PerspectiveCamera(50, 1, 0.01, 2000);
+camera.position.set(0, 30, 0);   // top-down default
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const cWrap = document.getElementById('canvas-wrap');
+cWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.07;
+controls.minDistance   = 3;
+controls.maxDistance   = 120;
+controls.target.set(0, 0, 0);
+
+// ── Background stars ──
+{
+    const n=4000, p=new Float32Array(n*3);
+    for(let i=0;i<n;i++){
+        const r=400+Math.random()*300, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+        p[i*3]=r*Math.sin(ph)*Math.cos(th); p[i*3+1]=r*Math.sin(ph)*Math.sin(th); p[i*3+2]=r*Math.cos(ph);
+    }
+    const bg=new THREE.BufferGeometry();
+    bg.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
+    scene.add(new THREE.Points(bg,new THREE.PointsMaterial({color:0xffffff,size:0.4,sizeAttenuation:false})));
+}
+
+// ═══════════════════════════════════════════════════════
+//  SUN  — G2V shader (same pipeline as WR-102)
+// ═══════════════════════════════════════════════════════
+const sunUniforms = {
+    u_time: { value: 0.0 },
+    u_teff: { value: 5778.0 },
+};
+const sunVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
+    void main() {
+        vNormal=normalize(normalMatrix*normal); vPosition=position;
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vViewDir=normalize(-mv.xyz); gl_Position=projectionMatrix*mv;
+    }
+`;
+const sunFS = /* glsl */`
+    uniform float u_time; uniform float u_teff;
+    varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm(vec3 p){float v=0.0,a=0.5;for(int i=0;i<5;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+    vec3 blackbody(float T){
+        if(T<6000.0){float f=clamp((T-1000.0)/5000.0,0.0,1.0);return mix(vec3(1.0,0.16,0.02),vec3(1.0,0.82,0.52),f);}
+        else if(T<10000.0){float f=clamp((T-6000.0)/4000.0,0.0,1.0);return mix(vec3(1.0,0.88,0.65),vec3(0.93,0.90,1.0),f);}
+        else {float f=clamp((T-10000.0)/40000.0,0.0,1.0);return mix(vec3(0.88,0.88,1.0),vec3(0.56,0.65,1.0),f);}
+    }
+    void main(){
+        vec3 nrm=normalize(vNormal), vDir=normalize(vViewDir);
+        vec3 base=blackbody(u_teff);
+        float conv=fbm(vPosition*0.40+vec3(u_time*0.012,u_time*0.009,u_time*0.011));
+        float gran=fbm(vPosition*2.10+vec3(u_time*0.025,-u_time*0.020,u_time*0.022));
+        float bmod=0.80+(conv*0.60+gran*0.40)*0.40;
+        float mu=max(dot(nrm,vDir),0.0);
+        float limb=0.42+0.58*mu;
+        vec3 col=base*bmod*limb*1.80;
+        float flick=fbm(vPosition*2.8+vec3(u_time*0.08))*2.0-1.0;
+        col*=1.0+0.08*flick;
+        float fr=pow(1.0-mu,3.0);
+        col+=blackbody(u_teff*1.12)*fr*1.0*0.50;
+        gl_FragColor=vec4(col,1.0);
+    }
+`;
+
+const sunGeo  = new THREE.SphereGeometry(1.5, 96, 96);
+const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms:sunUniforms });
+const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+scene.add(sunMesh);
+
+// Sun glow shells
+const sgVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main(){ vNormal=normalize(normalMatrix*normal); vec4 mv=modelViewMatrix*vec4(position,1.0); vViewDir=normalize(-mv.xyz); gl_Position=projectionMatrix*mv; }
+`;
+const sgInFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main(){
+        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
+        float a=pow(rim,1.8)*0.60;
+        float p=0.88+0.12*sin(u_time*1.8+0.6);
+        gl_FragColor=vec4(1.0,0.62,0.12,a*p);
+    }
+`;
+const sgOutFS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main(){
+        float rim=1.0-max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
+        float a=pow(rim,3.5)*0.22;
+        gl_FragColor=vec4(1.0,0.48,0.06,a);
+    }
+`;
+[{r:1.9,fs:sgInFS},{r:2.8,fs:sgOutFS}].forEach(({r,fs})=>{
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(r,24,24),
+        new THREE.ShaderMaterial({vertexShader:sgVS,fragmentShader:fs,uniforms:sunUniforms,
+            transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.BackSide})));
+});
+
+// Sun light
+const sunLight = new THREE.PointLight(0xfff4e0, 3.5, 0);
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x040408, 0.4));
+
+// ═══════════════════════════════════════════════════════
+//  PLANETS
+// ═══════════════════════════════════════════════════════
+// Logarithmic distance scaling: d_sim = 2.5 + 4.2 * ln(1 + d_AU * 1.8)
+// Keeps all planets visible while preserving relative order
+function simDist(dAU) { return 2.5 + 4.2 * Math.log(1 + dAU * 1.8); }
+
+const PLANETS = [
+    {
+        name:'Mercury', type:'Terrestrial planet', dAU:0.387, period:0.241,
+        radius:0.07, color:0x8c8c8c, emissive:0x1a1a1a,
+        data:{
+            'Distance':'0.387 AU', 'Period':'87.97 days', 'Radius':'2,439 km',
+            'Mass':'3.30×10²³ kg', 'Temp':'167°C (mean)', 'Moons':'0',
+        }
+    },
+    {
+        name:'Venus', type:'Terrestrial planet', dAU:0.723, period:0.615,
+        radius:0.11, color:0xe6c97a, emissive:0x1a1200,
+        data:{
+            'Distance':'0.723 AU', 'Period':'224.7 days', 'Radius':'6,051 km',
+            'Mass':'4.87×10²⁴ kg', 'Temp':'464°C (mean)', 'Moons':'0',
+        }
+    },
+    {
+        name:'Earth', type:'Terrestrial planet', dAU:1.000, period:1.000,
+        radius:0.12, color:0x2255cc, emissive:0x040a20,
+        data:{
+            'Distance':'1.000 AU', 'Period':'365.25 days', 'Radius':'6,371 km',
+            'Mass':'5.97×10²⁴ kg', 'Temp':'15°C (mean)', 'Moons':'1 (Luna)',
+        }
+    },
+    {
+        name:'Mars', type:'Terrestrial planet', dAU:1.524, period:1.881,
+        radius:0.08, color:0xc1440e, emissive:0x180400,
+        data:{
+            'Distance':'1.524 AU', 'Period':'686.97 days', 'Radius':'3,389 km',
+            'Mass':'6.42×10²³ kg', 'Temp':'-65°C (mean)', 'Moons':'2 (Phobos, Deimos)',
+        }
+    },
+    {
+        name:'Jupiter', type:'Gas giant', dAU:5.203, period:11.862,
+        radius:0.32, color:0xc8963a, emissive:0x100800,
+        data:{
+            'Distance':'5.203 AU', 'Period':'11.86 years', 'Radius':'69,911 km',
+            'Mass':'1.90×10²⁷ kg', 'Temp':'-110°C (cloud)', 'Moons':'95 known',
+        }
+    },
+    {
+        name:'Saturn', type:'Gas giant', dAU:9.537, period:29.457,
+        radius:0.27, color:0xd4b86a, emissive:0x100900,
+        rings:true,
+        data:{
+            'Distance':'9.537 AU', 'Period':'29.46 years', 'Radius':'58,232 km',
+            'Mass':'5.68×10²⁶ kg', 'Temp':'-140°C (cloud)', 'Moons':'146 known',
+        }
+    },
+];
+
+// Build orbit rings and planet meshes
+PLANETS.forEach(p => {
+    p.dist  = simDist(p.dAU);
+    p.angle = Math.random() * Math.PI * 2;
+
+    // Orbit ring
+    const og = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
+    const om = new THREE.MeshBasicMaterial({ color:p.color, transparent:true, opacity:0.18, side:THREE.DoubleSide });
+    const orb = new THREE.Mesh(og, om);
+    orb.rotation.x = Math.PI / 2;
+    scene.add(orb);
+
+    // Planet sphere
+    const pg = new THREE.SphereGeometry(p.radius, 32, 32);
+    const pm = new THREE.MeshStandardMaterial({ color:p.color, emissive:p.emissive, roughness:.8, metalness:.1 });
+    p.mesh = new THREE.Mesh(pg, pm);
+    p.mesh.userData = p;
+    scene.add(p.mesh);
+
+    // Saturn rings
+    if (p.rings) {
+        const rg = new THREE.RingGeometry(p.radius * 1.4, p.radius * 2.4, 64);
+        const rm = new THREE.MeshBasicMaterial({
+            color:0xc8a850, transparent:true, opacity:0.45, side:THREE.DoubleSide
+        });
+        const ring = new THREE.Mesh(rg, rm);
+        ring.rotation.x = Math.PI / 2.4;
+        p.mesh.add(ring);
+    }
+});
+
+// Build quick-select buttons in panel
+const btnContainer = document.getElementById('planet-btns');
+// Sun first
+const sunBtn = document.createElement('button');
+sunBtn.textContent = '☀ Sun';
+sunBtn.addEventListener('click', () => selectBody(null));
+btnContainer.appendChild(sunBtn);
+PLANETS.forEach(p => {
+    const b = document.createElement('button');
+    b.innerHTML = `<span class="planet-dot" style="background:#${p.color.toString(16).padStart(6,'0')}"></span>${p.name}`;
+    b.addEventListener('click', () => selectBody(p));
+    btnContainer.appendChild(b);
+});
+
+// ─── Body selection ───────────────────────────────────────────
+let selectedBody = null;
+const hudBody    = document.getElementById('hud-body');
+const tbl        = document.getElementById('planet-table');
+const panelName  = document.getElementById('panel-planet-name');
+const panelType  = document.getElementById('panel-planet-type');
+
+function selectBody(p) {
+    selectedBody = p;
+    if (!p) {
+        hudBody.textContent   = 'Sun';
+        panelName.textContent = 'Sun — G2V';
+        panelType.textContent = 'G-type main-sequence star';
+        tbl.innerHTML = `
+            <tr><td>Class</td><td>G2V</td></tr>
+            <tr><td>T<sub>eff</sub></td><td>5,778 K</td></tr>
+            <tr><td>Radius</td><td>695,700 km</td></tr>
+            <tr><td>Mass</td><td>1.989×10³⁰ kg</td></tr>
+            <tr><td>Luminosity</td><td>3.83×10²⁶ W</td></tr>
+            <tr><td>Age</td><td>4.6 Gyr</td></tr>`;
+    } else {
+        hudBody.textContent   = p.name;
+        panelName.textContent = p.name;
+        panelType.textContent = p.type;
+        tbl.innerHTML = Object.entries(p.data)
+            .map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+        // Snap camera to orbit altitude on next update
+        targetBody = p;
+    }
+}
+let targetBody = null;
+
+// ─── Raycaster for click-to-select ───────────────────────────
+const raycaster = new THREE.Raycaster();
+const mouse     = new THREE.Vector2();
+const meshes    = PLANETS.map(p => p.mesh);
+meshes.push(sunMesh);
+
+function onPointerDown(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    const cx   = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy   = e.touches ? e.touches[0].clientY : e.clientY;
+    mouse.x = ((cx - rect.left)  / rect.width)  * 2 - 1;
+    mouse.y = -((cy - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length > 0) {
+        const obj = hits[0].object;
+        if (obj === sunMesh) { selectBody(null); }
+        else                 { selectBody(obj.userData); }
+    }
+}
+renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+// ═══════════════════════════════════════════════════════
+//  SIMULATION STATE
+// ═══════════════════════════════════════════════════════
+let simTime  = 0;     // years
+let simSpeed = 1.0;   // multiplier
+const FRAMES_PER_YEAR = 1800; // 1 Earth orbit = 30 s at 60 fps, speed=1
+
+document.getElementById('sl-speed').addEventListener('input', function(){
+    simSpeed = +this.value;
+    document.getElementById('disp-speed').textContent = simSpeed.toFixed(1) + '×';
+    document.getElementById('hud-speed').textContent  = simSpeed.toFixed(1) + '×';
+});
+
+// ═══════════════════════════════════════════════════════
+//  CAMERA PRESETS
+// ═══════════════════════════════════════════════════════
+const CAM = {
+    top:    { pos:[0,30,0],    t:[0,0,0] },
+    iso:    { pos:[20,16,20],  t:[0,0,0] },
+    sun:    { pos:[0,1.5,10],  t:[0,0,0] },
+    earth:  { pos:[simDist(1.0)+1, 1.0, simDist(1.0)+1], t:[simDist(1.0),0,0] },
+};
+function setCam(name) {
+    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b=>b.classList.remove('active'));
+    document.getElementById('cam-'+name)?.classList.add('active');
+    const p = CAM[name];
+    if (!p) return;
+    camera.position.set(...p.pos);
+    controls.target.set(...p.t);
+    controls.update();
+    targetBody = null;
+}
+['top','iso','sun','earth'].forEach(n=>{
+    document.getElementById('cam-'+n).addEventListener('click',()=>setCam(n));
+});
+document.getElementById('btn-center').addEventListener('click', ()=>setCam('top'));
+
+// ═══════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════
+function resize() {
+    const w = cWrap.clientWidth, h = cWrap.clientHeight;
+    if (!w||!h) return;
+    renderer.setSize(w,h,false);
+    camera.aspect = w/h;
+    camera.updateProjectionMatrix();
+}
+const ro = new ResizeObserver(resize);
+ro.observe(cWrap);
+resize();
+
+// ─── FPS ─────────────────────────────────────────────────────
+let fF=0,fT=performance.now();
+const fEl=document.getElementById('fps-display');
+function tickFPS(){fF++;const n=performance.now();if(n-fT>=500){fEl.textContent=Math.round(fF*1000/(n-fT));fF=0;fT=n;}}
+
+// ═══════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════
+const hudYear = document.getElementById('hud-year');
+
+function animate() {
+    requestAnimationFrame(animate);
+
+    sunUniforms.u_time.value += 0.01;
+
+    // Advance simulation time
+    simTime += simSpeed / FRAMES_PER_YEAR;
+    hudYear.textContent = simTime.toFixed(2);
+
+    // Move planets
+    PLANETS.forEach(p => {
+        const angle = (simTime / p.period) * Math.PI * 2;
+        p.mesh.position.set(p.dist * Math.cos(angle), 0, p.dist * Math.sin(angle));
+        // Axial rotation (visual, not physically scaled)
+        p.mesh.rotation.y += 0.005 / p.period;
+    });
+    sunMesh.rotation.y += 0.0012;
+
+    // Smooth camera follow if body selected
+    if (targetBody) {
+        const tp = targetBody.mesh.position;
+        const offset = new THREE.Vector3(targetBody.radius * 8, targetBody.radius * 4, targetBody.radius * 8);
+        camera.position.lerp(tp.clone().add(offset), 0.03);
+        controls.target.lerp(tp, 0.05);
+    }
+
+    controls.update();
+    renderer.render(scene, camera);
+    tickFPS();
+}
+animate();
+
+console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
+console.log('  Sun G2V shader · 6 planets · orbital mechanics · click-to-select');
+</script>
 </body>
 </html>
