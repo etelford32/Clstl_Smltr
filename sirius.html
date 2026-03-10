@@ -110,13 +110,13 @@ nav {
 #btn-panel-open { top:12px; right:12px; }
 #btn-center     { bottom:16px; right:12px; }
 
-#backdrop { display:none; position:absolute; inset:0; z-index:25; background:rgba(0,0,0,.45); cursor:pointer; }
+#backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
 #backdrop.show { display:block; }
 
 #panel {
     position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
     background: rgba(2,4,18,.97); backdrop-filter: blur(16px);
-    border-left: 1px solid rgba(80,140,255,.18); z-index: 30;
+    border-left: 1px solid rgba(80,140,255,.18); z-index: 450;
     display: flex; flex-direction: column; overflow: hidden;
     transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
 }
@@ -700,7 +700,7 @@ function animate() {
 
     // Update HUD
     const sep = posB.distanceTo(posA);
-    document.getElementById('hud-sep').textContent = (sep * 8.0 / state.separation * state.separation).toFixed(1);
+    document.getElementById('hud-sep').textContent = state.separation.toFixed(1);
     document.getElementById('hud-phase').textContent = Math.round((state.orbitAngle % (Math.PI*2)) * 180 / Math.PI) + '°';
 }
 animate();
@@ -728,6 +728,7 @@ document.getElementById('btn-center').addEventListener('click',  ()=>setCam('def
 document.getElementById('tog-orbit').addEventListener('change',  e => { orbitTrail.visible = e.target.checked; });
 document.getElementById('tog-acca').addEventListener('change',   e => { siriusACorona.visible = e.target.checked; });
 document.getElementById('tog-accb').addEventListener('change',   e => { siriusBHalo.visible = e.target.checked; });
+document.getElementById('tog-labels').addEventListener('change', e => { document.getElementById('hud').style.display = e.target.checked ? '' : 'none'; });
 
 // SLIDERS
 document.getElementById('sl-speed').addEventListener('input', function() {

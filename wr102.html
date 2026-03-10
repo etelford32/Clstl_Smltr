@@ -129,8 +129,8 @@ nav {
 
 /* ─── Backdrop ───────────────────────────────────────────────── */
 #backdrop {
-    display:none; position:absolute; inset:0; z-index:25;
-    background: rgba(0,0,0,.45);
+    display:none; position:absolute; inset:0; z-index:400;
+    background: rgba(0,0,0,.50);
     cursor: pointer;
 }
 #backdrop.show { display:block; }
@@ -141,7 +141,7 @@ nav {
     width: min(296px, 88vw);
     background: rgba(3,2,16,.97); backdrop-filter: blur(16px);
     border-left: 1px solid rgba(64,128,255,.18);
-    z-index: 30;
+    z-index: 450;
     display: flex; flex-direction: column; overflow: hidden;
     transform: translateX(100%);
     transition: transform .3s cubic-bezier(.4,0,.2,1);
@@ -354,6 +354,14 @@ nav {
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-wind" checked>
                         <label for="tog-wind">Wind particles</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-spiral" checked>
+                        <label for="tog-spiral">Co-rotating spiral streamers</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-inner" checked>
+                        <label for="tog-inner">Inner wind zone</label>
                     </div>
                     <div class="toggle-row">
                         <input type="checkbox" id="tog-shell1" checked>
@@ -968,6 +976,104 @@ const windPoints = new THREE.Points(windGeo, windMat);
 scene.add(windPoints);
 
 // ────────────────────────────────────────────────────────────────
+//  CO-ROTATING SPIRAL WIND STREAMERS  (Archimedean spiral arms)
+//  WR stars eject material in rotating spiral patterns due to
+//  co-rotating interaction regions (CIRs) in the stellar wind
+// ────────────────────────────────────────────────────────────────
+const N_ARMS     = 4;     // number of spiral arms
+const N_PTS_ARM  = 180;   // points per arm curve
+const ARM_R_MIN  = 1.05;  // start just above surface
+const ARM_R_MAX  = 7.5;   // outer extent
+
+// Archimedean spiral: r = R_min + (R_max - R_min) * t
+// Wind-launch angle offset per arm
+function buildSpiralArm(armIndex) {
+    const pts = [];
+    const phiBase = (armIndex / N_ARMS) * Math.PI * 2;
+    for (let i = 0; i < N_PTS_ARM; i++) {
+        const t   = i / (N_PTS_ARM - 1);       // 0 → 1
+        const r   = ARM_R_MIN + (ARM_R_MAX - ARM_R_MIN) * t;
+        // Tightness factor (controls winding density)
+        const phi = phiBase + t * Math.PI * 2.5;
+        // Small vertical displacement — spiral has slight helical tilt
+        const y   = Math.sin(phi * 0.35 + armIndex) * 0.18 * r;
+        pts.push(r * Math.cos(phi), y, r * Math.sin(phi));
+    }
+    return new THREE.Float32BufferAttribute(pts, 3);
+}
+
+// Color gradient material: bright hot blue-white at r_min, dimmer cyan at r_max
+const spiralGroup = new THREE.Group();
+for (let arm = 0; arm < N_ARMS; arm++) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', buildSpiralArm(arm));
+
+    // Vertex colors: fade from hot to cool along arm
+    const colors = new Float32Array(N_PTS_ARM * 3);
+    for (let i = 0; i < N_PTS_ARM; i++) {
+        const t = i / (N_PTS_ARM - 1);
+        // near: bright ice-blue (hot); far: dim teal
+        colors[i*3]   = THREE.MathUtils.lerp(0.72, 0.10, t * t);
+        colors[i*3+1] = THREE.MathUtils.lerp(0.88, 0.55, t);
+        colors[i*3+2] = THREE.MathUtils.lerp(1.00, 0.80, t * 0.4);
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const mat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.55,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    spiralGroup.add(new THREE.Line(geo, mat));
+}
+scene.add(spiralGroup);
+
+// ────────────────────────────────────────────────────────────────
+//  INNER WIND POINT CLOUD  (dense bright region near surface)
+//  Represents the optically thick pseudo-photosphere where the
+//  WR wind already reaches significant velocity
+// ────────────────────────────────────────────────────────────────
+const N_INNER = 1200;
+const innerGeo = (() => {
+    const geo   = new THREE.BufferGeometry();
+    const pos   = new Float32Array(N_INNER * 3);
+    const col   = new Float32Array(N_INNER * 3);
+    for (let i = 0; i < N_INNER; i++) {
+        // Random points in shell r = 1.0 → 2.5
+        const u = Math.random() * 2 - 1;
+        const v = Math.random() * Math.PI * 2;
+        const sinU = Math.sqrt(1 - u * u);
+        // Non-uniform: cluster toward surface
+        const r = 1.0 + Math.pow(Math.random(), 1.8) * 1.5;
+        pos[i*3]   = r * sinU * Math.cos(v);
+        pos[i*3+1] = r * sinU * Math.sin(v);
+        pos[i*3+2] = r * u;
+        // Color: bright blue-white to cyan depending on r
+        const t = (r - 1.0) / 1.5;
+        col[i*3]   = THREE.MathUtils.lerp(0.92, 0.30, t);
+        col[i*3+1] = THREE.MathUtils.lerp(0.95, 0.72, t);
+        col[i*3+2] = 1.0;
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    return geo;
+})();
+
+const innerMat = new THREE.PointsMaterial({
+    vertexColors: true,
+    size: 0.055,
+    transparent: true,
+    opacity: 0.70,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+});
+const innerPoints = new THREE.Points(innerGeo, innerMat);
+scene.add(innerPoints);
+
+// ────────────────────────────────────────────────────────────────
 //  POINT LIGHT  (UV illumination of scene)
 // ────────────────────────────────────────────────────────────────
 const coreLight = new THREE.PointLight(0x6090ff, 5, 80);
@@ -1007,7 +1113,12 @@ function tickFPS() {
 // ────────────────────────────────────────────────────────────────
 function animate() {
     requestAnimationFrame(animate);
-    uniforms.u_time.value += 0.010;
+    const dt = 0.010;
+    uniforms.u_time.value += dt;
+    // Spiral group rotates at stellar rotation rate (driven by u_rot)
+    // One full revolution every ~60 seconds at 1× speed
+    const rotRate = uniforms.u_rot.value * dt * 0.012;
+    spiralGroup.rotation.y += rotRate;
     controls.update();
     renderer.render(scene, camera);
     tickFPS();
@@ -1045,8 +1156,10 @@ document.getElementById('btn-center').addEventListener('click',  () => setCam('d
 // ────────────────────────────────────────────────────────────────
 //  LAYER TOGGLES
 // ────────────────────────────────────────────────────────────────
-document.getElementById('tog-wind').addEventListener('change',   e => { windPoints.visible  = e.target.checked; });
-document.getElementById('tog-shell1').addEventListener('change', e => { heiiMesh.visible    = e.target.checked; });
+document.getElementById('tog-wind').addEventListener('change',   e => { windPoints.visible   = e.target.checked; });
+document.getElementById('tog-spiral').addEventListener('change', e => { spiralGroup.visible  = e.target.checked; });
+document.getElementById('tog-inner').addEventListener('change',  e => { innerPoints.visible  = e.target.checked; });
+document.getElementById('tog-shell1').addEventListener('change', e => { heiiMesh.visible     = e.target.checked; });
 document.getElementById('tog-shell2').addEventListener('change', e => { oviMesh.visible     = e.target.checked; });
 document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
 
