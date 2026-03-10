@@ -56,7 +56,7 @@
             display: none; position: absolute; top: calc(100% + 4px); left: 0;
             background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
-            padding: 4px 0; min-width: 144px; z-index: 800;
+            padding: 4px 0; min-width: 160px; z-index: 800;
             box-shadow: 0 6px 24px rgba(0,0,0,.65);
         }
         .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
@@ -305,6 +305,9 @@
                 <button class="nav-drop-btn" aria-haspopup="true">3D Sims ▾</button>
                 <div class="nav-drop-menu">
                     <a href="threejs.html">Solar System</a>
+                    <a href="sun.html">The Sun</a>
+                    <a href="sirius.html">Sirius System</a>
+                    <a href="betelgeuse.html">Betelgeuse</a>
                     <a href="wr102.html">WR-102</a>
                     <a href="vega.html">Vega</a>
                 </div>
@@ -416,6 +419,48 @@
                     <li>A0V blackbody surface shader</li>
                 </ul>
                 <a href="vega.html" class="card-link">Launch Simulator &rarr;</a>
+            </div>
+
+            <div class="simulator-card">
+                <span class="badge">&#11088; NEW</span>
+                <div class="card-icon">&#9728;&#65039;</div>
+                <h2 class="card-title">The Sun</h2>
+                <p class="card-description">Our G2V star — granulation, sunspots, chromosphere, white-light corona, and solar wind particles in real-time 3D.</p>
+                <ul class="card-features">
+                    <li>Cellular granulation convection shader</li>
+                    <li>Activity-driven sunspot regions</li>
+                    <li>Chromosphere + white-light corona</li>
+                    <li>Solar wind particle system</li>
+                </ul>
+                <a href="sun.html" class="card-link">Launch Simulator &rarr;</a>
+            </div>
+
+            <div class="simulator-card">
+                <span class="badge">&#11088; NEW</span>
+                <div class="card-icon">&#128308;</div>
+                <h2 class="card-title">Betelgeuse</h2>
+                <p class="card-description">The famous red supergiant M2Iab — giant convective cells, pulsation, TiO molecular shell, asymmetric dust envelope, and slow stellar wind.</p>
+                <ul class="card-features">
+                    <li>Large-scale convective plumes</li>
+                    <li>Semi-regular pulsation animation</li>
+                    <li>Asymmetric dust shell (Great Dimming)</li>
+                    <li>TiO molecular absorption model</li>
+                </ul>
+                <a href="betelgeuse.html" class="card-link">Launch Simulator &rarr;</a>
+            </div>
+
+            <div class="simulator-card">
+                <span class="badge">&#11088; NEW</span>
+                <div class="card-icon">&#11835;</div>
+                <h2 class="card-title">Sirius System</h2>
+                <p class="card-description">The Sirius A1V + DA2 white dwarf binary — watch them orbit with elliptical Keplerian dynamics and compare the brilliant blue-white primary to its tiny, dense companion.</p>
+                <ul class="card-features">
+                    <li>Eccentric binary orbit (e=0.591)</li>
+                    <li>Sirius A: A1V blue-white main sequence</li>
+                    <li>Sirius B: DA2 white dwarf (0.0084 R&#9737;)</li>
+                    <li>Interactive orbit speed &amp; inclination</li>
+                </ul>
+                <a href="sirius.html" class="card-link">Launch Simulator &rarr;</a>
             </div>
 
             <div class="simulator-card">

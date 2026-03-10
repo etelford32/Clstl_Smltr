@@ -47,7 +47,7 @@ nav {
     display: none; position: absolute; top: calc(100% + 4px); left: 0;
     background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
-    padding: 4px 0; min-width: 144px; z-index: 800;
+    padding: 4px 0; min-width: 160px; z-index: 800;
     box-shadow: 0 6px 24px rgba(0,0,0,.65);
 }
 .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
@@ -94,40 +94,38 @@ nav {
     width: 100%; height: calc(100vh - 48px);
     overflow: hidden;
 }
-/* Canvas fills the whole app area */
 #canvas-wrap {
     position: absolute; inset: 0;
-    background: radial-gradient(ellipse at 35% 55%, #08001a 0%, #02000a 65%, #000 100%);
+    background: radial-gradient(ellipse at 35% 55%, #04001a 0%, #01000a 65%, #000 100%);
 }
 #canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
 
 /* ─── HUD ────────────────────────────────────────────────────── */
 #hud {
     position: absolute; top: 12px; left: 12px; z-index: 50;
-    background: rgba(0,0,0,.68); backdrop-filter: blur(8px);
-    border: 1px solid rgba(128,64,255,.22); border-radius: 8px;
+    background: rgba(0,0,0,.72); backdrop-filter: blur(8px);
+    border: 1px solid rgba(64,128,255,.25); border-radius: 8px;
     padding: 10px 14px; font-size: 11px; line-height: 1.7;
-    pointer-events: none; min-width: 180px;
+    pointer-events: none; min-width: 190px;
 }
-#hud h3 { font-size: 13px; color:#a060ff; margin-bottom:4px; letter-spacing:.5px; }
-#hud .val { color:#80c8ff; font-weight:600; }
+#hud h3 { font-size: 13px; color:#60a8ff; margin-bottom:4px; letter-spacing:.5px; }
+#hud .val { color:#80d8ff; font-weight:600; }
 #hud .dim { color:#555; font-size:10px; }
-#hud .sep { border-top:1px solid rgba(128,64,255,.18); margin:5px 0; }
+#hud .sep { border-top:1px solid rgba(64,128,255,.2); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
 /* ─── Canvas overlay buttons ─────────────────────────────────── */
 .cv-btn {
     position: absolute; z-index: 60;
     background: rgba(4,2,16,.80); backdrop-filter: blur(8px);
-    border: 1px solid rgba(128,64,255,.30); border-radius: 7px;
-    color: #a060ff; cursor: pointer; font-family: inherit;
+    border: 1px solid rgba(64,128,255,.30); border-radius: 7px;
+    color: #60a8ff; cursor: pointer; font-family: inherit;
     font-size: 12px; padding: 6px 11px; transition: all .2s;
     touch-action: manipulation;
 }
-.cv-btn:hover, .cv-btn:active { background: rgba(128,64,255,.20); border-color:#8040ff; }
+.cv-btn:hover, .cv-btn:active { background: rgba(64,128,255,.20); border-color:#4080ff; }
 #btn-panel-open { top:12px; right:12px; }
 #btn-center     { bottom:16px; right:12px; }
-/* Hide open-button when panel is open (panel covers it) */
 
 /* ─── Backdrop ───────────────────────────────────────────────── */
 #backdrop {
@@ -141,8 +139,8 @@ nav {
 #panel {
     position: absolute; top:0; right:0; bottom:0;
     width: min(296px, 88vw);
-    background: rgba(5,3,18,.97); backdrop-filter: blur(16px);
-    border-left: 1px solid rgba(128,64,255,.18);
+    background: rgba(3,2,16,.97); backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(64,128,255,.18);
     z-index: 30;
     display: flex; flex-direction: column; overflow: hidden;
     transform: translateX(100%);
@@ -150,15 +148,14 @@ nav {
 }
 #panel.open { transform: translateX(0); }
 
-/* Panel header */
 #panel-header {
     flex-shrink: 0;
     display: flex; align-items: flex-start; justify-content: space-between;
     padding: 12px 14px 8px;
-    border-bottom: 1px solid rgba(128,64,255,.15);
+    border-bottom: 1px solid rgba(64,128,255,.15);
 }
 .panel-title { }
-.panel-star  { font-size:15px; font-weight:700; color:#c080ff; letter-spacing:.8px; }
+.panel-star  { font-size:15px; font-weight:700; color:#80c8ff; letter-spacing:.8px; }
 .panel-sub   { font-size:10px; color:#555; margin-top:2px; }
 .panel-badge {
     display:inline-block; margin-top:5px;
@@ -174,26 +171,24 @@ nav {
 }
 #btn-panel-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
 
-/* Panel scroll area */
 #panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
-/* Custom scrollbar */
 #panel-body::-webkit-scrollbar { width:4px; }
 #panel-body::-webkit-scrollbar-track { background: rgba(255,255,255,.03); }
-#panel-body::-webkit-scrollbar-thumb { background: rgba(128,64,255,.35); border-radius:2px; }
+#panel-body::-webkit-scrollbar-thumb { background: rgba(64,128,255,.35); border-radius:2px; }
 
 /* ─── Accordion sections ─────────────────────────────────────── */
 .sec {
-    margin-bottom:8px; border:1px solid rgba(128,64,255,.14);
-    border-radius:7px; overflow:hidden; background:rgba(128,64,255,.02);
+    margin-bottom:8px; border:1px solid rgba(64,128,255,.14);
+    border-radius:7px; overflow:hidden; background:rgba(64,128,255,.02);
 }
 .sec-hd {
     display:flex; justify-content:space-between; align-items:center;
-    padding:8px 11px; background:rgba(128,64,255,.07);
-    color:#a060ff; font-weight:600; font-size:10px;
+    padding:8px 11px; background:rgba(64,128,255,.07);
+    color:#80a8ff; font-weight:600; font-size:10px;
     cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.7px;
     touch-action:manipulation;
 }
-.sec-hd:hover { background:rgba(128,64,255,.14); }
+.sec-hd:hover { background:rgba(64,128,255,.14); }
 .sec-hd .arrow { transition:transform .25s; }
 .sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
 .sec-bd { padding:10px 11px; }
@@ -204,23 +199,22 @@ nav {
 .ctrl label { flex:0 0 60px; font-size:11px; color:#888; }
 .ctrl input[type=range] {
     flex:1; cursor:pointer;
-    /* large touch target */
     height:28px; padding:10px 0;
     -webkit-appearance:none; background:transparent;
 }
 .ctrl input[type=range]::-webkit-slider-runnable-track {
-    height:3px; background:rgba(128,64,255,.28); border-radius:2px;
+    height:3px; background:rgba(64,128,255,.28); border-radius:2px;
 }
 .ctrl input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none;
     width:18px; height:18px; margin-top:-7.5px;
-    border-radius:50%; background:#8040ff; cursor:pointer;
-    box-shadow:0 0 6px rgba(128,64,255,.5);
+    border-radius:50%; background:#4080ff; cursor:pointer;
+    box-shadow:0 0 6px rgba(64,128,255,.5);
 }
-.ctrl input[type=range]::-moz-range-track { height:3px; background:rgba(128,64,255,.28); }
-.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#8040ff; border:none; }
+.ctrl input[type=range]::-moz-range-track { height:3px; background:rgba(64,128,255,.28); }
+.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#4080ff; border:none; }
 .vdisp {
-    flex:0 0 62px; text-align:right; color:#80c8ff;
+    flex:0 0 72px; text-align:right; color:#80d8ff;
     font-size:10px; font-weight:600; font-variant-numeric:tabular-nums;
 }
 
@@ -228,25 +222,30 @@ nav {
 .dtbl { width:100%; border-collapse:collapse; font-size:11px; }
 .dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
 .dtbl td:first-child { color:#777; width:46%; }
-.dtbl td:last-child  { color:#80c8ff; text-align:right; font-weight:600; }
+.dtbl td:last-child  { color:#80d8ff; text-align:right; font-weight:600; }
 
 /* ─── Button rows ────────────────────────────────────────────── */
 .btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
 .btn-row button {
     flex:1; padding:8px 6px; min-width:56px;
-    background:rgba(128,64,255,.10); border:1px solid rgba(128,64,255,.26);
-    border-radius:5px; color:#a060ff; cursor:pointer;
+    background:rgba(64,128,255,.10); border:1px solid rgba(64,128,255,.26);
+    border-radius:5px; color:#80a8ff; cursor:pointer;
     font-family:inherit; font-size:10px; transition:all .15s;
     touch-action:manipulation;
 }
-.btn-row button:hover { background:rgba(128,64,255,.22); }
-.btn-row button.active { background:rgba(128,64,255,.32); border-color:#8040ff; color:#c080ff; }
+.btn-row button:hover { background:rgba(64,128,255,.22); }
+.btn-row button.active { background:rgba(64,128,255,.32); border-color:#4080ff; color:#c0d8ff; }
 
 /* ─── Notes text ─────────────────────────────────────────────── */
 .note-text { font-size:10px; color:#555; line-height:1.6; }
-.note-text strong { color:#8060cc; }
+.note-text strong { color:#6080cc; }
 .note-text ul { margin:6px 0 0 14px; list-style:disc; }
 .note-text li { margin:2px 0; }
+
+/* ─── Toggle row ─────────────────────────────────────────────── */
+.toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
+.toggle-row label { color:#888; flex:1; cursor:pointer; }
+.toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#4080ff; }
 </style>
 </head>
 <body>
@@ -261,6 +260,9 @@ nav {
             <button class="nav-drop-btn active" aria-haspopup="true">3D Sims ▾</button>
             <div class="nav-drop-menu">
                 <a href="threejs.html">Solar System</a>
+                <a href="sun.html">The Sun</a>
+                <a href="sirius.html">Sirius System</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
                 <a href="wr102.html" class="active">WR-102</a>
                 <a href="vega.html">Vega</a>
             </div>
@@ -275,32 +277,31 @@ nav {
 <!-- ═══════════════════════════════ APP ═══════════════════════════════ -->
 <div id="app">
 
-    <!-- Canvas fill -->
     <div id="canvas-wrap">
         <div id="hud">
-            <h3>WR 102</h3>
-            <div>Type: <span class="val">WO2</span></div>
+            <h3>WR 102 &mdash; WO2</h3>
             <div>T<sub>eff</sub>: <span class="val" id="hud-teff">210 000</span> <span class="dim">K</span></div>
             <div>v<sub>∞</sub>: <span class="val" id="hud-vinf">5000</span> <span class="dim">km/s</span></div>
             <div>β: <span class="val" id="hud-beta">0.80</span></div>
-            <div>Ṁ: <span class="val" id="hud-mdot">1.0e-5</span> <span class="dim">M☉/yr</span></div>
+            <div>Ṁ: <span class="val" id="hud-mdot">1.0×10⁻⁵</span> <span class="dim">M☉/yr</span></div>
             <div class="sep"></div>
+            <div>Wind particles: <span class="val" id="hud-particles">3000</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
 
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
-        <button class="cv-btn" id="btn-center"    title="Reset camera">⊙ Center</button>
+        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
         <div id="backdrop"></div>
     </div>
 
-    <!-- Side panel (slides from right) -->
+    <!-- Side panel -->
     <aside id="panel" aria-label="Simulation controls">
         <div id="panel-header">
             <div class="panel-title">
                 <div class="panel-star">WR 102</div>
                 <div class="panel-sub">Wolf-Rayet · WO2 spectral class</div>
-                <div class="panel-badge">Phase 1 — Stellar Core Shader</div>
+                <div class="panel-badge">Full Wind + Ionization Shells</div>
             </div>
             <button id="btn-panel-close" aria-label="Close panel">✕</button>
         </div>
@@ -314,7 +315,12 @@ nav {
                     <div class="ctrl">
                         <label>T<sub>eff</sub></label>
                         <input type="range" id="sl-teff" min="20000" max="250000" step="1000" value="210000">
-                        <span class="vdisp" id="disp-teff">210 000 K</span>
+                        <span class="vdisp" id="disp-teff">210 kK</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Rotation</label>
+                        <input type="range" id="sl-rot" min="0" max="3" step="0.1" value="1.0">
+                        <span class="vdisp" id="disp-rot">1.0×</span>
                     </div>
                 </div>
             </div>
@@ -325,23 +331,46 @@ nav {
                 <div class="sec-bd">
                     <div class="ctrl">
                         <label>v<sub>∞</sub></label>
-                        <input type="range" id="sl-vinf" min="0" max="6000" step="50" value="5000">
+                        <input type="range" id="sl-vinf" min="500" max="6000" step="50" value="5000">
                         <span class="vdisp" id="disp-vinf">5000 km/s</span>
                     </div>
                     <div class="ctrl">
                         <label>β</label>
-                        <input type="range" id="sl-beta" min="0.5" max="2.0" step="0.05" value="0.8">
+                        <input type="range" id="sl-beta" min="0.5" max="2.5" step="0.05" value="0.8">
                         <span class="vdisp" id="disp-beta">0.80</span>
                     </div>
                     <div class="ctrl">
-                        <label>Ṁ (log)</label>
-                        <input type="range" id="sl-mdot" min="-7" max="-4" step="0.05" value="-5">
-                        <span class="vdisp" id="disp-mdot">1.0e-5</span>
+                        <label>log Ṁ</label>
+                        <input type="range" id="sl-mdot" min="-7" max="-4" step="0.1" value="-5">
+                        <span class="vdisp" id="disp-mdot">10⁻⁵</span>
                     </div>
                 </div>
             </div>
 
-            <!-- 3. Camera -->
+            <!-- 3. Visibility toggles -->
+            <div class="sec" id="sec-vis">
+                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-wind" checked>
+                        <label for="tog-wind">Wind particles</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-shell1" checked>
+                        <label for="tog-shell1">HeII ionization zone (r=1.8)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-shell2" checked>
+                        <label for="tog-shell2">OVI emission nebula (r=3.2)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-corona" checked>
+                        <label for="tog-corona">Extended corona</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Camera -->
             <div class="sec" id="sec-cam">
                 <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -353,7 +382,7 @@ nav {
                 </div>
             </div>
 
-            <!-- 4. Reference data (collapsed) -->
+            <!-- 5. Reference data (collapsed) -->
             <div class="sec closed" id="sec-data">
                 <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -366,26 +395,30 @@ nav {
                         <tr><td>v<sub>∞</sub></td><td>~5000 km/s</td></tr>
                         <tr><td>Ṁ</td><td>~10<sup>-5</sup> M☉/yr</td></tr>
                         <tr><td>Distance</td><td>~4.8 kpc</td></tr>
+                        <tr><td>Dominant lines</td><td>OVI, HeII, CIV</td></tr>
                     </table>
                 </div>
             </div>
 
-            <!-- 5. Notes (collapsed) -->
+            <!-- 6. Physics notes -->
             <div class="sec closed" id="sec-notes">
-                <div class="sec-hd"><span>Phase Notes</span><span class="arrow">▼</span></div>
+                <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="note-text">
-                        <p><strong>Phase 1</strong> — Stellar core shader.</p>
-                        <p style="margin-top:5px">128×128 sphere · piecewise blackbody
-                        colour · 6-oct FBM convection · limb darkening (a=0.4, b=0.6)
-                        · Fresnel corona · hotspot flicker.</p>
-                        <p style="margin-top:5px">Phase 2+ will add:</p>
+                        <p><strong>WO2 Wolf-Rayet Stars</strong></p>
+                        <p style="margin-top:5px">The "surface" visible is actually the wind
+                        photosphere — the inner point where the stellar wind becomes optically thick.
+                        The true stellar surface lies hidden beneath.</p>
+                        <p style="margin-top:5px"><strong>β-law wind:</strong> v(r) = v<sub>∞</sub>(1−R★/r)<sup>β</sup>
+                        — smaller β = faster acceleration near surface.</p>
+                        <p style="margin-top:5px"><strong>Emission shells:</strong></p>
                         <ul>
-                            <li>β-law wind particle system</li>
-                            <li>Optically-thin line emission</li>
-                            <li>Ionization zone shaders</li>
-                            <li>Dust formation shell</li>
+                            <li>r≈1.8: HeII 4686Å ionization (cyan-blue)</li>
+                            <li>r≈3.2: OVI+OIII emission nebula (teal-green)</li>
                         </ul>
+                        <p style="margin-top:5px">WR-102 is one of the hottest known stars.
+                        Its extreme UV/X-ray luminosity dominates; visible light is the
+                        Rayleigh-Jeans tail of a ~210 kK blackbody.</p>
                     </div>
                 </div>
             </div>
@@ -409,7 +442,7 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ────────────────────────────────────────────────────────────────
-//  NAV — hamburger + touch dropdown
+//  NAV
 // ────────────────────────────────────────────────────────────────
 const burger  = document.getElementById('nav-burger');
 const navMenu = document.getElementById('nav-menu');
@@ -425,7 +458,6 @@ document.addEventListener('click', e => {
         burger.setAttribute('aria-expanded', false);
     }
 });
-// Touch-friendly dropdown toggle (click toggles, hover still works on desktop)
 document.querySelectorAll('.nav-drop-btn').forEach(btn => {
     btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -437,7 +469,7 @@ document.querySelectorAll('.nav-drop-btn').forEach(btn => {
 });
 
 // ────────────────────────────────────────────────────────────────
-//  PANEL STATE MACHINE
+//  PANEL
 // ────────────────────────────────────────────────────────────────
 const panel    = document.getElementById('panel');
 const backdrop = document.getElementById('backdrop');
@@ -450,7 +482,7 @@ function closePanel() { panel.classList.remove('open'); backdrop.classList.remov
 btnOpen.addEventListener('click',  openPanel);
 btnClose.addEventListener('click', closePanel);
 backdrop.addEventListener('click', closePanel);
-// Swipe-right to close on mobile
+
 let touchStartX = 0;
 panel.addEventListener('touchstart', e => { touchStartX = e.touches[0].clientX; }, { passive:true });
 panel.addEventListener('touchend',   e => {
@@ -461,12 +493,12 @@ panel.addEventListener('touchend',   e => {
 //  UNIFORMS
 // ────────────────────────────────────────────────────────────────
 const uniforms = {
-    u_time:       { value: 0.0 },
-    u_teff:       { value: 210000.0 },
-    u_resolution: { value: new THREE.Vector2() },
-    u_vinf:       { value: 5000.0 },
-    u_beta:       { value: 0.8 },
-    u_mdot:       { value: 1e-5 },
+    u_time:    { value: 0.0 },
+    u_teff:    { value: 210000.0 },
+    u_vinf:    { value: 5000.0 },
+    u_beta:    { value: 0.8 },
+    u_mdot:    { value: 1e-5 },
+    u_rot:     { value: 1.0 },
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -479,7 +511,7 @@ camera.position.set(0, 0, 8);
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
+renderer.toneMappingExposure = 1.2;
 
 const canvasWrap = document.getElementById('canvas-wrap');
 canvasWrap.appendChild(renderer.domElement);
@@ -487,30 +519,36 @@ canvasWrap.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.07;
-controls.minDistance   = 1.5;
+controls.minDistance   = 1.4;
 controls.maxDistance   = 80;
 
 // ────────────────────────────────────────────────────────────────
-//  BACKGROUND STARS
+//  BACKGROUND: stars + faint UV nebula hint
 // ────────────────────────────────────────────────────────────────
 {
-    const n = 3500, pos = new Float32Array(n * 3);
+    const n = 4000, pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-        const r  = 300 + Math.random() * 400;
+        const r  = 300 + Math.random() * 500;
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
         pos[i*3]   = r * Math.sin(ph) * Math.cos(th);
         pos[i*3+1] = r * Math.sin(ph) * Math.sin(th);
         pos[i*3+2] = r * Math.cos(ph);
+        // Tint some stars blue (WR radiation ionizes surroundings)
+        const blueShift = Math.random();
+        col[i*3]   = blueShift > 0.7 ? 0.7 : 1.0;
+        col[i*3+1] = blueShift > 0.7 ? 0.85 : 1.0;
+        col[i*3+2] = 1.0;
     }
     const bg = new THREE.BufferGeometry();
     bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    bg.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
     scene.add(new THREE.Points(bg,
-        new THREE.PointsMaterial({ color:0xffffff, size:0.5, sizeAttenuation:false })));
+        new THREE.PointsMaterial({ vertexColors:true, size:0.45, sizeAttenuation:false })));
 }
 
 // ────────────────────────────────────────────────────────────────
-//  WR-102 STELLAR CORE
+//  WR-102 STELLAR CORE — improved wind photosphere shader
 // ────────────────────────────────────────────────────────────────
 const coreVS = /* glsl */`
     varying vec3 vNormal;
@@ -519,88 +557,146 @@ const coreVS = /* glsl */`
     void main() {
         vNormal   = normalize(normalMatrix * normal);
         vPosition = position;
-        vec4 mv   = modelViewMatrix * vec4(position,1.0);
+        vec4 mv   = modelViewMatrix * vec4(position, 1.0);
         vViewDir  = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
     }
 `;
 
-// KEY FIX: normalise all colours so max channel = 1.0.
-// HDR headroom comes from the 1.8× push before tone-mapping, NOT from raw > 1.0 values.
-// Previous code had B=2.50 at 210 kK → ACESFilmic compressed to near-white (R≈G≈B≈0.99).
 const coreFS = /* glsl */`
     uniform float u_time;
     uniform float u_teff;
+    uniform float u_vinf;
+    uniform float u_beta;
+    uniform float u_mdot;
+    uniform float u_rot;
     varying vec3 vNormal;
     varying vec3 vPosition;
     varying vec3 vViewDir;
 
-    // ── Value noise & FBM ──────────────────────────────────────
+    // ── Noise primitives ──────────────────────────────────────
     float h3(vec3 p) {
-        p = fract(p * vec3(127.1,311.7,74.7));
+        p = fract(p * vec3(127.1, 311.7, 74.7));
         p += dot(p, p + 19.19);
         return fract(p.x * p.y * p.z);
     }
     float vn(vec3 p) {
         vec3 i = floor(p), f = fract(p);
-        vec3 u = f*f*(3.0-2.0*f);
+        vec3 u = f*f*(3.0 - 2.0*f);
         return mix(
-            mix(mix(h3(i),           h3(i+vec3(1,0,0)),u.x),
-                mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
-            mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),
-                mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),
+            mix(mix(h3(i),            h3(i+vec3(1,0,0)), u.x),
+                mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)), u.x), u.y),
+            mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)), u.x),
+                mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)), u.x), u.y),
             u.z);
     }
-    float fbm(vec3 p) {
-        float v=0.0, a=0.5;
-        for(int i=0;i<6;i++){ v+=a*vn(p); p=p*2.1+vec3(31.41,17.35,53.17); a*=0.5; }
+    float fbm6(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 6; i++) {
+            v += a * vn(p);
+            p  = p * 2.13 + vec3(31.41, 17.35, 53.17);
+            a *= 0.5;
+        }
         return v;
     }
+    // Domain-warped FBM — creates extreme WR-like turbulence
+    float wfbm(vec3 p) {
+        vec3 q = vec3(fbm6(p + vec3(0.0, 0.0, 0.0)),
+                      fbm6(p + vec3(5.2, 1.3, 0.8)),
+                      fbm6(p + vec3(2.7, 3.1, 4.9)));
+        return fbm6(p + 2.8 * q);
+    }
 
-    // ── Blackbody — normalised (max channel = 1.0) ─────────────
-    // HDR boost applied in main(), not here. Keeps ACES colour-accurate.
-    vec3 blackbody(float T) {
-        if (T < 10000.0) {
-            float f = clamp((T-1000.0)/9000.0, 0.0, 1.0);
-            return mix(vec3(1.0,0.15,0.02), vec3(1.0,0.88,0.65), f);
-        } else if (T < 50000.0) {
-            float f = clamp((T-10000.0)/40000.0, 0.0, 1.0);
-            return mix(vec3(0.94,0.86,1.0), vec3(0.56,0.65,1.0), f);
-        } else if (T < 150000.0) {
-            float f = clamp((T-50000.0)/100000.0, 0.0, 1.0);
-            return mix(vec3(0.50,0.42,1.0), vec3(0.36,0.22,1.0), f);
+    // ── WR blackbody (blue-white for extreme T) ────────────────
+    // At 210 kK, peak is in soft X-ray; visual is Rayleigh-Jeans tail.
+    // Stars at this T appear intensely blue-white / ice-blue.
+    vec3 wrColor(float T) {
+        float f;
+        if (T < 40000.0) {
+            f = (T - 20000.0) / 20000.0;
+            return mix(vec3(0.55, 0.68, 1.0), vec3(0.48, 0.60, 1.0), clamp(f,0.0,1.0));
+        } else if (T < 100000.0) {
+            f = (T - 40000.0) / 60000.0;
+            return mix(vec3(0.48, 0.60, 1.0), vec3(0.55, 0.68, 1.0), clamp(f,0.0,1.0));
+        } else if (T < 170000.0) {
+            f = (T - 100000.0) / 70000.0;
+            return mix(vec3(0.55, 0.68, 1.0), vec3(0.68, 0.80, 1.0), clamp(f,0.0,1.0));
         } else {
-            float f = clamp((T-150000.0)/100000.0, 0.0, 1.0);
-            return mix(vec3(0.34,0.20,1.0), vec3(0.42,0.26,1.0), f);
+            f = clamp((T - 170000.0) / 80000.0, 0.0, 1.0);
+            return mix(vec3(0.68, 0.80, 1.0), vec3(0.78, 0.88, 1.0), f);
         }
     }
 
     void main() {
         vec3 nrm  = normalize(vNormal);
         vec3 vDir = normalize(vViewDir);
+        float mu  = max(dot(nrm, vDir), 0.0);
 
-        // Base colour from normalised blackbody
-        vec3 base = blackbody(u_teff);
+        // Spherical coords for wind features
+        float phi   = atan(vPosition.z, vPosition.x);
+        float theta = asin(clamp(vPosition.y, -1.0, 1.0));
 
-        // FBM: two-layer (slow convection + fast granulation)
-        float conv = fbm(vPosition*0.38 + vec3(u_time*0.018,u_time*0.013,u_time*0.016));
-        float gran = fbm(vPosition*1.85 + vec3(u_time*0.038,-u_time*0.030,u_time*0.033));
-        float bmod = 0.78 + (conv*0.62 + gran*0.38) * 0.44;
+        // Animation speed: driven by v_inf (faster wind = more chaotic)
+        float vScale = u_vinf / 5000.0;
+        float rSpeed = u_rot * vScale;
+        float t      = u_time;
 
-        // Limb darkening I(μ) = a + b·μ  (a=0.4, b=0.6)
-        float mu   = max(dot(nrm,vDir), 0.0);
-        float limb = 0.40 + 0.60 * mu;
+        // Differential rotation (equator faster)
+        float diffRot = 1.0 - 0.35 * sin(theta) * sin(theta);
+        float rotPhi  = phi + t * 0.015 * rSpeed * diffRot;
 
-        // Combine + 1.8× HDR push (tone mapper handles the rest)
-        vec3 col = base * bmod * limb * 1.80;
+        // ── Turbulence layers ─────────────────────────────────
+        // Layer 1: Large-scale wind photosphere blobs
+        vec3 p1 = vec3(rotPhi * 0.6, theta * 0.6, 0.3) + vec3(t * 0.006, t * 0.004, t * 0.007);
+        float L1 = wfbm(p1 * 0.7);
 
-        // Hotspot flicker (±10%)
-        float flick = fbm(vPosition*3.2 + vec3(u_time*0.14)) * 2.0 - 1.0;
-        col *= 1.0 + 0.10*flick;
+        // Layer 2: Medium turbulence (wind compression regions)
+        vec3 p2 = vPosition * 1.4 + vec3(t * 0.018 * rSpeed, t * 0.013 * rSpeed, t * 0.021 * rSpeed);
+        float L2 = wfbm(p2);
 
-        // Coronal rim glow (Fresnel, hotter temperature × 1.15)
-        float fr  = pow(1.0-mu, 3.0);
-        col += blackbody(u_teff*1.15) * fr * 1.20 * 0.55;
+        // Layer 3: Fine wind streaks (radial outflow pattern)
+        // Create streak effect by using elongated coordinates
+        vec3 streakP = vec3(rotPhi * 2.5, theta * 6.0, t * 0.04 * rSpeed);
+        float L3 = vn(streakP) * 0.7 + vn(streakP * 2.1 + vec3(5.3, 2.7, 8.1)) * 0.3;
+
+        // mdot influences turbulence amplitude (denser wind = more chaotic)
+        float mdotLog = log(u_mdot * 1e6 + 1.0) / log(10.0);  // ~0 to 2
+        float mdotFac = 0.6 + clamp(mdotLog * 0.2, 0.0, 0.4);
+
+        // Combine layers
+        float bmod = 0.55
+            + L1 * 0.25 * mdotFac
+            + L2 * 0.35 * mdotFac
+            + L3 * 0.15;
+        bmod = clamp(bmod, 0.2, 1.4);
+
+        // beta modulates surface smoothness (lower beta = faster wind launch = rougher surface)
+        float betaNorm = (u_beta - 0.5) / 2.0;  // 0 to 1
+        float surfRough = 1.0 + (1.0 - betaNorm) * 0.3 * (L2 - 0.5);
+        bmod *= surfRough;
+
+        // ── Limb darkening ────────────────────────────────────
+        // WR stars: flatter limb darkening than normal stars (extended wind photosphere)
+        float limb = 0.50 + 0.50 * mu;
+
+        // ── Base color ────────────────────────────────────────
+        vec3 base = wrColor(u_teff);
+
+        // Hot spots: bright regions where wind erupts (O/B supergiants show these too)
+        float hotPow  = pow(max(L2 * L3 - 0.2, 0.0), 2.0) * 3.0;
+        vec3  hotTint = wrColor(u_teff * 1.3);
+
+        // HDR: WR star is intensely luminous
+        vec3 col = base * bmod * limb * 2.0;
+        col += hotTint * hotPow * 0.8;
+
+        // Emission: slight teal-cyan tinge from HeII and OIII at surface base
+        float emitZone = pow(1.0 - mu, 1.5) * 0.4;
+        col += vec3(0.0, 0.25, 0.5) * emitZone * (u_teff / 210000.0);
+
+        // Fresnel glow: very hot corona rim (hotter than photosphere)
+        float fr = pow(1.0 - mu, 3.5);
+        col += wrColor(u_teff * 1.25) * fr * 1.8;
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -609,66 +705,274 @@ const coreFS = /* glsl */`
 const coreGeo  = new THREE.SphereGeometry(1.0, 128, 128);
 const coreMat  = new THREE.ShaderMaterial({ vertexShader:coreVS, fragmentShader:coreFS, uniforms });
 const coreMesh = new THREE.Mesh(coreGeo, coreMat);
-const coreGrp  = new THREE.Group();
-coreGrp.add(coreMesh);
-scene.add(coreGrp);
+scene.add(coreMesh);
 
-// ── Glow shaders (reuse simple VS) ──
+// ────────────────────────────────────────────────────────────────
+//  INNER CHROMOSPHERE / WIND BASE  (r = 1.2)
+// ────────────────────────────────────────────────────────────────
 const glowVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vViewDir;
     void main() {
         vNormal  = normalize(normalMatrix * normal);
-        vec4 mv  = modelViewMatrix * vec4(position,1.0);
+        vec4 mv  = modelViewMatrix * vec4(position, 1.0);
         vViewDir = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
     }
 `;
-
-// Inner chromosphere — temperature-responsive
-const glowInFS = /* glsl */`
-    uniform float u_time; uniform float u_teff;
+const chromoFS = /* glsl */`
+    uniform float u_time; uniform float u_teff; uniform float u_vinf;
     varying vec3 vNormal; varying vec3 vViewDir;
-    void main() {
-        float rim   = 1.0 - max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float alpha = pow(rim,1.6) * 0.55;
-        float pulse = 0.88 + 0.12*sin(u_time*2.0+0.9);
-        float t     = clamp((u_teff-20000.0)/230000.0, 0.0, 1.0);
-        vec3  col   = mix(vec3(1.0,0.45,0.06), vec3(0.50,0.30,1.0), t);
-        gl_FragColor = vec4(col, alpha*pulse);
+    float h3(vec3 p) {
+        p = fract(p * vec3(127.1,311.7,74.7));
+        p += dot(p, p + 19.19);
+        return fract(p.x*p.y*p.z);
     }
-`;
-scene.add(new THREE.Mesh(
-    new THREE.SphereGeometry(1.22,32,32),
-    new THREE.ShaderMaterial({
-        vertexShader:glowVS, fragmentShader:glowInFS, uniforms,
-        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide
-    })
-));
-
-// Outer corona
-const glowOutFS = /* glsl */`
-    uniform float u_teff;
-    varying vec3 vNormal; varying vec3 vViewDir;
+    float vn(vec3 p) {
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
     void main() {
-        float rim   = 1.0 - max(dot(normalize(vNormal),normalize(vViewDir)),0.0);
-        float alpha = pow(rim,3.2) * 0.28;
-        float t     = clamp((u_teff-20000.0)/230000.0, 0.0, 1.0);
-        vec3  col   = mix(vec3(0.80,0.25,0.02), vec3(0.38,0.14,1.0), t);
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float pulse = 0.85 + 0.15 * sin(u_time * 2.8 + 1.2);
+        // Wind density fluctuations visible as brightness variation
+        float noise = vn(normalize(vNormal) * 3.0 + vec3(u_time * 0.04));
+        float alpha = pow(rim, 1.4) * 0.60 * pulse * (0.8 + noise * 0.4);
+        float t     = clamp((u_teff - 20000.0) / 230000.0, 0.0, 1.0);
+        vec3  col   = mix(vec3(0.4, 0.7, 1.0), vec3(0.6, 0.85, 1.0), t);
         gl_FragColor = vec4(col, alpha);
     }
 `;
-scene.add(new THREE.Mesh(
-    new THREE.SphereGeometry(2.0,24,24),
+const chromoMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.20, 48, 48),
     new THREE.ShaderMaterial({
-        vertexShader:glowVS, fragmentShader:glowOutFS, uniforms,
+        vertexShader:glowVS, fragmentShader:chromoFS, uniforms,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide
     })
-));
+);
+scene.add(chromoMesh);
 
-// Point light + ambient
-const coreLight = new THREE.PointLight(0x8040ff, 4, 60);
+// ────────────────────────────────────────────────────────────────
+//  HeII IONIZATION ZONE  (r = 1.8)  — blue-cyan emission
+// ────────────────────────────────────────────────────────────────
+const heiiFS = /* glsl */`
+    uniform float u_time; uniform float u_teff; uniform float u_vinf;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p) { p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p) {
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        // Clumpy emission — wind is not uniform
+        float clump = vn(normalize(vNormal) * 4.0 + vec3(u_time * 0.015)) * 0.5
+                    + vn(normalize(vNormal) * 8.0 + vec3(u_time * 0.025)) * 0.5;
+        float alpha = pow(rim, 2.2) * 0.35 * (0.5 + clump);
+        // HeII 4686Å = cyan-blue
+        vec3 col = vec3(0.10, 0.65, 1.0);
+        // Modulate with v_inf (faster wind = more compressed = brighter)
+        float vFac = clamp(u_vinf / 5000.0, 0.5, 1.5);
+        gl_FragColor = vec4(col, alpha * vFac);
+    }
+`;
+const heiiMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.80, 40, 40),
+    new THREE.ShaderMaterial({
+        vertexShader:glowVS, fragmentShader:heiiFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide
+    })
+);
+scene.add(heiiMesh);
+
+// ────────────────────────────────────────────────────────────────
+//  OVI / OIII EMISSION NEBULA  (r = 3.2)  — teal-green emission
+// ────────────────────────────────────────────────────────────────
+const oviFS = /* glsl */`
+    uniform float u_time; uniform float u_teff; uniform float u_mdot;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p) { p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p) {
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm3(vec3 p) {
+        float v=0.0,a=0.5;
+        for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}
+        return v;
+    }
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        // Multi-scale clumping for nebula structure
+        vec3 n3d    = normalize(vNormal);
+        float clump = fbm3(n3d * 3.0 + vec3(u_time * 0.008, 0.0, u_time * 0.006));
+        float fine  = vn(n3d * 7.0 + vec3(u_time * 0.012));
+        float alpha = pow(rim, 3.5) * 0.25 * (clump * 0.7 + fine * 0.3 + 0.2);
+        // mdot: more mass loss = brighter nebula
+        float mdotFac = clamp(log(u_mdot * 1e6 + 1.0) / log(10.0) * 0.5 + 0.5, 0.4, 1.4);
+        // OVI 3811 + OIII 5007Å mix → teal/cyan-green
+        vec3 col = vec3(0.0, 0.80, 0.65);
+        gl_FragColor = vec4(col, alpha * mdotFac);
+    }
+`;
+const oviMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(3.20, 32, 32),
+    new THREE.ShaderMaterial({
+        vertexShader:glowVS, fragmentShader:oviFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide
+    })
+);
+scene.add(oviMesh);
+
+// ────────────────────────────────────────────────────────────────
+//  OUTER CORONA / EXTENDED UV HALO  (r = 5.0)
+// ────────────────────────────────────────────────────────────────
+const coronaFS = /* glsl */`
+    uniform float u_teff;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float alpha = pow(rim, 4.5) * 0.18;
+        float t     = clamp((u_teff - 20000.0) / 230000.0, 0.0, 1.0);
+        // Deep blue outer corona with slight cyan
+        vec3 col = mix(vec3(0.1, 0.3, 0.9), vec3(0.05, 0.45, 0.85), t);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const coronaMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(5.0, 24, 24),
+    new THREE.ShaderMaterial({
+        vertexShader:glowVS, fragmentShader:coronaFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide
+    })
+);
+scene.add(coronaMesh);
+
+// ────────────────────────────────────────────────────────────────
+//  WIND PARTICLE SYSTEM  — β-law, GPU-animated
+// ────────────────────────────────────────────────────────────────
+const N_WIND = 3000;
+
+const windVS = /* glsl */`
+    attribute vec3  aDir;    // unit vector outward from star
+    attribute float aPhase;  // staggered birth times (0–1)
+    attribute float aSeed;   // per-particle variation
+
+    uniform float u_time;
+    uniform float u_vinf;
+    uniform float u_beta;
+    uniform float u_mdot;
+
+    varying float vProgress;
+    varying vec3  vColor;
+    varying float vAlpha;
+
+    void main() {
+        // Per-particle lifetime varies slightly (wind is turbulent)
+        float life = 3.2 + aSeed * 2.4;
+        // Speed scale from v_inf
+        float spd  = u_vinf / 5000.0;
+        // Current local time in lifecycle (loops continuously)
+        float lt   = mod(u_time * spd * 0.38 + aPhase * life, life);
+        float s    = lt / life;  // normalised progress 0→1
+
+        // β-law radius: v(r) = v_inf * (1 - R*/r)^beta
+        // Integrated approximately: r ≈ R* + (rMax-R*) * (1-(1-s)^(1/(1+beta)))
+        float R_star = 1.0;
+        float R_max  = 4.5 + spd * 2.5;
+        float rPow   = 1.0 / (1.0 + u_beta);
+        float r      = R_star + (R_max - R_star) * (1.0 - pow(max(1.0 - s, 0.001), rPow));
+
+        // Small turbulent wobble (wind is not perfectly radial)
+        float wobble = sin(aPhase * 23.7 + u_time * 1.8) * 0.04;
+        r += wobble;
+
+        vProgress = s;
+
+        // Color: hot blue-white near star → cooler cyan-blue far out
+        vec3 nearCol = vec3(0.75, 0.88, 1.00);  // hot
+        vec3 farCol  = vec3(0.10, 0.55, 0.90);  // cool
+        vColor = mix(nearCol, farCol, pow(s, 0.45));
+
+        // Alpha: fade in quickly, then fade out slowly
+        float fadeIn  = smoothstep(0.0, 0.08, s);
+        float fadeOut = 1.0 - pow(s, 2.5);
+        // mdot scale: more mass loss = more opaque particles
+        float mdotFac = clamp(log(u_mdot * 1e5 + 1.001) / log(10.0) + 1.0, 0.5, 3.0);
+        vAlpha = fadeIn * fadeOut * 0.65 * mdotFac * 0.35;
+
+        vec3 pos = aDir * r;
+        vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPos;
+
+        // Point size: large near surface, shrink with distance & progress
+        float sz = (2.8 + aSeed * 1.5) * (1.0 - s * 0.55) * (200.0 / max(-mvPos.z, 0.1));
+        gl_PointSize = clamp(sz, 0.5, 9.0);
+    }
+`;
+
+const windFS = /* glsl */`
+    varying float vProgress;
+    varying vec3  vColor;
+    varying float vAlpha;
+
+    void main() {
+        // Soft circular sprite
+        vec2  uv = gl_PointCoord - 0.5;
+        float d  = length(uv);
+        if (d > 0.5) discard;
+        float softEdge = 1.0 - smoothstep(0.2, 0.5, d);
+        gl_FragColor = vec4(vColor, vAlpha * softEdge);
+    }
+`;
+
+// Build particle geometry
+function buildWindParticles(n) {
+    const geo   = new THREE.BufferGeometry();
+    const dirs  = new Float32Array(n * 3);
+    const phases = new Float32Array(n);
+    const seeds  = new Float32Array(n);
+    const pos    = new Float32Array(n * 3); // placeholder
+
+    for (let i = 0; i < n; i++) {
+        // Uniform sphere distribution
+        const u = Math.random() * 2 - 1;
+        const v = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(1 - u * u);
+        dirs[i*3]   = r * Math.cos(v);
+        dirs[i*3+1] = r * Math.sin(v);
+        dirs[i*3+2] = u;
+        phases[i]   = Math.random();
+        seeds[i]    = Math.random();
+    }
+
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('aDir',     new THREE.Float32BufferAttribute(dirs, 3));
+    geo.setAttribute('aPhase',   new THREE.Float32BufferAttribute(phases, 1));
+    geo.setAttribute('aSeed',    new THREE.Float32BufferAttribute(seeds, 1));
+    return geo;
+}
+
+const windGeo  = buildWindParticles(N_WIND);
+const windMat  = new THREE.ShaderMaterial({
+    vertexShader:   windVS,
+    fragmentShader: windFS,
+    uniforms,
+    transparent:    true,
+    depthWrite:     false,
+    blending:       THREE.AdditiveBlending,
+});
+const windPoints = new THREE.Points(windGeo, windMat);
+scene.add(windPoints);
+
+// ────────────────────────────────────────────────────────────────
+//  POINT LIGHT  (UV illumination of scene)
+// ────────────────────────────────────────────────────────────────
+const coreLight = new THREE.PointLight(0x6090ff, 5, 80);
 scene.add(coreLight);
-scene.add(new THREE.AmbientLight(0x100820, 0.3));
+scene.add(new THREE.AmbientLight(0x080810, 0.4));
 
 // ────────────────────────────────────────────────────────────────
 //  RESIZE
@@ -677,7 +981,6 @@ function resize() {
     const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
-    uniforms.u_resolution.value.set(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
 }
@@ -704,7 +1007,7 @@ function tickFPS() {
 // ────────────────────────────────────────────────────────────────
 function animate() {
     requestAnimationFrame(animate);
-    uniforms.u_time.value += 0.01;
+    uniforms.u_time.value += 0.010;
     controls.update();
     renderer.render(scene, camera);
     tickFPS();
@@ -715,23 +1018,21 @@ animate();
 //  ACCORDION
 // ────────────────────────────────────────────────────────────────
 document.querySelectorAll('.sec-hd').forEach(hd => {
-    hd.addEventListener('click', () => {
-        hd.closest('.sec').classList.toggle('closed');
-    });
+    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
 });
 
 // ────────────────────────────────────────────────────────────────
-//  CAMERA PRESETS + CENTER BUTTON
+//  CAMERA PRESETS
 // ────────────────────────────────────────────────────────────────
 const CAM = {
-    default: { pos:[0,0,8],  t:[0,0,0] },
-    close:   { pos:[0,0,2.5],t:[0,0,0] },
-    wide:    { pos:[0,4,20], t:[0,0,0] },
+    default: { pos:[0, 0.5, 8],  t:[0,0,0] },
+    close:   { pos:[0, 0, 2.2],  t:[0,0,0] },
+    wide:    { pos:[0, 4, 18],   t:[0,0,0] },
 };
 function setCam(name) {
     const p = CAM[name]; if (!p) return;
     document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
-    document.getElementById('cam-'+name)?.classList.add('active');
+    document.getElementById('cam-' + name)?.classList.add('active');
     camera.position.set(...p.pos);
     controls.target.set(...p.t);
     controls.update();
@@ -742,49 +1043,67 @@ document.getElementById('cam-wide').addEventListener('click',    () => setCam('w
 document.getElementById('btn-center').addEventListener('click',  () => setCam('default'));
 
 // ────────────────────────────────────────────────────────────────
+//  LAYER TOGGLES
+// ────────────────────────────────────────────────────────────────
+document.getElementById('tog-wind').addEventListener('change',   e => { windPoints.visible  = e.target.checked; });
+document.getElementById('tog-shell1').addEventListener('change', e => { heiiMesh.visible    = e.target.checked; });
+document.getElementById('tog-shell2').addEventListener('change', e => { oviMesh.visible     = e.target.checked; });
+document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
+
+// ────────────────────────────────────────────────────────────────
 //  SLIDERS
 // ────────────────────────────────────────────────────────────────
-function fmtT(v) {
-    // "210 000 K" style
-    return (v/1000).toFixed(0).padStart(3,' ') + '\u202F000 K';
+function fmtKK(v) {
+    const kk = Math.round(v / 1000);
+    return kk >= 100 ? kk + ' kK' : kk + ' kK';
 }
 
 document.getElementById('sl-teff').addEventListener('input', function() {
     const v = +this.value;
     uniforms.u_teff.value = v;
-    // Sync point-light hue
-    const t = Math.min((v-20000)/230000, 1);
+    const t = Math.min((v - 20000) / 230000, 1);
     coreLight.color.setRGB(
-        THREE.MathUtils.lerp(1.00,0.42,t),
-        THREE.MathUtils.lerp(0.42,0.18,t),
-        THREE.MathUtils.lerp(0.05,1.00,t)
+        THREE.MathUtils.lerp(0.60, 0.42, t),
+        THREE.MathUtils.lerp(0.70, 0.55, t),
+        1.0
     );
-    document.getElementById('disp-teff').textContent = fmtT(v);
-    document.getElementById('hud-teff').textContent  = fmtT(v).replace(' K','');
+    document.getElementById('disp-teff').textContent = fmtKK(v);
+    document.getElementById('hud-teff').textContent  = Math.round(v/1000)*1000 < 1000000
+        ? Math.round(v/1000) + '\u202F000' : '≥1 MK';
 });
+
+document.getElementById('sl-rot').addEventListener('input', function() {
+    const v = +this.value;
+    uniforms.u_rot.value = v;
+    document.getElementById('disp-rot').textContent = v.toFixed(1) + '×';
+});
+
 document.getElementById('sl-vinf').addEventListener('input', function() {
     const v = +this.value;
     uniforms.u_vinf.value = v;
-    document.getElementById('disp-vinf').textContent = v.toFixed(0)+' km/s';
+    document.getElementById('disp-vinf').textContent = v.toFixed(0) + ' km/s';
     document.getElementById('hud-vinf').textContent  = v.toFixed(0);
 });
+
 document.getElementById('sl-beta').addEventListener('input', function() {
     const v = +this.value;
     uniforms.u_beta.value = v;
     document.getElementById('disp-beta').textContent = v.toFixed(2);
     document.getElementById('hud-beta').textContent  = v.toFixed(2);
 });
+
 document.getElementById('sl-mdot').addEventListener('input', function() {
     const logV = +this.value;
     const v    = Math.pow(10, logV);
     uniforms.u_mdot.value = v;
-    document.getElementById('disp-mdot').textContent = '10^'+logV.toFixed(2);
-    document.getElementById('hud-mdot').textContent  = v.toExponential(1);
+    const exp = logV.toFixed(1);
+    document.getElementById('disp-mdot').textContent = '10^' + exp;
+    document.getElementById('hud-mdot').textContent  = '10^' + exp;
 });
 
-console.log('%c[WR-102 · Phase 1]', 'color:#a060ff;font-weight:bold;font-size:13px');
-console.log('  Shader fix: normalised blackbody (max channel=1.0, 1.8× HDR push)');
-console.log('  Panel: proper open/close state machine + swipe-to-close');
+console.log('%c[WR-102 · Full Simulation]', 'color:#4080ff;font-weight:bold;font-size:13px');
+console.log('  Domain-warped turbulent photosphere | β-law wind particles');
+console.log('  HeII ionization zone | OVI emission nebula | Extended corona');
 </script>
 </body>
 </html>
