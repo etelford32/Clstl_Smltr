@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>The Sun — G2V Solar Simulator</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+nav {
+    position: relative; z-index: 600;
+    height: 48px; min-height: 48px;
+    background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; padding: 0 14px; gap: 8px;
+}
+.nav-brand {
+    font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+    background: linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.nav-item {
+    padding: 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+    transition: background .2s, border-color .2s;
+}
+.nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop { position: relative; }
+.nav-drop-btn {
+    padding: 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+    transition: background .2s, border-color .2s; white-space: nowrap;
+}
+.nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop-menu {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+    padding: 4px 0; min-width: 160px; z-index: 800;
+    box-shadow: 0 6px 24px rgba(0,0,0,.65);
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
+.nav-drop-menu a {
+    display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
+    font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
+}
+.nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#ffd700; font-weight:600; }
+.nav-burger {
+    display: none; margin-left: auto;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+    cursor: pointer; line-height: 1; transition: background .2s;
+}
+.nav-burger:hover { background: rgba(255,255,255,.18); }
+@media (max-width: 768px) {
+    .nav-burger { display: block; }
+    .nav-menu { display: none; flex-direction: column; align-items: stretch;
+        position: absolute; top: 48px; left: 0; right: 0;
+        background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+        border-bottom: 1px solid rgba(255,255,255,.1);
+        padding: 8px 12px 12px; gap: 4px; z-index: 700; }
+    .nav-menu.open { display: flex; }
+    .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+    .nav-drop-menu { position: static; box-shadow: none; border-radius: 4px;
+        background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0; }
+    .nav-drop-menu a { padding: 10px 22px; }
+    .nav-drop.open .nav-drop-menu { display: block !important; }
+    .nav-drop:hover .nav-drop-menu { display: none; }
+}
+
+#app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
+#canvas-wrap {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 40% 50%, #0d0500 0%, #050200 60%, #000 100%);
+}
+#canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+
+#hud {
+    position: absolute; top: 12px; left: 12px; z-index: 50;
+    background: rgba(0,0,0,.68); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,180,0,.22); border-radius: 8px;
+    padding: 10px 14px; font-size: 11px; line-height: 1.7;
+    pointer-events: none; min-width: 180px;
+}
+#hud h3 { font-size: 13px; color:#ffb830; margin-bottom:4px; letter-spacing:.5px; }
+#hud .val { color:#ffd080; font-weight:600; }
+#hud .dim { color:#555; font-size:10px; }
+#hud .sep { border-top:1px solid rgba(255,180,0,.2); margin:5px 0; }
+#fps-display { color:#40ff80; font-weight:600; }
+
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,160,0,.30); border-radius: 7px;
+    color: #ffb830; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation;
+}
+.cv-btn:hover { background: rgba(255,140,0,.20); border-color:#ff8c00; }
+#btn-panel-open { top:12px; right:12px; }
+#btn-center     { bottom:16px; right:12px; }
+
+#backdrop { display:none; position:absolute; inset:0; z-index:25; background:rgba(0,0,0,.45); cursor:pointer; }
+#backdrop.show { display:block; }
+
+#panel {
+    position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
+    background: rgba(8,4,0,.97); backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(255,160,0,.18); z-index: 30;
+    display: flex; flex-direction: column; overflow: hidden;
+    transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+#panel.open { transform: translateX(0); }
+#panel-header {
+    flex-shrink: 0; display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 12px 14px 8px; border-bottom: 1px solid rgba(255,160,0,.15);
+}
+.panel-star  { font-size:15px; font-weight:700; color:#ffb830; letter-spacing:.8px; }
+.panel-sub   { font-size:10px; color:#555; margin-top:2px; }
+.panel-badge { display:inline-block; margin-top:5px; padding:2px 8px; font-size:9px; letter-spacing:.4px;
+    background: rgba(255,140,0,.14); border:1px solid rgba(255,140,0,.32); border-radius:10px; color:#ffb060; }
+#btn-panel-close {
+    flex-shrink:0; margin-left:8px; margin-top:2px;
+    background: rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#888; cursor:pointer; font-size:13px;
+    padding:4px 8px; line-height:1; transition:all .2s;
+}
+#btn-panel-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
+#panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
+#panel-body::-webkit-scrollbar { width:4px; }
+#panel-body::-webkit-scrollbar-thumb { background: rgba(255,140,0,.35); border-radius:2px; }
+
+.sec { margin-bottom:8px; border:1px solid rgba(255,140,0,.14); border-radius:7px; overflow:hidden; background:rgba(255,140,0,.02); }
+.sec-hd { display:flex; justify-content:space-between; align-items:center;
+    padding:8px 11px; background:rgba(255,140,0,.07); color:#ffb060; font-weight:600;
+    font-size:10px; cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.7px; }
+.sec-hd:hover { background:rgba(255,140,0,.14); }
+.sec-hd .arrow { transition:transform .25s; }
+.sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
+.sec-bd { padding:10px 11px; }
+.sec.closed .sec-bd { display:none; }
+
+.ctrl { display:flex; align-items:center; margin:8px 0; gap:7px; }
+.ctrl label { flex:0 0 60px; font-size:11px; color:#888; }
+.ctrl input[type=range] { flex:1; cursor:pointer; height:28px; padding:10px 0; -webkit-appearance:none; background:transparent; }
+.ctrl input[type=range]::-webkit-slider-runnable-track { height:3px; background:rgba(255,140,0,.28); border-radius:2px; }
+.ctrl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; margin-top:-7.5px; border-radius:50%; background:#ff8c00; cursor:pointer; box-shadow:0 0 6px rgba(255,140,0,.5); }
+.ctrl input[type=range]::-moz-range-track { height:3px; background:rgba(255,140,0,.28); }
+.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#ff8c00; border:none; }
+.vdisp { flex:0 0 68px; text-align:right; color:#ffd080; font-size:10px; font-weight:600; }
+.dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
+.dtbl td:first-child { color:#777; width:46%; }
+.dtbl td:last-child  { color:#ffd080; text-align:right; font-weight:600; }
+.btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
+.btn-row button { flex:1; padding:8px 6px; min-width:56px;
+    background:rgba(255,140,0,.10); border:1px solid rgba(255,140,0,.26);
+    border-radius:5px; color:#ffb060; cursor:pointer; font-family:inherit; font-size:10px; transition:all .15s; }
+.btn-row button:hover { background:rgba(255,140,0,.22); }
+.btn-row button.active { background:rgba(255,140,0,.32); border-color:#ff8c00; color:#ffd080; }
+.toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
+.toggle-row label { color:#888; flex:1; cursor:pointer; }
+.toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#ff8c00; }
+.note-text { font-size:10px; color:#555; line-height:1.6; }
+.note-text strong { color:#cc8040; }
+.note-text ul { margin:6px 0 0 14px; list-style:disc; }
+.note-text li { margin:2px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-3d">
+            <button class="nav-drop-btn active" aria-haspopup="true">3D Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="threejs.html">Solar System</a>
+                <a href="sun.html" class="active">The Sun</a>
+                <a href="sirius.html">Sirius System</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
+                <a href="wr102.html">WR-102</a>
+                <a href="vega.html">Vega</a>
+            </div>
+        </div>
+        <a href="star2d.html"          class="nav-item">2D Star</a>
+        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
+        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <a href="rust.html"            class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
+
+<div id="app">
+    <div id="canvas-wrap">
+        <div id="hud">
+            <h3>Sol — G2V</h3>
+            <div>T<sub>eff</sub>: <span class="val" id="hud-teff">5778</span> <span class="dim">K</span></div>
+            <div>Activity: <span class="val" id="hud-activity">50</span><span class="dim">%</span></div>
+            <div>Rotation: <span class="val" id="hud-rot">25.4</span> <span class="dim">days (eq.)</span></div>
+            <div class="sep"></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+        </div>
+        <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
+        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+        <div id="backdrop"></div>
+    </div>
+
+    <aside id="panel">
+        <div id="panel-header">
+            <div>
+                <div class="panel-star">The Sun</div>
+                <div class="panel-sub">G2V main-sequence star</div>
+                <div class="panel-badge">Granulation · Corona · Solar Wind</div>
+            </div>
+            <button id="btn-panel-close">✕</button>
+        </div>
+        <div id="panel-body">
+
+            <div class="sec">
+                <div class="sec-hd"><span>Stellar Parameters</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>T<sub>eff</sub></label>
+                        <input type="range" id="sl-teff" min="4000" max="7000" step="50" value="5778">
+                        <span class="vdisp" id="disp-teff">5778 K</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Activity</label>
+                        <input type="range" id="sl-activity" min="0" max="100" step="1" value="50">
+                        <span class="vdisp" id="disp-activity">50%</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Rot. rate</label>
+                        <input type="range" id="sl-rot" min="0.2" max="3.0" step="0.1" value="1.0">
+                        <span class="vdisp" id="disp-rot">1.0×</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-spots" checked>
+                        <label for="tog-spots">Sunspot regions</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-flares" checked>
+                        <label for="tog-flares">Active region flares</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-chrom" checked>
+                        <label for="tog-chrom">Chromosphere (Ca H&amp;K)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-corona" checked>
+                        <label for="tog-corona">Corona (white light)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-wind" checked>
+                        <label for="tog-wind">Solar wind particles</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row">
+                        <button id="cam-default" class="active">Default</button>
+                        <button id="cam-close">Close-up</button>
+                        <button id="cam-wide">Wide</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl">
+                        <tr><td>Spectral type</td><td>G2V</td></tr>
+                        <tr><td>T<sub>eff</sub></td><td>5 778 K</td></tr>
+                        <tr><td>Luminosity</td><td>3.83×10²⁶ W</td></tr>
+                        <tr><td>Mass</td><td>1.989×10³⁰ kg</td></tr>
+                        <tr><td>Radius</td><td>696 000 km</td></tr>
+                        <tr><td>Rotation (eq.)</td><td>25.4 days</td></tr>
+                        <tr><td>Rotation (pole)</td><td>~35 days</td></tr>
+                        <tr><td>Corona T</td><td>1–3 MK</td></tr>
+                        <tr><td>Wind speed</td><td>~400–800 km/s</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text">
+                        <p><strong>Granulation:</strong> Convective cells ~1000 km across. Bright hot plasma rises at cell centers, cooler plasma descends at dark borders.</p>
+                        <p style="margin-top:5px"><strong>Sunspots:</strong> Magnetically inhibited convection regions. Appear dark (3500–4500 K) against the 5778 K photosphere. Activity follows an ~11-year cycle.</p>
+                        <p style="margin-top:5px"><strong>Differential rotation:</strong> Equator rotates in ~25 days, poles in ~35 days. This winds up magnetic field lines, driving activity.</p>
+                        <p style="margin-top:5px"><strong>Corona mystery:</strong> The corona at 1–3 MK is 200× hotter than the photosphere. Likely heated by wave dissipation and reconnection events.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// NAV
+const burger = document.getElementById('nav-burger');
+const navMenu = document.getElementById('nav-menu');
+burger.addEventListener('click', () => {
+    const open = navMenu.classList.toggle('open');
+    burger.textContent = open ? '✕' : '☰';
+    burger.setAttribute('aria-expanded', open);
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('nav')) { navMenu.classList.remove('open'); burger.textContent = '☰'; }
+});
+document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const drop = btn.closest('.nav-drop');
+        const opening = !drop.classList.contains('open');
+        document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+        if (opening) drop.classList.add('open');
+    });
+});
+
+// PANEL
+const panel = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
+document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// UNIFORMS
+const uniforms = {
+    u_time:     { value: 0.0 },
+    u_teff:     { value: 5778.0 },
+    u_activity: { value: 0.5 },
+    u_rot:      { value: 1.0 },
+};
+
+// SCENE
+const scene    = new THREE.Scene();
+const camera   = new THREE.PerspectiveCamera(50, 1, 0.001, 2000);
+camera.position.set(0, 0, 6);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const canvasWrap = document.getElementById('canvas-wrap');
+canvasWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.07;
+controls.minDistance = 1.3; controls.maxDistance = 60;
+
+// BACKGROUND STARS
+{
+    const n = 3500, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        const r = 250 + Math.random() * 400;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        pos[i*3] = r*Math.sin(ph)*Math.cos(th);
+        pos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
+        pos[i*3+2] = r*Math.cos(ph);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:0xffffff, size:0.4, sizeAttenuation:false })));
+}
+
+// ─── SOLAR PHOTOSPHERE — granulation + sunspots + limb darkening ──────────────
+const sunVS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    varying vec3 vViewDir;
+    void main() {
+        vNormal   = normalize(normalMatrix * normal);
+        vPosition = position;
+        vec4 mv   = modelViewMatrix * vec4(position, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+
+const sunFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_teff;
+    uniform float u_activity;
+    uniform float u_rot;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    varying vec3 vViewDir;
+
+    // ── Noise ──
+    float h3(vec3 p) { p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p) {
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm(vec3 p, int oct) {
+        float v=0.0,a=0.5;
+        for(int i=0;i<8;i++){
+            if(i>=oct)break;
+            v+=a*vn(p); p=p*2.1+vec3(31.41,17.35,53.17); a*=0.5;
+        }
+        return v;
+    }
+
+    // Cellular/Voronoi-like noise for granulation borders
+    // Returns a value near 0 at cell borders, 1 at cell centers
+    float granulation(vec3 p) {
+        // Use a combination of shifted noise samples to approximate Voronoi
+        float n1 = vn(p);
+        float n2 = vn(p + vec3(0.5, 0.5, 0.5));
+        float n3 = vn(p + vec3(1.0, 0.5, 0.0));
+        float n4 = vn(p + vec3(0.5, 1.0, 0.5));
+        // The "cell interior" brightens toward the max, borders are darker
+        float cellVal = max(max(n1, n2), max(n3, n4));
+        // Sharpen to create cell boundaries
+        return smoothstep(0.3, 0.75, cellVal);
+    }
+
+    // G-star blackbody: golden yellow
+    vec3 gColor(float T) {
+        float f;
+        if (T < 4500.0) {
+            f = (T - 3000.0) / 1500.0;
+            return mix(vec3(1.0, 0.35, 0.05), vec3(1.0, 0.55, 0.10), clamp(f,0.0,1.0));
+        } else if (T < 5500.0) {
+            f = (T - 4500.0) / 1000.0;
+            return mix(vec3(1.0, 0.60, 0.15), vec3(1.0, 0.78, 0.35), clamp(f,0.0,1.0));
+        } else if (T < 6500.0) {
+            f = (T - 5500.0) / 1000.0;
+            return mix(vec3(1.0, 0.82, 0.42), vec3(1.0, 0.92, 0.65), clamp(f,0.0,1.0));
+        } else {
+            f = clamp((T - 6500.0) / 1000.0, 0.0, 1.0);
+            return mix(vec3(1.0, 0.95, 0.75), vec3(0.95, 0.95, 1.0), f);
+        }
+    }
+
+    void main() {
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
+        float mu  = max(dot(nrm, vDir), 0.0);
+
+        // Spherical coords for sunspot bands
+        float lat = asin(clamp(vPosition.y, -1.0, 1.0));
+        float lon = atan(vPosition.z, vPosition.x);
+
+        // Differential rotation: equator faster
+        float diffRot = 1.0 - 0.28 * sin(lat)*sin(lat);
+        float rotLon  = lon + u_time * 0.012 * u_rot * diffRot;
+
+        // ── Granulation (convective cells ~1000 km = ~0.0014 R☉) ──
+        // Scale: ~8 cells per radian → multiplier ~8-12 looks good
+        vec3 granPos = vPosition * 8.0 + vec3(u_time * 0.004 * u_rot);
+        float gran   = granulation(granPos);
+        // Fine sub-granulation structure
+        float gran2  = fbm(vPosition * 22.0 + vec3(u_time * 0.006), 4);
+
+        // ── Sunspot mask ──────────────────────────────────────────
+        // Sunspots form in ±8-35° latitude bands (active latitude belts)
+        float spotBelt = smoothstep(0.14, 0.18, abs(lat)) * smoothstep(0.62, 0.52, abs(lat));
+        // Random spot locations from noise
+        float spotNoise = fbm(vec3(rotLon * 1.5, lat * 4.0, u_time * 0.0005), 3);
+        float spotThresh = 0.8 - u_activity * 0.35;  // more active = lower threshold = more spots
+        float spotMask = smoothstep(spotThresh, spotThresh - 0.1, spotNoise) * spotBelt;
+
+        // Penumbra (lighter ring around spot)
+        float penumbraNoise = fbm(vec3(rotLon * 1.5, lat * 4.0, u_time * 0.0005 + 5.0), 3);
+        float penumbra = smoothstep(spotThresh + 0.12, spotThresh + 0.02, penumbraNoise) * spotBelt;
+        penumbra *= (1.0 - spotMask);
+
+        // ── Active region flares ──────────────────────────────────
+        float flareNoise = vn(vec3(rotLon * 3.0, lat * 6.0, u_time * 0.08));
+        float flareActive = smoothstep(0.78, 0.9, flareNoise) * spotBelt * u_activity;
+
+        // ── Limb darkening (strong for G-stars) ───────────────────
+        // Standard law: I(μ) ≈ 0.3 + 0.7 * μ (stronger than WR)
+        float limb = 0.30 + 0.70 * mu;
+
+        // ── Base color ────────────────────────────────────────────
+        vec3 baseCol = gColor(u_teff);
+
+        // Granulation brightness: bright cell centers, dark borders
+        float granBright = 0.78 + gran * 0.28 + gran2 * 0.08;
+
+        // Sunspot temperature (~3700 K for umbra)
+        float spotTemp  = u_teff * (0.60 - spotMask * 0.25);  // umbra cooler
+        vec3  spotColor = gColor(max(spotTemp, 3000.0));
+
+        // Penumbra: intermediate temperature
+        float penumbraTemp = u_teff * 0.85;
+        vec3  penumbraColor = gColor(max(penumbraTemp, 4000.0));
+
+        // ── Combine ───────────────────────────────────────────────
+        vec3 col = baseCol * granBright;
+
+        // Apply sunspot darkening
+        col = mix(col, spotColor * 0.65, spotMask * smoothstep(0.0, 0.3, mu));
+        col = mix(col, penumbraColor * 0.85, penumbra * smoothstep(0.0, 0.25, mu));
+
+        // Flare brightening in active regions
+        float flareBright = flareActive * 0.6;
+        col += vec3(1.0, 0.85, 0.4) * flareBright;
+
+        // Apply limb darkening
+        col *= limb;
+
+        // HDR push
+        col *= 1.85;
+
+        // Fresnel: chromosphere/transition region glow at limb
+        float fr = pow(1.0 - mu, 2.8);
+        col += vec3(0.9, 0.4, 0.1) * fr * 0.45;  // reddish chromosphere at edge
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+const sunGeo  = new THREE.SphereGeometry(1.0, 128, 128);
+const sunMat  = new THREE.ShaderMaterial({ vertexShader:sunVS, fragmentShader:sunFS, uniforms });
+scene.add(new THREE.Mesh(sunGeo, sunMat));
+
+// ─── CHROMOSPHERE (r=1.15) — Ca H&K / Hα pink-red layer ──────────────────────
+const glowVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        vNormal  = normalize(normalMatrix * normal);
+        vec4 mv  = modelViewMatrix * vec4(position,1.0);
+        vViewDir = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const chromoFS = /* glsl */`
+    uniform float u_time; uniform float u_activity;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        // Spicule-like brightness variation (forest of spicules around limb)
+        float spicule = vn(normalize(vNormal) * 12.0 + vec3(u_time * 0.025)) * 0.4
+                      + vn(normalize(vNormal) * 25.0 + vec3(u_time * 0.035)) * 0.6;
+        float alpha = pow(rim, 1.8) * 0.50 * (0.7 + spicule * 0.6 * u_activity);
+        // Ca H&K / Hα: pink-red chromosphere
+        vec3 col = mix(vec3(1.0, 0.35, 0.15), vec3(0.9, 0.20, 0.10), rim);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const chromoMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.15, 48, 48),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:chromoFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })
+);
+scene.add(chromoMesh);
+
+// ─── CORONA (r=2.5) — white-light corona with ray structure ───────────────────
+const coronaFS = /* glsl */`
+    uniform float u_time; uniform float u_activity;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    float fbm4(vec3 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+    void main() {
+        vec3 n3d = normalize(vNormal);
+        float rim = 1.0 - max(dot(n3d, normalize(vViewDir)), 0.0);
+        // Coronal ray structure: elongated along equatorial plane
+        float lat = asin(clamp(n3d.y, -1.0, 1.0));
+        float equatorFactor = 1.0 + 0.6 * (1.0 - abs(lat) * 1.8 / 3.14159); // brighter at equator
+        // Streamers and ray structure
+        float streamers = fbm4(n3d * 2.5 + vec3(u_time * 0.003));
+        float fine = vn(n3d * 8.0 + vec3(u_time * 0.008));
+        float structure = streamers * 0.7 + fine * 0.3;
+        float alpha = pow(rim, 3.0) * 0.30 * equatorFactor * (0.6 + structure * 0.8 * (0.5 + u_activity * 0.5));
+        // White-light corona with slight warm tinge
+        vec3 col = mix(vec3(0.85, 0.90, 1.0), vec3(1.0, 0.95, 0.80), 0.3);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const coronaMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(2.5, 32, 32),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:coronaFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })
+);
+scene.add(coronaMesh);
+
+// ─── OUTER CORONA / HELIOSPHERE GLOW (r=4.0) ─────────────────────────────────
+const outerGlowFS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        float rim = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float alpha = pow(rim, 5.0) * 0.15;
+        gl_FragColor = vec4(0.9, 0.85, 0.7, alpha);
+    }
+`;
+scene.add(new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:outerGlowFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })));
+
+// ─── SOLAR WIND PARTICLES ─────────────────────────────────────────────────────
+const N_SOLAR = 2500;
+const solarWindVS = /* glsl */`
+    attribute vec3  aDir;
+    attribute float aPhase;
+    attribute float aSeed;
+    uniform float u_time; uniform float u_activity;
+    varying float vProgress; varying vec3 vColor;
+
+    void main() {
+        float life  = 4.0 + aSeed * 3.0;
+        float spd   = 0.9 + u_activity * 0.5;  // activity increases wind speed
+        float lt    = mod(u_time * spd * 0.3 + aPhase * life, life);
+        float s     = lt / life;
+        // Solar wind: slow at surface, fast at distance (Parker spiral would be 3D)
+        float r = 1.0 + (5.5 - 1.0) * s * s;   // quadratic acceleration
+        vProgress = s;
+
+        // Color: yellow-white near sun, fade to orange-white at distance
+        vColor = mix(vec3(1.0, 0.88, 0.5), vec3(0.8, 0.7, 0.5), pow(s, 0.6));
+
+        vec3 pos = aDir * r;
+        vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPos;
+        float sz = (1.5 + aSeed) * (1.0 - s * 0.6) * (150.0 / max(-mvPos.z, 0.1));
+        gl_PointSize = clamp(sz, 0.4, 6.0);
+    }
+`;
+const solarWindFS = /* glsl */`
+    varying float vProgress; varying vec3 vColor;
+    void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = length(uv);
+        if (d > 0.5) discard;
+        float alpha = (1.0 - d * 2.0) * (1.0 - pow(vProgress, 2.5)) * 0.55;
+        gl_FragColor = vec4(vColor, alpha);
+    }
+`;
+{
+    const geo = new THREE.BufferGeometry();
+    const dirs = new Float32Array(N_SOLAR * 3);
+    const phases = new Float32Array(N_SOLAR);
+    const seeds  = new Float32Array(N_SOLAR);
+    const pos    = new Float32Array(N_SOLAR * 3);
+    for (let i = 0; i < N_SOLAR; i++) {
+        const u = Math.random() * 2 - 1, v = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(1 - u*u);
+        dirs[i*3] = r*Math.cos(v); dirs[i*3+1] = r*Math.sin(v); dirs[i*3+2] = u;
+        phases[i] = Math.random(); seeds[i] = Math.random();
+    }
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('aDir',   new THREE.Float32BufferAttribute(dirs, 3));
+    geo.setAttribute('aPhase', new THREE.Float32BufferAttribute(phases, 1));
+    geo.setAttribute('aSeed',  new THREE.Float32BufferAttribute(seeds, 1));
+    const windMat = new THREE.ShaderMaterial({
+        vertexShader: solarWindVS, fragmentShader: solarWindFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+    });
+    const windPts = new THREE.Points(geo, windMat);
+    scene.add(windPts);
+
+    document.getElementById('tog-wind').addEventListener('change', e => { windPts.visible = e.target.checked; });
+}
+
+// Lights
+const sunLight = new THREE.PointLight(0xffcc44, 4, 80);
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x100800, 0.3));
+
+// Toggles
+document.getElementById('tog-spots').addEventListener('change',  e => { uniforms.u_activity.value = e.target.checked ? +document.getElementById('sl-activity').value/100 : 0; });
+document.getElementById('tog-flares').addEventListener('change', e => { /* covered by activity slider */ });
+document.getElementById('tog-chrom').addEventListener('change',  e => { chromoMesh.visible  = e.target.checked; });
+document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
+
+// RESIZE
+function resize() {
+    const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false);
+    camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvasWrap);
+resize();
+
+// FPS
+let fpsF = 0, fpsT = performance.now();
+const fpsEl = document.getElementById('fps-display');
+
+// ANIMATE
+function animate() {
+    requestAnimationFrame(animate);
+    uniforms.u_time.value += 0.010;
+    controls.update();
+    renderer.render(scene, camera);
+    fpsF++;
+    const now = performance.now();
+    if (now - fpsT >= 500) {
+        fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
+        fpsF = 0; fpsT = now;
+    }
+}
+animate();
+
+// ACCORDION
+document.querySelectorAll('.sec-hd').forEach(hd => {
+    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
+});
+
+// CAMERA
+const CAMS = {
+    default: [0, 0, 6],
+    close:   [0, 0, 2.0],
+    wide:    [0, 3, 14],
+};
+function setCam(k) {
+    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+    document.getElementById('cam-' + k)?.classList.add('active');
+    camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
+}
+document.getElementById('cam-default').addEventListener('click', () => setCam('default'));
+document.getElementById('cam-close').addEventListener('click',   () => setCam('close'));
+document.getElementById('cam-wide').addEventListener('click',    () => setCam('wide'));
+document.getElementById('btn-center').addEventListener('click',  () => setCam('default'));
+
+// SLIDERS
+document.getElementById('sl-teff').addEventListener('input', function() {
+    uniforms.u_teff.value = +this.value;
+    document.getElementById('disp-teff').textContent = (+this.value).toFixed(0) + ' K';
+    document.getElementById('hud-teff').textContent  = (+this.value).toFixed(0);
+    const t = (+this.value - 4000) / 3000;
+    sunLight.color.setRGB(1.0, THREE.MathUtils.lerp(0.6, 1.0, t), THREE.MathUtils.lerp(0.1, 0.8, t));
+});
+document.getElementById('sl-activity').addEventListener('input', function() {
+    const v = +this.value / 100;
+    uniforms.u_activity.value = v;
+    document.getElementById('disp-activity').textContent = this.value + '%';
+    document.getElementById('hud-activity').textContent  = this.value;
+});
+document.getElementById('sl-rot').addEventListener('input', function() {
+    uniforms.u_rot.value = +this.value;
+    document.getElementById('disp-rot').textContent = (+this.value).toFixed(1) + '×';
+    const rotDays = (25.4 / +this.value).toFixed(1);
+    document.getElementById('hud-rot').textContent = rotDays;
+});
+
+console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
+</script>
+</body>
+</html>

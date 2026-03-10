@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Betelgeuse — Red Supergiant Simulator</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+nav {
+    position: relative; z-index: 600;
+    height: 48px; min-height: 48px;
+    background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; padding: 0 14px; gap: 8px;
+}
+.nav-brand {
+    font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+    background: linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.nav-item {
+    padding: 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+    transition: background .2s, border-color .2s;
+}
+.nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,100,0,.4); color:#fff; }
+.nav-item.active { background: linear-gradient(45deg,#cc4400,#ff6600); border-color:#cc4400; color:#fff; font-weight:600; }
+.nav-drop { position: relative; }
+.nav-drop-btn {
+    padding: 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+    transition: background .2s, border-color .2s; white-space: nowrap;
+}
+.nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background: linear-gradient(45deg,#cc4400,#ff6600); border-color:#cc4400; color:#fff; font-weight:600; }
+.nav-drop-menu {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+    padding: 4px 0; min-width: 160px; z-index: 800;
+    box-shadow: 0 6px 24px rgba(0,0,0,.65);
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
+.nav-drop-menu a {
+    display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
+    font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
+}
+.nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#ff8844; font-weight:600; }
+.nav-burger {
+    display: none; margin-left: auto;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+    cursor: pointer; line-height: 1; transition: background .2s;
+}
+.nav-burger:hover { background: rgba(255,255,255,.18); }
+@media (max-width: 768px) {
+    .nav-burger { display: block; }
+    .nav-menu { display: none; flex-direction: column; align-items: stretch;
+        position: absolute; top: 48px; left: 0; right: 0;
+        background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+        border-bottom: 1px solid rgba(255,255,255,.1);
+        padding: 8px 12px 12px; gap: 4px; z-index: 700; }
+    .nav-menu.open { display: flex; }
+    .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+    .nav-drop-menu { position: static; box-shadow: none; border-radius: 4px;
+        background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0; }
+    .nav-drop-menu a { padding: 10px 22px; }
+    .nav-drop.open .nav-drop-menu { display: block !important; }
+    .nav-drop:hover .nav-drop-menu { display: none; }
+}
+
+#app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
+#canvas-wrap {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 40% 50%, #100200 0%, #060100 60%, #000 100%);
+}
+#canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+
+#hud {
+    position: absolute; top: 12px; left: 12px; z-index: 50;
+    background: rgba(0,0,0,.68); backdrop-filter: blur(8px);
+    border: 1px solid rgba(220,80,20,.25); border-radius: 8px;
+    padding: 10px 14px; font-size: 11px; line-height: 1.7;
+    pointer-events: none; min-width: 185px;
+}
+#hud h3 { font-size: 13px; color:#ff7040; margin-bottom:4px; letter-spacing:.5px; }
+#hud .val { color:#ffaa70; font-weight:600; }
+#hud .dim { color:#555; font-size:10px; }
+#hud .sep { border-top:1px solid rgba(220,80,20,.2); margin:5px 0; }
+#fps-display { color:#40ff80; font-weight:600; }
+
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(8,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid rgba(220,80,0,.30); border-radius: 7px;
+    color: #ff7040; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation;
+}
+.cv-btn:hover { background: rgba(200,60,0,.20); border-color:#cc4400; }
+#btn-panel-open { top:12px; right:12px; }
+#btn-center     { bottom:16px; right:12px; }
+
+#backdrop { display:none; position:absolute; inset:0; z-index:25; background:rgba(0,0,0,.45); cursor:pointer; }
+#backdrop.show { display:block; }
+
+#panel {
+    position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
+    background: rgba(8,2,0,.97); backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(200,60,0,.18); z-index: 30;
+    display: flex; flex-direction: column; overflow: hidden;
+    transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+#panel.open { transform: translateX(0); }
+#panel-header { flex-shrink:0; display:flex; align-items:flex-start; justify-content:space-between;
+    padding:12px 14px 8px; border-bottom:1px solid rgba(200,60,0,.15); }
+.panel-star  { font-size:15px; font-weight:700; color:#ff8844; letter-spacing:.8px; }
+.panel-sub   { font-size:10px; color:#555; margin-top:2px; }
+.panel-badge { display:inline-block; margin-top:5px; padding:2px 8px; font-size:9px; letter-spacing:.4px;
+    background:rgba(200,60,0,.14); border:1px solid rgba(200,60,0,.32); border-radius:10px; color:#ffaa70; }
+#btn-panel-close { flex-shrink:0; margin-left:8px; margin-top:2px;
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#888; cursor:pointer; font-size:13px; padding:4px 8px; line-height:1; transition:all .2s; }
+#btn-panel-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
+#panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
+#panel-body::-webkit-scrollbar { width:4px; }
+#panel-body::-webkit-scrollbar-thumb { background:rgba(200,60,0,.35); border-radius:2px; }
+
+.sec { margin-bottom:8px; border:1px solid rgba(200,60,0,.14); border-radius:7px; overflow:hidden; background:rgba(200,60,0,.02); }
+.sec-hd { display:flex; justify-content:space-between; align-items:center;
+    padding:8px 11px; background:rgba(200,60,0,.07); color:#ff8844; font-weight:600;
+    font-size:10px; cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.7px; }
+.sec-hd:hover { background:rgba(200,60,0,.14); }
+.sec-hd .arrow { transition:transform .25s; }
+.sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
+.sec-bd { padding:10px 11px; }
+.sec.closed .sec-bd { display:none; }
+.ctrl { display:flex; align-items:center; margin:8px 0; gap:7px; }
+.ctrl label { flex:0 0 60px; font-size:11px; color:#888; }
+.ctrl input[type=range] { flex:1; cursor:pointer; height:28px; padding:10px 0; -webkit-appearance:none; background:transparent; }
+.ctrl input[type=range]::-webkit-slider-runnable-track { height:3px; background:rgba(200,60,0,.28); border-radius:2px; }
+.ctrl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; margin-top:-7.5px; border-radius:50%; background:#cc4400; cursor:pointer; box-shadow:0 0 6px rgba(200,60,0,.5); }
+.ctrl input[type=range]::-moz-range-track { height:3px; background:rgba(200,60,0,.28); }
+.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#cc4400; border:none; }
+.vdisp { flex:0 0 68px; text-align:right; color:#ffaa70; font-size:10px; font-weight:600; }
+.dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
+.dtbl td:first-child { color:#777; width:46%; }
+.dtbl td:last-child  { color:#ffaa70; text-align:right; font-weight:600; }
+.btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
+.btn-row button { flex:1; padding:8px 6px; min-width:56px;
+    background:rgba(200,60,0,.10); border:1px solid rgba(200,60,0,.26);
+    border-radius:5px; color:#ff8844; cursor:pointer; font-family:inherit; font-size:10px; transition:all .15s; }
+.btn-row button:hover { background:rgba(200,60,0,.22); }
+.btn-row button.active { background:rgba(200,60,0,.32); border-color:#cc4400; color:#ffaa70; }
+.toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
+.toggle-row label { color:#888; flex:1; cursor:pointer; }
+.toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#cc4400; }
+.note-text { font-size:10px; color:#555; line-height:1.6; }
+.note-text strong { color:#aa4420; }
+.note-text ul { margin:6px 0 0 14px; list-style:disc; }
+.note-text li { margin:2px 0; }
+</style>
+</head>
+<body>
+
+<nav>
+    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-3d">
+            <button class="nav-drop-btn active" aria-haspopup="true">3D Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="threejs.html">Solar System</a>
+                <a href="sun.html">The Sun</a>
+                <a href="sirius.html">Sirius System</a>
+                <a href="betelgeuse.html" class="active">Betelgeuse</a>
+                <a href="wr102.html">WR-102</a>
+                <a href="vega.html">Vega</a>
+            </div>
+        </div>
+        <a href="star2d.html"          class="nav-item">2D Star</a>
+        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
+        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <a href="rust.html"            class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
+
+<div id="app">
+    <div id="canvas-wrap">
+        <div id="hud">
+            <h3>Betelgeuse — α Ori</h3>
+            <div>Type: <span class="val">M2Iab</span></div>
+            <div>T<sub>eff</sub>: <span class="val" id="hud-teff">3540</span> <span class="dim">K</span></div>
+            <div>Phase: <span class="val" id="hud-phase">Max</span></div>
+            <div>R★: <span class="val" id="hud-radius">~700</span> <span class="dim">R☉</span></div>
+            <div class="sep"></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+        </div>
+        <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
+        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+        <div id="backdrop"></div>
+    </div>
+
+    <aside id="panel">
+        <div id="panel-header">
+            <div>
+                <div class="panel-star">Betelgeuse</div>
+                <div class="panel-sub">M2Iab Red Supergiant · α Orionis</div>
+                <div class="panel-badge">Convection · Pulsation · Dust Shell</div>
+            </div>
+            <button id="btn-panel-close">✕</button>
+        </div>
+        <div id="panel-body">
+
+            <div class="sec">
+                <div class="sec-hd"><span>Stellar Parameters</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>T<sub>eff</sub></label>
+                        <input type="range" id="sl-teff" min="2800" max="4500" step="50" value="3540">
+                        <span class="vdisp" id="disp-teff">3540 K</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Pulsation</label>
+                        <input type="range" id="sl-pulse" min="0" max="1" step="0.05" value="0.5">
+                        <span class="vdisp" id="disp-pulse">0.50</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Asymmetry</label>
+                        <input type="range" id="sl-asym" min="0" max="1" step="0.05" value="0.35">
+                        <span class="vdisp" id="disp-asym">0.35</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-dust" checked>
+                        <label for="tog-dust">Dust/molecular envelope</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-atm" checked>
+                        <label for="tog-atm">Extended atmosphere</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-wind" checked>
+                        <label for="tog-wind">Slow stellar wind</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row">
+                        <button id="cam-default" class="active">Default</button>
+                        <button id="cam-close">Close-up</button>
+                        <button id="cam-wide">Wide</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl">
+                        <tr><td>Spectral type</td><td>M2Iab</td></tr>
+                        <tr><td>T<sub>eff</sub></td><td>~3 540 K</td></tr>
+                        <tr><td>Luminosity</td><td>~10⁵ L☉</td></tr>
+                        <tr><td>Mass</td><td>~16–19 M☉</td></tr>
+                        <tr><td>Radius</td><td>~700 R☉</td></tr>
+                        <tr><td>Pulsation P₁</td><td>~420 days</td></tr>
+                        <tr><td>Pulsation P₂</td><td>~185 days</td></tr>
+                        <tr><td>Distance</td><td>~200 pc</td></tr>
+                        <tr><td>Next supernova</td><td>~100 000 yr</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text">
+                        <p><strong>Giant Convection Cells:</strong> Unlike the Sun's millions of tiny granules, Betelgeuse has only ~5-10 massive convective cells covering the disk. These cells are responsible for its dramatic surface asymmetry.</p>
+                        <p style="margin-top:5px"><strong>Pulsation:</strong> Semi-regular with ~420 day and ~185 day periods. Radius changes by ~15%, driving TiO molecular absorption variations that make it appear to dim and brighten (Δmag ~1).</p>
+                        <p style="margin-top:5px"><strong>Great Dimming (2019–2020):</strong> A dust ejection event caused Betelgeuse to fade to its dimmest level in modern records. A large convective plume ejected material that condensed into dust south of the star.</p>
+                        <p style="margin-top:5px"><strong>Molecular shell:</strong> TiO, AlO, and SiO form in the cool extended atmosphere, creating additional opacity layers beyond the photosphere.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// NAV
+const burger = document.getElementById('nav-burger');
+const navMenu = document.getElementById('nav-menu');
+burger.addEventListener('click', () => {
+    const open = navMenu.classList.toggle('open');
+    burger.textContent = open ? '✕' : '☰';
+    burger.setAttribute('aria-expanded', open);
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('nav')) { navMenu.classList.remove('open'); burger.textContent = '☰'; }
+});
+document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const drop = btn.closest('.nav-drop');
+        const opening = !drop.classList.contains('open');
+        document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+        if (opening) drop.classList.add('open');
+    });
+});
+
+// PANEL
+const panel = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
+document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// UNIFORMS
+const uniforms = {
+    u_time:  { value: 0.0 },
+    u_teff:  { value: 3540.0 },
+    u_pulse: { value: 0.5 },
+    u_asym:  { value: 0.35 },
+};
+
+// SCENE
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 2000);
+camera.position.set(0, 0, 5.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const canvasWrap = document.getElementById('canvas-wrap');
+canvasWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.07;
+controls.minDistance = 1.4; controls.maxDistance = 60;
+
+// BACKGROUND
+{
+    const n = 3000, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        const r = 200+Math.random()*400, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+        pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:0xffeedd, size:0.4, sizeAttenuation:false })));
+}
+
+// ─── BETELGEUSE PHOTOSPHERE — large convection cells + pulsation ──────────────
+const betVS = /* glsl */`
+    uniform float u_time;
+    uniform float u_pulse;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    varying vec3 vViewDir;
+
+    void main() {
+        // Pulsation: oscillate radius slightly
+        // Two periods: ~420 day (slow) and ~185 day (fast) — simulated with two sinusoids
+        float pulseAmp  = u_pulse * 0.12;
+        float slowPulse = sin(u_time * 0.008) * pulseAmp;
+        float fastPulse = sin(u_time * 0.018) * pulseAmp * 0.5;
+        float radScale  = 1.0 + slowPulse + fastPulse;
+
+        vec3 scaledPos = position * radScale;
+
+        vNormal   = normalize(normalMatrix * normal);
+        vPosition = position;
+        vec4 mv   = modelViewMatrix * vec4(scaledPos, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+
+const betFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_teff;
+    uniform float u_pulse;
+    uniform float u_asym;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+    varying vec3 vViewDir;
+
+    // ── Noise ──
+    float h3(vec3 p) { p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p) {
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm(vec3 p) {
+        float v=0.0,a=0.5;
+        for(int i=0;i<6;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}
+        return v;
+    }
+
+    // M-star blackbody: deep red-orange for 2800-4500 K
+    vec3 mColor(float T) {
+        float f;
+        if (T < 3000.0) {
+            f = (T - 2500.0) / 500.0;
+            return mix(vec3(1.0, 0.08, 0.00), vec3(1.0, 0.18, 0.01), clamp(f,0.0,1.0));
+        } else if (T < 3500.0) {
+            f = (T - 3000.0) / 500.0;
+            return mix(vec3(1.0, 0.22, 0.02), vec3(1.0, 0.35, 0.05), clamp(f,0.0,1.0));
+        } else if (T < 4000.0) {
+            f = (T - 3500.0) / 500.0;
+            return mix(vec3(1.0, 0.38, 0.06), vec3(1.0, 0.50, 0.10), clamp(f,0.0,1.0));
+        } else {
+            f = clamp((T - 4000.0) / 500.0, 0.0, 1.0);
+            return mix(vec3(1.0, 0.52, 0.12), vec3(1.0, 0.65, 0.22), f);
+        }
+    }
+
+    void main() {
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
+        float mu  = max(dot(nrm, vDir), 0.0);
+
+        // ── Large-scale convection ────────────────────────────────
+        // Betelgeuse: only ~5-10 massive convective plumes
+        // Use VERY low spatial frequency noise to get large cells
+        float t = u_time;
+
+        // Slow rotation (Betelgeuse rotates ~once per ~36 years)
+        float phi = atan(vPosition.z, vPosition.x) + t * 0.0008;
+
+        // Giant convection cells (low frequency = large scale)
+        vec3 convPos1 = vec3(phi * 0.4, vPosition.y * 0.4, t * 0.002);
+        float cell1   = fbm(convPos1);  // very large scale
+
+        // Medium convection (sub-cells within large cells)
+        vec3 convPos2 = vec3(phi * 1.2, vPosition.y * 1.2, t * 0.005);
+        float cell2   = fbm(convPos2);
+
+        // Fine surface detail (hot/cool granules within convective cells)
+        float fine = vn(vPosition * 5.0 + vec3(t * 0.01));
+
+        // ── Surface brightness map ────────────────────────────────
+        // Hot plumes rise at bright regions, cool downdrafts at dark edges
+        float bmod = 0.60 + cell1 * 0.50 + cell2 * 0.25 + fine * 0.10;
+
+        // ── Asymmetry — one hemisphere brighter ───────────────────
+        // Observed: Betelgeuse shows persistent brightness asymmetry
+        float asymFactor = 1.0 + u_asym * (dot(nrm, vec3(0.6, 0.3, 0.7)) * 0.5 + 0.5) * 0.35;
+        bmod *= asymFactor;
+
+        // ── Pulsation effect on surface temperature ────────────────
+        // When expanded (larger): slightly cooler; when contracted: slightly hotter
+        float slowPulse = sin(t * 0.008);
+        float pulseTeff = u_teff * (1.0 - u_pulse * 0.04 * slowPulse);
+
+        // ── Limb darkening — very strong for M-giant (TiO absorption) ──
+        // Using Claret-style: stronger than Sun
+        float limb = 0.20 + 0.80 * pow(mu, 0.6);
+
+        // ── TiO molecular absorption ──────────────────────────────
+        // TiO bands absorb at certain wavelengths, making the star appear redder/darker
+        // When cooler (low T or large radius), TiO absorption is stronger
+        float tioFactor = clamp((4000.0 - pulseTeff) / 1500.0, 0.0, 0.5);
+        float tioMask   = 0.8 + 0.2 * vn(vPosition * 3.0 + vec3(t * 0.003));  // patchy
+
+        // ── Base color ────────────────────────────────────────────
+        vec3 baseCol = mColor(pulseTeff);
+
+        // TiO makes it appear less red-bright in band (darker, slightly more orange-brown)
+        vec3 tioCol  = mColor(pulseTeff * 0.85);
+        baseCol = mix(baseCol, tioCol, tioFactor * tioMask);
+
+        // ── Hotspots ─────────────────────────────────────────────
+        // Occasional very bright convective plumes
+        float hotspot = pow(max(cell1 - 0.65, 0.0), 2.0) * 5.0;
+        vec3 hotCol   = mColor(pulseTeff * 1.15);
+
+        // ── Combine ───────────────────────────────────────────────
+        vec3 col = baseCol * clamp(bmod, 0.15, 2.0) * limb;
+        col += hotCol * hotspot * 0.4;
+
+        // HDR push
+        col *= 1.7;
+
+        // Fresnel: faint reddish-orange atmospheric limb
+        float fr = pow(1.0 - mu, 3.0);
+        col += mColor(pulseTeff * 0.85) * fr * 0.3;
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+const betGeo  = new THREE.SphereGeometry(1.0, 128, 128);
+const betMat  = new THREE.ShaderMaterial({ vertexShader:betVS, fragmentShader:betFS, uniforms });
+const betMesh = new THREE.Mesh(betGeo, betMat);
+scene.add(betMesh);
+
+// ─── EXTENDED ATMOSPHERE / MOLECULAR SHELL (r=1.35) ──────────────────────────
+const glowVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        vNormal=normalize(normalMatrix*normal);
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vViewDir=normalize(-mv.xyz);
+        gl_Position=projectionMatrix*mv;
+    }
+`;
+
+const atmFS = /* glsl */`
+    uniform float u_time; uniform float u_teff; uniform float u_pulse;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    void main() {
+        float rim = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        // Molecular shell: TiO, AlO, SiO — forms clumpy layers
+        float clump = vn(normalize(vNormal)*4.0+vec3(u_time*0.004))*0.6
+                    + vn(normalize(vNormal)*9.0+vec3(u_time*0.008))*0.4;
+        float pulse = 0.9 + 0.1*sin(u_time*0.008);  // pulsation expands/contracts
+        float alpha = pow(rim, 1.5) * 0.55 * pulse * (0.6 + clump * 0.5);
+        // Deep red with some molecular brown tinge
+        vec3 col = mix(vec3(0.9, 0.20, 0.02), vec3(0.7, 0.15, 0.02), rim * 0.5);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const atmMesh = new THREE.Mesh(new THREE.SphereGeometry(1.35, 40, 40),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:atmFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
+scene.add(atmMesh);
+
+// ─── DUST SHELL (r=2.2) ───────────────────────────────────────────────────────
+// Asymmetric dust shell — stronger south of star (like the 2019-2020 event)
+const dustFS = /* glsl */`
+    uniform float u_time; uniform float u_asym;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    float fbm3(vec3 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+    void main() {
+        vec3 n3d = normalize(vNormal);
+        float rim = 1.0 - max(dot(n3d, normalize(vViewDir)), 0.0);
+        // Clumpy dust distribution
+        float dust = fbm3(n3d * 3.0 + vec3(u_time * 0.002));
+        float fine = vn(n3d * 8.0 + vec3(u_time * 0.004));
+        // Asymmetry: denser south-east of star (observed dust plume direction)
+        float asymDir = dot(n3d, normalize(vec3(0.3, -0.7, 0.4)));
+        float asymMask = 0.6 + 0.4 * (asymDir * 0.5 + 0.5) * u_asym;
+        float alpha = pow(rim, 4.0) * 0.22 * asymMask * (dust * 0.7 + fine * 0.3 + 0.3);
+        // Warm dust: reddish-brown/dark orange
+        vec3 col = mix(vec3(0.55, 0.15, 0.02), vec3(0.35, 0.10, 0.01), dust);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const dustMesh = new THREE.Mesh(new THREE.SphereGeometry(2.2, 32, 32),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:dustFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
+scene.add(dustMesh);
+
+// ─── STELLAR WIND PARTICLES (slow, 5–15 km/s) ────────────────────────────────
+const N_WIND = 1500;
+const windVS = /* glsl */`
+    attribute vec3  aDir;
+    attribute float aPhase;
+    attribute float aSeed;
+    uniform float u_time;
+    varying float vProgress;
+
+    void main() {
+        float life = 5.0 + aSeed * 4.0;
+        float lt   = mod(u_time * 0.20 + aPhase * life, life);
+        float s    = lt / life;
+        // Slow wind: red supergiants have very slow (~5-15 km/s), dense winds
+        float r = 1.35 + (5.0 - 1.35) * s * s;
+        vProgress = s;
+        vec3 pos = aDir * r;
+        vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mvPos;
+        float sz = (1.8 + aSeed * 1.2) * (1.0 - s * 0.5) * (180.0 / max(-mvPos.z, 0.1));
+        gl_PointSize = clamp(sz, 0.4, 7.0);
+    }
+`;
+const windFS = /* glsl */`
+    varying float vProgress;
+    void main() {
+        vec2 uv = gl_PointCoord - 0.5; float d = length(uv);
+        if (d > 0.5) discard;
+        float alpha = (1.0 - d * 2.0) * (1.0 - pow(vProgress, 2.2)) * 0.45;
+        // Warm dusty wind color
+        vec3 col = mix(vec3(0.9, 0.4, 0.1), vec3(0.5, 0.2, 0.05), pow(vProgress, 0.5));
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+{
+    const geo = new THREE.BufferGeometry();
+    const dirs=new Float32Array(N_WIND*3), phases=new Float32Array(N_WIND), seeds=new Float32Array(N_WIND), pos=new Float32Array(N_WIND*3);
+    for(let i=0;i<N_WIND;i++){
+        const u=Math.random()*2-1,v=Math.random()*Math.PI*2,r=Math.sqrt(1-u*u);
+        dirs[i*3]=r*Math.cos(v);dirs[i*3+1]=r*Math.sin(v);dirs[i*3+2]=u;
+        phases[i]=Math.random();seeds[i]=Math.random();
+    }
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    geo.setAttribute('aDir',new THREE.Float32BufferAttribute(dirs,3));
+    geo.setAttribute('aPhase',new THREE.Float32BufferAttribute(phases,1));
+    geo.setAttribute('aSeed',new THREE.Float32BufferAttribute(seeds,1));
+    const windPts = new THREE.Points(geo, new THREE.ShaderMaterial({
+        vertexShader:windVS, fragmentShader:windFS, uniforms,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending
+    }));
+    scene.add(windPts);
+    document.getElementById('tog-wind').addEventListener('change', e => { windPts.visible = e.target.checked; });
+}
+
+// Lights
+const starLight = new THREE.PointLight(0xff5520, 4, 80);
+scene.add(starLight);
+scene.add(new THREE.AmbientLight(0x0a0300, 0.4));
+
+// Toggles
+document.getElementById('tog-dust').addEventListener('change',  e => { dustMesh.visible = e.target.checked; });
+document.getElementById('tog-atm').addEventListener('change',   e => { atmMesh.visible  = e.target.checked; });
+
+// RESIZE
+function resize() {
+    const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvasWrap); resize();
+
+// FPS
+let fpsF=0,fpsT=performance.now();
+const fpsEl=document.getElementById('fps-display');
+
+// Pulsation phase display
+function phaseName(t) {
+    const phase = (Math.sin(t * 0.008) + 1) / 2;
+    if (phase > 0.7) return 'Max';
+    if (phase > 0.3) return 'Mid';
+    return 'Min';
+}
+
+// ANIMATE
+function animate() {
+    requestAnimationFrame(animate);
+    uniforms.u_time.value += 0.010;
+    const t = uniforms.u_time.value;
+    controls.update();
+    renderer.render(scene, camera);
+    fpsF++;
+    const now = performance.now();
+    if (now - fpsT >= 500) {
+        fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
+        fpsF = 0; fpsT = now;
+    }
+    // Update pulsation phase display
+    document.getElementById('hud-phase').textContent = phaseName(t);
+    // Radius varies with pulsation
+    const radScale = 1.0 + uniforms.u_pulse.value * 0.12 * Math.sin(t * 0.008);
+    document.getElementById('hud-radius').textContent = '~' + Math.round(700 * radScale);
+}
+animate();
+
+// ACCORDION
+document.querySelectorAll('.sec-hd').forEach(hd => {
+    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
+});
+
+// CAMERA
+const CAMS = { default:[0,0,5.5], close:[0,0,1.8], wide:[0,3,14] };
+function setCam(k) {
+    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+    document.getElementById('cam-'+k)?.classList.add('active');
+    camera.position.set(...CAMS[k]); controls.target.set(0,0,0); controls.update();
+}
+document.getElementById('cam-default').addEventListener('click', ()=>setCam('default'));
+document.getElementById('cam-close').addEventListener('click',   ()=>setCam('close'));
+document.getElementById('cam-wide').addEventListener('click',    ()=>setCam('wide'));
+document.getElementById('btn-center').addEventListener('click',  ()=>setCam('default'));
+
+// SLIDERS
+document.getElementById('sl-teff').addEventListener('input', function() {
+    uniforms.u_teff.value = +this.value;
+    document.getElementById('disp-teff').textContent = (+this.value).toFixed(0) + ' K';
+    document.getElementById('hud-teff').textContent  = (+this.value).toFixed(0);
+    const t2 = (+this.value - 2800) / 1700;
+    starLight.color.setRGB(1.0, THREE.MathUtils.lerp(0.20, 0.55, t2), THREE.MathUtils.lerp(0.01, 0.12, t2));
+});
+document.getElementById('sl-pulse').addEventListener('input', function() {
+    uniforms.u_pulse.value = +this.value;
+    document.getElementById('disp-pulse').textContent = (+this.value).toFixed(2);
+});
+document.getElementById('sl-asym').addEventListener('input', function() {
+    uniforms.u_asym.value = +this.value;
+    document.getElementById('disp-asym').textContent = (+this.value).toFixed(2);
+});
+
+console.log('%c[Betelgeuse · M2Iab Red Supergiant]', 'color:#ff7040;font-weight:bold;font-size:13px');
+</script>
+</body>
+</html>
