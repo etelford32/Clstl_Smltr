@@ -249,10 +249,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
         <!-- Zoom presets (bottom-centre) -->
         <div id="zoom-bar">
-            <button id="zoom-local" class="active">Local (&lt;50 ly)</button>
+            <button id="zoom-local">Local (&lt;50 ly)</button>
             <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
             <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
-            <button id="zoom-galaxy">Galaxy</button>
+            <button id="zoom-galaxy" class="active">Galaxy</button>
         </div>
 
         <!-- Coord display (bottom-left) -->
@@ -313,7 +313,9 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <strong style="color:#999">Galactic latitude (b):</strong> 0° = galactic plane, +90° = north pole.<br>
             <strong style="color:#999">Origin:</strong> Sagittarius A* (Galactic Center).<br>
             <strong style="color:#999">Sun–GC distance:</strong> 26,673 ly (8.178 kpc).<br>
-            Drag to orbit · Scroll to zoom · Click stars to select.
+            Drag to orbit · Scroll to zoom<br>
+            Click a star → fly to it + show data.<br>
+            Distances in ly / pc / kpc (scientific).
         </div>
     </div>
 </div>
@@ -331,24 +333,53 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC COORDINATE SYSTEM
-//  Coordinate convention (GCC = Galactic Center Cartesian):
-//    GCC_x : from Sgr A* toward the Sun (galactic "anticenter" direction)
-//    GCC_y : tangential (direction of galactic rotation)
-//    GCC_z : toward north galactic pole
+//  SCIENTIFIC NOTATION HELPERS
+// ══════════════════════════════════════════════════════════════════════════
+function fmtLy(d) {
+    if (d === 0) return '0 ly';
+    if (d < 0.01) return d.toExponential(2) + ' ly';
+    if (d < 100)  return d.toFixed(2) + ' ly';
+    if (d < 1000) return d.toFixed(1) + ' ly';
+    const exp = Math.floor(Math.log10(d));
+    const co  = (d / Math.pow(10, exp)).toFixed(3);
+    return co + ' × 10' + superscript(exp) + ' ly';
+}
+function fmtPc(d_ly) {
+    const pc = d_ly / 3.26156;
+    if (pc < 0.001) return (pc * 1e6).toFixed(1) + ' μpc';
+    if (pc < 1)     return (pc * 1000).toFixed(2) + ' mpc';
+    if (pc < 1000)  return pc.toFixed(3) + ' pc';
+    return (pc / 1000).toFixed(3) + ' kpc';
+}
+function fmtDist(ly) {
+    return fmtLy(ly) + ' (' + fmtPc(ly) + ')';
+}
+function superscript(n) {
+    return String(n).split('').map(c => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] ?? c).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC COORDINATE SYSTEM (GCC = Galactic Center Cartesian)
 //
-//  Three.js mapping (Y-up):
-//    THREE.x = GCC_x
-//    THREE.y = GCC_z   (north pole = up in scene)
-//    THREE.z = GCC_y   (tangential = depth)
+//  Scene axes (Three.js Y-up convention):
+//    scene X : GCC x-axis — from Sgr A* toward the Sun (anticenter dir.)
+//    scene Y : GCC z-axis — galactic north pole (up in scene)
+//    scene Z : GCC y-axis — galactic rotation direction (tangential)
 //
-//  Sun is at GCC ≈ (26673, 0, 20) ly
-//  Heliocentric galactic → GCC:
-//    GCC = (SUN_GC.x − HGC_x, SUN_GC.y + HGC_y, SUN_GC.z + HGC_z)
-//    (sign flip on x because l=0 from Sun points TOWARD GC, so GCC_x increases away)
+//  Key positions:
+//    Sgr A*   :  (0,       0,  0)  ly  — origin
+//    Sun      :  (26,673, 20,  0)  ly  — defined by GC distance 8.178 kpc
+//
+//  Heliocentric galactic (l°, b°, d ly) → scene coords:
+//    HGC_x = d·cos(b)·cos(l)   [toward GC, l=0]
+//    HGC_y = d·cos(b)·sin(l)   [tangential, l=90°]
+//    HGC_z = d·sin(b)           [north pole]
+//    scene = (SUN.x − HGC_x,   SUN.y + HGC_z,   SUN.z + HGC_y)
+//    (sign flip on x: moving toward GC decreases scene-x from 26673→0)
 // ══════════════════════════════════════════════════════════════════════════
 
-const SUN_GC = new THREE.Vector3(26673, 20, 0); // Sun in GCC (ly)
+// Sun's position in scene (= GCC); 26,673 ly = 8.178 kpc from Sgr A*
+const SUN_GC = new THREE.Vector3(26673, 20, 0);
 
 function helioToGCC(l_deg, b_deg, dist_ly) {
     const l = l_deg * Math.PI / 180;
@@ -607,65 +638,97 @@ const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 2_000_000);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.screenSpacePanning = false;
-controls.minDistance = 1;
-controls.maxDistance = 400_000;
+controls.dampingFactor = 0.06;
+controls.screenSpacePanning = true;
+controls.minDistance = 0.5;
+controls.maxDistance = 500_000;
+controls.zoomSpeed = 1.4;
+
+// ── Sun reference point ─────────────────────────────────────────────────
+const SUN3 = SUN_GC.clone(); // convenience alias
 
 // ── Zoom presets ────────────────────────────────────────────────────────
-const SUN3 = SUN_GC.clone(); // Sun position in three.js coords
-
+// Each preset: camera position + orbit target + descriptive radius
 const ZOOM_PRESETS = {
     local: {
-        pos: new THREE.Vector3(SUN3.x, 60, SUN3.z + 10),
+        // 80 ly above Sun; galactic plane view of solar neighborhood
+        pos: new THREE.Vector3(SUN3.x - 15, 80, SUN3.z + 20),
         target: SUN3.clone(),
         label: 'Local (<50 ly)', radius: 50,
     },
     hood: {
-        pos: new THREE.Vector3(SUN3.x, 1200, SUN3.z),
+        // ~1,500 ly above Sun; Aldebaran, Betelgeuse, Pleiades visible
+        pos: new THREE.Vector3(SUN3.x - 400, 1500, SUN3.z + 600),
         target: SUN3.clone(),
         label: 'Neighborhood (<1 kly)', radius: 1000,
     },
     arm: {
-        pos: new THREE.Vector3(SUN3.x - 2000, 12000, SUN3.z + 3000),
+        // 14,000 ly above galactic midplane near Sun; see full Orion Arm context
+        pos: new THREE.Vector3(SUN3.x - 4000, 14000, SUN3.z + 5000),
         target: SUN3.clone(),
         label: 'Local Arm (<10 kly)', radius: 10000,
     },
     galaxy: {
-        pos: new THREE.Vector3(20000, 80000, 20000),
+        // 90,000 ly above galactic center; full Milky Way view
+        pos: new THREE.Vector3(8000, 90000, 15000),
         target: new THREE.Vector3(0, 0, 0),
         label: 'Galaxy', radius: 100000,
     },
 };
 
-let currentZoom = 'local';
+let currentZoom = 'galaxy';
+let flyRaf = null; // active fly animation handle
 
-function flyTo(preset, duration = 1200) {
-    const { pos, target } = ZOOM_PRESETS[preset];
-    const startPos    = camera.position.clone();
-    const startTarget = controls.target.clone();
+// Cancel any in-progress fly when user starts dragging
+controls.addEventListener('start', () => {
+    if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+});
+
+function flyToPos(camPos, lookAt, duration = 1400) {
+    if (flyRaf) { cancelAnimationFrame(flyRaf); flyRaf = null; }
+    const startCam  = camera.position.clone();
+    const startLook = controls.target.clone();
     const t0 = performance.now();
 
     function step(now) {
-        const t = Math.min((now - t0) / duration, 1);
-        const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease-in-out quad
-        camera.position.lerpVectors(startPos, pos, ease);
-        controls.target.lerpVectors(startTarget, target, ease);
+        const raw  = Math.min((now - t0) / duration, 1);
+        const ease = raw < 0.5 ? 2*raw*raw : -1 + (4 - 2*raw)*raw;
+        camera.position.lerpVectors(startCam,  camPos, ease);
+        controls.target.lerpVectors(startLook, lookAt, ease);
         controls.update();
-        if (t < 1) requestAnimationFrame(step);
+        flyRaf = raw < 1 ? requestAnimationFrame(step) : null;
     }
-    requestAnimationFrame(step);
+    flyRaf = requestAnimationFrame(step);
+}
 
-    // Update zoom button states
+function flyTo(preset, duration = 1400) {
+    const { pos, target } = ZOOM_PRESETS[preset];
+    flyToPos(pos, target, duration);
     currentZoom = preset;
     document.querySelectorAll('#zoom-bar button').forEach(b => b.classList.remove('active'));
     document.getElementById('zoom-' + preset).classList.add('active');
-
-    // Update HUD view radius
+    const r = ZOOM_PRESETS[preset].radius;
     document.getElementById('hud-view').textContent =
-        ZOOM_PRESETS[preset].radius >= 1000
-            ? (ZOOM_PRESETS[preset].radius / 1000).toFixed(0) + ' kly'
-            : ZOOM_PRESETS[preset].radius + ' ly';
+        r >= 1000 ? fmtLy(r) : r + ' ly';
+}
+
+// ── Fly camera to orbit near a specific catalog star ────────────────────
+function computeOrbitDist(s) {
+    if (s.isGC)      return 7000;
+    if (s.isCluster) return 300;
+    if (s.dist > 2000) return s.dist * 0.5;
+    if (s.dist > 200)  return s.dist * 0.4;
+    if (s.dist > 30)   return 80;
+    return 20; // solar neighborhood stars
+}
+
+function flyToStar(s) {
+    const orbitDist = computeOrbitDist(s);
+    // Keep camera direction; only move target + scale distance
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    if (dir.lengthSq() < 0.0001) dir.set(0.5, 1, 0.3).normalize();
+    const newCam = s.pos3.clone().add(dir.multiplyScalar(orbitDist));
+    flyToPos(newCam, s.pos3.clone(), 1600);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -677,21 +740,32 @@ function buildGalaxy() {
     const colors    = new Float32Array(N * 3);
     const sizes     = new Float32Array(N);
 
-    const GALAXY_R   = 50000;  // ly
-    const BULGE_R    = 4000;
-    const DISK_H     = 800;    // ly scale height
-    const PITCH      = Math.tan(13 * Math.PI / 180); // 13° pitch
-    const N_ARMS     = 4;
-    // Arm starting angles (radians). Arm index 2 (Orion arm) starts so it
-    // passes near the Sun at GCC (26673, 0, 0).
-    // r = r0 * exp(PITCH * theta); Sun at r=26673, arm_start_r = 5500:
-    //   26673/5500 = exp(PITCH * theta) → theta = ln(4.85)/PITCH ≈ 6.69 rad
-    // At theta=6.69 rad, angle_in_galaxy = arm_start_angle + 6.69
-    // Sun is at GCC_x = 26673, GCC_z = 0, which is angle atan2(0,26673) = 0°
-    // So arm_start_angle = 0 - 6.69 = -6.69 rad ≈ -1.12 rad ≈ 216°
-    const ARM_STARTS = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2]; // 4 arms evenly spaced
-    // Orion/local arm offset to pass near Sun
-    const ORION_OFFSET = -6.69; // winding offset so Orion arm passes through Sun pos
+    // ── Galaxy parameters ─────────────────────────────────────────────────
+    const GALAXY_R = 50000;   // disk radius (ly)
+    const BULGE_R  = 4000;    // central bulge radius (ly)
+    const DISK_H   = 700;     // vertical scale height (ly)
+    const PITCH    = Math.tan(13 * Math.PI / 180); // 13° logarithmic pitch
+
+    // Logarithmic spiral: r = R0 * exp(PITCH * winding)
+    // R0 = 2500 ly.  To reach 50,000 ly: winding_max = ln(50000/2500)/PITCH ≈ 13.25 rad
+    const R0           = 2500;
+    const MAX_WINDING  = 13.5;
+
+    // ── 4-arm model ───────────────────────────────────────────────────────
+    // Arms at 90° offsets.  Arm index 2 = Orion/Local Arm.
+    // Goal: arm 2 passes through Sun's scene position (26673, 0, 0).
+    //
+    // Proof: at winding W where r = R0·exp(PITCH·W) = 26673:
+    //   W = ln(26673/2500) / PITCH = ln(10.669) / 0.2309 ≈ 10.252 rad
+    // The arm's galactic angle at that point = ARM_START[2] + ORION_OFF + W
+    // Sun is at angle=0 in scene (x=26673, z=0 → atan2(z,x)=0).
+    // ARM_START[2] = π, so:
+    //   ORION_OFF = 2π − π − 10.252 = π − 10.252 ≈ −7.111 rad  ✓
+    const ARM_STARTS   = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2];
+    const ORION_OFFSET = -(Math.PI + 10.252 - 2*Math.PI); // = 2π − π − 10.252 ≈ −7.111
+
+    // arm scatter: tighter near center, wider at edge
+    function armScatter(r) { return 300 + r * 0.055; }
 
     let idx = 0;
 
@@ -700,61 +774,54 @@ function buildGalaxy() {
         let x, y, z, bright;
 
         if (t < 0.12) {
-            // ── Central bulge (spheroidal) ─────────────────────────────
+            // ── Central bulge (oblate spheroid) ───────────────────────
             const r   = Math.pow(Math.random(), 0.4) * BULGE_R;
             const phi = (Math.random() - 0.5) * Math.PI;
             const th  = Math.random() * Math.PI * 2;
             x = r * Math.cos(phi) * Math.cos(th);
-            y = r * Math.cos(phi) * Math.sin(th) * 0.4; // flatten vertically
+            y = r * Math.cos(phi) * Math.sin(th) * 0.35;
             z = r * Math.sin(phi) * 0.6;
             bright = 0.9 + Math.random() * 0.1;
         } else {
-            // ── Spiral arm ────────────────────────────────────────────
-            const arm      = Math.floor(Math.random() * N_ARMS);
-            const winding  = Math.random() * 7.5; // winding angle (radians)
-            const r        = 2500 * Math.exp(PITCH * winding);
+            // ── Logarithmic spiral arm ─────────────────────────────────
+            const arm     = Math.floor(Math.random() * 4);
+            const winding = Math.random() * MAX_WINDING;
+            const r       = R0 * Math.exp(PITCH * winding);
             if (r > GALAXY_R) { i--; continue; }
 
-            // Apply Orion-arm offset for arm 2 (index 2) to pass near Sun
             let startAngle = ARM_STARTS[arm];
-            if (arm === 2) startAngle += ORION_OFFSET;
+            if (arm === 2) startAngle += ORION_OFFSET; // align Orion arm to Sun
 
-            const angle   = startAngle + winding;
             const scatter = armScatter(r);
             const sr      = (Math.random() - 0.5) * scatter;
-            const stheta  = (Math.random() - 0.5) * scatter * 0.003;
+            const sTheta  = (Math.random() - 0.5) * scatter / r; // angular scatter
 
-            x = (r + sr) * Math.cos(angle + stheta);
-            y = (Math.random() - 0.5) * DISK_H * Math.exp(-r / 25000);
-            z = (r + sr) * Math.sin(angle + stheta);
+            const angle = startAngle + winding + sTheta;
+            x = (r + sr) * Math.cos(angle);
+            z = (r + sr) * Math.sin(angle);
+            y = (Math.random() - 0.5) * DISK_H * Math.exp(-r / 28000);
             bright = 0.55 + Math.random() * 0.45;
         }
 
         // Radial fade
         const r2 = Math.sqrt(x*x + z*z);
         if (r2 > GALAXY_R) { i--; continue; }
-        const fade = Math.exp(-r2 / 35000);
+        const fade = Math.exp(-r2 / 36000);
 
         positions[idx*3]   = x;
         positions[idx*3+1] = y;
         positions[idx*3+2] = z;
 
-        // Color: inner = warm orange-yellow, mid = white, outer = cool blue
+        // Color gradient: core = warm amber, outer = cool blue-white
         const nr = r2 / GALAXY_R;
-        const rc = bright * fade * (0.70 + 0.30 * (1 - nr));
-        const gc = bright * fade * (0.60 + 0.25 * (1 - nr));
-        const bc = bright * fade * (0.40 + 0.60 * nr);
+        const rc = bright * fade * (0.72 + 0.28 * (1 - nr));
+        const gc = bright * fade * (0.58 + 0.28 * (1 - nr));
+        const bc = bright * fade * (0.38 + 0.62 * nr);
         colors[idx*3]   = rc;
         colors[idx*3+1] = gc;
         colors[idx*3+2] = bc;
-        sizes[idx] = 60 + Math.random() * 180;
-
+        sizes[idx] = 50 + Math.random() * 160;
         idx++;
-    }
-
-    function armScatter(r) {
-        // Arms are narrower near center, broader at large radii
-        return 400 + r * 0.06;
     }
 
     const geo = new THREE.BufferGeometry();
@@ -805,74 +872,108 @@ const galaxyPoints = buildGalaxy();
 scene.add(galaxyPoints);
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC CENTER GLOW (Sgr A*)
+//  BACKGROUND STARFIELD (distant/background stars)
 // ══════════════════════════════════════════════════════════════════════════
-(function buildGCGlow() {
-    // Outer soft glow
-    const geoG = new THREE.SphereGeometry(800, 16, 16);
-    const matG = new THREE.MeshBasicMaterial({
-        color: 0xff8800, transparent: true, opacity: 0.06,
-        depthWrite: false, blending: THREE.AdditiveBlending,
+(function buildStarfield() {
+    const N   = 6000;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+        // Uniform sphere shell 60k–200k ly, slightly flattened (disk-like)
+        const r     = 60000 + Math.random() * 140000;
+        const theta = Math.random() * Math.PI * 2;
+        const phi   = Math.acos(2 * Math.random() - 1);
+        pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+        pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta) * 0.08; // flatten to disk
+        pos[i*3+2] = r * Math.cos(phi);
+        // Slightly varied warm/cool tints
+        const warm = Math.random();
+        col[i*3]   = 0.7 + warm * 0.3;
+        col[i*3+1] = 0.7 + warm * 0.1;
+        col[i*3+2] = 0.75 + (1 - warm) * 0.25;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({
+        vertexColors: true, size: 120, sizeAttenuation: true,
+        transparent: true, opacity: 0.45, depthWrite: false,
     });
-    scene.add(new THREE.Mesh(geoG, matG));
-
-    // Inner bulge glow
-    const geoI = new THREE.SphereGeometry(200, 16, 16);
-    const matI = new THREE.MeshBasicMaterial({
-        color: 0xffcc44, transparent: true, opacity: 0.15,
-        depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    scene.add(new THREE.Mesh(geoI, matI));
+    scene.add(new THREE.Points(geo, mat));
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-//  DISTANCE RINGS (GC-centered, galactic midplane)
+//  GALACTIC CENTER GLOW (Sgr A*)
+// ══════════════════════════════════════════════════════════════════════════
+(function buildGCGlow() {
+    [[1600, 0xff8800, 0.04], [600, 0xffcc44, 0.10], [120, 0xffffff, 0.18]].forEach(([r, c, o]) => {
+        const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(r, 16, 16),
+            new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o,
+                depthWrite: false, blending: THREE.AdditiveBlending })
+        );
+        scene.add(mesh);
+    });
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC COORDINATE GRID
+//  - Distance rings from GC (every 5 kly)
+//  - Galactic longitude radials from GC (every 30°)
+//  - Sun's orbital circle at 26,673 ly
 // ══════════════════════════════════════════════════════════════════════════
 const ringsGroup = new THREE.Group();
 scene.add(ringsGroup);
 
-const RING_RADII = [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000];
-const RING_COLORS = {
-    25000: 0x8866ff, // ~Sun's orbit
-    10000: 0x446688,
-    default: 0x223344,
-};
-
-RING_RADII.forEach(r => {
-    const geo = new THREE.RingGeometry(r - 20, r + 20, 128);
-    const col = r === 26673 ? 0x8866ff : (RING_RADII.indexOf(r) === 0 ? 0x446688 : 0x1a2a3a);
-    const mat = new THREE.MeshBasicMaterial({
-        color: col, side: THREE.DoubleSide,
-        transparent: true, opacity: r === 26673 ? 0.35 : 0.18,
-        depthWrite: false,
+// Distance rings (5, 10, 15 ... 50 kly)
+[5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000].forEach(r => {
+    const thick = Math.max(18, r * 0.0006);
+    const geo   = new THREE.RingGeometry(r - thick, r + thick, 192);
+    const isSun = r === 25000; // closest labeled ring to Sun's orbit
+    const mat   = new THREE.MeshBasicMaterial({
+        color: 0x1e3348, side: THREE.DoubleSide,
+        transparent: true, opacity: 0.28, depthWrite: false,
     });
     const ring = new THREE.Mesh(geo, mat);
-    ring.rotation.x = Math.PI / 2; // lay flat in XZ galactic plane
-    // GCC: ring is in galactic plane (y=0 galactic → scene y=0)
+    ring.rotation.x = Math.PI / 2;
     ringsGroup.add(ring);
 });
 
-// Sun's galactic orbit circle (approximate, ~26,673 ly radius)
-const sunOrbitGeo = new THREE.RingGeometry(26640, 26706, 256);
-const sunOrbitMat = new THREE.MeshBasicMaterial({
-    color: 0xffff88, side: THREE.DoubleSide,
-    transparent: true, opacity: 0.25,
-    depthWrite: false,
-});
-const sunOrbit = new THREE.Mesh(sunOrbitGeo, sunOrbitMat);
+// Sun's exact orbital circle — highlighted in yellow
+const sunOrbit = new THREE.Mesh(
+    new THREE.RingGeometry(26620, 26726, 256),
+    new THREE.MeshBasicMaterial({
+        color: 0xffee66, side: THREE.DoubleSide,
+        transparent: true, opacity: 0.30, depthWrite: false,
+    })
+);
 sunOrbit.rotation.x = Math.PI / 2;
 ringsGroup.add(sunOrbit);
 
+// Galactic longitude radials (every 30° = 12 lines from GC outward)
+for (let deg = 0; deg < 360; deg += 30) {
+    const rad = deg * Math.PI / 180;
+    const pts = [
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(52000 * Math.cos(rad), 0, 52000 * Math.sin(rad)),
+    ];
+    const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x112233, transparent: true, opacity: 0.4 })
+    );
+    ringsGroup.add(line);
+}
+
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC PLANE (faint mesh)
+//  GALACTIC PLANE (faint translucent sheet)
 // ══════════════════════════════════════════════════════════════════════════
-const planeGeo = new THREE.PlaneGeometry(120000, 120000, 1, 1);
-const planeMat = new THREE.MeshBasicMaterial({
-    color: 0x112233, side: THREE.DoubleSide,
-    transparent: true, opacity: 0.07,
-    depthWrite: false,
-});
-const galPlane = new THREE.Mesh(planeGeo, planeMat);
+const galPlane = new THREE.Mesh(
+    new THREE.PlaneGeometry(120000, 120000),
+    new THREE.MeshBasicMaterial({
+        color: 0x0a1a2a, side: THREE.DoubleSide,
+        transparent: true, opacity: 0.06, depthWrite: false,
+    })
+);
 galPlane.rotation.x = Math.PI / 2;
 scene.add(galPlane);
 
@@ -922,62 +1023,72 @@ const starSprites = {};
 const raycaster = new THREE.Raycaster();
 raycaster.params.Points.threshold = 5;
 
+// Base sphere radius (ly) used for geometry — this is tiny; updateLabelScales
+// scales it up adaptively so it's always clickable at any zoom level.
+// Keeping it small prevents the "blob cluster" problem at local zoom.
+const BASE_SPHERE_R = { sgr_a: 80, default: 0.15 };
+
+function hexToRgb(h) { return { r:(h>>16)&255, g:(h>>8)&255, b:h&255 }; }
+
 CATALOG.forEach(s => {
     const pos = s.pos3;
 
-    // ── Sphere mesh ─────────────────────────────────────────────
-    const radius = s.isGC ? 180 : (s.size * 2.5);
-    const geo = new THREE.SphereGeometry(radius, 16, 16);
+    // ── Raycasting sphere (tiny base, scaled adaptively) ────────
+    const baseR = s.isGC ? BASE_SPHERE_R.sgr_a : BASE_SPHERE_R.default;
+    const geo = new THREE.SphereGeometry(baseR, 8, 8);
     const mat = new THREE.MeshBasicMaterial({ color: s.color });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.copy(pos);
     mesh.userData.starId = s.id;
+    mesh.userData.baseR  = baseR;
     scene.add(mesh);
     starMeshes[s.id] = mesh;
 
     // ── Glow sprite ─────────────────────────────────────────────
+    // base glow = size * 0.6 ly (very small at local zoom — correct behavior)
+    // updateLabelScales ensures it scales up to remain visible at all zooms
     const glowCanvas = document.createElement('canvas');
-    glowCanvas.width = glowCanvas.height = 64;
+    glowCanvas.width = glowCanvas.height = 128;
     const gctx = glowCanvas.getContext('2d');
-    const grad = gctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-    const hexToRgb = h => ({ r: (h>>16)&255, g: (h>>8)&255, b: h&255 });
-    const rgb = hexToRgb(s.color);
-    grad.addColorStop(0,   `rgba(${rgb.r},${rgb.g},${rgb.b},0.9)`);
-    grad.addColorStop(0.3, `rgba(${rgb.r},${rgb.g},${rgb.b},0.4)`);
+    const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+    const rgb  = hexToRgb(s.color);
+    grad.addColorStop(0,   `rgba(${rgb.r},${rgb.g},${rgb.b},1.0)`);
+    grad.addColorStop(0.25,`rgba(${rgb.r},${rgb.g},${rgb.b},0.6)`);
+    grad.addColorStop(0.6, `rgba(${rgb.r},${rgb.g},${rgb.b},0.15)`);
     grad.addColorStop(1,   `rgba(${rgb.r},${rgb.g},${rgb.b},0.0)`);
     gctx.fillStyle = grad;
-    gctx.fillRect(0, 0, 64, 64);
+    gctx.fillRect(0, 0, 128, 128);
     const glowTex = new THREE.CanvasTexture(glowCanvas);
-    const glowMat = new THREE.SpriteMaterial({
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
         map: glowTex, transparent: true, depthWrite: false,
         blending: THREE.AdditiveBlending,
-    });
-    const glowSize = s.isGC ? 4000 : (s.size * 30 + (s.isCluster ? 200 : 0));
-    const glow = new THREE.Sprite(glowMat);
+    }));
     glow.position.copy(pos);
-    glow.scale.setScalar(glowSize);
+    // Initial scale set small — updateLabelScales corrects it each frame
+    const baseGlow = s.isGC ? 1200 : (s.size * 0.6 + (s.isCluster ? 5 : 0));
+    glow.scale.setScalar(baseGlow);
+    glow.userData.baseGlow = baseGlow;
     scene.add(glow);
     starGlows[s.id] = glow;
 
     // ── Text label sprite ───────────────────────────────────────
     const lCanvas = document.createElement('canvas');
-    lCanvas.width = 320; lCanvas.height = 64;
+    lCanvas.width = 512; lCanvas.height = 96;
     const lctx = lCanvas.getContext('2d');
-    lctx.font = 'bold 22px Segoe UI, sans-serif';
-    lctx.fillStyle = s.isGC ? '#ffaa44' : 'rgba(220,210,255,0.92)';
+    lctx.font = 'bold 32px Segoe UI, sans-serif';
+    lctx.fillStyle = s.isGC ? '#ffaa44' : 'rgba(230,220,255,0.95)';
     lctx.textAlign = 'left';
-    lctx.textBaseline = 'middle';
-    lctx.fillText(s.abbr, 8, 32);
-    // Spectral type badge
-    lctx.font = '14px Segoe UI, sans-serif';
-    lctx.fillStyle = 'rgba(150,140,200,0.75)';
-    lctx.fillText(s.type, 8, 50);
+    lctx.textBaseline = 'top';
+    lctx.fillText(s.abbr, 6, 4);
+    lctx.font = '22px Segoe UI, sans-serif';
+    lctx.fillStyle = 'rgba(160,145,210,0.80)';
+    lctx.fillText(s.type, 6, 44);
     const lTex = new THREE.CanvasTexture(lCanvas);
-    const lMat = new THREE.SpriteMaterial({ map: lTex, transparent: true, depthWrite: false });
-    const label = new THREE.Sprite(lMat);
-    const labelOffset = radius + 8;
-    label.position.set(pos.x + labelOffset, pos.y + labelOffset, pos.z);
-    label.scale.set(300, 60, 1);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: lTex, transparent: true, depthWrite: false,
+    }));
+    label.position.copy(pos);
+    label.scale.set(1, 0.19, 1); // placeholder; updated every frame
     scene.add(label);
     starLabels[s.id] = label;
 });
@@ -987,6 +1098,7 @@ CATALOG.forEach(s => {
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
 CATALOG.forEach(s => {
+    const distStr = s.isGC ? '0 ly' : fmtLy(s.dist);
     const div = document.createElement('div');
     div.className = 'star-item';
     div.id = 'li-' + s.id;
@@ -996,9 +1108,9 @@ CATALOG.forEach(s => {
             <div class="star-name">${s.name}</div>
             <div class="star-type">${s.type}</div>
         </div>
-        <div class="star-dist">${s.dist === 0 ? '—' : s.dist >= 1000 ? (s.dist/1000).toFixed(1)+'kly' : s.dist+' ly'}</div>
+        <div class="star-dist" title="Distance from Sun">${distStr}</div>
     `;
-    div.addEventListener('click', () => selectStar(s.id));
+    div.addEventListener('click', () => selectStar(s.id, true));
     starListEl.appendChild(div);
 });
 
@@ -1006,55 +1118,67 @@ CATALOG.forEach(s => {
 //  STAR SELECTION
 // ══════════════════════════════════════════════════════════════════════════
 let selectedId = null;
-const SELECTED_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: false });
 
-function selectStar(id) {
-    if (selectedId) {
+function selectStar(id, doFly = false) {
+    // Restore previous selection color
+    if (selectedId && starMeshes[selectedId]) {
         const prev = CATALOG.find(s => s.id === selectedId);
-        if (prev && starMeshes[prev.id]) {
-            starMeshes[prev.id].material.color.setHex(prev.color);
-        }
-        document.querySelectorAll('.star-item').forEach(el => el.classList.remove('selected'));
+        if (prev) starMeshes[selectedId].material.color.setHex(prev.color);
     }
+    document.querySelectorAll('.star-item').forEach(el => el.classList.remove('selected'));
+
     selectedId = id;
     const s = CATALOG.find(s => s.id === id);
     if (!s) return;
 
-    // Highlight mesh
+    // Highlight selected star white
     starMeshes[id].material.color.setHex(0xffffff);
     document.getElementById('li-' + id)?.classList.add('selected');
 
-    // Update HUD
+    // ── HUD update (scientific notation) ────────────────────────
     document.getElementById('hud-name').textContent = s.name;
     document.getElementById('hud-dist').textContent =
-        s.dist === 0 ? '0 ly (GC)' : s.dist >= 1000 ? (s.dist/1000).toFixed(2) + ' kly' : s.dist + ' ly';
-    document.getElementById('hud-l').textContent = s.isGC ? 'N/A' : s.l.toFixed(2) + '°';
-    document.getElementById('hud-b').textContent = s.isGC ? 'N/A' : s.b.toFixed(2) + '°';
+        s.isGC ? '0 ly (origin)' : fmtDist(s.dist);
+    document.getElementById('hud-l').textContent =
+        s.isGC ? 'N/A (origin)' : s.l.toFixed(4) + '°';
+    document.getElementById('hud-b').textContent =
+        s.isGC ? 'N/A (origin)' : s.b.toFixed(4) + '°';
     document.getElementById('hud-gc').textContent =
-        s.isGC ? '0 ly' : s.gcDist.toLocaleString() + ' ly';
+        s.isGC ? '0 ly' : fmtDist(s.gcDist);
 
-    // Update info panel
-    const panel = document.getElementById('info-panel');
-    let rowsHtml = s.props.map(([k, v]) => `
-        <div class="ip-row"><span class="ip-k">${k}</span><span class="ip-v">${v}</span></div>
-    `).join('');
+    // ── Info panel ───────────────────────────────────────────────
+    // Add computed galactic coordinate rows
+    const coordRows = s.isGC ? [] : [
+        ['Galactic l (longitude)', s.l.toFixed(4) + '°'],
+        ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
+        ['Distance from Sun', fmtDist(s.dist)],
+        ['Distance from GC',  fmtDist(s.gcDist)],
+        ['Scene coords (ly)',  `(${s.pos3.x.toFixed(1)}, ${s.pos3.y.toFixed(1)}, ${s.pos3.z.toFixed(1)})`],
+    ];
+    const allProps = [...coordRows, ...s.props];
+    const rowsHtml = allProps.map(([k, v]) =>
+        `<div class="ip-row"><span class="ip-k">${k}</span><span class="ip-v">${v}</span></div>`
+    ).join('');
     const linkHtml = s.link
-        ? `<a href="${s.link}" class="info-link" id="info-link">Open Simulation →</a>`
-        : `<a id="info-link" class="info-link hidden"></a>`;
-    panel.innerHTML = `
+        ? `<a href="${s.link}" class="info-link">Open Simulation →</a>` : '';
+
+    document.getElementById('info-panel').innerHTML = `
         <h3>${s.name}</h3>
         <div class="ip-type">${s.type}</div>
         <div style="font-size:10.5px;color:#888;margin:6px 0 8px;line-height:1.55">${s.desc}</div>
         ${rowsHtml}
         ${linkHtml}
     `;
+
+    // ── Fly camera near this object ──────────────────────────────
+    if (doFly) flyToStar(s);
 }
 
-// Select Sun by default
-selectStar('sun');
+// Select Sun initially (no fly — camera starts at galaxy view)
+selectStar('sun', false);
 
 // ══════════════════════════════════════════════════════════════════════════
-//  MOUSE PICKING (click on star spheres)
+//  MOUSE PICKING — click on any star sphere to select + fly
 // ══════════════════════════════════════════════════════════════════════════
 const mouse = new THREE.Vector2();
 let isPointerDown = false;
@@ -1077,11 +1201,10 @@ renderer.domElement.addEventListener('pointerup', e => {
 
     raycaster.setFromCamera(mouse, camera);
     const meshes = CATALOG.map(s => starMeshes[s.id]).filter(Boolean);
-    const hits = raycaster.intersectObjects(meshes);
+    const hits   = raycaster.intersectObjects(meshes);
     if (hits.length > 0) {
-        const hit = hits[0].object;
-        const id  = hit.userData.starId;
-        if (id) selectStar(id);
+        const id = hits[0].object.userData.starId;
+        if (id) selectStar(id, true); // true = fly to it
     }
 });
 
@@ -1143,70 +1266,72 @@ document.querySelectorAll('.nav-drop-btn').forEach(btn => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  COORD DISPLAY (show Sun's galactic coords in footer)
+//  COORD DISPLAY — camera position in heliocentric galactic coords
+//  (l, b relative to Sun; d_GC = distance of camera from Sgr A*)
 // ══════════════════════════════════════════════════════════════════════════
-// Sun is the reference, so its heliocentric l/b/d are 0/0/0.
-// Show camera's approximate galactic l/b from the Sun instead.
 function updateCoordDisplay() {
-    // Direction from Sun to camera (approximate galactic l/b)
-    const camRelSun = camera.position.clone().sub(SUN3);
-    const dist = camRelSun.length();
-    const l_rad = Math.atan2(camRelSun.z, -camRelSun.x); // GCC_x toward Sun = negative HGC_x
-    const b_rad = Math.atan2(camRelSun.y, Math.sqrt(camRelSun.x*camRelSun.x + camRelSun.z*camRelSun.z));
-    const l_deg = ((l_rad * 180 / Math.PI) + 360) % 360;
-    const b_deg = b_rad * 180 / Math.PI;
+    // Camera position relative to Sun (heliocentric galactic frame)
+    // scene_x = SUN_GC.x − HGC_x  ⟹  HGC_x = SUN_GC.x − scene_x
+    const hx =  SUN_GC.x - camera.position.x; // toward GC (l=0)
+    const hy =  camera.position.z - SUN_GC.z; // tangential (l=90°)
+    const hz =  camera.position.y - SUN_GC.y; // north (b=90°)
 
-    document.getElementById('cd-l').textContent = l_deg.toFixed(1) + '°';
-    document.getElementById('cd-b').textContent = b_deg.toFixed(1) + '°';
-    const distFromGC = camera.position.length();
-    document.getElementById('cd-dgc').textContent =
-        distFromGC >= 1000
-            ? (distFromGC / 1000).toFixed(1) + ' kly from GC'
-            : distFromGC.toFixed(0) + ' ly from GC';
+    const l_rad = Math.atan2(hy, hx);
+    const b_rad = Math.atan2(hz, Math.sqrt(hx*hx + hy*hy));
+    const l_deg = ((l_rad * 180 / Math.PI) + 360) % 360;
+    const b_deg =   b_rad * 180 / Math.PI;
+
+    document.getElementById('cd-l').textContent   = l_deg.toFixed(2) + '°';
+    document.getElementById('cd-b').textContent   = b_deg.toFixed(2) + '°';
+    document.getElementById('cd-dgc').textContent = fmtLy(camera.position.length()) + ' from GC';
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  LABEL SCALE — keep labels readable at all zoom levels
+//  ADAPTIVE SCALE — keep stars + labels visible and correctly sized
+//  at every zoom level without "blob cluster" artifacts.
+//
+//  Key insight: base sizes are tiny (0.15 ly sphere, 0.6 ly glow).
+//  We then ensure:
+//    sphere radius ≥ camDist × 0.004  (always clickable)
+//    glow radius   ≥ camDist × 0.010  (always visible dot)
+//    label width   = camDist × 0.055  (consistent screen fraction)
 // ══════════════════════════════════════════════════════════════════════════
 function updateLabelScales() {
-    const camDist = camera.position.distanceTo(controls.target);
-    const scale   = camDist * 0.012;
+    const camDist = Math.max(1, camera.position.distanceTo(controls.target));
 
     CATALOG.forEach(s => {
-        const lbl = starLabels[s.id];
+        // ── Sphere (raycasting target) ──────────────────────────
+        const mesh   = starMeshes[s.id];
+        const baseR  = mesh.userData.baseR;
+        const minR   = camDist * 0.004;
+        const drawR  = Math.max(baseR, minR);
+        if (mesh) mesh.scale.setScalar(drawR / baseR);
+
+        // ── Glow sprite ─────────────────────────────────────────
+        const glow     = starGlows[s.id];
+        const baseGlow = glow.userData.baseGlow;
+        const minGlow  = camDist * 0.012;
+        if (glow) glow.scale.setScalar(Math.max(baseGlow, minGlow));
+
+        // ── Label sprite ─────────────────────────────────────────
+        // Width = 5.5% of cam dist; height = 1.1% of cam dist (matches 512:96 canvas)
+        const lbl  = starLabels[s.id];
         if (lbl) {
-            lbl.scale.set(scale * 5, scale, 1);
-            const mesh = starMeshes[s.id];
-            if (mesh) {
-                const meshR = s.isGC ? 180 : s.size * 2.5;
-                lbl.position.set(
-                    s.pos3.x + meshR + scale * 0.5,
-                    s.pos3.y + scale * 0.5,
-                    s.pos3.z
-                );
-            }
-        }
-        // Scale glow to stay visible
-        const glow = starGlows[s.id];
-        if (glow) {
-            const baseSize = s.isGC ? 4000 : (s.size * 30);
-            const minSize  = camDist * 0.003;
-            glow.scale.setScalar(Math.max(baseSize, minSize));
-        }
-        // Scale star spheres so they're always pickable but not huge
-        const mesh = starMeshes[s.id];
-        if (mesh) {
-            const baseR = s.isGC ? 180 : s.size * 2.5;
-            const minR  = camDist * 0.003;
-            const newR  = Math.max(baseR, minR);
-            mesh.scale.setScalar(newR / (s.isGC ? 180 : s.size * 2.5));
+            const lw = camDist * 0.055;
+            const lh = lw * (96 / 512);
+            lbl.scale.set(lw, lh, 1);
+            // Offset: just to the right + slightly above the glow edge
+            const off = Math.max(drawR, baseGlow, minGlow) * 0.55 + lw * 0.04;
+            lbl.position.set(s.pos3.x + off, s.pos3.y + lh * 0.6, s.pos3.z);
         }
     });
 
-    // Scale arm labels
+    // ── Arm name labels ─────────────────────────────────────────
     armLabels.forEach(l => {
-        const sz = Math.max(1400, camDist * 0.05);
+        const sz = Math.max(800, camDist * 0.032);
         l.scale.set(sz * 4, sz, 1);
+        // Only show arm labels when zoomed out enough to be meaningful
+        l.visible = document.getElementById('tog-arms').checked && camDist > 3000;
     });
 }
 
@@ -1227,14 +1352,15 @@ let t = 0;
 
 function animate() {
     requestAnimationFrame(animate);
-    const dt = clock.getDelta();
-    t += dt;
+    t += clock.getDelta();
     controls.update();
 
-    // Gently pulse Sgr A* glow
-    if (starGlows['sgr_a']) {
-        const base = Math.max(4000, camera.position.length() * 0.003);
-        starGlows['sgr_a'].scale.setScalar(base * (1 + 0.12 * Math.sin(t * 1.8)));
+    // Gently pulse Sgr A* glow (independent of label-scale system)
+    const sgrGlow = starGlows['sgr_a'];
+    if (sgrGlow) {
+        const camD = camera.position.length();
+        const baseG = Math.max(sgrGlow.userData.baseGlow, camD * 0.012);
+        sgrGlow.scale.setScalar(baseG * (1 + 0.10 * Math.sin(t * 1.6)));
     }
 
     updateLabelScales();
@@ -1242,17 +1368,20 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// ── Initial camera position (local view, looking down at Sun) ────────────
-camera.position.copy(ZOOM_PRESETS.local.pos);
-controls.target.copy(ZOOM_PRESETS.local.target);
+// ── Start at galaxy view so the full context is visible immediately ───────
+camera.position.copy(ZOOM_PRESETS.galaxy.pos);
+controls.target.copy(ZOOM_PRESETS.galaxy.target);
 controls.update();
-document.getElementById('hud-view').textContent = '50 ly';
+// Mark galaxy button active
+document.getElementById('zoom-galaxy').classList.add('active');
+document.getElementById('zoom-local').classList.remove('active');
+document.getElementById('hud-view').textContent = fmtLy(ZOOM_PRESETS.galaxy.radius);
 
 animate();
 console.log('%c[Galactic Map · Celestial Simulator]', 'color:#a060ff;font-weight:bold;font-size:13px');
-console.log('Coordinate system: GCC (Galactic Center Cartesian)');
-console.log('Sgr A* at origin (0,0,0). Sun at (~26673, 20, 0) ly.');
-console.log('Objects: ' + CATALOG.length + ' entries loaded.');
+console.log('GCC: Sgr A* at (0,0,0). Sun at (26673, 20, 0) ly.');
+console.log('Orion arm aligned: ORION_OFFSET ≈ −7.111 rad, passes through Sun at 26,673 ly.');
+console.log(CATALOG.length + ' objects loaded. Click any star to fly to it.');
 </script>
 </body>
 </html>
