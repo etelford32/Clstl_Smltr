@@ -53,13 +53,18 @@
         .nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
         .nav-drop-btn.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
         .nav-drop-menu {
-            display: none; position: absolute; top: calc(100% + 4px); left: 0;
+            display: block; position: absolute; top: 100%; left: 0;
             background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
-            padding: 4px 0; min-width: 200px; z-index: 800;
-            box-shadow: 0 6px 24px rgba(0,0,0,.65);
+            padding: 8px 0 4px; min-width: 200px; z-index: 800;
+            box-shadow: 0 8px 28px rgba(0,0,0,.7);
+            opacity: 0; visibility: hidden; pointer-events: none;
+            transform: translateY(-6px);
+            transition: opacity .18s ease, visibility .18s ease, transform .18s ease;
         }
-        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu { display: block; }
+        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+            opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+        }
         .nav-drop-menu a {
             display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
             font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
@@ -87,11 +92,12 @@
             .nav-drop-menu {
                 position: static; box-shadow: none; border-radius: 4px;
                 background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0;
+                opacity: 1; visibility: hidden; pointer-events: none;
+                transform: none; transition: none; display: none;
             }
             .nav-drop-menu a { padding: 10px 22px; }
-            .nav-drop.open .nav-drop-menu { display: block; }
-            .nav-drop:hover .nav-drop-menu { display: none; }
-            .nav-drop.open .nav-drop-menu { display: block !important; }
+            .nav-drop:hover .nav-drop-menu { display: none; opacity: 1; visibility: hidden; }
+            .nav-drop.open .nav-drop-menu { display: block !important; visibility: visible; pointer-events: auto; }
         }
 
         .hero {
@@ -553,6 +559,7 @@
         });
         document.querySelectorAll('.nav-drop-btn').forEach(function(btn) {
             btn.addEventListener('click', function(e) {
+                if (window.innerWidth > 768) return; // desktop: CSS hover handles it
                 e.stopPropagation();
                 var drop = btn.closest('.nav-drop');
                 var opening = !drop.classList.contains('open');

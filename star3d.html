@@ -741,16 +741,17 @@
                         <input type="range" id="planetOrbitScale" min="0" max="400" value="100">
                         <span class="vdisp" id="planetOrbitScaleVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#888;margin:2px 0 4px 0">
-                        Scales all planet speeds simultaneously.
+                    <div style="font-size:10px;color:#888;margin:2px 0 6px 0">
+                        Global speed multiplier — scales all planets simultaneously.
                     </div>
                     <div class="btn-row">
                         <button id="camPlanetsOverview">Overview</button>
                         <button id="camPlanetsSysWide">System Wide</button>
                     </div>
-                    <div style="margin-top:8px;font-size:10px;color:#888;line-height:1.5">
-                        Orbit radii are visually scaled for clarity. Hound displayed at 22&thinsp;AU; true distance 120&thinsp;AU.
+                    <div style="margin-top:8px;font-size:10px;color:#777;line-height:1.5;padding:6px;background:rgba(255,255,255,0.03);border-radius:5px;border:1px solid rgba(255,255,255,0.06)">
+                        Orbit radii visually scaled for clarity. Hound shown at 22&thinsp;AU (true&thinsp;120&thinsp;AU).
                         Circumbinary stability cliff &approx;&thinsp;79&thinsp;AU.
+                        <br><span style="color:#a0d8ff">&#9432;</span> Speeds auto-set to <em>Visual</em> preset on load.
                     </div>
                 </div>
             </div>
@@ -761,10 +762,30 @@
             <div class="sb-section sp-only" style="display:none">
                 <div class="sb-title">Orbit Speed Controls <span style="font-size:10px;color:#FFD700">&#9883;</span></div>
                 <div class="sb-body">
-                    <div style="font-size:10px;color:#aaa;margin-bottom:8px;line-height:1.5">
-                        Each slider sets that body&rsquo;s individual orbit speed relative to the
-                        global clock &times; All&nbsp;Planets master. Default <strong style="color:#ffd700">1.0&times;</strong>
-                        = true Keplerian rate.
+
+                    <!-- ── Speed Presets (top — pick one, then fine-tune below) ── -->
+                    <div style="font-size:10px;font-weight:600;color:#aaa;margin-bottom:5px;letter-spacing:0.4px">SPEED PRESET</div>
+                    <div class="btn-row" style="margin-bottom:4px">
+                        <button id="btnPresetVisual"
+                            style="flex:1;background:rgba(100,180,255,0.18);border-color:rgba(100,200,255,0.5);color:#a0d8ff;font-weight:600"
+                            title="Slows inner planets, boosts Hound so every orbit is watchable">
+                            &#9654; Visual
+                        </button>
+                        <button id="btnPresetRealistic"
+                            title="All bodies at true Keplerian rates (inner planets will blur)"
+                            style="flex:1">
+                            Realistic 1:1
+                        </button>
+                    </div>
+                    <div style="font-size:10px;color:#666;margin-bottom:10px;line-height:1.45">
+                        <strong style="color:#a0d8ff">Visual</strong>: slows Cinder &amp; Ashring, accelerates Hound — all orbits watchable at once.
+                        &nbsp;<strong style="color:#ccc">Realistic</strong>: true Keplerian rates (inner planets too fast to see).
+                    </div>
+
+                    <div style="border-top:1px solid rgba(255,255,255,0.07);margin:6px 0 8px"></div>
+                    <div style="font-size:10px;color:#aaa;margin-bottom:6px;line-height:1.5">
+                        Fine-tune individual body speeds below.
+                        <span style="color:#666">Master multiplier &times; per-body = effective rate.</span>
                     </div>
 
                     <!-- ── Sirius A Inner System ── -->
@@ -777,28 +798,28 @@
                         <input type="range" id="spd_a1_cinder" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_a1_cinderVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;10.6&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.12&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;10.6&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.12&thinsp;AU &nbsp;&#124;&nbsp; rocky lava world</div>
 
                     <div class="ctrl-row">
                         <label style="color:#C8C4A0">Glass</label>
                         <input type="range" id="spd_a2_glass" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_a2_glassVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;46&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.32&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;46&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.32&thinsp;AU &nbsp;&#124;&nbsp; super-Earth</div>
 
                     <div class="ctrl-row">
                         <label style="color:#EEA040">Saffron</label>
                         <input type="range" id="spd_a3_saffron" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_a3_saffronVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;165&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.75&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;165&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.75&thinsp;AU &nbsp;&#124;&nbsp; haze world</div>
 
                     <div class="ctrl-row">
                         <label style="color:#6699EE">Bluecoil</label>
                         <input type="range" id="spd_a4_bluecoil" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_a4_bluecoilVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;1.41&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;1.60&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;1.41&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;1.60&thinsp;AU &nbsp;&#124;&nbsp; mini-Neptune</div>
 
                     <!-- ── Sirius B System ── -->
                     <div style="font-size:10px;font-weight:600;color:#A2C7FF;margin:8px 0 4px;letter-spacing:0.5px">
@@ -810,7 +831,7 @@
                         <input type="range" id="spd_b1_ashring" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_b1_ashringVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;0.67&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.015&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;0.67&thinsp;d &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;0.015&thinsp;AU &nbsp;&#124;&nbsp; tidal furnace</div>
 
                     <!-- ── Circumbinary ── -->
                     <div style="font-size:10px;font-weight:600;color:#AAD4EE;margin:8px 0 4px;letter-spacing:0.5px">
@@ -822,24 +843,13 @@
                         <input type="range" id="spd_cb1_hound" min="0" max="500" value="100">
                         <span class="vdisp" id="spd_cb1_houndVal">1.0&times;</span>
                     </div>
-                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;749&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;120&thinsp;AU</div>
+                    <div style="font-size:10px;color:#666;margin:-3px 0 5px 0">P&nbsp;=&nbsp;749&thinsp;yr &nbsp;&#124;&nbsp; a&nbsp;=&nbsp;120&thinsp;AU &nbsp;&#124;&nbsp; cold sentinel</div>
 
                     <!-- ── Reset button ── -->
                     <div class="btn-row" style="margin-top:10px">
                         <button id="btnResetSpeeds" style="width:100%;background:rgba(255,215,0,0.08);border-color:rgba(255,215,0,0.3)">
-                            &#8634; Reset All Speeds to 1.0&times;
+                            &#8634; Reset All to 1.0&times;
                         </button>
-                    </div>
-
-                    <!-- ── Preset buttons ── -->
-                    <div style="font-size:10px;color:#888;margin:8px 0 4px">Speed Presets:</div>
-                    <div class="btn-row">
-                        <button id="btnPresetRealistic" title="All bodies at true Keplerian rates">Realistic</button>
-                        <button id="btnPresetVisual" title="Scale for visual interest: Hound and binary accelerated, fast planets slowed">Visual</button>
-                    </div>
-                    <div style="font-size:10px;color:#666;margin-top:4px;line-height:1.4">
-                        <em>Realistic</em>: all 1.0&times;. &nbsp;
-                        <em>Visual</em>: slows Cinder/Ashring, boosts Hound &amp; binary so all orbits are watchable.
                     </div>
                 </div>
             </div>
@@ -3667,6 +3677,14 @@
                 controls.target.set(0, 0, 0);
             }
 
+            // Auto-apply Visual Preset when entering Planetary Fantasy so planets are
+            // immediately watchable (at true Keplerian rates, inner planets blur and
+            // Hound is essentially stationary — Visual preset balances all speeds).
+            if (isSirPlan) {
+                const btnV = document.getElementById('btnPresetVisual');
+                if (btnV) btnV.click();
+            }
+
             // Particle cleanup
             if (!isDefault) {
                 defaultParticles.forEach(p => defaultGroup.remove(p.mesh));
@@ -3998,6 +4016,11 @@
                 state.bodySpeed[p.id] = parseInt(e.target.value) / 100;
                 document.getElementById(valId).textContent =
                     state.bodySpeed[p.id].toFixed(2) + '\u00d7';
+                // Manual tweak → clear preset highlight (custom config)
+                const bV = document.getElementById('btnPresetVisual');
+                const bR = document.getElementById('btnPresetRealistic');
+                if (bV) bV.style.boxShadow = '';
+                if (bR) bR.style.boxShadow = '';
             });
         });
 
@@ -4021,9 +4044,28 @@
             });
         });
 
+        // ── Preset active-state helper ──────────────────────────────────────
+        function setSpeedPresetActive(which) {
+            const bV = document.getElementById('btnPresetVisual');
+            const bR = document.getElementById('btnPresetRealistic');
+            if (!bV || !bR) return;
+            const VISUAL_ON  = 'background:rgba(100,180,255,0.28);border-color:rgba(100,200,255,0.7);color:#c0e8ff;font-weight:700';
+            const VISUAL_OFF = 'background:rgba(100,180,255,0.18);border-color:rgba(100,200,255,0.5);color:#a0d8ff;font-weight:600';
+            const REAL_ON    = 'background:rgba(255,215,0,0.18);border-color:rgba(255,215,0,0.5);color:#ffd700;font-weight:700';
+            const REAL_OFF   = '';
+            if (which === 'visual') {
+                bV.setAttribute('style', VISUAL_ON);
+                bR.setAttribute('style', REAL_OFF);
+            } else {
+                bV.setAttribute('style', VISUAL_OFF);
+                bR.setAttribute('style', REAL_ON);
+            }
+        }
+
         // ── Speed preset: Realistic (all 1.0×) ─────────────────────────────
         document.getElementById('btnPresetRealistic').addEventListener('click', () => {
             document.getElementById('btnResetSpeeds').click();  // reuse reset logic
+            setSpeedPresetActive('realistic');
         });
 
         // ── Speed preset: Visual (all orbits watchable) ─────────────────────
@@ -4061,6 +4103,7 @@
                 const vEl = document.getElementById('spd_' + id + 'Val');
                 if (vEl) vEl.textContent = spd.toFixed(2) + '\u00d7';
             });
+            setSpeedPresetActive('visual');
         });
 
         // Planet camera presets
