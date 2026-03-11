@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Galactic Map — Celestial Simulator</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ─── Nav ─────────────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:48px; min-height:48px;
+    background:rgba(4,2,16,.92); backdrop-filter:blur(14px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 14px; gap:8px;
+}
+.nav-brand {
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+}
+.nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.nav-item {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s;
+}
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+.nav-drop { position:relative; }
+.nav-drop-btn {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s; white-space:nowrap;
+}
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#000; font-weight:600; }
+.nav-drop-menu {
+    display:block; position:absolute; top:100%; left:0;
+    background:rgba(4,2,18,.97); backdrop-filter:blur(12px);
+    border:1px solid rgba(255,255,255,.11); border-radius:6px;
+    padding:8px 0 4px; min-width:180px; z-index:800;
+    box-shadow:0 8px 28px rgba(0,0,0,.7);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:translateY(-6px);
+    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
+}
+.nav-drop-menu a {
+    display:block; padding:9px 14px; color:#bbb; text-decoration:none;
+    font-size:.82rem; white-space:nowrap; transition:all .15s;
+}
+.nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#a060ff; font-weight:600; }
+.nav-burger {
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1; transition:background .2s;
+}
+.nav-burger:hover { background:rgba(255,255,255,.18); }
+@media (max-width:768px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:48px; left:0; right:0;
+        background:rgba(3,1,14,.97); backdrop-filter:blur(14px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 12px; gap:4px; z-index:700;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; background:rgba(255,255,255,.04);
+        display:none; opacity:1; visibility:visible; transform:none; transition:none; pointer-events:auto;
+    }
+    .nav-drop-menu a { padding:10px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none !important; }
+    .nav-drop.open .nav-drop-menu { display:block !important; }
+}
+
+/* ─── App shell ───────────────────────────────────────────────── */
+#app {
+    position:relative; width:100%; height:calc(100vh - 48px);
+    display:flex; overflow:hidden;
+}
+#canvas-wrap {
+    flex:1; position:relative;
+    background:radial-gradient(ellipse at 50% 50%, #000005 0%, #00000a 60%, #000 100%);
+}
+canvas { display:block; width:100% !important; height:100% !important; }
+
+/* ─── HUD (top-left) ─────────────────────────────────────────── */
+#hud {
+    position:absolute; top:14px; left:14px; z-index:100;
+    background:rgba(0,0,0,0.72); border:1px solid rgba(160,120,255,0.25);
+    border-radius:10px; padding:12px 16px; backdrop-filter:blur(8px);
+    pointer-events:none; font-size:12px; line-height:1.6; min-width:220px;
+}
+#hud h3 { margin:0 0 6px; font-size:14px; color:#c090ff; }
+#hud .label { color:#777; font-size:10px; }
+#hud .val { color:#a0d8ff; font-weight:600; }
+#hud .sep { border-top:1px solid rgba(255,255,255,0.07); margin:6px 0; }
+
+/* ─── Zoom Toolbar (bottom-centre) ──────────────────────────── */
+#zoom-bar {
+    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+    display:flex; gap:6px; z-index:100;
+}
+#zoom-bar button {
+    background:rgba(0,0,0,0.75); border:1px solid rgba(255,255,255,0.18);
+    border-radius:6px; color:#ccc; padding:6px 14px; font-size:11px;
+    cursor:pointer; font-family:inherit; transition:all .18s;
+    backdrop-filter:blur(8px);
+}
+#zoom-bar button:hover { background:rgba(160,100,255,0.25); border-color:#a060ff; color:#fff; }
+#zoom-bar button.active { background:rgba(160,100,255,0.35); border-color:#c090ff; color:#fff; font-weight:600; }
+
+/* ─── Coord crosshair display (bottom-left) ─────────────────── */
+#coord-display {
+    position:absolute; bottom:18px; left:14px; z-index:100;
+    background:rgba(0,0,0,0.65); border:1px solid rgba(255,255,255,0.1);
+    border-radius:7px; padding:8px 12px; font-size:11px; color:#888;
+    backdrop-filter:blur(6px); pointer-events:none; line-height:1.7;
+}
+#coord-display span { color:#a0d8ff; }
+
+/* ─── Sidebar ─────────────────────────────────────────────────── */
+#sidebar {
+    width:290px; min-width:290px;
+    background:rgba(6,4,20,0.97);
+    border-left:1px solid rgba(160,100,255,0.15);
+    overflow-y:auto; overflow-x:hidden;
+    padding:14px; font-size:12px; z-index:200;
+    transition:margin-right .3s ease, opacity .3s ease;
+}
+#sidebar.collapsed { margin-right:-290px; opacity:0; pointer-events:none; }
+#sidebar-toggle {
+    position:absolute; top:14px; right:14px; z-index:300;
+    background:rgba(0,0,0,0.7); border:1px solid rgba(160,100,255,0.35);
+    color:#c090ff; padding:5px 11px; border-radius:6px; cursor:pointer;
+    font-size:12px; font-family:inherit; backdrop-filter:blur(8px);
+    transition:all .2s;
+}
+#sidebar-toggle:hover { background:rgba(160,100,255,0.2); }
+
+/* sidebar section */
+.sb-hd {
+    font-size:10px; font-weight:700; color:#7766aa; letter-spacing:1px;
+    text-transform:uppercase; margin:14px 0 6px;
+    padding-bottom:4px; border-bottom:1px solid rgba(255,255,255,0.06);
+}
+.sb-hd:first-child { margin-top:0; }
+
+/* star list items */
+.star-item {
+    display:flex; align-items:center; gap:8px;
+    padding:7px 9px; border-radius:7px; cursor:pointer;
+    transition:background .15s; margin-bottom:2px;
+    border:1px solid transparent;
+}
+.star-item:hover { background:rgba(255,255,255,.06); }
+.star-item.selected { background:rgba(160,100,255,.15); border-color:rgba(160,100,255,.4); }
+.star-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.star-name { font-weight:600; font-size:11.5px; }
+.star-type { font-size:10px; color:#666; }
+.star-dist { font-size:10px; color:#888; margin-left:auto; white-space:nowrap; }
+
+/* info panel */
+#info-panel {
+    background:rgba(255,255,255,.03); border:1px solid rgba(160,100,255,.15);
+    border-radius:8px; padding:12px; margin-top:8px;
+}
+#info-panel h3 { font-size:14px; color:#e0d0ff; margin-bottom:2px; }
+#info-panel .ip-type { font-size:11px; color:#888; margin-bottom:8px; }
+.ip-row { display:flex; justify-content:space-between; padding:2px 0;
+    border-bottom:1px solid rgba(255,255,255,.04); font-size:11px; }
+.ip-row .ip-k { color:#888; }
+.ip-row .ip-v { color:#a0d8ff; }
+#info-link {
+    display:inline-block; margin-top:10px; padding:5px 12px;
+    background:rgba(160,100,255,.2); border:1px solid rgba(160,100,255,.4);
+    border-radius:5px; color:#c090ff; text-decoration:none; font-size:11px;
+    transition:all .15s;
+}
+#info-link:hover { background:rgba(160,100,255,.35); }
+#info-link.hidden { display:none; }
+
+/* checkbox/toggle row */
+.tog-row { display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer; }
+.tog-row input { accent-color:#a060ff; }
+.tog-row label { font-size:11px; color:#bbb; cursor:pointer; }
+
+/* legend */
+.legend-item { display:flex; align-items:center; gap:6px; margin:3px 0; font-size:10px; color:#888; }
+.legend-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+</style>
+</head>
+<body>
+<nav>
+    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu">☰</button>
+    <div class="nav-menu" id="nav-menu">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-3d">
+            <button class="nav-drop-btn active">3D Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="galactic-map.html" class="active">Galactic Map</a>
+                <a href="threejs.html">Solar System</a>
+                <a href="star3d.html">Sirius Planetary Fantasy</a>
+                <a href="sun.html">The Sun</a>
+                <a href="sirius.html">Sirius System</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
+                <a href="wr102.html">WR-102</a>
+                <a href="vega.html">Vega</a>
+            </div>
+        </div>
+        <a href="star2d.html"          class="nav-item">2D Star</a>
+        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
+        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <a href="rust.html"            class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
+
+<div id="app">
+    <div id="canvas-wrap">
+        <!-- HUD top-left -->
+        <div id="hud">
+            <h3>⬡ Galactic Map</h3>
+            <div><span class="label">Selected: </span><span class="val" id="hud-name">—</span></div>
+            <div><span class="label">Dist from Sun: </span><span class="val" id="hud-dist">—</span></div>
+            <div class="sep"></div>
+            <div><span class="label">Galactic l: </span><span class="val" id="hud-l">—</span></div>
+            <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
+            <div class="sep"></div>
+            <div><span class="label">Dist from GC: </span><span class="val" id="hud-gc">—</span></div>
+            <div><span class="label">View radius: </span><span class="val" id="hud-view">—</span></div>
+        </div>
+
+        <!-- Sidebar toggle -->
+        <button id="sidebar-toggle">☰ Panel</button>
+
+        <!-- Zoom presets (bottom-centre) -->
+        <div id="zoom-bar">
+            <button id="zoom-local" class="active">Local (&lt;50 ly)</button>
+            <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
+            <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
+            <button id="zoom-galaxy">Galaxy</button>
+        </div>
+
+        <!-- Coord display (bottom-left) -->
+        <div id="coord-display">
+            Galactic coords (heliocentric) &nbsp;|&nbsp;
+            l = <span id="cd-l">0.000°</span> &nbsp;
+            b = <span id="cd-b">0.000°</span> &nbsp;
+            d<sub>GC</sub> = <span id="cd-dgc">26,673 ly</span>
+        </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <div class="sb-hd">Galactic Objects</div>
+        <div id="star-list"></div>
+
+        <div class="sb-hd" style="margin-top:16px">Selected Object</div>
+        <div id="info-panel">
+            <div style="color:#555;font-size:11px;text-align:center;padding:10px 0">
+                Click a star to see details
+            </div>
+        </div>
+
+        <div class="sb-hd" style="margin-top:16px">Display</div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-galaxy" checked>
+            <label for="tog-galaxy">Galaxy background</label>
+        </div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-grid" checked>
+            <label for="tog-grid">GC distance rings</label>
+        </div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-arms" checked>
+            <label for="tog-arms">Arm labels</label>
+        </div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-labels" checked>
+            <label for="tog-labels">Star labels</label>
+        </div>
+        <div class="tog-row">
+            <input type="checkbox" id="tog-plane" checked>
+            <label for="tog-plane">Galactic plane</label>
+        </div>
+
+        <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ccddff"></div>A — white/blue-white</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffffee"></div>F — yellow-white</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffff88"></div>G — yellow (Sun-like)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffaa44"></div>K — orange</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff4400"></div>M — red</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aaddff;opacity:.7"></div>Cluster / other</div>
+
+        <div class="sb-hd" style="margin-top:16px">Coordinate Reference</div>
+        <div style="font-size:10px;color:#666;line-height:1.6">
+            <strong style="color:#999">Galactic longitude (l):</strong> 0° = toward Sgr A*, 90° = rotation direction.<br>
+            <strong style="color:#999">Galactic latitude (b):</strong> 0° = galactic plane, +90° = north pole.<br>
+            <strong style="color:#999">Origin:</strong> Sagittarius A* (Galactic Center).<br>
+            <strong style="color:#999">Sun–GC distance:</strong> 26,673 ly (8.178 kpc).<br>
+            Drag to orbit · Scroll to zoom · Click stars to select.
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC COORDINATE SYSTEM
+//  Coordinate convention (GCC = Galactic Center Cartesian):
+//    GCC_x : from Sgr A* toward the Sun (galactic "anticenter" direction)
+//    GCC_y : tangential (direction of galactic rotation)
+//    GCC_z : toward north galactic pole
+//
+//  Three.js mapping (Y-up):
+//    THREE.x = GCC_x
+//    THREE.y = GCC_z   (north pole = up in scene)
+//    THREE.z = GCC_y   (tangential = depth)
+//
+//  Sun is at GCC ≈ (26673, 0, 20) ly
+//  Heliocentric galactic → GCC:
+//    GCC = (SUN_GC.x − HGC_x, SUN_GC.y + HGC_y, SUN_GC.z + HGC_z)
+//    (sign flip on x because l=0 from Sun points TOWARD GC, so GCC_x increases away)
+// ══════════════════════════════════════════════════════════════════════════
+
+const SUN_GC = new THREE.Vector3(26673, 20, 0); // Sun in GCC (ly)
+
+function helioToGCC(l_deg, b_deg, dist_ly) {
+    const l = l_deg * Math.PI / 180;
+    const b = b_deg * Math.PI / 180;
+    // Heliocentric Galactic Cartesian (HGC): x→GC, y→l=90°, z→north
+    const hx = dist_ly * Math.cos(b) * Math.cos(l);
+    const hy = dist_ly * Math.cos(b) * Math.sin(l);
+    const hz = dist_ly * Math.sin(b);
+    // Convert to GCC
+    return new THREE.Vector3(
+        SUN_GC.x - hx,   // toward Sun means away from GC direction in HGC
+        SUN_GC.y + hz,   // up (galactic north pole) → y in GCC
+        SUN_GC.z + hy    // tangential
+    );
+}
+
+function gccToThree(gcc) {
+    // GCC → Three.js: x stays, y_gcc (north pole) → THREE.y, z_gcc (tangential) → THREE.z
+    return new THREE.Vector3(gcc.x, gcc.y, gcc.z);
+}
+
+function starPos(l_deg, b_deg, dist_ly) {
+    return gccToThree(helioToGCC(l_deg, b_deg, dist_ly));
+}
+
+// ─── Star & object catalog ───────────────────────────────────────────────
+// All positions: heliocentric galactic (l°, b°, distance ly)
+const CATALOG = [
+    {
+        id: 'sgr_a', name: 'Sagittarius A*', abbr: 'Sgr A*', type: 'SMBH',
+        l: 0, b: 0, dist: 26673,      // GC — placed at origin
+        gcDist: 0,
+        temp: 0, spectral: 'SMBH',
+        color: 0xffaa00, glowColor: 0xff6600, size: 4.0,
+        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉.',
+        props: [
+            ['Mass', '4.15 × 10⁶ M☉'],
+            ['Schwarzschild radius', '~0.08 AU'],
+            ['Distance from Sun', '26,673 ly (8.178 kpc)'],
+            ['Type', 'Supermassive Black Hole'],
+        ],
+        link: null, isGC: true,
+    },
+    {
+        id: 'sun', name: 'Sol (The Sun)', abbr: 'Sun', type: 'G2V',
+        l: 0, b: 0, dist: 0,
+        gcDist: 26673,
+        temp: 5778, spectral: 'G',
+        color: 0xffee88, size: 1.2,
+        desc: 'Our home star. G-type main sequence. The galactic coordinate system\'s reference origin.',
+        props: [
+            ['Spectral type', 'G2V'],
+            ['Temperature', '5,778 K'],
+            ['Mass', '1.0 M☉'],
+            ['Luminosity', '1.0 L☉'],
+            ['Galactic l / b', '— / — (origin)'],
+            ['Dist from GC', '26,673 ly'],
+        ],
+        link: 'sun.html',
+    },
+    {
+        id: 'alpha_cen', name: 'α Centauri', abbr: 'α Cen', type: 'G2V+K1V',
+        l: 315.78, b: -0.68, dist: 4.37,
+        gcDist: 26670,
+        temp: 5790, spectral: 'G',
+        color: 0xffee88, size: 0.85,
+        desc: 'Nearest star system to the Sun at 4.37 ly. Triple system: α Cen A (G2V), α Cen B (K1V), and Proxima Centauri (M5.5Ve) — the actual nearest star at 4.24 ly.',
+        props: [
+            ['Spectral type', 'G2V + K1V + M5.5Ve'],
+            ['Distance', '4.37 ly'],
+            ['Galactic l / b', '315.78° / −0.68°'],
+            ['Combined luminosity', '~1.7 L☉'],
+            ['Proxima dist.', '4.24 ly (nearest)'],
+        ],
+        link: null,
+    },
+    {
+        id: 'sirius', name: 'Sirius', abbr: 'Sirius', type: 'A1V+DA2',
+        l: 227.23, b: -8.89, dist: 8.61,
+        gcDist: 26672,
+        temp: 9940, spectral: 'A',
+        color: 0xbbddff, size: 1.4,
+        desc: 'Brightest star in Earth\'s night sky. Binary: Sirius A (A1V, 2.06 M☉) + Sirius B (DA2 white dwarf, 1.018 M☉). Part of the Canis Major OB1 association.',
+        props: [
+            ['Spectral type', 'A1V + DA2 (WD)'],
+            ['Distance', '8.61 ly'],
+            ['Galactic l / b', '227.23° / −8.89°'],
+            ['Temperature (A)', '9,940 K'],
+            ['Luminosity (A)', '25.4 L☉'],
+            ['Orbital period', '50.13 yr'],
+        ],
+        link: 'sirius.html',
+    },
+    {
+        id: 'eps_eri', name: 'ε Eridani', abbr: 'ε Eri', type: 'K2V',
+        l: 208.98, b: -48.84, dist: 10.52,
+        gcDist: 26668,
+        temp: 5084, spectral: 'K',
+        color: 0xffaa55, size: 0.75,
+        desc: 'Nearby K-type star with confirmed debris disk and planetary companions. Long-time SETI target (Project Ozma, 1960). Age ~800 Myr — relatively young.',
+        props: [
+            ['Spectral type', 'K2V'],
+            ['Distance', '10.52 ly'],
+            ['Galactic l / b', '208.98° / −48.84°'],
+            ['Temperature', '5,084 K'],
+            ['Mass', '0.83 M☉'],
+            ['Planets', 'Candidate system + debris disk'],
+        ],
+        link: null,
+    },
+    {
+        id: 'procyon', name: 'Procyon', abbr: 'Procyon', type: 'F5IV-V',
+        l: 213.70, b: 13.02, dist: 11.46,
+        gcDist: 26669,
+        temp: 6530, spectral: 'F',
+        color: 0xfff0cc, size: 0.9,
+        desc: 'Eighth-brightest star in the sky. F5 subgiant evolving off the main sequence. Binary: Procyon B is a white dwarf (DQZ spectral type). 11.46 ly from Sun.',
+        props: [
+            ['Spectral type', 'F5 IV-V + DQZ'],
+            ['Distance', '11.46 ly'],
+            ['Galactic l / b', '213.70° / +13.02°'],
+            ['Temperature', '6,530 K'],
+            ['Luminosity', '6.93 L☉'],
+            ['Radius', '2.05 R☉'],
+        ],
+        link: null,
+    },
+    {
+        id: 'tau_ceti', name: 'τ Ceti', abbr: 'τ Cet', type: 'G8.5V',
+        l: 173.10, b: -73.44, dist: 11.91,
+        gcDist: 26668,
+        temp: 5344, spectral: 'G',
+        color: 0xffee88, size: 0.72,
+        desc: 'Sun-like star at 11.91 ly. Notable SETI candidate — one of two stars targeted by Project Ozma (1960). Candidate multiplanet system with up to 5 exoplanets (tau Ceti e & f in habitable zone). High debris disk mass.',
+        props: [
+            ['Spectral type', 'G8.5V'],
+            ['Distance', '11.91 ly'],
+            ['Galactic l / b', '173.10° / −73.44°'],
+            ['Temperature', '5,344 K'],
+            ['Mass', '0.783 M☉'],
+            ['Exoplanets', '3–5 candidates'],
+        ],
+        link: null,
+    },
+    {
+        id: 'vega', name: 'Vega', abbr: 'Vega', type: 'A0Va',
+        l: 67.45, b: 19.21, dist: 25.05,
+        gcDist: 26655,
+        temp: 9602, spectral: 'A',
+        color: 0xddeeff, size: 1.2,
+        desc: 'Fifth-brightest star. Rapidly rotating A-type star — equatorial diameter 19% larger than polar. Once the pole star (~12,000 BCE) and will be again (~13,700 CE). Has a prominent debris disk.',
+        props: [
+            ['Spectral type', 'A0Va'],
+            ['Distance', '25.05 ly'],
+            ['Galactic l / b', '67.45° / +19.21°'],
+            ['Temperature', '9,602 K'],
+            ['Luminosity', '40.1 L☉'],
+            ['Rotation period', '~17 hr (oblate)'],
+        ],
+        link: 'vega.html',
+    },
+    {
+        id: 'aldebaran', name: 'Aldebaran', abbr: 'Aldebaran', type: 'K5III',
+        l: 180.25, b: -20.07, dist: 65.3,
+        gcDist: 26676,
+        temp: 3910, spectral: 'K',
+        color: 0xff8833, size: 1.8,
+        desc: '"Eye of the Bull" in Taurus. K-type red giant, 44× solar radius. Nearing the end of its life — will eventually expel a planetary nebula. Not physically part of the Hyades cluster (much closer).',
+        props: [
+            ['Spectral type', 'K5 III'],
+            ['Distance', '65.3 ly'],
+            ['Galactic l / b', '180.25° / −20.07°'],
+            ['Temperature', '3,910 K'],
+            ['Radius', '44.2 R☉'],
+            ['Luminosity', '439 L☉'],
+        ],
+        link: null,
+    },
+    {
+        id: 'betelgeuse', name: 'Betelgeuse', abbr: 'Betelgeuse', type: 'M1-2 Ia',
+        l: 199.79, b: -8.96, dist: 700,
+        gcDist: 26992,
+        temp: 3500, spectral: 'M',
+        color: 0xff3300, size: 2.8,
+        desc: 'Massive red supergiant in Orion. Among the largest known stars (~764 R☉). Supernova candidate — likely within next 100,000 years. The 2019–2020 "Great Dimming" was caused by a mass ejection and dust condensation.',
+        props: [
+            ['Spectral type', 'M1–M2 Ia (RSG)'],
+            ['Distance', '~700 ly'],
+            ['Galactic l / b', '199.79° / −8.96°'],
+            ['Temperature', '3,500 K'],
+            ['Radius', '~764 R☉'],
+            ['Luminosity', '~126,000 L☉'],
+        ],
+        link: 'betelgeuse.html',
+    },
+    {
+        id: 'pleiades', name: 'Pleiades (M45)', abbr: 'Pleiades', type: 'Open Cluster',
+        l: 166.47, b: -23.52, dist: 444,
+        gcDist: 26840,
+        temp: 20000, spectral: 'B',
+        color: 0x88aaff, size: 2.5,
+        desc: 'Iconic open star cluster in Taurus. ~1,000 stars dominated by hot B-type blue giants. Age ~100 Myr. Distance ~444 ly (Gaia DR3). The "Seven Sisters" are the seven brightest members.',
+        props: [
+            ['Type', 'Open Cluster (B-type)'],
+            ['Distance', '~444 ly'],
+            ['Galactic l / b', '166.47° / −23.52°'],
+            ['Star count', '~1,000'],
+            ['Age', '~100 Myr'],
+            ['Diameter', '~17.5 ly'],
+        ],
+        link: null, isCluster: true,
+    },
+    {
+        id: 'deneb', name: 'Deneb', abbr: 'Deneb', type: 'A2 Ia',
+        l: 84.22, b: 2.09, dist: 2600,
+        gcDist: 26085,
+        temp: 8525, spectral: 'A',
+        color: 0xccddff, size: 2.2,
+        desc: 'Luminous blue-white supergiant at the tail of Cygnus. One of the most intrinsically luminous stars visible to the naked eye (~196,000 L☉). Despite being ~2,600 ly away, still one of the brightest stars in the sky.',
+        props: [
+            ['Spectral type', 'A2 Ia'],
+            ['Distance', '~2,600 ly'],
+            ['Galactic l / b', '84.22° / +2.09°'],
+            ['Temperature', '8,525 K'],
+            ['Radius', '~203 R☉'],
+            ['Luminosity', '~196,000 L☉'],
+        ],
+        link: null,
+    },
+];
+
+// Pre-compute Three.js positions
+CATALOG.forEach(s => {
+    if (s.isGC) {
+        s.pos3 = new THREE.Vector3(0, 0, 0); // Sgr A* at origin
+    } else {
+        s.pos3 = starPos(s.l, s.b, s.dist);
+    }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  THREE.JS SETUP
+// ══════════════════════════════════════════════════════════════════════════
+const container = document.getElementById('canvas-wrap');
+const W = () => container.clientWidth;
+const H = () => container.clientHeight;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W(), H());
+renderer.setClearColor(0x000005, 1);
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 2_000_000);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.screenSpacePanning = false;
+controls.minDistance = 1;
+controls.maxDistance = 400_000;
+
+// ── Zoom presets ────────────────────────────────────────────────────────
+const SUN3 = SUN_GC.clone(); // Sun position in three.js coords
+
+const ZOOM_PRESETS = {
+    local: {
+        pos: new THREE.Vector3(SUN3.x, 60, SUN3.z + 10),
+        target: SUN3.clone(),
+        label: 'Local (<50 ly)', radius: 50,
+    },
+    hood: {
+        pos: new THREE.Vector3(SUN3.x, 1200, SUN3.z),
+        target: SUN3.clone(),
+        label: 'Neighborhood (<1 kly)', radius: 1000,
+    },
+    arm: {
+        pos: new THREE.Vector3(SUN3.x - 2000, 12000, SUN3.z + 3000),
+        target: SUN3.clone(),
+        label: 'Local Arm (<10 kly)', radius: 10000,
+    },
+    galaxy: {
+        pos: new THREE.Vector3(20000, 80000, 20000),
+        target: new THREE.Vector3(0, 0, 0),
+        label: 'Galaxy', radius: 100000,
+    },
+};
+
+let currentZoom = 'local';
+
+function flyTo(preset, duration = 1200) {
+    const { pos, target } = ZOOM_PRESETS[preset];
+    const startPos    = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const t0 = performance.now();
+
+    function step(now) {
+        const t = Math.min((now - t0) / duration, 1);
+        const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // ease-in-out quad
+        camera.position.lerpVectors(startPos, pos, ease);
+        controls.target.lerpVectors(startTarget, target, ease);
+        controls.update();
+        if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+
+    // Update zoom button states
+    currentZoom = preset;
+    document.querySelectorAll('#zoom-bar button').forEach(b => b.classList.remove('active'));
+    document.getElementById('zoom-' + preset).classList.add('active');
+
+    // Update HUD view radius
+    document.getElementById('hud-view').textContent =
+        ZOOM_PRESETS[preset].radius >= 1000
+            ? (ZOOM_PRESETS[preset].radius / 1000).toFixed(0) + ' kly'
+            : ZOOM_PRESETS[preset].radius + ' ly';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALAXY PARTICLE SYSTEM
+// ══════════════════════════════════════════════════════════════════════════
+function buildGalaxy() {
+    const N = 90000;
+    const positions = new Float32Array(N * 3);
+    const colors    = new Float32Array(N * 3);
+    const sizes     = new Float32Array(N);
+
+    const GALAXY_R   = 50000;  // ly
+    const BULGE_R    = 4000;
+    const DISK_H     = 800;    // ly scale height
+    const PITCH      = Math.tan(13 * Math.PI / 180); // 13° pitch
+    const N_ARMS     = 4;
+    // Arm starting angles (radians). Arm index 2 (Orion arm) starts so it
+    // passes near the Sun at GCC (26673, 0, 0).
+    // r = r0 * exp(PITCH * theta); Sun at r=26673, arm_start_r = 5500:
+    //   26673/5500 = exp(PITCH * theta) → theta = ln(4.85)/PITCH ≈ 6.69 rad
+    // At theta=6.69 rad, angle_in_galaxy = arm_start_angle + 6.69
+    // Sun is at GCC_x = 26673, GCC_z = 0, which is angle atan2(0,26673) = 0°
+    // So arm_start_angle = 0 - 6.69 = -6.69 rad ≈ -1.12 rad ≈ 216°
+    const ARM_STARTS = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2]; // 4 arms evenly spaced
+    // Orion/local arm offset to pass near Sun
+    const ORION_OFFSET = -6.69; // winding offset so Orion arm passes through Sun pos
+
+    let idx = 0;
+
+    for (let i = 0; i < N; i++) {
+        const t = Math.random();
+        let x, y, z, bright;
+
+        if (t < 0.12) {
+            // ── Central bulge (spheroidal) ─────────────────────────────
+            const r   = Math.pow(Math.random(), 0.4) * BULGE_R;
+            const phi = (Math.random() - 0.5) * Math.PI;
+            const th  = Math.random() * Math.PI * 2;
+            x = r * Math.cos(phi) * Math.cos(th);
+            y = r * Math.cos(phi) * Math.sin(th) * 0.4; // flatten vertically
+            z = r * Math.sin(phi) * 0.6;
+            bright = 0.9 + Math.random() * 0.1;
+        } else {
+            // ── Spiral arm ────────────────────────────────────────────
+            const arm      = Math.floor(Math.random() * N_ARMS);
+            const winding  = Math.random() * 7.5; // winding angle (radians)
+            const r        = 2500 * Math.exp(PITCH * winding);
+            if (r > GALAXY_R) { i--; continue; }
+
+            // Apply Orion-arm offset for arm 2 (index 2) to pass near Sun
+            let startAngle = ARM_STARTS[arm];
+            if (arm === 2) startAngle += ORION_OFFSET;
+
+            const angle   = startAngle + winding;
+            const scatter = armScatter(r);
+            const sr      = (Math.random() - 0.5) * scatter;
+            const stheta  = (Math.random() - 0.5) * scatter * 0.003;
+
+            x = (r + sr) * Math.cos(angle + stheta);
+            y = (Math.random() - 0.5) * DISK_H * Math.exp(-r / 25000);
+            z = (r + sr) * Math.sin(angle + stheta);
+            bright = 0.55 + Math.random() * 0.45;
+        }
+
+        // Radial fade
+        const r2 = Math.sqrt(x*x + z*z);
+        if (r2 > GALAXY_R) { i--; continue; }
+        const fade = Math.exp(-r2 / 35000);
+
+        positions[idx*3]   = x;
+        positions[idx*3+1] = y;
+        positions[idx*3+2] = z;
+
+        // Color: inner = warm orange-yellow, mid = white, outer = cool blue
+        const nr = r2 / GALAXY_R;
+        const rc = bright * fade * (0.70 + 0.30 * (1 - nr));
+        const gc = bright * fade * (0.60 + 0.25 * (1 - nr));
+        const bc = bright * fade * (0.40 + 0.60 * nr);
+        colors[idx*3]   = rc;
+        colors[idx*3+1] = gc;
+        colors[idx*3+2] = bc;
+        sizes[idx] = 60 + Math.random() * 180;
+
+        idx++;
+    }
+
+    function armScatter(r) {
+        // Arms are narrower near center, broader at large radii
+        return 400 + r * 0.06;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions.subarray(0, idx*3), 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(colors.subarray(0, idx*3),    3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sizes.subarray(0, idx),       1));
+    geo.setDrawRange(0, idx);
+
+    const mat = new THREE.ShaderMaterial({
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.3, 4.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.4, 1.0, d);
+                gl_FragColor = vec4(vCol, a * 0.75);
+            }
+        `,
+    });
+
+    const points = new THREE.Points(geo, mat);
+    // Galaxy disk is in GCC XZ plane (y=0 = galactic midplane)
+    // But scene uses x=GCC_x, y=GCC_y(north), z=GCC_z(tangential)
+    // Galaxy particles generated in (x_disk, y_height, z_disk) — needs rotation
+    // Galaxy XZ (disk) → scene: disk_x→scene_x, disk_z→scene_z, disk_y(height)→scene_y
+    // This matches already (scene_y = galactic north = galaxy height)
+    // So no rotation needed for the galaxy disk ✓
+    return points;
+}
+
+const galaxyPoints = buildGalaxy();
+scene.add(galaxyPoints);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC CENTER GLOW (Sgr A*)
+// ══════════════════════════════════════════════════════════════════════════
+(function buildGCGlow() {
+    // Outer soft glow
+    const geoG = new THREE.SphereGeometry(800, 16, 16);
+    const matG = new THREE.MeshBasicMaterial({
+        color: 0xff8800, transparent: true, opacity: 0.06,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    scene.add(new THREE.Mesh(geoG, matG));
+
+    // Inner bulge glow
+    const geoI = new THREE.SphereGeometry(200, 16, 16);
+    const matI = new THREE.MeshBasicMaterial({
+        color: 0xffcc44, transparent: true, opacity: 0.15,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    scene.add(new THREE.Mesh(geoI, matI));
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DISTANCE RINGS (GC-centered, galactic midplane)
+// ══════════════════════════════════════════════════════════════════════════
+const ringsGroup = new THREE.Group();
+scene.add(ringsGroup);
+
+const RING_RADII = [5000, 10000, 15000, 20000, 25000, 30000, 35000, 40000, 50000];
+const RING_COLORS = {
+    25000: 0x8866ff, // ~Sun's orbit
+    10000: 0x446688,
+    default: 0x223344,
+};
+
+RING_RADII.forEach(r => {
+    const geo = new THREE.RingGeometry(r - 20, r + 20, 128);
+    const col = r === 26673 ? 0x8866ff : (RING_RADII.indexOf(r) === 0 ? 0x446688 : 0x1a2a3a);
+    const mat = new THREE.MeshBasicMaterial({
+        color: col, side: THREE.DoubleSide,
+        transparent: true, opacity: r === 26673 ? 0.35 : 0.18,
+        depthWrite: false,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = Math.PI / 2; // lay flat in XZ galactic plane
+    // GCC: ring is in galactic plane (y=0 galactic → scene y=0)
+    ringsGroup.add(ring);
+});
+
+// Sun's galactic orbit circle (approximate, ~26,673 ly radius)
+const sunOrbitGeo = new THREE.RingGeometry(26640, 26706, 256);
+const sunOrbitMat = new THREE.MeshBasicMaterial({
+    color: 0xffff88, side: THREE.DoubleSide,
+    transparent: true, opacity: 0.25,
+    depthWrite: false,
+});
+const sunOrbit = new THREE.Mesh(sunOrbitGeo, sunOrbitMat);
+sunOrbit.rotation.x = Math.PI / 2;
+ringsGroup.add(sunOrbit);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC PLANE (faint mesh)
+// ══════════════════════════════════════════════════════════════════════════
+const planeGeo = new THREE.PlaneGeometry(120000, 120000, 1, 1);
+const planeMat = new THREE.MeshBasicMaterial({
+    color: 0x112233, side: THREE.DoubleSide,
+    transparent: true, opacity: 0.07,
+    depthWrite: false,
+});
+const galPlane = new THREE.Mesh(planeGeo, planeMat);
+galPlane.rotation.x = Math.PI / 2;
+scene.add(galPlane);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  ARM LABEL SPRITES (text planes in scene)
+// ══════════════════════════════════════════════════════════════════════════
+const armLabels = [];
+
+function makeTextSprite(text, size = 200) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 512, 128);
+    ctx.font = `bold ${Math.round(size * 0.22)}px Segoe UI, sans-serif`;
+    ctx.fillStyle = 'rgba(180,160,255,0.7)';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 64);
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(size * 4, size, 1);
+    return sprite;
+}
+
+const armDefs = [
+    { name: 'Scutum–Centaurus Arm', x: 12000, z: -8000 },
+    { name: 'Sagittarius–Carina Arm', x: 16000, z: 14000 },
+    { name: 'Orion Spur (Local Arm)', x: 28000, z: 5000 },
+    { name: 'Perseus Arm', x: 34000, z: -12000 },
+];
+armDefs.forEach(a => {
+    const sp = makeTextSprite(a.name, 1400);
+    sp.position.set(a.x, 800, a.z);
+    scene.add(sp);
+    armLabels.push(sp);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  STAR MESHES + LABELS
+// ══════════════════════════════════════════════════════════════════════════
+const starMeshes  = {};
+const starGlows   = {};
+const starLabels  = {};
+const starSprites = {};
+
+const raycaster = new THREE.Raycaster();
+raycaster.params.Points.threshold = 5;
+
+CATALOG.forEach(s => {
+    const pos = s.pos3;
+
+    // ── Sphere mesh ─────────────────────────────────────────────
+    const radius = s.isGC ? 180 : (s.size * 2.5);
+    const geo = new THREE.SphereGeometry(radius, 16, 16);
+    const mat = new THREE.MeshBasicMaterial({ color: s.color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(pos);
+    mesh.userData.starId = s.id;
+    scene.add(mesh);
+    starMeshes[s.id] = mesh;
+
+    // ── Glow sprite ─────────────────────────────────────────────
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = glowCanvas.height = 64;
+    const gctx = glowCanvas.getContext('2d');
+    const grad = gctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    const hexToRgb = h => ({ r: (h>>16)&255, g: (h>>8)&255, b: h&255 });
+    const rgb = hexToRgb(s.color);
+    grad.addColorStop(0,   `rgba(${rgb.r},${rgb.g},${rgb.b},0.9)`);
+    grad.addColorStop(0.3, `rgba(${rgb.r},${rgb.g},${rgb.b},0.4)`);
+    grad.addColorStop(1,   `rgba(${rgb.r},${rgb.g},${rgb.b},0.0)`);
+    gctx.fillStyle = grad;
+    gctx.fillRect(0, 0, 64, 64);
+    const glowTex = new THREE.CanvasTexture(glowCanvas);
+    const glowMat = new THREE.SpriteMaterial({
+        map: glowTex, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const glowSize = s.isGC ? 4000 : (s.size * 30 + (s.isCluster ? 200 : 0));
+    const glow = new THREE.Sprite(glowMat);
+    glow.position.copy(pos);
+    glow.scale.setScalar(glowSize);
+    scene.add(glow);
+    starGlows[s.id] = glow;
+
+    // ── Text label sprite ───────────────────────────────────────
+    const lCanvas = document.createElement('canvas');
+    lCanvas.width = 320; lCanvas.height = 64;
+    const lctx = lCanvas.getContext('2d');
+    lctx.font = 'bold 22px Segoe UI, sans-serif';
+    lctx.fillStyle = s.isGC ? '#ffaa44' : 'rgba(220,210,255,0.92)';
+    lctx.textAlign = 'left';
+    lctx.textBaseline = 'middle';
+    lctx.fillText(s.abbr, 8, 32);
+    // Spectral type badge
+    lctx.font = '14px Segoe UI, sans-serif';
+    lctx.fillStyle = 'rgba(150,140,200,0.75)';
+    lctx.fillText(s.type, 8, 50);
+    const lTex = new THREE.CanvasTexture(lCanvas);
+    const lMat = new THREE.SpriteMaterial({ map: lTex, transparent: true, depthWrite: false });
+    const label = new THREE.Sprite(lMat);
+    const labelOffset = radius + 8;
+    label.position.set(pos.x + labelOffset, pos.y + labelOffset, pos.z);
+    label.scale.set(300, 60, 1);
+    scene.add(label);
+    starLabels[s.id] = label;
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SIDEBAR STAR LIST
+// ══════════════════════════════════════════════════════════════════════════
+const starListEl = document.getElementById('star-list');
+CATALOG.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'star-item';
+    div.id = 'li-' + s.id;
+    div.innerHTML = `
+        <div class="star-dot" style="background:#${s.color.toString(16).padStart(6,'0')}"></div>
+        <div>
+            <div class="star-name">${s.name}</div>
+            <div class="star-type">${s.type}</div>
+        </div>
+        <div class="star-dist">${s.dist === 0 ? '—' : s.dist >= 1000 ? (s.dist/1000).toFixed(1)+'kly' : s.dist+' ly'}</div>
+    `;
+    div.addEventListener('click', () => selectStar(s.id));
+    starListEl.appendChild(div);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  STAR SELECTION
+// ══════════════════════════════════════════════════════════════════════════
+let selectedId = null;
+const SELECTED_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: false });
+
+function selectStar(id) {
+    if (selectedId) {
+        const prev = CATALOG.find(s => s.id === selectedId);
+        if (prev && starMeshes[prev.id]) {
+            starMeshes[prev.id].material.color.setHex(prev.color);
+        }
+        document.querySelectorAll('.star-item').forEach(el => el.classList.remove('selected'));
+    }
+    selectedId = id;
+    const s = CATALOG.find(s => s.id === id);
+    if (!s) return;
+
+    // Highlight mesh
+    starMeshes[id].material.color.setHex(0xffffff);
+    document.getElementById('li-' + id)?.classList.add('selected');
+
+    // Update HUD
+    document.getElementById('hud-name').textContent = s.name;
+    document.getElementById('hud-dist').textContent =
+        s.dist === 0 ? '0 ly (GC)' : s.dist >= 1000 ? (s.dist/1000).toFixed(2) + ' kly' : s.dist + ' ly';
+    document.getElementById('hud-l').textContent = s.isGC ? 'N/A' : s.l.toFixed(2) + '°';
+    document.getElementById('hud-b').textContent = s.isGC ? 'N/A' : s.b.toFixed(2) + '°';
+    document.getElementById('hud-gc').textContent =
+        s.isGC ? '0 ly' : s.gcDist.toLocaleString() + ' ly';
+
+    // Update info panel
+    const panel = document.getElementById('info-panel');
+    let rowsHtml = s.props.map(([k, v]) => `
+        <div class="ip-row"><span class="ip-k">${k}</span><span class="ip-v">${v}</span></div>
+    `).join('');
+    const linkHtml = s.link
+        ? `<a href="${s.link}" class="info-link" id="info-link">Open Simulation →</a>`
+        : `<a id="info-link" class="info-link hidden"></a>`;
+    panel.innerHTML = `
+        <h3>${s.name}</h3>
+        <div class="ip-type">${s.type}</div>
+        <div style="font-size:10.5px;color:#888;margin:6px 0 8px;line-height:1.55">${s.desc}</div>
+        ${rowsHtml}
+        ${linkHtml}
+    `;
+}
+
+// Select Sun by default
+selectStar('sun');
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MOUSE PICKING (click on star spheres)
+// ══════════════════════════════════════════════════════════════════════════
+const mouse = new THREE.Vector2();
+let isPointerDown = false;
+let pointerMoveCount = 0;
+
+renderer.domElement.addEventListener('pointerdown', () => {
+    isPointerDown = true;
+    pointerMoveCount = 0;
+});
+renderer.domElement.addEventListener('pointermove', () => {
+    if (isPointerDown) pointerMoveCount++;
+});
+renderer.domElement.addEventListener('pointerup', e => {
+    if (!isPointerDown || pointerMoveCount > 4) { isPointerDown = false; return; }
+    isPointerDown = false;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+    mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+    const meshes = CATALOG.map(s => starMeshes[s.id]).filter(Boolean);
+    const hits = raycaster.intersectObjects(meshes);
+    if (hits.length > 0) {
+        const hit = hits[0].object;
+        const id  = hit.userData.starId;
+        if (id) selectStar(id);
+    }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  DISPLAY TOGGLES
+// ══════════════════════════════════════════════════════════════════════════
+document.getElementById('tog-galaxy').addEventListener('change', e => {
+    galaxyPoints.visible = e.target.checked;
+});
+document.getElementById('tog-grid').addEventListener('change', e => {
+    ringsGroup.visible = e.target.checked;
+});
+document.getElementById('tog-arms').addEventListener('change', e => {
+    armLabels.forEach(l => l.visible = e.target.checked);
+});
+document.getElementById('tog-labels').addEventListener('change', e => {
+    Object.values(starLabels).forEach(l => l.visible = e.target.checked);
+});
+document.getElementById('tog-plane').addEventListener('change', e => {
+    galPlane.visible = e.target.checked;
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  ZOOM BUTTONS
+// ══════════════════════════════════════════════════════════════════════════
+document.getElementById('zoom-local').addEventListener('click',  () => flyTo('local'));
+document.getElementById('zoom-hood').addEventListener('click',   () => flyTo('hood'));
+document.getElementById('zoom-arm').addEventListener('click',    () => flyTo('arm'));
+document.getElementById('zoom-galaxy').addEventListener('click', () => flyTo('galaxy'));
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SIDEBAR TOGGLE
+// ══════════════════════════════════════════════════════════════════════════
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    document.getElementById('sidebar').classList.toggle('collapsed');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  NAV (hamburger + dropdown)
+// ══════════════════════════════════════════════════════════════════════════
+const burger  = document.getElementById('nav-burger');
+const navMenu = document.getElementById('nav-menu');
+burger.addEventListener('click', () => {
+    const open = navMenu.classList.toggle('open');
+    burger.textContent = open ? '✕' : '☰';
+});
+document.addEventListener('click', e => {
+    if (!e.target.closest('nav')) navMenu.classList.remove('open');
+});
+document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+        if (window.innerWidth > 768) return;
+        e.stopPropagation();
+        const drop = btn.closest('.nav-drop');
+        const opening = !drop.classList.contains('open');
+        document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+        if (opening) drop.classList.add('open');
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  COORD DISPLAY (show Sun's galactic coords in footer)
+// ══════════════════════════════════════════════════════════════════════════
+// Sun is the reference, so its heliocentric l/b/d are 0/0/0.
+// Show camera's approximate galactic l/b from the Sun instead.
+function updateCoordDisplay() {
+    // Direction from Sun to camera (approximate galactic l/b)
+    const camRelSun = camera.position.clone().sub(SUN3);
+    const dist = camRelSun.length();
+    const l_rad = Math.atan2(camRelSun.z, -camRelSun.x); // GCC_x toward Sun = negative HGC_x
+    const b_rad = Math.atan2(camRelSun.y, Math.sqrt(camRelSun.x*camRelSun.x + camRelSun.z*camRelSun.z));
+    const l_deg = ((l_rad * 180 / Math.PI) + 360) % 360;
+    const b_deg = b_rad * 180 / Math.PI;
+
+    document.getElementById('cd-l').textContent = l_deg.toFixed(1) + '°';
+    document.getElementById('cd-b').textContent = b_deg.toFixed(1) + '°';
+    const distFromGC = camera.position.length();
+    document.getElementById('cd-dgc').textContent =
+        distFromGC >= 1000
+            ? (distFromGC / 1000).toFixed(1) + ' kly from GC'
+            : distFromGC.toFixed(0) + ' ly from GC';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  LABEL SCALE — keep labels readable at all zoom levels
+// ══════════════════════════════════════════════════════════════════════════
+function updateLabelScales() {
+    const camDist = camera.position.distanceTo(controls.target);
+    const scale   = camDist * 0.012;
+
+    CATALOG.forEach(s => {
+        const lbl = starLabels[s.id];
+        if (lbl) {
+            lbl.scale.set(scale * 5, scale, 1);
+            const mesh = starMeshes[s.id];
+            if (mesh) {
+                const meshR = s.isGC ? 180 : s.size * 2.5;
+                lbl.position.set(
+                    s.pos3.x + meshR + scale * 0.5,
+                    s.pos3.y + scale * 0.5,
+                    s.pos3.z
+                );
+            }
+        }
+        // Scale glow to stay visible
+        const glow = starGlows[s.id];
+        if (glow) {
+            const baseSize = s.isGC ? 4000 : (s.size * 30);
+            const minSize  = camDist * 0.003;
+            glow.scale.setScalar(Math.max(baseSize, minSize));
+        }
+        // Scale star spheres so they're always pickable but not huge
+        const mesh = starMeshes[s.id];
+        if (mesh) {
+            const baseR = s.isGC ? 180 : s.size * 2.5;
+            const minR  = camDist * 0.003;
+            const newR  = Math.max(baseR, minR);
+            mesh.scale.setScalar(newR / (s.isGC ? 180 : s.size * 2.5));
+        }
+    });
+
+    // Scale arm labels
+    armLabels.forEach(l => {
+        const sz = Math.max(1400, camDist * 0.05);
+        l.scale.set(sz * 4, sz, 1);
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  RESIZE
+// ══════════════════════════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+    camera.aspect = W() / H();
+    camera.updateProjectionMatrix();
+    renderer.setSize(W(), H());
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ══════════════════════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+let t = 0;
+
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    t += dt;
+    controls.update();
+
+    // Gently pulse Sgr A* glow
+    if (starGlows['sgr_a']) {
+        const base = Math.max(4000, camera.position.length() * 0.003);
+        starGlows['sgr_a'].scale.setScalar(base * (1 + 0.12 * Math.sin(t * 1.8)));
+    }
+
+    updateLabelScales();
+    updateCoordDisplay();
+    renderer.render(scene, camera);
+}
+
+// ── Initial camera position (local view, looking down at Sun) ────────────
+camera.position.copy(ZOOM_PRESETS.local.pos);
+controls.target.copy(ZOOM_PRESETS.local.target);
+controls.update();
+document.getElementById('hud-view').textContent = '50 ly';
+
+animate();
+console.log('%c[Galactic Map · Celestial Simulator]', 'color:#a060ff;font-weight:bold;font-size:13px');
+console.log('Coordinate system: GCC (Galactic Center Cartesian)');
+console.log('Sgr A* at origin (0,0,0). Sun at (~26673, 20, 0) ly.');
+console.log('Objects: ' + CATALOG.length + ' entries loaded.');
+</script>
+</body>
+</html>
