@@ -1630,6 +1630,7 @@ scene.add(galaxyPoints);
 //  - Sun's orbital circle at 26,673 ly
 // ══════════════════════════════════════════════════════════════════════════
 const ringsGroup = new THREE.Group();
+let scaleBreakLabelSprite = null;   // set by buildScaleBreak; toggled by zoom
 scene.add(ringsGroup);
 
 // Distance rings (5, 10, 15 ... 50 kly)
@@ -1690,8 +1691,8 @@ scene.add(ringsGroup);
     }));
     sp.position.set(SUN_GC.x, 400, R);
     sp.scale.set(14000, 1750, 1);
-    sp.userData.scaleBreakLabel = true;
     scene.add(sp);
+    scaleBreakLabelSprite = sp;
 })();
 
 // Galactic longitude radials (every 30° = 12 lines from GC outward)
@@ -1901,8 +1902,8 @@ function buildGalaxySprite(s, pos) {
         blending: THREE.AdditiveBlending,
     }));
     sprite.position.copy(pos);
-    // Base size: ~2× the base glow so it fills the halo nicely
-    const baseSize = s.size * 1600;
+    // Base size: ~2.2× base glow so the galaxy disk fills the glow halo
+    const baseSize = s.size * 5200;
     sprite.scale.setScalar(baseSize);
     sprite.userData.baseGalaxy = baseSize;
     scene.add(sprite);
@@ -1945,9 +1946,13 @@ CATALOG.forEach(s => {
     }));
     glow.position.copy(pos);
     // Initial scale set small — updateLabelScales corrects it each frame
+    // Intergalactic baseGlow is larger so objects are visible at universe zoom
+    // without relying entirely on minGlow. Sized so that in universe view
+    // (~400k cam dist) each object occupies ~2-3% of field (FOV=50°, half=25°).
+    // At 400k cam dist: minGlow = 4800; baseGlow for size=4.5 = 4.5*2400 = 10800 → wins.
     const baseGlow = s.isGC ? 1200
                    : s.isSstar ? s.size * 0.5
-                   : s.isIntergalactic ? s.size * 800   // scene units (log-scale)
+                   : s.isIntergalactic ? s.size * 2400
                    : (s.size * 0.6 + (s.isCluster ? 5 : 0));
     glow.scale.setScalar(baseGlow);
     glow.userData.baseGlow = baseGlow;
@@ -1980,16 +1985,22 @@ CATALOG.forEach(s => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-//  TON 618 — SPECIAL GEOMETRY
-//  The most massive known black hole: ~66 billion M☉.
-//  We build a layered set of objects at its scene position:
-//    1. Event horizon sphere (solid black)
-//    2. Accretion disk — 3 ring layers (inner white-hot → outer blood-orange)
-//    3. Doppler-brightened arc on the approaching side
-//    4. Relativistic jets — two luminous blue-white cones along spin axis
-//    5. Jet termination shocks (bright blobs at jet tips)
-//  All sizes are in scene units. When orbiting (~32k scene units away) these
-//  features fill a satisfying fraction of the view.
+//  TON 618 — SPECIAL GEOMETRY  (66 billion M☉ — most massive known BH)
+//
+//  Architecture (all units = scene units; orbit distance ≈ 45,000):
+//    • Black drop shadow sphere   r=2200  (blacks out background behind EH)
+//    • Event horizon sphere       r=2000  (solid black — the shadow)
+//    • Photon ring canvas sprite  r=2400  (bright orange-white Einstein ring)
+//    • Innermost bright ring      2200–3200   white/blue-white  ω=0.0012 rad/f
+//    • Hot disk                   3000–6000   brilliant orange   ω=0.0007
+//    • Warm disk                  5500–10000  amber-orange       ω=0.0004
+//    • Cool outer disk            9000–16000  blood red          ω=0.00018
+//    • Temperature canvas         mapped to full-width ring — radial gradient
+//    • Doppler bright arc         left side, canvas sprite
+//    • Jet cones (×2)             70k long, opening angle 1.2°, bright core
+//    • Jet glow envelopes         wide soft cones around jets
+//    • Termination shocks         2800-unit blobs at jet tips
+//    • Outer nebula halos         3 shells: 22k / 38k / 55k
 // ══════════════════════════════════════════════════════════════════════════
 (function buildTon618() {
     const ton = CATALOG.find(s => s.id === 'ton618');
@@ -2000,36 +2011,78 @@ CATALOG.forEach(s => {
     g.position.copy(pos);
     scene.add(g);
 
-    // ── 1. Event horizon sphere ──────────────────────────────────
-    const eh = new THREE.Mesh(
-        new THREE.SphereGeometry(1400, 32, 32),
+    // ── Shadow drop sphere (blacks out stars behind EH) ──────────
+    g.add(new THREE.Mesh(
+        new THREE.SphereGeometry(2200, 32, 32),
+        new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true })
+    ));
+
+    // ── Event horizon (solid black sphere) ───────────────────────
+    g.add(new THREE.Mesh(
+        new THREE.SphereGeometry(2000, 48, 48),
         new THREE.MeshBasicMaterial({ color: 0x000000 })
-    );
-    g.add(eh);
+    ));
 
-    // ── 2. Photon sphere / innermost glow ────────────────────────
-    const photon = new THREE.Mesh(
-        new THREE.SphereGeometry(1600, 32, 32),
-        new THREE.MeshBasicMaterial({
-            color: 0xff8800, transparent: true, opacity: 0.18,
+    // ── Photon ring (Einstein ring bright limb around EH) ────────
+    (function() {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 256;
+        const cx = cv.getContext('2d');
+        // Outer glow
+        const og = cx.createRadialGradient(128,128, 80, 128,128, 128);
+        og.addColorStop(0,   'rgba(255,200,120,0.0)');
+        og.addColorStop(0.45,'rgba(255,200,120,0.5)');
+        og.addColorStop(0.65,'rgba(255,240,200,0.9)');
+        og.addColorStop(0.78,'rgba(255,220,160,0.4)');
+        og.addColorStop(1,   'rgba(255,180,60,0.0)');
+        cx.fillStyle = og; cx.fillRect(0,0,256,256);
+        const photonRing = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
             depthWrite: false, blending: THREE.AdditiveBlending,
-        })
-    );
-    g.add(photon);
+        }));
+        photonRing.scale.setScalar(5200);
+        g.add(photonRing);
+    })();
 
-    // ── 3. Accretion disk rings ──────────────────────────────────
-    // Ton 618's spin axis is unknown; tilt ~25° off line-of-sight for best visuals
+    // ── Accretion disk group (tilted for best viewing angle) ─────
+    // Ton 618's true spin axis is unknown; ~57° tilt shows the disk dramatically.
     const diskGroup = new THREE.Group();
-    diskGroup.rotation.x = 1.1;   // ~63° tilt — shows disk face at an angle
-    diskGroup.rotation.z = 0.4;
+    diskGroup.rotation.x = 0.95;   // ~54° — enough to see the oval disk shape
+    diskGroup.rotation.z = 0.55;   // slight roll for asymmetry
     g.add(diskGroup);
 
+    // Temperature-gradient canvas texture for the entire disk face
+    (function buildDiskTexture() {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 512;
+        const cx = cv.getContext('2d');
+        // Full disk fill: radial gradient white-hot center → deep red outer
+        const tg = cx.createRadialGradient(256,256, 80, 256,256, 256);
+        tg.addColorStop(0,    'rgba(255,255,255,0.0)');  // inside EH shadow
+        tg.addColorStop(0.12, 'rgba(255,255,255,0.95)'); // ISCO — white
+        tg.addColorStop(0.24, 'rgba(255,210,120,0.85)'); // hot inner — gold
+        tg.addColorStop(0.42, 'rgba(255,140,30,0.72)');  // orange
+        tg.addColorStop(0.60, 'rgba(220,60,10,0.52)');   // amber-red
+        tg.addColorStop(0.80, 'rgba(140,20,5,0.28)');    // deep red
+        tg.addColorStop(1,    'rgba(60,5,0,0.0)');
+        cx.fillStyle = tg; cx.fillRect(0,0,512,512);
+        const diskFace = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        diskFace.scale.setScalar(32000);
+        diskGroup.add(diskFace);
+    })();
+
+    // Individual ring meshes for Keplerian differential rotation
+    // stored as [mesh, angularVelocity] pairs
+    const diskRings = [];
     [
-        { inner: 1500, outer: 2800,  color: 0xffffff, opacity: 0.70 }, // innermost: white-hot
-        { inner: 2600, outer: 5000,  color: 0xff9900, opacity: 0.58 }, // hot orange
-        { inner: 4500, outer: 8500,  color: 0xff5500, opacity: 0.42 }, // warm amber
-        { inner: 8000, outer: 14000, color: 0xcc2200, opacity: 0.22 }, // cool outer
-    ].forEach(({ inner, outer, color, opacity }) => {
+        { inner: 2200,  outer: 3400,  color: 0xffffff, opacity: 0.80, omega: 0.0014 },
+        { inner: 3200,  outer: 5800,  color: 0xffcc44, opacity: 0.70, omega: 0.0008 },
+        { inner: 5400,  outer: 9500,  color: 0xff6600, opacity: 0.52, omega: 0.00045 },
+        { inner: 9000,  outer: 16000, color: 0xcc2800, opacity: 0.30, omega: 0.00020 },
+    ].forEach(({ inner, outer, color, opacity, omega }) => {
         const ring = new THREE.Mesh(
             new THREE.RingGeometry(inner, outer, 128),
             new THREE.MeshBasicMaterial({
@@ -2039,82 +2092,354 @@ CATALOG.forEach(s => {
             })
         );
         diskGroup.add(ring);
+        diskRings.push([ring, omega]);
     });
 
-    // ── 4. Doppler bright arc (approaching side brighter) ────────
-    const arcCanvas = document.createElement('canvas');
-    arcCanvas.width = arcCanvas.height = 256;
-    const actx = arcCanvas.getContext('2d');
-    const arcGrad = actx.createRadialGradient(128,128,60, 128,128,100);
-    arcGrad.addColorStop(0,   'rgba(255,240,180,0.0)');
-    arcGrad.addColorStop(0.5, 'rgba(255,240,180,0.65)');
-    arcGrad.addColorStop(1,   'rgba(255,240,180,0.0)');
-    actx.fillStyle = arcGrad;
-    // Only paint the left half (approaching side brightening)
-    actx.beginPath(); actx.arc(128,128,100,Math.PI*0.5,Math.PI*1.5); actx.fill();
-    const arcSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(arcCanvas),
-        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    }));
-    arcSprite.scale.setScalar(20000);
-    diskGroup.add(arcSprite);
+    // ── Doppler bright arc (approaching side) ────────────────────
+    (function() {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 512;
+        const cx = cv.getContext('2d');
+        // Crescent on left side only
+        const ag = cx.createRadialGradient(256,256, 90, 256,256, 200);
+        ag.addColorStop(0,   'rgba(255,255,200,0.0)');
+        ag.addColorStop(0.55,'rgba(255,240,180,0.80)');
+        ag.addColorStop(1,   'rgba(255,200,100,0.0)');
+        cx.fillStyle = ag;
+        cx.beginPath();
+        cx.arc(256,256, 200, Math.PI*0.45, Math.PI*1.55);
+        cx.fill();
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        sp.scale.setScalar(28000);
+        diskGroup.add(sp);
+    })();
 
-    // ── 5. Relativistic jets ─────────────────────────────────────
-    // Jets fire along the spin axis (perpendicular to disk plane → local +Y after tilt)
-    // We build them as tapered cones + glowing trail lines
-    const jetAxis = new THREE.Vector3(0, 1, 0); // in diskGroup's local frame → after tilt = spin axis
+    // ── Relativistic jets ─────────────────────────────────────────
+    // Two symmetric jets along the spin axis (local +Y of diskGroup after tilt)
     [1, -1].forEach(dir => {
-        const jetLen = 55000;
-        // Cone geometry: opens from BH outward, narrow at base
-        const cone = new THREE.Mesh(
-            new THREE.CylinderGeometry(dir > 0 ? 0 : 600, dir > 0 ? 600 : 0, jetLen, 32, 1, true),
+        const jetLen  = 72000;
+        const baseTip = dir > 0 ? 0 : 900;
+        const baseBot = dir > 0 ? 900 : 0;
+
+        // Narrow bright core cone
+        const core = new THREE.Mesh(
+            new THREE.CylinderGeometry(baseTip, baseBot, jetLen, 32, 1, true),
             new THREE.MeshBasicMaterial({
-                color: 0x88ccff, side: THREE.DoubleSide,
-                transparent: true, opacity: 0.22, depthWrite: false,
+                color: 0xddeeff, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.50, depthWrite: false,
                 blending: THREE.AdditiveBlending,
             })
         );
-        cone.position.y = dir * jetLen / 2;
-        diskGroup.add(cone);
+        core.position.y = dir * jetLen / 2;
+        diskGroup.add(core);
 
-        // Bright core line
-        const jetLine = new THREE.Line(
+        // Wide soft glow envelope (×3 wider)
+        const gEnv = new THREE.Mesh(
+            new THREE.CylinderGeometry(baseTip * 3, baseBot * 3, jetLen, 32, 1, true),
+            new THREE.MeshBasicMaterial({
+                color: 0x6699ff, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.12, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        gEnv.position.y = dir * jetLen / 2;
+        diskGroup.add(gEnv);
+
+        // Bright jet spine line
+        diskGroup.add(new THREE.Line(
             new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(0, 0, 0),
                 new THREE.Vector3(0, dir * jetLen, 0),
             ]),
-            new THREE.LineBasicMaterial({ color: 0xaaddff, transparent: true, opacity: 0.55 })
-        );
-        diskGroup.add(jetLine);
+            new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.80 })
+        ));
 
-        // Termination shock blob at jet tip
-        const shockMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(2200, 16, 16),
-            new THREE.MeshBasicMaterial({
-                color: 0x55aaff, transparent: true, opacity: 0.30,
-                depthWrite: false, blending: THREE.AdditiveBlending,
-            })
-        );
-        shockMesh.position.y = dir * jetLen;
-        diskGroup.add(shockMesh);
+        // Termination shock — larger and brighter
+        [[2800, 0x99ccff, 0.45], [5500, 0x3366aa, 0.15]].forEach(([r, c, o]) => {
+            const shock = new THREE.Mesh(
+                new THREE.SphereGeometry(r, 16, 16),
+                new THREE.MeshBasicMaterial({
+                    color: c, transparent: true, opacity: o,
+                    depthWrite: false, blending: THREE.AdditiveBlending,
+                })
+            );
+            shock.position.y = dir * jetLen;
+            diskGroup.add(shock);
+        });
     });
 
-    // ── 6. Outer quasar nebula halo ──────────────────────────────
-    [18000, 30000, 45000].forEach((r, i) => {
-        const halo = new THREE.Mesh(
+    // ── Outer nebula / quasar host halos ─────────────────────────
+    [
+        [22000, 0xff8800, 0.10],
+        [38000, 0xff4400, 0.055],
+        [55000, 0x330800, 0.025],
+        [80000, 0x110200, 0.010],
+    ].forEach(([r, c, o]) => {
+        g.add(new THREE.Mesh(
             new THREE.SphereGeometry(r, 16, 16),
             new THREE.MeshBasicMaterial({
-                color: [0xff6600, 0xff3300, 0x220011][i],
-                transparent: true, opacity: [0.08, 0.04, 0.015][i],
+                color: c, transparent: true, opacity: o,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        ));
+    });
+
+    // Store references for animation
+    g.userData.isTon618   = true;
+    g.userData.diskGroup  = diskGroup;
+    g.userData.diskRings  = diskRings;   // [[mesh, omega], ...]
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MILKY WAY — OUTSIDE VIEW SPRITE
+//  Visible only when camera is far enough away to "look back" at our galaxy.
+//  Drawn as a barred spiral with a central bar, 4 arms, and a bulge.
+//  Positioned at origin, flat in the galactic plane (XZ, y=0 in scene).
+//  Note: THREE.Sprite always faces camera, so this looks correct from above.
+// ══════════════════════════════════════════════════════════════════════════
+let mwOuterSprite = null;
+(function buildMWOuterSprite() {
+    const S = 512, cx = S / 2;
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = S;
+    const ctx = cv.getContext('2d');
+
+    // ── Core bulge ─────────────────────────────────────────────
+    const bulgeGrad = ctx.createRadialGradient(cx,cx, 0, cx,cx, 54);
+    bulgeGrad.addColorStop(0,   'rgba(255,240,200,0.95)');
+    bulgeGrad.addColorStop(0.35,'rgba(255,200,120,0.80)');
+    bulgeGrad.addColorStop(1,   'rgba(200,150,60,0.0)');
+    ctx.fillStyle = bulgeGrad; ctx.fillRect(0,0,S,S);
+
+    // ── Central bar ─────────────────────────────────────────────
+    ctx.save();
+    ctx.translate(cx, cx);
+    ctx.rotate(0.3);
+    const barGrad = ctx.createLinearGradient(-80, 0, 80, 0);
+    barGrad.addColorStop(0,   'rgba(200,150,50,0.0)');
+    barGrad.addColorStop(0.3, 'rgba(255,220,140,0.55)');
+    barGrad.addColorStop(0.5, 'rgba(255,235,180,0.65)');
+    barGrad.addColorStop(0.7, 'rgba(255,220,140,0.55)');
+    barGrad.addColorStop(1,   'rgba(200,150,50,0.0)');
+    ctx.fillStyle = barGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 80, 14, 0, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // ── 4 Spiral arms (Perseus, Sagittarius, Norma, Orion) ──────
+    const armColors = [
+        'rgba(180,200,255,{a})',  // Perseus — blue-white young stars
+        'rgba(255,220,160,{a})',  // Sagittarius — inner, warmer
+        'rgba(255,180,100,{a})',  // Norma — inner, orange
+        'rgba(200,220,255,{a})',  // Orion/Local — blue-white
+    ];
+    for (let arm = 0; arm < 4; arm++) {
+        ctx.save();
+        ctx.translate(cx, cx);
+        ctx.rotate(arm * Math.PI / 2 + 0.3);
+        for (let i = 0; i < 300; i++) {
+            const angle  = i * 0.055;
+            const radius = 20 + i * 0.58;
+            if (radius > cx * 0.92) break;
+            const x = radius * Math.cos(angle);
+            const y = radius * Math.sin(angle) * 0.95;
+            const alpha = Math.max(0, 0.50 - radius / (cx * 1.4));
+            const w = Math.max(0.5, 4.5 - radius / 80);
+            ctx.beginPath();
+            ctx.arc(x, y, w, 0, Math.PI*2);
+            ctx.fillStyle = armColors[arm].replace('{a}', alpha.toFixed(3));
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    // ── Outer halo ───────────────────────────────────────────────
+    const haloGrad = ctx.createRadialGradient(cx,cx, S*0.25, cx,cx, cx);
+    haloGrad.addColorStop(0,   'rgba(200,180,255,0.08)');
+    haloGrad.addColorStop(1,   'rgba(100,80,160,0.0)');
+    ctx.fillStyle = haloGrad; ctx.fillRect(0,0,S,S);
+
+    // ── Sun marker (tiny dot at correct position) ─────────────
+    // Sun is 26,673 ly from GC; MW diameter ~100,000 ly.
+    // On a 512-px canvas covering 120,000 ly → px/ly = 512/120000 ≈ 0.00427
+    // Sun offset: 26,673 * 0.00427 ≈ 113.8 px from center, in +x direction (scene x)
+    const sunR = 26673 / 120000 * S;
+    ctx.beginPath();
+    ctx.arc(cx + sunR, cx, 3.5, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,255,200,0.9)';
+    ctx.fill();
+    // Small label
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,180,0.75)';
+    ctx.fillText('☀', cx + sunR + 5, cx - 4);
+
+    mwOuterSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(cv),
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    }));
+    // 120,000 scene units = galaxy diameter — matches the actual galactic disk scale
+    mwOuterSprite.scale.setScalar(120000);
+    mwOuterSprite.position.set(0, 0, 0);
+    mwOuterSprite.visible = false;  // hidden until universe zoom
+    scene.add(mwOuterSprite);
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  M87 — ONE-SIDED RELATIVISTIC JET
+//  M87's jet is one of the most famous astrophysical jets, first observed in
+//  1918. It extends ~5,000 ly and is visible from radio to X-ray.
+//  In scene space, the jet is visually exaggerated (~8,000 scene units long)
+//  and points in the direction PA~291° (roughly toward galactic south-east).
+// ══════════════════════════════════════════════════════════════════════════
+(function buildM87Jet() {
+    const m87 = CATALOG.find(s => s.id === 'm87');
+    if (!m87) return;
+
+    const g = new THREE.Group();
+    g.position.copy(m87.pos3);
+    scene.add(g);
+
+    // Jet direction: M87's jet PA ~291° in equatorial coords.
+    // In our scene (galactic coords), this translates to roughly (-0.7, 0.35, 0.6)
+    // normalized — pointing toward galactic south-east at a mild upward angle.
+    const jetDir = new THREE.Vector3(-0.68, 0.38, 0.62).normalize();
+    const jetLen = 8500;
+
+    // Tilt the group so +Y aligns with the jet direction
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), jetDir);
+
+    // Core jet cone (narrow, bright)
+    g.add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0, 700, jetLen, 32, 1, true),
+        new THREE.MeshBasicMaterial({
+            color: 0xaaddff, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.55, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+    // Offset so base is at BH, tip at jetLen
+    g.children[0].position.y = jetLen / 2;
+
+    // Soft glow envelope
+    g.add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0, 2400, jetLen, 24, 1, true),
+        new THREE.MeshBasicMaterial({
+            color: 0x4477cc, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.14, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+    g.children[1].position.y = jetLen / 2;
+
+    // Bright spine line
+    g.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, jetLen, 0),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xeef8ff, transparent: true, opacity: 0.85 })
+    ));
+
+    // Bright knots along the jet (observed in real M87 jet)
+    [0.25, 0.50, 0.75, 1.0].forEach(frac => {
+        const knot = new THREE.Mesh(
+            new THREE.SphereGeometry(500, 12, 12),
+            new THREE.MeshBasicMaterial({
+                color: 0xbbddff, transparent: true, opacity: 0.60,
                 depthWrite: false, blending: THREE.AdditiveBlending,
             })
         );
-        g.add(halo);
+        knot.position.y = frac * jetLen;
+        g.add(knot);
     });
 
-    // Animate: slow disk rotation + jet pulse stored on group
-    g.userData.isTon618 = true;
-    g.userData.diskGroup = diskGroup;
+    // Counter-jet (dimmer, shorter — only faintly detected)
+    g.add(new THREE.Mesh(
+        new THREE.CylinderGeometry(0, 320, jetLen * 0.30, 16, 1, true),
+        new THREE.MeshBasicMaterial({
+            color: 0x446688, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.15, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        })
+    ));
+    g.children[g.children.length-1].position.y = -jetLen * 0.15;
+    g.children[g.children.length-1].rotation.x = Math.PI; // flip to point down
+
+    g.userData.isM87Jet = true;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MAGELLANIC STREAM — LMC/SMC TIDAL DEBRIS RIBBON
+//  The Magellanic Stream is ~150° of neutral hydrogen stripped from the
+//  Magellanic Clouds by tidal and ram-pressure forces as they orbit the MW.
+//  Rendered as a faint ribbon of points curving from LMC/SMC around the
+//  lower galactic halo and trailing behind their orbit.
+// ══════════════════════════════════════════════════════════════════════════
+(function buildMagellanicStream() {
+    const lmc = CATALOG.find(s => s.id === 'lmc');
+    const smc = CATALOG.find(s => s.id === 'smc');
+    if (!lmc || !smc) return;
+
+    // Stream waypoints: start near LMC/SMC, curve around the southern MW halo,
+    // tail trailing in the direction opposite to their orbital motion.
+    // Orbital motion is roughly +z direction (galactic rotation), so trailing
+    // end points toward -z and somewhat toward +x (galactic anticenter).
+    const lp = lmc.pos3, sp = smc.pos3;
+    const mid = lp.clone().add(sp).multiplyScalar(0.5);
+
+    // Control points for a cubic bezier through the stream
+    // From combined LMC/SMC center → curve under the MW → trail out to anticenter
+    const streamPts = [];
+    const waypoints = [
+        sp.clone(),                                              // start at SMC
+        lp.clone(),                                              // through LMC
+        new THREE.Vector3(mid.x * 0.6,  mid.y * 0.5,  mid.z * 0.8),  // curving in
+        new THREE.Vector3(0,            mid.y * 0.3,  -20000),        // under MW south
+        new THREE.Vector3(-15000,       -15000,         5000),         // swinging around
+        new THREE.Vector3(-25000,       -8000,          35000),        // trailing out
+        new THREE.Vector3(-20000,        2000,          55000),        // far trail end
+    ];
+
+    // Subdivide the path into ~300 particles
+    for (let seg = 0; seg < waypoints.length - 1; seg++) {
+        const a = waypoints[seg], b = waypoints[seg + 1];
+        const steps = 45;
+        for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            streamPts.push(a.clone().lerp(b, t));
+        }
+    }
+
+    // Scatter particles slightly perpendicular to path (stream has width)
+    const positions = new Float32Array(streamPts.length * 3);
+    const colors    = new Float32Array(streamPts.length * 3);
+    streamPts.forEach((p, i) => {
+        const jitter = 2000;
+        positions[i*3]   = p.x + (Math.random()-0.5) * jitter;
+        positions[i*3+1] = p.y + (Math.random()-0.5) * jitter * 0.4;
+        positions[i*3+2] = p.z + (Math.random()-0.5) * jitter;
+        // Color fades from LMC-blue near clouds to pale toward tail
+        const fade = 1 - i / streamPts.length;
+        colors[i*3]   = 0.5 + fade * 0.4;
+        colors[i*3+1] = 0.6 + fade * 0.3;
+        colors[i*3+2] = 0.8 + fade * 0.2;
+    });
+
+    const streamGeo = new THREE.BufferGeometry();
+    streamGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    streamGeo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    const streamMat = new THREE.PointsMaterial({
+        size: 800, vertexColors: true,
+        transparent: true, opacity: 0.28,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+        sizeAttenuation: true,
+    });
+    scene.add(new THREE.Points(streamGeo, streamMat));
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2416,27 +2741,43 @@ function animate() {
     t += clock.getDelta();
     controls.update();
 
-    // Gently pulse Sgr A* glow
+    const camDistFromOrigin = camera.position.length();
+
+    // ── Sgr A* glow pulse ────────────────────────────────────────
     const sgrGlow = starGlows['sgr_a'];
     if (sgrGlow) {
-        const camD = camera.position.length();
-        const baseG = Math.max(sgrGlow.userData.baseGlow, camD * 0.012);
+        const baseG = Math.max(sgrGlow.userData.baseGlow, camDistFromOrigin * 0.012);
         sgrGlow.scale.setScalar(baseG * (1 + 0.10 * Math.sin(t * 1.6)));
     }
 
-    // Animate Ton 618 — slowly rotate accretion disk + pulse glow
+    // ── Ton 618 — Keplerian differential disk rotation ────────────
     scene.traverse(obj => {
-        if (obj.userData.isTon618) {
-            const dg = obj.userData.diskGroup;
-            if (dg) dg.rotation.y += 0.00018; // very slow rotation
-        }
+        if (!obj.userData.isTon618) return;
+        const dg = obj.userData.diskGroup;
+        if (dg) dg.rotation.y += 0.00025;   // whole disk group rotates (orientation drift)
+        const rings = obj.userData.diskRings; // [[mesh, omega], ...]
+        if (rings) rings.forEach(([ring, omega]) => { ring.rotation.z += omega; });
     });
+
+    // ── Ton 618 glow — pulsing quasar variability ─────────────────
     const ton618Glow = starGlows['ton618'];
     if (ton618Glow) {
-        const camDTon = camera.position.distanceTo(ton618Glow.position);
+        const d = camera.position.distanceTo(ton618Glow.position);
         const bg = ton618Glow.userData.baseGlow;
-        const mg = camDTon * 0.012;
-        ton618Glow.scale.setScalar(Math.max(bg, mg) * (1 + 0.14 * Math.sin(t * 2.3)));
+        const mg = d * 0.012;
+        // Two-frequency pulse: fast flicker + slow breath
+        const pulse = 1 + 0.12 * Math.sin(t * 2.3) + 0.06 * Math.sin(t * 0.7);
+        ton618Glow.scale.setScalar(Math.max(bg, mg) * pulse);
+    }
+
+    // ── MW outer sprite: show only in universe view ───────────────
+    if (mwOuterSprite) {
+        mwOuterSprite.visible = camDistFromOrigin > 140000;
+    }
+
+    // ── Scale-break label: show at galaxy/universe zoom only ──────
+    if (scaleBreakLabelSprite) {
+        scaleBreakLabelSprite.visible = camDistFromOrigin > 40000 && camDistFromOrigin < 700000;
     }
 
     updateLabelScales();
