@@ -168,10 +168,17 @@ canvas { display:block; width:100% !important; height:100% !important; }
 }
 .star-item:hover { background:rgba(255,255,255,.06); }
 .star-item.selected { background:rgba(160,100,255,.15); border-color:rgba(160,100,255,.4); }
+.star-item.igm-item { border-left:2px solid rgba(80,140,255,0.3); }
 .star-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
 .star-name { font-weight:600; font-size:11.5px; }
 .star-type { font-size:10px; color:#666; }
 .star-dist { font-size:10px; color:#888; margin-left:auto; white-space:nowrap; }
+.star-section-hdr {
+    font-size:9.5px; font-weight:700; letter-spacing:.12em;
+    text-transform:uppercase; color:#4488cc; opacity:0.8;
+    padding:10px 9px 4px; border-top:1px solid rgba(80,140,255,0.2);
+    margin-top:6px;
+}
 
 /* info panel */
 #info-panel {
@@ -253,6 +260,7 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
             <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
             <button id="zoom-galaxy" class="active">Galaxy</button>
+            <button id="zoom-universe" title="Log-scale — distances compressed beyond 60 kly">Universe ⚠ log</button>
         </div>
 
         <!-- Coord display (bottom-left) -->
@@ -336,20 +344,22 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 //  SCIENTIFIC NOTATION HELPERS
 // ══════════════════════════════════════════════════════════════════════════
 function fmtLy(d) {
-    if (d === 0) return '0 ly';
-    if (d < 0.01) return d.toExponential(2) + ' ly';
-    if (d < 100)  return d.toFixed(2) + ' ly';
-    if (d < 1000) return d.toFixed(1) + ' ly';
-    const exp = Math.floor(Math.log10(d));
-    const co  = (d / Math.pow(10, exp)).toFixed(3);
-    return co + ' × 10' + superscript(exp) + ' ly';
+    if (d === 0)             return '0 ly';
+    if (d < 0.01)            return d.toExponential(2) + ' ly';
+    if (d < 100)             return d.toFixed(2) + ' ly';
+    if (d < 10_000)          return d.toFixed(1) + ' ly';
+    if (d < 1_000_000)       return (d / 1000).toFixed(2) + ' kly';
+    if (d < 1_000_000_000)   return (d / 1_000_000).toFixed(3) + ' Mly';
+    return (d / 1_000_000_000).toFixed(3) + ' Gly';
 }
 function fmtPc(d_ly) {
     const pc = d_ly / 3.26156;
-    if (pc < 0.001) return (pc * 1e6).toFixed(1) + ' μpc';
-    if (pc < 1)     return (pc * 1000).toFixed(2) + ' mpc';
-    if (pc < 1000)  return pc.toFixed(3) + ' pc';
-    return (pc / 1000).toFixed(3) + ' kpc';
+    if (pc < 0.001)          return (pc * 1e6).toFixed(1) + ' μpc';
+    if (pc < 1)              return (pc * 1000).toFixed(2) + ' mpc';
+    if (pc < 1000)           return pc.toFixed(2) + ' pc';
+    if (pc < 1_000_000)      return (pc / 1000).toFixed(2) + ' kpc';
+    if (pc < 1_000_000_000)  return (pc / 1_000_000).toFixed(3) + ' Mpc';
+    return (pc / 1_000_000_000).toFixed(3) + ' Gpc';
 }
 function fmtDist(ly) {
     return fmtLy(ly) + ' (' + fmtPc(ly) + ')';
@@ -403,6 +413,52 @@ function gccToThree(gcc) {
 
 function starPos(l_deg, b_deg, dist_ly) {
     return gccToThree(helioToGCC(l_deg, b_deg, dist_ly));
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  INTERGALACTIC COORDINATE MAPPING
+//
+//  Problem: the observable universe is ~93 billion ly across. Placing
+//  objects at true distances breaks THREE.js float precision (>~10^7 units)
+//  and requires impossibly large far clipping planes.
+//
+//  Solution: hybrid log-linear mapping anchored at the Milky Way boundary.
+//    • dist ≤ SCALE_BREAK : 1 scene unit = 1 ly  (galactic interior unchanged)
+//    • dist >  SCALE_BREAK : sceneDist = SCALE_BREAK + LOG_K·log₁₀(dist/SCALE_BREAK)
+//
+//  Resulting scene positions (approx):
+//    LMC   163 kly  →  74 k scene units
+//    SMC   200 kly  →  76 k
+//    M31   2.54 Mly → 109 k
+//    M87   53.5 Mly → 148 k
+//    Ton618 10.4 Gly → 307 k
+//
+//  All directions (galactic l, b) are exact — only radial distance is compressed.
+// ══════════════════════════════════════════════════════════════════════════
+const SCALE_BREAK = 60000;   // ly — galactic disk edge; linear scale ends here
+const LOG_K       = 30000;   // scene-unit scale factor for log region
+
+function mapDistToScene(dist_ly) {
+    if (dist_ly <= SCALE_BREAK) return dist_ly;
+    return SCALE_BREAK + LOG_K * Math.log10(dist_ly / SCALE_BREAK);
+}
+
+// Like starPos() but uses the log-compressed radial distance.
+// Direction (l, b) is preserved exactly.
+function intergalacticPos(l_deg, b_deg, dist_ly) {
+    const d = mapDistToScene(dist_ly);
+    const l = l_deg * Math.PI / 180;
+    const b = b_deg * Math.PI / 180;
+    // Heliocentric unit vector (same math as helioToGCC, dist=1)
+    const ux =  Math.cos(b) * Math.cos(l);  // toward GC
+    const uy =  Math.cos(b) * Math.sin(l);  // tangential
+    const uz =  Math.sin(b);                 // galactic north
+    // Place at compressed distance from Sun in scene space
+    return new THREE.Vector3(
+        SUN_GC.x - ux * d,
+        SUN_GC.y + uz * d,
+        SUN_GC.z + uy * d,
+    );
 }
 
 // ─── Star & object catalog ───────────────────────────────────────────────
@@ -993,20 +1049,140 @@ const CATALOG = [
         ],
         isCluster: true,
     },
+
+    // ── Section header (sidebar only — no 3D object) ───────────────────────
+    { id: '__sep_igm', sectionHeader: 'Intergalactic', isHeader: true },
+
+    // ── Intergalactic objects ──────────────────────────────────────────────
+    // Distances are true physical values; positions are log-compressed in scene.
+    // mapDistToScene() keeps directions exact; only radial magnitude is squeezed.
+    {
+        id: 'lmc', name: 'Large Magellanic Cloud', abbr: 'LMC', type: 'Dwarf Irregular Galaxy',
+        l: 280.47, b: -32.89, dist: 163_000,
+        isIntergalactic: true,
+        temp: 10000, spectral: 'B',
+        color: 0xddccff, size: 4.0,
+        desc: 'Largest satellite galaxy of the Milky Way. Visible to the naked eye from the southern hemisphere. Hosts the Tarantula Nebula — the most active star-forming region in the Local Group. Destined to merge with the Milky Way in ~2.4 Gyr.',
+        props: [
+            ['Type', 'Dwarf Irregular / SB(s)m'],
+            ['Distance', '~163,000 ly (49.97 kpc)'],
+            ['Galactic l / b', '280.47° / −32.89°'],
+            ['Mass', '~1.38 × 10¹⁰ M☉'],
+            ['Diameter', '~14,000 ly'],
+            ['Star count', '~30 billion'],
+            ['Future', 'Merging with MW in ~2.4 Gyr'],
+            ['Notable', 'Tarantula Nebula (30 Doradus)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'smc', name: 'Small Magellanic Cloud', abbr: 'SMC', type: 'Dwarf Irregular Galaxy',
+        l: 302.80, b: -44.30, dist: 200_000,
+        isIntergalactic: true,
+        temp: 10000, spectral: 'B',
+        color: 0xccbbff, size: 3.5,
+        desc: 'Second-largest satellite galaxy of the Milky Way. Contains ~3 billion stars. Connected to the LMC via the Magellanic Bridge (a stream of gas). Used historically for measuring cosmic distances via Cepheid variables.',
+        props: [
+            ['Type', 'Dwarf Irregular / SB(s)m pec'],
+            ['Distance', '~200,000 ly (61.9 kpc)'],
+            ['Galactic l / b', '302.80° / −44.30°'],
+            ['Mass', '~6.5 × 10⁸ M☉'],
+            ['Diameter', '~7,000 ly'],
+            ['Notable', 'Cepheid period-luminosity calibration'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm31', name: 'Andromeda Galaxy (M31)', abbr: 'M31', type: 'Spiral Galaxy (SA(s)b)',
+        l: 121.17, b: -21.57, dist: 2_537_000,
+        isIntergalactic: true,
+        temp: 5000, spectral: 'G',
+        color: 0xaaccff, size: 4.5,
+        desc: 'The nearest major galaxy to the Milky Way. Slightly larger than our galaxy with ~1 trillion stars. Approaching at ~110 km/s — on a collision course. The Milky Way–Andromeda merger is expected in ~4.5 Gyr, forming "Milkomeda."',
+        props: [
+            ['Type', 'Spiral — SA(s)b'],
+            ['Distance', '2.537 Mly (778 kpc)'],
+            ['Galactic l / b', '121.17° / −21.57°'],
+            ['Mass', '~1.5 × 10¹² M☉'],
+            ['Diameter', '~220,000 ly'],
+            ['Star count', '~1 trillion'],
+            ['Central BH', '~110–230 million M☉'],
+            ['Closing speed', '~110 km/s (collision in ~4.5 Gyr)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm33', name: 'Triangulum Galaxy (M33)', abbr: 'M33', type: 'Spiral Galaxy (SA(s)cd)',
+        l: 133.61, b: -31.33, dist: 2_730_000,
+        isIntergalactic: true,
+        temp: 5000, spectral: 'G',
+        color: 0x99bbff, size: 4.0,
+        desc: 'Third-largest galaxy in the Local Group. A loosely wound spiral with very little bulge. Home to the giant H II region NGC 604, one of the largest known star-forming nebulae (1,500 ly across).',
+        props: [
+            ['Type', 'Spiral — SA(s)cd'],
+            ['Distance', '2.73 Mly (837 kpc)'],
+            ['Galactic l / b', '133.61° / −31.33°'],
+            ['Mass', '~5 × 10¹⁰ M☉'],
+            ['Diameter', '~60,000 ly'],
+            ['Notable', 'NGC 604 — giant H II region (1,500 ly)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm87', name: 'M87 (Virgo A)', abbr: 'M87', type: 'Elliptical Galaxy + AGN',
+        l: 283.78, b: 74.49, dist: 53_490_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0xff9933, glowColor: 0xff6600, size: 4.5,
+        desc: 'Massive elliptical galaxy at the core of the Virgo Cluster. Hosts M87* — the first black hole ever directly imaged (Event Horizon Telescope, April 2019). Drives a 5,000 ly relativistic jet at near-light speed.',
+        props: [
+            ['Type', 'Elliptical — E0 / cD'],
+            ['Distance', '53.49 Mly (16.4 Mpc)'],
+            ['Galactic l / b', '283.78° / +74.49°'],
+            ['Mass', '~6.5 × 10¹² M☉'],
+            ['Star count', '~1 trillion'],
+            ['Central BH (M87*)', '6.5 × 10⁹ M☉'],
+            ['BH image', 'First BH imaged — EHT 2019'],
+            ['Jet length', '~5,000 ly (relativistic)'],
+        ],
+    },
+    {
+        id: 'ton618', name: 'Ton 618', abbr: 'Ton 618', type: 'Quasar / Ultramassive BH',
+        l: 180.49, b: 83.31, dist: 10_400_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xff4400, size: 3.5,
+        desc: 'One of the most massive black holes known — ~66 billion M☉. A hyperluminous quasar at redshift z=2.219, meaning its light left when the universe was only ~3 billion years old. Powered an AGN so bright it was originally catalogued as a star.',
+        props: [
+            ['Type', 'Quasar / Hyperluminous AGN'],
+            ['Distance', '10.4 Gly (3.19 Gpc)'],
+            ['Galactic l / b', '180.49° / +83.31°'],
+            ['Redshift', 'z = 2.219'],
+            ['Light travel time', '~10.4 Gyr (universe was ~3.4 Gyr old)'],
+            ['BH mass', '~6.6 × 10¹⁰ M☉ (66 billion M☉)'],
+            ['Schwarzschild radius', '~1,300 AU'],
+            ['Luminosity', '~4 × 10¹³ L☉'],
+            ['Apparent mag', '15.9 (V-band)'],
+        ],
+    },
 ];
 
 // Pre-compute Three.js positions + galactic-center distance
 CATALOG.forEach(s => {
+    if (s.isHeader) return;  // sidebar-only separator — no 3D object
     if (s.isSstar && s.gcOffset) {
-        // S-stars: tiny offset from GC origin (position in ly)
         s.pos3 = new THREE.Vector3(...s.gcOffset);
     } else if (s.isGC) {
         s.pos3 = new THREE.Vector3(0, 0, 0);
+    } else if (s.isIntergalactic) {
+        s.pos3 = intergalacticPos(s.l, s.b, s.dist);
     } else {
         s.pos3 = starPos(s.l, s.b, s.dist);
     }
-    // Auto-compute distance from Sgr A* (overrides any hardcoded gcDist)
-    s.gcDist = s.pos3.length();
+    // gcDist: actual astronomical distance from Sgr A*.
+    // Intergalactic pos3 is log-compressed, so use true dist (GC offset is
+    // negligible at Mly+ scales; actual difference is only ~26,673 ly).
+    s.gcDist = s.isIntergalactic ? s.dist : s.pos3.length();
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1023,14 +1199,14 @@ renderer.setClearColor(0x000005, 1);
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 2_000_000);
+const camera = new THREE.PerspectiveCamera(50, W() / H(), 0.1, 10_000_000);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.screenSpacePanning = true;
 controls.minDistance = 0.5;
-controls.maxDistance = 500_000;
+controls.maxDistance = 900_000;
 controls.zoomSpeed = 1.4;
 
 // ── Sun reference point ─────────────────────────────────────────────────
@@ -1062,6 +1238,13 @@ const ZOOM_PRESETS = {
         pos: new THREE.Vector3(8000, 90000, 15000),
         target: new THREE.Vector3(0, 0, 0),
         label: 'Galaxy', radius: 100000,
+    },
+    universe: {
+        // High above galactic north pole — see Milky Way + intergalactic objects
+        // Ton 618 appears near galactic north (b=83°); M31 below the plane.
+        pos: new THREE.Vector3(30000, 550000, 80000),
+        target: new THREE.Vector3(0, 0, 0),
+        label: 'Universe (log scale)', radius: 600000,
     },
 };
 
@@ -1103,13 +1286,18 @@ function flyTo(preset, duration = 1400) {
 
 // ── Fly camera to orbit near a specific catalog star ────────────────────
 function computeOrbitDist(s) {
-    if (s.isGC)      return 3000;  // close enough to see GC region
-    if (s.isSstar)   return 0.5;   // fly within 0.5 ly of S-star
+    if (s.isGC)           return 3000;
+    if (s.isSstar)        return 0.5;
+    if (s.isIntergalactic) {
+        // Orbit distance in scene units (compressed), not actual ly
+        const sceneDist = s.pos3.distanceTo(SUN3);
+        return Math.max(5000, sceneDist * 0.15);
+    }
     if (s.isCluster) return 300;
     if (s.dist > 2000) return s.dist * 0.5;
     if (s.dist > 200)  return s.dist * 0.4;
     if (s.dist > 30)   return 80;
-    return 20; // solar neighborhood stars
+    return 20;
 }
 
 function flyToStar(s) {
@@ -1376,6 +1564,40 @@ scene.add(ringsGroup);
     ringsGroup.add(line);
 })();
 
+// ── Scale-break boundary ─────────────────────────────────────────────────
+// Marks where 1:1 linear scale ends and log compression begins (60 kly from Sun).
+// Visible only at galaxy/universe zoom — a reminder that distances beyond are squeezed.
+(function buildScaleBreak() {
+    const R = SCALE_BREAK;   // 60,000 scene units from GC (approx. MW edge)
+    const pts = [];
+    for (let i = 0; i <= 180; i++) {
+        const a = i * Math.PI / 180;
+        pts.push(new THREE.Vector3(R * Math.cos(a), 0, R * Math.sin(a)));
+    }
+    // Only draw half-circle on the Sun-facing side (x>0) so it doesn't clutter GC
+    const ring = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x334466, transparent: true, opacity: 0.35 })
+    );
+    ringsGroup.add(ring);
+
+    // Small label sprite at ring edge
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 64;
+    const cx = cv.getContext('2d');
+    cx.font = 'bold 20px Segoe UI, sans-serif';
+    cx.fillStyle = 'rgba(80,120,200,0.7)';
+    cx.textAlign = 'center';
+    cx.fillText('⟵ log-scale boundary — beyond this, distances are compressed ⟶', 256, 36);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false,
+    }));
+    sp.position.set(SUN_GC.x, 400, R);
+    sp.scale.set(14000, 1750, 1);
+    sp.userData.scaleBreakLabel = true;
+    scene.add(sp);
+})();
+
 // Galactic longitude radials (every 30° = 12 lines from GC outward)
 for (let deg = 0; deg < 360; deg += 30) {
     const rad = deg * Math.PI / 180;
@@ -1457,6 +1679,7 @@ const BASE_SPHERE_R = { sgr_a: 80, default: 0.15 };
 function hexToRgb(h) { return { r:(h>>16)&255, g:(h>>8)&255, b:h&255 }; }
 
 CATALOG.forEach(s => {
+    if (s.isHeader) return;  // sidebar separator — no 3D mesh
     const pos = s.pos3;
 
     // ── Raycasting sphere (tiny base, scaled adaptively) ────────
@@ -1491,7 +1714,10 @@ CATALOG.forEach(s => {
     }));
     glow.position.copy(pos);
     // Initial scale set small — updateLabelScales corrects it each frame
-    const baseGlow = s.isGC ? 1200 : s.isSstar ? s.size * 0.5 : (s.size * 0.6 + (s.isCluster ? 5 : 0));
+    const baseGlow = s.isGC ? 1200
+                   : s.isSstar ? s.size * 0.5
+                   : s.isIntergalactic ? s.size * 800   // scene units (log-scale)
+                   : (s.size * 0.6 + (s.isCluster ? 5 : 0));
     glow.scale.setScalar(baseGlow);
     glow.userData.baseGlow = baseGlow;
     scene.add(glow);
@@ -1524,12 +1750,21 @@ CATALOG.forEach(s => {
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
 CATALOG.forEach(s => {
-    const distStr = s.isGC ? '0 ly' : fmtLy(s.dist);
+    // Section header (no 3D object)
+    if (s.isHeader) {
+        const hdr = document.createElement('div');
+        hdr.className = 'star-section-hdr';
+        hdr.textContent = s.sectionHeader;
+        starListEl.appendChild(hdr);
+        return;
+    }
+    const distStr = s.isGC ? '0 ly (origin)' : fmtLy(s.dist);
+    const dotColor = s.glowColor ? s.glowColor : s.color;
     const div = document.createElement('div');
-    div.className = 'star-item';
+    div.className = 'star-item' + (s.isIntergalactic ? ' igm-item' : '');
     div.id = 'li-' + s.id;
     div.innerHTML = `
-        <div class="star-dot" style="background:#${s.color.toString(16).padStart(6,'0')}"></div>
+        <div class="star-dot" style="background:#${dotColor.toString(16).padStart(6,'0')}"></div>
         <div>
             <div class="star-name">${s.name}</div>
             <div class="star-type">${s.type}</div>
@@ -1578,6 +1813,12 @@ function selectStar(id, doFly = false) {
         ['Galactic l / b', '≈ 0° / 0° (galactic center direction)'],
         ['Distance from Sun', fmtDist(s.dist)],
         ['Distance from Sgr A*', fmtDist(s.gcDist) + ' (orbital radius)'],
+    ] : s.isIntergalactic ? [
+        ['Galactic l (longitude)', s.l.toFixed(4) + '°'],
+        ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
+        ['Distance from Sun', fmtDist(s.dist)],
+        ['Distance from GC',  fmtDist(s.gcDist)],
+        ['⚠ Scale note', 'Scene position is log-compressed beyond 60 kly'],
     ] : [
         ['Galactic l (longitude)', s.l.toFixed(4) + '°'],
         ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
@@ -1660,10 +1901,11 @@ document.getElementById('tog-plane').addEventListener('change', e => {
 // ══════════════════════════════════════════════════════════════════════════
 //  ZOOM BUTTONS
 // ══════════════════════════════════════════════════════════════════════════
-document.getElementById('zoom-local').addEventListener('click',  () => flyTo('local'));
-document.getElementById('zoom-hood').addEventListener('click',   () => flyTo('hood'));
-document.getElementById('zoom-arm').addEventListener('click',    () => flyTo('arm'));
-document.getElementById('zoom-galaxy').addEventListener('click', () => flyTo('galaxy'));
+document.getElementById('zoom-local').addEventListener('click',    () => flyTo('local'));
+document.getElementById('zoom-hood').addEventListener('click',     () => flyTo('hood'));
+document.getElementById('zoom-arm').addEventListener('click',      () => flyTo('arm'));
+document.getElementById('zoom-galaxy').addEventListener('click',   () => flyTo('galaxy'));
+document.getElementById('zoom-universe').addEventListener('click', () => flyTo('universe', 2200));
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SIDEBAR TOGGLE
@@ -1730,6 +1972,7 @@ function updateLabelScales() {
     const camDist = Math.max(1, camera.position.distanceTo(controls.target));
 
     CATALOG.forEach(s => {
+        if (s.isHeader) return;
         // ── Sphere (raycasting target) ──────────────────────────
         const mesh   = starMeshes[s.id];
         const baseR  = mesh.userData.baseR;
