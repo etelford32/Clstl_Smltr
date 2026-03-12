@@ -407,26 +407,110 @@ function starPos(l_deg, b_deg, dist_ly) {
 
 // ─── Star & object catalog ───────────────────────────────────────────────
 // All positions: heliocentric galactic (l°, b°, distance ly)
+// S-stars have isSstar:true and gcOffset:[x,y,z] (ly offset from GC origin)
+// gcDist is auto-computed in the forEach below — no need to hardcode it
 const CATALOG = [
+
+    // ── Galactic Center ────────────────────────────────────────────────────
     {
         id: 'sgr_a', name: 'Sagittarius A*', abbr: 'Sgr A*', type: 'SMBH',
-        l: 0, b: 0, dist: 26673,      // GC — placed at origin
-        gcDist: 0,
+        l: 0, b: 0, dist: 26673,
         temp: 0, spectral: 'SMBH',
-        color: 0xffaa00, glowColor: 0xff6600, size: 4.0,
-        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉.',
+        color: 0x110800, glowColor: 0xff6600, size: 3.0,
+        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Surrounded by the S-star cluster whose orbits provide definitive proof of its mass.',
         props: [
+            ['Type', 'Supermassive Black Hole (Kerr)'],
             ['Mass', '4.15 × 10⁶ M☉'],
-            ['Schwarzschild radius', '~0.08 AU'],
+            ['Schwarzschild radius', '~0.08 AU (12 million km)'],
+            ['Event horizon diameter', '~24.6 million km'],
+            ['Spin parameter', 'a* ~ 0.9 (near-maximal)'],
             ['Distance from Sun', '26,673 ly (8.178 kpc)'],
-            ['Type', 'Supermassive Black Hole'],
+            ['Associated cluster', 'S-star cluster (~30 known orbits)'],
         ],
         link: null, isGC: true,
     },
+
+    // ── S-stars (orbiting Sgr A*) ──────────────────────────────────────────
+    // Positions are offsets from GC origin in light-years (not to galactic scale)
+    {
+        id: 's2', name: 'S2 (S0-2)', abbr: 'S2', type: 'B0-2.5 V [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0110, 0.0082, 0.0090],   // ~0.016 ly from GC
+        temp: 28000, spectral: 'B',
+        color: 0x88aaff, size: 0.18,
+        desc: 'The most famous S-star. Completes one full orbit of Sgr A* every 16.05 years, reaching a periapsis speed of ~7,650 km/s (2.55% c). Its orbit gave the first high-precision mass measurement of Sgr A*.',
+        props: [
+            ['Spectral type', 'B0–2.5 V'],
+            ['Orbital period', '16.05 yr'],
+            ['Semi-major axis', '~970 AU (0.016 ly)'],
+            ['Eccentricity', '0.884'],
+            ['Periapsis distance', '~120 AU from Sgr A*'],
+            ['Peak orbital speed', '~7,650 km/s (2.55% c)'],
+            ['Mass', '~15 M☉'],
+        ],
+    },
+    {
+        id: 's1', name: 'S1', abbr: 'S1', type: 'B2-3 V [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [-0.0155, 0.0118, 0.0182],  // ~0.025 ly from GC
+        temp: 23000, spectral: 'B',
+        color: 0x99aaff, size: 0.15,
+        desc: 'One of the original S-stars identified in the 1990s. B-type main sequence star orbiting Sgr A* with a longer period than S2. Its orbit helped constrain the enclosed mass of the galactic center.',
+        props: [
+            ['Spectral type', 'B2–3 V'],
+            ['Orbital period', '~94 yr (estimated)'],
+            ['Semi-major axis', '~0.025 ly from GC'],
+            ['Eccentricity', '~0.56'],
+            ['Mass', '~10–15 M☉'],
+        ],
+    },
+    {
+        id: 's12', name: 'S12', abbr: 'S12', type: 'K/M III [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0145, 0.0040, -0.0161],  // ~0.022 ly from GC
+        temp: 4200, spectral: 'K',
+        color: 0xff8844, size: 0.15,
+        desc: 'Evolved giant star orbiting Sgr A*, notable for being a cool K/M-type among the mostly hot B-type S-stars. Its presence suggests a complex star-formation history in the galactic center.',
+        props: [
+            ['Spectral type', 'K/M III (giant)'],
+            ['Semi-major axis', '~0.022 ly from GC'],
+            ['Orbital period', '~55 yr (estimated)'],
+            ['Mass', '~3–6 M☉'],
+        ],
+    },
+    {
+        id: 's14', name: 'S14', abbr: 'S14', type: 'B9 V [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [-0.0038, 0.0019, 0.0055],  // ~0.0069 ly from GC
+        temp: 10000, spectral: 'A',
+        color: 0xbbddff, size: 0.14,
+        desc: 'Very tightly orbiting S-star with one of the smallest known semi-major axes in the cluster. Provides tight constraints on the mass distribution within the innermost parsec.',
+        props: [
+            ['Spectral type', 'B9 V'],
+            ['Semi-major axis', '~0.007 ly from GC'],
+            ['Orbital period', '~38 yr (estimated)'],
+            ['Mass', '~5–8 M☉'],
+        ],
+    },
+    {
+        id: 's38', name: 'S38', abbr: 'S38', type: 'B0 V [S-star]',
+        l: 0, b: 0, dist: 26673,
+        isSstar: true, gcOffset: [0.0062, 0.0024, -0.0071],  // ~0.0096 ly from GC
+        temp: 30000, spectral: 'B',
+        color: 0x88aaff, size: 0.14,
+        desc: 'Hot B-type S-star with a highly eccentric orbit around Sgr A*. Discovered in the 2000s as part of the growing census of GC orbiting stars observed by the Keck and VLT telescopes.',
+        props: [
+            ['Spectral type', 'B0 V'],
+            ['Semi-major axis', '~0.010 ly from GC'],
+            ['Eccentricity', '~0.82'],
+            ['Orbital period', '~19 yr (estimated)'],
+        ],
+    },
+
+    // ── The Sun ────────────────────────────────────────────────────────────
     {
         id: 'sun', name: 'Sol (The Sun)', abbr: 'Sun', type: 'G2V',
         l: 0, b: 0, dist: 0,
-        gcDist: 26673,
         temp: 5778, spectral: 'G',
         color: 0xffee88, size: 1.2,
         desc: 'Our home star. G-type main sequence. The galactic coordinate system\'s reference origin.',
@@ -436,33 +520,78 @@ const CATALOG = [
             ['Mass', '1.0 M☉'],
             ['Luminosity', '1.0 L☉'],
             ['Galactic l / b', '— / — (origin)'],
-            ['Dist from GC', '26,673 ly'],
+            ['Age', '~4.6 Gyr'],
         ],
         link: 'sun.html',
     },
+
+    // ── Solar neighborhood (< 15 ly) ───────────────────────────────────────
     {
-        id: 'alpha_cen', name: 'α Centauri', abbr: 'α Cen', type: 'G2V+K1V',
-        l: 315.78, b: -0.68, dist: 4.37,
-        gcDist: 26670,
-        temp: 5790, spectral: 'G',
-        color: 0xffee88, size: 0.85,
-        desc: 'Nearest star system to the Sun at 4.37 ly. Triple system: α Cen A (G2V), α Cen B (K1V), and Proxima Centauri (M5.5Ve) — the actual nearest star at 4.24 ly.',
+        id: 'proxima', name: 'Proxima Centauri', abbr: 'Proxima Cen', type: 'M5.5Ve',
+        l: 313.94, b: 1.93, dist: 4.244,
+        temp: 3042, spectral: 'M',
+        color: 0xff3300, size: 0.55,
+        desc: 'The nearest individual star to the Sun at 4.244 ly. A red dwarf flare star loosely bound to the α Centauri system. Hosts Proxima b, a potentially habitable exoplanet, and Proxima d.',
         props: [
-            ['Spectral type', 'G2V + K1V + M5.5Ve'],
-            ['Distance', '4.37 ly'],
-            ['Galactic l / b', '315.78° / −0.68°'],
-            ['Combined luminosity', '~1.7 L☉'],
-            ['Proxima dist.', '4.24 ly (nearest)'],
+            ['Spectral type', 'M5.5 Ve'],
+            ['Distance', '4.244 ly (nearest star)'],
+            ['Galactic l / b', '313.94° / +1.93°'],
+            ['Temperature', '3,042 K'],
+            ['Mass', '0.122 M☉'],
+            ['Exoplanets', 'Proxima b, c, d (b in HZ)'],
         ],
-        link: null,
     },
     {
-        id: 'sirius', name: 'Sirius', abbr: 'Sirius', type: 'A1V+DA2',
+        id: 'alpha_cen', name: 'α Centauri A/B', abbr: 'α Cen', type: 'G2V + K1V',
+        l: 315.78, b: -0.68, dist: 4.37,
+        temp: 5790, spectral: 'G',
+        color: 0xffee88, size: 0.85,
+        desc: 'Nearest star system to the Sun at 4.37 ly (excluding Proxima). Binary: α Cen A (G2V, 1.1 M☉) + α Cen B (K1V, 0.9 M☉). Loosely accompanied by Proxima Centauri.',
+        props: [
+            ['Spectral type', 'G2V + K1V'],
+            ['Distance', '4.37 ly'],
+            ['Galactic l / b', '315.78° / −0.68°'],
+            ['α Cen A luminosity', '1.52 L☉'],
+            ['α Cen B luminosity', '0.50 L☉'],
+            ['Binary period', '79.9 yr'],
+        ],
+    },
+    {
+        id: 'barnard', name: "Barnard's Star", abbr: "Barnard's", type: 'M4Ve',
+        l: 31.02, b: 14.20, dist: 5.958,
+        temp: 3134, spectral: 'M',
+        color: 0xff3300, size: 0.55,
+        desc: 'Second-nearest star system (5.96 ly). Has the highest proper motion of any star — 10.3 arcsec/yr. Will be the nearest star to Earth in ~9,800 CE. Candidate exoplanet Barnard\'s Star b reported but disputed.',
+        props: [
+            ['Spectral type', 'M4 Ve'],
+            ['Distance', '5.958 ly'],
+            ['Galactic l / b', '31.02° / +14.20°'],
+            ['Proper motion', '10.3 arcsec/yr (highest known)'],
+            ['Temperature', '3,134 K'],
+            ['Mass', '0.144 M☉'],
+        ],
+    },
+    {
+        id: 'wolf359', name: 'Wolf 359', abbr: 'Wolf 359', type: 'M6Ve',
+        l: 205.76, b: 57.19, dist: 7.786,
+        temp: 2800, spectral: 'M',
+        color: 0xff2200, size: 0.50,
+        desc: 'Extremely dim red dwarf — third-faintest star known. One of the least massive stars capable of nuclear fusion. Famous from Star Trek as the site of the Battle of Wolf 359.',
+        props: [
+            ['Spectral type', 'M6 Ve'],
+            ['Distance', '7.786 ly'],
+            ['Galactic l / b', '205.76° / +57.19°'],
+            ['Temperature', '~2,800 K'],
+            ['Mass', '0.09 M☉'],
+            ['Luminosity', '0.001 L☉'],
+        ],
+    },
+    {
+        id: 'sirius', name: 'Sirius', abbr: 'Sirius', type: 'A1V + DA2',
         l: 227.23, b: -8.89, dist: 8.61,
-        gcDist: 26672,
         temp: 9940, spectral: 'A',
         color: 0xbbddff, size: 1.4,
-        desc: 'Brightest star in Earth\'s night sky. Binary: Sirius A (A1V, 2.06 M☉) + Sirius B (DA2 white dwarf, 1.018 M☉). Part of the Canis Major OB1 association.',
+        desc: 'Brightest star in Earth\'s night sky. Binary: Sirius A (A1V, 2.06 M☉) + Sirius B (DA2 white dwarf, 1.018 M☉).',
         props: [
             ['Spectral type', 'A1V + DA2 (WD)'],
             ['Distance', '8.61 ly'],
@@ -476,10 +605,9 @@ const CATALOG = [
     {
         id: 'eps_eri', name: 'ε Eridani', abbr: 'ε Eri', type: 'K2V',
         l: 208.98, b: -48.84, dist: 10.52,
-        gcDist: 26668,
         temp: 5084, spectral: 'K',
         color: 0xffaa55, size: 0.75,
-        desc: 'Nearby K-type star with confirmed debris disk and planetary companions. Long-time SETI target (Project Ozma, 1960). Age ~800 Myr — relatively young.',
+        desc: 'Nearby K-type star with confirmed debris disk. Long-time SETI target (Project Ozma, 1960). Age ~800 Myr — relatively young.',
         props: [
             ['Spectral type', 'K2V'],
             ['Distance', '10.52 ly'],
@@ -488,15 +616,13 @@ const CATALOG = [
             ['Mass', '0.83 M☉'],
             ['Planets', 'Candidate system + debris disk'],
         ],
-        link: null,
     },
     {
         id: 'procyon', name: 'Procyon', abbr: 'Procyon', type: 'F5IV-V',
         l: 213.70, b: 13.02, dist: 11.46,
-        gcDist: 26669,
         temp: 6530, spectral: 'F',
         color: 0xfff0cc, size: 0.9,
-        desc: 'Eighth-brightest star in the sky. F5 subgiant evolving off the main sequence. Binary: Procyon B is a white dwarf (DQZ spectral type). 11.46 ly from Sun.',
+        desc: 'Eighth-brightest star. F5 subgiant with a white dwarf companion (Procyon B). The binary pair orbit each other every ~40.8 years.',
         props: [
             ['Spectral type', 'F5 IV-V + DQZ'],
             ['Distance', '11.46 ly'],
@@ -505,15 +631,13 @@ const CATALOG = [
             ['Luminosity', '6.93 L☉'],
             ['Radius', '2.05 R☉'],
         ],
-        link: null,
     },
     {
         id: 'tau_ceti', name: 'τ Ceti', abbr: 'τ Cet', type: 'G8.5V',
         l: 173.10, b: -73.44, dist: 11.91,
-        gcDist: 26668,
         temp: 5344, spectral: 'G',
         color: 0xffee88, size: 0.72,
-        desc: 'Sun-like star at 11.91 ly. Notable SETI candidate — one of two stars targeted by Project Ozma (1960). Candidate multiplanet system with up to 5 exoplanets (tau Ceti e & f in habitable zone). High debris disk mass.',
+        desc: 'Sun-like star at 11.91 ly. One of two stars targeted by Project Ozma (1960). Candidate multi-planet system with up to 5 exoplanets.',
         props: [
             ['Spectral type', 'G8.5V'],
             ['Distance', '11.91 ly'],
@@ -522,15 +646,60 @@ const CATALOG = [
             ['Mass', '0.783 M☉'],
             ['Exoplanets', '3–5 candidates'],
         ],
-        link: null,
+    },
+    {
+        id: 'sixtyone_cyg', name: '61 Cygni', abbr: '61 Cyg', type: 'K5V + K7V',
+        l: 82.29, b: -5.86, dist: 11.41,
+        temp: 4526, spectral: 'K',
+        color: 0xff8844, size: 0.65,
+        desc: '"Piazzi\'s Flying Star" — first star to have its parallax measured (Bessel, 1838). Binary K-dwarf pair separated by ~84 AU. High proper motion star.',
+        props: [
+            ['Spectral type', 'K5V + K7V'],
+            ['Distance', '11.41 ly'],
+            ['Galactic l / b', '82.29° / −5.86°'],
+            ['Temperature (A)', '4,526 K'],
+            ['Orbital period', '~653 yr'],
+            ['First parallax', '1838 (Bessel)'],
+        ],
+    },
+
+    // ── Nearby stars (15–50 ly) ─────────────────────────────────────────────
+    {
+        id: 'altair', name: 'Altair', abbr: 'Altair', type: 'A7V',
+        l: 47.67, b: -8.91, dist: 16.73,
+        temp: 7670, spectral: 'A',
+        color: 0xddeeff, size: 1.0,
+        desc: 'Brightest star in Aquila. Rotates so rapidly (8.9 hr) it is noticeably oblate — equatorial radius ~20% larger than polar. One of the vertices of the Summer Triangle.',
+        props: [
+            ['Spectral type', 'A7 V'],
+            ['Distance', '16.73 ly'],
+            ['Galactic l / b', '47.67° / −8.91°'],
+            ['Temperature', '7,670 K'],
+            ['Rotation period', '~8.9 hr (oblate)'],
+            ['Luminosity', '10.6 L☉'],
+        ],
+    },
+    {
+        id: 'trappist1', name: 'TRAPPIST-1', abbr: 'TRAPPIST-1', type: 'M8V',
+        l: 263.17, b: -22.46, dist: 39.46,
+        temp: 2559, spectral: 'M',
+        color: 0xff2200, size: 0.50,
+        desc: 'Ultra-cool red dwarf hosting 7 Earth-sized planets, at least 3 in the habitable zone (e, f, g). Among the most studied systems for atmospheric characterization with JWST.',
+        props: [
+            ['Spectral type', 'M8 V'],
+            ['Distance', '39.46 ly'],
+            ['Galactic l / b', '263.17° / −22.46°'],
+            ['Temperature', '2,559 K'],
+            ['Mass', '0.089 M☉'],
+            ['Planets', '7 Earth-sized; e, f, g in HZ'],
+        ],
     },
     {
         id: 'vega', name: 'Vega', abbr: 'Vega', type: 'A0Va',
         l: 67.45, b: 19.21, dist: 25.05,
-        gcDist: 26655,
         temp: 9602, spectral: 'A',
         color: 0xddeeff, size: 1.2,
-        desc: 'Fifth-brightest star. Rapidly rotating A-type star — equatorial diameter 19% larger than polar. Once the pole star (~12,000 BCE) and will be again (~13,700 CE). Has a prominent debris disk.',
+        desc: 'Fifth-brightest star. Rapidly rotating — equatorial diameter 19% larger than polar. Once the pole star (~12,000 BCE) and will be again (~13,700 CE).',
         props: [
             ['Spectral type', 'A0Va'],
             ['Distance', '25.05 ly'],
@@ -542,12 +711,73 @@ const CATALOG = [
         link: 'vega.html',
     },
     {
+        id: 'fomalhaut', name: 'Fomalhaut', abbr: 'Fomalhaut', type: 'A4V',
+        l: 20.49, b: -64.89, dist: 25.13,
+        temp: 8590, spectral: 'A',
+        color: 0xddeeff, size: 1.1,
+        desc: 'Solitary bright star in Piscis Austrinus with a famous dusty debris disk imaged by Hubble. Fomalhaut b, once thought to be an exoplanet, is now believed to be an expanding dust cloud from a collisional event.',
+        props: [
+            ['Spectral type', 'A4 V'],
+            ['Distance', '25.13 ly'],
+            ['Galactic l / b', '20.49° / −64.89°'],
+            ['Temperature', '8,590 K'],
+            ['Luminosity', '16.6 L☉'],
+            ['Debris disk', 'Confirmed — Hubble imaged'],
+        ],
+    },
+    {
+        id: 'pollux', name: 'Pollux', abbr: 'Pollux', type: 'K0III',
+        l: 190.72, b: 23.46, dist: 33.72,
+        temp: 4666, spectral: 'K',
+        color: 0xff8844, size: 1.5,
+        desc: 'Brightest star in Gemini and the nearest giant star to the Sun. Hosts confirmed exoplanet Pollux b (Thestias), a hot Jupiter with 2.3 Jupiter masses.',
+        props: [
+            ['Spectral type', 'K0 III'],
+            ['Distance', '33.72 ly'],
+            ['Galactic l / b', '190.72° / +23.46°'],
+            ['Temperature', '4,666 K'],
+            ['Radius', '9.3 R☉'],
+            ['Exoplanet', 'Pollux b — 2.3 MJ hot Jupiter'],
+        ],
+    },
+    {
+        id: 'arcturus', name: 'Arcturus', abbr: 'Arcturus', type: 'K1.5III',
+        l: 15.14, b: 69.01, dist: 36.72,
+        temp: 4286, spectral: 'K',
+        color: 0xff8833, size: 1.8,
+        desc: 'Brightest star in Boötes and the northern hemisphere. K-type red giant, ~25× solar radius. Metal-poor halo star on a retrograde orbit — likely a captured remnant from an ancient dwarf galaxy.',
+        props: [
+            ['Spectral type', 'K1.5 III'],
+            ['Distance', '36.72 ly'],
+            ['Galactic l / b', '15.14° / +69.01°'],
+            ['Temperature', '4,286 K'],
+            ['Radius', '25.4 R☉'],
+            ['Luminosity', '170 L☉'],
+        ],
+    },
+    {
+        id: 'capella', name: 'Capella', abbr: 'Capella', type: 'G8III + G1III',
+        l: 162.58, b: 4.57, dist: 42.92,
+        temp: 4970, spectral: 'G',
+        color: 0xffee88, size: 1.6,
+        desc: 'Sixth-brightest star, brightest in Auriga. Spectroscopic binary of two G-type giants orbiting each other every 104 days. Both components have evolved off the main sequence.',
+        props: [
+            ['Spectral type', 'G8 III + G1 III'],
+            ['Distance', '42.92 ly'],
+            ['Galactic l / b', '162.58° / +4.57°'],
+            ['Temperature (Aa)', '4,970 K'],
+            ['Binary period', '104 days'],
+            ['Combined luminosity', '~78 L☉'],
+        ],
+    },
+
+    // ── Bright and notable stars (50–1000 ly) ──────────────────────────────
+    {
         id: 'aldebaran', name: 'Aldebaran', abbr: 'Aldebaran', type: 'K5III',
         l: 180.25, b: -20.07, dist: 65.3,
-        gcDist: 26676,
         temp: 3910, spectral: 'K',
         color: 0xff8833, size: 1.8,
-        desc: '"Eye of the Bull" in Taurus. K-type red giant, 44× solar radius. Nearing the end of its life — will eventually expel a planetary nebula. Not physically part of the Hyades cluster (much closer).',
+        desc: '"Eye of the Bull." K-type red giant, 44× solar radius. Not physically part of the Hyades cluster (much closer at ~150 ly).',
         props: [
             ['Spectral type', 'K5 III'],
             ['Distance', '65.3 ly'],
@@ -556,15 +786,89 @@ const CATALOG = [
             ['Radius', '44.2 R☉'],
             ['Luminosity', '439 L☉'],
         ],
-        link: null,
+    },
+    {
+        id: 'regulus', name: 'Regulus', abbr: 'Regulus', type: 'B7V',
+        l: 226.44, b: 48.95, dist: 79.3,
+        temp: 12460, spectral: 'B',
+        color: 0xaaccff, size: 1.1,
+        desc: '"Little King" — the brightest star in Leo. Rapidly rotating (15.9 hr) hot B-dwarf; rotation flattens it significantly. Part of a 4-star system.',
+        props: [
+            ['Spectral type', 'B7 V'],
+            ['Distance', '79.3 ly'],
+            ['Galactic l / b', '226.44° / +48.95°'],
+            ['Temperature', '12,460 K'],
+            ['Rotation period', '15.9 hr (oblate)'],
+            ['Luminosity', '362 L☉'],
+        ],
+    },
+    {
+        id: 'spica', name: 'Spica', abbr: 'Spica', type: 'B1III + B2V',
+        l: 316.11, b: 50.84, dist: 250,
+        temp: 25300, spectral: 'B',
+        color: 0x99bbff, size: 1.6,
+        desc: 'Brightest star in Virgo. Spectroscopic binary of two hot B-stars so close (18 million km) they are tidally distorted into egg shapes. Spica A is a variable (β Cephei type).',
+        props: [
+            ['Spectral type', 'B1 III + B2 V'],
+            ['Distance', '~250 ly'],
+            ['Galactic l / b', '316.11° / +50.84°'],
+            ['Temperature (A)', '25,300 K'],
+            ['Binary period', '4.01 days'],
+            ['Luminosity', '~13,400 L☉'],
+        ],
+    },
+    {
+        id: 'pleiades', name: 'Pleiades (M45)', abbr: 'Pleiades', type: 'Open Cluster',
+        l: 166.47, b: -23.52, dist: 444,
+        temp: 20000, spectral: 'B',
+        color: 0x88aaff, size: 2.5,
+        desc: 'Iconic open cluster in Taurus. ~1,000 stars dominated by hot B-type blue giants. Age ~100 Myr.',
+        props: [
+            ['Type', 'Open Cluster (B-type)'],
+            ['Distance', '~444 ly'],
+            ['Galactic l / b', '166.47° / −23.52°'],
+            ['Star count', '~1,000'],
+            ['Age', '~100 Myr'],
+            ['Diameter', '~17.5 ly'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'antares', name: 'Antares', abbr: 'Antares', type: 'M1.5Iab',
+        l: 351.96, b: 15.07, dist: 550,
+        temp: 3660, spectral: 'M',
+        color: 0xff2200, size: 2.8,
+        desc: 'Heart of Scorpius. Massive red supergiant with ~700 R☉ — one of the largest stars visible to the naked eye. Like Betelgeuse, an imminent supernova candidate on stellar timescales.',
+        props: [
+            ['Spectral type', 'M1.5 Iab (RSG)'],
+            ['Distance', '~550 ly'],
+            ['Galactic l / b', '351.96° / +15.07°'],
+            ['Temperature', '3,660 K'],
+            ['Radius', '~700 R☉'],
+            ['Luminosity', '~75,000 L☉'],
+        ],
+    },
+    {
+        id: 'canopus', name: 'Canopus', abbr: 'Canopus', type: 'F0II',
+        l: 261.22, b: -25.29, dist: 310,
+        temp: 7350, spectral: 'F',
+        color: 0xfff0cc, size: 2.0,
+        desc: 'Second-brightest star in the sky. F-type bright giant, much more luminous than its apparent magnitude suggests. Used as a navigation star by spacecraft. Part of the Carina constellation.',
+        props: [
+            ['Spectral type', 'F0 II'],
+            ['Distance', '~310 ly'],
+            ['Galactic l / b', '261.22° / −25.29°'],
+            ['Temperature', '7,350 K'],
+            ['Radius', '71 R☉'],
+            ['Luminosity', '10,700 L☉'],
+        ],
     },
     {
         id: 'betelgeuse', name: 'Betelgeuse', abbr: 'Betelgeuse', type: 'M1-2 Ia',
         l: 199.79, b: -8.96, dist: 700,
-        gcDist: 26992,
         temp: 3500, spectral: 'M',
         color: 0xff3300, size: 2.8,
-        desc: 'Massive red supergiant in Orion. Among the largest known stars (~764 R☉). Supernova candidate — likely within next 100,000 years. The 2019–2020 "Great Dimming" was caused by a mass ejection and dust condensation.',
+        desc: 'Massive red supergiant in Orion. Among the largest known stars (~764 R☉). Supernova candidate. The 2019–2020 "Great Dimming" was caused by a mass ejection and dust condensation.',
         props: [
             ['Spectral type', 'M1–M2 Ia (RSG)'],
             ['Distance', '~700 ly'],
@@ -576,29 +880,26 @@ const CATALOG = [
         link: 'betelgeuse.html',
     },
     {
-        id: 'pleiades', name: 'Pleiades (M45)', abbr: 'Pleiades', type: 'Open Cluster',
-        l: 166.47, b: -23.52, dist: 444,
-        gcDist: 26840,
-        temp: 20000, spectral: 'B',
-        color: 0x88aaff, size: 2.5,
-        desc: 'Iconic open star cluster in Taurus. ~1,000 stars dominated by hot B-type blue giants. Age ~100 Myr. Distance ~444 ly (Gaia DR3). The "Seven Sisters" are the seven brightest members.',
+        id: 'rigel', name: 'Rigel', abbr: 'Rigel', type: 'B8Ia',
+        l: 209.52, b: -25.10, dist: 860,
+        temp: 12100, spectral: 'B',
+        color: 0xaaccff, size: 2.2,
+        desc: 'Brightest star in Orion. Blue-white supergiant, one of the most intrinsically luminous stars visible without a telescope (~120,000 L☉). Part of the Orion OB1 association.',
         props: [
-            ['Type', 'Open Cluster (B-type)'],
-            ['Distance', '~444 ly'],
-            ['Galactic l / b', '166.47° / −23.52°'],
-            ['Star count', '~1,000'],
-            ['Age', '~100 Myr'],
-            ['Diameter', '~17.5 ly'],
+            ['Spectral type', 'B8 Ia (BSG)'],
+            ['Distance', '~860 ly'],
+            ['Galactic l / b', '209.52° / −25.10°'],
+            ['Temperature', '12,100 K'],
+            ['Radius', '78 R☉'],
+            ['Luminosity', '~120,000 L☉'],
         ],
-        link: null, isCluster: true,
     },
     {
         id: 'deneb', name: 'Deneb', abbr: 'Deneb', type: 'A2 Ia',
         l: 84.22, b: 2.09, dist: 2600,
-        gcDist: 26085,
         temp: 8525, spectral: 'A',
         color: 0xccddff, size: 2.2,
-        desc: 'Luminous blue-white supergiant at the tail of Cygnus. One of the most intrinsically luminous stars visible to the naked eye (~196,000 L☉). Despite being ~2,600 ly away, still one of the brightest stars in the sky.',
+        desc: 'Luminous blue-white supergiant at the tail of Cygnus. Despite being ~2,600 ly away, still one of the brightest in the sky (~196,000 L☉).',
         props: [
             ['Spectral type', 'A2 Ia'],
             ['Distance', '~2,600 ly'],
@@ -607,17 +908,105 @@ const CATALOG = [
             ['Radius', '~203 R☉'],
             ['Luminosity', '~196,000 L☉'],
         ],
-        link: null,
+    },
+
+    // ── Extreme / notable deep objects ─────────────────────────────────────
+    {
+        id: 'eta_car', name: 'Eta Carinae', abbr: 'η Car', type: 'LBV (binary)',
+        l: 287.60, b: -0.63, dist: 7500,
+        temp: 36000, spectral: 'B',
+        color: 0xffff44, size: 3.0,
+        desc: 'Hypergiant luminous blue variable — one of the most massive and luminous stars known (~5,000,000 L☉). Binary system. Experienced a "Great Eruption" in 1843 that briefly made it the second-brightest star. Hypernova/PISN candidate.',
+        props: [
+            ['Type', 'LBV + O (binary)'],
+            ['Distance', '~7,500 ly'],
+            ['Galactic l / b', '287.60° / −0.63°'],
+            ['Combined luminosity', '~5,000,000 L☉'],
+            ['Mass (primary)', '~100–150 M☉'],
+            ['Binary period', '5.54 yr'],
+            ['Great Eruption', '1837–1856 (2nd brightest)'],
+        ],
+    },
+    {
+        id: 'westerlund1', name: 'Westerlund 1', abbr: 'Wd 1', type: 'Massive Cluster',
+        l: 339.55, b: -0.40, dist: 15000,
+        temp: 30000, spectral: 'B',
+        color: 0x88aaff, size: 2.8,
+        desc: 'The most massive compact young star cluster in the Milky Way. Contains over 100,000 stars including numerous Wolf-Rayet stars, OB supergiants, and LBVs. Home to one of the largest known stars, Westerlund 1-26.',
+        props: [
+            ['Type', 'Super Star Cluster (young)'],
+            ['Distance', '~15,000 ly'],
+            ['Galactic l / b', '339.55° / −0.40°'],
+            ['Mass', '~75,000 M☉'],
+            ['Age', '~3.5–5 Myr'],
+            ['Largest member', 'Wd 1-26 (~1,500–2,000 R☉)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'omega_cen', name: 'Omega Centauri (NGC 5139)', abbr: 'ω Cen', type: 'Globular Cluster',
+        l: 309.10, b: 14.97, dist: 17100,
+        temp: 5000, spectral: 'G',
+        color: 0xffddaa, size: 3.5,
+        desc: 'Largest and most massive globular cluster in the Milky Way. ~10 million stars in a sphere 150 ly across. Likely the stripped core of an ancient dwarf galaxy. Contains a possible intermediate-mass black hole (~40,000 M☉).',
+        props: [
+            ['Type', 'Globular Cluster'],
+            ['Distance', '~17,100 ly'],
+            ['Galactic l / b', '309.10° / +14.97°'],
+            ['Mass', '~4 × 10⁶ M☉'],
+            ['Star count', '~10 million'],
+            ['Diameter', '~150 ly'],
+            ['Possible IMBH', '~40,000 M☉ (candidate)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: '47_tuc', name: '47 Tucanae (NGC 104)', abbr: '47 Tuc', type: 'Globular Cluster',
+        l: 305.90, b: -44.89, dist: 16700,
+        temp: 5000, spectral: 'G',
+        color: 0xffddaa, size: 3.2,
+        desc: 'Second-largest globular cluster. Located near the Small Magellanic Cloud in the sky, though physically unrelated. Rich in millisecond pulsars (~25 known) and exotic X-ray binaries.',
+        props: [
+            ['Type', 'Globular Cluster'],
+            ['Distance', '~16,700 ly'],
+            ['Galactic l / b', '305.90° / −44.89°'],
+            ['Mass', '~7 × 10⁵ M☉'],
+            ['Age', '~13 Gyr'],
+            ['Millisecond pulsars', '~25 known'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm13', name: 'M13 — Hercules Cluster', abbr: 'M13', type: 'Globular Cluster',
+        l: 59.01, b: 40.91, dist: 22200,
+        temp: 5000, spectral: 'G',
+        color: 0xffddaa, size: 3.0,
+        desc: 'The Great Globular Cluster in Hercules — the most prominent globular visible from the northern hemisphere. Target of the 1974 Arecibo Message broadcast. Contains ~300,000 stars.',
+        props: [
+            ['Type', 'Globular Cluster'],
+            ['Distance', '~22,200 ly'],
+            ['Galactic l / b', '59.01° / +40.91°'],
+            ['Star count', '~300,000'],
+            ['Age', '~11.65 Gyr'],
+            ['Diameter', '~145 ly'],
+            ['Arecibo Message', 'Target — 1974'],
+        ],
+        isCluster: true,
     },
 ];
 
-// Pre-compute Three.js positions
+// Pre-compute Three.js positions + galactic-center distance
 CATALOG.forEach(s => {
-    if (s.isGC) {
-        s.pos3 = new THREE.Vector3(0, 0, 0); // Sgr A* at origin
+    if (s.isSstar && s.gcOffset) {
+        // S-stars: tiny offset from GC origin (position in ly)
+        s.pos3 = new THREE.Vector3(...s.gcOffset);
+    } else if (s.isGC) {
+        s.pos3 = new THREE.Vector3(0, 0, 0);
     } else {
         s.pos3 = starPos(s.l, s.b, s.dist);
     }
+    // Auto-compute distance from Sgr A* (overrides any hardcoded gcDist)
+    s.gcDist = s.pos3.length();
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -714,7 +1103,8 @@ function flyTo(preset, duration = 1400) {
 
 // ── Fly camera to orbit near a specific catalog star ────────────────────
 function computeOrbitDist(s) {
-    if (s.isGC)      return 7000;
+    if (s.isGC)      return 3000;  // close enough to see GC region
+    if (s.isSstar)   return 0.5;   // fly within 0.5 ly of S-star
     if (s.isCluster) return 300;
     if (s.dist > 2000) return s.dist * 0.5;
     if (s.dist > 200)  return s.dist * 0.4;
@@ -906,13 +1296,46 @@ scene.add(galaxyPoints);
 //  GALACTIC CENTER GLOW (Sgr A*)
 // ══════════════════════════════════════════════════════════════════════════
 (function buildGCGlow() {
-    [[1600, 0xff8800, 0.04], [600, 0xffcc44, 0.10], [120, 0xffffff, 0.18]].forEach(([r, c, o]) => {
+    // Bulge glow layers (represent galactic bulge, not the BH itself)
+    [[1400, 0xff8800, 0.03], [500, 0xffaa44, 0.07], [100, 0xffeebb, 0.15]].forEach(([r, c, o]) => {
         const mesh = new THREE.Mesh(
             new THREE.SphereGeometry(r, 16, 16),
             new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o,
                 depthWrite: false, blending: THREE.AdditiveBlending })
         );
         scene.add(mesh);
+    });
+
+    // ── Accretion disk around Sgr A* ─────────────────────────────────────
+    // Tilted ~15° off galactic plane (Sgr A*'s spin axis not fully aligned).
+    // Three layers: hot inner (white-orange), warm mid (amber), cool outer (dark orange).
+    [
+        { inner: 1,   outer: 6,   color: 0xffffff, opacity: 0.55 },
+        { inner: 5,   outer: 18,  color: 0xff9900, opacity: 0.45 },
+        { inner: 15,  outer: 40,  color: 0xcc4400, opacity: 0.30 },
+    ].forEach(({ inner, outer, color, opacity }) => {
+        const disk = new THREE.Mesh(
+            new THREE.RingGeometry(inner, outer, 96),
+            new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide,
+                transparent: true, opacity, depthWrite: false,
+                blending: THREE.AdditiveBlending })
+        );
+        disk.rotation.x = Math.PI / 2;
+        disk.rotation.y = 0.26; // ~15° tilt
+        scene.add(disk);
+    });
+
+    // ── Relativistic jets (faint blue-white columns along rotation axis) ──
+    [1, -1].forEach(dir => {
+        const jetPts = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(0, dir * 80, 0),
+        ];
+        const jet = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(jetPts),
+            new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.40 })
+        );
+        scene.add(jet);
     });
 })();
 
@@ -939,16 +1362,19 @@ scene.add(ringsGroup);
     ringsGroup.add(ring);
 });
 
-// Sun's exact orbital circle — highlighted in yellow
-const sunOrbit = new THREE.Mesh(
-    new THREE.RingGeometry(26620, 26726, 256),
-    new THREE.MeshBasicMaterial({
-        color: 0xffee66, side: THREE.DoubleSide,
-        transparent: true, opacity: 0.30, depthWrite: false,
-    })
-);
-sunOrbit.rotation.x = Math.PI / 2;
-ringsGroup.add(sunOrbit);
+// Sun's exact orbital circle — thin dashed guideline
+(function buildSunOrbit() {
+    const pts = [];
+    for (let i = 0; i <= 360; i++) {
+        const a = i * Math.PI / 180;
+        pts.push(new THREE.Vector3(26673 * Math.cos(a), 0, 26673 * Math.sin(a)));
+    }
+    const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts),
+        new THREE.LineBasicMaterial({ color: 0x775533, transparent: true, opacity: 0.25 })
+    );
+    ringsGroup.add(line);
+})();
 
 // Galactic longitude radials (every 30° = 12 lines from GC outward)
 for (let deg = 0; deg < 360; deg += 30) {
@@ -1051,7 +1477,7 @@ CATALOG.forEach(s => {
     glowCanvas.width = glowCanvas.height = 128;
     const gctx = glowCanvas.getContext('2d');
     const grad = gctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-    const rgb  = hexToRgb(s.color);
+    const rgb  = hexToRgb(s.glowColor ?? s.color);
     grad.addColorStop(0,   `rgba(${rgb.r},${rgb.g},${rgb.b},1.0)`);
     grad.addColorStop(0.25,`rgba(${rgb.r},${rgb.g},${rgb.b},0.6)`);
     grad.addColorStop(0.6, `rgba(${rgb.r},${rgb.g},${rgb.b},0.15)`);
@@ -1065,7 +1491,7 @@ CATALOG.forEach(s => {
     }));
     glow.position.copy(pos);
     // Initial scale set small — updateLabelScales corrects it each frame
-    const baseGlow = s.isGC ? 1200 : (s.size * 0.6 + (s.isCluster ? 5 : 0));
+    const baseGlow = s.isGC ? 1200 : s.isSstar ? s.size * 0.5 : (s.size * 0.6 + (s.isCluster ? 5 : 0));
     glow.scale.setScalar(baseGlow);
     glow.userData.baseGlow = baseGlow;
     scene.add(glow);
@@ -1076,7 +1502,7 @@ CATALOG.forEach(s => {
     lCanvas.width = 512; lCanvas.height = 96;
     const lctx = lCanvas.getContext('2d');
     lctx.font = 'bold 32px Segoe UI, sans-serif';
-    lctx.fillStyle = s.isGC ? '#ffaa44' : 'rgba(230,220,255,0.95)';
+    lctx.fillStyle = s.isGC ? '#ffaa44' : s.isSstar ? '#aaddff' : 'rgba(230,220,255,0.95)';
     lctx.textAlign = 'left';
     lctx.textBaseline = 'top';
     lctx.fillText(s.abbr, 6, 4);
@@ -1138,17 +1564,21 @@ function selectStar(id, doFly = false) {
     // ── HUD update (scientific notation) ────────────────────────
     document.getElementById('hud-name').textContent = s.name;
     document.getElementById('hud-dist').textContent =
-        s.isGC ? '0 ly (origin)' : fmtDist(s.dist);
+        s.isGC ? '0 ly (origin)' : fmtDist(s.isSstar ? s.dist : s.dist);
     document.getElementById('hud-l').textContent =
-        s.isGC ? 'N/A (origin)' : s.l.toFixed(4) + '°';
+        s.isGC ? 'N/A (origin)' : (s.isSstar ? '≈ 0°' : s.l.toFixed(4) + '°');
     document.getElementById('hud-b').textContent =
-        s.isGC ? 'N/A (origin)' : s.b.toFixed(4) + '°';
+        s.isGC ? 'N/A (origin)' : (s.isSstar ? '≈ 0°' : s.b.toFixed(4) + '°');
     document.getElementById('hud-gc').textContent =
         s.isGC ? '0 ly' : fmtDist(s.gcDist);
 
     // ── Info panel ───────────────────────────────────────────────
     // Add computed galactic coordinate rows
-    const coordRows = s.isGC ? [] : [
+    const coordRows = s.isGC ? [] : s.isSstar ? [
+        ['Galactic l / b', '≈ 0° / 0° (galactic center direction)'],
+        ['Distance from Sun', fmtDist(s.dist)],
+        ['Distance from Sgr A*', fmtDist(s.gcDist) + ' (orbital radius)'],
+    ] : [
         ['Galactic l (longitude)', s.l.toFixed(4) + '°'],
         ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
         ['Distance from Sun', fmtDist(s.dist)],
@@ -1328,10 +1758,10 @@ function updateLabelScales() {
 
     // ── Arm name labels ─────────────────────────────────────────
     armLabels.forEach(l => {
-        const sz = Math.max(800, camDist * 0.032);
-        l.scale.set(sz * 4, sz, 1);
-        // Only show arm labels when zoomed out enough to be meaningful
-        l.visible = document.getElementById('tog-arms').checked && camDist > 3000;
+        const sz = Math.min(500, camDist * 0.010);
+        l.scale.set(sz * 3, sz, 1);
+        // Only show arm labels in arm-zoom range — not at galaxy overview or local zoom
+        l.visible = document.getElementById('tog-arms').checked && camDist > 4000 && camDist < 45000;
     });
 }
 
