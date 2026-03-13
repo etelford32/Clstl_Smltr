@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vega (&alpha; Lyrae) — Rapid Rotator Simulator</title>
+    <title>Vega — Rapid Rotator · Parker Physics App</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -239,27 +239,34 @@
 
 <!-- ── Navigation ── -->
 <nav>
-    <a href="index.html" class="nav-brand">✦ Celestial</a>
+    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
     <div class="nav-menu" id="nav-menu" role="navigation">
         <a href="index.html" class="nav-item">Home</a>
-        <div class="nav-drop" id="nav-drop-3d">
-            <button class="nav-drop-btn active" aria-haspopup="true">3D Sims ▾</button>
+        <a href="galactic-map.html" class="nav-item">Galactic Map</a>
+        <a href="threejs.html" class="nav-item">Solar System</a>
+        <a href="sun.html" class="nav-item">The Sun</a>
+        <div class="nav-drop" id="nav-drop-stars">
+            <button class="nav-drop-btn active" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
-                <a href="galactic-map.html">Galactic Map</a>
-                <a href="threejs.html">Solar System</a>
-                <a href="star3d.html">Sirius Planetary Fantasy</a>
-                <a href="sun.html">The Sun</a>
                 <a href="sirius.html">Sirius System</a>
+                <a href="star3d.html">Sirius Planetary</a>
                 <a href="betelgeuse.html">Betelgeuse</a>
-                <a href="wr102.html">WR-102</a>
+                <a href="wr102.html">WR 102</a>
                 <a href="vega.html" class="active">Vega</a>
+                <a href="star2d.html">2D Stellar Modeler</a>
+                <a href="star2d-advanced.html">Advanced 2D</a>
             </div>
         </div>
-        <a href="star2d.html"          class="nav-item">2D Star</a>
-        <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
-        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
-        <a href="rust.html"            class="nav-item">Rust/WASM</a>
+        <div class="nav-drop" id="nav-drop-fluid">
+            <button class="nav-drop-btn" aria-haspopup="true">Fluid Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
+                <a href="stellar-wind.html">Stellar Wind</a>
+                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+            </div>
+        </div>
+        <a href="rust.html" class="nav-item">Rust/WASM</a>
     </div>
 </nav>
 

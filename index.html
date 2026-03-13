@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Celestial Simulator - Interactive Star Simulations</title>
+    <title>Parker Physics App — Interactive Celestial Simulations</title>
     <style>
         * {
             margin: 0;
@@ -303,48 +303,68 @@
 </head>
 <body>
     <nav>
-        <a href="index.html" class="nav-brand">✦ Celestial</a>
-        <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-        <div class="nav-menu" id="nav-menu" role="navigation">
-            <a href="index.html" class="nav-item active">Home</a>
-            <div class="nav-drop" id="nav-drop-3d">
-                <button class="nav-drop-btn" aria-haspopup="true">3D Sims ▾</button>
-                <div class="nav-drop-menu">
-                    <a href="galactic-map.html">Galactic Map</a>
-                <a href="threejs.html">Solar System</a>
-                    <a href="star3d.html">Sirius Planetary Fantasy</a>
-                    <a href="sun.html">The Sun</a>
-                    <a href="sirius.html">Sirius System</a>
-                    <a href="betelgeuse.html">Betelgeuse</a>
-                    <a href="wr102.html">WR-102</a>
-                    <a href="vega.html">Vega</a>
-                </div>
+    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item active">Home</a>
+        <a href="galactic-map.html" class="nav-item">Galactic Map</a>
+        <a href="threejs.html" class="nav-item">Solar System</a>
+        <a href="sun.html" class="nav-item">The Sun</a>
+        <div class="nav-drop" id="nav-drop-stars">
+            <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
+            <div class="nav-drop-menu">
+                <a href="sirius.html">Sirius System</a>
+                <a href="star3d.html">Sirius Planetary</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
+                <a href="wr102.html">WR 102</a>
+                <a href="vega.html">Vega</a>
+                <a href="star2d.html">2D Stellar Modeler</a>
+                <a href="star2d-advanced.html">Advanced 2D</a>
             </div>
-            <a href="star2d.html"          class="nav-item">2D Star</a>
-            <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
-            <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
-            <a href="black-hole-fluid.html" class="nav-item">BH Fluid</a>
-            <a href="stellar-wind.html"    class="nav-item">Stellar Wind</a>
-            <a href="rust.html"            class="nav-item">Rust/WASM</a>
         </div>
-    </nav>
+        <div class="nav-drop" id="nav-drop-fluid">
+            <button class="nav-drop-btn" aria-haspopup="true">Fluid Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
+                <a href="stellar-wind.html">Stellar Wind</a>
+                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+            </div>
+        </div>
+        <a href="rust.html" class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
 
     <div class="hero">
-        <h1>🌟 Celestial Simulator</h1>
-        <p class="tagline">Interactive Star Simulations in Your Browser</p>
+        <h1>✦ Parker Physics App</h1>
+        <p class="tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA Data</p>
     </div>
 
     <div class="container">
         <div class="simulators-grid">
             <div class="simulator-card">
-                <div class="card-icon">⚡</div>
-                <h2 class="card-title">Three.js 3D</h2>
-                <p class="card-description">Hardware-accelerated WebGL visualization with realistic lighting and 2,000 solar wind particles.</p>
+                <span class="badge">&#11088; FEATURED</span>
+                <div class="card-icon">🌌</div>
+                <h2 class="card-title">Galactic Map</h2>
+                <p class="card-description">Interactive 3D map of the Milky Way and beyond — 100+ catalog stars with accurate Hipparcos distances, 90,000-particle spiral arms, and S-star orbits around Sgr A*.</p>
                 <ul class="card-features">
-                    <li>60+ FPS performance</li>
-                    <li>Interactive camera controls</li>
-                    <li>Physically-based rendering</li>
-                    <li>Dynamic particle system</li>
+                    <li>Logarithmic spiral arms (13° pitch, 4-arm model)</li>
+                    <li>Stars out to Andromeda (2.5 Mly) + Ton 618</li>
+                    <li>S2 star orbit around Sgr A* (16.05 yr)</li>
+                    <li>Click-any-star info panel with spectral data</li>
+                </ul>
+                <a href="galactic-map.html" class="card-link">Launch Simulator →</a>
+            </div>
+
+            <div class="simulator-card">
+                <span class="badge">&#11088; FEATURED</span>
+                <div class="card-icon">☀️</div>
+                <h2 class="card-title">Solar System</h2>
+                <p class="card-description">Hardware-accelerated 3D solar system — accurate orbital periods for all 6 major planets with a procedural G2V solar shader.</p>
+                <ul class="card-features">
+                    <li>Accurate Keplerian orbital periods</li>
+                    <li>G2V photosphere + granulation shader</li>
+                    <li>Saturn ring geometry + planet info panels</li>
+                    <li>Variable time-speed control (0–50×)</li>
                 </ul>
                 <a href="threejs.html" class="card-link">Launch Simulator →</a>
             </div>
@@ -460,15 +480,15 @@
             </div>
 
             <div class="simulator-card">
-                <span class="badge">&#11088; NEW</span>
+                <span class="badge">&#127749; LIVE DATA</span>
                 <div class="card-icon">&#9728;&#65039;</div>
-                <h2 class="card-title">The Sun</h2>
-                <p class="card-description">Our G2V star — granulation, sunspots, chromosphere, white-light corona, and solar wind particles in real-time 3D.</p>
+                <h2 class="card-title">The Sun — Live</h2>
+                <p class="card-description">G2V 3D simulator with real-time NOAA/SWPC data — active region markers, GOES X-ray flux, and recent flare log updated live.</p>
                 <ul class="card-features">
-                    <li>Cellular granulation convection shader</li>
-                    <li>Activity-driven sunspot regions</li>
-                    <li>Chromosphere + white-light corona</li>
-                    <li>Solar wind particle system</li>
+                    <li>NOAA active region 3D markers (torus rings)</li>
+                    <li>Live GOES X-ray class (A/B/C/M/X)</li>
+                    <li>48h flare log + fly-to-region camera</li>
+                    <li>Granulation · corona · solar wind shader</li>
                 </ul>
                 <a href="sun.html" class="card-link">Launch Simulator &rarr;</a>
             </div>
@@ -530,11 +550,11 @@
         </div>
 
         <div class="features-section">
-            <h2>✨ Key Features</h2>
+            <h2>✦ What's Inside Parker Physics</h2>
             <div class="features-grid">
                 <div class="feature-item">
-                    <h3>🔬 Scientifically Accurate</h3>
-                    <p>Based on real astrophysics including Parker solar wind models, stellar classifications, and fluid dynamics equations.</p>
+                    <h3>🔬 Scientifically Grounded</h3>
+                    <p>Parker solar wind theory, Hipparcos star catalog distances, NOAA/SWPC live solar data, Navier-Stokes CFD, and real orbital elements throughout.</p>
                 </div>
                 <div class="feature-item">
                     <h3>⚡ High Performance</h3>
@@ -567,7 +587,7 @@
             Deployed on Vercel
         </p>
         <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
-            Built with Three.js, WebGL, Rust, and WebAssembly
+            Parker Physics App — Built with Three.js, WebGL, Rust, and WebAssembly
         </p>
     </footer>
 
