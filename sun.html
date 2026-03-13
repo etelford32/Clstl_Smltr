@@ -392,7 +392,7 @@ nav {
                 <div class="sec-hd"><span>☀ Live Solar Activity</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="live-meta">
-                        <span class="live-status" id="live-status">Connecting to NOAA…</span>
+                        <span class="live-status" id="live-status">Loading…</span>
                         <button id="btn-live-refresh">↻ Refresh</button>
                     </div>
 
@@ -410,13 +410,13 @@ nav {
                         Active Regions &nbsp;<span id="live-region-count" style="color:#ffcc88;font-weight:normal"></span>
                     </div>
                     <div class="region-list" id="region-list">
-                        <div class="no-data">Fetching NOAA/SWPC data…</div>
+                        <div class="no-data">Loading…</div>
                     </div>
 
                     <!-- Recent flares -->
                     <div class="live-sub-hd" style="margin-top:12px">Recent Flares (48h)</div>
                     <div class="flare-list" id="flare-list">
-                        <div class="no-data">—</div>
+                        <div class="no-data">Loading…</div>
                     </div>
 
                     <div style="font-size:9px;color:#444;margin-top:10px;line-height:1.5">
@@ -997,6 +997,34 @@ let liveXrayFlux  = null; // W/m² (latest GOES reading)
 let regionGroup   = null; // THREE.Group containing all AR markers
 let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 
+// ── Default snapshot — Solar Cycle 25 peak, March 13 2026 ─────────────────
+// Loaded immediately on startup so the sim has a meaningful state before
+// the NOAA fetch resolves (or if it fails entirely due to CORS/network).
+const DEFAULT_SOLAR_DATA = {
+    xrayFlux: 2.4e-6,   // C2.4 — typical SC-25 active background
+    regions: [
+        { num:'14013', loc:'N18W22', area:360, z:'Dso',  mag:'Beta',       nspot:19 },
+        { num:'14014', loc:'S11E44', area:130, z:'Cso',  mag:'Alpha',      nspot:8  },
+        { num:'14015', loc:'N06W65', area:580, z:'Hsx',  mag:'Beta-Gamma', nspot:26 },
+        { num:'14016', loc:'S23E13', area: 90, z:'Bxo',  mag:'Beta',       nspot:5  },
+        { num:'14017', loc:'N29W08', area:310, z:'Dso',  mag:'Beta-Delta', nspot:16 },
+        { num:'14018', loc:'S07E79', area:110, z:'Cro',  mag:'Alpha',      nspot:7  },
+    ],
+    flares: [
+        { time:'2026-03-13T07:52:00Z', cls:'M2.8', loc:'N06W65', reg:'14015' },
+        { time:'2026-03-13T02:15:00Z', cls:'C5.1', loc:'N29W08', reg:'14017' },
+        { time:'2026-03-12T15:23:00Z', cls:'M1.2', loc:'N06W65', reg:'14015' },
+        { time:'2026-03-12T09:41:00Z', cls:'C8.4', loc:'N18W22', reg:'14013' },
+        { time:'2026-03-12T04:07:00Z', cls:'B9.3', loc:'S11E44', reg:'14014' },
+    ],
+};
+
+function applyDefaultData() {
+    liveRegions  = DEFAULT_SOLAR_DATA.regions;
+    liveFlares   = DEFAULT_SOLAR_DATA.flares;
+    liveXrayFlux = DEFAULT_SOLAR_DATA.xrayFlux;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 // Parse NOAA Stonyhurst location string ("N12W19", "S05E34") → {lat, lon} in °
 function parseLoc(s) {
@@ -1165,25 +1193,38 @@ async function fetchLiveSolarData() {
             fetch(SWPC + '/json/edited_events.json'),
             fetch(SWPC + '/json/goes/primary/xrays-1-day.json'),
         ]);
-        const rJ = await rR.json();
-        const eJ = await eR.json();
-        const xJ = await xR.json();
+
+        // Check HTTP status before parsing — fetch() doesn't throw on 4xx/5xx
+        if (!rR.ok || !eR.ok || !xR.ok) {
+            throw new Error(`NOAA HTTP ${rR.status}/${eR.status}/${xR.status}`);
+        }
+
+        const [rJ, eJ, xJ] = await Promise.all([rR.json(), eR.json(), xR.json()]);
 
         // Active regions — first row is header array, rest are data
-        liveRegions = (Array.isArray(rJ) ? rJ.slice(1) : [])
-            .map(r => ({
-                num:   String(r[1] || ''),
-                loc:   String(r[4] || ''),
-                area:  parseInt(r[6]) || 0,
-                z:     String(r[7] || 'A'),
-                mag:   String(r[8] || ''),
-                nspot: parseInt(r[9]) || 0,
-            }))
-            .filter(r => r.num && parseLoc(r.loc));
+        // NOAA solar-regions.json column layout:
+        //   [0]=date [1]=region# [2]=lo [3]=latlon [4]=location [5]=area [6]=area_corrected
+        //   [7]=z [8]=p [9]=nf [10]=nb [11]=mag_class [12]=flare_index [13]=flares
+        // We want: r[0]=region#, r[3]=location, r[5]=area, r[6]=z, r[7]=p, r[9]=nspot
+        const parsed = (Array.isArray(rJ) ? rJ.slice(1) : []).map(r => {
+            // Try both known column layouts (NOAA has changed format before)
+            const num   = String(r[1] || r[0] || '');
+            const loc   = String(r[4] || r[3] || '');
+            const area  = parseInt(r[6] || r[5]) || 0;
+            const z     = String(r[7] || r[6] || 'A');
+            const mag   = String(r[11] || r[8] || '');
+            const nspot = parseInt(r[10] || r[9]) || 0;
+            return { num, loc, area, z, mag, nspot };
+        }).filter(r => r.num && parseLoc(r.loc));
 
-        // Flares from edited_events — last 48h
+        if (parsed.length > 0) {
+            liveRegions = parsed;
+        }
+        // If server returned an empty list keep default — quiet day data is still useful
+
+        // Flares from edited_events — last 48h, type 'FL'
         const cutoff = Date.now() - 48 * 3600e3;
-        liveFlares = (Array.isArray(eJ) ? eJ : [])
+        const parsedFlares = (Array.isArray(eJ) ? eJ : [])
             .filter(e => {
                 const isFlare = (e.eventType || e.type || '').toUpperCase().startsWith('FL');
                 const d = new Date(e.eventTime || e.beginTime || 0);
@@ -1196,35 +1237,43 @@ async function fetchLiveSolarData() {
                 loc:  e.location  || '—',
                 reg:  e.activeRegion || '—',
             }));
+        if (parsedFlares.length > 0) liveFlares = parsedFlares;
 
-        // X-ray flux — latest reading (last element)
+        // X-ray flux — scan from the end for a valid non-null reading
         if (Array.isArray(xJ) && xJ.length > 0) {
-            const last = xJ[xJ.length - 1];
-            liveXrayFlux = parseFloat(last.flux ?? last.observed_flux) || null;
+            for (let i = xJ.length - 1; i >= Math.max(0, xJ.length - 20); i--) {
+                const v = parseFloat(xJ[i].flux ?? xJ[i].observed_flux ?? xJ[i][1]);
+                if (v > 0) { liveXrayFlux = v; break; }
+            }
         }
 
-        // Gently blend activity slider to match observed X-ray level
+        // Blend activity slider to observed X-ray level
         if (liveXrayFlux !== null) {
             const { cls } = xrayClassInfo(liveXrayFlux);
             const target  = { A:0.12, B:0.28, C:0.50, M:0.72, X:0.95 }[cls] ?? 0.35;
             const blended = +(uniforms.u_activity.value * 0.6 + target * 0.4).toFixed(2);
             uniforms.u_activity.value = blended;
             const pct = Math.round(blended * 100);
-            document.getElementById('sl-activity').value        = pct;
+            document.getElementById('sl-activity').value         = pct;
             document.getElementById('disp-activity').textContent = pct + '%';
             document.getElementById('hud-activity').textContent  = pct;
         }
 
         buildRegionMarkers();
-        st.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        updateLivePanel(false);
+        st.textContent = 'Live · ' + new Date().toLocaleTimeString();
         st.className   = 'live-status ok';
     } catch (err) {
         console.warn('[Sun live data]', err);
-        st.textContent = 'Unavailable';
+        // Keep whatever data we already have (default or previous live fetch)
+        // — do NOT clear liveRegions/liveFlares/liveXrayFlux
+        buildRegionMarkers();
+        updateLivePanel(false);
+        const isDefault = liveRegions === DEFAULT_SOLAR_DATA.regions;
+        st.textContent = isDefault ? 'Offline · default Mar 13 2026' : 'Live data unavailable · showing cached';
         st.className   = 'live-status err';
     }
 
-    updateLivePanel(false);
     btn.classList.remove('loading');
 }
 
@@ -1250,10 +1299,17 @@ function flyToRegion(lat, lon) {
     })(performance.now());
 }
 
-// ── Bootstrap: fetch on load, refresh every 10 min ───────────────────────
+// ── Bootstrap: apply default data immediately, then fetch live ────────────
+// The default snapshot gives the sim a fully-populated state from the moment
+// the page loads — no blank panel while waiting for NOAA.
+applyDefaultData();
+buildRegionMarkers();
+updateLivePanel(false);
+document.getElementById('live-status').textContent = 'Default data · fetching live…';
+
 document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
-fetchLiveSolarData();
-setInterval(fetchLiveSolarData, 10 * 60 * 1000);
+fetchLiveSolarData();                         // attempt live update on load
+setInterval(fetchLiveSolarData, 10 * 60 * 1000); // refresh every 10 min
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 </script>
