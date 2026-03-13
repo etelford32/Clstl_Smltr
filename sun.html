@@ -179,6 +179,64 @@ nav {
 .note-text strong { color:#cc8040; }
 .note-text ul { margin:6px 0 0 14px; list-style:disc; }
 .note-text li { margin:2px 0; }
+
+/* ── Live Solar Data ─────────────────────────────────────── */
+.live-meta { display:flex; justify-content:space-between; align-items:center; margin:4px 0 8px; }
+.live-status { font-size:10px; color:#555; }
+.live-status.ok  { color:#44bb66; }
+.live-status.err { color:#aa5555; }
+#btn-live-refresh {
+    background:rgba(255,140,0,.12); border:1px solid rgba(255,140,0,.30);
+    border-radius:4px; color:#ffb060; cursor:pointer; font-family:inherit;
+    font-size:10px; padding:3px 9px; transition:all .15s;
+}
+#btn-live-refresh:hover { background:rgba(255,140,0,.28); }
+#btn-live-refresh.loading { opacity:.45; pointer-events:none; }
+.xray-bar {
+    display:flex; align-items:center; gap:10px; margin:4px 0 10px;
+    background:rgba(0,0,0,.35); border:1px solid rgba(255,140,0,.14);
+    border-radius:6px; padding:7px 11px;
+}
+.xray-class { font-size:26px; font-weight:800; line-height:1; min-width:36px; text-align:center; }
+.xray-class.A { color:#44ff88; }
+.xray-class.B { color:#88ddaa; }
+.xray-class.C { color:#ffee44; }
+.xray-class.M { color:#ff9900; }
+.xray-class.X { color:#ff3300; text-shadow:0 0 10px #ff3300; animation:xpulse 0.9s ease-in-out infinite; }
+@keyframes xpulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+.xray-desc { font-size:10px; color:#666; line-height:1.45; }
+.xray-flux { font-size:9px; color:#555; margin-top:2px; }
+.live-sub-hd {
+    font-size:9.5px; color:#886644; font-weight:700; text-transform:uppercase;
+    letter-spacing:.5px; margin:8px 0 4px;
+}
+.region-list { display:flex; flex-direction:column; gap:3px; }
+.region-row {
+    display:flex; align-items:center; gap:6px;
+    background:rgba(255,140,0,.04); border:1px solid rgba(255,140,0,.10);
+    border-radius:5px; padding:5px 8px; cursor:pointer; transition:background .15s;
+}
+.region-row:hover { background:rgba(255,140,0,.15); border-color:rgba(255,140,0,.35); }
+.region-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.region-num { font-size:11px; font-weight:700; color:#ffcc88; min-width:48px; }
+.region-loc { font-size:10px; color:#888; flex:1; }
+.region-cls { font-size:10px; color:#aa7755; }
+.region-cnt { font-size:9px; color:#555; }
+.flare-list { display:flex; flex-direction:column; gap:2px; }
+.flare-row {
+    display:flex; align-items:center; gap:6px;
+    padding:3px 8px; border-radius:4px; font-size:10px;
+    background:rgba(255,60,0,.04);
+}
+.flare-class { font-weight:700; min-width:30px; }
+.flare-class.X { color:#ff3300; }
+.flare-class.M { color:#ff8800; }
+.flare-class.C { color:#ffee44; }
+.flare-class.B { color:#88ddaa; }
+.flare-class.A { color:#44ff88; }
+.flare-time { color:#555; font-size:9px; flex:1; }
+.flare-loc  { color:#666; font-size:9px; }
+.no-data    { font-size:10px; color:#555; text-align:center; padding:6px 0; font-style:italic; }
 </style>
 </head>
 <body>
@@ -216,6 +274,7 @@ nav {
             <div>Activity: <span class="val" id="hud-activity">50</span><span class="dim">%</span></div>
             <div>Rotation: <span class="val" id="hud-rot">25.4</span> <span class="dim">days (eq.)</span></div>
             <div class="sep"></div>
+            <div>X-ray: <span class="val" id="hud-xray" style="color:#44ff88">—</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
@@ -318,6 +377,45 @@ nav {
                         <p style="margin-top:5px"><strong>Sunspots:</strong> Magnetically inhibited convection regions. Appear dark (3500–4500 K) against the 5778 K photosphere. Activity follows an ~11-year cycle.</p>
                         <p style="margin-top:5px"><strong>Differential rotation:</strong> Equator rotates in ~25 days, poles in ~35 days. This winds up magnetic field lines, driving activity.</p>
                         <p style="margin-top:5px"><strong>Corona mystery:</strong> The corona at 1–3 MK is 200× hotter than the photosphere. Likely heated by wave dissipation and reconnection events.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" id="sec-live">
+                <div class="sec-hd"><span>☀ Live Solar Activity</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="live-meta">
+                        <span class="live-status" id="live-status">Connecting to NOAA…</span>
+                        <button id="btn-live-refresh">↻ Refresh</button>
+                    </div>
+
+                    <!-- Current X-ray flux class -->
+                    <div class="xray-bar">
+                        <div class="xray-class A" id="xray-class">—</div>
+                        <div>
+                            <div class="xray-desc">GOES X-ray flux (1–8 Å)</div>
+                            <div class="xray-flux" id="xray-flux-val">fetching…</div>
+                        </div>
+                    </div>
+
+                    <!-- Active regions -->
+                    <div class="live-sub-hd">
+                        Active Regions &nbsp;<span id="live-region-count" style="color:#ffcc88;font-weight:normal"></span>
+                    </div>
+                    <div class="region-list" id="region-list">
+                        <div class="no-data">Fetching NOAA/SWPC data…</div>
+                    </div>
+
+                    <!-- Recent flares -->
+                    <div class="live-sub-hd" style="margin-top:12px">Recent Flares (48h)</div>
+                    <div class="flare-list" id="flare-list">
+                        <div class="no-data">—</div>
+                    </div>
+
+                    <div style="font-size:9px;color:#444;margin-top:10px;line-height:1.5">
+                        Source: NOAA Space Weather Prediction Center (SWPC).<br>
+                        Click a region to fly the camera there.<br>
+                        Markers rotate with the simulated photosphere.
                     </div>
                 </div>
             </div>
@@ -797,7 +895,29 @@ const fpsEl = document.getElementById('fps-display');
 // ANIMATE
 function animate() {
     requestAnimationFrame(animate);
-    uniforms.u_time.value += 0.010;
+    const dt = 0.010;
+    uniforms.u_time.value += dt;
+
+    // Accumulate solar rotation to match photosphere UV scroll rate:
+    // Shader shifts UV.x by (u_time * 0.004 * u_rot) per time unit
+    // → rotation angle per frame = dt * 0.004 * u_rot * 2π radians
+    solarRotAngle += dt * 0.004 * uniforms.u_rot.value * Math.PI * 2;
+
+    // Rotate region marker group with the photosphere texture
+    if (regionGroup) {
+        regionGroup.rotation.y = solarRotAngle;
+        // Pulse each marker ring + disc
+        const t = uniforms.u_time.value;
+        regionGroup.children.forEach((obj, i) => {
+            if (!obj.children) return;
+            obj.children.forEach(c => {
+                if (c.userData.baseOp === undefined || !c.material) return;
+                const pulse = 0.70 + 0.30 * Math.sin(t * 2.2 + i * 1.3);
+                c.material.opacity = c.userData.baseOp * pulse;
+            });
+        });
+    }
+
     controls.update();
     renderer.render(scene, camera);
     fpsF++;
@@ -850,6 +970,283 @@ document.getElementById('sl-rot').addEventListener('input', function() {
     const rotDays = (25.4 / +this.value).toFixed(1);
     document.getElementById('hud-rot').textContent = rotDays;
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+//  LIVE SOLAR DATA — NOAA Space Weather Prediction Center
+//
+//  Endpoints (open CORS, no API key required):
+//    • /products/solar-regions.json — today's active sunspot regions
+//    • /json/edited_events.json     — recent solar events (flares, etc.)
+//    • /json/goes/primary/xrays-1-day.json — GOES X-ray flux (1-min cadence)
+//
+//  Active region markers: torus rings + glow discs placed at each region's
+//  Stonyhurst heliographic position, rotating with the photosphere texture.
+// ══════════════════════════════════════════════════════════════════════════
+const SWPC = 'https://services.swpc.noaa.gov';
+
+let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
+let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
+let liveXrayFlux  = null; // W/m² (latest GOES reading)
+let regionGroup   = null; // THREE.Group containing all AR markers
+let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+// Parse NOAA Stonyhurst location string ("N12W19", "S05E34") → {lat, lon} in °
+function parseLoc(s) {
+    const m = (s||'').trim().match(/^([NS])(\d+)([EW])(\d+)$/i);
+    if (!m) return null;
+    return {
+        lat: (m[1].toUpperCase() === 'N' ?  1 : -1) * +m[2],
+        lon: (m[3].toUpperCase() === 'W' ?  1 : -1) * +m[4],
+    };
+}
+
+// Convert GOES flux (W/m²) → GOES class letter + magnitude
+function xrayClassInfo(flux) {
+    if (!flux || flux <= 0) return { cls:'?', n:0 };
+    if (flux >= 1e-4) return { cls:'X', n: flux / 1e-4 };
+    if (flux >= 1e-5) return { cls:'M', n: flux / 1e-5 };
+    if (flux >= 1e-6) return { cls:'C', n: flux / 1e-6 };
+    if (flux >= 1e-7) return { cls:'B', n: flux / 1e-7 };
+    return { cls:'A', n: flux / 1e-8 };
+}
+
+// Map Zurich/McIntosh z-class first letter → visual importance & color
+function zClassInfo(z) {
+    const l = (z||'').trim()[0]?.toUpperCase() || 'A';
+    if ('EF'.includes(l)) return { hex:0xff2200, css:'#ff2200', label:'Major complex' };
+    if ('DH'.includes(l)) return { hex:0xff8800, css:'#ff8800', label:'Large group' };
+    if ('BC'.includes(l)) return { hex:0xffcc44, css:'#ffcc44', label:'Moderate group' };
+    return                       { hex:0x66cc88, css:'#66cc88', label:'Simple group' };
+}
+
+const XRAY_COLOR = { A:'#44ff88', B:'#88ddaa', C:'#ffee44', M:'#ff9900', X:'#ff3300', '?':'#888' };
+
+// ── Three.js: build torus ring + glow disc for each active region ──────────
+function buildRegionMarkers() {
+    if (regionGroup) { scene.remove(regionGroup); regionGroup = null; }
+    regionGroup = new THREE.Group();
+
+    liveRegions.forEach((reg, i) => {
+        const c = parseLoc(reg.loc);
+        if (!c) return;
+        const cls    = zClassInfo(reg.z);
+        const lat_r  = c.lat * Math.PI / 180;
+        const lon_r  = c.lon * Math.PI / 180;
+
+        // Position on unit sphere (photosphere surface = r 1.001)
+        const pos = new THREE.Vector3(
+            Math.cos(lat_r) * Math.sin(lon_r),
+            Math.sin(lat_r),
+            Math.cos(lat_r) * Math.cos(lon_r)
+        );
+
+        const g = new THREE.Group();
+        g.position.copy(pos);
+        // Orient so the torus ring lies tangent to the sphere:
+        // setFromUnitVectors maps local +Z → outward normal, so ring (in XY plane) is flat on surface.
+        g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
+        g.userData = { regNum: reg.num, lat: c.lat, lon: c.lon, idx: i };
+
+        // Ring size scales with region area (clamped); min 0.022, max 0.055
+        const rr = 0.022 + Math.min(reg.area, 800) / 800 * 0.033;
+
+        // Outer torus ring — color = z-class importance
+        const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(rr, 0.0042, 8, 64),
+            new THREE.MeshBasicMaterial({
+                color: cls.hex, transparent: true, opacity: 0.92,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            })
+        );
+        ring.userData.baseOp = 0.92;
+        g.add(ring);
+
+        // Filled glow disc (softer inner fill)
+        const disc = new THREE.Mesh(
+            new THREE.CircleGeometry(rr * 0.72, 32),
+            new THREE.MeshBasicMaterial({
+                color: cls.hex, transparent: true, opacity: 0.28,
+                depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+            })
+        );
+        disc.position.z = 0.0008;
+        disc.userData.baseOp = 0.28;
+        g.add(disc);
+
+        // Short spike line perpendicular to surface for edge-on visibility
+        g.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0.055),
+            ]),
+            new THREE.LineBasicMaterial({ color: cls.hex, transparent: true, opacity: 0.50 })
+        ));
+
+        regionGroup.add(g);
+    });
+
+    scene.add(regionGroup);
+}
+
+// ── Panel DOM update ─────────────────────────────────────────────────────
+function updateLivePanel(failed = false) {
+    // X-ray class
+    if (liveXrayFlux !== null) {
+        const { cls, n } = xrayClassInfo(liveXrayFlux);
+        const nStr = n >= 1 ? n.toFixed(1) : '';
+        document.getElementById('xray-class').textContent = cls + nStr;
+        document.getElementById('xray-class').className   = 'xray-class ' + cls;
+        document.getElementById('xray-flux-val').textContent = liveXrayFlux.toExponential(2) + ' W/m²';
+        const hud = document.getElementById('hud-xray');
+        if (hud) { hud.textContent = cls + nStr; hud.style.color = XRAY_COLOR[cls] || '#aaa'; }
+    }
+
+    // Active regions
+    const rl  = document.getElementById('region-list');
+    const cnt = document.getElementById('live-region-count');
+    if (failed || !liveRegions.length) {
+        rl.innerHTML = `<div class="no-data">${failed ? 'NOAA data unavailable — check console.' : 'No numbered active regions today.'}</div>`;
+        if (cnt) cnt.textContent = '';
+    } else {
+        if (cnt) cnt.textContent = `(${liveRegions.length})`;
+        rl.innerHTML = liveRegions.map(r => {
+            const cls = zClassInfo(r.z);
+            const c   = parseLoc(r.loc);
+            return `<div class="region-row" data-lat="${c?.lat ?? 0}" data-lon="${c?.lon ?? 0}">
+                <div class="region-dot" style="background:${cls.css};box-shadow:0 0 5px ${cls.css}80"></div>
+                <span class="region-num">AR ${r.num}</span>
+                <span class="region-loc">${r.loc}</span>
+                <span class="region-cls">${r.z}</span>
+                <span class="region-cnt">${r.nspot}&thinsp;spt</span>
+            </div>`;
+        }).join('');
+        rl.querySelectorAll('.region-row').forEach(row => {
+            row.addEventListener('click', () => flyToRegion(+row.dataset.lat, +row.dataset.lon));
+        });
+    }
+
+    // Flares
+    const fl = document.getElementById('flare-list');
+    if (!liveFlares.length) {
+        fl.innerHTML = '<div class="no-data">No significant flares in past 48h.</div>';
+    } else {
+        fl.innerHTML = liveFlares.map(f => {
+            const tc = (f.cls || '?')[0].toUpperCase();
+            const t  = new Date(f.time);
+            const ts = isNaN(t) ? f.time
+                : t.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+            return `<div class="flare-row">
+                <span class="flare-class ${tc}">${f.cls}</span>
+                <span class="flare-time">${ts}</span>
+                <span class="flare-loc">${f.loc}</span>
+            </div>`;
+        }).join('');
+    }
+}
+
+// ── Main fetch ────────────────────────────────────────────────────────────
+async function fetchLiveSolarData() {
+    const btn = document.getElementById('btn-live-refresh');
+    const st  = document.getElementById('live-status');
+    btn.classList.add('loading');
+    st.className   = 'live-status';
+    st.textContent = 'Fetching NOAA/SWPC…';
+
+    try {
+        const [rR, eR, xR] = await Promise.all([
+            fetch(SWPC + '/products/solar-regions.json'),
+            fetch(SWPC + '/json/edited_events.json'),
+            fetch(SWPC + '/json/goes/primary/xrays-1-day.json'),
+        ]);
+        const rJ = await rR.json();
+        const eJ = await eR.json();
+        const xJ = await xR.json();
+
+        // Active regions — first row is header array, rest are data
+        liveRegions = (Array.isArray(rJ) ? rJ.slice(1) : [])
+            .map(r => ({
+                num:   String(r[1] || ''),
+                loc:   String(r[4] || ''),
+                area:  parseInt(r[6]) || 0,
+                z:     String(r[7] || 'A'),
+                mag:   String(r[8] || ''),
+                nspot: parseInt(r[9]) || 0,
+            }))
+            .filter(r => r.num && parseLoc(r.loc));
+
+        // Flares from edited_events — last 48h
+        const cutoff = Date.now() - 48 * 3600e3;
+        liveFlares = (Array.isArray(eJ) ? eJ : [])
+            .filter(e => {
+                const isFlare = (e.eventType || e.type || '').toUpperCase().startsWith('FL');
+                const d = new Date(e.eventTime || e.beginTime || 0);
+                return isFlare && d.getTime() > cutoff;
+            })
+            .slice(-14).reverse()
+            .map(e => ({
+                time: e.eventTime || e.beginTime || '',
+                cls:  e.severity  || e.class || '?',
+                loc:  e.location  || '—',
+                reg:  e.activeRegion || '—',
+            }));
+
+        // X-ray flux — latest reading (last element)
+        if (Array.isArray(xJ) && xJ.length > 0) {
+            const last = xJ[xJ.length - 1];
+            liveXrayFlux = parseFloat(last.flux ?? last.observed_flux) || null;
+        }
+
+        // Gently blend activity slider to match observed X-ray level
+        if (liveXrayFlux !== null) {
+            const { cls } = xrayClassInfo(liveXrayFlux);
+            const target  = { A:0.12, B:0.28, C:0.50, M:0.72, X:0.95 }[cls] ?? 0.35;
+            const blended = +(uniforms.u_activity.value * 0.6 + target * 0.4).toFixed(2);
+            uniforms.u_activity.value = blended;
+            const pct = Math.round(blended * 100);
+            document.getElementById('sl-activity').value        = pct;
+            document.getElementById('disp-activity').textContent = pct + '%';
+            document.getElementById('hud-activity').textContent  = pct;
+        }
+
+        buildRegionMarkers();
+        st.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        st.className   = 'live-status ok';
+    } catch (err) {
+        console.warn('[Sun live data]', err);
+        st.textContent = 'Unavailable';
+        st.className   = 'live-status err';
+    }
+
+    updateLivePanel(false);
+    btn.classList.remove('loading');
+}
+
+// ── Fly camera to a heliographic region position ──────────────────────────
+function flyToRegion(lat, lon) {
+    const lr  = lat * Math.PI / 180;
+    const lnr = lon * Math.PI / 180 + solarRotAngle;  // offset by current rotation
+    const dir = new THREE.Vector3(
+        Math.cos(lr) * Math.sin(lnr),
+        Math.sin(lr),
+        Math.cos(lr) * Math.cos(lnr)
+    ).normalize();
+    const dest  = dir.multiplyScalar(3.0);
+    const start = camera.position.clone();
+    const t0    = performance.now();
+    (function step(now) {
+        const raw  = Math.min((now - t0) / 900, 1);
+        const ease = raw < 0.5 ? 2*raw*raw : -1 + (4-2*raw)*raw;
+        camera.position.lerpVectors(start, dest, ease);
+        controls.target.set(0, 0, 0);
+        controls.update();
+        if (raw < 1) requestAnimationFrame(step);
+    })(performance.now());
+}
+
+// ── Bootstrap: fetch on load, refresh every 10 min ───────────────────────
+document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
+fetchLiveSolarData();
+setInterval(fetchLiveSolarData, 10 * 60 * 1000);
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 </script>
