@@ -249,7 +249,14 @@ canvas { display:block; width:100% !important; height:100% !important; }
         </div>
         <a href="star2d.html"          class="nav-item">2D Star</a>
         <a href="star2d-advanced.html" class="nav-item">Advanced 2D</a>
-        <a href="solar-fluid.html"     class="nav-item">Fluid Sim</a>
+        <div class="nav-drop" id="nav-drop-physics">
+            <button class="nav-drop-btn">Physics ▾</button>
+            <div class="nav-drop-menu">
+                <a href="solar-fluid.html">Solar Fluid (N-S)</a>
+                <a href="black-hole-fluid.html">BH Accretion Sim</a>
+                <a href="stellar-wind.html">Stellar Wind</a>
+            </div>
+        </div>
         <a href="rust.html"            class="nav-item">Rust/WASM</a>
     </div>
 </nav>
@@ -2443,6 +2450,127 @@ let mwOuterSprite = null;
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
+//  M31 COLLISION TRAJECTORY
+//  Andromeda is approaching at ~110 km/s; merger in ~4.5 Gyr.
+//  We trace its path in log-compressed scene space with:
+//    • Dashed approach line (M31 current → merger region near GC)
+//    • Ghost markers at each Gyr mark with time labels
+//    • Visible only at universe zoom (cam > 200k scene units)
+// ══════════════════════════════════════════════════════════════════════════
+const m31TrajObjects = [];  // toggled in animate loop
+(function buildM31Trajectory() {
+    const m31 = CATALOG.find(s => s.id === 'm31');
+    if (!m31) return;
+
+    // Compute approach waypoints.  ~366k ly closer per Gyr at 110 km/s closing speed.
+    const steps = [
+        ['T₀ (now)',              2_537_000],
+        ['T+1 Gyr',               2_171_000],
+        ['T+2 Gyr',               1_805_000],
+        ['T+3 Gyr',               1_439_000],
+        ['T+4 Gyr',               1_073_000],
+        ['T+4.5 Gyr  1st pass',     800_000],
+        ['T+6 Gyr  Merger',          60_000],
+    ];
+
+    // Same direction cosines as M31's galactic coords
+    const l = m31.l * Math.PI / 180;
+    const b = m31.b * Math.PI / 180;
+    const ux = Math.cos(b) * Math.cos(l);
+    const uy = Math.cos(b) * Math.sin(l);
+    const uz = Math.sin(b);
+    function scenePos(dist) {
+        const sd = mapDistToScene(dist);
+        return new THREE.Vector3(SUN_GC.x - ux*sd, SUN_GC.y + uz*sd, SUN_GC.z + uy*sd);
+    }
+
+    const pts = steps.map(([, d]) => scenePos(d));
+
+    // ── Dashed approach line ─────────────────────────────────────
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(lineGeo, new THREE.LineDashedMaterial({
+        color: 0x3366ff, dashSize: 3000, gapSize: 1500,
+        transparent: true, opacity: 0.55,
+    }));
+    line.computeLineDistances();
+    line.visible = false;
+    scene.add(line);
+    m31TrajObjects.push(line);
+
+    // ── Arrow indicating direction of approach ────────────────────
+    // A small cone at M31's current position pointing toward MW
+    const arrowDir = pts[pts.length-1].clone().sub(pts[0]).normalize();
+    const arrow = new THREE.Mesh(
+        new THREE.ConeGeometry(1200, 4000, 16),
+        new THREE.MeshBasicMaterial({
+            color: 0x4488ff, transparent: true, opacity: 0.60, depthWrite: false,
+        })
+    );
+    // Orient cone along arrowDir using quaternion
+    arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), arrowDir);
+    arrow.position.copy(pts[0]).addScaledVector(arrowDir, 4000);
+    arrow.visible = false;
+    scene.add(arrow);
+    m31TrajObjects.push(arrow);
+
+    // ── Waypoint markers + time labels ────────────────────────────
+    steps.forEach(([label, dist], i) => {
+        if (i === 0) return;  // M31's current position is already rendered
+        const pos = pts[i];
+        const isMerger = i === steps.length - 1;
+
+        // Small marker sphere
+        const mkr = new THREE.Mesh(
+            new THREE.SphereGeometry(isMerger ? 2400 : 1200, 12, 12),
+            new THREE.MeshBasicMaterial({
+                color: isMerger ? 0xff9900 : 0x5599ff,
+                transparent: true, opacity: isMerger ? 0.80 : 0.55,
+            })
+        );
+        mkr.position.copy(pos);
+        mkr.visible = false;
+        scene.add(mkr);
+        m31TrajObjects.push(mkr);
+
+        // Time label sprite
+        const cv = document.createElement('canvas');
+        cv.width = 320; cv.height = 48;
+        const cx = cv.getContext('2d');
+        cx.font = 'bold 17px Segoe UI, sans-serif';
+        cx.fillStyle = isMerger ? '#ffcc66' : '#88aaff';
+        cx.textBaseline = 'middle';
+        cx.textAlign = 'left';
+        cx.fillText(label, 4, 24);
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false,
+        }));
+        sp.position.set(pos.x + 2200, pos.y + 1400, pos.z);
+        sp.scale.set(9000, 1350, 1);
+        sp.visible = false;
+        scene.add(sp);
+        m31TrajObjects.push(sp);
+    });
+
+    // ── "Milkomeda" label at merger point ─────────────────────────
+    const mergePos = pts[pts.length - 1];
+    const milkCV = document.createElement('canvas');
+    milkCV.width = 512; milkCV.height = 64;
+    const milkCX = milkCV.getContext('2d');
+    milkCX.font = 'bold 20px Segoe UI, sans-serif';
+    milkCX.fillStyle = '#ffcc88';
+    milkCX.textBaseline = 'middle'; milkCX.textAlign = 'center';
+    milkCX.fillText('★ MILKOMEDA — Future merger ~T+6 Gyr', 256, 32);
+    const milkSp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(milkCV), transparent: true, depthWrite: false,
+    }));
+    milkSp.position.set(mergePos.x, mergePos.y + 5000, mergePos.z);
+    milkSp.scale.set(20000, 2500, 1);
+    milkSp.visible = false;
+    scene.add(milkSp);
+    m31TrajObjects.push(milkSp);
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
 //  SIDEBAR STAR LIST
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
@@ -2774,6 +2902,10 @@ function animate() {
     if (mwOuterSprite) {
         mwOuterSprite.visible = camDistFromOrigin > 140000;
     }
+
+    // ── M31 trajectory: show only in universe view ────────────────
+    const showTraj = camDistFromOrigin > 200000;
+    m31TrajObjects.forEach(o => { o.visible = showTraj; });
 
     // ── Scale-break label: show at galaxy/universe zoom only ──────
     if (scaleBreakLabelSprite) {

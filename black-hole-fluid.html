@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Black Hole Accretion Fluid Sim — Celestial Simulator</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; }
+
+/* ─── Nav ────────────────────────────────────────────────── */
+nav { position:sticky; top:0; z-index:600; height:48px; min-height:48px; background:rgba(4,2,16,.92); backdrop-filter:blur(14px); border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; padding:0 14px; gap:8px; }
+.nav-brand { font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap; background:linear-gradient(45deg,#ffd700,#ff8c00); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.nav-item { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); border-radius:5px; color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap; transition:background .2s,border-color .2s; }
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+.nav-drop { position:relative; }
+.nav-drop-btn { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); border-radius:5px; color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit; transition:background .2s,border-color .2s; white-space:nowrap; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+.nav-drop-menu { display:block; position:absolute; top:100%; left:0; background:rgba(4,2,18,.97); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.11); border-radius:6px; padding:8px 0 4px; min-width:170px; z-index:800; box-shadow:0 8px 28px rgba(0,0,0,.7); opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-6px); transition:opacity .18s,visibility .18s,transform .18s; }
+.nav-drop:hover .nav-drop-menu { opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0); }
+.nav-drop-menu a { display:block; padding:9px 14px; color:#bbb; text-decoration:none; font-size:.82rem; white-space:nowrap; transition:background .15s,color .15s; }
+.nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#ff8800; font-weight:600; }
+
+/* ─── Layout ─────────────────────────────────────────────── */
+#container { display:flex; height:calc(100vh - 48px); }
+#canvas-area { flex:1; position:relative; background:#000; }
+canvas { display:block; width:100%; height:100%; image-rendering:pixelated; }
+#overlay-info { position:absolute; top:10px; left:10px; font-size:11px; color:#ff9933; pointer-events:none; line-height:1.7; }
+
+/* ─── Controls panel ────────────────────────────────────── */
+#panel { width:240px; min-width:240px; background:rgba(8,4,20,.95); border-left:1px solid rgba(255,120,0,.2); display:flex; flex-direction:column; overflow-y:auto; padding:12px; gap:10px; }
+.section-title { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800; border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px; }
+.ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
+.ctrl label { font-size:10px; color:#aaa; }
+.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
+.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+select { background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc; padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%; }
+.btn { background:rgba(255,100,0,.18); border:1px solid rgba(255,120,0,.4); color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer; font-family:inherit; font-size:11px; width:100%; transition:background .2s; }
+.btn:hover { background:rgba(255,100,0,.35); }
+.btn.danger { background:rgba(200,0,0,.18); border-color:rgba(200,60,0,.4); color:#ff6644; }
+.info-box { font-size:10px; color:#888; line-height:1.6; border:1px solid rgba(255,255,255,.06); border-radius:4px; padding:8px; background:rgba(255,255,255,.02); }
+.info-box b { color:#ffaa44; }
+.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="index.html" class="nav-brand">✦ Celestial</a>
+  <div class="nav-menu">
+    <a href="index.html" class="nav-item">Home</a>
+    <div class="nav-drop">
+      <button class="nav-drop-btn">3D Sims ▾</button>
+      <div class="nav-drop-menu">
+        <a href="galactic-map.html">Galactic Map</a>
+        <a href="threejs.html">Solar System</a>
+        <a href="sun.html">The Sun</a>
+        <a href="sirius.html">Sirius System</a>
+        <a href="betelgeuse.html">Betelgeuse</a>
+        <a href="wr102.html">WR-102</a>
+      </div>
+    </div>
+    <div class="nav-drop">
+      <button class="nav-drop-btn active">Physics ▾</button>
+      <div class="nav-drop-menu">
+        <a href="solar-fluid.html">Solar Fluid (N-S)</a>
+        <a href="black-hole-fluid.html" class="active">BH Accretion Sim</a>
+        <a href="stellar-wind.html">Stellar Wind</a>
+      </div>
+    </div>
+    <a href="rust.html" class="nav-item">Rust/WASM</a>
+  </div>
+</nav>
+
+<div id="container">
+  <div id="canvas-area">
+    <canvas id="c"></canvas>
+    <div id="overlay-info">
+      <div id="oi-preset">Stellar BH — 10 M☉</div>
+      <div id="oi-mass">GM = 0.08</div>
+      <div id="oi-step">Step: 0</div>
+      <div id="oi-fps">FPS: —</div>
+    </div>
+  </div>
+  <div id="panel">
+    <div>
+      <div class="section-title">⬤ Black Hole Preset</div>
+      <select id="preset">
+        <option value="stellar">Stellar BH — 10 M☉</option>
+        <option value="agn">AGN — 10⁶ M☉</option>
+        <option value="smbh">SMBH — 10⁹ M☉</option>
+        <option value="ton618">Ton 618 — 6.6×10¹⁰ M☉</option>
+      </select>
+    </div>
+
+    <div>
+      <div class="section-title">⚙ Accretion Physics</div>
+      <div class="ctrl"><label>BH Mass (GM)</label><input type="range" id="s-gm" min="1" max="100" value="25"><div class="val" id="v-gm">0.08</div></div>
+      <div class="ctrl"><label>Accretion Rate (ṁ)</label><input type="range" id="s-acc" min="1" max="100" value="35"><div class="val" id="v-acc">0.35</div></div>
+      <div class="ctrl"><label>Angular Momentum (L)</label><input type="range" id="s-spin" min="0" max="100" value="70"><div class="val" id="v-spin">0.70</div></div>
+      <div class="ctrl"><label>Viscosity (α-disk)</label><input type="range" id="s-visc" min="0" max="100" value="8"><div class="val" id="v-visc">0.0008</div></div>
+      <div class="ctrl"><label>Jet Power</label><input type="range" id="s-jet" min="0" max="100" value="40"><div class="val" id="v-jet">0.40</div></div>
+    </div>
+
+    <div>
+      <div class="section-title">🌈 Visualization</div>
+      <select id="colormap">
+        <option value="thermal" selected>Thermal (T gradient)</option>
+        <option value="density">Density only</option>
+        <option value="velocity">Velocity field</option>
+        <option value="pressure">Pressure map</option>
+      </select>
+      <div style="margin-top:6px">
+        <input type="checkbox" id="showEH" checked> <label for="showEH" style="font-size:10px">Event horizon</label>&nbsp;&nbsp;
+        <input type="checkbox" id="showGrid"> <label for="showGrid" style="font-size:10px">Velocity grid</label>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">▶ Controls</div>
+      <button class="btn" id="btnReset">↺ Reset Disk</button>
+      <button class="btn" id="btnCME" style="margin-top:5px">💥 Inject Mass</button>
+      <button class="btn danger" id="btnClear" style="margin-top:5px">✕ Clear All</button>
+    </div>
+
+    <div class="sep"></div>
+    <div class="info-box">
+      <b>Physics model</b><br>
+      Incompressible 2D Navier-Stokes with central gravity (GM/r²) and Keplerian angular momentum initialization. Material spirals inward via α-disk viscosity, heats up (T∝1/r), and is removed at the event horizon. Jets are launched from the polar region.<br><br>
+      <b>Color = temperature proxy:</b><br>
+      Black → deep red → orange → gold → white-hot
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  2D BLACK HOLE ACCRETION FLUID SIMULATION
+//  Physics: Incompressible Navier-Stokes + central gravity (1/r²)
+//           + Keplerian angular momentum initialization
+//           + α-disk viscosity proxy
+//           + relativistic jet launch from polar region
+//           + event horizon density sink
+//
+//  Solver: Jos Stam (1999) semi-Lagrangian stable fluids
+//  Grid: N×N, cells indexed IX(i,j) = i + j*(N+2)
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const N = 128;
+const M = N + 2;  // with boundary padding
+
+// Resize canvas to native pixel size (CSS scales it up)
+function resize() {
+    const area = document.getElementById('canvas-area');
+    // Use square that fits the area
+    const sz = Math.min(area.clientWidth, area.clientHeight);
+    canvas.width  = N;
+    canvas.height = N;
+    canvas.style.width  = sz + 'px';
+    canvas.style.height = sz + 'px';
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Grid state ───────────────────────────────────────────────
+let u, v, u0, v0, dens, dens0, pres, div2;
+function mkGrid() { return new Float32Array(M * M); }
+function resetGrids() {
+    u=mkGrid(); v=mkGrid(); u0=mkGrid(); v0=mkGrid();
+    dens=mkGrid(); dens0=mkGrid(); pres=mkGrid(); div2=mkGrid();
+}
+resetGrids();
+
+// ── Parameters ───────────────────────────────────────────────
+const state = {
+    GM:    0.08,   // gravitational parameter (normalized)
+    accR:  0.35,   // accretion rate (inward spiral strength)
+    spin:  0.70,   // angular momentum fraction of Keplerian
+    visc:  0.0008, // kinematic viscosity
+    jet:   0.40,   // jet power
+    dt:    0.016,  // time step
+    iter:  18,     // pressure Jacobi iterations
+    EH:    0.04,   // event horizon radius (normalized [0,1])
+    jetR:  0.06,   // jet launch radius
+    diskR0:0.25,   // disk inner edge (normalized)
+    diskR1:0.68,   // disk outer edge
+    colormap: 'thermal',
+    showEH: true,
+    showGrid: false,
+};
+
+// ── BH Presets ───────────────────────────────────────────────
+const PRESETS = {
+    stellar: { name:'Stellar BH — 10 M☉',      GM:0.08, EH:0.04, jetR:0.06, diskR0:0.25, diskR1:0.68 },
+    agn:     { name:'AGN — 10⁶ M☉',            GM:0.18, EH:0.06, jetR:0.09, diskR0:0.20, diskR1:0.72 },
+    smbh:    { name:'SMBH — 10⁹ M☉',           GM:0.30, EH:0.08, jetR:0.12, diskR0:0.18, diskR1:0.75 },
+    ton618:  { name:'Ton 618 — 6.6×10¹⁰ M☉',  GM:0.45, EH:0.10, jetR:0.16, diskR0:0.16, diskR1:0.80 },
+};
+
+// ── Navier-Stokes solver helpers ─────────────────────────────
+function IX(i, j) { return i + j * M; }
+
+function setBounds(b, x) {
+    for (let i = 1; i <= N; i++) {
+        x[IX(0, i)]   = b === 1 ? -x[IX(1, i)]   : x[IX(1, i)];
+        x[IX(N+1, i)] = b === 1 ? -x[IX(N, i)]   : x[IX(N, i)];
+        x[IX(i, 0)]   = b === 2 ? -x[IX(i, 1)]   : x[IX(i, 1)];
+        x[IX(i, N+1)] = b === 2 ? -x[IX(i, N)]   : x[IX(i, N)];
+    }
+    x[IX(0,0)]     = 0.5*(x[IX(1,0)]     + x[IX(0,1)]);
+    x[IX(0,N+1)]   = 0.5*(x[IX(1,N+1)]   + x[IX(0,N)]);
+    x[IX(N+1,0)]   = 0.5*(x[IX(N,0)]     + x[IX(N+1,1)]);
+    x[IX(N+1,N+1)] = 0.5*(x[IX(N,N+1)]   + x[IX(N+1,N)]);
+}
+
+function linearSolve(b, x, x0, a, c) {
+    const cInv = 1 / c;
+    for (let k = 0; k < state.iter; k++) {
+        for (let j = 1; j <= N; j++) {
+            for (let i = 1; i <= N; i++) {
+                x[IX(i,j)] = (x0[IX(i,j)] + a * (x[IX(i-1,j)] + x[IX(i+1,j)] + x[IX(i,j-1)] + x[IX(i,j+1)])) * cInv;
+            }
+        }
+        setBounds(b, x);
+    }
+}
+
+function diffuse(b, x, x0, diff) {
+    const a = state.dt * diff * N * N;
+    linearSolve(b, x, x0, a, 1 + 4 * a);
+}
+
+function advect(b, d, d0, uu, vv) {
+    const dt0 = state.dt * N;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            let xi = i - dt0 * uu[IX(i,j)];
+            let yi = j - dt0 * vv[IX(i,j)];
+            xi = Math.max(0.5, Math.min(N + 0.5, xi));
+            yi = Math.max(0.5, Math.min(N + 0.5, yi));
+            const i0 = Math.floor(xi), i1 = i0 + 1;
+            const j0 = Math.floor(yi), j1 = j0 + 1;
+            const s1 = xi - i0, s0 = 1 - s1;
+            const t1 = yi - j0, t0 = 1 - t1;
+            d[IX(i,j)] = s0*(t0*d0[IX(i0,j0)] + t1*d0[IX(i0,j1)]) +
+                         s1*(t0*d0[IX(i1,j0)] + t1*d0[IX(i1,j1)]);
+        }
+    }
+    setBounds(b, d);
+}
+
+function project(uu, vv, pp, div) {
+    const h = 1 / N;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            div[IX(i,j)] = -0.5 * h * (uu[IX(i+1,j)] - uu[IX(i-1,j)] + vv[IX(i,j+1)] - vv[IX(i,j-1)]);
+            pp[IX(i,j)] = 0;
+        }
+    }
+    setBounds(0, div); setBounds(0, pp);
+    linearSolve(0, pp, div, 1, 4);
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            uu[IX(i,j)] -= 0.5 * (pp[IX(i+1,j)] - pp[IX(i-1,j)]) * N;
+            vv[IX(i,j)] -= 0.5 * (pp[IX(i,j+1)] - pp[IX(i,j-1)]) * N;
+        }
+    }
+    setBounds(1, uu); setBounds(2, vv);
+}
+
+// ── BH-specific physics ──────────────────────────────────────
+const eps2 = 0.003 * 0.003;  // gravitational softening²
+
+function addGravity() {
+    const GM = state.GM, dt = state.dt;
+    for (let j = 1; j <= N; j++) {
+        const yn = (j / (N + 1) - 0.5) * 2;
+        for (let i = 1; i <= N; i++) {
+            const xn = (i / (N + 1) - 0.5) * 2;
+            const r2 = xn*xn + yn*yn + eps2;
+            const r3 = Math.pow(r2, 1.5);
+            const f = GM * dt / r3;
+            u[IX(i,j)] -= f * xn;
+            v[IX(i,j)] -= f * yn;
+        }
+    }
+}
+
+function addJets() {
+    const jp = state.jet * 0.015, dt = state.dt;
+    const jetR = state.jetR;
+    for (let j = 1; j <= N; j++) {
+        const yn = (j / (N + 1) - 0.5) * 2;
+        for (let i = 1; i <= N; i++) {
+            const xn = (i / (N + 1) - 0.5) * 2;
+            const r = Math.sqrt(xn*xn + yn*yn);
+            // Jet: narrow column above/below BH within jetR, |xn| < jetR/3
+            if (r < jetR && Math.abs(xn) < jetR / 3) {
+                const jetDir = yn >= 0 ? 1 : -1;
+                v[IX(i,j)] += jp * jetDir * (1 - r / jetR);
+                // Remove density carried by jet
+                dens[IX(i,j)] *= Math.max(0, 1 - jp * 8);
+            }
+        }
+    }
+}
+
+function sinkAtEH() {
+    // Remove material inside the event horizon
+    const EH = state.EH;
+    for (let j = 1; j <= N; j++) {
+        const yn = (j / (N + 1) - 0.5) * 2;
+        for (let i = 1; i <= N; i++) {
+            const xn = (i / (N + 1) - 0.5) * 2;
+            const r = Math.sqrt(xn*xn + yn*yn);
+            if (r < EH) {
+                dens[IX(i,j)] = 0;
+                u[IX(i,j)] = 0;
+                v[IX(i,j)] = 0;
+            } else if (r < EH * 1.4) {
+                // ISCO: strong inward pull near EH
+                const pull = (1 - (r - EH) / (EH * 0.4)) * 0.06;
+                u[IX(i,j)] -= xn / (r + 0.001) * pull;
+                v[IX(i,j)] -= yn / (r + 0.001) * pull;
+            }
+        }
+    }
+}
+
+function injectSource() {
+    // Continuously inject matter at outer ring boundary
+    const r0 = state.diskR1 - 0.02, rate = state.accR * 0.12;
+    for (let j = 1; j <= N; j++) {
+        const yn = (j / (N + 1) - 0.5) * 2;
+        for (let i = 1; i <= N; i++) {
+            const xn = (i / (N + 1) - 0.5) * 2;
+            const r = Math.sqrt(xn*xn + yn*yn);
+            if (Math.abs(r - r0) < 0.015) {
+                dens[IX(i,j)] += rate * state.dt * (0.8 + 0.4 * Math.random());
+                // Keplerian velocity at injection radius
+                const vk = Math.sqrt(state.GM / r) * state.spin;
+                const vr = -vk * 0.015 * state.accR;  // slight inward drift
+                u[IX(i,j)] = -vk * yn/r + vr * xn/r;
+                v[IX(i,j)] =  vk * xn/r + vr * yn/r;
+            }
+        }
+    }
+}
+
+// ── Initialize accretion disk ─────────────────────────────────
+function initDisk() {
+    resetGrids();
+    const GM = state.GM, spin = state.spin, accR = state.accR;
+    for (let j = 1; j <= N; j++) {
+        const yn = (j / (N + 1) - 0.5) * 2;
+        for (let i = 1; i <= N; i++) {
+            const xn = (i / (N + 1) - 0.5) * 2;
+            const r = Math.sqrt(xn*xn + yn*yn);
+            if (r > state.diskR0 && r < state.diskR1) {
+                // Density: gaussian profile with azimuthal noise
+                const width = (state.diskR1 - state.diskR0) / 2;
+                const rMid  = (state.diskR0 + state.diskR1) / 2;
+                const rho   = Math.exp(-Math.pow(r - rMid, 2) / (2 * width * width));
+                dens[IX(i,j)] = rho * (0.9 + 0.2 * Math.random());
+
+                // Keplerian velocity + slight inward accretion drift
+                const vk = spin * Math.sqrt(Math.max(0.001, GM / r));
+                const vr = -accR * vk * 0.01;
+                u[IX(i,j)] = -vk * yn/r + vr * xn/r + (Math.random()-0.5)*0.002;
+                v[IX(i,j)] =  vk * xn/r + vr * yn/r + (Math.random()-0.5)*0.002;
+            }
+        }
+    }
+}
+
+// ── Simulation step ───────────────────────────────────────────
+let step = 0;
+function simStep() {
+    injectSource();
+    addGravity();
+    addJets();
+
+    // Velocity step
+    u0.set(u); v0.set(v);
+    diffuse(1, u, u0, state.visc);
+    diffuse(2, v, v0, state.visc);
+    project(u, v, pres, div2);
+    u0.set(u); v0.set(v);
+    advect(1, u, u0, u0, v0);
+    advect(2, v, v0, u0, v0);
+    project(u, v, pres, div2);
+
+    // Density step
+    dens0.set(dens);
+    diffuse(0, dens, dens0, state.visc * 0.5);
+    dens0.set(dens);
+    advect(0, dens, dens0, u, v);
+
+    // Apply dissipation + sink
+    for (let k = 0; k < M*M; k++) { dens[k] *= 0.999; }
+    sinkAtEH();
+    step++;
+}
+
+// ── Rendering ─────────────────────────────────────────────────
+const imgData = ctx.createImageData(N, N);
+const px = imgData.data;
+
+function tempColor(density, r) {
+    // Temperature proxy: hot inner disk → cool outer
+    const T = Math.min(1, density * 0.8 / (r * r + 0.005));
+    let rr, gg, bb;
+    if      (T > 0.85) { rr=255; gg=255; bb=Math.round(200+T*55); }
+    else if (T > 0.65) { rr=255; gg=Math.round(200+T*55); bb=Math.round(T*100); }
+    else if (T > 0.40) { rr=255; gg=Math.round(80+T*200); bb=0; }
+    else if (T > 0.18) { rr=Math.round(180+T*200); gg=Math.round(T*120); bb=0; }
+    else               { rr=Math.round(density*600); gg=0; bb=0; }
+    return [Math.min(255,rr), Math.min(255,gg), Math.min(255,bb)];
+}
+
+function renderFrame() {
+    for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+            const xn = (i / N - 0.5) * 2;
+            const yn = (j / N - 0.5) * 2;
+            const r  = Math.sqrt(xn*xn + yn*yn);
+            const idx = (i + j * N) * 4;
+            const d   = Math.max(0, dens[IX(i+1, j+1)]);
+
+            let rr=0, gg=0, bb=0;
+            if (state.colormap === 'thermal') {
+                [rr,gg,bb] = tempColor(d, r);
+            } else if (state.colormap === 'density') {
+                const v_ = Math.min(255, d * 800);
+                rr=Math.round(v_*0.9); gg=Math.round(v_*0.7); bb=Math.round(v_*0.4);
+            } else if (state.colormap === 'velocity') {
+                const speed = Math.sqrt(u[IX(i+1,j+1)]**2 + v[IX(i+1,j+1)]**2);
+                const sv = Math.min(1, speed * 15);
+                rr=Math.round(sv*200); gg=Math.round((1-sv)*180); bb=Math.round(sv*255*0.8);
+            } else if (state.colormap === 'pressure') {
+                const p_ = pres[IX(i+1,j+1)];
+                const pv = Math.min(1, Math.abs(p_) * 40);
+                rr = p_ > 0 ? Math.round(pv*255) : 0;
+                gg = Math.round(pv*80);
+                bb = p_ < 0 ? Math.round(pv*255) : 0;
+            }
+
+            // Event horizon: solid black override
+            if (state.showEH && r < state.EH) {
+                rr=gg=bb=0;
+            } else if (state.showEH && r < state.EH * 1.08) {
+                // Photon ring: bright orange-white rim
+                const rim = 1 - (r - state.EH) / (state.EH * 0.08);
+                rr=Math.min(255, rr + Math.round(rim*255));
+                gg=Math.min(255, gg + Math.round(rim*200));
+                bb=Math.min(255, bb + Math.round(rim*80));
+            }
+
+            // Velocity grid overlay
+            if (state.showGrid && i%8===0 && j%8===0) {
+                const uu = u[IX(i+1,j+1)], vv = v[IX(i+1,j+1)];
+                const sp = Math.sqrt(uu*uu+vv*vv);
+                if (sp > 0.002) { rr=200; gg=200; bb=50; }
+            }
+
+            px[idx]=rr; px[idx+1]=gg; px[idx+2]=bb; px[idx+3]=255;
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // Jet highlight (vertical streaks at center in canvas coordinates)
+    if (state.jet > 0) {
+        const cx_ = canvas.width / 2;
+        const cy_ = canvas.height / 2;
+        const ehPx = state.EH * canvas.width / 2;
+        const grad = ctx.createLinearGradient(cx_, cy_ - ehPx, cx_, 0);
+        grad.addColorStop(0,   'rgba(120,180,255,0.0)');
+        grad.addColorStop(0.4, 'rgba(120,180,255,' + (state.jet * 0.25) + ')');
+        grad.addColorStop(1,   'rgba(80,130,220,0.0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx_ - 3, 0, 6, cy_ - ehPx);
+        const grad2 = ctx.createLinearGradient(cx_, cy_ + ehPx, cx_, canvas.height);
+        grad2.addColorStop(0,   'rgba(120,180,255,0.0)');
+        grad2.addColorStop(0.4, 'rgba(120,180,255,' + (state.jet * 0.25) + ')');
+        grad2.addColorStop(1,   'rgba(80,130,220,0.0)');
+        ctx.fillStyle = grad2;
+        ctx.fillRect(cx_ - 3, cy_ + ehPx, 6, canvas.height - cy_ - ehPx);
+    }
+}
+
+// ── Main loop ─────────────────────────────────────────────────
+let lastT = performance.now(), fps = 60;
+function loop(now) {
+    requestAnimationFrame(loop);
+    const dt_ = (now - lastT) / 1000;
+    lastT = now;
+    fps = fps * 0.95 + (1 / (dt_ + 0.001)) * 0.05;
+
+    simStep();
+    renderFrame();
+
+    document.getElementById('oi-step').textContent = 'Step: ' + step;
+    document.getElementById('oi-fps').textContent  = 'FPS: ' + fps.toFixed(0);
+}
+
+// ── Controls ──────────────────────────────────────────────────
+function bindSlider(id, valId, key, scale, fmt) {
+    const sl = document.getElementById(id);
+    const vl = document.getElementById(valId);
+    sl.addEventListener('input', () => {
+        state[key] = sl.value / 100 * scale;
+        vl.textContent = fmt ? fmt(state[key]) : state[key].toFixed(4);
+    });
+}
+bindSlider('s-gm',  'v-gm',  'GM',   0.50, v => v.toFixed(3));
+bindSlider('s-acc', 'v-acc', 'accR', 1.0,  v => v.toFixed(2));
+bindSlider('s-spin','v-spin','spin', 1.0,  v => v.toFixed(2));
+bindSlider('s-visc','v-visc','visc', 0.01, v => v.toFixed(4));
+bindSlider('s-jet', 'v-jet', 'jet',  1.0,  v => v.toFixed(2));
+
+document.getElementById('colormap').addEventListener('change', e => { state.colormap = e.target.value; });
+document.getElementById('showEH').addEventListener('change', e => { state.showEH = e.target.checked; });
+document.getElementById('showGrid').addEventListener('change', e => { state.showGrid = e.target.checked; });
+
+document.getElementById('preset').addEventListener('change', e => {
+    const p = PRESETS[e.target.value];
+    Object.assign(state, p);
+    document.getElementById('oi-preset').textContent = p.name;
+    document.getElementById('oi-mass').textContent = 'GM = ' + state.GM.toFixed(3);
+    initDisk();
+    step = 0;
+});
+
+document.getElementById('btnReset').addEventListener('click', () => { initDisk(); step = 0; });
+document.getElementById('btnCME').addEventListener('click', () => {
+    // Inject a clump of material at random angle at outer disk
+    const angle = Math.random() * Math.PI * 2;
+    const r = state.diskR1 - 0.05;
+    const ci = Math.round((Math.cos(angle)*r*0.5 + 0.5) * N);
+    const cj = Math.round((Math.sin(angle)*r*0.5 + 0.5) * N);
+    for (let dj = -5; dj <= 5; dj++) {
+        for (let di = -5; di <= 5; di++) {
+            const dist = Math.sqrt(di*di+dj*dj);
+            if (dist < 5 && ci+di >= 1 && ci+di <= N && cj+dj >= 1 && cj+dj <= N) {
+                const f = Math.exp(-dist*dist/8);
+                dens[IX(ci+di, cj+dj)] += 1.2 * f;
+            }
+        }
+    }
+});
+document.getElementById('btnClear').addEventListener('click', () => { resetGrids(); step = 0; });
+
+// Mouse interaction: add matter where clicked/dragged
+let mouseDown = false;
+canvas.addEventListener('mousedown', e => { mouseDown = true; });
+canvas.addEventListener('mouseup', () => { mouseDown = false; });
+canvas.addEventListener('mousemove', e => {
+    if (!mouseDown) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top)  / rect.height;
+    const ci = Math.round(x * N) + 1;
+    const cj = Math.round(y * N) + 1;
+    for (let dj = -3; dj <= 3; dj++) {
+        for (let di = -3; di <= 3; di++) {
+            const ii = ci+di, jj = cj+dj;
+            if (ii >= 1 && ii <= N && jj >= 1 && jj <= N) {
+                const f = Math.exp(-(di*di+dj*dj)/4);
+                dens[IX(ii,jj)] += 0.5 * f;
+            }
+        }
+    }
+});
+
+// ── Start ──────────────────────────────────────────────────────
+initDisk();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
