@@ -505,18 +505,21 @@ const CATALOG = [
         id: 'sgr_a', name: 'Sagittarius A*', abbr: 'Sgr A*', type: 'SMBH',
         l: 0, b: 0, dist: 26673,
         temp: 0, spectral: 'SMBH',
-        color: 0x110800, glowColor: 0xff6600, size: 3.0,
-        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Surrounded by the S-star cluster whose orbits provide definitive proof of its mass.',
+        color: 0x110800, glowColor: 0xff7700, size: 5.0,
+        desc: 'Supermassive black hole at the center of the Milky Way. Mass ~4.15 million M☉. Directly imaged by the Event Horizon Telescope in May 2022, revealing the characteristic crescent of emission and shadow predicted by general relativity. Surrounded by the S-star cluster whose orbits provide the most direct gravitational proof of its mass.',
         props: [
             ['Type', 'Supermassive Black Hole (Kerr)'],
-            ['Mass', '4.15 × 10⁶ M☉'],
-            ['Schwarzschild radius', '~0.08 AU (12 million km)'],
-            ['Event horizon diameter', '~24.6 million km'],
-            ['Spin parameter', 'a* ~ 0.9 (near-maximal)'],
+            ['Mass', '4.154 × 10⁶ M☉'],
+            ['Schwarzschild radius', '~0.08 AU (12.1 million km)'],
+            ['Event horizon diameter', '~24.6 million km (~0.16 AU)'],
+            ['Shadow diameter', '~52 μas (EHT 2022 image)'],
+            ['Spin parameter', 'a* ~ 0.5–0.9 (partially constrained)'],
             ['Distance from Sun', '26,673 ly (8.178 kpc)'],
             ['Associated cluster', 'S-star cluster (~30 known orbits)'],
+            ['First EHT image', 'May 12, 2022 (240 μJy at 228 GHz)'],
+            ['Accretion rate', '~10⁻⁸–10⁻⁷ M☉/yr (quiescent LLAGN)'],
         ],
-        link: null, isGC: true,
+        link: 'black-hole-fluid.html', isGC: true,
     },
 
     // ── S-stars (orbiting Sgr A*) ──────────────────────────────────────────
@@ -1180,6 +1183,27 @@ const CATALOG = [
         ],
     },
     {
+        id: 'phoenix_cluster', name: 'Phoenix Cluster (SPT-CL J2344−4243)', abbr: 'Phoenix Cl.', type: 'Galaxy Cluster / AGN',
+        l: 339.7, b: -69.3, dist: 5_700_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x0011aa, glowColor: 0x3366ff, size: 5.5,
+        desc: 'The most X-ray luminous galaxy cluster known and one of the most massive structures in the observable universe. Named for its remarkable "phoenix-like" cooling flow: the central BCG is forming stars at ~800 M☉/yr — the highest rate in any known cluster. Discovered by the South Pole Telescope (2010). At z=0.596, its light left when the universe was 7.7 Gyr old.',
+        props: [
+            ['Type', 'Massive Galaxy Cluster (BCG + AGN)'],
+            ['Distance', '5.7 Gly (lookback time; z = 0.596)'],
+            ['Galactic l / b', '339.7° / −69.3°'],
+            ['Cluster mass', '~2.5 × 10¹⁵ M☉ (one of the most massive known)'],
+            ['ICM temperature', '~15 keV (~1.7 × 10⁸ K)'],
+            ['X-ray luminosity', '~8.2 × 10⁴⁵ erg/s (most luminous known)'],
+            ['BCG star formation', '~800 M☉/yr (highest known in any cluster)'],
+            ['Cooling flow rate', '~3,600 M☉/yr (largest known)'],
+            ['Central BH mass', '~10¹⁰ M☉ (ultramassive)'],
+            ['Discovery', 'South Pole Telescope 2010 (McDonald+2012)'],
+        ],
+        isCluster: true,
+    },
+    {
         id: '3c273', name: '3C 273', abbr: '3C 273', type: 'Quasar / Blazar',
         l: 289.95, b: 64.36, dist: 2_440_000_000,
         isIntergalactic: true,
@@ -1584,49 +1608,182 @@ scene.add(galaxyPoints);
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
-//  GALACTIC CENTER GLOW (Sgr A*)
+//  GALACTIC CENTER — SGR A* VISUAL SYSTEM
+//
+//  Scales (all in ly; reality is sub-AU but visually exaggerated for 3D):
+//    Shadow sphere   : r = 8 ly     (actual ~0.000025 ly — black drop sphere)
+//    Photon ring     : r ≈ 21 ly    (bright crescent sprite — EHT signature)
+//    ISCO region     :  8–22 ly     (white-hot, innermost stable orbit)
+//    Hot inner disk  : 20–50 ly     (gold/amber, Keplerian ω≈0.0016)
+//    Warm mid disk   : 45–100 ly    (orange,  ω≈0.0008)
+//    Cool outer disk : 90–180 ly    (dark red, ω≈0.0003)
+//    Circumnuclear   : 150–350 ly   (molecular torus, reddish-brown)
+//    Jets            : ±220 ly      (blue-white cones + line spine)
+//    Inner bulge     : 100 / 500 / 1400 / 3000 ly glow halos
+//
+//  Disk tilted ~14° off galactic plane (Sgr A*'s spin axis ~26° from z-axis).
 // ══════════════════════════════════════════════════════════════════════════
+const sgraDiskRings = [];  // [[mesh, angularVelocity], ...] — filled in IIFE, used in animate()
+
 (function buildGCGlow() {
-    // Bulge glow layers (represent galactic bulge, not the BH itself)
-    [[1400, 0xff8800, 0.03], [500, 0xffaa44, 0.07], [100, 0xffeebb, 0.15]].forEach(([r, c, o]) => {
-        const mesh = new THREE.Mesh(
+    // ── Galactic bulge / nuclear star cluster glow halos ──────────────────
+    [
+        [3000, 0xff5500, 0.010],
+        [1400, 0xff8800, 0.025],
+        [500,  0xffaa44, 0.065],
+        [100,  0xffddaa, 0.14],
+        [30,   0xfff0cc, 0.22],
+    ].forEach(([r, c, o]) => {
+        scene.add(new THREE.Mesh(
             new THREE.SphereGeometry(r, 16, 16),
             new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: o,
                 depthWrite: false, blending: THREE.AdditiveBlending })
-        );
-        scene.add(mesh);
+        ));
     });
 
-    // ── Accretion disk around Sgr A* ─────────────────────────────────────
-    // Tilted ~15° off galactic plane (Sgr A*'s spin axis not fully aligned).
-    // Three layers: hot inner (white-orange), warm mid (amber), cool outer (dark orange).
+    // ── Event horizon — black drop sphere (occludes background) ──────────
+    scene.add(new THREE.Mesh(
+        new THREE.SphereGeometry(7, 32, 32),
+        new THREE.MeshBasicMaterial({ color: 0x000000, depthWrite: true })
+    ));
+
+    // ── Photon ring sprite — the EHT crescent ────────────────────────────
+    // A thin bright ring at the shadow edge; one side boosted by Doppler.
+    (function() {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 512;
+        const cx = cv.getContext('2d');
+        // Outer ring glow
+        const rg = cx.createRadialGradient(256,256, 120, 256,256, 256);
+        rg.addColorStop(0,   'rgba(255,220,140,0.0)');
+        rg.addColorStop(0.48,'rgba(255,210,120,0.50)');
+        rg.addColorStop(0.60,'rgba(255,245,210,0.95)');
+        rg.addColorStop(0.70,'rgba(255,230,160,0.45)');
+        rg.addColorStop(1.0, 'rgba(255,180,60,0.0)');
+        cx.fillStyle = rg; cx.fillRect(0,0,512,512);
+        // Doppler bright arc — left side (approaching gas)
+        cx.save(); cx.translate(256,256);
+        const ag = cx.createRadialGradient(-30, 0, 100, 0, 0, 220);
+        ag.addColorStop(0,   'rgba(255,255,220,0.0)');
+        ag.addColorStop(0.55,'rgba(255,255,220,0.55)');
+        ag.addColorStop(0.75,'rgba(255,220,140,0.18)');
+        ag.addColorStop(1,   'rgba(255,220,140,0.0)');
+        cx.fillStyle = ag;
+        cx.beginPath(); cx.arc(0,0,220, 0.45*Math.PI, 1.55*Math.PI); cx.closePath();
+        cx.fill();
+        cx.restore();
+        const photonRing = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        photonRing.scale.setScalar(22);
+        scene.add(photonRing);
+    })();
+
+    // ── Accretion disk (tilted ~14° off galactic plane) ───────────────────
+    // diskGroup carries the tilt; rings rotate independently inside it.
+    const diskGroup = new THREE.Group();
+    diskGroup.rotation.x = 0.24;   // ~14° tilt from galactic midplane
+    diskGroup.rotation.z = 0.18;   // slight roll for visual variety
+    scene.add(diskGroup);
+
+    // Temperature-gradient canvas texture spanning the full disk face
+    (function() {
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = 512;
+        const cx = cv.getContext('2d');
+        const tg = cx.createRadialGradient(256,256, 50, 256,256, 256);
+        tg.addColorStop(0,    'rgba(255,255,255,0.0)');   // inside EH shadow
+        tg.addColorStop(0.10, 'rgba(255,255,255,0.90)');  // ISCO — blazing white
+        tg.addColorStop(0.22, 'rgba(255,220,100,0.82)');  // hot inner — gold
+        tg.addColorStop(0.40, 'rgba(255,140,30,0.68)');   // mid — amber
+        tg.addColorStop(0.58, 'rgba(210,55,8,0.46)');     // warm outer — orange-red
+        tg.addColorStop(0.75, 'rgba(130,18,3,0.26)');     // cool outer — deep red
+        tg.addColorStop(1,    'rgba(50,5,0,0.0)');
+        cx.fillStyle = tg; cx.fillRect(0,0,512,512);
+        const face = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        face.scale.setScalar(380);
+        diskGroup.add(face);
+    })();
+
+    // Individual Keplerian rings (differential rotation)
     [
-        { inner: 1,   outer: 6,   color: 0xffffff, opacity: 0.55 },
-        { inner: 5,   outer: 18,  color: 0xff9900, opacity: 0.45 },
-        { inner: 15,  outer: 40,  color: 0xcc4400, opacity: 0.30 },
-    ].forEach(({ inner, outer, color, opacity }) => {
-        const disk = new THREE.Mesh(
-            new THREE.RingGeometry(inner, outer, 96),
+        { inner:  8,  outer:  22,  color: 0xffffff, opacity: 0.82, omega: 0.00200 },
+        { inner: 20,  outer:  50,  color: 0xffdd88, opacity: 0.68, omega: 0.00100 },
+        { inner: 45,  outer: 100,  color: 0xff8800, opacity: 0.50, omega: 0.00055 },
+        { inner: 90,  outer: 180,  color: 0xcc3300, opacity: 0.32, omega: 0.00025 },
+    ].forEach(({ inner, outer, color, opacity, omega }) => {
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(inner, outer, 128),
             new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide,
                 transparent: true, opacity, depthWrite: false,
                 blending: THREE.AdditiveBlending })
         );
-        disk.rotation.x = Math.PI / 2;
-        disk.rotation.y = 0.26; // ~15° tilt
-        scene.add(disk);
+        diskGroup.add(ring);
+        sgraDiskRings.push([ring, omega]);
     });
 
-    // ── Relativistic jets (faint blue-white columns along rotation axis) ──
-    [1, -1].forEach(dir => {
-        const jetPts = [
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(0, dir * 80, 0),
-        ];
-        const jet = new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints(jetPts),
-            new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.40 })
+    // ── Circumnuclear molecular disk (real feature: ~1.5–7 pc = ~5–23 ly)
+    // Rendered at 150–350 ly — exaggerated but represents the real structure.
+    {
+        const cnd = new THREE.Mesh(
+            new THREE.RingGeometry(150, 350, 96),
+            new THREE.MeshBasicMaterial({ color: 0x882200, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.18, depthWrite: false,
+                blending: THREE.AdditiveBlending })
         );
-        scene.add(jet);
+        diskGroup.add(cnd);
+        sgraDiskRings.push([cnd, 0.000060]);
+    }
+
+    // ── Relativistic jets along Sgr A*'s spin axis ────────────────────────
+    // Sgr A*'s jets are faint but observed at radio/X-ray wavelengths.
+    // Extended to ±220 ly (real ~0.1–1 pc per knot; rendered for visibility).
+    [1, -1].forEach(dir => {
+        const jetLen = 220;
+        const baseTip = dir > 0 ? 0 : 6;
+        const baseBot = dir > 0 ? 6 : 0;
+
+        // Bright inner core cone
+        const core = new THREE.Mesh(
+            new THREE.CylinderGeometry(baseTip, baseBot, jetLen, 24, 1, true),
+            new THREE.MeshBasicMaterial({ color: 0xaaddff, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.55, depthWrite: false,
+                blending: THREE.AdditiveBlending })
+        );
+        core.position.y = dir * jetLen / 2;
+        diskGroup.add(core);
+
+        // Soft wide envelope (3× wider)
+        const env = new THREE.Mesh(
+            new THREE.CylinderGeometry(baseTip * 3, baseBot * 3, jetLen, 24, 1, true),
+            new THREE.MeshBasicMaterial({ color: 0x5588cc, side: THREE.DoubleSide,
+                transparent: true, opacity: 0.14, depthWrite: false,
+                blending: THREE.AdditiveBlending })
+        );
+        env.position.y = dir * jetLen / 2;
+        diskGroup.add(env);
+
+        // Bright spine line
+        diskGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                new THREE.Vector3(0, dir * jetLen, 0),
+            ]),
+            new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })
+        ));
+
+        // Jet knot / termination shock blob
+        const knot = new THREE.Mesh(
+            new THREE.SphereGeometry(9, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.45,
+                depthWrite: false, blending: THREE.AdditiveBlending })
+        );
+        knot.position.y = dir * jetLen;
+        diskGroup.add(knot);
     });
 })();
 
@@ -1889,6 +2046,54 @@ function makeGalaxySpriteCanvas(type, colorHex) {
             ctx.stroke(); ctx.restore();
         });
         ctx.restore();
+
+    } else if (type === 'galaxy_cluster') {
+        // Diffuse ICM glow + bright BCG core + satellite galaxy dots
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Extended hot ICM (X-ray emitting intracluster medium) — large diffuse halo
+        const icm = ctx.createRadialGradient(0,0,0, 0,0,cx);
+        icm.addColorStop(0,    `rgba(${r},${g},${b},0.38)`);
+        icm.addColorStop(0.25, `rgba(${r},${g},${b},0.28)`);
+        icm.addColorStop(0.55, `rgba(${r},${g},${b},0.12)`);
+        icm.addColorStop(0.80, `rgba(${r},${g},${b},0.04)`);
+        icm.addColorStop(1,    `rgba(${r},${g},${b},0.00)`);
+        ctx.fillStyle = icm;
+        ctx.beginPath(); ctx.arc(0,0,cx,0,Math.PI*2); ctx.fill();
+
+        // Slightly elongated core (clusters are rarely perfectly round)
+        ctx.save(); ctx.scale(1.25, 0.82);
+        const coreOval = ctx.createRadialGradient(0,0,0, 0,0,cx*0.4);
+        coreOval.addColorStop(0,   `rgba(${r},${g},${b},0.22)`);
+        coreOval.addColorStop(1,   `rgba(${r},${g},${b},0.00)`);
+        ctx.fillStyle = coreOval;
+        ctx.beginPath(); ctx.arc(0,0,cx*0.4,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // BCG — brightest cluster galaxy (central dominant cD galaxy)
+        const bcg = ctx.createRadialGradient(0,0,0, 0,0,28);
+        bcg.addColorStop(0,   `rgba(255,255,240,1.0)`);
+        bcg.addColorStop(0.25,`rgba(255,240,200,0.85)`);
+        bcg.addColorStop(0.55,`rgba(${r},${g},${b},0.55)`);
+        bcg.addColorStop(1,   `rgba(${r},${g},${b},0.00)`);
+        ctx.fillStyle = bcg; ctx.beginPath(); ctx.arc(0,0,28,0,Math.PI*2); ctx.fill();
+
+        // Satellite galaxies — scatter of elliptical sub-blobs
+        [
+            [42, -18, 11, 0.58], [-35, 30,  9, 0.50],
+            [25,  46,  8, 0.45], [-48,-12, 10, 0.48],
+            [55,  22,  7, 0.40], [-20,-52,  8, 0.42],
+            [12, -58,  6, 0.36], [ 58,-38,  7, 0.34],
+            [-58, 40,  6, 0.30], [ 30, 55,  5, 0.28],
+        ].forEach(([sx,sy,sr,op]) => {
+            const sg = ctx.createRadialGradient(sx,sy,0, sx,sy,sr);
+            sg.addColorStop(0,   `rgba(255,240,210,${op})`);
+            sg.addColorStop(0.5, `rgba(${r},${g},${b},${(op*0.35).toFixed(3)})`);
+            sg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = sg;
+            ctx.beginPath(); ctx.arc(sx,sy,sr,0,Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
     }
     return cv;
 }
@@ -1899,6 +2104,7 @@ function buildGalaxySprite(s, pos) {
         m31: 'spiral',    m33: 'spiral',
         m87: 'elliptical',
         ton618: 'quasar', '3c273': 'quasar', 'apm08279': 'quasar',
+        phoenix_cluster: 'galaxy_cluster',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
@@ -2871,12 +3077,15 @@ function animate() {
 
     const camDistFromOrigin = camera.position.length();
 
-    // ── Sgr A* glow pulse ────────────────────────────────────────
+    // ── Sgr A* glow pulse + disk differential rotation ───────────
     const sgrGlow = starGlows['sgr_a'];
     if (sgrGlow) {
         const baseG = Math.max(sgrGlow.userData.baseGlow, camDistFromOrigin * 0.012);
-        sgrGlow.scale.setScalar(baseG * (1 + 0.10 * Math.sin(t * 1.6)));
+        // Two-frequency flicker: Sgr A* is a low-luminosity AGN with known variability
+        sgrGlow.scale.setScalar(baseG * (1 + 0.12 * Math.sin(t * 1.8) + 0.04 * Math.sin(t * 5.1)));
     }
+    // Keplerian differential rotation: inner rings spin faster (v ∝ r^{-1/2})
+    sgraDiskRings.forEach(([ring, omega]) => { ring.rotation.z += omega; });
 
     // ── Ton 618 — Keplerian differential disk rotation ────────────
     scene.traverse(obj => {
