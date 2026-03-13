@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Star Simulator - Sirius Binary System</title>
+    <title>Sirius Planetary — Parker Physics App</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -13,10 +13,84 @@
             color: #ddd;
         }
 
+        /* ── Nav ─────────────────────────────────────────────────── */
+        nav {
+            position: relative; z-index: 600;
+            height: 48px; min-height: 48px;
+            background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,255,255,.07);
+            display: flex; align-items: center; padding: 0 14px; gap: 8px;
+        }
+        .nav-brand {
+            font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+        .nav-drop { position: relative; }
+        .nav-drop-btn {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+            transition: background .2s, border-color .2s; white-space: nowrap;
+        }
+        .nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+        .nav-drop-btn.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+        .nav-drop-menu {
+            display: block; position: absolute; top: 100%; left: 0;
+            background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+            padding: 8px 0 4px; min-width: 200px; z-index: 800;
+            box-shadow: 0 8px 28px rgba(0,0,0,.7);
+            opacity: 0; visibility: hidden; pointer-events: none;
+            transform: translateY(-6px);
+            transition: opacity .18s ease, visibility .18s ease, transform .18s ease;
+        }
+        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+            opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+        }
+        .nav-drop-menu a {
+            display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
+            font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
+        }
+        .nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+        .nav-drop-menu a.active { color:#ffd700; font-weight:600; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; line-height: 1; transition: background .2s;
+        }
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu { display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 48px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700; }
+            .nav-menu.open { display: flex; }
+            .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+            .nav-drop-menu { position: static; box-shadow: none; border-radius: 4px;
+                background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0;
+                display: none; opacity: 1; visibility: visible; transform: none;
+                transition: none; pointer-events: auto; }
+            .nav-drop-menu a { padding: 10px 22px; }
+            .nav-drop.open .nav-drop-menu { display: block; }
+        }
+
         #app {
             display: flex;
             width: 100vw;
-            height: 100vh;
+            height: calc(100vh - 48px);
         }
 
         #canvas-container {
@@ -260,6 +334,37 @@
     </style>
 </head>
 <body>
+<nav>
+    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <a href="galactic-map.html" class="nav-item">Galactic Map</a>
+        <a href="threejs.html" class="nav-item">Solar System</a>
+        <a href="sun.html" class="nav-item">The Sun</a>
+        <div class="nav-drop" id="nav-drop-stars">
+            <button class="nav-drop-btn active" aria-haspopup="true">Stars ▾</button>
+            <div class="nav-drop-menu">
+                <a href="sirius.html">Sirius System</a>
+                <a href="star3d.html" class="active">Sirius Planetary</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
+                <a href="wr102.html">WR 102</a>
+                <a href="vega.html">Vega</a>
+                <a href="star2d.html">2D Stellar Modeler</a>
+                <a href="star2d-advanced.html">Advanced 2D</a>
+            </div>
+        </div>
+        <div class="nav-drop" id="nav-drop-fluid">
+            <button class="nav-drop-btn" aria-haspopup="true">Fluid Sims ▾</button>
+            <div class="nav-drop-menu">
+                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
+                <a href="stellar-wind.html">Stellar Wind</a>
+                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+            </div>
+        </div>
+        <a href="rust.html" class="nav-item">Rust/WASM</a>
+    </div>
+</nav>
     <div id="app">
         <div id="canvas-container"></div>
 
@@ -963,6 +1068,28 @@
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // NAV
+        const burger = document.getElementById('nav-burger');
+        const navMenu = document.getElementById('nav-menu');
+        burger.addEventListener('click', () => {
+            const open = navMenu.classList.toggle('open');
+            burger.textContent = open ? '✕' : '☰';
+            burger.setAttribute('aria-expanded', open);
+        });
+        document.addEventListener('click', e => {
+            if (!e.target.closest('nav')) { navMenu.classList.remove('open'); burger.textContent = '☰'; }
+        });
+        document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+            btn.addEventListener('click', e => {
+                if (window.innerWidth > 768) return;
+                e.stopPropagation();
+                const drop = btn.closest('.nav-drop');
+                const opening = !drop.classList.contains('open');
+                document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+                if (opening) drop.classList.add('open');
+            });
+        });
 
         // ──────────────────────────────────────────────
         // SIRIUS SYSTEM SCIENTIFIC DATA
