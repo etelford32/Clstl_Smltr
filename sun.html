@@ -899,6 +899,10 @@ resize();
 let fpsF = 0, fpsT = performance.now();
 const fpsEl = document.getElementById('fps-display');
 
+// Declared here so animate() (below) can access them before the NOAA section
+let regionGroup   = null; // THREE.Group containing all AR markers
+let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
+
 // ANIMATE
 function animate() {
     requestAnimationFrame(animate);
@@ -994,8 +998,6 @@ const SWPC = 'https://services.swpc.noaa.gov';
 let liveRegions   = [];   // [{num, loc, area, z, mag, nspot}, ...]
 let liveFlares    = [];   // [{time, cls, loc, reg}, ...]
 let liveXrayFlux  = null; // W/m² (latest GOES reading)
-let regionGroup   = null; // THREE.Group containing all AR markers
-let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 
 // ── Default snapshot — Solar Cycle 25 peak, March 13 2026 ─────────────────
 // Loaded immediately on startup so the sim has a meaningful state before
