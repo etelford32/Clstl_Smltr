@@ -611,8 +611,14 @@ const sunFS = /* glsl */`
         float spicule = spLine * (1.0 - mu) * (0.55 + netStr * 1.5);
         col += vec3(0.95, 0.40, 0.12) * spicule;
 
-        // ── Active-region sunspots / flare brightening ────────────────────────
-        float arDark = 0.0, arBrite = 0.0;
+        // ── Active-region sunspots / flare brightening / filament channels ─────
+        // Filament channels mark the polarity inversion line (PIL) of each AR.
+        // They are dark elongated features in H-alpha on the disk — the on-disk
+        // counterpart of the prominence seen at the limb.  The PIL runs E-W
+        // through the AR centre (bipole axis perpendicular to PIL).
+        // During a flare the filament is disrupted and the channel brightens
+        // (post-flare loop arcade).
+        float arDark = 0.0, arBrite = 0.0, filDark = 0.0;
         for (int i = 0; i < 5; i++) {
             if (i >= u_ar_count) break;
             float clat = cos(u_ar_lat[i]);
@@ -623,8 +629,26 @@ const sunFS = /* glsl */`
             float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
             arDark  += inAR * core * (1.0 - u_flare_str*2.5) * 0.5;
             arBrite += inAR * u_flare_str * 2.2;
+
+            // Filament channel: elongated dark absorption along E-W PIL
+            // eastDir = tangent to the latitude circle (increasing longitude)
+            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
+            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
+            vec3 northDir = normalize(cross(arDir, eastDir));
+            // Linearised projected distances from the AR centre along each PIL axis
+            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
+            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
+            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
+            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
+            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
+                            (1.0 - smoothstep(filL*0.4, filL, dEW));
+            // Filament vanishes when flare disrupts the flux rope
+            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
+                       * max(0.0, 1.0 - u_flare_str * 2.5);
         }
         bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
+        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
+        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
         bmod = clamp(bmod, 0.05, 3.0);
 
         // ── Effective temperature + flare boost ───────────────────────────────
@@ -635,6 +659,15 @@ const sunFS = /* glsl */`
         col += base * bmod * limb * 1.80;
         float flick = fbm(vPosition*2.8 + vec3(u_time*0.08))*2.0 - 1.0;
         col *= 1.0 + 0.08*flick;
+
+        // ── Filament channel barbs: H-alpha bright fringe at PIL boundary ──────
+        // Chromospheric fibrils converge on the filament channel edges and glow
+        // brightly in H-alpha (6563 Å) — the so-called "filament barbs".
+        // Bright at mid-darkness of channel; absent in core and outside channel.
+        if (filDark > 0.04) {
+            float barb = smoothstep(0.03, 0.09, filDark) * (1.0 - smoothstep(0.32, 0.55, filDark));
+            col += vec3(0.62, 0.10, 0.02) * barb * 0.20 * mu;
+        }
 
         // ── Transition region UV fringe ───────────────────────────────────────
         // The chromosphere/corona interface emits strongly in UV (He II 304Å, etc.)
@@ -1306,6 +1339,11 @@ scene.add(windPoints);
 
 let windPhaseSpeed = 0.0006; // base advance/frame (≈400 km/s nominal)
 
+// Alfvén wave amplitude scale, computed each SWPC update from live Bt/√n.
+// v_A = 21.8 × Bt(nT) / √n(cm⁻³) km/s.  Baseline (Bt=5nT, n=5cc) ≈ 49 km/s → 1.0.
+// High v_A (strong IMF, low density) → large Alfvénic switchbacks visible in the stream.
+let alfvenAmpScale = 1.0;
+
 function updateWindParticles() {
     const pos = windGeo.attributes.position.array;
     const t   = sunUniforms.u_time.value;
@@ -1327,7 +1365,7 @@ function updateWindParticles() {
         // Transverse wave displacement growing with distance (∝ r^0.5)
         if (wType[i] === 2) {
             const wFreq = 0.028;              // ~224 t-units per cycle (≈4 min at 60fps)
-            const wAmp  = 0.10 * Math.sqrt(yFrac);
+            const wAmp  = 0.10 * Math.sqrt(yFrac) * alfvenAmpScale;
             const phase = wFreq * t + 0.9 * r + wAngle[i];
             y += wAmp * Math.sin(phase);
             // Perpendicular component in the XZ plane
@@ -1357,6 +1395,101 @@ document.getElementById('sl-speed').addEventListener('input', function () {
         Math.round(400 * Math.max(s, 0.2)).toLocaleString() + ' km/s';
     windPhaseSpeed = 0.0006 * Math.max(s, 0.2);
 });
+
+// ═══════════════════════════════════════════════════════
+//  HELIOSPHERIC CURRENT SHEET (HCS)
+// ═══════════════════════════════════════════════════════
+// The HCS is a thin wavy surface that separates two IMF polarity sectors
+// throughout the heliosphere.  Its shape is set by the ~7° tilt between the
+// solar rotation axis and the magnetic dipole axis — as the Sun rotates it
+// sweeps a "ballerina skirt" warp into the sheet:
+//
+//   y_HCS(r, φ) = A × (r/r₀)^α × sin(φ − ω_rot·t + δ_tilt)
+//
+// where ω_rot = 2π / 251 t-units (≈ 25-day synodic period at 60 fps / 0.01 t per frame).
+// The outward-B sector (positive Br) is warm orange (slow dense wind),
+// the inward-B sector is pale blue.  The sheet is driven by live Bt from SWPC.
+
+const HCS_INNER = WIND_MIN_R;          // 1.9  — just outside sun
+const HCS_OUTER = WIND_MAX_R * 0.72;   // ≈15.8 — stops short of outer edge
+const HCS_NR    = 36;                  // radial rings
+const HCS_NPHI  = 108;                 // azimuthal steps
+
+// Build a flat disc in the XZ plane; the vertex shader warps it into yHCS
+const hcsVerts = new Float32Array(HCS_NR * HCS_NPHI * 3);
+const hcsIdx   = [];
+for (let ri = 0; ri < HCS_NR; ri++) {
+    const r = HCS_INNER + (HCS_OUTER - HCS_INNER) * (ri / (HCS_NR - 1));
+    for (let pi = 0; pi < HCS_NPHI; pi++) {
+        const phi = (pi / HCS_NPHI) * Math.PI * 2;
+        const v   = ri * HCS_NPHI + pi;
+        hcsVerts[v*3]   = r * Math.cos(phi);
+        hcsVerts[v*3+1] = 0.0;
+        hcsVerts[v*3+2] = r * Math.sin(phi);
+    }
+}
+for (let ri = 0; ri < HCS_NR - 1; ri++) {
+    for (let pi = 0; pi < HCS_NPHI; pi++) {
+        const pn = (pi + 1) % HCS_NPHI;
+        const a = ri * HCS_NPHI + pi,       b = ri * HCS_NPHI + pn;
+        const c = (ri + 1) * HCS_NPHI + pi, d = (ri + 1) * HCS_NPHI + pn;
+        hcsIdx.push(a, b, c,  b, d, c);
+    }
+}
+const hcsGeo = new THREE.BufferGeometry();
+hcsGeo.setAttribute('position', new THREE.Float32BufferAttribute(hcsVerts, 3));
+hcsGeo.setIndex(hcsIdx);
+
+const hcsVS = /* glsl */`
+    uniform float u_time;
+    varying float vR;
+    varying float vPhi;
+    void main() {
+        float r   = length(position.xz);
+        float phi = atan(position.z, position.x);   // azimuthal angle in XZ plane
+        // Ballerina-skirt warp (grows sub-linearly with distance)
+        // ω_rot = 0.025 rad/t-unit → period = 2π/0.025 ≈ 251 t-units ≈ 25 days
+        float yHCS = 0.28 * pow(r / 1.90, 0.82) * sin(phi - 0.025 * u_time + 0.35);
+        vR   = r;
+        vPhi = phi;
+        gl_Position = projectionMatrix * modelViewMatrix
+                    * vec4(position.x, yHCS, position.z, 1.0);
+    }
+`;
+const hcsFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_bt_norm;    // total IMF Bt normalised [0,1] from DSCOVR/ACE
+    varying float vR;
+    varying float vPhi;
+    void main() {
+        // Radial intensity: brighter near sun, fades at outer boundary
+        float rFade = 1.0 - smoothstep(8.0, 15.8, vR);
+        // IMF sector polarity — same sine wave as the vertex shader
+        float sector = sin(vPhi - 0.025 * u_time + 0.35);
+        // Outward-B sector (+Br, slow dense wind): warm orange
+        // Inward-B sector  (−Br, fast tenuous wind): cool blue
+        vec3 outCol = vec3(1.00, 0.60, 0.20);
+        vec3 inCol  = vec3(0.25, 0.50, 0.88);
+        vec3 col    = mix(inCol, outCol, smoothstep(-0.5, 0.5, sector));
+        float bright = 0.40 + u_bt_norm * 0.60;
+        float alpha  = rFade * bright * 0.30;
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const hcsUniforms = {
+    u_time:    sunUniforms.u_time,       // shared time uniform
+    u_bt_norm: { value: 0.18 },          // updated from SWPC (Bt ≈ 5 nT baseline)
+};
+const hcsMesh = new THREE.Mesh(hcsGeo, new THREE.ShaderMaterial({
+    vertexShader:   hcsVS,
+    fragmentShader: hcsFS,
+    uniforms:       hcsUniforms,
+    transparent:    true,
+    depthWrite:     false,
+    blending:       THREE.AdditiveBlending,
+    side:           THREE.DoubleSide,
+}));
+scene.add(hcsMesh);
 
 // ═══════════════════════════════════════════════════════
 //  CORONAL MAGNETIC STRUCTURE
@@ -1845,6 +1978,19 @@ window.addEventListener('swpc-update', (e) => {
 
     // 2. Wind particle opacity — denser plasma = more visible stream
     windMat.opacity = 0.25 + d.wind_density_norm * 0.40;
+
+    // 2a. HCS brightness from live total IMF magnitude (Bt from DSCOVR/ACE)
+    hcsUniforms.u_bt_norm.value = d.bt_norm;
+
+    // 2b. Alfvén speed from in-situ Bt and density: v_A = 21.8 × Bt(nT) / √n(cm⁻³)
+    //     Normalised to baseline (Bt=5nT, n=5cc → v_A ≈ 49 km/s = amplitude scale 1.0)
+    //     High v_A  → large Alfvénic switchbacks in the intermediate wind stream.
+    //     Low  v_A  → nearly radial slow-wind streams, small transverse perturbations.
+    {
+        const btRaw = sw.solar_wind.bt      ?? 5.0;
+        const nRaw  = Math.max(sw.solar_wind.density ?? 5.0, 0.1);
+        alfvenAmpScale = Math.max(0.3, Math.min(3.0, (21.8 * btRaw / Math.sqrt(nRaw)) / 49.0));
+    }
 
     // 3. Sun shader — GOES X-ray intensity + active region positions
     sunUniforms.u_flare_str.value = d.xray_intensity;
