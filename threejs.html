@@ -105,6 +105,44 @@ nav {
 #hud .sep { border-top:1px solid rgba(255,200,0,.12); margin:5px 0; }
 #fps-display { color:#40ff80; font-weight:600; }
 
+/* ─── Space Weather ribbon ───────────────────────────────────── */
+#sw-ribbon {
+    position:absolute; bottom:58px; left:50%; transform:translateX(-50%);
+    z-index:55; display:flex; align-items:center; gap:14px;
+    background:rgba(0,0,0,.72); backdrop-filter:blur(10px);
+    border:1px solid rgba(80,160,255,.22); border-radius:20px;
+    padding:6px 16px; font-size:10px; pointer-events:none;
+    white-space:nowrap; letter-spacing:.35px;
+    transition: border-color .4s, box-shadow .4s;
+}
+#sw-ribbon.storm-1 { border-color:rgba(255,220,0,.45); box-shadow:0 0 12px rgba(255,220,0,.15); }
+#sw-ribbon.storm-2 { border-color:rgba(255,140,0,.55); box-shadow:0 0 14px rgba(255,140,0,.20); }
+#sw-ribbon.storm-3 { border-color:rgba(255, 60,0,.65); box-shadow:0 0 18px rgba(255, 60,0,.28); }
+.sw-item { display:flex; align-items:center; gap:5px; }
+.sw-lbl { color:#556; font-size:9px; text-transform:uppercase; letter-spacing:.6px; }
+.sw-val { color:#aee; font-weight:700; font-size:10.5px; min-width:28px; text-align:right; }
+.sw-val.warn  { color:#ffd060; }
+.sw-val.alert { color:#ff7060; }
+.sw-val.storm { color:#ff3060; }
+#sw-dot {
+    width:7px; height:7px; border-radius:50%;
+    background:#40ff80; box-shadow:0 0 6px #40ff80;
+    animation: sw-pulse 2s ease-in-out infinite;
+}
+#sw-dot.offline  { background:#555; box-shadow:none; animation:none; }
+#sw-dot.stale    { background:#aa8800; box-shadow:0 0 4px #aa8800; }
+#sw-sep { width:1px; height:16px; background:rgba(255,255,255,.12); }
+@keyframes sw-pulse {
+    0%,100%{ opacity:1; }  50%{ opacity:.35; }
+}
+#sw-flare-badge {
+    display:none; padding:2px 8px; border-radius:10px; font-size:9.5px;
+    font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+}
+#sw-flare-badge.cls-c { display:inline; background:rgba(0,180,100,.25); color:#40ff90; }
+#sw-flare-badge.cls-m { display:inline; background:rgba(255,160,0,.25); color:#ffcc40; }
+#sw-flare-badge.cls-x { display:inline; background:rgba(255,40,0,.30);  color:#ff8080; animation:sw-pulse 1.2s infinite; }
+
 /* ─── Canvas buttons ─────────────────────────────────────────── */
 .cv-btn {
     position:absolute; z-index:60;
@@ -267,6 +305,40 @@ nav {
             <label>Speed</label>
             <input type="range" id="sl-speed" min="0" max="50" step="0.5" value="1">
             <span id="disp-speed">1×</span>
+        </div>
+
+        <!-- Space Weather live ribbon -->
+        <div id="sw-ribbon">
+            <div class="sw-item">
+                <div id="sw-dot"></div>
+                <span class="sw-lbl" id="sw-status-lbl">CONNECTING</span>
+            </div>
+            <div id="sw-sep"></div>
+            <div class="sw-item">
+                <span class="sw-lbl">Kp</span>
+                <span class="sw-val" id="sw-kp">—</span>
+            </div>
+            <div id="sw-sep"></div>
+            <div class="sw-item">
+                <span class="sw-lbl">Wind</span>
+                <span class="sw-val" id="sw-speed">—</span>
+            </div>
+            <div class="sw-item" style="margin-left:-6px">
+                <span class="sw-lbl">km/s</span>
+            </div>
+            <div id="sw-sep"></div>
+            <div class="sw-item">
+                <span class="sw-lbl">IMF Bz</span>
+                <span class="sw-val" id="sw-bz">—</span>
+                <span class="sw-lbl">nT</span>
+            </div>
+            <div id="sw-sep"></div>
+            <div class="sw-item">
+                <span class="sw-lbl">Flare</span>
+                <span class="sw-val" id="sw-flare">—</span>
+            </div>
+            <div id="sw-sep"></div>
+            <span id="sw-flare-badge"></span>
         </div>
 
         <div id="backdrop"></div>
@@ -433,8 +505,19 @@ controls.target.set(0, 0, 0);
 //  SUN  — G2V shader (same pipeline as WR-102)
 // ═══════════════════════════════════════════════════════
 const sunUniforms = {
-    u_time: { value: 0.0 },
-    u_teff: { value: 5778.0 },
+    u_time:     { value: 0.0    },
+    u_teff:     { value: 5778.0 },
+    // ── Live SWPC data ─────────────────────────────────────────────────────
+    // u_flare_str  : normalised GOES X-ray intensity [0,1]  (0=A-class, 0.8=X1)
+    // u_ar_count   : number of active regions in the arrays below (0–5)
+    // u_ar_lat[5]  : heliographic latitude  (radians, local body frame)
+    // u_ar_lon[5]  : heliographic longitude (radians, Carrington − sunMesh.rotation.y)
+    // u_ar_area[5] : normalised area [0,1]  (proxy for spot/plage size)
+    u_flare_str: { value: 0.0 },
+    u_ar_count:  { value: 0   },
+    u_ar_lat:    { value: [0, 0, 0, 0, 0] },
+    u_ar_lon:    { value: [0, 0, 0, 0, 0] },
+    u_ar_area:   { value: [0, 0, 0, 0, 0] },
 };
 const sunVS = /* glsl */`
     varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
@@ -445,8 +528,17 @@ const sunVS = /* glsl */`
     }
 `;
 const sunFS = /* glsl */`
-    uniform float u_time; uniform float u_teff;
+    uniform float u_time;
+    uniform float u_teff;
+    uniform float u_flare_str;          // GOES X-ray intensity [0,1]
+    uniform int   u_ar_count;           // active regions this frame
+    uniform float u_ar_lat[5];          // latitude  (rad) per region
+    uniform float u_ar_lon[5];          // longitude (rad) per region (local frame)
+    uniform float u_ar_area[5];         // normalised area [0,1] per region
+
     varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
+
+    // ── Procedural noise ──────────────────────────────────────────────────────
     float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
     float vn(vec3 p){
         vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
@@ -454,25 +546,84 @@ const sunFS = /* glsl */`
                    mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
     }
     float fbm(vec3 p){float v=0.0,a=0.5;for(int i=0;i<5;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+
+    // ── Piecewise blackbody (same pipeline as WR-102) ─────────────────────────
     vec3 blackbody(float T){
         if(T<6000.0){float f=clamp((T-1000.0)/5000.0,0.0,1.0);return mix(vec3(1.0,0.16,0.02),vec3(1.0,0.82,0.52),f);}
         else if(T<10000.0){float f=clamp((T-6000.0)/4000.0,0.0,1.0);return mix(vec3(1.0,0.88,0.65),vec3(0.93,0.90,1.0),f);}
         else {float f=clamp((T-10000.0)/40000.0,0.0,1.0);return mix(vec3(0.88,0.88,1.0),vec3(0.56,0.65,1.0),f);}
     }
+
     void main(){
-        vec3 nrm=normalize(vNormal), vDir=normalize(vViewDir);
-        vec3 base=blackbody(u_teff);
-        float conv=fbm(vPosition*0.40+vec3(u_time*0.012,u_time*0.009,u_time*0.011));
-        float gran=fbm(vPosition*2.10+vec3(u_time*0.025,-u_time*0.020,u_time*0.022));
-        float bmod=0.80+(conv*0.60+gran*0.40)*0.40;
-        float mu=max(dot(nrm,vDir),0.0);
-        float limb=0.42+0.58*mu;
-        vec3 col=base*bmod*limb*1.80;
-        float flick=fbm(vPosition*2.8+vec3(u_time*0.08))*2.0-1.0;
-        col*=1.0+0.08*flick;
-        float fr=pow(1.0-mu,3.0);
-        col+=blackbody(u_teff*1.12)*fr*1.0*0.50;
-        gl_FragColor=vec4(col,1.0);
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
+        vec3 pos  = normalize(vPosition);   // unit sphere surface direction
+
+        // ── Surface convection + granulation (FBM) ───────────────────────────
+        float conv = fbm(vPosition*0.40 + vec3(u_time*0.012, u_time*0.009, u_time*0.011));
+        float gran = fbm(vPosition*2.10 + vec3(u_time*0.025,-u_time*0.020, u_time*0.022));
+        float bmod = 0.80 + (conv*0.60 + gran*0.40)*0.40;
+
+        // ── Limb darkening ───────────────────────────────────────────────────
+        float mu   = max(dot(nrm, vDir), 0.0);
+        float limb = 0.42 + 0.58*mu;
+
+        // ── Active region effects — sunspots + flare brightening ──────────────
+        //    Each active region is a patch defined by its heliographic lat/lon.
+        //    Quiet: dark umbra (sunspot).  During flare: bright hot plasma.
+        float arDark  = 0.0;   // cumulative sunspot darkening
+        float arBrite = 0.0;   // cumulative flare brightening
+
+        for (int i = 0; i < 5; i++) {
+            if (i >= u_ar_count) break;
+            // Convert lat/lon to unit vector in local solar frame
+            float clat = cos(u_ar_lat[i]);
+            vec3 arDir = vec3(clat * cos(u_ar_lon[i]),
+                              sin(u_ar_lat[i]),
+                              clat * sin(u_ar_lon[i]));
+            float cosD = clamp(dot(pos, arDir), -1.0, 1.0);
+            float angD = acos(cosD);
+
+            // Angular radius grows with reported area
+            float arR  = 0.10 + u_ar_area[i] * 0.18;
+            float inAR = 1.0 - smoothstep(arR * 0.55, arR, angD);
+            // Darker umbra at core
+            float core = 1.0 - smoothstep(arR * 0.15, arR * 0.45, angD);
+
+            // Sunspot darkening (suppressed during strong flare)
+            arDark  += inAR * core * (1.0 - u_flare_str * 2.5) * 0.5;
+            // Flare brightening — hot chromospheric plasma in the active region
+            arBrite += inAR * u_flare_str * 2.2;
+        }
+
+        // Apply active region modulation to brightness
+        bmod = bmod * (1.0 - clamp(arDark,  0.0, 0.95))
+                    + clamp(arBrite, 0.0, 2.0);
+        bmod = clamp(bmod, 0.05, 3.0);
+
+        // ── Effective temperature — boosted during flare ──────────────────────
+        float flareTemp = u_teff * (1.0 + u_flare_str * 0.55);
+        vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), u_flare_str * 0.75);
+
+        // ── Combine ───────────────────────────────────────────────────────────
+        vec3 col = base * bmod * limb * 1.80;
+
+        // Fine-scale flicker
+        float flick = fbm(vPosition*2.8 + vec3(u_time*0.08))*2.0 - 1.0;
+        col *= 1.0 + 0.08*flick;
+
+        // ── Limb / corona rim glow — intensifies with flare activity ──────────
+        float fr  = pow(1.0 - mu, 3.0);
+        float rimT = u_teff * (1.12 + u_flare_str * 0.4);
+        col += blackbody(rimT) * fr * (0.50 + u_flare_str * 0.70);
+
+        // ── Coronal loop shimmer in active regions (flare-driven) ─────────────
+        if (u_flare_str > 0.02) {
+            float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * u_flare_str * 0.35;
+            col += vec3(1.0, 0.82, 0.52) * cLoop;
+        }
+
+        gl_FragColor = vec4(col, 1.0);
     }
 `;
 
@@ -894,6 +1045,99 @@ const asteroidBelt = new THREE.Points(beltGeo, beltMat);
 scene.add(asteroidBelt);
 
 // ═══════════════════════════════════════════════════════
+//  CME BURST SYSTEM
+// ═══════════════════════════════════════════════════════
+// Activated by triggerCME(dir) when the SWPC feed detects a new M/X flare.
+// A cone of fast-moving particles erupts from the sun surface in the flare
+// direction, sweeping outward at 3–10× solar-wind speed before fading.
+
+const N_CME         = 700;
+const CME_LIFE      = 1800;     // frames at 60 fps ≈ 30 s  (sim speeds up with simSpeed)
+const CME_SPREAD    = 0.45;     // half-angle of eruption cone (radians, ~26°)
+const CME_SPEED_MIN = 0.0015;   // phase-speed/frame (3× base wind speed)
+const CME_SPEED_MAX = 0.0048;
+
+const cmePosArr    = new Float32Array(N_CME * 3);
+const cmePhaseArr  = new Float32Array(N_CME);    // 0→1 radial progress
+const cmeAngleArr  = new Float32Array(N_CME);    // azimuthal angle in Parker spiral
+const cmeSpeedArr  = new Float32Array(N_CME);    // individual speed
+const cmeYOffArr   = new Float32Array(N_CME);    // ecliptic scatter
+
+let   cmeActive    = false;
+let   cmeAge       = 0;
+let   cmeDirLat    = 0;   // eruption direction (lat, radians) — can be updated by SWPC
+let   cmeDirLon    = 0;   // eruption direction (lon, radians)
+
+const cmeGeo  = new THREE.BufferGeometry();
+cmeGeo.setAttribute('position', new THREE.Float32BufferAttribute(cmePosArr, 3));
+const cmeMat  = new THREE.PointsMaterial({
+    color: 0xffcc66, size: 0.07, transparent: true, opacity: 0.0,
+    sizeAttenuation: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const cmeMesh = new THREE.Points(cmeGeo, cmeMat);
+scene.add(cmeMesh);
+
+/** Initialise and launch a CME burst.  dir = { lat_rad, lon_rad } or null (random). */
+function triggerCME(dir = null) {
+    cmeDirLat = dir ? dir.lat_rad : (Math.random() - 0.5) * 0.5;
+    cmeDirLon = dir ? dir.lon_rad : Math.random() * Math.PI * 2;
+    cmeActive = true;
+    cmeAge    = 0;
+
+    // Eruption axis unit vector
+    const cl  = Math.cos(cmeDirLat);
+    const axX = cl * Math.cos(cmeDirLon);
+    const axY = Math.sin(cmeDirLat);
+    const axZ = cl * Math.sin(cmeDirLon);
+
+    // Build an orthonormal basis around the eruption axis for the cone
+    const axV  = new THREE.Vector3(axX, axY, axZ).normalize();
+    const tmp  = Math.abs(axV.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const perpA = new THREE.Vector3().crossVectors(axV, tmp).normalize();
+    const perpB = new THREE.Vector3().crossVectors(axV, perpA).normalize();
+
+    for (let i = 0; i < N_CME; i++) {
+        // Random cone angle and phase
+        const θ  = (Math.random() - 0.5) * CME_SPREAD * 2;   // polar offset
+        const φ  = Math.random() * Math.PI * 2;               // azimuth around axis
+        const dx = axV.x + perpA.x * Math.sin(θ) * Math.cos(φ) + perpB.x * Math.sin(θ) * Math.sin(φ);
+        const dy = axV.y + perpA.y * Math.sin(θ) * Math.cos(φ) + perpB.y * Math.sin(θ) * Math.sin(φ);
+        const dz = axV.z + perpA.z * Math.sin(θ) * Math.cos(φ) + perpB.z * Math.sin(θ) * Math.sin(φ);
+        const mag = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+        // Store as (azimuth relative to cone axis, elevation angle) for Parker spiral offset
+        cmeAngleArr[i]  = Math.atan2(dz / mag, dx / mag);
+        cmeYOffArr[i]   = dy / mag * 0.6;
+        cmePhaseArr[i]  = Math.random() * 0.25;    // staggered start
+        cmeSpeedArr[i]  = CME_SPEED_MIN + Math.random() * (CME_SPEED_MAX - CME_SPEED_MIN);
+    }
+}
+
+/** Called each frame from the animate loop when cmeActive is true. */
+function updateCME() {
+    cmeAge++;
+    if (cmeAge > CME_LIFE) { cmeActive = false; cmeMat.opacity = 0.0; return; }
+
+    const progress    = cmeAge / CME_LIFE;
+    cmeMat.opacity    = Math.sin(progress * Math.PI) * 0.65;   // fade in then out
+    const spiralK_cme = 0.06;   // CME propagates more radially than solar wind
+
+    for (let i = 0; i < N_CME; i++) {
+        cmePhaseArr[i] += cmeSpeedArr[i] * simSpeed;
+        if (cmePhaseArr[i] > 1.0) cmePhaseArr[i] -= 1.0;
+
+        const r      = WIND_MIN_R + cmePhaseArr[i] * WIND_MAX_R;
+        const spiral = cmeAngleArr[i] - spiralK_cme * r;
+        const yFrac  = r / WIND_MAX_R;
+
+        cmePosArr[i*3+0] = r * Math.cos(spiral);
+        cmePosArr[i*3+1] = cmeYOffArr[i] * yFrac * 0.8;
+        cmePosArr[i*3+2] = r * Math.sin(spiral);
+    }
+    cmeGeo.attributes.position.needsUpdate = true;
+}
+
+// ═══════════════════════════════════════════════════════
 //  SOLAR WIND PARTICLE STREAM
 // ═══════════════════════════════════════════════════════
 // Particles radiate outward from the Sun following the Parker spiral.
@@ -1161,6 +1405,7 @@ function animate() {
 
     // Advance solar-wind particle stream
     if (windVisible) updateWindParticles();
+    if (cmeActive)   updateCME();
 
     // Smooth camera follow if body selected
     if (targetBody) {
@@ -1176,8 +1421,132 @@ function animate() {
 }
 animate();
 
+// ═══════════════════════════════════════════════════════
+//  SPACE WEATHER DATA PIPELINE  (NOAA SWPC)
+// ═══════════════════════════════════════════════════════
+// Import the feed module, start polling, and wire every data field
+// to the corresponding visual parameter.
+
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+
+// ── DOM refs for the status ribbon ───────────────────────────────────────────
+const ribbonEl   = document.getElementById('sw-ribbon');
+const dotEl      = document.getElementById('sw-dot');
+const statusLbl  = document.getElementById('sw-status-lbl');
+const kpEl       = document.getElementById('sw-kp');
+const speedEl    = document.getElementById('sw-speed');
+const bzEl       = document.getElementById('sw-bz');
+const flareEl    = document.getElementById('sw-flare');
+const flareBadge = document.getElementById('sw-flare-badge');
+
+// Kp-to-class helpers
+const KP_COLOR = v =>
+    v >= 7 ? 'storm' : v >= 5 ? 'alert' : v >= 4 ? 'warn' : '';
+
+const FLARE_BADGE_CLASS = letter =>
+    letter === 'X' ? 'cls-x' : letter === 'M' ? 'cls-m' :
+    letter === 'C' ? 'cls-c' : '';
+
+/** Update the live ribbon with the latest SwaceWeather state. */
+function updateSWRibbon(sw) {
+    const { solar_wind: wind, kp, xray_class, flare_class, flare_letter,
+            derived: d, status } = sw;
+
+    // Connection dot + status label
+    dotEl.className    = status === 'live' ? '' : status;
+    statusLbl.textContent = status.toUpperCase();
+
+    // Kp index
+    const kpStr     = kp != null ? kp.toFixed(1) : '—';
+    kpEl.textContent = kpStr;
+    kpEl.className   = 'sw-val ' + KP_COLOR(kp ?? 0);
+
+    // Wind speed
+    speedEl.textContent = wind.speed != null ? Math.round(wind.speed) : '—';
+
+    // IMF Bz — negative (southward) is geoeffective → colour red
+    if (wind.bz != null) {
+        bzEl.textContent = wind.bz.toFixed(1);
+        bzEl.className   = 'sw-val ' + (wind.bz < -10 ? 'storm' : wind.bz < -5 ? 'alert' : wind.bz < 0 ? 'warn' : '');
+    }
+
+    // Latest flare class
+    flareEl.textContent  = flare_class ?? '—';
+    flareBadge.className = 'sw-flare-badge ' + FLARE_BADGE_CLASS(flare_letter ?? 'A');
+    if (flareBadge.className.includes('cls-')) {
+        flareBadge.textContent = flare_class;
+    }
+
+    // Storm-level border on ribbon
+    ribbonEl.className = d.storm_level >= 3 ? 'storm-3' :
+                         d.storm_level === 2 ? 'storm-2' :
+                         d.storm_level === 1 ? 'storm-1' : '';
+}
+
+// ── 'swpc-update' event handler — map data → visual parameters ───────────────
+window.addEventListener('swpc-update', (e) => {
+    const sw = e.detail;
+    const d  = sw.derived;
+
+    // 1. Solar wind particle speed  (real wind speed drives Parker spiral advance)
+    //    Nominal 400 km/s → windPhaseSpeed 0.0006; scales linearly with speed.
+    windPhaseSpeed = 0.0006 * (0.35 + d.wind_speed_norm * 1.30);
+
+    // 2. Wind particle opacity — denser plasma = more visible stream
+    windMat.opacity = 0.25 + d.wind_density_norm * 0.40;
+
+    // 3. Sun shader — GOES X-ray intensity + active region positions
+    sunUniforms.u_flare_str.value = d.xray_intensity;
+
+    const ars = sw.active_regions;
+    sunUniforms.u_ar_count.value  = ars.length;
+    for (let i = 0; i < 5; i++) {
+        if (i < ars.length) {
+            sunUniforms.u_ar_lat.value[i]  = ars[i].lat_rad;
+            // Subtract current sun rotation so the AR stays fixed on the surface
+            sunUniforms.u_ar_lon.value[i]  = ars[i].lon_rad - sunMesh.rotation.y;
+            sunUniforms.u_ar_area.value[i] = ars[i].area_norm;
+        } else {
+            sunUniforms.u_ar_lat.value[i]  = 0;
+            sunUniforms.u_ar_lon.value[i]  = 0;
+            sunUniforms.u_ar_area.value[i] = 0;
+        }
+    }
+
+    // 4. Planet wind shaders — scale by live solar-wind conditions
+    //    Base windStr is the quiet-Sun value; live solar wind scales all effects.
+    const liveScale = 0.50 + d.wind_speed_norm * 1.50;
+    PLANETS.forEach(p => {
+        if (!p.uniforms) return;
+        let ws = p.windStr * liveScale;
+        // Earth gets an extra Kp + southward-Bz aurora boost
+        if (p.name === 'Earth') {
+            ws *= 1.0 + d.kp_norm * 2.2 + d.bz_southward * 2.8;
+        }
+        // Jupiter / Saturn: their own aurora can flare with solar wind density spikes
+        if (p.name === 'Jupiter' || p.name === 'Saturn') {
+            ws *= 1.0 + d.wind_density_norm * 0.6;
+        }
+        p.uniforms.u_windStr.value = ws;
+    });
+
+    // 5. CME burst — triggered once per new M/X flare detection
+    if (sw.new_major_flare && !cmeActive) {
+        console.log(`[SWPC] New ${sw.flare_class} flare detected — launching CME burst`);
+        triggerCME(sw.flare_direction);
+    }
+
+    // 6. Update HUD ribbon
+    updateSWRibbon(sw);
+});
+
+// ── Start the feed (first poll is immediate, then every 5 minutes) ────────────
+const swFeed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
+swFeed.start();
+
 console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
-console.log('  Sun G2V shader · 6 planets · orbital mechanics · click-to-select');
+console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 19 moons · asteroid belt · CME bursts');
+console.log('  NOAA SWPC endpoints: wind_1m · kp_index · xray_flux · flares_7d · regions');
 </script>
 </body>
 </html>
