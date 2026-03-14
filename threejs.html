@@ -611,8 +611,14 @@ const sunFS = /* glsl */`
         float spicule = spLine * (1.0 - mu) * (0.55 + netStr * 1.5);
         col += vec3(0.95, 0.40, 0.12) * spicule;
 
-        // ── Active-region sunspots / flare brightening ────────────────────────
-        float arDark = 0.0, arBrite = 0.0;
+        // ── Active-region sunspots / flare brightening / filament channels ─────
+        // Filament channels mark the polarity inversion line (PIL) of each AR.
+        // They are dark elongated features in H-alpha on the disk — the on-disk
+        // counterpart of the prominence seen at the limb.  The PIL runs E-W
+        // through the AR centre (bipole axis perpendicular to PIL).
+        // During a flare the filament is disrupted and the channel brightens
+        // (post-flare loop arcade).
+        float arDark = 0.0, arBrite = 0.0, filDark = 0.0;
         for (int i = 0; i < 5; i++) {
             if (i >= u_ar_count) break;
             float clat = cos(u_ar_lat[i]);
@@ -623,8 +629,26 @@ const sunFS = /* glsl */`
             float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
             arDark  += inAR * core * (1.0 - u_flare_str*2.5) * 0.5;
             arBrite += inAR * u_flare_str * 2.2;
+
+            // Filament channel: elongated dark absorption along E-W PIL
+            // eastDir = tangent to the latitude circle (increasing longitude)
+            vec3 eastDir  = normalize(vec3(-sin(u_ar_lon[i]), 0.0, cos(u_ar_lon[i])));
+            // northDir ≈ north in the AR tangent plane (for N-S width measurement)
+            vec3 northDir = normalize(cross(arDir, eastDir));
+            // Linearised projected distances from the AR centre along each PIL axis
+            float dNS = abs(dot(pos, northDir));    // cross-PIL (narrow)
+            float dEW = abs(dot(pos, eastDir));     // along-PIL (long)
+            float filW = 0.052 + u_ar_area[i] * 0.030;   // N-S half-width
+            float filL = 0.260 + u_ar_area[i] * 0.140;   // E-W half-length
+            float filMask = (1.0 - smoothstep(filW*0.4, filW, dNS)) *
+                            (1.0 - smoothstep(filL*0.4, filL, dEW));
+            // Filament vanishes when flare disrupts the flux rope
+            filDark += filMask * (0.28 + u_ar_area[i] * 0.30) * mu
+                       * max(0.0, 1.0 - u_flare_str * 2.5);
         }
         bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
+        // Filament channel: cool dense PIL plasma absorbs continuum (dark on disk)
+        bmod *= 1.0 - clamp(filDark, 0.0, 0.56);
         bmod = clamp(bmod, 0.05, 3.0);
 
         // ── Effective temperature + flare boost ───────────────────────────────
@@ -635,6 +659,15 @@ const sunFS = /* glsl */`
         col += base * bmod * limb * 1.80;
         float flick = fbm(vPosition*2.8 + vec3(u_time*0.08))*2.0 - 1.0;
         col *= 1.0 + 0.08*flick;
+
+        // ── Filament channel barbs: H-alpha bright fringe at PIL boundary ──────
+        // Chromospheric fibrils converge on the filament channel edges and glow
+        // brightly in H-alpha (6563 Å) — the so-called "filament barbs".
+        // Bright at mid-darkness of channel; absent in core and outside channel.
+        if (filDark > 0.04) {
+            float barb = smoothstep(0.03, 0.09, filDark) * (1.0 - smoothstep(0.32, 0.55, filDark));
+            col += vec3(0.62, 0.10, 0.02) * barb * 0.20 * mu;
+        }
 
         // ── Transition region UV fringe ───────────────────────────────────────
         // The chromosphere/corona interface emits strongly in UV (He II 304Å, etc.)
@@ -1306,6 +1339,11 @@ scene.add(windPoints);
 
 let windPhaseSpeed = 0.0006; // base advance/frame (≈400 km/s nominal)
 
+// Alfvén wave amplitude scale, computed each SWPC update from live Bt/√n.
+// v_A = 21.8 × Bt(nT) / √n(cm⁻³) km/s.  Baseline (Bt=5nT, n=5cc) ≈ 49 km/s → 1.0.
+// High v_A (strong IMF, low density) → large Alfvénic switchbacks visible in the stream.
+let alfvenAmpScale = 1.0;
+
 function updateWindParticles() {
     const pos = windGeo.attributes.position.array;
     const t   = sunUniforms.u_time.value;
@@ -1327,7 +1365,7 @@ function updateWindParticles() {
         // Transverse wave displacement growing with distance (∝ r^0.5)
         if (wType[i] === 2) {
             const wFreq = 0.028;              // ~224 t-units per cycle (≈4 min at 60fps)
-            const wAmp  = 0.10 * Math.sqrt(yFrac);
+            const wAmp  = 0.10 * Math.sqrt(yFrac) * alfvenAmpScale;
             const phase = wFreq * t + 0.9 * r + wAngle[i];
             y += wAmp * Math.sin(phase);
             // Perpendicular component in the XZ plane
@@ -1359,6 +1397,101 @@ document.getElementById('sl-speed').addEventListener('input', function () {
 });
 
 // ═══════════════════════════════════════════════════════
+//  HELIOSPHERIC CURRENT SHEET (HCS)
+// ═══════════════════════════════════════════════════════
+// The HCS is a thin wavy surface that separates two IMF polarity sectors
+// throughout the heliosphere.  Its shape is set by the ~7° tilt between the
+// solar rotation axis and the magnetic dipole axis — as the Sun rotates it
+// sweeps a "ballerina skirt" warp into the sheet:
+//
+//   y_HCS(r, φ) = A × (r/r₀)^α × sin(φ − ω_rot·t + δ_tilt)
+//
+// where ω_rot = 2π / 251 t-units (≈ 25-day synodic period at 60 fps / 0.01 t per frame).
+// The outward-B sector (positive Br) is warm orange (slow dense wind),
+// the inward-B sector is pale blue.  The sheet is driven by live Bt from SWPC.
+
+const HCS_INNER = WIND_MIN_R;          // 1.9  — just outside sun
+const HCS_OUTER = WIND_MAX_R * 0.72;   // ≈15.8 — stops short of outer edge
+const HCS_NR    = 36;                  // radial rings
+const HCS_NPHI  = 108;                 // azimuthal steps
+
+// Build a flat disc in the XZ plane; the vertex shader warps it into yHCS
+const hcsVerts = new Float32Array(HCS_NR * HCS_NPHI * 3);
+const hcsIdx   = [];
+for (let ri = 0; ri < HCS_NR; ri++) {
+    const r = HCS_INNER + (HCS_OUTER - HCS_INNER) * (ri / (HCS_NR - 1));
+    for (let pi = 0; pi < HCS_NPHI; pi++) {
+        const phi = (pi / HCS_NPHI) * Math.PI * 2;
+        const v   = ri * HCS_NPHI + pi;
+        hcsVerts[v*3]   = r * Math.cos(phi);
+        hcsVerts[v*3+1] = 0.0;
+        hcsVerts[v*3+2] = r * Math.sin(phi);
+    }
+}
+for (let ri = 0; ri < HCS_NR - 1; ri++) {
+    for (let pi = 0; pi < HCS_NPHI; pi++) {
+        const pn = (pi + 1) % HCS_NPHI;
+        const a = ri * HCS_NPHI + pi,       b = ri * HCS_NPHI + pn;
+        const c = (ri + 1) * HCS_NPHI + pi, d = (ri + 1) * HCS_NPHI + pn;
+        hcsIdx.push(a, b, c,  b, d, c);
+    }
+}
+const hcsGeo = new THREE.BufferGeometry();
+hcsGeo.setAttribute('position', new THREE.Float32BufferAttribute(hcsVerts, 3));
+hcsGeo.setIndex(hcsIdx);
+
+const hcsVS = /* glsl */`
+    uniform float u_time;
+    varying float vR;
+    varying float vPhi;
+    void main() {
+        float r   = length(position.xz);
+        float phi = atan(position.z, position.x);   // azimuthal angle in XZ plane
+        // Ballerina-skirt warp (grows sub-linearly with distance)
+        // ω_rot = 0.025 rad/t-unit → period = 2π/0.025 ≈ 251 t-units ≈ 25 days
+        float yHCS = 0.28 * pow(r / 1.90, 0.82) * sin(phi - 0.025 * u_time + 0.35);
+        vR   = r;
+        vPhi = phi;
+        gl_Position = projectionMatrix * modelViewMatrix
+                    * vec4(position.x, yHCS, position.z, 1.0);
+    }
+`;
+const hcsFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_bt_norm;    // total IMF Bt normalised [0,1] from DSCOVR/ACE
+    varying float vR;
+    varying float vPhi;
+    void main() {
+        // Radial intensity: brighter near sun, fades at outer boundary
+        float rFade = 1.0 - smoothstep(8.0, 15.8, vR);
+        // IMF sector polarity — same sine wave as the vertex shader
+        float sector = sin(vPhi - 0.025 * u_time + 0.35);
+        // Outward-B sector (+Br, slow dense wind): warm orange
+        // Inward-B sector  (−Br, fast tenuous wind): cool blue
+        vec3 outCol = vec3(1.00, 0.60, 0.20);
+        vec3 inCol  = vec3(0.25, 0.50, 0.88);
+        vec3 col    = mix(inCol, outCol, smoothstep(-0.5, 0.5, sector));
+        float bright = 0.40 + u_bt_norm * 0.60;
+        float alpha  = rFade * bright * 0.30;
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const hcsUniforms = {
+    u_time:    sunUniforms.u_time,       // shared time uniform
+    u_bt_norm: { value: 0.18 },          // updated from SWPC (Bt ≈ 5 nT baseline)
+};
+const hcsMesh = new THREE.Mesh(hcsGeo, new THREE.ShaderMaterial({
+    vertexShader:   hcsVS,
+    fragmentShader: hcsFS,
+    uniforms:       hcsUniforms,
+    transparent:    true,
+    depthWrite:     false,
+    blending:       THREE.AdditiveBlending,
+    side:           THREE.DoubleSide,
+}));
+scene.add(hcsMesh);
+
+// ═══════════════════════════════════════════════════════
 //  CORONAL MAGNETIC STRUCTURE
 // ═══════════════════════════════════════════════════════
 
@@ -1383,6 +1516,8 @@ function latLonToVec3(lat, lon) {
 
 let coronalLoopMeshes = [];
 let coronalLoopPhases  = [];
+let coronalLoopCurves  = [];   // CatmullRomCurve3 per loop — sampled by coronal rain
+let coronalLoopArIdx   = [];   // AR index per loop (-1 = quiet-sun background)
 
 function buildCoronalLoops(ars, sunRotY) {
     coronalLoopMeshes.forEach(m => {
@@ -1392,6 +1527,8 @@ function buildCoronalLoops(ars, sunRotY) {
     });
     coronalLoopMeshes = [];
     coronalLoopPhases  = [];
+    coronalLoopCurves  = [];
+    coronalLoopArIdx   = [];
 
     // Active-region loops
     ars.forEach((ar, arIdx) => {
@@ -1428,6 +1565,8 @@ function buildCoronalLoops(ars, sunRotY) {
             scene.add(mesh);
             coronalLoopMeshes.push(mesh);
             coronalLoopPhases.push(arIdx * 1.7 + k * 2.3);
+            coronalLoopCurves.push(curve);
+            coronalLoopArIdx.push(arIdx);
         }
     });
 
@@ -1451,6 +1590,8 @@ function buildCoronalLoops(ars, sunRotY) {
         scene.add(mesh);
         coronalLoopMeshes.push(mesh);
         coronalLoopPhases.push(i * 3.14 + 1.1);
+        coronalLoopCurves.push(curve);
+        coronalLoopArIdx.push(-1);
     }
 }
 
@@ -1464,6 +1605,219 @@ function updateCoronalLoops(t) {
         const osc  = 0.78 + 0.22 * Math.sin(t * 0.022 + φ) * Math.cos(t * 0.013 + φ * 0.6);
         m.material.opacity = base * osc;
     });
+}
+
+// ═══════════════════════════════════════════════════════
+//  CORONAL RAIN
+// ═══════════════════════════════════════════════════════
+// Coronal rain is the in-situ condensation and gravitational drainage of plasma
+// that has cooled below the transition region temperature in a hot coronal loop.
+//
+// Physical sequence (Field 1965 / Antiochos & Klimchuk 1991):
+//   1. Loop heated impulsively to T > 1 MK (nanoflares / Alfvén wave dissipation)
+//   2. Density increases near the apex where field-line curvature traps plasma
+//   3. Radiative cooling time τ_cool ∝ T^0.5/n shortens below the heating time
+//   4. Thermal runaway: local T crashes from ~0.5 MK to ~8,000 K in a few minutes
+//   5. Blob condenses near apex; the coronal-rain 'catastrophic cooling' phase
+//   6. Dense cool blob (ρ ~ 10× coronal, T ~ 8,000 K) drains down the field line
+//      under solar gravity; fall takes 20–30 min at ~50–80 km/s
+//   7. Blob hits the chromosphere → UV/EUV footpoint brightening
+//
+// Emission signatures rendered here:
+//   H-alpha 6563 Å  → deep red    (T ~ 8 kK, dense cool core)
+//   Fe IX   171  Å  → green-cyan  (T ~ 0.6 MK, intermediate cooling)
+//   He II   304  Å  → blue-white  (T ~ 80 kK, condensation onset sheath)
+//
+// Gravity model (semi-circular arc approximation):
+//   d²s/dt² ∝ g_eff × sin(π/2 × |2s−1|)
+//   s = 0 or 1: footpoints (gravity fully along field) → maximum acceleration
+//   s = 0.5:    apex       (gravity perpendicular)     → no acceleration
+// This gives the correct pendulum-like dynamics without needing to evaluate
+// actual 3-D field-line geometry.
+
+const N_RAIN    = 60;        // max simultaneous blobs across all loops
+const RAIN_GRAV = 0.000013;  // gravitational acceleration (arc-param² / frame)
+
+// ── Per-blob state (typed arrays for GC-free updates) ────────────────────────
+const rainS      = new Float32Array(N_RAIN);   // arc parameter s ∈ [0, 1]
+const rainDS     = new Float32Array(N_RAIN);   // ds / frame (arc velocity)
+const rainLoop   = new Int32Array(N_RAIN);     // index into coronalLoopCurves
+const rainTemp   = new Float32Array(N_RAIN);   // cooling temperature [0=cold, 1=hot]
+const rainAge    = new Uint16Array(N_RAIN);    // frames since spawn
+const rainMaxAge = new Uint16Array(N_RAIN);    // kill threshold
+const rainActive = new Uint8Array(N_RAIN);     // 0 = dead, 1 = alive
+
+// ── GPU geometry ─────────────────────────────────────────────────────────────
+const rainPos     = new Float32Array(N_RAIN * 3);
+const rainTempBuf = new Float32Array(N_RAIN);
+const rainSizeBuf = new Float32Array(N_RAIN);
+
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position',
+    new THREE.BufferAttribute(rainPos,     3).setUsage(THREE.DynamicDrawUsage));
+rainGeo.setAttribute('a_temp',
+    new THREE.BufferAttribute(rainTempBuf, 1).setUsage(THREE.DynamicDrawUsage));
+rainGeo.setAttribute('a_size',
+    new THREE.BufferAttribute(rainSizeBuf, 1).setUsage(THREE.DynamicDrawUsage));
+
+// ── Vertex shader ─────────────────────────────────────────────────────────────
+// a_size = 0 → inactive blob; clip to outside NDC so no rasterisation occurs.
+// Perspective scaling keeps blobs visually consistent across zoom levels.
+const rainVS = /* glsl */`
+    attribute float a_temp;
+    attribute float a_size;
+    varying  float vTemp;
+    varying  float vActive;
+    void main() {
+        vTemp   = a_temp;
+        vActive = step(0.0001, a_size);
+        if (a_size < 0.0001) {
+            // Send inactive blob outside the clip volume — never rasterised
+            gl_Position  = vec4(2.0, 2.0, 2.0, 1.0);
+            gl_PointSize = 1.0;
+            return;
+        }
+        vec4 mv      = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = a_size * 340.0 / -mv.z;   // perspective point size
+        gl_Position  = projectionMatrix * mv;
+    }
+`;
+
+// ── Fragment shader ────────────────────────────────────────────────────────────
+// Temperature → spectral colour:
+//   0.0 = H-alpha / Ca II H&K deep red  (T ~ 8 kK,   cool condensed blob)
+//   0.5 = Fe IX 171 Å green-cyan        (T ~ 0.6 MK, intermediate cooling)
+//   1.0 = He II 304 Å blue-white        (T ~ 80 kK,  just-condensed sheath)
+//
+// Radial profile: tight Gaussian core (optically thick blob body) +
+// broad soft halo (transition region sheath, optically thin).
+const rainFS = /* glsl */`
+    varying float vTemp;
+    varying float vActive;
+    void main() {
+        if (vActive < 0.5) discard;
+
+        vec2  uv = gl_PointCoord * 2.0 - 1.0;
+        float r  = length(uv);
+        if (r > 1.0) discard;
+
+        float core = exp(-r * r * 4.5);                         // tight blob body
+        float halo = (1.0 - smoothstep(0.42, 1.0, r)) * 0.26;  // TR-sheath glow
+
+        // Three spectral endpoints
+        vec3 coolCol = vec3(0.88, 0.12, 0.04);   // H-alpha / Ca II  (deep red)
+        vec3 warmCol = vec3(0.14, 0.82, 0.52);   // Fe IX 171 Å      (green)
+        vec3 hotCol  = vec3(0.22, 0.58, 1.00);   // He II 304 Å      (blue-white)
+
+        vec3 col = vTemp < 0.5
+            ? mix(coolCol, warmCol, vTemp * 2.0)
+            : mix(warmCol, hotCol,  (vTemp - 0.5) * 2.0);
+
+        gl_FragColor = vec4(col, core + halo);
+    }
+`;
+
+const rainMat = new THREE.ShaderMaterial({
+    vertexShader:   rainVS,
+    fragmentShader: rainFS,
+    transparent:    true,
+    depthWrite:     false,
+    blending:       THREE.AdditiveBlending,
+});
+const rainPoints = new THREE.Points(rainGeo, rainMat);
+scene.add(rainPoints);
+
+// ── Spawn one rain blob on a given loop ───────────────────────────────────────
+function spawnRainBlob(loopIdx) {
+    // Find a free slot in the pool
+    let slot = -1;
+    for (let i = 0; i < N_RAIN; i++) { if (!rainActive[i]) { slot = i; break; } }
+    if (slot < 0) return;
+
+    // Condensation starts near the apex (s ∈ [0.46, 0.54])
+    const s0   = 0.46 + Math.random() * 0.08;
+    // Randomly choose which footpoint the blob falls toward
+    const side = Math.random() < 0.5 ? -1.0 : 1.0;
+    // Initial tiny push from condensation onset (unstable equilibrium at apex)
+    const ds0  = side * (0.0009 + Math.random() * 0.0016);
+
+    rainS[slot]      = s0;
+    rainDS[slot]     = ds0;
+    rainLoop[slot]   = loopIdx;
+    rainTemp[slot]   = 0.72 + Math.random() * 0.24;  // just-condensed: warm-to-hot
+    rainAge[slot]    = 0;
+    rainMaxAge[slot] = 480 + Math.floor(Math.random() * 380);  // 480–860 frames
+    rainActive[slot] = 1;
+}
+
+// ── Per-frame rain update ─────────────────────────────────────────────────────
+function updateCoronalRain(flareStr) {
+    const nLoops = coronalLoopCurves.length;
+
+    // Spawning: stochastic condensation triggered by energy accumulation + flares
+    for (let li = 0; li < nLoops; li++) {
+        const arIdx  = coronalLoopArIdx[li];
+        const energy = arIdx >= 0 ? (arEnergyBuf[arIdx] ?? 0) : 0;
+        // AR loops: driven by stored nanoflare energy + live X-ray intensity
+        // Quiet-sun loops: rare baseline condensation + flare boost
+        const baseRate  = arIdx >= 0 ? 0.0042 : 0.0005;
+        const spawnProb = baseRate * (Math.max(energy, 0.12) + flareStr * 4.5);
+        if (Math.random() < spawnProb) spawnRainBlob(li);
+    }
+
+    // Update each blob
+    for (let i = 0; i < N_RAIN; i++) {
+        if (!rainActive[i]) {
+            rainSizeBuf[i] = 0.0;
+            rainPos[i*3] = rainPos[i*3+1] = rainPos[i*3+2] = 0.0;
+            continue;
+        }
+
+        rainAge[i]++;
+
+        // Safety: kill if parent loop was rebuilt and index is now stale
+        if (rainLoop[i] >= coronalLoopCurves.length) {
+            rainActive[i] = 0; rainSizeBuf[i] = 0.0; continue;
+        }
+
+        // Kill checks: footpoint impact or lifetime exceeded
+        if (rainS[i] < 0.025 || rainS[i] > 0.975 || rainAge[i] > rainMaxAge[i]) {
+            rainActive[i] = 0; rainSizeBuf[i] = 0.0; continue;
+        }
+
+        // Gravity component along arc: sin(π/2 × |2s−1|)
+        //   = 0 at apex  (s=0.5: field horizontal, gravity perpendicular)
+        //   = 1 at feet  (s=0 or 1: field vertical, gravity fully along arc)
+        const q    = Math.abs(2.0 * rainS[i] - 1.0);
+        const gAcc = RAIN_GRAV * Math.sin(Math.PI * 0.5 * q);
+        // Acceleration always pushes away from apex (toward the nearer footpoint)
+        rainDS[i]  += rainDS[i] >= 0 ? gAcc : -gAcc;
+        rainS[i]   += rainDS[i];
+
+        // Radiative cooling: faster near footpoints (denser chromospheric material)
+        rainTemp[i] = Math.max(0.0, rainTemp[i] - 0.00080 - q * 0.00028);
+
+        // Fade in over first 25 frames; fade out in last 30 frames
+        const fadeIn  = Math.min(rainAge[i] / 25.0, 1.0);
+        const fadeOut = Math.max(0.0,
+            1.0 - (rainAge[i] - (rainMaxAge[i] - 30)) / 30.0);
+        const envelope = fadeIn * Math.min(fadeOut, 1.0);
+
+        // Blob grows larger as it cools (optically thick cross-section increases)
+        rainSizeBuf[i] = (0.006 + (1.0 - rainTemp[i]) * 0.007) * envelope;
+        rainTempBuf[i] = rainTemp[i];
+
+        // World position by sampling the parent loop's parametric arc
+        const pt = coronalLoopCurves[rainLoop[i]]
+                        .getPoint(Math.max(0.001, Math.min(0.999, rainS[i])));
+        rainPos[i*3]   = pt.x;
+        rainPos[i*3+1] = pt.y;
+        rainPos[i*3+2] = pt.z;
+    }
+
+    rainGeo.attributes.position.needsUpdate = true;
+    rainGeo.attributes.a_temp.needsUpdate   = true;
+    rainGeo.attributes.a_size.needsUpdate   = true;
 }
 
 // ── Prominence arc system ─────────────────────────────────────────────────────
@@ -1756,6 +2110,7 @@ function animate() {
 
     // Coronal magnetic structure animation
     updateCoronalLoops(t);
+    updateCoronalRain(sunUniforms.u_flare_str.value);
     updateProminences(t, sunUniforms.u_flare_str.value);
 
     // Smooth camera follow if body selected
@@ -1845,6 +2200,19 @@ window.addEventListener('swpc-update', (e) => {
 
     // 2. Wind particle opacity — denser plasma = more visible stream
     windMat.opacity = 0.25 + d.wind_density_norm * 0.40;
+
+    // 2a. HCS brightness from live total IMF magnitude (Bt from DSCOVR/ACE)
+    hcsUniforms.u_bt_norm.value = d.bt_norm;
+
+    // 2b. Alfvén speed from in-situ Bt and density: v_A = 21.8 × Bt(nT) / √n(cm⁻³)
+    //     Normalised to baseline (Bt=5nT, n=5cc → v_A ≈ 49 km/s = amplitude scale 1.0)
+    //     High v_A  → large Alfvénic switchbacks in the intermediate wind stream.
+    //     Low  v_A  → nearly radial slow-wind streams, small transverse perturbations.
+    {
+        const btRaw = sw.solar_wind.bt      ?? 5.0;
+        const nRaw  = Math.max(sw.solar_wind.density ?? 5.0, 0.1);
+        alfvenAmpScale = Math.max(0.3, Math.min(3.0, (21.8 * btRaw / Math.sqrt(nRaw)) / 49.0));
+    }
 
     // 3. Sun shader — GOES X-ray intensity + active region positions
     sunUniforms.u_flare_str.value = d.xray_intensity;
