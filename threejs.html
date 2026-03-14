@@ -1516,6 +1516,8 @@ function latLonToVec3(lat, lon) {
 
 let coronalLoopMeshes = [];
 let coronalLoopPhases  = [];
+let coronalLoopCurves  = [];   // CatmullRomCurve3 per loop — sampled by coronal rain
+let coronalLoopArIdx   = [];   // AR index per loop (-1 = quiet-sun background)
 
 function buildCoronalLoops(ars, sunRotY) {
     coronalLoopMeshes.forEach(m => {
@@ -1525,6 +1527,8 @@ function buildCoronalLoops(ars, sunRotY) {
     });
     coronalLoopMeshes = [];
     coronalLoopPhases  = [];
+    coronalLoopCurves  = [];
+    coronalLoopArIdx   = [];
 
     // Active-region loops
     ars.forEach((ar, arIdx) => {
@@ -1561,6 +1565,8 @@ function buildCoronalLoops(ars, sunRotY) {
             scene.add(mesh);
             coronalLoopMeshes.push(mesh);
             coronalLoopPhases.push(arIdx * 1.7 + k * 2.3);
+            coronalLoopCurves.push(curve);
+            coronalLoopArIdx.push(arIdx);
         }
     });
 
@@ -1584,6 +1590,8 @@ function buildCoronalLoops(ars, sunRotY) {
         scene.add(mesh);
         coronalLoopMeshes.push(mesh);
         coronalLoopPhases.push(i * 3.14 + 1.1);
+        coronalLoopCurves.push(curve);
+        coronalLoopArIdx.push(-1);
     }
 }
 
@@ -1597,6 +1605,219 @@ function updateCoronalLoops(t) {
         const osc  = 0.78 + 0.22 * Math.sin(t * 0.022 + φ) * Math.cos(t * 0.013 + φ * 0.6);
         m.material.opacity = base * osc;
     });
+}
+
+// ═══════════════════════════════════════════════════════
+//  CORONAL RAIN
+// ═══════════════════════════════════════════════════════
+// Coronal rain is the in-situ condensation and gravitational drainage of plasma
+// that has cooled below the transition region temperature in a hot coronal loop.
+//
+// Physical sequence (Field 1965 / Antiochos & Klimchuk 1991):
+//   1. Loop heated impulsively to T > 1 MK (nanoflares / Alfvén wave dissipation)
+//   2. Density increases near the apex where field-line curvature traps plasma
+//   3. Radiative cooling time τ_cool ∝ T^0.5/n shortens below the heating time
+//   4. Thermal runaway: local T crashes from ~0.5 MK to ~8,000 K in a few minutes
+//   5. Blob condenses near apex; the coronal-rain 'catastrophic cooling' phase
+//   6. Dense cool blob (ρ ~ 10× coronal, T ~ 8,000 K) drains down the field line
+//      under solar gravity; fall takes 20–30 min at ~50–80 km/s
+//   7. Blob hits the chromosphere → UV/EUV footpoint brightening
+//
+// Emission signatures rendered here:
+//   H-alpha 6563 Å  → deep red    (T ~ 8 kK, dense cool core)
+//   Fe IX   171  Å  → green-cyan  (T ~ 0.6 MK, intermediate cooling)
+//   He II   304  Å  → blue-white  (T ~ 80 kK, condensation onset sheath)
+//
+// Gravity model (semi-circular arc approximation):
+//   d²s/dt² ∝ g_eff × sin(π/2 × |2s−1|)
+//   s = 0 or 1: footpoints (gravity fully along field) → maximum acceleration
+//   s = 0.5:    apex       (gravity perpendicular)     → no acceleration
+// This gives the correct pendulum-like dynamics without needing to evaluate
+// actual 3-D field-line geometry.
+
+const N_RAIN    = 60;        // max simultaneous blobs across all loops
+const RAIN_GRAV = 0.000013;  // gravitational acceleration (arc-param² / frame)
+
+// ── Per-blob state (typed arrays for GC-free updates) ────────────────────────
+const rainS      = new Float32Array(N_RAIN);   // arc parameter s ∈ [0, 1]
+const rainDS     = new Float32Array(N_RAIN);   // ds / frame (arc velocity)
+const rainLoop   = new Int32Array(N_RAIN);     // index into coronalLoopCurves
+const rainTemp   = new Float32Array(N_RAIN);   // cooling temperature [0=cold, 1=hot]
+const rainAge    = new Uint16Array(N_RAIN);    // frames since spawn
+const rainMaxAge = new Uint16Array(N_RAIN);    // kill threshold
+const rainActive = new Uint8Array(N_RAIN);     // 0 = dead, 1 = alive
+
+// ── GPU geometry ─────────────────────────────────────────────────────────────
+const rainPos     = new Float32Array(N_RAIN * 3);
+const rainTempBuf = new Float32Array(N_RAIN);
+const rainSizeBuf = new Float32Array(N_RAIN);
+
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position',
+    new THREE.BufferAttribute(rainPos,     3).setUsage(THREE.DynamicDrawUsage));
+rainGeo.setAttribute('a_temp',
+    new THREE.BufferAttribute(rainTempBuf, 1).setUsage(THREE.DynamicDrawUsage));
+rainGeo.setAttribute('a_size',
+    new THREE.BufferAttribute(rainSizeBuf, 1).setUsage(THREE.DynamicDrawUsage));
+
+// ── Vertex shader ─────────────────────────────────────────────────────────────
+// a_size = 0 → inactive blob; clip to outside NDC so no rasterisation occurs.
+// Perspective scaling keeps blobs visually consistent across zoom levels.
+const rainVS = /* glsl */`
+    attribute float a_temp;
+    attribute float a_size;
+    varying  float vTemp;
+    varying  float vActive;
+    void main() {
+        vTemp   = a_temp;
+        vActive = step(0.0001, a_size);
+        if (a_size < 0.0001) {
+            // Send inactive blob outside the clip volume — never rasterised
+            gl_Position  = vec4(2.0, 2.0, 2.0, 1.0);
+            gl_PointSize = 1.0;
+            return;
+        }
+        vec4 mv      = modelViewMatrix * vec4(position, 1.0);
+        gl_PointSize = a_size * 340.0 / -mv.z;   // perspective point size
+        gl_Position  = projectionMatrix * mv;
+    }
+`;
+
+// ── Fragment shader ────────────────────────────────────────────────────────────
+// Temperature → spectral colour:
+//   0.0 = H-alpha / Ca II H&K deep red  (T ~ 8 kK,   cool condensed blob)
+//   0.5 = Fe IX 171 Å green-cyan        (T ~ 0.6 MK, intermediate cooling)
+//   1.0 = He II 304 Å blue-white        (T ~ 80 kK,  just-condensed sheath)
+//
+// Radial profile: tight Gaussian core (optically thick blob body) +
+// broad soft halo (transition region sheath, optically thin).
+const rainFS = /* glsl */`
+    varying float vTemp;
+    varying float vActive;
+    void main() {
+        if (vActive < 0.5) discard;
+
+        vec2  uv = gl_PointCoord * 2.0 - 1.0;
+        float r  = length(uv);
+        if (r > 1.0) discard;
+
+        float core = exp(-r * r * 4.5);                         // tight blob body
+        float halo = (1.0 - smoothstep(0.42, 1.0, r)) * 0.26;  // TR-sheath glow
+
+        // Three spectral endpoints
+        vec3 coolCol = vec3(0.88, 0.12, 0.04);   // H-alpha / Ca II  (deep red)
+        vec3 warmCol = vec3(0.14, 0.82, 0.52);   // Fe IX 171 Å      (green)
+        vec3 hotCol  = vec3(0.22, 0.58, 1.00);   // He II 304 Å      (blue-white)
+
+        vec3 col = vTemp < 0.5
+            ? mix(coolCol, warmCol, vTemp * 2.0)
+            : mix(warmCol, hotCol,  (vTemp - 0.5) * 2.0);
+
+        gl_FragColor = vec4(col, core + halo);
+    }
+`;
+
+const rainMat = new THREE.ShaderMaterial({
+    vertexShader:   rainVS,
+    fragmentShader: rainFS,
+    transparent:    true,
+    depthWrite:     false,
+    blending:       THREE.AdditiveBlending,
+});
+const rainPoints = new THREE.Points(rainGeo, rainMat);
+scene.add(rainPoints);
+
+// ── Spawn one rain blob on a given loop ───────────────────────────────────────
+function spawnRainBlob(loopIdx) {
+    // Find a free slot in the pool
+    let slot = -1;
+    for (let i = 0; i < N_RAIN; i++) { if (!rainActive[i]) { slot = i; break; } }
+    if (slot < 0) return;
+
+    // Condensation starts near the apex (s ∈ [0.46, 0.54])
+    const s0   = 0.46 + Math.random() * 0.08;
+    // Randomly choose which footpoint the blob falls toward
+    const side = Math.random() < 0.5 ? -1.0 : 1.0;
+    // Initial tiny push from condensation onset (unstable equilibrium at apex)
+    const ds0  = side * (0.0009 + Math.random() * 0.0016);
+
+    rainS[slot]      = s0;
+    rainDS[slot]     = ds0;
+    rainLoop[slot]   = loopIdx;
+    rainTemp[slot]   = 0.72 + Math.random() * 0.24;  // just-condensed: warm-to-hot
+    rainAge[slot]    = 0;
+    rainMaxAge[slot] = 480 + Math.floor(Math.random() * 380);  // 480–860 frames
+    rainActive[slot] = 1;
+}
+
+// ── Per-frame rain update ─────────────────────────────────────────────────────
+function updateCoronalRain(flareStr) {
+    const nLoops = coronalLoopCurves.length;
+
+    // Spawning: stochastic condensation triggered by energy accumulation + flares
+    for (let li = 0; li < nLoops; li++) {
+        const arIdx  = coronalLoopArIdx[li];
+        const energy = arIdx >= 0 ? (arEnergyBuf[arIdx] ?? 0) : 0;
+        // AR loops: driven by stored nanoflare energy + live X-ray intensity
+        // Quiet-sun loops: rare baseline condensation + flare boost
+        const baseRate  = arIdx >= 0 ? 0.0042 : 0.0005;
+        const spawnProb = baseRate * (Math.max(energy, 0.12) + flareStr * 4.5);
+        if (Math.random() < spawnProb) spawnRainBlob(li);
+    }
+
+    // Update each blob
+    for (let i = 0; i < N_RAIN; i++) {
+        if (!rainActive[i]) {
+            rainSizeBuf[i] = 0.0;
+            rainPos[i*3] = rainPos[i*3+1] = rainPos[i*3+2] = 0.0;
+            continue;
+        }
+
+        rainAge[i]++;
+
+        // Safety: kill if parent loop was rebuilt and index is now stale
+        if (rainLoop[i] >= coronalLoopCurves.length) {
+            rainActive[i] = 0; rainSizeBuf[i] = 0.0; continue;
+        }
+
+        // Kill checks: footpoint impact or lifetime exceeded
+        if (rainS[i] < 0.025 || rainS[i] > 0.975 || rainAge[i] > rainMaxAge[i]) {
+            rainActive[i] = 0; rainSizeBuf[i] = 0.0; continue;
+        }
+
+        // Gravity component along arc: sin(π/2 × |2s−1|)
+        //   = 0 at apex  (s=0.5: field horizontal, gravity perpendicular)
+        //   = 1 at feet  (s=0 or 1: field vertical, gravity fully along arc)
+        const q    = Math.abs(2.0 * rainS[i] - 1.0);
+        const gAcc = RAIN_GRAV * Math.sin(Math.PI * 0.5 * q);
+        // Acceleration always pushes away from apex (toward the nearer footpoint)
+        rainDS[i]  += rainDS[i] >= 0 ? gAcc : -gAcc;
+        rainS[i]   += rainDS[i];
+
+        // Radiative cooling: faster near footpoints (denser chromospheric material)
+        rainTemp[i] = Math.max(0.0, rainTemp[i] - 0.00080 - q * 0.00028);
+
+        // Fade in over first 25 frames; fade out in last 30 frames
+        const fadeIn  = Math.min(rainAge[i] / 25.0, 1.0);
+        const fadeOut = Math.max(0.0,
+            1.0 - (rainAge[i] - (rainMaxAge[i] - 30)) / 30.0);
+        const envelope = fadeIn * Math.min(fadeOut, 1.0);
+
+        // Blob grows larger as it cools (optically thick cross-section increases)
+        rainSizeBuf[i] = (0.006 + (1.0 - rainTemp[i]) * 0.007) * envelope;
+        rainTempBuf[i] = rainTemp[i];
+
+        // World position by sampling the parent loop's parametric arc
+        const pt = coronalLoopCurves[rainLoop[i]]
+                        .getPoint(Math.max(0.001, Math.min(0.999, rainS[i])));
+        rainPos[i*3]   = pt.x;
+        rainPos[i*3+1] = pt.y;
+        rainPos[i*3+2] = pt.z;
+    }
+
+    rainGeo.attributes.position.needsUpdate = true;
+    rainGeo.attributes.a_temp.needsUpdate   = true;
+    rainGeo.attributes.a_size.needsUpdate   = true;
 }
 
 // ── Prominence arc system ─────────────────────────────────────────────────────
@@ -1889,6 +2110,7 @@ function animate() {
 
     // Coronal magnetic structure animation
     updateCoronalLoops(t);
+    updateCoronalRain(sunUniforms.u_flare_str.value);
     updateProminences(t, sunUniforms.u_flare_str.value);
 
     // Smooth camera follow if body selected
