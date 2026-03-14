@@ -530,15 +530,15 @@ const sunVS = /* glsl */`
 const sunFS = /* glsl */`
     uniform float u_time;
     uniform float u_teff;
-    uniform float u_flare_str;          // GOES X-ray intensity [0,1]
-    uniform int   u_ar_count;           // active regions this frame
-    uniform float u_ar_lat[5];          // latitude  (rad) per region
-    uniform float u_ar_lon[5];          // longitude (rad) per region (local frame)
-    uniform float u_ar_area[5];         // normalised area [0,1] per region
+    uniform float u_flare_str;
+    uniform int   u_ar_count;
+    uniform float u_ar_lat[5];
+    uniform float u_ar_lon[5];
+    uniform float u_ar_area[5];
 
     varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
 
-    // ── Procedural noise ──────────────────────────────────────────────────────
+    // ── Noise library ─────────────────────────────────────────────────────────
     float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
     float vn(vec3 p){
         vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
@@ -547,77 +547,107 @@ const sunFS = /* glsl */`
     }
     float fbm(vec3 p){float v=0.0,a=0.5;for(int i=0;i<5;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
 
-    // ── Piecewise blackbody (same pipeline as WR-102) ─────────────────────────
+    // ── Piecewise blackbody ───────────────────────────────────────────────────
     vec3 blackbody(float T){
         if(T<6000.0){float f=clamp((T-1000.0)/5000.0,0.0,1.0);return mix(vec3(1.0,0.16,0.02),vec3(1.0,0.82,0.52),f);}
         else if(T<10000.0){float f=clamp((T-6000.0)/4000.0,0.0,1.0);return mix(vec3(1.0,0.88,0.65),vec3(0.93,0.90,1.0),f);}
-        else {float f=clamp((T-10000.0)/40000.0,0.0,1.0);return mix(vec3(0.88,0.88,1.0),vec3(0.56,0.65,1.0),f);}
+        else{float f=clamp((T-10000.0)/40000.0,0.0,1.0);return mix(vec3(0.88,0.88,1.0),vec3(0.56,0.65,1.0),f);}
     }
 
     void main(){
         vec3 nrm  = normalize(vNormal);
         vec3 vDir = normalize(vViewDir);
-        vec3 pos  = normalize(vPosition);   // unit sphere surface direction
+        vec3 pos  = normalize(vPosition);
 
-        // ── Surface convection + granulation (FBM) ───────────────────────────
-        float conv = fbm(vPosition*0.40 + vec3(u_time*0.012, u_time*0.009, u_time*0.011));
+        // ── Photospheric convection + granulation ─────────────────────────────
+        vec3 drift = vec3(u_time*0.012, u_time*0.009, u_time*0.011);
+        float conv = fbm(vPosition*0.40 + drift);
         float gran = fbm(vPosition*2.10 + vec3(u_time*0.025,-u_time*0.020, u_time*0.022));
         float bmod = 0.80 + (conv*0.60 + gran*0.40)*0.40;
 
-        // ── Limb darkening ───────────────────────────────────────────────────
+        // ── Limb darkening (Eddington approximation) ──────────────────────────
         float mu   = max(dot(nrm, vDir), 0.0);
         float limb = 0.42 + 0.58*mu;
 
-        // ── Active region effects — sunspots + flare brightening ──────────────
-        //    Each active region is a patch defined by its heliographic lat/lon.
-        //    Quiet: dark umbra (sunspot).  During flare: bright hot plasma.
-        float arDark  = 0.0;   // cumulative sunspot darkening
-        float arBrite = 0.0;   // cumulative flare brightening
+        // ── Parker braiding: current density proxy ────────────────────────────
+        // J ∝ |∇B|  approximated by the gradient magnitude of the convection FBM.
+        // High-J regions are where tangled field lines form current sheets.
+        const float FD = 0.018;
+        float dCx = fbm(vPosition*0.40 + vec3(FD,0,0) + drift) - conv;
+        float dCy = fbm(vPosition*0.40 + vec3(0,FD,0) + drift) - conv;
+        float dCz = fbm(vPosition*0.40 + vec3(0,0,FD) + drift) - conv;
+        float jProx = length(vec3(dCx,dCy,dCz)) / FD;   // proxy for |∇B|
 
+        // ── Chromospheric H-alpha network ─────────────────────────────────────
+        // Bright web at supergranule boundaries.  Colour = H-alpha 6563 Å (deep red).
+        // Intensity proportional to local current density proxy.
+        float netStr = smoothstep(0.55, 1.10, jProx) * (0.18 + u_flare_str * 0.30);
+        // Network is most visible at the limb where we look along the surface
+        vec3 col = vec3(0.0);
+        col += vec3(0.88, 0.22, 0.05) * netStr * limb;
+
+        // ── Nanoflare events (Parker 1988) ────────────────────────────────────
+        // Stochastic magnetic reconnection at high-J sites.
+        // The surface is divided into time-quantised spatial cells; each cell fires
+        // independently with a probability that rises with local current density.
+        float tQ   = floor(u_time * 8.0);              // 8 Hz quantisation window
+        vec3  pQ   = floor(vPosition * 24.0);           // ~24 cells per radius unit
+        float nRnd = h3(pQ + vec3(tQ*0.97, tQ*2.31, tQ*1.57));
+        float tAge = fract(u_time * 8.0);
+        float thresh = 0.80 - jProx * 0.24;            // high-J sites fire more often
+        float fires  = step(thresh, nRnd);
+        float decay  = exp(-tAge * 5.5);                // fast decay < 180 ms
+        float nStr   = fires * decay * jProx * 1.6;
+        // Energy spectrum: low-energy → H-alpha/EUV (orange-red); high-energy → X-ray (white-blue)
+        float nHiE = h3(pQ + vec3(8.13, 3.27, 6.51));
+        col += vec3(1.0, 0.45, 0.10) * nStr * (1.0 - nHiE * 0.70) * limb;
+        col += vec3(0.82, 0.90, 1.00) * nStr * pow(nHiE, 1.4) * 3.8 * limb;
+
+        // ── Spicule jets at chromospheric network boundaries ───────────────────
+        // Narrow Mach~0.5 upward jets where convective driver ejects chromospheric
+        // material onto coronal field lines.  Most visible at the limb.
+        float spFBM  = fbm(vPosition * 9.2 + vec3(u_time * 0.04, 0.0, 0.0));
+        float spLine = smoothstep(0.05, 0.0, abs(spFBM - 0.49));
+        float spicule = spLine * (1.0 - mu) * (0.55 + netStr * 1.5);
+        col += vec3(0.95, 0.40, 0.12) * spicule;
+
+        // ── Active-region sunspots / flare brightening ────────────────────────
+        float arDark = 0.0, arBrite = 0.0;
         for (int i = 0; i < 5; i++) {
             if (i >= u_ar_count) break;
-            // Convert lat/lon to unit vector in local solar frame
             float clat = cos(u_ar_lat[i]);
-            vec3 arDir = vec3(clat * cos(u_ar_lon[i]),
-                              sin(u_ar_lat[i]),
-                              clat * sin(u_ar_lon[i]));
-            float cosD = clamp(dot(pos, arDir), -1.0, 1.0);
-            float angD = acos(cosD);
-
-            // Angular radius grows with reported area
+            vec3 arDir = vec3(clat*cos(u_ar_lon[i]), sin(u_ar_lat[i]), clat*sin(u_ar_lon[i]));
+            float angD = acos(clamp(dot(pos, arDir), -1.0, 1.0));
             float arR  = 0.10 + u_ar_area[i] * 0.18;
-            float inAR = 1.0 - smoothstep(arR * 0.55, arR, angD);
-            // Darker umbra at core
-            float core = 1.0 - smoothstep(arR * 0.15, arR * 0.45, angD);
-
-            // Sunspot darkening (suppressed during strong flare)
-            arDark  += inAR * core * (1.0 - u_flare_str * 2.5) * 0.5;
-            // Flare brightening — hot chromospheric plasma in the active region
+            float inAR = 1.0 - smoothstep(arR*0.55, arR, angD);
+            float core = 1.0 - smoothstep(arR*0.15, arR*0.45, angD);
+            arDark  += inAR * core * (1.0 - u_flare_str*2.5) * 0.5;
             arBrite += inAR * u_flare_str * 2.2;
         }
-
-        // Apply active region modulation to brightness
-        bmod = bmod * (1.0 - clamp(arDark,  0.0, 0.95))
-                    + clamp(arBrite, 0.0, 2.0);
+        bmod = bmod * (1.0 - clamp(arDark, 0.0, 0.95)) + clamp(arBrite, 0.0, 2.0);
         bmod = clamp(bmod, 0.05, 3.0);
 
-        // ── Effective temperature — boosted during flare ──────────────────────
+        // ── Effective temperature + flare boost ───────────────────────────────
         float flareTemp = u_teff * (1.0 + u_flare_str * 0.55);
         vec3  base      = mix(blackbody(u_teff), blackbody(flareTemp), u_flare_str * 0.75);
 
-        // ── Combine ───────────────────────────────────────────────────────────
-        vec3 col = base * bmod * limb * 1.80;
-
-        // Fine-scale flicker
+        // Combine photospheric emission
+        col += base * bmod * limb * 1.80;
         float flick = fbm(vPosition*2.8 + vec3(u_time*0.08))*2.0 - 1.0;
         col *= 1.0 + 0.08*flick;
 
-        // ── Limb / corona rim glow — intensifies with flare activity ──────────
-        float fr  = pow(1.0 - mu, 3.0);
-        float rimT = u_teff * (1.12 + u_flare_str * 0.4);
+        // ── Transition region UV fringe ───────────────────────────────────────
+        // The chromosphere/corona interface emits strongly in UV (He II 304Å, etc.)
+        // despite being only ~100 km thick.  Visible as a thin blue-white arc at limb.
+        float trGlow = pow(1.0 - mu, 7.0) * 0.22;
+        col += vec3(0.50, 0.72, 1.00) * trGlow * (1.0 + u_flare_str * 2.0);
+
+        // ── Corona rim glow + Alfvén-wave-heated loops ────────────────────────
+        float fr   = pow(1.0 - mu, 3.0);
+        float rimT = u_teff * (1.12 + u_flare_str * 0.40);
         col += blackbody(rimT) * fr * (0.50 + u_flare_str * 0.70);
 
-        // ── Coronal loop shimmer in active regions (flare-driven) ─────────────
+        // Coronal loop shimmer: fine-scale FBM driven by flare activity
         if (u_flare_str > 0.02) {
             float cLoop = fbm(vPosition * 6.0 + vec3(u_time * 0.18)) * u_flare_str * 0.35;
             col += vec3(1.0, 0.82, 0.52) * cLoop;
@@ -660,6 +690,80 @@ const sgOutFS = /* glsl */`
         new THREE.ShaderMaterial({vertexShader:sgVS,fragmentShader:fs,uniforms:sunUniforms,
             transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.BackSide})));
 });
+
+// ── Chromosphere shell (r = 1.52) ─────────────────────────────────────────
+// Thin layer between photosphere (r=1.5) and inner corona (r=1.9).
+// Shows H-alpha network (red), Ca II K (violet), fibril/spicule texture.
+// The transition region and chromosphere are both optically thin and strongly
+// limb-brightened — most emission comes from the line-of-sight integral near limb.
+const chromoVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPosition;
+    void main(){
+        vNormal   = normalize(normalMatrix * normal);
+        vPosition = position;
+        vec4 mv   = modelViewMatrix * vec4(position, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const chromoFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_flare_str;
+    varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vPosition;
+
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm(vec3 p){float v=0.0,a=0.5;for(int i=0;i<5;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+
+    void main(){
+        vec3  nrm  = normalize(vNormal);
+        vec3  vDir = normalize(vViewDir);
+        float mu   = max(dot(nrm, vDir), 0.0);
+        float rim  = 1.0 - mu;
+
+        // Supergranule network: bright knots at cell boundaries
+        // Network scale ~35 Mm → ~0.05 AU → roughly fbm at spatial freq 3-4
+        float net = fbm(vPosition * 3.8 + vec3(u_time * 0.007));
+        float netBright = smoothstep(0.44, 0.62, net);
+
+        // Fibril / spicule texture — narrow radial streaks along field lines
+        float fib  = fbm(vPosition * 11.5 + vec3(u_time * 0.05, 0.0, u_time * 0.03));
+        float fibLine = smoothstep(0.065, 0.0, abs(fib - 0.48));
+
+        // H-alpha emission (6563 Å — deep red)
+        // Limb-brightened: optically thin in disk, bright at limb
+        float hAlpha = pow(rim, 1.8) * 0.80;
+        // Ca II K (3934 Å — violet): even more limb-bright
+        float caK    = pow(rim, 3.2) * 0.45;
+        // Network is bright on disk too (plage regions)
+        float diskNet = netBright * mu * 0.30;
+
+        // Flare ribbons: during flares, chromosphere lights up in H-alpha
+        float flareRib = u_flare_str * (netBright * 0.6 + hAlpha * 0.4);
+
+        vec3 col  = vec3(0.90, 0.18, 0.04) * (hAlpha + diskNet + fibLine*0.4 + flareRib);
+        col += vec3(0.48, 0.30, 0.92) * (caK + fibLine * rim * 0.15);  // Ca K
+        // Warm orange bleed from photosphere visible through disk
+        col += vec3(1.0, 0.55, 0.15) * mu * 0.05;
+
+        float alpha = clamp(pow(rim, 1.5)*0.65 + fibLine*0.30 + diskNet*0.25 + flareRib*0.40, 0.0, 0.80);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const chromoUniforms = { u_time: sunUniforms.u_time, u_flare_str: sunUniforms.u_flare_str };
+scene.add(new THREE.Mesh(
+    new THREE.SphereGeometry(1.52, 64, 64),
+    new THREE.ShaderMaterial({
+        vertexShader: chromoVS, fragmentShader: chromoFS,
+        uniforms: chromoUniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+    })
+));
 
 // Sun light
 const sunLight = new THREE.PointLight(0xfff4e0, 3.5, 0);
@@ -1152,46 +1256,89 @@ const wAngle  = new Float32Array(N_WIND);      // initial azimuth angle
 const wPhase  = new Float32Array(N_WIND);      // progress 0→1 along radial path
 const wYOff   = new Float32Array(N_WIND);      // fixed vertical scatter
 
+// ── Two solar-wind populations + Alfvénic intermediate stream ───────────────
+// FAST WIND  (|y| > 0.58):  from open-field coronal holes, polar preference.
+//            700 km/s, blue-white colour (hotter, lower density).
+// SLOW WIND  (|y| < 0.38):  from streamer-belt reconnection, equatorial.
+//            350 km/s, orange colour (cooler, higher density).
+// ALFVÉNIC   (0.38–0.58):   switchback-prone intermediate stream.
+//            450 km/s, helical Alfvén wave transverse displacement.
+
+const wColors    = new Float32Array(N_WIND * 3);
+const wSpeedMult = new Float32Array(N_WIND);   // per-particle speed factor
+const wType      = new Uint8Array(N_WIND);     // 0=slow, 1=fast, 2=alfvénic
+
 for (let i = 0; i < N_WIND; i++) {
     wAngle[i] = Math.random() * Math.PI * 2;
     wPhase[i] = Math.random();
-    // slight ecliptic flare: |y| grows with distance, max ±1.5 at outer edge
     wYOff[i]  = (Math.random() * 2 - 1) * 0.8;
+
+    const absY = Math.abs(wYOff[i]);
+    if (absY > 0.58) {
+        // Fast wind — coronal hole origin
+        wType[i]      = 1;
+        wSpeedMult[i] = 1.75;
+        wColors[i*3]  = 0.58; wColors[i*3+1] = 0.82; wColors[i*3+2] = 1.00;
+    } else if (absY < 0.38) {
+        // Slow wind — streamer belt origin
+        wType[i]      = 0;
+        wSpeedMult[i] = 0.55;
+        wColors[i*3]  = 1.00; wColors[i*3+1] = 0.60; wColors[i*3+2] = 0.18;
+    } else {
+        // Alfvénic intermediate stream — switchback-prone
+        wType[i]      = 2;
+        wSpeedMult[i] = 1.10;
+        wColors[i*3]  = 0.82; wColors[i*3+1] = 0.90; wColors[i*3+2] = 0.95;
+    }
 }
 
 const windGeo = new THREE.BufferGeometry();
 windGeo.setAttribute('position', new THREE.Float32BufferAttribute(wPos, 3));
+windGeo.setAttribute('color',    new THREE.Float32BufferAttribute(wColors, 3));
 
-// Simple point particles — additive blending for plasma glow
 const windMat = new THREE.PointsMaterial({
-    color: 0x88ddff,
-    size: 0.055,
-    transparent: true,
-    opacity: 0.45,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    sizeAttenuation: true,
+    vertexColors: true,
+    size: 0.055, transparent: true, opacity: 0.45,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
 });
 const windPoints = new THREE.Points(windGeo, windMat);
 scene.add(windPoints);
 
-// Speed slider value maps to 0.05–0.30 scene-units/frame advance per frame
-let windPhaseSpeed = 0.0006; // base advance per frame (≈400 km/s feel)
+let windPhaseSpeed = 0.0006; // base advance/frame (≈400 km/s nominal)
 
 function updateWindParticles() {
     const pos = windGeo.attributes.position.array;
+    const t   = sunUniforms.u_time.value;
     for (let i = 0; i < N_WIND; i++) {
-        wPhase[i] += windPhaseSpeed;
+        wPhase[i] += windPhaseSpeed * wSpeedMult[i];
         if (wPhase[i] > 1.0) {
             wPhase[i] = 0.0;
             wAngle[i] = Math.random() * Math.PI * 2;
         }
         const r      = WIND_MIN_R + wPhase[i] * (WIND_MAX_R - WIND_MIN_R);
-        const spiral = wAngle[i] - SPIRAL_K * r;    // Parker spiral lag
-        const yFrac  = r / WIND_MAX_R;              // vertical flare with distance
-        pos[i * 3 + 0] = r * Math.cos(spiral);
-        pos[i * 3 + 1] = wYOff[i] * yFrac;
-        pos[i * 3 + 2] = r * Math.sin(spiral);
+        const spiral = wAngle[i] - SPIRAL_K * r;
+        const yFrac  = r / WIND_MAX_R;
+
+        let x = r * Math.cos(spiral);
+        let y = wYOff[i] * yFrac;
+        let z = r * Math.sin(spiral);
+
+        // Alfvénic stream: Parker Solar Probe–style sinusoidal switchbacks
+        // Transverse wave displacement growing with distance (∝ r^0.5)
+        if (wType[i] === 2) {
+            const wFreq = 0.028;              // ~224 t-units per cycle (≈4 min at 60fps)
+            const wAmp  = 0.10 * Math.sqrt(yFrac);
+            const phase = wFreq * t + 0.9 * r + wAngle[i];
+            y += wAmp * Math.sin(phase);
+            // Perpendicular component in the XZ plane
+            const perp = wAmp * 0.45 * Math.cos(phase);
+            x += -Math.sin(spiral) * perp;
+            z +=  Math.cos(spiral) * perp;
+        }
+
+        pos[i*3]   = x;
+        pos[i*3+1] = y;
+        pos[i*3+2] = z;
     }
     windGeo.attributes.position.needsUpdate = true;
 }
@@ -1210,6 +1357,206 @@ document.getElementById('sl-speed').addEventListener('input', function () {
         Math.round(400 * Math.max(s, 0.2)).toLocaleString() + ' km/s';
     windPhaseSpeed = 0.0006 * Math.max(s, 0.2);
 });
+
+// ═══════════════════════════════════════════════════════
+//  CORONAL MAGNETIC STRUCTURE
+// ═══════════════════════════════════════════════════════
+
+// ── Utility: heliographic lat/lon (rad) → unit Vec3 in local solar frame ─────
+function latLonToVec3(lat, lon) {
+    return new THREE.Vector3(
+        Math.cos(lat) * Math.cos(lon),
+        Math.sin(lat),
+        Math.cos(lat) * Math.sin(lon)
+    );
+}
+
+// ── Coronal loop arc system ───────────────────────────────────────────────────
+// Hot (1–10 MK) magnetic flux tubes arch above active regions.
+// Each AR gets 3 loops (quiet) or 5 loops (complex); loops span a range of heights
+// and temperatures.  Opacity pulses at the Alfvén wave cadence.
+//
+// Physics basis: loops channel heat from footpoints into the corona via:
+//   a) direct Ohmic dissipation (J²/σ) in current-carrying threads
+//   b) phase-mixing of Alfvén waves → turbulent heating
+//   c) impulsive nanoflare reconnection
+
+let coronalLoopMeshes = [];
+let coronalLoopPhases  = [];
+
+function buildCoronalLoops(ars, sunRotY) {
+    coronalLoopMeshes.forEach(m => {
+        scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+    });
+    coronalLoopMeshes = [];
+    coronalLoopPhases  = [];
+
+    // Active-region loops
+    ars.forEach((ar, arIdx) => {
+        const lat  = ar.lat_rad;
+        const lon  = ar.lon_rad - sunRotY;
+        const nL   = ar.is_complex ? 5 : 3;
+
+        for (let k = 0; k < nL; k++) {
+            const sep   = 0.10 + k * 0.12;
+            const h     = 0.16 + k * 0.14 + ar.area_norm * 0.10;
+            // Shear angle: complex ARs have sigmoidally twisted loops
+            const shearY = (k - nL * 0.5) * (ar.is_complex ? 0.10 : 0.03);
+
+            const fp1 = latLonToVec3(lat + sep * 0.3, lon - sep).multiplyScalar(1.53);
+            const fp2 = latLonToVec3(lat - sep * 0.3, lon + sep).multiplyScalar(1.53);
+            const apex = fp1.clone().add(fp2).normalize().multiplyScalar(1.53 + h);
+            apex.y += shearY;
+
+            const curve = new THREE.CatmullRomCurve3([fp1, apex, fp2], false, 'catmullrom', 0.5);
+            const tube  = new THREE.TubeGeometry(curve, 30, 0.005 + k * 0.0018, 5, false);
+
+            // Temperature colour: innermost hottest (blue-white) → outer cooler (green-cyan)
+            // 10 MK (k=0) → hue 0.60 (blue); 1 MK (k=4) → hue 0.44 (green-cyan)
+            const hue  = 0.60 - k * 0.028;
+            const base = 0.52 - k * 0.07;
+            const mat  = new THREE.MeshBasicMaterial({
+                color:       new THREE.Color().setHSL(hue, 0.85, 0.65),
+                transparent: true, opacity: base,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            mat.userData.baseOpacity = base;
+
+            const mesh = new THREE.Mesh(tube, mat);
+            scene.add(mesh);
+            coronalLoopMeshes.push(mesh);
+            coronalLoopPhases.push(arIdx * 1.7 + k * 2.3);
+        }
+    });
+
+    // Quiet-sun background loops: low-lying, faint, distributed across disk
+    for (let i = 0; i < 10; i++) {
+        const lat   = (Math.random() - 0.5) * 0.9;
+        const lon   = Math.random() * Math.PI * 2;
+        const sep   = 0.06 + Math.random() * 0.09;
+        const h     = 0.07 + Math.random() * 0.11;
+        const fp1   = latLonToVec3(lat, lon - sep).multiplyScalar(1.53);
+        const fp2   = latLonToVec3(lat, lon + sep).multiplyScalar(1.53);
+        const apex  = fp1.clone().add(fp2).normalize().multiplyScalar(1.53 + h);
+        const curve = new THREE.CatmullRomCurve3([fp1, apex, fp2], false, 'catmullrom', 0.5);
+        const tube  = new THREE.TubeGeometry(curve, 20, 0.004, 4, false);
+        const mat   = new THREE.MeshBasicMaterial({
+            color: 0x5588ee, transparent: true, opacity: 0.18,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        mat.userData.baseOpacity = 0.18;
+        const mesh  = new THREE.Mesh(tube, mat);
+        scene.add(mesh);
+        coronalLoopMeshes.push(mesh);
+        coronalLoopPhases.push(i * 3.14 + 1.1);
+    }
+}
+
+// Alfvén wave opacity pulsation on each loop
+// Typical Alfvénic periods: 3–10 min → at 0.01 t/frame × 60fps = 0.6 t/s
+// ω_A = 0.022 t⁻¹ → period ≈ 286 t units ≈ 477 s ≈ 8 min
+function updateCoronalLoops(t) {
+    coronalLoopMeshes.forEach((m, idx) => {
+        const base = m.material.userData.baseOpacity ?? 0.25;
+        const φ    = coronalLoopPhases[idx];
+        const osc  = 0.78 + 0.22 * Math.sin(t * 0.022 + φ) * Math.cos(t * 0.013 + φ * 0.6);
+        m.material.opacity = base * osc;
+    });
+}
+
+// ── Prominence arc system ─────────────────────────────────────────────────────
+// Prominences: dense cool (T ≈ 8,000–10,000 K) H-alpha plasma draped in coronal
+// magnetic dips above active-region polarity inversion lines (PILs).
+//
+// Pipeline: nanoflare → energy accumulation → flux rope forms →
+//           prominence condenses in the dip → torus instability → eruption → CME.
+//
+// Each prominence has:
+//   - Outer hot envelope (coronal sheath, blue, T > 1 MK)
+//   - Dense cool core (H-alpha red, T ≈ 8–10 kK)
+
+let prominenceMeshes = [];
+let prominencePhases = [];
+
+// Per-AR energy accumulator charged by nanoflare activity and X-ray flux.
+// When it exceeds 1.0 a CME is triggered and the buffer resets.
+const arEnergyBuf = new Float32Array(5);
+
+function buildProminences(ars, sunRotY) {
+    prominenceMeshes.forEach(m => {
+        scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+    });
+    prominenceMeshes = [];
+    prominencePhases = [];
+
+    ars.forEach((ar, idx) => {
+        // Only complex ARs or highly-charged simple ARs grow prominences
+        if (!ar.is_complex && arEnergyBuf[idx] < 0.45) return;
+
+        const lat   = ar.lat_rad;
+        const lon   = ar.lon_rad - sunRotY;
+        const energy = Math.min(arEnergyBuf[idx], 1.0);
+
+        // Height and width scale with stored energy (flux rope inflating)
+        const h   = 0.38 + energy * 0.42;
+        const sep = 0.26 + ar.area_norm * 0.18;
+
+        const fp1  = latLonToVec3(lat, lon - sep).multiplyScalar(1.53);
+        const fp2  = latLonToVec3(lat, lon + sep).multiplyScalar(1.53);
+        // Off-axis control points: draping catenary shape
+        const cp1  = fp1.clone().lerp(latLonToVec3(lat, lon).multiplyScalar(1.53 + h), 0.45);
+        const cp2  = fp2.clone().lerp(latLonToVec3(lat, lon).multiplyScalar(1.53 + h), 0.45);
+        const apex = latLonToVec3(lat + 0.04, lon).multiplyScalar(1.53 + h);
+        const curve = new THREE.CatmullRomCurve3([fp1, cp1, apex, cp2, fp2], false, 'catmullrom', 0.5);
+
+        // Outer coronal sheath: hot blue cavity surrounding the flux rope
+        const envGeo = new THREE.TubeGeometry(curve, 44, 0.032, 7, false);
+        const envMat = new THREE.MeshBasicMaterial({
+            color: 0x3366dd, transparent: true, opacity: 0.20,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        envMat.userData.baseOpacity = 0.20;
+
+        // Dense H-alpha core: cool, draped plasma
+        const coreGeo = new THREE.TubeGeometry(curve, 44, 0.013, 6, false);
+        const coreMat = new THREE.MeshBasicMaterial({
+            color: 0xff3318, transparent: true, opacity: 0.60,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        coreMat.userData.baseOpacity = 0.60;
+
+        [[envGeo, envMat], [coreGeo, coreMat]].forEach(([geo, mat], mi) => {
+            const mesh = new THREE.Mesh(geo, mat);
+            scene.add(mesh);
+            prominenceMeshes.push(mesh);
+            prominencePhases.push(idx * 2.1 + mi * 1.55);
+        });
+    });
+}
+
+function updateProminences(t, flareStr) {
+    // Charge energy buffers: slow trickle from X-ray + random nanoflare bursts
+    for (let i = 0; i < 5; i++) {
+        arEnergyBuf[i] += 0.000015 + flareStr * 0.00018 + Math.random() * 0.000008;
+        arEnergyBuf[i]  = Math.min(arEnergyBuf[i], 1.05);
+    }
+
+    // Prominence oscillation: fast (Alfvénic, ~3–5 min) + slow (kink/sausage, ~10–20 min)
+    prominenceMeshes.forEach((m, idx) => {
+        const base = m.material.userData.baseOpacity ?? 0.3;
+        const φ    = prominencePhases[idx];
+        const fast = Math.sin(t * 0.18 + φ);
+        const slow = Math.sin(t * 0.07 + φ * 1.3);
+        m.material.opacity = base * (0.85 + 0.10 * fast + 0.05 * slow);
+    });
+}
+
+// Build quiet-sun coronal structure immediately (no AR data needed)
+buildCoronalLoops([], 0);
 
 // Build quick-select buttons in panel
 const btnContainer = document.getElementById('planet-btns');
@@ -1407,6 +1754,10 @@ function animate() {
     if (windVisible) updateWindParticles();
     if (cmeActive)   updateCME();
 
+    // Coronal magnetic structure animation
+    updateCoronalLoops(t);
+    updateProminences(t, sunUniforms.u_flare_str.value);
+
     // Smooth camera follow if body selected
     if (targetBody) {
         const tp = targetBody.mesh.position;
@@ -1503,7 +1854,6 @@ window.addEventListener('swpc-update', (e) => {
     for (let i = 0; i < 5; i++) {
         if (i < ars.length) {
             sunUniforms.u_ar_lat.value[i]  = ars[i].lat_rad;
-            // Subtract current sun rotation so the AR stays fixed on the surface
             sunUniforms.u_ar_lon.value[i]  = ars[i].lon_rad - sunMesh.rotation.y;
             sunUniforms.u_ar_area.value[i] = ars[i].area_norm;
         } else {
@@ -1512,6 +1862,19 @@ window.addEventListener('swpc-update', (e) => {
             sunUniforms.u_ar_area.value[i] = 0;
         }
     }
+
+    // Rebuild coronal loop + prominence geometry for new active-region layout
+    buildCoronalLoops(ars, sunMesh.rotation.y);
+    buildProminences(ars, sunMesh.rotation.y);
+
+    // Energy accumulator discharge: if any AR is > 0.95 and complex → erupt
+    ars.forEach((ar, idx) => {
+        if (arEnergyBuf[idx] > 0.95 && ar.is_complex && !cmeActive) {
+            console.log(`[Solar] AR ${ar.region ?? idx} reached torus instability — eruption`);
+            triggerCME({ lat_rad: ar.lat_rad, lon_rad: ar.lon_rad - sunMesh.rotation.y });
+            arEnergyBuf[idx] = 0.15;  // discharge — some flux remains post-eruption
+        }
+    });
 
     // 4. Planet wind shaders — scale by live solar-wind conditions
     //    Base windStr is the quiet-Sun value; live solar wind scales all effects.
