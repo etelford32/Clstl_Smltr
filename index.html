@@ -353,8 +353,88 @@
             font-size: .68rem; padding: 2px 7px; border-radius: 3px;
             font-weight: 700; letter-spacing: .05em;
         }
-        .src-noaa { background: rgba(0,180,255,.15); color: #50d0ff; border: 1px solid rgba(0,180,255,.3); }
-        .src-nasa { background: rgba(30,100,200,.2);  color: #80b0ff; border: 1px solid rgba(30,100,200,.4); }
+        .src-noaa   { background: rgba(0,180,255,.15);  color: #50d0ff; border: 1px solid rgba(0,180,255,.3); }
+        .src-nasa   { background: rgba(30,100,200,.2);  color: #80b0ff; border: 1px solid rgba(30,100,200,.4); }
+        .src-jpl    { background: rgba(200,80,20,.18);  color: #ff9966; border: 1px solid rgba(200,80,20,.4); }
+        .src-soho   { background: rgba(80,180,80,.15);  color: #80ee80; border: 1px solid rgba(80,180,80,.3); }
+        .src-stereo { background: rgba(160,80,220,.18); color: #cc99ff; border: 1px solid rgba(160,80,220,.4); }
+
+        /* ─── Live planet + NEO widgets ──────────────────────────────────── */
+        .live-widgets {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.2rem;
+            margin-bottom: 3rem;
+        }
+        @media (max-width: 800px) { .live-widgets { grid-template-columns: 1fr; } }
+        .widget-box {
+            background: rgba(0,0,0,.4);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px;
+            padding: 1.2rem 1.4rem;
+            font-family: 'Courier New', monospace;
+        }
+        .widget-title {
+            font-size: .78rem; font-weight: 700; letter-spacing: .07em;
+            color: #ffd700; margin-bottom: .9rem;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .widget-status {
+            font-size: .65rem; padding: 2px 7px; border-radius: 3px;
+            font-weight: 700;
+        }
+        .widget-status.live    { background: rgba(0,200,100,.18); color:#4eff91; border:1px solid rgba(0,200,100,.3); }
+        .widget-status.stale   { background: rgba(255,200,0,.15); color:#ffd700; border:1px solid rgba(255,200,0,.3); }
+        .widget-status.offline { background: rgba(255,60,60,.15);  color:#ff6060; border:1px solid rgba(255,60,60,.3); }
+        .planet-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.04);
+            font-size: .73rem;
+        }
+        .planet-row:last-child { border-bottom: none; }
+        .planet-name { color: #ccc; width: 80px; }
+        .planet-dist { color: #ffd700; text-align: right; }
+        .planet-lon  { color: #7a7aaa; text-align: right; font-size: .68rem; }
+        .neo-row {
+            display: flex; align-items: flex-start; gap: 8px;
+            padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,.04);
+            font-size: .72rem;
+        }
+        .neo-row:last-child { border-bottom: none; }
+        .neo-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+        .neo-dot.safe { background: #4eff91; }
+        .neo-dot.warn { background: #ffd700; box-shadow: 0 0 6px #ffd700; }
+        .neo-dot.pha  { background: #ff4444; box-shadow: 0 0 6px #ff4444; animation: blinkPHA 1.5s ease-in-out infinite; }
+        @keyframes blinkPHA { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+        .neo-name { color: #ddd; flex: 1; line-height: 1.3; }
+        .neo-meta { color: #7a7aaa; font-size: .67rem; margin-top: 1px; }
+        .neo-dist { color: #80b0ff; text-align: right; white-space: nowrap; }
+        .widget-empty { color: #555; font-size: .78rem; text-align: center; padding: 1rem 0; }
+
+        /* ─── SOHO image strip ────────────────────────────────────────────── */
+        .soho-strip {
+            display: flex; gap: .7rem; overflow-x: auto; padding-bottom: .4rem;
+            margin-bottom: 3rem;
+            scrollbar-width: thin; scrollbar-color: rgba(255,200,0,.3) transparent;
+        }
+        .soho-frame {
+            flex-shrink: 0; border-radius: 8px; overflow: hidden;
+            border: 1px solid rgba(255,255,255,.1);
+            position: relative; cursor: pointer;
+            transition: transform .2s, box-shadow .2s;
+        }
+        .soho-frame:hover { transform: scale(1.04); box-shadow: 0 6px 24px rgba(255,200,0,.3); }
+        .soho-frame img { display: block; width: 160px; height: 160px; object-fit: cover; }
+        .soho-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,.85));
+            font-size: .62rem; color: #aaa; padding: 12px 5px 4px;
+            text-align: center; font-family: 'Courier New', monospace;
+        }
+        .soho-section-title {
+            font-size: 1.1rem; color: #80ee80; font-weight: 700;
+            margin-bottom: .8rem; letter-spacing: .04em;
+        }
 
         /* ─── Footer ──────────────────────────────────────────────────────── */
         footer {
@@ -691,7 +771,7 @@
     <!-- ════════════════════════════════ NASA / NOAA DATA SECTION ═══ -->
     <div class="data-section">
         <h2>&#127759; Live NASA &amp; NOAA Data Streams</h2>
-        <p class="subtitle">All feeds are public, CORS-enabled APIs — no API key needed for NOAA. NASA DONKI uses a free demo key.</p>
+        <p class="subtitle">All feeds are public, CORS-enabled APIs — no API key needed for NOAA or JPL Horizons. NASA DONKI &amp; NeoWs use a free demo key.</p>
         <div class="data-grid">
 
             <div class="data-card">
@@ -721,7 +801,7 @@
 
             <div class="data-card">
                 <h4><span class="data-source-label src-noaa">NOAA</span> Energetic Proton Flux</h4>
-                <p>GOES integral proton channels (&gt;10, &gt;50, &gt;100 MeV) — detects Solar Energetic Particle (SEP) events and radiation storm levels (S1–S5).</p>
+                <p>GOES integral proton channels (&gt;10 &amp; &gt;100 MeV) — detects Solar Energetic Particle events and radiation storm levels (S1–S5).</p>
             </div>
 
             <div class="data-card">
@@ -752,6 +832,64 @@
             <div class="data-card">
                 <h4><span class="data-source-label src-nasa">NASA</span> DONKI — SEP Events</h4>
                 <p>Solar Energetic Particle event catalogue from NASA DONKI — onset times, peak fluxes, and linked CME/flare associations.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-soho">SOHO</span> LASCO Coronagraphs C2 &amp; C3</h4>
+                <p>Live SOHO/LASCO coronagraph images — C2 covers 2–6 solar radii (inner corona), C3 covers 3–30 solar radii (CME detection). Updated every ~20 min.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-soho">SDO</span> AIA Multi-wavelength Imagery</h4>
+                <p>NASA Solar Dynamics Observatory AIA images at 8 wavelengths — 171Å (coronal loops), 193Å (1.5 MK corona), 304Å (chromosphere), 1600Å (UV), HMI magnetogram. Updated every ~12 min.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-stereo">STEREO</span> STEREO-A SECCHI Beacon</h4>
+                <p>STEREO-A spacecraft COR2 coronagraph and EUVI 195Å images from its L4 vantage point — shows the Sun's far side. Position tracked via JPL Horizons.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-jpl">JPL</span> Horizons Real-Time Ephemeris</h4>
+                <p>JPL HORIZONS REST API — live heliocentric XYZ positions (AU) for all 8 planets, the Moon, and STEREO-A. No API key required. Updated hourly in-sim.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-nasa">NASA</span> NeoWs — Near-Earth Objects</h4>
+                <p>NASA NeoWs API — close-approach list for the next 7 days. Includes miss distance (km / lunar), relative velocity, diameter estimate, and hazard flag (PHA).</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════ SOHO/SDO LIVE IMAGE STRIP ═══ -->
+    <div id="soho-section" style="margin-bottom:3rem; display:none">
+        <p class="soho-section-title">&#127775; Live Solar Observatory Images <span style="font-size:.75rem;color:#7a7aaa;font-weight:400;margin-left:6px;">— click to open full-res in new tab</span></p>
+        <div class="soho-strip" id="soho-strip">
+            <!-- populated by JS -->
+        </div>
+    </div>
+
+    <!-- ═══════════════════════ LIVE PLANET POSITIONS + NEO WIDGETS ═══ -->
+    <div class="live-widgets">
+        <!-- Planet positions -->
+        <div class="widget-box">
+            <div class="widget-title">
+                &#9728; Planetary Positions (JPL Horizons)
+                <span class="widget-status offline" id="hor-status">loading…</span>
+            </div>
+            <div id="hor-body">
+                <div class="widget-empty">Fetching ephemeris…</div>
+            </div>
+        </div>
+
+        <!-- Near-Earth Asteroids -->
+        <div class="widget-box">
+            <div class="widget-title">
+                &#9762; Near-Earth Objects (NeoWs)
+                <span class="widget-status offline" id="neo-status">loading…</span>
+            </div>
+            <div id="neo-body">
+                <div class="widget-empty">Fetching asteroid data…</div>
             </div>
         </div>
     </div>
@@ -830,6 +968,126 @@
         });
     });
 })();
+</script>
+
+<!-- ══════════════════════════════ EXTENDED FEEDS (Horizons · NEO · SOHO) ═══ -->
+<script type="module">
+import { SohoFeed, HorizonsFeed, NeoFeed, SOHO_IMAGES, STEREO_IMAGES }
+    from './js/extended-feeds.js';
+
+// ── SOHO / SDO image strip ────────────────────────────────────────────────────
+const SOHO_LABELS = {
+    sdo_aia171:  'SDO AIA 171Å',
+    sdo_aia193:  'SDO AIA 193Å',
+    sdo_aia211:  'SDO AIA 211Å',
+    sdo_aia304:  'SDO AIA 304Å',
+    sdo_hmi_ic:  'HMI Continuum',
+    sdo_hmi_mag: 'HMI Magnetogram',
+    lasco_c2:    'LASCO C2',
+    lasco_c3:    'LASCO C3',
+    eit_195:     'SOHO EIT 195',
+};
+const STEREO_LABELS = {
+    cor2:    'STEREO-A COR2',
+    euvi195: 'STEREO-A EUVI',
+};
+
+window.addEventListener('soho-update', e => {
+    const strip = document.getElementById('soho-strip');
+    const sec   = document.getElementById('soho-section');
+    if (!strip) return;
+    strip.innerHTML = '';
+    // SDO + SOHO frames
+    for (const [key, url] of Object.entries(e.detail.images)) {
+        const label = SOHO_LABELS[key] ?? key;
+        const frame = document.createElement('div');
+        frame.className = 'soho-frame';
+        frame.title = label;
+        frame.addEventListener('click', () => window.open(url, '_blank'));
+        frame.innerHTML = `<img src="${url}" alt="${label}" loading="lazy">
+            <div class="soho-label">${label}</div>`;
+        strip.appendChild(frame);
+    }
+    // STEREO frames
+    for (const [key, url] of Object.entries(e.detail.stereo_images)) {
+        const label = STEREO_LABELS[key] ?? key;
+        const frame = document.createElement('div');
+        frame.className = 'soho-frame';
+        frame.title = label;
+        frame.addEventListener('click', () => window.open(url, '_blank'));
+        frame.innerHTML = `<img src="${url}" alt="${label}" loading="lazy">
+            <div class="soho-label">${label}</div>`;
+        strip.appendChild(frame);
+    }
+    sec.style.display = '';
+});
+
+// ── JPL Horizons planetary positions ─────────────────────────────────────────
+const PLANET_EMOJI = {
+    mercury:'☿', venus:'♀', earth:'🌍', mars:'♂',
+    jupiter:'♃', saturn:'♄', uranus:'⛢', neptune:'♆',
+    moon:'🌙', stereo_a:'🛰',
+};
+const BODY_ORDER = ['mercury','venus','earth','mars','jupiter','saturn','uranus','neptune','moon','stereo_a'];
+
+window.addEventListener('horizons-update', e => {
+    const el  = document.getElementById('hor-body');
+    const sta = document.getElementById('hor-status');
+    if (!el) return;
+    const b = e.detail.bodies;
+    sta.textContent = e.detail.status;
+    sta.className   = 'widget-status ' + e.detail.status;
+    if (!Object.keys(b).length) return;
+    el.innerHTML = BODY_ORDER.map(name => {
+        const p = b[name];
+        if (!p) return '';
+        const distStr = p.r != null ? p.r.toFixed(3) + ' AU' : '—';
+        const lonStr  = p.lon_deg != null ? p.lon_deg.toFixed(1) + '°' : '';
+        const label   = name.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+        return `<div class="planet-row">
+            <span class="planet-name">${PLANET_EMOJI[name]??'●'} ${label}</span>
+            <span class="planet-dist">${distStr}</span>
+            <span class="planet-lon">${lonStr}</span>
+        </div>`;
+    }).join('');
+});
+
+// ── NeoWs asteroid list ───────────────────────────────────────────────────────
+window.addEventListener('neo-update', e => {
+    const el  = document.getElementById('neo-body');
+    const sta = document.getElementById('neo-status');
+    if (!el) return;
+    sta.textContent = e.detail.status;
+    sta.className   = 'widget-status ' + e.detail.status;
+    const list = e.detail.closest.slice(0, 8);
+    if (!list.length) { el.innerHTML = '<div class="widget-empty">No data</div>'; return; }
+    el.innerHTML = list.map(neo => {
+        const ld   = neo.miss_lunar.toFixed(1);
+        const km   = (neo.miss_km / 1e6).toFixed(2);
+        const diam = neo.diam_mid_km ? neo.diam_mid_km.toFixed(2) + ' km' : '?';
+        const dot  = neo.hazardous ? 'pha' : neo.miss_lunar < 5 ? 'warn' : 'safe';
+        const name = neo.name.replace(/[()]/g,'').trim().slice(0, 28);
+        return `<div class="neo-row">
+            <span class="neo-dot ${dot}"></span>
+            <span class="neo-name">${name}
+                <div class="neo-meta">${neo.close_date ?? ''} · ⌀ ${diam} · ${neo.velocity_kms.toFixed(1)} km/s</div>
+            </span>
+            <span class="neo-dist">${ld} LD<br><span style="font-size:.65rem;color:#555">${km}M km</span></span>
+        </div>`;
+    }).join('');
+    // Count label
+    const total = e.detail.element_count;
+    const pha   = e.detail.hazardous.length;
+    const info  = document.createElement('div');
+    info.style.cssText = 'margin-top:.6rem;font-size:.67rem;color:#555;text-align:right';
+    info.textContent   = `${total} tracked this week · ${pha} PHA${pha!==1?'s':''}`;
+    el.appendChild(info);
+});
+
+// Start feeds
+new SohoFeed().start();
+new HorizonsFeed().start();
+new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 </script>
 
 <!-- ═══════════════════════════════════════ LIVE SPACE WEATHER BAR ═══ -->
