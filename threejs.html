@@ -378,6 +378,26 @@ nav {
                 </div>
             </div>
 
+            <!-- Earth Space Weather Panel — shown only when Earth is selected -->
+            <div class="sec" id="sec-earth-sw" style="display:none">
+                <div class="sec-hd"><span>🌍 Space Weather at Earth</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl" id="earth-sw-table">
+                        <tr><td>Storm level</td><td id="esw-storm" style="font-weight:600">G0 — Quiet</td></tr>
+                        <tr><td>Dst index</td><td id="esw-dst">~0 nT</td></tr>
+                        <tr><td>Magnetopause</td><td id="esw-msp">~10.0 Re</td></tr>
+                        <tr><td>Radiation storm</td><td id="esw-sep">S0 — None</td></tr>
+                        <tr><td>Aurora power</td><td id="esw-aurora">— GW</td></tr>
+                        <tr><td>HF radio</td><td id="esw-hf">Clear</td></tr>
+                        <tr><td>Plasmasphere</td><td id="esw-plasma">Intact (~4 Re)</td></tr>
+                        <tr><td>IMF Bz</td><td id="esw-bz">—</td></tr>
+                    </table>
+                    <div id="esw-alert" style="display:none;margin-top:8px;padding:6px 8px;border-radius:5px;
+                         font-size:10px;background:rgba(255,60,60,.15);border:1px solid rgba(255,60,60,.4);
+                         color:#ff8080;line-height:1.5"></div>
+                </div>
+            </div>
+
             <!-- Planets quick-select -->
             <div class="sec" id="sec-select">
                 <div class="sec-hd"><span>Bodies</span><span class="arrow">▼</span></div>
@@ -831,6 +851,11 @@ const planetFS = /* glsl */`
     uniform float u_mag;       // magnetic-field strength 0–1
     uniform float u_atm;       // atmosphere thickness   0–1
     uniform vec3  u_windClr;   // characteristic interaction color
+    // ── Earth heliophysics uniforms (non-Earth planets receive 0.0) ─
+    uniform float u_kp;        // raw Kp index 0–9
+    uniform float u_bz_s;      // southward IMF Bz normalised 0–1
+    uniform float u_xray;      // GOES X-ray intensity 0–1
+    uniform float u_storm;     // NOAA G-scale 0–5
 
     varying vec3 vWorldNormal;
     varying vec3 vWorldPos;
@@ -848,7 +873,6 @@ const planetFS = /* glsl */`
         vec3 col = u_base * (max(sunFace, 0.0) * 0.88 + 0.08);
 
         // ── Atmospheric limb scatter (sunward side) ─────────────────
-        // Hazes glow cyan/yellow at the day-lit edge
         if (u_atm > 0.0) {
             float scatter = pow(max(rim, 0.0), 2.2) * max(sunFace + 0.55, 0.0);
             col += u_windClr * scatter * u_atm * 0.38 * u_windStr;
@@ -856,35 +880,70 @@ const planetFS = /* glsl */`
 
         // ── Magnetosphere bow-shock (electric glow on sunward limb) ─
         if (u_mag > 0.0) {
-            float bow     = pow(rim * max(sunFace + 0.25, 0.0), 1.8);
-            float flicker = 0.80 + 0.20 * sin(u_time * 4.2 + vWorldPos.y * 7.0);
+            float bow = pow(rim * max(sunFace + 0.25, 0.0), 1.8);
+            // Flicker intensifies and quickens during southward Bz (reconnection)
+            float flicker = 0.80 + 0.20 * sin(u_time * 4.2 + vWorldPos.y * 7.0)
+                          - u_bz_s * 0.18 * sin(u_time * 7.8 + vWorldPos.y * 14.0);
             col += vec3(0.12, 0.52, 1.0) * bow * u_mag * u_windStr * 0.55 * flicker;
         }
 
         // ── Direct-bombardment sputtering (unshielded surface) ──────
         float exposed = (1.0 - u_mag) * (1.0 - min(u_atm * 0.9, 1.0));
         if (exposed > 0.0) {
-            float impact = pow(max(sunFace, 0.0), 1.4);
+            float impact  = pow(max(sunFace, 0.0), 1.4);
             float sputter = 0.75 + 0.25 * sin(u_time * 5.5 + nrm.x * 9.0 + nrm.z * 9.0);
             col += vec3(1.0, 0.42, 0.08) * impact * exposed * u_windStr * 0.38 * sputter;
         }
 
         // ── Polar aurora (planets with a significant magnetic field) ─
         if (u_mag > 0.08) {
-            float absLat = abs(nrm.y);
-            // Auroral oval: ~60–80° magnetic latitude
-            float aZone  = smoothstep(0.50, 0.72, absLat)
-                         * (1.0 - smoothstep(0.86, 0.97, absLat));
-            float aTime  = u_time * 1.9 + vWorldPos.x * 5.0 + vWorldPos.z * 5.0;
-            float aPulse = 0.55 + 0.45 * sin(aTime);
-            // Green at lower latitudes → blue/violet poleward
-            vec3  aCol   = mix(vec3(0.0, 1.0, 0.28),
-                               vec3(0.18, 0.42, 1.0),
-                               clamp((absLat - 0.50) / 0.36, 0.0, 1.0));
-            // Curtain on the lit disk surface
+            float absLat = abs(nrm.y);   // sin(magnetic latitude): 0=equator, 1=pole
+
+            // Kp-dependent auroral oval centre latitude (NOAA AE/Kp empirical model)
+            //   Kp 0 → ~70° lat (sin ≈ 0.940) — quiet, confined to polar cap
+            //   Kp 5 → ~59° lat (sin ≈ 0.858) — moderate storm, equatorward expansion
+            //   Kp 9 → ~50° lat (sin ≈ 0.766) — extreme storm, mid-latitude aurora
+            float kpN     = clamp(u_kp, 0.0, 9.0);
+            float ovalCtr = 0.940 - kpN * 0.0197;
+            float ovalW   = 0.045 + (kpN / 9.0) * 0.055;  // oval widens with storm level
+
+            float aZone   = smoothstep(ovalCtr - ovalW * 1.5, ovalCtr, absLat)
+                          * (1.0 - smoothstep(ovalCtr + ovalW * 0.4, ovalCtr + ovalW * 1.5, absLat));
+
+            // Reconnection-driven pulsing — faster during southward Bz
+            float pRate  = 1.9 + u_bz_s * 4.5;
+            float aPulse = 0.50 + 0.50 * sin(u_time * pRate + vWorldPos.x * 5.0 + vWorldPos.z * 5.0);
+
+            // Color: green (lower oval edge) → blue/violet (poleward into cap)
+            float latFrac = clamp((absLat - (ovalCtr - ovalW)) / (ovalW * 2.5), 0.0, 1.0);
+            vec3  aCol    = mix(vec3(0.0, 1.0, 0.28), vec3(0.18, 0.42, 1.0), latFrac);
+
+            // G4+ storms: main oval takes on red SAR-arc tones (low-altitude O emission)
+            float strmFrac = clamp((u_storm - 2.5) / 2.5, 0.0, 1.0);
+            aCol = mix(aCol, vec3(0.95, 0.10, 0.05), strmFrac * 0.45 * (1.0 - latFrac));
+
             col += aCol * aZone * facing * aPulse * u_mag * u_windStr * 0.95;
-            // Glowing ring visible at the planet's limb from outside
             col += aCol * aZone * rim    * aPulse * u_mag * u_windStr * 0.65;
+
+            // Sub-auroral red arcs (SARs) — appear equatorward of oval during G3+ storms
+            // Caused by ring-current ion precipitation into low-altitude thermosphere
+            if (u_storm >= 3.0) {
+                float sarCtr  = ovalCtr - ovalW * 1.9;
+                float sarW    = ovalW * 0.8;
+                float sarZone = smoothstep(sarCtr - sarW, sarCtr, absLat)
+                              * (1.0 - smoothstep(sarCtr + sarW * 0.25, sarCtr + sarW, absLat));
+                float sarPulse = 0.6 + 0.4 * sin(u_time * 0.9 + vWorldPos.z * 3.0);
+                col += vec3(0.92, 0.06, 0.0) * sarZone * strmFrac * facing * 0.50 * sarPulse;
+            }
+        }
+
+        // ── Ionospheric X-ray flash (dayside D-layer, HF radio blackout) ──
+        // Solar X-ray / EUV flares over-ionise the dayside D-layer (60–90 km).
+        // Visible as a brightening of the sunlit disk — white-blue tint.
+        if (u_xray > 0.30 && u_atm > 0.0) {
+            float flashStr = (u_xray - 0.30) / 0.70;
+            float ionoGlow = pow(max(sunFace, 0.0), 0.65) * flashStr;
+            col += vec3(0.85, 0.92, 1.0) * ionoGlow * u_atm * 0.42;
         }
 
         // ── Night-side ion tail (anti-sunward limb glow) ─────────────
@@ -1117,6 +1176,238 @@ PLANETS.forEach(p => {
         p.mesh.add(ring);
     }
 });
+
+// ═══════════════════════════════════════════════════════
+//  EARTH HELIOPHYSICS SYSTEM
+// ═══════════════════════════════════════════════════════
+// Five independent 3D structures around Earth, all driven by live NOAA SWPC data:
+//   1. Magnetosphere  — Chapman-Ferraro paraboloid (compressed dayside, elongated tail)
+//   2. Inner radiation belt (Van Allen proton belt, ~1.5 Re, yellow)
+//   3. Outer radiation belt (Van Allen electron belt, ~4.5 Re, blue)
+//   4. Ring current torus (~3.5 Re, red/orange, Kp-driven)
+//   5. Ionosphere shell (1.07 Re, blue→white during X-ray flares)
+//   6. Plasmasphere (4 Re, cyan, erodes during geomagnetic storms)
+
+const earthP = PLANETS.find(p => p.name === 'Earth');
+const earthR = earthP.radius;   // 0.12 sim units = 1 Re in this scene
+
+// ── Patch extra uniforms onto ALL planet shader materials ─────────────────────
+// (All planets share planetFS, so all must define every uniform declared there.
+//  Non-Earth planets keep these at 0, which produces no visible change.)
+PLANETS.forEach(p => {
+    if (!p.uniforms) return;
+    p.uniforms.u_kp    = { value: 0.0 };
+    p.uniforms.u_bz_s  = { value: 0.0 };
+    p.uniforms.u_xray  = { value: 0.0 };
+    p.uniforms.u_storm = { value: 0.0 };
+});
+
+// ── Shared simple vertex shader (no distortion) ───────────────────────────────
+const simpleVS = `void main(){gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. MAGNETOSPHERE
+//    Vertex shader distorts a sphere into a Chapman-Ferraro paraboloid:
+//      • Dayside (cos θ > 0): ~1.3× radius at sub-solar point (bow shock)
+//      • Flanks  (cos θ ≈ 0): nominal magnetopause at ~10 Re
+//      • Nightside tail: stretches to ~35 Re at anti-solar point
+//    u_standoff scales the whole structure with solar-wind dynamic pressure.
+// ─────────────────────────────────────────────────────────────────────────────
+const msVS = /* glsl */`
+    uniform vec3  u_sun_dir;   // Earth→Sun unit vector (world space = local space here)
+    uniform float u_standoff;  // pressure-scaled size factor (1.0 = nominal 10 Re standoff)
+    varying float vSunDot;
+    varying vec3  vWorldPos;
+    void main() {
+        vec3  dir   = normalize(position);
+        float cos_t = dot(dir, u_sun_dir);
+        float day   = max(cos_t, 0.0);
+        float night = max(-cos_t, 0.0);
+        // Shape: blunt dayside + elongated nightside tail
+        float r = length(position) * (1.0 + day * 0.30 + night * night * 2.50) * u_standoff;
+        vec3  newPos = dir * r;
+        vec4  wp     = modelMatrix * vec4(newPos, 1.0);
+        vWorldPos    = wp.xyz;
+        vSunDot      = cos_t;
+        gl_Position  = projectionMatrix * viewMatrix * wp;
+    }
+`;
+const msFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_kp;
+    uniform float u_bz_s;
+    varying float vSunDot;
+    varying vec3  vWorldPos;
+    void main() {
+        float dayFrac  = clamp(vSunDot * 0.5 + 0.5, 0.0, 1.0);
+        vec3  col      = mix(vec3(0.06, 0.02, 0.25), vec3(0.08, 0.50, 1.00), dayFrac);
+        // Bow-shock brightening near sub-solar point + terminator ring
+        float bow  = pow(max(vSunDot, 0.0), 6.0) * 0.80;
+        float term = exp(-vSunDot * vSunDot * 5.0) * 0.18;
+        col += vec3(0.05, 0.55, 1.0) * (bow + term);
+        // Reconnection flicker during southward Bz (dayside erosion)
+        float flick = 1.0 - u_bz_s * 0.35 * (0.5 + 0.5 * sin(u_time * 5.3 + vWorldPos.y * 12.0));
+        col *= flick;
+        // G3+ storms: reddish flanks (ring-current influence on magnetopause)
+        float kpFrac  = clamp(u_kp / 9.0, 0.0, 1.0);
+        float flankM  = (1.0 - vSunDot * vSunDot);
+        col += vec3(0.55, 0.0, 0.0) * flankM * kpFrac * kpFrac * 0.45;
+        float alpha = 0.055 + bow * 0.07 + term * 0.05 + kpFrac * 0.025;
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const msUniforms = {
+    u_sun_dir:  { value: new THREE.Vector3(1, 0, 0) },
+    u_standoff: { value: 1.0 },
+    u_time:     { value: 0.0 },
+    u_kp:       { value: 0.0 },
+    u_bz_s:     { value: 0.0 },
+};
+// Base sphere radius = 10 Re in sim units; vertex shader shapes it into magnetosphere
+const msMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(earthR * 10, 48, 48),
+    new THREE.ShaderMaterial({
+        vertexShader: msVS, fragmentShader: msFS, uniforms: msUniforms,
+        transparent: true, depthWrite: false,
+        side: THREE.BackSide, blending: THREE.AdditiveBlending,
+    })
+);
+scene.add(msMesh);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2 & 3. VAN ALLEN RADIATION BELTS
+//    Two toroidal shells of energetic particles trapped by Earth's dipole field.
+//    Inner belt (~1.5 Re): mostly energetic protons — yellow/white.
+//    Outer belt (~4.5 Re): mostly relativistic electrons — blue.
+//    Intensity driven by live GOES proton/electron flux from NOAA SWPC.
+// ─────────────────────────────────────────────────────────────────────────────
+const vaBeltFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_intensity;  // 0–1, from live NOAA particle flux
+    uniform vec3  u_clr;
+    void main() {
+        float pulse = 0.72 + 0.28 * sin(u_time * 2.1 + gl_FragCoord.x * 0.09);
+        float alpha = clamp(u_intensity, 0.03, 1.0) * pulse * 0.28;
+        gl_FragColor = vec4(u_clr * (0.8 + u_intensity * 0.7), alpha);
+    }
+`;
+// Inner proton belt (~1.5 Re radius, 0.3 Re tube thickness)
+const innerBeltUni = {
+    u_time:      { value: 0.0 },
+    u_intensity: { value: 0.15 },
+    u_clr:       { value: new THREE.Vector3(1.0, 0.85, 0.30) },  // yellow-white
+};
+const innerBelt = new THREE.Mesh(
+    new THREE.TorusGeometry(earthR * 1.5, earthR * 0.30, 12, 80),
+    new THREE.ShaderMaterial({
+        vertexShader: simpleVS, fragmentShader: vaBeltFS, uniforms: innerBeltUni,
+        transparent: true, depthWrite: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    })
+);
+innerBelt.rotation.x = Math.PI / 2;   // lie in XZ ecliptic plane
+scene.add(innerBelt);
+
+// Outer electron belt (~4.5 Re radius, 1.1 Re tube thickness — much broader)
+const outerBeltUni = {
+    u_time:      { value: 0.0 },
+    u_intensity: { value: 0.25 },
+    u_clr:       { value: new THREE.Vector3(0.25, 0.50, 1.00) },  // blue
+};
+const outerBelt = new THREE.Mesh(
+    new THREE.TorusGeometry(earthR * 4.5, earthR * 1.10, 12, 80),
+    new THREE.ShaderMaterial({
+        vertexShader: simpleVS, fragmentShader: vaBeltFS, uniforms: outerBeltUni,
+        transparent: true, depthWrite: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    })
+);
+outerBelt.rotation.x = Math.PI / 2;
+scene.add(outerBelt);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. RING CURRENT
+//    Hot plasma torus at 3–4 Re, injected from the plasma sheet during storms.
+//    The ring current is the primary cause of the Dst (now Sym-H) index drop.
+//    Appears only during Kp > 2.5; intensifies strongly with storm level.
+// ─────────────────────────────────────────────────────────────────────────────
+const rcFS = /* glsl */`
+    uniform float u_time;
+    uniform float u_kp;
+    void main() {
+        float kpFrac = clamp((u_kp - 2.5) / 6.5, 0.0, 1.0);
+        float pulse  = 0.65 + 0.35 * sin(u_time * 1.6 + gl_FragCoord.y * 0.05);
+        vec3  col    = mix(vec3(0.55, 0.00, 0.00), vec3(1.00, 0.35, 0.00), kpFrac);
+        float alpha  = kpFrac * kpFrac * pulse * 0.28;
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+const rcUniforms = { u_time: { value: 0.0 }, u_kp: { value: 0.0 } };
+const ringCurrentMesh = new THREE.Mesh(
+    new THREE.TorusGeometry(earthR * 3.5, earthR * 0.90, 12, 80),
+    new THREE.ShaderMaterial({
+        vertexShader: simpleVS, fragmentShader: rcFS, uniforms: rcUniforms,
+        transparent: true, depthWrite: false,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+    })
+);
+ringCurrentMesh.rotation.x = Math.PI / 2;
+scene.add(ringCurrentMesh);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. IONOSPHERE / THERMOSPHERE SHELL
+//    Thin glowing shell at 1.07 Re (~450 km altitude — peak F-layer).
+//    Normally faint blue (background EUV ionization).
+//    Brightens to white-blue during X-ray flares (D-layer over-ionization → HF blackout).
+//    Also responds to F10.7 flux (solar cycle EUV proxy).
+// ─────────────────────────────────────────────────────────────────────────────
+const ionoFS = /* glsl */`
+    uniform float u_xray;   // GOES X-ray intensity 0–1
+    uniform float u_f107;   // F10.7 radio flux normalised 0–1
+    uniform float u_time;
+    void main() {
+        float baseA  = 0.040 + u_f107 * 0.040;
+        float flare  = u_xray * u_xray * 0.28;
+        vec3  col    = mix(vec3(0.15, 0.55, 1.0), vec3(1.0, 0.92, 0.8), u_xray * 0.75);
+        float pulse  = 1.0 + 0.04 * sin(u_time * 0.5);
+        gl_FragColor = vec4(col * pulse, baseA + flare);
+    }
+`;
+const ionoUni = { u_xray: { value: 0.0 }, u_f107: { value: 0.3 }, u_time: { value: 0.0 } };
+const ionoMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(earthR * 1.07, 32, 32),
+    new THREE.ShaderMaterial({
+        vertexShader: simpleVS, fragmentShader: ionoFS, uniforms: ionoUni,
+        transparent: true, depthWrite: false,
+        side: THREE.FrontSide, blending: THREE.AdditiveBlending,
+    })
+);
+scene.add(ionoMesh);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. PLASMASPHERE
+//    Cold, dense plasma torus extending to ~4 Re corotating with Earth.
+//    During geomagnetic storms, the outer plasmasphere drains tailward
+//    (plasmaspheric erosion) — modeled as shrinking opacity with Kp.
+// ─────────────────────────────────────────────────────────────────────────────
+const plasmaFS = /* glsl */`
+    uniform float u_kp;
+    void main() {
+        float erosion = 1.0 - clamp(u_kp / 8.5, 0.0, 0.80);
+        float alpha   = 0.032 * erosion;
+        gl_FragColor  = vec4(0.25, 0.80, 1.0, alpha);
+    }
+`;
+const plasmaUni = { u_kp: { value: 0.0 } };
+const plasmaMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(earthR * 4.0, 32, 32),
+    new THREE.ShaderMaterial({
+        vertexShader: simpleVS, fragmentShader: plasmaFS, uniforms: plasmaUni,
+        transparent: true, depthWrite: false,
+        side: THREE.BackSide, blending: THREE.AdditiveBlending,
+    })
+);
+scene.add(plasmaMesh);
 
 // ═══════════════════════════════════════════════════════
 //  MOON MESHES + ORBIT RINGS
@@ -1972,6 +2263,9 @@ function selectBody(p) {
         panelType.textContent = p.type;
         tbl.innerHTML = Object.entries(p.data)
             .map(([k,v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+        // Show Earth heliophysics panel only for Earth
+        document.getElementById('sec-earth-sw').style.display =
+            p.name === 'Earth' ? '' : 'none';
         // Snap camera to orbit altitude on next update
         targetBody = p;
     }
@@ -2100,6 +2394,22 @@ function animate() {
         }
     });
     sunMesh.rotation.y += 0.0012;
+
+    // ── Earth heliophysics objects: follow Earth's orbital position ───────────
+    const ep = earthP.mesh.position;
+    msMesh.position.copy(ep);
+    innerBelt.position.copy(ep);
+    outerBelt.position.copy(ep);
+    ringCurrentMesh.position.copy(ep);
+    ionoMesh.position.copy(ep);
+    plasmaMesh.position.copy(ep);
+    // Magnetosphere sun direction = Earth→Sun = -normalize(earthPos)
+    msUniforms.u_sun_dir.value.copy(ep).negate().normalize();
+    msUniforms.u_time.value = t;
+    innerBeltUni.u_time.value = t;
+    outerBeltUni.u_time.value = t;
+    rcUniforms.u_time.value   = t;
+    ionoUni.u_time.value      = t;
 
     // Asteroid belt slow orbital rotation (avg ~4.5 yr period)
     asteroidBelt.rotation.y = (simTime / 4.5) * Math.PI * 2;
@@ -2245,21 +2555,129 @@ window.addEventListener('swpc-update', (e) => {
     });
 
     // 4. Planet wind shaders — scale by live solar-wind conditions
-    //    Base windStr is the quiet-Sun value; live solar wind scales all effects.
     const liveScale = 0.50 + d.wind_speed_norm * 1.50;
     PLANETS.forEach(p => {
         if (!p.uniforms) return;
         let ws = p.windStr * liveScale;
-        // Earth gets an extra Kp + southward-Bz aurora boost
         if (p.name === 'Earth') {
             ws *= 1.0 + d.kp_norm * 2.2 + d.bz_southward * 2.8;
         }
-        // Jupiter / Saturn: their own aurora can flare with solar wind density spikes
         if (p.name === 'Jupiter' || p.name === 'Saturn') {
             ws *= 1.0 + d.wind_density_norm * 0.6;
         }
         p.uniforms.u_windStr.value = ws;
     });
+
+    // ── Earth heliophysics uniforms (planet shader) ───────────────────────────
+    const kpRaw = sw.kp ?? 0;
+    const earthU = earthP.uniforms;
+    earthU.u_kp.value    = kpRaw;
+    earthU.u_bz_s.value  = d.bz_southward;
+    earthU.u_xray.value  = d.xray_intensity;
+    earthU.u_storm.value = d.storm_level;
+
+    // ── Magnetosphere: size driven by solar-wind dynamic pressure ─────────────
+    // P_dyn = n × v² (proportional); standoff ∝ P_dyn^(-1/6) (Chapman-Ferraro)
+    {
+        const v    = sw.solar_wind.speed   ?? 400.0;
+        const n    = Math.max(sw.solar_wind.density ?? 5.0, 0.1);
+        const Pnow = n * v * v;
+        const Pref = 5.0 * 400 * 400;   // quiet-Sun reference
+        const standoff = Math.max(0.50, Math.min(1.35, Math.pow(Pref / Pnow, 1/6)));
+        msUniforms.u_standoff.value = standoff;
+        msUniforms.u_kp.value       = kpRaw;
+        msUniforms.u_bz_s.value     = d.bz_southward;
+        // Store for panel display (standoff in Earth radii at sub-solar point)
+        sw._msp_Re = (10 * standoff * (1.0 + 0.30)).toFixed(1);  // ~13 Re nominal
+    }
+
+    // ── Van Allen radiation belts ─────────────────────────────────────────────
+    // Inner (proton belt): driven by >10 MeV proton flux — SEP events brighten it sharply
+    innerBeltUni.u_intensity.value = 0.12 + (d.proton_10mev_norm ?? 0) * 0.72;
+    // Outer (electron belt): driven by >2 MeV electron flux — high during CIR-driven storms
+    outerBeltUni.u_intensity.value = 0.18 + (d.electron_2mev_norm ?? 0) * 0.65;
+
+    // ── Ring current ──────────────────────────────────────────────────────────
+    rcUniforms.u_kp.value = kpRaw;
+
+    // ── Ionosphere / thermosphere ─────────────────────────────────────────────
+    ionoUni.u_xray.value  = d.xray_intensity;
+    ionoUni.u_f107.value  = d.f107_norm ?? 0.3;
+
+    // ── Plasmasphere erosion ──────────────────────────────────────────────────
+    plasmaUni.u_kp.value = kpRaw;
+
+    // ── Earth info panel (shown when Earth is selected) ───────────────────────
+    const G_LABELS = ['G0 — Quiet','G1 — Minor','G2 — Moderate',
+                      'G3 — Strong','G4 — Severe','G5 — Extreme'];
+    const G_COLS   = ['#aaa','#aadd44','#ffd700','#ff8800','#ff3300','#ff00aa'];
+    const S_LABELS = ['S0 — None','S1 — Minor','S2 — Moderate',
+                      'S3 — Strong','S4 — Severe','S5 — Extreme'];
+    const stormEl   = document.getElementById('esw-storm');
+    const dstEl     = document.getElementById('esw-dst');
+    const mspEl     = document.getElementById('esw-msp');
+    const sepEl     = document.getElementById('esw-sep');
+    const auroraEl  = document.getElementById('esw-aurora');
+    const hfEl      = document.getElementById('esw-hf');
+    const plasmaEl  = document.getElementById('esw-plasma');
+    const bzEl2     = document.getElementById('esw-bz');
+    const alertEl   = document.getElementById('esw-alert');
+    if (stormEl) {
+        const gl = d.storm_level;
+        stormEl.textContent = G_LABELS[gl] ?? 'G0 — Quiet';
+        stormEl.style.color = G_COLS[gl] ?? '#aaa';
+
+        // Dst proxy: empirical Kp→Dst (Burton et al. approximation)
+        const dstProxy = -Math.round(3.5 * Math.pow(Math.max(kpRaw - 1, 0), 2.3));
+        dstEl.textContent = `~${dstProxy} nT`;
+        dstEl.style.color = dstProxy < -100 ? '#ff3300' : dstProxy < -50 ? '#ffd700' : '#aaa';
+
+        // Magnetopause standoff in Re
+        mspEl.textContent = `~${sw._msp_Re ?? '13.0'} Re`;
+        mspEl.style.color = parseFloat(sw._msp_Re) < 8.0 ? '#ff8800' : '#aaa';
+
+        // SEP / radiation storm (S-scale)
+        const sLevel = sw.sep_storm_level ?? 0;
+        sepEl.textContent = S_LABELS[sLevel] ?? 'S0 — None';
+        sepEl.style.color = sLevel >= 3 ? '#ff3300' : sLevel >= 1 ? '#ffd700' : '#aaa';
+
+        // Aurora power from OVATION
+        const aN = sw.aurora_power_north ?? null;
+        auroraEl.textContent = aN != null
+            ? `${aN.toFixed(0)} GW N · ${(sw.aurora_power_south ?? 0).toFixed(0)} GW S`
+            : '—';
+        const aAct = sw.aurora_activity ?? 'quiet';
+        auroraEl.style.color = aAct === 'storm' ? '#ff8800' : aAct === 'active' ? '#ffd700' : '#4eff91';
+
+        // HF radio status from X-ray class
+        const xClass = sw.xray_class ?? 'A1.0';
+        const xLetter = xClass[0];
+        const hfStatus = xLetter === 'X' ? 'Blackout (R3–R5)' :
+                         xLetter === 'M' ? 'Degraded (R1–R2)' :
+                         xLetter === 'C' ? 'Minor degradation' : 'Clear';
+        hfEl.textContent = hfStatus;
+        hfEl.style.color = xLetter === 'X' ? '#ff3300' : xLetter === 'M' ? '#ffd700' : '#4eff91';
+
+        // Plasmasphere extent (shrinks with Kp)
+        const pRe = Math.max(2.0, 4.0 - kpRaw * 0.22).toFixed(1);
+        plasmaEl.textContent = kpRaw > 6 ? `Eroded (~${pRe} Re)` : `Intact (~${pRe} Re)`;
+        plasmaEl.style.color = kpRaw > 6 ? '#ffd700' : '#aaa';
+
+        // IMF Bz
+        const bzRaw = sw.solar_wind.bz ?? 0;
+        bzEl2.textContent = `${bzRaw.toFixed(1)} nT ${bzRaw < 0 ? '↓ southward' : '↑ northward'}`;
+        bzEl2.style.color = bzRaw < -10 ? '#ff3300' : bzRaw < -5 ? '#ffd700' : '#4eff91';
+
+        // Alert banner for active warnings
+        const alerts = sw.active_alerts ?? [];
+        const activeWarning = alerts.find(a => a.level === 'alert' || a.level === 'warning');
+        if (activeWarning) {
+            alertEl.style.display = '';
+            alertEl.textContent   = '⚠ ' + activeWarning.text.split('\n')[0].slice(0, 100);
+        } else {
+            alertEl.style.display = 'none';
+        }
+    }
 
     // 5. CME burst — triggered once per new M/X flare detection
     if (sw.new_major_flare && !cmeActive) {
