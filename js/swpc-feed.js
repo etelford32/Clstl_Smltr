@@ -44,15 +44,27 @@
 // ── Endpoint registry ─────────────────────────────────────────────────────────
 export const ENDPOINTS = {
     /** DSCOVR/ACE 1-minute real-time solar wind (Bt, Bz, speed, density, temp) */
-    wind_1m:   'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',
+    wind_1m:      'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',
     /** Planetary Kp index (3-hour cadence, 2-D array) */
-    kp_index:  'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
+    kp_index:     'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
     /** GOES primary X-ray flux 1-day history (0.1–0.8 nm channel) */
-    xray_flux: 'https://services.swpc.noaa.gov/json/goes/primary/xray-1-day.json',
+    xray_flux:    'https://services.swpc.noaa.gov/json/goes/primary/xray-1-day.json',
     /** Solar flare event list — last 7 days */
-    flares_7d: 'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
+    flares_7d:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
     /** Active solar regions (sunspot groups) */
-    regions:   'https://services.swpc.noaa.gov/json/solar_regions.json',
+    regions:      'https://services.swpc.noaa.gov/json/solar_regions.json',
+
+    // ── Extended NOAA feeds ────────────────────────────────────────────────
+    /** GOES integral proton flux 1-day (>10, >50, >100 MeV channels) — SEP/radiation storm */
+    protons_1d:   'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json',
+    /** GOES integral electron flux 1-day (>0.8, >2.0 MeV channels) */
+    electrons_1d: 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json',
+    /** OVATION Prime auroral power nowcast (GW) — north + south hemispheres */
+    aurora_now:   'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
+    /** Space weather alerts / warnings / watches (machine-readable JSON) */
+    alerts:       'https://services.swpc.noaa.gov/products/alerts.json',
+    /** Daily 10.7-cm solar radio flux (F10.7) — EUV/X-ray activity proxy */
+    radio_flux:   'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
 };
 
 // ── Quiet-Sun baseline (used as fallback when endpoints are unavailable) ──────
@@ -74,6 +86,16 @@ export const FALLBACK = {
     flare_watts:  1e-8,
     recent_flares:  [],
     active_regions: [],
+    // Extended fields
+    proton_flux_10mev:  0.1,   // pfu — background >10 MeV channel
+    proton_flux_100mev: 0.01,  // pfu — background >100 MeV channel
+    electron_flux_2mev: 100,   // pfu — background >2 MeV channel
+    aurora_power_north: 2,     // GW  — quiet auroral oval
+    aurora_power_south: 2,     // GW
+    active_alerts:      [],    // current NOAA alert/warning messages
+    f107_flux:          150,   // sfu — moderate solar activity
+    sep_storm_level:    0,     // S0–S5 radiation storm proxy
+    aurora_activity:    'quiet', // 'quiet'|'active'|'storm'
 };
 
 // ── X-ray class helpers ───────────────────────────────────────────────────────
@@ -124,7 +146,36 @@ function derivedFields(raw) {
     d.storm_level = raw.kp >= 9 ? 5 : raw.kp >= 8 ? 4 : raw.kp >= 7 ? 3 :
                     raw.kp >= 6 ? 2 : raw.kp >= 5 ? 1 : 0;
 
+    // Proton flux (log): 0.1 pfu (background) → 0; 1e5 pfu (S5 storm) → 1
+    d.proton_10mev_norm  = clamp01((Math.log10(Math.max(raw.proton_flux_10mev,  0.1)) + 1) / 6);
+    d.proton_100mev_norm = clamp01((Math.log10(Math.max(raw.proton_flux_100mev, 0.01)) + 2) / 5);
+
+    // Electron flux: log-normalised, typical quiet ~100 pfu → 0.5
+    d.electron_2mev_norm = clamp01((Math.log10(Math.max(raw.electron_flux_2mev, 10)) - 1) / 5);
+
+    // Aurora: 0 GW (no aurora) → 600 GW (severe storm)
+    d.aurora_north_norm = clamp01(raw.aurora_power_north / 600);
+    d.aurora_south_norm = clamp01(raw.aurora_power_south / 600);
+
+    // F10.7: 65 sfu (solar minimum) → 300 sfu (solar maximum)
+    d.f107_norm = clamp01((raw.f107_flux - 65) / 235);
+
     return d;
+}
+
+// ── Normalization helpers (extended) ──────────────────────────────────────────
+
+/**
+ * NOAA S-scale Solar Radiation Storm from >10 MeV proton flux (pfu)
+ * S1≥10, S2≥100, S3≥1000, S4≥10000, S5≥100000
+ */
+function protonToSLevel(pfu) {
+    if (pfu >= 1e5) return 5;
+    if (pfu >= 1e4) return 4;
+    if (pfu >= 1e3) return 3;
+    if (pfu >= 100) return 2;
+    if (pfu >= 10)  return 1;
+    return 0;
 }
 
 // ── Individual endpoint fetchers ──────────────────────────────────────────────
@@ -245,6 +296,96 @@ async function fetchRegions(state) {
         }));
 }
 
+// ── Extended NOAA fetchers ────────────────────────────────────────────────────
+
+/**
+ * GOES integral proton flux — picks the most recent >10 MeV and >100 MeV values.
+ * Response: array of {time_tag, energy, flux} objects.
+ */
+async function fetchProtons(state) {
+    const data = await fetchJSON(ENDPOINTS.protons_1d);
+    if (!Array.isArray(data)) return;
+    // Walk backwards; pick latest non-null record per channel
+    const byEnergy = {};
+    for (const rec of [...data].reverse()) {
+        if (rec.flux == null || rec.flux <= 0) continue;
+        const key = String(rec.energy ?? '');
+        if (!byEnergy[key]) byEnergy[key] = rec.flux;
+    }
+    // >10 MeV key varies by satellite; match any key containing '10'
+    for (const [k, v] of Object.entries(byEnergy)) {
+        if (k.includes('10') && !k.includes('100')) state.proton_flux_10mev  = v;
+        if (k.includes('100'))                       state.proton_flux_100mev = v;
+    }
+    state.sep_storm_level = protonToSLevel(state.proton_flux_10mev);
+}
+
+/**
+ * GOES integral electron flux — picks the most recent >2 MeV value.
+ */
+async function fetchElectrons(state) {
+    const data = await fetchJSON(ENDPOINTS.electrons_1d);
+    if (!Array.isArray(data)) return;
+    const rec = [...data].reverse().find(r => r.flux != null && r.flux > 0 &&
+        String(r.energy ?? '').includes('2'));
+    if (rec) state.electron_flux_2mev = rec.flux;
+}
+
+/**
+ * OVATION Prime auroral power nowcast.
+ * Response: { Forecast: { North: { Power: N }, South: { Power: N } } }
+ *           or flat { north: N, south: N } depending on version.
+ */
+async function fetchAurora(state) {
+    const data = await fetchJSON(ENDPOINTS.aurora_now);
+    // Attempt multiple response shapes
+    const north = data?.Forecast?.North?.Power
+               ?? data?.north
+               ?? data?.[0]?.power
+               ?? null;
+    const south = data?.Forecast?.South?.Power
+               ?? data?.south
+               ?? data?.[1]?.power
+               ?? null;
+    if (north != null) state.aurora_power_north = north;
+    if (south != null) state.aurora_power_south = south;
+
+    const totalGW = (state.aurora_power_north ?? 0) + (state.aurora_power_south ?? 0);
+    state.aurora_activity = totalGW > 200 ? 'storm' : totalGW > 80 ? 'active' : 'quiet';
+}
+
+/**
+ * NOAA space weather alerts/warnings/watches.
+ * Response: array of {message, issue_datetime, ...} objects.
+ * We keep only current (non-cancelled) messages, capped at 10.
+ */
+async function fetchAlerts(state) {
+    const data = await fetchJSON(ENDPOINTS.alerts);
+    if (!Array.isArray(data)) { state.active_alerts = []; return; }
+    state.active_alerts = data
+        .filter(a => a.message && !/CANCEL/i.test(a.message))
+        .slice(0, 10)
+        .map(a => ({
+            issued: new Date((a.issue_datetime ?? '').replace(' ', 'T') + 'Z'),
+            text:   String(a.message ?? '').trim(),
+            // Classify severity by first line of message
+            level:  /WARNING|WATCH/i.test(a.message) ? 'warning'
+                  : /ALERT/i.test(a.message)         ? 'alert'
+                  : 'info',
+        }));
+}
+
+/**
+ * F10.7-cm solar radio flux.
+ * Response: array of {time_tag, flux} objects — most recent last.
+ */
+async function fetchRadioFlux(state) {
+    const data = await fetchJSON(ENDPOINTS.radio_flux);
+    if (!Array.isArray(data)) return;
+    const rec = [...data].reverse().find(r => r.flux != null && r.flux > 0);
+    if (rec) state.f107_flux = rec.flux;
+}
+
 // ── Parse NOAA location string to lat/lon (e.g. "N24W30") ────────────────────
 function parseLocation(loc) {
     if (!loc) return null;
@@ -302,6 +443,12 @@ export class SpaceWeatherFeed {
             fetchXray(this._raw),
             fetchFlares(this._raw),
             fetchRegions(this._raw),
+            // Extended NOAA feeds
+            fetchProtons(this._raw),
+            fetchElectrons(this._raw),
+            fetchAurora(this._raw),
+            fetchAlerts(this._raw),
+            fetchRadioFlux(this._raw),
         ];
         const results = await Promise.allSettled(tasks);
         const ok  = results.some(r => r.status === 'fulfilled');
@@ -367,6 +514,16 @@ export class SpaceWeatherFeed {
             lastUpdated:    this.lastUpdated,
             new_major_flare: newMajor,
             flare_direction: flareDir,
+            // Extended fields
+            proton_flux_10mev:  raw.proton_flux_10mev,
+            proton_flux_100mev: raw.proton_flux_100mev,
+            electron_flux_2mev: raw.electron_flux_2mev,
+            sep_storm_level:    raw.sep_storm_level ?? 0,
+            aurora_power_north: raw.aurora_power_north,
+            aurora_power_south: raw.aurora_power_south,
+            aurora_activity:    raw.aurora_activity ?? 'quiet',
+            active_alerts:      raw.active_alerts ?? [],
+            f107_flux:          raw.f107_flux,
         };
     }
 }

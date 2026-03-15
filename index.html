@@ -4,12 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parker Physics App — Interactive Celestial Simulations</title>
+    <meta name="description" content="Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data. Explore stars, black holes, solar wind, and the galactic map interactively.">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -20,13 +17,18 @@
             flex-direction: column;
         }
 
-        /* ─── Nav (shared, sticky, 48px) ──────────────────────────── */
+        /* ─── Nav ────────────────────────────────────────────────────────── */
         nav {
             position: sticky; top: 0; z-index: 600;
-            height: 48px; min-height: 48px;
-            background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
-            border-bottom: 1px solid rgba(255,255,255,.07);
-            display: flex; align-items: center; padding: 0 14px; gap: 8px;
+            height: 54px; min-height: 54px;
+            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,200,0,.12);
+            display: flex; align-items: center; padding: 0 16px; gap: 10px;
+        }
+        .nav-logo-img {
+            height: 36px; width: auto;
+            filter: drop-shadow(0 0 6px rgba(255,180,0,.5));
+            flex-shrink: 0;
         }
         .nav-brand {
             font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
@@ -82,7 +84,7 @@
             .nav-burger { display: block; }
             .nav-menu {
                 display: none; flex-direction: column; align-items: stretch;
-                position: absolute; top: 48px; left: 0; right: 0;
+                position: absolute; top: 54px; left: 0; right: 0;
                 background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
                 border-bottom: 1px solid rgba(255,255,255,.1);
                 padding: 8px 12px 12px; gap: 4px; z-index: 700;
@@ -100,216 +102,304 @@
             .nav-drop.open .nav-drop-menu { display: block !important; visibility: visible; pointer-events: auto; }
         }
 
+        /* ─── Live Space Weather Bar ──────────────────────────────────────── */
+        #swpc-bar {
+            background: linear-gradient(90deg, rgba(10,5,30,.95), rgba(20,10,50,.95));
+            border-bottom: 1px solid rgba(255,200,0,.15);
+            padding: 6px 20px;
+            display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+            font-size: .72rem; font-family: 'Courier New', monospace;
+            overflow: hidden;
+        }
+        .swpc-label {
+            color: #ffd700; font-weight: 700; font-size: .7rem; letter-spacing: .06em;
+            flex-shrink: 0;
+        }
+        .swpc-stat { color: #aaa; white-space: nowrap; }
+        .swpc-stat span { color: #fff; font-weight: 600; }
+        .swpc-stat .val-good  { color: #4eff91; }
+        .swpc-stat .val-warn  { color: #ffd700; }
+        .swpc-stat .val-alert { color: #ff4444; }
+        .swpc-status {
+            margin-left: auto; font-size: .68rem; padding: 2px 8px;
+            border-radius: 3px; flex-shrink: 0;
+        }
+        .swpc-status.live    { background: rgba(0,200,100,.18); color:#4eff91; border: 1px solid rgba(0,200,100,.3); }
+        .swpc-status.stale   { background: rgba(255,200,0,.15); color:#ffd700; border: 1px solid rgba(255,200,0,.3); }
+        .swpc-status.offline { background: rgba(255,60,60,.15); color:#ff6060; border: 1px solid rgba(255,60,60,.3); }
+
+        /* ─── Hero ────────────────────────────────────────────────────────── */
         .hero {
             text-align: center;
-            padding: 4rem 2rem 2rem;
+            padding: 3.5rem 2rem 1.5rem;
             animation: fadeIn 1s ease-in;
+            position: relative;
         }
-
-        h1 {
-            font-size: 3.5rem;
+        .hero-logo {
+            width: min(340px, 75vw);
+            height: auto;
+            margin: 0 auto 1.5rem;
+            display: block;
+            filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3));
+            animation: logoPulse 4s ease-in-out infinite;
+        }
+        @keyframes logoPulse {
+            0%,100% { filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3)); }
+            50%      { filter: drop-shadow(0 0 60px rgba(255,200,0,.65)) drop-shadow(0 0 110px rgba(160,80,255,.45)); }
+        }
+        .hero-title {
+            font-size: 3rem;
             background: linear-gradient(45deg, #ffd700, #ff8c00);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
             background-clip: text;
-            margin-bottom: 1rem;
+            margin-bottom: .75rem;
         }
-
-        .tagline {
-            font-size: 1.3rem;
+        .hero-tagline {
+            font-size: 1.2rem;
             color: #aaa;
-            margin-bottom: 3rem;
+            margin-bottom: .6rem;
+        }
+        .hero-sub {
+            font-size: .92rem;
+            color: #7a7aaa;
+            margin-bottom: 2rem;
+            max-width: 600px;
+            margin-left: auto; margin-right: auto;
+            line-height: 1.6;
+        }
+        .hero-badges {
+            display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+            margin-bottom: 2.5rem;
+        }
+        .hero-badge {
+            padding: 5px 14px; border-radius: 20px; font-size: .78rem; font-weight: 600;
+            letter-spacing: .04em;
+        }
+        .hero-badge.gold   { background: rgba(255,180,0,.15); border: 1px solid rgba(255,180,0,.4); color:#ffd700; }
+        .hero-badge.purple { background: rgba(128,64,255,.15); border: 1px solid rgba(128,64,255,.4); color:#c090ff; }
+        .hero-badge.blue   { background: rgba(64,128,255,.15); border: 1px solid rgba(64,128,255,.4); color:#80b0ff; }
+        .hero-badge.green  { background: rgba(0,200,100,.15); border: 1px solid rgba(0,200,100,.4); color:#4eff91; }
+
+        /* ─── Showcase Banner ─────────────────────────────────────────────── */
+        .showcase-section {
+            max-width: 1300px; margin: 0 auto 2.5rem;
+            padding: 0 2rem;
+        }
+        .showcase-header {
+            text-align: center; margin-bottom: 1.2rem;
+            font-size: 1.4rem; color: #ffd700; font-weight: 700;
+        }
+        .showcase-header span { color: #aaa; font-size: .9rem; font-weight: 400; margin-left: 8px; }
+        .showcase-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.2rem;
+        }
+        .showcase-card {
+            border-radius: 12px; overflow: hidden; position: relative;
+            border: 1px solid rgba(255,255,255,.1);
+            box-shadow: 0 8px 32px rgba(0,0,0,.5);
+            transition: transform .3s, box-shadow .3s;
+        }
+        .showcase-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 16px 48px rgba(255,140,0,.25);
+        }
+        .showcase-card img {
+            width: 100%; height: 220px; object-fit: cover; display: block;
+        }
+        .showcase-card-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: linear-gradient(transparent, rgba(0,0,0,.85));
+            padding: 24px 14px 12px;
+            font-size: .85rem; color: #ddd;
+        }
+        .showcase-card-label strong { color: #ffd700; display: block; font-size: .95rem; margin-bottom: 2px; }
+        @media (max-width: 600px) {
+            .showcase-grid { grid-template-columns: 1fr; }
+            .showcase-card img { height: 180px; }
         }
 
+        /* ─── Main container ──────────────────────────────────────────────── */
         .container {
             max-width: 1400px;
             margin: 0 auto;
             padding: 0 2rem 4rem;
         }
 
+        /* ─── Simulators Grid ─────────────────────────────────────────────── */
+        .section-title {
+            text-align: center; font-size: 1.6rem; color: #ffd700;
+            margin-bottom: 1.8rem; font-weight: 700;
+        }
+        .section-title span { color: #7a7aaa; font-size: .9rem; font-weight: 400; margin-left: 6px; }
+
         .simulators-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+            gap: 1.8rem;
             margin-bottom: 3rem;
         }
 
         .simulator-card {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            padding: 2rem;
-            transition: all 0.3s;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.09);
+            border-radius: 14px;
+            padding: 1.8rem;
+            transition: all .3s;
             position: relative;
             overflow: hidden;
         }
-
         .simulator-card::before {
             content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
+            position: absolute; top: 0; left: 0; right: 0; height: 3px;
             background: linear-gradient(90deg, #ffd700, #ff8c00);
-            opacity: 0;
-            transition: opacity 0.3s;
+            opacity: 0; transition: opacity .3s;
         }
-
         .simulator-card:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255,255,255,.09);
             transform: translateY(-5px);
-            box-shadow: 0 10px 30px rgba(255, 140, 0, 0.3);
+            box-shadow: 0 10px 30px rgba(255,140,0,.25);
         }
+        .simulator-card:hover::before { opacity: 1; }
 
-        .simulator-card:hover::before {
-            opacity: 1;
-        }
-
-        .card-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-
-        .card-title {
-            font-size: 1.5rem;
-            color: #ffd700;
-            margin-bottom: 0.5rem;
-        }
-
-        .card-description {
-            color: #ddd;
-            margin-bottom: 1rem;
-            line-height: 1.6;
-        }
-
-        .card-features {
-            list-style: none;
-            margin-bottom: 1.5rem;
-        }
-
-        .card-features li {
-            padding: 0.3rem 0;
-            color: #aaa;
-            font-size: 0.9rem;
-        }
-
-        .card-features li:before {
-            content: "→ ";
-            color: #ffd700;
-            margin-right: 0.5rem;
-        }
+        .card-icon { font-size: 2.6rem; margin-bottom: .9rem; }
+        .card-title { font-size: 1.4rem; color: #ffd700; margin-bottom: .45rem; }
+        .card-description { color: #ddd; margin-bottom: .9rem; line-height: 1.6; font-size: .93rem; }
+        .card-features { list-style: none; margin-bottom: 1.4rem; }
+        .card-features li { padding: .25rem 0; color: #aaa; font-size: .87rem; }
+        .card-features li:before { content: "→ "; color: #ffd700; margin-right: .4rem; }
 
         .card-link {
             display: inline-block;
-            padding: 0.8rem 1.5rem;
+            padding: .75rem 1.4rem;
             background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            transition: transform 0.2s;
-            font-weight: bold;
+            color: white; text-decoration: none; border-radius: 6px;
+            transition: transform .2s, box-shadow .2s; font-weight: bold; font-size: .88rem;
         }
-
         .card-link:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 5px 20px rgba(102,126,234,.4);
         }
 
         .badge {
             display: inline-block;
-            padding: 0.3rem 0.8rem;
-            background: rgba(255, 140, 0, 0.2);
+            padding: .25rem .75rem;
+            background: rgba(255,140,0,.18);
             border: 1px solid #ff8c00;
             border-radius: 20px;
-            font-size: 0.75rem;
-            color: #ffd700;
-            margin-bottom: 1rem;
+            font-size: .72rem; color: #ffd700;
+            margin-bottom: .9rem;
         }
+        .badge.live { background: rgba(0,200,100,.15); border-color: rgba(0,200,100,.5); color: #4eff91; }
 
+        /* ─── Features section ────────────────────────────────────────────── */
         .features-section {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            padding: 2rem;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            padding: 2.2rem;
             margin-bottom: 3rem;
         }
-
         .features-section h2 {
-            color: #ffd700;
-            margin-bottom: 1.5rem;
-            text-align: center;
-            font-size: 2rem;
+            color: #ffd700; margin-bottom: 1.6rem;
+            text-align: center; font-size: 1.8rem;
         }
-
         .features-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 1.4rem;
         }
-
         .feature-item {
-            padding: 1rem;
-            background: rgba(255, 255, 255, 0.05);
+            padding: 1.1rem;
+            background: rgba(255,255,255,.04);
             border-radius: 10px;
-            border-left: 4px solid #ffd700;
+            border-left: 3px solid #ffd700;
         }
+        .feature-item h3 { color: #ffd700; margin-bottom: .45rem; font-size: 1rem; }
+        .feature-item p { color: #ccc; font-size: .88rem; line-height: 1.55; }
 
-        .feature-item h3 {
-            color: #ffd700;
-            margin-bottom: 0.5rem;
-            font-size: 1.1rem;
+        /* ─── NASA/NOAA data section ──────────────────────────────────────── */
+        .data-section {
+            background: linear-gradient(135deg, rgba(0,30,60,.5), rgba(10,5,30,.7));
+            border: 1px solid rgba(64,128,255,.2);
+            border-radius: 14px;
+            padding: 2.2rem;
+            margin-bottom: 3rem;
         }
-
-        .feature-item p {
-            color: #ddd;
-            font-size: 0.9rem;
-            line-height: 1.5;
+        .data-section h2 {
+            color: #80b0ff; margin-bottom: .5rem; font-size: 1.7rem;
         }
+        .data-section .subtitle {
+            color: #7a7aaa; font-size: .9rem; margin-bottom: 1.8rem;
+        }
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.2rem;
+        }
+        .data-card {
+            background: rgba(0,0,0,.35);
+            border: 1px solid rgba(64,128,255,.15);
+            border-radius: 10px;
+            padding: 1.2rem;
+        }
+        .data-card h4 {
+            color: #80b0ff; font-size: .95rem; margin-bottom: .4rem;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .data-card p { color: #aaa; font-size: .82rem; line-height: 1.5; }
+        .data-source-label {
+            font-size: .68rem; padding: 2px 7px; border-radius: 3px;
+            font-weight: 700; letter-spacing: .05em;
+        }
+        .src-noaa { background: rgba(0,180,255,.15); color: #50d0ff; border: 1px solid rgba(0,180,255,.3); }
+        .src-nasa { background: rgba(30,100,200,.2);  color: #80b0ff; border: 1px solid rgba(30,100,200,.4); }
 
+        /* ─── Footer ──────────────────────────────────────────────────────── */
         footer {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 2rem;
+            background: rgba(0,0,0,.5);
+            padding: 2.2rem 2rem;
             text-align: center;
             margin-top: auto;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            border-top: 1px solid rgba(255,255,255,.08);
         }
-
-        footer a {
-            color: #ffd700;
-            text-decoration: none;
+        .footer-logo {
+            height: 48px; width: auto; margin: 0 auto 1rem;
+            display: block; opacity: .7;
+            filter: drop-shadow(0 0 10px rgba(255,180,0,.3));
         }
-
-        footer a:hover {
-            text-decoration: underline;
-        }
+        footer a { color: #ffd700; text-decoration: none; }
+        footer a:hover { text-decoration: underline; }
+        .footer-copy { margin-top: .9rem; font-size: .85rem; color: #555; }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; transform: translateY(-16px); }
+            to   { opacity: 1; transform: translateY(0); }
         }
 
         @media (max-width: 768px) {
-            h1 {
-                font-size: 2.5rem;
-            }
-            .tagline {
-                font-size: 1.1rem;
-            }
-            .simulators-grid {
-                grid-template-columns: 1fr;
-            }
+            .hero-title { font-size: 2.2rem; }
+            .hero-tagline { font-size: 1rem; }
+            .simulators-grid { grid-template-columns: 1fr; }
+            #swpc-bar { gap: 10px; }
         }
     </style>
 </head>
 <body>
-    <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+
+<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
+<nav>
+    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics Logo">
+        <span class="nav-brand">Parker Physics</span>
+    </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
     <div class="nav-menu" id="nav-menu" role="navigation">
         <a href="index.html" class="nav-item active">Home</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item">Solar System</a>
-        <a href="sun.html" class="nav-item">The Sun</a>
+        <a href="sun.html" class="nav-item">The Sun &#127749;</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -334,300 +424,482 @@
     </div>
 </nav>
 
-    <div class="hero">
-        <h1>✦ Parker Physics App</h1>
-        <p class="tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA Data</p>
+<!-- ═══════════════════════════════════════════════════ SWPC BAR ═══ -->
+<div id="swpc-bar">
+    <span class="swpc-label">&#9729; LIVE SPACE WEATHER</span>
+    <span class="swpc-stat">Wind <span id="sw-speed">—</span> km/s</span>
+    <span class="swpc-stat">Bz <span id="sw-bz">—</span> nT</span>
+    <span class="swpc-stat">Density <span id="sw-dens">—</span> n/cc</span>
+    <span class="swpc-stat">Kp <span id="sw-kp">—</span></span>
+    <span class="swpc-stat">X-ray <span id="sw-xray">—</span></span>
+    <span class="swpc-stat">Flare <span id="sw-flare">—</span></span>
+    <span class="swpc-stat" id="sw-region-wrap" style="display:none">Regions <span id="sw-regions">—</span></span>
+    <span class="swpc-status offline" id="sw-status">connecting…</span>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
+<div class="hero">
+    <img src="ParkerPhaysics_logo1.png" class="hero-logo" alt="Parker Physics App Logo">
+    <h1 class="hero-title">Parker Physics App</h1>
+    <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
+    <p class="hero-sub">
+        Explore the universe through scientifically grounded, interactive simulations.
+        From solar wind physics to galactic structure — all running live in your browser.
+    </p>
+    <div class="hero-badges">
+        <span class="hero-badge gold">&#9728;&#65039; Live Solar Data</span>
+        <span class="hero-badge purple">&#128640; Rust / WASM</span>
+        <span class="hero-badge blue">&#127760; WebGL 3D</span>
+        <span class="hero-badge green">&#128295; Open Source</span>
     </div>
+</div>
 
-    <div class="container">
-        <div class="simulators-grid">
-            <div class="simulator-card">
-                <span class="badge">&#11088; FEATURED</span>
-                <div class="card-icon">🌌</div>
-                <h2 class="card-title">Galactic Map</h2>
-                <p class="card-description">Interactive 3D map of the Milky Way and beyond — 100+ catalog stars with accurate Hipparcos distances, 90,000-particle spiral arms, and S-star orbits around Sgr A*.</p>
-                <ul class="card-features">
-                    <li>Logarithmic spiral arms (13° pitch, 4-arm model)</li>
-                    <li>Stars out to Andromeda (2.5 Mly) + Ton 618</li>
-                    <li>S2 star orbit around Sgr A* (16.05 yr)</li>
-                    <li>Click-any-star info panel with spectral data</li>
-                </ul>
-                <a href="galactic-map.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#11088; FEATURED</span>
-                <div class="card-icon">☀️</div>
-                <h2 class="card-title">Solar System</h2>
-                <p class="card-description">Hardware-accelerated 3D solar system — accurate orbital periods for all 6 major planets with a procedural G2V solar shader.</p>
-                <ul class="card-features">
-                    <li>Accurate Keplerian orbital periods</li>
-                    <li>G2V photosphere + granulation shader</li>
-                    <li>Saturn ring geometry + planet info panels</li>
-                    <li>Variable time-speed control (0–50×)</li>
-                </ul>
-                <a href="threejs.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <div class="card-icon">🎨</div>
-                <h2 class="card-title">2D Star Modeler</h2>
-                <p class="card-description">Explore 12 different stellar classifications from blue giants to black holes with accurate scientific data.</p>
-                <ul class="card-features">
-                    <li>12 star types (O-M class + remnants)</li>
-                    <li>Real temperature & mass data</li>
-                    <li>Adjustable parameters</li>
-                    <li>Solar wind visualization</li>
-                </ul>
-                <a href="star2d.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <div class="card-icon">🌊</div>
-                <h2 class="card-title">Advanced Solar Physics</h2>
-                <p class="card-description">Simulates Parker spirals, coronal mass ejections, solar flares, and fluid dynamics with multiple visualization modes.</p>
-                <ul class="card-features">
-                    <li>Parker spiral trajectories</li>
-                    <li>6 emission modes (CME, flares, etc.)</li>
-                    <li>Density grid simulation</li>
-                    <li>Magnetic field visualization</li>
-                </ul>
-                <a href="star2d-advanced.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">⚡ NEW</span>
-                <div class="card-icon">💧</div>
-                <h2 class="card-title">Navier-Stokes Fluid Sim</h2>
-                <p class="card-description">Real computational fluid dynamics with full Navier-Stokes solver, Parker spirals, and ultra-compact terminal UI.</p>
-                <ul class="card-features">
-                    <li>Real CFD equations</li>
-                    <li>Divergence & curl calculations</li>
-                    <li>Pressure projection solver</li>
-                    <li>Terminal-style data-dense UI</li>
-                </ul>
-                <a href="solar-fluid.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">⚡ NEW</span>
-                <div class="card-icon">🕳️</div>
-                <h2 class="card-title">Black Hole Fluid Sim</h2>
-                <p class="card-description">2D accretion disk fluid dynamics with Jos Stam stable fluids solver — BH gravity, jets, event horizon sink, and photon ring rendering.</p>
-                <ul class="card-features">
-                    <li>N=128 Eulerian grid (Jos Stam 1999)</li>
-                    <li>BH gravity + ISCO infall + jet injection</li>
-                    <li>4 presets: Stellar → AGN → SMBH → Ton 618</li>
-                    <li>Thermal / velocity / pressure colormaps</li>
-                </ul>
-                <a href="black-hole-fluid.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">⚡ NEW</span>
-                <div class="card-icon">🌀</div>
-                <h2 class="card-title">Stellar Wind Dynamics</h2>
-                <p class="card-description">Parker spiral magnetic field + stellar wind particle simulation with Alfvén surface, termination shock, heliopause, and bow shock boundaries.</p>
-                <ul class="card-features">
-                    <li>Parker (1958) spiral field lines</li>
-                    <li>4 presets: Sun · WR 102 · Betelgeuse · Pulsar</li>
-                    <li>Alfvén radius &amp; termination shock physics</li>
-                    <li>CME burst, flare &amp; coronal hole events</li>
-                </ul>
-                <a href="stellar-wind.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">⚠️ Experimental</span>
-                <div class="card-icon">🦀</div>
-                <h2 class="card-title">Rust/WASM 3D</h2>
-                <p class="card-description">High-performance native code compiled to WebAssembly using the Bevy game engine.</p>
-                <ul class="card-features">
-                    <li>Native Rust performance</li>
-                    <li>Bevy ECS architecture</li>
-                    <li>Memory-safe rendering</li>
-                    <li>Optimized WASM binary</li>
-                </ul>
-                <a href="rust.html" class="card-link">Launch Simulator →</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#11088; NEW</span>
-                <div class="card-icon">&#128165;</div>
-                <h2 class="card-title">WR-102</h2>
-                <p class="card-description">Wolf-Rayet stellar wind simulator — the hottest known star at ~210,000 K with extreme mass-loss and 5,000 km/s winds.</p>
-                <ul class="card-features">
-                    <li>WO2 spectral class, T<sub>eff</sub> ~210 000 K</li>
-                    <li>Interactive &beta;-law wind controls</li>
-                    <li>Real-time parameter sliders</li>
-                    <li>ACESFilmic tone-mapped WebGL</li>
-                </ul>
-                <a href="wr102.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#11088; NEW</span>
-                <div class="card-icon">&#11835;</div>
-                <h2 class="card-title">Vega (&#945; Lyrae)</h2>
-                <p class="card-description">Rapid-rotator A0V star simulator — Vega spins so fast its equator bulges 23&thinsp;% wider than its poles, with gravity darkening across the disk.</p>
-                <ul class="card-features">
-                    <li>Oblate spheroid geometry (von&nbsp;Zeipel)</li>
-                    <li>Pole-to-equator gravity darkening</li>
-                    <li>Live oblateness &amp; T<sub>eff</sub> sliders</li>
-                    <li>A0V blackbody surface shader</li>
-                </ul>
-                <a href="vega.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#127749; LIVE DATA</span>
-                <div class="card-icon">&#9728;&#65039;</div>
-                <h2 class="card-title">The Sun — Live</h2>
-                <p class="card-description">G2V 3D simulator with real-time NOAA/SWPC data — active region markers, GOES X-ray flux, and recent flare log updated live.</p>
-                <ul class="card-features">
-                    <li>NOAA active region 3D markers (torus rings)</li>
-                    <li>Live GOES X-ray class (A/B/C/M/X)</li>
-                    <li>48h flare log + fly-to-region camera</li>
-                    <li>Granulation · corona · solar wind shader</li>
-                </ul>
-                <a href="sun.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#11088; NEW</span>
-                <div class="card-icon">&#128308;</div>
-                <h2 class="card-title">Betelgeuse</h2>
-                <p class="card-description">The famous red supergiant M2Iab — giant convective cells, pulsation, TiO molecular shell, asymmetric dust envelope, and slow stellar wind.</p>
-                <ul class="card-features">
-                    <li>Large-scale convective plumes</li>
-                    <li>Semi-regular pulsation animation</li>
-                    <li>Asymmetric dust shell (Great Dimming)</li>
-                    <li>TiO molecular absorption model</li>
-                </ul>
-                <a href="betelgeuse.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#11088; NEW</span>
-                <div class="card-icon">&#11835;</div>
-                <h2 class="card-title">Sirius System</h2>
-                <p class="card-description">The Sirius A1V + DA2 white dwarf binary — watch them orbit with elliptical Keplerian dynamics and compare the brilliant blue-white primary to its tiny, dense companion.</p>
-                <ul class="card-features">
-                    <li>Eccentric binary orbit (e=0.591)</li>
-                    <li>Sirius A: A1V blue-white main sequence</li>
-                    <li>Sirius B: DA2 white dwarf (0.0084 R&#9737;)</li>
-                    <li>Interactive orbit speed &amp; inclination</li>
-                </ul>
-                <a href="sirius.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <span class="badge">&#127775; CLASSIC</span>
-                <div class="card-icon">&#127760;</div>
-                <h2 class="card-title">Sirius Planetary Fantasy</h2>
-                <p class="card-description">A speculative planetary system around Sirius A &amp; B — full orbital mechanics, imagined worlds in the habitable zone, and the stellar wind from this brilliant binary pair.</p>
-                <ul class="card-features">
-                    <li>Sirius A &amp; B full binary orbit (e=0.591)</li>
-                    <li>Fantasy planet roster with Keplerian orbits</li>
-                    <li>Stellar wind particle system (Sirius A)</li>
-                    <li>Speed presets: realistic &amp; visual modes</li>
-                </ul>
-                <a href="star3d.html" class="card-link">Launch Simulator &rarr;</a>
-            </div>
-
-            <div class="simulator-card">
-                <div class="card-icon">🖥️</div>
-                <h2 class="card-title">Python Desktop Version</h2>
-                <p class="card-description">Full-featured desktop application with OpenGL rendering and advanced creator tools.</p>
-                <ul class="card-features">
-                    <li>Native OpenGL performance</li>
-                    <li>Object creation tools</li>
-                    <li>Advanced physics</li>
-                    <li>Export capabilities</li>
-                </ul>
-                <a href="https://github.com/etelford32/Clstl_Smltr" class="card-link">View on GitHub →</a>
+<!-- ═══════════════════════════════════════════════ SCREENSHOT GALLERY ═══ -->
+<section class="showcase-section">
+    <p class="showcase-header">&#128247; App Gallery <span>— real screens from the simulator</span></p>
+    <div class="showcase-grid">
+        <div class="showcase-card">
+            <img src="Celestial_Simulator.jpg" alt="Celestial Simulator — live screenshot">
+            <div class="showcase-card-label">
+                <strong>Celestial Simulator</strong>
+                Interactive star &amp; solar system physics — runs at 60+ FPS in-browser
             </div>
         </div>
-
-        <div class="features-section">
-            <h2>✦ What's Inside Parker Physics</h2>
-            <div class="features-grid">
-                <div class="feature-item">
-                    <h3>🔬 Scientifically Grounded</h3>
-                    <p>Parker solar wind theory, Hipparcos star catalog distances, NOAA/SWPC live solar data, Navier-Stokes CFD, and real orbital elements throughout.</p>
-                </div>
-                <div class="feature-item">
-                    <h3>⚡ High Performance</h3>
-                    <p>Optimized rendering with WebGL, Three.js, and WebAssembly for smooth 60+ FPS simulations.</p>
-                </div>
-                <div class="feature-item">
-                    <h3>🎮 Interactive</h3>
-                    <p>Real-time parameter adjustments, camera controls, and visualization modes to explore stellar phenomena.</p>
-                </div>
-                <div class="feature-item">
-                    <h3>📱 Cross-Platform</h3>
-                    <p>Runs in any modern browser on desktop, tablet, and mobile. No installation required.</p>
-                </div>
-                <div class="feature-item">
-                    <h3>🧪 Educational</h3>
-                    <p>Learn about stellar evolution, solar wind dynamics, and computational fluid dynamics through interactive visualization.</p>
-                </div>
-                <div class="feature-item">
-                    <h3>🚀 Open Source</h3>
-                    <p>Full source code available on GitHub. Contribute, fork, or customize for your needs.</p>
-                </div>
+        <div class="showcase-card">
+            <img src="ChatGPT Image Nov 5, 2025, 12_51_35 PM.png" alt="Parker Physics UI design concept">
+            <div class="showcase-card-label">
+                <strong>Parker Physics — UI Concept</strong>
+                Data-dense terminal aesthetic with live NOAA telemetry overlays
             </div>
         </div>
     </div>
+</section>
 
-    <footer>
-        <p>
-            <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a> |
-            <a href="https://github.com/etelford32/Clstl_Smltr/issues">Report Issues</a> |
-            Deployed on Vercel
-        </p>
-        <p style="margin-top: 1rem; font-size: 0.9rem; color: #666;">
-            Parker Physics App — Built with Three.js, WebGL, Rust, and WebAssembly
-        </p>
-    </footer>
+<!-- ═══════════════════════════════════════════════ SIMULATORS GRID ═══ -->
+<div class="container">
+    <p class="section-title">&#10022; Simulations <span>— click any card to launch</span></p>
+    <div class="simulators-grid">
 
-    <script>
-    // Nav — hamburger + touch dropdown
-    (function() {
-        var burger  = document.getElementById('nav-burger');
-        var navMenu = document.getElementById('nav-menu');
-        burger.addEventListener('click', function() {
-            var open = navMenu.classList.toggle('open');
-            burger.textContent = open ? '✕' : '☰';
-            burger.setAttribute('aria-expanded', String(open));
+        <div class="simulator-card">
+            <span class="badge">&#11088; FEATURED</span>
+            <div class="card-icon">🌌</div>
+            <h2 class="card-title">Galactic Map</h2>
+            <p class="card-description">Interactive 3D map of the Milky Way and beyond — 100+ catalog stars with accurate Hipparcos distances, 90,000-particle spiral arms, and S-star orbits around Sgr A*.</p>
+            <ul class="card-features">
+                <li>Logarithmic spiral arms (13° pitch, 4-arm model)</li>
+                <li>Stars out to Andromeda (2.5 Mly) + Ton 618</li>
+                <li>S2 star orbit around Sgr A* (16.05 yr)</li>
+                <li>Click-any-star info panel with spectral data</li>
+            </ul>
+            <a href="galactic-map.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#11088; FEATURED</span>
+            <div class="card-icon">☀️</div>
+            <h2 class="card-title">Solar System</h2>
+            <p class="card-description">Hardware-accelerated 3D solar system — accurate orbital periods for all 6 major planets with a procedural G2V solar shader.</p>
+            <ul class="card-features">
+                <li>Accurate Keplerian orbital periods</li>
+                <li>G2V photosphere + granulation shader</li>
+                <li>Saturn ring geometry + planet info panels</li>
+                <li>Variable time-speed control (0–50×)</li>
+            </ul>
+            <a href="threejs.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge live">&#127749; LIVE DATA</span>
+            <div class="card-icon">&#9728;&#65039;</div>
+            <h2 class="card-title">The Sun — Live</h2>
+            <p class="card-description">G2V 3D simulator with real-time NOAA/SWPC data — active region markers, GOES X-ray flux, and recent flare log updated live.</p>
+            <ul class="card-features">
+                <li>NOAA active region 3D markers (torus rings)</li>
+                <li>Live GOES X-ray class (A/B/C/M/X)</li>
+                <li>48h flare log + fly-to-region camera</li>
+                <li>Granulation · corona · solar wind shader</li>
+            </ul>
+            <a href="sun.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <div class="card-icon">🎨</div>
+            <h2 class="card-title">2D Star Modeler</h2>
+            <p class="card-description">Explore 12 different stellar classifications from blue giants to black holes with accurate scientific data.</p>
+            <ul class="card-features">
+                <li>12 star types (O-M class + remnants)</li>
+                <li>Real temperature & mass data</li>
+                <li>Adjustable parameters</li>
+                <li>Solar wind visualization</li>
+            </ul>
+            <a href="star2d.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <div class="card-icon">🌊</div>
+            <h2 class="card-title">Advanced Solar Physics</h2>
+            <p class="card-description">Simulates Parker spirals, coronal mass ejections, solar flares, and fluid dynamics with multiple visualization modes.</p>
+            <ul class="card-features">
+                <li>Parker spiral trajectories</li>
+                <li>6 emission modes (CME, flares, etc.)</li>
+                <li>Density grid simulation</li>
+                <li>Magnetic field visualization</li>
+            </ul>
+            <a href="star2d-advanced.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#9889; NEW</span>
+            <div class="card-icon">💧</div>
+            <h2 class="card-title">Navier-Stokes Fluid Sim</h2>
+            <p class="card-description">Real computational fluid dynamics with full Navier-Stokes solver, Parker spirals, and ultra-compact terminal UI.</p>
+            <ul class="card-features">
+                <li>Real CFD equations</li>
+                <li>Divergence & curl calculations</li>
+                <li>Pressure projection solver</li>
+                <li>Terminal-style data-dense UI</li>
+            </ul>
+            <a href="solar-fluid.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#9889; NEW</span>
+            <div class="card-icon">🕳️</div>
+            <h2 class="card-title">Black Hole Fluid Sim</h2>
+            <p class="card-description">2D accretion disk fluid dynamics with Jos Stam stable fluids solver — BH gravity, jets, event horizon sink, and photon ring rendering.</p>
+            <ul class="card-features">
+                <li>N=128 Eulerian grid (Jos Stam 1999)</li>
+                <li>BH gravity + ISCO infall + jet injection</li>
+                <li>4 presets: Stellar → AGN → SMBH → Ton 618</li>
+                <li>Thermal / velocity / pressure colormaps</li>
+            </ul>
+            <a href="black-hole-fluid.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#9889; NEW</span>
+            <div class="card-icon">🌀</div>
+            <h2 class="card-title">Stellar Wind Dynamics</h2>
+            <p class="card-description">Parker spiral magnetic field + stellar wind particle simulation with Alfvén surface, termination shock, heliopause, and bow shock boundaries.</p>
+            <ul class="card-features">
+                <li>Parker (1958) spiral field lines</li>
+                <li>4 presets: Sun · WR 102 · Betelgeuse · Pulsar</li>
+                <li>Alfvén radius &amp; termination shock physics</li>
+                <li>CME burst, flare &amp; coronal hole events</li>
+            </ul>
+            <a href="stellar-wind.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#11088; NEW</span>
+            <div class="card-icon">&#128165;</div>
+            <h2 class="card-title">WR-102</h2>
+            <p class="card-description">Wolf-Rayet stellar wind simulator — the hottest known star at ~210,000 K with extreme mass-loss and 5,000 km/s winds.</p>
+            <ul class="card-features">
+                <li>WO2 spectral class, T<sub>eff</sub> ~210 000 K</li>
+                <li>Interactive &beta;-law wind controls</li>
+                <li>Real-time parameter sliders</li>
+                <li>ACESFilmic tone-mapped WebGL</li>
+            </ul>
+            <a href="wr102.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#11088; NEW</span>
+            <div class="card-icon">&#11835;</div>
+            <h2 class="card-title">Vega (&#945; Lyrae)</h2>
+            <p class="card-description">Rapid-rotator A0V star simulator — Vega spins so fast its equator bulges 23&thinsp;% wider than its poles, with gravity darkening across the disk.</p>
+            <ul class="card-features">
+                <li>Oblate spheroid geometry (von&nbsp;Zeipel)</li>
+                <li>Pole-to-equator gravity darkening</li>
+                <li>Live oblateness &amp; T<sub>eff</sub> sliders</li>
+                <li>A0V blackbody surface shader</li>
+            </ul>
+            <a href="vega.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#11088; NEW</span>
+            <div class="card-icon">&#128308;</div>
+            <h2 class="card-title">Betelgeuse</h2>
+            <p class="card-description">The famous red supergiant M2Iab — giant convective cells, pulsation, TiO molecular shell, asymmetric dust envelope, and slow stellar wind.</p>
+            <ul class="card-features">
+                <li>Large-scale convective plumes</li>
+                <li>Semi-regular pulsation animation</li>
+                <li>Asymmetric dust shell (Great Dimming)</li>
+                <li>TiO molecular absorption model</li>
+            </ul>
+            <a href="betelgeuse.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#11088; NEW</span>
+            <div class="card-icon">&#11835;</div>
+            <h2 class="card-title">Sirius System</h2>
+            <p class="card-description">The Sirius A1V + DA2 white dwarf binary — watch them orbit with elliptical Keplerian dynamics and compare the brilliant blue-white primary to its tiny, dense companion.</p>
+            <ul class="card-features">
+                <li>Eccentric binary orbit (e=0.591)</li>
+                <li>Sirius A: A1V blue-white main sequence</li>
+                <li>Sirius B: DA2 white dwarf (0.0084 R&#9737;)</li>
+                <li>Interactive orbit speed &amp; inclination</li>
+            </ul>
+            <a href="sirius.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#127775; CLASSIC</span>
+            <div class="card-icon">&#127760;</div>
+            <h2 class="card-title">Sirius Planetary Fantasy</h2>
+            <p class="card-description">A speculative planetary system around Sirius A &amp; B — full orbital mechanics, imagined worlds in the habitable zone, and the stellar wind from this brilliant binary pair.</p>
+            <ul class="card-features">
+                <li>Sirius A &amp; B full binary orbit (e=0.591)</li>
+                <li>Fantasy planet roster with Keplerian orbits</li>
+                <li>Stellar wind particle system (Sirius A)</li>
+                <li>Speed presets: realistic &amp; visual modes</li>
+            </ul>
+            <a href="star3d.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <span class="badge">&#9888;&#65039; Experimental</span>
+            <div class="card-icon">🦀</div>
+            <h2 class="card-title">Rust/WASM 3D</h2>
+            <p class="card-description">High-performance native code compiled to WebAssembly using the Bevy game engine — fluid simulation, magnetic field tracing, and particle advection.</p>
+            <ul class="card-features">
+                <li>Native Rust performance in-browser</li>
+                <li>Bevy ECS architecture (0.17)</li>
+                <li>3D magnetic field line tracing (RK4)</li>
+                <li>GPU compute fluid advection</li>
+            </ul>
+            <a href="rust.html" class="card-link">Launch Simulator →</a>
+        </div>
+
+        <div class="simulator-card">
+            <div class="card-icon">🖥️</div>
+            <h2 class="card-title">Python Desktop Version</h2>
+            <p class="card-description">Full-featured desktop application with OpenGL rendering and the Celestial Studio creator tool.</p>
+            <ul class="card-features">
+                <li>Native OpenGL performance</li>
+                <li>Celestial Studio creator (12 object types)</li>
+                <li>Scene save/load JSON export</li>
+                <li>Windows / Linux / macOS</li>
+            </ul>
+            <a href="https://github.com/etelford32/Clstl_Smltr" class="card-link">View on GitHub →</a>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════ NASA / NOAA DATA SECTION ═══ -->
+    <div class="data-section">
+        <h2>&#127759; Live NASA &amp; NOAA Data Streams</h2>
+        <p class="subtitle">All feeds are public, CORS-enabled APIs — no API key needed for NOAA. NASA DONKI uses a free demo key.</p>
+        <div class="data-grid">
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Real-Time Solar Wind</h4>
+                <p>DSCOVR/ACE L1 magnetometer — Bt, Bz, speed, density &amp; temperature at 1-minute cadence. Powers the live bar above and all Sun/wind simulations.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Planetary Kp Index</h4>
+                <p>3-hour estimated Kp from the global network of ground magnetometers. Drives geomagnetic storm level (G0–G5) in the simulations.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> GOES X-ray Flux</h4>
+                <p>Primary GOES satellite 0.1–0.8 nm channel — classifies solar flares A/B/C/M/X in real time and triggers flare animations.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Solar Flare Event Log</h4>
+                <p>7-day GOES flare catalogue with location strings (e.g. N24W30). Used to aim camera fly-to events on the Sun simulator.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Active Solar Regions</h4>
+                <p>Current sunspot group table — Carrington longitude, area (μHem), magnetic complexity (Beta/Gamma). Renders torus markers on the 3D Sun.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Energetic Proton Flux</h4>
+                <p>GOES integral proton channels (&gt;10, &gt;50, &gt;100 MeV) — detects Solar Energetic Particle (SEP) events and radiation storm levels (S1–S5).</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Aurora Oval Forecast</h4>
+                <p>OVATION Prime model auroral power estimate — north &amp; south hemispheres, 30-minute nowcast. Feeds auroral ring visualization.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Space Weather Alerts</h4>
+                <p>Machine-readable alert/warning/watch messages for all NOAA G/S/R scales — parsed and surfaced as in-app notification banners.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-noaa">NOAA</span> Solar Radio Flux (F10.7)</h4>
+                <p>10.7-cm solar radio flux — a proxy for EUV/X-ray solar activity. Updates every 24 hours; drives solar cycle phase indicator.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-nasa">NASA</span> DONKI — CME Catalogue</h4>
+                <p>NASA Space Weather Database CME list with speed, half-angle, and GSM direction. Used to trigger modelled CME propagation in-sim.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-nasa">NASA</span> DONKI — Geomagnetic Storms</h4>
+                <p>NASA-catalogued geomagnetic storm events with Kp onset time — cross-referenced to NOAA Kp for richer storm timeline display.</p>
+            </div>
+
+            <div class="data-card">
+                <h4><span class="data-source-label src-nasa">NASA</span> DONKI — SEP Events</h4>
+                <p>Solar Energetic Particle event catalogue from NASA DONKI — onset times, peak fluxes, and linked CME/flare associations.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════ FEATURES SECTION ═══ -->
+    <div class="features-section">
+        <h2>✦ What's Inside Parker Physics</h2>
+        <div class="features-grid">
+            <div class="feature-item">
+                <h3>&#128300; Scientifically Grounded</h3>
+                <p>Parker solar wind theory, Hipparcos star catalog distances, NOAA/SWPC live solar data, Navier-Stokes CFD, and real orbital elements throughout.</p>
+            </div>
+            <div class="feature-item">
+                <h3>&#9889; High Performance</h3>
+                <p>Optimized rendering with WebGL, Three.js, and WebAssembly for smooth 60+ FPS simulations — even on mobile.</p>
+            </div>
+            <div class="feature-item">
+                <h3>&#127918; Interactive</h3>
+                <p>Real-time parameter adjustments, camera controls, and visualization modes to explore stellar phenomena at your own pace.</p>
+            </div>
+            <div class="feature-item">
+                <h3>&#127749; Live NASA Data</h3>
+                <p>12 real-time data streams from NOAA/SWPC and NASA DONKI — solar wind, Kp, X-ray flux, CME alerts, proton storms, and aurora forecasts.</p>
+            </div>
+            <div class="feature-item">
+                <h3>&#128241; Cross-Platform</h3>
+                <p>Runs in any modern browser on desktop, tablet, and mobile. No installation required — just click and explore.</p>
+            </div>
+            <div class="feature-item">
+                <h3>&#128640; Open Source</h3>
+                <p>Full source on <a href="https://github.com/etelford32/Clstl_Smltr" style="color:#ffd700">GitHub</a>. Rust/Bevy WASM, Three.js, WebGL, Python/Pygame — contribute, fork, or customize.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+    <img src="ParkerPhaysics_logo1.png" class="footer-logo" alt="Parker Physics">
+    <p>
+        <a href="https://github.com/etelford32/Clstl_Smltr">View on GitHub</a> |
+        <a href="https://github.com/etelford32/Clstl_Smltr/issues">Report Issues</a> |
+        Deployed on Vercel
+    </p>
+    <p class="footer-copy">
+        Parker Physics App — Built with Three.js, WebGL, Rust/Bevy &amp; WebAssembly<br>
+        Live data from NOAA Space Weather Prediction Center &amp; NASA DONKI
+    </p>
+</footer>
+
+<!-- ═══════════════════════════════════════════ NAV SCRIPT ═══ -->
+<script>
+(function() {
+    var burger  = document.getElementById('nav-burger');
+    var navMenu = document.getElementById('nav-menu');
+    burger.addEventListener('click', function() {
+        var open = navMenu.classList.toggle('open');
+        burger.textContent = open ? '✕' : '☰';
+        burger.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('nav')) {
+            navMenu.classList.remove('open');
+            burger.textContent = '☰';
+            burger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            if (window.innerWidth > 768) return;
+            e.stopPropagation();
+            var drop = btn.closest('.nav-drop');
+            var opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(function(d) { d.classList.remove('open'); });
+            if (opening) drop.classList.add('open');
         });
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('nav')) {
-                navMenu.classList.remove('open');
-                burger.textContent = '☰';
-                burger.setAttribute('aria-expanded', 'false');
-            }
-        });
-        document.querySelectorAll('.nav-drop-btn').forEach(function(btn) {
-            btn.addEventListener('click', function(e) {
-                if (window.innerWidth > 768) return; // desktop: CSS hover handles it
-                e.stopPropagation();
-                var drop = btn.closest('.nav-drop');
-                var opening = !drop.classList.contains('open');
-                document.querySelectorAll('.nav-drop').forEach(function(d) { d.classList.remove('open'); });
-                if (opening) drop.classList.add('open');
-            });
-        });
-    })();
-    </script>
-    <script>
-        console.log('🌟 Celestial Simulator');
-        console.log('Available simulators:');
-        console.log('  - Three.js 3D (WebGL)');
-        console.log('  - 2D Star Modeler (12 stellar types)');
-        console.log('  - Advanced Solar Physics (Parker spirals)');
-        console.log('  - Navier-Stokes Fluid Sim (Real CFD)');
-        console.log('  - Rust/WASM 3D (Bevy engine)');
-    </script>
+    });
+})();
+</script>
+
+<!-- ═══════════════════════════════════════ LIVE SPACE WEATHER BAR ═══ -->
+<script type="module">
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+
+const elSpeed  = document.getElementById('sw-speed');
+const elBz     = document.getElementById('sw-bz');
+const elDens   = document.getElementById('sw-dens');
+const elKp     = document.getElementById('sw-kp');
+const elXray   = document.getElementById('sw-xray');
+const elFlare  = document.getElementById('sw-flare');
+const elRegions= document.getElementById('sw-regions');
+const elRegWrap= document.getElementById('sw-region-wrap');
+const elStatus = document.getElementById('sw-status');
+
+function colourKp(kp) {
+    if (kp >= 7) return 'val-alert';
+    if (kp >= 5) return 'val-warn';
+    return 'val-good';
+}
+function colourBz(bz) {
+    if (bz <= -10) return 'val-alert';
+    if (bz <= -5)  return 'val-warn';
+    return 'val-good';
+}
+function colourFlare(letter) {
+    if (letter === 'X') return 'val-alert';
+    if (letter === 'M') return 'val-warn';
+    return '';
+}
+
+window.addEventListener('swpc-update', e => {
+    const d = e.detail;
+    const sw = d.solar_wind;
+
+    elSpeed.textContent = sw.speed ? sw.speed.toFixed(0) : '—';
+    elSpeed.className = '';
+
+    const bzVal = sw.bz != null ? sw.bz.toFixed(1) : '—';
+    elBz.textContent = bzVal + (sw.bz != null ? ' nT' : '');
+    elBz.className = sw.bz != null ? colourBz(sw.bz) : '';
+
+    elDens.textContent = sw.density != null ? sw.density.toFixed(1) : '—';
+
+    elKp.textContent = d.kp != null ? d.kp.toFixed(1) : '—';
+    elKp.className = d.kp != null ? colourKp(d.kp) : '';
+
+    elXray.textContent = d.xray_class ?? '—';
+    elXray.className = colourFlare(d.flare_letter);
+
+    if (d.flare_class) {
+        elFlare.textContent = d.flare_class + (d.flare_location ? ' ' + d.flare_location : '');
+        elFlare.className = colourFlare(d.flare_letter);
+    } else {
+        elFlare.textContent = 'none';
+        elFlare.className = '';
+    }
+
+    if (d.active_regions && d.active_regions.length > 0) {
+        elRegions.textContent = d.active_regions.length + ' active';
+        elRegWrap.style.display = '';
+    }
+
+    elStatus.textContent = d.status;
+    elStatus.className = 'swpc-status ' + d.status;
+});
+
+const feed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
+feed.start();
+</script>
 </body>
 </html>
