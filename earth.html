@@ -157,6 +157,31 @@ nav {
 #sw-dot { width:7px; height:7px; border-radius:50%; background:#4dff80;
     box-shadow:0 0 5px #4dff80; flex-shrink:0; }
 
+/* ─── Weather analysis panel ─────────────────────────────────── */
+#wx-panel {
+    position:absolute; bottom:52px; left:10px; z-index:50;
+    background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
+    border:1px solid rgba(0,200,255,.18); border-radius:9px;
+    padding:12px 14px; width:190px; font-size:11px;
+}
+#wx-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
+    letter-spacing:.8px; margin-bottom:9px; }
+#wx-status-dot { width:7px; height:7px; border-radius:50%; background:#888;
+    display:inline-block; margin-right:5px; flex-shrink:0; }
+#wx-status-dot.live    { background:#4dff80; box-shadow:0 0 5px #4dff80; }
+#wx-status-dot.fetch   { background:#ffaa44; box-shadow:0 0 4px #ffaa44; }
+#wx-status-dot.offline { background:#555; }
+.wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
+.wx-k { color:#4a6a80; }
+.wx-v { color:#a0d8f0; font-weight:600; }
+#wx-refresh {
+    margin-top:9px; width:100%; padding:5px; cursor:pointer;
+    background:rgba(0,200,255,.1); border:1px solid rgba(0,200,255,.3);
+    border-radius:5px; color:#00c6ff; font-size:11px; font-family:inherit;
+    transition:background .2s;
+}
+#wx-refresh:hover { background:rgba(0,200,255,.2); }
+
 /* ─── Loading overlay ────────────────────────────────────────── */
 #loading {
     position:absolute; inset:0; z-index:200;
@@ -253,6 +278,7 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics &amp; Polar Circles</label></label>
         <hr class="lyr-sep">
         <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather Layer (temp)</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-wind"   checked><label for="lyr-wind">Wind Particles</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
     </div>
 
@@ -271,6 +297,25 @@ nav {
         <div class="ir"><span class="ik">Axial tilt</span> <span class="iv">23.44°</span></div>
         <div class="ir"><span class="ik">Solar decl.</span><span class="iv" id="ip-decl">—</span></div>
         <div class="ir"><span class="ik">Subsolar pt</span><span class="iv" id="ip-subsolar">—</span></div>
+    </div>
+
+    <!-- Weather analysis panel -->
+    <div id="wx-panel">
+        <h3>
+            <span id="wx-status-dot" class="offline"></span>Weather Analysis
+        </h3>
+        <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
+        <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
+        <hr class="ir-sep">
+        <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
+        <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
+        <div class="wx-row"><span class="wx-k">T° mean</span>  <span class="wx-v" id="wx-tmean">—</span></div>
+        <hr class="ir-sep">
+        <div class="wx-row"><span class="wx-k">P low</span>    <span class="wx-v" id="wx-pmin">—</span></div>
+        <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
+        <hr class="ir-sep">
+        <div class="wx-row"><span class="wx-k">Max wind</span> <span class="wx-v" id="wx-wmax">—</span></div>
+        <button id="wx-refresh">↺ Refresh Data</button>
     </div>
 
     <!-- Space weather bar -->
@@ -293,8 +338,9 @@ nav {
 
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls }  from 'three/addons/controls/OrbitControls.js';
+import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
@@ -632,6 +678,13 @@ const EARTH_INIT_ROT = gmst(JD0) * DEG;  // rotation at page load
 // ═══════════════════════════════════════════════════════════════
 //  SHARED UNIFORMS
 // ═══════════════════════════════════════════════════════════════
+// Wind DataTexture — RG = U,V in [-1,1], B = speed [0,1]
+const windTexture = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+windTexture.needsUpdate = true;
+
 const earthU = {
     u_day:        { value: null },
     u_night:      { value: null },
@@ -690,38 +743,14 @@ scene.add(new THREE.Mesh(atmGeo, atmMat));
 //  360×180 RGBA Float32 — channels: R=temp, G=pressure, B=humidity, A=wind
 //  Replace with real GFS / ERA5 data tiles when available.
 // ═══════════════════════════════════════════════════════════════
-function buildWeatherTexture() {
-    const W = 360, H = 180;
-    const buf = new Float32Array(W * H * 4);
-    for (let j = 0; j < H; j++) {
-        for (let i = 0; i < W; i++) {
-            const idx = (j * W + i) * 4;
-            const lat = (j / (H - 1) - 0.5) * Math.PI;   // −π/2 … +π/2
-            const lon = (i / (W - 1) - 0.5) * TWO_PI;    // −π … +π
-
-            // Temperature: warm tropics, cold poles + Rossby wave perturbation
-            const tBase = Math.cos(lat * 1.05) * 0.5 + 0.5;
-            const wave  = 0.20 * Math.sin(lon * 3.0 + lat * 1.5)
-                        + 0.12 * Math.sin(lon * 5.0 - lat * 2.5)
-                        + 0.08 * Math.sin(lon * 7.0 + lat * 0.8);
-            buf[idx + 0] = Math.max(0, Math.min(1, tBase + wave));
-
-            // Pressure: zonal bands (high subtropics, low polar/equatorial)
-            buf[idx + 1] = 0.5 + 0.3 * Math.cos(lat * 3.0) + 0.1 * Math.sin(lon * 4.0);
-
-            // Humidity: high in ITCZ (equator) and storm tracks
-            buf[idx + 2] = Math.max(0, Math.cos(lat * 1.8) * 0.8
-                         + 0.2 * Math.abs(Math.sin(lat * 3.0 + lon * 2.0)));
-
-            // Wind speed (placeholder)
-            buf[idx + 3] = 0.3 + 0.4 * Math.abs(Math.cos(lat * 2.0));
-        }
-    }
-    const tex = new THREE.DataTexture(buf, W, H, THREE.RGBAFormat, THREE.FloatType);
-    tex.needsUpdate = true;
-    return tex;
-}
-earthU.u_weather.value = buildWeatherTexture();
+// Weather DataTexture — initialised with empty buffer; WeatherFeed will
+// populate it on the first weather-update event via updateWeatherTextures().
+// TEX_W / TEX_H are imported from weather-feed.js so sizes always match.
+earthU.u_weather.value = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+earthU.u_weather.value.needsUpdate = true;
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -913,8 +942,166 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
 document.getElementById('lyr-weather').addEventListener('change', e => {
     earthU.u_weather_on.value = e.target.checked ? 1.0 : 0.0;
 });
+document.getElementById('lyr-wind').addEventListener('change', e => {
+    windParticles.setVisible(e.target.checked);
+});
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  WIND PARTICLES
+//  CPU-advected particles that live in Earth-local space and
+//  auto-rotate with the globe (they are added as earthMesh children).
+//  Wind U,V read from windTexture buffer; visually replicate the
+//  earth.nullschool.net-style streamline aesthetic.
+// ═══════════════════════════════════════════════════════════════
+class WindParticles {
+    constructor(parent, N = 4000) {
+        this.N       = N;
+        this.lat     = new Float32Array(N);
+        this.lon     = new Float32Array(N);
+        this.age     = new Float32Array(N);
+        this.maxAge  = new Float32Array(N);
+        this.spd     = new Float32Array(N);
+        this.windBuf = null;   // set on first weather-update
+
+        for (let i = 0; i < N; i++) this._reset(i, true);
+
+        this._pos = new Float32Array(N * 3);
+        this._col = new Float32Array(N * 3);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(this._col, 3));
+        const mat = new THREE.PointsMaterial({
+            size: 0.006, vertexColors: true,
+            transparent: true, opacity: 0.80,
+            sizeAttenuation: true, depthWrite: false,
+        });
+        this.mesh = new THREE.Points(geo, mat);
+        this.mesh.renderOrder = 2;
+        parent.add(this.mesh);   // child of earthMesh → auto-rotates with globe
+    }
+
+    setVisible(v) { this.mesh.visible = v; }
+
+    setWindData(buf) { this.windBuf = buf; }
+
+    _reset(i, randomAge = false) {
+        this.lat[i]    = (Math.random() - 0.5) * 160;
+        this.lon[i]    = (Math.random() - 0.5) * 360;
+        this.age[i]    = randomAge ? Math.random() * 25 : 0;
+        this.maxAge[i] = 18 + Math.random() * 18;   // 18–36 s lifetime
+        this.spd[i]    = 0;
+    }
+
+    _lookupWind(lat, lon) {
+        if (!this.windBuf) return { u: 0, v: 0, s: 0 };
+        const ix = Math.round((lon / 360 + 0.5) * (TEX_W - 1) + TEX_W) % TEX_W;
+        const iy = Math.max(0, Math.min(TEX_H - 1,
+            Math.round((0.5 - lat / 180) * (TEX_H - 1))));
+        const k4 = (iy * TEX_W + ix) * 4;
+        return { u: this.windBuf[k4], v: this.windBuf[k4+1], s: this.windBuf[k4+2] };
+    }
+
+    update(dt) {
+        // m/s → deg/s normalised to MAX_WIND, then scaled for visual appeal
+        const VIS = 40;   // visual speed multiplier (degrees per second at full wind)
+
+        for (let i = 0; i < this.N; i++) {
+            this.age[i] += dt;
+            if (this.age[i] > this.maxAge[i]) { this._reset(i); continue; }
+
+            const { u, v, s } = this._lookupWind(this.lat[i], this.lon[i]);
+            const cosLat = Math.max(0.02, Math.cos(this.lat[i] * DEG));
+
+            // Advect in geographic space
+            this.lon[i] += u * VIS * dt / cosLat;
+            this.lat[i] += v * VIS * dt;
+            this.spd[i]  = s;
+
+            if (this.lon[i] >  180) this.lon[i] -= 360;
+            if (this.lon[i] < -180) this.lon[i] += 360;
+            this.lat[i] = Math.max(-84, Math.min(84, this.lat[i]));
+        }
+
+        // Write local positions and colours
+        for (let i = 0; i < this.N; i++) {
+            const phi = this.lat[i] * DEG, lam = this.lon[i] * DEG;
+            const r   = R_EARTH * 1.003;
+            this._pos[i*3]   = r * Math.cos(phi) * Math.sin(lam);
+            this._pos[i*3+1] = r * Math.sin(phi);
+            this._pos[i*3+2] = r * Math.cos(phi) * Math.cos(lam);
+
+            // Age envelope: fade-in (first 10%), full, fade-out (last 20%)
+            const a = this.age[i] / this.maxAge[i];
+            const fade = a < 0.10 ? a / 0.10 : a > 0.80 ? (1 - a) / 0.20 : 1.0;
+            const s    = this.spd[i];
+            // Colour: slow=blue, medium=cyan, fast=white/yellow
+            this._col[i*3]   = Math.min(1, s * 2.0)        * fade;  // R
+            this._col[i*3+1] = Math.min(1, s * 1.4 + 0.15) * fade;  // G
+            this._col[i*3+2] = Math.max(0, 1 - s * 1.8)    * fade;  // B
+        }
+
+        this.mesh.geometry.attributes.position.needsUpdate = true;
+        this.mesh.geometry.attributes.color.needsUpdate    = true;
+    }
+}
+
+const windParticles = new WindParticles(earthMesh, 4000);
+
+// ═══════════════════════════════════════════════════════════════
+//  WEATHER FEED — real-time Open-Meteo / GFS data
+// ═══════════════════════════════════════════════════════════════
+const wxFeed = new WeatherFeed();
+wxFeed.start();
+
+function updateWeatherTextures(weatherBuf, wBuf) {
+    // Update weather DataTexture (temperature/pressure/humidity overlay)
+    earthU.u_weather.value.image.data.set(weatherBuf);
+    earthU.u_weather.value.needsUpdate = true;
+    // Update wind buffer for particle advection
+    windTexture.image.data.set(wBuf);
+    windTexture.needsUpdate = true;
+    windParticles.setWindData(wBuf);
+}
+
+document.addEventListener('weather-update', e => {
+    const { weatherBuffer, windBuffer, meta } = e.detail;
+    updateWeatherTextures(weatherBuffer, windBuffer);
+
+    // Weather analysis panel
+    const dot  = document.getElementById('wx-status-dot');
+    const live = meta.source.includes('GFS') || meta.source.includes('Open-Meteo');
+    dot.className = live ? 'live' : 'offline';
+    document.getElementById('wx-src').textContent  = meta.source;
+    document.getElementById('wx-upd').textContent  = meta.fetchTime
+        ? meta.fetchTime.toUTCString().slice(17, 25) + ' UTC' : '—';
+
+    if (meta.tempMin != null) {
+        document.getElementById('wx-tmin').textContent  = `${meta.tempMin.toFixed(1)} °C`;
+        document.getElementById('wx-tmax').textContent  = `${meta.tempMax.toFixed(1)} °C`;
+        document.getElementById('wx-tmean').textContent = `${meta.tempMean.toFixed(1)} °C`;
+    }
+    if (meta.presMin != null) {
+        document.getElementById('wx-pmin').textContent = `${Math.round(meta.presMin)} hPa`;
+        document.getElementById('wx-pmax').textContent = `${Math.round(meta.presMax)} hPa`;
+    }
+    if (meta.windMax != null) {
+        document.getElementById('wx-wmax').textContent = `${meta.windMax.toFixed(1)} m/s`;
+    }
+});
+
+document.addEventListener('weather-status', e => {
+    if (e.detail.status === 'fetching') {
+        document.getElementById('wx-status-dot').className = 'fetch';
+    }
+});
+
+document.getElementById('wx-refresh').addEventListener('click', () => {
+    document.getElementById('wx-status-dot').className = 'fetch';
+    wxFeed.refresh();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -941,10 +1128,13 @@ function updateAstroHUD(now) {
 }
 
 let lastAstro = 0;
+let lastT = 0;
 
 function animate() {
     requestAnimationFrame(animate);
-    const t = clock.getElapsedTime();
+    const t  = clock.getElapsedTime();
+    const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
+    lastT = t;
 
     // ── Earth sidereal rotation in equatorial frame
     // GMST at page load + elapsed sidereal rotation
@@ -976,6 +1166,9 @@ function animate() {
     } else {
         tipEl.classList.remove('show');
     }
+
+    // ── Wind particle advection
+    windParticles.update(dt);
 
     // ── Astro HUD (every 5 s)
     if (t - lastAstro > 5) {
