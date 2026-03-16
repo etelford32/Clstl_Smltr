@@ -422,6 +422,10 @@ import {
     computeRingCurrentDst, computeJouleHeating,
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
+import { initScaleNav } from './js/scale-nav.js';
+
+// ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
+initScaleNav('earth');
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS

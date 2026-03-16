@@ -396,6 +396,12 @@ nav {
                     <div id="esw-alert" style="display:none;margin-top:8px;padding:6px 8px;border-radius:5px;
                          font-size:10px;background:rgba(255,60,60,.15);border:1px solid rgba(255,60,60,.4);
                          color:#ff8080;line-height:1.5"></div>
+                    <!-- Zoom into Earth View -->
+                    <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.06)">
+                        <button id="btn-goto-earth" title="Open full Earth magnetosphere simulation">
+                            🌍 Open Earth Simulation →
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -443,6 +449,10 @@ nav {
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { initScaleNav, navigateTo } from './js/scale-nav.js';
+
+// ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
+initScaleNav('solar');
 
 // ── Nav hamburger + touch dropdown ──
 const burger  = document.getElementById('nav-burger');
@@ -2280,6 +2290,10 @@ const meshes    = PLANETS.map(p => p.mesh);
 meshes.push(sunMesh);
 allMoonMeshes.forEach(m => meshes.push(m));
 
+// Double-click tracking — double-clicking Earth zooms into the Earth simulation
+let _lastClickMs = 0;
+let _lastClickName = '';
+
 function onPointerDown(e) {
     const rect = renderer.domElement.getBoundingClientRect();
     const cx   = e.touches ? e.touches[0].clientX : e.clientX;
@@ -2289,12 +2303,24 @@ function onPointerDown(e) {
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObjects(meshes);
     if (hits.length > 0) {
-        const obj = hits[0].object;
-        if (obj === sunMesh) { selectBody(null); }
-        else                 { selectBody(obj.userData); }
+        const obj  = hits[0].object;
+        const body = obj === sunMesh ? null : obj.userData;
+        selectBody(body);
+
+        // Double-click on Earth → open Earth simulation
+        const now  = performance.now();
+        const name = body?.name ?? 'Sun';
+        if (name === 'Earth' && now - _lastClickMs < 400 && _lastClickName === 'Earth') {
+            navigateTo('earth.html');
+        }
+        _lastClickMs   = now;
+        _lastClickName = name;
     }
 }
 renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+// "Open Earth Simulation" button in the Earth Space Weather panel
+document.getElementById('btn-goto-earth').addEventListener('click', () => navigateTo('earth.html'));
 
 // ═══════════════════════════════════════════════════════
 //  SIMULATION STATE
