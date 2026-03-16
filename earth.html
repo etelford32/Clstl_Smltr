@@ -294,6 +294,7 @@ nav {
         <hr class="lyr-sep">
         <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather Layer (temp)</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobar Contours</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts (NWS)</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
     </div>
@@ -331,6 +332,25 @@ nav {
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">Max wind</span> <span class="wx-v" id="wx-wmax">—</span></div>
+        <hr class="ir-sep">
+        <!-- Isobar / pressure analysis -->
+        <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
+            <span class="wx-k">Isobars</span>
+            <span class="wx-v" id="wx-iso-count">—</span>
+        </div>
+        <div class="wx-row">
+            <span class="wx-k">Max&nbsp;∇P</span>
+            <span class="wx-v" id="wx-grad">—</span>
+        </div>
+        <div class="wx-row" title="Geostrophic wind — mid-latitude approximation">
+            <span class="wx-k">Geo wind</span>
+            <span class="wx-v" id="wx-geo">—</span>
+        </div>
+        <div class="wx-row">
+            <span class="wx-k">Centers</span>
+            <span class="wx-v" id="wx-centers">—</span>
+        </div>
+        <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
         <hr class="ir-sep">
         <!-- NWS alert summary -->
         <div class="wx-row">
@@ -376,6 +396,7 @@ import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER } from './js/nws-alerts.js';
+import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
@@ -1106,6 +1127,10 @@ document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer);
 
+    // Rebuild isobar contours from the fresh pressure field
+    isobarLayer.update(weatherBuffer);
+    updateIsobarPanel();
+
     // Weather analysis panel
     const dot  = document.getElementById('wx-status-dot');
     const live = meta.source.includes('GFS') || meta.source.includes('Open-Meteo');
@@ -1253,6 +1278,59 @@ function showAlertTip(alert, clientX, clientY) {
 function hideAlertTip() {
     alertTipEl.classList.remove('show');
     _alertTipShowing = false;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ISOBAR LAYER — marching-squares pressure contours
+// ═══════════════════════════════════════════════════════════════
+const isobarLayer = new IsobarLayer(earthMesh);
+
+// IsobarLayer is populated on the first 'weather-update' event
+// (WeatherFeed fires this after async fetch + procedural fallback)
+
+document.getElementById('lyr-isobars').addEventListener('change', e => {
+    isobarLayer.setVisible(e.target.checked);
+});
+
+function updateIsobarPanel() {
+    const stats   = isobarLayer.stats;
+    const extrema = isobarLayer.extrema;
+    if (!stats) return;
+
+    // Pressure gradient
+    document.getElementById('wx-grad').textContent =
+        `${stats.maxGrad.toFixed(2)} hPa/100km`;
+
+    // Geostrophic wind estimate (mid-latitude approximation)
+    const gw = geoWindMs(stats.maxGrad, stats.maxLat);
+    document.getElementById('wx-geo').textContent = gw != null
+        ? `~${gw.toFixed(0)} m/s (~${(gw * 1.944).toFixed(0)} kt)`
+        : '—  (near equator)';
+
+    // H / L count
+    const nH = extrema.filter(e => e.type === 'H').length;
+    const nL = extrema.filter(e => e.type === 'L').length;
+    document.getElementById('wx-centers').textContent = `${nH} H  /  ${nL} L`;
+
+    // Top H and top L detail
+    const topH = extrema.filter(e => e.type === 'H')[0];
+    const topL = extrema.filter(e => e.type === 'L')[0];
+    const fmtE = e => {
+        if (!e) return '—';
+        const { lat, lon } = { lat: (e.y / 180) * 180 - 90, lon: (e.x / 360) * 360 - 180 };
+        const ls = lat >= 0 ? `${lat.toFixed(0)}°N` : `${(-lat).toFixed(0)}°S`;
+        const lo = lon >= 0 ? `${lon.toFixed(0)}°E` : `${(-lon).toFixed(0)}°W`;
+        return `${Math.round(e.hPa)} hPa @ ${ls} ${lo}`;
+    };
+    document.getElementById('wx-centers-list').innerHTML =
+        `<span style="color:#ff8833">H</span> ${fmtE(topH)}<br>`
+      + `<span style="color:#33aaff">L</span> ${fmtE(topL)}`;
+
+    // Isobar segment count
+    const geo = isobarLayer._lines?.geometry;
+    const nSeg = geo ? (geo.getAttribute('position').count / 2) : 0;
+    document.getElementById('wx-iso-count').textContent =
+        `${ISOBAR_LEVELS.length} levels · ${nSeg.toLocaleString()} segs`;
 }
 
 // ── NWS ALERTS FEED ──────────────────────────────────────────────────────────
