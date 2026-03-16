@@ -281,6 +281,15 @@ canvas { display:block; width:100% !important; height:100% !important; }
 
         <!-- Zoom presets (bottom-centre) -->
         <div id="zoom-bar">
+            <!-- Cross-scale zoom out: go to Solar System simulator -->
+            <button id="zoom-solar-system"
+                    title="Zoom into the Solar System simulator (threejs.html)"
+                    style="border-color:rgba(255,220,60,.35);color:#ffdd66;">
+                ☀️ Solar Sys.
+            </button>
+            <span style="display:inline-block;width:1px;height:18px;
+                  background:rgba(255,255,255,.12);margin:0 4px;vertical-align:middle;
+                  align-self:center;flex-shrink:0;"></span>
             <button id="zoom-local">Local (&lt;50 ly)</button>
             <button id="zoom-hood">Neighborhood (&lt;1 kly)</button>
             <button id="zoom-arm">Local Arm (&lt;10 kly)</button>
@@ -372,6 +381,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { initScaleNav, navigateTo } from './js/scale-nav.js';
+
+// ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
+initScaleNav('galaxy');
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SCIENTIFIC NOTATION HELPERS
@@ -3134,6 +3147,10 @@ controls.update();
 document.getElementById('zoom-galaxy').classList.add('active');
 document.getElementById('zoom-local').classList.remove('active');
 document.getElementById('hud-view').textContent = fmtLy(ZOOM_PRESETS.galaxy.radius);
+
+// ── Solar System cross-scale navigation ───────────────────────────────────────
+// The "☀️ Solar Sys." zoom-bar button navigates out to threejs.html
+document.getElementById('zoom-solar-system').addEventListener('click', () => navigateTo('threejs.html'));
 
 animate();
 console.log('%c[Galactic Map · Celestial Simulator]', 'color:#a060ff;font-weight:bold;font-size:13px');
