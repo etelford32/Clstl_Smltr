@@ -1531,7 +1531,7 @@ function animate() {
     // ── Raycaster → coords
     raycaster.setFromCamera(mouse, camera);
     const hits = raycaster.intersectObject(earthMesh);
-    if (hits.length > 0) {
+    if (hits.length > 0 && hits[0].uv) {
         // UV from intersection — correct for current mesh rotation
         const uv = hits[0].uv.clone();
         // The mesh rotates, so UV is in the mesh's local UV space (texture fixed to mesh).
