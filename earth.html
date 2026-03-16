@@ -294,8 +294,12 @@ nav {
         <hr class="lyr-sep">
         <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather Layer (temp)</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobar Contours</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts (NWS)</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-isobars"      checked><label for="lyr-isobars">Isobar Contours</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-alerts"       checked><label for="lyr-alerts">Storm Alerts (NWS)</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-magnetopause" checked><label for="lyr-magnetopause">Magnetopause</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-bowshock"     checked><label for="lyr-bowshock">Bow Shock</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Radiation Belts</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
     </div>
 
@@ -310,6 +314,21 @@ nav {
         <div class="ir"><span class="ik">Solar Wind</span> <span class="iv" id="ip-wind">—</span></div>
         <div class="ir"><span class="ik">X-Ray</span>      <span class="iv" id="ip-xray">—</span></div>
         <div class="ir"><span class="ik">HF Radio</span>   <span class="iv" id="ip-hf">Normal</span></div>
+        <hr class="ir-sep">
+        <!-- Magnetosphere analysis -->
+        <div class="ir"><span class="ik">Magnetopause</span><span class="iv" id="ip-mp">— Re</span></div>
+        <div class="ir"><span class="ik">Bow Shock</span>  <span class="iv" id="ip-bs">— Re</span></div>
+        <div class="ir"><span class="ik">Plasmapause</span><span class="iv" id="ip-lpp">— Re</span></div>
+        <div class="ir" title="Ring current Dst proxy (nT)">
+            <span class="ik">Dst proxy</span>  <span class="iv" id="ip-dst">— nT</span>
+        </div>
+        <div class="ir" title="Joule heating in auroral ionosphere">
+            <span class="ik">Joule heat</span> <span class="iv" id="ip-joule">— GW</span>
+        </div>
+        <hr class="ir-sep">
+        <!-- Ionospheric layer analysis -->
+        <div class="ik" style="font-size:9px;color:#88aacc;margin-bottom:3px;letter-spacing:.06em;">IONOSPHERIC LAYERS</div>
+        <div id="ip-iono-layers">—</div>
         <hr class="ir-sep">
         <div class="ir"><span class="ik">Axial tilt</span> <span class="iv">23.44°</span></div>
         <div class="ir"><span class="ik">Solar decl.</span><span class="iv" id="ip-decl">—</span></div>
@@ -397,6 +416,12 @@ import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER } from './js/nws-alerts.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
+import {
+    MagnetosphereEngine,
+    computeShue, computePlasmapause, computeIonoLayers,
+    computeRingCurrentDst, computeJouleHeating,
+    renderIonoHTML,
+} from './js/magnetosphere-engine.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
@@ -972,6 +997,10 @@ document.addEventListener('swpc-update', e => {
     // ── Earth shader
     earthU.u_kp.value  = kp;
     earthU.u_xray.value = sw.xray_intensity ?? 0;
+
+    // ── Magnetosphere geometry + ionosphere analysis
+    magnetosphere.update(e.detail);
+    updateMagnetospherePanel();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1333,6 +1362,45 @@ function updateIsobarPanel() {
         `${ISOBAR_LEVELS.length} levels · ${nSeg.toLocaleString()} segs`;
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  MAGNETOSPHERE ENGINE
+// ═══════════════════════════════════════════════════════════════
+const magnetosphere = new MagnetosphereEngine(scene);
+
+// Layer toggles
+document.getElementById('lyr-magnetopause').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('magnetopause', e.target.checked));
+document.getElementById('lyr-bowshock').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('bowShock', e.target.checked));
+document.getElementById('lyr-belts').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('belts', e.target.checked));
+document.getElementById('lyr-plasma').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('plasmasphere', e.target.checked));
+
+function updateMagnetospherePanel() {
+    const a = magnetosphere.analysis;
+    if (!a) return;
+
+    document.getElementById('ip-mp').textContent =
+        `${a.r0.toFixed(1)} Re  (α ${a.alpha.toFixed(2)})`;
+    document.getElementById('ip-bs').textContent =
+        `${a.bowShockR0.toFixed(1)} Re`;
+    document.getElementById('ip-lpp').textContent =
+        `${a.plasmapause.toFixed(1)} Re`;
+
+    const dstEl = document.getElementById('ip-dst');
+    dstEl.textContent = `${Math.round(a.dst)} nT`;
+    dstEl.style.color = a.dst < -100 ? '#ff4422'
+                      : a.dst < -50  ? '#ffaa22'
+                      : a.dst < -20  ? '#ffee44'
+                      : '#88ccaa';
+
+    document.getElementById('ip-joule').textContent =
+        `${a.joule.toFixed(1)} GW`;
+
+    document.getElementById('ip-iono-layers').innerHTML = renderIonoHTML(a.iono);
+}
+
 // ── NWS ALERTS FEED ──────────────────────────────────────────────────────────
 const nwsAlerts = new NWSAlerts();
 nwsAlerts.start();
@@ -1474,6 +1542,9 @@ function animate() {
 
     // ── Alert marker pulse
     alertMarkers.tick(t);
+
+    // ── Magnetosphere: orient to sun + animate belt glow
+    magnetosphere.tick(t, earthU.u_sun_dir.value);
 
     // ── Astro HUD (every 5 s)
     if (t - lastAstro > 5) {
