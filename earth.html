@@ -157,6 +157,21 @@ nav {
 #sw-dot { width:7px; height:7px; border-radius:50%; background:#4dff80;
     box-shadow:0 0 5px #4dff80; flex-shrink:0; }
 
+/* ─── Alert tooltip ──────────────────────────────────────────── */
+#alert-tip {
+    position:absolute; pointer-events:none; z-index:120;
+    background:rgba(0,0,0,.88); backdrop-filter:blur(6px);
+    border-left:3px solid #ff8800; border-radius:7px;
+    padding:8px 11px; font-size:11px; max-width:240px;
+    display:none; line-height:1.55;
+}
+#alert-tip.show { display:block; }
+#alert-tip .at-sev   { font-size:9px; text-transform:uppercase;
+    letter-spacing:.6px; font-weight:700; }
+#alert-tip .at-event { font-weight:700; margin:2px 0 3px; font-size:12px; }
+#alert-tip .at-area  { color:#7ab; font-size:10px; }
+#alert-tip .at-exp   { color:#555; font-size:10px; margin-top:4px; }
+
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
@@ -278,7 +293,8 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics &amp; Polar Circles</label></label>
         <hr class="lyr-sep">
         <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather Layer (temp)</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-wind"   checked><label for="lyr-wind">Wind Particles</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts (NWS)</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
     </div>
 
@@ -315,7 +331,25 @@ nav {
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">Max wind</span> <span class="wx-v" id="wx-wmax">—</span></div>
+        <hr class="ir-sep">
+        <!-- NWS alert summary -->
+        <div class="wx-row">
+            <span class="wx-k" style="display:flex;align-items:center;gap:4px;">
+                <span id="nws-dot" style="width:7px;height:7px;border-radius:50%;background:#555;display:inline-block;flex-shrink:0"></span>
+                Storm Alerts
+            </span>
+            <span class="wx-v" id="wx-alert-count">—</span>
+        </div>
+        <div id="wx-alert-badges" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px;"></div>
         <button id="wx-refresh">↺ Refresh Data</button>
+    </div>
+
+    <!-- Alert hover tooltip -->
+    <div id="alert-tip">
+        <div class="at-sev"  id="at-sev"></div>
+        <div class="at-event" id="at-event"></div>
+        <div class="at-area"  id="at-area"></div>
+        <div class="at-exp"   id="at-exp"></div>
     </div>
 
     <!-- Space weather bar -->
@@ -341,6 +375,7 @@ import * as THREE from 'three';
 import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
+import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER } from './js/nws-alerts.js';
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
@@ -1102,7 +1137,196 @@ document.addEventListener('weather-status', e => {
 document.getElementById('wx-refresh').addEventListener('click', () => {
     document.getElementById('wx-status-dot').className = 'fetch';
     wxFeed.refresh();
+    nwsAlerts.refresh();
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  ALERT MARKERS
+//  Three.js dot + pulsing ring per active NWS alert, all children
+//  of earthMesh so they rotate automatically with the globe.
+//  Hover detection extends the existing raycaster pipeline.
+// ═══════════════════════════════════════════════════════════════
+class AlertMarkers {
+    constructor(parent) {
+        this._parent   = parent;
+        this._dotGeo   = new THREE.SphereGeometry(0.009, 7, 7);
+        this._ringGeo  = new THREE.RingGeometry(0.013, 0.022, 20);
+        this._dots     = [];   // { mesh, alert }
+        this._rings    = [];   // { mesh, freq, phase }
+        this._visible  = true;
+    }
+
+    setVisible(v) {
+        this._visible = v;
+        this._dots.forEach(d => d.mesh.visible = v);
+        this._rings.forEach(r => { r.mesh.visible = v; });
+    }
+
+    // Replace all markers from a fresh alert array
+    rebuild(alerts) {
+        // Dispose existing (share geometries, clone materials)
+        this._dots.forEach(d  => { this._parent.remove(d.mesh);  d.mesh.material.dispose(); });
+        this._rings.forEach(r => { this._parent.remove(r.mesh); r.mesh.material.dispose(); });
+        this._dots  = [];
+        this._rings = [];
+
+        for (const alert of alerts) {
+            const hexColor = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
+            const phi = alert.lat * DEG, lam = alert.lon * DEG;
+            const r   = R_EARTH * 1.004;
+
+            // Earth-local Cartesian (+Z = prime meridian, +Y = north pole)
+            const pos = new THREE.Vector3(
+                r * Math.cos(phi) * Math.sin(lam),
+                r * Math.sin(phi),
+                r * Math.cos(phi) * Math.cos(lam)
+            );
+
+            // Core dot
+            const dotMat = new THREE.MeshBasicMaterial({ color: hexColor });
+            const dot    = new THREE.Mesh(this._dotGeo, dotMat);
+            dot.position.copy(pos);
+            dot.visible = this._visible;
+            this._parent.add(dot);
+            this._dots.push({ mesh: dot, alert });
+
+            // Pulse ring — lookAt(origin) makes ring tangent to sphere surface
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: hexColor, transparent: true, opacity: 0.75,
+                side: THREE.DoubleSide, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(this._ringGeo, ringMat);
+            ring.position.copy(pos);
+            ring.lookAt(new THREE.Vector3(0, 0, 0));
+            ring.visible = this._visible;
+            this._parent.add(ring);
+            this._rings.push({
+                mesh:  ring,
+                freq:  ALERT_PULSE_FREQ[alert.severity] ?? 0.5,
+                phase: Math.random() * Math.PI * 2,
+            });
+        }
+    }
+
+    // Animate pulse rings each frame
+    tick(t) {
+        if (!this._visible) return;
+        for (const { mesh, freq, phase } of this._rings) {
+            const pulse = Math.sin(t * freq * Math.PI * 2 + phase) * 0.5 + 0.5;
+            const s     = 1 + pulse * 2.2;
+            mesh.scale.set(s, s, 1);
+            mesh.material.opacity = 0.72 * (1 - pulse * 0.88);
+        }
+    }
+
+    // Returns the alert under cursor, or null
+    getHovered(raycaster) {
+        if (!this._visible || this._dots.length === 0) return null;
+        const hits = raycaster.intersectObjects(this._dots.map(d => d.mesh));
+        if (hits.length === 0) return null;
+        return this._dots.find(d => d.mesh === hits[0].object)?.alert ?? null;
+    }
+}
+
+const alertMarkers = new AlertMarkers(earthMesh);
+
+// Alert tooltip element
+const alertTipEl  = document.getElementById('alert-tip');
+let   _alertTipShowing = false;
+
+function showAlertTip(alert, clientX, clientY) {
+    const r = renderer.domElement.getBoundingClientRect();
+    document.getElementById('at-sev').textContent   = alert.severity.toUpperCase();
+    document.getElementById('at-sev').style.color   = ALERT_CSS_COLORS[alert.severity] ?? '#888';
+    document.getElementById('at-event').textContent = alert.event;
+    document.getElementById('at-area').textContent  = alert.area;
+    const exp = alert.expires
+        ? 'Exp: ' + new Date(alert.expires).toUTCString().slice(5, 22) + ' UTC'
+        : '';
+    document.getElementById('at-exp').textContent = exp;
+    alertTipEl.style.left = (clientX - r.left + 16) + 'px';
+    alertTipEl.style.top  = (clientY - r.top  - 8)  + 'px';
+    alertTipEl.classList.add('show');
+    _alertTipShowing = true;
+}
+
+function hideAlertTip() {
+    alertTipEl.classList.remove('show');
+    _alertTipShowing = false;
+}
+
+// ── NWS ALERTS FEED ──────────────────────────────────────────────────────────
+const nwsAlerts = new NWSAlerts();
+nwsAlerts.start();
+
+document.addEventListener('nws-status', e => {
+    if (e.detail.status === 'fetching')
+        document.getElementById('nws-dot').style.background = '#ffaa44';
+});
+
+document.addEventListener('nws-alerts-update', e => {
+    const { alerts, meta, error } = e.detail;
+
+    // Update 3-D markers
+    alertMarkers.rebuild(alerts);
+
+    // Status dot: live=green, error=red, 0 alerts=dim
+    const dot = document.getElementById('nws-dot');
+    if (error) {
+        dot.style.background = '#ff4444';
+        dot.style.boxShadow  = '0 0 4px #ff4444';
+    } else if (alerts.length > 0) {
+        dot.style.background = '#ff8800';
+        dot.style.boxShadow  = '0 0 5px #ff8800';
+    } else {
+        dot.style.background = '#4dff80';
+        dot.style.boxShadow  = '0 0 4px #4dff80';
+    }
+
+    // Alert count
+    document.getElementById('wx-alert-count').textContent =
+        error ? 'error' : (meta.count > 0 ? `${meta.count} active` : 'none');
+
+    // Severity badges
+    const badgesEl = document.getElementById('wx-alert-badges');
+    badgesEl.innerHTML = '';
+    for (const sev of SEVERITY_ORDER) {
+        const n = meta.bySeverity[sev];
+        if (!n) continue;
+        const b = document.createElement('span');
+        b.textContent = `${n} ${sev}`;
+        b.style.cssText = `
+            display:inline-block; padding:2px 5px; border-radius:3px; font-size:9px;
+            font-weight:700; letter-spacing:.4px;
+            background:${ALERT_CSS_COLORS[sev]}22;
+            color:${ALERT_CSS_COLORS[sev]};
+            border:1px solid ${ALERT_CSS_COLORS[sev]}55;
+        `;
+        badgesEl.appendChild(b);
+    }
+});
+
+document.getElementById('lyr-alerts').addEventListener('change', e => {
+    alertMarkers.setVisible(e.target.checked);
+});
+
+// Extend mousemove to detect alert marker hovers
+renderer.domElement.addEventListener('mousemove', e => {
+    const r     = renderer.domElement.getBoundingClientRect();
+    const ndcX  = ((e.clientX - r.left) / r.width)  * 2 - 1;
+    const ndcY  = -((e.clientY - r.top)  / r.height) * 2 + 1;
+    const alertRay = new THREE.Raycaster();
+    alertRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+
+    // Intersect alert dots (must account for earthMesh rotation)
+    const hovered = alertMarkers.getHovered(alertRay);
+    if (hovered) {
+        showAlertTip(hovered, e.clientX, e.clientY);
+    } else {
+        hideAlertTip();
+    }
+});
+renderer.domElement.addEventListener('mouseleave', hideAlertTip);
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATE
@@ -1169,6 +1393,9 @@ function animate() {
 
     // ── Wind particle advection
     windParticles.update(dt);
+
+    // ── Alert marker pulse
+    alertMarkers.tick(t);
 
     // ── Astro HUD (every 5 s)
     if (t - lastAstro > 5) {
