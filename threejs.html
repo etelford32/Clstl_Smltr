@@ -143,6 +143,11 @@ nav {
 #sw-flare-badge.cls-m { display:inline; background:rgba(255,160,0,.25); color:#ffcc40; }
 #sw-flare-badge.cls-x { display:inline; background:rgba(255,40,0,.30);  color:#ff8080; animation:sw-pulse 1.2s infinite; }
 
+/* ─── Kp gauge (shared with Earth ribbon panel) ─────────────── */
+.kp-cells { display:flex; gap:2px; margin:5px 0 3px; }
+.kp-cell  { flex:1; height:6px; border-radius:2px; opacity:.18; transition:opacity .35s, box-shadow .35s; }
+.kp-cell.kp-active { opacity:1; }
+
 /* ─── Canvas buttons ─────────────────────────────────────────── */
 .cv-btn {
     position:absolute; z-index:60;
@@ -250,6 +255,7 @@ nav {
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item active">Solar System</a>
         <a href="sun.html" class="nav-item">The Sun</a>
+        <a href="earth.html" class="nav-item">Earth View</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -270,7 +276,6 @@ nav {
                 <a href="black-hole-fluid.html">Black Hole Accretion</a>
             </div>
         </div>
-        <a href="earth.html" class="nav-item">Earth View</a>
         <a href="rust.html" class="nav-item">Rust/WASM</a>
     </div>
 </nav>
@@ -340,6 +345,12 @@ nav {
             </div>
             <div id="sw-sep"></div>
             <span id="sw-flare-badge"></span>
+            <div id="sw-sep"></div>
+            <div class="sw-item">
+                <span class="sw-lbl">🌍</span>
+                <span class="sw-val" id="sw-earth-g" title="Earth geomagnetic storm level">G0</span>
+                <span class="sw-lbl" id="sw-earth-gl">Quiet</span>
+            </div>
         </div>
 
         <div id="backdrop"></div>
@@ -383,6 +394,11 @@ nav {
             <div class="sec" id="sec-earth-sw" style="display:none">
                 <div class="sec-hd"><span>🌍 Space Weather at Earth</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
+                    <!-- Kp gauge -->
+                    <div class="kp-cells" id="esw-kp-cells" style="margin-bottom:2px;"><!-- built by JS --></div>
+                    <div style="display:flex;justify-content:space-between;font-size:8px;color:#334;margin-bottom:6px;padding:0 1px;">
+                        <span>0</span><span>3</span><span>5</span><span>7</span><span>9</span>
+                    </div>
                     <table class="dtbl" id="earth-sw-table">
                         <tr><td>Storm level</td><td id="esw-storm" style="font-weight:600">G0 — Quiet</td></tr>
                         <tr><td>Dst index</td><td id="esw-dst">~0 nT</td></tr>
@@ -2481,6 +2497,8 @@ const speedEl    = document.getElementById('sw-speed');
 const bzEl       = document.getElementById('sw-bz');
 const flareEl    = document.getElementById('sw-flare');
 const flareBadge = document.getElementById('sw-flare-badge');
+const earthGEl   = document.getElementById('sw-earth-g');
+const earthGLbl  = document.getElementById('sw-earth-gl');
 
 // Kp-to-class helpers
 const KP_COLOR = v =>
@@ -2489,6 +2507,31 @@ const KP_COLOR = v =>
 const FLARE_BADGE_CLASS = letter =>
     letter === 'X' ? 'cls-x' : letter === 'M' ? 'cls-m' :
     letter === 'C' ? 'cls-c' : '';
+
+// Kp gauge cell colors (0–9)
+const KP_CELL_COLS = [
+    '#4dff80','#88ee44','#ccee22','#ffdd44','#ffaa22',
+    '#ff8c00','#ff4400','#dd0000','#aa0088','#cc00ff'
+];
+const KP_STORM_LABELS = ['Quiet','Quiet','Quiet','Unsettled','Active','Minor','Moderate','Strong','Severe','Extreme'];
+const G_SCALE_COLS    = ['#aaa','#aadd44','#ffd700','#ff8800','#ff3300','#ff00aa'];
+const G_SCALE_LABELS  = ['Quiet','G1 Minor','G2 Moderate','G3 Strong','G4 Severe','G5 Extreme'];
+
+// ── Build Kp gauge cells in Earth panel (once, lazily on first open)
+let eswKpBuilt = false;
+function buildEswKpCells() {
+    if (eswKpBuilt) return;
+    const wrap = document.getElementById('esw-kp-cells');
+    if (!wrap) return;
+    for (let i = 0; i < 10; i++) {
+        const c = document.createElement('div');
+        c.className = 'kp-cell';
+        c.style.background = KP_CELL_COLS[i];
+        c.title = `Kp ${i} — ${KP_STORM_LABELS[i]}`;
+        wrap.appendChild(c);
+    }
+    eswKpBuilt = true;
+}
 
 /** Update the live ribbon with the latest SwaceWeather state. */
 function updateSWRibbon(sw) {
@@ -2524,6 +2567,19 @@ function updateSWRibbon(sw) {
     ribbonEl.className = d.storm_level >= 3 ? 'storm-3' :
                          d.storm_level === 2 ? 'storm-2' :
                          d.storm_level === 1 ? 'storm-1' : '';
+
+    // Earth G-scale chip in ribbon
+    if (earthGEl) {
+        const gl = d.storm_level ?? 0;
+        const gc = G_SCALE_COLS[Math.min(gl, 5)];
+        earthGEl.textContent = gl >= 1 ? `G${gl}` : 'G0';
+        earthGEl.className   = 'sw-val ' + KP_COLOR(kp ?? 0);
+        earthGEl.style.color = gc;
+        if (earthGLbl) {
+            earthGLbl.textContent = G_SCALE_LABELS[Math.min(gl, 5)].split(' ').slice(-1)[0];
+            earthGLbl.style.color = gc + 'bb';
+        }
+    }
 }
 
 // ── 'swpc-update' event handler — map data → visual parameters ───────────────
@@ -2635,6 +2691,16 @@ window.addEventListener('swpc-update', (e) => {
     plasmaUni.u_kp.value = kpRaw;
 
     // ── Earth info panel (shown when Earth is selected) ───────────────────────
+    // Build Kp cells lazily (panel may not exist in DOM yet)
+    buildEswKpCells();
+    // Update Kp gauge cells
+    const kpIdx = Math.min(9, Math.floor(kpRaw));
+    const eswCells = document.getElementById('esw-kp-cells')?.children ?? [];
+    for (let i = 0; i < eswCells.length; i++) {
+        eswCells[i].classList.toggle('kp-active', i === kpIdx);
+        eswCells[i].style.boxShadow = i === kpIdx ? `0 0 4px ${KP_CELL_COLS[i]}` : 'none';
+    }
+
     const G_LABELS = ['G0 — Quiet','G1 — Minor','G2 — Moderate',
                       'G3 — Strong','G4 — Severe','G5 — Extreme'];
     const G_COLS   = ['#aaa','#aadd44','#ffd700','#ff8800','#ff3300','#ff00aa'];

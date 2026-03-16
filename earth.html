@@ -129,18 +129,46 @@ nav {
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
     position:absolute; bottom:52px; right:10px; z-index:50;
-    background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
-    border:1px solid rgba(0,200,255,.18); border-radius:9px;
-    padding:12px 14px; width:190px; font-size:11px;
+    background:rgba(0,0,0,.78); backdrop-filter:blur(10px);
+    border:1px solid rgba(0,200,255,.22); border-radius:9px;
+    padding:12px 14px; width:210px; font-size:11px;
+    max-height:calc(100vh - 120px); overflow-y:auto;
 }
+#info-panel::-webkit-scrollbar { width:3px; }
+#info-panel::-webkit-scrollbar-thumb { background:rgba(0,200,255,.25); border-radius:2px; }
 #info-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
-    letter-spacing:.8px; margin-bottom:9px; }
-.ir { display:flex; justify-content:space-between; margin-bottom:5px; gap:6px; }
+    letter-spacing:.8px; margin:0; }
+.ir { display:flex; justify-content:space-between; margin-bottom:5px; gap:6px; align-items:center; }
 .ik { color:#4a6a80; }
 .iv { color:#a0d8f0; font-weight:600; text-align:right; }
 .iv.warn  { color:#ffaa44; }
 .iv.alert { color:#ff4444; }
 .ir-sep { border:none; border-top:1px solid rgba(255,255,255,.06); margin:7px 0; }
+
+/* ── Kp gauge cells */
+.kp-cells { display:flex; gap:2px; margin:4px 0 1px; }
+.kp-cell  { flex:1; height:7px; border-radius:2px; opacity:.18; transition:opacity .4s, box-shadow .4s; }
+.kp-cell.kp-active { opacity:1; }
+
+/* ── G-scale badge */
+.g-badge {
+    display:inline-block; padding:1px 7px; border-radius:4px;
+    font-size:10px; font-weight:700; letter-spacing:.5px;
+    color:#4dff80; background:rgba(77,255,128,.12);
+    border:1px solid rgba(77,255,128,.4); transition:all .5s;
+}
+
+/* ── Bz / xray visual */
+.bz-arrow { font-size:15px; line-height:1; transition:color .4s; margin-right:2px; }
+.xray-badge {
+    display:inline-block; padding:1px 7px; border-radius:4px;
+    font-size:11px; font-weight:700; letter-spacing:.4px;
+    transition:all .5s; border:1px solid rgba(77,255,128,.4);
+}
+
+/* ── Solar wind speed bar */
+.spd-bar-wrap { height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; margin:3px 0 5px; }
+.spd-bar { height:100%; background:#00c6ff; border-radius:2px; transition:width .9s, background .5s; }
 
 /* ─── Space weather bar ──────────────────────────────────────── */
 #sw-bar {
@@ -228,6 +256,7 @@ nav {
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html"     class="nav-item">Solar System</a>
         <a href="sun.html"         class="nav-item">The Sun</a>
+        <a href="earth.html" class="nav-item active">Earth View</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -248,7 +277,6 @@ nav {
                 <a href="black-hole-fluid.html">Black Hole Accretion</a>
             </div>
         </div>
-        <a href="earth.html" class="nav-item active">Earth View</a>
         <a href="rust.html"  class="nav-item">Rust/WASM</a>
     </div>
 </nav>
@@ -303,36 +331,97 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
     </div>
 
-    <!-- Info panel -->
+    <!-- Info panel — Space Weather HUD -->
     <div id="info-panel">
-        <h3>Space Weather at Earth</h3>
-        <div class="ir"><span class="ik">Kp Index</span>   <span class="iv" id="ip-kp">—</span></div>
-        <div class="ir"><span class="ik">Storm</span>      <span class="iv" id="ip-storm">—</span></div>
-        <div class="ir"><span class="ik">Aurora Power</span><span class="iv" id="ip-aurora">—</span></div>
-        <div class="ir"><span class="ik">IMF Bz</span>     <span class="iv" id="ip-bz">—</span></div>
+
+        <!-- Header row: title + G-scale badge -->
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+            <h3>Space Weather</h3>
+            <span class="g-badge" id="ip-g-badge">Quiet</span>
+        </div>
+
+        <!-- Kp gauge -->
+        <div style="margin-bottom:7px;">
+            <div class="ir" style="margin-bottom:1px;">
+                <span class="ik">Kp Index</span>
+                <span class="iv" id="ip-kp" style="font-size:13px;line-height:1;">—</span>
+            </div>
+            <div class="kp-cells" id="kp-cells"><!-- built by JS --></div>
+            <div style="display:flex;justify-content:space-between;padding:0 1px;">
+                <span style="font-size:8px;color:#2a4a5a;">0</span>
+                <span style="font-size:8px;color:#2a4a5a;">3</span>
+                <span style="font-size:8px;color:#2a4a5a;">5</span>
+                <span style="font-size:8px;color:#2a4a5a;">7</span>
+                <span style="font-size:8px;color:#2a4a5a;">9</span>
+            </div>
+        </div>
+
         <hr class="ir-sep">
-        <div class="ir"><span class="ik">Solar Wind</span> <span class="iv" id="ip-wind">—</span></div>
-        <div class="ir"><span class="ik">X-Ray</span>      <span class="iv" id="ip-xray">—</span></div>
-        <div class="ir"><span class="ik">HF Radio</span>   <span class="iv" id="ip-hf">Normal</span></div>
+
+        <!-- IMF Bz — direction arrow + value -->
+        <div class="ir">
+            <span class="ik">IMF Bz</span>
+            <span style="display:flex;align-items:center;gap:2px;">
+                <span class="bz-arrow" id="ip-bz-arrow">—</span>
+                <span class="iv" id="ip-bz">—</span>
+            </span>
+        </div>
+
+        <!-- Solar wind + speed bar -->
+        <div>
+            <div class="ir" style="margin-bottom:2px;">
+                <span class="ik">Solar Wind</span>
+                <span class="iv" id="ip-wind">—</span>
+            </div>
+            <div class="spd-bar-wrap"><div class="spd-bar" id="ip-spd-bar" style="width:30%"></div></div>
+        </div>
+
+        <!-- X-ray + HF status -->
+        <div class="ir">
+            <span class="ik">X-Ray</span>
+            <span style="display:flex;align-items:center;gap:5px;">
+                <span class="xray-badge" id="ip-xray">A</span>
+                <span class="ik" id="ip-hf" style="font-size:9px;">Normal</span>
+            </span>
+        </div>
+
+        <!-- Aurora power -->
+        <div class="ir">
+            <span class="ik">Aurora Power</span>
+            <span class="iv" id="ip-aurora">—</span>
+        </div>
+
+        <!-- (hidden legacy element for JS compat) -->
+        <span id="ip-storm" style="display:none;">—</span>
+
         <hr class="ir-sep">
-        <!-- Magnetosphere analysis -->
+
+        <!-- Magnetosphere section -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px;">Magnetosphere</div>
         <div class="ir"><span class="ik">Magnetopause</span><span class="iv" id="ip-mp">— Re</span></div>
-        <div class="ir"><span class="ik">Bow Shock</span>  <span class="iv" id="ip-bs">— Re</span></div>
-        <div class="ir"><span class="ik">Plasmapause</span><span class="iv" id="ip-lpp">— Re</span></div>
+        <div class="ir"><span class="ik">Bow Shock</span>   <span class="iv" id="ip-bs">— Re</span></div>
+        <div class="ir"><span class="ik">Plasmapause</span> <span class="iv" id="ip-lpp">— Re</span></div>
         <div class="ir" title="Ring current Dst proxy (nT)">
-            <span class="ik">Dst proxy</span>  <span class="iv" id="ip-dst">— nT</span>
+            <span class="ik">Dst proxy</span>
+            <span class="iv" id="ip-dst">— nT</span>
         </div>
         <div class="ir" title="Joule heating in auroral ionosphere">
-            <span class="ik">Joule heat</span> <span class="iv" id="ip-joule">— GW</span>
+            <span class="ik">Joule heat</span>
+            <span class="iv" id="ip-joule">— GW</span>
         </div>
+
         <hr class="ir-sep">
-        <!-- Ionospheric layer analysis -->
-        <div class="ik" style="font-size:9px;color:#88aacc;margin-bottom:3px;letter-spacing:.06em;">IONOSPHERIC LAYERS</div>
+
+        <!-- Ionospheric layers -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:3px;">Ionospheric Layers</div>
         <div id="ip-iono-layers">—</div>
+
         <hr class="ir-sep">
-        <div class="ir"><span class="ik">Axial tilt</span> <span class="iv">23.44°</span></div>
+
+        <!-- Astronomical -->
         <div class="ir"><span class="ik">Solar decl.</span><span class="iv" id="ip-decl">—</span></div>
         <div class="ir"><span class="ik">Subsolar pt</span><span class="iv" id="ip-subsolar">—</span></div>
+
     </div>
 
     <!-- Weather analysis panel -->
@@ -961,6 +1050,24 @@ function updateCoords(uv) {
 // ═══════════════════════════════════════════════════════════════
 const G_LABELS = ['','G1','G2','G3','G4','G5'];
 const G_COLS   = ['#4dff80','#ffdd44','#ff8c00','#ff4400','#ff1111','#cc00ff'];
+// Kp gauge: 10 cells (0–9), green → red → violet
+const KP_CELL_COLORS = [
+    '#4dff80','#88ee44','#ccee22','#ffdd44','#ffaa22',
+    '#ff8c00','#ff4400','#dd0000','#aa0088','#cc00ff'
+];
+const KP_QUIET_LABELS = ['Quiet','Quiet','Quiet','Unsettled','Active','G1 Minor','G2 Moderate','G3 Strong','G4 Severe','G5 Extreme'];
+
+// ── Build Kp gauge cells (once)
+(function buildKpCells() {
+    const wrap = document.getElementById('kp-cells');
+    for (let i = 0; i < 10; i++) {
+        const c = document.createElement('div');
+        c.className = 'kp-cell';
+        c.style.background = KP_CELL_COLORS[i];
+        c.title = `Kp ${i} — ${KP_QUIET_LABELS[i]}`;
+        wrap.appendChild(c);
+    }
+})();
 
 const swFeed = new SpaceWeatherFeed();
 swFeed.start();
@@ -974,7 +1081,7 @@ document.addEventListener('swpc-update', e => {
     const spd = sw.solar_wind?.speed ?? 400;
     const dns = sw.solar_wind?.density ?? 5;
 
-    // ── Space weather bar
+    // ── Space weather bar (bottom)
     document.getElementById('sw-speed').textContent = `${Math.round(spd)} km/s`;
     document.getElementById('sw-bz').textContent    = `${bz.toFixed(1)} nT`;
     document.getElementById('sw-dens').textContent  = `${dns.toFixed(1)} /cc`;
@@ -982,24 +1089,73 @@ document.addEventListener('swpc-update', e => {
     document.getElementById('sw-xray').textContent  = sw.xray_class ?? '—';
     document.getElementById('sw-dot').style.background = G_COLS[storm];
 
-    // ── Info panel
-    document.getElementById('ip-kp').textContent    = kp.toFixed(1);
-    const stEl = document.getElementById('ip-storm');
-    stEl.textContent  = G_LABELS[storm] || 'None';
-    stEl.style.color  = G_COLS[storm];
-    document.getElementById('ip-bz').textContent    = `${bz.toFixed(1)} nT`;
-    document.getElementById('ip-bz').style.color    = bz < -5 ? '#ff6644' : '#a0d8f0';
-    document.getElementById('ip-wind').textContent  = `${Math.round(spd)} km/s`;
-    document.getElementById('ip-xray').textContent  = sw.xray_class ?? 'A';
+    // ── Info panel — Kp numeric
+    document.getElementById('ip-kp').textContent = kp.toFixed(1);
+
+    // ── Kp gauge cells
+    const kpIdx = Math.min(9, Math.floor(kp));
+    const cells = document.getElementById('kp-cells').children;
+    for (let i = 0; i < cells.length; i++) {
+        cells[i].classList.toggle('kp-active', i === kpIdx);
+        cells[i].style.boxShadow = i === kpIdx ? `0 0 5px ${KP_CELL_COLORS[i]}` : 'none';
+    }
+
+    // ── G-scale badge
+    const gBadge = document.getElementById('ip-g-badge');
+    const gColor = KP_CELL_COLORS[kpIdx];
+    gBadge.textContent = kpIdx >= 4 ? `G${Math.min(5, kpIdx - 3)} ${KP_QUIET_LABELS[kpIdx].split(' ')[1] ?? ''}`.trim()
+                                     : KP_QUIET_LABELS[kpIdx];
+    gBadge.style.color       = gColor;
+    gBadge.style.background  = gColor + '18';
+    gBadge.style.borderColor = gColor + '88';
+
+    // ── IMF Bz — direction arrow + coloring
+    const bzArrow = document.getElementById('ip-bz-arrow');
+    const bzEl    = document.getElementById('ip-bz');
+    bzEl.textContent = `${bz.toFixed(1)} nT`;
+    if (bz < -10) {
+        bzArrow.textContent = '↓↓'; bzArrow.style.color = '#ff2200'; bzEl.style.color = '#ff4422';
+    } else if (bz < -5) {
+        bzArrow.textContent = '↓';  bzArrow.style.color = '#ff8844'; bzEl.style.color = '#ff8844';
+    } else if (bz < -2) {
+        bzArrow.textContent = '↓';  bzArrow.style.color = '#ffcc44'; bzEl.style.color = '#ffcc44';
+    } else if (bz > 2) {
+        bzArrow.textContent = '↑';  bzArrow.style.color = '#44ccff'; bzEl.style.color = '#a0d8f0';
+    } else {
+        bzArrow.textContent = '→';  bzArrow.style.color = '#88aacc'; bzEl.style.color = '#a0d8f0';
+    }
+
+    // ── Solar wind speed + bar
+    document.getElementById('ip-wind').textContent = `${Math.round(spd)} km/s`;
+    const spdPct = Math.min(100, ((spd - 300) / 600) * 100);
+    const spdBar = document.getElementById('ip-spd-bar');
+    spdBar.style.width      = spdPct + '%';
+    spdBar.style.background = spd > 700 ? '#ff4400' : spd > 500 ? '#ff8c00' : '#00c6ff';
+
+    // ── X-ray class badge
+    const xrayClass = sw.xray_class ?? 'A';
+    const xrayLetter = xrayClass[0] ?? 'A';
+    const xrayColors = { A:'#4dff80', B:'#00ccff', C:'#ffee44', M:'#ff8c00', X:'#ff2200' };
+    const xc = xrayColors[xrayLetter] ?? '#88aacc';
+    const xrayBadge = document.getElementById('ip-xray');
+    xrayBadge.textContent   = xrayClass;
+    xrayBadge.style.color   = xc;
+    xrayBadge.style.background  = xc + '18';
+    xrayBadge.style.borderColor = xc + '88';
+
+    // ── HF radio status
     const hfEl = document.getElementById('ip-hf');
-    hfEl.textContent = (sw.xray_intensity ?? 0) > 0.3 ? 'Blackout' : 'Normal';
-    hfEl.className   = 'iv' + ((sw.xray_intensity ?? 0) > 0.3 ? ' alert' : '');
+    hfEl.textContent = (sw.xray_intensity ?? 0) > 0.3 ? '⚠ Blackout' : 'Normal';
+    hfEl.style.color = (sw.xray_intensity ?? 0) > 0.3 ? '#ff4444' : '#4a6a80';
+
+    // ── Aurora power
     if (d.aurora_power_north != null) {
-        document.getElementById('ip-aurora').textContent = `N ${Math.round(d.aurora_power_north)} GW`;
+        document.getElementById('ip-aurora').textContent =
+            `N ${Math.round(d.aurora_power_north)} GW`;
     }
 
     // ── Earth shader
-    earthU.u_kp.value  = kp;
+    earthU.u_kp.value   = kp;
     earthU.u_xray.value = sw.xray_intensity ?? 0;
 
     // ── Magnetosphere geometry + ionosphere analysis
