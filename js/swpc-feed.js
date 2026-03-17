@@ -65,6 +65,13 @@ export const ENDPOINTS = {
     alerts:       'https://services.swpc.noaa.gov/products/alerts.json',
     /** Daily 10.7-cm solar radio flux (F10.7) — EUV/X-ray activity proxy */
     radio_flux:   'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
+
+    // ── NASA CCMC / DONKI (Space Weather Database Of Notifications, Knowledge, Info) ──
+    /** CME Analysis — cone model, speed, direction, ENLIL model arrival times.
+     *  Requires dynamic date params; base URL completed at fetch time. */
+    donki_cme:    'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/CMEAnalysis',
+    /** DONKI notifications — all space weather events, last 30 days */
+    donki_notify: 'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/notifications',
 };
 
 // ── Quiet-Sun baseline (used as fallback when endpoints are unavailable) ──────
@@ -96,6 +103,11 @@ export const FALLBACK = {
     f107_flux:          150,   // sfu — moderate solar activity
     sep_storm_level:    0,     // S0–S5 radiation storm proxy
     aurora_activity:    'quiet', // 'quiet'|'active'|'storm'
+    // DONKI CME fields
+    recent_cmes:          [],   // parsed CME events from DONKI (last 7 days)
+    earth_directed_cme:   null, // most recent Earth-directed CME object
+    cme_eta_hours:        null, // float hours until Earth arrival (negative = arrived)
+    donki_notifications:  [],   // recent DONKI notification messages
 };
 
 // ── X-ray class helpers ───────────────────────────────────────────────────────
@@ -386,6 +398,125 @@ async function fetchRadioFlux(state) {
     if (rec) state.f107_flux = rec.flux;
 }
 
+/**
+ * NASA DONKI CME Analysis — cone model, speed, direction, ENLIL arrival forecast.
+ *
+ * Key fields returned per CME:
+ *   time21_5   ISO datetime when CME reached 21.5 solar radii
+ *   latitude   CME axis ecliptic latitude (°N positive)
+ *   longitude  Stonyhurst heliographic longitude (0° = Sun-Earth direction, +W)
+ *   halfAngle  Angular half-width of the eruption cone (degrees)
+ *   speed      CME leading-edge speed at 21.5 Rs (km/s)
+ *   type       S (slow), C (common), O (halo), R (partial halo)
+ *   enlilList  WSA-ENLIL model run(s) with estimatedShockArrivalTime
+ *
+ * Earth-directed criterion: |longitude| ≤ halfAngle + 30° buffer
+ *   (Earth is in the cone ± a generous buffer for partial halos).
+ */
+async function fetchDONKICME(state) {
+    const now   = new Date();
+    const start = new Date(now - 7 * 86400e3);   // 7-day window
+    const fmt   = d => d.toISOString().split('T')[0];
+    const url   = `${ENDPOINTS.donki_cme}` +
+                  `?mostAccurateOnly=true` +
+                  `&startDate=${fmt(start)}&endDate=${fmt(now)}`;
+
+    let data;
+    try { data = await fetchJSON(url); }
+    catch { return; }  // DONKI is occasionally slow/down — gracefully degrade
+
+    if (!Array.isArray(data)) { state.recent_cmes = []; return; }
+
+    const parsed = data
+        .filter(c => c.time21_5 && c.speed > 0)
+        .map(c => {
+            // ── Arrival time ─────────────────────────────────────────────
+            // t21_5 = when CME crosses 21.5 Rs (the model inner boundary, ~0.1 AU)
+            // Remaining distance to Earth: (215 - 21.5) Rs = 193.5 Rs ≈ 1.345 × 10⁸ km
+            const t21_5   = new Date(c.time21_5.endsWith('Z') ? c.time21_5 : c.time21_5 + 'Z');
+            const distKm  = 1.345e8;
+            const etaMs   = (distKm / Math.max(c.speed, 50)) * 1e6; // km/s → ms
+            const kinetic = new Date(t21_5.getTime() + etaMs);
+
+            // Prefer ENLIL model if available (more accurate)
+            let enlilArrival = null, enlilKp = null, enlilDuration = null;
+            if (Array.isArray(c.enlilList) && c.enlilList.length > 0) {
+                const run = c.enlilList.find(r => r.estimatedShockArrivalTime)
+                         ?? c.enlilList[0];
+                if (run?.estimatedShockArrivalTime) {
+                    const ts = run.estimatedShockArrivalTime;
+                    enlilArrival = new Date(ts.endsWith('Z') ? ts : ts + 'Z');
+                }
+                enlilKp       = run?.kp18 ?? run?.kp90 ?? null;
+                enlilDuration = run?.estimatedDuration ?? null;
+            }
+
+            const arrival      = enlilArrival ?? kinetic;
+            const hoursUntil   = (arrival.getTime() - now.getTime()) / 3.6e6;
+
+            // ── Earth-directed flag ──────────────────────────────────────
+            // longitude 0° = Sun→Earth direction; ±half+30° inclusive cone
+            const lon          = c.longitude   ?? 0;
+            const half         = c.halfAngle   ?? 30;
+            const earthDir     = Math.abs(lon) <= (half + 30);
+
+            return {
+                time:         t21_5,
+                speed:        c.speed,
+                latitude:     c.latitude  ?? 0,
+                longitude:    lon,
+                halfAngle:    half,
+                type:         c.type      ?? 'S',
+                earthDirected: earthDir,
+                arrivalTime:  arrival,
+                hoursUntil,
+                hasEnlil:     !!enlilArrival,
+                enlilKp,
+                enlilDuration,
+                note:         c.note ?? '',
+                link:         c.link ?? '',
+                lat_rad:      (c.latitude ?? 0) * Math.PI / 180,
+                lon_rad:      lon * Math.PI / 180,
+            };
+        })
+        .sort((a, b) => b.time - a.time)   // most recent first
+        .slice(0, 10);
+
+    state.recent_cmes = parsed;
+
+    // Most recent Earth-directed CME (arrived within last 24h or future)
+    const edList = parsed.filter(c => c.earthDirected && c.hoursUntil > -24);
+    state.earth_directed_cme = edList[0] ?? null;
+    state.cme_eta_hours      = state.earth_directed_cme?.hoursUntil ?? null;
+}
+
+/**
+ * DONKI all-event notifications (last 7 days).
+ * Returns compact notification objects for display in the alert feed.
+ */
+async function fetchDONKINotifications(state) {
+    const now   = new Date();
+    const start = new Date(now - 7 * 86400e3);
+    const fmt   = d => d.toISOString().split('T')[0];
+    const url   = `${ENDPOINTS.donki_notify}?type=all&startDate=${fmt(start)}&endDate=${fmt(now)}`;
+
+    let data;
+    try { data = await fetchJSON(url); }
+    catch { return; }
+    if (!Array.isArray(data)) { state.donki_notifications = []; return; }
+
+    state.donki_notifications = data
+        .filter(n => n.messageType && n.messageTime)
+        .map(n => ({
+            type:    n.messageType,
+            time:    new Date(n.messageTime.endsWith('Z') ? n.messageTime : n.messageTime + 'Z'),
+            body:    (n.messageBody ?? '').slice(0, 280),
+            url:     n.messageURL ?? null,
+        }))
+        .sort((a, b) => b.time - a.time)
+        .slice(0, 12);
+}
+
 // ── Parse NOAA location string to lat/lon (e.g. "N24W30") ────────────────────
 function parseLocation(loc) {
     if (!loc) return null;
@@ -411,6 +542,7 @@ export class SpaceWeatherFeed {
         // Mutable raw state; endpoints mutate fields in place
         this._raw          = { ...FALLBACK };
         this._lastFlareKey = null;  // used to detect new flare events
+        this._lastCmeKey   = null;  // used to detect new CME events
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -449,6 +581,9 @@ export class SpaceWeatherFeed {
             fetchAurora(this._raw),
             fetchAlerts(this._raw),
             fetchRadioFlux(this._raw),
+            // NASA DONKI — run independently so CCMC slowness doesn't block NOAA feeds
+            fetchDONKICME(this._raw),
+            fetchDONKINotifications(this._raw),
         ];
         const results = await Promise.allSettled(tasks);
         const ok  = results.some(r => r.status === 'fulfilled');
@@ -485,6 +620,12 @@ export class SpaceWeatherFeed {
             flareKey !== this._lastFlareKey
         );
         if (newMajor) this._lastFlareKey = flareKey;
+
+        // Detect new Earth-directed CME from DONKI
+        const topCme    = (raw.recent_cmes ?? []).find(c => c.earthDirected) ?? null;
+        const cmeKey    = topCme ? topCme.time?.toISOString() : null;
+        const newCme    = !!(topCme && cmeKey !== this._lastCmeKey);
+        if (newCme) this._lastCmeKey = cmeKey;
 
         // Direction of the most recent flare (from NOAA location string)
         const flareDir = parseLocation(raw.flare_location);
@@ -524,6 +665,12 @@ export class SpaceWeatherFeed {
             aurora_activity:    raw.aurora_activity ?? 'quiet',
             active_alerts:      raw.active_alerts ?? [],
             f107_flux:          raw.f107_flux,
+            // DONKI CME fields
+            recent_cmes:         raw.recent_cmes ?? [],
+            earth_directed_cme:  raw.earth_directed_cme ?? null,
+            cme_eta_hours:       raw.cme_eta_hours ?? null,
+            donki_notifications: raw.donki_notifications ?? [],
+            new_cme_detected:    newCme,
         };
     }
 }

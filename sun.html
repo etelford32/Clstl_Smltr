@@ -287,6 +287,61 @@ nav {
 .flare-time { color:#555; font-size:9px; flex:1; }
 .flare-loc  { color:#666; font-size:9px; }
 .no-data    { font-size:10px; color:#555; text-align:center; padding:6px 0; font-style:italic; }
+
+/* ── CME events section ────────────────────────────────────── */
+.cme-list { display:flex; flex-direction:column; gap:4px; }
+.cme-row {
+    border:1px solid rgba(255,100,0,.15); border-radius:6px;
+    padding:6px 9px; background:rgba(255,60,0,.04);
+}
+.cme-row.earth-dir {
+    border-color:rgba(255,140,0,.35);
+    background:rgba(255,100,0,.09);
+}
+.cme-header { display:flex; align-items:center; gap:6px; margin-bottom:3px; }
+.cme-speed  { font-size:11px; font-weight:700; color:#ff9944; min-width:54px; }
+.cme-type   { font-size:9px; color:#664433; text-transform:uppercase; letter-spacing:.4px; }
+.cme-earth  {
+    margin-left:auto; font-size:8.5px; font-weight:700; letter-spacing:.3px;
+    padding:1px 5px; border-radius:4px;
+    background:rgba(0,160,255,.15); border:1px solid rgba(0,160,255,.3); color:#44aaff;
+}
+.cme-arrived {
+    background:rgba(100,200,80,.12); border-color:rgba(100,200,80,.3); color:#88dd66;
+}
+.cme-meta   { font-size:9px; color:#664433; line-height:1.5; }
+.cme-eta    { font-size:9.5px; font-weight:600; color:#ffcc44; }
+.cme-time-ago { font-size:8.5px; color:#554433; }
+
+/* ── SWPC Alerts section ───────────────────────────────────── */
+.alert-list  { display:flex; flex-direction:column; gap:3px; }
+.alert-row {
+    border-radius:5px; padding:5px 8px;
+    background:rgba(255,220,60,.04); border:1px solid rgba(255,220,60,.10);
+    font-size:9.5px; line-height:1.5; color:#998866;
+}
+.alert-row.warning { border-color:rgba(255,140,0,.25); background:rgba(255,100,0,.06); color:#cc8844; }
+.alert-row.alert   { border-color:rgba(255,60,0,.35);  background:rgba(255,40,0,.09);  color:#ff6633; }
+.alert-tag  { font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+.alert-tag.warning { color:#ff8800; }
+.alert-tag.alert   { color:#ff3300; }
+.alert-tag.info    { color:#887755; }
+.alert-time { font-size:8px; color:#443322; margin-left:6px; }
+.alert-body { margin-top:2px; font-size:9px; color:#665544; }
+
+/* ── S-scale badge in ribbon ───────────────────────────────── */
+.sw-s-badge {
+    display:flex; flex-direction:column; align-items:center; gap:1px;
+}
+.sw-s-letter {
+    font-size:15px; font-weight:800; line-height:1; color:#44aaff;
+    transition:color .4s;
+}
+.sw-s-letter.S1 { color:#44aaff; }
+.sw-s-letter.S2 { color:#44ccff; }
+.sw-s-letter.S3 { color:#88ddff; }
+.sw-s-letter.S4 { color:#ffcc44; }
+.sw-s-letter.S5 { color:#ff8800; text-shadow:0 0 10px #ff880088; }
 </style>
 </head>
 <body>
@@ -380,6 +435,14 @@ nav {
             <div class="sw-col">
                 <span class="sw-k">Kp</span>
                 <span class="sw-v" id="sw-kp">—</span>
+            </div>
+
+            <!-- S-scale (Solar Radiation Storm) -->
+            <div class="sw-col" title="NOAA S-scale: Solar Radiation Storm (>10 MeV proton flux)">
+                <span class="sw-k">S-scale</span>
+                <div class="sw-s-badge">
+                    <span class="sw-s-letter S0" id="sw-s-letter">S0</span>
+                </div>
             </div>
 
             <div class="sw-div"></div>
@@ -529,6 +592,36 @@ nav {
                         Source: NOAA Space Weather Prediction Center (SWPC).<br>
                         Click a region to fly the camera there.<br>
                         Markers rotate with the simulated photosphere.
+                    </div>
+                </div>
+            </div>
+
+            <!-- CME Events — populated from NASA DONKI ───────── -->
+            <div class="sec closed" id="sec-cme">
+                <div class="sec-hd"><span>☄ CME Events (DONKI)</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="live-meta">
+                        <span class="live-status" id="cme-status">Loading…</span>
+                    </div>
+                    <div class="cme-list" id="cme-list">
+                        <div class="no-data">Fetching NASA DONKI…</div>
+                    </div>
+                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
+                        Source: NASA CCMC / DONKI CME Analysis.<br>
+                        Earth-directed CMEs highlighted. Arrival times from WSA-ENLIL model when available.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Space Weather Alerts ─────────────────────────── -->
+            <div class="sec closed" id="sec-alerts">
+                <div class="sec-hd"><span>⚠ SWPC Alerts</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="alert-list" id="alert-list">
+                        <div class="no-data">No current alerts.</div>
+                    </div>
+                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
+                        Source: NOAA SWPC real-time alerts, warnings &amp; watches.
                     </div>
                 </div>
             </div>
@@ -1519,13 +1612,144 @@ document.addEventListener('swpc-update', (ev) => {
         const xrayLtr = document.getElementById('sw-xray-ltr');
         const fluxVal = document.getElementById('sw-flux-val');
         const letter  = sw.xray_class[0] ?? 'A';
-        if (xrayLtr && !liveXrayFlux) {   // prefer the NOAA flux when available
+        if (xrayLtr && !liveXrayFlux) {
             xrayLtr.textContent = letter;
             xrayLtr.className   = letter;
         }
         if (fluxVal && !liveXrayFlux) fluxVal.textContent = sw.xray_class;
     }
+
+    // ── S-scale (Solar Radiation Storm) ─────────────────────────────────────
+    const sLevel  = sw.sep_storm_level ?? 0;
+    const sLetEl  = document.getElementById('sw-s-letter');
+    if (sLetEl) {
+        sLetEl.textContent = sLevel >= 1 ? `S${sLevel}` : 'S0';
+        sLetEl.className   = sLevel >= 1 ? `sw-s-letter S${sLevel}` : 'sw-s-letter S0';
+        sLetEl.style.opacity = sLevel >= 1 ? '1' : '0.35';
+    }
+
+    // ── CME Events panel ─────────────────────────────────────────────────────
+    _updateCMEPanel(sw.recent_cmes ?? [], sw.earth_directed_cme, sw.cme_eta_hours);
+
+    // ── SWPC Alerts panel ────────────────────────────────────────────────────
+    _updateAlertsPanel(sw.active_alerts ?? []);
+
+    // ── Visual flare/CME burst ───────────────────────────────────────────────
+    // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
+    if (sw.new_major_flare) {
+        console.log(`[Sun] Real ${sw.flare_class} flare detected — visual burst`);
+        _triggerSunFlashFromSWPC(sw.flare_direction);
+    }
+    if (sw.new_cme_detected && sw.earth_directed_cme) {
+        console.log('[Sun] New Earth-directed CME from DONKI — auto-opening CME panel');
+        const secCme = document.getElementById('sec-cme');
+        if (secCme?.classList.contains('closed')) secCme.classList.remove('closed');
+    }
 });
+
+// ── CME panel renderer ────────────────────────────────────────────────────────
+function _updateCMEPanel(cmes, edCme, etaHours) {
+    const listEl   = document.getElementById('cme-list');
+    const statusEl = document.getElementById('cme-status');
+    if (!listEl) return;
+
+    if (!cmes.length) {
+        listEl.innerHTML = '<div class="no-data">No CME data in past 7 days (DONKI offline or quiet).</div>';
+        if (statusEl) statusEl.textContent = 'No events';
+        return;
+    }
+
+    const now = Date.now();
+    if (statusEl) {
+        const edCount = cmes.filter(c => c.earthDirected).length;
+        statusEl.textContent = `${cmes.length} events · ${edCount} Earth-directed`;
+        statusEl.className   = edCount > 0 ? 'live-status ok' : 'live-status';
+    }
+
+    listEl.innerHTML = cmes.slice(0, 8).map(c => {
+        const isEd        = c.earthDirected;
+        const hasArrived  = c.hoursUntil < 0;
+        const etaStr      = !isEd ? '' : hasArrived
+            ? `Arrived ~${Math.abs(Math.round(c.hoursUntil))}h ago`
+            : c.hoursUntil < 72
+                ? `ETA ~${Math.round(c.hoursUntil)}h`
+                : `ETA ${(c.hoursUntil / 24).toFixed(1)}d`;
+        const timeAgo     = _timeAgo(c.time);
+        const typeLabel   = { S:'Slow', C:'Common', O:'Halo', R:'Partial Halo' }[c.type] ?? c.type;
+        const kpStr       = c.enlilKp != null ? ` · Kp ≈ ${c.enlilKp}` : '';
+        const modelStr    = c.hasEnlil ? ' <span style="color:#446633;font-size:8px">[ENLIL]</span>' : '';
+        return `<div class="cme-row${isEd ? ' earth-dir' : ''}">
+            <div class="cme-header">
+                <span class="cme-speed">${Math.round(c.speed)} km/s</span>
+                <span class="cme-type">${typeLabel}</span>
+                ${isEd ? `<span class="cme-earth${hasArrived ? ' cme-arrived' : ''}">${etaStr || '→ Earth'}${modelStr}</span>` : ''}
+            </div>
+            <div class="cme-meta">
+                <span class="cme-time-ago">${timeAgo}</span>
+                · ${c.latitude >= 0 ? 'N' : 'S'}${Math.abs(Math.round(c.latitude))}
+                  ${c.longitude >= 0 ? 'W' : 'E'}${Math.abs(Math.round(c.longitude))}
+                · ±${Math.round(c.halfAngle)}°${kpStr}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── Alerts panel renderer ─────────────────────────────────────────────────────
+function _updateAlertsPanel(alerts) {
+    const listEl = document.getElementById('alert-list');
+    if (!listEl) return;
+    if (!alerts.length) {
+        listEl.innerHTML = '<div class="no-data">No current SWPC alerts.</div>';
+        return;
+    }
+    listEl.innerHTML = alerts.slice(0, 8).map(a => {
+        // Extract first line (typically "Space Weather Message Code: XXXXX")
+        const firstLine = a.text.split('\n').find(l => l.trim()) ?? '';
+        const code      = firstLine.replace(/Space Weather Message Code:\s*/i, '').split('\n')[0].trim();
+        const excerpt   = a.text.split('\n').filter(l => l.trim() && !l.match(/^(Space|Issue)/i)).join(' ').slice(0, 120);
+        return `<div class="alert-row ${a.level}">
+            <div>
+                <span class="alert-tag ${a.level}">${a.level.toUpperCase()}</span>
+                <span class="alert-time">${_timeAgo(a.issued)}</span>
+                <span style="font-size:9px;color:#554433;margin-left:4px">${code}</span>
+            </div>
+            <div class="alert-body">${excerpt}…</div>
+        </div>`;
+    }).join('');
+}
+
+// ── Visual sun burst from real SWPC event ─────────────────────────────────────
+// Briefly brightens the activity uniform and lets the shader respond.
+function _triggerSunFlashFromSWPC(dir) {
+    const cls       = liveXrayFlux ? (liveXrayFlux >= 1e-4 ? 'X' : liveXrayFlux >= 1e-5 ? 'M' : 'C') : 'M';
+    const intensity = cls === 'X' ? 0.25 : cls === 'M' ? 0.15 : 0.08;
+    const prev      = uniforms.u_activity.value;
+    const peak      = Math.min(1.0, prev + intensity);
+    uniforms.u_activity.value = peak;
+    // Flash the HUD X-ray indicator
+    const hudXray = document.getElementById('hud-xray');
+    if (hudXray) { hudXray.style.textShadow = '0 0 12px currentColor'; }
+    // Fade back over 3 seconds
+    let elapsed = 0;
+    const decay = setInterval(() => {
+        elapsed += 100;
+        uniforms.u_activity.value = peak - (peak - prev) * (elapsed / 3000);
+        if (elapsed >= 3000) {
+            uniforms.u_activity.value = prev;
+            if (hudXray) hudXray.style.textShadow = '';
+            clearInterval(decay);
+        }
+    }, 100);
+}
+
+// ── Relative time helper ──────────────────────────────────────────────────────
+function _timeAgo(date) {
+    if (!date) return '—';
+    const h = (Date.now() - new Date(date)) / 3.6e6;
+    if (h < 1)   return `${Math.round(h * 60)}m ago`;
+    if (h < 24)  return `${Math.round(h)}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+}
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 </script>
