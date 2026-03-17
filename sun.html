@@ -342,6 +342,64 @@ nav {
 .sw-s-letter.S3 { color:#88ddff; }
 .sw-s-letter.S4 { color:#ffcc44; }
 .sw-s-letter.S5 { color:#ff8800; text-shadow:0 0 10px #ff880088; }
+
+/* ── Solar Wind Live gauges ────────────────────────────────── */
+.wind-gauge-row { display:flex; align-items:center; margin:5px 0; gap:7px; }
+.wind-gauge-lbl { font-size:10px; color:#887766; flex:0 0 54px; }
+.wind-gauge-bar { flex:1; height:4px; background:rgba(255,255,255,.06); border-radius:2px; overflow:hidden; }
+.wind-gauge-fill { height:100%; border-radius:2px; transition:width .9s ease; }
+.wind-gauge-val  { font-size:10px; color:#cc9955; font-weight:700; flex:0 0 62px; text-align:right; }
+.wind-bz-row { display:flex; align-items:center; margin:6px 0; gap:6px; font-size:10px; }
+.wind-bz-bar-wrap { flex:1; height:6px; background:rgba(255,255,255,.05); border-radius:3px; position:relative; }
+.wind-bz-center { position:absolute; left:50%; top:0; width:1px; height:100%; background:rgba(255,255,255,.15); }
+.wind-bz-fill { position:absolute; top:0; height:100%; border-radius:3px; transition:all .9s ease; }
+.wind-bz-fill.north { right:50%; background:rgba(0,180,255,.75); }
+.wind-bz-fill.south { left:50%;  background:rgba(255,60,60,.75); }
+.wind-spiral-chip {
+    display:inline-flex; align-items:center; gap:5px; margin-top:6px;
+    padding:3px 9px; border-radius:5px;
+    background:rgba(255,140,0,.05); border:1px solid rgba(255,140,0,.14);
+    font-size:10px; color:#886644;
+}
+.wind-spiral-chip span { color:#ffbb44; font-weight:700; }
+.cme-burst-indicator {
+    display:flex; align-items:center; gap:6px; margin:8px 0;
+    padding:5px 9px; border-radius:6px;
+    border:1px solid rgba(255,100,0,.30); background:rgba(255,60,0,.06);
+    font-size:10px; color:#cc7744;
+    transition:border-color .5s, background .5s;
+}
+.cme-burst-indicator.active {
+    border-color:rgba(255,140,0,.65); background:rgba(255,80,0,.14);
+    animation:cme-pulse 1.6s ease-in-out infinite;
+}
+.cme-burst-indicator .cme-dot {
+    width:7px; height:7px; border-radius:50%;
+    background:#ff6600; box-shadow:0 0 6px #ff660080;
+    flex-shrink:0; transition:background .4s;
+}
+.cme-burst-indicator.active .cme-dot { animation:cme-dot-pulse 0.8s ease-in-out infinite; }
+@keyframes cme-pulse    { 0%,100%{opacity:1} 50%{opacity:.7} }
+@keyframes cme-dot-pulse{ 0%,100%{box-shadow:0 0 6px #ff6600} 50%{box-shadow:0 0 14px #ff9900} }
+.sep-indicator {
+    display:flex; align-items:center; gap:6px; margin:5px 0;
+    padding:4px 9px; border-radius:5px;
+    border:1px solid rgba(0,140,255,.16); background:rgba(0,80,200,.05);
+    font-size:10px; color:#5577aa; transition:all .5s;
+}
+.sep-indicator.active { border-color:rgba(0,200,255,.45); background:rgba(0,120,255,.12); color:#66aaff; }
+.sep-indicator .sep-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:#336688; flex-shrink:0; transition:all .4s;
+}
+.sep-indicator.active .sep-dot {
+    background:#44bbff; box-shadow:0 0 8px #44bbff88;
+    animation:sep-dot-blink 1.2s ease-in-out infinite;
+}
+@keyframes sep-dot-blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+.wind-temp-row { display:flex; justify-content:space-between; align-items:center; margin:6px 0; font-size:10px; }
+.wind-temp-row .wt-lbl { color:#665544; }
+.wind-temp-row .wt-val { color:#bb9966; font-weight:700; }
 </style>
 </head>
 <body>
@@ -596,6 +654,74 @@ nav {
                 </div>
             </div>
 
+            <!-- Solar Wind Live ────────────────────────────────── -->
+            <div class="sec" id="sec-wind-live">
+                <div class="sec-hd"><span>☉ Solar Wind Live</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Speed gauge -->
+                    <div class="wind-gauge-row">
+                        <span class="wind-gauge-lbl">Speed</span>
+                        <div class="wind-gauge-bar">
+                            <div class="wind-gauge-fill" id="wg-speed"
+                                 style="width:23%;background:linear-gradient(90deg,#ff8800,#ffcc44)"></div>
+                        </div>
+                        <span class="wind-gauge-val" id="wv-speed">400 km/s</span>
+                    </div>
+                    <!-- Density gauge -->
+                    <div class="wind-gauge-row">
+                        <span class="wind-gauge-lbl">Density</span>
+                        <div class="wind-gauge-bar">
+                            <div class="wind-gauge-fill" id="wg-dens"
+                                 style="width:20%;background:linear-gradient(90deg,#44aaff,#88ddff)"></div>
+                        </div>
+                        <span class="wind-gauge-val" id="wv-dens">5.0 /cc</span>
+                    </div>
+                    <!-- IMF |B| total field gauge -->
+                    <div class="wind-gauge-row">
+                        <span class="wind-gauge-lbl">IMF |B|</span>
+                        <div class="wind-gauge-bar">
+                            <div class="wind-gauge-fill" id="wg-bt"
+                                 style="width:17%;background:linear-gradient(90deg,#aa66ff,#dd99ff)"></div>
+                        </div>
+                        <span class="wind-gauge-val" id="wv-bt">5 nT</span>
+                    </div>
+                    <!-- IMF Bz north/south bar -->
+                    <div class="wind-bz-row">
+                        <span style="color:#887766;flex:0 0 54px">IMF Bz</span>
+                        <div class="wind-bz-bar-wrap">
+                            <div class="wind-bz-center"></div>
+                            <div class="wind-bz-fill north" id="wg-bz-n" style="width:0"></div>
+                            <div class="wind-bz-fill south" id="wg-bz-s" style="width:0"></div>
+                        </div>
+                        <span class="wind-gauge-val" id="wv-bz">0 nT</span>
+                    </div>
+                    <!-- Temperature -->
+                    <div class="wind-temp-row">
+                        <span class="wt-lbl">Temperature</span>
+                        <span class="wt-val" id="wv-temp">100 000 K</span>
+                    </div>
+                    <!-- Parker spiral angle -->
+                    <div class="wind-spiral-chip">
+                        Parker spiral: <span id="wv-spiral">~45°</span>
+                        &nbsp;·&nbsp; Ω·r/v
+                    </div>
+                    <!-- CME burst status -->
+                    <div class="cme-burst-indicator" id="cme-burst-ind">
+                        <div class="cme-dot"></div>
+                        <span id="cme-burst-txt">No active CME burst</span>
+                    </div>
+                    <!-- SEP radiation storm -->
+                    <div class="sep-indicator" id="sep-ind">
+                        <div class="sep-dot"></div>
+                        <span id="sep-txt">S0 — No radiation storm</span>
+                    </div>
+                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
+                        Gauges driven by DSCOVR/ACE L1 real-time data.<br>
+                        Particle shader uses live speed/density &amp; Parker spiral.
+                    </div>
+                </div>
+            </div>
+
             <!-- CME Events — populated from NASA DONKI ───────── -->
             <div class="sec closed" id="sec-cme">
                 <div class="sec-hd"><span>☄ CME Events (DONKI)</span><span class="arrow">▼</span></div>
@@ -674,12 +800,21 @@ backdrop.addEventListener('click', () => { panel.classList.remove('open'); backd
 
 // UNIFORMS
 const uniforms = {
-    u_time:       { value: 0.0 },
-    u_teff:       { value: 5778.0 },
-    u_activity:   { value: 0.5 },
-    u_rot:        { value: 1.0 },
-    u_showSpots:  { value: 1.0 },   // 1 = show sunspots, 0 = hide
-    u_showFlares: { value: 1.0 },   // 1 = show flares,   0 = hide
+    u_time:              { value: 0.0 },
+    u_teff:              { value: 5778.0 },
+    u_activity:          { value: 0.5 },
+    u_rot:               { value: 1.0 },
+    u_showSpots:         { value: 1.0 },   // 1 = show sunspots, 0 = hide
+    u_showFlares:        { value: 1.0 },   // 1 = show flares,   0 = hide
+    // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
+    u_wind_speed_norm:   { value: 0.23 },  // (400-250)/650 ≈ 0.23 nominal slow wind
+    u_wind_density_norm: { value: 0.20 },  // 5/25 = 0.20 nominal background
+    u_bz_sw:             { value: 0.0  },  // 0=northward, 1=30 nT southward
+    // ── CME directional burst ──
+    u_cme_active:        { value: 0.0  },  // 0=off, 1=on
+    u_cme_speed_norm:    { value: 0.5  },  // CME speed [0-1]
+    // ── SEP radiation storm ──
+    u_sep_level:         { value: 0.0  },  // NOAA S-scale 0-5
 };
 
 // SCENE
@@ -981,34 +1116,48 @@ const solarWindVS = /* glsl */`
 
     uniform float u_time;
     uniform float u_activity;
-    uniform float u_rot;     // rotation rate multiplier
+    uniform float u_rot;              // rotation rate multiplier
+    uniform float u_wind_speed_norm;  // 0=250 km/s, 1=900 km/s (DSCOVR L1)
+    uniform float u_wind_density_norm;// 0=calm, 1=25 n/cc (DSCOVR L1)
+    uniform float u_bz_sw;            // 0=northward, 1=30 nT southward
 
     varying float vProgress;
     varying vec3  vColor;
+    varying float vDensBoost;
 
     void main() {
-        float life  = 4.5 + aSeed * 3.5;
-        float spd   = 0.85 + u_activity * 0.6;   // higher activity = faster wind
-        float lt    = mod(u_time * spd * 0.28 + aPhase * life, life);
-        float s     = lt / life;
+        float life = 4.5 + aSeed * 3.5;
+
+        // Speed: driven primarily by live wind speed, supplemented by activity
+        // u_wind_speed_norm maps 250-900 km/s → 0-1
+        float spd = 0.55 + u_wind_speed_norm * 0.85 + u_activity * 0.12;
+        float lt  = mod(u_time * spd * 0.28 + aPhase * life, life);
+        float s   = lt / life;
 
         // Slow-wind / fast-wind bifurcation:
         // Near equator: slow solar wind (~400 km/s); polar regions: fast wind (~750 km/s)
         float sinLat = abs(aDir.y);   // 0=equator, 1=pole
-        float R_far  = mix(4.8, 6.5, sinLat * sinLat);   // fast wind reaches farther
-        float r = 1.0 + (R_far - 1.0) * s * s;           // quadratic acceleration
+        // Live speed boosts max reach — CME/fast streams reach farther
+        float R_far = mix(4.8, 6.5, sinLat * sinLat) + u_wind_speed_norm * 1.2;
+        float r = 1.0 + (R_far - 1.0) * s * s;   // quadratic acceleration
 
-        vProgress = s;
+        vProgress  = s;
+        vDensBoost = u_wind_density_norm;
 
-        // ── Parker spiral azimuthal deflection ──────────────────────────
-        // The Sun's rotation sweeps the wind into an Archimedean spiral.
-        // Azimuth offset ∝ Ω·r / v_wind, scaled so it's visible
-        // Spiral is strongest in the ecliptic plane (small |sinLat|)
+        // ── Parker spiral ─────────────────────────────────────────────
+        // Real formula: φ = Ω·r / v_wind
+        // Higher wind speed → less winding (flatter spiral)
+        // spiralStrength: 1.0 at 250 km/s slow wind → ~0.3 at CME speeds
+        float spiralStrength = mix(1.0, 0.28, u_wind_speed_norm * 0.9);
         float spiralFac = (1.0 - sinLat * sinLat) * u_rot;  // zero at poles
-        float phi_parker = spiralFac * (r - 1.0) * 0.55;    // grows with distance
+        float phi_parker = spiralFac * (r - 1.0) * 0.55 * spiralStrength;
+
+        // Southward Bz warps equatorial wind slightly (reconnection-driven asymmetry)
+        float bzSkew = u_bz_sw * 0.04 * (1.0 - sinLat * sinLat) * sin(aPhase * 6.28);
+        phi_parker += bzSkew;
 
         // Rotate aDir around the star's Y-axis by phi_parker
-        float cp = cos(phi_parker);
+        float cp  = cos(phi_parker);
         float sp2 = sin(phi_parker);
         vec3 deflected = vec3(
             aDir.x * cp - aDir.z * sp2,
@@ -1017,16 +1166,22 @@ const solarWindVS = /* glsl */`
         );
 
         // Small cross-stream turbulence (simulates co-rotating interaction regions)
-        float cir = sin(aPhase * 7.3 + u_time * 0.4) * 0.035 * (1.0 - s);
+        // Turbulence stronger at high density (stream-stream interaction)
+        float turbScale = 0.030 + u_wind_density_norm * 0.025;
+        float cir = sin(aPhase * 7.3 + u_time * 0.4) * turbScale * (1.0 - s);
         deflected += vec3(-deflected.z, 0.0, deflected.x) * cir;
 
-        // Color: hot yellow-white at surface → pale gold at distance → faint blue-white at solar energetic particles
-        vec3 nearCol = vec3(1.00, 0.92, 0.60);
-        vec3 farCol  = vec3(0.68, 0.78, 0.95);
+        // Color: hot yellow-white at surface → pale gold → blue-white at distance
+        // Dense slow wind: richer gold; fast stream: cooler blue-white
+        vec3 nearCol = mix(vec3(1.00, 0.88, 0.50), vec3(1.00, 0.95, 0.70), u_wind_speed_norm);
+        vec3 farCol  = mix(vec3(0.72, 0.82, 0.98), vec3(0.55, 0.70, 1.00), u_wind_speed_norm);
         vColor = mix(nearCol, farCol, pow(s, 0.7));
 
         // Boost color in fast-wind streams (polar regions)
-        vColor = mix(vColor, vec3(0.85, 0.92, 1.00), sinLat * sinLat * 0.4);
+        vColor = mix(vColor, vec3(0.80, 0.90, 1.00), sinLat * sinLat * 0.45);
+
+        // High-density stream tint: slightly warmer gold
+        vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.20 * (1.0 - s));
 
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
@@ -1036,7 +1191,9 @@ const solarWindVS = /* glsl */`
     }
 `;
 const solarWindFS = /* glsl */`
-    varying float vProgress; varying vec3 vColor;
+    varying float vProgress;
+    varying vec3  vColor;
+    varying float vDensBoost;
     void main() {
         vec2  uv = gl_PointCoord - 0.5;
         float d  = length(uv);
@@ -1044,7 +1201,9 @@ const solarWindFS = /* glsl */`
         float core  = exp(-d * d * 22.0);          // bright centre
         float glow  = 1.0 - smoothstep(0.1, 0.5, d);
         float fade  = 1.0 - pow(vProgress, 2.2);   // fade out with distance
-        float alpha = (core * 0.6 + glow * 0.35) * fade * 0.60;
+        // Live density boosts opacity: higher particle density → more visible stream
+        float densOp = 0.82 + vDensBoost * 0.38;
+        float alpha  = (core * 0.62 + glow * 0.35) * fade * 0.60 * densOp;
         gl_FragColor = vec4(vColor, alpha);
     }
 `;
@@ -1072,6 +1231,178 @@ const solarWindFS = /* glsl */`
     scene.add(windPts);
 
     document.getElementById('tog-wind').addEventListener('change', e => { windPts.visible = e.target.checked; });
+}
+
+// ─── CME DIRECTIONAL PARTICLE BURST ─────────────────────────────────────────
+// Compact cone of fast particles triggered by Earth-directed CME (NASA DONKI).
+// Direction is updated when a new CME is detected; particles steer toward that angle.
+const N_CME = 600;
+const cmeVS = /* glsl */`
+    attribute vec3  aDir;
+    attribute float aPhase;
+    attribute float aSeed;
+    uniform float u_time;
+    uniform float u_cme_active;
+    uniform float u_cme_speed_norm;
+    varying float vProgress;
+    varying vec3  vColor;
+    void main() {
+        float life = 1.8 + aSeed * 1.6;
+        float spd  = 1.5 + u_cme_speed_norm * 1.2;
+        float lt   = mod(u_time * spd * 0.38 + aPhase * life, life);
+        float s    = lt / life;
+        // CME particles expand quickly from near-surface outward
+        float r = 1.05 + 7.0 * s * s;
+        vProgress = s;
+        // Color: bright white-orange at ejection → pale rose-lavender at distance
+        vColor = mix(vec3(1.0, 0.88, 0.52), vec3(0.95, 0.60, 0.85), pow(s, 0.5));
+        vec4 mvPos = modelViewMatrix * vec4(aDir * r, 1.0);
+        gl_Position = projectionMatrix * mvPos;
+        float sz = (2.8 + aSeed * 1.2) * (1.0 - s * 0.6) * (160.0 / max(-mvPos.z, 0.1));
+        // Only visible when CME is active
+        gl_PointSize = clamp(sz * u_cme_active, 0.0, 12.0);
+    }
+`;
+const cmeFS = /* glsl */`
+    varying float vProgress;
+    varying vec3  vColor;
+    void main() {
+        vec2  uv = gl_PointCoord - 0.5;
+        float d  = length(uv);
+        if (d > 0.5) discard;
+        float core  = exp(-d * d * 16.0);
+        float glow  = 1.0 - smoothstep(0.08, 0.5, d);
+        float fade  = 1.0 - pow(vProgress, 1.8);
+        float alpha = (core * 0.7 + glow * 0.3) * fade * 0.75;
+        gl_FragColor = vec4(vColor, alpha);
+    }
+`;
+const cmeGeo = new THREE.BufferGeometry();
+{
+    const dirs   = new Float32Array(N_CME * 3);
+    const phases = new Float32Array(N_CME);
+    const seeds  = new Float32Array(N_CME);
+    const pos    = new Float32Array(N_CME * 3);
+    for (let i = 0; i < N_CME; i++) { phases[i] = Math.random(); seeds[i] = Math.random(); }
+    cmeGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    cmeGeo.setAttribute('aDir',     new THREE.Float32BufferAttribute(dirs, 3));
+    cmeGeo.setAttribute('aPhase',   new THREE.Float32BufferAttribute(phases, 1));
+    cmeGeo.setAttribute('aSeed',    new THREE.Float32BufferAttribute(seeds, 1));
+}
+
+// Build CME cone directions in JS — regenerated when CME direction changes
+function setCMECone(lat_rad, lon_rad, halfAngle_deg) {
+    const halfRad = Math.min((halfAngle_deg || 35), 60) * Math.PI / 180;
+    // CME propagation direction in heliocentric coords
+    const cLat = Math.cos(lat_rad), sLat = Math.sin(lat_rad);
+    const cLon = Math.cos(lon_rad), sLon = Math.sin(lon_rad);
+    const cx = cLat * sLon,  cy = sLat,  cz = cLat * cLon;
+    // Build orthonormal frame around the cone axis (cx, cy, cz)
+    const upRef = Math.abs(cy) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+    const rl = [cy * upRef[2] - cz * upRef[1],  cz * upRef[0] - cx * upRef[2],  cx * upRef[1] - cy * upRef[0]];
+    const rLen = Math.sqrt(rl[0]*rl[0] + rl[1]*rl[1] + rl[2]*rl[2]);
+    const r = rl.map(v => v / rLen);
+    const u = [cy * r[2] - cz * r[1],  cz * r[0] - cx * r[2],  cx * r[1] - cy * r[0]];
+    const dirs = cmeGeo.attributes.aDir.array;
+    for (let i = 0; i < N_CME; i++) {
+        const theta = Math.pow(Math.random(), 0.5) * halfRad;  // denser at center
+        const phi   = Math.random() * Math.PI * 2;
+        const cosT  = Math.cos(theta), sinT = Math.sin(theta);
+        const cosP  = Math.cos(phi),   sinP = Math.sin(phi);
+        dirs[i*3]   = cx * cosT + (r[0] * cosP + u[0] * sinP) * sinT;
+        dirs[i*3+1] = cy * cosT + (r[1] * cosP + u[1] * sinP) * sinT;
+        dirs[i*3+2] = cz * cosT + (r[2] * cosP + u[2] * sinP) * sinT;
+    }
+    cmeGeo.attributes.aDir.needsUpdate = true;
+}
+// Default direction: ecliptic plane toward nominal Earth direction
+setCMECone(0, 0, 35);
+
+const cmeMat  = new THREE.ShaderMaterial({
+    vertexShader: cmeVS, fragmentShader: cmeFS,
+    uniforms: {
+        u_time:            uniforms.u_time,
+        u_cme_active:      uniforms.u_cme_active,
+        u_cme_speed_norm:  uniforms.u_cme_speed_norm,
+    },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+});
+const cmePts = new THREE.Points(cmeGeo, cmeMat);
+scene.add(cmePts);
+
+// ─── SEP SOLAR ENERGETIC PARTICLES ──────────────────────────────────────────
+// Bright blue-white fast particles during S-scale radiation storms (NOAA GOES).
+// Near-isotropic but biased toward field-aligned polar channels.
+const N_SEP = 350;
+const sepVS = /* glsl */`
+    attribute vec3  aDir;
+    attribute float aPhase;
+    attribute float aSeed;
+    uniform float u_time;
+    uniform float u_sep_level;  // 0–5 NOAA S-scale
+    varying float vProgress;
+    varying vec3  vColor;
+    void main() {
+        float life = 1.2 + aSeed * 1.2;
+        float spd  = 3.0 + u_sep_level * 0.6;  // near-relativistic → very fast
+        float lt   = mod(u_time * spd * 0.42 + aPhase * life, life);
+        float s    = lt / life;
+        float r    = 1.0 + 9.0 * s;  // fast linear (energetic, near-c)
+        vProgress = s;
+        // S1 = pale blue; S5 = intense blue-white
+        float intensity = u_sep_level / 5.0;
+        vColor = mix(vec3(0.55, 0.80, 1.0), vec3(0.88, 0.94, 1.0), intensity * (1.0 - s * 0.5));
+        vec4 mvPos = modelViewMatrix * vec4(aDir * r, 1.0);
+        gl_Position = projectionMatrix * mvPos;
+        float sz = (1.0 + aSeed * 0.8) * (160.0 / max(-mvPos.z, 0.1));
+        // Point size scales with S-level
+        gl_PointSize = clamp(sz * clamp(u_sep_level / 2.0, 0.0, 1.0), 0.0, 6.0);
+    }
+`;
+const sepFS = /* glsl */`
+    varying float vProgress;
+    varying vec3  vColor;
+    void main() {
+        vec2  uv = gl_PointCoord - 0.5;
+        float d  = length(uv);
+        if (d > 0.5) discard;
+        float core  = exp(-d * d * 28.0);
+        float fade  = 1.0 - pow(vProgress, 1.6);
+        float alpha = core * fade * 0.65;
+        gl_FragColor = vec4(vColor, alpha);
+    }
+`;
+{
+    const sepGeo = new THREE.BufferGeometry();
+    const dirs   = new Float32Array(N_SEP * 3);
+    const phases = new Float32Array(N_SEP);
+    const seeds  = new Float32Array(N_SEP);
+    const pos    = new Float32Array(N_SEP * 3);
+    for (let i = 0; i < N_SEP; i++) {
+        // Isotropic but polar-biased (SEPs follow open field lines at poles)
+        const u2 = Math.random() * 2 - 1;
+        const v2 = Math.random() * Math.PI * 2;
+        const r2 = Math.sqrt(1 - u2*u2);
+        // Bias toward poles: |y| > 0.5
+        const poleBias = (Math.random() < 0.6)
+            ? new THREE.Vector3(r2 * Math.cos(v2), Math.abs(u2), r2 * Math.sin(v2)).normalize()
+            : new THREE.Vector3(r2 * Math.cos(v2), u2, r2 * Math.sin(v2)).normalize();
+        dirs[i*3] = poleBias.x; dirs[i*3+1] = poleBias.y; dirs[i*3+2] = poleBias.z;
+        phases[i] = Math.random(); seeds[i] = Math.random();
+    }
+    sepGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    sepGeo.setAttribute('aDir',     new THREE.Float32BufferAttribute(dirs, 3));
+    sepGeo.setAttribute('aPhase',   new THREE.Float32BufferAttribute(phases, 1));
+    sepGeo.setAttribute('aSeed',    new THREE.Float32BufferAttribute(seeds, 1));
+    const sepMat = new THREE.ShaderMaterial({
+        vertexShader: sepVS, fragmentShader: sepFS,
+        uniforms: {
+            u_time:      uniforms.u_time,
+            u_sep_level: uniforms.u_sep_level,
+        },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    scene.add(new THREE.Points(sepGeo, sepMat));
 }
 
 // Lights
@@ -1559,13 +1890,100 @@ document.addEventListener('swpc-update', (ev) => {
     const d   = sw.derived ?? {};
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
-    const spd = sw.solar_wind?.speed   ?? 400;
-    const dns = sw.solar_wind?.density ?? 5;
+    const spd = sw.solar_wind?.speed       ?? 400;
+    const dns = sw.solar_wind?.density     ?? 5;
+    const bt  = sw.solar_wind?.bt          ?? 5;
+    const tmp = sw.solar_wind?.temperature ?? 1e5;
 
     const gl  = Math.min(5, Math.floor(kp / 1.67));
     const gc  = _G_COLS_SUN[gl];
 
-    // Solar wind speed + density
+    // ── Wire live values into 3D particle uniforms ─────────────────────────────
+    uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
+    uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
+    uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+
+    // S-scale drives SEP particle system
+    const sepLevel = sw.sep_storm_level ?? 0;
+    uniforms.u_sep_level.value = sepLevel;
+
+    // CME burst: active when an Earth-directed CME is within ±48h window
+    const edCme = sw.earth_directed_cme ?? null;
+    if (edCme && Math.abs(edCme.hoursUntil) <= 48) {
+        uniforms.u_cme_active.value = 1.0;
+        // Normalise CME speed: 300-2500 km/s → 0-1
+        uniforms.u_cme_speed_norm.value = Math.max(0, Math.min(1, (edCme.speed - 300) / 2200));
+        // Aim the cone at the CME direction (DONKI lat/lon)
+        setCMECone(edCme.lat_rad ?? 0, edCme.lon_rad ?? 0, edCme.halfAngle ?? 35);
+    } else {
+        uniforms.u_cme_active.value = 0.0;
+    }
+
+    // ── Update Solar Wind Live panel gauges ────────────────────────────────────
+    const spdNorm  = uniforms.u_wind_speed_norm.value;
+    const dnsNorm  = uniforms.u_wind_density_norm.value;
+    const btNorm   = Math.max(0, Math.min(1, bt / 30));
+    const bzNorm   = Math.abs(bz) / 30;
+
+    const setW = (id, pct) => { const el = document.getElementById(id); if (el) el.style.width = Math.round(pct * 100) + '%'; };
+    const setV = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+    setW('wg-speed', spdNorm);
+    setW('wg-dens',  dnsNorm);
+    setW('wg-bt',    btNorm);
+    setV('wv-speed', `${Math.round(spd)} km/s`);
+    setV('wv-dens',  `${dns.toFixed(1)} /cc`);
+    setV('wv-bt',    `${bt.toFixed(1)} nT`);
+
+    // Bz bar: northward=blue (right of center), southward=red (left of center)
+    const bzNEl = document.getElementById('wg-bz-n');
+    const bzSEl = document.getElementById('wg-bz-s');
+    if (bzNEl && bzSEl) {
+        if (bz >= 0) { bzNEl.style.width = Math.round(bzNorm * 50) + '%'; bzSEl.style.width = '0'; }
+        else         { bzSEl.style.width = Math.round(bzNorm * 50) + '%'; bzNEl.style.width = '0'; }
+    }
+    setV('wv-bz', `${bz >= 0 ? '+' : ''}${bz.toFixed(1)} nT`);
+    const bzValEl = document.getElementById('wv-bz');
+    if (bzValEl) bzValEl.style.color = bz <= -10 ? '#ff4444' : bz <= -5 ? '#ff8844' : bz >= 5 ? '#44aaff' : '#cc9955';
+
+    // Temperature
+    const tempK = tmp >= 1e6 ? `${(tmp / 1e6).toFixed(2)} MK` : `${Math.round(tmp / 1e3)} kK`;
+    setV('wv-temp', tempK);
+
+    // Parker spiral angle (at 1 AU ≈ 215 R☉): φ = Ω·(215 R☉) / v_wind
+    // Ω_sun = 2π / (25.4 × 86400) rad/s, 1 AU in km = 1.496e8
+    const Omega  = 2 * Math.PI / (25.4 * 86400);   // rad/s
+    const dist1AU = 1.496e8;                         // km
+    const spiralAngle = Math.atan2(Omega * dist1AU, spd) * 180 / Math.PI;
+    setV('wv-spiral', `~${Math.round(spiralAngle)}°`);
+
+    // CME burst indicator
+    const cmeIndEl  = document.getElementById('cme-burst-ind');
+    const cmeTxtEl  = document.getElementById('cme-burst-txt');
+    if (cmeIndEl && cmeTxtEl) {
+        if (edCme && Math.abs(edCme.hoursUntil) <= 48) {
+            cmeIndEl.classList.add('active');
+            const etaStr = edCme.hoursUntil < 0
+                ? `Arrived ~${Math.abs(Math.round(edCme.hoursUntil))}h ago`
+                : `ETA ~${Math.round(edCme.hoursUntil)}h`;
+            cmeTxtEl.textContent = `CME burst active · ${Math.round(edCme.speed)} km/s · ${etaStr}`;
+        } else {
+            cmeIndEl.classList.remove('active');
+            cmeTxtEl.textContent = 'No active CME burst';
+        }
+    }
+
+    // SEP radiation storm indicator
+    const sepIndEl = document.getElementById('sep-ind');
+    const sepTxtEl = document.getElementById('sep-txt');
+    const S_LABELS = ['No radiation storm', 'Minor', 'Moderate', 'Strong', 'Severe', 'Extreme'];
+    if (sepIndEl && sepTxtEl) {
+        if (sepLevel >= 1) { sepIndEl.classList.add('active'); }
+        else               { sepIndEl.classList.remove('active'); }
+        sepTxtEl.textContent = `S${sepLevel} — ${S_LABELS[sepLevel] ?? 'Unknown'}`;
+    }
+
+    // Solar wind speed + density (space weather ribbon)
     const spdEl = document.getElementById('sw-speed');
     const dnsEl = document.getElementById('sw-dens');
     if (spdEl) spdEl.textContent = `${Math.round(spd)} km/s`;
