@@ -287,7 +287,11 @@ nav {
         <div id="hud">
             <h3 id="hud-name">Solar System</h3>
             <div>Selected: <span class="val" id="hud-body">—</span></div>
-            <div>Sim year: <span class="val" id="hud-year">0.00</span></div>
+            <div>Date: <span class="val" id="hud-year" style="font-variant-numeric:tabular-nums">—</span></div>
+            <div style="display:flex;justify-content:space-between;margin-top:1px;">
+                <span class="dim">Ephemeris</span>
+                <span id="hud-ephem" style="font-size:9px;color:#445566;letter-spacing:.2px">Meeus</span>
+            </div>
             <div>Speed: <span class="val" id="hud-speed">1.0×</span></div>
             <div class="sep"></div>
             <div>FPS: <span id="fps-display">--</span></div>
@@ -496,6 +500,8 @@ nav {
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initScaleNav, navigateTo } from './js/scale-nav.js';
+import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric }
+    from './js/horizons.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('solar');
@@ -2369,11 +2375,76 @@ renderer.domElement.addEventListener('pointerdown', onPointerDown);
 document.getElementById('btn-goto-earth').addEventListener('click', () => navigateTo('earth.html'));
 
 // ═══════════════════════════════════════════════════════
-//  SIMULATION STATE
+//  SIMULATION STATE — initialised from real ephemeris
 // ═══════════════════════════════════════════════════════
-let simTime  = 0;     // years
+
+// ── Compute real positions synchronously (Meeus, no network) ────────────────
+// simTime = fraction of Earth's orbital period completed.
+// At simTime=0, Earth is at angle=0 (sim +X direction ≡ ecliptic vernal equinox).
+// Setting simTime = earthLon_rad / 2π places Earth at its real current longitude.
+
+const _jd0  = jdNow();
+const _e0   = earthHeliocentric(_jd0);   // { lon_rad, dist_AU }
+const _m0   = moonGeocentric(_jd0);      // { lon_rad, lat_rad, dist_km }
+
+let simTime  = _e0.lon_rad / (Math.PI * 2);   // Earth at real ecliptic longitude
 let simSpeed = 1.0;   // multiplier
 const FRAMES_PER_YEAR = 1800; // 1 Earth orbit = 30 s at 60 fps, speed=1
+
+// ── Locate Luna and set her initial phase from real Moon position ────────────
+const _earthPlanet = PLANETS.find(p => p.name === 'Earth');
+const _luna        = _earthPlanet?.moons?.find(m => m.name === 'Luna');
+if (_luna) {
+    // mAngle = (simTime / period) × 2π + angle0
+    // Solve for angle0 so mAngle = Moon's real geocentric ecliptic longitude
+    const _mAngleNow = (simTime / _luna.period) * Math.PI * 2;
+    _luna.angle0     = _m0.lon_rad - _mAngleNow;
+    console.log(`[Ephemeris/Meeus] Earth lon ${(_e0.lon_rad * 180/Math.PI).toFixed(2)}°`
+              + ` | Moon lon ${(_m0.lon_rad * 180/Math.PI).toFixed(2)}°`
+              + ` | dist ${Math.round(_m0.dist_km)} km`);
+}
+
+// ── Epoch for converting simTime → real calendar date display ────────────────
+// currentDate = epochDate + (simTime − epochSimTime) × 365.25 days
+let _ephemEpoch = { simTime, date: new Date() };
+const _MON      = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _fmtSimDate(d) {
+    return `${d.getUTCFullYear()} ${_MON[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+// ── Async Horizons refinement — fetch precise vectors from JPL ───────────────
+// When Horizons responds it fires 'ephemeris-ready'; we nudge simTime to the
+// more accurate value and update the HUD badge.  The adjustment is tiny
+// (~0.01° or less) so there is no visible jump.
+const _ephemSvc = new EphemerisService();
+_ephemSvc.load();
+
+window.addEventListener('ephemeris-ready', ev => {
+    const ep         = ev.detail;
+    const newSimTime = ep.earth.lon_rad / (Math.PI * 2);
+
+    // Only accept if the shift is physically small (< 1° ≈ 0.003 yr)
+    if (Math.abs(newSimTime - simTime) < 0.01) {
+        simTime = newSimTime;
+        if (_luna) {
+            const mAngle = (simTime / _luna.period) * Math.PI * 2;
+            _luna.angle0 = ep.moon.lon_rad - mAngle;
+        }
+        _ephemEpoch = { simTime, date: ep.timestamp };
+    }
+
+    // Update ephemeris source badge
+    const srcEl = document.getElementById('hud-ephem');
+    if (srcEl) {
+        const isLive = ep.source === 'horizons';
+        srcEl.textContent = isLive ? 'JPL Horizons ✓' : 'Meeus';
+        srcEl.style.color = isLive ? '#44ff88' : '#aabbcc';
+    }
+
+    console.log(`[Ephemeris/${ep.source}] Earth lon ${(ep.earth.lon_rad * 180/Math.PI).toFixed(3)}°`
+              + ` r=${ep.earth.dist_AU.toFixed(6)} AU`
+              + ` | Moon lon ${(ep.moon.lon_rad * 180/Math.PI).toFixed(3)}°`);
+});
 
 document.getElementById('sl-speed').addEventListener('input', function(){
     simSpeed = +this.value;
@@ -2437,7 +2508,13 @@ function animate() {
 
     // Advance simulation time
     simTime += simSpeed / FRAMES_PER_YEAR;
-    hudYear.textContent = simTime.toFixed(2);
+
+    // Update HUD date — real calendar date derived from ephemeris epoch + elapsed sim-years
+    if (_ephemEpoch) {
+        const dt      = simTime - _ephemEpoch.simTime;
+        const simDate = new Date(_ephemEpoch.date.getTime() + dt * 365.25 * 86400e3);
+        hudYear.textContent = _fmtSimDate(simDate);
+    }
 
     // Move planets + update wind-shader uniforms
     PLANETS.forEach(p => {
@@ -2876,6 +2953,7 @@ console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weigh
 console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 19 moons · asteroid belt · CME bursts');
 console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regions · protons · electrons · aurora · alerts · f107');
 console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
+console.log('  Ephemeris: JPL Horizons (Earth vectors ECLIPJ2000) + Meeus fallback');
 </script>
 </body>
 </html>
