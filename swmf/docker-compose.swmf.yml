@@ -1,0 +1,183 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parker Physics — SWMF/BATS-R-US operational pipeline
+# Phase 0: containerized solar wind forecasting
+#
+#  Services:
+#    swmf       — MHD solver + ingestion daemon + results API
+#    redis      — job queue + result cache (millisecond latency for API)
+#    postgres   — run history, validation metrics, benchmark archive
+#    grafana    — live monitoring dashboard (port 3000)
+#    prometheus — metrics scraping
+#
+# Usage:
+#   docker-compose -f docker-compose.swmf.yml up -d
+#   docker-compose -f docker-compose.swmf.yml logs -f swmf
+#
+# One-shot forecast run:
+#   docker-compose -f docker-compose.swmf.yml run --rm swmf \
+#     python3 /app/pipeline/run_forecast.py --once --hours 24
+#
+# AR3842 benchmark validation:
+#   docker-compose -f docker-compose.swmf.yml run --rm swmf \
+#     python3 /app/benchmark/ar3842_validate.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-common-env: &common-env
+  TZ: UTC
+  # NOAA SWPC endpoints (no API key required)
+  SWPC_PLASMA_URL:    "https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json"
+  SWPC_MAG_URL:       "https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json"
+  SWPC_ALERTS_URL:    "https://services.swpc.noaa.gov/products/alerts.json"
+  SWPC_DONKI_CME_URL: "https://api.nasa.gov/DONKI/CME"
+  SWPC_GOES_URL:      "https://services.swpc.noaa.gov/json/goes/primary/xrays-7-day.json"
+  # NASA DONKI API key (set in .env or environment)
+  NASA_API_KEY:       "${NASA_API_KEY:-DEMO_KEY}"
+  # Pipeline config
+  IMF_DIR:            "/data/imf"
+  RUNS_DIR:           "/data/runs"
+  RESULTS_DIR:        "/data/results"
+  LOGS_DIR:           "/data/logs"
+  # SWMF binary paths (set at build time)
+  SWMF_BIN:           "/opt/swmf/bin"
+  BATSRUS_IH:         "/opt/swmf/IH/BATSRUS/BATSRUS.exe"
+  BATSRUS_SC:         "/opt/swmf/SC/BATSRUS/BATSRUS.exe"
+  # Forecast settings
+  FORECAST_HORIZON_H: "24"   # hours to simulate ahead
+  MPI_NPROC:          "4"    # MPI ranks for BATS-R-US
+  L1_INGEST_INTERVAL: "60"   # seconds between L1 data pulls
+  # Database
+  DATABASE_URL:       "postgresql://swmf:swmfpass@postgres:5432/swmf"
+  REDIS_URL:          "redis://redis:6379/0"
+
+services:
+
+  # ── SWMF solver + pipeline ───────────────────────────────────────────────
+  swmf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: parkerphysics/swmf:latest
+    container_name: swmf-pipeline
+    environment:
+      <<: *common-env
+    volumes:
+      - swmf-runs:/data/runs
+      - swmf-imf:/data/imf
+      - swmf-results:/data/results
+      - swmf-logs:/data/logs
+      # Mount local pipeline/ for development hot-reload (comment out in prod)
+      - ./pipeline:/app/pipeline:ro
+      - ./config:/app/config:ro
+      - ./benchmark:/app/benchmark:ro
+    ports:
+      - "8000:8000"    # Results API
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # BATS-R-US is memory-hungry; 8 GB minimum for IH-only runs
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+          cpus: "8.0"
+        reservations:
+          memory: 4G
+    networks:
+      - swmf-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ── Redis — job queue + result cache ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: swmf-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - swmf-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── PostgreSQL — run history + validation metrics ─────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: swmf-postgres
+    environment:
+      POSTGRES_DB:       swmf
+      POSTGRES_USER:     swmf
+      POSTGRES_PASSWORD: swmfpass
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - swmf-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swmf -d swmf"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Prometheus — metrics collection ──────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: swmf-prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    ports:
+      - "9090:9090"
+    networks:
+      - swmf-net
+    restart: unless-stopped
+
+  # ── Grafana — live forecast + validation dashboard ────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: swmf-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-parkerphysics}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s:%(http_port)s/grafana/"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - postgres
+    networks:
+      - swmf-net
+    restart: unless-stopped
+
+volumes:
+  swmf-runs:
+  swmf-imf:
+  swmf-results:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  swmf-logs:
+
+networks:
+  swmf-net:
+    driver: bridge
