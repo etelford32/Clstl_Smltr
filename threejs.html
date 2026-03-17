@@ -324,6 +324,10 @@ nav {
                 <span class="dim">Pause</span>
                 <span class="val" id="hud-msp" style="color:#88aacc">— Re</span>
             </div>
+            <div style="display:flex;justify-content:space-between;margin-top:3px;">
+                <span class="dim">CME ETA</span>
+                <span class="val" id="hud-cme-eta" style="color:#334">—</span>
+            </div>
             <div class="sep"></div>
             <div class="dim" style="margin-top:0">Drag · Scroll · Click planet</div>
         </div>
@@ -2829,10 +2833,35 @@ window.addEventListener('swpc-update', (e) => {
         }
     }
 
-    // 5. CME burst — triggered once per new M/X flare detection
-    if (sw.new_major_flare && !cmeActive) {
-        console.log(`[SWPC] New ${sw.flare_class} flare detected — launching CME burst`);
-        triggerCME(sw.flare_direction);
+    // 5. CME burst — triggered by new M/X flare OR new Earth-directed DONKI CME
+    if ((sw.new_major_flare || sw.new_cme_detected) && !cmeActive) {
+        // Prefer DONKI CME direction (most accurate); fall back to flare location
+        const cmeDir = sw.earth_directed_cme
+            ? { lat_rad: sw.earth_directed_cme.lat_rad, lon_rad: sw.earth_directed_cme.lon_rad }
+            : sw.flare_direction;
+        const src = sw.new_cme_detected ? `DONKI CME ${Math.round(sw.earth_directed_cme?.speed ?? 0)} km/s`
+                                        : `${sw.flare_class} flare`;
+        console.log(`[SWPC] ${src} — launching CME burst`);
+        triggerCME(cmeDir);
+    }
+
+    // 5b. CME transit indicator in HUD — show ETA when an Earth-directed CME is in transit
+    const hudCme = document.getElementById('hud-cme-eta');
+    if (hudCme) {
+        const eta = sw.cme_eta_hours;
+        if (eta == null) {
+            hudCme.textContent = '—';
+            hudCme.style.color = '#334';
+        } else if (eta < 0) {
+            hudCme.textContent = `arrived ${Math.abs(Math.round(eta))}h ago`;
+            hudCme.style.color = '#88aacc';
+        } else if (eta < 24) {
+            hudCme.textContent = `~${Math.round(eta)}h`;
+            hudCme.style.color = eta < 6 ? '#ff3300' : eta < 12 ? '#ff8800' : '#ffd700';
+        } else {
+            hudCme.textContent = `~${(eta / 24).toFixed(1)}d`;
+            hudCme.style.color = '#aabb88';
+        }
     }
 
     // 6. Update HUD ribbon
@@ -2845,7 +2874,8 @@ swFeed.start();
 
 console.log('%c[Solar System · Celestial Simulator]', 'color:#ffd700;font-weight:bold;font-size:13px');
 console.log('  Sun G2V+SWPC shader · 8 planets + Ceres · 19 moons · asteroid belt · CME bursts');
-console.log('  NOAA SWPC endpoints: wind_1m · kp_index · xray_flux · flares_7d · regions');
+console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regions · protons · electrons · aurora · alerts · f107');
+console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
 </script>
 </body>
 </html>
