@@ -117,6 +117,56 @@ nav {
 #backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
 #backdrop.show { display:block; }
 
+/* ─── Space Weather ribbon ──────────────────────────────────── */
+#sw-ribbon {
+    position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+    z-index:55; display:flex; align-items:center; gap:12px;
+    background:rgba(0,0,0,.84); backdrop-filter:blur(10px);
+    border-top:1px solid rgba(255,140,0,.15);
+    border-radius:10px 10px 0 0;
+    padding:5px 22px; font-size:10px; pointer-events:none;
+    white-space:nowrap; letter-spacing:.35px;
+    transition:border-color .5s, box-shadow .5s;
+}
+#sw-ribbon.flare-m { border-color:rgba(255,140,0,.55); box-shadow:0 0 16px rgba(255,140,0,.18); }
+#sw-ribbon.flare-x { border-color:rgba(255,40,0,.65);  box-shadow:0 0 22px rgba(255,40,0,.28); animation:ribbon-pulse 1.4s ease-in-out infinite; }
+@keyframes ribbon-pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+#sw-xray-ltr {
+    font-size:22px; font-weight:800; line-height:1; min-width:28px; text-align:center;
+    transition:color .4s;
+}
+#sw-xray-ltr.A { color:#44ff88; }
+#sw-xray-ltr.B { color:#88ddbb; }
+#sw-xray-ltr.C { color:#ffee44; }
+#sw-xray-ltr.M { color:#ff9900; text-shadow:0 0 8px #ff990060; }
+#sw-xray-ltr.X { color:#ff3300; text-shadow:0 0 12px #ff330088; animation:xpulse 0.9s ease-in-out infinite; }
+.sw-div  { width:1px; height:18px; background:rgba(255,255,255,.1); flex-shrink:0; }
+.sw-col  { display:flex; flex-direction:column; align-items:center; gap:1px; }
+.sw-k    { color:#3a3220; font-size:8.5px; text-transform:uppercase; letter-spacing:.5px; }
+.sw-v    { color:#cc9944; font-weight:700; font-size:10.5px; }
+.sw-v.warn  { color:#ffcc44; }
+.sw-v.alert { color:#ff8800; }
+.sw-v.storm { color:#ff3300; }
+.sw-dot-wrap { display:flex; align-items:center; gap:4px; }
+#sw-live-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:#40ff80; box-shadow:0 0 5px #40ff80;
+    animation:sw-pulse 2.2s ease-in-out infinite;
+}
+#sw-live-dot.offline { background:#444; box-shadow:none; animation:none; }
+@keyframes sw-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+/* earth-impact chip */
+#sw-earth-chip {
+    display:flex; align-items:center; gap:4px;
+    padding:2px 7px 2px 5px; border-radius:8px;
+    border:1px solid rgba(0,160,255,.25);
+    background:rgba(0,100,200,.1);
+    font-size:9.5px; transition:all .5s;
+}
+#sw-earth-chip .ec-g { font-weight:700; font-size:10px; color:#44ccff; }
+#sw-earth-chip .ec-lbl { color:#2255aa; font-size:8.5px; letter-spacing:.3px; }
+#sw-earth-chip a { color:inherit; text-decoration:none; display:contents; }
+
 #panel {
     position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
     background: rgba(8,4,0,.97); backdrop-filter: blur(16px);
@@ -289,6 +339,61 @@ nav {
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
         <div id="backdrop"></div>
+
+        <!-- Space Weather ribbon ─────────────────────────────── -->
+        <div id="sw-ribbon">
+            <!-- Live dot -->
+            <div class="sw-dot-wrap">
+                <div id="sw-live-dot" class="offline"></div>
+            </div>
+
+            <!-- GOES X-ray class (big) -->
+            <div id="sw-xray-ltr" class="A" title="GOES 1–8 Å X-ray flux class">A</div>
+            <div class="sw-col" style="align-items:flex-start;">
+                <span class="sw-k">X-Ray</span>
+                <span class="sw-v" id="sw-flux-val">—</span>
+            </div>
+
+            <div class="sw-div"></div>
+
+            <!-- Solar wind speed -->
+            <div class="sw-col">
+                <span class="sw-k">Solar Wind</span>
+                <span class="sw-v" id="sw-speed">— km/s</span>
+            </div>
+
+            <!-- Density -->
+            <div class="sw-col">
+                <span class="sw-k">Density</span>
+                <span class="sw-v" id="sw-dens">— /cc</span>
+            </div>
+
+            <div class="sw-div"></div>
+
+            <!-- IMF Bz -->
+            <div class="sw-col">
+                <span class="sw-k">IMF Bz</span>
+                <span class="sw-v" id="sw-bz">— nT</span>
+            </div>
+
+            <!-- Kp -->
+            <div class="sw-col">
+                <span class="sw-k">Kp</span>
+                <span class="sw-v" id="sw-kp">—</span>
+            </div>
+
+            <div class="sw-div"></div>
+
+            <!-- Earth impact chip -->
+            <div id="sw-earth-chip" title="Current geomagnetic conditions at Earth">
+                <span style="font-size:13px;line-height:1;">🌍</span>
+                <div>
+                    <div><span class="ec-g" id="sw-g-scale">G0</span></div>
+                    <div class="ec-lbl" id="sw-g-label">Quiet at Earth</div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <aside id="panel">
@@ -441,8 +546,9 @@ nav {
 }
 </script>
 <script type="module">
-import * as THREE        from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import * as THREE             from 'three';
+import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
+import { SpaceWeatherFeed }   from './js/swpc-feed.js';
 
 // NAV
 const burger = document.getElementById('nav-burger');
@@ -1313,6 +1419,113 @@ document.getElementById('live-status').textContent = 'Default data · fetching l
 document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
 fetchLiveSolarData();                         // attempt live update on load
 setInterval(fetchLiveSolarData, 10 * 60 * 1000); // refresh every 10 min
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
+//  X-ray class comes from the existing NOAA fetch above; wind/Kp from SWPC.
+// ══════════════════════════════════════════════════════════════════════════
+const _G_COLS_SUN   = ['#44ccff','#aadd44','#ffd700','#ff8800','#ff3300','#ff00aa'];
+const _G_LABELS_SUN = ['Quiet','G1 Minor','G2 Moderate','G3 Strong','G4 Severe','G5 Extreme'];
+
+// Keep the ribbon X-ray letter in sync whenever liveXrayFlux updates
+const _origUpdateLivePanel = updateLivePanel;  // already defined above
+
+function _updateRibbonXray() {
+    if (liveXrayFlux == null) return;
+    const { cls, n } = xrayClassInfo(liveXrayFlux);
+    const nStr = n >= 1 ? n.toFixed(1) : '';
+    const xrayLtr = document.getElementById('sw-xray-ltr');
+    const fluxVal = document.getElementById('sw-flux-val');
+    if (xrayLtr) {
+        xrayLtr.textContent = cls;
+        xrayLtr.className   = cls;
+    }
+    if (fluxVal) fluxVal.textContent = cls + nStr;
+    // Ribbon glow
+    const ribbon = document.getElementById('sw-ribbon');
+    if (ribbon) {
+        ribbon.className = cls === 'X' ? 'flare-x' : cls === 'M' ? 'flare-m' : '';
+    }
+}
+
+// Patch updateLivePanel so ribbon X-ray stays in sync with every NOAA fetch
+const _patchedUpdateLivePanel = function(failed) {
+    _origUpdateLivePanel(failed);
+    _updateRibbonXray();
+};
+// Re-assign: we can't easily monkey-patch an already-called function, so
+// instead we call _updateRibbonXray() after the initial panel update.
+_updateRibbonXray();
+
+// SpaceWeatherFeed provides solar wind, Kp, Bz — same feed as Earth view
+const _swFeed = new SpaceWeatherFeed();
+_swFeed.start();
+
+document.addEventListener('swpc-update', (ev) => {
+    const sw  = ev.detail.state;
+    const d   = sw.derived ?? {};
+    const kp  = sw.kp ?? 0;
+    const bz  = sw.solar_wind?.bz  ?? 0;
+    const spd = sw.solar_wind?.speed   ?? 400;
+    const dns = sw.solar_wind?.density ?? 5;
+
+    const gl  = Math.min(5, Math.floor(kp / 1.67));
+    const gc  = _G_COLS_SUN[gl];
+
+    // Solar wind speed + density
+    const spdEl = document.getElementById('sw-speed');
+    const dnsEl = document.getElementById('sw-dens');
+    if (spdEl) spdEl.textContent = `${Math.round(spd)} km/s`;
+    if (dnsEl) dnsEl.textContent = `${dns.toFixed(1)} /cc`;
+
+    // IMF Bz (color: red=southward, blue=northward)
+    const bzEl = document.getElementById('sw-bz');
+    if (bzEl) {
+        const arrow = bz < -5 ? '↓' : bz < 0 ? '↓' : bz > 0 ? '↑' : '→';
+        bzEl.textContent = `${arrow} ${bz.toFixed(1)} nT`;
+        bzEl.className   = 'sw-v' + (bz < -10 ? ' storm' : bz < -5 ? ' alert' : bz < 0 ? ' warn' : '');
+    }
+
+    // Kp
+    const kpEl = document.getElementById('sw-kp');
+    if (kpEl) {
+        kpEl.textContent = kp.toFixed(1);
+        kpEl.className   = 'sw-v' + (kp >= 7 ? ' storm' : kp >= 5 ? ' alert' : kp >= 4 ? ' warn' : '');
+    }
+
+    // Earth impact chip
+    const gScaleEl = document.getElementById('sw-g-scale');
+    const gLabelEl = document.getElementById('sw-g-label');
+    const chipEl   = document.getElementById('sw-earth-chip');
+    if (gScaleEl) {
+        gScaleEl.textContent = gl >= 1 ? `G${gl}` : 'G0';
+        gScaleEl.style.color = gc;
+    }
+    if (gLabelEl) {
+        gLabelEl.textContent = _G_LABELS_SUN[gl] + ' at Earth';
+        gLabelEl.style.color = gc + 'aa';
+    }
+    if (chipEl) {
+        chipEl.style.borderColor = gc + '44';
+        chipEl.style.background  = gc + '10';
+    }
+
+    // Live dot → green
+    const dot = document.getElementById('sw-live-dot');
+    if (dot) dot.className = '';
+
+    // Also refresh X-ray from SWPC class (in case NOAA fetch hasn't run yet)
+    if (sw.xray_class) {
+        const xrayLtr = document.getElementById('sw-xray-ltr');
+        const fluxVal = document.getElementById('sw-flux-val');
+        const letter  = sw.xray_class[0] ?? 'A';
+        if (xrayLtr && !liveXrayFlux) {   // prefer the NOAA flux when available
+            xrayLtr.textContent = letter;
+            xrayLtr.className   = letter;
+        }
+        if (fluxVal && !liveXrayFlux) fluxVal.textContent = sw.xray_class;
+    }
+});
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
 </script>

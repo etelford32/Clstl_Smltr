@@ -299,7 +299,33 @@ nav {
                 </label>
                 <span id="wind-speed-lbl" style="font-size:10px;color:#88ddff;font-weight:600">400 km/s</span>
             </div>
-            <div class="dim" style="margin-top:3px">Drag · Scroll · Click planet</div>
+            <div class="sep"></div>
+            <!-- Live space weather — always visible, not gated behind Earth selection -->
+            <div style="font-size:9px;color:#334;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">
+                Space Weather
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span class="dim">Kp</span>
+                <span class="val" id="hud-kp" style="color:#4dff80">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span class="dim">Wind</span>
+                <span class="val" id="hud-wind" style="color:#88ddff">— km/s</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span class="dim">IMF Bz</span>
+                <span class="val" id="hud-bz" style="color:#88aacc">— nT</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
+                <span class="dim">Flare</span>
+                <span class="val" id="hud-flare" style="color:#44ff88">—</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+                <span class="dim">Pause</span>
+                <span class="val" id="hud-msp" style="color:#88aacc">— Re</span>
+            </div>
+            <div class="sep"></div>
+            <div class="dim" style="margin-top:0">Drag · Scroll · Click planet</div>
         </div>
 
         <!-- Overlay buttons -->
@@ -2533,7 +2559,7 @@ function buildEswKpCells() {
     eswKpBuilt = true;
 }
 
-/** Update the live ribbon with the latest SwaceWeather state. */
+/** Update the live ribbon and HUD with the latest SpaceWeather state. */
 function updateSWRibbon(sw) {
     const { solar_wind: wind, kp, xray_class, flare_class, flare_letter,
             derived: d, status } = sw;
@@ -2579,6 +2605,30 @@ function updateSWRibbon(sw) {
             earthGLbl.textContent = G_SCALE_LABELS[Math.min(gl, 5)].split(' ').slice(-1)[0];
             earthGLbl.style.color = gc + 'bb';
         }
+    }
+
+    // ── Top-left HUD — always-visible space weather section ───────────────────
+    const kpColor = kp >= 7 ? '#ff3300' : kp >= 5 ? '#ff8800' : kp >= 4 ? '#ffd700' : '#4dff80';
+    const hudKp = document.getElementById('hud-kp');
+    if (hudKp) { hudKp.textContent = kp != null ? kp.toFixed(1) : '—'; hudKp.style.color = kpColor; }
+
+    const hudWind = document.getElementById('hud-wind');
+    if (hudWind) hudWind.textContent = wind.speed != null ? `${Math.round(wind.speed)} km/s` : '— km/s';
+
+    const hudBz = document.getElementById('hud-bz');
+    if (hudBz) {
+        const bz = wind.bz ?? 0;
+        const arrow = bz < -5 ? '↓' : bz < 0 ? '↓' : bz > 0 ? '↑' : '→';
+        hudBz.textContent = `${arrow} ${bz.toFixed(1)} nT`;
+        hudBz.style.color = bz < -10 ? '#ff3300' : bz < -5 ? '#ff8844' : bz < 0 ? '#ffcc44' : '#88aacc';
+    }
+
+    const hudFlare = document.getElementById('hud-flare');
+    if (hudFlare) {
+        const fc = (flare_class ?? '—')[0] ?? 'A';
+        hudFlare.textContent = flare_class ?? '—';
+        const fc2col = { A:'#44ff88', B:'#88ddaa', C:'#ffee44', M:'#ff8c00', X:'#ff2200' };
+        hudFlare.style.color = fc2col[fc] ?? '#88aacc';
     }
 }
 
@@ -2672,6 +2722,13 @@ window.addEventListener('swpc-update', (e) => {
         msUniforms.u_bz_s.value     = d.bz_southward;
         // Store for panel display (standoff in Earth radii at sub-solar point)
         sw._msp_Re = (10 * standoff * (1.0 + 0.30)).toFixed(1);  // ~13 Re nominal
+        // Update HUD magnetopause
+        const hudMsp = document.getElementById('hud-msp');
+        if (hudMsp) {
+            hudMsp.textContent = `${sw._msp_Re} Re`;
+            hudMsp.style.color = parseFloat(sw._msp_Re) < 8.0 ? '#ff8800'
+                               : parseFloat(sw._msp_Re) < 10.0 ? '#ffd700' : '#88aacc';
+        }
     }
 
     // ── Van Allen radiation belts ─────────────────────────────────────────────
