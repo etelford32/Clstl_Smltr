@@ -1028,6 +1028,13 @@ const uniforms = {
     u_cme_speed_norm:    { value: 0.5  },  // CME speed [0-1]
     // ── SEP radiation storm ──
     u_sep_level:         { value: 0.0  },  // NOAA S-scale 0-5
+    // ── Flare ribbon / post-flare arcade ──
+    // u_flare_lat/lon: heliographic position of the most recent M/X flare (radians).
+    // u_flare_t: simulation-time elapsed since flare onset.  Starts at 999 so
+    //            no ribbon is drawn on load; resets to 0 on each new major flare.
+    u_flare_lat:         { value: 0.0  },  // radians
+    u_flare_lon:         { value: 0.0  },  // radians
+    u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
 };
 
 // SCENE
@@ -1056,18 +1063,28 @@ let composer, bloomPass;
     composer  = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    // UnrealBloomPass — gives the sun its stellar glow.
-    // threshold 0.72: only bright photosphere/corona bloom, not dim particles.
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 1.9, 0.55, 0.72);
+    // UnrealBloomPass — subtle HDR bloom for the very hottest surface pixels
+    // and M/X flare peaks only.  Kept deliberately low so the corona shader
+    // (not screen-space blur) carries the ambient glow.
+    // threshold 0.88 — only the sub-percent of pixels that exceed ~2.25× HDR
+    // get bloomed (granule centres, umbral contrasts, active-region UV kernels).
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.45, 0.32, 0.88);
     composer.addPass(bloomPass);
 
-    // Radial diffusion pass — scatters light outward from the solar disk
-    // simulating Thomson-scattered K-corona and atmospheric seeing.
+    // ── Vectorised limb-corona scatter ───────────────────────────────────────
+    // Simulates K-corona Thomson scattering: photons from the bright solar limb
+    // scatter off free electrons along the observer's line of sight, producing
+    // a radially-directed glow that falls off as ~r⁻².
+    //
+    // Implementation: for each pixel in the corona annulus, sample along the
+    // inward radial direction (toward the solar centre) to gather limb photons,
+    // then add a weighted fraction to the outward pixel.  The key difference
+    // from a Gaussian blur is that light only travels RADIALLY — no tangential
+    // spread — matching the streamer/plume morphology in real coronagraph images.
     const diffuseShader = {
         uniforms: {
             tDiffuse:   { value: null },
             resolution: { value: new THREE.Vector2(W, H) },
-            strength:   { value: 0.18 },
             center:     { value: new THREE.Vector2(0.5, 0.5) },
         },
         vertexShader: /* glsl */`
@@ -1075,27 +1092,50 @@ let composer, bloomPass;
             void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
         `,
         fragmentShader: /* glsl */`
+            precision highp float;
             uniform sampler2D tDiffuse;
             uniform vec2      resolution;
-            uniform float     strength;
             uniform vec2      center;
             varying vec2      vUv;
+
             void main() {
-                vec2 dir    = vUv - center;
-                float dist  = length(dir * resolution / resolution.y);
-                // Only apply within ~2.5 solar radii (normalised screen coords)
-                float mask  = smoothstep(0.55, 0.12, dist);
-                vec4  orig  = texture2D(tDiffuse, vUv);
-                vec4  accum = orig;
-                float w     = 1.0;
-                const int   SAMPLES = 8;
-                for (int i = 1; i <= SAMPLES; i++) {
-                    float t  = float(i) / float(SAMPLES);
-                    vec2  uv = vUv - dir * t * strength * mask * 0.012;
-                    accum   += texture2D(tDiffuse, clamp(uv, vec2(0.0), vec2(1.0)));
-                    w       += 1.0;
+                vec2  ar   = vec2(resolution.x / resolution.y, 1.0);
+                vec2  dir  = vUv - center;                // points away from sun
+                float dist = length(dir * ar);            // aspect-corrected distance
+
+                // Corona annulus: between the solar disk edge (~0.145) and
+                // ~1.9× disk radius (~0.27).  Outside this ring we return
+                // the original pixel untouched — no unnecessary blur.
+                float inner = 0.140;
+                float outer = 0.270;
+                float mask  = smoothstep(inner, inner + 0.025, dist)
+                            * smoothstep(outer, outer - 0.040, dist);
+
+                vec4 orig = texture2D(tDiffuse, vUv);
+                if (mask < 0.002) { gl_FragColor = orig; return; }
+
+                // Gather limb photons by sampling inward along the radial vector.
+                // Exponential weights: the closest inward samples dominate,
+                // producing a sharp inner brightening that falls off outward.
+                vec2  inDir = -normalize(dir);   // inward unit vector
+                vec4  accum = vec4(0.0);
+                float wSum  = 0.0;
+                const int STEPS = 14;
+                for (int i = 1; i <= STEPS; i++) {
+                    float fi  = float(i);
+                    // Sample spacing widens slightly so outer corona gets
+                    // contribution from farther inward regions.
+                    float off = fi * fi * 0.00065;
+                    vec2  uv  = vUv + inDir * off;
+                    float w   = exp(-fi * 0.28);          // exponential falloff
+                    accum    += texture2D(tDiffuse, clamp(uv, vec2(0.0), vec2(1.0))) * w;
+                    wSum     += w;
                 }
-                gl_FragColor = accum / w;
+                accum /= wSum;
+
+                // Add the gathered limb light to the original pixel.
+                // Scale by mask so the effect fades smoothly at both edges.
+                gl_FragColor = orig + accum * mask * 0.18;
             }
         `,
     };
@@ -1146,6 +1186,10 @@ const sunFS = /* glsl */`
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
+    // Flare ribbon uniforms
+    uniform float u_flare_lat;   // heliographic latitude of most recent M/X flare (radians)
+    uniform float u_flare_lon;   // heliographic longitude (radians)
+    uniform float u_flare_t;     // simulation-time elapsed since flare onset (0 = just fired)
     varying vec3  vNormal;
     varying vec3  vPosition;
     varying vec3  vViewDir;
@@ -1312,6 +1356,58 @@ const sunFS = /* glsl */`
         col += mix(vec3(1.3, 0.95, 0.40), vec3(0.80, 0.90, 1.50),
                    flareActive) * flareActive * 0.75 * u_showFlares;
 
+        // ── Flare ribbons — chromospheric UV footpoints of reconnecting loops ─
+        // During and after a solar flare, the chromosphere brightens in two
+        // parallel arcs (ribbons) that straddle the polarity inversion line (PIL)
+        // and separate as more field lines reconnect.
+        //
+        //  u_flare_t = 0 : flare onset — ribbons are narrow, very bright
+        //  u_flare_t → ∞ : ribbons widen, fade, and the post-flare arcade cools
+        //
+        // Angular scale: 1 R_sun ≈ 696 000 km → 0.001 rad ≈ 696 km (1 Mm)
+        // Ribbon separation starts at ~15 Mm (0.022 rad), grows to ~50 Mm.
+        // e-folding decay ≈ 175 sim-time units (~5 min at 60fps / dt=0.010).
+        {
+            float cos_df = sin(lat) * sin(u_flare_lat)
+                         + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
+            float df = acos(clamp(cos_df, -1.0, 1.0));
+
+            // Decay envelope — fast for UV continuum, slower for Hα cooling
+            float fDecay = exp(-u_flare_t / 175.0);
+
+            // ── UV/EUV hard kernel (AIA 1600/1700 Å proxy) ─────────────────
+            // Compact bright kernel at the reconnection site itself.
+            // Width sigma grows as chromospheric evaporation broadens the ribbon.
+            float sigKern = 0.022 + u_flare_t * 5.0e-5;
+            float uvKern  = exp(-df * df / (sigKern * sigKern)) * fDecay;
+            col += vec3(2.2, 1.9, 1.1) * uvKern * u_showFlares;
+
+            // ── Hα ribbon pair (AIA 304 Å proxy) ────────────────────────────
+            // Two arcs at ±sep from the flare centre, separating in time.
+            // Colour shifts from bright UV to red Hα as the ribbons cool.
+            float sep  = 0.025 + u_flare_t * 2.8e-5;
+            float rWid = 0.006 + u_flare_t * 7.0e-6;
+            float rib1 = exp(-pow((df - sep) / rWid, 2.0));
+            float rib2 = exp(-pow((df + sep) / rWid, 2.0));  // opposite side (symmetric)
+            float ribMask = (rib1 + rib2) * fDecay * 0.75;
+            // Colour: UV white at onset → Hα red as it cools
+            vec3 ribHot  = vec3(1.6, 1.3, 0.9);    // bright UV continuum
+            vec3 ribCool = vec3(1.1, 0.18, 0.06);  // Hα 656 nm red
+            col += mix(ribHot, ribCool, clamp(u_flare_t / 300.0, 0.0, 1.0))
+                 * ribMask * u_showFlares;
+
+            // ── Post-flare arcade glow (AIA 131/171 Å teal-gold) ────────────
+            // Hot plasma filling reconnected loops above the PIL — visible on
+            // the disk as a diffuse warm glow centred on the flare site.
+            float arcadeSig  = 0.055 + u_flare_t * 8.0e-5;
+            float arcadeGlow = exp(-df * df / (arcadeSig * arcadeSig))
+                             * exp(-u_flare_t / 350.0) * 0.45;
+            vec3 arcadeCol   = mix(vec3(0.55, 1.30, 1.20),  // AIA 131 teal (10 MK)
+                                   vec3(1.00, 0.80, 0.30),  // AIA 171 gold (1 MK)
+                                   clamp(u_flare_t / 250.0, 0.0, 1.0));
+            col += arcadeCol * arcadeGlow * u_showFlares;
+        }
+
         // ── Limb darkening ─────────────────────────────────────────────────────
         col *= limb;
 
@@ -1405,6 +1501,9 @@ const coronaFS = /* glsl */`
     uniform float u_rot;
     uniform float u_wind_speed_norm;
     uniform float u_bz_sw;
+    uniform float u_flare_lat;   // active flare position — same as sunFS
+    uniform float u_flare_lon;
+    uniform float u_flare_t;
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -1504,6 +1603,23 @@ const coronaFS = /* glsl */`
 
         // Subtle corona-wide activity brightening
         float pulse = 1.0 + 0.07 * sin(u_time * 2.6 + lon) * u_activity;
+
+        // ── Flare-driven coronal brightening (post-flare loop arcade in corona) ─
+        // Directly above the flare site, the corona brightens as reconnected
+        // field lines fill with ~10–30 MK plasma — the "post-flare arcade".
+        // Visible in white-light as a density enhancement and in EUV as a hot loop.
+        {
+            float cos_df = sin(lat) * sin(u_flare_lat)
+                         + cos(lat) * cos(u_flare_lat) * cos(lon - u_flare_lon);
+            float df_c   = acos(clamp(cos_df, -1.0, 1.0));
+            // Wide gaussian: loops spread over ±0.25 rad (~175 Mm) in corona
+            float cSig   = 0.20;
+            float cGlow  = exp(-df_c * df_c / (cSig * cSig))
+                         * exp(-u_flare_t / 280.0) * 0.55;
+            // Hot EUV colour in lower corona, fading to K-corona white above
+            col = mix(col, vec3(0.60, 1.10, 1.30), cGlow * rim);
+            alpha += cGlow * pow(rim, 1.6) * 0.35;
+        }
 
         gl_FragColor = vec4(col * pulse, alpha);
     }
@@ -1938,29 +2054,55 @@ function buildCoronalLoops() {
 
 // ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
 // Cool dense plasma curtains (T ~ 8–80 kK) suspended by magnetic fields.
-// Appear as bright pink-red arches beyond the limb (H-alpha emission).
-// Taller than active-region loops, lower than large coronal structures.
-// A few are seeded near active regions; a few random background prominences.
-let promGroup = null;
+// Appear as bright pink-red arches beyond the limb (Hα 656 nm / AIA 304 Å).
+//
+// PHYSICAL SCALES (used in the geometry below):
+//   Height:  50–300 Mm  → 0.07–0.43 R_sun above photosphere
+//   Width:   10–100 Mm  → 0.014–0.14 R_sun footpoint separation
+//   Life:    days–weeks; eruptive: minutes–hours
+//   T:       8 000–80 000 K (Hα: ~10 000 K, Ca H&K: ~15 000 K)
+//
+// Rendered as multi-strand "curtain" geometry: 4–8 parallel Bézier arcs that
+// share the same footpoints but have slightly different widths and heights,
+// giving the rope/curtain texture visible in Hα filtergrams.
+//
+// Each arc stores userData:
+//   baseOp   — rest opacity
+//   phase    — MHD wave phase offset (slow oscillation, ~10–20 min period)
+//   period   — oscillation period in sim-time units
+//   promId   — parent prominence index (for group eruption)
+//   eruptStart — sim-time when eruption was triggered (-999 = not erupting)
+let promGroup  = null;
+const promMeta = [];   // per-prominence metadata: { lat_r, lon_r, eruptStart }
 
 function buildProminences() {
     if (promGroup) { scene.remove(promGroup); promGroup = null; }
     promGroup = new THREE.Group();
+    promMeta.length = 0;
 
-    // Seed positions: near active regions + background
-    const seedPositions = liveRegions.slice(0, 4).map(reg => {
+    // ── Seed positions ────────────────────────────────────────────────────────
+    // Near each live active region (prominences form at polarity inversion lines)
+    const seeds = liveRegions.slice(0, 5).map(reg => {
         const c = parseLoc(reg.loc);
         if (!c) return null;
-        // Prominences form near polarity inversion lines; offset slightly
-        return { lat: c.lat + (Math.random() - 0.5) * 12, lon: c.lon + (Math.random() - 0.5) * 20 };
+        // PIL is typically offset from AR centre toward the equator
+        return {
+            lat: c.lat + (Math.random() - 0.5) * 14,
+            lon: c.lon + (Math.random() - 0.5) * 25,
+            type: 'ar',    // near active region — more complex/taller
+        };
     }).filter(Boolean);
 
-    // Add a few global background prominences
-    for (let i = 0; i < 3; i++) {
-        seedPositions.push({ lat: (Math.random() - 0.5) * 50, lon: Math.random() * 360 - 180 });
+    // Background quiescent prominences at higher latitudes (filament channel belt)
+    for (let i = 0; i < 4; i++) {
+        seeds.push({
+            lat: (Math.random() < 0.5 ? 1 : -1) * (30 + Math.random() * 30),
+            lon: Math.random() * 360 - 180,
+            type: 'quiescent',
+        });
     }
 
-    seedPositions.forEach(({ lat, lon }) => {
+    seeds.forEach(({ lat, lon, type }, seedIdx) => {
         const lat_r  = lat * Math.PI / 180;
         const lon_r  = lon * Math.PI / 180;
         const origin = new THREE.Vector3(
@@ -1973,26 +2115,58 @@ function buildProminences() {
         const tang1 = new THREE.Vector3().crossVectors(origin, up).normalize();
         const tang2 = new THREE.Vector3().crossVectors(origin, tang1).normalize();
 
-        // Prominence: 2–4 arcs forming a curtain (narrow fan)
-        const nArcs  = 2 + Math.floor(Math.random() * 3);
-        const fanDir = tang1.clone().multiplyScalar(Math.cos(Math.random() * Math.PI * 2))
-                             .add(tang2.clone().multiplyScalar(Math.sin(Math.random() * Math.PI * 2)));
+        // Prominence orientation — PIL direction (random, biased E-W for AR type)
+        const pilAngle = Math.random() * Math.PI * 2;
+        const pilDir   = tang1.clone().multiplyScalar(Math.cos(pilAngle))
+                               .add(tang2.clone().multiplyScalar(Math.sin(pilAngle)));
 
-        for (let ai = 0; ai < nArcs; ai++) {
-            const fanOffset = (ai / (nArcs - 1 || 1) - 0.5) * 0.04;
-            const height    = 0.025 + Math.random() * 0.06;   // 0.025–0.085 R_sun
-            const spread    = 0.04 + Math.random() * 0.12;    // narrower than loops
+        // Physical size:  AR prominences taller + narrower  (eruptive)
+        //                 quiescent prominences shorter + wider (stable)
+        const isAR      = type === 'ar';
+        // Height above photosphere (in R_sun)
+        const height    = isAR
+            ? 0.08 + Math.random() * 0.18   // 56–182 Mm  — eruptive prominence
+            : 0.05 + Math.random() * 0.10;  // 35–105 Mm  — quiescent filament
+        // Footpoint separation along PIL
+        const spread    = isAR
+            ? 0.035 + Math.random() * 0.07  // 24–73 Mm
+            : 0.06  + Math.random() * 0.10; // 42–110 Mm
 
-            const sideOffset = tang2.clone().multiplyScalar(fanOffset);
-            const fp1 = origin.clone().add(fanDir.clone().multiplyScalar(-spread * 0.5)).add(sideOffset).normalize();
-            const fp2 = origin.clone().add(fanDir.clone().multiplyScalar( spread * 0.5)).add(sideOffset).normalize();
+        // Number of curtain strands
+        const nStrands  = isAR ? 5 + Math.floor(Math.random() * 4)   // 5–8
+                                : 4 + Math.floor(Math.random() * 3);  // 4–6
 
-            const apex = fp1.clone().add(fp2).normalize().multiplyScalar(1.0 + height);
-            const c1   = fp1.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + height * 0.7);
-            const c2   = fp2.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + height * 0.7);
+        // Record per-prominence metadata for the animate loop
+        const promIdx = promMeta.length;
+        promMeta.push({ lat_r, lon_r, eruptStart: -999, seedIdx });
 
+        for (let si = 0; si < nStrands; si++) {
+            // Each strand is offset perpendicular to the PIL (across the curtain width)
+            const tFrac      = (si / (nStrands - 1 || 1)) - 0.5;
+            // Curtain width: AR ~0.025 R_sun, quiescent ~0.04 R_sun
+            const curtainW   = isAR ? 0.025 : 0.042;
+            const sideOffset = tang2.clone()
+                .crossVectors(pilDir, origin).normalize()   // perpendicular to PIL in surface plane
+                .multiplyScalar(tFrac * curtainW);
+
+            // Slight height variation across strands (inner strands taller)
+            const strandH    = height * (1.0 - 0.25 * Math.abs(tFrac * 2));
+            // Slight spread variation — outer strands slightly wider
+            const strandSprd = spread * (1.0 + 0.15 * Math.abs(tFrac * 2));
+
+            const fp1  = origin.clone()
+                .add(pilDir.clone().multiplyScalar(-strandSprd * 0.5))
+                .add(sideOffset).normalize();
+            const fp2  = origin.clone()
+                .add(pilDir.clone().multiplyScalar( strandSprd * 0.5))
+                .add(sideOffset).normalize();
+            const apex = fp1.clone().add(fp2).normalize().multiplyScalar(1.0 + strandH);
+            const c1   = fp1.clone().lerp(apex, 0.42).normalize().multiplyScalar(1.0 + strandH * 0.72);
+            const c2   = fp2.clone().lerp(apex, 0.42).normalize().multiplyScalar(1.0 + strandH * 0.72);
+
+            // Cubic Bézier points
+            const N   = 30;
             const pts = [];
-            const N   = 24;
             for (let i = 0; i <= N; i++) {
                 const t = i / N, it = 1 - t;
                 pts.push(
@@ -2003,21 +2177,98 @@ function buildProminences() {
                 );
             }
 
-            // Prominence color: H-alpha pink-red (cool plasma in emission)
-            const redness = 0.65 + Math.random() * 0.25;  // variation in pinkness
-            const col = new THREE.Color(redness, 0.18 + Math.random() * 0.12, 0.22 + Math.random() * 0.15);
-            const baseOp = 0.28 + Math.random() * 0.22;
+            // Colour: AIA 304 Å palette — bright red-orange footpoints, pink-white apex
+            // Vary slightly per strand for visible texture
+            const rHot  = 0.82 + Math.random() * 0.15;   // footpoint: deep red
+            const gHot  = 0.10 + Math.random() * 0.10;
+            const gCool = 0.35 + Math.random() * 0.15;   // apex: pink
+            // Use footpoint colour; the brightness is modulated per-point in the loop below
             const mat = new THREE.LineBasicMaterial({
-                color: col, transparent: true, opacity: baseOp,
-                depthWrite: false, blending: THREE.AdditiveBlending,
+                color: new THREE.Color(rHot, gHot, 0.14 + Math.random() * 0.12),
+                transparent: true,
+                opacity: 0.0,   // driven entirely by userData in animate()
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                vertexColors: false,
             });
-            mat.userData = { baseOp, phase: Math.random() * Math.PI * 2, period: 4.0 + Math.random() * 3.0 };
+            // Base opacity: inner strands slightly brighter
+            const baseOp  = (isAR ? 0.38 : 0.28) * (1.0 - 0.25 * Math.abs(tFrac * 2));
+            mat.userData = {
+                baseOp,
+                phase:      Math.random() * Math.PI * 2,
+                period:     8.0 + Math.random() * 12.0,   // MHD wave 8–20 sim-time units
+                promIdx,                                   // index into promMeta
+                eruptFade:  1.0,                          // multiplier during eruption (1→0)
+            };
             promGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
         }
     });
 
     scene.add(promGroup);
     promGroup.visible = document.getElementById('tog-prom')?.checked !== false;
+}
+
+// Trigger an eruption on a specific prominence (by promMeta index)
+function eruptProminence(promIdx) {
+    const pm = promMeta[promIdx];
+    if (!pm || pm.eruptStart >= 0) return;   // already erupting
+    pm.eruptStart = uniforms.u_time.value;
+    // Mark all strand lines that belong to this prominence
+    promGroup?.children.forEach(line => {
+        if (line.material.userData.promIdx === promIdx) {
+            line.material.userData.eruptFade = 1.0;
+        }
+    });
+}
+
+// Find the prominence closest to a lat/lon (radians) and erupt it
+function eruptNearestProminence(lat_r, lon_r) {
+    if (!promMeta.length) return;
+    let bestIdx = 0, bestCos = -2;
+    promMeta.forEach((pm, idx) => {
+        if (pm.eruptStart >= 0) return; // skip already erupting
+        const c = Math.sin(pm.lat_r)*Math.sin(lat_r)
+                + Math.cos(pm.lat_r)*Math.cos(lat_r)*Math.cos(pm.lon_r - lon_r);
+        if (c > bestCos) { bestCos = c; bestIdx = idx; }
+    });
+    eruptProminence(bestIdx);
+}
+
+// ─── ERUPTING PROMINENCE / CME BUBBLE system ──────────────────────────────────
+// When a flare fires, spawnEruptingProminence() creates a torus-shaped CME front
+// that rises from the flare site and expands outward, representing the erupting
+// magnetic flux rope seen in LASCO coronagraph images.
+const eruptionMeshes = [];
+
+function spawnEruptingProminence(lat_r, lon_r, classCh) {
+    // Determine size and colour by flare class
+    const isX    = classCh === 'X';
+    const isM    = classCh === 'M';
+    const color  = isX ? 0xff3366 : isM ? 0xff7733 : 0xff6699;
+    const peakR  = isX ? 0.11 : 0.08;
+    const life   = isX ? 28 : isM ? 22 : 16;   // sim-time units
+
+    // Inner loop bubble (tight, represents the rising flux rope)
+    const geo1 = new THREE.TorusGeometry(peakR, 0.009, 8, 40);
+    const mat1 = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.72,
+        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const m1 = new THREE.Mesh(geo1, mat1);
+    m1.userData = { type:'eruption', t0: uniforms.u_time.value, lat_r, lon_r, life, inner: true };
+    scene.add(m1);
+    eruptionMeshes.push(m1);
+
+    // Outer diffuse halo (Thomson-scattered CME front)
+    const geo2 = new THREE.TorusGeometry(peakR * 1.6, 0.022, 8, 40);
+    const mat2 = new THREE.MeshBasicMaterial({
+        color: 0xffddaa, transparent: true, opacity: 0.30,
+        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const m2 = new THREE.Mesh(geo2, mat2);
+    m2.userData = { type:'eruption', t0: uniforms.u_time.value, lat_r, lon_r, life: life * 1.3, inner: false };
+    scene.add(m2);
+    eruptionMeshes.push(m2);
 }
 
 // Lights
@@ -2089,17 +2340,59 @@ function animate() {
         });
     }
 
-    // Prominences — co-rotate, slow MHD wave oscillation
+    // Prominences — co-rotate, slow MHD wave oscillation + eruption fade
     if (promGroup) {
         promGroup.rotation.y = solarRotAngle;
         promGroup.children.forEach(line => {
             const ud = line.material.userData;
-            if (ud.baseOp !== undefined) {
-                const period = ud.period ?? 5.0;
-                line.material.opacity = ud.baseOp * (0.65 + 0.35 * Math.sin(t * (Math.PI / period) + ud.phase));
+            if (ud.baseOp === undefined) return;
+            const period = ud.period ?? 8.0;
+            const wave   = 0.62 + 0.38 * Math.sin(t * (Math.PI / period) + ud.phase);
+            // Eruption fade: if this strand's prominence is erupting, fade it out
+            const pm = promMeta[ud.promIdx];
+            if (pm && pm.eruptStart >= 0) {
+                const et = t - pm.eruptStart;
+                const life = 14.0;
+                ud.eruptFade = Math.max(0, 1.0 - et / life);
+                if (et > life) {
+                    pm.eruptStart = -999; // done — promGroup rebuilt on next data update
+                    ud.eruptFade  = 0.0;
+                }
             }
+            line.material.opacity = ud.baseOp * wave * (ud.eruptFade ?? 1.0);
         });
     }
+
+    // Erupting prominence / CME bubble animation
+    for (let i = eruptionMeshes.length - 1; i >= 0; i--) {
+        const m  = eruptionMeshes[i];
+        const et = t - m.userData.t0;
+        const lf = m.userData.life;
+        if (et > lf) {
+            scene.remove(m);
+            eruptionMeshes.splice(i, 1);
+            continue;
+        }
+        // Rise outward from flare site
+        const lat_r = m.userData.lat_r;
+        const lon_r = m.userData.lon_r + solarRotAngle;
+        const origin = new THREE.Vector3(
+            Math.cos(lat_r) * Math.sin(lon_r),
+            Math.sin(lat_r),
+            Math.cos(lat_r) * Math.cos(lon_r)
+        ).normalize();
+        const riseSpeed = m.userData.inner ? 0.11 : 0.07;
+        const r = 1.05 + et * riseSpeed;
+        m.position.copy(origin.multiplyScalar(r));
+        m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), origin.clone().normalize());
+        // Expand torus radius
+        const expScale = 1.0 + et * (m.userData.inner ? 0.10 : 0.08);
+        m.scale.setScalar(expScale);
+        m.material.opacity = Math.max(0, (m.userData.inner ? 0.72 : 0.30) * Math.pow(1 - et / lf, 1.4));
+    }
+
+    // Flare ribbon timer — increments each frame; capped at 999
+    if (uniforms.u_flare_t.value < 999) uniforms.u_flare_t.value += dt;
 
     // Flare flashes — position-accurate bloom following photosphere rotation
     flareFlashes.forEach(ring => {
@@ -2130,10 +2423,12 @@ function animate() {
     });
 
     controls.update();
-    // Bloom strength breathes slightly with activity (flare events → more bloom)
+    // Bloom breathes gently with activity, and briefly spikes on flare onset.
+    // Base is deliberately low — the K-corona shader carries ambient glow.
     if (bloomPass) {
-        const baseBloom = 1.9 + uniforms.u_activity.value * 0.4;
-        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.02);
+        const flareBoost = Math.max(0, 0.55 * Math.exp(-uniforms.u_flare_t.value / 18.0));
+        const baseBloom  = 0.45 + uniforms.u_activity.value * 0.12 + flareBoost;
+        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.035);
     }
     composer.render();
     fpsF++;
@@ -2763,13 +3058,32 @@ document.addEventListener('swpc-update', (ev) => {
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
     if (sw.new_major_flare) {
-        console.log(`[Sun] Real ${sw.flare_class} flare detected — visual burst`);
+        const cls   = sw.flare_class ?? 'M';
+        const clsCh = cls[0];
+        console.log(`[Sun] Real ${cls} flare detected — ribbon + prominence eruption`);
         _triggerSunFlashFromSWPC(sw.flare_direction);
-        // Position-accurate 3D bloom at the flare AR location
+
         if (sw.flare_direction) {
-            const lat = (sw.flare_direction.lat_rad ?? 0) * 180 / Math.PI;
-            const lon = (sw.flare_direction.lon_rad ?? 0) * 180 / Math.PI;
-            triggerPositionFlare(lat, lon, (sw.flare_class ?? 'M')[0]);
+            const lat_r = sw.flare_direction.lat_rad ?? 0;
+            const lon_r = sw.flare_direction.lon_rad ?? 0;
+            const latDeg = lat_r * 180 / Math.PI;
+            const lonDeg = lon_r * 180 / Math.PI;
+
+            // ── Flare ribbon shader — reset timer to draw ribbons on surface ──
+            uniforms.u_flare_lat.value = lat_r;
+            uniforms.u_flare_lon.value = lon_r;
+            uniforms.u_flare_t.value   = 0.0;   // reset: ribbons appear immediately
+
+            // ── Position-accurate 3D ring flash ──────────────────────────────
+            triggerPositionFlare(latDeg, lonDeg, clsCh);
+
+            // ── Erupting prominence near this flare site ──────────────────────
+            eruptNearestProminence(lat_r, lon_r);
+
+            // ── CME bubble rising from surface ────────────────────────────────
+            spawnEruptingProminence(lat_r, lon_r, clsCh);
+
+            // Brief bloom spike (already handled by flareBoost in animate loop)
         }
         // Show flare alert banner
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
