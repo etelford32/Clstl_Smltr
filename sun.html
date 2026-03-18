@@ -400,6 +400,31 @@ nav {
 .wind-temp-row { display:flex; justify-content:space-between; align-items:center; margin:6px 0; font-size:10px; }
 .wind-temp-row .wt-lbl { color:#665544; }
 .wind-temp-row .wt-val { color:#bb9966; font-weight:700; }
+
+/* ── Flare Alert Banner ────────────────────────────────────── */
+#flare-alert-banner {
+    display:none; position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    z-index:200; padding:6px 20px; border-radius:7px;
+    font-size:12px; font-weight:800; letter-spacing:.8px; pointer-events:none;
+    background:rgba(255,30,0,.88); border:1px solid #ff5500;
+    color:#fff; text-shadow:0 0 8px rgba(255,200,100,.7);
+    box-shadow:0 0 22px rgba(255,60,0,.55);
+    white-space:nowrap;
+    animation:flare-banner-pulse 0.9s ease-in-out infinite;
+}
+@keyframes flare-banner-pulse { 0%,100%{opacity:1;box-shadow:0 0 22px rgba(255,60,0,.55)} 50%{opacity:.82;box-shadow:0 0 36px rgba(255,100,0,.85)} }
+
+/* ── Wind speed dial ───────────────────────────────────────── */
+.wind-dial-wrap { display:flex; align-items:center; gap:10px; margin:6px 0 10px; }
+.wind-dial-svg  { flex-shrink:0; }
+.wind-dial-info { font-size:10px; color:#885544; line-height:1.6; }
+.wind-dial-val  { font-size:16px; font-weight:800; color:#ffaa44; }
+
+/* ── Sparkline ─────────────────────────────────────────────── */
+.sparkline-wrap { margin:6px 0 10px; }
+.sparkline-lbl  { font-size:9px; color:#664433; margin-bottom:3px; }
+#xray-sparkline { width:100%; height:36px; border-radius:4px; display:block;
+                  background:rgba(0,0,0,.35); border:1px solid rgba(255,140,0,.08); }
 </style>
 </head>
 <body>
@@ -446,9 +471,13 @@ nav {
             <div>Rotation: <span class="val" id="hud-rot">25.4</span> <span class="dim">days (eq.)</span></div>
             <div class="sep"></div>
             <div>X-ray: <span class="val" id="hud-xray" style="color:#44ff88">—</span></div>
+            <div>F10.7: <span class="val" id="hud-f107">—</span><span class="dim"> sfu</span></div>
+            <div>Wind: <span class="val" id="hud-wind-spd">—</span><span class="dim"> km/s</span></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
         </div>
+        <!-- Flare Alert Banner -->
+        <div id="flare-alert-banner"></div>
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
         <div id="backdrop"></div>
@@ -501,6 +530,12 @@ nav {
                 <div class="sw-s-badge">
                     <span class="sw-s-letter S0" id="sw-s-letter">S0</span>
                 </div>
+            </div>
+
+            <!-- F10.7 solar radio flux -->
+            <div class="sw-col" title="F10.7-cm solar radio flux — EUV/X-ray activity proxy (solar flux units)">
+                <span class="sw-k">F10.7</span>
+                <span class="sw-v" id="sw-f107">— sfu</span>
             </div>
 
             <div class="sw-div"></div>
@@ -572,6 +607,14 @@ nav {
                         <input type="checkbox" id="tog-wind" checked>
                         <label for="tog-wind">Solar wind particles</label>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-loops" checked>
+                        <label for="tog-loops">Coronal loops (AR)</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-prom" checked>
+                        <label for="tog-prom">Prominences / filaments</label>
+                    </div>
                 </div>
             </div>
 
@@ -632,6 +675,12 @@ nav {
                         </div>
                     </div>
 
+                    <!-- 24h X-ray sparkline -->
+                    <div class="sparkline-wrap">
+                        <div class="sparkline-lbl">24h X-ray trend (log scale)</div>
+                        <canvas id="xray-sparkline" width="240" height="40"></canvas>
+                    </div>
+
                     <!-- Active regions -->
                     <div class="live-sub-hd">
                         Active Regions &nbsp;<span id="live-region-count" style="color:#ffcc88;font-weight:normal"></span>
@@ -646,6 +695,19 @@ nav {
                         <div class="no-data">Loading…</div>
                     </div>
 
+                    <!-- Flare frequency meter -->
+                    <div class="live-sub-hd" style="margin-top:12px">
+                        Flare Activity (24h)
+                        <span id="flare-freq-badge" style="float:right;font-size:9px;font-weight:400;color:#886644"></span>
+                    </div>
+                    <div id="flare-activity-bar" style="
+                        height:5px;border-radius:3px;margin:4px 0 8px;
+                        background:rgba(255,140,0,.12);overflow:hidden;">
+                        <div id="flare-activity-fill" style="
+                            height:100%;border-radius:3px;width:0%;
+                            background:linear-gradient(90deg,#ffcc44,#ff4400);
+                            transition:width 1s ease;"></div>
+                    </div>
                     <div style="font-size:9px;color:#444;margin-top:10px;line-height:1.5">
                         Source: NOAA Space Weather Prediction Center (SWPC).<br>
                         Click a region to fly the camera there.<br>
@@ -705,6 +767,12 @@ nav {
                         Parker spiral: <span id="wv-spiral">~45°</span>
                         &nbsp;·&nbsp; Ω·r/v
                     </div>
+                    <!-- Wind speed vs latitude chart (fast/slow stream) -->
+                    <div class="sparkline-lbl" style="margin-top:8px">Wind speed profile (latitude)</div>
+                    <canvas id="wind-lat-chart" width="240" height="52" style="
+                        width:100%;height:52px;border-radius:4px;display:block;
+                        background:rgba(0,0,0,.35);border:1px solid rgba(255,140,0,.08);
+                        margin-bottom:6px;"></canvas>
                     <!-- CME burst status -->
                     <div class="cme-burst-indicator" id="cme-burst-ind">
                         <div class="cme-dot"></div>
@@ -1405,6 +1473,200 @@ const sepFS = /* glsl */`
     scene.add(new THREE.Points(sepGeo, sepMat));
 }
 
+// ─── POSITION-ACCURATE FLARE FLASH POOL ──────────────────────────────────────
+// Bright expanding bloom rings that fire at the exact AR heliographic position.
+const FLARE_POOL_SIZE = 3;
+const flareFlashes = [];
+{
+    for (let i = 0; i < FLARE_POOL_SIZE; i++) {
+        const ring = new THREE.Mesh(
+            new THREE.RingGeometry(0.0, 0.06, 32),
+            new THREE.MeshBasicMaterial({
+                color: 0xffffff, transparent: true, opacity: 0,
+                depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+            })
+        );
+        ring.visible = false;
+        ring.userData = { active: false, t0: 0, lat: 0, lon: 0, peak: 1.0, cls: 'C' };
+        scene.add(ring);
+        flareFlashes.push(ring);
+    }
+}
+
+function triggerPositionFlare(lat_deg, lon_deg, cls) {
+    const flash   = flareFlashes.find(f => !f.userData.active) ?? flareFlashes[0];
+    const peak    = cls === 'X' ? 1.2 : cls === 'M' ? 0.85 : 0.5;
+    flash.userData = { active: true, t0: uniforms.u_time.value, lat: lat_deg || 0, lon: lon_deg || 0, peak, cls };
+    const col = cls === 'X' ? 0xffffff : cls === 'M' ? 0xffcc55 : 0xffee88;
+    flash.material.color.setHex(col);
+    flash.visible = true;
+}
+
+// ─── CORONAL LOOPS ────────────────────────────────────────────────────────────
+// Hot magnetic field line arcs (1–3 MK) over active regions.
+// Blue-white at apex (high-T), warm gold near footpoints.
+// Co-rotates with photosphere via loopGroup.rotation.y = solarRotAngle.
+let loopGroup = null;
+
+function buildCoronalLoops() {
+    if (loopGroup) { scene.remove(loopGroup); loopGroup = null; }
+    if (!liveRegions.length) return;
+    loopGroup = new THREE.Group();
+
+    liveRegions.forEach(reg => {
+        const c = parseLoc(reg.loc);
+        if (!c) return;
+        const lat_r  = c.lat * Math.PI / 180;
+        const lon_r  = c.lon * Math.PI / 180;
+        const origin = new THREE.Vector3(
+            Math.cos(lat_r) * Math.sin(lon_r),
+            Math.sin(lat_r),
+            Math.cos(lat_r) * Math.cos(lon_r)
+        ).normalize();
+
+        const areaNorm  = Math.min((reg.area || 20) / 800, 1.0);
+        const isComplex = (reg.mag || '').toLowerCase().includes('delta') ||
+                          !!(reg.z || '')[0]?.toUpperCase().match(/[EFGH]/);
+        const nLoops    = isComplex ? 7 + Math.floor(areaNorm * 5) : 3 + Math.floor(areaNorm * 3);
+
+        // Build orthonormal basis tangent to sphere at origin
+        const up   = Math.abs(origin.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+        const tang1 = new THREE.Vector3().crossVectors(origin, up).normalize();
+        const tang2 = new THREE.Vector3().crossVectors(origin, tang1).normalize();
+
+        for (let li = 0; li < nLoops; li++) {
+            const angle  = (li / nLoops) * Math.PI * 2 + Math.random() * 0.4;
+            const spread = 0.06 + Math.random() * 0.20;
+            const height = 0.04 + Math.random() * 0.18 + areaNorm * 0.06;
+
+            const offsetDir = tang1.clone().multiplyScalar(Math.cos(angle))
+                                    .add(tang2.clone().multiplyScalar(Math.sin(angle)));
+            const fp1 = origin.clone().add(offsetDir.clone().multiplyScalar(-spread * 0.5)).normalize();
+            const fp2 = origin.clone().add(offsetDir.clone().multiplyScalar( spread * 0.5)).normalize();
+
+            // Cubic Bézier: apex above the midpoint
+            const mid  = fp1.clone().add(fp2).normalize();
+            const apex = mid.clone().multiplyScalar(1.0 + height);
+            const c1   = fp1.clone().lerp(apex, 0.5).normalize().multiplyScalar(1.0 + height * 0.75);
+            const c2   = fp2.clone().lerp(apex, 0.5).normalize().multiplyScalar(1.0 + height * 0.75);
+
+            const pts = [];
+            const N   = 30;
+            for (let i = 0; i <= N; i++) {
+                const t = i / N, it = 1 - t;
+                pts.push(
+                    fp1.clone().multiplyScalar(it*it*it)
+                       .add(c1.clone().multiplyScalar(3*it*it*t))
+                       .add(c2.clone().multiplyScalar(3*it*t*t))
+                       .add(fp2.clone().multiplyScalar(t*t*t))
+                );
+            }
+
+            // Color: apex hotter (bluer), footpoints warmer (golden)
+            const heatFrac = Math.min(height / 0.22, 1.0);
+            const col = new THREE.Color(
+                THREE.MathUtils.lerp(1.0, 0.55, heatFrac),
+                THREE.MathUtils.lerp(0.80, 0.82, heatFrac),
+                THREE.MathUtils.lerp(0.20, 1.00, heatFrac)
+            );
+            const baseOp = 0.20 + areaNorm * 0.22 + (isComplex ? 0.09 : 0);
+            const mat = new THREE.LineBasicMaterial({
+                color: col, transparent: true, opacity: baseOp,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            mat.userData = { baseOp, phase: Math.random() * Math.PI * 2 };
+            loopGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        }
+    });
+
+    scene.add(loopGroup);
+    loopGroup.visible = document.getElementById('tog-loops')?.checked !== false;
+}
+
+// ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
+// Cool dense plasma curtains (T ~ 8–80 kK) suspended by magnetic fields.
+// Appear as bright pink-red arches beyond the limb (H-alpha emission).
+// Taller than active-region loops, lower than large coronal structures.
+// A few are seeded near active regions; a few random background prominences.
+let promGroup = null;
+
+function buildProminences() {
+    if (promGroup) { scene.remove(promGroup); promGroup = null; }
+    promGroup = new THREE.Group();
+
+    // Seed positions: near active regions + background
+    const seedPositions = liveRegions.slice(0, 4).map(reg => {
+        const c = parseLoc(reg.loc);
+        if (!c) return null;
+        // Prominences form near polarity inversion lines; offset slightly
+        return { lat: c.lat + (Math.random() - 0.5) * 12, lon: c.lon + (Math.random() - 0.5) * 20 };
+    }).filter(Boolean);
+
+    // Add a few global background prominences
+    for (let i = 0; i < 3; i++) {
+        seedPositions.push({ lat: (Math.random() - 0.5) * 50, lon: Math.random() * 360 - 180 });
+    }
+
+    seedPositions.forEach(({ lat, lon }) => {
+        const lat_r  = lat * Math.PI / 180;
+        const lon_r  = lon * Math.PI / 180;
+        const origin = new THREE.Vector3(
+            Math.cos(lat_r) * Math.sin(lon_r),
+            Math.sin(lat_r),
+            Math.cos(lat_r) * Math.cos(lon_r)
+        ).normalize();
+
+        const up    = Math.abs(origin.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+        const tang1 = new THREE.Vector3().crossVectors(origin, up).normalize();
+        const tang2 = new THREE.Vector3().crossVectors(origin, tang1).normalize();
+
+        // Prominence: 2–4 arcs forming a curtain (narrow fan)
+        const nArcs  = 2 + Math.floor(Math.random() * 3);
+        const fanDir = tang1.clone().multiplyScalar(Math.cos(Math.random() * Math.PI * 2))
+                             .add(tang2.clone().multiplyScalar(Math.sin(Math.random() * Math.PI * 2)));
+
+        for (let ai = 0; ai < nArcs; ai++) {
+            const fanOffset = (ai / (nArcs - 1 || 1) - 0.5) * 0.04;
+            const height    = 0.025 + Math.random() * 0.06;   // 0.025–0.085 R_sun
+            const spread    = 0.04 + Math.random() * 0.12;    // narrower than loops
+
+            const sideOffset = tang2.clone().multiplyScalar(fanOffset);
+            const fp1 = origin.clone().add(fanDir.clone().multiplyScalar(-spread * 0.5)).add(sideOffset).normalize();
+            const fp2 = origin.clone().add(fanDir.clone().multiplyScalar( spread * 0.5)).add(sideOffset).normalize();
+
+            const apex = fp1.clone().add(fp2).normalize().multiplyScalar(1.0 + height);
+            const c1   = fp1.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + height * 0.7);
+            const c2   = fp2.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + height * 0.7);
+
+            const pts = [];
+            const N   = 24;
+            for (let i = 0; i <= N; i++) {
+                const t = i / N, it = 1 - t;
+                pts.push(
+                    fp1.clone().multiplyScalar(it*it*it)
+                       .add(c1.clone().multiplyScalar(3*it*it*t))
+                       .add(c2.clone().multiplyScalar(3*it*t*t))
+                       .add(fp2.clone().multiplyScalar(t*t*t))
+                );
+            }
+
+            // Prominence color: H-alpha pink-red (cool plasma in emission)
+            const redness = 0.65 + Math.random() * 0.25;  // variation in pinkness
+            const col = new THREE.Color(redness, 0.18 + Math.random() * 0.12, 0.22 + Math.random() * 0.15);
+            const baseOp = 0.28 + Math.random() * 0.22;
+            const mat = new THREE.LineBasicMaterial({
+                color: col, transparent: true, opacity: baseOp,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            mat.userData = { baseOp, phase: Math.random() * Math.PI * 2, period: 4.0 + Math.random() * 3.0 };
+            promGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+        }
+    });
+
+    scene.add(promGroup);
+    promGroup.visible = document.getElementById('tog-prom')?.checked !== false;
+}
+
 // Lights
 const sunLight = new THREE.PointLight(0xffcc44, 4, 80);
 scene.add(sunLight);
@@ -1415,6 +1677,8 @@ document.getElementById('tog-spots').addEventListener('change',  e => { uniforms
 document.getElementById('tog-flares').addEventListener('change', e => { uniforms.u_showFlares.value = e.target.checked ? 1.0 : 0.0; });
 document.getElementById('tog-chrom').addEventListener('change',  e => { chromoMesh.visible  = e.target.checked; });
 document.getElementById('tog-corona').addEventListener('change', e => { coronaMesh.visible  = e.target.checked; });
+document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
+document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
 
 // RESIZE
 function resize() {
@@ -1446,10 +1710,10 @@ function animate() {
     solarRotAngle += dt * 0.004 * uniforms.u_rot.value * Math.PI * 2;
 
     // Rotate region marker group with the photosphere texture
+    const t = uniforms.u_time.value;
     if (regionGroup) {
         regionGroup.rotation.y = solarRotAngle;
         // Pulse each marker ring + disc
-        const t = uniforms.u_time.value;
         regionGroup.children.forEach((obj, i) => {
             if (!obj.children) return;
             obj.children.forEach(c => {
@@ -1459,6 +1723,56 @@ function animate() {
             });
         });
     }
+
+    // Coronal loops — co-rotate with photosphere, pulse opacity
+    if (loopGroup) {
+        loopGroup.rotation.y = solarRotAngle;
+        loopGroup.children.forEach(line => {
+            const ud = line.material.userData;
+            if (ud.baseOp !== undefined)
+                line.material.opacity = ud.baseOp * (0.55 + 0.45 * Math.sin(t * 1.8 + ud.phase));
+        });
+    }
+
+    // Prominences — co-rotate, slow MHD wave oscillation
+    if (promGroup) {
+        promGroup.rotation.y = solarRotAngle;
+        promGroup.children.forEach(line => {
+            const ud = line.material.userData;
+            if (ud.baseOp !== undefined) {
+                const period = ud.period ?? 5.0;
+                line.material.opacity = ud.baseOp * (0.65 + 0.35 * Math.sin(t * (Math.PI / period) + ud.phase));
+            }
+        });
+    }
+
+    // Flare flashes — position-accurate bloom following photosphere rotation
+    flareFlashes.forEach(ring => {
+        if (!ring.userData.active) return;
+        const elapsed  = t - ring.userData.t0;
+        const duration = 4.0;
+        if (elapsed > duration) {
+            ring.userData.active = false;
+            ring.visible = false;
+            ring.material.opacity = 0;
+            return;
+        }
+        // Update position: follow photosphere rotation
+        const lat_r = ring.userData.lat * Math.PI / 180;
+        const lon_r = ring.userData.lon * Math.PI / 180 + solarRotAngle;
+        const pos   = new THREE.Vector3(
+            Math.cos(lat_r) * Math.sin(lon_r),
+            Math.sin(lat_r),
+            Math.cos(lat_r) * Math.cos(lon_r)
+        ).multiplyScalar(1.015);
+        ring.position.copy(pos);
+        ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
+        // Animate: fast expand, sharp fade
+        const frac  = elapsed / duration;
+        const scale = 0.4 + frac * 3.5;
+        ring.scale.setScalar(scale * ring.userData.peak);
+        ring.material.opacity = Math.max(0, Math.pow(1 - frac, 1.6) * ring.userData.peak * 0.85);
+    });
 
     controls.update();
     renderer.render(scene, camera);
@@ -1772,12 +2086,21 @@ async function fetchLiveSolarData() {
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
 
-        // X-ray flux — scan from the end for a valid non-null reading
+        // X-ray flux — scan from the end for a valid non-null reading; also capture sparkline
         if (Array.isArray(xJ) && xJ.length > 0) {
             for (let i = xJ.length - 1; i >= Math.max(0, xJ.length - 20); i--) {
                 const v = parseFloat(xJ[i].flux ?? xJ[i].observed_flux ?? xJ[i][1]);
                 if (v > 0) { liveXrayFlux = v; break; }
             }
+            // Build sparkline from last 24h of 0.1-0.8nm channel
+            const cutoff24 = Date.now() - 24 * 3600e3;
+            const hist = xJ.filter(r => {
+                const tt  = new Date((r.time_tag ?? '').replace(' ', 'T') + 'Z');
+                const flx = r.flux ?? r.observed_flux ?? r[1];
+                const ch  = r.energy ?? '';
+                return tt.getTime() > cutoff24 && flx > 0 && (!ch || ch.includes('0.1'));
+            }).map(r => ({ flux: r.flux ?? r.observed_flux ?? r[1] }));
+            if (hist.length > 5) renderXraySparkline(hist);
         }
 
         // Blend activity slider to observed X-ray level
@@ -1793,7 +2116,10 @@ async function fetchLiveSolarData() {
         }
 
         buildRegionMarkers();
+        buildCoronalLoops();
+        buildProminences();
         updateLivePanel(false);
+        updateFlareActivityBar();
         st.textContent = 'Live · ' + new Date().toLocaleTimeString();
         st.className   = 'live-status ok';
     } catch (err) {
@@ -1801,7 +2127,10 @@ async function fetchLiveSolarData() {
         // Keep whatever data we already have (default or previous live fetch)
         // — do NOT clear liveRegions/liveFlares/liveXrayFlux
         buildRegionMarkers();
+        buildCoronalLoops();
+        buildProminences();
         updateLivePanel(false);
+        updateFlareActivityBar();
         const isDefault = liveRegions === DEFAULT_SOLAR_DATA.regions;
         st.textContent = isDefault ? 'Offline · default Mar 13 2026' : 'Live data unavailable · showing cached';
         st.className   = 'live-status err';
@@ -1837,7 +2166,10 @@ function flyToRegion(lat, lon) {
 // the page loads — no blank panel while waiting for NOAA.
 applyDefaultData();
 buildRegionMarkers();
+buildCoronalLoops();
+buildProminences();
 updateLivePanel(false);
+updateFlareActivityBar();
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
 document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
@@ -2052,11 +2384,35 @@ document.addEventListener('swpc-update', (ev) => {
     // ── SWPC Alerts panel ────────────────────────────────────────────────────
     _updateAlertsPanel(sw.active_alerts ?? []);
 
+    // ── F10.7 update ─────────────────────────────────────────────────────────
+    if (sw.f107_flux) {
+        const f107El  = document.getElementById('hud-f107');
+        const f107SwEl = document.getElementById('sw-f107');
+        const val = Math.round(sw.f107_flux);
+        if (f107El)  f107El.textContent  = val;
+        if (f107SwEl) f107SwEl.textContent = `${val} sfu`;
+    }
+
+    // ── HUD wind speed ────────────────────────────────────────────────────────
+    const hudWindEl = document.getElementById('hud-wind-spd');
+    if (hudWindEl) hudWindEl.textContent = Math.round(spd);
+
+    // ── Wind latitude chart ───────────────────────────────────────────────────
+    renderWindLatChart(spd);
+
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
     if (sw.new_major_flare) {
         console.log(`[Sun] Real ${sw.flare_class} flare detected — visual burst`);
         _triggerSunFlashFromSWPC(sw.flare_direction);
+        // Position-accurate 3D bloom at the flare AR location
+        if (sw.flare_direction) {
+            const lat = (sw.flare_direction.lat_rad ?? 0) * 180 / Math.PI;
+            const lon = (sw.flare_direction.lon_rad ?? 0) * 180 / Math.PI;
+            triggerPositionFlare(lat, lon, (sw.flare_class ?? 'M')[0]);
+        }
+        // Show flare alert banner
+        showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
         console.log('[Sun] New Earth-directed CME from DONKI — auto-opening CME panel');
@@ -2167,6 +2523,143 @@ function _timeAgo(date) {
     if (h < 1)   return `${Math.round(h * 60)}m ago`;
     if (h < 24)  return `${Math.round(h)}h ago`;
     return `${Math.round(h / 24)}d ago`;
+}
+
+// ── X-ray 24h sparkline renderer ─────────────────────────────────────────────
+function renderXraySparkline(data) {
+    const canvas = document.getElementById('xray-sparkline');
+    if (!canvas || !data.length) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Log scale A(1e-8) → X(1e-4)
+    const logMin = -8, logRange = 4;
+    const toY = flux => H - Math.max(0, Math.min(1, (Math.log10(Math.max(flux, 1e-9)) - logMin) / logRange)) * (H - 2) - 1;
+
+    // Class boundary lines
+    [{ f: 1e-7, l: 'B', c: '#2a4' }, { f: 1e-6, l: 'C', c: '#aa6' },
+     { f: 1e-5, l: 'M', c: '#a62' }, { f: 1e-4, l: 'X', c: '#a22' }].forEach(cl => {
+        const y = toY(cl.f);
+        ctx.strokeStyle = cl.c + '55'; ctx.lineWidth = 0.5;
+        ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = cl.c + 'bb'; ctx.font = '7px monospace';
+        ctx.fillText(cl.l, 2, y - 1.5);
+    });
+
+    // Filled area under curve
+    const n = data.length;
+    ctx.beginPath();
+    data.forEach((d, i) => {
+        const x = (i / (n - 1)) * W;
+        const y = toY(d.flux);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+    const grd = ctx.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0, 'rgba(255,140,40,0.35)');
+    grd.addColorStop(1, 'rgba(255,80,0,0.04)');
+    ctx.fillStyle = grd; ctx.fill();
+
+    // Flux line
+    ctx.beginPath();
+    data.forEach((d, i) => {
+        const x = (i / (n - 1)) * W;
+        i === 0 ? ctx.moveTo(x, toY(d.flux)) : ctx.lineTo(x, toY(d.flux));
+    });
+    ctx.strokeStyle = '#ffaa44cc'; ctx.lineWidth = 1.5; ctx.setLineDash([]); ctx.stroke();
+
+    // Current dot
+    const lastY = toY(data[data.length - 1].flux);
+    ctx.beginPath(); ctx.arc(W - 2, lastY, 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffcc44'; ctx.fill();
+}
+
+// ── Wind speed vs latitude chart ─────────────────────────────────────────────
+// Shows theoretical slow/fast wind bifurcation driven by live speed measurement.
+function renderWindLatChart(baseSpeed) {
+    const canvas = document.getElementById('wind-lat-chart');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Background gradient (pole = fast blue, equator = slow gold)
+    const grd = ctx.createLinearGradient(0, 0, W, 0);
+    grd.addColorStop(0,   'rgba(60,120,220,0.18)');
+    grd.addColorStop(0.3, 'rgba(255,120,30,0.12)');
+    grd.addColorStop(0.7, 'rgba(255,120,30,0.12)');
+    grd.addColorStop(1,   'rgba(60,120,220,0.18)');
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, W, H);
+
+    // Speed as function of latitude (lat = -90 to +90 mapped to x = 0 to W)
+    // Parker/Cranmer model: fast wind (750 km/s) from poles, slow (400 km/s) at equator
+    const slowV = baseSpeed;                    // live slow wind speed
+    const fastV = Math.max(slowV + 250, 700);   // fast wind (coronal hole streams)
+    const minV  = 250, maxV = 900;
+
+    const latToX = lat => ((lat + 90) / 180) * W;
+    const vToY   = v   => H - ((v - minV) / (maxV - minV)) * (H - 4) - 2;
+
+    // Grid lines
+    [300, 400, 500, 600, 700, 800].forEach(v => {
+        const y = vToY(v);
+        ctx.strokeStyle = 'rgba(255,140,0,0.08)'; ctx.lineWidth = 0.5;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        if (v % 200 === 0) {
+            ctx.fillStyle = 'rgba(200,140,50,0.6)'; ctx.font = '7px monospace';
+            ctx.fillText(v, 2, y - 1);
+        }
+    });
+    ctx.setLineDash([]);
+
+    // Draw wind profile curve
+    ctx.beginPath();
+    for (let xi = 0; xi <= W; xi++) {
+        const lat   = (xi / W) * 180 - 90;
+        const sinL2 = Math.sin(lat * Math.PI / 180) ** 2;
+        // Smooth transition: equatorial slow wind, polar fast wind
+        const v = slowV * (1 - sinL2) + fastV * sinL2;
+        xi === 0 ? ctx.moveTo(xi, vToY(v)) : ctx.lineTo(xi, vToY(v));
+    }
+    const lnGrd = ctx.createLinearGradient(0, 0, W, 0);
+    lnGrd.addColorStop(0,   '#4488ff');
+    lnGrd.addColorStop(0.35,'#ffaa44');
+    lnGrd.addColorStop(0.65,'#ffaa44');
+    lnGrd.addColorStop(1,   '#4488ff');
+    ctx.strokeStyle = lnGrd; ctx.lineWidth = 2; ctx.stroke();
+
+    // Labels
+    ctx.fillStyle = '#664433'; ctx.font = '7.5px sans-serif';
+    ctx.fillText('−90°', 2, H - 2);
+    ctx.fillText('EQ', W / 2 - 8, H - 2);
+    ctx.fillText('+90°', W - 26, H - 2);
+}
+
+// ── Flare Activity Bar ────────────────────────────────────────────────────────
+function updateFlareActivityBar() {
+    const cutoff24 = Date.now() - 24 * 3600e3;
+    const recent   = liveFlares.filter(f => new Date(f.time).getTime() > cutoff24);
+    const cPlus    = recent.filter(f => (f.cls || 'A')[0].toUpperCase().match(/[CMX]/)).length;
+    const mPlus    = recent.filter(f => (f.cls || 'A')[0].toUpperCase().match(/[MX]/)).length;
+
+    const badge = document.getElementById('flare-freq-badge');
+    const fill  = document.getElementById('flare-activity-fill');
+    if (badge) badge.textContent = `${cPlus} C+, ${mPlus} M/X in 24h`;
+    if (fill)  fill.style.width  = Math.min(100, cPlus * 8 + mPlus * 20) + '%';
+}
+
+// ── Flare Alert Banner ────────────────────────────────────────────────────────
+let _flareAlertTimer = null;
+function showFlareAlertBanner(cls, loc) {
+    const banner = document.getElementById('flare-alert-banner');
+    if (!banner) return;
+    banner.textContent = `☀ ${cls} SOLAR FLARE${loc ? ' · ' + loc : ''}`;
+    banner.style.display = 'block';
+    if (_flareAlertTimer) clearTimeout(_flareAlertTimer);
+    _flareAlertTimer = setTimeout(() => { banner.style.display = 'none'; }, 12000);
 }
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
