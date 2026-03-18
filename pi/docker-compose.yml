@@ -1,0 +1,70 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Parker Physics — Raspberry Pi stack
+#
+# Zero Python. Zero persistent processes. Just nginx.
+#
+# What runs:
+#   nginx:alpine (ARM64) — serves static HTML, caches NOAA/DONKI API calls,
+#   pre-wires /api/swmf/ for future BATS-R-US model output.
+#
+# Usage:
+#   cd pi/
+#   docker compose up -d
+#
+# Then open http://<pi-ip>/ in any browser on your network.
+#
+# Cache lives in a named volume (nginx_cache). Survives restarts.
+# When BATS-R-US is done, bind-mount your results into swmf_results volume.
+#
+# Architecture notes:
+#   - nginx sub_filter rewrites NOAA/DONKI hostnames in HTML+JS at serve-time
+#   - Browser hits /noaa-swpc/* → nginx proxy_cache → services.swpc.noaa.gov
+#   - Browser hits /nasa-donki/* → nginx proxy_cache → kauai.ccmc.gsfc.nasa.gov
+#   - NOAA cache TTL: 5 min | DONKI cache TTL: 15 min
+#   - Stale-while-revalidate: serves cached data if upstream is unreachable
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  web:
+    image: nginx:1.27-alpine
+    platform: linux/arm64          # native ARM64 — no emulation on Pi 4/5
+    container_name: parker-physics
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    volumes:
+      # Repo root → web root (read-only; all .html, js/, assets)
+      - ..:/usr/share/nginx/html:ro
+
+      # nginx config
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+      # Persistent cache (survives container restarts)
+      - nginx_cache:/var/cache/nginx
+
+      # BATS-R-US model output (read-only; empty until Phase 0 complete)
+      # To populate: docker volume create swmf_results
+      #              then bind-mount your run output into it
+      - swmf_results:/data/results:ro
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    # Low memory footprint for Pi — nginx is ~50 MB RSS
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  nginx_cache:
+    driver: local
+
+  swmf_results:
+    driver: local

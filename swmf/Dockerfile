@@ -42,8 +42,10 @@ RUN update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-1
 
 # Clone SWMF (Apache 2 license — https://github.com/SWMFsoftware/SWMF)
 # Phase 0: SC (Solar Corona) + IH (Inner Heliosphere) components only
+# Force HTTPS for all github.com submodules (SWMFsoftware .gitmodules uses SSH URLs)
 WORKDIR /opt
-RUN git clone --depth=1 https://github.com/SWMFsoftware/SWMF.git swmf \
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+ && git clone --depth=1 https://github.com/SWMFsoftware/SWMF.git swmf \
  && cd swmf \
  && git submodule update --init --recursive BATL SC/BATSRUS IH/BATSRUS share
 
