@@ -257,6 +257,7 @@ nav {
         <a href="threejs.html"     class="nav-item">Solar System</a>
         <a href="sun.html"         class="nav-item">The Sun</a>
         <a href="earth.html" class="nav-item active">Earth View</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -421,6 +422,41 @@ nav {
         <!-- Astronomical -->
         <div class="ir"><span class="ik">Solar decl.</span><span class="iv" id="ip-decl">—</span></div>
         <div class="ir"><span class="ik">Subsolar pt</span><span class="iv" id="ip-subsolar">—</span></div>
+
+        <hr class="ir-sep">
+
+        <!-- Space Weather Impacts on Earth Systems -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px;">Space Weather Impacts</div>
+        <div class="ir" title="HF radio propagation conditions based on X-ray flux">
+            <span class="ik">HF Radio</span>
+            <span class="iv" id="ip-hfcond" style="font-size:10px;">—</span>
+        </div>
+        <div class="ir" title="GNSS/GPS error estimate from ionospheric disturbance">
+            <span class="ik">GPS / GNSS</span>
+            <span class="iv" id="ip-gpscond" style="font-size:10px;">—</span>
+        </div>
+        <div class="ir" title="Surface charging risk for low-Earth orbit spacecraft">
+            <span class="ik">Spacecraft</span>
+            <span class="iv" id="ip-scraft" style="font-size:10px;">—</span>
+        </div>
+        <div class="ir" title="Induced geo-electric field and power grid risk">
+            <span class="ik">Power grids</span>
+            <span class="iv" id="ip-grid" style="font-size:10px;">—</span>
+        </div>
+        <div class="ir" title="Aurora viewable from geographic latitudes below">
+            <span class="ik">Aurora to</span>
+            <span class="iv" id="ip-aur-lat" style="font-size:10px;">—</span>
+        </div>
+
+        <div style="margin-top:7px;padding:5px 7px;border-radius:4px;background:rgba(0,180,120,.07);
+                    border:1px solid rgba(0,180,120,.12);display:none" id="ip-sw-alert">
+            <div style="font-size:9px;color:#00bb88;font-weight:600;margin-bottom:2px" id="ip-sw-alert-title">—</div>
+            <div style="font-size:9px;color:#447;line-height:1.4" id="ip-sw-alert-body">—</div>
+        </div>
+
+        <div style="margin-top:6px;font-size:9px;color:#3a5a6a;">
+            <a href="space-weather.html" style="color:#00c6ff;text-decoration:none;">→ Full space weather dashboard</a>
+        </div>
 
     </div>
 
@@ -1157,6 +1193,63 @@ document.addEventListener('swpc-update', e => {
     // ── Earth shader
     earthU.u_kp.value   = kp;
     earthU.u_xray.value = sw.xray_intensity ?? 0;
+
+    // ── Space Weather Impacts on Earth Systems (new panel)
+    const kpI = Math.floor(kp);
+    const xInt = sw.xray_intensity ?? 0;
+    // HF radio: driven by X-ray flux
+    const hfCond = xInt > 0.5 ? { t:'Severe blackout', c:'#ff2200' }
+                 : xInt > 0.3 ? { t:'Moderate blackout', c:'#ff6600' }
+                 : xInt > 0.15? { t:'Degraded', c:'#ffaa00' }
+                 :              { t:'Normal', c:'#00cc88' };
+    // GPS: driven by Kp + Bz
+    const gpsCond = kpI >= 8 ? { t:'Possible outage', c:'#ff2200' }
+                  : kpI >= 6 ? { t:'Degraded ~50m', c:'#ff8800' }
+                  : kpI >= 4 ? { t:'Minor errors', c:'#ffcc44' }
+                  :            { t:'Nominal', c:'#00cc88' };
+    // Spacecraft surface charging: driven by Kp (electron flux proxy)
+    const sfCond = kpI >= 7 ? { t:'High risk', c:'#ff2200' }
+                 : kpI >= 5 ? { t:'Elevated', c:'#ffaa00' }
+                 :            { t:'Low', c:'#00cc88' };
+    // Power grid: driven by Kp (geomagnetically induced currents)
+    const gridCond = kpI >= 9 ? { t:'Collapse risk', c:'#ff2200' }
+                   : kpI >= 7 ? { t:'Voltage corrections', c:'#ff6600' }
+                   : kpI >= 5 ? { t:'Minor fluctuations', c:'#ffcc44' }
+                   :            { t:'No impact', c:'#00cc88' };
+    // Aurora latitude
+    const aurLats = ['poles only','~67°N','~65°N','~62°N','~59°N','~57°N','~54°N','~51°N','~48°N','~45°N'];
+    const aurLat  = aurLats[Math.min(kpI, 9)];
+
+    const setIp = (id, txt, col) => {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = txt; el.style.color = col || ''; }
+    };
+    setIp('ip-hfcond',   hfCond.t,   hfCond.c);
+    setIp('ip-gpscond',  gpsCond.t,  gpsCond.c);
+    setIp('ip-scraft',   sfCond.t,   sfCond.c);
+    setIp('ip-grid',     gridCond.t, gridCond.c);
+    setIp('ip-aur-lat',  aurLat,     kpI >= 4 ? '#00ff88' : '#4a6a80');
+
+    // Active storm alert banner
+    const alertBox = document.getElementById('ip-sw-alert');
+    if (alertBox) {
+        if (kpI >= 5 || xInt > 0.3) {
+            alertBox.style.display = 'block';
+            const title = kpI >= 7 ? `G${Math.min(5,kpI-3)} Geomagnetic Storm`
+                        : kpI >= 5 ? `G${kpI-4} Storm Watch`
+                        : 'Solar Flare Alert';
+            const body  = kpI >= 5
+                ? `Kp = ${kp.toFixed(1)}  ·  Auroras visible to ${aurLat}  ·  ${gridCond.t} expected`
+                : `${sw.xray_class ?? 'M-class'} flare · ${hfCond.t} on sunlit side`;
+            alertBox.style.borderColor = kpI >= 7 ? 'rgba(255,68,0,.35)' : 'rgba(255,180,0,.2)';
+            alertBox.style.background  = kpI >= 7 ? 'rgba(255,68,0,.08)' : 'rgba(255,180,0,.06)';
+            document.getElementById('ip-sw-alert-title').textContent = title;
+            document.getElementById('ip-sw-alert-title').style.color = kpI >= 7 ? '#ff6644' : '#ffbb44';
+            document.getElementById('ip-sw-alert-body').textContent  = body;
+        } else {
+            alertBox.style.display = 'none';
+        }
+    }
 
     // ── Magnetosphere geometry + ionosphere analysis
     magnetosphere.update(e.detail);

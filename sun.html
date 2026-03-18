@@ -113,6 +113,54 @@ nav {
 .cv-btn:hover { background: rgba(255,140,0,.20); border-color:#ff8c00; }
 #btn-panel-open { top:12px; right:12px; }
 #btn-center     { bottom:16px; right:12px; }
+/* SDO imagery button */
+#btn-sdo { top:12px; right:115px; }
+
+/* ─── SDO Live Imagery drawer ──────────────────────────────── */
+#sdo-drawer {
+    position:absolute; bottom:52px; left:12px; right:12px;
+    max-height:0; overflow:hidden;
+    z-index:200;
+    transition: max-height .35s cubic-bezier(.4,0,.2,1);
+}
+#sdo-drawer.open { max-height:240px; }
+#sdo-drawer-inner {
+    background:rgba(0,0,0,.88); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,140,0,.18); border-radius:10px;
+    padding:10px 12px;
+}
+#sdo-drawer-inner h4 {
+    font-size:.7rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#aa6600; margin-bottom:8px;
+}
+.sdo-strip {
+    display:flex; gap:8px; overflow-x:auto;
+    scrollbar-width:thin; scrollbar-color:#442 transparent;
+    padding-bottom:4px;
+}
+.sdo-img-btn {
+    flex:0 0 auto; display:flex; flex-direction:column;
+    border:1px solid rgba(255,140,0,.15); border-radius:6px;
+    overflow:hidden; cursor:pointer; background:#000;
+    transition:border-color .2s,transform .2s;
+}
+.sdo-img-btn:hover { border-color:rgba(255,160,0,.55); transform:scale(1.04); }
+.sdo-img-btn img { width:110px; height:110px; object-fit:cover; display:block; }
+.sdo-img-btn span {
+    font-size:.64rem; color:#aa8844; text-align:center;
+    padding:3px 4px; background:rgba(0,0,0,.5); line-height:1.3;
+}
+.sdo-img-btn.active { border-color:#ffd700; }
+
+/* SDO full overlay */
+#sdo-overlay {
+    display:none; position:absolute; inset:0; z-index:500;
+    background:rgba(0,0,0,.92); align-items:center; justify-content:center;
+    cursor:zoom-out;
+}
+#sdo-overlay.show { display:flex; flex-direction:column; gap:8px; }
+#sdo-overlay img { max-width:80vmin; max-height:80vmin; border-radius:8px; }
+#sdo-overlay span { font-size:.78rem; color:#aa8844; }
 
 #backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
 #backdrop.show { display:block; }
@@ -438,6 +486,7 @@ nav {
         <a href="threejs.html" class="nav-item">Solar System</a>
         <a href="sun.html" class="nav-item active">The Sun</a>
         <a href="earth.html" class="nav-item">Earth View</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -480,7 +529,63 @@ nav {
         <div id="flare-alert-banner"></div>
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+        <button class="cv-btn" id="btn-sdo" title="Live SDO imagery">🔭 SDO Live</button>
         <div id="backdrop"></div>
+
+        <!-- SDO Live Imagery Drawer ────────────────────────────── -->
+        <div id="sdo-drawer">
+            <div id="sdo-drawer-inner">
+                <h4>SDO/AIA Live Imagery &amp; SOHO · Updated every ~12 min</h4>
+                <div class="sdo-strip" id="sdo-strip">
+                    <div class="sdo-img-btn" data-label="AIA 304 Å · Chromosphere · 50 000 K"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0304.jpg','AIA 304 Å · Chromosphere · ~50 000 K')">
+                        <img id="sdo-304" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0304.jpg" alt="AIA 304">
+                        <span>AIA 304 Å<br>Chromosphere</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="AIA 171 Å · Coronal loops · 600 000 K"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0171.jpg','AIA 171 Å · Coronal loops · ~600 000 K')">
+                        <img id="sdo-171" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0171.jpg" alt="AIA 171">
+                        <span>AIA 171 Å<br>Coronal loops</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="AIA 193 Å · Active corona · 1.5 MK"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0193.jpg','AIA 193 Å · Active corona · ~1.5 MK')">
+                        <img id="sdo-193" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0193.jpg" alt="AIA 193">
+                        <span>AIA 193 Å<br>Active corona</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="AIA 211 Å · Active regions · 2 MK"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0211.jpg','AIA 211 Å · Active regions · ~2 MK')">
+                        <img id="sdo-211" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0211.jpg" alt="AIA 211">
+                        <span>AIA 211 Å<br>Active regions</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="AIA 131 Å · Flare plasma · 10 MK"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_0131.jpg','AIA 131 Å · Flare plasma · ~10 MK')">
+                        <img id="sdo-131" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_0131.jpg" alt="AIA 131">
+                        <span>AIA 131 Å<br>Flare plasma</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="HMI Magnetogram · B-field"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIB.jpg','HMI Magnetogram · Line-of-sight B-field')">
+                        <img id="sdo-hmib" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIB.jpg" alt="HMI Mag">
+                        <span>HMI Mag<br>B-field LOS</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="HMI Intensitygram · Sunspots"
+                         onclick="sdoOpen('https://sdo.gsfc.nasa.gov/assets/img/latest/latest_1024_HMIIC.jpg','HMI Intensitygram · Photosphere / sunspots')">
+                        <img id="sdo-hmic" src="https://sdo.gsfc.nasa.gov/assets/img/latest/latest_512_HMIIC.jpg" alt="HMI IC">
+                        <span>HMI IC<br>Photosphere</span>
+                    </div>
+                    <div class="sdo-img-btn" data-label="SOHO LASCO C2 · Inner corona 2–6 R☉"
+                         onclick="sdoOpen('https://soho.nascom.nasa.gov/data/realtime/c2/1024/latest.jpg','SOHO LASCO C2 · Inner corona 2–6 R☉')">
+                        <img id="sdo-c2" src="https://soho.nascom.nasa.gov/data/realtime/c2/512/latest.jpg" alt="LASCO C2">
+                        <span>LASCO C2<br>2–6 R☉</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SDO Full-image overlay -->
+        <div id="sdo-overlay" onclick="this.classList.remove('show')">
+            <img id="sdo-ovr-img" src="" alt="">
+            <span id="sdo-ovr-lbl"></span>
+        </div>
 
         <!-- Space Weather ribbon ─────────────────────────────── -->
         <div id="sw-ribbon">
@@ -836,6 +941,7 @@ nav {
 import * as THREE             from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import { SohoFeed }           from './js/extended-feeds.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -869,6 +975,41 @@ const backdrop = document.getElementById('backdrop');
 document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
 document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
 backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// SDO drawer toggle
+const sdoDrawer = document.getElementById('sdo-drawer');
+document.getElementById('btn-sdo').addEventListener('click', () => {
+    sdoDrawer.classList.toggle('open');
+});
+
+// SDO image fullscreen overlay
+window.sdoOpen = function(src, label) {
+    document.getElementById('sdo-ovr-img').src  = src;
+    document.getElementById('sdo-ovr-lbl').textContent = label;
+    document.getElementById('sdo-overlay').classList.add('show');
+};
+
+// SohoFeed: load live SDO image URLs on startup (fires once)
+new SohoFeed().start();
+window.addEventListener('soho-update', e => {
+    const imgs = e.detail.images || {};
+    // Map from soho-update URLs to the 512px thumbs already in the drawer
+    // (SohoFeed gives 1024px; we swap to the /512/ variant for thumbnails)
+    const swap = url => url ? url.replace('/latest_1024_', '/latest_512_') : '';
+    const map = {
+        'sdo-304':  swap(imgs.sdo_aia304),
+        'sdo-171':  swap(imgs.sdo_aia171),
+        'sdo-193':  swap(imgs.sdo_aia193),
+        'sdo-211':  swap(imgs.sdo_aia211),
+        'sdo-131':  swap(imgs.sdo_aia131),
+        'sdo-hmib': swap(imgs.sdo_hmi_mag),
+        'sdo-hmic': swap(imgs.sdo_hmi_ic),
+    };
+    for (const [id, src] of Object.entries(map)) {
+        const img = document.getElementById(id);
+        if (img && src) img.src = src;
+    }
+});
 
 // UNIFORMS
 const uniforms = {
