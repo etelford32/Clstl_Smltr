@@ -836,6 +836,10 @@ nav {
 import * as THREE             from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 
 // NAV
 const burger = document.getElementById('nav-burger');
@@ -890,13 +894,72 @@ const scene    = new THREE.Scene();
 const camera   = new THREE.PerspectiveCamera(50, 1, 0.001, 2000);
 camera.position.set(0, 0, 6);
 
-const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+const renderer = new THREE.WebGLRenderer({
+    antialias: true, powerPreference: 'high-performance',
+    // Linear color space for correct HDR bloom accumulation
+});
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.15;
+renderer.outputColorSpace    = THREE.SRGBColorSpace;
 
 const canvasWrap = document.getElementById('canvas-wrap');
 canvasWrap.appendChild(renderer.domElement);
+
+// ── Post-processing pipeline: Bloom + Radial diffusion ────────────────────────
+let composer, bloomPass;
+{
+    const W = canvasWrap.clientWidth  || 1280;
+    const H = canvasWrap.clientHeight || 720;
+
+    composer  = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+
+    // UnrealBloomPass — gives the sun its stellar glow.
+    // threshold 0.72: only bright photosphere/corona bloom, not dim particles.
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 1.9, 0.55, 0.72);
+    composer.addPass(bloomPass);
+
+    // Radial diffusion pass — scatters light outward from the solar disk
+    // simulating Thomson-scattered K-corona and atmospheric seeing.
+    const diffuseShader = {
+        uniforms: {
+            tDiffuse:   { value: null },
+            resolution: { value: new THREE.Vector2(W, H) },
+            strength:   { value: 0.18 },
+            center:     { value: new THREE.Vector2(0.5, 0.5) },
+        },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+        `,
+        fragmentShader: /* glsl */`
+            uniform sampler2D tDiffuse;
+            uniform vec2      resolution;
+            uniform float     strength;
+            uniform vec2      center;
+            varying vec2      vUv;
+            void main() {
+                vec2 dir    = vUv - center;
+                float dist  = length(dir * resolution / resolution.y);
+                // Only apply within ~2.5 solar radii (normalised screen coords)
+                float mask  = smoothstep(0.55, 0.12, dist);
+                vec4  orig  = texture2D(tDiffuse, vUv);
+                vec4  accum = orig;
+                float w     = 1.0;
+                const int   SAMPLES = 8;
+                for (int i = 1; i <= SAMPLES; i++) {
+                    float t  = float(i) / float(SAMPLES);
+                    vec2  uv = vUv - dir * t * strength * mask * 0.012;
+                    accum   += texture2D(tDiffuse, clamp(uv, vec2(0.0), vec2(1.0)));
+                    w       += 1.0;
+                }
+                gl_FragColor = accum / w;
+            }
+        `,
+    };
+    composer.addPass(new ShaderPass(diffuseShader));
+}
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.07;
@@ -918,14 +981,16 @@ controls.minDistance = 1.3; controls.maxDistance = 60;
     scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:0xffffff, size:0.4, sizeAttenuation:false })));
 }
 
-// ─── SOLAR PHOTOSPHERE — granulation + sunspots + limb darkening ──────────────
+// ─── SOLAR PHOTOSPHERE — Voronoi granulation + faculae + 5-term limb darkening ─
 const sunVS = /* glsl */`
     varying vec3 vNormal;
     varying vec3 vPosition;
     varying vec3 vViewDir;
+    varying vec2 vUv;
     void main() {
         vNormal   = normalize(normalMatrix * normal);
         vPosition = position;
+        vUv       = uv;
         vec4 mv   = modelViewMatrix * vec4(position, 1.0);
         vViewDir  = normalize(-mv.xyz);
         gl_Position = projectionMatrix * mv;
@@ -933,139 +998,190 @@ const sunVS = /* glsl */`
 `;
 
 const sunFS = /* glsl */`
+    precision highp float;
     uniform float u_time;
     uniform float u_teff;
     uniform float u_activity;
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
-    varying vec3 vNormal;
-    varying vec3 vPosition;
-    varying vec3 vViewDir;
+    varying vec3  vNormal;
+    varying vec3  vPosition;
+    varying vec3  vViewDir;
+    varying vec2  vUv;
 
-    // ── Noise ──
-    float h3(vec3 p) { p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
-    float vn(vec3 p) {
-        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
-                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);
+    // ── High-quality hash ──────────────────────────────────────────────────────
+    vec3 hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p.zxy, p.yzx + 19.19);
+        return fract(p.xyx * p.yzy * p.zxz);
     }
+    float hash(vec3 p) {
+        p = fract(p * vec3(127.1, 311.7, 74.7));
+        p += dot(p, p + 19.19);
+        return fract(p.x * p.y * p.z);
+    }
+
+    // ── Value noise (smooth) ───────────────────────────────────────────────────
+    float vnoise(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        vec3 u = f * f * (3.0 - 2.0 * f);
+        return mix(
+            mix(mix(hash(i),           hash(i+vec3(1,0,0)), u.x),
+                mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),u.x), u.y),
+            mix(mix(hash(i+vec3(0,0,1)),hash(i+vec3(1,0,1)),u.x),
+                mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),u.x), u.y), u.z);
+    }
+
+    // ── Fractal Brownian motion ────────────────────────────────────────────────
     float fbm(vec3 p, int oct) {
-        float v=0.0,a=0.5;
-        for(int i=0;i<8;i++){
-            if(i>=oct)break;
-            v+=a*vn(p); p=p*2.1+vec3(31.41,17.35,53.17); a*=0.5;
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 8; i++) {
+            if (i >= oct) break;
+            v += a * vnoise(p); p = p * 2.17 + vec3(31.41, 17.35, 53.17); a *= 0.52;
         }
         return v;
     }
 
-    // Cellular/Voronoi-like noise for granulation borders
-    // Returns a value near 0 at cell borders, 1 at cell centers
-    float granulation(vec3 p) {
-        // Use a combination of shifted noise samples to approximate Voronoi
-        float n1 = vn(p);
-        float n2 = vn(p + vec3(0.5, 0.5, 0.5));
-        float n3 = vn(p + vec3(1.0, 0.5, 0.0));
-        float n4 = vn(p + vec3(0.5, 1.0, 0.5));
-        // The "cell interior" brightens toward the max, borders are darker
-        float cellVal = max(max(n1, n2), max(n3, n4));
-        // Sharpen to create cell boundaries
-        return smoothstep(0.3, 0.75, cellVal);
+    // ── Voronoi cellular noise — proper granulation topology ──────────────────
+    // Returns (d1, d2): distance to nearest and second-nearest cell centre.
+    // Cell interiors (d1 small) = hot bright plasma rising centre.
+    // Cell boundaries (d1 large) = cool dark intergranular lanes.
+    vec2 voronoi(vec3 p) {
+        vec3 ip = floor(p), fp = fract(p);
+        float d1 = 1e9, d2 = 1e9;
+        for (int z = -1; z <= 1; z++) {
+            for (int y = -1; y <= 1; y++) {
+                for (int x = -1; x <= 1; x++) {
+                    vec3 nb  = vec3(float(x), float(y), float(z));
+                    vec3 pos = nb - fp + hash3(ip + nb);
+                    float d  = dot(pos, pos);
+                    if (d < d1) { d2 = d1; d1 = d; }
+                    else if (d < d2) { d2 = d; }
+                }
+            }
+        }
+        return vec2(sqrt(d1), sqrt(d2));
     }
 
-    // G-star blackbody: golden yellow
-    vec3 gColor(float T) {
-        float f;
-        if (T < 4500.0) {
-            f = (T - 3000.0) / 1500.0;
-            return mix(vec3(1.0, 0.35, 0.05), vec3(1.0, 0.55, 0.10), clamp(f,0.0,1.0));
-        } else if (T < 5500.0) {
-            f = (T - 4500.0) / 1000.0;
-            return mix(vec3(1.0, 0.60, 0.15), vec3(1.0, 0.78, 0.35), clamp(f,0.0,1.0));
-        } else if (T < 6500.0) {
-            f = (T - 5500.0) / 1000.0;
-            return mix(vec3(1.0, 0.82, 0.42), vec3(1.0, 0.92, 0.65), clamp(f,0.0,1.0));
-        } else {
-            f = clamp((T - 6500.0) / 1000.0, 0.0, 1.0);
-            return mix(vec3(1.0, 0.95, 0.75), vec3(0.95, 0.95, 1.0), f);
-        }
+    // ── Blackbody colour (Planck peak approximation) ───────────────────────────
+    // Correct G-star colours: T 4000–7000 K
+    vec3 blackbody(float T) {
+        // Piecewise linear fit through sRGB primaries at 1000 K intervals
+        float t = clamp((T - 3000.0) / 5000.0, 0.0, 1.0);
+        vec3 c0 = vec3(1.00, 0.28, 0.02);   // ~3000 K — orange-red
+        vec3 c1 = vec3(1.00, 0.60, 0.12);   // ~4500 K — deep yellow
+        vec3 c2 = vec3(1.00, 0.83, 0.40);   // ~5800 K — golden (G2V)
+        vec3 c3 = vec3(0.98, 0.96, 0.72);   // ~7000 K — pale yellow-white
+        vec3 c4 = vec3(0.90, 0.93, 1.00);   // ~8000 K — blue-white
+        if (t < 0.3) return mix(c0, c1, t / 0.3);
+        if (t < 0.56)return mix(c1, c2, (t-0.3)/0.26);
+        if (t < 0.8) return mix(c2, c3, (t-0.56)/0.24);
+        return mix(c3, c4, (t-0.8)/0.2);
     }
 
     void main() {
-        vec3 nrm  = normalize(vNormal);
-        vec3 vDir = normalize(vViewDir);
-        float mu  = max(dot(nrm, vDir), 0.0);
+        vec3  nrm  = normalize(vNormal);
+        vec3  vDir = normalize(vViewDir);
+        float mu   = max(dot(nrm, vDir), 0.0);
 
-        // Spherical coords for sunspot bands
+        // Spherical coordinates
         float lat = asin(clamp(vPosition.y, -1.0, 1.0));
         float lon = atan(vPosition.z, vPosition.x);
 
-        // Differential rotation: equator faster
-        float diffRot = 1.0 - 0.28 * sin(lat)*sin(lat);
-        float rotLon  = lon + u_time * 0.012 * u_rot * diffRot;
+        // Differential rotation (Snodgrass 1990): Ω(lat) = A + B sin²(lat) + C sin⁴(lat)
+        float sinLat2 = sin(lat) * sin(lat);
+        float diffRot  = 1.0 - 0.19 * sinLat2 - 0.09 * sinLat2 * sinLat2;
+        float rotLon   = lon + u_time * 0.014 * u_rot * diffRot;
 
-        // ── Granulation (convective cells ~1000 km = ~0.0014 R☉) ──
-        // Scale: ~8 cells per radian → multiplier ~8-12 looks good
-        vec3 granPos = vPosition * 8.0 + vec3(u_time * 0.004 * u_rot);
-        float gran   = granulation(granPos);
-        // Fine sub-granulation structure
-        float gran2  = fbm(vPosition * 22.0 + vec3(u_time * 0.006), 4);
+        // ── Supergranulation (~30 000 km cells, flow pattern beneath granules) ──
+        vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * u_rot);
+        vec2  sgCell = voronoi(sgPos);
+        // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
+        float superGran = smoothstep(0.0, 0.55, sgCell.x) * 0.05;  // very subtle (~2%)
 
-        // ── Sunspot mask ──────────────────────────────────────────
-        // Sunspots form in ±8-35° latitude bands (active latitude belts)
-        float spotBelt = smoothstep(0.14, 0.18, abs(lat)) * smoothstep(0.62, 0.52, abs(lat));
-        // Random spot locations from noise
-        float spotNoise = fbm(vec3(rotLon * 1.5, lat * 4.0, u_time * 0.0005), 3);
-        float spotThresh = 0.8 - u_activity * 0.35;  // more active = lower threshold = more spots
-        float spotMask = smoothstep(spotThresh, spotThresh - 0.1, spotNoise) * spotBelt;
+        // ── Granulation (~1 000 km cells) ─────────────────────────────────────
+        vec3 gPos   = vPosition * 9.5 + vec3(u_time * 0.0055 * u_rot);
+        vec2 gCell  = voronoi(gPos);
+        // Interior: bright hot upwelling. Boundary lanes: dark and narrow.
+        float lane      = 1.0 - smoothstep(0.0, 0.42, gCell.x);  // 1 = lane, 0 = interior
+        float granLight = 1.0 - lane * 0.36;                       // bright interior, dark lane
 
-        // Penumbra (lighter ring around spot)
-        float penumbraNoise = fbm(vec3(rotLon * 1.5, lat * 4.0, u_time * 0.0005 + 5.0), 3);
-        float penumbra = smoothstep(spotThresh + 0.12, spotThresh + 0.02, penumbraNoise) * spotBelt;
-        penumbra *= (1.0 - spotMask);
+        // ── Fine sub-granulation turbulence ─────────────────────────────────
+        float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.009), 4) * 0.06;
 
-        // ── Active region flares ──────────────────────────────────
-        float flareNoise = vn(vec3(rotLon * 3.0, lat * 6.0, u_time * 0.08));
-        float flareActive = smoothstep(0.78, 0.9, flareNoise) * spotBelt * u_activity;
+        // ── Magnetic bright points at intergranular lanes ─────────────────────
+        // Tiny intense specks where kG flux tubes emerge between granules
+        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.025));
+        float mbp = smoothstep(0.86, 0.95, mbpNoise) * lane * 0.25;
 
-        // ── Limb darkening (strong for G-stars) ───────────────────
-        // Standard law: I(μ) ≈ 0.3 + 0.7 * μ (stronger than WR)
-        float limb = 0.30 + 0.70 * mu;
+        // ── Active latitude belt ───────────────────────────────────────────────
+        float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
 
-        // ── Base color ────────────────────────────────────────────
-        vec3 baseCol = gColor(u_teff);
+        // ── Facular brightening (bright network near spots, limb-visible) ──────
+        // Facula appear bright near limb (μ<0.5) due to hot walls of flux tubes
+        float facNoise = fbm(vec3(rotLon * 2.2, lat * 5.5, u_time * 0.0012), 4);
+        float facular  = smoothstep(0.58, 0.80, facNoise) * spotBelt
+                        * (1.0 - mu) * (1.0 - mu) * u_activity * 0.60;
 
-        // Granulation brightness: bright cell centers, dark borders
-        float granBright = 0.78 + gran * 0.28 + gran2 * 0.08;
+        // ── Sunspot umbra + penumbra ───────────────────────────────────────────
+        float spotNoise   = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004), 4);
+        float spotThresh  = 0.78 - u_activity * 0.32;
+        float umbra       = smoothstep(spotThresh, spotThresh - 0.13, spotNoise) * spotBelt;
+        float penThresh   = spotThresh + 0.17;
+        float penNoise    = fbm(vec3(rotLon * 1.6, lat * 4.2, u_time * 0.0004 + 4.7), 4);
+        float penumbra    = smoothstep(penThresh, penThresh - 0.09, penNoise) * spotBelt * (1.0 - umbra);
 
-        // Sunspot temperature (~3700 K for umbra)
-        float spotTemp  = u_teff * (0.60 - spotMask * 0.25);  // umbra cooler
-        vec3  spotColor = gColor(max(spotTemp, 3000.0));
+        // Penumbra fibrils — radial striation texture in the grey ring
+        float fibrils = vnoise(vec3(rotLon * 12.0, lat * 12.0, u_time * 0.006)) * 0.18;
 
-        // Penumbra: intermediate temperature
-        float penumbraTemp = u_teff * 0.85;
-        vec3  penumbraColor = gColor(max(penumbraTemp, 4000.0));
+        // ── Active-region flare brightening ───────────────────────────────────
+        float flareNoise  = vnoise(vec3(rotLon * 4.0, lat * 7.5, u_time * 0.12));
+        float flareActive = smoothstep(0.82, 0.95, flareNoise) * spotBelt * u_activity;
 
-        // ── Combine ───────────────────────────────────────────────
-        vec3 col = baseCol * granBright;
+        // ── 5-term limb darkening law (Neckel & Labs 1994, G-star approx.) ────
+        // I(μ)/I(1) = Σ aₙ μⁿ  (n=0..5), valid 0 < μ ≤ 1
+        float mu2 = mu*mu, mu3 = mu*mu2, mu4 = mu2*mu2, mu5 = mu*mu4;
+        float limb = max(0.06,
+              0.36459 + 1.06147*mu - 1.01793*mu2 + 1.01203*mu3 - 0.70623*mu4 + 0.25007*mu5);
 
-        // Apply sunspot darkening (gated by u_showSpots)
-        col = mix(col, spotColor * 0.65,     spotMask * smoothstep(0.0, 0.3, mu)  * u_showSpots);
-        col = mix(col, penumbraColor * 0.85, penumbra * smoothstep(0.0, 0.25, mu) * u_showSpots);
+        // ── Base photospheric colour at T_eff ─────────────────────────────────
+        vec3 baseCol = blackbody(u_teff);
 
-        // Flare brightening in active regions (gated by u_showFlares)
-        float flareBright = flareActive * 0.6 * u_showFlares;
-        col += vec3(1.0, 0.85, 0.4) * flareBright;
+        // ── Compose surface brightness ────────────────────────────────────────
+        vec3 col = baseCol * (granLight + fineTurb + superGran);
 
-        // Apply limb darkening
+        // Magnetic bright points — intensely white
+        col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
+
+        // Facular brightening near limb
+        col += baseCol * facular * 0.55;
+
+        // ── Sunspot umbra (T_umbra ~ 0.62 × T_eff ≈ 3580 K) ──────────────────
+        float umbraT = u_teff * (0.60 - umbra * 0.18);
+        col = mix(col, blackbody(max(umbraT, 3000.0)) * 0.50,
+                  umbra * smoothstep(0.0, 0.20, mu) * u_showSpots);
+
+        // ── Sunspot penumbra (T ~ 0.82 × T_eff) with radial fibrils ──────────
+        float penT = u_teff * 0.82;
+        col = mix(col, blackbody(max(penT, 4200.0)) * (0.80 + fibrils),
+                  penumbra * smoothstep(0.0, 0.15, mu) * u_showSpots);
+
+        // ── Active-region UV/EUV brightening (hot blue-white arcade) ─────────
+        col += mix(vec3(1.3, 0.95, 0.40), vec3(0.80, 0.90, 1.50),
+                   flareActive) * flareActive * 0.75 * u_showFlares;
+
+        // ── Limb darkening ─────────────────────────────────────────────────────
         col *= limb;
 
-        // HDR push
-        col *= 1.85;
+        // ── HDR amplification — drives the bloom glow ─────────────────────────
+        // Central disk peaks at ~2.6; limb at ~0.6 (below bloom threshold).
+        col *= 2.55;
 
-        // Fresnel: chromosphere/transition region glow at limb
-        float fr = pow(1.0 - mu, 2.8);
-        col += vec3(0.9, 0.4, 0.1) * fr * 0.45;  // reddish chromosphere at edge
+        // ── Chromospheric / transition-region emission at extreme limb ─────────
+        // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
+        float fr = pow(max(1.0 - mu, 0.0), 3.5);
+        col += vec3(1.10, 0.32, 0.10) * fr * 0.65;
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -1086,20 +1202,50 @@ const glowVS = /* glsl */`
     }
 `;
 const chromoFS = /* glsl */`
-    uniform float u_time; uniform float u_activity;
-    varying vec3 vNormal; varying vec3 vViewDir;
-    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
-    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
-                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    precision highp float;
+    uniform float u_time;
+    uniform float u_activity;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+
     void main() {
-        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
-        // Spicule-like brightness variation (forest of spicules around limb)
-        float spicule = vn(normalize(vNormal) * 12.0 + vec3(u_time * 0.025)) * 0.4
-                      + vn(normalize(vNormal) * 25.0 + vec3(u_time * 0.035)) * 0.6;
-        float alpha = pow(rim, 1.8) * 0.50 * (0.7 + spicule * 0.6 * u_activity);
-        // Ca H&K / Hα: pink-red chromosphere
-        vec3 col = mix(vec3(1.0, 0.35, 0.15), vec3(0.9, 0.20, 0.10), rim);
+        vec3  n3d = normalize(vNormal);
+        vec3  vd  = normalize(vViewDir);
+        float mu  = max(dot(n3d, vd), 0.0);
+        float rim = 1.0 - mu;
+
+        // ── Spicule forest — narrow jets 5–10 Mm tall above photosphere ──────
+        // Fine-scale: ~1000 km spacing. Coarse-scale: supergranule outlines.
+        float sp1 = vn(n3d * 18.0 + vec3(u_time * 0.028));
+        float sp2 = vn(n3d * 38.0 + vec3(u_time * 0.042));
+        float sp3 = vn(n3d *  8.0 + vec3(u_time * 0.012));  // supergranule boundary
+        float spicule = sp1 * 0.45 + sp2 * 0.35 + sp3 * 0.20;
+
+        // Spicules are sharpest at the limb (we see them in emission at the edge)
+        float limbAmp = pow(rim, 1.6) * (0.60 + spicule * 0.80 * u_activity);
+
+        // ── Chromospheric network (Ca K bright network at supergranule boundaries) ──
+        float network = smoothstep(0.55, 0.75, sp3) * 0.25 * u_activity;
+
+        float alpha = clamp(limbAmp + network * (1.0 - rim * rim), 0.0, 0.80);
+
+        // ── Colour: H-alpha red at limb, Ca H&K blue-violet deeper, UV extreme limb ──
+        vec3 hAlpha  = vec3(0.98, 0.22, 0.10);   // Hα 656 nm — bright red
+        vec3 caHK    = vec3(0.55, 0.14, 0.60);   // Ca H&K 393–396 nm — violet
+        vec3 euv     = vec3(0.30, 0.45, 1.00);   // EUV — blue-white
+        // Blend: inner limb = H-alpha red, mid = Ca violet, extreme limb = EUV
+        vec3 col = mix(hAlpha, caHK, pow(rim, 2.0));
+        col = mix(col, euv, pow(rim, 5.0) * u_activity * 0.6);
+        // Network brightening is more Ca-dominated
+        col = mix(col, caHK * 1.4 + 0.1, network * 0.5);
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -1112,46 +1258,112 @@ scene.add(chromoMesh);
 
 // ─── CORONA (r=2.5) — white-light corona with ray structure ───────────────────
 const coronaFS = /* glsl */`
-    uniform float u_time; uniform float u_activity; uniform float u_rot;
-    varying vec3 vNormal; varying vec3 vViewDir;
-    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
-    float vn(vec3 p){vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
-                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
-    float fbm4(vec3 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+    precision highp float;
+    uniform float u_time;
+    uniform float u_activity;
+    uniform float u_rot;
+    uniform float u_wind_speed_norm;
+    uniform float u_bz_sw;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+
+    // ── Noise helpers ──────────────────────────────────────────────────────────
+    float h(vec3 p){ p=fract(p*vec3(127.1,311.7,74.7)); p+=dot(p,p+19.19); return fract(p.x*p.y*p.z); }
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h(i),h(i+vec3(1,0,0)),u.x),mix(h(i+vec3(0,1,0)),h(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h(i+vec3(0,0,1)),h(i+vec3(1,0,1)),u.x),mix(h(i+vec3(0,1,1)),h(i+vec3(1,1,1)),u.x),u.y),u.z);
+    }
+    float fbm4(vec3 p){
+        float v=0.0,a=0.5;
+        for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}
+        return v;
+    }
+    float fbm6(vec3 p){
+        float v=0.0,a=0.5;
+        for(int i=0;i<6;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.52;}
+        return v;
+    }
+
     void main() {
-        vec3 n3d = normalize(vNormal);
-        float rim = 1.0 - max(dot(n3d, normalize(vViewDir)), 0.0);
+        vec3  n3d = normalize(vNormal);
+        vec3  vd  = normalize(vViewDir);
+        float rim = 1.0 - max(dot(n3d, vd), 0.0);
         float lat = asin(clamp(n3d.y, -1.0, 1.0));
-        float lon = atan(n3d.z, n3d.x) + u_time * 0.003 * u_rot;
+        float lon = atan(n3d.z, n3d.x) + u_time * 0.0025 * u_rot;
 
-        // ── Helmet streamer belt: denser at equatorial plane ─────
-        // Real corona: helmet streamers extend from active belt, create HCS
-        float beltWidth   = 0.35 + u_activity * 0.25;
-        float helmetBelt  = exp(-lat * lat / (beltWidth * beltWidth));
+        // ── Coronal hole mask ─────────────────────────────────────────────────
+        // Polar coronal holes: dark (open B-field, fast wind escapes freely).
+        // Equatorial holes: present at solar minimum, reduce at maximum.
+        float poleHole  = smoothstep(0.50, 0.72, abs(lat));   // 1 = hole at pole
+        float actFactor = 0.5 + u_activity * 1.2;
 
-        // Coronal holes at poles: dark (open field lines, fast wind)
-        float poleHole = smoothstep(0.65, 0.55, abs(lat));  // dark at poles
+        // ── Helmet streamer belt ──────────────────────────────────────────────
+        // Broad equatorial belt of closed B-field loops containing the HCS.
+        // Width broadens with activity (more active = more closed field lines).
+        float beltW    = 0.30 + u_activity * 0.28;
+        float helmetBelt = exp(-lat * lat / (beltW * beltW));
 
-        // Ray-like streamer structure (elongated radially)
-        float streamer1 = fbm4(vec3(lon * 2.0, lat * 3.0, u_time * 0.004));
-        float streamer2 = vn(vec3(lon * 5.0, lat * 6.0, u_time * 0.008));
-        float rayStr = streamer1 * 0.65 + streamer2 * 0.35;
+        // ── Heliospheric current sheet (HCS) ─────────────────────────────────
+        // Undulates ±10–30° about the equatorial plane following Bz polarity.
+        // The "ballerina skirt" — strongest coronal density feature.
+        float hcsWave = sin(lon * 2.5 + u_time * 0.008) * 0.22 +
+                        sin(lon * 1.2 - u_time * 0.005) * 0.12;
+        hcsWave += u_bz_sw * 0.08;   // live IMF Bz tilts the sheet
+        float hcsDist = lat - hcsWave;
+        float hcs     = exp(-hcsDist * hcsDist / 0.018) * 0.45;
 
-        // Activity increases coronal brightness and structures
-        float actBoost = 0.5 + u_activity * 1.0;
+        // ── Helmet streamer fine ray structure ────────────────────────────────
+        // Elongated radial plumes within the streamer belt.
+        float streamer1 = fbm6(vec3(lon * 1.8, lat * 2.2, u_time * 0.003));
+        float streamer2 = vn( vec3(lon * 7.0, lat * 9.0,  u_time * 0.011));
+        float streamer3 = fbm4(vec3(lon * 0.8, lat * 1.2, u_time * 0.0015));
+        float rayStr    = streamer1 * 0.50 + streamer2 * 0.25 + streamer3 * 0.25;
 
-        // Base opacity: higher at equator (helmet streamers), dim at poles (coronal holes)
-        float base = pow(rim, 2.8) * 0.32;
-        float alpha = base * (helmetBelt * 1.4 + poleHole * 0.25) * (0.5 + rayStr * actBoost);
-        alpha = clamp(alpha, 0.0, 0.7);
+        // ── Polar plumes ──────────────────────────────────────────────────────
+        // Narrow bright structures along open B-field lines above coronal holes.
+        // Rotate slowly with the polar field.
+        float plumeLon  = lon * 4.0 + u_time * 0.004;
+        float plumeLat  = abs(lat);
+        float plumeMask = smoothstep(0.58, 0.75, plumeLat);  // only near poles
+        float plumeTex  = max(0.0, cos(plumeLon) * cos(plumeLon * 2.3) * 0.5 + 0.5);
+        plumeTex       *= fbm4(vec3(lon * 5.0, plumeLat * 6.0, u_time * 0.006));
+        float plume     = plumeMask * plumeTex * 1.0;
 
-        // White-light corona: yellow-white near sun, pure white/blue-white further
-        vec3 innerCol = vec3(1.0, 0.94, 0.78);  // warm inner corona
-        vec3 outerCol = vec3(0.90, 0.93, 1.00);  // cooler outer corona
-        vec3 col = mix(innerCol, outerCol, rim);
-        // Bright active regions pulse slightly
-        float pulse = 1.0 + 0.08 * sin(u_time * 2.2) * u_activity;
+        // ── Pseudo-streamer / secondary bright regions ────────────────────────
+        float pseudoStr = fbm4(vec3(lon * 3.5, lat * 4.5, u_time * 0.005))
+                        * smoothstep(0.3, 0.5, abs(lat)) * smoothstep(0.7, 0.5, abs(lat));
+
+        // ── Compose alpha ────────────────────────────────────────────────────
+        float base = pow(rim, 2.4) * 0.42;
+        float alpha = base * (
+            // Streamer belt contribution (dimmed at coronal holes)
+            helmetBelt * (0.70 + rayStr * actFactor) * (1.0 - poleHole * 0.72) +
+            // HCS ridge
+            hcs * (0.8 + 0.4 * u_activity) +
+            // Polar plumes
+            plume * 0.90 +
+            // Pseudo-streamers
+            pseudoStr * 0.35 * u_activity
+        );
+        alpha = clamp(alpha, 0.0, 0.90);
+
+        // ── Colour ───────────────────────────────────────────────────────────
+        // K-corona (Thomson-scattered photospheric light): warm yellow-white.
+        // Polar plumes: cooler, slightly blue-white.
+        // HCS: slightly enhanced yellow (enhanced density).
+        vec3 kCorona   = vec3(1.00, 0.96, 0.80);  // inner K-corona
+        vec3 outerCor  = vec3(0.88, 0.92, 1.00);  // outer corona / F-corona dust scatter
+        vec3 plumeCol  = vec3(0.90, 0.95, 1.00);  // polar plume — blue-white
+        vec3 hcsCol    = vec3(1.05, 0.98, 0.72);  // HCS ridge — enhanced yellow
+
+        vec3 col = mix(kCorona, outerCor, rim * rim);
+        col = mix(col, plumeCol, plume * 0.55);
+        col = mix(col, hcsCol, hcs * 0.4);
+
+        // Subtle corona-wide activity brightening
+        float pulse = 1.0 + 0.07 * sin(u_time * 2.6 + lon) * u_activity;
+
         gl_FragColor = vec4(col * pulse, alpha);
     }
 `;
@@ -1685,7 +1897,9 @@ function resize() {
     const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
-    camera.aspect = w/h; camera.updateProjectionMatrix();
+    composer.setSize(w, h);
+    if (bloomPass) bloomPass.resolution.set(w, h);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(canvasWrap);
 resize();
@@ -1775,7 +1989,12 @@ function animate() {
     });
 
     controls.update();
-    renderer.render(scene, camera);
+    // Bloom strength breathes slightly with activity (flare events → more bloom)
+    if (bloomPass) {
+        const baseBloom = 1.9 + uniforms.u_activity.value * 0.4;
+        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.02);
+    }
+    composer.render();
     fpsF++;
     const now = performance.now();
     if (now - fpsT >= 500) {
