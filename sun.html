@@ -1035,6 +1035,8 @@ const uniforms = {
     u_flare_lat:         { value: 0.0  },  // radians
     u_flare_lon:         { value: 0.0  },  // radians
     u_flare_t:           { value: 999.0 }, // simulation-time units (dt=0.01/frame)
+    // ── Live Kp — drives corona storm glow and bloom strength ──
+    u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
 };
 
 // SCENE
@@ -1501,6 +1503,7 @@ const coronaFS = /* glsl */`
     uniform float u_rot;
     uniform float u_wind_speed_norm;
     uniform float u_bz_sw;
+    uniform float u_kp_norm;     // Kp/9 — geomagnetic storm intensity [0-1]
     uniform float u_flare_lat;   // active flare position — same as sunFS
     uniform float u_flare_lon;
     uniform float u_flare_t;
@@ -1540,8 +1543,8 @@ const coronaFS = /* glsl */`
 
         // ── Helmet streamer belt ──────────────────────────────────────────────
         // Broad equatorial belt of closed B-field loops containing the HCS.
-        // Width broadens with activity (more active = more closed field lines).
-        float beltW    = 0.30 + u_activity * 0.28;
+        // Width broadens with activity and Kp (high Kp = more closed field + storms).
+        float beltW    = 0.30 + u_activity * 0.28 + u_kp_norm * 0.07;
         float helmetBelt = exp(-lat * lat / (beltW * beltW));
 
         // ── Heliospheric current sheet (HCS) ─────────────────────────────────
@@ -1551,7 +1554,8 @@ const coronaFS = /* glsl */`
                         sin(lon * 1.2 - u_time * 0.005) * 0.12;
         hcsWave += u_bz_sw * 0.08;   // live IMF Bz tilts the sheet
         float hcsDist = lat - hcsWave;
-        float hcs     = exp(-hcsDist * hcsDist / 0.018) * 0.45;
+        // HCS brightens during geomagnetic storms (high Kp = active current sheet)
+        float hcs     = exp(-hcsDist * hcsDist / 0.018) * (0.45 + u_kp_norm * 0.42);
 
         // ── Helmet streamer fine ray structure ────────────────────────────────
         // Elongated radial plumes within the streamer belt.
@@ -1600,6 +1604,13 @@ const coronaFS = /* glsl */`
         vec3 col = mix(kCorona, outerCor, rim * rim);
         col = mix(col, plumeCol, plume * 0.55);
         col = mix(col, hcsCol, hcs * 0.4);
+
+        // CME / fast solar wind: outer corona shifts blue-white (hot electrons)
+        // u_wind_speed_norm: 0=slow wind, 1=CME/fast stream
+        col = mix(col, vec3(0.80, 0.88, 1.00), u_wind_speed_norm * 0.22 * pow(rim, 1.5));
+
+        // Geomagnetic storm: HCS ridge takes on orange-gold tint (enhanced compression)
+        col = mix(col, vec3(1.08, 0.85, 0.45), u_kp_norm * hcs * 0.55);
 
         // Subtle corona-wide activity brightening
         float pulse = 1.0 + 0.07 * sin(u_time * 2.6 + lon) * u_activity;
@@ -2425,9 +2436,11 @@ function animate() {
     controls.update();
     // Bloom breathes gently with activity, and briefly spikes on flare onset.
     // Base is deliberately low — the K-corona shader carries ambient glow.
+    // Kp contributes: geomagnetic storms drive visible corona brightening.
     if (bloomPass) {
         const flareBoost = Math.max(0, 0.55 * Math.exp(-uniforms.u_flare_t.value / 18.0));
-        const baseBloom  = 0.45 + uniforms.u_activity.value * 0.12 + flareBoost;
+        const baseBloom  = 0.45 + uniforms.u_activity.value * 0.12
+                         + uniforms.u_kp_norm.value * 0.09 + flareBoost;
         bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.035);
     }
     composer.render();
@@ -2693,7 +2706,7 @@ async function fetchLiveSolarData() {
         const [rR, eR, xR] = await Promise.all([
             fetch(SWPC + '/products/solar-regions.json'),
             fetch(SWPC + '/json/edited_events.json'),
-            fetch(SWPC + '/json/goes/primary/xrays-1-day.json'),
+            fetch(SWPC + '/json/goes/primary/xray-1-day.json'),
         ]);
 
         // Check HTTP status before parsing — fetch() doesn't throw on 4xx/5xx
@@ -2774,6 +2787,7 @@ async function fetchLiveSolarData() {
         buildCoronalLoops();
         buildProminences();
         updateLivePanel(false);
+        _updateRibbonXray();
         updateFlareActivityBar();
         st.textContent = 'Live · ' + new Date().toLocaleTimeString();
         st.className   = 'live-status ok';
@@ -2785,6 +2799,7 @@ async function fetchLiveSolarData() {
         buildCoronalLoops();
         buildProminences();
         updateLivePanel(false);
+        _updateRibbonXray();
         updateFlareActivityBar();
         const isDefault = liveRegions === DEFAULT_SOLAR_DATA.regions;
         st.textContent = isDefault ? 'Offline · default Mar 13 2026' : 'Live data unavailable · showing cached';
@@ -2831,6 +2846,16 @@ document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveS
 fetchLiveSolarData();                         // attempt live update on load
 setInterval(fetchLiveSolarData, 10 * 60 * 1000); // refresh every 10 min
 
+// Refresh SDO/SOHO thumbnail images every 15 min (SDO updates ~every 12 min)
+setInterval(() => {
+    const t = Date.now();
+    ['sdo-304','sdo-171','sdo-193','sdo-211','sdo-131','sdo-hmib','sdo-hmic','sdo-c2'].forEach(id => {
+        const img = document.getElementById(id);
+        if (!img || !img.src) return;
+        img.src = img.src.split('?')[0] + '?_=' + t;
+    });
+}, 15 * 60 * 1000);
+
 // ══════════════════════════════════════════════════════════════════════════
 //  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
 //  X-ray class comes from the existing NOAA fetch above; wind/Kp from SWPC.
@@ -2839,8 +2864,6 @@ const _G_COLS_SUN   = ['#44ccff','#aadd44','#ffd700','#ff8800','#ff3300','#ff00a
 const _G_LABELS_SUN = ['Quiet','G1 Minor','G2 Moderate','G3 Strong','G4 Severe','G5 Extreme'];
 
 // Keep the ribbon X-ray letter in sync whenever liveXrayFlux updates
-const _origUpdateLivePanel = updateLivePanel;  // already defined above
-
 function _updateRibbonXray() {
     if (liveXrayFlux == null) return;
     const { cls, n } = xrayClassInfo(liveXrayFlux);
@@ -2859,21 +2882,12 @@ function _updateRibbonXray() {
     }
 }
 
-// Patch updateLivePanel so ribbon X-ray stays in sync with every NOAA fetch
-const _patchedUpdateLivePanel = function(failed) {
-    _origUpdateLivePanel(failed);
-    _updateRibbonXray();
-};
-// Re-assign: we can't easily monkey-patch an already-called function, so
-// instead we call _updateRibbonXray() after the initial panel update.
-_updateRibbonXray();
-
 // SpaceWeatherFeed provides solar wind, Kp, Bz — same feed as Earth view
 const _swFeed = new SpaceWeatherFeed();
 _swFeed.start();
 
-document.addEventListener('swpc-update', (ev) => {
-    const sw  = ev.detail.state;
+window.addEventListener('swpc-update', (ev) => {
+    const sw  = ev.detail;
     const d   = sw.derived ?? {};
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
@@ -2889,10 +2903,23 @@ document.addEventListener('swpc-update', (ev) => {
     uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
     uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
     uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+    uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
 
     // S-scale drives SEP particle system
     const sepLevel = sw.sep_storm_level ?? 0;
     uniforms.u_sep_level.value = sepLevel;
+
+    // Drive u_activity from live X-ray intensity (blended with manual slider)
+    // xray_intensity is log-scaled [0-1]: A=0.17, C=0.50, M=0.67, X=0.83+
+    if (d.xray_intensity !== undefined) {
+        const sliderPct = +document.getElementById('sl-activity').value / 100;
+        const liveBlend = sliderPct * 0.40 + d.xray_intensity * 0.60;
+        uniforms.u_activity.value = Math.max(0.05, Math.min(1.0, liveBlend));
+        const pct = Math.round(uniforms.u_activity.value * 100);
+        document.getElementById('sl-activity').value         = pct;
+        document.getElementById('disp-activity').textContent = pct + '%';
+        document.getElementById('hud-activity').textContent  = pct;
+    }
 
     // CME burst: active when an Earth-directed CME is within ±48h window
     const edCme = sw.earth_directed_cme ?? null;
