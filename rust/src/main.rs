@@ -8,6 +8,7 @@ mod simulation;
 
 use camera::{camera_controller, handle_exit};
 use prediction::solar_wind::{update_live_wind, LiveWindPlugin, LiveWindSpeed};
+use rendering::hud::{setup_hud, update_hud};
 use rendering::star::{setup, update_star_glow};
 use simulation::fluid::{update_velocity_field, VelocityField};
 use simulation::magnetic::{draw_field_lines, update_field_lines, FieldLineSet};
@@ -43,7 +44,7 @@ fn main() {
         .insert_resource(ParticleSpawner::default())
         .insert_resource(VelocityField::new())
         .insert_resource(FieldLineSet::default())
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, setup_hud))
         .add_systems(
             Update,
             (
@@ -61,6 +62,7 @@ fn main() {
                     update_particles,
                     draw_field_lines,
                     handle_exit,
+                    update_hud,
                 )
                     .after(update_field_lines),
             ),
