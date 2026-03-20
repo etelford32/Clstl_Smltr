@@ -1271,15 +1271,56 @@ new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 <script type="module">
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 
-const elSpeed  = document.getElementById('sw-speed');
-const elBz     = document.getElementById('sw-bz');
-const elDens   = document.getElementById('sw-dens');
-const elKp     = document.getElementById('sw-kp');
-const elXray   = document.getElementById('sw-xray');
-const elFlare  = document.getElementById('sw-flare');
-const elRegions= document.getElementById('sw-regions');
-const elRegWrap= document.getElementById('sw-region-wrap');
-const elStatus = document.getElementById('sw-status');
+const elSpeed     = document.getElementById('sw-speed');
+const elBz        = document.getElementById('sw-bz');
+const elDens      = document.getElementById('sw-dens');
+const elKp        = document.getElementById('sw-kp');
+const elXray      = document.getElementById('sw-xray');
+const elFlare     = document.getElementById('sw-flare');
+const elRegions   = document.getElementById('sw-regions');
+const elRegWrap   = document.getElementById('sw-region-wrap');
+const elStatus    = document.getElementById('sw-status');
+const elAlert     = document.getElementById('sw-alert');
+const elAlertWrap = document.getElementById('sw-alert-wrap');
+const elTrend     = document.getElementById('sw-trend');
+const elTrendWrap = document.getElementById('sw-trend-wrap');
+
+// ── In-browser rolling window for trend + alert (replaces FastAPI pipeline) ──
+// NOAA blocks server-side fetches (403 host_not_allowed), so all processing
+// must happen client-side. We keep the last 30 readings in memory.
+const TREND_WINDOW  = 30;
+const SLOPE_BAND    = 2.0;   // km/s per reading — threshold for STEADY
+const speedHistory  = [];    // [{ t: Date, v: number }]
+
+function pushSpeed(speed) {
+    if (speed == null || speed <= 0) return;
+    speedHistory.push({ t: Date.now(), v: speed });
+    if (speedHistory.length > TREND_WINDOW) speedHistory.shift();
+}
+
+function computeTrend() {
+    if (speedHistory.length < 3) return null;
+    const n  = speedHistory.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    speedHistory.forEach((p, i) => { sumX += i; sumY += p.v; sumXY += i * p.v; sumXX += i * i; });
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const dir   = slope >  SLOPE_BAND ? 'RISING'
+                : slope < -SLOPE_BAND ? 'FALLING'
+                : 'STEADY';
+    return { slope, dir };
+}
+
+function alertLevel(speed, bz) {
+    const s = speed ?? 400;
+    const b = bz    ?? 0;
+    if (s >= 800 || (s >= 600 && b < -15)) return 'EXTREME';
+    if (s >= 600 || (s >= 400 && b < -10)) return 'HIGH';
+    if (s >= 400 || b < -10)               return 'MODERATE';
+    return 'QUIET';
+}
+
+const ALERT_CLASS = { QUIET: 'alert-quiet', MODERATE: 'alert-moderate', HIGH: 'alert-high', EXTREME: 'alert-extreme' };
+const TREND_ARROW = { RISING: '↑', FALLING: '↓', STEADY: '→' };
 
 function colourKp(kp) {
     if (kp >= 7) return 'val-alert';
@@ -1298,109 +1339,66 @@ function colourFlare(letter) {
 }
 
 window.addEventListener('swpc-update', e => {
-    const d = e.detail;
+    const d  = e.detail;
     const sw = d.solar_wind;
 
-    elSpeed.textContent = sw.speed ? sw.speed.toFixed(0) : '—';
-    elSpeed.className = '';
+    // ── Speed ──
+    const speed = sw.speed && sw.speed > 0 ? sw.speed : null;
+    elSpeed.textContent = speed ? speed.toFixed(0) : '—';
+    elSpeed.className   = '';
 
+    // ── Bz / Density / Kp / X-ray / Flare ──
     const bzVal = sw.bz != null ? sw.bz.toFixed(1) : '—';
-    elBz.textContent = bzVal + (sw.bz != null ? ' nT' : '');
-    elBz.className = sw.bz != null ? colourBz(sw.bz) : '';
-
+    elBz.textContent  = bzVal + (sw.bz != null ? ' nT' : '');
+    elBz.className    = sw.bz != null ? colourBz(sw.bz) : '';
     elDens.textContent = sw.density != null ? sw.density.toFixed(1) : '—';
-
-    elKp.textContent = d.kp != null ? d.kp.toFixed(1) : '—';
-    elKp.className = d.kp != null ? colourKp(d.kp) : '';
-
+    elKp.textContent   = d.kp != null ? d.kp.toFixed(1) : '—';
+    elKp.className     = d.kp != null ? colourKp(d.kp) : '';
     elXray.textContent = d.xray_class ?? '—';
-    elXray.className = colourFlare(d.flare_letter);
-
+    elXray.className   = colourFlare(d.flare_letter);
     if (d.flare_class) {
         elFlare.textContent = d.flare_class + (d.flare_location ? ' ' + d.flare_location : '');
-        elFlare.className = colourFlare(d.flare_letter);
+        elFlare.className   = colourFlare(d.flare_letter);
     } else {
         elFlare.textContent = 'none';
-        elFlare.className = '';
+        elFlare.className   = '';
+    }
+    if (d.active_regions?.length > 0) {
+        elRegions.textContent    = d.active_regions.length + ' active';
+        elRegWrap.style.display  = '';
     }
 
-    if (d.active_regions && d.active_regions.length > 0) {
-        elRegions.textContent = d.active_regions.length + ' active';
-        elRegWrap.style.display = '';
-    }
-
-    elStatus.textContent = d.status;
-    elStatus.className = 'swpc-status ' + d.status;
-});
-
-const feed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
-feed.start();
-</script>
-
-<!-- ══════════════════════════ WIND SPEED PIPELINE FEED ══════════════════ -->
-<script type="module">
-import WindPipelineFeed from './js/wind-pipeline-feed.js';
-
-const elSpeed     = document.getElementById('sw-speed');
-const elAlert     = document.getElementById('sw-alert');
-const elAlertWrap = document.getElementById('sw-alert-wrap');
-const elTrend     = document.getElementById('sw-trend');
-const elTrendWrap = document.getElementById('sw-trend-wrap');
-const elStatus    = document.getElementById('sw-status');
-
-const ALERT_CLASS = {
-    QUIET:    'alert-quiet',
-    MODERATE: 'alert-moderate',
-    HIGH:     'alert-high',
-    EXTREME:  'alert-extreme',
-};
-
-const TREND_ARROW = {
-    RISING:  '↑',
-    FALLING: '↓',
-    STEADY:  '→',
-};
-
-window.addEventListener('wind-pipeline-update', e => {
-    const d = e.detail;
-
-    if (d.status === 'offline') {
-        // Don't overwrite NOAA bar — just leave it as-is; status reflects offline
-        return;
-    }
-
-    // Speed — pipeline data is preferred (processed, QC'd by ingest_l1)
-    if (d.speed_km_s != null) {
-        elSpeed.textContent = d.speed_km_s.toFixed(0);
-    }
-
-    // Alert level badge
-    if (d.alert_level) {
-        elAlert.textContent  = d.alert_level;
-        elAlert.className    = ALERT_CLASS[d.alert_level] ?? '';
+    // ── In-browser trend + alert (replaces FastAPI wind-pipeline-feed) ──
+    if (speed) {
+        pushSpeed(speed);
+        const trend = computeTrend();
+        if (trend) {
+            elTrend.textContent       = `${TREND_ARROW[trend.dir]} ${trend.dir}`;
+            elTrend.className         = trend.dir === 'RISING'  ? 'val-warn'
+                                      : trend.dir === 'FALLING' ? 'val-good' : '';
+            elTrendWrap.style.display = '';
+        }
+        const lvl = alertLevel(speed, sw.bz);
+        elAlert.textContent       = lvl;
+        elAlert.className         = ALERT_CLASS[lvl] ?? '';
         elAlertWrap.style.display = '';
     }
 
-    // Trend arrow
-    if (d.trend?.direction) {
-        const arrow = TREND_ARROW[d.trend.direction] ?? '→';
-        elTrend.textContent = `${arrow} ${d.trend.direction}`;
-        elTrend.className   = d.trend.direction === 'RISING'  ? 'val-warn'
-                            : d.trend.direction === 'FALLING' ? 'val-good'
-                            : '';
-        elTrendWrap.style.display = '';
-    }
-
-    // Mark status as live when pipeline is fresh
-    if (d.status === 'live') {
-        elStatus.textContent = 'live';
-        elStatus.className   = 'swpc-status live';
-    }
+    // ── Status ──
+    elStatus.textContent = d.status;
+    elStatus.className   = 'swpc-status ' + d.status;
 });
 
-// Start the pipeline feed — polls /v1/solar-wind/wind-speed every 60 s.
-// If the FastAPI server isn't running, it degrades silently; NOAA bar still works.
-new WindPipelineFeed().start();
+// Poll at 90 s — NOAA rtsw_wind_1m.json updates every 60 s from user's browser.
+// Server-side fetches blocked by NOAA WAF (403 host_not_allowed), so all data
+// fetching must stay client-side (browser → NOAA directly, CORS works).
+const feed = new SpaceWeatherFeed({ pollInterval: 90 * 1000 });
+feed.start();
 </script>
+
+<!-- Wind pipeline feed removed: NOAA WAF (403 host_not_allowed) blocks all
+     server-side fetches, so the FastAPI backend cannot proxy NOAA data from
+     Vercel. Trend + alert level are now computed in-browser in the swpc block
+     above. wind-pipeline-feed.js remains for local/self-hosted deployments. -->
 </body>
 </html>
