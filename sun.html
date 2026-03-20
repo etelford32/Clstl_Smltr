@@ -215,6 +215,20 @@ nav {
 #sw-earth-chip .ec-lbl { color:#2255aa; font-size:8.5px; letter-spacing:.3px; }
 #sw-earth-chip a { color:inherit; text-decoration:none; display:contents; }
 
+/* ── NOAA R-scale (Radio Blackout) badge ─────────────────────── */
+.sw-r-badge  { display:flex; align-items:center; justify-content:center; }
+.sw-r-letter { font-size:10px; font-weight:800; padding:1px 5px; border-radius:4px;
+               border:1px solid currentColor; transition:all .4s; }
+.sw-r-letter.R0 { color:#446655; border-color:#223322; }
+.sw-r-letter.R1 { color:#88cc44; }
+.sw-r-letter.R2 { color:#ddcc22; text-shadow:0 0 6px #ddcc2260; }
+.sw-r-letter.R3 { color:#ff9900; text-shadow:0 0 8px #ff990060; }
+.sw-r-letter.R4 { color:#ff5500; text-shadow:0 0 10px #ff550080; }
+.sw-r-letter.R5 { color:#ff2200; text-shadow:0 0 12px #ff220099; animation:xpulse 0.9s ease-in-out infinite; }
+
+/* ── CME shock wave arrival indicator ───────────────────────── */
+.cme-shock-active #sw-earth-chip { border-color:rgba(255,140,0,.7); box-shadow:0 0 12px rgba(255,100,0,.3); }
+
 #panel {
     position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
     background: rgba(8,4,0,.97); backdrop-filter: blur(16px);
@@ -627,6 +641,14 @@ nav {
             <div class="sw-col">
                 <span class="sw-k">Kp</span>
                 <span class="sw-v" id="sw-kp">—</span>
+            </div>
+
+            <!-- R-scale (Radio Blackout) -->
+            <div class="sw-col" title="NOAA R-scale: Radio Blackout (X-ray flux driven)">
+                <span class="sw-k">R-scale</span>
+                <div class="sw-r-badge">
+                    <span class="sw-r-letter R0" id="sw-r-letter">R0</span>
+                </div>
             </div>
 
             <!-- S-scale (Solar Radiation Storm) -->
@@ -2030,46 +2052,143 @@ const cmeMat  = new THREE.ShaderMaterial({
 const cmePts = new THREE.Points(cmeGeo, cmeMat);
 scene.add(cmePts);
 
-// ─── SEP SOLAR ENERGETIC PARTICLES ──────────────────────────────────────────
-// Bright blue-white fast particles during S-scale radiation storms (NOAA GOES).
-// Near-isotropic but biased toward field-aligned polar channels.
-const N_SEP = 350;
+// ─── CME EXPANDING SHOCK FRONT ───────────────────────────────────────────────
+// Translucent expanding sphere spawned when a new Earth-directed CME is detected.
+// Expands at a physically scaled rate; turbulent leading edge simulates the
+// magnetosheath compression region.
+const cmeShockWaves = [];   // [{mesh, t0, speed}]
+
+const cmeShockVS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        vNormal  = normalize(normalMatrix * normal);
+        vViewDir = -(modelViewMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+const cmeShockFS = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    uniform float u_age;      // 0 → life (sim-time units)
+    uniform float u_speed;    // 0-1 normalised CME speed
+    uniform float u_time;
+
+    float hash21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5); }
+
+    void main() {
+        vec3 N   = normalize(vNormal);
+        vec3 V   = normalize(vViewDir);
+        float rim = 1.0 - abs(dot(N, V));
+        float life = 28.0;
+        float prog = u_age / life;
+
+        // Limb-brightened leading edge
+        float edge = pow(rim, 2.2);
+
+        // Turbulent shock compression texture
+        float noise1 = hash21(N.xy * 12.0 + u_time * 0.08);
+        float noise2 = hash21(N.yz * 8.0  - u_time * 0.05);
+        float turb = smoothstep(0.35, 0.80, (noise1 + noise2) * 0.5) * rim;
+
+        // Rise fast, fade slow
+        float fade = pow(1.0 - prog, 1.6) * min(1.0, u_age * 4.0);
+
+        float alpha = (edge * 0.50 + turb * 0.18) * fade;
+
+        // Colour: hot white-orange at ejection → cool violet-rose at distance
+        vec3 cHot  = mix(vec3(1.00, 0.88, 0.55), vec3(1.00, 0.55, 0.22), prog * 0.7);
+        vec3 cCool = mix(vec3(0.80, 0.60, 1.00), vec3(0.55, 0.40, 0.80), prog);
+        vec3 col   = mix(cHot, cCool, rim) * (1.0 + u_speed * 0.45);
+
+        if (alpha < 0.004) discard;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.48));
+    }
+`;
+
+function spawnCMEShock(speedNorm) {
+    const su = { u_age: { value: 0.0 }, u_speed: { value: speedNorm }, u_time: uniforms.u_time };
+    const mat = new THREE.ShaderMaterial({
+        vertexShader: cmeShockVS, fragmentShader: cmeShockFS, uniforms: su,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.FrontSide,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1.0, 40, 24), mat);
+    scene.add(mesh);
+    cmeShockWaves.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm });
+    console.log(`[CME Shock] Spawned — speed_norm=${speedNorm.toFixed(2)}`);
+}
+
+// ─── SEP SOLAR ENERGETIC PARTICLES ───────────────────────────────────────────
+// S-scale radiation storm: >10 MeV protons (orange/white) + relativistic
+// electrons (blue-white). Near-relativistic speed, polar-field-aligned.
+// A beam-mode subset originates from the flare injection site along the
+// Parker spiral, dramatically boosted during active flares.
+const N_SEP = 500;
 const sepVS = /* glsl */`
     attribute vec3  aDir;
     attribute float aPhase;
     attribute float aSeed;
+    attribute float aType;   // 0=proton-beam, 1=electron-shell, 2=polar-cap
+
     uniform float u_time;
-    uniform float u_sep_level;  // 0–5 NOAA S-scale
+    uniform float u_sep_level;       // 0–5 NOAA S-scale
+    uniform float u_flare_lat;       // injection point lat (rad)
+    uniform float u_flare_lon;       // injection point lon (rad)
+    uniform float u_flare_intensity; // 0-1 flash intensity boosts SEP onset
     varying float vProgress;
     varying vec3  vColor;
+    varying float vType;
+
     void main() {
-        float life = 1.2 + aSeed * 1.2;
-        float spd  = 3.0 + u_sep_level * 0.6;  // near-relativistic → very fast
-        float lt   = mod(u_time * spd * 0.42 + aPhase * life, life);
+        vType = aType;
+        float sNorm = clamp(u_sep_level / 5.0, 0.0, 1.0);
+        // Proton beam: faster; electrons: very fast; polar-cap: moderate
+        float spd  = aType < 0.5 ? (4.2 + sNorm * 1.4)   // proton beam — MeV range
+                   : aType < 1.5 ? (5.5 + sNorm * 0.8)   // relativistic electrons
+                                 : (3.0 + sNorm * 0.5);   // polar-cap GCR-like
+        float life = 1.0 + aSeed * 1.4;
+        float lt   = mod(u_time * spd * 0.40 + aPhase * life, life);
         float s    = lt / life;
-        float r    = 1.0 + 9.0 * s;  // fast linear (energetic, near-c)
+        // Straight-line radial expansion (SEPs don't curve significantly at this scale)
+        float r = 1.02 + 9.5 * s;
         vProgress = s;
-        // S1 = pale blue; S5 = intense blue-white
-        float intensity = u_sep_level / 5.0;
-        vColor = mix(vec3(0.55, 0.80, 1.0), vec3(0.88, 0.94, 1.0), intensity * (1.0 - s * 0.5));
+
+        // Color scheme: protons = orange-white, electrons = blue-white, polar = cyan
+        float intBoost = 1.0 + u_flare_intensity * 0.8 * (aType < 0.5 ? 1.5 : 0.6);
+        vec3 cProt = mix(vec3(1.00, 0.55, 0.10), vec3(1.00, 0.90, 0.60), s) * intBoost;
+        vec3 cElec = mix(vec3(0.50, 0.75, 1.00), vec3(0.85, 0.93, 1.00), s * 0.6) * intBoost;
+        vec3 cPole = mix(vec3(0.30, 0.85, 1.00), vec3(0.60, 0.90, 1.00), s * 0.8);
+        vColor = aType < 0.5 ? cProt
+               : aType < 1.5 ? cElec
+                              : cPole;
+        vColor *= (0.5 + sNorm * 0.5);   // dim at S1, vivid at S5
+
         vec4 mvPos = modelViewMatrix * vec4(aDir * r, 1.0);
         gl_Position = projectionMatrix * mvPos;
-        float sz = (1.0 + aSeed * 0.8) * (160.0 / max(-mvPos.z, 0.1));
-        // Point size scales with S-level
-        gl_PointSize = clamp(sz * clamp(u_sep_level / 2.0, 0.0, 1.0), 0.0, 6.0);
+        // Proton beam is brightest + largest; electrons are smaller
+        float sz = aType < 0.5 ? (2.0 + aSeed * 1.0) : (1.2 + aSeed * 0.8);
+        sz *= 160.0 / max(-mvPos.z, 0.1);
+        // Visible from S1+ (electrons visible earlier than proton beam)
+        float thresh = aType < 0.5 ? 0.18 : 0.08;
+        gl_PointSize = clamp(sz * max(0.0, sNorm - thresh) / (1.0 - thresh), 0.0, 8.0);
     }
 `;
 const sepFS = /* glsl */`
     varying float vProgress;
     varying vec3  vColor;
+    varying float vType;
     void main() {
         vec2  uv = gl_PointCoord - 0.5;
         float d  = length(uv);
         if (d > 0.5) discard;
-        float core  = exp(-d * d * 28.0);
-        float fade  = 1.0 - pow(vProgress, 1.6);
-        float alpha = core * fade * 0.65;
-        gl_FragColor = vec4(vColor, alpha);
+        // Proton beam: sharp core with faint trail; electrons: rounder glow
+        float sharpness = vType < 0.5 ? 32.0 : 22.0;
+        float core  = exp(-d * d * sharpness);
+        float glow  = exp(-d * d * 8.0) * 0.35;
+        float fade  = 1.0 - pow(vProgress, vType < 0.5 ? 1.8 : 1.4);
+        float alpha = (core + glow) * fade * (vType < 0.5 ? 0.80 : 0.60);
+        gl_FragColor = vec4(vColor, clamp(alpha, 0.0, 1.0));
     }
 `;
 {
@@ -2077,28 +2196,55 @@ const sepFS = /* glsl */`
     const dirs   = new Float32Array(N_SEP * 3);
     const phases = new Float32Array(N_SEP);
     const seeds  = new Float32Array(N_SEP);
+    const types  = new Float32Array(N_SEP);   // 0=proton-beam, 1=electron, 2=polar
     const pos    = new Float32Array(N_SEP * 3);
+
+    // Particle composition: 30% proton beam (narrow, from equator), 45% electrons, 25% polar
     for (let i = 0; i < N_SEP; i++) {
-        // Isotropic but polar-biased (SEPs follow open field lines at poles)
-        const u2 = Math.random() * 2 - 1;
-        const v2 = Math.random() * Math.PI * 2;
-        const r2 = Math.sqrt(1 - u2*u2);
-        // Bias toward poles: |y| > 0.5
-        const poleBias = (Math.random() < 0.6)
-            ? new THREE.Vector3(r2 * Math.cos(v2), Math.abs(u2), r2 * Math.sin(v2)).normalize()
-            : new THREE.Vector3(r2 * Math.cos(v2), u2, r2 * Math.sin(v2)).normalize();
-        dirs[i*3] = poleBias.x; dirs[i*3+1] = poleBias.y; dirs[i*3+2] = poleBias.z;
-        phases[i] = Math.random(); seeds[i] = Math.random();
+        const roll = Math.random();
+        const t    = roll < 0.30 ? 0 : roll < 0.75 ? 1 : 2;
+        types[i]   = t;
+        phases[i]  = Math.random();
+        seeds[i]   = Math.random();
+
+        let d;
+        if (t === 0) {
+            // Proton beam: equatorial belt (Parker spiral injection, ±30° lat)
+            const lat   = (Math.random() - 0.5) * Math.PI / 3;
+            const lon   = Math.random() * Math.PI * 2;
+            d = new THREE.Vector3(Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)).normalize();
+        } else if (t === 1) {
+            // Relativistic electrons: wide distribution, slightly polar-enhanced
+            const u2 = Math.random() * 2 - 1;
+            const v2 = Math.random() * Math.PI * 2;
+            const rr = Math.sqrt(Math.max(0, 1 - u2*u2));
+            d = Math.abs(u2) > 0.3
+                ? new THREE.Vector3(rr * Math.cos(v2), u2, rr * Math.sin(v2)).normalize()
+                : new THREE.Vector3(rr * Math.cos(v2), Math.sign(u2) * 0.3, rr * Math.sin(v2)).normalize();
+        } else {
+            // Polar-cap: tightly field-aligned toward poles
+            const sign  = Math.random() < 0.5 ? 1 : -1;
+            const theta = Math.random() * 0.45;   // tight cone around pole
+            const phi   = Math.random() * Math.PI * 2;
+            d = new THREE.Vector3(Math.sin(theta) * Math.cos(phi), sign * Math.cos(theta), Math.sin(theta) * Math.sin(phi)).normalize();
+        }
+        dirs[i*3] = d.x; dirs[i*3+1] = d.y; dirs[i*3+2] = d.z;
     }
+
     sepGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     sepGeo.setAttribute('aDir',     new THREE.Float32BufferAttribute(dirs, 3));
     sepGeo.setAttribute('aPhase',   new THREE.Float32BufferAttribute(phases, 1));
     sepGeo.setAttribute('aSeed',    new THREE.Float32BufferAttribute(seeds, 1));
+    sepGeo.setAttribute('aType',    new THREE.Float32BufferAttribute(types, 1));
+
     const sepMat = new THREE.ShaderMaterial({
         vertexShader: sepVS, fragmentShader: sepFS,
         uniforms: {
-            u_time:      uniforms.u_time,
-            u_sep_level: uniforms.u_sep_level,
+            u_time:            uniforms.u_time,
+            u_sep_level:       uniforms.u_sep_level,
+            u_flare_lat:       uniforms.u_flare_lat,
+            u_flare_lon:       uniforms.u_flare_lon,
+            u_flare_intensity: uniforms.u_flare_intensity,
         },
         transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     });
@@ -2562,6 +2708,24 @@ function animate() {
         m.material.opacity = Math.max(0, (m.userData.inner ? 0.72 : 0.30) * Math.pow(1 - et / lf, 1.4));
     }
 
+    // CME shock front expansion (physical: ~1-3 AU/day, scaled visually)
+    for (let i = cmeShockWaves.length - 1; i >= 0; i--) {
+        const sh  = cmeShockWaves[i];
+        const age = t - sh.t0;
+        const life = 28.0;
+        if (age > life) {
+            scene.remove(sh.mesh);
+            sh.mesh.geometry.dispose();
+            sh.mesh.material.dispose();
+            cmeShockWaves.splice(i, 1);
+            continue;
+        }
+        sh.mesh.material.uniforms.u_age.value = age;
+        // Expand: r = 1.15 at birth, ~5.8 at life end (faster for higher-speed CMEs)
+        const expandRate = 0.15 + sh.speed * 0.08;
+        sh.mesh.scale.setScalar(1.15 + age * expandRate);
+    }
+
     // Flare ribbon timer — increments each frame; capped at 999
     if (uniforms.u_flare_t.value < 999) uniforms.u_flare_t.value += dt;
 
@@ -2732,6 +2896,17 @@ function zClassInfo(z) {
 
 const XRAY_COLOR = { A:'#44ff88', B:'#88ddaa', C:'#ffee44', M:'#ff9900', X:'#ff3300', '?':'#888' };
 
+// Map magnetic class string to complexity level 0-3
+function magComplexity(mag) {
+    const m = (mag || '').toLowerCase();
+    if (m.includes('delta'))  return 3;   // Beta-Gamma-Delta — highest flare risk
+    if (m.includes('gamma'))  return 2;   // Beta-Gamma
+    if (m.includes('beta'))   return 1;   // Beta
+    return 0;                             // Alpha / unipolar
+}
+const MAG_AURA_COLOR = [0x226644, 0xffcc44, 0xff7700, 0xff2200];   // alpha, β, βγ, βγδ
+const MAG_AURA_LABEL = ['α','β','βγ','βγδ'];
+
 // ── Three.js: build torus ring + glow disc for each active region ──────────
 function buildRegionMarkers() {
     if (regionGroup) { scene.remove(regionGroup); regionGroup = null; }
@@ -2741,6 +2916,7 @@ function buildRegionMarkers() {
         const c = parseLoc(reg.loc);
         if (!c) return;
         const cls    = zClassInfo(reg.z);
+        const mc     = magComplexity(reg.mag);
         const lat_r  = c.lat * Math.PI / 180;
         const lon_r  = c.lon * Math.PI / 180;
 
@@ -2756,12 +2932,13 @@ function buildRegionMarkers() {
         // Orient so the torus ring lies tangent to the sphere:
         // setFromUnitVectors maps local +Z → outward normal, so ring (in XY plane) is flat on surface.
         g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), pos.clone().normalize());
-        g.userData = { regNum: reg.num, lat: c.lat, lon: c.lon, idx: i };
+        g.userData = { regNum: reg.num, lat: c.lat, lon: c.lon, idx: i, mc };
 
-        // Ring size scales with region area (clamped); min 0.022, max 0.055
-        const rr = 0.022 + Math.min(reg.area, 800) / 800 * 0.033;
+        // Ring size scales with region area; complexity boosts size
+        const areaFrac = Math.min(reg.area, 800) / 800;
+        const rr = 0.022 + areaFrac * 0.033 + mc * 0.006;
 
-        // Outer torus ring — color = z-class importance
+        // Inner torus ring — color = z-class importance
         const ring = new THREE.Mesh(
             new THREE.TorusGeometry(rr, 0.0042, 8, 64),
             new THREE.MeshBasicMaterial({
@@ -2784,12 +2961,42 @@ function buildRegionMarkers() {
         disc.userData.baseOp = 0.28;
         g.add(disc);
 
+        // Magnetic complexity outer aura ring — scale with mc level
+        if (mc > 0) {
+            const auraR  = rr * 1.55 + mc * 0.008;
+            const auraOp = [0, 0.40, 0.62, 0.80][mc];
+            const auraTube = [0.003, 0.004, 0.005][mc - 1];
+            const auraRing = new THREE.Mesh(
+                new THREE.TorusGeometry(auraR, auraTube, 8, 64),
+                new THREE.MeshBasicMaterial({
+                    color: MAG_AURA_COLOR[mc], transparent: true, opacity: auraOp,
+                    depthWrite: false, blending: THREE.AdditiveBlending,
+                })
+            );
+            auraRing.userData.baseOp = auraOp;
+            // βγδ regions get a second wider diffuse halo disc
+            if (mc === 3) {
+                const halo = new THREE.Mesh(
+                    new THREE.CircleGeometry(auraR * 1.6, 32),
+                    new THREE.MeshBasicMaterial({
+                        color: 0xff2200, transparent: true, opacity: 0.12,
+                        depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+                    })
+                );
+                halo.position.z = 0.0005;
+                halo.userData.baseOp = 0.12;
+                g.add(halo);
+            }
+            g.add(auraRing);
+        }
+
         // Short spike line perpendicular to surface for edge-on visibility
+        const spikeColor = mc >= 2 ? MAG_AURA_COLOR[mc] : cls.hex;
         g.add(new THREE.Line(
             new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0.055),
+                new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 0.055 + mc * 0.015),
             ]),
-            new THREE.LineBasicMaterial({ color: cls.hex, transparent: true, opacity: 0.50 })
+            new THREE.LineBasicMaterial({ color: spikeColor, transparent: true, opacity: 0.55 })
         ));
 
         regionGroup.add(g);
@@ -2820,13 +3027,20 @@ function updateLivePanel(failed = false) {
     } else {
         if (cnt) cnt.textContent = `(${liveRegions.length})`;
         rl.innerHTML = liveRegions.map(r => {
-            const cls = zClassInfo(r.z);
-            const c   = parseLoc(r.loc);
+            const cls  = zClassInfo(r.z);
+            const c    = parseLoc(r.loc);
+            const mc   = magComplexity(r.mag);
+            const mcLbl = MAG_AURA_LABEL[mc];
+            const mcCol = ['#446655','#ffcc44','#ff9900','#ff3300'][mc];
+            const mcBadge = mc > 0
+                ? `<span style="font-size:9px;font-weight:800;color:${mcCol};
+                    text-shadow:0 0 4px ${mcCol}88;margin-left:3px">${mcLbl}</span>`
+                : '';
             return `<div class="region-row" data-lat="${c?.lat ?? 0}" data-lon="${c?.lon ?? 0}">
                 <div class="region-dot" style="background:${cls.css};box-shadow:0 0 5px ${cls.css}80"></div>
                 <span class="region-num">AR ${r.num}</span>
                 <span class="region-loc">${r.loc}</span>
-                <span class="region-cls">${r.z}</span>
+                <span class="region-cls">${r.z}${mcBadge}</span>
                 <span class="region-cnt">${r.nspot}&thinsp;spt</span>
             </div>`;
         }).join('');
@@ -2949,6 +3163,7 @@ async function fetchLiveSolarData() {
         updateLivePanel(false);
         _updateRibbonXray();
         updateFlareActivityBar();
+        replayRecentFlares();
         st.textContent = 'Live · ' + new Date().toLocaleTimeString();
         st.className   = 'live-status ok';
     } catch (err) {
@@ -2991,6 +3206,38 @@ function flyToRegion(lat, lon) {
     })(performance.now());
 }
 
+// ── Recent flare replay ────────────────────────────────────────────────────
+// After data load, replay flares from the past hour to pre-seed the
+// shader ribbons and 3D ring flashes at their real solar positions.
+function replayRecentFlares() {
+    const cutoff60 = Date.now() - 60 * 60e3;   // last 60 minutes
+    // Sort oldest-first so newest flare ends up driving the shader
+    const recent = liveFlares
+        .filter(f => new Date(f.time).getTime() > cutoff60)
+        .sort((a, b) => new Date(a.time) - new Date(b.time));
+
+    if (!recent.length) return;
+
+    recent.forEach(f => {
+        const c = parseLoc(f.loc);
+        if (!c) return;
+        const clsCh = (f.cls || 'C')[0].toUpperCase();
+        const lat_r = c.lat * Math.PI / 180;
+        const lon_r = c.lon * Math.PI / 180;
+        const ageMs = Date.now() - new Date(f.time).getTime();
+        const ageSimUnits = Math.min(850, (ageMs / 1000) * 0.35);   // compress real time to sim-time
+
+        // 3D ring flash at this position (visual-only: no intensity — it's historical)
+        triggerPositionFlare(c.lat, c.lon, clsCh);
+
+        // Point shader ribbons at this flare site with appropriate aging
+        uniforms.u_flare_lat.value = lat_r;
+        uniforms.u_flare_lon.value = lon_r;
+        uniforms.u_flare_t.value   = ageSimUnits;
+        console.log(`[Flare Replay] ${f.cls} at ${f.loc} — ${Math.round(ageMs / 60000)} min ago → sim-t ${ageSimUnits.toFixed(0)}`);
+    });
+}
+
 // ── Bootstrap: apply default data immediately, then fetch live ────────────
 // The default snapshot gives the sim a fully-populated state from the moment
 // the page loads — no blank panel while waiting for NOAA.
@@ -3000,6 +3247,7 @@ buildCoronalLoops();
 buildProminences();
 updateLivePanel(false);
 updateFlareActivityBar();
+replayRecentFlares();
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
 document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
@@ -3023,7 +3271,47 @@ setInterval(() => {
 const _G_COLS_SUN   = ['#44ccff','#aadd44','#ffd700','#ff8800','#ff3300','#ff00aa'];
 const _G_LABELS_SUN = ['Quiet','G1 Minor','G2 Moderate','G3 Strong','G4 Severe','G5 Extreme'];
 
-// Keep the ribbon X-ray letter in sync whenever liveXrayFlux updates
+// NOAA space weather scale helpers
+function _rScale(flux) {
+    // R-scale: Radio Blackout (X-ray driven)
+    if (!flux || flux <= 0) return 0;
+    if (flux >= 2e-3) return 5;   // X20+
+    if (flux >= 1e-3) return 4;   // X10+
+    if (flux >= 1e-4) return 3;   // X1+
+    if (flux >= 5e-5) return 2;   // M5+
+    if (flux >= 1e-5) return 1;   // M1+
+    return 0;
+}
+function _gScale(kp) {
+    // G-scale: Geomagnetic storm (Kp driven)
+    if (kp >= 9.0) return 5;
+    if (kp >= 8.0) return 4;
+    if (kp >= 7.0) return 3;
+    if (kp >= 6.0) return 2;
+    if (kp >= 5.0) return 1;
+    return 0;
+}
+function _updateRScale(flux) {
+    const r = _rScale(flux);
+    const el = document.getElementById('sw-r-letter');
+    if (!el) return;
+    el.textContent = 'R' + r;
+    el.className   = 'sw-r-letter R' + r;
+}
+function _updateGScale(kp) {
+    const g = _gScale(kp);
+    const gEl    = document.getElementById('sw-g-scale');
+    const gLabel = document.getElementById('sw-g-label');
+    const chip   = document.getElementById('sw-earth-chip');
+    if (gEl) { gEl.textContent = 'G' + g; gEl.style.color = _G_COLS_SUN[g] || '#44ccff'; }
+    if (gLabel) gLabel.textContent = _G_LABELS_SUN[g] || 'Quiet';
+    if (chip) {
+        const gColors = ['rgba(0,100,200,.1)','rgba(60,140,20,.15)','rgba(160,140,0,.2)','rgba(200,80,0,.22)','rgba(220,20,0,.28)','rgba(180,0,180,.28)'];
+        chip.style.background = gColors[g] || gColors[0];
+    }
+}
+
+// Keep the ribbon X-ray letter + R-scale in sync whenever liveXrayFlux updates
 function _updateRibbonXray() {
     if (liveXrayFlux == null) return;
     const { cls, n } = xrayClassInfo(liveXrayFlux);
@@ -3035,6 +3323,8 @@ function _updateRibbonXray() {
         xrayLtr.className   = cls;
     }
     if (fluxVal) fluxVal.textContent = cls + nStr;
+    // Update R-scale from live flux
+    _updateRScale(liveXrayFlux);
     // Ribbon glow
     const ribbon = document.getElementById('sw-ribbon');
     if (ribbon) {
@@ -3211,6 +3501,11 @@ window.addEventListener('swpc-update', (ev) => {
         if (fluxVal && !liveXrayFlux) fluxVal.textContent = sw.xray_class;
     }
 
+    // ── R-scale (Radio Blackout — X-ray flux driven) ──────────────────────────
+    // Update from live NOAA flux if available, else fall back to SWPC class
+    const rFlux = liveXrayFlux ?? sw.flare_watts ?? null;
+    _updateRScale(rFlux);
+
     // ── S-scale (Solar Radiation Storm) ─────────────────────────────────────
     const sLevel  = sw.sep_storm_level ?? 0;
     const sLetEl  = document.getElementById('sw-s-letter');
@@ -3276,7 +3571,11 @@ window.addEventListener('swpc-update', (ev) => {
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
-        console.log('[Sun] New Earth-directed CME from DONKI — auto-opening CME panel');
+        console.log('[Sun] New Earth-directed CME from DONKI — shock wave + CME panel');
+        // Spawn expanding shock wave shell
+        const cmeSpeedNorm = Math.max(0, Math.min(1, ((sw.earth_directed_cme.speed ?? 800) - 300) / 2200));
+        spawnCMEShock(cmeSpeedNorm);
+        // Also spawn one without new_cme_detected if u_cme_active just turned on
         const secCme = document.getElementById('sec-cme');
         if (secCme?.classList.contains('closed')) secCme.classList.remove('closed');
     }
