@@ -78,6 +78,18 @@
     {
       "source": "/login",
       "destination": "/signin.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/eula",
+      "destination": "/eula.html"
+    },
+    {
+      "source": "/api-policy",
+      "destination": "/api-policy.html"
     }
   ]
 }
