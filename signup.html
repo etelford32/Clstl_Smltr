@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up — Parker Physics App</title>
+    <meta name="description" content="Create your Parker Physics account and start exploring interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ─── Nav ────────────────────────────────────────────────────────── */
+        nav {
+            position: sticky; top: 0; z-index: 600;
+            height: 54px; min-height: 54px;
+            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,200,0,.12);
+            display: flex; align-items: center; padding: 0 16px; gap: 10px;
+        }
+        .nav-logo-img { height: 36px; width: auto; filter: drop-shadow(0 0 6px rgba(255,180,0,.5)); flex-shrink: 0; }
+        .nav-brand {
+            font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-item.cta { background: linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#0a0a1a; font-weight:700; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; line-height: 1; transition: background .2s;
+        }
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 54px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item { padding: 11px 14px; font-size: .9rem; }
+        }
+
+        /* ─── Page layout ─────────────────────────────────────────────── */
+        .auth-page {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3rem 16px;
+        }
+
+        .auth-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            max-width: 900px;
+            width: 100%;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 24px 80px rgba(0,0,0,.6);
+            animation: fadeUp .5s ease-out both;
+        }
+        @keyframes fadeUp { from { opacity:0; transform: translateY(20px); } to { opacity:1; transform: translateY(0); } }
+
+        @media (max-width: 700px) {
+            .auth-container { grid-template-columns: 1fr; }
+            .auth-side { display: none; }
+        }
+
+        /* ─── Left side panel ─────────────────────────────────────────── */
+        .auth-side {
+            background: linear-gradient(160deg, rgba(128,64,255,.25), rgba(64,128,255,.15));
+            border-right: 1px solid rgba(255,255,255,.08);
+            padding: 48px 36px;
+            display: flex; flex-direction: column; justify-content: center;
+        }
+        .auth-side-logo {
+            width: 72px; height: 72px; object-fit: contain;
+            filter: drop-shadow(0 0 20px rgba(255,180,0,.5));
+            margin-bottom: 24px;
+        }
+        .auth-side h2 {
+            font-size: 1.5rem; font-weight: 800; margin-bottom: 10px;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .auth-side p { font-size: .9rem; color: #999; line-height: 1.7; margin-bottom: 28px; }
+        .side-features { list-style: none; }
+        .side-features li {
+            display: flex; align-items: center; gap: 10px;
+            font-size: .85rem; color: #bbb; padding: 7px 0;
+            border-bottom: 1px solid rgba(255,255,255,.05);
+        }
+        .side-features li:last-child { border-bottom: none; }
+        .side-features .dot { width: 6px; height: 6px; border-radius: 50%; background: #4eff91; flex-shrink: 0; }
+
+        /* ─── Form panel ──────────────────────────────────────────────── */
+        .auth-form-panel { padding: 48px 40px; display: flex; flex-direction: column; justify-content: center; }
+        @media (max-width: 480px) { .auth-form-panel { padding: 32px 24px; } }
+
+        .form-title { font-size: 1.6rem; font-weight: 800; margin-bottom: 4px; }
+        .form-sub { font-size: .88rem; color: #888; margin-bottom: 28px; }
+        .form-sub a { color: #a080ff; text-decoration: none; }
+        .form-sub a:hover { text-decoration: underline; }
+
+        /* Plan selector */
+        .plan-pills {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 22px;
+        }
+        .plan-pill {
+            border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+            padding: 10px 6px; text-align: center; cursor: pointer;
+            transition: border-color .2s, background .2s;
+            background: rgba(255,255,255,.04);
+        }
+        .plan-pill:hover { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.08); }
+        .plan-pill.selected { border-color: #8040ff; background: rgba(128,64,255,.15); }
+        .plan-pill.selected.basic { border-color: #ffd700; background: rgba(255,215,0,.1); }
+        .plan-pill.selected.advanced { border-color: #8040ff; background: rgba(128,64,255,.15); }
+        .plan-pill-name { font-size: .8rem; font-weight: 700; color: #ddd; display: block; }
+        .plan-pill-price { font-size: .72rem; color: #777; display: block; margin-top: 2px; }
+        .plan-pill input[type=radio] { display: none; }
+
+        /* Form fields */
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        @media (max-width: 480px) { .form-row { grid-template-columns: 1fr; } }
+
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+            display: block; font-size: .78rem; color: #888; font-weight: 600;
+            margin-bottom: 5px; letter-spacing: .04em; text-transform: uppercase;
+        }
+        .form-group input {
+            width: 100%; padding: 11px 14px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+            color: #fff; font-family: inherit; font-size: .92rem;
+            transition: border-color .2s, background .2s; outline: none;
+        }
+        .form-group input:focus { border-color: rgba(128,64,255,.6); background: rgba(255,255,255,.09); }
+        .form-group input::placeholder { color: #555; }
+        .form-group input.error { border-color: rgba(255,80,80,.6); }
+        .form-error { font-size: .75rem; color: #ff6060; margin-top: 4px; display: none; }
+        .form-error.visible { display: block; }
+
+        /* Password strength */
+        .pw-strength { margin-top: 6px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
+        .pw-strength-bar { height: 100%; width: 0; border-radius: 2px; transition: width .3s, background .3s; }
+
+        /* Checkbox */
+        .form-check {
+            display: flex; align-items: flex-start; gap: 10px;
+            font-size: .82rem; color: #888; margin: 16px 0 20px; cursor: pointer;
+        }
+        .form-check input[type=checkbox] { margin-top: 2px; accent-color: #8040ff; flex-shrink: 0; }
+        .form-check a { color: #a080ff; text-decoration: none; }
+        .form-check a:hover { text-decoration: underline; }
+
+        /* Submit */
+        .btn-submit {
+            width: 100%; padding: 13px; border-radius: 8px; border: none;
+            font-family: inherit; font-size: 1rem; font-weight: 700; cursor: pointer;
+            background: linear-gradient(45deg,#8040ff,#4080ff);
+            color: #fff; transition: opacity .2s, transform .15s;
+        }
+        .btn-submit:hover { opacity: .9; transform: translateY(-1px); }
+        .btn-submit:active { transform: translateY(0); }
+        .btn-submit:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+        .btn-submit.basic-plan { background: linear-gradient(45deg,#ffd700,#ff8c00); color: #0a0a1a; }
+        .btn-submit.advanced-plan { background: linear-gradient(45deg,#8040ff,#4080ff); }
+
+        .divider {
+            display: flex; align-items: center; gap: 10px;
+            margin: 18px 0; color: #444; font-size: .8rem;
+        }
+        .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid rgba(255,255,255,.08); }
+
+        /* Social buttons */
+        .social-btns { display: flex; gap: 10px; }
+        .btn-social {
+            flex: 1; padding: 11px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.14);
+            background: rgba(255,255,255,.05);
+            color: #ccc; font-family: inherit; font-size: .85rem;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
+            transition: background .2s, border-color .2s;
+        }
+        .btn-social:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.26); color:#fff; }
+        .btn-social svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+        /* Success state */
+        .success-overlay {
+            display: none; text-align: center; padding: 20px 0;
+        }
+        .success-overlay.show { display: block; }
+        .success-icon { font-size: 3rem; margin-bottom: 12px; }
+        .success-overlay h3 { font-size: 1.4rem; margin-bottom: 8px; color: #4eff91; }
+        .success-overlay p { color: #888; font-size: .9rem; line-height: 1.6; }
+
+        footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
+        footer a { color: #555; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
+<nav>
+    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics Logo">
+        <span class="nav-brand">Parker Physics</span>
+    </a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <a href="pricing.html" class="nav-item">Pricing</a>
+        <a href="signin.html" class="nav-item">Sign In</a>
+        <a href="signup.html" class="nav-item active cta">Get Started</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════ MAIN ═══ -->
+<main class="auth-page">
+    <div class="auth-container">
+
+        <!-- Left panel -->
+        <div class="auth-side">
+            <img src="ParkerPhaysics_logo1.png" class="auth-side-logo" alt="Logo">
+            <h2>Explore the Universe</h2>
+            <p>Join Parker Physics and get access to real-time astrophysics simulations powered by WebGL, live NASA/NOAA data feeds, and more.</p>
+            <ul class="side-features">
+                <li><span class="dot"></span> 17 interactive simulations</li>
+                <li><span class="dot"></span> Live solar wind &amp; Kp index</li>
+                <li><span class="dot"></span> 3D stars, black holes, galaxies</li>
+                <li><span class="dot"></span> Real NASA DONKI event feed</li>
+                <li><span class="dot"></span> Rust/WASM high-perf engine</li>
+                <li><span class="dot"></span> Free tier — no card required</li>
+            </ul>
+        </div>
+
+        <!-- Right form panel -->
+        <div class="auth-form-panel">
+            <div id="form-view">
+                <div class="form-title">Create your account</div>
+                <div class="form-sub">Already have one? <a href="signin.html">Sign in →</a></div>
+
+                <!-- Plan selector -->
+                <div class="plan-pills" id="plan-pills">
+                    <label class="plan-pill free" id="pill-free">
+                        <input type="radio" name="plan" value="free">
+                        <span class="plan-pill-name">🔭 Free</span>
+                        <span class="plan-pill-price">Always free</span>
+                    </label>
+                    <label class="plan-pill basic" id="pill-basic">
+                        <input type="radio" name="plan" value="basic">
+                        <span class="plan-pill-name">⭐ Basic</span>
+                        <span class="plan-pill-price">$10 / mo</span>
+                    </label>
+                    <label class="plan-pill advanced" id="pill-advanced">
+                        <input type="radio" name="plan" value="advanced">
+                        <span class="plan-pill-name">🚀 Advanced</span>
+                        <span class="plan-pill-price">$100 / mo</span>
+                    </label>
+                </div>
+
+                <form id="signup-form" novalidate>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="first-name">First Name</label>
+                            <input type="text" id="first-name" name="first_name" placeholder="Jane" autocomplete="given-name" required>
+                            <div class="form-error" id="err-first">Please enter your first name.</div>
+                        </div>
+                        <div class="form-group">
+                            <label for="last-name">Last Name</label>
+                            <input type="text" id="last-name" name="last_name" placeholder="Parker" autocomplete="family-name" required>
+                            <div class="form-error" id="err-last">Please enter your last name.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email">Email Address</label>
+                        <input type="email" id="email" name="email" placeholder="jane@example.com" autocomplete="email" required>
+                        <div class="form-error" id="err-email">Please enter a valid email address.</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" placeholder="8+ characters" autocomplete="new-password" required minlength="8">
+                        <div class="pw-strength"><div class="pw-strength-bar" id="pw-bar"></div></div>
+                        <div class="form-error" id="err-pw">Password must be at least 8 characters.</div>
+                    </div>
+
+                    <label class="form-check">
+                        <input type="checkbox" id="terms" required>
+                        I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a>
+                    </label>
+                    <div class="form-error" id="err-terms" style="margin-top:-12px;margin-bottom:12px;">You must agree to continue.</div>
+
+                    <button type="submit" class="btn-submit" id="btn-submit">Create Account →</button>
+                </form>
+
+                <div class="divider">or continue with</div>
+                <div class="social-btns">
+                    <button class="btn-social" type="button" onclick="alert('OAuth coming soon!')">
+                        <!-- Google icon -->
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                            <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                            <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                            <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                        </svg>
+                        Google
+                    </button>
+                    <button class="btn-social" type="button" onclick="alert('OAuth coming soon!')">
+                        <!-- GitHub icon -->
+                        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                        </svg>
+                        GitHub
+                    </button>
+                </div>
+            </div>
+
+            <!-- Success state -->
+            <div class="success-overlay" id="success-view">
+                <div class="success-icon">🎉</div>
+                <h3>You're in!</h3>
+                <p>Your account has been created.<br>Check your inbox to verify your email, then<br><a href="index.html" style="color:#a080ff;">launch your first simulation →</a></p>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<footer>
+    <p>© 2025 Parker Physics App &nbsp;·&nbsp; <a href="pricing.html">Pricing</a> &nbsp;·&nbsp; <a href="signin.html">Sign In</a> &nbsp;·&nbsp; <a href="index.html">Home</a></p>
+</footer>
+
+<script>
+    // ── Nav burger ──────────────────────────────────────────────────
+    document.getElementById('nav-burger').addEventListener('click', function() {
+        const menu = document.getElementById('nav-menu');
+        const open = menu.classList.toggle('open');
+        this.setAttribute('aria-expanded', open);
+    });
+
+    // ── Plan pre-selection from URL param ──────────────────────────
+    const urlPlan = new URLSearchParams(location.search).get('plan') || 'free';
+    const planMap = { free: 'pill-free', basic: 'pill-basic', advanced: 'pill-advanced' };
+    function selectPlan(val) {
+        document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
+        const pill = document.getElementById(planMap[val]);
+        if (pill) {
+            pill.classList.add('selected');
+            pill.querySelector('input').checked = true;
+        }
+        const btn = document.getElementById('btn-submit');
+        btn.className = 'btn-submit' + (val === 'basic' ? ' basic-plan' : val === 'advanced' ? ' advanced-plan' : '');
+    }
+    selectPlan(urlPlan);
+
+    document.querySelectorAll('.plan-pill').forEach(pill => {
+        pill.addEventListener('click', () => selectPlan(pill.querySelector('input').value));
+    });
+
+    // ── Password strength ───────────────────────────────────────────
+    const pwInput = document.getElementById('password');
+    const pwBar   = document.getElementById('pw-bar');
+    pwInput.addEventListener('input', () => {
+        const v = pwInput.value;
+        let score = 0;
+        if (v.length >= 8) score++;
+        if (v.length >= 12) score++;
+        if (/[A-Z]/.test(v)) score++;
+        if (/[0-9]/.test(v)) score++;
+        if (/[^A-Za-z0-9]/.test(v)) score++;
+        const pct = Math.min(score * 20, 100);
+        const color = score < 2 ? '#ff4444' : score < 4 ? '#ffd700' : '#4eff91';
+        pwBar.style.width = pct + '%';
+        pwBar.style.background = color;
+    });
+
+    // ── Form validation & submit ────────────────────────────────────
+    document.getElementById('signup-form').addEventListener('submit', function(e) {
+        e.preventDefault();
+        let valid = true;
+
+        const fields = [
+            { id: 'first-name', err: 'err-first',  check: v => v.trim().length > 0 },
+            { id: 'last-name',  err: 'err-last',   check: v => v.trim().length > 0 },
+            { id: 'email',      err: 'err-email',  check: v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) },
+            { id: 'password',   err: 'err-pw',     check: v => v.length >= 8 },
+        ];
+        fields.forEach(f => {
+            const inp = document.getElementById(f.id);
+            const err = document.getElementById(f.err);
+            const ok  = f.check(inp.value);
+            inp.classList.toggle('error', !ok);
+            err.classList.toggle('visible', !ok);
+            if (!ok) valid = false;
+        });
+
+        const terms = document.getElementById('terms');
+        const termsErr = document.getElementById('err-terms');
+        if (!terms.checked) { termsErr.classList.add('visible'); valid = false; }
+        else { termsErr.classList.remove('visible'); }
+
+        if (!valid) return;
+
+        const btn = document.getElementById('btn-submit');
+        btn.disabled = true;
+        btn.textContent = 'Creating account…';
+
+        // Simulate account creation (replace with real API call)
+        setTimeout(() => {
+            document.getElementById('form-view').style.display = 'none';
+            document.getElementById('success-view').classList.add('show');
+        }, 1200);
+    });
+</script>
+</body>
+</html>

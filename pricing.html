@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing — Parker Physics App</title>
+    <meta name="description" content="Choose your Parker Physics plan. Free trial, Basic at $10/mo, or Advanced at $100/mo. Interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ─── Nav ────────────────────────────────────────────────────────── */
+        nav {
+            position: sticky; top: 0; z-index: 600;
+            height: 54px; min-height: 54px;
+            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,200,0,.12);
+            display: flex; align-items: center; padding: 0 16px; gap: 10px;
+        }
+        .nav-logo-img { height: 36px; width: auto; filter: drop-shadow(0 0 6px rgba(255,180,0,.5)); flex-shrink: 0; }
+        .nav-brand {
+            font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.active { background: linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+        .nav-item.cta { background: linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#0a0a1a; font-weight:700; }
+        .nav-item.cta:hover { opacity: .9; }
+        .nav-drop { position: relative; }
+        .nav-drop-btn {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
+            transition: background .2s, border-color .2s; white-space: nowrap;
+        }
+        .nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
+        .nav-drop-menu {
+            display: block; position: absolute; top: 100%; left: 0;
+            background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
+            padding: 8px 0 4px; min-width: 200px; z-index: 800;
+            box-shadow: 0 8px 28px rgba(0,0,0,.7);
+            opacity: 0; visibility: hidden; pointer-events: none;
+            transform: translateY(-6px);
+            transition: opacity .18s ease, visibility .18s ease, transform .18s ease;
+        }
+        .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+            opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+        }
+        .nav-drop-menu a { display: block; padding: 9px 14px; color: #bbb; text-decoration: none; font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s; }
+        .nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; line-height: 1; transition: background .2s;
+        }
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 54px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
+            .nav-drop-menu { position: static; box-shadow: none; border-radius: 4px; background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0; opacity: 1; visibility: hidden; pointer-events: none; transform: none; transition: none; display: none; }
+            .nav-drop-menu a { padding: 10px 22px; }
+            .nav-drop.open .nav-drop-menu { display: block !important; visibility: visible; pointer-events: auto; }
+        }
+
+        /* ─── Page Layout ─────────────────────────────────────────────── */
+        .page-wrapper { max-width: 1160px; margin: 0 auto; padding: 0 24px; width: 100%; }
+
+        /* ─── Hero ────────────────────────────────────────────────────── */
+        .pricing-hero {
+            text-align: center;
+            padding: 4rem 2rem 2rem;
+        }
+        .pricing-hero h1 {
+            font-size: 2.8rem; font-weight: 800;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: .75rem;
+        }
+        .pricing-hero p {
+            font-size: 1.15rem; color: #aaa; max-width: 560px; margin: 0 auto 1rem; line-height: 1.6;
+        }
+        .billing-toggle {
+            display: inline-flex; align-items: center; gap: 12px;
+            background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
+            border-radius: 30px; padding: 6px 14px; margin: 1.5rem auto 0;
+            font-size: .85rem; color: #aaa;
+        }
+        .billing-toggle strong { color: #ffd700; }
+
+        /* ─── Cards ───────────────────────────────────────────────────── */
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin: 3rem auto 0;
+            max-width: 1100px;
+            padding: 0 24px;
+        }
+        @media (max-width: 900px) { .pricing-grid { grid-template-columns: 1fr; max-width: 480px; } }
+
+        .price-card {
+            background: rgba(255,255,255,.05);
+            border: 1px solid rgba(255,255,255,.1);
+            border-radius: 16px;
+            padding: 32px 28px;
+            display: flex; flex-direction: column;
+            transition: border-color .25s, transform .25s;
+            position: relative;
+            overflow: hidden;
+        }
+        .price-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: rgba(255,255,255,.08);
+        }
+        .price-card:hover { border-color: rgba(255,200,0,.3); transform: translateY(-4px); }
+
+        /* Featured card */
+        .price-card.featured {
+            border-color: rgba(128,64,255,.5);
+            background: rgba(128,64,255,.08);
+        }
+        .price-card.featured::before { background: linear-gradient(90deg, #8040ff, #4080ff); }
+        .price-card.featured:hover { border-color: rgba(128,64,255,.8); }
+
+        .badge-top {
+            position: absolute; top: 16px; right: 16px;
+            background: linear-gradient(45deg,#8040ff,#4080ff);
+            color: #fff; font-size: .7rem; font-weight: 700;
+            padding: 3px 10px; border-radius: 12px; letter-spacing: .05em;
+        }
+
+        .tier-icon { font-size: 2rem; margin-bottom: 12px; }
+        .tier-name { font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 4px; }
+        .tier-desc { font-size: .85rem; color: #888; margin-bottom: 20px; line-height: 1.5; }
+
+        .price-amount {
+            font-size: 3rem; font-weight: 800; line-height: 1;
+            color: #fff; margin-bottom: 4px;
+        }
+        .price-amount sup { font-size: 1.4rem; vertical-align: super; }
+        .price-amount .period { font-size: 1rem; color: #666; font-weight: 400; }
+        .price-free { font-size: 2.4rem; font-weight: 800; color: #4eff91; margin-bottom: 4px; }
+        .price-note { font-size: .78rem; color: #666; margin-bottom: 28px; min-height: 18px; }
+
+        .price-divider { border: none; border-top: 1px solid rgba(255,255,255,.08); margin: 0 0 20px; }
+
+        .feature-list { list-style: none; flex: 1; margin-bottom: 28px; }
+        .feature-list li {
+            display: flex; align-items: flex-start; gap: 10px;
+            font-size: .87rem; color: #bbb; padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,.04);
+        }
+        .feature-list li:last-child { border-bottom: none; }
+        .feature-list li .check { color: #4eff91; font-size: .9rem; flex-shrink: 0; margin-top: 1px; }
+        .feature-list li .cross { color: #444; font-size: .9rem; flex-shrink: 0; margin-top: 1px; }
+        .feature-list li.dim { color: #555; }
+
+        .btn-plan {
+            display: block; width: 100%; padding: 13px 20px;
+            border-radius: 8px; border: none; font-family: inherit;
+            font-size: .95rem; font-weight: 700; cursor: pointer;
+            text-align: center; text-decoration: none;
+            transition: opacity .2s, transform .15s;
+        }
+        .btn-plan:hover { opacity: .9; transform: translateY(-1px); }
+        .btn-plan:active { transform: translateY(0); }
+
+        .btn-plan.free {
+            background: rgba(255,255,255,.1);
+            border: 1px solid rgba(255,255,255,.2);
+            color: #fff;
+        }
+        .btn-plan.free:hover { background: rgba(255,255,255,.18); }
+        .btn-plan.basic {
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            color: #0a0a1a;
+        }
+        .btn-plan.advanced {
+            background: linear-gradient(45deg,#8040ff,#4080ff);
+            color: #fff;
+        }
+
+        /* ─── Comparison Table ────────────────────────────────────────── */
+        .compare-section {
+            max-width: 900px; margin: 5rem auto 0; padding: 0 24px;
+        }
+        .compare-section h2 {
+            text-align: center; font-size: 1.6rem; color: #ffd700;
+            margin-bottom: 2rem; font-weight: 700;
+        }
+        .compare-table {
+            width: 100%; border-collapse: collapse; font-size: .88rem;
+        }
+        .compare-table th, .compare-table td {
+            padding: 12px 16px; text-align: center;
+        }
+        .compare-table thead th {
+            font-size: .9rem; font-weight: 700; color: #fff;
+            background: rgba(255,255,255,.06);
+            border-bottom: 1px solid rgba(255,255,255,.12);
+        }
+        .compare-table thead th:first-child { text-align: left; }
+        .compare-table th.col-basic { color: #ffd700; }
+        .compare-table th.col-advanced { color: #b080ff; }
+        .compare-table tbody tr { border-bottom: 1px solid rgba(255,255,255,.05); }
+        .compare-table tbody tr:last-child { border-bottom: none; }
+        .compare-table tbody tr:hover { background: rgba(255,255,255,.03); }
+        .compare-table td:first-child { text-align: left; color: #ccc; }
+        .compare-table td .yes { color: #4eff91; font-size: 1.1rem; }
+        .compare-table td .no  { color: #444; font-size: 1.1rem; }
+        .compare-table td .partial { color: #ffd700; font-size: .78rem; font-weight: 600; }
+        .compare-table .section-header td {
+            background: rgba(255,255,255,.04); color: #888;
+            font-size: .75rem; font-weight: 700; letter-spacing: .07em;
+            text-transform: uppercase; padding: 8px 16px;
+            text-align: left;
+        }
+        @media (max-width: 640px) {
+            .compare-table th, .compare-table td { padding: 10px 8px; font-size: .8rem; }
+        }
+
+        /* ─── FAQ ─────────────────────────────────────────────────────── */
+        .faq-section {
+            max-width: 740px; margin: 5rem auto; padding: 0 24px;
+        }
+        .faq-section h2 {
+            text-align: center; font-size: 1.6rem; color: #ffd700;
+            margin-bottom: 2rem; font-weight: 700;
+        }
+        .faq-item {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 10px; margin-bottom: 12px; overflow: hidden;
+        }
+        .faq-q {
+            width: 100%; background: none; border: none; padding: 16px 20px;
+            text-align: left; font-family: inherit; font-size: .93rem;
+            color: #ddd; font-weight: 600; cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center; gap: 12px;
+            transition: color .2s;
+        }
+        .faq-q:hover { color: #ffd700; }
+        .faq-q .arrow { color: #666; font-size: .8rem; transition: transform .2s; flex-shrink: 0; }
+        .faq-item.open .faq-q .arrow { transform: rotate(180deg); color: #ffd700; }
+        .faq-a {
+            display: none; padding: 0 20px 16px;
+            font-size: .87rem; color: #999; line-height: 1.7;
+        }
+        .faq-item.open .faq-a { display: block; }
+
+        /* ─── Footer ──────────────────────────────────────────────────── */
+        footer {
+            text-align: center; padding: 3rem 2rem;
+            border-top: 1px solid rgba(255,255,255,.06);
+            color: #444; font-size: .8rem; margin-top: auto;
+        }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+
+        @keyframes fadeIn { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
+        .pricing-hero, .pricing-grid, .compare-section, .faq-section { animation: fadeIn .6s ease-out both; }
+        .pricing-grid { animation-delay: .1s; }
+        .compare-section { animation-delay: .15s; }
+        .faq-section { animation-delay: .2s; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
+<nav>
+    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics Logo">
+        <span class="nav-brand">Parker Physics</span>
+    </a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu" role="navigation">
+        <a href="index.html" class="nav-item">Home</a>
+        <div class="nav-drop" id="nav-drop-sims">
+            <button class="nav-drop-btn" aria-haspopup="true">Simulations ▾</button>
+            <div class="nav-drop-menu">
+                <a href="galactic-map.html">Galactic Map</a>
+                <a href="threejs.html">Solar System</a>
+                <a href="sun.html">The Sun ☀️</a>
+                <a href="earth.html">Earth View</a>
+                <a href="space-weather.html">Space Weather</a>
+                <a href="sirius.html">Sirius System</a>
+                <a href="betelgeuse.html">Betelgeuse</a>
+                <a href="wr102.html">WR 102</a>
+                <a href="vega.html">Vega</a>
+                <a href="stellar-wind.html">Stellar Wind</a>
+                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+            </div>
+        </div>
+        <a href="pricing.html" class="nav-item active">Pricing</a>
+        <a href="signin.html" class="nav-item">Sign In</a>
+        <a href="signup.html" class="nav-item cta">Get Started</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
+<div class="pricing-hero">
+    <h1>Simple, Transparent Pricing</h1>
+    <p>Start free, scale as you explore. All plans include access to our WebGL simulations and live space weather data feeds.</p>
+    <div class="billing-toggle">Billed monthly &nbsp;·&nbsp; <strong>Cancel anytime</strong> &nbsp;·&nbsp; No contracts</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ CARDS ═══ -->
+<div class="pricing-grid">
+
+    <!-- Free -->
+    <div class="price-card">
+        <div class="tier-icon">🔭</div>
+        <div class="tier-name">Free Trial</div>
+        <div class="tier-desc">Explore the cosmos with no commitment. Perfect for students and curious minds.</div>
+        <div class="price-free">Free</div>
+        <div class="price-note">No credit card required</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> 3 simulations (Sun, Earth, Space Weather)</li>
+            <li><span class="check">✓</span> Basic 2D stellar modeler</li>
+            <li><span class="check">✓</span> Live NOAA solar wind readout</li>
+            <li><span class="check">✓</span> Community access</li>
+            <li class="dim"><span class="cross">✗</span> 3D WebGL simulations</li>
+            <li class="dim"><span class="cross">✗</span> Full NASA/NOAA data feeds</li>
+            <li class="dim"><span class="cross">✗</span> Fluid dynamics sims</li>
+            <li class="dim"><span class="cross">✗</span> API access</li>
+        </ul>
+        <a href="signup.html?plan=free" class="btn-plan free">Start Free →</a>
+    </div>
+
+    <!-- Basic -->
+    <div class="price-card featured">
+        <div class="badge-top">MOST POPULAR</div>
+        <div class="tier-icon">⭐</div>
+        <div class="tier-name">Basic</div>
+        <div class="tier-desc">Full simulation suite for enthusiasts, educators, and early-career researchers.</div>
+        <div class="price-amount"><sup>$</sup>10<span class="period">/mo</span></div>
+        <div class="price-note">~$0.33 per day</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> All 17 simulations unlocked</li>
+            <li><span class="check">✓</span> Full 3D WebGL rendering</li>
+            <li><span class="check">✓</span> Live NASA DONKI &amp; NOAA feeds</li>
+            <li><span class="check">✓</span> Stellar Wind, Fluid NSE, Black Hole</li>
+            <li><span class="check">✓</span> Galactic map &amp; solar system 3D</li>
+            <li><span class="check">✓</span> Real-time Kp, Bz, X-ray alerts</li>
+            <li><span class="check">✓</span> Email support</li>
+            <li class="dim"><span class="cross">✗</span> API / data export</li>
+        </ul>
+        <a href="signup.html?plan=basic" class="btn-plan basic">Get Basic →</a>
+    </div>
+
+    <!-- Advanced -->
+    <div class="price-card">
+        <div class="tier-icon">🚀</div>
+        <div class="tier-name">Advanced</div>
+        <div class="tier-desc">For researchers, institutions, and professionals who need deep data access and priority support.</div>
+        <div class="price-amount"><sup>$</sup>100<span class="period">/mo</span></div>
+        <div class="price-note">Billed monthly, cancel anytime</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> Everything in Basic</li>
+            <li><span class="check">✓</span> Rust/WASM high-performance engine</li>
+            <li><span class="check">✓</span> SWMF magnetosphere pipeline access</li>
+            <li><span class="check">✓</span> REST API for simulation data</li>
+            <li><span class="check">✓</span> CSV/JSON data export</li>
+            <li><span class="check">✓</span> Solar wind prediction models</li>
+            <li><span class="check">✓</span> Priority &amp; dedicated support</li>
+            <li><span class="check">✓</span> Early access to new features</li>
+        </ul>
+        <a href="signup.html?plan=advanced" class="btn-plan advanced">Get Advanced →</a>
+    </div>
+
+</div><!-- /pricing-grid -->
+
+<!-- ═══════════════════════════════════════════════════════ TABLE ═══ -->
+<div class="compare-section">
+    <h2>Full Feature Comparison</h2>
+    <table class="compare-table">
+        <thead>
+            <tr>
+                <th style="text-align:left">Feature</th>
+                <th>Free</th>
+                <th class="col-basic">Basic</th>
+                <th class="col-advanced">Advanced</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="section-header"><td colspan="4">Simulations</td></tr>
+            <tr><td>Sun &amp; Earth simulations</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Space Weather dashboard</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Full 3D WebGL stellar sims (17 total)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Fluid dynamics (NSE, accretion disk)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Galactic map &amp; solar system 3D</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Rust/WASM high-performance engine</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+
+            <tr class="section-header"><td colspan="4">Data &amp; Feeds</td></tr>
+            <tr><td>Basic NOAA solar wind readout</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Full NASA DONKI feed (CME, flares)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Real-time Kp, Bz, X-ray, density</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>SWMF magnetosphere pipeline</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Solar wind prediction models (L1)</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>REST API access</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>CSV / JSON data export</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+
+            <tr class="section-header"><td colspan="4">Support</td></tr>
+            <tr><td>Community forum access</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Email support</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Priority &amp; dedicated support</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Early access to new features</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ FAQ ═══ -->
+<div class="faq-section">
+    <h2>Frequently Asked Questions</h2>
+
+    <div class="faq-item">
+        <button class="faq-q">Do I need a credit card for the free trial? <span class="arrow">▼</span></button>
+        <div class="faq-a">No — the free tier is completely free with no credit card required. You'll get instant access to our core simulations right after creating your account.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Can I switch plans at any time? <span class="arrow">▼</span></button>
+        <div class="faq-a">Yes. You can upgrade or downgrade your plan at any time from your account dashboard. Upgrades take effect immediately; downgrades apply at the next billing cycle.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">What is the SWMF pipeline in the Advanced plan? <span class="arrow">▼</span></button>
+        <div class="faq-a">SWMF (Space Weather Modeling Framework) is a physics-based magnetosphere simulation tool used by NASA and NOAA researchers. Advanced members can run and retrieve magnetosphere model outputs driven by live solar wind data from the L1 Lagrange point.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Is there an academic or institutional discount? <span class="arrow">▼</span></button>
+        <div class="faq-a">Yes — universities, research institutions, and K–12 educators can contact us for discounted or site-license pricing. Reach out via the support link in your account.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">How does billing work? <span class="arrow">▼</span></button>
+        <div class="faq-a">All plans are billed monthly via Stripe. You'll receive a receipt by email after each payment. There are no setup fees or long-term contracts.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">What simulations are in the free tier? <span class="arrow">▼</span></button>
+        <div class="faq-a">The free tier includes the Sun simulation, Earth atmospheric view, basic Space Weather dashboard with live solar wind speed, and the 2D Stellar Modeler. Upgrading to Basic unlocks all 17 interactive simulations.</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+    <p>© 2025 Parker Physics App &nbsp;·&nbsp; <a href="index.html">Home</a> &nbsp;·&nbsp; <a href="signup.html">Sign Up</a> &nbsp;·&nbsp; <a href="signin.html">Sign In</a> &nbsp;·&nbsp; <a href="mailto:support@parkerphysics.app">Contact</a></p>
+</footer>
+
+<script>
+    // Nav burger
+    const burger = document.getElementById('nav-burger');
+    const navMenu = document.getElementById('nav-menu');
+    burger.addEventListener('click', () => {
+        const open = navMenu.classList.toggle('open');
+        burger.setAttribute('aria-expanded', open);
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const drop = btn.closest('.nav-drop');
+            drop.classList.toggle('open');
+        });
+    });
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.nav-drop.open').forEach(d => d.classList.remove('open'));
+    });
+
+    // FAQ accordion
+    document.querySelectorAll('.faq-q').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const item = btn.closest('.faq-item');
+            const isOpen = item.classList.contains('open');
+            document.querySelectorAll('.faq-item.open').forEach(i => i.classList.remove('open'));
+            if (!isOpen) item.classList.add('open');
+        });
+    });
+</script>
+</body>
+</html>

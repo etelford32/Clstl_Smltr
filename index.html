@@ -2,9 +2,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Parker Physics App — Interactive Celestial Simulations</title>
     <meta name="description" content="Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data. Explore stars, black holes, solar wind, and the galactic map interactively.">
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0a0a1a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Parker Physics">
+    <link rel="apple-touch-icon" href="ParkersPhysics_logo2.jpg">
+    <!-- Open Graph -->
+    <meta property="og:title" content="Parker Physics App — Interactive Celestial Simulations">
+    <meta property="og:description" content="Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data.">
+    <meta property="og:image" content="ParkersPhysics_logo2.jpg">
+    <meta property="og:type" content="website">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -25,10 +38,42 @@
             border-bottom: 1px solid rgba(255,200,0,.12);
             display: flex; align-items: center; padding: 0 16px; gap: 10px;
         }
+        /* ─── Nav Logo Animation ────────────────────────────────────── */
+        .nav-logo-wrap {
+            position: relative;
+            width: 36px; height: 36px;
+            flex-shrink: 0;
+        }
+        .nav-logo-wrap::before {
+            content: '';
+            position: absolute;
+            inset: -5px;
+            border-radius: 50%;
+            border: 1.5px solid transparent;
+            border-top-color: rgba(255,180,0,.85);
+            border-right-color: rgba(128,64,255,.55);
+            animation: navRingSpin 3s linear infinite;
+            pointer-events: none;
+        }
+        .nav-logo-wrap::after {
+            content: '';
+            position: absolute;
+            inset: -9px;
+            border-radius: 50%;
+            border: 1px solid transparent;
+            border-bottom-color: rgba(64,128,255,.45);
+            border-left-color: rgba(255,100,80,.35);
+            animation: navRingSpin 5.5s linear infinite reverse;
+            pointer-events: none;
+        }
+        @keyframes navRingSpin { to { transform: rotate(360deg); } }
         .nav-logo-img {
-            height: 36px; width: auto;
+            height: 36px; width: 36px;
+            border-radius: 50%;
+            object-fit: cover;
             filter: drop-shadow(0 0 6px rgba(255,180,0,.5));
             flex-shrink: 0;
+            display: block;
         }
         .nav-brand {
             font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
@@ -140,17 +185,71 @@
             animation: fadeIn 1s ease-in;
             position: relative;
         }
-        .hero-logo {
+        /* ─── Hero Logo Animation ───────────────────────────────────── */
+        .hero-logo-wrap {
+            position: relative;
             width: min(340px, 75vw);
-            height: auto;
+            height: min(340px, 75vw);
             margin: 0 auto 1.5rem;
-            display: block;
-            filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3));
-            animation: logoPulse 4s ease-in-out infinite;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        @keyframes logoPulse {
-            0%,100% { filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3)); }
-            50%      { filter: drop-shadow(0 0 60px rgba(255,200,0,.65)) drop-shadow(0 0 110px rgba(160,80,255,.45)); }
+        .hero-logo-ring {
+            position: absolute;
+            border-radius: 50%;
+            pointer-events: none;
+            will-change: transform;
+            top: 50%; left: 50%;
+        }
+        .hero-logo-ring-1 {
+            width: 110%; height: 110%;
+            margin-left: -55%; margin-top: -55%;
+            border: 2px solid transparent;
+            border-top-color: rgba(255,180,0,.65);
+            border-right-color: rgba(255,120,0,.2);
+            border-bottom-color: rgba(128,64,255,.45);
+            animation: heroRingSpin 7s linear infinite;
+        }
+        .hero-logo-ring-2 {
+            width: 124%; height: 124%;
+            margin-left: -62%; margin-top: -62%;
+            border: 1.5px solid transparent;
+            border-top-color: rgba(64,128,255,.45);
+            border-left-color: rgba(255,80,120,.35);
+            animation: heroRingSpin 11s linear infinite reverse;
+        }
+        .hero-logo-ring-3 {
+            width: 140%; height: 140%;
+            margin-left: -70%; margin-top: -70%;
+            border: 1px solid transparent;
+            border-right-color: rgba(255,200,0,.28);
+            border-bottom-color: rgba(160,64,255,.22);
+            animation: heroRingSpin 17s linear infinite;
+        }
+        @keyframes heroRingSpin {
+            from { transform: rotate(0deg); }
+            to   { transform: rotate(360deg); }
+        }
+        .hero-logo {
+            width: 88%; height: 88%;
+            border-radius: 14px;
+            object-fit: cover;
+            display: block;
+            position: relative; z-index: 1;
+            filter: drop-shadow(0 0 32px rgba(255,180,0,.45)) drop-shadow(0 0 70px rgba(128,64,255,.3));
+            animation: heroLogoFloat 6s ease-in-out infinite;
+            will-change: transform;
+        }
+        @keyframes heroLogoFloat {
+            0%,100% {
+                transform: translateY(0px);
+                filter: drop-shadow(0 0 32px rgba(255,180,0,.45)) drop-shadow(0 0 70px rgba(128,64,255,.3));
+            }
+            50% {
+                transform: translateY(-14px);
+                filter: drop-shadow(0 0 55px rgba(255,200,0,.65)) drop-shadow(0 0 105px rgba(160,80,255,.45));
+            }
         }
         .hero-title {
             font-size: 3rem;
@@ -469,6 +568,45 @@
             .simulators-grid { grid-template-columns: 1fr; }
             #swpc-bar { gap: 10px; }
         }
+
+        /* ─── Mobile: Tablet ─────────────────────────────────────────── */
+        @media (max-width: 600px) {
+            .hero { padding: 2.5rem 1.2rem 1.2rem; }
+            .hero-logo-wrap { width: min(280px, 82vw); height: min(280px, 82vw); }
+            .hero-title { font-size: 1.9rem; }
+            .hero-tagline { font-size: .95rem; }
+            .hero-sub { font-size: .85rem; }
+            .hero-badges { gap: 6px; }
+            .hero-badge { font-size: .75rem; padding: 5px 10px; }
+            #swpc-bar { padding: 5px 12px; gap: 8px; font-size: .68rem; }
+            .swpc-label { font-size: .64rem; }
+        }
+
+        /* ─── Mobile: Phone ──────────────────────────────────────────── */
+        @media (max-width: 480px) {
+            .hero { padding: 2rem 1rem 1rem; }
+            .hero-logo-wrap { width: min(240px, 80vw); height: min(240px, 80vw); }
+            .hero-title { font-size: 1.65rem; }
+            .hero-tagline { font-size: .9rem; }
+            .hero-sub { font-size: .82rem; }
+            nav { padding: 0 10px; gap: 6px; }
+            .nav-brand { font-size: .85rem; }
+            /* Simplify orbital rings on low-end mobile for perf */
+            .hero-logo-ring-3 { display: none; }
+        }
+
+        /* ─── Mobile: Small Phone ────────────────────────────────────── */
+        @media (max-width: 375px) {
+            .hero-title { font-size: 1.4rem; }
+            .hero-tagline { font-size: .82rem; }
+            .hero-badge { font-size: .7rem; padding: 4px 8px; }
+            nav { height: 48px; min-height: 48px; }
+            .nav-logo-wrap { width: 30px; height: 30px; }
+            .nav-logo-img { height: 30px; width: 30px; }
+            /* Hide outermost hero ring on tiny screens */
+            .hero-logo-ring-2 { display: none; }
+            #swpc-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
     </style>
 </head>
 <body>
@@ -476,7 +614,9 @@
 <!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
 <nav>
     <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
-        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics Logo">
+        <div class="nav-logo-wrap">
+            <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics Logo">
+        </div>
         <span class="nav-brand">Parker Physics</span>
     </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
@@ -508,6 +648,9 @@
             </div>
         </div>
         <a href="rust.html" class="nav-item">Rust/WASM</a>
+        <a href="pricing.html" class="nav-item">Pricing</a>
+        <a href="signin.html" class="nav-item">Sign In</a>
+        <a href="signup.html" class="nav-item" style="background:linear-gradient(45deg,#ffd700,#ff8c00);border-color:#ffd700;color:#0a0a1a;font-weight:700;">Get Started</a>
     </div>
 </nav>
 
@@ -528,7 +671,12 @@
 
 <!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
 <div class="hero">
-    <img src="ParkerPhaysics_logo1.png" class="hero-logo" alt="Parker Physics App Logo">
+    <div class="hero-logo-wrap">
+        <div class="hero-logo-ring hero-logo-ring-1"></div>
+        <div class="hero-logo-ring hero-logo-ring-2"></div>
+        <div class="hero-logo-ring hero-logo-ring-3"></div>
+        <img src="ParkersPhysics_logo2.jpg" class="hero-logo" alt="Parker Physics App Logo">
+    </div>
     <h1 class="hero-title">Parker Physics App</h1>
     <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
     <p class="hero-sub">

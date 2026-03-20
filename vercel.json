@@ -62,6 +62,22 @@
     {
       "source": "/vega",
       "destination": "/vega.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/pricing.html"
+    },
+    {
+      "source": "/signup",
+      "destination": "/signup.html"
+    },
+    {
+      "source": "/signin",
+      "destination": "/signin.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/signin.html"
     }
   ]
 }
