@@ -127,6 +127,11 @@
         .swpc-status.live    { background: rgba(0,200,100,.18); color:#4eff91; border: 1px solid rgba(0,200,100,.3); }
         .swpc-status.stale   { background: rgba(255,200,0,.15); color:#ffd700; border: 1px solid rgba(255,200,0,.3); }
         .swpc-status.offline { background: rgba(255,60,60,.15); color:#ff6060; border: 1px solid rgba(255,60,60,.3); }
+        /* Alert level badge colouring (applied to #sw-alert span) */
+        .alert-quiet    { color: #4eff91; }
+        .alert-moderate { color: #a0d8f0; }
+        .alert-high     { color: #ffd700; }
+        .alert-extreme  { color: #ff4444; font-weight: 700; }
 
         /* ─── Hero ────────────────────────────────────────────────────────── */
         .hero {
@@ -510,6 +515,8 @@
 <div id="swpc-bar">
     <span class="swpc-label">&#9729; LIVE SPACE WEATHER</span>
     <span class="swpc-stat">Wind <span id="sw-speed">—</span> km/s</span>
+    <span class="swpc-stat" id="sw-alert-wrap" style="display:none">Alert <span id="sw-alert">—</span></span>
+    <span class="swpc-stat" id="sw-trend-wrap" style="display:none">Trend <span id="sw-trend">—</span></span>
     <span class="swpc-stat">Bz <span id="sw-bz">—</span> nT</span>
     <span class="swpc-stat">Density <span id="sw-dens">—</span> n/cc</span>
     <span class="swpc-stat">Kp <span id="sw-kp">—</span></span>
@@ -1174,6 +1181,72 @@ window.addEventListener('swpc-update', e => {
 
 const feed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
 feed.start();
+</script>
+
+<!-- ══════════════════════════ WIND SPEED PIPELINE FEED ══════════════════ -->
+<script type="module">
+import WindPipelineFeed from './js/wind-pipeline-feed.js';
+
+const elSpeed     = document.getElementById('sw-speed');
+const elAlert     = document.getElementById('sw-alert');
+const elAlertWrap = document.getElementById('sw-alert-wrap');
+const elTrend     = document.getElementById('sw-trend');
+const elTrendWrap = document.getElementById('sw-trend-wrap');
+const elStatus    = document.getElementById('sw-status');
+
+const ALERT_CLASS = {
+    QUIET:    'alert-quiet',
+    MODERATE: 'alert-moderate',
+    HIGH:     'alert-high',
+    EXTREME:  'alert-extreme',
+};
+
+const TREND_ARROW = {
+    RISING:  '↑',
+    FALLING: '↓',
+    STEADY:  '→',
+};
+
+window.addEventListener('wind-pipeline-update', e => {
+    const d = e.detail;
+
+    if (d.status === 'offline') {
+        // Don't overwrite NOAA bar — just leave it as-is; status reflects offline
+        return;
+    }
+
+    // Speed — pipeline data is preferred (processed, QC'd by ingest_l1)
+    if (d.speed_km_s != null) {
+        elSpeed.textContent = d.speed_km_s.toFixed(0);
+    }
+
+    // Alert level badge
+    if (d.alert_level) {
+        elAlert.textContent  = d.alert_level;
+        elAlert.className    = ALERT_CLASS[d.alert_level] ?? '';
+        elAlertWrap.style.display = '';
+    }
+
+    // Trend arrow
+    if (d.trend?.direction) {
+        const arrow = TREND_ARROW[d.trend.direction] ?? '→';
+        elTrend.textContent = `${arrow} ${d.trend.direction}`;
+        elTrend.className   = d.trend.direction === 'RISING'  ? 'val-warn'
+                            : d.trend.direction === 'FALLING' ? 'val-good'
+                            : '';
+        elTrendWrap.style.display = '';
+    }
+
+    // Mark status as live when pipeline is fresh
+    if (d.status === 'live') {
+        elStatus.textContent = 'live';
+        elStatus.className   = 'swpc-status live';
+    }
+});
+
+// Start the pipeline feed — polls /v1/solar-wind/wind-speed every 60 s.
+// If the FastAPI server isn't running, it degrades silently; NOAA bar still works.
+new WindPipelineFeed().start();
 </script>
 </body>
 </html>
