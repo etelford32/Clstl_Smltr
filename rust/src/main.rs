@@ -7,10 +7,22 @@ mod rendering;
 mod simulation;
 
 use camera::{camera_controller, handle_exit};
+use prediction::solar_wind::{update_live_wind, LiveWindPlugin, LiveWindSpeed};
 use rendering::star::{setup, update_star_glow};
 use simulation::fluid::{update_velocity_field, VelocityField};
 use simulation::magnetic::{draw_field_lines, update_field_lines, FieldLineSet};
 use simulation::particles::{spawn_particles, update_particles, ParticleSpawner};
+
+/// Transfer the live wind speed from [`LiveWindSpeed`] into the velocity field
+/// scale so that real NOAA observations modulate the particle animation.
+///
+/// Maps normalised speed [0, 1] → wind scale [0.5, 2.5]:
+///   - 0.0 (250 km/s quiet)  → scale 0.5  (slow corona outflow)
+///   - 0.5 (450 km/s nominal) → scale 1.5  (normal animation speed)
+///   - 1.0 (900 km/s storm)  → scale 2.5  (dramatic storm particles)
+fn apply_live_wind_scale(wind: Res<LiveWindSpeed>, mut field: ResMut<VelocityField>) {
+    field.wind_speed_scale = 0.5 + wind.speed_norm * 2.0;
+}
 
 pub const STAR_RADIUS: f32 = 2.0;
 pub const MAX_PARTICLES: usize = 2000;
@@ -25,6 +37,8 @@ fn main() {
             }),
             ..default()
         }))
+        // Live NOAA wind speed pipeline (polls API in background thread).
+        .add_plugins(LiveWindPlugin)
         .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .insert_resource(ParticleSpawner::default())
         .insert_resource(VelocityField::new())
@@ -33,8 +47,11 @@ fn main() {
         .add_systems(
             Update,
             (
-                // 1. Physics tick: velocity field first, then field lines.
-                update_velocity_field,
+                // 0. Receive latest live wind speed from the NOAA pipeline.
+                update_live_wind,
+                // 1. Apply live scale to the velocity field, then rebuild it.
+                apply_live_wind_scale.after(update_live_wind),
+                update_velocity_field.after(apply_live_wind_scale),
                 update_field_lines.after(update_velocity_field),
                 // 2. Everything that reads the results of the physics tick.
                 (

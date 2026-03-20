@@ -32,6 +32,8 @@ import httpx
 import numpy as np
 import pandas as pd
 
+from pipeline.wind_speed_pipeline import append_reading as _wind_append
+
 # ── Configuration ──────────────────────────────────────────────────────────────
 PLASMA_URL = os.environ.get(
     "SWPC_PLASMA_URL",
@@ -301,6 +303,17 @@ def run_once() -> bool:
 
         # JSON snapshot for API + browser
         write_current_conditions(recent, RESULTS_DIR / "current_conditions.json")
+
+        # Append latest reading to the rolling wind speed time-series.
+        if not recent.empty:
+            last = recent.iloc[-1]
+            _wind_append(
+                speed_km_s=float(-last["vx"]),
+                speed_norm=round(max(0.0, min(1.0, (-last["vx"] - 250) / 650)), 3),
+                density_cc=float(last["density"]),
+                bz_nT=float(last["bz_gsm"]),
+                timestamp=recent.index[-1].to_pydatetime(),
+            )
 
         return True
 

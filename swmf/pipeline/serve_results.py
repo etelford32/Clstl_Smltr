@@ -264,6 +264,43 @@ async def benchmark_ar3842():
     }
 
 
+@app.get("/v1/solar-wind/wind-speed", tags=["observations"])
+async def solar_wind_speed():
+    """
+    Live solar wind speed time-series (rolling 24-hour window).
+
+    Returns the current reading, trend (RISING / STEADY / FALLING), alert
+    level (QUIET / MODERATE / HIGH / EXTREME), and the full 1-minute series.
+    Updated every ~60 s by the ingest daemon via wind_speed_pipeline.
+    """
+    from pipeline.wind_speed_pipeline import SERIES_FILE, load_series_doc
+
+    doc = load_series_doc()
+    if doc is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Wind speed series not yet available. "
+                "Ingest daemon may still be initializing."
+            ),
+        )
+
+    age = _file_age_min(SERIES_FILE)
+    return {
+        "source":    "NOAA SWPC DSCOVR/ACE L1 (via wind_speed_pipeline)",
+        "age_min":   age,
+        "freshness": _freshness_status(age, 5, 20),
+        "data":      doc,
+        "units": {
+            "speed_km_s":         "km/s",
+            "speed_norm":         "0=250 km/s, 1=900 km/s",
+            "density_cc":         "protons/cm³",
+            "bz_nT":              "nT GSM (negative = southward)",
+            "slope_km_s_per_min": "km/s per minute (positive = accelerating)",
+        },
+    }
+
+
 @app.get("/v1/solar-wind/history", tags=["observations"])
 async def solar_wind_history(hours: float = 24.0):
     """
@@ -325,6 +362,7 @@ async def root():
         "health":     "/health",
         "endpoints": [
             "/v1/solar-wind/current",
+            "/v1/solar-wind/wind-speed",
             "/v1/forecast/latest",
             "/v1/benchmark/ar3842",
             "/v1/solar-wind/history",
