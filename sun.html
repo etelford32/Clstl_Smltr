@@ -292,6 +292,31 @@ nav {
 .note-text ul { margin:6px 0 0 14px; list-style:disc; }
 .note-text li { margin:2px 0; }
 
+/* ── Simulation time controls ───────────────────────────────── */
+.spd-btn { flex:1; padding:5px 3px; min-width:32px;
+    background:rgba(255,140,0,.10); border:1px solid rgba(255,140,0,.26);
+    border-radius:5px; color:#ffb060; cursor:pointer; font-family:inherit;
+    font-size:10px; font-weight:700; letter-spacing:.3px; transition:all .15s; }
+.spd-btn:hover  { background:rgba(255,140,0,.22); }
+.spd-btn.active { background:rgba(255,140,0,.30); border-color:#ff8c00; color:#ffd080; }
+.scrub-hdr { display:flex; justify-content:space-between; align-items:center; margin:10px 0 2px; }
+.scrub-hdr .scrub-edge { font-size:8.5px; color:#444; }
+#scrub-time-lbl { font-size:9px; font-weight:700; color:#44bb66; letter-spacing:.3px; }
+.scrub-vals { display:flex; justify-content:space-around; margin:6px 0 2px; }
+.scrub-val  { text-align:center; }
+.scrub-val .sv { font-size:11px; font-weight:700; color:#ffd080; }
+.scrub-val .su { font-size:8px; color:#555; margin-top:1px; }
+input#sl-scrub { width:100%; margin:0; height:20px; }
+
+/* ── Live feed status dots ───────────────────────────────────── */
+.feed-row { display:flex; align-items:center; gap:7px; font-size:10px; color:#666; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.03); }
+.feed-row:last-of-type { border-bottom:none; }
+.feed-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; background:#333; transition:background .4s, box-shadow .4s; }
+.feed-dot.live  { background:#44bb66; box-shadow:0 0 5px #44bb6688; }
+.feed-dot.stale { background:#cc8800; box-shadow:0 0 4px #cc880055; }
+.feed-dot.err   { background:#bb4444; }
+.feed-src { margin-left:auto; font-size:8px; color:#443322; }
+
 /* ── Live Solar Data ─────────────────────────────────────── */
 .live-meta { display:flex; justify-content:space-between; align-items:center; margin:4px 0 8px; }
 .live-status { font-size:10px; color:#555; }
@@ -690,6 +715,41 @@ nav {
         </div>
         <div id="panel-body">
 
+            <!-- ── Simulation Time ──────────────────────────────────── -->
+            <div class="sec">
+                <div class="sec-hd"><span>Simulation Time</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Speed multiplier slider -->
+                    <div class="ctrl">
+                        <label>Sim speed</label>
+                        <input type="range" id="sl-simspeed" min="0" max="50" step="0.5" value="1">
+                        <span class="vdisp" id="disp-simspeed">1.0×</span>
+                    </div>
+                    <!-- Preset speed buttons -->
+                    <div class="btn-row">
+                        <button class="spd-btn" id="spd-pause">⏸</button>
+                        <button class="spd-btn active" id="spd-1x">1×</button>
+                        <button class="spd-btn" id="spd-5x">5×</button>
+                        <button class="spd-btn" id="spd-10x">10×</button>
+                        <button class="spd-btn" id="spd-50x">50×</button>
+                    </div>
+                    <!-- 7-day SWPC data scrubber -->
+                    <div style="margin-top:10px">
+                        <div class="scrub-hdr">
+                            <span class="scrub-edge">7d ago</span>
+                            <span id="scrub-time-lbl">● LIVE</span>
+                            <span class="scrub-edge">now</span>
+                        </div>
+                        <input type="range" id="sl-scrub" min="0" max="10079" step="1" value="10079">
+                        <div class="scrub-vals" id="scrub-vals" style="display:none">
+                            <div class="scrub-val"><div class="sv" id="scrub-v-speed">—</div><div class="su">km/s</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-dens">—</div><div class="su">n/cc</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-bz">—</div><div class="su">Bz nT</div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="sec">
                 <div class="sec-hd"><span>Stellar Parameters</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -786,6 +846,22 @@ nav {
                         <p style="margin-top:5px"><strong>Differential rotation:</strong> Equator rotates in ~25 days, poles in ~35 days. This winds up magnetic field lines, driving activity.</p>
                         <p style="margin-top:5px"><strong>Corona mystery:</strong> The corona at 1–3 MK is 200× hotter than the photosphere. Likely heated by wave dissipation and reconnection events.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- ── NOAA Live Feed Status ─────────────────────────────── -->
+            <div class="sec closed" id="sec-feeds">
+                <div class="sec-hd"><span>NOAA Live Feeds</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="feed-row"><span class="feed-dot" id="fd-wind"></span>Solar wind plasma (DSCOVR)<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-imf"></span>IMF / Bz (DSCOVR)<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-kp"></span>Kp geomagnetic index<span class="feed-src">3-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-xray"></span>GOES X-ray flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-flares"></span>Solar flare events<span class="feed-src">7-day</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-regions"></span>Active sunspot regions<span class="feed-src">daily</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-cme"></span>CME analysis (DONKI)<span class="feed-src">48-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-sep"></span>SEP proton flux<span class="feed-src">1-min</span></div>
+                    <div id="swpc-last-upd" style="font-size:8.5px;color:#443322;margin-top:6px;text-align:right">Not yet updated</div>
                 </div>
             </div>
 
@@ -1001,6 +1077,124 @@ const backdrop = document.getElementById('backdrop');
 document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
 document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
 backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// ── Simulation speed ──────────────────────────────────────────────────────
+let simSpeed = 1.0;
+
+function setSimSpeed(v) {
+    simSpeed = v;
+    const sl = document.getElementById('sl-simspeed');
+    sl.value = v;
+    document.getElementById('disp-simspeed').textContent = v.toFixed(v < 1 ? 1 : 0) + '×';
+    ['spd-pause','spd-1x','spd-5x','spd-10x','spd-50x'].forEach(id =>
+        document.getElementById(id).classList.remove('active'));
+    const activeMap = { 0:'spd-pause', 1:'spd-1x', 5:'spd-5x', 10:'spd-10x', 50:'spd-50x' };
+    if (activeMap[v]) document.getElementById(activeMap[v]).classList.add('active');
+}
+
+document.getElementById('sl-simspeed').addEventListener('input', function() {
+    const v = +this.value;
+    simSpeed = v;
+    document.getElementById('disp-simspeed').textContent = v.toFixed(v < 1 ? 1 : 0) + '×';
+    ['spd-pause','spd-1x','spd-5x','spd-10x','spd-50x'].forEach(id =>
+        document.getElementById(id).classList.remove('active'));
+});
+document.getElementById('spd-pause').addEventListener('click', () => setSimSpeed(0));
+document.getElementById('spd-1x').addEventListener('click',    () => setSimSpeed(1));
+document.getElementById('spd-5x').addEventListener('click',    () => setSimSpeed(5));
+document.getElementById('spd-10x').addEventListener('click',   () => setSimSpeed(10));
+document.getElementById('spd-50x').addEventListener('click',   () => setSimSpeed(50));
+
+// ── 7-day SWPC scrubber ────────────────────────────────────────────────────
+let swpcTimeline = [];   // [{t, speed, density, bz}] oldest → newest
+let scrubLive    = true; // true = follow real-time swpc-update events
+
+(async function loadSwpcTimeline() {
+    const PLASMA = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json';
+    const MAG    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json';
+    try {
+        const [pRes, mRes] = await Promise.all([fetch(PLASMA), fetch(MAG)]);
+        if (!pRes.ok) throw new Error('plasma ' + pRes.status);
+        const [pRaw, mRaw] = await Promise.all([pRes.json(), mRes.ok ? mRes.json() : Promise.resolve(null)]);
+
+        // Parse plasma (row[0] = headers)
+        const pH = pRaw[0];
+        const [iTime, iSpd, iDns] = [pH.indexOf('time_tag'), pH.indexOf('speed'), pH.indexOf('density')];
+        const plasma = pRaw.slice(1)
+            .map(r => ({ t: r[iTime], speed: parseFloat(r[iSpd]), density: parseFloat(r[iDns]) }))
+            .filter(r => r.speed > 0 && r.density > 0);
+
+        // Parse mag → timestamp→bz map (key = "YYYY-MM-DD HH:MM")
+        let magMap = new Map();
+        if (mRaw) {
+            const mH = mRaw[0];
+            const [iMT, iBz] = [mH.indexOf('time_tag'), mH.indexOf('bz_gsm')];
+            mRaw.slice(1).forEach(r => {
+                const bz = parseFloat(r[iBz]);
+                if (!isNaN(bz) && Math.abs(bz) < 500)
+                    magMap.set(String(r[iMT]).slice(0,16), bz);
+            });
+        }
+
+        swpcTimeline = plasma.map(r => ({
+            t:       r.t,
+            speed:   r.speed,
+            density: r.density,
+            bz:      magMap.get(String(r.t).slice(0,16)) ?? null,
+        }));
+
+        const sl = document.getElementById('sl-scrub');
+        sl.max   = Math.max(0, swpcTimeline.length - 1);
+        sl.value = sl.max;   // start at live (rightmost)
+        console.log('[SWPC] 7-day timeline loaded:', swpcTimeline.length, 'readings');
+
+        // Mark wind + IMF feeds as live
+        ['fd-wind','fd-imf'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.className = 'feed-dot live';
+        });
+    } catch(e) {
+        console.warn('[SWPC] 7-day timeline fetch failed:', e.message);
+        ['fd-wind','fd-imf'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.className = 'feed-dot err';
+        });
+    }
+})();
+
+document.getElementById('sl-scrub').addEventListener('input', function() {
+    const idx    = +this.value;
+    const maxIdx = swpcTimeline.length - 1;
+    scrubLive    = (idx >= maxIdx);
+
+    const lbl = document.getElementById('scrub-time-lbl');
+    if (scrubLive || swpcTimeline.length === 0) {
+        lbl.textContent = '● LIVE';
+        lbl.style.color = '#44bb66';
+        document.getElementById('scrub-vals').style.display = 'none';
+        return;
+    }
+
+    const pt = swpcTimeline[Math.min(idx, maxIdx)];
+    if (!pt) return;
+
+    const d   = new Date(pt.t.replace(' ', 'T') + 'Z');
+    const lbl_str = d.toLocaleDateString('en-US', { month:'short', day:'numeric' })
+                  + ' ' + d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:false });
+    lbl.textContent = lbl_str;
+    lbl.style.color = '#ff9944';
+
+    document.getElementById('scrub-vals').style.display = 'flex';
+    document.getElementById('scrub-v-speed').textContent = pt.speed?.toFixed(0)   ?? '—';
+    document.getElementById('scrub-v-dens').textContent  = pt.density?.toFixed(1) ?? '—';
+    document.getElementById('scrub-v-bz').textContent    = pt.bz != null ? pt.bz.toFixed(1) : '—';
+
+    // Drive simulation with historical data
+    uniforms.u_wind_speed_norm.value   = Math.max(0, Math.min(1, (pt.speed   - 250) / 650));
+    uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, (pt.density ?? 5)  / 25));
+    if (pt.bz != null)
+        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -pt.bz / 30));
+});
 
 // SDO drawer toggle
 const sdoDrawer = document.getElementById('sdo-drawer');
@@ -2617,7 +2811,7 @@ let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 // ANIMATE
 function animate() {
     requestAnimationFrame(animate);
-    const dt = 0.010;
+    const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
 
     // Accumulate solar rotation to match photosphere UV scroll rate:
@@ -3349,10 +3543,28 @@ window.addEventListener('swpc-update', (ev) => {
     const gl  = Math.min(5, Math.floor(kp / 1.67));
     const gc  = _G_COLS_SUN[gl];
 
+    // ── Update feed status dots ────────────────────────────────────────────────
+    const _fd = id => document.getElementById(id);
+    if (spd > 0)  { if (_fd('fd-wind'))    _fd('fd-wind').className    = 'feed-dot live'; }
+    if (bz != null){ if (_fd('fd-imf'))    _fd('fd-imf').className     = 'feed-dot live'; }
+    if (kp  >= 0) { if (_fd('fd-kp'))     _fd('fd-kp').className      = 'feed-dot live'; }
+    if (sw.xray_flux) { if (_fd('fd-xray'))  _fd('fd-xray').className  = 'feed-dot live'; }
+    if (sw.recent_flares?.length) { if (_fd('fd-flares')) _fd('fd-flares').className = 'feed-dot live'; }
+    if (sw.active_regions?.length){ if (_fd('fd-regions'))_fd('fd-regions').className= 'feed-dot live'; }
+    if (sw.earth_directed_cme || sw.recent_cmes?.length) {
+        if (_fd('fd-cme')) _fd('fd-cme').className = 'feed-dot live';
+    }
+    if (sw.sep_storm_level > 0) { if (_fd('fd-sep')) _fd('fd-sep').className = 'feed-dot live'; }
+    const updEl = document.getElementById('swpc-last-upd');
+    if (updEl) updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
-    uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
-    uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
-    uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+    // Skip wind/IMF uniforms when user is scrubbing historical data
+    if (scrubLive) {
+        uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
+        uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
+        uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+    }
     uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
 
     // S-scale drives SEP particle system
