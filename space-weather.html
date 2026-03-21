@@ -353,6 +353,57 @@ nav {
     transition: color .2s;
 }
 .sol-canvas-wrap .sol-corner-link:hover { color: rgba(255,200,80,0.9); }
+
+/* ── SUN → EARTH CONNECTION SECTION ─────────────────────────────────────── */
+.sun-earth-section {
+    background: rgba(0,4,18,.7);
+    border: 1px solid rgba(0,198,255,.12);
+    border-radius: 14px;
+    padding: 18px 20px 14px;
+    margin-bottom: 16px;
+}
+.se-section-header {
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;
+}
+.se-title {
+    font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
+    color: #9cf;
+}
+.se-subtitle {
+    font-size: .72rem; color: #445;
+}
+.se-panels {
+    display: flex; gap: 16px; align-items: stretch;
+}
+.se-panorama-wrap {
+    flex: 3; min-width: 0; display: flex; flex-direction: column;
+}
+.se-earth-wrap {
+    flex: 2; min-width: 0; display: flex; flex-direction: column; align-items: center;
+}
+#se-panorama-canvas {
+    width: 100%; height: 220px; display: block;
+    border-radius: 8px; background: #020108;
+    border: 1px solid rgba(255,255,255,.05);
+}
+#se-earth-canvas {
+    width: 100%; max-width: 420px; height: 420px; display: block;
+    border-radius: 8px; background: #020108;
+    border: 1px solid rgba(255,255,255,.05);
+}
+.se-legend {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px;
+    font-size: .7rem; color: #556;
+}
+.se-legend span { display: flex; align-items: center; gap: 5px; }
+.leg-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+@media (max-width: 860px) {
+    .se-panels { flex-direction: column; }
+    #se-panorama-canvas { height: 180px; }
+    #se-earth-canvas { height: 320px; max-width: 100%; }
+}
 </style>
 </head>
 <body>
@@ -489,6 +540,46 @@ nav {
         </div>
 
     </div><!-- /hero-row -->
+
+    <!-- ── SUN → EARTH CONNECTION ─────────────────────────────────────────────── -->
+    <section class="sun-earth-section">
+        <div class="se-section-header">
+            <span class="se-title">☉ Sun → ⊕ Earth Connection</span>
+            <span class="se-subtitle">Heliosphere · Magnetosphere · Atmosphere · Van Allen Belts · Lagrange Points</span>
+        </div>
+        <div class="se-panels">
+
+            <!-- Panorama: Sun → L1 → Earth → L2 with Parker spiral & magnetosphere -->
+            <div class="se-panorama-wrap">
+                <canvas id="se-panorama-canvas"
+                    aria-label="Sun to Earth heliospheric panorama with Parker spiral and magnetosphere"
+                    role="img"></canvas>
+                <div class="se-legend">
+                    <span><span class="leg-dot" style="background:#ffcc44"></span>Solar Wind (Parker Spiral)</span>
+                    <span><span class="leg-dot" style="background:#ff7040"></span>CME Ejecta</span>
+                    <span><span class="leg-dot" style="background:#00e874"></span>L1 (DSCOVR/ACE) · L2 (JWST)</span>
+                    <span><span class="leg-dot" style="background:#6080ff"></span>Bow Shock</span>
+                    <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue model)</span>
+                </div>
+            </div>
+
+            <!-- Earth cross-section: atmosphere + Van Allen belts -->
+            <div class="se-earth-wrap">
+                <canvas id="se-earth-canvas"
+                    aria-label="Earth atmospheric layers and Van Allen radiation belts cross-section"
+                    role="img"></canvas>
+                <div class="se-legend" style="justify-content:center">
+                    <span><span class="leg-dot" style="background:#3a9fff"></span>Troposphere/Strat/Meso</span>
+                    <span><span class="leg-dot" style="background:#50d8ff"></span>Ionosphere D/E/F (X-ray driven)</span>
+                    <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen Inner Belt</span>
+                    <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen Outer Belt</span>
+                    <span><span class="leg-dot" style="background:#00ff88"></span>Aurora Oval (Kp driven)</span>
+                    <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause</span>
+                </div>
+            </div>
+
+        </div>
+    </section>
 
     <!-- ── DATA GRID ────────────────────────────────────────────────────────── -->
     <div class="data-grid">
@@ -1003,6 +1094,477 @@ new NasaFeed({ apiKey: 'DEMO_KEY' }).start();
 // ── Live solar canvas (shares the swpc-update event stream) ──────────────────
 const swCanvas = document.getElementById('sw-solar-canvas');
 if (swCanvas) new SolarLiveCanvas(swCanvas, { showOrbit: false }).start();
+
+// ── SUN → EARTH CONNECTION VISUALIZATION ─────────────────────────────────────
+// Two animated Canvas 2D panels:
+//   1. Panorama: Sun → Parker spiral → L1 → Earth → L2 (with bow shock + magnetopause)
+//   2. Earth cross-section: atmospheric layers + Van Allen belts + aurora ovals
+// All driven by live swpc-update state (speed, Bz, Kp, X-ray flux, SEP level).
+(function () {
+    const panCanvas   = el('se-panorama-canvas');
+    const earthCanvas = el('se-earth-canvas');
+    if (!panCanvas || !earthCanvas) return;
+
+    const DPR = window.devicePixelRatio || 1;
+
+    // Live state (seeded with reasonable defaults, overwritten by swpc-update)
+    const S = {
+        speed:   450, density: 5, bz: -2, bt: 5, by: 0,
+        kp: 2, xrayFlux: 1e-7, cmeActive: false, sepLevel: 0,
+    };
+    window.addEventListener('swpc-update', e => {
+        const d = e.detail, sw = d.solar_wind || {};
+        S.speed     = sw.speed    ?? S.speed;
+        S.density   = sw.density  ?? S.density;
+        S.bz        = sw.bz       ?? S.bz;
+        S.bt        = sw.bt       ?? S.bt;
+        S.by        = sw.by       ?? S.by;
+        S.kp        = d.kp        ?? S.kp;
+        S.xrayFlux  = d.xray_flux ?? S.xrayFlux;
+        S.cmeActive = d.cme_active ?? S.cmeActive;
+        S.sepLevel  = d.sep_level  ?? S.sepLevel;
+    });
+
+    // ── Canvas resize helpers ──────────────────────────────────────────────────
+    function resizePan() {
+        const r = panCanvas.getBoundingClientRect();
+        panCanvas.width  = r.width  * DPR;
+        panCanvas.height = r.height * DPR;
+    }
+    function resizeEarth() {
+        const r = earthCanvas.getBoundingClientRect();
+        earthCanvas.width  = r.width  * DPR;
+        earthCanvas.height = r.height * DPR;
+    }
+
+    // ── Star field (shared background) ────────────────────────────────────────
+    const STARS = Array.from({length: 120}, () => ({
+        x: Math.random(), y: Math.random(),
+        r: 0.4 + Math.random() * 0.8,
+        a: 0.2 + Math.random() * 0.6,
+    }));
+
+    // ── Solar wind particles (panorama) ───────────────────────────────────────
+    const N_WIND = 90;
+    const wPts = Array.from({length: N_WIND}, () => ({
+        x: Math.random(), y: 0.05 + Math.random() * 0.90,
+        vx: 0.0008 + Math.random() * 0.0012,
+        seed: Math.random(),
+    }));
+
+    // ── CME particles ─────────────────────────────────────────────────────────
+    const N_CME = 45;
+    const cmePts = Array.from({length: N_CME}, () => ({
+        x: 0.06 + Math.random() * 0.08,
+        y: 0.35 + Math.random() * 0.30,
+        vx: 0.002 + Math.random() * 0.003,
+        vy: (Math.random() - 0.5) * 0.0015,
+        seed: Math.random(), sz: 1.5 + Math.random() * 2,
+    }));
+
+    // ── Panorama draw ─────────────────────────────────────────────────────────
+    function drawPanorama(t) {
+        const ctx = panCanvas.getContext('2d');
+        const W = panCanvas.width, H = panCanvas.height;
+        ctx.save();
+        ctx.scale(DPR, DPR);
+        const w = W / DPR, h = H / DPR;
+
+        // Background
+        ctx.fillStyle = '#020108';
+        ctx.fillRect(0, 0, w, h);
+
+        // Stars
+        STARS.forEach(s => {
+            ctx.beginPath();
+            ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180,200,255,${s.a * (0.6 + 0.4 * Math.sin(t * 0.7 + s.seed * 10))})`;
+            ctx.fill();
+        });
+
+        // Key geometry positions (logical pixels)
+        const sunX = w * 0.07, sunY = h * 0.50;
+        const earthX = w * 0.82, earthY = h * 0.50;
+        const sunR  = h * 0.22;
+        const eR    = h * 0.08;     // Earth radius on screen
+
+        // Shue magnetopause standoff (in units of eR)
+        const bzS  = Math.max(-S.bz, 0);
+        const mpMult = 10.9 * Math.pow(1 + 0.013 * bzS, -1 / 2.1);
+        const mpR  = eR * mpMult;
+        const bsR  = mpR * 1.38;
+
+        // Fraction of Sun→Earth distance that L1/L2 occupy on screen
+        const l1X = earthX - (earthX - sunX) * 0.14;
+        const l2X = earthX + (earthX - sunX) * 0.13;
+
+        // ── Parker spiral arms ───────────────────────────────────────────────
+        const nArms = 5;
+        const spdNorm = Math.max(0, Math.min(1, (S.speed - 250) / 650));
+        for (let s = 0; s < nArms; s++) {
+            const yFrac = (s / (nArms - 1) - 0.5) * 0.78;
+            const y0 = sunY + yFrac * h;
+            const yE = earthY + yFrac * h * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(sunX + sunR * 0.9, y0);
+            ctx.bezierCurveTo(
+                sunX + (earthX - sunX) * 0.28, y0 * 0.92 + sunY * 0.08,
+                sunX + (earthX - sunX) * 0.66, yE * 0.94 + earthY * 0.06,
+                earthX - mpR * 1.1, yE
+            );
+            const baseA = 0.08 + spdNorm * 0.14;
+            const grad = ctx.createLinearGradient(sunX, sunY, earthX, earthY);
+            grad.addColorStop(0, `rgba(255,200,60,${baseA * 2.2})`);
+            grad.addColorStop(0.55, `rgba(255,160,50,${baseA})`);
+            grad.addColorStop(1, `rgba(255,120,40,${baseA * 0.3})`);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 1.3;
+            ctx.setLineDash([5, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // ── Animated solar wind dots ─────────────────────────────────────────
+        wPts.forEach(p => {
+            p.x += p.vx * (S.speed / 450);
+            if (p.x > 1) { p.x = 0.13; p.y = 0.05 + Math.random() * 0.90; }
+            const px = p.x * w, py = p.y * h;
+            const dx = px - earthX, dy = py - earthY;
+            if (Math.sqrt(dx * dx + dy * dy) < mpR * 1.05) return; // inside magnetopause
+            ctx.beginPath();
+            ctx.arc(px, py, 1.3, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,210,80,${0.25 + 0.35 * Math.sin(t * 2.2 + p.seed * 9)})`;
+            ctx.fill();
+        });
+
+        // ── CME ejecta ───────────────────────────────────────────────────────
+        if (S.cmeActive) {
+            cmePts.forEach(p => {
+                p.x += p.vx * (S.speed / 400);
+                p.y += p.vy;
+                if (p.x > 1) { p.x = 0.06; p.y = 0.35 + Math.random() * 0.30; }
+                if (p.y < 0.02 || p.y > 0.98) p.vy *= -1;
+                ctx.beginPath();
+                ctx.arc(p.x * w, p.y * h, p.sz, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,140,50,${0.5 + 0.4 * Math.sin(t * 3.5 + p.seed * 7)})`;
+                ctx.fill();
+            });
+        }
+
+        // ── Sun ───────────────────────────────────────────────────────────────
+        // Corona glow
+        const xRayBrt = Math.min(1, Math.log10(Math.max(S.xrayFlux, 1e-9) / 1e-9) / 6);
+        for (let ri = 0; ri < 5; ri++) {
+            const cr = sunR * (1.4 + ri * 0.38);
+            const cg = ctx.createRadialGradient(sunX, sunY, sunR, sunX, sunY, cr);
+            const ca = (0.04 + xRayBrt * 0.06) * (1 - ri / 5);
+            cg.addColorStop(0, `rgba(255,200,80,${ca * 2})`);
+            cg.addColorStop(1, 'rgba(255,200,80,0)');
+            ctx.beginPath(); ctx.arc(sunX, sunY, cr, 0, Math.PI * 2);
+            ctx.fillStyle = cg; ctx.fill();
+        }
+        const sg = ctx.createRadialGradient(sunX - sunR * 0.18, sunY - sunR * 0.18, 0, sunX, sunY, sunR);
+        sg.addColorStop(0, '#fff8e0'); sg.addColorStop(0.4, '#ffd700');
+        sg.addColorStop(0.82, '#ff8c00'); sg.addColorStop(1, '#cc3300');
+        ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+        ctx.fillStyle = sg; ctx.fill();
+
+        // X-ray flare pulse
+        if (xRayBrt > 0.3) {
+            const fp = (Math.sin(t * 3.5) * 0.5 + 0.5) * xRayBrt * 0.4;
+            const fg = ctx.createRadialGradient(sunX, sunY, sunR, sunX, sunY, sunR * 1.6);
+            fg.addColorStop(0, `rgba(255,255,200,${fp})`); fg.addColorStop(1, 'rgba(255,255,200,0)');
+            ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 1.6, 0, Math.PI * 2);
+            ctx.fillStyle = fg; ctx.fill();
+        }
+
+        // ── Bow Shock (Spreiter parabola) ─────────────────────────────────────
+        ctx.save(); ctx.translate(earthX, earthY);
+        ctx.beginPath();
+        for (let i = 0; i <= 60; i++) {
+            const th = (i / 60 - 0.5) * Math.PI * 1.7;
+            const r  = bsR * (1.05 + 0.12 * th * th) / (1 + 0.62 * Math.cos(th));
+            const bx = -r * Math.cos(th), by = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(bx, by) : ctx.lineTo(bx, by);
+        }
+        ctx.strokeStyle = 'rgba(80,150,255,0.4)';
+        ctx.lineWidth = 1.4; ctx.stroke();
+        ctx.restore();
+
+        // ── Magnetopause (Shue model, teardrop) ───────────────────────────────
+        ctx.save(); ctx.translate(earthX, earthY);
+        const mpCol = S.bz < -15 ? 'rgba(200,60,255,0.6)' : S.bz < -5 ? 'rgba(150,80,255,0.5)' : 'rgba(100,120,255,0.38)';
+        ctx.beginPath();
+        for (let i = 0; i <= 60; i++) {
+            const th = (i / 60 - 0.5) * Math.PI * 1.7;
+            const r  = mpR * (1.04 + 0.08 * th * th) / (1 + 0.52 * Math.cos(th));
+            const mx = -r * Math.cos(th), my = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+        }
+        ctx.strokeStyle = mpCol; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+
+        // ── Earth ─────────────────────────────────────────────────────────────
+        // Atmosphere glow
+        const kpNorm = Math.min(S.kp / 9, 1);
+        const atmCol = kpNorm > 0.7 ? 'rgba(255,40,120,' : kpNorm > 0.4 ? 'rgba(80,255,140,' : 'rgba(60,160,255,';
+        const ag = ctx.createRadialGradient(earthX, earthY, eR, earthX, earthY, eR * 1.55);
+        ag.addColorStop(0, atmCol + '0.3)'); ag.addColorStop(1, atmCol + '0)');
+        ctx.beginPath(); ctx.arc(earthX, earthY, eR * 1.55, 0, Math.PI * 2);
+        ctx.fillStyle = ag; ctx.fill();
+
+        // Night side
+        ctx.beginPath(); ctx.arc(earthX, earthY, eR, 0, Math.PI * 2);
+        ctx.fillStyle = '#081828'; ctx.fill();
+
+        // Day side (lit from Sun on left)
+        const dg = ctx.createRadialGradient(earthX - eR * 0.3, earthY, 0, earthX, earthY, eR);
+        dg.addColorStop(0, '#4499ff'); dg.addColorStop(0.5, '#1e60bf');
+        dg.addColorStop(0.85, '#0a2050'); dg.addColorStop(1, '#030818');
+        ctx.save(); ctx.beginPath();
+        ctx.arc(earthX, earthY, eR, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(earthX, earthY + eR);
+        ctx.arc(earthX, earthY, eR, Math.PI / 2, -Math.PI / 2, true);
+        ctx.closePath(); ctx.fillStyle = dg; ctx.fill(); ctx.restore();
+
+        // ── L1 point ─────────────────────────────────────────────────────────
+        const l1Pulse = 0.5 + 0.5 * Math.sin(t * 2.5);
+        ctx.beginPath(); ctx.arc(l1X, earthY, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,232,116,${0.5 + 0.4 * l1Pulse})`; ctx.fill();
+        ctx.shadowColor = '#00e874'; ctx.shadowBlur = 6 * l1Pulse;
+        ctx.beginPath(); ctx.arc(l1X, earthY, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#00e874'; ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00e874'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('L1', l1X, earthY - 10);
+        ctx.fillStyle = '#334'; ctx.font = '7.5px monospace';
+        ctx.fillText('DSCOVR·ACE', l1X, earthY - 20);
+
+        // ── L2 point ─────────────────────────────────────────────────────────
+        const l2Pulse = 0.5 + 0.5 * Math.sin(t * 2.5 + 1.3);
+        ctx.shadowColor = '#00e874'; ctx.shadowBlur = 5 * l2Pulse;
+        ctx.beginPath(); ctx.arc(l2X, earthY, 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,220,100,${0.4 + 0.3 * l2Pulse})`; ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00c870'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('L2', l2X, earthY - 10);
+        ctx.fillStyle = '#334'; ctx.font = '7.5px monospace';
+        ctx.fillText('JWST·Gaia', l2X, earthY - 20);
+
+        // ── Status labels ─────────────────────────────────────────────────────
+        ctx.textAlign = 'center'; ctx.font = 'bold 9.5px monospace';
+        ctx.fillStyle = S.speed > 700 ? '#ff6644' : S.speed > 500 ? '#ffaa44' : '#88cc88';
+        ctx.fillText(`${Math.round(S.speed)} km/s`, (sunX + earthX) / 2, h - 7);
+        ctx.fillStyle = S.bz < -15 ? '#ff4488' : S.bz < -5 ? '#ffaa44' : '#44aa66';
+        ctx.fillText(`Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT`, earthX - 2, h - 7);
+        ctx.fillStyle = '#334'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('1 AU  ·  ←  150 × 10⁶ km  →', sunX + sunR + 6, h - 7);
+
+        // Magnetopause distance label
+        ctx.fillStyle = '#554'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(`R_mp=${mpMult.toFixed(1)} R⊕`, earthX - mpR * 1.1, earthY - mpR * 0.6);
+        ctx.fillStyle = '#446'; ctx.font = '8px monospace';
+        ctx.fillText('Bow Shock', earthX - bsR * 0.95, earthY - bsR * 0.55);
+
+        ctx.restore();
+    }
+
+    // ── Earth Layers Draw ─────────────────────────────────────────────────────
+    function drawEarth(t) {
+        const ctx = earthCanvas.getContext('2d');
+        const W = earthCanvas.width, H = earthCanvas.height;
+        ctx.save();
+        ctx.scale(DPR, DPR);
+        const w = W / DPR, h = H / DPR;
+        const cx = w / 2, cy = h / 2;
+        const R = Math.min(w, h) * 0.135;   // Earth radius in logical px
+
+        // Background
+        ctx.fillStyle = '#030108';
+        ctx.fillRect(0, 0, w, h);
+
+        // Stars
+        STARS.forEach(s => {
+            ctx.beginPath();
+            ctx.arc(s.x * w, s.y * h, s.r * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180,200,255,${s.a * 0.7})`;
+            ctx.fill();
+        });
+
+        // Derived metrics
+        const kpNorm   = Math.min(S.kp / 9, 1);
+        const bzS      = Math.max(-S.bz, 0);
+        const xRayNorm = Math.min(Math.log10(Math.max(S.xrayFlux, 1e-9) / 1e-9) / 6, 1);
+        const sepNorm  = Math.min(S.sepLevel / 5, 1);
+        const spdNorm  = Math.max(0, Math.min(1, (S.speed - 250) / 650));
+
+        // Magnetopause standoff
+        const mpRad = R * 10.9 * Math.pow(1 + 0.013 * bzS, -1 / 2.1);
+
+        // ── Layer rings (innermost→outermost) ────────────────────────────────
+        const layers = [
+            // Atmosphere
+            { r1: R,        r2: R * 1.085, rgb: [30, 100, 220],  a: 0.55, label: null },   // Troposphere fill
+            { r1: R*1.085,  r2: R*1.155,   rgb: [20, 145, 200],  a: 0.35, label: null },   // Stratosphere
+            { r1: R*1.155,  r2: R*1.215,   rgb: [30, 175, 195],  a: 0.30, label: null },   // Mesosphere
+            // Ionosphere (driven by X-ray)
+            { r1: R*1.215,  r2: R*1.30,    rgb: [40, 210, 255],  a: 0.15 + xRayNorm * 0.35, label: null },   // D layer
+            { r1: R*1.30,   r2: R*1.42,    rgb: [100, 225, 255], a: 0.12 + xRayNorm * 0.28, label: null },   // E layer
+            { r1: R*1.42,   r2: R*1.68,    rgb: [140, 205, 255], a: 0.10 + xRayNorm * 0.24, label: null },   // F layer
+            // Plasmasphere
+            { r1: R*1.68,   r2: R*2.1,     rgb: [80, 120, 200],  a: 0.07 + kpNorm * 0.06, label: null },
+            // Inner Van Allen Belt (proton belt ~1–3 R⊕)
+            { r1: R*2.1,    r2: R*3.1,     rgb: [255, 165, 40],  a: 0.11 + sepNorm * 0.26 + kpNorm * 0.07, label: null },
+            // Slot region
+            { r1: R*3.1,    r2: R*3.55,    rgb: [50, 55, 110],   a: 0.04, label: null },
+            // Outer Van Allen Belt (electron belt ~3–10 R⊕)
+            { r1: R*3.55,   r2: R*6.8,     rgb: [255, 95, 50],   a: 0.09 + kpNorm * 0.20 + sepNorm * 0.14, label: null },
+            // Magnetopause
+            { r1: mpRad*0.88, r2: mpRad,   rgb: [110, 75, 255],  a: 0.14 + kpNorm * 0.09, label: null },
+        ];
+
+        layers.forEach(L => {
+            const grad = ctx.createRadialGradient(cx, cy, L.r1, cx, cy, L.r2);
+            const [r, g, b] = L.rgb;
+            const aIn  = Math.min(L.a * 0.55, 0.85);
+            const aMid = Math.min(L.a, 0.85);
+            const aOut = 0;
+            grad.addColorStop(0,   `rgba(${r},${g},${b},${aIn})`);
+            grad.addColorStop(0.5, `rgba(${r},${g},${b},${aMid})`);
+            grad.addColorStop(1,   `rgba(${r},${g},${b},${aOut})`);
+            ctx.beginPath();
+            ctx.arc(cx, cy, L.r2, 0, Math.PI * 2);
+            ctx.arc(cx, cy, L.r1, 0, Math.PI * 2, true);
+            ctx.fillStyle = grad;
+            ctx.fill();
+        });
+
+        // ── Magnetopause boundary line ────────────────────────────────────────
+        ctx.save(); ctx.translate(cx, cy);
+        const mpLineCol = S.bz < -15 ? 'rgba(200,60,255,0.55)' : S.bz < -5 ? 'rgba(150,80,255,0.45)' : 'rgba(100,100,255,0.32)';
+        ctx.beginPath();
+        for (let i = 0; i <= 72; i++) {
+            const th = (i / 72 - 0.5) * Math.PI * 1.8;
+            const r  = mpRad * (1.03 + 0.07 * th * th) / (1 + 0.48 * Math.cos(th));
+            const mx = -r * Math.cos(th), my = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+        }
+        ctx.strokeStyle = mpLineCol; ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+
+        // ── Aurora ovals ──────────────────────────────────────────────────────
+        const auroraAlpha = 0.15 + kpNorm * 0.65;
+        const auroraRGB   = kpNorm > 0.7 ? '255,50,130' : kpNorm > 0.4 ? '80,255,130' : '40,200,110';
+        const auroraLat   = (75 - kpNorm * 35) * Math.PI / 180;  // equatorward with high Kp
+        const aRing = R * 1.26;  // aurora altitude ~300km above surface
+        const nAurRx = aRing * Math.sin(auroraLat);
+        const nAurRy = nAurRx * 0.22;   // flattened for top-down-ish perspective
+
+        // North aurora
+        const nAurY = cy - R * Math.cos(auroraLat) * 0.88;
+        ctx.save();
+        ctx.shadowColor = kpNorm > 0.4 ? (kpNorm > 0.7 ? '#ff3080' : '#00ff88') : '#00cc88';
+        ctx.shadowBlur = 10 * kpNorm;
+        ctx.beginPath(); ctx.ellipse(cx, nAurY, nAurRx, nAurRy, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${auroraRGB},${auroraAlpha})`; ctx.lineWidth = 4.5; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.restore();
+
+        // South aurora
+        const sAurY = cy + R * Math.cos(auroraLat) * 0.88;
+        ctx.save(); ctx.shadowColor = ctx.shadowColor;
+        ctx.shadowBlur = 10 * kpNorm;
+        ctx.beginPath(); ctx.ellipse(cx, sAurY, nAurRx, nAurRy, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${auroraRGB},${auroraAlpha * 0.85})`; ctx.lineWidth = 4.5; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.restore();
+
+        // ── Earth disk ────────────────────────────────────────────────────────
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        const eg = ctx.createRadialGradient(cx - R * 0.22, cy - R * 0.22, 0, cx, cy, R);
+        eg.addColorStop(0, '#2a60a8'); eg.addColorStop(0.5, '#1a3a6a'); eg.addColorStop(1, '#080e22');
+        ctx.fillStyle = eg; ctx.fill();
+
+        // Simplified continents
+        ctx.save(); ctx.clip();
+        ctx.fillStyle = 'rgba(38,98,38,0.72)';
+        ctx.beginPath(); ctx.ellipse(cx - R*0.33, cy - R*0.14, R*0.27, R*0.21, -0.2, 0, Math.PI*2); ctx.fill();  // N. America
+        ctx.beginPath(); ctx.ellipse(cx + R*0.12, cy - R*0.17, R*0.36, R*0.17, 0.3, 0, Math.PI*2);  ctx.fill();  // Eurasia
+        ctx.beginPath(); ctx.ellipse(cx + R*0.14, cy + R*0.10, R*0.16, R*0.26, 0.1, 0, Math.PI*2);  ctx.fill();  // Africa
+        ctx.beginPath(); ctx.ellipse(cx - R*0.22, cy + R*0.24, R*0.13, R*0.22, -0.2, 0, Math.PI*2); ctx.fill();  // S. America
+        ctx.beginPath(); ctx.ellipse(cx + R*0.42, cy + R*0.22, R*0.22, R*0.14, 0.5, 0, Math.PI*2);  ctx.fill();  // Australia
+        // Ice caps
+        ctx.fillStyle = 'rgba(220,238,255,0.88)';
+        ctx.beginPath(); ctx.ellipse(cx, cy - R*0.83, R*0.34, R*0.13, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, cy + R*0.83, R*0.42, R*0.17, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // Atmosphere rim glow
+        const rimG = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.09);
+        rimG.addColorStop(0, 'rgba(60,150,255,0)');
+        rimG.addColorStop(0.55, 'rgba(80,170,255,0.38)');
+        rimG.addColorStop(1, 'rgba(80,200,255,0)');
+        ctx.beginPath(); ctx.arc(cx, cy, R * 1.09, 0, Math.PI * 2);
+        ctx.fillStyle = rimG; ctx.fill();
+
+        // ── Layer labels (right side, angled leader lines) ────────────────────
+        const labelDefs = [
+            { r: R * 1.04,  txt: 'Troposphere',       sub: '0–12 km',         col: '#3a9fff' },
+            { r: R * 1.12,  txt: 'Stratosphere',       sub: '12–50 km',        col: '#28b8cc' },
+            { r: R * 1.18,  txt: 'Mesosphere',         sub: '50–80 km',        col: '#30c4cc' },
+            { r: R * 1.25,  txt: 'Iono D layer',       sub: '80–120 km',       col: `rgba(${40 + xRayNorm * 200},210,255,1)` },
+            { r: R * 1.36,  txt: 'Iono E layer',       sub: '120–200 km',      col: `rgba(${100 + xRayNorm * 155},225,255,1)` },
+            { r: R * 1.55,  txt: 'Iono F layer',       sub: '200–600 km',      col: `rgba(${140 + xRayNorm * 115},205,255,1)` },
+            { r: R * 1.88,  txt: 'Plasmasphere',       sub: '1–3 R⊕',         col: '#6080cc' },
+            { r: R * 2.55,  txt: 'Van Allen (inner)',  sub: 'protons ~1–3 R⊕',  col: '#ffa040' },
+            { r: R * 5.1,   txt: 'Van Allen (outer)',  sub: 'electrons ~3–7 R⊕',col: '#ff6040' },
+            { r: mpRad * 0.92, txt: `Magnetopause`,    sub: `${(mpRad/R).toFixed(1)} R⊕ (Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT)`, col: '#9060ff' },
+        ];
+
+        const LA = -Math.PI * 0.28;   // label angle (upper-right quadrant)
+        ctx.save();
+        labelDefs.forEach((d, i) => {
+            const lx0 = cx + d.r * Math.cos(LA);
+            const ly0 = cy + d.r * Math.sin(LA);
+            const lx1 = lx0 + 8;
+            const ly1 = ly0 - 1;
+            ctx.beginPath(); ctx.moveTo(lx0, ly0); ctx.lineTo(lx1, ly1);
+            ctx.strokeStyle = d.col + '66'; ctx.lineWidth = 0.9; ctx.stroke();
+            ctx.fillStyle = d.col;
+            ctx.font = `bold 8px 'Segoe UI', monospace`;
+            ctx.textAlign = 'left'; ctx.fillText(d.txt, lx1 + 2, ly1 + 3);
+            ctx.fillStyle = '#445'; ctx.font = '7px monospace';
+            ctx.fillText(d.sub, lx1 + 2, ly1 + 11);
+        });
+        ctx.restore();
+
+        // ── Title & live indicators ────────────────────────────────────────────
+        ctx.fillStyle = '#334'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Earth: Atmosphere · Radiation Belts · Magnetosphere', cx, 13);
+
+        ctx.textAlign = 'left'; ctx.font = '8px monospace';
+        ctx.fillStyle = kpNorm > 0.6 ? '#ff6080' : kpNorm > 0.35 ? '#ffaa44' : '#447744';
+        ctx.fillText(`Kp ${S.kp.toFixed(1)}`, 5, h - 16);
+        ctx.fillStyle = S.bz < -10 ? '#ff4488' : S.bz < -5 ? '#ffaa44' : '#448844';
+        ctx.fillText(`Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT`, 5, h - 6);
+        ctx.textAlign = 'right';
+        const xC = xRayNorm > 0.83 ? 'X' : xRayNorm > 0.66 ? 'M' : xRayNorm > 0.50 ? 'C' : xRayNorm > 0.33 ? 'B' : 'A';
+        ctx.fillStyle = xC === 'X' ? '#ff4444' : xC === 'M' ? '#ff8844' : '#4a7a4a';
+        ctx.fillText(`X-ray: ${xC}  SEP: S${S.sepLevel}`, w - 5, h - 6);
+
+        ctx.restore();
+    }
+
+    // ── Animation loop ─────────────────────────────────────────────────────────
+    function animate(now) {
+        requestAnimationFrame(animate);
+        const t = now / 1000;
+        drawPanorama(t);
+        drawEarth(t);
+    }
+
+    function onResize() { resizePan(); resizeEarth(); }
+    onResize();
+    window.addEventListener('resize', onResize);
+    requestAnimationFrame(animate);
+})();
 
 // ── Image overlay ─────────────────────────────────────────────────────────────
 window.openImg = function(thumb) {
