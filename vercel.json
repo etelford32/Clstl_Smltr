@@ -90,6 +90,10 @@
     {
       "source": "/api-policy",
       "destination": "/api-policy.html"
+    },
+    {
+      "source": "/v1/solar-wind/:path*",
+      "destination": "/api/solar-wind/:path*"
     }
   ]
 }
