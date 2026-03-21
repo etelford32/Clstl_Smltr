@@ -1048,6 +1048,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 import * as THREE             from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import WindPipelineFeed        from './js/wind-pipeline-feed.js';
 import { SohoFeed }           from './js/extended-feeds.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
@@ -3675,8 +3676,9 @@ window.addEventListener('wind-pipeline-update', (ev) => {
     if (fdW) fdW.className = wp.freshness === 'fresh' ? 'feed-dot live' : 'feed-dot stale';
 });
 
-const _wpFeed = new WindPipelineFeed();
-_wpFeed.start();
+// ── Start SpaceWeatherFeed FIRST — this is the primary NOAA data pipeline ──────
+// Must be started before the optional wind-pipeline so any startup error in the
+// wind pipeline (server not running) cannot block the primary feed.
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
@@ -3747,8 +3749,17 @@ function _updateRibbonXray() {
 }
 
 // SpaceWeatherFeed provides solar wind, Kp, Bz — same feed as Earth view
+// Primary NOAA real-time feed — must start unconditionally
 const _swFeed = new SpaceWeatherFeed();
 _swFeed.start();
+
+// Optional processed wind pipeline (local FastAPI / Vercel edge) — fails silently
+// when the server isn't running so it never blocks the primary NOAA feed.
+try {
+    new WindPipelineFeed().start();
+} catch (e) {
+    console.debug('[WindPipeline] server not available, using NOAA data only:', e.message);
+}
 
 window.addEventListener('swpc-update', (ev) => {
     const sw  = ev.detail;
