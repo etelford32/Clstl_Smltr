@@ -326,6 +326,33 @@ nav {
     font-size:.74rem; color:#445; line-height:2;
 }
 .sw-footer a { color:#667; }
+
+/* ── LIVE SOLAR CANVAS WIDGET ────────────────────────────────────────────── */
+.sol-canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 320px;
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    border: 1px solid rgba(255,180,40,0.12);
+    background: #020109;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.6), inset 0 0 60px rgba(255,120,20,0.04);
+}
+@media (max-width: 600px) {
+    .sol-canvas-wrap { height: 230px; }
+}
+#sw-solar-canvas {
+    display: block;
+    width: 100%; height: 100%;
+}
+.sol-canvas-wrap .sol-corner-link {
+    position: absolute; bottom: 12px; right: 14px; z-index: 10;
+    font-size: .72rem; color: rgba(255,180,60,0.5);
+    text-decoration: none; font-family: monospace;
+    transition: color .2s;
+}
+.sol-canvas-wrap .sol-corner-link:hover { color: rgba(255,200,80,0.9); }
 </style>
 </head>
 <body>
@@ -380,6 +407,16 @@ nav {
 
     <!-- Alerts bar (hidden by default) -->
     <div id="alerts-bar"></div>
+
+    <!-- ── LIVE SOLAR CANVAS ─────────────────────────────────────────────── -->
+    <!-- Real-time solar disk: active regions, flares, solar wind particles     -->
+    <!-- driven by the same swpc-update event the metrics cards below use.     -->
+    <div class="sol-canvas-wrap">
+        <canvas id="sw-solar-canvas"
+                aria-label="Live solar disk — NOAA active regions and flare activity"
+                role="img"></canvas>
+        <a class="sol-corner-link" href="sun.html" title="Open full Sun simulator">☉ Full simulator →</a>
+    </div>
 
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
     <div class="hero-row">
@@ -685,6 +722,7 @@ nav {
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { SohoFeed }         from './js/extended-feeds.js';
 import { NasaFeed }         from './js/nasa-feed.js';
+import { SolarLiveCanvas }  from './js/solar-live-canvas.js';
 
 // ── NAV burger ─────────────────────────────────────────────────────────────────
 const burger  = document.getElementById('nav-burger');
@@ -961,6 +999,10 @@ window.addEventListener('soho-update', e => {
 new SpaceWeatherFeed().start();
 new SohoFeed().start();
 new NasaFeed({ apiKey: 'DEMO_KEY' }).start();
+
+// ── Live solar canvas (shares the swpc-update event stream) ──────────────────
+const swCanvas = document.getElementById('sw-solar-canvas');
+if (swCanvas) new SolarLiveCanvas(swCanvas, { showOrbit: false }).start();
 
 // ── Image overlay ─────────────────────────────────────────────────────────────
 window.openImg = function(thumb) {
