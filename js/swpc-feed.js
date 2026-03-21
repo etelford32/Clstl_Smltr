@@ -74,12 +74,16 @@ export const ENDPOINTS = {
     /** GOES differential proton flux 1-day (energy-resolved: 1–500 MeV) */
     diff_protons: 'https://services.swpc.noaa.gov/json/goes/primary/differential-protons-1-day.json',
 
-    // ── NASA CCMC / DONKI (Space Weather Database Of Notifications, Knowledge, Info) ──
-    /** CME Analysis — cone model, speed, direction, ENLIL model arrival times.
-     *  Requires dynamic date params; base URL completed at fetch time. */
-    donki_cme:    'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/CMEAnalysis',
-    /** DONKI notifications — all space weather events, last 30 days */
-    donki_notify: 'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/notifications',
+    // ── NASA DONKI (Space Weather Database Of Notifications, Knowledge, Information) ──
+    // NOTE: kauai.ccmc.gsfc.nasa.gov is the old host (CORS issues / 404s in 2025-26).
+    //       The canonical CORS-enabled endpoint is now at api.nasa.gov. DEMO_KEY gives
+    //       30 req/hr, 50 req/day — sufficient for a 5-minute poll interval.
+    /** CME Analysis — cone model, speed, direction, ENLIL arrival forecast */
+    donki_cme:    'https://api.nasa.gov/DONKI/CMEAnalysis',
+    /** DONKI all-event notifications (FLR, CME, GST, SEP, …) */
+    donki_notify: 'https://api.nasa.gov/DONKI/notifications',
+    /** DONKI API key (DEMO_KEY works for development; replace for production) */
+    donki_key:    'DEMO_KEY',
 };
 
 // ── Quiet-Sun baseline (used as fallback when endpoints are unavailable) ──────
@@ -489,7 +493,8 @@ async function fetchDONKICME(state) {
     const fmt   = d => d.toISOString().split('T')[0];
     const url   = `${ENDPOINTS.donki_cme}` +
                   `?mostAccurateOnly=true` +
-                  `&startDate=${fmt(start)}&endDate=${fmt(now)}`;
+                  `&startDate=${fmt(start)}&endDate=${fmt(now)}` +
+                  `&api_key=${ENDPOINTS.donki_key}`;
 
     let data;
     try { data = await fetchJSON(url); }
@@ -568,7 +573,7 @@ async function fetchDONKINotifications(state) {
     const now   = new Date();
     const start = new Date(now - 7 * 86400e3);
     const fmt   = d => d.toISOString().split('T')[0];
-    const url   = `${ENDPOINTS.donki_notify}?type=all&startDate=${fmt(start)}&endDate=${fmt(now)}`;
+    const url   = `${ENDPOINTS.donki_notify}?type=all&startDate=${fmt(start)}&endDate=${fmt(now)}&api_key=${ENDPOINTS.donki_key}`;
 
     let data;
     try { data = await fetchJSON(url); }
