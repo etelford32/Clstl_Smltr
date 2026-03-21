@@ -702,6 +702,11 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             </div>
         </div>
 
+        <!-- NOAA live feed timestamp — always visible, confirms data stream is alive -->
+        <div id="sw-noaa-ts" style="font-size:9px;color:#997755;padding:2px 10px 3px;text-align:right;
+             border-top:1px solid rgba(180,120,40,0.15);letter-spacing:0.03em">
+            NOAA · connecting…
+        </div>
     </div>
 
     <aside id="panel">
@@ -3460,19 +3465,20 @@ async function fetchLiveSolarData() {
     st.className   = 'live-status';
     st.textContent = 'Fetching NOAA/SWPC…';
 
+    // Helper: fetch JSON, return null on any error (network or HTTP 4xx/5xx)
+    const tryFetch = url => fetch(url, { cache: 'no-cache' })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null);
+
     try {
-        const [rR, eR, xR] = await Promise.all([
-            fetch(SWPC + '/products/solar-regions.json'),
-            fetch(SWPC + '/json/edited_events.json'),
-            fetch(SWPC + '/json/goes/primary/xray-1-day.json'),
+        const [rJ, eJ, xJ] = await Promise.all([
+            tryFetch(SWPC + '/products/solar-regions.json'),
+            tryFetch(SWPC + '/json/goes/primary/xray-flares-7day.json'),
+            tryFetch(SWPC + '/json/goes/primary/xray-1-day.json'),
         ]);
 
-        // Check HTTP status before parsing — fetch() doesn't throw on 4xx/5xx
-        if (!rR.ok || !eR.ok || !xR.ok) {
-            throw new Error(`NOAA HTTP ${rR.status}/${eR.status}/${xR.status}`);
-        }
-
-        const [rJ, eJ, xJ] = await Promise.all([rR.json(), eR.json(), xR.json()]);
+        // Fail only if every endpoint returned nothing useful
+        if (!rJ && !eJ && !xJ) throw new Error('All NOAA endpoints returned null');
 
         // Active regions — first row is header array, rest are data
         // NOAA solar-regions.json column layout:
@@ -3495,20 +3501,22 @@ async function fetchLiveSolarData() {
         }
         // If server returned an empty list keep default — quiet day data is still useful
 
-        // Flares from edited_events — last 48h, type 'FL'
+        // Flares from xray-flares-7day.json — last 48h
+        // Schema: [{begin_time, class, begin_location, active_region_num, ...}]
         const cutoff = Date.now() - 48 * 3600e3;
         const parsedFlares = (Array.isArray(eJ) ? eJ : [])
             .filter(e => {
-                const isFlare = (e.eventType || e.type || '').toUpperCase().startsWith('FL');
-                const d = new Date(e.eventTime || e.beginTime || 0);
-                return isFlare && d.getTime() > cutoff;
+                const t = new Date((e.begin_time ?? e.eventTime ?? e.beginTime ?? 0)
+                    .replace ? (e.begin_time ?? '').replace(' ', 'T') + 'Z' : 0);
+                const cls = e.class ?? e.severity ?? '';
+                return cls && t.getTime() > cutoff;
             })
             .slice(-14).reverse()
             .map(e => ({
-                time: e.eventTime || e.beginTime || '',
-                cls:  e.severity  || e.class || '?',
-                loc:  e.location  || '—',
-                reg:  e.activeRegion || '—',
+                time: (e.begin_time ?? e.eventTime ?? '').replace(' ', 'T'),
+                cls:  e.class ?? e.severity ?? '?',
+                loc:  e.begin_location ?? e.location ?? '—',
+                reg:  String(e.active_region_num ?? e.activeRegion ?? '—'),
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
 
@@ -3767,6 +3775,10 @@ window.addEventListener('swpc-update', (ev) => {
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
     const spd = sw.solar_wind?.speed       ?? 400;
+
+    // ── Diagnostic: confirm event is firing + log key values ─────────────────
+    console.log(`[SWPC] ${sw.status} | wind ${spd} km/s | kp ${kp} | bz ${bz.toFixed(1)} nT | xray ${sw.xray_class ?? '?'}`);
+
     const dns = sw.solar_wind?.density     ?? 5;
     const bt  = sw.solar_wind?.bt          ?? 5;
     const tmp = sw.solar_wind?.temperature ?? 1e5;
@@ -3910,6 +3922,15 @@ window.addEventListener('swpc-update', (ev) => {
     const dnsEl = document.getElementById('sw-dens');
     if (spdEl) spdEl.textContent = `${Math.round(spd)} km/s`;
     if (dnsEl) dnsEl.textContent = `${dns.toFixed(1)} /cc`;
+
+    // ── NOAA feed timestamp — proves data is live ──────────────────────────────
+    const noaaTimeEl = document.getElementById('sw-noaa-ts');
+    if (noaaTimeEl) {
+        const t   = sw.lastUpdated ? new Date(sw.lastUpdated) : new Date();
+        const age = Math.round((Date.now() - t.getTime()) / 1000);
+        noaaTimeEl.textContent = `NOAA ${sw.status ?? '?'} · ${t.toLocaleTimeString()} (${age}s ago)`;
+        noaaTimeEl.style.color = sw.status === 'live' ? '#44cc66' : '#cc8844';
+    }
 
     // IMF Bz (color: red=southward, blue=northward)
     const bzEl = document.getElementById('sw-bz');
