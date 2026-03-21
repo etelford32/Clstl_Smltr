@@ -871,7 +871,11 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                     <div class="feed-row"><span class="feed-dot" id="fd-electron"></span>GOES electron flux<span class="feed-src">1-min</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-dst"></span>Dst ring-current index<span class="feed-src">1-hr</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-f107"></span>F10.7 solar radio flux<span class="feed-src">daily</span></div>
-                    <div id="swpc-last-upd" style="font-size:8.5px;color:#443322;margin-top:6px;text-align:right">Not yet updated</div>
+                    <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        <span id="swpc-live-badge" style="font-size:8px;padding:2px 7px;border-radius:10px;background:rgba(60,200,100,.12);border:1px solid rgba(60,200,100,.25);color:#3ca;letter-spacing:.06em">⬤ CONNECTING</span>
+                        <span id="swpc-last-upd" style="font-size:8px;color:#443322;flex:1;text-align:right">Not yet updated</span>
+                    </div>
+                    <div id="swpc-countdown" style="font-size:8px;color:#332211;text-align:right;margin-top:2px">Refresh in —</div>
                 </div>
             </div>
 
@@ -2508,6 +2512,139 @@ function spawnCMEShock(speedNorm) {
     console.log(`[CME Shock] Spawned — speed_norm=${speedNorm.toFixed(2)}`);
 }
 
+// ─── CME MAGNETIC FLUX ROPE ───────────────────────────────────────────────────
+// When an Earth-directed CME is detected, spawn a glowing twisted flux rope
+// that rises from the solar surface and expands into the heliosphere.
+//
+// Physics: A CME flux rope is a coherent bundle of helically twisted magnetic
+// field lines erupting from the solar corona. It appears in LASCO imagery as
+// a bright, curved loop with a dark void (the driver region) and bright sheath.
+//
+// Geometry: CatmullRom arch with two footpoints anchored near the surface and
+// an apex that expands outward along the CME propagation direction.
+// The twisted field-line appearance is encoded in the GLSL UV-based stripe pattern.
+
+const cmeFluxRopes = [];  // [{ mesh, t0, speed, lat, lon }]
+const FLUX_ROPE_LIFE = 35.0;   // sim-time units before removal
+
+const fluxRopeVS = /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    void main() {
+        vUv      = uv;
+        vNormal  = normalize(normalMatrix * normal);
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const fluxRopeFS = /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    uniform float u_age;
+    uniform float u_speed;
+    uniform float u_time;
+    uniform vec3  u_cam;
+
+    void main() {
+        float prog   = clamp(u_age / ${FLUX_ROPE_LIFE.toFixed(1)}, 0.0, 1.0);
+        float life   = ${FLUX_ROPE_LIFE.toFixed(1)};
+
+        // Limb / rim brightening — glows brightest edge-on (like real coronagraph)
+        vec3 camDir = normalize(u_cam - vWorldPos);
+        float rim   = 1.0 - abs(dot(normalize(vNormal), camDir));
+
+        // Helical field-line twist pattern
+        // vUv.x : 0→1 along the tube spine (foot1 → apex → foot2)
+        // vUv.y : 0→1 around the tube cross-section
+        float axialPhase = vUv.x * 3.14159 * 10.0;    // 5 full cycles along tube
+        float azimuth    = vUv.y * 3.14159 * 2.0;     // full cross-section wrap
+        float twist      = sin(axialPhase + azimuth * 3.0 + u_time * 0.7) * 0.5 + 0.5;
+        float stripe     = pow(twist, 3.2) * 0.75;
+
+        // Fade: quick rise-in, slow fallout; brighter at footpoints
+        float riseIn  = min(1.0, u_age * 3.0);
+        float fadeOut = pow(1.0 - prog, 1.5);
+        float footBrt = 1.0 - sin(vUv.x * 3.14159) * 0.28; // brighter at feet & apex
+
+        float alpha = (pow(rim, 1.35) * 0.55 + stripe * 0.30 + 0.06) * riseIn * fadeOut * footBrt;
+
+        // Colour: white-gold rope body; violet rim (like LASCO CME imagery)
+        vec3 cBody = mix(vec3(1.00, 0.92, 0.58), vec3(1.00, 0.65, 0.22), prog * 0.75);
+        vec3 cRim  = mix(vec3(0.72, 0.60, 1.00), vec3(0.50, 0.35, 0.88), prog);
+        vec3 cFL   = mix(vec3(1.00, 0.88, 0.40), vec3(0.82, 0.50, 1.00), prog * 0.5);
+
+        vec3 col = mix(cBody, cRim, pow(rim, 1.5));
+        col = mix(col, cFL, stripe * 0.38);
+        col *= (1.0 + u_speed * 0.55);   // faster CME = brighter rope
+
+        if (alpha < 0.004) discard;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.68));
+    }
+`;
+
+/**
+ * Build the 7 control points for the flux rope arch.
+ * @param {number} latRad   Heliographic latitude of the CME source
+ * @param {number} lonRad   Heliographic longitude of the CME source
+ * @param {number} speedNorm  0-1 normalised CME speed (faster → higher apex)
+ */
+function _buildFluxRopePts(latRad, lonRad, speedNorm) {
+    // Propagation axis direction in heliocentric Cartesian
+    const cL = Math.cos(latRad), sL = Math.sin(latRad);
+    const cO = Math.cos(lonRad), sO = Math.sin(lonRad);
+    const axis = new THREE.Vector3(cL * sO, sL, cL * cO).normalize();
+
+    // Orthonormal frame: axis + perpendicular "side" + "up" vectors
+    const ref  = Math.abs(sL) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const side = new THREE.Vector3().crossVectors(axis, ref).normalize();
+
+    // Half-separation between footpoints (solar radii)
+    const hw     = 0.18 + speedNorm * 0.08;
+    const apexH  = 1.85 + speedNorm * 2.8;   // apex radius from sun centre
+
+    const pt = (axF, sdF) =>
+        new THREE.Vector3()
+            .addScaledVector(axis, axF)
+            .addScaledVector(side, sdF);
+
+    // 7-point smooth arch: foot → rise → apex → descent → foot
+    return [
+        pt(1.02,  -hw),          // foot 1 on surface
+        pt(1.18,  -hw * 0.70),   // first kink
+        pt(1.50,  -hw * 0.28),   // flank left
+        pt(apexH,  0.0),         // apex (highest point)
+        pt(1.50,   hw * 0.28),   // flank right
+        pt(1.18,   hw * 0.70),   // second kink
+        pt(1.02,   hw),          // foot 2 on surface
+    ];
+}
+
+function spawnFluxRope(latRad, lonRad, speedNorm) {
+    const pts    = _buildFluxRopePts(latRad, lonRad, speedNorm);
+    const curve  = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.45);
+    const tubeR  = 0.042 + speedNorm * 0.032;   // thicker for faster CMEs
+    const geo    = new THREE.TubeGeometry(curve, 72, tubeR, 14, false);
+    const su     = {
+        u_age:   { value: 0.0 },
+        u_speed: { value: speedNorm },
+        u_time:  uniforms.u_time,            // shared with scene
+        u_cam:   { value: new THREE.Vector3() },
+    };
+    const mat  = new THREE.ShaderMaterial({
+        vertexShader: fluxRopeVS, fragmentShader: fluxRopeFS,
+        uniforms: su,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    cmeFluxRopes.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm, lat: latRad, lon: lonRad });
+    console.log(`[FluxRope] Spawned at lat=${(latRad*180/Math.PI).toFixed(1)}° lon=${(lonRad*180/Math.PI).toFixed(1)}° apex=${(1.85+speedNorm*2.8).toFixed(1)} R☉`);
+}
+
 // ─── SEP SOLAR ENERGETIC PARTICLES ───────────────────────────────────────────
 // S-scale radiation storm: >10 MeV protons (orange/white) + relativistic
 // electrons (blue-white). Near-relativistic speed, polar-field-aligned.
@@ -3115,6 +3252,25 @@ function animate() {
         sh.mesh.scale.setScalar(1.15 + age * expandRate);
     }
 
+    // ── CME Flux Rope expansion ───────────────────────────────────────────────
+    for (let i = cmeFluxRopes.length - 1; i >= 0; i--) {
+        const fr  = cmeFluxRopes[i];
+        const age = t - fr.t0;
+        if (age > FLUX_ROPE_LIFE) {
+            scene.remove(fr.mesh);
+            fr.mesh.geometry.dispose();
+            fr.mesh.material.dispose();
+            cmeFluxRopes.splice(i, 1);
+            continue;
+        }
+        fr.mesh.material.uniforms.u_age.value = age;
+        fr.mesh.material.uniforms.u_cam.value.copy(camera.position);
+        // Expand the rope outward as the CME propagates — scale along propagation axis
+        // Use non-uniform scale: rope expands mostly along its axis direction
+        const growFactor = 1.0 + (age / FLUX_ROPE_LIFE) * (fr.speed * 2.0 + 1.5);
+        fr.mesh.scale.setScalar(growFactor);
+    }
+
     // Flare ribbon timer — increments each frame; capped at 999
     if (uniforms.u_flare_t.value < 999) uniforms.u_flare_t.value += dt;
 
@@ -3642,9 +3798,12 @@ updateFlareActivityBar();
 replayRecentFlares();
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
-document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
+document.getElementById('btn-live-refresh').addEventListener('click', () => {
+    fetchLiveSolarData();
+    _swFeed.refresh();   // also kick SpaceWeatherFeed for immediate wind data
+});
 fetchLiveSolarData();                         // attempt live update on load
-setInterval(fetchLiveSolarData, 10 * 60 * 1000); // refresh every 10 min
+setInterval(fetchLiveSolarData, 5 * 60 * 1000);  // refresh every 5 min
 
 // Refresh SDO/SOHO thumbnail images every 15 min (SDO updates ~every 12 min)
 setInterval(() => {
@@ -3758,7 +3917,8 @@ function _updateRibbonXray() {
 
 // SpaceWeatherFeed provides solar wind, Kp, Bz — same feed as Earth view
 // Primary NOAA real-time feed — must start unconditionally
-const _swFeed = new SpaceWeatherFeed();
+// 60-second poll: NOAA rtsw_wind_1m.json updates every 60 s at source.
+const _swFeed = new SpaceWeatherFeed({ pollInterval: 60_000 });
 _swFeed.start();
 
 // Optional processed wind pipeline (local FastAPI / Vercel edge) — fails silently
@@ -3768,6 +3928,24 @@ try {
 } catch (e) {
     console.debug('[WindPipeline] server not available, using NOAA data only:', e.message);
 }
+
+// ── Live countdown ticker — shows "Next NOAA refresh in Xs" ──────────────────
+// Gives the user clear feedback that the feed is active even between polls.
+let _lastSwpcFireAt = Date.now();
+window.addEventListener('swpc-update', () => { _lastSwpcFireAt = Date.now(); }, true);
+setInterval(() => {
+    const el = document.getElementById('swpc-countdown');
+    if (!el) return;
+    const ageS   = Math.round((Date.now() - _lastSwpcFireAt) / 1000);
+    const nextS  = Math.max(0, 60 - ageS);  // 60 s poll interval
+    const ageStr = ageS < 60 ? `${ageS}s ago` : `${Math.floor(ageS / 60)}m ${ageS % 60}s ago`;
+    el.textContent = `Updated ${ageStr} · next in ${nextS}s`;
+    el.style.color = nextS < 10 ? '#4eda90' : '#443322';
+}, 1000);
+
+// Set of "cls|timestamp" keys for flares already given a 3D ring — prevents
+// duplicate rings when swpc-update fires repeatedly on the same flare data.
+const _shownFlareKeys = new Set();
 
 window.addEventListener('swpc-update', (ev) => {
     const sw  = ev.detail;
@@ -3803,7 +3981,16 @@ window.addEventListener('swpc-update', (ev) => {
     _setFd('fd-dst',      sw.dst_index != null);
     _setFd('fd-f107',     (sw.f107_flux ?? -1) > 0);
     const updEl = document.getElementById('swpc-last-upd');
-    if (updEl) updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    if (updEl) updEl.textContent = 'NOAA ' + new Date().toLocaleTimeString();
+    // Live badge — turns green when data arrives
+    const badge = document.getElementById('swpc-live-badge');
+    if (badge) {
+        const isLive = sw.status === 'live';
+        badge.textContent = isLive ? '⬤ LIVE' : sw.status === 'stale' ? '⬤ STALE' : '⬤ OFFLINE';
+        badge.style.background = isLive ? 'rgba(60,200,100,.18)' : 'rgba(200,120,40,.18)';
+        badge.style.borderColor = isLive ? 'rgba(60,200,100,.4)' : 'rgba(200,120,40,.4)';
+        badge.style.color = isLive ? '#4eda90' : '#cc8844';
+    }
 
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
     // Skip wind/IMF uniforms when user is scrubbing historical data
@@ -4016,6 +4203,38 @@ window.addEventListener('swpc-update', (ev) => {
     // ── Wind latitude chart ───────────────────────────────────────────────────
     renderWindLatChart(spd);
 
+    // ── Position rings for ALL recent flares (< 3h old) ─────────────────────
+    // The swpc-update event fires every 60 s. We track shown flare keys so we
+    // only trigger a ring once per unique flare event, not on every poll.
+    if (sw.recent_flares?.length) {
+        const cutoff3h = Date.now() - 3 * 3600e3;
+        sw.recent_flares.forEach(f => {
+            if (!f.location) return;
+            const ft  = f.time instanceof Date ? f.time.getTime() : new Date(f.time).getTime();
+            if (ft < cutoff3h) return;
+            const key = `${f.cls}|${ft}`;
+            if (_shownFlareKeys.has(key)) return;
+            _shownFlareKeys.add(key);
+            const loc = parseLoc(f.location);
+            if (!loc) return;
+            const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
+            const ageMs  = Date.now() - ft;
+            const simAge = Math.min(800, (ageMs / 1000) * 0.35);
+            // Place 3D ring flash at this exact NOAA location
+            triggerPositionFlare(loc.lat, loc.lon, clsCh);
+            // Also drive ribbon shader to this site if it's the newest flare
+            if (!sw.new_major_flare && ft === Math.max(...sw.recent_flares.map(x => {
+                const xt = x.time instanceof Date ? x.time.getTime() : new Date(x.time).getTime();
+                return xt;
+            }))) {
+                uniforms.u_flare_lat.value = loc.lat * Math.PI / 180;
+                uniforms.u_flare_lon.value = loc.lon * Math.PI / 180;
+                uniforms.u_flare_t.value   = simAge;
+            }
+            console.log(`[Flare] ${f.cls} at ${f.location} — ${Math.round(ageMs/60000)}m ago → ring placed`);
+        });
+    }
+
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
     if (sw.new_major_flare) {
@@ -4050,13 +4269,30 @@ window.addEventListener('swpc-update', (ev) => {
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
-        console.log('[Sun] New Earth-directed CME from DONKI — shock wave + CME panel');
-        // Spawn expanding shock wave shell
+        console.log('[Sun] New Earth-directed CME from DONKI — flux rope + shock wave');
         const cmeSpeedNorm = Math.max(0, Math.min(1, ((sw.earth_directed_cme.speed ?? 800) - 300) / 2200));
+        // Spawn the 3D flux rope (twisted magnetic field tube)
+        const cmeLat = sw.earth_directed_cme.lat_rad ?? (sw.flare_direction?.lat_rad ?? 0);
+        const cmeLon = sw.earth_directed_cme.lon_rad ?? (sw.flare_direction?.lon_rad ?? 0);
+        spawnFluxRope(cmeLat, cmeLon, cmeSpeedNorm);
+        // Also spawn the expanding shock wave shell
         spawnCMEShock(cmeSpeedNorm);
-        // Also spawn one without new_cme_detected if u_cme_active just turned on
         const secCme = document.getElementById('sec-cme');
         if (secCme?.classList.contains('closed')) secCme.classList.remove('closed');
+    }
+
+    // Also spawn a flux rope on strong flares even without DONKI CME confirmation
+    // (M5+ and all X-class flares are associated with CMEs >90% of the time)
+    if (sw.new_major_flare && sw.flare_direction) {
+        const cls = (sw.flare_class ?? 'M')[0];
+        if (cls === 'X' || (cls === 'M' && parseFloat(sw.flare_class?.slice(1) ?? 0) >= 3)) {
+            const sn = Math.max(0, Math.min(1, (liveXrayFlux ?? 1e-5) / 1e-4));
+            spawnFluxRope(
+                sw.flare_direction.lat_rad,
+                sw.flare_direction.lon_rad,
+                sn
+            );
+        }
     }
 });
 
