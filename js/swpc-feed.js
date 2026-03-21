@@ -66,6 +66,14 @@ export const ENDPOINTS = {
     /** Daily 10.7-cm solar radio flux (F10.7) — EUV/X-ray activity proxy */
     radio_flux:   'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
 
+    // ── Higher-cadence / additional NOAA feeds ─────────────────────────────
+    /** Estimated planetary Kp index — 1-minute cadence (faster storm onset detection) */
+    kp_1m:        'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json',
+    /** Kyoto Dst geomagnetic index 1-day history (ring-current strength, nT) */
+    dst_index:    'https://services.swpc.noaa.gov/products/kyoto-dst.json',
+    /** GOES differential proton flux 1-day (energy-resolved: 1–500 MeV) */
+    diff_protons: 'https://services.swpc.noaa.gov/json/goes/primary/differential-protons-1-day.json',
+
     // ── NASA CCMC / DONKI (Space Weather Database Of Notifications, Knowledge, Info) ──
     /** CME Analysis — cone model, speed, direction, ENLIL model arrival times.
      *  Requires dynamic date params; base URL completed at fetch time. */
@@ -108,6 +116,11 @@ export const FALLBACK = {
     earth_directed_cme:   null, // most recent Earth-directed CME object
     cme_eta_hours:        null, // float hours until Earth arrival (negative = arrived)
     donki_notifications:  [],   // recent DONKI notification messages
+    // Extended geomagnetic / radiation
+    dst_index:           -5,    // nT — Dst ring-current index (negative = storm)
+    kp_1min:              2.0,  // estimated 1-min Kp
+    proton_diff_1mev:     0.0,  // differential proton flux >1 MeV (pfu/MeV)
+    proton_diff_10mev:    0.0,  // differential proton flux ~10 MeV
 };
 
 // ── X-ray class helpers ───────────────────────────────────────────────────────
@@ -171,6 +184,13 @@ function derivedFields(raw) {
 
     // F10.7: 65 sfu (solar minimum) → 300 sfu (solar maximum)
     d.f107_norm = clamp01((raw.f107_flux - 65) / 235);
+
+    // Dst ring-current index: 0 nT (quiet) → -600 nT (extreme storm)
+    // Inverted so 0=quiet, 1=extreme negative Dst
+    d.dst_norm = clamp01(-raw.dst_index / 200);
+
+    // 1-minute Kp (faster storm detection than 3-hr average)
+    d.kp_1min_norm = clamp01((raw.kp_1min ?? raw.kp) / 9);
 
     return d;
 }
@@ -388,6 +408,56 @@ async function fetchAlerts(state) {
 }
 
 /**
+ * 1-minute estimated planetary Kp index (faster storm detection than 3-hr Kp).
+ * Response: 2-D array [[time_tag, kp], ...] — most recent last.
+ */
+async function fetchKp1m(state) {
+    const data = await fetchJSON(ENDPOINTS.kp_1m);
+    if (!Array.isArray(data)) return;
+    // Skip header row if present
+    const rows = data[0]?.[0] === 'time_tag' ? data.slice(1) : data;
+    const rec  = [...rows].reverse().find(r => r[1] != null && parseFloat(r[1]) >= 0);
+    if (rec) state.kp_1min = parseFloat(rec[1]);
+}
+
+/**
+ * Kyoto Dst geomagnetic index (ring-current strength).
+ * Negative Dst = storm-time depression; typical storm: −30 to −600 nT.
+ * Response: 2-D array [[time_tag, dst_value], ...].
+ */
+async function fetchDst(state) {
+    const data = await fetchJSON(ENDPOINTS.dst_index);
+    if (!Array.isArray(data)) return;
+    const rows = data[0]?.[0] === 'time_tag' ? data.slice(1) : data;
+    const rec  = [...rows].reverse().find(r => r[1] != null);
+    if (rec) {
+        const v = parseFloat(rec[1]);
+        if (!isNaN(v)) state.dst_index = v;
+    }
+}
+
+/**
+ * GOES differential proton flux — energy-resolved channels from ~1–500 MeV.
+ * Complements integral-protons for more detailed SEP spectral shape.
+ * Response: 2-D array with header row; columns vary by satellite.
+ */
+async function fetchDiffProtons(state) {
+    const data = await fetchJSON(ENDPOINTS.diff_protons);
+    if (!Array.isArray(data) || data.length < 2) return;
+    const hdr = data[0].map(h => String(h));
+    // Look for ~1 MeV and ~10 MeV differential flux columns
+    const i1   = hdr.findIndex(h => /P1/i.test(h));   // ~1–5 MeV
+    const i10  = hdr.findIndex(h => /P5|P6/i.test(h)); // ~10–50 MeV
+    const rec  = [...data.slice(1)].reverse().find(r => r[i1]  != null && parseFloat(r[i1]) > 0);
+    if (rec) {
+        const v1  = parseFloat(rec[i1]);
+        const v10 = i10 >= 0 ? parseFloat(rec[i10]) : 0;
+        if (!isNaN(v1))  state.proton_diff_1mev  = v1;
+        if (!isNaN(v10)) state.proton_diff_10mev = v10;
+    }
+}
+
+/**
  * F10.7-cm solar radio flux.
  * Response: array of {time_tag, flux} objects — most recent last.
  */
@@ -581,6 +651,10 @@ export class SpaceWeatherFeed {
             fetchAurora(this._raw),
             fetchAlerts(this._raw),
             fetchRadioFlux(this._raw),
+            // High-cadence / additional geomagnetic feeds
+            fetchKp1m(this._raw),
+            fetchDst(this._raw),
+            fetchDiffProtons(this._raw),
             // NASA DONKI — run independently so CCMC slowness doesn't block NOAA feeds
             fetchDONKICME(this._raw),
             fetchDONKINotifications(this._raw),
@@ -671,6 +745,11 @@ export class SpaceWeatherFeed {
             cme_eta_hours:       raw.cme_eta_hours ?? null,
             donki_notifications: raw.donki_notifications ?? [],
             new_cme_detected:    newCme,
+            // Extended geomagnetic / radiation fields
+            dst_index:           raw.dst_index   ?? -5,
+            kp_1min:             raw.kp_1min     ?? raw.kp,
+            proton_diff_1mev:    raw.proton_diff_1mev  ?? 0,
+            proton_diff_10mev:   raw.proton_diff_10mev ?? 0,
         };
     }
 }

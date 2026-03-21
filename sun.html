@@ -854,13 +854,18 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 <div class="sec-hd"><span>NOAA Live Feeds</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <div class="feed-row"><span class="feed-dot" id="fd-wind"></span>Solar wind plasma (DSCOVR)<span class="feed-src">1-min</span></div>
-                    <div class="feed-row"><span class="feed-dot" id="fd-imf"></span>IMF / Bz (DSCOVR)<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-imf"></span>IMF Bt / Bz / By (DSCOVR)<span class="feed-src">1-min</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-kp"></span>Kp geomagnetic index<span class="feed-src">3-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-kp1m"></span>Kp 1-min estimated<span class="feed-src">1-min</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-xray"></span>GOES X-ray flux<span class="feed-src">1-min</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-flares"></span>Solar flare events<span class="feed-src">7-day</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-regions"></span>Active sunspot regions<span class="feed-src">daily</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-aurora"></span>OVATION aurora power<span class="feed-src">30-min</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-cme"></span>CME analysis (DONKI)<span class="feed-src">48-hr</span></div>
                     <div class="feed-row"><span class="feed-dot" id="fd-sep"></span>SEP proton flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-electron"></span>GOES electron flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-dst"></span>Dst ring-current index<span class="feed-src">1-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-f107"></span>F10.7 solar radio flux<span class="feed-src">daily</span></div>
                     <div id="swpc-last-upd" style="font-size:8.5px;color:#443322;margin-top:6px;text-align:right">Not yet updated</div>
                 </div>
             </div>
@@ -1259,6 +1264,27 @@ const uniforms = {
     u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
     // ── Flare white-light intensity — brief whole-disk flash at flare onset ──
     u_flare_intensity:   { value: 0.0  },  // 0-1, decays exponentially ~3 s
+
+    // ── F10.7 solar radio flux — chromospheric/coronal solar-cycle activity proxy ──
+    u_f107_norm:         { value: 0.30 },  // (f107-65)/235 [0-1]; 0=solar min, 1=solar max
+
+    // ── OVATION Prime auroral power — polar coronal-hole / open-field brightness ──
+    u_aurora_north:      { value: 0.0  },  // GW/600 [0-1] north hemisphere
+    u_aurora_south:      { value: 0.0  },  // GW/600 [0-1] south hemisphere
+
+    // ── GOES energetic particle fluxes ──
+    u_electron_norm:     { value: 0.0  },  // >2 MeV electron flux log-norm [0-1]
+    u_proton_norm:       { value: 0.0  },  // >10 MeV proton flux log-norm [0-1]
+
+    // ── NOAA G-scale geomagnetic storm level (integer 0–5) ──
+    u_storm_level:       { value: 0.0  },  // 0=quiet … 5=extreme G5
+
+    // ── Total IMF magnitude + IMF By sector polarity ──
+    u_bt_norm:           { value: 0.17 },  // bt/30 nT [0-1]
+    u_by_sw:             { value: 0.0  },  // IMF By/20 nT, signed [-1, +1]
+
+    // ── Kyoto Dst ring-current index ──
+    u_dst_norm:          { value: 0.025 }, // -dst/200 nT [0-1]; 1 = severe storm
 };
 
 // SCENE
@@ -1410,6 +1436,9 @@ const sunFS = /* glsl */`
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
+    uniform float u_f107_norm;       // F10.7 solar cycle proxy [0-1]: 0=min, 1=max
+    uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
+    uniform float u_proton_norm;     // GOES >10MeV proton flux [0-1]
     // Flare ribbon uniforms
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
@@ -1648,6 +1677,18 @@ const sunFS = /* glsl */`
         // for large X-class events, but visually dramatic).
         col *= 2.55 + u_flare_intensity * 0.90;
 
+        // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
+        // Higher radio flux index → more magnetic heating → brighter surface
+        col *= 1.0 + u_f107_norm * 0.30;
+        // Shift slightly toward blue-white at solar maximum (hotter effective temperature)
+        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18);
+
+        // ── SEP / energetic electron impact — brief UV brightening during radiation storms ──
+        // Energetic electrons precipitating along open field lines produce
+        // localised UV flashes visible as bright patches near active region footpoints.
+        float sepUV = (u_electron_norm + u_proton_norm * 0.5) * 0.12;
+        col += vec3(0.90, 0.95, 1.20) * sepUV * (0.5 + u_activity * 0.5);
+
         // ── Chromospheric / transition-region emission at extreme limb ─────────
         // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
         float fr = pow(max(1.0 - mu, 0.0), 3.5);
@@ -1675,6 +1716,9 @@ const chromoFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
+    uniform float u_f107_norm;       // F10.7 solar cycle [0-1]
+    uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
+    uniform float u_kp_norm;         // Kp/9 [0-1] — storm-time heating
     uniform float u_flare_t;         // sim-time since flare (0 = just fired, 999 = none)
     uniform float u_flare_lat;       // heliographic latitude of last flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
@@ -1736,6 +1780,23 @@ const chromoFS = /* glsl */`
         col = mix(col, hAlpha * 1.5, chromoFl * 0.85);
         col = mix(col, euv * 1.2, globalFl * 0.5);
 
+        // ── F10.7 solar-cycle: hotter chromosphere at solar maximum ─────────────
+        // At high F10.7 the chromospheric network is more visible and the Ca H&K
+        // emission is stronger — boost the orange-pink limb brightening.
+        float cycleBoost = 1.0 + u_f107_norm * 0.55;
+        alpha = clamp(alpha * cycleBoost, 0.0, 0.92);
+        col   = mix(col, col * vec3(1.08, 0.90, 0.78), u_f107_norm * 0.25);
+
+        // ── Electron flux: energetic electrons excite EUV emission ──────────────
+        // Energetic electrons from solar wind precipitation create additional
+        // blue-UV chromospheric glow, especially near pole and limb regions.
+        vec3 euvBlue = vec3(0.55, 0.75, 1.20);
+        col   += euvBlue * u_electron_norm * rim * 0.20;
+        alpha  = clamp(alpha + u_electron_norm * rim * 0.08, 0.0, 0.92);
+
+        // ── Kp storm heating: chromospheric network brightens during storms ──────
+        col *= 1.0 + u_kp_norm * u_kp_norm * 0.15;
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -1758,6 +1819,9 @@ const trFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
+    uniform float u_f107_norm;       // F10.7 [0-1]
+    uniform float u_electron_norm;   // GOES electron flux [0-1]
+    uniform float u_kp_norm;         // Kp/9 [0-1]
     uniform float u_flare_t;
     uniform float u_flare_lat;
     uniform float u_flare_lon;
@@ -1809,6 +1873,19 @@ const trFS = /* glsl */`
         vec3 col = mix(trOrange, tr171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
         col = mix(col, trUV, (localFl + globalFl * 0.5) * 0.80);
 
+        // ── F10.7 solar cycle: hotter TR at solar maximum ─────────────────────
+        // More loop footpoints, stronger He II 304 Å emission ring
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, 0.90);
+        col   = mix(col, tr171 * 1.2, u_f107_norm * 0.20);
+
+        // ── Electron flux: EUV / soft X-ray brightening from SEP events ────────
+        // Penetrating energetic electrons produce intense EUV at loop footpoints
+        col  += vec3(0.60, 0.88, 1.20) * u_electron_norm * pow(rim, 3.0) * 0.35;
+        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, 0.90);
+
+        // ── Kp geomagnetic activity: broader TR ring during storms ─────────────
+        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, 0.90);
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -1827,10 +1904,18 @@ const coronaFS = /* glsl */`
     uniform float u_rot;
     uniform float u_wind_speed_norm;
     uniform float u_bz_sw;
-    uniform float u_kp_norm;     // Kp/9 — geomagnetic storm intensity [0-1]
-    uniform float u_flare_lat;   // active flare position — same as sunFS
+    uniform float u_kp_norm;        // Kp/9 — geomagnetic storm intensity [0-1]
+    uniform float u_flare_lat;      // active flare position — same as sunFS
     uniform float u_flare_lon;
     uniform float u_flare_t;
+    // ── Additional live NOAA channels ──
+    uniform float u_aurora_north;   // OVATION north aurora power/600 [0-1]
+    uniform float u_aurora_south;   // OVATION south aurora power/600 [0-1]
+    uniform float u_storm_level;    // NOAA G-scale 0-5
+    uniform float u_bt_norm;        // total IMF / 30 nT [0-1]
+    uniform float u_f107_norm;      // F10.7 solar cycle [0-1]
+    uniform float u_electron_norm;  // GOES >2MeV electron flux [0-1]
+    uniform float u_dst_norm;       // -Dst/200 nT [0-1]
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -1956,6 +2041,51 @@ const coronaFS = /* glsl */`
             alpha += cGlow * pow(rim, 1.6) * 0.35;
         }
 
+        // ── OVATION aurora power → polar coronal hole brightening ─────────────────
+        // High aurora power = more open field at poles = brighter polar plumes.
+        // At the Sun: polar coronal holes are the source of fast solar wind and
+        // the origin of the aurora-producing field lines at Earth.
+        float poleFac_n = smoothstep(0.55, 0.92, lat);    // North polar region
+        float poleFac_s = smoothstep(0.55, 0.92, -lat);   // South polar region
+        float auroraGlow = poleFac_n * u_aurora_north * 0.70
+                         + poleFac_s * u_aurora_south * 0.70;
+        // Coronal hole fast-wind streams: cool blue-green polar plumes
+        vec3 plumeCol = mix(vec3(0.55, 0.88, 1.00), vec3(0.45, 1.00, 0.75),
+                            (u_aurora_north + u_aurora_south) * 0.5);
+        col   += plumeCol * auroraGlow * pow(rim, 1.8) * 1.2;
+        alpha += auroraGlow * pow(rim, 2.2) * 0.30;
+
+        // ── G-scale geomagnetic storm: corona-wide brightening + red-orange tint ─
+        // During major storms, the compressed dayside corona and enhanced current
+        // sheet glow brighter; the electron density increases.
+        float stormNorm = u_storm_level / 5.0;
+        col   = mix(col, col * vec3(1.35, 0.82, 0.60), stormNorm * 0.38);
+        alpha *= 1.0 + stormNorm * 0.28;
+
+        // ── Total IMF: stronger B-field → brighter/sharper streamer belt ─────────
+        // Stronger total IMF means more compressed magnetic flux in the HCS,
+        // making the streamer belt denser and the HCS tilt angle more pronounced.
+        col   *= 1.0 + helmetBelt * u_bt_norm * 0.50;
+        alpha *= 1.0 + u_bt_norm * 0.20;
+
+        // ── F10.7 solar cycle: global corona brightness ────────────────────────
+        // At solar maximum the corona is hotter, denser, and more structured.
+        col   *= 1.0 + u_f107_norm * 0.35;
+        alpha *= 1.0 + u_f107_norm * 0.28;
+
+        // ── Energetic electron flux: blue-white coronal hazing ─────────────────
+        // High-energy electrons scatter off the coronal plasma adding a faint
+        // blue-UV glow; also signals enhanced solar activity.
+        col  = mix(col, vec3(0.55, 0.80, 1.20) * (col * 0.6 + 0.4), u_electron_norm * 0.30);
+        alpha += u_electron_norm * pow(rim, 2.5) * 0.10;
+
+        // ── Dst ring-current: sub-storm magnetospheric injection glow ─────────
+        // Negative Dst (ring-current injection) comes from the solar wind
+        // energizing Earth's magnetosphere — reflects extreme solar wind pressure.
+        float dstBoost = u_dst_norm * helmetBelt;
+        col  = mix(col, vec3(0.80, 0.55, 1.10), dstBoost * 0.22);
+        alpha += dstBoost * pow(rim, 2.8) * 0.12;
+
         gl_FragColor = vec4(col * pulse, alpha);
     }
 `;
@@ -1977,6 +2107,13 @@ const outerGlowFS = /* glsl */`
     uniform float u_wind_density_norm;
     uniform float u_bz_sw;
     uniform float u_flare_intensity;
+    // ── Additional live channels ──
+    uniform float u_aurora_north;   // OVATION north [0-1]
+    uniform float u_aurora_south;   // OVATION south [0-1]
+    uniform float u_bt_norm;        // total IMF [0-1]
+    uniform float u_storm_level;    // G-scale 0-5
+    uniform float u_electron_norm;  // GOES >2MeV electrons [0-1]
+    uniform float u_f107_norm;      // F10.7 solar cycle [0-1]
 
     void main() {
         vec3 N = normalize(vNormal);
@@ -2016,6 +2153,29 @@ const outerGlowFS = /* glsl */`
         // Flare EUV blast — brief global brightening
         alpha = clamp(alpha + pow(rim, 4.0) * u_flare_intensity * 0.30, 0.0, 0.65);
 
+        // ── OVATION aurora: bright polar fast-wind plume streamers ─────────────
+        float polN = smoothstep(0.50, 0.95, N.y);
+        float polS = smoothstep(0.50, 0.95, -N.y);
+        vec3 auroraCol = mix(vec3(0.48, 0.92, 0.78), vec3(0.55, 0.88, 1.00), 0.5);
+        col   = mix(col, auroraCol, (polN * u_aurora_north + polS * u_aurora_south) * 0.32);
+        alpha += (polN * u_aurora_north + polS * u_aurora_south) * pow(rim, 2.8) * 0.15;
+
+        // ── G-scale storm: broad equatorial brightening + warm tint ───────────
+        float stNorm = u_storm_level / 5.0;
+        col   = mix(col, vec3(1.08, 0.78, 0.55), stNorm * beltW * 0.35);
+        alpha = clamp(alpha * (1.0 + stNorm * 0.38), 0.0, 0.75);
+
+        // ── Total IMF: stronger field = tighter, brighter streamer belt ────────
+        alpha += beltAlph * u_bt_norm * 0.55;
+        col    = mix(col, vec3(1.05, 0.95, 0.80), u_bt_norm * beltW * 0.18);
+
+        // ── F10.7 solar cycle: global heliospheric glow intensity ──────────────
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.30), 0.0, 0.75);
+
+        // ── Energetic electron flux: faint blue-violet outer heliosphere haze ──
+        col   = mix(col, vec3(0.62, 0.76, 1.12), u_electron_norm * 0.22);
+        alpha += u_electron_norm * pow(rim, 3.5) * 0.08;
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -2036,6 +2196,13 @@ const solarWindVS = /* glsl */`
     uniform float u_wind_speed_norm;  // 0=250 km/s, 1=900 km/s (DSCOVR L1)
     uniform float u_wind_density_norm;// 0=calm, 1=25 n/cc (DSCOVR L1)
     uniform float u_bz_sw;            // 0=northward, 1=30 nT southward
+    uniform float u_by_sw;            // IMF By / 20 nT, signed [-1,+1]
+    uniform float u_bt_norm;          // total IMF / 30 nT [0-1]
+    uniform float u_electron_norm;    // GOES >2MeV electron flux [0-1]
+    uniform float u_f107_norm;        // F10.7 solar cycle [0-1]
+    uniform float u_aurora_north;     // OVATION north aurora [0-1]
+    uniform float u_aurora_south;     // OVATION south aurora [0-1]
+    uniform float u_proton_norm;      // GOES >10MeV proton flux [0-1]
 
     varying float vProgress;
     varying vec3  vColor;
@@ -2053,8 +2220,12 @@ const solarWindVS = /* glsl */`
         // Slow-wind / fast-wind bifurcation:
         // Near equator: slow solar wind (~400 km/s); polar regions: fast wind (~750 km/s)
         float sinLat = abs(aDir.y);   // 0=equator, 1=pole
+        // Aurora power → faster open-field polar streams (coronal-hole fast wind)
+        float auroraBoost = mix(u_aurora_south, u_aurora_north, step(0.0, aDir.y));
         // Live speed boosts max reach — CME/fast streams reach farther
-        float R_far = mix(4.8, 6.5, sinLat * sinLat) + u_wind_speed_norm * 1.2;
+        // Aurora-driven polar coronal holes also extend fast-wind reach
+        float R_far = mix(4.8, 6.5, sinLat * sinLat) + u_wind_speed_norm * 1.2
+                    + auroraBoost * sinLat * sinLat * 0.80;
         float r = 1.0 + (R_far - 1.0) * s * s;   // quadratic acceleration
 
         vProgress  = s;
@@ -2071,6 +2242,11 @@ const solarWindVS = /* glsl */`
         // Southward Bz warps equatorial wind slightly (reconnection-driven asymmetry)
         float bzSkew = u_bz_sw * 0.04 * (1.0 - sinLat * sinLat) * sin(aPhase * 6.28);
         phi_parker += bzSkew;
+
+        // IMF By sector polarity: dawn-dusk asymmetry in the Parker spiral
+        // Positive By → spiral biased toward +z (dusk-side); negative → dawn-side
+        float bySkew = u_by_sw * 0.07 * (1.0 - sinLat * sinLat);
+        phi_parker  += bySkew;
 
         // Rotate aDir around the star's Y-axis by phi_parker
         float cp  = cos(phi_parker);
@@ -2098,6 +2274,19 @@ const solarWindVS = /* glsl */`
 
         // High-density stream tint: slightly warmer gold
         vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.20 * (1.0 - s));
+
+        // ── F10.7 solar cycle: brighter, warmer particles at solar maximum ──────
+        vColor *= 1.0 + u_f107_norm * 0.22;
+        // ── Energetic electron flux: blue-white stream colour shift ──────────────
+        // High-energy electron beams ride with the solar wind, slightly shifting
+        // the bulk colour toward blue-white especially in the inner corona region.
+        vColor  = mix(vColor, vec3(0.72, 0.88, 1.15), u_electron_norm * 0.22 * (1.0 - s * 0.6));
+        // ── Aurora-driven polar plumes: teal-blue fast-wind colour ───────────────
+        vColor  = mix(vColor, vec3(0.48, 0.92, 1.00), auroraBoost * sinLat * sinLat * 0.35);
+        // ── SEP proton storm: bright white-gold high-energy particles ─────────────
+        vColor  = mix(vColor, vec3(1.10, 1.00, 0.75), u_proton_norm * 0.28 * (1.0 - s));
+        // ── Total IMF: stronger B-field → tighter, more structured spiral ────────
+        vColor  = mix(vColor, vColor * vec3(1.0, 0.97, 0.92), u_bt_norm * 0.12);
 
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
@@ -3458,6 +3647,37 @@ setInterval(() => {
     });
 }, 15 * 60 * 1000);
 
+// ── Wind pipeline supplemental feed ────────────────────────────────────────────
+// wind-pipeline-update comes from the Vercel Edge Function (api/solar-wind/wind-speed)
+// or the local FastAPI server. Provides processed trend + alert level data.
+// Only overrides live uniforms when scrubLive is true (not scrubbing history).
+window.addEventListener('wind-pipeline-update', (ev) => {
+    const wp = ev.detail;
+    if (!wp || wp.status === 'offline' || wp.freshness === 'expired') return;
+    if (!scrubLive) return;   // don't override historical scrubbing
+
+    if (wp.speed_km_s > 0) {
+        const sn = wp.speed_norm ?? Math.max(0, Math.min(1, (wp.speed_km_s - 250) / 650));
+        uniforms.u_wind_speed_norm.value = sn;
+    }
+    if ((wp.density_cc ?? 0) > 0) {
+        uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, wp.density_cc / 25));
+    }
+    if (wp.bz_nT != null) {
+        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -wp.bz_nT / 30));
+    }
+    // Reflect trend direction in a subtle pulsing speed boost
+    if (wp.trend?.direction === 'RISING') {
+        uniforms.u_wind_speed_norm.value = Math.min(1, uniforms.u_wind_speed_norm.value + 0.02);
+    }
+    // Update pipeline feed dot
+    const fdW = document.getElementById('fd-wind');
+    if (fdW) fdW.className = wp.freshness === 'fresh' ? 'feed-dot live' : 'feed-dot stale';
+});
+
+const _wpFeed = new WindPipelineFeed();
+_wpFeed.start();
+
 // ══════════════════════════════════════════════════════════════════════════
 //  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
 //  X-ray class comes from the existing NOAA fetch above; wind/Kp from SWPC.
@@ -3544,17 +3764,21 @@ window.addEventListener('swpc-update', (ev) => {
     const gc  = _G_COLS_SUN[gl];
 
     // ── Update feed status dots ────────────────────────────────────────────────
-    const _fd = id => document.getElementById(id);
-    if (spd > 0)  { if (_fd('fd-wind'))    _fd('fd-wind').className    = 'feed-dot live'; }
-    if (bz != null){ if (_fd('fd-imf'))    _fd('fd-imf').className     = 'feed-dot live'; }
-    if (kp  >= 0) { if (_fd('fd-kp'))     _fd('fd-kp').className      = 'feed-dot live'; }
-    if (sw.xray_flux) { if (_fd('fd-xray'))  _fd('fd-xray').className  = 'feed-dot live'; }
-    if (sw.recent_flares?.length) { if (_fd('fd-flares')) _fd('fd-flares').className = 'feed-dot live'; }
-    if (sw.active_regions?.length){ if (_fd('fd-regions'))_fd('fd-regions').className= 'feed-dot live'; }
-    if (sw.earth_directed_cme || sw.recent_cmes?.length) {
-        if (_fd('fd-cme')) _fd('fd-cme').className = 'feed-dot live';
-    }
-    if (sw.sep_storm_level > 0) { if (_fd('fd-sep')) _fd('fd-sep').className = 'feed-dot live'; }
+    const _fd    = id => document.getElementById(id);
+    const _setFd = (id, on) => { const el = _fd(id); if (el) el.className = on ? 'feed-dot live' : 'feed-dot'; };
+    _setFd('fd-wind',     spd > 0);
+    _setFd('fd-imf',      bt  > 0);
+    _setFd('fd-kp',       kp  >= 0);
+    _setFd('fd-kp1m',     (sw.kp_1min ?? -1) >= 0);
+    _setFd('fd-xray',     !!sw.xray_flux);
+    _setFd('fd-flares',   !!(sw.recent_flares?.length));
+    _setFd('fd-regions',  !!(sw.active_regions?.length));
+    _setFd('fd-aurora',   (sw.aurora_power_north ?? -1) >= 0);
+    _setFd('fd-cme',      !!(sw.earth_directed_cme || sw.recent_cmes?.length));
+    _setFd('fd-sep',      (sw.sep_storm_level ?? 0) >= 0);
+    _setFd('fd-electron', (sw.electron_flux_2mev ?? -1) >= 0);
+    _setFd('fd-dst',      sw.dst_index != null);
+    _setFd('fd-f107',     (sw.f107_flux ?? -1) > 0);
     const updEl = document.getElementById('swpc-last-upd');
     if (updEl) updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
 
@@ -3566,6 +3790,17 @@ window.addEventListener('swpc-update', (ev) => {
         uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
     }
     uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
+
+    // ── Wire all remaining NOAA channels to shader uniforms ──────────────────
+    uniforms.u_f107_norm.value     = d.f107_norm         ?? 0.30;
+    uniforms.u_aurora_north.value  = d.aurora_north_norm ?? 0.0;
+    uniforms.u_aurora_south.value  = d.aurora_south_norm ?? 0.0;
+    uniforms.u_electron_norm.value = d.electron_2mev_norm ?? 0.0;
+    uniforms.u_proton_norm.value   = d.proton_10mev_norm  ?? 0.0;
+    uniforms.u_storm_level.value   = d.storm_level        ?? 0.0;
+    uniforms.u_bt_norm.value       = d.bt_norm            ?? Math.max(0, Math.min(1, bt / 30));
+    uniforms.u_by_sw.value         = Math.max(-1, Math.min(1, (sw.solar_wind?.by ?? 0) / 20));
+    uniforms.u_dst_norm.value      = d.dst_norm           ?? 0.025;
 
     // S-scale drives SEP particle system
     const sepLevel = sw.sep_storm_level ?? 0;
