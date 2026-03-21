@@ -180,76 +180,43 @@
 
         /* ─── Hero ────────────────────────────────────────────────────────── */
         .hero {
-            text-align: center;
-            padding: 3.5rem 2rem 1.5rem;
-            animation: fadeIn 1s ease-in;
             position: relative;
-        }
-        /* ─── Hero Logo Animation ───────────────────────────────────── */
-        .hero-logo-wrap {
-            position: relative;
-            width: min(340px, 75vw);
-            height: min(340px, 75vw);
-            margin: 0 auto 1.5rem;
+            overflow: hidden;
+            min-height: 520px;
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            animation: fadeIn 1s ease-in;
+            /* Logo image becomes the background, darkened for readability */
+            background-image: url('ParkersPhysics_logo2.jpg');
+            background-size: cover;
+            background-position: center 28%;
         }
-        .hero-logo-ring {
-            position: absolute;
-            border-radius: 50%;
-            pointer-events: none;
-            will-change: transform;
-            top: 50%; left: 50%;
+        /* Dark overlay so canvas + text stay readable over the photo */
+        .hero::before {
+            content: '';
+            position: absolute; inset: 0; z-index: 0;
+            background: linear-gradient(
+                180deg,
+                rgba(3,1,14,0.78)  0%,
+                rgba(3,1,14,0.50) 40%,
+                rgba(3,1,14,0.82) 78%,
+                rgba(3,1,14,0.97) 100%
+            );
         }
-        .hero-logo-ring-1 {
-            width: 110%; height: 110%;
-            margin-left: -55%; margin-top: -55%;
-            border: 2px solid transparent;
-            border-top-color: rgba(255,180,0,.65);
-            border-right-color: rgba(255,120,0,.2);
-            border-bottom-color: rgba(128,64,255,.45);
-            animation: heroRingSpin 7s linear infinite;
-        }
-        .hero-logo-ring-2 {
-            width: 124%; height: 124%;
-            margin-left: -62%; margin-top: -62%;
-            border: 1.5px solid transparent;
-            border-top-color: rgba(64,128,255,.45);
-            border-left-color: rgba(255,80,120,.35);
-            animation: heroRingSpin 11s linear infinite reverse;
-        }
-        .hero-logo-ring-3 {
-            width: 140%; height: 140%;
-            margin-left: -70%; margin-top: -70%;
-            border: 1px solid transparent;
-            border-right-color: rgba(255,200,0,.28);
-            border-bottom-color: rgba(160,64,255,.22);
-            animation: heroRingSpin 17s linear infinite;
-        }
-        @keyframes heroRingSpin {
-            from { transform: rotate(0deg); }
-            to   { transform: rotate(360deg); }
-        }
-        .hero-logo {
-            width: 88%; height: 88%;
-            border-radius: 14px;
-            object-fit: cover;
+        /* Live solar canvas — fills the hero, sits above the photo overlay */
+        #hero-solar-canvas {
+            position: absolute; inset: 0; z-index: 1;
+            width: 100%; height: 100%;
             display: block;
-            position: relative; z-index: 1;
-            filter: drop-shadow(0 0 32px rgba(255,180,0,.45)) drop-shadow(0 0 70px rgba(128,64,255,.3));
-            animation: heroLogoFloat 6s ease-in-out infinite;
-            will-change: transform;
         }
-        @keyframes heroLogoFloat {
-            0%,100% {
-                transform: translateY(0px);
-                filter: drop-shadow(0 0 32px rgba(255,180,0,.45)) drop-shadow(0 0 70px rgba(128,64,255,.3));
-            }
-            50% {
-                transform: translateY(-14px);
-                filter: drop-shadow(0 0 55px rgba(255,200,0,.65)) drop-shadow(0 0 105px rgba(160,80,255,.45));
-            }
+        /* Text block anchored to the bottom of the hero */
+        .hero-text {
+            position: relative; z-index: 2;
+            text-align: center;
+            margin-top: auto;
+            padding: 1.2rem 2rem 2.4rem;
+            /* Gradient mask so text appears on a readable dark strip */
+            background: linear-gradient(transparent, rgba(3,1,14,0.55) 25%, rgba(3,1,14,0.82) 70%);
         }
         .hero-title {
             font-size: 3rem;
@@ -670,24 +637,24 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
-<div class="hero">
-    <div class="hero-logo-wrap">
-        <div class="hero-logo-ring hero-logo-ring-1"></div>
-        <div class="hero-logo-ring hero-logo-ring-2"></div>
-        <div class="hero-logo-ring hero-logo-ring-3"></div>
-        <img src="ParkersPhysics_logo2.jpg" class="hero-logo" alt="Parker Physics App Logo">
-    </div>
-    <h1 class="hero-title">Parker Physics App</h1>
-    <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
-    <p class="hero-sub">
-        Explore the universe through scientifically grounded, interactive simulations.
-        From solar wind physics to galactic structure — all running live in your browser.
-    </p>
-    <div class="hero-badges">
-        <span class="hero-badge gold">&#9728;&#65039; Live Solar Data</span>
-        <span class="hero-badge purple">&#128640; Rust / WASM</span>
-        <span class="hero-badge blue">&#127760; WebGL 3D</span>
-        <span class="hero-badge green">&#128295; Open Source</span>
+<div class="hero" id="hero">
+    <!-- Live solar canvas — animation drawn here; photo background set via CSS -->
+    <canvas id="hero-solar-canvas" aria-label="Live solar disk with NOAA space weather data" role="img"></canvas>
+
+    <!-- Text overlay anchored to hero bottom -->
+    <div class="hero-text">
+        <h1 class="hero-title">Parker Physics App</h1>
+        <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
+        <p class="hero-sub">
+            Explore the universe through scientifically grounded, interactive simulations.
+            From solar wind physics to galactic structure — all running live in your browser.
+        </p>
+        <div class="hero-badges">
+            <span class="hero-badge gold">&#9728;&#65039; Live Solar Data</span>
+            <span class="hero-badge purple">&#128640; Rust / WASM</span>
+            <span class="hero-badge blue">&#127760; WebGL 3D</span>
+            <span class="hero-badge green">&#128295; Open Source</span>
+        </div>
     </div>
 </div>
 
@@ -1270,6 +1237,7 @@ new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 <!-- ═══════════════════════════════════════ LIVE SPACE WEATHER BAR ═══ -->
 <script type="module">
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { SolarLiveCanvas }  from './js/solar-live-canvas.js';
 
 const elSpeed     = document.getElementById('sw-speed');
 const elBz        = document.getElementById('sw-bz');
@@ -1394,6 +1362,12 @@ window.addEventListener('swpc-update', e => {
 // fetching must stay client-side (browser → NOAA directly, CORS works).
 const feed = new SpaceWeatherFeed({ pollInterval: 90 * 1000 });
 feed.start();
+
+// ── Hero live solar canvas ─────────────────────────────────────────────────
+// The canvas fills the hero section; the logo photo is set as CSS background.
+// SolarLiveCanvas listens to the same swpc-update event the feed dispatches.
+const heroCanvas = document.getElementById('hero-solar-canvas');
+if (heroCanvas) new SolarLiveCanvas(heroCanvas).start();
 </script>
 
 <!-- Wind pipeline feed removed: NOAA WAF (403 host_not_allowed) blocks all
