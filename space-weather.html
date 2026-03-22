@@ -389,82 +389,52 @@ nav {
 }
 .sw-footer a { color:#667; }
 
-/* ── LIVE SOLAR CANVAS WIDGET ────────────────────────────────────────────── */
-.sol-canvas-wrap {
-    position: relative;
-    width: 100%;
-    height: 320px;
-    border-radius: 14px;
-    overflow: hidden;
-    margin-bottom: 16px;
-    border: 1px solid rgba(255,180,40,0.12);
-    background: #020109;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.6), inset 0 0 60px rgba(255,120,20,0.04);
+/* ── HELIOSPHERE HERO CANVAS ─────────────────────────────────────────────── */
+.helio-hero-wrap {
+    position: relative; width: 100%; height: 500px;
+    border-radius: 16px; overflow: hidden; margin-bottom: 16px;
+    border: 1px solid rgba(255,180,40,0.12); background: #02010a;
+    box-shadow: 0 4px 32px rgba(0,0,0,0.7), inset 0 0 80px rgba(255,100,20,0.03);
 }
-@media (max-width: 600px) {
-    .sol-canvas-wrap { height: 230px; }
-}
-#sw-solar-canvas {
-    display: block;
-    width: 100%; height: 100%;
-}
-.sol-canvas-wrap .sol-corner-link {
+@media (max-width: 700px) { .helio-hero-wrap { height: 340px; } }
+#helio-canvas { display: block; width: 100%; height: 100%; }
+.helio-corner-link {
     position: absolute; bottom: 12px; right: 14px; z-index: 10;
-    font-size: .72rem; color: rgba(255,180,60,0.5);
-    text-decoration: none; font-family: monospace;
-    transition: color .2s;
+    font-size: .72rem; color: rgba(255,180,60,0.45);
+    text-decoration: none; font-family: monospace; transition: color .2s;
 }
-.sol-canvas-wrap .sol-corner-link:hover { color: rgba(255,200,80,0.9); }
+.helio-corner-link:hover { color: rgba(255,200,80,0.9); }
 
-/* ── SUN → EARTH CONNECTION SECTION ─────────────────────────────────────── */
-.sun-earth-section {
+/* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
+.earth-section {
     background: rgba(0,4,18,.7);
     border: 1px solid rgba(0,198,255,.12);
-    border-radius: 14px;
-    padding: 18px 20px 14px;
-    margin-bottom: 16px;
+    border-radius: 14px; padding: 18px 20px 14px; margin-bottom: 16px;
 }
-.se-section-header {
-    display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px;
+.earth-section-header {
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
 }
-.se-title {
+.earth-section-title {
     font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
     color: #9cf;
 }
-.se-subtitle {
-    font-size: .72rem; color: #445;
-}
-.se-panels {
-    display: flex; gap: 16px; align-items: stretch;
-}
-.se-panorama-wrap {
-    flex: 3; min-width: 0; display: flex; flex-direction: column;
-}
-.se-earth-wrap {
-    flex: 2; min-width: 0; display: flex; flex-direction: column; align-items: center;
-}
-#se-panorama-canvas {
-    width: 100%; height: 220px; display: block;
-    border-radius: 8px; background: #020108;
-    border: 1px solid rgba(255,255,255,.05);
+.earth-section-sub { font-size: .72rem; color: #445; }
+.earth-canvas-row {
+    display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;
 }
 #se-earth-canvas {
-    width: 100%; max-width: 420px; height: 420px; display: block;
-    border-radius: 8px; background: #020108;
-    border: 1px solid rgba(255,255,255,.05);
+    flex: 1; min-width: 280px; max-width: 520px; height: 480px; display: block;
+    border-radius: 10px; background: #020108; border: 1px solid rgba(255,255,255,.05);
 }
 .se-legend {
-    display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 8px;
-    font-size: .7rem; color: #556;
+    flex: 1; min-width: 220px; display: flex; flex-direction: column;
+    gap: 8px; font-size: .72rem; color: #556; padding-top: 4px;
 }
-.se-legend span { display: flex; align-items: center; gap: 5px; }
-.leg-dot {
-    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-}
-@media (max-width: 860px) {
-    .se-panels { flex-direction: column; }
-    #se-panorama-canvas { height: 180px; }
-    #se-earth-canvas { height: 320px; max-width: 100%; }
+.se-legend span { display: flex; align-items: center; gap: 6px; line-height: 1.4; }
+.leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+@media (max-width: 600px) {
+    #se-earth-canvas { height: 340px; max-width: 100%; }
+    .se-legend { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; }
 }
 </style>
 </head>
@@ -472,15 +442,14 @@ nav {
 
 <!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <a href="space-weather.html" class="nav-brand">✦ Parker Physics</a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
     <div class="nav-menu" id="nav-menu" role="navigation">
-        <a href="index.html"         class="nav-item">Home</a>
+        <a href="space-weather.html" class="nav-item active">Home</a>
         <a href="galactic-map.html"  class="nav-item">Galactic Map</a>
         <a href="threejs.html"       class="nav-item">Solar System</a>
         <a href="sun.html"           class="nav-item">The Sun</a>
         <a href="earth.html"         class="nav-item">Earth View</a>
-        <a href="space-weather.html" class="nav-item active">Space Weather</a>
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
@@ -528,14 +497,14 @@ nav {
         <span class="dsb-age" id="dsb-age"></span>
     </div>
 
-    <!-- ── LIVE SOLAR CANVAS ─────────────────────────────────────────────── -->
-    <!-- Real-time solar disk: active regions, flares, solar wind particles     -->
-    <!-- driven by the same swpc-update event the metrics cards below use.     -->
-    <div class="sol-canvas-wrap">
-        <canvas id="sw-solar-canvas"
-                aria-label="Live solar disk — NOAA active regions and flare activity"
+    <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
+    <!-- Inner solar system top-down view: ephemeris planets, Parker spiral,   -->
+    <!-- animated solar wind + CME, shared SunRenderer2D at centre.            -->
+    <div class="helio-hero-wrap">
+        <canvas id="helio-canvas"
+                aria-label="Inner solar system — Parker spiral, planetary positions, live solar wind"
                 role="img"></canvas>
-        <a class="sol-corner-link" href="sun.html" title="Open full Sun simulator">☉ Full simulator →</a>
+        <a class="helio-corner-link" href="threejs.html" title="Open full Solar System">Solar System →</a>
     </div>
 
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
@@ -610,43 +579,27 @@ nav {
 
     </div><!-- /hero-row -->
 
-    <!-- ── SUN → EARTH CONNECTION ─────────────────────────────────────────────── -->
-    <section class="sun-earth-section">
-        <div class="se-section-header">
-            <span class="se-title">☉ Sun → ⊕ Earth Connection</span>
-            <span class="se-subtitle">Heliosphere · Magnetosphere · Atmosphere · Van Allen Belts · Lagrange Points</span>
+    <!-- ── EARTH CROSS-SECTION ───────────────────────────────────────────────── -->
+    <!-- Atmosphere · ionosphere · Van Allen belts · aurora · magnetopause      -->
+    <!-- driven by EarthRenderer2D (sim-earth.js) — same renderer used sitewide -->
+    <section class="earth-section">
+        <div class="earth-section-header">
+            <span class="earth-section-title">⊕ Earth: Atmosphere · Radiation Belts · Magnetosphere</span>
+            <span class="earth-section-sub">Van Allen belts · Aurora ovals · Kp · Bz · X-ray driven</span>
         </div>
-        <div class="se-panels">
-
-            <!-- Panorama: Sun → L1 → Earth → L2 with Parker spiral & magnetosphere -->
-            <div class="se-panorama-wrap">
-                <canvas id="se-panorama-canvas"
-                    aria-label="Sun to Earth heliospheric panorama with Parker spiral and magnetosphere"
-                    role="img"></canvas>
-                <div class="se-legend">
-                    <span><span class="leg-dot" style="background:#ffcc44"></span>Solar Wind (Parker Spiral)</span>
-                    <span><span class="leg-dot" style="background:#ff7040"></span>CME Ejecta</span>
-                    <span><span class="leg-dot" style="background:#00e874"></span>L1 (DSCOVR/ACE) · L2 (JWST)</span>
-                    <span><span class="leg-dot" style="background:#6080ff"></span>Bow Shock</span>
-                    <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue model)</span>
-                </div>
+        <div class="earth-canvas-row">
+            <canvas id="se-earth-canvas"
+                aria-label="Earth atmospheric layers, Van Allen radiation belts, aurora ovals and magnetopause cross-section"
+                role="img"></canvas>
+            <div class="se-legend">
+                <span><span class="leg-dot" style="background:#3a9fff"></span>Troposphere / Stratosphere / Mesosphere</span>
+                <span><span class="leg-dot" style="background:#50d8ff"></span>Ionosphere D / E / F layers (X-ray driven)</span>
+                <span><span class="leg-dot" style="background:#6080cc"></span>Plasmasphere</span>
+                <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen Inner Belt (protons, 1–3 R⊕)</span>
+                <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen Outer Belt (electrons, 3–7 R⊕)</span>
+                <span><span class="leg-dot" style="background:#00ff88"></span>Aurora Oval (Kp driven — equatorward during storms)</span>
+                <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue model, Bz-compressed)</span>
             </div>
-
-            <!-- Earth cross-section: atmosphere + Van Allen belts -->
-            <div class="se-earth-wrap">
-                <canvas id="se-earth-canvas"
-                    aria-label="Earth atmospheric layers and Van Allen radiation belts cross-section"
-                    role="img"></canvas>
-                <div class="se-legend" style="justify-content:center">
-                    <span><span class="leg-dot" style="background:#3a9fff"></span>Troposphere/Strat/Meso</span>
-                    <span><span class="leg-dot" style="background:#50d8ff"></span>Ionosphere D/E/F (X-ray driven)</span>
-                    <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen Inner Belt</span>
-                    <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen Outer Belt</span>
-                    <span><span class="leg-dot" style="background:#00ff88"></span>Aurora Oval (Kp driven)</span>
-                    <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause</span>
-                </div>
-            </div>
-
         </div>
     </section>
 
@@ -923,10 +876,12 @@ nav {
 </script>
 <script type="module">
 import './js/live-status-bar.js';
-import { SpaceWeatherFeed } from './js/swpc-feed.js';
-import { SohoFeed }         from './js/extended-feeds.js';
-import { NasaFeed }         from './js/nasa-feed.js';
-import { SolarLiveCanvas }  from './js/solar-live-canvas.js';
+import { SpaceWeatherFeed }  from './js/swpc-feed.js';
+import { SohoFeed }          from './js/extended-feeds.js';
+import { NasaFeed }          from './js/nasa-feed.js';
+import { HeliosphereCanvas } from './js/heliosphere.js';
+import { EarthRenderer2D }   from './js/sim-earth.js';
+import { EphemerisService }  from './js/horizons.js';
 
 // ── NAV burger ─────────────────────────────────────────────────────────────────
 const burger  = document.getElementById('nav-burger');
@@ -1241,18 +1196,28 @@ new SpaceWeatherFeed().start();
 new SohoFeed().start();
 new NasaFeed({ apiKey: 'DEMO_KEY' }).start();
 
-// ── Live solar canvas (shares the swpc-update event stream) ──────────────────
-const swCanvas = document.getElementById('sw-solar-canvas');
-if (swCanvas) new SolarLiveCanvas(swCanvas, { showOrbit: false }).start();
+// ── Ephemeris — real planet positions for the heliosphere canvas ──────────────
+new EphemerisService().startLive(120);
 
-// ── SUN → EARTH CONNECTION VISUALIZATION ─────────────────────────────────────
-// Two animated Canvas 2D panels:
-//   1. Panorama: Sun → Parker spiral → L1 → Earth → L2 (with bow shock + magnetopause)
-//   2. Earth cross-section: atmospheric layers + Van Allen belts + aurora ovals
-// All driven by live swpc-update state (speed, Bz, Kp, X-ray flux, SEP level).
-(function () {
-    const panCanvas   = el('se-panorama-canvas');
+// ── Heliosphere hero canvas (inner solar system, top-down) ───────────────────
+// Uses HeliosphereCanvas (heliosphere.js) + SunRenderer2D (sim-sun.js) so the
+// sun visual is identical to the close-up solar page.
+const helioCanvas = document.getElementById('helio-canvas');
+if (helioCanvas) new HeliosphereCanvas(helioCanvas).start();
+
+// ── Earth cross-section canvas — shared EarthRenderer2D module ───────────────
+// Atmospheric layers, Van Allen belts, aurora ovals, magnetopause.
+// Same renderer (sim-earth.js) reused across any page needing the Earth view.
+{
     const earthCanvas = el('se-earth-canvas');
+    // EarthRenderer2D handles its own animation loop + swpc-update listener
+    if (earthCanvas) new EarthRenderer2D(earthCanvas).start();
+}
+
+// ── LEGACY IIFE REMOVED — kept below as dead stub for safety until cleanup ──
+(function () {
+    const panCanvas   = null; // removed
+    const earthCanvas = null; // handled by EarthRenderer2D above
     if (!panCanvas || !earthCanvas) return;
 
     const DPR = window.devicePixelRatio || 1;

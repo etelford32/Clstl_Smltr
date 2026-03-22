@@ -17,7 +17,12 @@
  *
  * Listens to the 'swpc-update' CustomEvent dispatched by SpaceWeatherFeed.
  * Works alongside an existing feed — does NOT start its own feed.
+ *
+ * Sun disk / corona / active-region rendering is delegated to SunRenderer2D
+ * (sim-sun.js) so the visual is identical across all pages that show the sun.
  */
+
+import { SunRenderer2D } from './sim-sun.js';
 
 export class SolarLiveCanvas {
 
@@ -50,12 +55,14 @@ export class SolarLiveCanvas {
             flareDir:    null, // { lat_rad, lon_rad } | null
         };
 
+        // ── Shared sun renderer (same visual as heliosphere + space-weather) ─────
+        this._sun = new SunRenderer2D();
+
         // ── Animation state ────────────────────────────────────────────────────
-        this._particles  = [];
-        this._N_PART     = 300;
-        this._flareAnims = [];  // active flare burst animations
-        this._t          = 0;  // frame counter
-        this._rafId      = null;
+        this._particles = [];
+        this._N_PART    = 300;
+        this._t         = 0;
+        this._rafId     = null;
 
         // Seeded starfield (stable across frames)
         this._stars = this._genStars(100);
@@ -109,14 +116,7 @@ export class SolarLiveCanvas {
     _clsRank(cls) { return { A:1, B:2, C:3, M:4, X:5 }[String(cls)[0]] ?? 0; }
 
     _triggerFlare(cls, dir) {
-        const lat = dir?.lat_rad ?? (Math.random() - 0.5) * 0.7;
-        const lon = dir?.lon_rad ?? (Math.random() - 0.5) * 0.7;
-        this._flareAnims.push({
-            lat, lon,
-            cls:      (String(cls)[0] ?? 'C'),
-            t:        0,
-            duration: { A:60, B:80, C:100, M:160, X:240 }[String(cls)[0]] ?? 100,
-        });
+        this._sun.addFlare(cls, dir);
     }
 
     // ── Seeded starfield ───────────────────────────────────────────────────────
@@ -202,22 +202,13 @@ export class SolarLiveCanvas {
 
         if (this.opts.showStars) this._drawStars(ctx, W, H);
 
-        // ── Particles behind sun ──────────────────────────────────────────────
+        // ── Wind particles behind sun ─────────────────────────────────────────
         if (this.opts.showParticles) this._drawParticles(ctx, cx, cy, R, true);
 
-        // ── Corona ────────────────────────────────────────────────────────────
-        this._drawCorona(ctx, cx, cy, R);
+        // ── Sun (corona + disk + active regions + flares) — shared renderer ───
+        this._sun.draw(ctx, cx, cy, R, this._t, this._s);
 
-        // ── Solar disk ────────────────────────────────────────────────────────
-        this._drawSun(ctx, cx, cy, R);
-
-        // ── Active regions ────────────────────────────────────────────────────
-        if (this.opts.showRegions) this._drawRegions(ctx, cx, cy, R);
-
-        // ── Flare burst animations ────────────────────────────────────────────
-        if (this.opts.showFlares)  this._drawFlares(ctx, cx, cy, R);
-
-        // ── Particles in front of sun ─────────────────────────────────────────
+        // ── Wind particles in front of sun ────────────────────────────────────
         if (this.opts.showParticles) this._drawParticles(ctx, cx, cy, R, false);
 
         // ── Orbit hint ring ───────────────────────────────────────────────────
@@ -244,8 +235,9 @@ export class SolarLiveCanvas {
         ctx.globalAlpha = 1;
     }
 
-    // ── Corona ────────────────────────────────────────────────────────────────
+    // ── (Corona, disk, regions, flares delegated to SunRenderer2D) ───────────
 
+    /** @deprecated Use this._sun.draw() instead — kept only for dead-code safety */
     _drawCorona(ctx, cx, cy, R) {
         const { kp, stormLevel } = this._s;
         const t   = this._t;
