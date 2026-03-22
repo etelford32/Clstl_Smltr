@@ -94,6 +94,14 @@
     {
       "source": "/v1/solar-wind/:path*",
       "destination": "/api/solar-wind/:path*"
+    },
+    {
+      "source": "/v1/noaa/:path*",
+      "destination": "/api/noaa/:path*"
+    },
+    {
+      "source": "/v1/donki/:path*",
+      "destination": "/api/donki/:path*"
     }
   ]
 }
