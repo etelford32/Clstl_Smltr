@@ -283,6 +283,26 @@ nav {
     border:1px solid rgba(255,140,0,.3); font-size:.68rem;
 }
 
+/* ── WIND ALERT LEVEL BADGE ──────────────────────────────────────────────── */
+.wind-alert-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: .66rem; font-weight: 700; letter-spacing: .06em;
+    font-family: 'Courier New', monospace; text-transform: uppercase;
+    border: 1px solid; transition: background .4s, color .4s, border-color .4s;
+    white-space: nowrap;
+}
+.wind-alert-badge::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+    animation: alert-pulse 2s ease-in-out infinite; flex-shrink: 0;
+}
+@keyframes alert-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.wind-alert-badge.alert-quiet    { background:rgba(0,200,100,.10); color:#00e874; border-color:rgba(0,200,100,.25); }
+.wind-alert-badge.alert-moderate { background:rgba(255,200,0,.12); color:#ffd700; border-color:rgba(255,200,0,.28); }
+.wind-alert-badge.alert-high     { background:rgba(255,120,0,.14); color:#ff8800; border-color:rgba(255,120,0,.35); }
+.wind-alert-badge.alert-extreme  { background:rgba(255,30,80,.16);  color:#ff3060; border-color:rgba(255,30,80,.40);
+    box-shadow: 0 0 8px rgba(255,30,80,.35); }
+
 /* ── STORM LEVEL GAUGE ─────────────────────────────────────────────────────── */
 .storm-levels { display:flex; gap:4px; margin-top:8px; }
 .storm-lvl {
@@ -512,9 +532,16 @@ nav {
 
         <!-- Solar Wind Speed -->
         <div class="metric-card" style="--accent:rgba(0,198,255,.08)">
-            <div class="metric-label">Solar Wind Speed · L1 (DSCOVR)</div>
-            <div class="metric-big"><span id="wind-speed" class="skel"></span> <span class="metric-unit">km/s</span></div>
+            <div class="metric-label">Solar Wind Speed · L1 (DSCOVR/ACE)</div>
+            <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+                <div class="metric-big"><span id="wind-speed" class="skel"></span> <span class="metric-unit">km/s</span></div>
+                <span id="wind-alert-badge" class="wind-alert-badge" style="display:none"></span>
+            </div>
             <div class="metric-sub" id="wind-trend">–</div>
+            <!-- 60-min sparkline from pipeline series -->
+            <canvas id="wind-sparkline" width="240" height="36"
+                    style="width:100%;height:36px;margin:6px 0 4px;display:block;opacity:.85"
+                    title="Solar wind speed — last 60 minutes"></canvas>
             <div class="bz-bar" title="IMF Bz: left = southward (active), right = northward (quiet)">
                 <div class="bz-marker" id="bz-marker" style="left:50%"></div>
             </div>
@@ -882,6 +909,7 @@ import { NasaFeed }          from './js/nasa-feed.js';
 import { HeliosphereCanvas } from './js/heliosphere.js';
 import { EarthRenderer2D }   from './js/sim-earth.js';
 import { EphemerisService }  from './js/horizons.js';
+import WindPipelineFeed       from './js/wind-pipeline-feed.js';
 
 // ── NAV burger ─────────────────────────────────────────────────────────────────
 const burger  = document.getElementById('nav-burger');
@@ -1020,6 +1048,92 @@ function updateXray(xray_class, xray_flux) {
     el('xray-desc').textContent = XRAY_DESCS[letter] || '–';
 }
 
+// ── Wind sparkline renderer ───────────────────────────────────────────────────
+function drawWindSparkline(series) {
+    const canvas = el('wind-sparkline');
+    if (!canvas || !series?.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.offsetWidth  || 240;
+    const H   = canvas.offsetHeight || 36;
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const speeds = series.map(r => r.speed_km_s ?? 0).filter(v => v > 0);
+    if (speeds.length < 2) { ctx.clearRect(0, 0, W, H); return; }
+
+    const minV = Math.min(...speeds);
+    const maxV = Math.max(...speeds);
+    const range = Math.max(maxV - minV, 40);  // at least 40 km/s range
+
+    const xStep = W / (speeds.length - 1);
+    const yOf   = v => H - ((v - minV) / range) * (H - 4) - 2;
+
+    // Filled area under line
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    const latest = speeds[speeds.length - 1];
+    const aColor = latest >= 800 ? 'rgba(255,48,96,' : latest >= 600 ? 'rgba(255,140,0,'
+                 : latest >= 400 ? 'rgba(0,200,255,' : 'rgba(0,232,118,';
+    grad.addColorStop(0, aColor + '0.28)');
+    grad.addColorStop(1, aColor + '0.02)');
+
+    ctx.beginPath();
+    ctx.moveTo(0, yOf(speeds[0]));
+    speeds.forEach((v, i) => { if (i > 0) ctx.lineTo(i * xStep, yOf(v)); });
+    ctx.lineTo((speeds.length - 1) * xStep, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    speeds.forEach((v, i) => i === 0 ? ctx.moveTo(0, yOf(v)) : ctx.lineTo(i * xStep, yOf(v)));
+    ctx.strokeStyle = aColor + '0.8)';
+    ctx.lineWidth   = 1.4;
+    ctx.stroke();
+
+    // Min / max / latest labels
+    ctx.font      = `${Math.round(8 * dpr) / dpr}px monospace`;
+    ctx.fillStyle = 'rgba(100,130,160,0.7)';
+    ctx.textAlign = 'left';  ctx.fillText(`${Math.round(minV)}`, 2, H - 2);
+    ctx.textAlign = 'right'; ctx.fillText(`${Math.round(maxV)} km/s`, W - 2, 10);
+}
+
+// ── Wind pipeline update handler ──────────────────────────────────────────────
+// Enriches the wind speed card with: trend arrow, alert level badge, sparkline.
+// Falls back gracefully when the pipeline is offline (swpc-update still works).
+window.addEventListener('wind-pipeline-update', ev => {
+    const d = ev.detail;
+    if (!d) return;
+
+    // Speed — prefer pipeline value (fresher / cleaned) if available
+    if (d.speed_km_s != null) {
+        el('wind-speed').textContent = Math.round(d.speed_km_s);
+        el('wind-speed').classList.remove('skel');
+    }
+
+    // Trend line in metric-sub: arrow + slope + density from pipeline
+    const dir    = d.trend?.direction ?? 'STEADY';
+    const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
+    const slope  = d.trend?.slope_km_s_per_min;
+    const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
+    const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
+    el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+
+    // Alert badge
+    const badge = el('wind-alert-badge');
+    if (badge && d.alert_level) {
+        badge.textContent = d.alert_level;
+        badge.className   = `wind-alert-badge alert-${d.alert_level.toLowerCase()}`;
+        badge.style.display = '';
+    }
+
+    // Sparkline
+    if (d.series?.length) drawWindSparkline(d.series);
+});
+
 // ── SWPC update handler ────────────────────────────────────────────────────────
 window.addEventListener('swpc-update', e => {
     const d = e.detail;
@@ -1039,7 +1153,11 @@ window.addEventListener('swpc-update', e => {
     const bt      = sw.bt ?? 0;
     const windNorm = Math.min((spd - 250) / 650, 1);
 
-    el('wind-trend').textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
+    // Only update the trend line from NOAA if the pipeline hasn't already enriched it
+    // (pipeline handler replaces this with trend arrow + slope when available).
+    const trendEl = el('wind-trend');
+    if (!trendEl.textContent || trendEl.textContent === '–')
+        trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
     el('p-speed').textContent   = `${Math.round(spd)} km/s`;
     el('p-speed').className     = `param-val ${spd > 700 ? 'danger' : spd > 500 ? 'warn' : 'ok'}`;
     el('p-density').textContent = `${density.toFixed(2)} n/cc`;
@@ -1195,6 +1313,16 @@ window.addEventListener('soho-update', e => {
 new SpaceWeatherFeed().start();
 new SohoFeed().start();
 new NasaFeed({ apiKey: 'DEMO_KEY' }).start();
+
+// ── Wind-speed pipeline (Vercel Edge /api/solar-wind/wind-speed) ──────────────
+// Provides enriched solar wind data: trend direction, alert level, 60-min series.
+// Falls back gracefully — swpc-update still supplies the raw speed number if
+// the pipeline endpoint is unavailable (e.g. during local dev without the server).
+try {
+    new WindPipelineFeed().start();
+} catch (e) {
+    console.debug('[WindPipeline] not available, using NOAA direct only:', e.message);
+}
 
 // ── Ephemeris — real planet positions for the heliosphere canvas ──────────────
 new EphemerisService().startLive(120);

@@ -23,6 +23,8 @@
  *   alert_level   string  'QUIET' | 'MODERATE' | 'HIGH' | 'EXTREME'
  *   trend         object  { slope_km_s_per_min: float, direction: 'RISING'|'STEADY'|'FALLING' }
  *   series_count  int     number of data points in rolling window
+ *   series        array   last 60 readings  [{ timestamp, speed_km_s, speed_norm, density_cc, bz_nT }]
+ *                         trimmed to ≤ 60 points for sparkline use
  *   age_min       float   minutes since last ingest
  *   freshness     string  'fresh' | 'stale' | 'expired' | 'missing'
  *   updated       string  ISO timestamp of last reading
@@ -80,8 +82,11 @@ export class WindPipelineFeed {
     }
 
     _dispatch(json) {
-        const curr = json?.data?.current ?? {};
-        const trend = json?.data?.trend  ?? { slope_km_s_per_min: 0, direction: 'STEADY' };
+        const curr   = json?.data?.current ?? {};
+        const trend  = json?.data?.trend   ?? { slope_km_s_per_min: 0, direction: 'STEADY' };
+        const full   = json?.data?.series  ?? [];
+        // Trim to last 60 readings (≈1 h at 1-min cadence) for sparkline use.
+        const series = full.length > 60 ? full.slice(-60) : full;
 
         window.dispatchEvent(new CustomEvent('wind-pipeline-update', {
             detail: {
@@ -92,7 +97,8 @@ export class WindPipelineFeed {
                 bz_nT:        curr.bz_nT        ?? null,
                 alert_level:  curr.alert_level  ?? 'QUIET',
                 trend,
-                series_count: (json?.data?.series ?? []).length,
+                series_count: full.length,
+                series,
                 age_min:      json.age_min      ?? null,
                 freshness:    json.freshness    ?? 'missing',
                 updated:      json?.data?.updated ?? null,
