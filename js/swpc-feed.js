@@ -48,9 +48,9 @@ export const ENDPOINTS = {
     /** Planetary Kp index (3-hour cadence, 2-D array) */
     kp_index:     'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
     /** GOES primary X-ray flux 1-day history (0.1–0.8 nm channel) */
-    xray_flux:    'https://services.swpc.noaa.gov/json/goes/primary/xray-1-day.json',
+    xray_flux:    'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json',
     /** Solar flare event list — last 7 days */
-    flares_7d:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
+    flares_7d:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json',
     /** Active solar regions (sunspot groups) */
     regions:      'https://services.swpc.noaa.gov/json/solar_regions.json',
 

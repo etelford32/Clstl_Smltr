@@ -439,22 +439,38 @@ nav {
     color: #9cf;
 }
 .earth-section-sub { font-size: .72rem; color: #445; }
-.earth-canvas-row {
-    display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap;
+/* ── 3D Globe canvas ─────────────────────────────────────────────────────── */
+#sw-globe-canvas {
+    display: block; width: 100%; height: 520px;
+    border-radius: 12px; background: #010812;
+    border: 1px solid rgba(0,198,255,.10);
+    cursor: grab;
 }
-#se-earth-canvas {
-    flex: 1; min-width: 280px; max-width: 520px; height: 480px; display: block;
-    border-radius: 10px; background: #020108; border: 1px solid rgba(255,255,255,.05);
+#sw-globe-canvas:active { cursor: grabbing; }
+
+/* Layer toggle buttons */
+.globe-layer-btns {
+    display: flex; gap: 6px; flex-wrap: wrap;
 }
-.se-legend {
-    flex: 1; min-width: 220px; display: flex; flex-direction: column;
-    gap: 8px; font-size: .72rem; color: #556; padding-top: 4px;
+.layer-btn {
+    padding: 3px 10px; border-radius: 20px; border: 1px solid rgba(0,198,255,.25);
+    background: rgba(0,198,255,.07); color: #6aaccc; font-size: .68rem;
+    font-family: inherit; cursor: pointer; transition: all .2s; letter-spacing: .04em;
 }
-.se-legend span { display: flex; align-items: center; gap: 6px; line-height: 1.4; }
+.layer-btn:hover  { border-color: rgba(0,198,255,.5); color: #aee; }
+.layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
+    border-color: rgba(0,198,255,.45); }
+
+/* Legend below the globe */
+.globe-legend {
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    font-size: .70rem; color: #556; margin-top: 12px;
+}
+.globe-legend span { display: flex; align-items: center; gap: 6px; }
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
 @media (max-width: 600px) {
-    #se-earth-canvas { height: 340px; max-width: 100%; }
-    .se-legend { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; }
+    #sw-globe-canvas { height: 340px; }
 }
 </style>
 </head>
@@ -606,27 +622,34 @@ nav {
 
     </div><!-- /hero-row -->
 
-    <!-- ── EARTH CROSS-SECTION ───────────────────────────────────────────────── -->
-    <!-- Atmosphere · ionosphere · Van Allen belts · aurora · magnetopause      -->
-    <!-- driven by EarthRenderer2D (sim-earth.js) — same renderer used sitewide -->
-    <section class="earth-section">
-        <div class="earth-section-header">
-            <span class="earth-section-title">⊕ Earth: Atmosphere · Radiation Belts · Magnetosphere</span>
-            <span class="earth-section-sub">Van Allen belts · Aurora ovals · Kp · Bz · X-ray driven</span>
-        </div>
-        <div class="earth-canvas-row">
-            <canvas id="se-earth-canvas"
-                aria-label="Earth atmospheric layers, Van Allen radiation belts, aurora ovals and magnetopause cross-section"
-                role="img"></canvas>
-            <div class="se-legend">
-                <span><span class="leg-dot" style="background:#3a9fff"></span>Troposphere / Stratosphere / Mesosphere</span>
-                <span><span class="leg-dot" style="background:#50d8ff"></span>Ionosphere D / E / F layers (X-ray driven)</span>
-                <span><span class="leg-dot" style="background:#6080cc"></span>Plasmasphere</span>
-                <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen Inner Belt (protons, 1–3 R⊕)</span>
-                <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen Outer Belt (electrons, 3–7 R⊕)</span>
-                <span><span class="leg-dot" style="background:#00ff88"></span>Aurora Oval (Kp driven — equatorward during storms)</span>
-                <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue model, Bz-compressed)</span>
+    <!-- ── 3D MAGNETOSPHERE GLOBE ────────────────────────────────────────────── -->
+    <!-- Three.js Earth + live magnetosphere, aurora ovals, solar wind particles -->
+    <section class="earth-section globe-section">
+        <div class="earth-section-header" style="flex-wrap:wrap;gap:10px">
+            <div>
+                <span class="earth-section-title">3D Earth · Magnetosphere · Aurora</span>
+                <span class="earth-section-sub">Shue-1998 magnetopause · Van Allen belts · Kp/Bz live</span>
             </div>
+            <!-- Layer toggle buttons -->
+            <div class="globe-layer-btns" id="globe-layers">
+                <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
+                <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
+                <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
+                <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
+            </div>
+        </div>
+        <canvas id="sw-globe-canvas"
+            aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
+            role="img"></canvas>
+        <div class="globe-legend">
+            <span><span class="leg-dot" style="background:#00ff88"></span>Aurora oval (Kp-driven, equatorward during storms)</span>
+            <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue 1998, Bz-compressed)</span>
+            <span><span class="leg-dot" style="background:#66aaff"></span>Bow shock</span>
+            <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1–3 R⊕)</span>
+            <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3–7 R⊕)</span>
+            <span><span class="leg-dot" style="background:#00ccff"></span>Plasmasphere (Carpenter-Anderson model)</span>
+            <span><span class="leg-dot" style="background:#88d8ff"></span>Solar wind particle stream (speed-coloured)</span>
+            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom</span>
         </div>
     </section>
 
@@ -907,9 +930,9 @@ import { SpaceWeatherFeed }  from './js/swpc-feed.js';
 import { SohoFeed }          from './js/extended-feeds.js';
 import { NasaFeed }          from './js/nasa-feed.js';
 import { HeliosphereCanvas } from './js/heliosphere.js';
-import { EarthRenderer2D }   from './js/sim-earth.js';
-import { EphemerisService }  from './js/horizons.js';
-import WindPipelineFeed       from './js/wind-pipeline-feed.js';
+import { EphemerisService }    from './js/horizons.js';
+import WindPipelineFeed         from './js/wind-pipeline-feed.js';
+import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 
 // ── NAV burger ─────────────────────────────────────────────────────────────────
 const burger  = document.getElementById('nav-burger');
@@ -1139,6 +1162,9 @@ window.addEventListener('swpc-update', e => {
     const d = e.detail;
     const sw = d.solar_wind || {};
 
+    // Feed 3D globe
+    if (_globe) _globe.update(d);
+
     // Last update
     if (d.lastUpdated) {
         el('last-update').textContent = fmtTime(d.lastUpdated);
@@ -1333,20 +1359,29 @@ new EphemerisService().startLive(120);
 const helioCanvas = document.getElementById('helio-canvas');
 if (helioCanvas) new HeliosphereCanvas(helioCanvas).start();
 
-// ── Earth cross-section canvas — shared EarthRenderer2D module ───────────────
-// Atmospheric layers, Van Allen belts, aurora ovals, magnetopause.
-// Same renderer (sim-earth.js) reused across any page needing the Earth view.
+// ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
+// SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.
+// Receives live updates via swpc-update; layer toggles wired to buttons below.
+let _globe = null;
 {
-    const earthCanvas = el('se-earth-canvas');
-    // EarthRenderer2D handles its own animation loop + swpc-update listener
-    if (earthCanvas) new EarthRenderer2D(earthCanvas).start();
+    const globeCanvas = el('sw-globe-canvas');
+    if (globeCanvas) {
+        _globe = new SpaceWeatherGlobe(globeCanvas).start();
+
+        // Layer toggle buttons
+        document.getElementById('globe-layers')?.addEventListener('click', ev => {
+            const btn = ev.target.closest('.layer-btn');
+            if (!btn) return;
+            btn.classList.toggle('active');
+            _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+    }
 }
 
 // ── LEGACY IIFE REMOVED — kept below as dead stub for safety until cleanup ──
 (function () {
     const panCanvas   = null; // removed
-    const earthCanvas = null; // handled by EarthRenderer2D above
-    if (!panCanvas || !earthCanvas) return;
+    if (!panCanvas) return;
 
     const DPR = window.devicePixelRatio || 1;
 
