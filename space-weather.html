@@ -310,6 +310,68 @@ nav {
 }
 #alerts-bar.show { display:block; }
 
+/* ── OFFLINE / STALE BANNER ──────────────────────────────────────────────── */
+#data-status-banner {
+    display:none; align-items:center; gap:10px;
+    padding:9px 14px; border-radius:8px; margin-bottom:12px;
+    font-size:.8rem; border:1px solid;
+}
+#data-status-banner.stale   { display:flex; background:rgba(255,200,0,.07); border-color:rgba(255,200,0,.28); color:#ffd700; }
+#data-status-banner.offline { display:flex; background:rgba(255,60,60,.07); border-color:rgba(255,60,60,.28); color:#ff7070; }
+#data-status-banner .dsb-icon { font-size:1rem; }
+#data-status-banner .dsb-text { flex:1; }
+#data-status-banner .dsb-age  { color:inherit; opacity:.7; font-size:.72rem; margin-left:auto; }
+
+/* ── SOURCE CHIPS on data card headers ───────────────────────────────────── */
+.src-chip {
+    display:inline-flex; align-items:center; gap:4px;
+    margin-left:8px; padding:1px 6px;
+    border-radius:3px; font-size:.6rem; font-weight:400;
+    text-transform:none; letter-spacing:0; vertical-align:middle;
+    border:1px solid; transition:background .4s, color .4s, border-color .4s;
+    font-family:'Courier New', monospace;
+}
+.src-chip::before {
+    content:''; width:5px; height:5px; border-radius:50%;
+    background:currentColor; flex-shrink:0;
+}
+.src-chip.live    { background:rgba(0,200,100,.1); color:#00e874; border-color:rgba(0,200,100,.25); }
+.src-chip.stale   { background:rgba(255,200,0,.1); color:#ffd700; border-color:rgba(255,200,0,.25); }
+.src-chip.offline { background:rgba(255,60,60,.1); color:#ff7070; border-color:rgba(255,60,60,.25); }
+.src-chip.live::before { animation: src-pulse 2s ease-in-out infinite; }
+@keyframes src-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── DATA SOURCES FOOTER PANEL ────────────────────────────────────────────── */
+.data-sources-panel {
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:10px; padding:14px 18px;
+    margin-bottom:16px;
+}
+.data-sources-panel h4 {
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.09em;
+    color:#446; margin-bottom:10px;
+}
+.ds-grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+    gap:8px;
+}
+.ds-row {
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04);
+    font-size:.75rem;
+}
+.ds-row:last-child { border-bottom:none; }
+.ds-name  { color:#556; }
+.ds-val   { color:#778; font-family:'Courier New',monospace; font-size:.68rem; }
+.ds-badge {
+    font-size:.6rem; padding:1px 5px; border-radius:2px;
+    margin-left:6px; font-family:'Courier New',monospace;
+}
+.ds-badge.live    { background:rgba(0,200,100,.12); color:#00e874; }
+.ds-badge.stale   { background:rgba(255,200,0,.12);  color:#ffd700; }
+.ds-badge.offline { background:rgba(255,60,60,.12);  color:#ff7070; }
+
 /* ── DARK LOADING SKELETON ─────────────────────────────────────────────────── */
 .skel {
     display:inline-block; width:80px; height:1em;
@@ -459,6 +521,13 @@ nav {
     <!-- Alerts bar (hidden by default) -->
     <div id="alerts-bar"></div>
 
+    <!-- ── DATA STATUS BANNER (shown when feed is stale or offline) ────────── -->
+    <div id="data-status-banner">
+        <span class="dsb-icon">⚠</span>
+        <span class="dsb-text" id="dsb-text">Space weather data is temporarily unavailable. Showing cached values.</span>
+        <span class="dsb-age" id="dsb-age"></span>
+    </div>
+
     <!-- ── LIVE SOLAR CANVAS ─────────────────────────────────────────────── -->
     <!-- Real-time solar disk: active regions, flares, solar wind particles     -->
     <!-- driven by the same swpc-update event the metrics cards below use.     -->
@@ -586,7 +655,7 @@ nav {
 
         <!-- Solar Wind Detail -->
         <div class="data-card">
-            <h3>Solar Wind Parameters · DSCOVR/ACE L1</h3>
+            <h3>Solar Wind Parameters · DSCOVR/ACE L1<span class="src-chip live" id="src-wind" title="Source: NOAA SWPC — DSCOVR/ACE L1 real-time solar wind (rtsw_wind_1m.json) · 1 min cadence">NOAA · DSCOVR/ACE</span></h3>
 
             <div class="param-row">
                 <span class="param-name">Speed</span>
@@ -625,7 +694,7 @@ nav {
 
         <!-- Geomagnetic Conditions -->
         <div class="data-card">
-            <h3>Geomagnetic Storm Scale (NOAA)</h3>
+            <h3>Geomagnetic Storm Scale (NOAA)<span class="src-chip live" id="src-kp" title="Source: NOAA SWPC — Planetary Kp index (planetary_k_index_1m.json) · 3 hr cadence">NOAA · Kp index</span></h3>
 
             <div style="margin-bottom:12px">
                 <div class="storm-levels" id="storm-levels">
@@ -662,7 +731,7 @@ nav {
 
         <!-- Latest CME -->
         <div class="data-card">
-            <h3>Latest CME · NASA DONKI</h3>
+            <h3>Latest CME · NASA DONKI<span class="src-chip live" id="src-cme" title="Source: NASA DONKI CMEAnalysis endpoint · updated on detection">NASA · DONKI</span></h3>
             <div id="cme-content">
                 <div style="color:#445;font-size:.8rem;padding:12px 0">Connecting to NASA DONKI…</div>
             </div>
@@ -748,7 +817,7 @@ nav {
     <div class="tables-row">
 
         <div class="table-card">
-            <h3>Active Regions · NOAA/SWPC</h3>
+            <h3>Active Regions · NOAA/SWPC<span class="src-chip live" id="src-ar" title="Source: NOAA SWPC — solar-regions.json · daily update">NOAA · SWPC</span></h3>
             <table class="sw-table">
                 <thead>
                     <tr>
@@ -765,7 +834,7 @@ nav {
         </div>
 
         <div class="table-card">
-            <h3>Recent Flares · GOES (7 days)</h3>
+            <h3>Recent Flares · GOES (7 days)<span class="src-chip live" id="src-flares" title="Source: NOAA GOES XRS — xray-flares-7day.json">NOAA · GOES XRS</span></h3>
             <table class="sw-table">
                 <thead>
                     <tr>
@@ -781,6 +850,49 @@ nav {
             </table>
         </div>
 
+    </div>
+
+    <!-- ── LIVE DATA SOURCES PANEL ─────────────────────────────────────────── -->
+    <div class="data-sources-panel">
+        <h4>⚡ Live Data Sources</h4>
+        <div class="ds-grid">
+            <div>
+                <div class="ds-row">
+                    <span class="ds-name">Solar Wind (speed/density/Bt/Bz)</span>
+                    <span class="ds-val">NOAA DSCOVR/ACE L1 <span class="ds-badge live" id="ds-wind">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Geomagnetic Kp index</span>
+                    <span class="ds-val">NOAA SWPC Kp 1-min <span class="ds-badge live" id="ds-kp">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">X-ray flux / Flares</span>
+                    <span class="ds-val">NOAA GOES-16/18 XRS <span class="ds-badge live" id="ds-xray">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Active regions</span>
+                    <span class="ds-val">NOAA solar-regions.json <span class="ds-badge live" id="ds-ar">live</span></span>
+                </div>
+            </div>
+            <div>
+                <div class="ds-row">
+                    <span class="ds-name">Proton / Electron flux</span>
+                    <span class="ds-val">NOAA GOES SEP channels <span class="ds-badge live" id="ds-sep">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">CME analysis</span>
+                    <span class="ds-val">NASA DONKI CMEAnalysis <span class="ds-badge live" id="ds-cme">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Solar imagery</span>
+                    <span class="ds-val">NASA SDO/AIA + SOHO LASCO <span class="ds-badge live" id="ds-sdo">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Refresh cadence</span>
+                    <span class="ds-val" id="ds-cadence">5 min (wind: 1 min)</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="sw-footer">
@@ -810,6 +922,7 @@ nav {
 }
 </script>
 <script type="module">
+import './js/live-status-bar.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { SohoFeed }         from './js/extended-feeds.js';
 import { NasaFeed }         from './js/nasa-feed.js';
@@ -1042,6 +1155,35 @@ window.addEventListener('swpc-update', e => {
             </tr>`;
         }).join('');
     }
+
+    // ── Source chips + offline/stale banner ──────────────────────────────────
+    const st = d.status || 'live';
+
+    // All NOAA-sourced chips reflect the same feed status
+    ['src-wind','src-kp','src-ar','src-flares',
+     'ds-wind','ds-kp','ds-xray','ds-ar','ds-sep'].forEach(id => {
+        const chip = el(id);
+        if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g, '') + ' ' + st;
+    });
+
+    // NASA DONKI chip — always 'live' if we got the event (nasa-update handles its own)
+    const cmeChip = el('src-cme');
+    if (cmeChip) cmeChip.className = cmeChip.className.replace(/\b(live|stale|offline)\b/g, '') + ' live';
+
+    // Offline / stale data banner
+    const banner  = el('data-status-banner');
+    const dsbText = el('dsb-text');
+    const dsbAge  = el('dsb-age');
+    if (banner) {
+        banner.className = 'data-status-banner ' + (st === 'live' ? '' : st);
+        if (st === 'offline') {
+            dsbText.textContent = '⚠ NOAA live feed unavailable — showing last cached values. Retrying in 90 s.';
+            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
+        } else if (st === 'stale') {
+            dsbText.textContent = '⚠ Space weather data is stale (>5 min old) — network may be slow.';
+            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
+        }
+    }
 });
 
 // ── NASA DONKI update ─────────────────────────────────────────────────────────
@@ -1062,11 +1204,19 @@ window.addEventListener('nasa-update', e => {
     } else {
         el('cme-content').innerHTML = '<div style="color:#445;font-size:.8rem;padding:8px 0">No recent CME data available.</div>';
     }
+    // Mark NASA DONKI source as live
+    ['src-cme','ds-cme'].forEach(id => {
+        const chip = el(id);
+        if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g,'') + ' live';
+    });
 });
 
 // ── SOHO/SDO imagery ──────────────────────────────────────────────────────────
 window.addEventListener('soho-update', e => {
     const imgs = e.detail.images || {};
+    // Mark SDO source as live when imagery arrives
+    const sdoChip = el('ds-sdo');
+    if (sdoChip) sdoChip.className = sdoChip.className.replace(/\b(live|stale|offline)\b/g,'') + ' live';
     const map = {
         'img-304':  imgs.sdo_aia304,
         'img-171':  imgs.sdo_aia171,
