@@ -182,28 +182,26 @@
         .hero {
             position: relative;
             overflow: hidden;
-            min-height: 520px;
+            min-height: 580px;
             display: flex;
             flex-direction: column;
             animation: fadeIn 1s ease-in;
-            /* Logo image becomes the background, darkened for readability */
-            background-image: url('ParkersPhysics_logo2.jpg');
-            background-size: cover;
-            background-position: center 28%;
+            /* Deep-space base colour — visible while WebGL loads or as fallback */
+            background: radial-gradient(ellipse at 60% 40%, #0a0a2a 0%, #010209 100%);
         }
-        /* Dark overlay so canvas + text stay readable over the photo */
+        /* Gradient overlay ensures hero text stays readable over the 3D scene */
         .hero::before {
             content: '';
             position: absolute; inset: 0; z-index: 0;
             background: linear-gradient(
                 180deg,
-                rgba(3,1,14,0.78)  0%,
-                rgba(3,1,14,0.50) 40%,
-                rgba(3,1,14,0.82) 78%,
-                rgba(3,1,14,0.97) 100%
+                rgba(1,2,9,0.20)  0%,
+                rgba(1,2,9,0.05) 35%,
+                rgba(1,2,9,0.55) 70%,
+                rgba(1,2,9,0.95) 100%
             );
         }
-        /* Live solar canvas — fills the hero, sits above the photo overlay */
+        /* 3D WebGL canvas — fills the hero entirely */
         #hero-solar-canvas {
             position: absolute; inset: 0; z-index: 1;
             width: 100%; height: 100%;
@@ -1114,6 +1112,17 @@
 })();
 </script>
 
+<!-- ═══════════════════════════════════════════════ THREE.JS IMPORT MAP ═══ -->
+<!-- Required for hero-space-weather.js → magnetosphere-engine.js → 'three'  -->
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
 <!-- ══════════════════════════════ EXTENDED FEEDS (Horizons · NEO · SOHO) ═══ -->
 <script type="module">
 import { SohoFeed, HorizonsFeed, NeoFeed, SOHO_IMAGES, STEREO_IMAGES }
@@ -1236,8 +1245,8 @@ new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 
 <!-- ═══════════════════════════════════════ LIVE SPACE WEATHER BAR ═══ -->
 <script type="module">
-import { SpaceWeatherFeed } from './js/swpc-feed.js';
-import { SolarLiveCanvas }  from './js/solar-live-canvas.js';
+import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import { HeroSpaceWeather }  from './js/hero-space-weather.js';
 
 const elSpeed     = document.getElementById('sw-speed');
 const elBz        = document.getElementById('sw-bz');
@@ -1363,11 +1372,12 @@ window.addEventListener('swpc-update', e => {
 const feed = new SpaceWeatherFeed({ pollInterval: 90 * 1000 });
 feed.start();
 
-// ── Hero live solar canvas ─────────────────────────────────────────────────
-// The canvas fills the hero section; the logo photo is set as CSS background.
-// SolarLiveCanvas listens to the same swpc-update event the feed dispatches.
+// ── Hero 3D space-weather scene ────────────────────────────────────────────
+// Three.js WebGL canvas: Earth + magnetosphere + solar-wind particles.
+// Driven by the same swpc-update events the feed dispatches.
+// Gracefully hides itself if WebGL is unavailable (hero photo shows instead).
 const heroCanvas = document.getElementById('hero-solar-canvas');
-if (heroCanvas) new SolarLiveCanvas(heroCanvas).start();
+if (heroCanvas) new HeroSpaceWeather(heroCanvas).start();
 </script>
 
 <!-- Wind pipeline feed removed: NOAA WAF (403 host_not_allowed) blocks all
