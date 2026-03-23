@@ -348,8 +348,8 @@ export class MagnetosphereEngine {
         const pdyn    = 1.67e-6 * Math.max(0.5, density) * Math.max(200, speed) ** 2; // nPa
 
         // ── Magnetopause wire — blue (north Bz) ↔ red-violet (south Bz) ───
+        const bzSouth = Math.max(0, Math.min(1, -bz / 30));  // 0=north, 1=−30 nT
         if (this._mpWire) {
-            const bzSouth = Math.max(0, Math.min(1, -bz / 30));  // 0=north, 1=−30 nT
             // Blue → violet → magenta as southward Bz increases
             const r = Math.round(100 + bzSouth * 155);
             const g = Math.round(120 - bzSouth * 70);
@@ -359,7 +359,6 @@ export class MagnetosphereEngine {
             this._mpWire.material.opacity = 0.30 + bzSouth * 0.35;
         }
         if (this._mpFill) {
-            const bzSouth = Math.max(0, Math.min(1, -bz / 30));
             this._mpFill.material.opacity = 0.06 + bzSouth * 0.08;
         }
 

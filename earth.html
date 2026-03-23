@@ -681,7 +681,6 @@ varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
 // ── Aurora curtains ───────────────────────────────────────────
-//   Driven by Kp + live aurora_power (GW) + southward Bz
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
     // Southward Bz expands and brightens the oval
     float kpEff  = kp + u_bz_south * 2.5;
@@ -1353,9 +1352,9 @@ class SolarWindParticles {
         this._alpha   = 0.58;    // Shue flaring
         this._sunDir  = new THREE.Vector3(1, 0, 0);
 
-        // Build right-hand basis from initial sunDir
         this._t1 = new THREE.Vector3();
         this._t2 = new THREE.Vector3();
+        this._buildBasis();
 
         const pos = new Float32Array(N * 3);
         const col = new Float32Array(N * 3);
@@ -1397,7 +1396,6 @@ class SolarWindParticles {
     }
 
     _spawn(i, randomAge = false) {
-        this._buildBasis();
         const sd = this._sunDir;
         const t1 = this._t1, t2 = this._t2;
 
@@ -1424,6 +1422,7 @@ class SolarWindParticles {
     /** Call from animate() every frame.  sunDir must be the world-space unit vector toward sun. */
     tick(dt, sunDir) {
         this._sunDir.copy(sunDir).normalize();
+        this._buildBasis();
         const r0    = this._r0;
         const alpha = this._alpha;
         const sx    = sunDir.x, sy = sunDir.y, sz = sunDir.z;
@@ -1445,7 +1444,6 @@ class SolarWindParticles {
 
             // Shue-model magnetopause radius at this particle's polar angle
             const cosTheta = Math.max(-1, Math.min(1, sunDot / rp));
-            const theta    = Math.acos(cosTheta);
             const rMp      = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
 
             // Deflect / exclude particles inside the magnetopause
