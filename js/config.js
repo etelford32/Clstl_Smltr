@@ -29,9 +29,9 @@ export const TIER = Object.freeze({
 // ── Base poll intervals (milliseconds) ───────────────────────────────────────
 // These are the CALM-sun defaults.  Storm-mode escalation multiplies them down.
 export const INTERVALS = Object.freeze({
-    T1:  60  * 1000,          //  60 s  — wind, Kp-1m
-    T2:   5  * 60 * 1000,     //   5 min — xray, protons, electrons, aurora, dst, alerts
-    T3:  15  * 60 * 1000,     //  15 min — flares, regions, DONKI CME/notify
+    T1:  60  * 1000,          //  60 s  — wind, Kp-1m, X-ray (GOES ~1-min products)
+    T2:   5  * 60 * 1000,     //   5 min — protons, electrons, aurora, alerts
+    T3:  15  * 60 * 1000,     //  15 min — flares, regions, Dst (1-hr product), DONKI CME/notify
     T4:  60  * 60 * 1000,     //  60 min — F10.7, NEO, SOHO (PRO only)
     T2_OFFSET: 5  * 1000,     //   5 s  — T2 fires this many ms after T1 to stagger bursts
     T3_OFFSET: 10 * 1000,     //  10 s  — T3 fires this many ms after T1
@@ -47,9 +47,10 @@ export const STORM = Object.freeze({
 // ── Storm-mode trigger thresholds ────────────────────────────────────────────
 export const STORM_TRIGGERS = Object.freeze({
     kp_min:          6,      // Kp ≥ 6 → G2+ geomagnetic storm
-    xray_letter:    'X',     // X-class or stronger flare
-    earth_cme:      true,    // confirmed earth-directed CME
-    calm_streak:    30,      // consecutive quiet readings before auto-revert
+    xray_flux_min:   1e-4,   // X-class threshold (0.1–0.8 nm ≥ 10⁻⁴ W/m²) — checked live at T1
+    sep_level_min:   3,      // S3+ solar radiation storm (>10 MeV protons ≥ 1000 pfu)
+    earth_cme:       true,   // confirmed earth-directed CME
+    calm_streak:     30,     // consecutive quiet readings before auto-revert
 });
 
 // ── FREE tier data limits ────────────────────────────────────────────────────

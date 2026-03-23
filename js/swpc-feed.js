@@ -7,9 +7,9 @@
  *
  * THREE POLL TIERS
  * ─────────────────────────────────────────────────────────────────────────────
- *  T1 — 60 s   wind, Kp-1m           (drives live globe shader)
- *  T2 —  5 min xray, protons, electrons, aurora, alerts, Dst
- *  T3 — 15 min flares, regions, DONKI CME, DONKI notifications
+ *  T1 — 60 s   wind, Kp-1m, X-ray  (drives live globe shader; GOES products update ~1 min)
+ *  T2 —  5 min protons, electrons, aurora, alerts
+ *  T3 — 15 min flares, regions, Dst (1-hr product), DONKI CME, DONKI notifications
  *
  *  T2 fires 5 s after T1; T3 fires 10 s after T1 (staggered to avoid burst).
  *  Storm-mode escalation compresses all intervals when Kp ≥ 6, X-class flare,
@@ -424,6 +424,7 @@ export class SpaceWeatherFeed {
         const results = await Promise.allSettled([
             fetchWind(this._raw),
             fetchKp1m(this._raw),
+            fetchXray(this._raw),
         ]);
         const ok = results.some(r => r.status === 'fulfilled');
         if (ok) {
@@ -444,17 +445,16 @@ export class SpaceWeatherFeed {
 
     async _runT2() {
         const results = await Promise.allSettled([
-            fetchXray(this._raw),
             fetchProtons(this._raw),
             fetchElectrons(this._raw),
             fetchAurora(this._raw),
             fetchAlerts(this._raw),
-            fetchDst(this._raw),
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
                 console.debug(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
+        this._checkStormMode();
         this._dispatch();
     }
 
@@ -462,6 +462,7 @@ export class SpaceWeatherFeed {
         const results = await Promise.allSettled([
             fetchFlares(this._raw),
             fetchRegions(this._raw),
+            fetchDst(this._raw),
             fetchDONKICME(this._raw),
             fetchDONKINotifications(this._raw),
         ]);
@@ -469,6 +470,7 @@ export class SpaceWeatherFeed {
             if (r.status === 'rejected')
                 console.debug(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
+        this._checkStormMode();
         this._dispatch();
     }
 
@@ -488,9 +490,10 @@ export class SpaceWeatherFeed {
         const raw  = this._raw;
         const trig = STORM_TRIGGERS;
         const active = (
-            (raw.kp_1min ?? raw.kp) >= trig.kp_min ||
-            raw.flare_letter === trig.xray_letter  ||
-            !!raw.earth_directed_cme
+            (raw.kp_1min ?? raw.kp) >= trig.kp_min      ||  // G2+ geomagnetic storm
+            (raw.xray_flux         ?? 0) >= trig.xray_flux_min ||  // live X-class (T1 cadence)
+            (raw.sep_storm_level   ?? 0) >= trig.sep_level_min  ||  // S3+ radiation storm
+            !!raw.earth_directed_cme                             // imminent CME arrival
         );
 
         if (active && !this._stormMode) {
@@ -586,6 +589,48 @@ export class SpaceWeatherFeed {
             kp_1min:             raw.kp_1min    ?? raw.kp,
             proton_diff_1mev:    raw.proton_diff_1mev  ?? 0,
             proton_diff_10mev:   raw.proton_diff_10mev ?? 0,
+
+            // ── Nested groups — clean API for new consumers ───────────────
+            geomagnetic: {
+                kp:           raw.kp,
+                kp_1min:      raw.kp_1min      ?? raw.kp,
+                dst_nT:       raw.dst_index    ?? -5,
+                storm_level:  d.storm_level,
+                kp_norm:      d.kp_norm,
+                kp_1min_norm: d.kp_1min_norm,
+                dst_norm:     d.dst_norm,
+            },
+            particles: {
+                proton_10mev_pfu:   raw.proton_flux_10mev,
+                proton_100mev_pfu:  raw.proton_flux_100mev,
+                electron_2mev_pfu:  raw.electron_flux_2mev,
+                sep_storm_level:    raw.sep_storm_level     ?? 0,
+                proton_10mev_norm:  d.proton_10mev_norm,
+                proton_100mev_norm: d.proton_100mev_norm,
+                electron_2mev_norm: d.electron_2mev_norm,
+            },
+            aurora: {
+                north_gw:   raw.aurora_power_north,
+                south_gw:   raw.aurora_power_south,
+                activity:   raw.aurora_activity  ?? 'quiet',
+                north_norm: d.aurora_north_norm,
+                south_norm: d.aurora_south_norm,
+            },
+            solar_activity: {
+                f107_sfu:          raw.f107_flux,
+                f107_adjusted_sfu: raw.f107_adjusted_sfu       ?? null,
+                activity_label:    raw.f107_activity           ?? null,
+                slope_per_day:     raw.f107_slope_sfu_per_day  ?? null,
+                trend:             raw.f107_trend_direction    ?? null,
+                recent:            raw.f107_recent             ?? [],
+                f107_norm:         d.f107_norm,
+            },
+            meta: {
+                status:      this.status,
+                lastUpdated: this.lastUpdated,
+                storm_mode:  this._stormMode,
+                tier:        this.tier,
+            },
         };
     }
 }
