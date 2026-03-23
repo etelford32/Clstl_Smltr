@@ -58,7 +58,12 @@ export const FALLBACK = {
     aurora_power_south: 2,
     aurora_activity:    'quiet',
     active_alerts:      [],
-    f107_flux:          150,
+    f107_flux:               150,    // sfu — moderate solar activity
+    f107_adjusted_sfu:       null,
+    f107_activity:           'moderate',
+    f107_slope_sfu_per_day:  null,
+    f107_trend_direction:    null,
+    f107_recent:             [],
     sep_storm_level:    0,
     recent_cmes:        [],
     earth_directed_cme: null,
@@ -310,6 +315,26 @@ async function fetchDONKINotifications(state) {
     })).slice(0, 12);
 }
 
+// ── T4 fetchers (PRO only, 60-min cadence) ────────────────────────────────────
+
+async function fetchRadioFlux(state) {
+    const json = await fetchEdge(API.radioFlux);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.flux_sfu != null) {
+        state.f107_flux          = cur.flux_sfu;
+        state.f107_adjusted_sfu  = cur.flux_adjusted_sfu ?? null;
+        state.f107_activity      = cur.activity_label    ?? null;
+    }
+    const trend = json?.data?.trend;
+    if (trend) {
+        state.f107_slope_sfu_per_day = trend.slope_sfu_per_day ?? null;
+        state.f107_trend_direction   = trend.direction          ?? null;
+    }
+    const recent = json?.data?.recent;
+    if (Array.isArray(recent)) state.f107_recent = recent;
+}
+
 // ── SpaceWeatherFeed ──────────────────────────────────────────────────────────
 
 export class SpaceWeatherFeed {
@@ -332,7 +357,7 @@ export class SpaceWeatherFeed {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Start all three tiers. Returns `this` for chaining. */
+    /** Start all tiers. Returns `this` for chaining. */
     start() {
         // T1 — immediate, then every ~60 s
         this._runT1();
@@ -350,6 +375,12 @@ export class SpaceWeatherFeed {
             this._timers.t3 = setInterval(() => this._runT3(), this._interval('T3'));
         }, INTERVALS.T3_OFFSET);
 
+        // T4 — PRO only, 60-min cadence; fires immediately so first state is complete
+        if (this.tier === TIER.PRO) {
+            this._runT4();
+            this._timers.t4 = setInterval(() => this._runT4(), INTERVALS.T4);
+        }
+
         return this;
     }
 
@@ -359,9 +390,11 @@ export class SpaceWeatherFeed {
         this._timers = {};
     }
 
-    /** Immediately fire all three tiers. */
+    /** Immediately fire all tiers (T4 only if PRO). */
     refresh() {
-        return Promise.all([this._runT1(), this._runT2(), this._runT3()]);
+        const tiers = [this._runT1(), this._runT2(), this._runT3()];
+        if (this.tier === TIER.PRO) tiers.push(this._runT4());
+        return Promise.all(tiers);
     }
 
     /** Current normalised state snapshot (does not trigger a fetch). */
@@ -376,7 +409,7 @@ export class SpaceWeatherFeed {
             : base;
     }
 
-    /** Restart timers with current storm-mode intervals. */
+    /** Restart timers with current storm-mode intervals. (T4 is fixed; no reschedule.) */
     _reschedule() {
         ['t1', 't2', 't3'].forEach(k => {
             clearInterval(this._timers[k]);
@@ -435,6 +468,18 @@ export class SpaceWeatherFeed {
         results.forEach((r, i) => {
             if (r.status === 'rejected')
                 console.debug(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
+        });
+        this._dispatch();
+    }
+
+    /** T4 — PRO only, 60-min cadence. */
+    async _runT4() {
+        const results = await Promise.allSettled([
+            fetchRadioFlux(this._raw),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected')
+                console.debug(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._dispatch();
     }
@@ -526,7 +571,12 @@ export class SpaceWeatherFeed {
             aurora_power_south: raw.aurora_power_south,
             aurora_activity:    raw.aurora_activity ?? 'quiet',
             active_alerts:      raw.active_alerts   ?? [],
-            f107_flux:          raw.f107_flux,
+            f107_flux:               raw.f107_flux,
+            f107_adjusted_sfu:       raw.f107_adjusted_sfu       ?? null,
+            f107_activity:           raw.f107_activity           ?? null,
+            f107_slope_sfu_per_day:  raw.f107_slope_sfu_per_day  ?? null,
+            f107_trend_direction:    raw.f107_trend_direction     ?? null,
+            f107_recent:             raw.f107_recent              ?? [],
             recent_cmes:         raw.recent_cmes        ?? [],
             earth_directed_cme:  raw.earth_directed_cme ?? null,
             cme_eta_hours:       raw.cme_eta_hours      ?? null,
