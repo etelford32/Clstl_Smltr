@@ -4,14 +4,15 @@
  * Source: GOES primary X-ray flux 1-day history (0.1–0.8 nm channel)
  *   xrays-1-day.json  (~1 440 records)
  *
- * T2 endpoint (5-minute cadence).
+ * T1 endpoint (60-second cadence).
  * Returns the latest X-ray flux reading plus classification.
- * Consumers should NOT poll this more often than 5 minutes.
+ * NOAA GOES publishes a new 1-min X-ray reading approximately every minute,
+ * so T1 polling gives near-real-time flare detection and storm-mode triggering.
  */
 export const config = { runtime: 'edge' };
 
 const NOAA_XRAY = 'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json';
-const CACHE_TTL = 300;  // 5 min — matches T2 cadence
+const CACHE_TTL = 60;   // 60 s — matches T1 cadence; NOAA GOES updates ~1 min
 
 // ── X-ray flux → flare class ──────────────────────────────────────────────────
 function fluxToClass(flux) {
