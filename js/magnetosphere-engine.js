@@ -327,8 +327,9 @@ export class MagnetosphereEngine {
      * Per-frame update. Call from animate().
      * @param {number}          t       elapsed seconds
      * @param {THREE.Vector3}   sunDir  world-space unit vector toward sun
+     * @param {object}          sw      swpc-feed state (optional; uses last if omitted)
      */
-    tick(t, sunDir) {
+    tick(t, sunDir, sw = {}) {
         // Orient solar group: +Y → sun direction
         const q = new THREE.Quaternion().setFromUnitVectors(
             new THREE.Vector3(0, 1, 0),
@@ -336,15 +337,63 @@ export class MagnetosphereEngine {
         );
         this._solarGroup.setRotationFromQuaternion(q);
 
-        // Gentle glow pulse on radiation belts
+        // ── Derive live quantities ─────────────────────────────────────────
+        const wind    = sw.solar_wind ?? {};
+        const bz      = wind.bz      ?? 0;
+        const speed   = wind.speed   ?? 400;
+        const density = wind.density ?? 5;
+        const kp      = sw.kp        ?? (sw.geomagnetic?.kp ?? 2);
+        const dst     = sw.dst_index ?? (sw.geomagnetic?.dst_nT ?? -5);
+        const sep     = sw.sep_storm_level ?? (sw.particles?.sep_storm_level ?? 0);
+        const pdyn    = 1.67e-6 * Math.max(0.5, density) * Math.max(200, speed) ** 2; // nPa
+
+        // ── Magnetopause wire — blue (north Bz) ↔ red-violet (south Bz) ───
+        if (this._mpWire) {
+            const bzSouth = Math.max(0, Math.min(1, -bz / 30));  // 0=north, 1=−30 nT
+            // Blue → violet → magenta as southward Bz increases
+            const r = Math.round(100 + bzSouth * 155);
+            const g = Math.round(120 - bzSouth * 70);
+            const b = Math.round(255 - bzSouth * 55);
+            this._mpWire.material.color.setRGB(r / 255, g / 255, b / 255);
+            // Opacity also scales with Bz southward (more pronounced reconnection visual)
+            this._mpWire.material.opacity = 0.30 + bzSouth * 0.35;
+        }
+        if (this._mpFill) {
+            const bzSouth = Math.max(0, Math.min(1, -bz / 30));
+            this._mpFill.material.opacity = 0.06 + bzSouth * 0.08;
+        }
+
+        // ── Bow shock wire — intensity pulses with dynamic pressure ────────
+        if (this._bsWire) {
+            const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression
+            const pulse    = 0.5 + 0.5 * Math.sin(t * 0.8 + pdynNorm * 3);
+            this._bsWire.material.opacity = 0.12 + pdynNorm * 0.22 + pulse * 0.08;
+            // Hotter orange → yellow at high pressure
+            const g = Math.round(136 + pdynNorm * 80);
+            this._bsWire.material.color.setRGB(1.0, g / 255, 0.2 - pdynNorm * 0.1);
+        }
+
+        // ── Radiation belt glow pulses + storm enhancement ─────────────────
+        const kpNorm  = Math.min(1, kp / 9);
+        const sepNorm = Math.min(1, sep / 5);
+
         if (this._outerBelt) {
-            this._outerBelt.material.opacity = 0.20 + 0.07 * Math.sin(t * 1.7);
+            this._outerBelt.material.opacity =
+                0.16 + 0.07 * Math.sin(t * 1.7) + kpNorm * 0.12 + sepNorm * 0.08;
         }
         if (this._innerBelt) {
-            this._innerBelt.material.opacity = 0.28 + 0.06 * Math.sin(t * 2.3 + 1.1);
+            this._innerBelt.material.opacity =
+                0.22 + 0.06 * Math.sin(t * 2.3 + 1.1) + sepNorm * 0.16;
         }
         if (this._plasmasphere) {
-            this._plasmasphere.material.opacity = 0.10 + 0.03 * Math.sin(t * 0.9 + 0.5);
+            this._plasmasphere.material.opacity = 0.08 + 0.03 * Math.sin(t * 0.9 + 0.5);
+        }
+
+        // ── Ring current — scales with |Dst| (storm main phase injection) ──
+        if (this._ringCurrent) {
+            const dstNorm = Math.min(1, Math.max(0, -dst) / 200);
+            this._ringCurrent.material.opacity =
+                dstNorm * 0.28 + 0.03 * Math.sin(t * 1.1) * dstNorm;
         }
     }
 
@@ -454,6 +503,11 @@ export class MagnetosphereEngine {
         const psTube = lpp * 0.18;
         this._plasmasphere = buildTorus(psR, psTube, 0x44ccee, 0.10, 64);
         this._eqGroup.add(this._plasmasphere);
+
+        // Ring current torus (~3–4 Re) — O'Brien & McPherron driven by Dst
+        // Opacity starts near 0; driven up by |Dst| in tick()
+        this._ringCurrent = buildTorus(3.6, 0.38, 0xff4400, 0.0, 48);
+        this._eqGroup.add(this._ringCurrent);
 
         // Apply layer visibility
         if (!this._layers.belts) {
