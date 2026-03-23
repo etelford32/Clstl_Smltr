@@ -672,6 +672,9 @@ uniform float u_xray;           // normalised X-ray intensity [0–1]
 uniform float u_city_lights;    // 1=on, 0=off
 uniform float u_aurora_on;      // 1=on, 0=off
 uniform float u_weather_on;     // 1=on, 0=off
+uniform float u_aurora_power;   // live aurora power [0–1]
+uniform float u_bz_south;       // southward IMF Bz [0–1]  (0.0=north, 1.0=–30 nT)
+uniform float u_dst_norm;       // ring current |Dst|/200   [0–1]
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
@@ -679,8 +682,10 @@ varying vec3 vWorldPos;
 
 // ── Aurora curtains ───────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
-    float ovalCtr = 0.940 - clamp(kp, 0.0, 9.0) * 0.0197;
-    float ovalW   = 0.045 + (kp / 9.0) * 0.055;
+    // Southward Bz expands and brightens the oval
+    float kpEff  = kp + u_bz_south * 2.5;
+    float ovalCtr = 0.940 - clamp(kpEff, 0.0, 9.0) * 0.0197;
+    float ovalW   = 0.045 + (kpEff / 9.0) * 0.055;
 
     float zone = smoothstep(ovalCtr - ovalW * 1.5, ovalCtr, sinAbsLat)
                * (1.0 - smoothstep(ovalCtr + ovalW * 0.4, ovalCtr + ovalW * 1.5, sinAbsLat));
@@ -688,12 +693,17 @@ vec3 auroraColor(float sinAbsLat, float lon, float kp) {
 
     // Animated curtains — phase varies with lon & time
     float phase  = u_time * 1.4 + lon * 9.0;
-    float bright = zone * (0.55 + 0.45 * sin(phase)) * (0.7 + 0.3 * sin(phase * 2.1 + 1.0));
+    float anim   = (0.55 + 0.45 * sin(phase)) * (0.7 + 0.3 * sin(phase * 2.1 + 1.0));
 
-    // Green → magenta as Kp rises
-    vec3 lo = vec3(0.05, 0.95, 0.15);   // green  (quiet)
-    vec3 hi = vec3(0.90, 0.10, 0.80);   // magenta (storm)
-    return mix(lo, hi, clamp((kp - 3.0) / 6.0, 0.0, 1.0)) * bright * 0.85;
+    // Scale by live aurora power (floor of 0.3 so Kp always shows some glow)
+    float powerScale = 0.30 + 0.70 * u_aurora_power;
+    float bright = zone * anim * powerScale;
+
+    // Green (quiet) → magenta (storm) driven by Kp + Bz
+    vec3 lo = vec3(0.05, 0.95, 0.15);   // green
+    vec3 hi = vec3(0.90, 0.10, 0.80);   // magenta
+    float stormMix = clamp((kpEff - 3.0) / 6.0, 0.0, 1.0);
+    return mix(lo, hi, stormMix) * bright * 0.90;
 }
 
 // ── Weather / temperature overlay (placeholder for real data) ─
@@ -755,6 +765,23 @@ void main() {
     if (u_xray > 0.25 && dayMix > 0.4) {
         float flash = (u_xray - 0.25) / 0.75 * dayMix;
         base += vec3(0.3, 0.5, 1.0) * flash * 0.30;
+    }
+
+    // ── Ring current heating: equatorial nightside reddish glow ─
+    //   Peaks at ±20° latitude, strengthens with |Dst|
+    if (u_dst_norm > 0.08) {
+        float lat    = (0.5 - vUv.y) * 3.14159265;
+        float absLat = abs(lat);
+        // Glow peaks at ±20° (~0.35 rad) equatorial band on night side
+        float rcZone  = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
+        base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
+    }
+
+    // ── Southward Bz: faint particle injection on nightside ───
+    if (u_bz_south > 0.15) {
+        float bzGlow = (u_bz_south - 0.15) / 0.85;
+        float nightM = 1.0 - smoothstep(-0.25, 0.10, NdotL);
+        base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
     }
 
     // ── Very faint earthshine fill on night side ──────────────
@@ -897,17 +924,20 @@ const windTexture = new THREE.DataTexture(
 windTexture.needsUpdate = true;
 
 const earthU = {
-    u_day:        { value: null },
-    u_night:      { value: null },
-    u_specular:   { value: null },
-    u_weather:    { value: null },
-    u_sun_dir:    { value: SUN_EQ.clone() },
-    u_time:       { value: 0 },
-    u_kp:         { value: 1 },
-    u_xray:       { value: 0 },
-    u_city_lights:{ value: 1.0 },
-    u_aurora_on:  { value: 1.0 },
-    u_weather_on: { value: 0.0 },
+    u_day:          { value: null },
+    u_night:        { value: null },
+    u_specular:     { value: null },
+    u_weather:      { value: null },
+    u_sun_dir:      { value: SUN_EQ.clone() },
+    u_time:         { value: 0 },
+    u_kp:           { value: 1 },
+    u_xray:         { value: 0 },
+    u_city_lights:  { value: 1.0 },
+    u_aurora_on:    { value: 1.0 },
+    u_weather_on:   { value: 0.0 },
+    u_aurora_power: { value: 0.0 },    // live aurora power: 0 (quiet) → 1 (600 GW)
+    u_bz_south:     { value: 0.0 },    // southward IMF: 0 (north) → 1 (−30 nT)
+    u_dst_norm:     { value: 0.0 },    // ring current:  0 (quiet) → 1 (−200 nT)
 };
 const cloudU = {
     u_clouds:  { value: null },
@@ -1109,8 +1139,12 @@ const KP_QUIET_LABELS = ['Quiet','Quiet','Quiet','Unsettled','Active','G1 Minor'
 const swFeed = new SpaceWeatherFeed();
 swFeed.start();
 
-document.addEventListener('swpc-update', e => {
-    const sw = e.detail.state;
+// Cache last solar wind state for animate() loop
+let _lastSwState = {};
+
+window.addEventListener('swpc-update', e => {
+    const sw = e.detail;           // e.detail IS the full state
+    _lastSwState = sw;
     const d  = sw.derived ?? {};
     const kp = sw.kp ?? 0;
     const storm = Math.min(5, Math.floor(kp / 1.67));
@@ -1181,23 +1215,27 @@ document.addEventListener('swpc-update', e => {
     xrayBadge.style.borderColor = xc + '88';
 
     // ── HF radio status
+    const xInt = d.xray_intensity ?? 0;
     const hfEl = document.getElementById('ip-hf');
-    hfEl.textContent = (sw.xray_intensity ?? 0) > 0.3 ? '⚠ Blackout' : 'Normal';
-    hfEl.style.color = (sw.xray_intensity ?? 0) > 0.3 ? '#ff4444' : '#4a6a80';
+    hfEl.textContent = xInt > 0.3 ? '⚠ Blackout' : 'Normal';
+    hfEl.style.color = xInt > 0.3 ? '#ff4444' : '#4a6a80';
 
-    // ── Aurora power
-    if (d.aurora_power_north != null) {
+    // ── Aurora power (from feed, not derived)
+    const aurNorth = sw.aurora_power_north ?? sw.aurora?.north_gw ?? null;
+    if (aurNorth != null) {
         document.getElementById('ip-aurora').textContent =
-            `N ${Math.round(d.aurora_power_north)} GW`;
+            `N ${Math.round(aurNorth)} GW`;
     }
 
-    // ── Earth shader
-    earthU.u_kp.value   = kp;
-    earthU.u_xray.value = sw.xray_intensity ?? 0;
+    // ── Earth shader uniforms
+    earthU.u_kp.value          = kp;
+    earthU.u_xray.value        = xInt;
+    earthU.u_aurora_power.value = Math.min(1, (aurNorth ?? 2) / 600);
+    earthU.u_bz_south.value    = Math.max(0, Math.min(1, -(sw.solar_wind?.bz ?? 0) / 30));
+    earthU.u_dst_norm.value    = Math.min(1, Math.max(0, -(sw.dst_index ?? -5) / 200));
 
     // ── Space Weather Impacts on Earth Systems (new panel)
     const kpI = Math.floor(kp);
-    const xInt = sw.xray_intensity ?? 0;
     // HF radio: driven by X-ray flux
     const hfCond = xInt > 0.5 ? { t:'Severe blackout', c:'#ff2200' }
                  : xInt > 0.3 ? { t:'Moderate blackout', c:'#ff6600' }
@@ -1253,8 +1291,11 @@ document.addEventListener('swpc-update', e => {
     }
 
     // ── Magnetosphere geometry + ionosphere analysis
-    magnetosphere.update(e.detail);
+    magnetosphere.update(sw);
     updateMagnetospherePanel();
+
+    // ── Solar wind particle stream params
+    solarWindParticles.setParams(sw, magnetosphere.analysis);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1287,6 +1328,172 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR WIND PARTICLES
+//  Particle stream flowing from the sun-side, deflecting around
+//  the magnetopause (Shue model boundary) and sweeping down the
+//  magnetotail.  All quantities in Earth-radii (scene units).
+// ═══════════════════════════════════════════════════════════════
+class SolarWindParticles {
+    constructor(scene, N = 3000) {
+        this.N  = N;
+        this._px = new Float32Array(N); this._py = new Float32Array(N);
+        this._pz = new Float32Array(N);
+        this._vx = new Float32Array(N); this._vy = new Float32Array(N);
+        this._vz = new Float32Array(N);
+        this._age  = new Float32Array(N);
+        this._maxA = new Float32Array(N);
+
+        // Live state (updated from feed)
+        this._speed   = 400;     // km/s
+        this._density = 5.0;     // n/cc
+        this._r0      = 10.9;    // magnetopause standoff (Re)
+        this._alpha   = 0.58;    // Shue flaring
+        this._sunDir  = new THREE.Vector3(1, 0, 0);
+
+        this._t1 = new THREE.Vector3();
+        this._t2 = new THREE.Vector3();
+        this._buildBasis();
+
+        const pos = new Float32Array(N * 3);
+        const col = new Float32Array(N * 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+        this._pos = pos; this._col = col;
+
+        this.mesh = new THREE.Points(geo, new THREE.PointsMaterial({
+            size: 0.09, vertexColors: true,
+            transparent: true, opacity: 0.55,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false, sizeAttenuation: true,
+        }));
+        this.mesh.renderOrder = 7;
+        scene.add(this.mesh);
+
+        for (let i = 0; i < N; i++) this._spawn(i, true);
+    }
+
+    setVisible(v) { this.mesh.visible = v; }
+
+    /** Call from swpc-update handler with current state + magnetosphere analysis. */
+    setParams(sw, analysis) {
+        const wind = sw?.solar_wind ?? {};
+        this._speed   = wind.speed   ?? 400;
+        this._density = wind.density ?? 5.0;
+        if (analysis) {
+            this._r0    = analysis.r0    ?? 10.9;
+            this._alpha = analysis.alpha ?? 0.58;
+        }
+    }
+
+    _buildBasis() {
+        const sd  = this._sunDir;
+        const up  = Math.abs(sd.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+        this._t1.crossVectors(sd, up).normalize();
+        this._t2.crossVectors(sd, this._t1).normalize();
+    }
+
+    _spawn(i, randomAge = false) {
+        const sd = this._sunDir;
+        const t1 = this._t1, t2 = this._t2;
+
+        // Spawn disk centred on sun side: distance = bow shock + 2 Re
+        const spawnDist = this._r0 * 1.22 + 3.5;
+        const diskR     = this._r0 * 1.35 * Math.sqrt(Math.random());
+        const angle     = Math.random() * Math.PI * 2;
+
+        this._px[i] = sd.x * spawnDist + t1.x * Math.cos(angle) * diskR + t2.x * Math.sin(angle) * diskR;
+        this._py[i] = sd.y * spawnDist + t1.y * Math.cos(angle) * diskR + t2.y * Math.sin(angle) * diskR;
+        this._pz[i] = sd.z * spawnDist + t1.z * Math.cos(angle) * diskR + t2.z * Math.sin(angle) * diskR;
+
+        // Visual speed: compress ~100× for animation (particles cross ~6 Re in ~2 s)
+        const speedVis = (this._speed / 400) * 4.2;
+        const lat = (Math.random() - 0.5) * 0.018;
+        this._vx[i] = -sd.x * speedVis + t1.x * lat + (Math.random() - 0.5) * 0.04;
+        this._vy[i] = -sd.y * speedVis + t1.y * lat + (Math.random() - 0.5) * 0.04;
+        this._vz[i] = -sd.z * speedVis + t1.z * lat + (Math.random() - 0.5) * 0.04;
+
+        this._age[i]  = randomAge ? Math.random() * 35 : 0;
+        this._maxA[i] = 28 + Math.random() * 22;
+    }
+
+    /** Call from animate() every frame.  sunDir must be the world-space unit vector toward sun. */
+    tick(dt, sunDir) {
+        this._sunDir.copy(sunDir).normalize();
+        this._buildBasis();
+        const r0    = this._r0;
+        const alpha = this._alpha;
+        const sx    = sunDir.x, sy = sunDir.y, sz = sunDir.z;
+
+        for (let i = 0; i < this.N; i++) {
+            this._age[i] += dt;
+            if (this._age[i] > this._maxA[i]) { this._spawn(i); continue; }
+
+            // Integrate position
+            this._px[i] += this._vx[i] * dt;
+            this._py[i] += this._vy[i] * dt;
+            this._pz[i] += this._vz[i] * dt;
+
+            const px = this._px[i], py = this._py[i], pz = this._pz[i];
+            const rp = Math.sqrt(px*px + py*py + pz*pz) + 1e-5;
+
+            // Projection along sun–Earth line (positive = sun side)
+            const sunDot = px*sx + py*sy + pz*sz;
+
+            // Shue-model magnetopause radius at this particle's polar angle
+            const cosTheta = Math.max(-1, Math.min(1, sunDot / rp));
+            const rMp      = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
+
+            // Deflect / exclude particles inside the magnetopause
+            if (rp < rMp * 1.08) {
+                // Radial outward force — pushes particle along magnetopause surface
+                const nr     = 1 / rp;
+                const excess = Math.max(0, 1.0 - rp / (rMp * 1.08));
+                const force  = excess * 6.0 * dt;
+                this._vx[i] += px * nr * force;
+                this._vy[i] += py * nr * force;
+                this._vz[i] += pz * nr * force;
+
+                // Cancel inward radial velocity component
+                const vDotR = (this._vx[i]*px + this._vy[i]*py + this._vz[i]*pz) * nr;
+                if (vDotR < 0) {
+                    this._vx[i] -= vDotR * px * nr;
+                    this._vy[i] -= vDotR * py * nr;
+                    this._vz[i] -= vDotR * pz * nr;
+                }
+            }
+
+            // Kill particles deep in magnetosphere or far down tail
+            if (rp < r0 * 0.55 || (sunDot < -r0 * 3.0 && rp > r0 * 2.5)) {
+                this._spawn(i);
+            }
+        }
+
+        // Write buffers
+        const densNorm = Math.min(1, this._density / 20);
+        const spdNorm  = Math.min(1, (this._speed - 300) / 600);
+        for (let i = 0; i < this.N; i++) {
+            this._pos[i*3]   = this._px[i];
+            this._pos[i*3+1] = this._py[i];
+            this._pos[i*3+2] = this._pz[i];
+
+            const a    = this._age[i] / this._maxA[i];
+            const fade = a < 0.08 ? a / 0.08 : a > 0.82 ? (1 - a) / 0.18 : 1.0;
+            // Cyan-blue; hotter (more white) at high density+speed
+            const r  = (0.10 + spdNorm * 0.35 + densNorm * 0.20) * fade;
+            const g  = (0.55 + spdNorm * 0.25 + densNorm * 0.15) * fade;
+            const b  = 1.0 * fade;
+            this._col[i*3]   = r;
+            this._col[i*3+1] = g;
+            this._col[i*3+2] = b;
+        }
+
+        this.mesh.geometry.attributes.position.needsUpdate = true;
+        this.mesh.geometry.attributes.color.needsUpdate    = true;
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  WIND PARTICLES
@@ -1388,7 +1595,8 @@ class WindParticles {
     }
 }
 
-const windParticles = new WindParticles(earthMesh, 4000);
+const windParticles    = new WindParticles(earthMesh, 4000);
+const solarWindParticles = new SolarWindParticles(scene, 3000);
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER FEED — real-time Open-Meteo / GFS data
@@ -1791,14 +1999,17 @@ function animate() {
         tipEl.classList.remove('show');
     }
 
-    // ── Wind particle advection
+    // ── Wind particle advection (tropospheric weather)
     windParticles.update(dt);
+
+    // ── Solar wind particle stream (interplanetary → magnetopause)
+    solarWindParticles.tick(dt, earthU.u_sun_dir.value);
 
     // ── Alert marker pulse
     alertMarkers.tick(t);
 
-    // ── Magnetosphere: orient to sun + animate belt glow
-    magnetosphere.tick(t, earthU.u_sun_dir.value);
+    // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
+    magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
     // ── Astro HUD (every 5 s)
     if (t - lastAstro > 5) {
