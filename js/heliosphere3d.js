@@ -515,7 +515,7 @@ export class Heliosphere3D {
         this._windR      = new Float32Array(N);   // r_AU along spiral
         this._windPY     = new Float32Array(N);   // sin(latitude) — constant per particle
         this._windVY     = new Float32Array(N);   // unused; retained for shape compat
-        this._windArm    = new Uint8Array(N);     // Parker arm index 0-3
+        this._windArm    = new Float32Array(N);     // source longitude (rad, 0–2π) — continuous per-particle
         this._windJitter = new Float32Array(N);   // fixed angular jitter from arm centre
         this._windAge    = new Float32Array(N);   // age (s) — used for fade-in only
         this._windMaxAge = new Float32Array(N);   // max age (s)
@@ -578,27 +578,32 @@ export class Heliosphere3D {
     }
 
     _spawnWind(i, scatter = false) {
-        // Assign particle to one of the N_SPIRAL sampled field lines
-        this._windArm[i]    = Math.floor(Math.random() * N_SPIRAL);
+        // Every particle originates from a unique, randomly-chosen heliographic
+        // longitude on the solar surface.  There are no discrete "arms" for
+        // emission — the Parker spiral equation applies equally to every longitude.
+        // The N_SPIRAL backbone lines are purely a visual guide overlay.
+        this._windArm[i]    = Math.random() * Math.PI * 2;   // source longitude (rad)
+        // Start at the coronal base (~0.008–0.02 AU ≈ 1.7–4 R☉).
+        // Scatter=true seeds the initial cloud spread across the full disc.
         this._windR[i]      = scatter
-            ? 0.04 + Math.random() * (MAX_R_AU - 0.04)
-            : 0.02 + Math.random() * 0.04;
-        // Small angular jitter (±10°) around the field line — gives each line visible
-        // width and simulates the finite sector thickness (~5–10° observed).
-        this._windJitter[i] = (Math.random() - 0.5) * 0.35;
+            ? 0.008 + Math.random() * (MAX_R_AU - 0.008)
+            : 0.008 + Math.random() * 0.015;
+        // Narrow stream jitter (±4°) — models the finite angular width of a
+        // coronal hole / streamer stream without creating visible discrete blobs.
+        this._windJitter[i] = (Math.random() - 0.5) * 0.14;
         // Heliographic latitude: sin(lat) stored; Y = sinLat × r_px each frame.
         // Distribution mimics real solar wind: most particles near equatorial
         // (|lat|<15°, slow wind) with a minority at higher latitudes (fast polar wind).
         const u = Math.random();
         if (u < 0.72) {
-            // Slow equatorial wind belt (±15°)
+            // Slow equatorial wind belt (±15°) — streamer belt / HCS region
             this._windPY[i] = (Math.random() - 0.5) * 0.52;   // sin(±15°) ≈ ±0.26
         } else {
-            // Fast polar wind (15–45°) — opposite sign at random
+            // Fast polar wind (15–45°) — coronal hole streams
             const sign = Math.random() < 0.5 ? 1 : -1;
             this._windPY[i] = sign * (0.26 + Math.random() * 0.45);  // sin(15–45°)
         }
-        this._windVY[i]     = 0;     // unused
+        this._windVY[i]     = 0;
         this._windAge[i]    = scatter ? 2.0 : 0;
         this._windMaxAge[i] = 9999;  // position-based kill only
     }
@@ -675,6 +680,7 @@ export class Heliosphere3D {
         }
 
         // ── Update solar wind particles ───────────────────────────────────────
+        const TWO_PI = Math.PI * 2;
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
             this._windR[i]   += dr;
@@ -683,45 +689,50 @@ export class Heliosphere3D {
                 this._spawnWind(i, false);
             }
 
-            const r       = this._windR[i];
-            const arm     = this._windArm[i];
-            const sinLat  = this._windPY[i];
+            const r      = this._windR[i];
+            // srcLon: the particle's fixed source longitude on the solar surface (rad).
+            // This is the only quantity that distinguishes one Parker spiral from another.
+            const srcLon = this._windArm[i];
+            const sinLat = this._windPY[i];
 
-            // Latitude-dependent solar wind speed: fast polar wind winds less tightly.
-            // |sinLat| = sin(heliographic latitude). At lat > ~30° (|sinLat| > 0.5)
-            // we're in the polar coronal-hole fast stream region.
-            const latFrac = Math.min(1, Math.abs(sinLat) / 0.5);  // 0=equator, 1=polar
-            const V_local = speed * (1 + latFrac * 0.65);         // 1× → 1.65× at poles
+            // Latitude-dependent solar wind speed.
+            // |sinLat| = sin(heliographic latitude). Polar coronal-hole wind
+            // (lat > ~30°) travels at up to 1.65× the measured equatorial speed.
+            const latFrac = Math.min(1, Math.abs(sinLat) / 0.5);
+            const V_local = speed * (1 + latFrac * 0.65);
 
-            // Parker spiral winding at this particle's speed + latitude
-            const srcLon = arm * (Math.PI * 2 / N_SPIRAL);
+            // Full Parker spiral: θ(r) = θ₀ + Ω_rot − (Ω_sun/V_sw) × r
+            // 428.6 = Ω_sun × 1 AU / (1 km s⁻¹) in consistent units
             const ang    = srcLon + this._rot - (428.6 / V_local) * r + this._windJitter[i];
             const rPx    = r * AU;
             const cosLat = Math.sqrt(Math.max(0, 1 - sinLat * sinLat));
 
-            // Constant heliographic latitude trajectory: X,Z on ecliptic × cos(lat)
+            // Full 3D position on constant-latitude path
             this._windPos[i * 3]     = rPx * cosLat * Math.cos(ang);
             this._windPos[i * 3 + 1] = rPx * sinLat;
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
 
-            // ── Particle colour ────────────────────────────────────────────────
+            // ── Sector polarity colour ─────────────────────────────────────────
+            // Convert inertial source longitude → heliographic (Sun co-rotating) frame
+            // to determine which IMF sector (toward/away) this particle lives in.
+            // The HCS separates heliographic longitudes 0–π (sector A) from π–2π (B).
+            const heliogLon = ((srcLon - this._rot) % TWO_PI + TWO_PI) % TWO_PI;
+            const inAway    = (heliogLon < Math.PI) === awayFirst;
+            const polR = inAway ? 0.88 : 0.15;
+            const polG = inAway ? 0.58 : 0.42;
+            const polB = inAway ? 0.05 : 0.92;
+
             const fadeIn  = Math.min(1.0, this._windAge[i] / 1.5);
             const rNorm   = r / MAX_R_AU;
             const fadeOut = Math.pow(1.0 - rNorm, 0.5);
             const fade    = fadeIn * fadeOut * dFactor;
 
-            // Base colour: white-gold near sun → sector polarity tint at distance
-            // Polar (fast) particles are slightly cooler/bluer
-            const inAway   = (arm < N_SPIRAL / 2) === awayFirst;
-            const polR = inAway ? 0.85 : 0.20;
-            const polG = inAway ? 0.55 : 0.45;
-            const polB = inAway ? 0.05 : 0.90;
-
-            // Near-sun: bright white regardless of polarity (high T, near-Sun corona)
-            const tSun  = Math.max(0, 1 - rNorm * 2.5);   // 1 near sun → 0 beyond 0.4 AU
-            const cr = Math.max(0, ((0.95  * tSun + polR * (1 - tSun)) + bzSouth * 0.20 + spdNorm * 0.08) * fade);
-            const cg = Math.max(0, ((0.85  * tSun + polG * (1 - tSun)) - bzSouth * 0.45 + spdNorm * 0.10) * fade);
-            const cb = Math.max(0, ((0.75  * tSun + polB * (1 - tSun)) - bzSouth * 0.55) * fade);
+            // Near-sun (< 0.4 AU): bright white/gold corona regardless of sector.
+            // Beyond 0.4 AU: sector polarity colour fades in smoothly.
+            const tSun = Math.max(0, 1 - rNorm * 2.5);
+            const cr = Math.max(0, ((0.95 * tSun + polR * (1 - tSun)) + bzSouth * 0.18 + spdNorm * 0.08) * fade);
+            const cg = Math.max(0, ((0.85 * tSun + polG * (1 - tSun)) - bzSouth * 0.44 + spdNorm * 0.10) * fade);
+            const cb = Math.max(0, ((0.75 * tSun + polB * (1 - tSun)) - bzSouth * 0.54) * fade);
 
             this._windCol[i * 3]     = Math.min(1, cr);
             this._windCol[i * 3 + 1] = Math.min(1, cg);
