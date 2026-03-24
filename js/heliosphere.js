@@ -81,6 +81,7 @@ export class HeliosphereCanvas {
         this._particles  = [];
         this._cme        = null;       // null or { r_AU, auPerFrame, opacity }
         this._sunPulse   = 0;
+        this._flashTimer = 0;          // frames remaining for data-arrival flash
 
         // Stable star field
         this._stars = Array.from({ length: 180 }, () => ({
@@ -134,6 +135,9 @@ export class HeliosphereCanvas {
         this._s.stormLevel   = d.derived?.storm_level ?? this._s.stormLevel;
 
         if (!prevCme && this._s.cmeActive) this._triggerCME();
+
+        // Brief visual flash so users can see the data just refreshed
+        this._flashTimer = 45;
     }
 
     _onEph(ev) {
@@ -156,6 +160,7 @@ export class HeliosphereCanvas {
         // Slow spiral rotation: 1 rev per ~3.5 min at 60fps
         this._rot += 0.0003;
         this._sunPulse = (this._sunPulse + 0.018) % (Math.PI * 2);
+        if (this._flashTimer > 0) this._flashTimer--;
     }
 
     _resize() {
@@ -315,28 +320,26 @@ export class HeliosphereCanvas {
     // ── Parker spiral ─────────────────────────────────────────────────────────
 
     _drawSpiral(ctx, cx, cy, px) {
-        const speed    = this._s.speed || 450;
-        const bz       = this._s.bz;
-        const by       = this._s.by || 0;
-        const N_STEPS  = 120;
-        const maxR     = this.opts.maxR_AU;
+        const speed   = this._s.speed || 450;
+        const bz      = this._s.bz;
+        const N_STEPS = 120;
+        const maxR    = this.opts.maxR_AU;
 
-        // Colour arms by IMF sector (by > 0 → away, by < 0 → toward)
-        // and intensity by |bz| southward
-        const bzFactor = Math.min(Math.max(-bz / 20, 0), 1); // 0 (quiet) → 1 (storm)
-        const armCols  = [
-            `rgba(255,${Math.round(180 - bzFactor * 100)},40,`,
-            `rgba(255,${Math.round(160 - bzFactor * 80)},20,`,
-            `rgba(255,${Math.round(170 - bzFactor * 90)},30,`,
-            `rgba(255,${Math.round(165 - bzFactor * 85)},25,`,
-        ];
+        // Bz-driven colour shift: southward → red, northward → golden
+        const bzFactor  = Math.min(Math.max(-bz / 20, 0), 1);
+        const gBase     = Math.round(180 - bzFactor * 110);
+        const bBase     = Math.round(40  - bzFactor * 30);
+
+        // Extra brightness when fresh NOAA data just arrived
+        const flashBoost = this._flashTimer > 0
+            ? (this._flashTimer / 45) * 0.22
+            : 0;
 
         ctx.save();
-        ctx.lineWidth = 1.2;
 
         for (let arm = 0; arm < 4; arm++) {
-            ctx.beginPath();
-            let firstPt = true;
+            let prevX, prevY;
+
             for (let i = 0; i <= N_STEPS; i++) {
                 const r_AU  = (i / N_STEPS) * maxR;
                 const angle = arm * Math.PI / 2 + this._rot
@@ -345,14 +348,24 @@ export class HeliosphereCanvas {
                 const x = cx + r_px * Math.cos(angle);
                 const y = cy - r_px * Math.sin(angle);
 
-                const fade  = Math.min(i / 12, 1) * (1 - i / (N_STEPS * 1.05));
-                const alpha = Math.max(fade * 0.55, 0);
-                ctx.strokeStyle = armCols[arm] + alpha + ')';
+                if (i > 0) {
+                    // Each segment drawn individually so per-step alpha actually works.
+                    // Fade in over first ~12 steps, fade out toward maxR.
+                    const tIn   = Math.min(i / 12, 1);
+                    const tOut  = 1 - (i / N_STEPS);
+                    const fade  = tIn * tOut;
+                    const alpha = Math.max(fade * 0.70 + flashBoost, 0);
 
-                if (firstPt) { ctx.moveTo(x, y); firstPt = false; }
-                else          ctx.lineTo(x, y);
+                    ctx.strokeStyle = `rgba(255,${gBase},${bBase},${alpha})`;
+                    ctx.lineWidth   = 1.0 + fade * 0.6;
+                    ctx.beginPath();
+                    ctx.moveTo(prevX, prevY);
+                    ctx.lineTo(x, y);
+                    ctx.stroke();
+                }
+                prevX = x;
+                prevY = y;
             }
-            ctx.stroke();
         }
         ctx.restore();
     }
@@ -361,8 +374,17 @@ export class HeliosphereCanvas {
 
     _drawParticles(ctx, cx, cy, px) {
         this._tickParticles();
-        const bz   = this._s.bz;
-        const busy = bz < -5;
+        const bz      = this._s.bz;
+        const density = this._s.density || 5;
+        // NOAA density (n/cc): nominal ~5, storm can reach 20+
+        // Scale particle opacity so dense solar wind is visually thicker
+        const dFactor = Math.max(0.3, Math.min(2.0, density / 5));
+
+        // Continuous Bz colour: southward → red-orange, northward → teal
+        const bzN  = Math.max(-1, Math.min(1, bz / 20));
+        const colR = bzN < 0 ? 255 : Math.round(255 - 115 * bzN);   // 255→140 as bzN 0→1
+        const colG = Math.round(150 + 60 * (1 - Math.abs(bzN) * 0.7));
+        const colB = bzN > 0 ? 255 : Math.round(200 + 55 * (1 + bzN)); // 145→200 as bzN -1→0
 
         for (const p of this._particles) {
             const { x, y } = this._particlePos(p.arm, p.r_AU);
@@ -370,15 +392,11 @@ export class HeliosphereCanvas {
             // Fade in near sun, fade out at edge
             const edgeFade = 1 - Math.min(p.r_AU / this.opts.maxR_AU, 1);
             const sunFade  = Math.min(p.r_AU / 0.12, 1);
-            const alpha    = p.alpha * edgeFade * sunFade;
-            if (alpha < 0.02) continue;
+            const alpha    = p.alpha * edgeFade * sunFade * dFactor;
+            if (alpha < 0.015) continue;
 
-            // Colour by Bz: southward → red-orange, northward → teal
-            const r = busy ? 255 : 180;
-            const g = busy ? Math.round(80 + p.r_AU * 60) : 210;
-            const b = busy ? 40  : 255;
-            ctx.globalAlpha = alpha;
-            ctx.fillStyle   = `rgb(${r},${g},${b})`;
+            ctx.globalAlpha = Math.min(alpha, 1);
+            ctx.fillStyle   = `rgb(${colR},${colG},${colB})`;
             ctx.beginPath();
             ctx.arc(x, y, p.size, 0, Math.PI * 2);
             ctx.fill();
@@ -583,16 +601,20 @@ export class HeliosphereCanvas {
         const kpCol  = s.kp < 3 ? '#00e874' : s.kp < 5 ? '#ffcc00' : s.kp < 7 ? '#ff8800' : '#ff44aa';
         const src    = this._eph.source === 'horizons' ? 'JPL Horizons' :
                        this._eph.source === 'meeus'    ? 'Meeus Algo' : 'Ephemeris pending';
+        // Parker winding constant: Ω☉/v_sw  (rad/AU); higher = tighter spiral
+        const windingStr = (428.6 / (s.speed || 450)).toFixed(2) + ' rad/AU';
+        const dataFresh  = this._flashTimer > 0;
 
         const lines = [
-            { text: `Wind  ${Math.round(s.speed)} km/s`, color: '#a0c8ff' },
+            { text: `Wind  ${Math.round(s.speed)} km/s`, color: dataFresh ? '#ffe080' : '#a0c8ff' },
             { text: `Bz    ${bzStr}`,                    color: s.bz < -5 ? '#ff8080' : '#c0d8f0' },
             { text: `Kp    ${s.kp.toFixed(1)}`,          color: kpCol },
             { text: `Xray  ${s.xrayClass || '–'}`,       color: '#ffd080' },
+            { text: `Spiral ${windingStr}`,               color: 'rgba(160,220,180,0.85)' },
             { text: src,                                  color: 'rgba(120,140,160,0.7)' },
         ];
 
-        const boxW = 118 * dpr;
+        const boxW = 130 * dpr;
         const boxH = lines.length * lh + pad * 1.6;
         const bx   = pad;
         const by   = H - boxH - pad;
