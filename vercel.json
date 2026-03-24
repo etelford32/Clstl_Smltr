@@ -102,6 +102,10 @@
     {
       "source": "/v1/donki/:path*",
       "destination": "/api/donki/:path*"
+    },
+    {
+      "source": "/v1/horizons",
+      "destination": "/api/horizons"
     }
   ]
 }
