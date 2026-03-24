@@ -32,6 +32,16 @@
 import * as THREE from 'three';
 import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
+import {
+    buildParkerLUT,
+    parkerSpeedRatio,
+    alfvenSpeed,
+    plasmaTemp,
+    tempToRGB,
+    petschekRate,
+    plasmaBeta,
+    cglAnisotropy,
+} from './helio-physics.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -137,6 +147,10 @@ export class Heliosphere3D {
         this._hcsMesh    = null;
         this._hcsPosArr  = null;
         this._hcsTilt    = 0;      // current warp amplitude (rad)
+        // Parker transonic speed profile (precomputed LUT)
+        this._parkerLUT  = null;
+        // Sweet-Parker / Petschek reconnection events at HCS
+        this._reconnEvents = [];
         this._planetMeshes = {};
 
         // Bound handlers
@@ -169,6 +183,12 @@ export class Heliosphere3D {
             this._hcsMesh.geometry.dispose();
             this._hcsMesh.material.dispose();
         }
+        for (const ev of this._reconnEvents) {
+            this._scene?.remove(ev.mesh);
+            ev.mesh.geometry.dispose();
+            ev.mesh.material.dispose();
+        }
+        this._reconnEvents = [];
         this._renderer?.dispose();
     }
 
@@ -509,6 +529,12 @@ export class Heliosphere3D {
     _buildSolarWind() {
         if (!this._opts.showWind) return;
 
+        // Precompute Parker speed-ratio LUT (200 pts, 0.002–2.1 AU, T_corona = 1.5 MK)
+        // The LUT encodes V(r)/V(1 AU) from the Parker (1958) transcendental equation.
+        // Particles closer to the sun advect much more slowly (factor ~15–20 near corona),
+        // creating a physically-correct dense coronal glow that thins into the outer wind.
+        this._parkerLUT = buildParkerLUT(200, 0.002, 2.1, 1.5e6);
+
         const N = N_WIND;
         this._windPos    = new Float32Array(N * 3);
         this._windCol    = new Float32Array(N * 3);
@@ -613,63 +639,50 @@ export class Heliosphere3D {
 
         const speed   = this._sw.speed   || 450;
         const bz      = this._sw.bz      ?? 0;
-        const by      = this._sw.by      ?? 5;    // sector polarity indicator
+        const by      = this._sw.by      ?? 5;
         const density = this._sw.density || 5;
         const bt      = Math.max(1, this._sw.bt || 5);
 
-        // Radial advection step (scaled to measured equatorial speed)
-        const dr      = (speed / 450) * 0.0028 * dt * 60;
+        // Base advection step at measured DSCOVR equatorial speed
+        const dr_base  = (speed / 450) * 0.0028 * dt * 60;
 
-        // Derived scalars for colour/opacity
-        const bzSouth = Math.max(0, Math.min(1, -bz / 30));   // 0=quiet, 1=southward storm
-        const spdNorm = Math.max(0, Math.min(1, (speed - 300) / 600));
-        const btNorm  = Math.min(1, bt / 20);                  // |B| normalised to 20 nT
-        // NOAA density: nominal 5 n/cc = 1.0; modulates particle brightness
-        const dFactor = Math.max(0.4, Math.min(2.5, density / 5));
+        // Derived scalars
+        const bzSouth  = Math.max(0, Math.min(1, -bz / 30));  // 0=quiet, 1=southward storm
+        const btNorm   = Math.min(1, bt / 20);                 // |B| ∕ 20 nT
+        const dFactor  = Math.max(0.4, Math.min(2.5, density / 5));
 
-        // ── IMF sector polarity colours (By-based) ────────────────────────────
-        // "Away" sector (By > 0): field points outward from Sun — warm golden-orange
-        // "Toward" sector (By < 0): field points inward — cool blue-teal
-        // Southward Bz during a storm shifts both toward orange-red.
-        // Sector boundary (HCS) separates the first half from the second half of
-        // the N_SPIRAL field lines.
+        // ── IMF sector polarity colours for field-line backbone (By-based) ──────
+        // Field lines show MAGNETIC structure. Particles show THERMAL structure (below).
         const awayR  = (0.95 + bzSouth * 0.05) * btNorm;
-        const awayG  = (0.65 - bzSouth * 0.55) * btNorm;
+        const awayG  = (0.68 - bzSouth * 0.55) * btNorm;
         const awayB  = (0.08 - bzSouth * 0.06) * btNorm;
-        const towdR  = (0.10 + bzSouth * 0.60) * btNorm;
+        const towdR  = (0.10 + bzSouth * 0.55) * btNorm;
         const towdG  = (0.50 - bzSouth * 0.35) * btNorm;
         const towdB  = (0.95 - bzSouth * 0.60) * btNorm;
-
-        // Which half is "away" right now depends on sign of By
         const awayFirst = by >= 0;
 
-        // ── Update N_SPIRAL field-line samples ────────────────────────────────
+        // ── N_SPIRAL field-line backbone lines (magnetic structure) ──────────────
         if (this._spiralLines) {
             for (let arm = 0; arm < N_SPIRAL; arm++) {
                 const pts  = this._spiralLinePts[arm];
                 const cols = this._spiralLineCols[arm];
-
-                // Sector: first N_SPIRAL/2 = sector A, rest = sector B
                 const inAwayHalf = (arm < N_SPIRAL / 2) === awayFirst;
                 const sR = inAwayHalf ? awayR : towdR;
                 const sG = inAwayHalf ? awayG : towdG;
                 const sB = inAwayHalf ? awayB : towdB;
-
-                // Field-line source longitude — evenly sampled around full 360°
                 const srcLon = arm * (Math.PI * 2 / N_SPIRAL);
 
                 for (let j = 0; j < N_LINE; j++) {
-                    const r_AU  = (j / (N_LINE - 1)) * MAX_R_AU;
-                    const ang   = srcLon + this._rot - (428.6 / speed) * r_AU;
-                    const rp    = r_AU * AU;
+                    const r_AU = (j / (N_LINE - 1)) * MAX_R_AU;
+                    const ang  = srcLon + this._rot - (428.6 / speed) * r_AU;
+                    const rp   = r_AU * AU;
                     pts[j * 3]     = rp * Math.cos(ang);
-                    pts[j * 3 + 1] = 0;   // field lines lie in equatorial plane
+                    pts[j * 3 + 1] = 0;
                     pts[j * 3 + 2] = rp * Math.sin(ang);
 
-                    // Per-vertex brightness: fade in near sun (j<10), fade out at edge
                     const tIn  = Math.min(j / 10, 1.0);
                     const tOut = 1.0 - Math.pow(j / N_LINE, 1.6);
-                    const brt  = tIn * tOut * 0.75;
+                    const brt  = tIn * tOut * 0.78;
                     cols[j * 3]     = Math.max(0, sR * brt);
                     cols[j * 3 + 1] = Math.max(0, sG * brt);
                     cols[j * 3 + 2] = Math.max(0, sB * brt);
@@ -679,64 +692,93 @@ export class Heliosphere3D {
             }
         }
 
-        // ── Update solar wind particles ───────────────────────────────────────
+        // ── Solar wind particles (Parker-CGL Thermal Differentiation model) ──────
+        //
+        // Position:  uses Parker transonic speed profile to modulate dr per particle.
+        //   Near sun (r ≈ 0.01 AU): Parker ratio ≈ 0.06 → very slow (subsonic corona)
+        //   At critical point (r_c ≈ 0.018 AU at 1.5 MK): ratio ≈ 0.35
+        //   At 1 AU: ratio = 1.0 (normalised to DSCOVR measurement)
+        //   Visual: dense glowing corona that thins into the outer wind — physically correct
+        //
+        // Colour: derived from first-principles temperature via the Parker-CGL model:
+        //   T(r) = T_corona × (r₀/r)^0.74 + Alfvénic wave heating  (Helios/PSP fit)
+        //   Temperature → thermal spectral colour via tempToRGB()
+        //   Sector polarity tint (±12% brightness shift) on top of thermal base
+        //   Southward Bz brightens and reddens (reconnection heating)
+        //
+        // CGL anisotropy tint: T_⊥/T_∥ profile mapped to a slight blue↔red shift
+        //   Near sun: T_⊥ ≫ T_∥ (oblate) → slight blue-green tint
+        //   At 1 AU : T_⊥/T_∥ ≈ 0.4 (prolate) → slight warm shift
+
         const TWO_PI = Math.PI * 2;
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
-            this._windR[i]   += dr;
+
+            const r = this._windR[i];
+
+            // Parker transonic advection: scale radial step by V(r)/V(1 AU)
+            // Particles automatically pile up near the corona (subsonic crowding)
+            const parker = this._parkerLUT
+                ? parkerSpeedRatio(r, this._parkerLUT)
+                : 1.0;
+            const latFrac = Math.min(1, Math.abs(this._windPY[i]) / 0.5);
+            // Polar wind travels faster (up to 1.65× equatorial)
+            const V_local_frac = 1 + latFrac * 0.65;
+            this._windR[i] += dr_base * parker * V_local_frac;
 
             if (this._windR[i] > MAX_R_AU) {
                 this._spawnWind(i, false);
             }
 
-            const r      = this._windR[i];
-            // srcLon: the particle's fixed source longitude on the solar surface (rad).
-            // This is the only quantity that distinguishes one Parker spiral from another.
+            const r_new  = this._windR[i];
             const srcLon = this._windArm[i];
             const sinLat = this._windPY[i];
-
-            // Latitude-dependent solar wind speed.
-            // |sinLat| = sin(heliographic latitude). Polar coronal-hole wind
-            // (lat > ~30°) travels at up to 1.65× the measured equatorial speed.
-            const latFrac = Math.min(1, Math.abs(sinLat) / 0.5);
-            const V_local = speed * (1 + latFrac * 0.65);
-
-            // Full Parker spiral: θ(r) = θ₀ + Ω_rot − (Ω_sun/V_sw) × r
-            // 428.6 = Ω_sun × 1 AU / (1 km s⁻¹) in consistent units
-            const ang    = srcLon + this._rot - (428.6 / V_local) * r + this._windJitter[i];
-            const rPx    = r * AU;
             const cosLat = Math.sqrt(Math.max(0, 1 - sinLat * sinLat));
 
-            // Full 3D position on constant-latitude path
+            // Parker spiral angle
+            const V_lat   = speed * V_local_frac;
+            const ang     = srcLon + this._rot - (428.6 / V_lat) * r_new + this._windJitter[i];
+            const rPx     = r_new * AU;
+
             this._windPos[i * 3]     = rPx * cosLat * Math.cos(ang);
             this._windPos[i * 3 + 1] = rPx * sinLat;
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
 
-            // ── Sector polarity colour ─────────────────────────────────────────
-            // Convert inertial source longitude → heliographic (Sun co-rotating) frame
-            // to determine which IMF sector (toward/away) this particle lives in.
-            // The HCS separates heliographic longitudes 0–π (sector A) from π–2π (B).
+            // ── Parker-CGL thermal colour ──────────────────────────────────────
+            // Base colour from first-principles temperature model
+            const T_K          = plasmaTemp(r_new, 1.5e6);
+            const [tR, tG, tB] = tempToRGB(T_K);
+
+            // Sector polarity tint: Away = marginally warmer (+12%), Toward = cooler
             const heliogLon = ((srcLon - this._rot) % TWO_PI + TWO_PI) % TWO_PI;
             const inAway    = (heliogLon < Math.PI) === awayFirst;
-            const polR = inAway ? 0.88 : 0.15;
-            const polG = inAway ? 0.58 : 0.42;
-            const polB = inAway ? 0.05 : 0.92;
+            const polShift  = inAway ? 0.12 : -0.12;  // ±12% warmth shift
+            const pR = Math.min(1, tR + polShift * (1 - tR));
+            const pG = tG;
+            const pB = Math.max(0, tB - polShift * 0.4);
 
+            // CGL anisotropy tint: near-sun oblate (T_⊥>T_∥) → slight blue-green
+            // distant prolate (T_∥>T_⊥) → slight warm shift
+            const aniso     = cglAnisotropy(r_new);
+            const anisoTint = Math.max(-0.08, Math.min(0.08, (aniso - 1) * 0.015));
+            const aR = Math.max(0, pR - anisoTint * 0.5);
+            const aG = Math.max(0, pG + anisoTint * 0.3);
+            const aB = Math.max(0, pB + anisoTint);
+
+            // Storm modifier: Bz southward → reconnection heating → brighter, redder
+            const stR = Math.min(1, aR + bzSouth * 0.22);
+            const stG = Math.max(0, aG - bzSouth * 0.18);
+            const stB = Math.max(0, aB - bzSouth * 0.25);
+
+            // Fade-in from birth; position-based fade at domain edge
             const fadeIn  = Math.min(1.0, this._windAge[i] / 1.5);
-            const rNorm   = r / MAX_R_AU;
-            const fadeOut = Math.pow(1.0 - rNorm, 0.5);
+            const rNorm   = r_new / MAX_R_AU;
+            const fadeOut = Math.pow(Math.max(0, 1.0 - rNorm), 0.5);
             const fade    = fadeIn * fadeOut * dFactor;
 
-            // Near-sun (< 0.4 AU): bright white/gold corona regardless of sector.
-            // Beyond 0.4 AU: sector polarity colour fades in smoothly.
-            const tSun = Math.max(0, 1 - rNorm * 2.5);
-            const cr = Math.max(0, ((0.95 * tSun + polR * (1 - tSun)) + bzSouth * 0.18 + spdNorm * 0.08) * fade);
-            const cg = Math.max(0, ((0.85 * tSun + polG * (1 - tSun)) - bzSouth * 0.44 + spdNorm * 0.10) * fade);
-            const cb = Math.max(0, ((0.75 * tSun + polB * (1 - tSun)) - bzSouth * 0.54) * fade);
-
-            this._windCol[i * 3]     = Math.min(1, cr);
-            this._windCol[i * 3 + 1] = Math.min(1, cg);
-            this._windCol[i * 3 + 2] = Math.min(1, cb);
+            this._windCol[i * 3]     = Math.min(1, stR * fade);
+            this._windCol[i * 3 + 1] = Math.min(1, stG * fade);
+            this._windCol[i * 3 + 2] = Math.min(1, stB * fade);
         }
 
         const geo = this._windPoints.geometry;
@@ -770,6 +812,106 @@ export class Heliosphere3D {
             r_AU:      0.003,
             auPerFrame: (this._sw.cmeSpeed / 450) * 0.004,
         };
+    }
+
+    // ── Sweet-Parker / Petschek reconnection events at the HCS ───────────────
+    //
+    // The HCS is a current sheet separating antiparallel IMF sectors.
+    // When southward Bz tilts the IMF antiparallel to Earth's magnetopause field,
+    // Petschek fast reconnection is triggered.  At the HCS itself, ongoing
+    // Sweet–Parker reconnection creates "plasmoids" — magnetic islands ejected
+    // along the current sheet at ~V_A.
+    //
+    // Spawn probability per frame:  petschekRate() × |Bz_south| × V_A
+    // Visual: an expanding ring in the HCS plane, colour-transitioning from
+    // hot white (10 MK reconnection exhaust) to blue-teal (cooling exhaust).
+    //
+    // Maximum concurrent events: 6 (prevents GPU overload on fast machines)
+
+    _tickReconnection(dt) {
+        const bz      = this._sw.bz      ?? 0;
+        const bt      = Math.max(1, this._sw.bt      || 5);
+        const density = this._sw.density || 5;
+
+        // Only fire when Bz is clearly southward
+        const bzSouth = Math.max(0, -bz / 15);
+        if (bzSouth < 0.05) {
+            // Quiet — age out existing events but don't spawn new ones
+        } else {
+            // Alfvén speed and Petschek rate from measured quantities
+            const V_A    = alfvenSpeed(bt, density);   // km/s
+            // Anomalous (turbulent) magnetic diffusivity η_anomalous ≈ 10⁶ m²/s
+            // (much larger than classical ~10 m²/s → enables fast Petschek reconnection)
+            const rate   = petschekRate(0.08, V_A, 1e6);
+
+            // Spawn probability — scales with both Bz southward and reconnection rate
+            const prob = rate * bzSouth * dt * 1.8;
+            if (Math.random() < prob && this._reconnEvents.length < 6) {
+                // Random position along the HCS surface
+                const r_AU   = 0.15 + Math.random() * 0.90;   // 0.15–1.05 AU
+                const phi_w  = Math.random() * Math.PI * 2;    // world longitude
+                const r_px   = r_AU * AU;
+
+                // Y follows HCS warp: y = r_px × tilt × sin(phi_world − rot)
+                const amp    = (this._hcsTilt || 0.12) * Math.pow(r_AU, 0.4);
+                const y_hcs  = r_px * amp * Math.sin(phi_w - this._rot);
+
+                const ring = new THREE.Mesh(
+                    new THREE.RingGeometry(0.4, 1.0, 32),
+                    new THREE.MeshBasicMaterial({
+                        color:       0xbbddff,
+                        transparent: true,
+                        opacity:     0.85,
+                        blending:    THREE.AdditiveBlending,
+                        depthWrite:  false,
+                        side:        THREE.DoubleSide,
+                    })
+                );
+                ring.position.set(r_px * Math.cos(phi_w), y_hcs, r_px * Math.sin(phi_w));
+                // Orient ring parallel to the HCS (face approximately radially outward)
+                ring.lookAt(0, 0, 0);
+                ring.renderOrder = 8;
+                this._scene.add(ring);
+
+                this._reconnEvents.push({
+                    mesh:   ring,
+                    age:    0,
+                    maxAge: 2.0 + Math.random() * 1.5,
+                    V_A,
+                });
+            }
+        }
+
+        // Age and update all active events
+        for (let i = this._reconnEvents.length - 1; i >= 0; i--) {
+            const ev = this._reconnEvents[i];
+            ev.age  += dt;
+
+            if (ev.age >= ev.maxAge) {
+                this._scene.remove(ev.mesh);
+                ev.mesh.geometry.dispose();
+                ev.mesh.material.dispose();
+                this._reconnEvents.splice(i, 1);
+                continue;
+            }
+
+            const t = ev.age / ev.maxAge;   // 0 → 1 over event lifetime
+
+            // Expand ring outward (moves at ~V_A exhaust speed from reconnection site)
+            ev.mesh.scale.setScalar(1.0 + t * 5.0);
+
+            // Colour transition: hot white (T ~ 10 MK) → blue-teal (cooling exhaust)
+            // t=0: bright white/cyan  t=1: dim blue
+            const hue = 0.58 - t * 0.12;   // blue-teal range
+            const sat = 0.3  + t * 0.6;
+            const lit = 0.9  - t * 0.55;
+            ev.mesh.material.color.setHSL(hue, sat, lit);
+
+            // Fast flash-in, slow fade-out (like real reconnection exhaust)
+            const fadeIn  = Math.min(1, t / 0.12);
+            const fadeOut = 1 - Math.pow(t, 1.8);
+            ev.mesh.material.opacity = Math.max(0, fadeIn * fadeOut * 0.85);
+        }
     }
 
     _tickCME(dt) {
@@ -964,8 +1106,9 @@ export class Heliosphere3D {
 
         this._tickSun();
         this._tickMoon(dt);
-        this._tickHCS();            // rotate HCS with Sun; rebuild if Kp changed
+        this._tickHCS();
         this._tickWind(dt);
+        this._tickReconnection(dt);
         this._tickCME(dt);
         this._tickFlare(dt);
         this._tickMagnetosphere(dt);
