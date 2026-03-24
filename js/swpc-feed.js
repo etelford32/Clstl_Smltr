@@ -72,6 +72,12 @@ export const FALLBACK = {
     dst_index:          -5,
     proton_diff_1mev:   0.0,
     proton_diff_10mev:  0.0,
+    donki_flares:       [],
+    gst_events:         [],
+    current_gst:        null,
+    sep_events:         [],
+    recent_sep_event:   null,
+    radiation_storm_active: false,
 };
 
 // ── X-ray class helpers ───────────────────────────────────────────────────────
@@ -315,6 +321,54 @@ async function fetchDONKINotifications(state) {
     })).slice(0, 12);
 }
 
+async function fetchDONKIFlares(state) {
+    const json = await fetchEdge(API.donkiFlares);
+    const list = json?.data?.flares;
+    if (!Array.isArray(list)) { state.donki_flares = []; return; }
+    state.donki_flares = list.map(f => ({
+        id:           f.id           ?? null,
+        begin_time:   new Date(f.begin_time ?? 0),
+        peak_time:    f.peak_time  ? new Date(f.peak_time)  : null,
+        flare_class:  f.flare_class  ?? null,
+        class_letter: f.class_letter ?? 'A',
+        location:     f.location     ?? null,
+        active_region: f.active_region ?? null,
+        linked_cme:   f.linked_cme   ?? false,
+    })).slice(0, 12);
+}
+
+async function fetchDONKIGST(state) {
+    const json = await fetchEdge(API.donkiGST);
+    const list = json?.data?.events;
+    if (!Array.isArray(list)) { state.gst_events = []; state.current_gst = null; return; }
+    state.gst_events = list.map(g => ({
+        id:         g.id         ?? null,
+        start_time: new Date(g.start_time ?? 0),
+        max_kp:     g.max_kp     ?? null,
+        g_scale:    g.g_scale    ?? 0,
+        linked_cme: g.linked_cme ?? false,
+    }));
+    state.current_gst = json?.data?.current_storm
+        ? { ...json.data.current_storm, start_time: new Date(json.data.current_storm.start_time ?? 0) }
+        : null;
+}
+
+async function fetchDONKISEP(state) {
+    const json = await fetchEdge(API.donkiSEP);
+    const list = json?.data?.events;
+    if (!Array.isArray(list)) { state.sep_events = []; state.recent_sep_event = null; state.radiation_storm_active = false; return; }
+    state.sep_events = list.map(s => ({
+        id:           s.id          ?? null,
+        event_time:   new Date(s.event_time ?? 0),
+        linked_flare: s.linked_flare ?? false,
+        linked_cme:   s.linked_cme   ?? false,
+    }));
+    state.recent_sep_event      = json?.data?.recent_event
+        ? { ...json.data.recent_event, event_time: new Date(json.data.recent_event.event_time ?? 0) }
+        : null;
+    state.radiation_storm_active = json?.data?.radiation_storm_active ?? false;
+}
+
 // ── T4 fetchers (PRO only, 60-min cadence) ────────────────────────────────────
 
 async function fetchRadioFlux(state) {
@@ -465,6 +519,9 @@ export class SpaceWeatherFeed {
             fetchDst(this._raw),
             fetchDONKICME(this._raw),
             fetchDONKINotifications(this._raw),
+            fetchDONKIFlares(this._raw),
+            fetchDONKIGST(this._raw),
+            fetchDONKISEP(this._raw),
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
@@ -584,6 +641,12 @@ export class SpaceWeatherFeed {
             earth_directed_cme:  raw.earth_directed_cme ?? null,
             cme_eta_hours:       raw.cme_eta_hours      ?? null,
             donki_notifications: raw.donki_notifications ?? [],
+            donki_flares:        raw.donki_flares        ?? [],
+            gst_events:          raw.gst_events          ?? [],
+            current_gst:         raw.current_gst         ?? null,
+            sep_events:          raw.sep_events          ?? [],
+            recent_sep_event:    raw.recent_sep_event    ?? null,
+            radiation_storm_active: raw.radiation_storm_active ?? false,
             new_cme_detected:    newCme,
             dst_index:           raw.dst_index  ?? -5,
             kp_1min:             raw.kp_1min    ?? raw.kp,

@@ -7,6 +7,7 @@ on:
       - master
       - claude/sun-animation-preset-nkx5Y
       - claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU
+      - claude/solar-wind-parker-spiral-jLLtK
   workflow_dispatch:
 
 permissions:
