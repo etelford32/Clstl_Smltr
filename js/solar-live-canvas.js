@@ -59,10 +59,12 @@ export class SolarLiveCanvas {
         this._sun = new SunRenderer2D();
 
         // ── Animation state ────────────────────────────────────────────────────
-        this._particles = [];
-        this._N_PART    = 300;
-        this._t         = 0;
-        this._rafId     = null;
+        this._particles  = [];
+        this._N_PART     = 300;
+        this._t          = 0;
+        this._rot        = 0;    // Parker spiral slow rotation (same rate as heliosphere.js)
+        this._MAX_VIEW_AU = 0.5; // treat canvas edge as ~0.5 AU for Parker winding math
+        this._rafId      = null;
 
         // Seeded starfield (stable across frames)
         this._stars = this._genStars(100);
@@ -135,20 +137,28 @@ export class SolarLiveCanvas {
 
     _initParticles() {
         this._particles = [];
-        const R = this._R();
         for (let i = 0; i < this._N_PART; i++) {
             this._particles.push(this._newParticle(true));
         }
     }
 
     _newParticle(scatter = false) {
-        const R   = this._R();
-        const maxR = this._maxR();
+        const maxR    = this._maxR();
+        const R       = this._R();
+        const maxAU   = this._MAX_VIEW_AU;
+        // Sun surface in virtual AU: R pixels → R/pxPerAU AU
+        const pxPerAU = maxR > 0 ? maxR / maxAU : 1;
+        const minAU   = maxR > 0 ? R / pxPerAU : 0.02;
+        const arm     = Math.floor(Math.random() * 4);
+        // Scatter existing particles along the spiral; new ones born at the sun
+        const r_AU    = scatter
+            ? minAU + Math.random() * (maxAU - minAU)
+            : minAU * (1.0 + Math.random() * 0.05);
         return {
-            angle:   Math.random() * Math.PI * 2,
-            r:       scatter ? R * 1.05 + Math.random() * (maxR - R * 1.05) : R * 1.02,
+            arm,
+            r_AU,
             speed:   0.35 + Math.random() * 1.5,
-            size:    0.5 + Math.random() * 1.8,
+            size:    0.5  + Math.random() * 1.8,
             opacity: 0.15 + Math.random() * 0.8,
         };
     }
@@ -218,6 +228,7 @@ export class SolarLiveCanvas {
         if (this.opts.showOverlay) this._drawOverlay(ctx, W, H);
 
         this._t++;
+        this._rot += 0.0003;   // Parker spiral slow rotation (~1 rev / 3.5 min at 60fps)
     }
 
     // ── Starfield ─────────────────────────────────────────────────────────────
@@ -469,13 +480,21 @@ export class SolarLiveCanvas {
         });
     }
 
-    // ── Solar wind particles ───────────────────────────────────────────────────
+    // ── Solar wind particles (Parker-spiral geometry) ─────────────────────────
 
     _drawParticles(ctx, cx, cy, R, behindSun) {
         const { speed, density, bz } = this._s;
-        const sFactor = Math.max(0.25, speed / 400);
-        const dFactor = Math.max(0.2,  density / 5);
-        const maxR    = this._maxR();
+        const sFactor  = Math.max(0.25, speed / 400);
+        // NOAA plasma density (n/cc): nominal ~5; dense wind makes more visible particles
+        const dFactor  = Math.max(0.2, Math.min(2.2, density / 5));
+        const maxR     = this._maxR();
+        const maxAU    = this._MAX_VIEW_AU;
+        const pxPerAU  = maxR / maxAU;
+        const minAU    = R / pxPerAU;
+        // Parker winding constant (rad/AU) — changes live with wind speed
+        const windK    = 428.6 / (speed || 450);
+        // AU per frame: cross full view in ~8 s at 60fps at nominal speed
+        const drAU     = (speed / 450) * (maxAU / (60 * 8));
 
         // Bz-coloured: southward (<0) → red/amber; northward (>0) → blue/white
         const bzN = Math.max(-1, Math.min(1, bz / 25));
@@ -483,34 +502,39 @@ export class SolarLiveCanvas {
         const pG  = Math.round(165 + 55 * (1 - Math.abs(bzN) * 0.6));
         const pB  = bzN > 0 ? 255 : Math.round(155 + 100 * (1 - Math.abs(bzN)));
 
-        this._particles.forEach(p => {
-            p.r += p.speed * sFactor * 0.75;
+        for (const p of this._particles) {
+            p.r_AU += drAU * p.speed * sFactor;
 
-            if (p.r > maxR) {
-                p.r      = R * 1.02;
-                p.angle  = Math.random() * Math.PI * 2;
+            if (p.r_AU > maxAU || p.r_AU < minAU * 0.9) {
+                // Reset to just outside the solar surface on a random arm
+                p.arm    = Math.floor(Math.random() * 4);
+                p.r_AU   = minAU * (1.0 + Math.random() * 0.05);
                 p.speed  = 0.35 + Math.random() * 1.5;
                 p.size   = 0.5  + Math.random() * 1.8;
                 p.opacity = 0.15 + Math.random() * 0.8;
             }
 
-            const px = cx + Math.cos(p.angle) * p.r;
-            const py = cy + Math.sin(p.angle) * p.r;
+            // Parker spiral position: angle bends with radius, tighter at low speed
+            const angle = p.arm * Math.PI / 2 + this._rot - windK * p.r_AU;
+            const r_px  = p.r_AU * pxPerAU;
+            const px    = cx + Math.cos(angle) * r_px;
+            const py    = cy + Math.sin(angle) * r_px;
 
-            // Draw only on the correct layer
-            const inFront = p.r > R * 1.02;
-            if (behindSun &&  inFront) return;
-            if (!behindSun && !inFront) return;
+            // Layer: behind sun (r < R) or in front (r > R)
+            const inFront = r_px > R * 1.02;
+            if ( behindSun &&  inFront) continue;
+            if (!behindSun && !inFront) continue;
 
-            const fadeIn  = Math.min(1, (p.r - R) / (R * 0.45));
-            const fadeOut = Math.min(1, (maxR - p.r) / (maxR * 0.22));
+            const fadeIn  = Math.min(1, (r_px - R) / (R * 0.45));
+            const fadeOut = Math.min(1, (maxR - r_px) / (maxR * 0.22));
             const opacity = p.opacity * fadeIn * fadeOut * dFactor * 0.55;
+            if (opacity < 0.015) continue;
 
             ctx.beginPath();
             ctx.arc(px, py, p.size, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(${pR},${pG},${pB},${opacity})`;
             ctx.fill();
-        });
+        }
     }
 
     // ── Orbit hint ring ───────────────────────────────────────────────────────
