@@ -62,6 +62,7 @@ const COL = {
 
 const N_WIND   = 3000;   // solar wind particles
 const MAX_R_AU = 1.65;   // kill particles beyond this
+const N_LINE   = 90;     // points per spiral arm backbone line
 
 // ── Heliosphere3D ─────────────────────────────────────────────────────────────
 
@@ -115,15 +116,20 @@ export class Heliosphere3D {
         this._moonMesh    = null;
         this._moonOrbit   = 0;    // current moon angle (rad), animated
         this._magnetosphere = null;
-        this._windPoints  = null;
-        this._windPos     = null;
-        this._windCol     = null;
-        this._windAge     = null;
-        this._windMaxAge  = null;
-        this._windArm     = null;
-        this._windR       = null;  // r_AU for each particle
-        this._windVY      = null;  // vertical velocity
-        this._windPY      = null;  // y position
+        this._windPoints   = null;
+        this._windPos      = null;
+        this._windCol      = null;
+        this._windAge      = null;
+        this._windMaxAge   = null;
+        this._windArm      = null;
+        this._windR        = null;  // r_AU for each particle
+        this._windVY       = null;  // (unused — kept for array shape compat)
+        this._windPY       = null;  // sin(latitude) for constant-lat trajectory
+        this._windJitter   = null;  // per-particle angular offset from arm (rad)
+        // Spiral arm backbone lines
+        this._spiralLines     = null;
+        this._spiralLinePts   = null;
+        this._spiralLineCols  = null;
         this._planetMeshes = {};
 
         // Bound handlers
@@ -146,6 +152,12 @@ export class Heliosphere3D {
         window.removeEventListener('swpc-update',     this._onSwpc);
         window.removeEventListener('ephemeris-ready', this._onEph);
         if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+        if (this._spiralLines) {
+            for (const line of this._spiralLines) {
+                line.geometry.dispose();
+                line.material.dispose();
+            }
+        }
         this._renderer?.dispose();
     }
 
@@ -397,11 +409,12 @@ export class Heliosphere3D {
         this._windPos    = new Float32Array(N * 3);
         this._windCol    = new Float32Array(N * 3);
         this._windR      = new Float32Array(N);   // r_AU along spiral
-        this._windPY     = new Float32Array(N);   // y world position
-        this._windVY     = new Float32Array(N);   // y drift velocity
+        this._windPY     = new Float32Array(N);   // sin(latitude) — constant per particle
+        this._windVY     = new Float32Array(N);   // unused; retained for shape compat
         this._windArm    = new Uint8Array(N);     // Parker arm index 0-3
-        this._windAge    = new Float32Array(N);
-        this._windMaxAge = new Float32Array(N);
+        this._windJitter = new Float32Array(N);   // fixed angular jitter from arm centre
+        this._windAge    = new Float32Array(N);   // age (s) — used for fade-in only
+        this._windMaxAge = new Float32Array(N);   // max age (s)
 
         for (let i = 0; i < N; i++) this._spawnWind(i, true);
 
@@ -410,67 +423,147 @@ export class Heliosphere3D {
         geo.setAttribute('color',    new THREE.BufferAttribute(this._windCol, 3));
 
         const mat = new THREE.PointsMaterial({
-            size:         1.6,
-            vertexColors: true,
-            blending:     THREE.AdditiveBlending,
-            depthWrite:   false,
+            size:            2.2,
+            vertexColors:    true,
+            blending:        THREE.AdditiveBlending,
+            depthWrite:      false,
             sizeAttenuation: true,
-            transparent:  true,
-            opacity:      0.85,
+            transparent:     true,
+            opacity:         0.9,
         });
 
         this._windPoints = new THREE.Points(geo, mat);
         this._windPoints.renderOrder = 3;
         this._scene.add(this._windPoints);
+
+        // Build the 4 Parker spiral arm backbone lines
+        this._buildSpiralLines();
+    }
+
+    _buildSpiralLines() {
+        this._spiralLines    = [];
+        this._spiralLinePts  = [];
+        this._spiralLineCols = [];
+
+        for (let arm = 0; arm < 4; arm++) {
+            const pts  = new Float32Array(N_LINE * 3);
+            const cols = new Float32Array(N_LINE * 3);
+            const geo  = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pts,  3));
+            geo.setAttribute('color',    new THREE.BufferAttribute(cols, 3));
+            const mat  = new THREE.LineBasicMaterial({
+                vertexColors: true,
+                transparent:  true,
+                opacity:      0.9,
+                blending:     THREE.AdditiveBlending,
+                depthWrite:   false,
+            });
+            const line = new THREE.Line(geo, mat);
+            line.renderOrder = 2;
+            this._scene.add(line);
+            this._spiralLines.push(line);
+            this._spiralLinePts.push(pts);
+            this._spiralLineCols.push(cols);
+        }
     }
 
     _spawnWind(i, scatter = false) {
         const arm = Math.floor(Math.random() * 4);
         this._windArm[i]    = arm;
-        this._windR[i]      = scatter ? Math.random() * MAX_R_AU : 0.02 + Math.random() * 0.04;
-        this._windPY[i]     = (Math.random() - 0.5) * this._windR[i] * 6;
-        this._windVY[i]     = (Math.random() - 0.5) * 0.002;
-        this._windAge[i]    = scatter ? Math.random() * 40 : 0;
-        this._windMaxAge[i] = 30 + Math.random() * 20;
+        this._windR[i]      = scatter
+            ? 0.04 + Math.random() * (MAX_R_AU - 0.04)
+            : 0.02 + Math.random() * 0.04;
+        // Fixed angular jitter: ±13° — particle stays on this offset from the arm
+        // through its whole life, creating arm "width" rather than a single-pixel line.
+        this._windJitter[i] = (Math.random() - 0.5) * 0.46;
+        // Constant heliographic latitude (±10° max):  sin(lat) stored, Y = sinLat * r * AU
+        this._windPY[i]     = (Math.random() - 0.5) * 0.34;   // ≈ sin(±10°)
+        this._windVY[i]     = 0;   // unused
+        // Age is only used for the brief fade-in (first 1.5 s)
+        this._windAge[i]    = scatter ? 2.0 : 0;
+        this._windMaxAge[i] = 9999;   // die by position (r > MAX_R_AU), not age
     }
 
     _tickWind(dt) {
         if (!this._windPoints) return;
 
-        const speed    = this._sw.speed || 450;
-        const bz       = this._sw.bz;
-        const dr       = (speed / 450) * 0.0028 * dt * 60;  // AU per frame (at 60 fps)
-        const bzSouth  = Math.max(0, Math.min(1, -bz / 30));
-        const spdNorm  = Math.min(1, (speed - 300) / 600);
+        const speed   = this._sw.speed || 450;
+        const bz      = this._sw.bz ?? 0;
+        const density = this._sw.density || 5;
+        // AU per frame radial step
+        const dr      = (speed / 450) * 0.0028 * dt * 60;
+        // Normalised quantities driving colour
+        const bzSouth = Math.max(0, Math.min(1, -bz  / 30));
+        const spdNorm = Math.max(0, Math.min(1, (speed - 300) / 600));
+        // NOAA density scales overall particle brightness (nominal 5 n/cc = 1.0)
+        const dFactor = Math.max(0.4, Math.min(2.2, density / 5));
 
+        // ── Update 4 visible Parker spiral arm lines ──────────────────────────
+        if (this._spiralLines) {
+            for (let arm = 0; arm < 4; arm++) {
+                const pts  = this._spiralLinePts[arm];
+                const cols = this._spiralLineCols[arm];
+                for (let j = 0; j < N_LINE; j++) {
+                    const r_AU  = (j / (N_LINE - 1)) * MAX_R_AU;
+                    const ang   = arm * Math.PI / 2 + this._rot - (428.6 / speed) * r_AU;
+                    const rp    = r_AU * AU;
+                    pts[j * 3]     = rp * Math.cos(ang);
+                    pts[j * 3 + 1] = 0;
+                    pts[j * 3 + 2] = rp * Math.sin(ang);
+
+                    // Per-vertex fade: bright near sun (open field), fade at edge
+                    const tIn    = Math.min(j / 8, 1.0);
+                    const tOut   = 1.0 - Math.pow(j / N_LINE, 1.4);
+                    const lBrt   = tIn * tOut * 0.8;
+                    // Golden-white (quiet) → orange-red (southward Bz storm)
+                    cols[j * 3]     = (1.00 - bzSouth * 0.20) * lBrt;
+                    cols[j * 3 + 1] = (0.72 - bzSouth * 0.55) * lBrt;
+                    cols[j * 3 + 2] = (0.20 - bzSouth * 0.16) * lBrt;
+                }
+                this._spiralLines[arm].geometry.attributes.position.needsUpdate = true;
+                this._spiralLines[arm].geometry.attributes.color.needsUpdate    = true;
+            }
+        }
+
+        // ── Update solar wind particles ───────────────────────────────────────
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
             this._windR[i]   += dr;
-            this._windPY[i]  += this._windVY[i] * dt * 60;
 
-            if (this._windR[i] > MAX_R_AU || this._windAge[i] > this._windMaxAge[i]) {
+            if (this._windR[i] > MAX_R_AU) {
                 this._spawnWind(i, false);
             }
 
-            const r   = this._windR[i];
-            const arm = this._windArm[i];
-            const ang = arm * Math.PI / 2 + this._rot - (428.6 / speed) * r;
-            const rPx = r * AU;
+            const r    = this._windR[i];
+            const arm  = this._windArm[i];
+            // Angular position along Parker spiral + fixed per-particle jitter
+            const ang  = arm * Math.PI / 2 + this._rot
+                         - (428.6 / speed) * r
+                         + this._windJitter[i];
+            const rPx  = r * AU;
 
-            this._windPos[i*3]   = rPx * Math.cos(ang);
-            this._windPos[i*3+1] = this._windPY[i];
-            this._windPos[i*3+2] = rPx * Math.sin(ang);
+            this._windPos[i * 3]     = rPx * Math.cos(ang);
+            // Constant heliographic latitude: Y = sin(lat) × r_AU × AU
+            this._windPos[i * 3 + 1] = this._windPY[i] * rPx;
+            this._windPos[i * 3 + 2] = rPx * Math.sin(ang);
 
-            // Fade at spawn and death
-            const a    = this._windAge[i] / this._windMaxAge[i];
-            const fade = a < 0.08 ? a / 0.08 : a > 0.82 ? (1 - a) / 0.18 : 1.0;
-            // Cyan-blue base; orange tint on southward Bz; brighter at high speed
-            const cr = (0.08 + spdNorm * 0.30 + bzSouth * 0.55) * fade;
-            const cg = (0.50 + spdNorm * 0.20 - bzSouth * 0.25) * fade;
-            const cb = (0.95 - bzSouth * 0.45) * fade;
-            this._windCol[i*3]   = cr;
-            this._windCol[i*3+1] = cg;
-            this._windCol[i*3+2] = cb;
+            // ── Per-particle colour ────────────────────────────────────────────
+            // Fade in from birth (first 1.5 s); no age-based fade-out
+            const fadeIn  = Math.min(1.0, this._windAge[i] / 1.5);
+            // Position-based fade: brightest near sun, dim at edge
+            const rNorm   = r / MAX_R_AU;
+            const fadeOut = Math.pow(1.0 - rNorm, 0.55);  // slower rolloff
+            const fade    = fadeIn * fadeOut * dFactor;
+
+            // Colour gradient: warm white-gold near sun → blue-teal at 1 AU
+            // Southward Bz shifts the gradient toward orange-red
+            const cr = Math.max(0, (0.95 - rNorm * 0.60 + bzSouth * 0.30 + spdNorm * 0.10) * fade);
+            const cg = Math.max(0, (0.75 - rNorm * 0.30 - bzSouth * 0.48 + spdNorm * 0.15) * fade);
+            const cb = Math.max(0, (0.40 + rNorm * 0.45 - bzSouth * 0.35) * fade);
+
+            this._windCol[i * 3]     = Math.min(1, cr);
+            this._windCol[i * 3 + 1] = Math.min(1, cg);
+            this._windCol[i * 3 + 2] = Math.min(1, cb);
         }
 
         const geo = this._windPoints.geometry;
