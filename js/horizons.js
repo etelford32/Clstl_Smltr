@@ -261,7 +261,9 @@ export function marsHeliocentric(jd = jdNow()) {
 }
 
 // ── NASA JPL Horizons REST API ────────────────────────────────────────────────
-const HORIZONS_URL = 'https://ssd.jpl.nasa.gov/api/horizons.api';
+// Use a same-origin proxy (/api/horizons) so the browser avoids CORS.
+// Falls back to direct JPL if the proxy is unavailable (caught upstream).
+const HORIZONS_URL = '/api/horizons';
 
 function _horizonsParams(command, center) {
     const now   = new Date();
@@ -298,7 +300,7 @@ function _parseVec(text) {
 async function _fetchVec(command, center) {
     const params = _horizonsParams(command, center);
     const url    = `${HORIZONS_URL}?${params}`;
-    const resp   = await fetch(url, { mode: 'cors', cache: 'no-cache' });
+    const resp   = await fetch(url, { cache: 'no-cache' });
     if (!resp.ok) throw new Error(`Horizons HTTP ${resp.status}`);
     const json = await resp.json();
     if (typeof json.result !== 'string') throw new Error('Horizons: no result string');
