@@ -18,10 +18,12 @@ nav {
     display:flex; align-items:center; padding:0 14px; gap:8px;
 }
 .nav-brand {
+    display:flex; align-items:center; gap:7px;
     font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
     background:linear-gradient(45deg,#ffd700,#ff8c00);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
 }
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
 .nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
 .nav-item {
     padding:5px 10px; background:rgba(255,255,255,.07);
@@ -30,21 +32,21 @@ nav {
     transition:background .2s, border-color .2s;
 }
 .nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
-.nav-item.active { background:linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#000; font-weight:600; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
 .nav-drop { position:relative; }
 .nav-drop-btn {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
     color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
-    transition:background .2s; white-space:nowrap;
+    transition:background .2s, border-color .2s; white-space:nowrap;
 }
 .nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
-.nav-drop-btn.active { background:linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#000; font-weight:600; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
 .nav-drop-menu {
     display:block; position:absolute; top:100%; left:0;
     background:rgba(4,2,18,.97); backdrop-filter:blur(12px);
     border:1px solid rgba(255,255,255,.11); border-radius:6px;
-    padding:8px 0 4px; min-width:144px; z-index:800;
+    padding:8px 0 4px; min-width:160px; z-index:800;
     box-shadow:0 8px 28px rgba(0,0,0,.7);
     opacity:0; visibility:hidden; pointer-events:none;
     transform:translateY(-6px);
@@ -58,13 +60,19 @@ nav {
     font-size:.82rem; white-space:nowrap; transition:all .15s;
 }
 .nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
-.nav-drop-menu a.active { color:#ffd700; font-weight:600; }
+.nav-drop-menu a.active { color:#ffd700; font-weight:600; background:rgba(255,180,0,.08); }
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 2px; flex-shrink:0; }
+.nav-login { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
+.nav-signup:hover { filter:brightness(1.12) !important; }
 .nav-burger {
     display:none; margin-left:auto;
     background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
     border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
-    cursor:pointer; line-height:1;
+    cursor:pointer; line-height:1; transition:background .2s;
 }
+.nav-burger:hover { background:rgba(255,255,255,.18); }
 @media (max-width:768px) {
     .nav-burger { display:block; }
     .nav-menu {
@@ -76,11 +84,12 @@ nav {
     }
     .nav-menu.open { display:flex; }
     .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
-        .nav-drop-menu { position:static; box-shadow:none; background:rgba(255,255,255,.04);
+    .nav-drop-menu { position:static; box-shadow:none; background:rgba(255,255,255,.04);
         display:none; opacity:1; visibility:visible; transform:none; transition:none; pointer-events:auto; }
     .nav-drop-menu a { padding:10px 22px; }
     .nav-drop:hover .nav-drop-menu { display:none !important; }
     .nav-drop.open .nav-drop-menu { display:block !important; }
+    .nav-auth-sep { display:none; }
 }
 
 /* ─── App shell ──────────────────────────────────────────────── */
@@ -248,9 +257,12 @@ nav {
 
 <!-- ═══ NAV ═══ -->
 <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <a href="index.html" class="nav-brand">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        Parker Physics
+    </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu" role="navigation">
+    <div class="nav-menu" id="nav-menu">
         <a href="index.html" class="nav-item">Home</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item active">Solar System</a>
@@ -278,6 +290,9 @@ nav {
             </div>
         </div>
         <a href="rust.html" class="nav-item">Rust/WASM</a>
+        <div class="nav-auth-sep"></div>
+        <a href="#login"  class="nav-item nav-login">Log In</a>
+        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -508,27 +523,33 @@ import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric }
 initScaleNav('solar');
 
 // ── Nav hamburger + touch dropdown ──
-const burger  = document.getElementById('nav-burger');
-const navMenu = document.getElementById('nav-menu');
-burger.addEventListener('click', () => {
-    const o = navMenu.classList.toggle('open');
-    burger.textContent = o ? '✕' : '☰';
-    burger.setAttribute('aria-expanded', o);
-});
-document.addEventListener('click', e => {
-    if (!e.target.closest('nav')) {
-        navMenu.classList.remove('open'); burger.textContent='☰';
-    }
-});
-document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-        if (window.innerWidth > 768) return; // desktop: CSS :hover handles it
-        e.stopPropagation();
-        const drop = btn.closest('.nav-drop');
-        const opening = !drop.classList.contains('open');
-        document.querySelectorAll('.nav-drop').forEach(d=>d.classList.remove('open'));
-        if (opening) drop.classList.add('open');
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '✕' : '☰';
+        _navBurger.setAttribute('aria-expanded', open);
     });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '☰';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 768) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
 });
 
 // ── Panel state ──

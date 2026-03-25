@@ -50,9 +50,12 @@ select { background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc; pa
 </head>
 <body>
 <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <a href="index.html" class="nav-brand">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        Parker Physics
+    </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu" role="navigation">
+    <div class="nav-menu" id="nav-menu">
         <a href="index.html" class="nav-item">Home</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item">Solar System</a>
@@ -80,6 +83,9 @@ select { background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc; pa
             </div>
         </div>
         <a href="rust.html" class="nav-item">Rust/WASM</a>
+        <div class="nav-auth-sep"></div>
+        <a href="#login"  class="nav-item nav-login">Log In</a>
+        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
