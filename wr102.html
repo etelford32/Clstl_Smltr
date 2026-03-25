@@ -13,28 +13,30 @@ html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#d
 /* ─── Nav ────────────────────────────────────────────────────── */
 nav {
     position:relative; z-index:600;
-    height:48px; min-height:48px;
-    background:rgba(4,2,16,.92); backdrop-filter:blur(14px);
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
     border-bottom:1px solid rgba(255,255,255,.07);
-    display:flex; align-items:center; padding:0 14px; gap:8px;
+    display:flex; align-items:center; padding:0 16px; gap:6px;
 }
 .nav-brand {
-    display:flex; align-items:center; gap:7px;
+    display:flex; align-items:center; gap:8px;
     font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
     background:linear-gradient(45deg,#ffd700,#ff8c00);
     -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    margin-right:2px;
 }
 .nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
-.nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
+/* nav-menu stretches to fill all remaining space */
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
 .nav-item {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
     color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
-    transition:background .2s, border-color .2s;
+    transition:background .2s, border-color .2s; flex-shrink:0;
 }
 .nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
 .nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
-.nav-drop { position:relative; }
+.nav-drop { position:relative; flex-shrink:0; }
 .nav-drop-btn {
     padding:5px 10px; background:rgba(255,255,255,.07);
     border:1px solid rgba(255,255,255,.12); border-radius:5px;
@@ -43,30 +45,50 @@ nav {
 }
 .nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
 .nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+/* Rich dropdown panel */
 .nav-drop-menu {
-    display:block; position:absolute; top:100%; left:0;
-    background:rgba(4,2,18,.97); backdrop-filter:blur(12px);
-    border:1px solid rgba(255,255,255,.11); border-radius:6px;
-    padding:8px 0 4px; min-width:160px; z-index:800;
-    box-shadow:0 8px 28px rgba(0,0,0,.7);
+    display:block; position:absolute; top:calc(100% + 5px); left:0;
+    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.11); border-radius:9px;
+    padding:6px 0 8px; min-width:268px; z-index:800;
+    box-shadow:0 14px 44px rgba(0,0,0,.80);
     opacity:0; visibility:hidden; pointer-events:none;
-    transform:translateY(-6px);
+    transform:translateY(-4px);
     transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
 }
 .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
     opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
 }
-.nav-drop-menu a {
-    display:block; padding:9px 14px; color:#bbb; text-decoration:none;
-    font-size:.82rem; white-space:nowrap; transition:all .15s;
+/* Each item in the dropdown */
+.nav-drop-link {
+    display:flex; align-items:center; gap:11px;
+    padding:7px 16px; text-decoration:none; transition:background .15s;
 }
-.nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
-.nav-drop-menu a.active { color:#ffd700; font-weight:600; background:rgba(255,180,0,.08); }
-.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 2px; flex-shrink:0; }
-.nav-login { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
-.nav-login:hover { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-drop-link:hover { background:rgba(255,255,255,.07); }
+.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+.nav-drop-link.active .ndl-icon  { opacity:1; }
+.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
+.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
+.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.nav-drop-link:hover .ndl-title { color:#fff; }
+.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
+/* Section label inside dropdown */
+.nav-drop-section {
+    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
+    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
+}
+.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+/* Spacer that pushes auth buttons to the far right */
+.nav-spacer { flex:1; }
+/* Auth */
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
+.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
 .nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
 .nav-signup:hover { filter:brightness(1.12) !important; }
+/* Burger */
 .nav-burger {
     display:none; margin-left:auto;
     background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
@@ -74,22 +96,30 @@ nav {
     cursor:pointer; line-height:1; transition:background .2s;
 }
 .nav-burger:hover { background:rgba(255,255,255,.18); }
-@media (max-width:768px) {
+@media (max-width:1024px) {
     .nav-burger { display:block; }
     .nav-menu {
         display:none; flex-direction:column; align-items:stretch;
-        position:absolute; top:48px; left:0; right:0;
-        background:rgba(3,1,14,.97); backdrop-filter:blur(14px);
+        position:absolute; top:50px; left:0; right:0;
+        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
         border-bottom:1px solid rgba(255,255,255,.1);
-        padding:8px 12px 12px; gap:4px; z-index:700;
+        padding:8px 12px 14px; gap:3px; z-index:700;
+        max-height:calc(100vh - 50px); overflow-y:auto;
     }
     .nav-menu.open { display:flex; }
     .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
-    .nav-drop-menu { position:static; box-shadow:none; background:rgba(255,255,255,.04);
-        display:none; opacity:1; visibility:visible; transform:none; transition:none; pointer-events:auto; }
-    .nav-drop-menu a { padding:10px 22px; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; border-radius:5px; min-width:0;
+        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
+        display:none; opacity:1; visibility:visible; transform:none;
+        transition:none; pointer-events:auto; padding:2px 0 6px;
+    }
+    .nav-drop-link { padding:8px 14px 8px 22px; }
+    .ndl-sub { display:none; }
+    .nav-drop-section { padding:5px 14px 2px 22px; }
     .nav-drop:hover .nav-drop-menu { display:none !important; }
-    .nav-drop.open .nav-drop-menu { display:block !important; }
+    .nav-drop.open  .nav-drop-menu { display:block !important; }
+    .nav-spacer { display:none; }
     .nav-auth-sep { display:none; }
 }
 
@@ -264,32 +294,76 @@ nav {
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
     <div class="nav-menu" id="nav-menu">
         <a href="index.html" class="nav-item">Home</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item">Solar System</a>
         <a href="sun.html" class="nav-item">The Sun</a>
         <a href="earth.html" class="nav-item">Earth View</a>
-        <a href="space-weather.html" class="nav-item">Space Weather</a>
+
+        <!-- ── Stars dropdown ── -->
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn active" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
-                <a href="sirius.html">Sirius System</a>
-                <a href="star3d.html">Sirius Planetary</a>
-                <a href="betelgeuse.html">Betelgeuse</a>
-                <a href="wr102.html" class="active">WR 102</a>
-                <a href="vega.html">Vega</a>
-                <a href="star2d.html">2D Stellar Modeler</a>
-                <a href="star2d-advanced.html">Advanced 2D</a>
+                <div class="nav-drop-section">3D Stellar Systems</div>
+                <a href="sirius.html" class="nav-drop-link">
+                    <span class="ndl-icon">✦</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius A System</span><span class="ndl-sub">A1V Blue Star + White Dwarf Binary</span></span>
+                </a>
+                <a href="star3d.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔵</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius Planetary</span><span class="ndl-sub">Exoplanetary Orbital Mechanics</span></span>
+                </a>
+                <a href="betelgeuse.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔴</span>
+                    <span class="ndl-body"><span class="ndl-title">Betelgeuse</span><span class="ndl-sub">Red Supergiant α Ori — Pulsating</span></span>
+                </a>
+                <a href="vega.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚪</span>
+                    <span class="ndl-body"><span class="ndl-title">Vega</span><span class="ndl-sub">Rapid Rotator A0Vp — Oblateness &amp; Wind</span></span>
+                </a>
+                <a href="wr102.html" class="nav-drop-link active">
+                    <span class="ndl-icon">💜</span>
+                    <span class="ndl-body"><span class="ndl-title">WR 102</span><span class="ndl-sub">Wolf-Rayet — Hottest Known Star</span></span>
+                </a>
+                <div class="nav-drop-section">Stellar Modeling</div>
+                <a href="star2d.html" class="nav-drop-link">
+                    <span class="ndl-icon">📐</span>
+                    <span class="ndl-body"><span class="ndl-title">2D Stellar Modeler</span><span class="ndl-sub">Interactive Cross-Section Physics</span></span>
+                </a>
+                <a href="star2d-advanced.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔬</span>
+                    <span class="ndl-body"><span class="ndl-title">Advanced 2D Solar</span><span class="ndl-sub">High-Fidelity 2D Solar Physics Engine</span></span>
+                </a>
             </div>
         </div>
-        <div class="nav-drop" id="nav-drop-fluid">
-            <button class="nav-drop-btn" aria-haspopup="true">Fluid Sims ▾</button>
+
+        <!-- ── Simulations dropdown ── -->
+        <div class="nav-drop" id="nav-drop-sims">
+            <button class="nav-drop-btn" aria-haspopup="true">Simulations ▾</button>
             <div class="nav-drop-menu">
-                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
-                <a href="stellar-wind.html">Stellar Wind</a>
-                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+                <div class="nav-drop-section">Fluid &amp; Particle Physics</div>
+                <a href="solar-fluid.html" class="nav-drop-link">
+                    <span class="ndl-icon">🌊</span>
+                    <span class="ndl-body"><span class="ndl-title">Solar Fluid Dynamics</span><span class="ndl-sub">Navier-Stokes MHD on the Solar Surface</span></span>
+                </a>
+                <a href="stellar-wind.html" class="nav-drop-link">
+                    <span class="ndl-icon">💨</span>
+                    <span class="ndl-body"><span class="ndl-title">Stellar Wind</span><span class="ndl-sub">Parker Spiral Particle Simulation</span></span>
+                </a>
+                <a href="black-hole-fluid.html" class="nav-drop-link">
+                    <span class="ndl-icon">🕳</span>
+                    <span class="ndl-body"><span class="ndl-title">Black Hole Accretion</span><span class="ndl-sub">WebGL2 Accretion Disk + Gravitational Lensing</span></span>
+                </a>
+                <div class="nav-drop-section">Tools</div>
+                <a href="rust.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚙</span>
+                    <span class="ndl-body"><span class="ndl-title">Rust / WASM Engine</span><span class="ndl-sub">WebAssembly High-Performance Compute</span></span>
+                </a>
             </div>
         </div>
-        <a href="rust.html" class="nav-item">Rust/WASM</a>
+
+        <!-- Auth pushed to the far right by the spacer -->
+        <div class="nav-spacer"></div>
         <div class="nav-auth-sep"></div>
         <a href="#login"  class="nav-item nav-login">Log In</a>
         <a href="#signup" class="nav-item nav-signup">Sign Up</a>
@@ -475,6 +549,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 //  NAV
 // ────────────────────────────────────────────────────────────────
 // ─── Nav ─────────────────────────────────────────────────────────────────────
+// ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
 const _navMenu   = document.getElementById('nav-menu');
 if (_navBurger && _navMenu) {
@@ -490,6 +565,17 @@ if (_navBurger && _navMenu) {
             _navBurger.setAttribute('aria-expanded', 'false');
         }
     });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
     document.querySelectorAll('.nav-drop-btn').forEach(btn => {
         btn.addEventListener('click', e => {
             if (window.innerWidth > 768) return;
