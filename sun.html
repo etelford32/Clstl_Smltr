@@ -9,77 +9,117 @@
 html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
+/* ─── Nav ────────────────────────────────────────────────────── */
 nav {
-    position: relative; z-index: 600;
-    height: 48px; min-height: 48px;
-    background: rgba(4,2,16,.92); backdrop-filter: blur(14px);
-    border-bottom: 1px solid rgba(255,255,255,.07);
-    display: flex; align-items: center; padding: 0 14px; gap: 8px;
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
 }
 .nav-brand {
-    font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
-    background: linear-gradient(45deg,#ffd700,#ff8c00);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    display:flex; align-items:center; gap:8px;
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    margin-right:2px;
 }
-.nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+/* nav-menu stretches to fill all remaining space */
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
 .nav-item {
-    padding: 5px 10px; background: rgba(255,255,255,.07);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
-    color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
-    transition: background .2s, border-color .2s;
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0;
 }
-.nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
-.nav-item.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
-.nav-drop { position: relative; }
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop { position:relative; flex-shrink:0; }
 .nav-drop-btn {
-    padding: 5px 10px; background: rgba(255,255,255,.07);
-    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
-    color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
-    transition: background .2s, border-color .2s; white-space: nowrap;
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s, border-color .2s; white-space:nowrap;
 }
-.nav-drop-btn:hover { background: rgba(255,255,255,.16); color:#fff; }
-.nav-drop-btn.active { background: linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+/* Rich dropdown panel */
 .nav-drop-menu {
-    display: block; position: absolute; top: 100%; left: 0;
-    background: rgba(4,2,18,.97); backdrop-filter: blur(12px);
-    border: 1px solid rgba(255,255,255,.11); border-radius: 6px;
-    padding: 8px 0 4px; min-width: 200px; z-index: 800;
-    box-shadow: 0 8px 28px rgba(0,0,0,.7);
-    opacity: 0; visibility: hidden; pointer-events: none;
-    transform: translateY(-6px);
-    transition: opacity .18s ease, visibility .18s ease, transform .18s ease;
+    display:block; position:absolute; top:calc(100% + 5px); left:0;
+    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.11); border-radius:9px;
+    padding:6px 0 8px; min-width:268px; z-index:800;
+    box-shadow:0 14px 44px rgba(0,0,0,.80);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:translateY(-4px);
+    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
 }
 .nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
-    opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
 }
-.nav-drop-menu a {
-    display: block; padding: 9px 14px; color: #bbb; text-decoration: none;
-    font-size: .82rem; white-space: nowrap; transition: background .15s, color .15s;
+/* Each item in the dropdown */
+.nav-drop-link {
+    display:flex; align-items:center; gap:11px;
+    padding:7px 16px; text-decoration:none; transition:background .15s;
 }
-.nav-drop-menu a:hover { background: rgba(255,255,255,.08); color:#fff; }
-.nav-drop-menu a.active { color:#ffd700; font-weight:600; }
+.nav-drop-link:hover { background:rgba(255,255,255,.07); }
+.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+.nav-drop-link.active .ndl-icon  { opacity:1; }
+.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
+.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
+.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.nav-drop-link:hover .ndl-title { color:#fff; }
+.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
+/* Section label inside dropdown */
+.nav-drop-section {
+    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
+    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
+}
+.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+/* Spacer that pushes auth buttons to the far right */
+.nav-spacer { flex:1; }
+/* Auth */
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
+.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
+.nav-signup:hover { filter:brightness(1.12) !important; }
+/* Burger */
 .nav-burger {
-    display: none; margin-left: auto;
-    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
-    border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
-    cursor: pointer; line-height: 1; transition: background .2s;
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1; transition:background .2s;
 }
-.nav-burger:hover { background: rgba(255,255,255,.18); }
-@media (max-width: 768px) {
-    .nav-burger { display: block; }
-    .nav-menu { display: none; flex-direction: column; align-items: stretch;
-        position: absolute; top: 48px; left: 0; right: 0;
-        background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
-        border-bottom: 1px solid rgba(255,255,255,.1);
-        padding: 8px 12px 12px; gap: 4px; z-index: 700; }
-    .nav-menu.open { display: flex; }
-    .nav-item, .nav-drop-btn { padding: 11px 14px; font-size: .9rem; }
-        .nav-drop-menu { position: static; box-shadow: none; border-radius: 4px;
-        background: rgba(255,255,255,.04); margin: 4px 0; padding: 2px 0;
-        display: none; opacity: 1; visibility: visible; transform: none; transition: none; pointer-events: auto; }
-    .nav-drop-menu a { padding: 10px 22px; }
-    .nav-drop:hover .nav-drop-menu { display: none !important; }
-    .nav-drop.open .nav-drop-menu { display: block !important; }
+.nav-burger:hover { background:rgba(255,255,255,.18); }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:50px; left:0; right:0;
+        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 14px; gap:3px; z-index:700;
+        max-height:calc(100vh - 50px); overflow-y:auto;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; border-radius:5px; min-width:0;
+        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
+        display:none; opacity:1; visibility:visible; transform:none;
+        transition:none; pointer-events:auto; padding:2px 0 6px;
+    }
+    .nav-drop-link { padding:8px 14px 8px 22px; }
+    .ndl-sub { display:none; }
+    .nav-drop-section { padding:5px 14px 2px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none !important; }
+    .nav-drop.open  .nav-drop-menu { display:block !important; }
+    .nav-spacer { display:none; }
+    .nav-auth-sep { display:none; }
 }
 
 #app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
@@ -517,36 +557,86 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 <body>
 
 <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <a href="index.html" class="nav-brand">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        Parker Physics
+    </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu" role="navigation">
+    <div class="nav-menu" id="nav-menu">
         <a href="index.html" class="nav-item">Home</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item">Solar System</a>
         <a href="sun.html" class="nav-item active">The Sun</a>
         <a href="earth.html" class="nav-item">Earth View</a>
-        <a href="space-weather.html" class="nav-item">Space Weather</a>
+
+        <!-- ── Stars dropdown ── -->
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
-                <a href="sirius.html">Sirius System</a>
-                <a href="star3d.html">Sirius Planetary</a>
-                <a href="betelgeuse.html">Betelgeuse</a>
-                <a href="wr102.html">WR 102</a>
-                <a href="vega.html">Vega</a>
-                <a href="star2d.html">2D Stellar Modeler</a>
-                <a href="star2d-advanced.html">Advanced 2D</a>
+                <div class="nav-drop-section">3D Stellar Systems</div>
+                <a href="sirius.html" class="nav-drop-link">
+                    <span class="ndl-icon">✦</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius A System</span><span class="ndl-sub">A1V Blue Star + White Dwarf Binary</span></span>
+                </a>
+                <a href="star3d.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔵</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius Planetary</span><span class="ndl-sub">Exoplanetary Orbital Mechanics</span></span>
+                </a>
+                <a href="betelgeuse.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔴</span>
+                    <span class="ndl-body"><span class="ndl-title">Betelgeuse</span><span class="ndl-sub">Red Supergiant α Ori — Pulsating</span></span>
+                </a>
+                <a href="vega.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚪</span>
+                    <span class="ndl-body"><span class="ndl-title">Vega</span><span class="ndl-sub">Rapid Rotator A0Vp — Oblateness &amp; Wind</span></span>
+                </a>
+                <a href="wr102.html" class="nav-drop-link">
+                    <span class="ndl-icon">💜</span>
+                    <span class="ndl-body"><span class="ndl-title">WR 102</span><span class="ndl-sub">Wolf-Rayet — Hottest Known Star</span></span>
+                </a>
+                <div class="nav-drop-section">Stellar Modeling</div>
+                <a href="star2d.html" class="nav-drop-link">
+                    <span class="ndl-icon">📐</span>
+                    <span class="ndl-body"><span class="ndl-title">2D Stellar Modeler</span><span class="ndl-sub">Interactive Cross-Section Physics</span></span>
+                </a>
+                <a href="star2d-advanced.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔬</span>
+                    <span class="ndl-body"><span class="ndl-title">Advanced 2D Solar</span><span class="ndl-sub">High-Fidelity 2D Solar Physics Engine</span></span>
+                </a>
             </div>
         </div>
-        <div class="nav-drop" id="nav-drop-fluid">
-            <button class="nav-drop-btn" aria-haspopup="true">Fluid Sims ▾</button>
+
+        <!-- ── Simulations dropdown ── -->
+        <div class="nav-drop" id="nav-drop-sims">
+            <button class="nav-drop-btn" aria-haspopup="true">Simulations ▾</button>
             <div class="nav-drop-menu">
-                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
-                <a href="stellar-wind.html">Stellar Wind</a>
-                <a href="black-hole-fluid.html">Black Hole Accretion</a>
+                <div class="nav-drop-section">Fluid &amp; Particle Physics</div>
+                <a href="solar-fluid.html" class="nav-drop-link">
+                    <span class="ndl-icon">🌊</span>
+                    <span class="ndl-body"><span class="ndl-title">Solar Fluid Dynamics</span><span class="ndl-sub">Navier-Stokes MHD on the Solar Surface</span></span>
+                </a>
+                <a href="stellar-wind.html" class="nav-drop-link">
+                    <span class="ndl-icon">💨</span>
+                    <span class="ndl-body"><span class="ndl-title">Stellar Wind</span><span class="ndl-sub">Parker Spiral Particle Simulation</span></span>
+                </a>
+                <a href="black-hole-fluid.html" class="nav-drop-link">
+                    <span class="ndl-icon">🕳</span>
+                    <span class="ndl-body"><span class="ndl-title">Black Hole Accretion</span><span class="ndl-sub">WebGL2 Accretion Disk + Gravitational Lensing</span></span>
+                </a>
+                <div class="nav-drop-section">Tools</div>
+                <a href="rust.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚙</span>
+                    <span class="ndl-body"><span class="ndl-title">Rust / WASM Engine</span><span class="ndl-sub">WebAssembly High-Performance Compute</span></span>
+                </a>
             </div>
         </div>
-        <a href="rust.html" class="nav-item">Rust/WASM</a>
+
+        <!-- Auth pushed to the far right by the spacer -->
+        <div class="nav-spacer"></div>
+        <div class="nav-auth-sep"></div>
+        <a href="#login"  class="nav-item nav-login">Log In</a>
+        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -939,7 +1029,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 
             <!-- Solar Wind Live ────────────────────────────────── -->
             <div class="sec" id="sec-wind-live">
-                <div class="sec-hd"><span>☉ Solar Wind Live</span><span class="arrow">▼</span></div>
+                <div class="sec-hd"><span>☉ Solar Wind Live</span><span class="live-status" id="wind-live-status" style="margin-left:6px;font-size:9px">connecting…</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <!-- Speed gauge -->
                     <div class="wind-gauge-row">
@@ -1004,9 +1094,45 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <div class="sep-dot"></div>
                         <span id="sep-txt">S0 — No radiation storm</span>
                     </div>
-                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
+                    <!-- Derived solar wind diagnostics ──────────────────── -->
+                    <div style="margin:8px 0 2px;font-size:9px;color:#664433;text-transform:uppercase;letter-spacing:.5px">
+                        Derived plasma diagnostics
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">
+                        <!-- Dynamic pressure -->
+                        <div style="background:rgba(255,140,0,.06);border:1px solid rgba(255,140,0,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#664433;letter-spacing:.4px">DYN. PRESSURE</div>
+                            <div style="font-size:12px;font-weight:700;color:#ffaa44" id="wv-pdyn">—</div>
+                            <div style="font-size:8px;color:#443322">nPa · ½·m_p·n·v²</div>
+                        </div>
+                        <!-- Alfvénic Mach number -->
+                        <div style="background:rgba(100,180,255,.05);border:1px solid rgba(100,180,255,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#336677;letter-spacing:.4px">ALFVÉN MACH</div>
+                            <div style="font-size:12px;font-weight:700;color:#88ccff" id="wv-mach">—</div>
+                            <div style="font-size:8px;color:#334455">M_A = v/v_A</div>
+                        </div>
+                        <!-- Wind transit time from Sun -->
+                        <div style="background:rgba(255,200,80,.05);border:1px solid rgba(255,200,80,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#665522;letter-spacing:.4px">TRANSIT AGE</div>
+                            <div style="font-size:12px;font-weight:700;color:#ffdd88" id="wv-transit">—</div>
+                            <div style="font-size:8px;color:#554422">days from Sun</div>
+                        </div>
+                        <!-- Wind type classifier -->
+                        <div style="background:rgba(200,255,200,.04);border:1px solid rgba(100,255,100,.10);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#336633;letter-spacing:.4px">WIND TYPE</div>
+                            <div style="font-size:10px;font-weight:700;color:#88ee88;line-height:1.3" id="wv-type">—</div>
+                        </div>
+                    </div>
+                    <!-- Proton flux (SEP context) -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:9.5px;color:#666;margin:4px 0 8px">
+                        <span>p⁺ &gt;10 MeV:</span>
+                        <span style="font-weight:700;color:#ffaa66" id="wv-proton10">— pfu</span>
+                        <span style="margin-left:8px">p⁺ &gt;100 MeV:</span>
+                        <span style="font-weight:700;color:#ffddaa" id="wv-proton100">— pfu</span>
+                    </div>
+                    <div style="font-size:9px;color:#443322;margin-top:4px;line-height:1.5">
                         Gauges driven by DSCOVR/ACE L1 real-time data.<br>
-                        Particle shader uses live speed/density &amp; Parker spiral.
+                        Particle colors encode temperature (gold=cool SB, blue=hot CH/CME).
                     </div>
                 </div>
             </div>
@@ -1065,26 +1191,45 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 
-// NAV
-const burger = document.getElementById('nav-burger');
-const navMenu = document.getElementById('nav-menu');
-burger.addEventListener('click', () => {
-    const open = navMenu.classList.toggle('open');
-    burger.textContent = open ? '✕' : '☰';
-    burger.setAttribute('aria-expanded', open);
-});
-document.addEventListener('click', e => {
-    if (!e.target.closest('nav')) { navMenu.classList.remove('open'); burger.textContent = '☰'; }
-});
-document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-        if (window.innerWidth > 768) return; // desktop: CSS :hover handles it
-        e.stopPropagation();
-        const drop = btn.closest('.nav-drop');
-        const opening = !drop.classList.contains('open');
-        document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-        if (opening) drop.classList.add('open');
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '✕' : '☰';
+        _navBurger.setAttribute('aria-expanded', open);
     });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '☰';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 768) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
 });
 
 // PANEL
@@ -1258,6 +1403,7 @@ const uniforms = {
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
     u_wind_speed_norm:   { value: 0.23 },  // (400-250)/650 ≈ 0.23 nominal slow wind
     u_wind_density_norm: { value: 0.20 },  // 5/25 = 0.20 nominal background
+    u_wind_temp_norm:    { value: 0.17 },  // (100kK-50kK)/500kK ≈ 0.10; hot CME ~1.0
     u_bz_sw:             { value: 0.0  },  // 0=northward, 1=30 nT southward
     // ── CME directional burst ──
     u_cme_active:        { value: 0.0  },  // 0=off, 1=on
@@ -1329,7 +1475,10 @@ let composer, bloomPass;
     // (not screen-space blur) carries the ambient glow.
     // threshold 0.88 — only the sub-percent of pixels that exceed ~2.25× HDR
     // get bloomed (granule centres, umbral contrasts, active-region UV kernels).
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.45, 0.32, 0.88);
+    // strength 0.65 (was 0.45) — more visible solar halo
+    // radius   0.45 (was 0.32) — wider bloom kernel for softer corona edge
+    // threshold 0.82 (was 0.88) — slightly lower threshold catches more bright surface pixels
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.65, 0.45, 0.82);
     composer.addPass(bloomPass);
 
     // ── Vectorised limb-corona scatter ───────────────────────────────────────
@@ -1407,20 +1556,79 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.07;
 controls.minDistance = 1.3; controls.maxDistance = 60;
 
-// BACKGROUND STARS
+// BACKGROUND STARS — spectral-type colour + size variation
 {
-    const n = 3500, pos = new Float32Array(n * 3);
+    const n = 4500;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const siz = new Float32Array(n);
+
+    // Stellar spectral-class colour palette (approximate sRGB, log-boosted for visibility)
+    const starPalette = [
+        // [r,g,b, weight]   O/B = blue-white, A = white, F = yellow-white, G = yellow, K = orange, M = red
+        [0.64, 0.74, 1.00, 4 ],   // B  – blue-white
+        [0.78, 0.87, 1.00, 8 ],   // A  – white-blue
+        [1.00, 0.97, 0.90, 14],   // F  – white-yellow
+        [1.00, 0.93, 0.70, 18],   // G  – yellow (like our sun)
+        [1.00, 0.80, 0.42, 14],   // K  – orange
+        [1.00, 0.55, 0.28, 8 ],   // M  – orange-red
+        [0.90, 0.80, 1.00, 6 ],   // WR/hot subdwarf – blue-violet
+        [1.00, 1.00, 1.00, 5 ],   // white dwarf – pure white
+    ];
+    const totalW = starPalette.reduce((s, p) => s + p[3], 0);
+    function pickStarColor() {
+        let r = Math.random() * totalW;
+        for (const [cr, cg, cb, w] of starPalette) {
+            r -= w; if (r <= 0) return [cr, cg, cb];
+        }
+        return [1, 1, 1];
+    }
+
     for (let i = 0; i < n; i++) {
-        const r = 250 + Math.random() * 400;
+        const radius = 250 + Math.random() * 450;
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
-        pos[i*3] = r*Math.sin(ph)*Math.cos(th);
-        pos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
-        pos[i*3+2] = r*Math.cos(ph);
+        pos[i*3]   = radius * Math.sin(ph) * Math.cos(th);
+        pos[i*3+1] = radius * Math.sin(ph) * Math.sin(th);
+        pos[i*3+2] = radius * Math.cos(ph);
+        const [cr, cg, cb] = pickStarColor();
+        col[i*3] = cr; col[i*3+1] = cg; col[i*3+2] = cb;
+        // Most stars small (0.4-0.9), rare bright ones up to 1.6
+        siz[i] = Math.random() < 0.06 ? 1.1 + Math.random() * 0.6 : 0.35 + Math.random() * 0.55;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:0xffffff, size:0.4, sizeAttenuation:false })));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.Float32BufferAttribute(siz, 1));
+    const starMat = new THREE.ShaderMaterial({
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        vertexShader: `
+            attribute float size;
+            varying vec3 vColor;
+            uniform float u_time;
+            void main() {
+                vColor = color;
+                // subtle twinkle driven by position hash
+                float tw = sin(u_time * 1.4 + position.x * 0.031 + position.z * 0.027) * 0.08 + 0.92;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * tw * (600.0 / -mv.z);
+                gl_Position = projectionMatrix * mv;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vColor;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                a = pow(a, 1.6);
+                gl_FragColor = vec4(vColor, a);
+            }
+        `,
+        uniforms: { u_time: uniforms.u_time },
+    });
+    scene.add(new THREE.Points(geo, starMat));
 }
 
 // ─── SOLAR PHOTOSPHERE — Voronoi granulation + faculae + 5-term limb darkening ─
@@ -1551,11 +1759,18 @@ const sunFS = /* glsl */`
         float superGran = smoothstep(0.0, 0.55, sgCell.x) * 0.05;  // very subtle (~2%)
 
         // ── Granulation (~1 000 km cells) ─────────────────────────────────────
-        vec3 gPos   = vPosition * 9.5 + vec3(u_time * 0.0055 * u_rot);
+        // Domain-warp: slow turbulent deformation gives a "boiling" look
+        vec3 dwarp = vec3(
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 1.7), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 3.4), 3)
+        ) * 0.12;
+        vec3 gPos   = vPosition * 9.5 + dwarp + vec3(u_time * 0.0055 * u_rot);
         vec2 gCell  = voronoi(gPos);
-        // Interior: bright hot upwelling. Boundary lanes: dark and narrow.
-        float lane      = 1.0 - smoothstep(0.0, 0.38, gCell.x);  // 1 = lane, 0 = interior — tighter lanes
-        float granLight = 1.0 - lane * 0.47;                       // darker intergranular lanes
+        // Use d2-d1 for cell-boundary detection: dark narrow lanes where d2≈d1,
+        // bright broad interiors where d2>>d1 — matches SDO/HMI granulation morphology.
+        float laneD  = smoothstep(0.05, 0.30, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
+        float granLight = mix(0.50, 1.0, laneD);                    // lane contrast: 50% → 100%
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.009), 4) * 0.06;
@@ -1563,7 +1778,8 @@ const sunFS = /* glsl */`
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
         float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.025));
-        float mbp = smoothstep(0.86, 0.94, mbpNoise) * lane * 0.40;
+        float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
+        float mbp = smoothstep(0.86, 0.94, mbpNoise) * laneMask * 0.40;
 
         // ── Active latitude belt ───────────────────────────────────────────────
         float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
@@ -1607,10 +1823,19 @@ const sunFS = /* glsl */`
         // Facular brightening near limb
         col += baseCol * facular * 0.55;
 
-        // ── Sunspot umbra (T_umbra ~ 0.62 × T_eff ≈ 3580 K) ──────────────────
+        // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
-        col = mix(col, blackbody(max(umbraT, 3000.0)) * 0.50,
+        col = mix(col, blackbody(max(umbraT, 3000.0)) * 0.48,
                   umbra * smoothstep(0.0, 0.20, mu) * u_showSpots);
+
+        // ── Umbral dots — bright granule-like specks inside umbra ─────────────
+        // Real solar umbrae contain ~100–300 K bright dots (unresolved convection).
+        // Visible in high-resolution magnetograms as sub-arcsecond bright points.
+        float udNoise = vnoise(vec3(rotLon * 42.0, lat * 42.0, u_time * 0.018));
+        float udNoise2= vnoise(vec3(rotLon * 38.0, lat * 36.0, u_time * 0.014 + 7.3));
+        float uDots   = smoothstep(0.76, 0.85, udNoise) * smoothstep(0.78, 0.86, udNoise2);
+        vec3 udCol    = blackbody(u_teff * 0.72);  // ~4160 K — cool but brighter than umbra
+        col = mix(col, udCol * 0.85, uDots * umbra * 0.65 * u_showSpots);
 
         // ── Sunspot penumbra (T ~ 0.82 × T_eff) with radial fibrils ──────────
         float penT = u_teff * 0.82;
@@ -1678,6 +1903,22 @@ const sunFS = /* glsl */`
                                    vec3(1.00, 0.80, 0.30),  // AIA 171 gold (1 MK)
                                    clamp(u_flare_t / 250.0, 0.0, 1.0));
             col += arcadeCol * arcadeGlow * u_showFlares;
+
+            // ── EIT wave / Moreton wave ──────────────────────────────────────
+            // A coronal pressure wave (EIT wave) propagates globally from the flare
+            // site at ~400–1000 km/s ≈ 0.00057–0.0014 R_sun/s.
+            // In sim-time: wave front at radius r_w = u_flare_t * 0.005 radians
+            // (reaches antipodal point ~π rad in ~630 sim units ≈ 6s at 100Hz clock)
+            // Visible as a faint circular brightening ring in EUV (AIA 193/211).
+            float eitDecay = exp(-u_flare_t / 220.0) * u_flare_intensity;
+            if (eitDecay > 0.01) {
+                float r_wave  = u_flare_t * 0.0055;               // expanding radius (rad)
+                float dr      = abs(df - r_wave);                  // distance from wave front
+                float waveSig = 0.06 + u_flare_t * 2.5e-4;        // front widens as it ages
+                float eitWave = exp(-dr * dr / (waveSig * waveSig)) * eitDecay * 0.55;
+                // EIT 193 Å colour: teal-green (hot Fe XII, 1.5 MK)
+                col += vec3(0.30, 1.10, 0.80) * eitWave * u_showFlares;
+            }
         }
 
         // ── Limb darkening ─────────────────────────────────────────────────────
@@ -1998,6 +2239,15 @@ const coronaFS = /* glsl */`
         float pseudoStr = fbm4(vec3(lon * 3.5, lat * 4.5, u_time * 0.005))
                         * smoothstep(0.3, 0.5, abs(lat)) * smoothstep(0.7, 0.5, abs(lat));
 
+        // ── Coronal bright points (CBP) — X-ray/EUV-bright compact loops ─────
+        // ~100–200 present on the sun at any time; lifetime hours–days; size ~5–10 Mm.
+        // In the corona shell (r=2.5) they appear as tiny bright dots scattered
+        // across the disk, more numerous during high activity.
+        float cbp1 = vn(vec3(lon * 22.0 + u_time * 0.006, lat * 22.0, u_time * 0.004));
+        float cbp2 = vn(vec3(lon * 18.0 - u_time * 0.005, lat * 18.0 + u_time * 0.003, 1.7));
+        float cbpMask = smoothstep(0.88, 0.96, cbp1) * smoothstep(0.86, 0.94, cbp2);
+        cbpMask *= (0.4 + u_activity * 0.9) * (1.0 - poleHole * 0.5);
+
         // ── Compose alpha ────────────────────────────────────────────────────
         float base = pow(rim, 2.4) * 0.42;
         float alpha = base * (
@@ -2010,7 +2260,9 @@ const coronaFS = /* glsl */`
             // Pseudo-streamers
             pseudoStr * 0.35 * u_activity
         );
-        alpha = clamp(alpha, 0.0, 0.90);
+        // Coronal bright points add localised alpha spikes on/near disk face
+        alpha += cbpMask * pow(max(1.0 - rim, 0.0), 0.5) * 0.35;
+        alpha = clamp(alpha, 0.0, 0.92);
 
         // ── Colour ───────────────────────────────────────────────────────────
         // K-corona (Thomson-scattered photospheric light): warm yellow-white.
@@ -2020,10 +2272,12 @@ const coronaFS = /* glsl */`
         vec3 outerCor  = vec3(0.88, 0.92, 1.00);  // outer corona / F-corona dust scatter
         vec3 plumeCol  = vec3(0.90, 0.95, 1.00);  // polar plume — blue-white
         vec3 hcsCol    = vec3(1.05, 0.98, 0.72);  // HCS ridge — enhanced yellow
+        vec3 cbpCol    = vec3(0.60, 1.00, 0.90);  // CBP — AIA 193 Å blue-green
 
         vec3 col = mix(kCorona, outerCor, rim * rim);
         col = mix(col, plumeCol, plume * 0.55);
         col = mix(col, hcsCol, hcs * 0.4);
+        col = mix(col, cbpCol, cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.70);
 
         // CME / fast solar wind: outer corona shifts blue-white (hot electrons)
         // u_wind_speed_norm: 0=slow wind, 1=CME/fast stream
@@ -2206,6 +2460,7 @@ const solarWindVS = /* glsl */`
     uniform float u_rot;              // rotation rate multiplier
     uniform float u_wind_speed_norm;  // 0=250 km/s, 1=900 km/s (DSCOVR L1)
     uniform float u_wind_density_norm;// 0=calm, 1=25 n/cc (DSCOVR L1)
+    uniform float u_wind_temp_norm;   // 0=50kK slow wind, 1=500kK+ fast/CME wind
     uniform float u_bz_sw;            // 0=northward, 1=30 nT southward
     uniform float u_by_sw;            // IMF By / 20 nT, signed [-1,+1]
     uniform float u_bt_norm;          // total IMF / 30 nT [0-1]
@@ -2274,17 +2529,26 @@ const solarWindVS = /* glsl */`
         float cir = sin(aPhase * 7.3 + u_time * 0.4) * turbScale * (1.0 - s);
         deflected += vec3(-deflected.z, 0.0, deflected.x) * cir;
 
-        // Color: hot yellow-white at surface → pale gold → blue-white at distance
-        // Dense slow wind: richer gold; fast stream: cooler blue-white
-        vec3 nearCol = mix(vec3(1.00, 0.88, 0.50), vec3(1.00, 0.95, 0.70), u_wind_speed_norm);
-        vec3 farCol  = mix(vec3(0.72, 0.82, 0.98), vec3(0.55, 0.70, 1.00), u_wind_speed_norm);
+        // ── Temperature-driven particle color ─────────────────────────────────────
+        // u_wind_temp_norm: 0 = 50 kK (cool slow-wind streamer belt) → gold/orange
+        //                   0.5 = 250 kK (warm fast coronal-hole stream) → yellow-white
+        //                   1.0 = 500 kK+ (hot CME sheath/ejecta) → blue-white
+        // Near-sun always hot (corona T ~ several MK); cools as plasma expands
+        vec3 coolNear = mix(vec3(1.00, 0.70, 0.30), vec3(1.00, 0.88, 0.50), u_wind_speed_norm);
+        vec3 hotNear  = mix(vec3(1.00, 0.94, 0.78), vec3(0.90, 0.95, 1.00), u_wind_temp_norm);
+        vec3 nearCol  = mix(coolNear, hotNear, u_wind_temp_norm);
+
+        vec3 coolFar  = mix(vec3(0.88, 0.74, 0.40), vec3(0.72, 0.82, 0.95), u_wind_speed_norm);
+        vec3 hotFar   = mix(vec3(0.65, 0.80, 1.00), vec3(0.50, 0.65, 1.00), u_wind_temp_norm);
+        vec3 farCol   = mix(coolFar, hotFar, u_wind_temp_norm);
+
         vColor = mix(nearCol, farCol, pow(s, 0.7));
 
-        // Boost color in fast-wind streams (polar regions)
-        vColor = mix(vColor, vec3(0.80, 0.90, 1.00), sinLat * sinLat * 0.45);
+        // Polar fast-wind brightness boost (field-aligned fast streams)
+        vColor = mix(vColor, vec3(0.80, 0.90, 1.00), sinLat * sinLat * 0.40 * (0.5 + u_wind_temp_norm * 0.5));
 
-        // High-density stream tint: slightly warmer gold
-        vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.20 * (1.0 - s));
+        // High-density slow-wind: warm orange-gold tint at launch
+        vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.22 * (1.0 - s) * (1.0 - u_wind_temp_norm));
 
         // ── F10.7 solar cycle: brighter, warmer particles at solar maximum ──────
         vColor *= 1.0 + u_f107_norm * 0.22;
@@ -3992,12 +4256,31 @@ window.addEventListener('swpc-update', (ev) => {
         badge.style.borderColor = isLive ? 'rgba(60,200,100,.4)' : 'rgba(200,120,40,.4)';
         badge.style.color = isLive ? '#4eda90' : '#cc8844';
     }
+    // Legacy wind-live-status badge
+    const windBadge = document.getElementById('wind-live-status');
+    if (windBadge) {
+        const status = sw.status ?? 'connecting';
+        if (status === 'live') {
+            const t = sw.lastUpdated;
+            const ts = t ? t.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
+            windBadge.textContent = `● Live ${ts}`;
+            windBadge.className   = 'live-status ok';
+        } else if (status === 'stale' || status === 'offline') {
+            windBadge.textContent = '⚠ NOAA offline';
+            windBadge.className   = 'live-status err';
+        } else {
+            windBadge.textContent = '○ connecting…';
+            windBadge.className   = 'live-status';
+        }
+    }
 
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
     // Skip wind/IMF uniforms when user is scrubbing historical data
-    if (scrubLive) {
+    if (typeof scrubLive === 'undefined' || scrubLive) {
         uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
         uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
+        // Temperature: 50 kK (slow) → 500 kK (fast/CME) mapped to 0-1
+        uniforms.u_wind_temp_norm.value    = Math.max(0, Math.min(1, (tmp - 50e3) / 450e3));
         uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
     }
     uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
@@ -4071,6 +4354,60 @@ window.addEventListener('swpc-update', (ev) => {
     // Temperature
     const tempK = tmp >= 1e6 ? `${(tmp / 1e6).toFixed(2)} MK` : `${Math.round(tmp / 1e3)} kK`;
     setV('wv-temp', tempK);
+
+    // ── Derived plasma diagnostics ────────────────────────────────────────────
+    // Dynamic ram pressure: P_dyn = ½ × m_p × n × v²  [nPa]
+    //   m_p = 1.673e-27 kg; n [cm⁻³] → [m⁻³]: ×1e6; v [km/s] → [m/s]: ×1e3; 1 Pa = 1e9 nPa
+    const pdyn = 0.5 * 1.673e-27 * dns * 1e6 * (spd * 1e3) ** 2 * 1e9;   // nPa
+    const pdynEl = document.getElementById('wv-pdyn');
+    if (pdynEl) {
+        pdynEl.textContent = pdyn.toFixed(2) + ' nPa';
+        pdynEl.style.color = pdyn > 12 ? '#ff4400' : pdyn > 6 ? '#ff9900' : pdyn > 2 ? '#ffcc44' : '#ffaa44';
+    }
+
+    // Alfvénic speed: v_A = |B| / sqrt(μ₀ × n × m_p)   [km/s]
+    //   Bt [nT] → [T]: ×1e-9; n [cm⁻³] → [m⁻³]: ×1e6; result in m/s → /1e3 for km/s
+    const mu0    = 4 * Math.PI * 1e-7;
+    const vAlfvn = (bt * 1e-9) / Math.sqrt(mu0 * dns * 1e6 * 1.673e-27) / 1e3;   // km/s
+    const mAlfvn = vAlfvn > 0 ? spd / vAlfvn : 0;
+    const machEl = document.getElementById('wv-mach');
+    if (machEl) {
+        machEl.textContent = mAlfvn.toFixed(1);
+        machEl.style.color = mAlfvn < 4 ? '#ff8844' : mAlfvn > 12 ? '#88ddff' : '#88ccff';
+    }
+
+    // Transit time from Sun: T = 1 AU / v
+    const transitDays = (1.496e8 / spd) / 86400;
+    setV('wv-transit', transitDays.toFixed(1) + ' d');
+
+    // Wind type classification
+    const windTypeEl = document.getElementById('wv-type');
+    if (windTypeEl) {
+        let wType, wColor;
+        if (spd > 600 && tmp > 400e3) {
+            wType = 'CME Sheath'; wColor = '#ff8888';
+        } else if (spd > 500 && dns < 8) {
+            wType = 'Fast CH Stream'; wColor = '#88ddff';
+        } else if (spd < 380 && tmp < 80e3) {
+            wType = 'Slow SB Wind'; wColor = '#ffcc66';
+        } else if (spd > 450 && dns > 12) {
+            wType = 'Dense HCS Crossing'; wColor = '#ffaa44';
+        } else {
+            wType = 'Mixed/Transition'; wColor = '#aaaaaa';
+        }
+        windTypeEl.textContent = wType;
+        windTypeEl.style.color = wColor;
+    }
+
+    // Proton flux (SEP context)
+    const pf10  = sw.proton_flux_10mev  ?? 0.1;
+    const pf100 = sw.proton_flux_100mev ?? 0.01;
+    const pf10El  = document.getElementById('wv-proton10');
+    const pf100El = document.getElementById('wv-proton100');
+    if (pf10El)  pf10El.textContent  = pf10  >= 10 ? pf10.toFixed(0)  : pf10.toFixed(2)  + ' pfu';
+    if (pf100El) pf100El.textContent = pf100 >= 1  ? pf100.toFixed(1) : pf100.toFixed(3) + ' pfu';
+    if (pf10El)  pf10El.style.color  = pf10  > 100 ? '#ff5500' : pf10  > 10 ? '#ffaa44' : '#ffcc88';
+    if (pf100El) pf100El.style.color = pf100 > 1   ? '#ff8800' : pf100 > 0.1 ? '#ffcc88' : '#888888';
 
     // Parker spiral angle (at 1 AU ≈ 215 R☉): φ = Ω·(215 R☉) / v_wind
     // Ω_sun = 2π / (25.4 × 86400) rad/s, 1 AU in km = 1.496e8

@@ -50,36 +50,86 @@ select { background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc; pa
 </head>
 <body>
 <nav>
-    <a href="index.html" class="nav-brand">✦ Parker Physics</a>
+    <a href="index.html" class="nav-brand">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        Parker Physics
+    </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu" role="navigation">
+    <div class="nav-menu" id="nav-menu">
         <a href="index.html" class="nav-item">Home</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
         <a href="galactic-map.html" class="nav-item">Galactic Map</a>
         <a href="threejs.html" class="nav-item">Solar System</a>
         <a href="sun.html" class="nav-item">The Sun</a>
         <a href="earth.html" class="nav-item">Earth View</a>
-        <a href="space-weather.html" class="nav-item">Space Weather</a>
+
+        <!-- ── Stars dropdown ── -->
         <div class="nav-drop" id="nav-drop-stars">
             <button class="nav-drop-btn" aria-haspopup="true">Stars ▾</button>
             <div class="nav-drop-menu">
-                <a href="sirius.html">Sirius System</a>
-                <a href="star3d.html">Sirius Planetary</a>
-                <a href="betelgeuse.html">Betelgeuse</a>
-                <a href="wr102.html">WR 102</a>
-                <a href="vega.html">Vega</a>
-                <a href="star2d.html">2D Stellar Modeler</a>
-                <a href="star2d-advanced.html">Advanced 2D</a>
+                <div class="nav-drop-section">3D Stellar Systems</div>
+                <a href="sirius.html" class="nav-drop-link">
+                    <span class="ndl-icon">✦</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius A System</span><span class="ndl-sub">A1V Blue Star + White Dwarf Binary</span></span>
+                </a>
+                <a href="star3d.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔵</span>
+                    <span class="ndl-body"><span class="ndl-title">Sirius Planetary</span><span class="ndl-sub">Exoplanetary Orbital Mechanics</span></span>
+                </a>
+                <a href="betelgeuse.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔴</span>
+                    <span class="ndl-body"><span class="ndl-title">Betelgeuse</span><span class="ndl-sub">Red Supergiant α Ori — Pulsating</span></span>
+                </a>
+                <a href="vega.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚪</span>
+                    <span class="ndl-body"><span class="ndl-title">Vega</span><span class="ndl-sub">Rapid Rotator A0Vp — Oblateness &amp; Wind</span></span>
+                </a>
+                <a href="wr102.html" class="nav-drop-link">
+                    <span class="ndl-icon">💜</span>
+                    <span class="ndl-body"><span class="ndl-title">WR 102</span><span class="ndl-sub">Wolf-Rayet — Hottest Known Star</span></span>
+                </a>
+                <div class="nav-drop-section">Stellar Modeling</div>
+                <a href="star2d.html" class="nav-drop-link">
+                    <span class="ndl-icon">📐</span>
+                    <span class="ndl-body"><span class="ndl-title">2D Stellar Modeler</span><span class="ndl-sub">Interactive Cross-Section Physics</span></span>
+                </a>
+                <a href="star2d-advanced.html" class="nav-drop-link">
+                    <span class="ndl-icon">🔬</span>
+                    <span class="ndl-body"><span class="ndl-title">Advanced 2D Solar</span><span class="ndl-sub">High-Fidelity 2D Solar Physics Engine</span></span>
+                </a>
             </div>
         </div>
-        <div class="nav-drop" id="nav-drop-fluid">
-            <button class="nav-drop-btn active" aria-haspopup="true">Fluid Sims ▾</button>
+
+        <!-- ── Simulations dropdown ── -->
+        <div class="nav-drop" id="nav-drop-sims">
+            <button class="nav-drop-btn active" aria-haspopup="true">Simulations ▾</button>
             <div class="nav-drop-menu">
-                <a href="solar-fluid.html">Solar Fluid (NSE)</a>
-                <a href="stellar-wind.html">Stellar Wind</a>
-                <a href="black-hole-fluid.html" class="active">Black Hole Accretion</a>
+                <div class="nav-drop-section">Fluid &amp; Particle Physics</div>
+                <a href="solar-fluid.html" class="nav-drop-link">
+                    <span class="ndl-icon">🌊</span>
+                    <span class="ndl-body"><span class="ndl-title">Solar Fluid Dynamics</span><span class="ndl-sub">Navier-Stokes MHD on the Solar Surface</span></span>
+                </a>
+                <a href="stellar-wind.html" class="nav-drop-link">
+                    <span class="ndl-icon">💨</span>
+                    <span class="ndl-body"><span class="ndl-title">Stellar Wind</span><span class="ndl-sub">Parker Spiral Particle Simulation</span></span>
+                </a>
+                <a href="black-hole-fluid.html" class="nav-drop-link active">
+                    <span class="ndl-icon">🕳</span>
+                    <span class="ndl-body"><span class="ndl-title">Black Hole Accretion</span><span class="ndl-sub">WebGL2 Accretion Disk + Gravitational Lensing</span></span>
+                </a>
+                <div class="nav-drop-section">Tools</div>
+                <a href="rust.html" class="nav-drop-link">
+                    <span class="ndl-icon">⚙</span>
+                    <span class="ndl-body"><span class="ndl-title">Rust / WASM Engine</span><span class="ndl-sub">WebAssembly High-Performance Compute</span></span>
+                </a>
             </div>
         </div>
-        <a href="rust.html" class="nav-item">Rust/WASM</a>
+
+        <!-- Auth pushed to the far right by the spacer -->
+        <div class="nav-spacer"></div>
+        <div class="nav-auth-sep"></div>
+        <a href="#login"  class="nav-item nav-login">Log In</a>
+        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -521,428 +571,34 @@ const PRESETS = {
     ton618:  { name:'Ton 618 — 6.6×10¹⁰ M☉', GM:0.45, EH:0.10, jetR:0.16, diskR0:0.16, diskR1:0.80, tmax:3e4 },
 };
 
-// ── Navier-Stokes solver ──────────────────────────────────────
-function IX(i,j) { return i + j*M; }
-
-function setBounds(b, x) {
-    for (let i=1;i<=N;i++) {
-        x[IX(0,i)]   = b===1 ? -x[IX(1,i)]   : x[IX(1,i)];
-        x[IX(N+1,i)] = b===1 ? -x[IX(N,i)]   : x[IX(N,i)];
-        x[IX(i,0)]   = b===2 ? -x[IX(i,1)]   : x[IX(i,1)];
-        x[IX(i,N+1)] = b===2 ? -x[IX(i,N)]   : x[IX(i,N)];
-    }
-    x[IX(0,0)]     = 0.5*(x[IX(1,0)]     + x[IX(0,1)]);
-    x[IX(0,N+1)]   = 0.5*(x[IX(1,N+1)]   + x[IX(0,N)]);
-    x[IX(N+1,0)]   = 0.5*(x[IX(N,0)]     + x[IX(N+1,1)]);
-    x[IX(N+1,N+1)] = 0.5*(x[IX(N,N+1)]   + x[IX(N+1,N)]);
-}
-
-function linearSolve(b,x,x0,a,c) {
-    const cInv = 1/c;
-    for (let k=0;k<state.iter;k++) {
-        for (let j=1;j<=N;j++) for (let i=1;i<=N;i++)
-            x[IX(i,j)] = (x0[IX(i,j)] + a*(x[IX(i-1,j)]+x[IX(i+1,j)]+x[IX(i,j-1)]+x[IX(i,j+1)]))*cInv;
-        setBounds(b,x);
-    }
-}
-
-function diffuse(b,x,x0,diff) {
-    const a = state.dt*diff*N*N;
-    linearSolve(b,x,x0,a,1+4*a);
-}
-
-function advect(b,d,d0,uu,vv) {
-    const dt0 = state.dt*N;
-    for (let j=1;j<=N;j++) for (let i=1;i<=N;i++) {
-        let xi = i - dt0*uu[IX(i,j)];
-        let yi = j - dt0*vv[IX(i,j)];
-        xi = Math.max(0.5, Math.min(N+0.5, xi));
-        yi = Math.max(0.5, Math.min(N+0.5, yi));
-        const i0=Math.floor(xi), i1=i0+1;
-        const j0=Math.floor(yi), j1=j0+1;
-        const s1=xi-i0, s0=1-s1, t1=yi-j0, t0=1-t1;
-        d[IX(i,j)] = s0*(t0*d0[IX(i0,j0)]+t1*d0[IX(i0,j1)]) +
-                     s1*(t0*d0[IX(i1,j0)]+t1*d0[IX(i1,j1)]);
-    }
-    setBounds(b,d);
-}
-
-function project(uu,vv,pp,div) {
-    const h = 1/N;
-    for (let j=1;j<=N;j++) for (let i=1;i<=N;i++) {
-        div[IX(i,j)] = -0.5*h*(uu[IX(i+1,j)]-uu[IX(i-1,j)]+vv[IX(i,j+1)]-vv[IX(i,j-1)]);
-        pp[IX(i,j)]  = 0;
-    }
-    setBounds(0,div); setBounds(0,pp);
-    linearSolve(0,pp,div,1,4);
-    for (let j=1;j<=N;j++) for (let i=1;i<=N;i++) {
-        uu[IX(i,j)] -= 0.5*(pp[IX(i+1,j)]-pp[IX(i-1,j)])*N;
-        vv[IX(i,j)] -= 0.5*(pp[IX(i,j+1)]-pp[IX(i,j-1)])*N;
-    }
-    setBounds(1,uu); setBounds(2,vv);
-}
-
-// ── BH-specific physics ──────────────────────────────────────
-const eps2 = 0.003*0.003;
-
-function addGravity() {
-    const GM=state.GM, dt=state.dt;
-    for (let j=1;j<=N;j++) {
-        const yn = (j/(N+1)-0.5)*2;
-        for (let i=1;i<=N;i++) {
-            const xn = (i/(N+1)-0.5)*2;
-            const r2 = xn*xn+yn*yn+eps2;
-            const r3 = Math.pow(r2,1.5);
-            const f  = GM*dt/r3;
-            u[IX(i,j)] -= f*xn;
-            v[IX(i,j)] -= f*yn;
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '✕' : '☰';
+        _navBurger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '☰';
+            _navBurger.setAttribute('aria-expanded', 'false');
         }
-    }
-}
-
-function addJets() {
-    const jp=state.jet*0.015, jetR=state.jetR;
-    for (let j=1;j<=N;j++) {
-        const yn = (j/(N+1)-0.5)*2;
-        for (let i=1;i<=N;i++) {
-            const xn = (i/(N+1)-0.5)*2;
-            const r  = Math.sqrt(xn*xn+yn*yn);
-            if (r < jetR && Math.abs(xn) < jetR/3) {
-                const dir = yn>=0 ? 1 : -1;
-                v[IX(i,j)] += jp*dir*(1-r/jetR);
-                dens[IX(i,j)] *= Math.max(0, 1-jp*8);
-            }
-        }
-    }
-}
-
-function sinkAtEH() {
-    const EH=state.EH;
-    for (let j=1;j<=N;j++) {
-        const yn = (j/(N+1)-0.5)*2;
-        for (let i=1;i<=N;i++) {
-            const xn = (i/(N+1)-0.5)*2;
-            const r  = Math.sqrt(xn*xn+yn*yn);
-            if (r < EH) {
-                dens[IX(i,j)]=0; u[IX(i,j)]=0; v[IX(i,j)]=0;
-            } else if (r < EH*1.4) {
-                const pull = (1-(r-EH)/(EH*0.4))*0.06;
-                u[IX(i,j)] -= xn/(r+0.001)*pull;
-                v[IX(i,j)] -= yn/(r+0.001)*pull;
-            }
-        }
-    }
-}
-
-function injectSource() {
-    const r0=state.diskR1-0.02, rate=state.accR*0.12;
-    for (let j=1;j<=N;j++) {
-        const yn = (j/(N+1)-0.5)*2;
-        for (let i=1;i<=N;i++) {
-            const xn = (i/(N+1)-0.5)*2;
-            const r  = Math.sqrt(xn*xn+yn*yn);
-            if (Math.abs(r-r0) < 0.015) {
-                dens[IX(i,j)] += rate*state.dt*(0.8+0.4*Math.random());
-                const vk = Math.sqrt(state.GM/r)*state.spin;
-                const vr = -vk*0.015*state.accR;
-                u[IX(i,j)] = -vk*yn/r + vr*xn/r;
-                v[IX(i,j)] =  vk*xn/r + vr*yn/r;
-            }
-        }
-    }
-}
-
-function initDisk() {
-    resetGrids();
-    const {GM,spin,accR} = state;
-    for (let j=1;j<=N;j++) {
-        const yn = (j/(N+1)-0.5)*2;
-        for (let i=1;i<=N;i++) {
-            const xn = (i/(N+1)-0.5)*2;
-            const r  = Math.sqrt(xn*xn+yn*yn);
-            if (r > state.diskR0 && r < state.diskR1) {
-                const w   = (state.diskR1-state.diskR0)/2;
-                const rM  = (state.diskR0+state.diskR1)/2;
-                const rho = Math.exp(-Math.pow(r-rM,2)/(2*w*w));
-                dens[IX(i,j)] = rho*(0.9+0.2*Math.random());
-                const vk  = spin*Math.sqrt(Math.max(0.001,GM/r));
-                const vr  = -accR*vk*0.01;
-                u[IX(i,j)] = -vk*yn/r + vr*xn/r + (Math.random()-0.5)*0.002;
-                v[IX(i,j)] =  vk*xn/r + vr*yn/r + (Math.random()-0.5)*0.002;
-            }
-        }
-    }
-}
-
-// ── Simulation step ───────────────────────────────────────────
-let step = 0;
-function simStep() {
-    injectSource(); addGravity(); addJets();
-    u0.set(u); v0.set(v);
-    diffuse(1,u,u0,state.visc); diffuse(2,v,v0,state.visc);
-    project(u,v,pres,div2);
-    u0.set(u); v0.set(v);
-    advect(1,u,u0,u0,v0); advect(2,v,v0,u0,v0);
-    project(u,v,pres,div2);
-    dens0.set(dens);
-    diffuse(0,dens,dens0,state.visc*0.5);
-    dens0.set(dens);
-    advect(0,dens,dens0,u,v);
-    for (let k=0;k<M*M;k++) dens[k]*=0.999;
-    sinkAtEH();
-    step++;
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  WebGL2 Renderer Setup
-// ═══════════════════════════════════════════════════════════════
-const gl = glCanvas.getContext('webgl2');
-if (!gl) { alert('WebGL2 not supported.'); }
-
-function compileShader(src, type) {
-    const s = gl.createShader(type);
-    gl.shaderSource(s, src);
-    gl.compileShader(s);
-    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-        throw new Error('Shader compile error:\n' + gl.getShaderInfoLog(s));
-    return s;
-}
-
-const vsSrc = document.getElementById('vs').textContent;
-const fsSrc = document.getElementById('fs').textContent;
-const prog  = gl.createProgram();
-gl.attachShader(prog, compileShader(vsSrc, gl.VERTEX_SHADER));
-gl.attachShader(prog, compileShader(fsSrc, gl.FRAGMENT_SHADER));
-gl.linkProgram(prog);
-if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
-    throw new Error('Program link error:\n' + gl.getProgramInfoLog(prog));
-gl.useProgram(prog);
-
-// Full-screen quad
-const quadBuf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
-const aPos = gl.getAttribLocation(prog, 'aPos');
-gl.enableVertexAttribArray(aPos);
-gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-// Uniform locations
-const uLoc = {};
-['uDens','uVel','uPres','uRes','uGM','uEH','uRs','uTmax',
- 'uIncl','uLensStr','uExposure','uColorMode'].forEach(n => {
-    uLoc[n] = gl.getUniformLocation(prog, n);
-});
-
-// Texture slot binding (done once)
-gl.uniform1i(uLoc.uDens, 0);
-gl.uniform1i(uLoc.uVel,  1);
-gl.uniform1i(uLoc.uPres, 2);
-
-// Create a Float32 texture
-function makeF32Texture(unit, channels) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    const fmt = channels === 1 ? [gl.R32F,  gl.RED] : [gl.RG32F, gl.RG];
-    gl.texImage2D(gl.TEXTURE_2D, 0, fmt[0], N, N, 0, fmt[1], gl.FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    return tex;
-}
-
-const texDens = makeF32Texture(0, 1);
-const texVel  = makeF32Texture(1, 2);
-const texPres = makeF32Texture(2, 1);
-
-// Scratch buffers for texture upload (extract interior N×N from M×M grid)
-const densUpload = new Float32Array(N * N);
-const velUpload  = new Float32Array(N * N * 2);
-const presUpload = new Float32Array(N * N);
-
-function uploadTextures() {
-    // Extract interior cells (skip boundary row/col at index 0 and N+1)
-    for (let j = 0; j < N; j++) {
-        for (let i = 0; i < N; i++) {
-            const src = IX(i+1, j+1);
-            const dst = i + j * N;
-            densUpload[dst]       = dens[src];
-            velUpload[dst*2]      = u[src];
-            velUpload[dst*2 + 1]  = v[src];
-            presUpload[dst]       = pres[src];
-        }
-    }
-    gl.activeTexture(gl.TEXTURE0);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RED, gl.FLOAT, densUpload);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RG, gl.FLOAT, velUpload);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RED, gl.FLOAT, presUpload);
-}
-
-// Push all uniforms that match current state
-function pushUniforms() {
-    const rs = state.EH; // Schwarzschild radius = EH in our units
-    gl.uniform2f(uLoc.uRes,       glCanvas.width, glCanvas.height);
-    gl.uniform1f(uLoc.uGM,        state.GM);
-    gl.uniform1f(uLoc.uEH,        state.EH);
-    gl.uniform1f(uLoc.uRs,        rs);
-    gl.uniform1f(uLoc.uTmax,      state.tmax);
-    gl.uniform1f(uLoc.uIncl,      state.inclDeg * Math.PI / 180);
-    gl.uniform1f(uLoc.uLensStr,   state.lensStr);
-    gl.uniform1f(uLoc.uExposure,  state.exposure);
-    gl.uniform1i(uLoc.uColorMode, state.colormap);
-}
-
-// ── 2D overlay rendering (jets, velocity grid) ────────────────
-function renderOverlay() {
-    const W = ovCanvas.width, H = ovCanvas.height;
-    ovCtx.clearRect(0, 0, W, H);
-
-    // Relativistic jets — drawn on overlay canvas
-    if (state.jet > 0) {
-        const cx = W/2, cy = H/2;
-        // EH visual radius in canvas pixels
-        const ehPx = state.EH * W * 0.5 * 2.598; // shadow radius
-
-        const jw = Math.max(3, state.jet * 10);
-        for (const [y0, y1] of [[cy - ehPx, 0], [cy + ehPx, H]]) {
-            const g = ovCtx.createLinearGradient(cx, y0, cx, y1);
-            const a = (state.jet * 0.55).toFixed(2);
-            g.addColorStop(0,   `rgba(140,200,255,0)`);
-            g.addColorStop(0.3, `rgba(140,200,255,${a})`);
-            g.addColorStop(0.7, `rgba(80,140,255,${(state.jet*0.3).toFixed(2)})`);
-            g.addColorStop(1,   `rgba(60,100,220,0)`);
-            ovCtx.beginPath();
-            ovCtx.rect(cx - jw/2, Math.min(y0,y1), jw, Math.abs(y1-y0));
-            ovCtx.fillStyle = g;
-            ovCtx.fill();
-        }
-        // Jet knots — discrete bright blobs moving outward
-        const t = step * 0.004;
-        for (const sign of [-1, 1]) {
-            for (let k = 0; k < 3; k++) {
-                const frac = ((t * 0.7 + k / 3) % 1.0);
-                const ky = cy + sign * (ehPx + frac * (H/2 - ehPx));
-                const kr = 2 + state.jet * 3 * (1 - frac);
-                ovCtx.beginPath();
-                ovCtx.arc(cx, ky, kr, 0, Math.PI*2);
-                ovCtx.fillStyle = `rgba(180,220,255,${(0.7*(1-frac)).toFixed(2)})`;
-                ovCtx.fill();
-            }
-        }
-    }
-
-    // Velocity grid overlay
-    if (state.showGrid) {
-        const scale = W / (N * 1.0);
-        ovCtx.strokeStyle = 'rgba(0,220,180,0.45)';
-        ovCtx.lineWidth = 0.8;
-        for (let j = 2; j <= N; j += 8) {
-            for (let i = 2; i <= N; i += 8) {
-                const uu_ = u[IX(i,j)], vv_ = v[IX(i,j)];
-                const sp  = Math.sqrt(uu_*uu_+vv_*vv_);
-                if (sp < 0.001) continue;
-                const sx = i * scale, sy = j * scale;
-                const ex = sx + uu_*scale*2, ey = sy + vv_*scale*2;
-                ovCtx.beginPath();
-                ovCtx.moveTo(sx, sy);
-                ovCtx.lineTo(ex, ey);
-                ovCtx.stroke();
-            }
-        }
-    }
-}
-
-// ── Main render call ──────────────────────────────────────────
-function renderFrame() {
-    uploadTextures();
-    pushUniforms();
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    renderOverlay();
-}
-
-// ── Main loop ─────────────────────────────────────────────────
-let lastT = performance.now(), fps = 60;
-function loop(now) {
-    requestAnimationFrame(loop);
-    const dt_ = now - lastT;
-    lastT = now;
-    fps = fps * 0.95 + (1000 / (dt_ + 0.001)) * 0.05;
-
-    simStep();
-    renderFrame();
-
-    document.getElementById('oi-step').textContent = 'Step: ' + step;
-    document.getElementById('oi-fps').textContent  = 'FPS: ' + fps.toFixed(0);
-}
-
-// ── Controls ──────────────────────────────────────────────────
-function bindSlider(id, valId, key, scale, fmt) {
-    const sl = document.getElementById(id);
-    const vl = valId ? document.getElementById(valId) : null;
-    sl.addEventListener('input', () => {
-        state[key] = sl.value / 100 * scale;
-        if (vl && fmt) vl.textContent = fmt(state[key]);
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
     });
 }
-bindSlider('s-gm',  'v-gm',   'GM',    0.50, v => v.toFixed(3));
-bindSlider('s-acc', 'v-acc',  'accR',  1.0,  v => v.toFixed(2));
-bindSlider('s-spin','v-spin', 'spin',  1.0,  v => v.toFixed(2));
-bindSlider('s-visc','v-visc', 'visc',  0.01, v => v.toFixed(4));
-bindSlider('s-jet', 'v-jet',  'jet',   1.0,  v => v.toFixed(2));
-
-bindSlider('s-lens','v-lens', 'lensStr', 1.0, v => v.toFixed(2) + '×');
-bindSlider('s-expo','v-expo', 'exposure',1.0, v => v.toFixed(2));
-
-document.getElementById('s-incl').addEventListener('input', function() {
-    state.inclDeg = parseFloat(this.value);
-    document.getElementById('v-incl').textContent = state.inclDeg.toFixed(0) + '°';
-});
-document.getElementById('s-tmax').addEventListener('input', function() {
-    const exp = parseFloat(this.value);
-    state.tmax = Math.pow(10, exp);
-    document.getElementById('v-tmax').textContent = '10' + superscript(exp.toFixed(1)) + ' K';
-});
-function superscript(n) {
-    const map = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','.':'·','-':'⁻'};
-    return n.split('').map(c => map[c]||c).join('');
-}
-
-document.getElementById('colormap').addEventListener('change', e => {
-    state.colormap = parseInt(e.target.value);
-});
-document.getElementById('showGrid').addEventListener('change', e => {
-    state.showGrid = e.target.checked;
-});
-
-document.getElementById('preset').addEventListener('change', e => {
-    const p = PRESETS[e.target.value];
-    Object.assign(state, p);
-    document.getElementById('oi-preset').textContent = p.name;
-    document.getElementById('oi-mass').textContent   = 'GM = ' + state.GM.toFixed(3);
-    // Sync tmax slider
-    const expVal = Math.log10(p.tmax);
-    document.getElementById('s-tmax').value = expVal;
-    document.getElementById('v-tmax').textContent = '10' + superscript(expVal.toFixed(1)) + ' K';
-    initDisk(); step = 0;
-});
-
-document.getElementById('btnReset').addEventListener('click', () => { initDisk(); step = 0; });
-document.getElementById('btnCME').addEventListener('click', () => {
-    const angle = Math.random()*Math.PI*2;
-    const r = state.diskR1 - 0.05;
-    const ci = Math.round((Math.cos(angle)*r*0.5+0.5)*N);
-    const cj = Math.round((Math.sin(angle)*r*0.5+0.5)*N);
-    for (let dj=-5;dj<=5;dj++) for (let di=-5;di<=5;di++) {
-        const dist = Math.sqrt(di*di+dj*dj);
-        if (dist<5 && ci+di>=1 && ci+di<=N && cj+dj>=1 && cj+dj<=N) {
-            const f = Math.exp(-dist*dist/8);
-            dens[IX(ci+di,cj+dj)] += 1.2*f;
-        }
-    }
-});
 document.getElementById('btnClear').addEventListener('click', () => { resetGrids(); step = 0; });
 
 // Mouse: inject matter on drag
