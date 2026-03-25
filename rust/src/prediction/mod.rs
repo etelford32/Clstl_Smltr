@@ -1,5 +1,9 @@
-// Solar prediction model — Phase 2.
+// Solar prediction model.
 //
-// Planned submodules:
+// Submodules:
+//   solar_wind  — live NOAA wind speed pipeline → simulation bridge
+//
+// Planned (Phase 2):
 //   energy      — free magnetic energy estimation + flare probability
-//   solar_wind  — CME trajectory and solar wind speed estimation
+
+pub mod solar_wind;

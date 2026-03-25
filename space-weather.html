@@ -327,6 +327,26 @@ nav {
     border:1px solid rgba(255,140,0,.3); font-size:.68rem;
 }
 
+/* ── WIND ALERT LEVEL BADGE ──────────────────────────────────────────────── */
+.wind-alert-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: .66rem; font-weight: 700; letter-spacing: .06em;
+    font-family: 'Courier New', monospace; text-transform: uppercase;
+    border: 1px solid; transition: background .4s, color .4s, border-color .4s;
+    white-space: nowrap;
+}
+.wind-alert-badge::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+    animation: alert-pulse 2s ease-in-out infinite; flex-shrink: 0;
+}
+@keyframes alert-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.wind-alert-badge.alert-quiet    { background:rgba(0,200,100,.10); color:#00e874; border-color:rgba(0,200,100,.25); }
+.wind-alert-badge.alert-moderate { background:rgba(255,200,0,.12); color:#ffd700; border-color:rgba(255,200,0,.28); }
+.wind-alert-badge.alert-high     { background:rgba(255,120,0,.14); color:#ff8800; border-color:rgba(255,120,0,.35); }
+.wind-alert-badge.alert-extreme  { background:rgba(255,30,80,.16);  color:#ff3060; border-color:rgba(255,30,80,.40);
+    box-shadow: 0 0 8px rgba(255,30,80,.35); }
+
 /* ── STORM LEVEL GAUGE ─────────────────────────────────────────────────────── */
 .storm-levels { display:flex; gap:4px; margin-top:8px; }
 .storm-lvl {
@@ -354,6 +374,68 @@ nav {
 }
 #alerts-bar.show { display:block; }
 
+/* ── OFFLINE / STALE BANNER ──────────────────────────────────────────────── */
+#data-status-banner {
+    display:none; align-items:center; gap:10px;
+    padding:9px 14px; border-radius:8px; margin-bottom:12px;
+    font-size:.8rem; border:1px solid;
+}
+#data-status-banner.stale   { display:flex; background:rgba(255,200,0,.07); border-color:rgba(255,200,0,.28); color:#ffd700; }
+#data-status-banner.offline { display:flex; background:rgba(255,60,60,.07); border-color:rgba(255,60,60,.28); color:#ff7070; }
+#data-status-banner .dsb-icon { font-size:1rem; }
+#data-status-banner .dsb-text { flex:1; }
+#data-status-banner .dsb-age  { color:inherit; opacity:.7; font-size:.72rem; margin-left:auto; }
+
+/* ── SOURCE CHIPS on data card headers ───────────────────────────────────── */
+.src-chip {
+    display:inline-flex; align-items:center; gap:4px;
+    margin-left:8px; padding:1px 6px;
+    border-radius:3px; font-size:.6rem; font-weight:400;
+    text-transform:none; letter-spacing:0; vertical-align:middle;
+    border:1px solid; transition:background .4s, color .4s, border-color .4s;
+    font-family:'Courier New', monospace;
+}
+.src-chip::before {
+    content:''; width:5px; height:5px; border-radius:50%;
+    background:currentColor; flex-shrink:0;
+}
+.src-chip.live    { background:rgba(0,200,100,.1); color:#00e874; border-color:rgba(0,200,100,.25); }
+.src-chip.stale   { background:rgba(255,200,0,.1); color:#ffd700; border-color:rgba(255,200,0,.25); }
+.src-chip.offline { background:rgba(255,60,60,.1); color:#ff7070; border-color:rgba(255,60,60,.25); }
+.src-chip.live::before { animation: src-pulse 2s ease-in-out infinite; }
+@keyframes src-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ── DATA SOURCES FOOTER PANEL ────────────────────────────────────────────── */
+.data-sources-panel {
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:10px; padding:14px 18px;
+    margin-bottom:16px;
+}
+.data-sources-panel h4 {
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.09em;
+    color:#446; margin-bottom:10px;
+}
+.ds-grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+    gap:8px;
+}
+.ds-row {
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04);
+    font-size:.75rem;
+}
+.ds-row:last-child { border-bottom:none; }
+.ds-name  { color:#556; }
+.ds-val   { color:#778; font-family:'Courier New',monospace; font-size:.68rem; }
+.ds-badge {
+    font-size:.6rem; padding:1px 5px; border-radius:2px;
+    margin-left:6px; font-family:'Courier New',monospace;
+}
+.ds-badge.live    { background:rgba(0,200,100,.12); color:#00e874; }
+.ds-badge.stale   { background:rgba(255,200,0,.12);  color:#ffd700; }
+.ds-badge.offline { background:rgba(255,60,60,.12);  color:#ff7070; }
+
 /* ── DARK LOADING SKELETON ─────────────────────────────────────────────────── */
 .skel {
     display:inline-block; width:80px; height:1em;
@@ -370,6 +452,87 @@ nav {
     font-size:.74rem; color:#445; line-height:2;
 }
 .sw-footer a { color:#667; }
+
+/* ── HELIOSPHERE HERO CANVAS ─────────────────────────────────────────────── */
+.helio-hero-wrap {
+    position: relative; width: 100%; height: 620px;
+    border-radius: 16px; overflow: hidden; margin-bottom: 16px;
+    border: 1px solid rgba(255,180,40,0.14); background: #02010a;
+    box-shadow: 0 4px 40px rgba(0,0,0,0.8), inset 0 0 100px rgba(255,100,20,0.03);
+}
+@media (max-width: 700px) { .helio-hero-wrap { height: 420px; } }
+#helio-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+#helio-canvas:active { cursor: grabbing; }
+.helio-corner-link {
+    position: absolute; bottom: 12px; right: 14px; z-index: 10;
+    font-size: .72rem; color: rgba(255,180,60,0.45);
+    text-decoration: none; font-family: monospace; transition: color .2s;
+}
+.helio-corner-link:hover { color: rgba(255,200,80,0.9); }
+/* Controls hint overlay */
+.helio-hint {
+    position: absolute; bottom: 12px; left: 14px; z-index: 10;
+    font-size: .68rem; color: rgba(255,255,255,0.22); font-family: monospace;
+    pointer-events: none; line-height: 1.6;
+}
+/* Live data badge over canvas */
+.helio-live-hud {
+    position: absolute; top: 12px; left: 14px; z-index: 10;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
+    padding: 7px 12px; font-size: .70rem; line-height: 1.8;
+    pointer-events: none; color: #8ab;
+}
+.helio-live-hud .hv { color: #aef; font-weight: 600; font-family: monospace; }
+.helio-live-hud .hl { color: #aaa; font-size: .64rem; margin-right: 6px; }
+
+/* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
+.earth-section {
+    background: rgba(0,4,18,.7);
+    border: 1px solid rgba(0,198,255,.12);
+    border-radius: 14px; padding: 18px 20px 14px; margin-bottom: 16px;
+}
+.earth-section-header {
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap;
+}
+.earth-section-title {
+    font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
+    color: #9cf;
+}
+.earth-section-sub { font-size: .72rem; color: #445; }
+/* ── 3D Globe canvas ─────────────────────────────────────────────────────── */
+#sw-globe-canvas {
+    display: block; width: 100%; height: 520px;
+    border-radius: 12px; background: #010812;
+    border: 1px solid rgba(0,198,255,.10);
+    cursor: grab;
+}
+#sw-globe-canvas:active { cursor: grabbing; }
+
+/* Layer toggle buttons */
+.globe-layer-btns {
+    display: flex; gap: 6px; flex-wrap: wrap;
+}
+.layer-btn {
+    padding: 3px 10px; border-radius: 20px; border: 1px solid rgba(0,198,255,.25);
+    background: rgba(0,198,255,.07); color: #6aaccc; font-size: .68rem;
+    font-family: inherit; cursor: pointer; transition: all .2s; letter-spacing: .04em;
+}
+.layer-btn:hover  { border-color: rgba(0,198,255,.5); color: #aee; }
+.layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
+    border-color: rgba(0,198,255,.45); }
+
+/* Legend below the globe */
+.globe-legend {
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    font-size: .70rem; color: #556; margin-top: 12px;
+}
+.globe-legend span { display: flex; align-items: center; gap: 6px; }
+.leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+@media (max-width: 600px) {
+    #sw-globe-canvas { height: 340px; }
+}
 </style>
 </head>
 <body>
@@ -377,7 +540,7 @@ nav {
 <!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <nav>
     <a href="index.html" class="nav-brand">
-        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics">
         Parker Physics
     </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
@@ -475,14 +638,48 @@ nav {
     <!-- Alerts bar (hidden by default) -->
     <div id="alerts-bar"></div>
 
+    <!-- ── DATA STATUS BANNER (shown when feed is stale or offline) ────────── -->
+    <div id="data-status-banner">
+        <span class="dsb-icon">⚠</span>
+        <span class="dsb-text" id="dsb-text">Space weather data is temporarily unavailable. Showing cached values.</span>
+        <span class="dsb-age" id="dsb-age"></span>
+    </div>
+
+    <!-- ── HELIOSPHERE HERO ────────────────────────────────────────────────── -->
+    <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
+    <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
+    <div class="helio-hero-wrap">
+        <canvas id="helio-canvas"
+                aria-label="3D inner solar system — Parker spiral solar wind, Earth magnetosphere, planetary positions"
+                role="img"></canvas>
+        <!-- Live data HUD -->
+        <div class="helio-live-hud">
+            <span class="hl">Wind</span><span class="hv" id="h3d-speed">–</span> km/s &nbsp;
+            <span class="hl">Bz</span><span class="hv" id="h3d-bz">–</span> nT &nbsp;
+            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span>
+        </div>
+        <!-- Controls hint -->
+        <div class="helio-hint">
+            Drag to orbit &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Zoom in toward Earth to explore the magnetosphere
+        </div>
+        <a class="helio-corner-link" href="earth.html" title="Open Earth detail view">Earth View →</a>
+    </div>
+
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
     <div class="hero-row">
 
         <!-- Solar Wind Speed -->
         <div class="metric-card" style="--accent:rgba(0,198,255,.08)">
-            <div class="metric-label">Solar Wind Speed · L1 (DSCOVR)</div>
-            <div class="metric-big"><span id="wind-speed" class="skel"></span> <span class="metric-unit">km/s</span></div>
+            <div class="metric-label">Solar Wind Speed · L1 (DSCOVR/ACE)</div>
+            <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap">
+                <div class="metric-big"><span id="wind-speed" class="skel"></span> <span class="metric-unit">km/s</span></div>
+                <span id="wind-alert-badge" class="wind-alert-badge" style="display:none"></span>
+            </div>
             <div class="metric-sub" id="wind-trend">–</div>
+            <!-- 60-min sparkline from pipeline series -->
+            <canvas id="wind-sparkline" width="240" height="36"
+                    style="width:100%;height:36px;margin:6px 0 4px;display:block;opacity:.85"
+                    title="Solar wind speed — last 60 minutes"></canvas>
             <div class="bz-bar" title="IMF Bz: left = southward (active), right = northward (quiet)">
                 <div class="bz-marker" id="bz-marker" style="left:50%"></div>
             </div>
@@ -547,12 +744,43 @@ nav {
 
     </div><!-- /hero-row -->
 
+    <!-- ── 3D MAGNETOSPHERE GLOBE ────────────────────────────────────────────── -->
+    <!-- Three.js Earth + live magnetosphere, aurora ovals, solar wind particles -->
+    <section class="earth-section globe-section">
+        <div class="earth-section-header" style="flex-wrap:wrap;gap:10px">
+            <div>
+                <span class="earth-section-title">3D Earth · Magnetosphere · Aurora</span>
+                <span class="earth-section-sub">Shue-1998 magnetopause · Van Allen belts · Kp/Bz live</span>
+            </div>
+            <!-- Layer toggle buttons -->
+            <div class="globe-layer-btns" id="globe-layers">
+                <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
+                <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
+                <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
+                <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
+            </div>
+        </div>
+        <canvas id="sw-globe-canvas"
+            aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
+            role="img"></canvas>
+        <div class="globe-legend">
+            <span><span class="leg-dot" style="background:#00ff88"></span>Aurora oval (Kp-driven, equatorward during storms)</span>
+            <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue 1998, Bz-compressed)</span>
+            <span><span class="leg-dot" style="background:#66aaff"></span>Bow shock</span>
+            <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1–3 R⊕)</span>
+            <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3–7 R⊕)</span>
+            <span><span class="leg-dot" style="background:#00ccff"></span>Plasmasphere (Carpenter-Anderson model)</span>
+            <span><span class="leg-dot" style="background:#88d8ff"></span>Solar wind particle stream (speed-coloured)</span>
+            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom</span>
+        </div>
+    </section>
+
     <!-- ── DATA GRID ────────────────────────────────────────────────────────── -->
     <div class="data-grid">
 
         <!-- Solar Wind Detail -->
         <div class="data-card">
-            <h3>Solar Wind Parameters · DSCOVR/ACE L1</h3>
+            <h3>Solar Wind Parameters · DSCOVR/ACE L1<span class="src-chip live" id="src-wind" title="Source: NOAA SWPC — DSCOVR/ACE L1 real-time solar wind (rtsw_wind_1m.json) · 1 min cadence">NOAA · DSCOVR/ACE</span></h3>
 
             <div class="param-row">
                 <span class="param-name">Speed</span>
@@ -591,7 +819,7 @@ nav {
 
         <!-- Geomagnetic Conditions -->
         <div class="data-card">
-            <h3>Geomagnetic Storm Scale (NOAA)</h3>
+            <h3>Geomagnetic Storm Scale (NOAA)<span class="src-chip live" id="src-kp" title="Source: NOAA SWPC — Planetary Kp index (planetary_k_index_1m.json) · 3 hr cadence">NOAA · Kp index</span></h3>
 
             <div style="margin-bottom:12px">
                 <div class="storm-levels" id="storm-levels">
@@ -628,7 +856,7 @@ nav {
 
         <!-- Latest CME -->
         <div class="data-card">
-            <h3>Latest CME · NASA DONKI</h3>
+            <h3>Latest CME · NASA DONKI<span class="src-chip live" id="src-cme" title="Source: NASA DONKI CMEAnalysis endpoint · updated on detection">NASA · DONKI</span></h3>
             <div id="cme-content">
                 <div style="color:#445;font-size:.8rem;padding:12px 0">Connecting to NASA DONKI…</div>
             </div>
@@ -714,7 +942,7 @@ nav {
     <div class="tables-row">
 
         <div class="table-card">
-            <h3>Active Regions · NOAA/SWPC</h3>
+            <h3>Active Regions · NOAA/SWPC<span class="src-chip live" id="src-ar" title="Source: NOAA SWPC — solar-regions.json · daily update">NOAA · SWPC</span></h3>
             <table class="sw-table">
                 <thead>
                     <tr>
@@ -731,7 +959,7 @@ nav {
         </div>
 
         <div class="table-card">
-            <h3>Recent Flares · GOES (7 days)</h3>
+            <h3>Recent Flares · GOES (7 days)<span class="src-chip live" id="src-flares" title="Source: NOAA GOES XRS — xray-flares-7day.json">NOAA · GOES XRS</span></h3>
             <table class="sw-table">
                 <thead>
                     <tr>
@@ -747,6 +975,49 @@ nav {
             </table>
         </div>
 
+    </div>
+
+    <!-- ── LIVE DATA SOURCES PANEL ─────────────────────────────────────────── -->
+    <div class="data-sources-panel">
+        <h4>⚡ Live Data Sources</h4>
+        <div class="ds-grid">
+            <div>
+                <div class="ds-row">
+                    <span class="ds-name">Solar Wind (speed/density/Bt/Bz)</span>
+                    <span class="ds-val">NOAA DSCOVR/ACE L1 <span class="ds-badge live" id="ds-wind">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Geomagnetic Kp index</span>
+                    <span class="ds-val">NOAA SWPC Kp 1-min <span class="ds-badge live" id="ds-kp">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">X-ray flux / Flares</span>
+                    <span class="ds-val">NOAA GOES-16/18 XRS <span class="ds-badge live" id="ds-xray">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Active regions</span>
+                    <span class="ds-val">NOAA solar-regions.json <span class="ds-badge live" id="ds-ar">live</span></span>
+                </div>
+            </div>
+            <div>
+                <div class="ds-row">
+                    <span class="ds-name">Proton / Electron flux</span>
+                    <span class="ds-val">NOAA GOES SEP channels <span class="ds-badge live" id="ds-sep">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">CME analysis</span>
+                    <span class="ds-val">NASA DONKI CMEAnalysis <span class="ds-badge live" id="ds-cme">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Solar imagery</span>
+                    <span class="ds-val">NASA SDO/AIA + SOHO LASCO <span class="ds-badge live" id="ds-sdo">live</span></span>
+                </div>
+                <div class="ds-row">
+                    <span class="ds-name">Refresh cadence</span>
+                    <span class="ds-val" id="ds-cadence">5 min (wind: 1 min)</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="sw-footer">
@@ -776,9 +1047,14 @@ nav {
 }
 </script>
 <script type="module">
-import { SpaceWeatherFeed } from './js/swpc-feed.js';
-import { SohoFeed }         from './js/extended-feeds.js';
-import { NasaFeed }         from './js/nasa-feed.js';
+import './js/live-status-bar.js';
+import { SpaceWeatherFeed }  from './js/swpc-feed.js';
+import { SohoFeed }          from './js/extended-feeds.js';
+import { NasaFeed }          from './js/nasa-feed.js';
+import { Heliosphere3D }     from './js/heliosphere3d.js';
+import { EphemerisService }    from './js/horizons.js';
+import WindPipelineFeed         from './js/wind-pipeline-feed.js';
+import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 
 // ── NAV burger ─────────────────────────────────────────────────────────────────
 // ─── Nav ─────────────────────────────────────────────────────────────────────
@@ -837,11 +1113,6 @@ function fmtDate(d) {
     if (isNaN(dt)) return String(d).slice(0, 10);
     return dt.toISOString().slice(0, 10) + ' ' + dt.toISOString().slice(11, 16);
 }
-function clsColor(cls) {
-    const c = cls ? cls[0].toUpperCase() : '';
-    return `cls-${c}` in document.querySelector('.sw-table') ? `cls-${c}` : `cls-${c}`;
-}
-
 // ── Kp gauge ────────────────────────────────────────────────────────────────────
 const KP_LABELS = ['Quiet','Quiet','Unsettled','Active','Active','G1 Storm','G2 Storm','G3 Storm','G4 Storm','G5 Extreme'];
 const KP_CITIES = [
@@ -882,11 +1153,11 @@ function updateKp(kp) {
         }
     }
     // Aurora oval radius: scale from r=38 (Kp0) to r=28 (Kp9, tight around pole)
+    const auroraOval = el('aurora-oval');
     const ovalR = Math.max(26, 40 - k * 1.5);
-    el('aurora-oval').setAttribute('r', ovalR);
+    auroraOval.setAttribute('r', ovalR);
     const auroraCol = k < 3 ? '#00cc66' : k < 5 ? '#88ff44' : k < 7 ? '#ffaa00' : '#ff4488';
-    el('aurora-oval').setAttribute('stroke', auroraCol.replace('#', 'rgba(') + ',0.6)');
-    el('aurora-oval').setAttribute('stroke', auroraCol);
+    auroraOval.setAttribute('stroke', auroraCol);
 
     el('aurora-level').textContent = KP_LABELS[Math.min(k, 9)];
     el('aurora-level').style.color = k < 3 ? '#556' : k < 5 ? '#00e874' : k < 7 ? '#ffaa00' : '#ff4488';
@@ -942,10 +1213,107 @@ function updateXray(xray_class, xray_flux) {
     el('xray-desc').textContent = XRAY_DESCS[letter] || '–';
 }
 
+// ── Wind sparkline renderer ───────────────────────────────────────────────────
+function drawWindSparkline(series) {
+    const canvas = el('wind-sparkline');
+    if (!canvas || !series?.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W   = canvas.offsetWidth  || 240;
+    const H   = canvas.offsetHeight || 36;
+    canvas.width  = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const speeds = series.map(r => r.speed_km_s ?? 0).filter(v => v > 0);
+    if (speeds.length < 2) { ctx.clearRect(0, 0, W, H); return; }
+
+    const minV = Math.min(...speeds);
+    const maxV = Math.max(...speeds);
+    const range = Math.max(maxV - minV, 40);  // at least 40 km/s range
+
+    const xStep = W / (speeds.length - 1);
+    const yOf   = v => H - ((v - minV) / range) * (H - 4) - 2;
+
+    // Filled area under line
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    const latest = speeds[speeds.length - 1];
+    const aColor = latest >= 800 ? 'rgba(255,48,96,' : latest >= 600 ? 'rgba(255,140,0,'
+                 : latest >= 400 ? 'rgba(0,200,255,' : 'rgba(0,232,118,';
+    grad.addColorStop(0, aColor + '0.28)');
+    grad.addColorStop(1, aColor + '0.02)');
+
+    ctx.beginPath();
+    ctx.moveTo(0, yOf(speeds[0]));
+    speeds.forEach((v, i) => { if (i > 0) ctx.lineTo(i * xStep, yOf(v)); });
+    ctx.lineTo((speeds.length - 1) * xStep, H);
+    ctx.lineTo(0, H);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    speeds.forEach((v, i) => i === 0 ? ctx.moveTo(0, yOf(v)) : ctx.lineTo(i * xStep, yOf(v)));
+    ctx.strokeStyle = aColor + '0.8)';
+    ctx.lineWidth   = 1.4;
+    ctx.stroke();
+
+    // Min / max / latest labels
+    ctx.font      = `${Math.round(8 * dpr) / dpr}px monospace`;
+    ctx.fillStyle = 'rgba(100,130,160,0.7)';
+    ctx.textAlign = 'left';  ctx.fillText(`${Math.round(minV)}`, 2, H - 2);
+    ctx.textAlign = 'right'; ctx.fillText(`${Math.round(maxV)} km/s`, W - 2, 10);
+}
+
+// ── Wind pipeline update handler ──────────────────────────────────────────────
+// Enriches the wind speed card with: trend arrow, alert level badge, sparkline.
+// Falls back gracefully when the pipeline is offline (swpc-update still works).
+window.addEventListener('wind-pipeline-update', ev => {
+    const d = ev.detail;
+    if (!d) return;
+
+    // Speed — prefer pipeline value (fresher / cleaned) if available
+    if (d.speed_km_s != null) {
+        el('wind-speed').textContent = Math.round(d.speed_km_s);
+        el('wind-speed').classList.remove('skel');
+    }
+
+    // Trend line in metric-sub: arrow + slope + density from pipeline
+    const dir    = d.trend?.direction ?? 'STEADY';
+    const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
+    const slope  = d.trend?.slope_km_s_per_min;
+    const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
+    const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
+    el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+
+    // Alert badge
+    const badge = el('wind-alert-badge');
+    if (badge && d.alert_level) {
+        badge.textContent = d.alert_level;
+        badge.className   = `wind-alert-badge alert-${d.alert_level.toLowerCase()}`;
+        badge.style.display = '';
+    }
+
+    // Sparkline
+    if (d.series?.length) drawWindSparkline(d.series);
+});
+
 // ── SWPC update handler ────────────────────────────────────────────────────────
 window.addEventListener('swpc-update', e => {
     const d = e.detail;
     const sw = d.solar_wind || {};
+
+    // Feed 3D globe
+    if (_globe) _globe.update(d);
+
+    // 3D heliosphere HUD
+    const h3spd = el('h3d-speed');
+    const h3bz  = el('h3d-bz');
+    const h3kp  = el('h3d-kp');
+    if (h3spd && sw.speed  != null) h3spd.textContent = Math.round(sw.speed);
+    if (h3bz  && sw.bz     != null) { h3bz.textContent = sw.bz.toFixed(1); h3bz.style.color = sw.bz < -5 ? '#ff6644' : sw.bz < 0 ? '#ffaa55' : '#88ccff'; }
+    if (h3kp  && d.kp      != null) h3kp.textContent  = d.kp.toFixed(1);
 
     // Last update
     if (d.lastUpdated) {
@@ -961,7 +1329,11 @@ window.addEventListener('swpc-update', e => {
     const bt      = sw.bt ?? 0;
     const windNorm = Math.min((spd - 250) / 650, 1);
 
-    el('wind-trend').textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
+    // Only update the trend line from NOAA if the pipeline hasn't already enriched it
+    // (pipeline handler replaces this with trend arrow + slope when available).
+    const trendEl = el('wind-trend');
+    if (!trendEl.textContent || trendEl.textContent === '–')
+        trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
     el('p-speed').textContent   = `${Math.round(spd)} km/s`;
     el('p-speed').className     = `param-val ${spd > 700 ? 'danger' : spd > 500 ? 'warn' : 'ok'}`;
     el('p-density').textContent = `${density.toFixed(2)} n/cc`;
@@ -1032,6 +1404,35 @@ window.addEventListener('swpc-update', e => {
             </tr>`;
         }).join('');
     }
+
+    // ── Source chips + offline/stale banner ──────────────────────────────────
+    const st = d.status || 'live';
+
+    // All NOAA-sourced chips reflect the same feed status
+    ['src-wind','src-kp','src-ar','src-flares',
+     'ds-wind','ds-kp','ds-xray','ds-ar','ds-sep'].forEach(id => {
+        const chip = el(id);
+        if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g, '') + ' ' + st;
+    });
+
+    // NASA DONKI chip — always 'live' if we got the event (nasa-update handles its own)
+    const cmeChip = el('src-cme');
+    if (cmeChip) cmeChip.className = cmeChip.className.replace(/\b(live|stale|offline)\b/g, '') + ' live';
+
+    // Offline / stale data banner
+    const banner  = el('data-status-banner');
+    const dsbText = el('dsb-text');
+    const dsbAge  = el('dsb-age');
+    if (banner) {
+        banner.className = 'data-status-banner ' + (st === 'live' ? '' : st);
+        if (st === 'offline') {
+            dsbText.textContent = '⚠ NOAA live feed unavailable — showing last cached values. Retrying in 90 s.';
+            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
+        } else if (st === 'stale') {
+            dsbText.textContent = '⚠ Space weather data is stale (>5 min old) — network may be slow.';
+            dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
+        }
+    }
 });
 
 // ── NASA DONKI update ─────────────────────────────────────────────────────────
@@ -1052,11 +1453,19 @@ window.addEventListener('nasa-update', e => {
     } else {
         el('cme-content').innerHTML = '<div style="color:#445;font-size:.8rem;padding:8px 0">No recent CME data available.</div>';
     }
+    // Mark NASA DONKI source as live
+    ['src-cme','ds-cme'].forEach(id => {
+        const chip = el(id);
+        if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g,'') + ' live';
+    });
 });
 
 // ── SOHO/SDO imagery ──────────────────────────────────────────────────────────
 window.addEventListener('soho-update', e => {
     const imgs = e.detail.images || {};
+    // Mark SDO source as live when imagery arrives
+    const sdoChip = el('ds-sdo');
+    if (sdoChip) sdoChip.className = sdoChip.className.replace(/\b(live|stale|offline)\b/g,'') + ' live';
     const map = {
         'img-304':  imgs.sdo_aia304,
         'img-171':  imgs.sdo_aia171,
@@ -1077,9 +1486,517 @@ window.addEventListener('soho-update', e => {
 });
 
 // ── Start all feeds ───────────────────────────────────────────────────────────
+// SpaceWeatherFeed now owns all NOAA + DONKI polling via tiered edge routes.
+// NasaFeed is a legacy shim that forwards swpc-update → nasa-update for any
+// remaining listeners; it no longer polls independently or needs an API key.
 new SpaceWeatherFeed().start();
 new SohoFeed().start();
-new NasaFeed({ apiKey: 'DEMO_KEY' }).start();
+new NasaFeed().start();
+
+// ── Wind-speed pipeline (Vercel Edge /api/solar-wind/wind-speed) ──────────────
+// Provides enriched solar wind data: trend direction, alert level, 60-min series.
+// Falls back gracefully — swpc-update still supplies the raw speed number if
+// the pipeline endpoint is unavailable (e.g. during local dev without the server).
+try {
+    new WindPipelineFeed().start();
+} catch (e) {
+    console.debug('[WindPipeline] not available, using NOAA direct only:', e.message);
+}
+
+// ── Ephemeris — real planet positions for the heliosphere canvas ──────────────
+new EphemerisService().startLive(120);
+
+// ── 3D Heliosphere hero (inner solar system, Three.js) ───────────────────────
+// Heliosphere3D: 3D Parker spiral solar wind, real ephemeris planetary orbits,
+// Earth magnetosphere via MagnetosphereEngine, CME shells, flare bursts.
+// Listens to swpc-update + ephemeris-ready events automatically.
+const helioCanvas = document.getElementById('helio-canvas');
+if (helioCanvas) new Heliosphere3D(helioCanvas).start();
+
+// ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
+// SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.
+// Receives live updates via swpc-update; layer toggles wired to buttons below.
+let _globe = null;
+{
+    const globeCanvas = el('sw-globe-canvas');
+    if (globeCanvas) {
+        _globe = new SpaceWeatherGlobe(globeCanvas).start();
+
+        // Layer toggle buttons
+        document.getElementById('globe-layers')?.addEventListener('click', ev => {
+            const btn = ev.target.closest('.layer-btn');
+            if (!btn) return;
+            btn.classList.toggle('active');
+            _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+    }
+}
+
+// ── LEGACY IIFE REMOVED — kept below as dead stub for safety until cleanup ──
+(function () {
+    const panCanvas   = null; // removed
+    if (!panCanvas) return;
+
+    const DPR = window.devicePixelRatio || 1;
+
+    // Live state (seeded with reasonable defaults, overwritten by swpc-update)
+    const S = {
+        speed:   450, density: 5, bz: -2, bt: 5, by: 0,
+        kp: 2, xrayFlux: 1e-7, cmeActive: false, sepLevel: 0,
+    };
+    window.addEventListener('swpc-update', e => {
+        const d = e.detail, sw = d.solar_wind || {};
+        S.speed     = sw.speed    ?? S.speed;
+        S.density   = sw.density  ?? S.density;
+        S.bz        = sw.bz       ?? S.bz;
+        S.bt        = sw.bt       ?? S.bt;
+        S.by        = sw.by       ?? S.by;
+        S.kp        = d.kp        ?? S.kp;
+        S.xrayFlux  = d.xray_flux ?? S.xrayFlux;
+        S.cmeActive = d.cme_active ?? S.cmeActive;
+        S.sepLevel  = d.sep_level  ?? S.sepLevel;
+    });
+
+    // ── Canvas resize helpers ──────────────────────────────────────────────────
+    function resizePan() {
+        const r = panCanvas.getBoundingClientRect();
+        panCanvas.width  = r.width  * DPR;
+        panCanvas.height = r.height * DPR;
+    }
+    function resizeEarth() {
+        const r = earthCanvas.getBoundingClientRect();
+        earthCanvas.width  = r.width  * DPR;
+        earthCanvas.height = r.height * DPR;
+    }
+
+    // ── Star field (shared background) ────────────────────────────────────────
+    const STARS = Array.from({length: 120}, () => ({
+        x: Math.random(), y: Math.random(),
+        r: 0.4 + Math.random() * 0.8,
+        a: 0.2 + Math.random() * 0.6,
+    }));
+
+    // ── Solar wind particles (panorama) ───────────────────────────────────────
+    const N_WIND = 90;
+    const wPts = Array.from({length: N_WIND}, () => ({
+        x: Math.random(), y: 0.05 + Math.random() * 0.90,
+        vx: 0.0008 + Math.random() * 0.0012,
+        seed: Math.random(),
+    }));
+
+    // ── CME particles ─────────────────────────────────────────────────────────
+    const N_CME = 45;
+    const cmePts = Array.from({length: N_CME}, () => ({
+        x: 0.06 + Math.random() * 0.08,
+        y: 0.35 + Math.random() * 0.30,
+        vx: 0.002 + Math.random() * 0.003,
+        vy: (Math.random() - 0.5) * 0.0015,
+        seed: Math.random(), sz: 1.5 + Math.random() * 2,
+    }));
+
+    // ── Panorama draw ─────────────────────────────────────────────────────────
+    function drawPanorama(t) {
+        const ctx = panCanvas.getContext('2d');
+        const W = panCanvas.width, H = panCanvas.height;
+        ctx.save();
+        ctx.scale(DPR, DPR);
+        const w = W / DPR, h = H / DPR;
+
+        // Background
+        ctx.fillStyle = '#020108';
+        ctx.fillRect(0, 0, w, h);
+
+        // Stars
+        STARS.forEach(s => {
+            ctx.beginPath();
+            ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180,200,255,${s.a * (0.6 + 0.4 * Math.sin(t * 0.7 + s.seed * 10))})`;
+            ctx.fill();
+        });
+
+        // Key geometry positions (logical pixels)
+        const sunX = w * 0.07, sunY = h * 0.50;
+        const earthX = w * 0.82, earthY = h * 0.50;
+        const sunR  = h * 0.22;
+        const eR    = h * 0.08;     // Earth radius on screen
+
+        // Shue magnetopause standoff (in units of eR)
+        const bzS  = Math.max(-S.bz, 0);
+        const mpMult = 10.9 * Math.pow(1 + 0.013 * bzS, -1 / 2.1);
+        const mpR  = eR * mpMult;
+        const bsR  = mpR * 1.38;
+
+        // Fraction of Sun→Earth distance that L1/L2 occupy on screen
+        const l1X = earthX - (earthX - sunX) * 0.14;
+        const l2X = earthX + (earthX - sunX) * 0.13;
+
+        // ── Parker spiral arms ───────────────────────────────────────────────
+        const nArms = 5;
+        const spdNorm = Math.max(0, Math.min(1, (S.speed - 250) / 650));
+        for (let s = 0; s < nArms; s++) {
+            const yFrac = (s / (nArms - 1) - 0.5) * 0.78;
+            const y0 = sunY + yFrac * h;
+            const yE = earthY + yFrac * h * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(sunX + sunR * 0.9, y0);
+            ctx.bezierCurveTo(
+                sunX + (earthX - sunX) * 0.28, y0 * 0.92 + sunY * 0.08,
+                sunX + (earthX - sunX) * 0.66, yE * 0.94 + earthY * 0.06,
+                earthX - mpR * 1.1, yE
+            );
+            const baseA = 0.08 + spdNorm * 0.14;
+            const grad = ctx.createLinearGradient(sunX, sunY, earthX, earthY);
+            grad.addColorStop(0, `rgba(255,200,60,${baseA * 2.2})`);
+            grad.addColorStop(0.55, `rgba(255,160,50,${baseA})`);
+            grad.addColorStop(1, `rgba(255,120,40,${baseA * 0.3})`);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 1.3;
+            ctx.setLineDash([5, 8]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // ── Animated solar wind dots ─────────────────────────────────────────
+        wPts.forEach(p => {
+            p.x += p.vx * (S.speed / 450);
+            if (p.x > 1) { p.x = 0.13; p.y = 0.05 + Math.random() * 0.90; }
+            const px = p.x * w, py = p.y * h;
+            const dx = px - earthX, dy = py - earthY;
+            if (Math.sqrt(dx * dx + dy * dy) < mpR * 1.05) return; // inside magnetopause
+            ctx.beginPath();
+            ctx.arc(px, py, 1.3, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255,210,80,${0.25 + 0.35 * Math.sin(t * 2.2 + p.seed * 9)})`;
+            ctx.fill();
+        });
+
+        // ── CME ejecta ───────────────────────────────────────────────────────
+        if (S.cmeActive) {
+            cmePts.forEach(p => {
+                p.x += p.vx * (S.speed / 400);
+                p.y += p.vy;
+                if (p.x > 1) { p.x = 0.06; p.y = 0.35 + Math.random() * 0.30; }
+                if (p.y < 0.02 || p.y > 0.98) p.vy *= -1;
+                ctx.beginPath();
+                ctx.arc(p.x * w, p.y * h, p.sz, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255,140,50,${0.5 + 0.4 * Math.sin(t * 3.5 + p.seed * 7)})`;
+                ctx.fill();
+            });
+        }
+
+        // ── Sun ───────────────────────────────────────────────────────────────
+        // Corona glow
+        const xRayBrt = Math.min(1, Math.log10(Math.max(S.xrayFlux, 1e-9) / 1e-9) / 6);
+        for (let ri = 0; ri < 5; ri++) {
+            const cr = sunR * (1.4 + ri * 0.38);
+            const cg = ctx.createRadialGradient(sunX, sunY, sunR, sunX, sunY, cr);
+            const ca = (0.04 + xRayBrt * 0.06) * (1 - ri / 5);
+            cg.addColorStop(0, `rgba(255,200,80,${ca * 2})`);
+            cg.addColorStop(1, 'rgba(255,200,80,0)');
+            ctx.beginPath(); ctx.arc(sunX, sunY, cr, 0, Math.PI * 2);
+            ctx.fillStyle = cg; ctx.fill();
+        }
+        const sg = ctx.createRadialGradient(sunX - sunR * 0.18, sunY - sunR * 0.18, 0, sunX, sunY, sunR);
+        sg.addColorStop(0, '#fff8e0'); sg.addColorStop(0.4, '#ffd700');
+        sg.addColorStop(0.82, '#ff8c00'); sg.addColorStop(1, '#cc3300');
+        ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
+        ctx.fillStyle = sg; ctx.fill();
+
+        // X-ray flare pulse
+        if (xRayBrt > 0.3) {
+            const fp = (Math.sin(t * 3.5) * 0.5 + 0.5) * xRayBrt * 0.4;
+            const fg = ctx.createRadialGradient(sunX, sunY, sunR, sunX, sunY, sunR * 1.6);
+            fg.addColorStop(0, `rgba(255,255,200,${fp})`); fg.addColorStop(1, 'rgba(255,255,200,0)');
+            ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 1.6, 0, Math.PI * 2);
+            ctx.fillStyle = fg; ctx.fill();
+        }
+
+        // ── Bow Shock (Spreiter parabola) ─────────────────────────────────────
+        ctx.save(); ctx.translate(earthX, earthY);
+        ctx.beginPath();
+        for (let i = 0; i <= 60; i++) {
+            const th = (i / 60 - 0.5) * Math.PI * 1.7;
+            const r  = bsR * (1.05 + 0.12 * th * th) / (1 + 0.62 * Math.cos(th));
+            const bx = -r * Math.cos(th), by = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(bx, by) : ctx.lineTo(bx, by);
+        }
+        ctx.strokeStyle = 'rgba(80,150,255,0.4)';
+        ctx.lineWidth = 1.4; ctx.stroke();
+        ctx.restore();
+
+        // ── Magnetopause (Shue model, teardrop) ───────────────────────────────
+        ctx.save(); ctx.translate(earthX, earthY);
+        const mpCol = S.bz < -15 ? 'rgba(200,60,255,0.6)' : S.bz < -5 ? 'rgba(150,80,255,0.5)' : 'rgba(100,120,255,0.38)';
+        ctx.beginPath();
+        for (let i = 0; i <= 60; i++) {
+            const th = (i / 60 - 0.5) * Math.PI * 1.7;
+            const r  = mpR * (1.04 + 0.08 * th * th) / (1 + 0.52 * Math.cos(th));
+            const mx = -r * Math.cos(th), my = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+        }
+        ctx.strokeStyle = mpCol; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+
+        // ── Earth ─────────────────────────────────────────────────────────────
+        // Atmosphere glow
+        const kpNorm = Math.min(S.kp / 9, 1);
+        const atmCol = kpNorm > 0.7 ? 'rgba(255,40,120,' : kpNorm > 0.4 ? 'rgba(80,255,140,' : 'rgba(60,160,255,';
+        const ag = ctx.createRadialGradient(earthX, earthY, eR, earthX, earthY, eR * 1.55);
+        ag.addColorStop(0, atmCol + '0.3)'); ag.addColorStop(1, atmCol + '0)');
+        ctx.beginPath(); ctx.arc(earthX, earthY, eR * 1.55, 0, Math.PI * 2);
+        ctx.fillStyle = ag; ctx.fill();
+
+        // Night side
+        ctx.beginPath(); ctx.arc(earthX, earthY, eR, 0, Math.PI * 2);
+        ctx.fillStyle = '#081828'; ctx.fill();
+
+        // Day side (lit from Sun on left)
+        const dg = ctx.createRadialGradient(earthX - eR * 0.3, earthY, 0, earthX, earthY, eR);
+        dg.addColorStop(0, '#4499ff'); dg.addColorStop(0.5, '#1e60bf');
+        dg.addColorStop(0.85, '#0a2050'); dg.addColorStop(1, '#030818');
+        ctx.save(); ctx.beginPath();
+        ctx.arc(earthX, earthY, eR, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(earthX, earthY + eR);
+        ctx.arc(earthX, earthY, eR, Math.PI / 2, -Math.PI / 2, true);
+        ctx.closePath(); ctx.fillStyle = dg; ctx.fill(); ctx.restore();
+
+        // ── L1 point ─────────────────────────────────────────────────────────
+        const l1Pulse = 0.5 + 0.5 * Math.sin(t * 2.5);
+        ctx.beginPath(); ctx.arc(l1X, earthY, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,232,116,${0.5 + 0.4 * l1Pulse})`; ctx.fill();
+        ctx.shadowColor = '#00e874'; ctx.shadowBlur = 6 * l1Pulse;
+        ctx.beginPath(); ctx.arc(l1X, earthY, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#00e874'; ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00e874'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('L1', l1X, earthY - 10);
+        ctx.fillStyle = '#334'; ctx.font = '7.5px monospace';
+        ctx.fillText('DSCOVR·ACE', l1X, earthY - 20);
+
+        // ── L2 point ─────────────────────────────────────────────────────────
+        const l2Pulse = 0.5 + 0.5 * Math.sin(t * 2.5 + 1.3);
+        ctx.shadowColor = '#00e874'; ctx.shadowBlur = 5 * l2Pulse;
+        ctx.beginPath(); ctx.arc(l2X, earthY, 3, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0,220,100,${0.4 + 0.3 * l2Pulse})`; ctx.fill(); ctx.shadowBlur = 0;
+        ctx.fillStyle = '#00c870'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('L2', l2X, earthY - 10);
+        ctx.fillStyle = '#334'; ctx.font = '7.5px monospace';
+        ctx.fillText('JWST·Gaia', l2X, earthY - 20);
+
+        // ── Status labels ─────────────────────────────────────────────────────
+        ctx.textAlign = 'center'; ctx.font = 'bold 9.5px monospace';
+        ctx.fillStyle = S.speed > 700 ? '#ff6644' : S.speed > 500 ? '#ffaa44' : '#88cc88';
+        ctx.fillText(`${Math.round(S.speed)} km/s`, (sunX + earthX) / 2, h - 7);
+        ctx.fillStyle = S.bz < -15 ? '#ff4488' : S.bz < -5 ? '#ffaa44' : '#44aa66';
+        ctx.fillText(`Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT`, earthX - 2, h - 7);
+        ctx.fillStyle = '#334'; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('1 AU  ·  ←  150 × 10⁶ km  →', sunX + sunR + 6, h - 7);
+
+        // Magnetopause distance label
+        ctx.fillStyle = '#554'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+        ctx.fillText(`R_mp=${mpMult.toFixed(1)} R⊕`, earthX - mpR * 1.1, earthY - mpR * 0.6);
+        ctx.fillStyle = '#446'; ctx.font = '8px monospace';
+        ctx.fillText('Bow Shock', earthX - bsR * 0.95, earthY - bsR * 0.55);
+
+        ctx.restore();
+    }
+
+    // ── Earth Layers Draw ─────────────────────────────────────────────────────
+    function drawEarth(t) {
+        const ctx = earthCanvas.getContext('2d');
+        const W = earthCanvas.width, H = earthCanvas.height;
+        ctx.save();
+        ctx.scale(DPR, DPR);
+        const w = W / DPR, h = H / DPR;
+        const cx = w / 2, cy = h / 2;
+        const R = Math.min(w, h) * 0.135;   // Earth radius in logical px
+
+        // Background
+        ctx.fillStyle = '#030108';
+        ctx.fillRect(0, 0, w, h);
+
+        // Stars
+        STARS.forEach(s => {
+            ctx.beginPath();
+            ctx.arc(s.x * w, s.y * h, s.r * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180,200,255,${s.a * 0.7})`;
+            ctx.fill();
+        });
+
+        // Derived metrics
+        const kpNorm   = Math.min(S.kp / 9, 1);
+        const bzS      = Math.max(-S.bz, 0);
+        const xRayNorm = Math.min(Math.log10(Math.max(S.xrayFlux, 1e-9) / 1e-9) / 6, 1);
+        const sepNorm  = Math.min(S.sepLevel / 5, 1);
+        const spdNorm  = Math.max(0, Math.min(1, (S.speed - 250) / 650));
+
+        // Magnetopause standoff
+        const mpRad = R * 10.9 * Math.pow(1 + 0.013 * bzS, -1 / 2.1);
+
+        // ── Layer rings (innermost→outermost) ────────────────────────────────
+        const layers = [
+            // Atmosphere
+            { r1: R,        r2: R * 1.085, rgb: [30, 100, 220],  a: 0.55, label: null },   // Troposphere fill
+            { r1: R*1.085,  r2: R*1.155,   rgb: [20, 145, 200],  a: 0.35, label: null },   // Stratosphere
+            { r1: R*1.155,  r2: R*1.215,   rgb: [30, 175, 195],  a: 0.30, label: null },   // Mesosphere
+            // Ionosphere (driven by X-ray)
+            { r1: R*1.215,  r2: R*1.30,    rgb: [40, 210, 255],  a: 0.15 + xRayNorm * 0.35, label: null },   // D layer
+            { r1: R*1.30,   r2: R*1.42,    rgb: [100, 225, 255], a: 0.12 + xRayNorm * 0.28, label: null },   // E layer
+            { r1: R*1.42,   r2: R*1.68,    rgb: [140, 205, 255], a: 0.10 + xRayNorm * 0.24, label: null },   // F layer
+            // Plasmasphere
+            { r1: R*1.68,   r2: R*2.1,     rgb: [80, 120, 200],  a: 0.07 + kpNorm * 0.06, label: null },
+            // Inner Van Allen Belt (proton belt ~1–3 R⊕)
+            { r1: R*2.1,    r2: R*3.1,     rgb: [255, 165, 40],  a: 0.11 + sepNorm * 0.26 + kpNorm * 0.07, label: null },
+            // Slot region
+            { r1: R*3.1,    r2: R*3.55,    rgb: [50, 55, 110],   a: 0.04, label: null },
+            // Outer Van Allen Belt (electron belt ~3–10 R⊕)
+            { r1: R*3.55,   r2: R*6.8,     rgb: [255, 95, 50],   a: 0.09 + kpNorm * 0.20 + sepNorm * 0.14, label: null },
+            // Magnetopause
+            { r1: mpRad*0.88, r2: mpRad,   rgb: [110, 75, 255],  a: 0.14 + kpNorm * 0.09, label: null },
+        ];
+
+        layers.forEach(L => {
+            const grad = ctx.createRadialGradient(cx, cy, L.r1, cx, cy, L.r2);
+            const [r, g, b] = L.rgb;
+            const aIn  = Math.min(L.a * 0.55, 0.85);
+            const aMid = Math.min(L.a, 0.85);
+            const aOut = 0;
+            grad.addColorStop(0,   `rgba(${r},${g},${b},${aIn})`);
+            grad.addColorStop(0.5, `rgba(${r},${g},${b},${aMid})`);
+            grad.addColorStop(1,   `rgba(${r},${g},${b},${aOut})`);
+            ctx.beginPath();
+            ctx.arc(cx, cy, L.r2, 0, Math.PI * 2);
+            ctx.arc(cx, cy, L.r1, 0, Math.PI * 2, true);
+            ctx.fillStyle = grad;
+            ctx.fill();
+        });
+
+        // ── Magnetopause boundary line ────────────────────────────────────────
+        ctx.save(); ctx.translate(cx, cy);
+        const mpLineCol = S.bz < -15 ? 'rgba(200,60,255,0.55)' : S.bz < -5 ? 'rgba(150,80,255,0.45)' : 'rgba(100,100,255,0.32)';
+        ctx.beginPath();
+        for (let i = 0; i <= 72; i++) {
+            const th = (i / 72 - 0.5) * Math.PI * 1.8;
+            const r  = mpRad * (1.03 + 0.07 * th * th) / (1 + 0.48 * Math.cos(th));
+            const mx = -r * Math.cos(th), my = r * Math.sin(th);
+            i === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my);
+        }
+        ctx.strokeStyle = mpLineCol; ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+        ctx.restore();
+
+        // ── Aurora ovals ──────────────────────────────────────────────────────
+        const auroraAlpha = 0.15 + kpNorm * 0.65;
+        const auroraRGB   = kpNorm > 0.7 ? '255,50,130' : kpNorm > 0.4 ? '80,255,130' : '40,200,110';
+        const auroraLat   = (75 - kpNorm * 35) * Math.PI / 180;  // equatorward with high Kp
+        const aRing = R * 1.26;  // aurora altitude ~300km above surface
+        const nAurRx = aRing * Math.sin(auroraLat);
+        const nAurRy = nAurRx * 0.22;   // flattened for top-down-ish perspective
+
+        // North aurora
+        const nAurY = cy - R * Math.cos(auroraLat) * 0.88;
+        ctx.save();
+        ctx.shadowColor = kpNorm > 0.4 ? (kpNorm > 0.7 ? '#ff3080' : '#00ff88') : '#00cc88';
+        ctx.shadowBlur = 10 * kpNorm;
+        ctx.beginPath(); ctx.ellipse(cx, nAurY, nAurRx, nAurRy, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${auroraRGB},${auroraAlpha})`; ctx.lineWidth = 4.5; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.restore();
+
+        // South aurora
+        const sAurY = cy + R * Math.cos(auroraLat) * 0.88;
+        ctx.save(); ctx.shadowColor = ctx.shadowColor;
+        ctx.shadowBlur = 10 * kpNorm;
+        ctx.beginPath(); ctx.ellipse(cx, sAurY, nAurRx, nAurRy, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(${auroraRGB},${auroraAlpha * 0.85})`; ctx.lineWidth = 4.5; ctx.stroke();
+        ctx.shadowBlur = 0; ctx.restore();
+
+        // ── Earth disk ────────────────────────────────────────────────────────
+        ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2);
+        const eg = ctx.createRadialGradient(cx - R * 0.22, cy - R * 0.22, 0, cx, cy, R);
+        eg.addColorStop(0, '#2a60a8'); eg.addColorStop(0.5, '#1a3a6a'); eg.addColorStop(1, '#080e22');
+        ctx.fillStyle = eg; ctx.fill();
+
+        // Simplified continents
+        ctx.save(); ctx.clip();
+        ctx.fillStyle = 'rgba(38,98,38,0.72)';
+        ctx.beginPath(); ctx.ellipse(cx - R*0.33, cy - R*0.14, R*0.27, R*0.21, -0.2, 0, Math.PI*2); ctx.fill();  // N. America
+        ctx.beginPath(); ctx.ellipse(cx + R*0.12, cy - R*0.17, R*0.36, R*0.17, 0.3, 0, Math.PI*2);  ctx.fill();  // Eurasia
+        ctx.beginPath(); ctx.ellipse(cx + R*0.14, cy + R*0.10, R*0.16, R*0.26, 0.1, 0, Math.PI*2);  ctx.fill();  // Africa
+        ctx.beginPath(); ctx.ellipse(cx - R*0.22, cy + R*0.24, R*0.13, R*0.22, -0.2, 0, Math.PI*2); ctx.fill();  // S. America
+        ctx.beginPath(); ctx.ellipse(cx + R*0.42, cy + R*0.22, R*0.22, R*0.14, 0.5, 0, Math.PI*2);  ctx.fill();  // Australia
+        // Ice caps
+        ctx.fillStyle = 'rgba(220,238,255,0.88)';
+        ctx.beginPath(); ctx.ellipse(cx, cy - R*0.83, R*0.34, R*0.13, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx, cy + R*0.83, R*0.42, R*0.17, 0, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // Atmosphere rim glow
+        const rimG = ctx.createRadialGradient(cx, cy, R * 0.9, cx, cy, R * 1.09);
+        rimG.addColorStop(0, 'rgba(60,150,255,0)');
+        rimG.addColorStop(0.55, 'rgba(80,170,255,0.38)');
+        rimG.addColorStop(1, 'rgba(80,200,255,0)');
+        ctx.beginPath(); ctx.arc(cx, cy, R * 1.09, 0, Math.PI * 2);
+        ctx.fillStyle = rimG; ctx.fill();
+
+        // ── Layer labels (right side, angled leader lines) ────────────────────
+        const labelDefs = [
+            { r: R * 1.04,  txt: 'Troposphere',       sub: '0–12 km',         col: '#3a9fff' },
+            { r: R * 1.12,  txt: 'Stratosphere',       sub: '12–50 km',        col: '#28b8cc' },
+            { r: R * 1.18,  txt: 'Mesosphere',         sub: '50–80 km',        col: '#30c4cc' },
+            { r: R * 1.25,  txt: 'Iono D layer',       sub: '80–120 km',       col: `rgba(${40 + xRayNorm * 200},210,255,1)` },
+            { r: R * 1.36,  txt: 'Iono E layer',       sub: '120–200 km',      col: `rgba(${100 + xRayNorm * 155},225,255,1)` },
+            { r: R * 1.55,  txt: 'Iono F layer',       sub: '200–600 km',      col: `rgba(${140 + xRayNorm * 115},205,255,1)` },
+            { r: R * 1.88,  txt: 'Plasmasphere',       sub: '1–3 R⊕',         col: '#6080cc' },
+            { r: R * 2.55,  txt: 'Van Allen (inner)',  sub: 'protons ~1–3 R⊕',  col: '#ffa040' },
+            { r: R * 5.1,   txt: 'Van Allen (outer)',  sub: 'electrons ~3–7 R⊕',col: '#ff6040' },
+            { r: mpRad * 0.92, txt: `Magnetopause`,    sub: `${(mpRad/R).toFixed(1)} R⊕ (Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT)`, col: '#9060ff' },
+        ];
+
+        const LA = -Math.PI * 0.28;   // label angle (upper-right quadrant)
+        ctx.save();
+        labelDefs.forEach((d, i) => {
+            const lx0 = cx + d.r * Math.cos(LA);
+            const ly0 = cy + d.r * Math.sin(LA);
+            const lx1 = lx0 + 8;
+            const ly1 = ly0 - 1;
+            ctx.beginPath(); ctx.moveTo(lx0, ly0); ctx.lineTo(lx1, ly1);
+            ctx.strokeStyle = d.col + '66'; ctx.lineWidth = 0.9; ctx.stroke();
+            ctx.fillStyle = d.col;
+            ctx.font = `bold 8px 'Segoe UI', monospace`;
+            ctx.textAlign = 'left'; ctx.fillText(d.txt, lx1 + 2, ly1 + 3);
+            ctx.fillStyle = '#445'; ctx.font = '7px monospace';
+            ctx.fillText(d.sub, lx1 + 2, ly1 + 11);
+        });
+        ctx.restore();
+
+        // ── Title & live indicators ────────────────────────────────────────────
+        ctx.fillStyle = '#334'; ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('Earth: Atmosphere · Radiation Belts · Magnetosphere', cx, 13);
+
+        ctx.textAlign = 'left'; ctx.font = '8px monospace';
+        ctx.fillStyle = kpNorm > 0.6 ? '#ff6080' : kpNorm > 0.35 ? '#ffaa44' : '#447744';
+        ctx.fillText(`Kp ${S.kp.toFixed(1)}`, 5, h - 16);
+        ctx.fillStyle = S.bz < -10 ? '#ff4488' : S.bz < -5 ? '#ffaa44' : '#448844';
+        ctx.fillText(`Bz ${S.bz >= 0 ? '+' : ''}${S.bz.toFixed(1)} nT`, 5, h - 6);
+        ctx.textAlign = 'right';
+        const xC = xRayNorm > 0.83 ? 'X' : xRayNorm > 0.66 ? 'M' : xRayNorm > 0.50 ? 'C' : xRayNorm > 0.33 ? 'B' : 'A';
+        ctx.fillStyle = xC === 'X' ? '#ff4444' : xC === 'M' ? '#ff8844' : '#4a7a4a';
+        ctx.fillText(`X-ray: ${xC}  SEP: S${S.sepLevel}`, w - 5, h - 6);
+
+        ctx.restore();
+    }
+
+    // ── Animation loop ─────────────────────────────────────────────────────────
+    function animate(now) {
+        requestAnimationFrame(animate);
+        const t = now / 1000;
+        drawPanorama(t);
+        drawEarth(t);
+    }
+
+    function onResize() { resizePan(); resizeEarth(); }
+    onResize();
+    window.addEventListener('resize', onResize);
+    requestAnimationFrame(animate);
+})();
 
 // ── Image overlay ─────────────────────────────────────────────────────────────
 window.openImg = function(thumb) {

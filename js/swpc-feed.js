@@ -1,89 +1,47 @@
 /**
- * swpc-feed.js — NOAA Space Weather Prediction Center real-time data pipeline
+ * swpc-feed.js — Tiered space weather data pipeline
  *
- * Polls five public SWPC JSON endpoints on a configurable interval (default 5 min),
- * normalises raw physical units to [0,1] shader-friendly scalars, and dispatches a
- * 'swpc-update' CustomEvent on window each time new data arrives.
+ * All data now flows through Vercel Edge Functions (api/noaa/*, api/donki/*,
+ * api/solar-wind/*) rather than hitting NOAA / NASA directly from the browser.
+ * Benefits: CDN caching, payload slicing, NASA key isolation, CORS guarantee.
  *
- * ENDPOINTS (all public, CORS-enabled, ~1-minute NOAA update cadence)
- * ─────────────────────────────────────────────────────────────────────
- *  wind_1m   DSCOVR / ACE L1 real-time solar wind
- *            fields: bt(nT), bz(nT), bx_gse, by_gse, density(n/cc),
- *                    speed(km/s), temperature(K)
- *  kp_index  NOAA estimated planetary Kp index (3-hour)
- *  xray_flux GOES primary 0.1–0.8 nm channel (1-day history)
- *  flares_7d GOES solar flare event list (7-day)
- *  regions   Active solar region (sunspot group) table
+ * THREE POLL TIERS
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  T1 — 60 s   wind, Kp-1m, X-ray  (drives live globe shader; GOES products update ~1 min)
+ *  T2 —  5 min protons, electrons, aurora, alerts
+ *  T3 — 15 min flares, regions, Dst (1-hr product), DONKI CME, DONKI notifications
  *
- * STATE OBJECT  (event.detail)
- * ─────────────────────────────────────────────────────────────────────
- *  solar_wind  { speed, density, temperature, bt, bz, bx, by }
- *  kp          number  0–9  (NOAA planetary K-index)
- *  xray_flux   W/m²    current GOES X-ray flux
- *  xray_class  string  "A1.2" / "M5.4" / "X2.1" …
- *  flare_class string  class of most recent flare (may be hours old)
- *  flare_time  Date
- *  flare_location  string e.g. "N24W30"
- *  active_regions  [{ region, lat_rad, lon_rad, area_norm, is_complex }]
- *  recent_flares   [{ time, cls, parsed, location }]  (10 most recent)
- *  derived     { wind_speed_norm, wind_density_norm, kp_norm,
- *                bz_southward, bt_norm, xray_intensity, storm_level }
- *  status      'live' | 'stale' | 'offline' | 'connecting'
- *  lastUpdated Date
- *  new_major_flare  bool  — true once per M/X flare detection
- *  flare_direction  { lat_rad, lon_rad } | null
+ *  T2 fires 5 s after T1; T3 fires 10 s after T1 (staggered to avoid burst).
+ *  Storm-mode escalation compresses all intervals when Kp ≥ 6, X-class flare,
+ *  or Earth-directed CME is detected.  Auto-reverts after calm streak.
+ *
+ * STATE EVENT
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  window.addEventListener('swpc-update', e => …)
+ *  e.detail — see _buildState() for full schema.
  *
  * USAGE
- * ─────────────────────────────────────────────────────────────────────
+ * ─────────────────────────────────────────────────────────────────────────────
  *  import { SpaceWeatherFeed } from './js/swpc-feed.js';
- *  const feed = new SpaceWeatherFeed();
- *  window.addEventListener('swpc-update', e => console.log(e.detail));
+ *  import { TIER } from './js/config.js';
+ *
+ *  const feed = new SpaceWeatherFeed({ tier: TIER.FREE });
  *  feed.start();
  */
 
-// ── Endpoint registry ─────────────────────────────────────────────────────────
-export const ENDPOINTS = {
-    /** DSCOVR/ACE 1-minute real-time solar wind (Bt, Bz, speed, density, temp) */
-    wind_1m:      'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',
-    /** Planetary Kp index (3-hour cadence, 2-D array) */
-    kp_index:     'https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json',
-    /** GOES primary X-ray flux 1-day history (0.1–0.8 nm channel) */
-    xray_flux:    'https://services.swpc.noaa.gov/json/goes/primary/xray-1-day.json',
-    /** Solar flare event list — last 7 days */
-    flares_7d:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
-    /** Active solar regions (sunspot groups) */
-    regions:      'https://services.swpc.noaa.gov/json/solar_regions.json',
+import { API, INTERVALS, STORM, STORM_TRIGGERS, TIER } from './config.js';
 
-    // ── Extended NOAA feeds ────────────────────────────────────────────────
-    /** GOES integral proton flux 1-day (>10, >50, >100 MeV channels) — SEP/radiation storm */
-    protons_1d:   'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json',
-    /** GOES integral electron flux 1-day (>0.8, >2.0 MeV channels) */
-    electrons_1d: 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json',
-    /** OVATION Prime auroral power nowcast (GW) — north + south hemispheres */
-    aurora_now:   'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
-    /** Space weather alerts / warnings / watches (machine-readable JSON) */
-    alerts:       'https://services.swpc.noaa.gov/products/alerts.json',
-    /** Daily 10.7-cm solar radio flux (F10.7) — EUV/X-ray activity proxy */
-    radio_flux:   'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
-
-    // ── NASA CCMC / DONKI (Space Weather Database Of Notifications, Knowledge, Info) ──
-    /** CME Analysis — cone model, speed, direction, ENLIL model arrival times.
-     *  Requires dynamic date params; base URL completed at fetch time. */
-    donki_cme:    'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/CMEAnalysis',
-    /** DONKI notifications — all space weather events, last 30 days */
-    donki_notify: 'https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/rest/notifications',
-};
-
-// ── Quiet-Sun baseline (used as fallback when endpoints are unavailable) ──────
+// ── Quiet-Sun fallback state ──────────────────────────────────────────────────
 export const FALLBACK = {
     speed:       400,    // km/s   — nominal slow solar wind
     density:       5.0,  // n/cc
-    temperature: 1e5,   // K
+    temperature: 1e5,    // K
     bt:            5.0,  // nT total IMF
-    bz:            0.0,  // nT  (0 = weakly northward Parker spiral)
+    bz:            0.0,  // nT (0 = weakly northward Parker spiral)
     bx:            0.0,
     by:            5.0,
     kp:            2.0,  // quiet geomagnetic conditions
+    kp_1min:       2.0,
     xray_flux:   1e-8,   // W/m²  A-class background
     xray_class:  'A1.0',
     flare_class:  null,
@@ -93,31 +51,43 @@ export const FALLBACK = {
     flare_watts:  1e-8,
     recent_flares:  [],
     active_regions: [],
-    // Extended fields
-    proton_flux_10mev:  0.1,   // pfu — background >10 MeV channel
-    proton_flux_100mev: 0.01,  // pfu — background >100 MeV channel
-    electron_flux_2mev: 100,   // pfu — background >2 MeV channel
-    aurora_power_north: 2,     // GW  — quiet auroral oval
-    aurora_power_south: 2,     // GW
-    active_alerts:      [],    // current NOAA alert/warning messages
-    f107_flux:          150,   // sfu — moderate solar activity
-    sep_storm_level:    0,     // S0–S5 radiation storm proxy
-    aurora_activity:    'quiet', // 'quiet'|'active'|'storm'
-    // DONKI CME fields
-    recent_cmes:          [],   // parsed CME events from DONKI (last 7 days)
-    earth_directed_cme:   null, // most recent Earth-directed CME object
-    cme_eta_hours:        null, // float hours until Earth arrival (negative = arrived)
-    donki_notifications:  [],   // recent DONKI notification messages
+    proton_flux_10mev:  0.1,
+    proton_flux_100mev: 0.01,
+    electron_flux_2mev: 100,
+    aurora_power_north: 2,
+    aurora_power_south: 2,
+    aurora_activity:    'quiet',
+    active_alerts:      [],
+    f107_flux:               150,    // sfu — moderate solar activity
+    f107_adjusted_sfu:       null,
+    f107_activity:           'moderate',
+    f107_slope_sfu_per_day:  null,
+    f107_trend_direction:    null,
+    f107_recent:             [],
+    sep_storm_level:    0,
+    recent_cmes:        [],
+    earth_directed_cme: null,
+    cme_eta_hours:      null,
+    donki_notifications: [],
+    dst_index:          -5,
+    proton_diff_1mev:   0.0,
+    proton_diff_10mev:  0.0,
+    donki_flares:       [],
+    gst_events:         [],
+    current_gst:        null,
+    sep_events:         [],
+    recent_sep_event:   null,
+    radiation_storm_active: false,
 };
 
 // ── X-ray class helpers ───────────────────────────────────────────────────────
 const CLASS_SCALE = { A: 1e-8, B: 1e-7, C: 1e-6, M: 1e-5, X: 1e-4 };
 
 function fluxToClass(flux) {
-    const f = Math.max(flux, 1e-9);
+    const f      = Math.max(flux, 1e-9);
     const letter = f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' :
                    f >= 1e-7 ? 'B' : 'A';
-    const num = (f / CLASS_SCALE[letter]).toFixed(1);
+    const num    = (f / CLASS_SCALE[letter]).toFixed(1);
     return `${letter}${num}`;
 }
 
@@ -129,402 +99,31 @@ function parseFlareClass(cls) {
     return { letter, number, watts };
 }
 
-// ── Normalization helpers ─────────────────────────────────────────────────────
+// ── Normalisation helpers ─────────────────────────────────────────────────────
 const clamp01 = v => Math.max(0, Math.min(1, v ?? 0));
 
-/**
- * Map raw measurements to [0,1] scalars used by shaders/particles.
- * Ranges are empirically chosen to span common solar-cycle conditions.
- */
 function derivedFields(raw) {
     const d = {};
-
-    // Wind speed: 250 km/s (slow) → 900 km/s (fast stream / CME shock)
-    d.wind_speed_norm   = clamp01((raw.speed   - 250) / 650);
-    // Density: background ~3 n/cc, solar energetic particle events ~20+ n/cc
-    d.wind_density_norm = clamp01( raw.density        / 25);
-    // Kp: 0 (quiet) → 9 (extreme storm)
-    d.kp_norm           = clamp01( raw.kp             / 9);
-    // Southward Bz: only negative component drives magnetospheric reconnection
-    // Range: 0 (northward) → 30 nT southward
-    d.bz_southward      = clamp01(-raw.bz             / 30);
-    // Total IMF: 0 → 30 nT
-    d.bt_norm           = clamp01( raw.bt             / 30);
-    // X-ray flux (log scale): 1e-9 W/m² → 0.0,  1e-7 → 0.33,  1e-4 → 0.83,  1e-3 → 1.0
-    const logFlux       = Math.log10(Math.max(raw.xray_flux, 1e-9));
-    d.xray_intensity    = clamp01((logFlux + 9) / 6);
-
-    // NOAA G-scale geomagnetic storm proxy from Kp
-    d.storm_level = raw.kp >= 9 ? 5 : raw.kp >= 8 ? 4 : raw.kp >= 7 ? 3 :
-                    raw.kp >= 6 ? 2 : raw.kp >= 5 ? 1 : 0;
-
-    // Proton flux (log): 0.1 pfu (background) → 0; 1e5 pfu (S5 storm) → 1
+    d.wind_speed_norm    = clamp01((raw.speed   - 250) / 650);
+    d.wind_density_norm  = clamp01( raw.density        / 25);
+    d.kp_norm            = clamp01( raw.kp             / 9);
+    d.bz_southward       = clamp01(-raw.bz             / 30);
+    d.bt_norm            = clamp01( raw.bt             / 30);
+    const logFlux        = Math.log10(Math.max(raw.xray_flux, 1e-9));
+    d.xray_intensity     = clamp01((logFlux + 9) / 6);
+    d.storm_level        = raw.kp >= 9 ? 5 : raw.kp >= 8 ? 4 : raw.kp >= 7 ? 3 :
+                           raw.kp >= 6 ? 2 : raw.kp >= 5 ? 1 : 0;
     d.proton_10mev_norm  = clamp01((Math.log10(Math.max(raw.proton_flux_10mev,  0.1)) + 1) / 6);
     d.proton_100mev_norm = clamp01((Math.log10(Math.max(raw.proton_flux_100mev, 0.01)) + 2) / 5);
-
-    // Electron flux: log-normalised, typical quiet ~100 pfu → 0.5
     d.electron_2mev_norm = clamp01((Math.log10(Math.max(raw.electron_flux_2mev, 10)) - 1) / 5);
-
-    // Aurora: 0 GW (no aurora) → 600 GW (severe storm)
-    d.aurora_north_norm = clamp01(raw.aurora_power_north / 600);
-    d.aurora_south_norm = clamp01(raw.aurora_power_south / 600);
-
-    // F10.7: 65 sfu (solar minimum) → 300 sfu (solar maximum)
-    d.f107_norm = clamp01((raw.f107_flux - 65) / 235);
-
+    d.aurora_north_norm  = clamp01(raw.aurora_power_north / 600);
+    d.aurora_south_norm  = clamp01(raw.aurora_power_south / 600);
+    d.f107_norm          = clamp01((raw.f107_flux - 65) / 235);
+    d.dst_norm           = clamp01(-raw.dst_index / 200);
+    d.kp_1min_norm       = clamp01((raw.kp_1min ?? raw.kp) / 9);
     return d;
 }
 
-// ── Normalization helpers (extended) ──────────────────────────────────────────
-
-/**
- * NOAA S-scale Solar Radiation Storm from >10 MeV proton flux (pfu)
- * S1≥10, S2≥100, S3≥1000, S4≥10000, S5≥100000
- */
-function protonToSLevel(pfu) {
-    if (pfu >= 1e5) return 5;
-    if (pfu >= 1e4) return 4;
-    if (pfu >= 1e3) return 3;
-    if (pfu >= 100) return 2;
-    if (pfu >= 10)  return 1;
-    return 0;
-}
-
-// ── Individual endpoint fetchers ──────────────────────────────────────────────
-async function fetchJSON(url) {
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-}
-
-/**
- * DSCOVR/ACE real-time solar wind
- * Response: array of 1-minute records, latest last.
- * Fields vary by instrument; we normalise the union.
- */
-async function fetchWind(state) {
-    const data = await fetchJSON(ENDPOINTS.wind_1m);
-    if (!Array.isArray(data)) return;
-    // Walk backwards to find most recent record with non-null speed + density
-    const rec = [...data].reverse().find(r => r.speed != null && r.speed > 0);
-    if (!rec) return;
-    if (rec.speed       != null) state.speed       = rec.speed;
-    if (rec.density     != null) state.density     = rec.density;
-    if (rec.temperature != null) state.temperature = rec.temperature;
-    if (rec.bt          != null) state.bt          = rec.bt;
-    if (rec.bz          != null) state.bz          = rec.bz;
-    if (rec.bx_gse      != null) state.bx          = rec.bx_gse;
-    if (rec.by_gse      != null) state.by          = rec.by_gse;
-    const ts = (rec.time_tag ?? '').replace(' ', 'T');
-    const tsDate = ts ? new Date(ts.endsWith('Z') ? ts : ts + 'Z') : new Date(0);
-    state.wind_timestamp = isNaN(tsDate.getTime()) ? new Date(0) : tsDate;
-}
-
-/**
- * NOAA planetary Kp index
- * Response: 2-D array — row[0] is a header row, subsequent rows are data.
- * Column order varies; locate 'kp' column by header name.
- */
-async function fetchKp(state) {
-    const data = await fetchJSON(ENDPOINTS.kp_index);
-    if (!Array.isArray(data) || data.length < 2) return;
-    const headers = data[0].map(h => String(h).toLowerCase());
-    const kpCol   = headers.indexOf('kp');
-    if (kpCol < 0) return;
-    const recent  = [...data.slice(1)].reverse().find(r => r[kpCol] != null && r[kpCol] !== '');
-    if (recent) state.kp = parseFloat(recent[kpCol]);
-}
-
-/**
- * GOES primary X-ray flux (0.1–0.8 nm)
- * Response: array of objects with { time_tag, flux, energy }
- * Pick the most recent record with the long-channel (0.1–0.8nm) flux.
- */
-async function fetchXray(state) {
-    const data = await fetchJSON(ENDPOINTS.xray_flux);
-    if (!Array.isArray(data)) return;
-    const rec = [...data]
-        .reverse()
-        .find(r => r.flux != null && r.flux > 0 &&
-              (!r.energy || r.energy.includes('0.1-0.8')));
-    if (!rec) return;
-    state.xray_flux  = rec.flux;
-    state.xray_class = fluxToClass(rec.flux);
-}
-
-/**
- * GOES flare event list (7-day)
- * Response: array of flare event objects.
- */
-async function fetchFlares(state) {
-    const data = await fetchJSON(ENDPOINTS.flares_7d);
-    if (!Array.isArray(data)) { state.recent_flares = []; return; }
-
-    const parsed = data
-        .filter(f => f.begin_time && f.class)
-        .map(f => ({
-            time:     new Date((f.begin_time ?? '').replace(' ', 'T') + 'Z'),
-            cls:      f.class,
-            location: f.location ?? null,
-            parsed:   parseFlareClass(f.class),
-        }))
-        .sort((a, b) => b.time - a.time)
-        .slice(0, 12);
-
-    state.recent_flares = parsed;
-    if (parsed.length > 0) {
-        const top          = parsed[0];
-        state.flare_class  = top.cls;
-        state.flare_watts  = top.parsed.watts;
-        state.flare_letter = top.parsed.letter;
-        state.flare_time   = top.time;
-        state.flare_location = top.location;
-    }
-}
-
-/**
- * Active solar regions (sunspot groups)
- * Response: array of region objects.
- * We cap at 5 — matching the shader array size.
- */
-async function fetchRegions(state) {
-    const data = await fetchJSON(ENDPOINTS.regions);
-    if (!Array.isArray(data)) { state.active_regions = []; return; }
-
-    state.active_regions = data
-        .filter(r => r.region && r.latitude != null)
-        .slice(0, 5)
-        .map(r => ({
-            region:     r.region,
-            lat_deg:    r.latitude            ?? 0,
-            lon_deg:    r.carrington_longitude ?? 0,
-            lat_rad:    (r.latitude            ?? 0) * Math.PI / 180,
-            // Carrington longitude in radians — sun-rotation offset applied by caller
-            lon_rad:    (r.carrington_longitude ?? 0) * Math.PI / 180,
-            // Normalised area: typical range 10–500 μHem
-            area_norm:  Math.min((r.area ?? 20) / 400, 1.0),
-            mag_class:  r.mag_class ?? '',
-            // Complex (Beta-Gamma / Gamma) regions are most likely to flare
-            is_complex: (r.mag_class ?? '').includes('amma'),
-            num_spots:  r.num_spots ?? 1,
-        }));
-}
-
-// ── Extended NOAA fetchers ────────────────────────────────────────────────────
-
-/**
- * GOES integral proton flux — picks the most recent >10 MeV and >100 MeV values.
- * Response: array of {time_tag, energy, flux} objects.
- */
-async function fetchProtons(state) {
-    const data = await fetchJSON(ENDPOINTS.protons_1d);
-    if (!Array.isArray(data)) return;
-    // Walk backwards; pick latest non-null record per channel
-    const byEnergy = {};
-    for (const rec of [...data].reverse()) {
-        if (rec.flux == null || rec.flux <= 0) continue;
-        const key = String(rec.energy ?? '');
-        if (!byEnergy[key]) byEnergy[key] = rec.flux;
-    }
-    // >10 MeV key varies by satellite; match any key containing '10'
-    for (const [k, v] of Object.entries(byEnergy)) {
-        if (k.includes('10') && !k.includes('100')) state.proton_flux_10mev  = v;
-        if (k.includes('100'))                       state.proton_flux_100mev = v;
-    }
-    state.sep_storm_level = protonToSLevel(state.proton_flux_10mev);
-}
-
-/**
- * GOES integral electron flux — picks the most recent >2 MeV value.
- */
-async function fetchElectrons(state) {
-    const data = await fetchJSON(ENDPOINTS.electrons_1d);
-    if (!Array.isArray(data)) return;
-    const rec = [...data].reverse().find(r => r.flux != null && r.flux > 0 &&
-        String(r.energy ?? '').includes('2'));
-    if (rec) state.electron_flux_2mev = rec.flux;
-}
-
-/**
- * OVATION Prime auroral power nowcast.
- * Response: { Forecast: { North: { Power: N }, South: { Power: N } } }
- *           or flat { north: N, south: N } depending on version.
- */
-async function fetchAurora(state) {
-    const data = await fetchJSON(ENDPOINTS.aurora_now);
-    // Attempt multiple response shapes
-    const north = data?.Forecast?.North?.Power
-               ?? data?.north
-               ?? data?.[0]?.power
-               ?? null;
-    const south = data?.Forecast?.South?.Power
-               ?? data?.south
-               ?? data?.[1]?.power
-               ?? null;
-    if (north != null) state.aurora_power_north = north;
-    if (south != null) state.aurora_power_south = south;
-
-    const totalGW = (state.aurora_power_north ?? 0) + (state.aurora_power_south ?? 0);
-    state.aurora_activity = totalGW > 200 ? 'storm' : totalGW > 80 ? 'active' : 'quiet';
-}
-
-/**
- * NOAA space weather alerts/warnings/watches.
- * Response: array of {message, issue_datetime, ...} objects.
- * We keep only current (non-cancelled) messages, capped at 10.
- */
-async function fetchAlerts(state) {
-    const data = await fetchJSON(ENDPOINTS.alerts);
-    if (!Array.isArray(data)) { state.active_alerts = []; return; }
-    state.active_alerts = data
-        .filter(a => a.message && !/CANCEL/i.test(a.message))
-        .slice(0, 10)
-        .map(a => {
-            // issue_datetime may be null/undefined/empty — guard against invalid Date
-            const raw = a.issue_datetime ?? a.issued_at ?? '';
-            const isoStr = raw ? raw.replace(' ', 'T').replace(/(?<!\+\d{2}:\d{2})$/, 'Z').replace('ZZ', 'Z') : '';
-            const issued = isoStr ? new Date(isoStr) : new Date(0);
-            return {
-                issued: isNaN(issued.getTime()) ? new Date(0) : issued,
-                text:   String(a.message ?? '').trim(),
-                level:  /WARNING|WATCH/i.test(a.message) ? 'warning'
-                      : /ALERT/i.test(a.message)         ? 'alert'
-                      : 'info',
-            };
-        });
-}
-
-/**
- * F10.7-cm solar radio flux.
- * Response: array of {time_tag, flux} objects — most recent last.
- */
-async function fetchRadioFlux(state) {
-    const data = await fetchJSON(ENDPOINTS.radio_flux);
-    if (!Array.isArray(data)) return;
-    const rec = [...data].reverse().find(r => r.flux != null && r.flux > 0);
-    if (rec) state.f107_flux = rec.flux;
-}
-
-/**
- * NASA DONKI CME Analysis — cone model, speed, direction, ENLIL arrival forecast.
- *
- * Key fields returned per CME:
- *   time21_5   ISO datetime when CME reached 21.5 solar radii
- *   latitude   CME axis ecliptic latitude (°N positive)
- *   longitude  Stonyhurst heliographic longitude (0° = Sun-Earth direction, +W)
- *   halfAngle  Angular half-width of the eruption cone (degrees)
- *   speed      CME leading-edge speed at 21.5 Rs (km/s)
- *   type       S (slow), C (common), O (halo), R (partial halo)
- *   enlilList  WSA-ENLIL model run(s) with estimatedShockArrivalTime
- *
- * Earth-directed criterion: |longitude| ≤ halfAngle + 30° buffer
- *   (Earth is in the cone ± a generous buffer for partial halos).
- */
-async function fetchDONKICME(state) {
-    const now   = new Date();
-    const start = new Date(now - 7 * 86400e3);   // 7-day window
-    const fmt   = d => d.toISOString().split('T')[0];
-    const url   = `${ENDPOINTS.donki_cme}` +
-                  `?mostAccurateOnly=true` +
-                  `&startDate=${fmt(start)}&endDate=${fmt(now)}`;
-
-    let data;
-    try { data = await fetchJSON(url); }
-    catch { return; }  // DONKI is occasionally slow/down — gracefully degrade
-
-    if (!Array.isArray(data)) { state.recent_cmes = []; return; }
-
-    const parsed = data
-        .filter(c => c.time21_5 && c.speed > 0)
-        .map(c => {
-            // ── Arrival time ─────────────────────────────────────────────
-            // t21_5 = when CME crosses 21.5 Rs (the model inner boundary, ~0.1 AU)
-            // Remaining distance to Earth: (215 - 21.5) Rs = 193.5 Rs ≈ 1.345 × 10⁸ km
-            const t21_5   = new Date(c.time21_5.endsWith('Z') ? c.time21_5 : c.time21_5 + 'Z');
-            const distKm  = 1.345e8;
-            const etaMs   = (distKm / Math.max(c.speed, 50)) * 1e6; // km/s → ms
-            const kinetic = new Date(t21_5.getTime() + etaMs);
-
-            // Prefer ENLIL model if available (more accurate)
-            let enlilArrival = null, enlilKp = null, enlilDuration = null;
-            if (Array.isArray(c.enlilList) && c.enlilList.length > 0) {
-                const run = c.enlilList.find(r => r.estimatedShockArrivalTime)
-                         ?? c.enlilList[0];
-                if (run?.estimatedShockArrivalTime) {
-                    const ts = run.estimatedShockArrivalTime;
-                    enlilArrival = new Date(ts.endsWith('Z') ? ts : ts + 'Z');
-                }
-                enlilKp       = run?.kp18 ?? run?.kp90 ?? null;
-                enlilDuration = run?.estimatedDuration ?? null;
-            }
-
-            const arrival      = enlilArrival ?? kinetic;
-            const hoursUntil   = (arrival.getTime() - now.getTime()) / 3.6e6;
-
-            // ── Earth-directed flag ──────────────────────────────────────
-            // longitude 0° = Sun→Earth direction; ±half+30° inclusive cone
-            const lon          = c.longitude   ?? 0;
-            const half         = c.halfAngle   ?? 30;
-            const earthDir     = Math.abs(lon) <= (half + 30);
-
-            return {
-                time:         t21_5,
-                speed:        c.speed,
-                latitude:     c.latitude  ?? 0,
-                longitude:    lon,
-                halfAngle:    half,
-                type:         c.type      ?? 'S',
-                earthDirected: earthDir,
-                arrivalTime:  arrival,
-                hoursUntil,
-                hasEnlil:     !!enlilArrival,
-                enlilKp,
-                enlilDuration,
-                note:         c.note ?? '',
-                link:         c.link ?? '',
-                lat_rad:      (c.latitude ?? 0) * Math.PI / 180,
-                lon_rad:      lon * Math.PI / 180,
-            };
-        })
-        .sort((a, b) => b.time - a.time)   // most recent first
-        .slice(0, 10);
-
-    state.recent_cmes = parsed;
-
-    // Most recent Earth-directed CME (arrived within last 24h or future)
-    const edList = parsed.filter(c => c.earthDirected && c.hoursUntil > -24);
-    state.earth_directed_cme = edList[0] ?? null;
-    state.cme_eta_hours      = state.earth_directed_cme?.hoursUntil ?? null;
-}
-
-/**
- * DONKI all-event notifications (last 7 days).
- * Returns compact notification objects for display in the alert feed.
- */
-async function fetchDONKINotifications(state) {
-    const now   = new Date();
-    const start = new Date(now - 7 * 86400e3);
-    const fmt   = d => d.toISOString().split('T')[0];
-    const url   = `${ENDPOINTS.donki_notify}?type=all&startDate=${fmt(start)}&endDate=${fmt(now)}`;
-
-    let data;
-    try { data = await fetchJSON(url); }
-    catch { return; }
-    if (!Array.isArray(data)) { state.donki_notifications = []; return; }
-
-    state.donki_notifications = data
-        .filter(n => n.messageType && n.messageTime)
-        .map(n => ({
-            type:    n.messageType,
-            time:    new Date(n.messageTime.endsWith('Z') ? n.messageTime : n.messageTime + 'Z'),
-            body:    (n.messageBody ?? '').slice(0, 280),
-            url:     n.messageURL ?? null,
-        }))
-        .sort((a, b) => b.time - a.time)
-        .slice(0, 12);
-}
-
-// ── Parse NOAA location string to lat/lon (e.g. "N24W30") ────────────────────
 function parseLocation(loc) {
     if (!loc) return null;
     const m = loc.match(/([NS])(\d+)([EW])(\d+)/i);
@@ -534,83 +133,445 @@ function parseLocation(loc) {
     return { lat_rad: lat * Math.PI / 180, lon_rad: lon * Math.PI / 180 };
 }
 
+// ── Edge API fetchers ─────────────────────────────────────────────────────────
+// Each function calls one of our Vercel edge routes and writes normalised values
+// into the shared mutable `state` object.  All throw on network/parse failure
+// so Promise.allSettled can catch them individually.
+
+async function fetchEdge(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+    return res.json();
+}
+
+// ── T1 fetchers ───────────────────────────────────────────────────────────────
+
+async function fetchWind(state) {
+    const json = await fetchEdge(API.wind);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.speed_km_s    != null) state.speed       = cur.speed_km_s;
+    if (cur.density_cc    != null) state.density     = cur.density_cc;
+    if (cur.temperature_K != null) state.temperature = cur.temperature_K;
+    if (cur.bt_nT         != null) state.bt          = cur.bt_nT;
+    if (cur.bz_nT         != null) state.bz          = cur.bz_nT;
+    if (cur.bx_nT         != null) state.bx          = cur.bx_nT;
+    if (cur.by_nT         != null) state.by          = cur.by_nT;
+    state.wind_timestamp = new Date(json.data.updated);
+}
+
+async function fetchKp1m(state) {
+    const json = await fetchEdge(API.kp1m);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.kp != null) {
+        state.kp_1min = cur.kp;
+        state.kp      = cur.kp;   // use 1-min Kp as primary
+    }
+}
+
+// ── T2 fetchers ───────────────────────────────────────────────────────────────
+
+async function fetchXray(state) {
+    const json = await fetchEdge(API.xray);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.flux_W_m2  != null) state.xray_flux  = cur.flux_W_m2;
+    if (cur.xray_class != null) state.xray_class = cur.xray_class;
+    if (cur.xray_letter != null) {
+        // derive flare_letter from current background X-ray for shader
+        state.flare_letter = state.flare_letter ?? cur.xray_letter;
+    }
+}
+
+async function fetchProtons(state) {
+    const json = await fetchEdge(API.protons);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.flux_10mev_pfu  != null) state.proton_flux_10mev  = cur.flux_10mev_pfu;
+    if (cur.flux_100mev_pfu != null) state.proton_flux_100mev = cur.flux_100mev_pfu;
+    if (cur.sep_storm_level != null) state.sep_storm_level    = cur.sep_storm_level;
+}
+
+async function fetchElectrons(state) {
+    const json = await fetchEdge(API.electrons);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.flux_2mev_pfu != null) state.electron_flux_2mev = cur.flux_2mev_pfu;
+}
+
+async function fetchAurora(state) {
+    const json = await fetchEdge(API.aurora);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.aurora_power_north_GW != null) state.aurora_power_north = cur.aurora_power_north_GW;
+    if (cur.aurora_power_south_GW != null) state.aurora_power_south = cur.aurora_power_south_GW;
+    if (cur.aurora_activity       != null) state.aurora_activity    = cur.aurora_activity;
+}
+
+async function fetchAlerts(state) {
+    const json = await fetchEdge(API.alerts);
+    const list = json?.data?.alerts;
+    if (!Array.isArray(list)) { state.active_alerts = []; return; }
+    state.active_alerts = list.map(a => ({
+        issued: new Date(a.issue_time),
+        text:   String(a.message ?? a.body ?? '').trim(),
+        level:  /WARNING|WATCH/i.test(a.message ?? a.body ?? '') ? 'warning'
+              : /ALERT/i.test(a.message ?? a.body ?? '')          ? 'alert'
+              : 'info',
+    }));
+}
+
+async function fetchDst(state) {
+    const json = await fetchEdge(API.dst);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.dst_nT != null) state.dst_index = cur.dst_nT;
+}
+
+// ── T3 fetchers ───────────────────────────────────────────────────────────────
+
+async function fetchFlares(state) {
+    const json = await fetchEdge(API.flares);
+    const list = json?.data?.flares;
+    if (!Array.isArray(list)) { state.recent_flares = []; return; }
+
+    const parsed = list
+        .map(f => ({
+            time:     new Date(f.peak_time ?? f.begin_time ?? 0),
+            cls:      f.flare_class ?? null,
+            location: f.location    ?? null,
+            parsed:   parseFlareClass(f.flare_class),
+        }))
+        .filter(f => f.cls)
+        .slice(0, 12);
+
+    state.recent_flares = parsed;
+    if (parsed.length > 0) {
+        const top            = parsed[0];
+        state.flare_class    = top.cls;
+        state.flare_watts    = top.parsed.watts;
+        state.flare_letter   = top.parsed.letter;
+        state.flare_time     = top.time;
+        state.flare_location = top.location;
+    }
+}
+
+async function fetchRegions(state) {
+    const json = await fetchEdge(API.regions);
+    const list = json?.data?.regions;
+    if (!Array.isArray(list)) { state.active_regions = []; return; }
+    state.active_regions = list.slice(0, 5).map(r => ({
+        region:     r.region,
+        lat_deg:    r.latitude_deg      ?? 0,
+        lon_deg:    r.carrington_lon_deg ?? 0,
+        lat_rad:    (r.latitude_deg      ?? 0) * Math.PI / 180,
+        lon_rad:    (r.carrington_lon_deg ?? 0) * Math.PI / 180,
+        area_norm:  Math.min((r.area ?? 20) / 400, 1.0),
+        mag_class:  r.mag_class ?? '',
+        is_complex: (r.mag_class ?? '').includes('amma'),
+        num_spots:  r.num_spots ?? 1,
+    }));
+}
+
+async function fetchDONKICME(state) {
+    const json = await fetchEdge(API.donkiCME);
+    const list = json?.data?.cmes;
+    if (!Array.isArray(list)) { state.recent_cmes = []; return; }
+
+    const now    = Date.now();
+    const parsed = list.map(c => {
+        // Kinematic arrival estimate: distance from 21.5 Rs to Earth ≈ 1.345 × 10⁸ km
+        const t21_5      = c.time ? new Date(c.time) : null;
+        const speed      = c.speed_km_s ?? 400;
+        const etaMs      = t21_5 ? (1.345e8 / Math.max(speed, 50)) * 1e6 : null;
+        const arrival    = etaMs ? new Date(t21_5.getTime() + etaMs) : null;
+        const hoursUntil = arrival ? (arrival.getTime() - now) / 3.6e6 : null;
+        return {
+            time:          c.time ?? null,
+            speed:         speed,
+            latitude:      c.latitude_deg   ?? 0,
+            longitude:     c.longitude_deg  ?? 0,
+            halfAngle:     c.half_angle_deg ?? 30,
+            type:          c.type           ?? 'S',
+            earthDirected: c.earth_directed ?? false,
+            arrivalTime:   arrival?.toISOString() ?? null,
+            hoursUntil,
+            note:          c.note ?? '',
+            lat_rad:       (c.latitude_deg  ?? 0) * Math.PI / 180,
+            lon_rad:       (c.longitude_deg ?? 0) * Math.PI / 180,
+        };
+    });
+
+    state.recent_cmes = parsed;
+    const edList             = parsed.filter(c => c.earthDirected && (c.hoursUntil ?? 0) > -24);
+    state.earth_directed_cme = edList[0] ?? null;
+    state.cme_eta_hours      = state.earth_directed_cme?.hoursUntil ?? null;
+}
+
+async function fetchDONKINotifications(state) {
+    const json = await fetchEdge(API.donkiNotify);
+    const list = json?.data?.notifications;
+    if (!Array.isArray(list)) { state.donki_notifications = []; return; }
+    state.donki_notifications = list.map(n => ({
+        type: n.type,
+        time: new Date(n.issue_time ?? 0),
+        body: String(n.body ?? '').slice(0, 280),
+        url:  n.url ?? null,
+    })).slice(0, 12);
+}
+
+async function fetchDONKIFlares(state) {
+    const json = await fetchEdge(API.donkiFlares);
+    const list = json?.data?.flares;
+    if (!Array.isArray(list)) { state.donki_flares = []; return; }
+    state.donki_flares = list.map(f => ({
+        id:           f.id           ?? null,
+        begin_time:   new Date(f.begin_time ?? 0),
+        peak_time:    f.peak_time  ? new Date(f.peak_time)  : null,
+        flare_class:  f.flare_class  ?? null,
+        class_letter: f.class_letter ?? 'A',
+        location:     f.location     ?? null,
+        active_region: f.active_region ?? null,
+        linked_cme:   f.linked_cme   ?? false,
+    })).slice(0, 12);
+}
+
+async function fetchDONKIGST(state) {
+    const json = await fetchEdge(API.donkiGST);
+    const list = json?.data?.events;
+    if (!Array.isArray(list)) { state.gst_events = []; state.current_gst = null; return; }
+    state.gst_events = list.map(g => ({
+        id:         g.id         ?? null,
+        start_time: new Date(g.start_time ?? 0),
+        max_kp:     g.max_kp     ?? null,
+        g_scale:    g.g_scale    ?? 0,
+        linked_cme: g.linked_cme ?? false,
+    }));
+    state.current_gst = json?.data?.current_storm
+        ? { ...json.data.current_storm, start_time: new Date(json.data.current_storm.start_time ?? 0) }
+        : null;
+}
+
+async function fetchDONKISEP(state) {
+    const json = await fetchEdge(API.donkiSEP);
+    const list = json?.data?.events;
+    if (!Array.isArray(list)) { state.sep_events = []; state.recent_sep_event = null; state.radiation_storm_active = false; return; }
+    state.sep_events = list.map(s => ({
+        id:           s.id          ?? null,
+        event_time:   new Date(s.event_time ?? 0),
+        linked_flare: s.linked_flare ?? false,
+        linked_cme:   s.linked_cme   ?? false,
+    }));
+    state.recent_sep_event      = json?.data?.recent_event
+        ? { ...json.data.recent_event, event_time: new Date(json.data.recent_event.event_time ?? 0) }
+        : null;
+    state.radiation_storm_active = json?.data?.radiation_storm_active ?? false;
+}
+
+// ── T4 fetchers (PRO only, 60-min cadence) ────────────────────────────────────
+
+async function fetchRadioFlux(state) {
+    const json = await fetchEdge(API.radioFlux);
+    const cur  = json?.data?.current;
+    if (!cur) return;
+    if (cur.flux_sfu != null) {
+        state.f107_flux          = cur.flux_sfu;
+        state.f107_adjusted_sfu  = cur.flux_adjusted_sfu ?? null;
+        state.f107_activity      = cur.activity_label    ?? null;
+    }
+    const trend = json?.data?.trend;
+    if (trend) {
+        state.f107_slope_sfu_per_day = trend.slope_sfu_per_day ?? null;
+        state.f107_trend_direction   = trend.direction          ?? null;
+    }
+    const recent = json?.data?.recent;
+    if (Array.isArray(recent)) state.f107_recent = recent;
+}
+
 // ── SpaceWeatherFeed ──────────────────────────────────────────────────────────
+
 export class SpaceWeatherFeed {
     /**
      * @param {object} opts
-     * @param {number} opts.pollInterval  milliseconds between polls (default 5 min)
+     * @param {string} opts.tier  TIER.FREE (default) or TIER.PRO
      */
-    constructor({ pollInterval = 5 * 60 * 1000 } = {}) {
-        this.pollInterval  = pollInterval;
-        this._timer        = null;
-        this.status        = 'connecting';
-        this.lastUpdated   = null;
-        this.failStreak    = 0;
-        // Mutable raw state; endpoints mutate fields in place
-        this._raw          = { ...FALLBACK };
-        this._lastFlareKey = null;  // used to detect new flare events
-        this._lastCmeKey   = null;  // used to detect new CME events
+    constructor({ tier = TIER.FREE } = {}) {
+        this.tier        = tier;
+        this._raw        = { ...FALLBACK };
+        this._timers     = {};
+        this._stormMode  = false;
+        this._calmStreak = 0;
+        this.status      = 'connecting';
+        this.lastUpdated = null;
+        this.failStreak  = 0;
+        this._lastFlareKey = null;
+        this._lastCmeKey   = null;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /** Start polling. Returns `this` for chaining. */
+    /** Start all tiers. Returns `this` for chaining. */
     start() {
-        this._poll();  // immediate first call
-        this._timer = setInterval(() => this._poll(), this.pollInterval);
+        // T1 — immediate, then every ~60 s
+        this._runT1();
+        this._timers.t1 = setInterval(() => this._runT1(), this._interval('T1'));
+
+        // T2 — slight delay to stagger burst, then every ~5 min
+        setTimeout(() => {
+            this._runT2();
+            this._timers.t2 = setInterval(() => this._runT2(), this._interval('T2'));
+        }, INTERVALS.T2_OFFSET);
+
+        // T3 — slight delay, then every ~15 min
+        setTimeout(() => {
+            this._runT3();
+            this._timers.t3 = setInterval(() => this._runT3(), this._interval('T3'));
+        }, INTERVALS.T3_OFFSET);
+
+        // T4 — PRO only, 60-min cadence; fires immediately so first state is complete
+        if (this.tier === TIER.PRO) {
+            this._runT4();
+            this._timers.t4 = setInterval(() => this._runT4(), INTERVALS.T4);
+        }
+
         return this;
     }
 
-    /** Stop polling. */
+    /** Stop all polling. */
     stop() {
-        clearInterval(this._timer);
-        this._timer = null;
+        Object.values(this._timers).forEach(clearInterval);
+        this._timers = {};
     }
 
-    /** Trigger an out-of-band refresh immediately. */
-    refresh() { return this._poll(); }
+    /** Immediately fire all tiers (T4 only if PRO). */
+    refresh() {
+        const tiers = [this._runT1(), this._runT2(), this._runT3()];
+        if (this.tier === TIER.PRO) tiers.push(this._runT4());
+        return Promise.all(tiers);
+    }
 
     /** Current normalised state snapshot (does not trigger a fetch). */
     get state() { return this._buildState(); }
 
     // ── Internals ─────────────────────────────────────────────────────────────
 
-    async _poll() {
-        const tasks = [
-            fetchWind(this._raw),
-            fetchKp(this._raw),
-            fetchXray(this._raw),
-            fetchFlares(this._raw),
-            fetchRegions(this._raw),
-            // Extended NOAA feeds
-            fetchProtons(this._raw),
-            fetchElectrons(this._raw),
-            fetchAurora(this._raw),
-            fetchAlerts(this._raw),
-            fetchRadioFlux(this._raw),
-            // NASA DONKI — run independently so CCMC slowness doesn't block NOAA feeds
-            fetchDONKICME(this._raw),
-            fetchDONKINotifications(this._raw),
-        ];
-        const results = await Promise.allSettled(tasks);
-        const ok  = results.some(r => r.status === 'fulfilled');
-        const all = results.every(r => r.status === 'rejected');
+    _interval(tier) {
+        const base = INTERVALS[tier];
+        return this._stormMode
+            ? Math.round(base * STORM[this.tier][tier])
+            : base;
+    }
 
+    /** Restart timers with current storm-mode intervals. (T4 is fixed; no reschedule.) */
+    _reschedule() {
+        ['t1', 't2', 't3'].forEach(k => {
+            clearInterval(this._timers[k]);
+            delete this._timers[k];
+        });
+        this._timers.t1 = setInterval(() => this._runT1(), this._interval('T1'));
+        this._timers.t2 = setInterval(() => this._runT2(), this._interval('T2'));
+        this._timers.t3 = setInterval(() => this._runT3(), this._interval('T3'));
+    }
+
+    async _runT1() {
+        const results = await Promise.allSettled([
+            fetchWind(this._raw),
+            fetchKp1m(this._raw),
+            fetchXray(this._raw),
+        ]);
+        const ok = results.some(r => r.status === 'fulfilled');
         if (ok) {
             this.status      = 'live';
             this.lastUpdated = new Date();
             this.failStreak  = 0;
-        } else if (all) {
+        } else {
             this.failStreak++;
             this.status = this.failStreak > 2 ? 'offline' : 'stale';
         }
-
-        // Debug-level logging only
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC] ${Object.keys(ENDPOINTS)[i]}: ${r.reason?.message ?? r.reason}`);
+                console.debug(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
+        this._checkStormMode();
+        this._dispatch();
+    }
 
+    async _runT2() {
+        const results = await Promise.allSettled([
+            fetchProtons(this._raw),
+            fetchElectrons(this._raw),
+            fetchAurora(this._raw),
+            fetchAlerts(this._raw),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected')
+                console.debug(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
+        });
+        this._checkStormMode();
+        this._dispatch();
+    }
+
+    async _runT3() {
+        const results = await Promise.allSettled([
+            fetchFlares(this._raw),
+            fetchRegions(this._raw),
+            fetchDst(this._raw),
+            fetchDONKICME(this._raw),
+            fetchDONKINotifications(this._raw),
+            fetchDONKIFlares(this._raw),
+            fetchDONKIGST(this._raw),
+            fetchDONKISEP(this._raw),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected')
+                console.debug(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
+        });
+        this._checkStormMode();
+        this._dispatch();
+    }
+
+    /** T4 — PRO only, 60-min cadence. */
+    async _runT4() {
+        const results = await Promise.allSettled([
+            fetchRadioFlux(this._raw),
+        ]);
+        results.forEach((r, i) => {
+            if (r.status === 'rejected')
+                console.debug(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
+        });
+        this._dispatch();
+    }
+
+    _checkStormMode() {
+        const raw  = this._raw;
+        const trig = STORM_TRIGGERS;
+        const active = (
+            (raw.kp_1min ?? raw.kp) >= trig.kp_min      ||  // G2+ geomagnetic storm
+            (raw.xray_flux         ?? 0) >= trig.xray_flux_min ||  // live X-class (T1 cadence)
+            (raw.sep_storm_level   ?? 0) >= trig.sep_level_min  ||  // S3+ radiation storm
+            !!raw.earth_directed_cme                             // imminent CME arrival
+        );
+
+        if (active && !this._stormMode) {
+            this._stormMode  = true;
+            this._calmStreak = 0;
+            console.info('[SWPC] Storm mode ACTIVATED — intervals compressed');
+            this._reschedule();
+        } else if (!active && this._stormMode) {
+            this._calmStreak++;
+            if (this._calmStreak >= trig.calm_streak) {
+                this._stormMode  = false;
+                this._calmStreak = 0;
+                console.info('[SWPC] Storm mode DEACTIVATED — intervals restored');
+                this._reschedule();
+            }
+        } else if (active) {
+            this._calmStreak = 0;
+        }
+    }
+
+    _dispatch() {
         window.dispatchEvent(new CustomEvent('swpc-update', { detail: this._buildState() }));
     }
 
@@ -618,23 +579,22 @@ export class SpaceWeatherFeed {
         const raw = this._raw;
         const d   = derivedFields(raw);
 
-        // Detect whether a new M-class or stronger flare just appeared
-        const topFlare    = raw.recent_flares[0] ?? null;
-        const flareKey    = topFlare ? `${topFlare.cls}|${topFlare.time?.toISOString()}` : null;
-        const newMajor    = !!(
+        // Detect new M/X flare
+        const topFlare   = raw.recent_flares[0] ?? null;
+        const flareKey   = topFlare ? `${topFlare.cls}|${topFlare.time?.toISOString()}` : null;
+        const newMajor   = !!(
             topFlare &&
             (topFlare.parsed.letter === 'M' || topFlare.parsed.letter === 'X') &&
             flareKey !== this._lastFlareKey
         );
         if (newMajor) this._lastFlareKey = flareKey;
 
-        // Detect new Earth-directed CME from DONKI
-        const topCme    = (raw.recent_cmes ?? []).find(c => c.earthDirected) ?? null;
-        const cmeKey    = topCme ? topCme.time?.toISOString() : null;
-        const newCme    = !!(topCme && cmeKey !== this._lastCmeKey);
+        // Detect new Earth-directed CME
+        const topCme     = (raw.recent_cmes ?? []).find(c => c.earthDirected) ?? null;
+        const cmeKey     = topCme?.time ?? null;
+        const newCme     = !!(topCme && cmeKey !== this._lastCmeKey);
         if (newCme) this._lastCmeKey = cmeKey;
 
-        // Direction of the most recent flare (from NOAA location string)
         const flareDir = parseLocation(raw.flare_location);
 
         return {
@@ -660,9 +620,9 @@ export class SpaceWeatherFeed {
             derived:        d,
             status:         this.status,
             lastUpdated:    this.lastUpdated,
+            storm_mode:     this._stormMode,
             new_major_flare: newMajor,
             flare_direction: flareDir,
-            // Extended fields
             proton_flux_10mev:  raw.proton_flux_10mev,
             proton_flux_100mev: raw.proton_flux_100mev,
             electron_flux_2mev: raw.electron_flux_2mev,
@@ -670,14 +630,70 @@ export class SpaceWeatherFeed {
             aurora_power_north: raw.aurora_power_north,
             aurora_power_south: raw.aurora_power_south,
             aurora_activity:    raw.aurora_activity ?? 'quiet',
-            active_alerts:      raw.active_alerts ?? [],
-            f107_flux:          raw.f107_flux,
-            // DONKI CME fields
-            recent_cmes:         raw.recent_cmes ?? [],
+            active_alerts:      raw.active_alerts   ?? [],
+            f107_flux:               raw.f107_flux,
+            f107_adjusted_sfu:       raw.f107_adjusted_sfu       ?? null,
+            f107_activity:           raw.f107_activity           ?? null,
+            f107_slope_sfu_per_day:  raw.f107_slope_sfu_per_day  ?? null,
+            f107_trend_direction:    raw.f107_trend_direction     ?? null,
+            f107_recent:             raw.f107_recent              ?? [],
+            recent_cmes:         raw.recent_cmes        ?? [],
             earth_directed_cme:  raw.earth_directed_cme ?? null,
-            cme_eta_hours:       raw.cme_eta_hours ?? null,
+            cme_eta_hours:       raw.cme_eta_hours      ?? null,
             donki_notifications: raw.donki_notifications ?? [],
+            donki_flares:        raw.donki_flares        ?? [],
+            gst_events:          raw.gst_events          ?? [],
+            current_gst:         raw.current_gst         ?? null,
+            sep_events:          raw.sep_events          ?? [],
+            recent_sep_event:    raw.recent_sep_event    ?? null,
+            radiation_storm_active: raw.radiation_storm_active ?? false,
             new_cme_detected:    newCme,
+            dst_index:           raw.dst_index  ?? -5,
+            kp_1min:             raw.kp_1min    ?? raw.kp,
+            proton_diff_1mev:    raw.proton_diff_1mev  ?? 0,
+            proton_diff_10mev:   raw.proton_diff_10mev ?? 0,
+
+            // ── Nested groups — clean API for new consumers ───────────────
+            geomagnetic: {
+                kp:           raw.kp,
+                kp_1min:      raw.kp_1min      ?? raw.kp,
+                dst_nT:       raw.dst_index    ?? -5,
+                storm_level:  d.storm_level,
+                kp_norm:      d.kp_norm,
+                kp_1min_norm: d.kp_1min_norm,
+                dst_norm:     d.dst_norm,
+            },
+            particles: {
+                proton_10mev_pfu:   raw.proton_flux_10mev,
+                proton_100mev_pfu:  raw.proton_flux_100mev,
+                electron_2mev_pfu:  raw.electron_flux_2mev,
+                sep_storm_level:    raw.sep_storm_level     ?? 0,
+                proton_10mev_norm:  d.proton_10mev_norm,
+                proton_100mev_norm: d.proton_100mev_norm,
+                electron_2mev_norm: d.electron_2mev_norm,
+            },
+            aurora: {
+                north_gw:   raw.aurora_power_north,
+                south_gw:   raw.aurora_power_south,
+                activity:   raw.aurora_activity  ?? 'quiet',
+                north_norm: d.aurora_north_norm,
+                south_norm: d.aurora_south_norm,
+            },
+            solar_activity: {
+                f107_sfu:          raw.f107_flux,
+                f107_adjusted_sfu: raw.f107_adjusted_sfu       ?? null,
+                activity_label:    raw.f107_activity           ?? null,
+                slope_per_day:     raw.f107_slope_sfu_per_day  ?? null,
+                trend:             raw.f107_trend_direction    ?? null,
+                recent:            raw.f107_recent             ?? [],
+                f107_norm:         d.f107_norm,
+            },
+            meta: {
+                status:      this.status,
+                lastUpdated: this.lastUpdated,
+                storm_mode:  this._stormMode,
+                tier:        this.tier,
+            },
         };
     }
 }

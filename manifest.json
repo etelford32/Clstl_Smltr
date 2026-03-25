@@ -1,0 +1,39 @@
+{
+  "name": "Parker Physics App",
+  "short_name": "ParkerPhysics",
+  "description": "Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a0a1a",
+  "theme_color": "#0a0a1a",
+  "categories": ["education", "science", "utilities"],
+  "lang": "en-US",
+  "icons": [
+    {
+      "src": "ParkersPhysics_logo2.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "ParkerPhaysics_logo1.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "Celestial_Simulator.jpg",
+      "sizes": "1536x1024",
+      "type": "image/jpeg",
+      "label": "Celestial Simulator — Star and Solar System Views"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Solar System", "url": "/threejs.html", "description": "Interactive 3D Solar System" },
+    { "name": "The Sun",      "url": "/sun.html",     "description": "Real-time Solar Activity" },
+    { "name": "Galactic Map", "url": "/galactic-map.html", "description": "Explore the Galaxy" }
+  ]
+}

@@ -62,6 +62,50 @@
     {
       "source": "/vega",
       "destination": "/vega.html"
+    },
+    {
+      "source": "/pricing",
+      "destination": "/pricing.html"
+    },
+    {
+      "source": "/signup",
+      "destination": "/signup.html"
+    },
+    {
+      "source": "/signin",
+      "destination": "/signin.html"
+    },
+    {
+      "source": "/login",
+      "destination": "/signin.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/eula",
+      "destination": "/eula.html"
+    },
+    {
+      "source": "/api-policy",
+      "destination": "/api-policy.html"
+    },
+    {
+      "source": "/v1/solar-wind/:path*",
+      "destination": "/api/solar-wind/:path*"
+    },
+    {
+      "source": "/v1/noaa/:path*",
+      "destination": "/api/noaa/:path*"
+    },
+    {
+      "source": "/v1/donki/:path*",
+      "destination": "/api/donki/:path*"
+    },
+    {
+      "source": "/v1/horizons",
+      "destination": "/api/horizons"
     }
   ]
 }

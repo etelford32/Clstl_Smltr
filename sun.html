@@ -332,6 +332,31 @@ nav {
 .note-text ul { margin:6px 0 0 14px; list-style:disc; }
 .note-text li { margin:2px 0; }
 
+/* ── Simulation time controls ───────────────────────────────── */
+.spd-btn { flex:1; padding:5px 3px; min-width:32px;
+    background:rgba(255,140,0,.10); border:1px solid rgba(255,140,0,.26);
+    border-radius:5px; color:#ffb060; cursor:pointer; font-family:inherit;
+    font-size:10px; font-weight:700; letter-spacing:.3px; transition:all .15s; }
+.spd-btn:hover  { background:rgba(255,140,0,.22); }
+.spd-btn.active { background:rgba(255,140,0,.30); border-color:#ff8c00; color:#ffd080; }
+.scrub-hdr { display:flex; justify-content:space-between; align-items:center; margin:10px 0 2px; }
+.scrub-hdr .scrub-edge { font-size:8.5px; color:#444; }
+#scrub-time-lbl { font-size:9px; font-weight:700; color:#44bb66; letter-spacing:.3px; }
+.scrub-vals { display:flex; justify-content:space-around; margin:6px 0 2px; }
+.scrub-val  { text-align:center; }
+.scrub-val .sv { font-size:11px; font-weight:700; color:#ffd080; }
+.scrub-val .su { font-size:8px; color:#555; margin-top:1px; }
+input#sl-scrub { width:100%; margin:0; height:20px; }
+
+/* ── Live feed status dots ───────────────────────────────────── */
+.feed-row { display:flex; align-items:center; gap:7px; font-size:10px; color:#666; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.03); }
+.feed-row:last-of-type { border-bottom:none; }
+.feed-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; background:#333; transition:background .4s, box-shadow .4s; }
+.feed-dot.live  { background:#44bb66; box-shadow:0 0 5px #44bb6688; }
+.feed-dot.stale { background:#cc8800; box-shadow:0 0 4px #cc880055; }
+.feed-dot.err   { background:#bb4444; }
+.feed-src { margin-left:auto; font-size:8px; color:#443322; }
+
 /* ── Live Solar Data ─────────────────────────────────────── */
 .live-meta { display:flex; justify-content:space-between; align-items:center; margin:4px 0 8px; }
 .live-status { font-size:10px; color:#555; }
@@ -767,6 +792,11 @@ nav {
             </div>
         </div>
 
+        <!-- NOAA live feed timestamp — always visible, confirms data stream is alive -->
+        <div id="sw-noaa-ts" style="font-size:9px;color:#997755;padding:2px 10px 3px;text-align:right;
+             border-top:1px solid rgba(180,120,40,0.15);letter-spacing:0.03em">
+            NOAA · connecting…
+        </div>
     </div>
 
     <aside id="panel">
@@ -779,6 +809,41 @@ nav {
             <button id="btn-panel-close">✕</button>
         </div>
         <div id="panel-body">
+
+            <!-- ── Simulation Time ──────────────────────────────────── -->
+            <div class="sec">
+                <div class="sec-hd"><span>Simulation Time</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Speed multiplier slider -->
+                    <div class="ctrl">
+                        <label>Sim speed</label>
+                        <input type="range" id="sl-simspeed" min="0" max="50" step="0.5" value="1">
+                        <span class="vdisp" id="disp-simspeed">1.0×</span>
+                    </div>
+                    <!-- Preset speed buttons -->
+                    <div class="btn-row">
+                        <button class="spd-btn" id="spd-pause">⏸</button>
+                        <button class="spd-btn active" id="spd-1x">1×</button>
+                        <button class="spd-btn" id="spd-5x">5×</button>
+                        <button class="spd-btn" id="spd-10x">10×</button>
+                        <button class="spd-btn" id="spd-50x">50×</button>
+                    </div>
+                    <!-- 7-day SWPC data scrubber -->
+                    <div style="margin-top:10px">
+                        <div class="scrub-hdr">
+                            <span class="scrub-edge">7d ago</span>
+                            <span id="scrub-time-lbl">● LIVE</span>
+                            <span class="scrub-edge">now</span>
+                        </div>
+                        <input type="range" id="sl-scrub" min="0" max="10079" step="1" value="10079">
+                        <div class="scrub-vals" id="scrub-vals" style="display:none">
+                            <div class="scrub-val"><div class="sv" id="scrub-v-speed">—</div><div class="su">km/s</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-dens">—</div><div class="su">n/cc</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-bz">—</div><div class="su">Bz nT</div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <div class="sec">
                 <div class="sec-hd"><span>Stellar Parameters</span><span class="arrow">▼</span></div>
@@ -876,6 +941,31 @@ nav {
                         <p style="margin-top:5px"><strong>Differential rotation:</strong> Equator rotates in ~25 days, poles in ~35 days. This winds up magnetic field lines, driving activity.</p>
                         <p style="margin-top:5px"><strong>Corona mystery:</strong> The corona at 1–3 MK is 200× hotter than the photosphere. Likely heated by wave dissipation and reconnection events.</p>
                     </div>
+                </div>
+            </div>
+
+            <!-- ── NOAA Live Feed Status ─────────────────────────────── -->
+            <div class="sec closed" id="sec-feeds">
+                <div class="sec-hd"><span>NOAA Live Feeds</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="feed-row"><span class="feed-dot" id="fd-wind"></span>Solar wind plasma (DSCOVR)<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-imf"></span>IMF Bt / Bz / By (DSCOVR)<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-kp"></span>Kp geomagnetic index<span class="feed-src">3-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-kp1m"></span>Kp 1-min estimated<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-xray"></span>GOES X-ray flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-flares"></span>Solar flare events<span class="feed-src">7-day</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-regions"></span>Active sunspot regions<span class="feed-src">daily</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-aurora"></span>OVATION aurora power<span class="feed-src">30-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-cme"></span>CME analysis (DONKI)<span class="feed-src">48-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-sep"></span>SEP proton flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-electron"></span>GOES electron flux<span class="feed-src">1-min</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-dst"></span>Dst ring-current index<span class="feed-src">1-hr</span></div>
+                    <div class="feed-row"><span class="feed-dot" id="fd-f107"></span>F10.7 solar radio flux<span class="feed-src">daily</span></div>
+                    <div style="margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                        <span id="swpc-live-badge" style="font-size:8px;padding:2px 7px;border-radius:10px;background:rgba(60,200,100,.12);border:1px solid rgba(60,200,100,.25);color:#3ca;letter-spacing:.06em">⬤ CONNECTING</span>
+                        <span id="swpc-last-upd" style="font-size:8px;color:#443322;flex:1;text-align:right">Not yet updated</span>
+                    </div>
+                    <div id="swpc-countdown" style="font-size:8px;color:#332211;text-align:right;margin-top:2px">Refresh in —</div>
                 </div>
             </div>
 
@@ -1090,9 +1180,11 @@ nav {
 }
 </script>
 <script type="module">
+import './js/live-status-bar.js';
 import * as THREE             from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import WindPipelineFeed        from './js/wind-pipeline-feed.js';
 import { SohoFeed }           from './js/extended-feeds.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
@@ -1146,6 +1238,124 @@ const backdrop = document.getElementById('backdrop');
 document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
 document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
 backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// ── Simulation speed ──────────────────────────────────────────────────────
+let simSpeed = 1.0;
+
+function setSimSpeed(v) {
+    simSpeed = v;
+    const sl = document.getElementById('sl-simspeed');
+    sl.value = v;
+    document.getElementById('disp-simspeed').textContent = v.toFixed(v < 1 ? 1 : 0) + '×';
+    ['spd-pause','spd-1x','spd-5x','spd-10x','spd-50x'].forEach(id =>
+        document.getElementById(id).classList.remove('active'));
+    const activeMap = { 0:'spd-pause', 1:'spd-1x', 5:'spd-5x', 10:'spd-10x', 50:'spd-50x' };
+    if (activeMap[v]) document.getElementById(activeMap[v]).classList.add('active');
+}
+
+document.getElementById('sl-simspeed').addEventListener('input', function() {
+    const v = +this.value;
+    simSpeed = v;
+    document.getElementById('disp-simspeed').textContent = v.toFixed(v < 1 ? 1 : 0) + '×';
+    ['spd-pause','spd-1x','spd-5x','spd-10x','spd-50x'].forEach(id =>
+        document.getElementById(id).classList.remove('active'));
+});
+document.getElementById('spd-pause').addEventListener('click', () => setSimSpeed(0));
+document.getElementById('spd-1x').addEventListener('click',    () => setSimSpeed(1));
+document.getElementById('spd-5x').addEventListener('click',    () => setSimSpeed(5));
+document.getElementById('spd-10x').addEventListener('click',   () => setSimSpeed(10));
+document.getElementById('spd-50x').addEventListener('click',   () => setSimSpeed(50));
+
+// ── 7-day SWPC scrubber ────────────────────────────────────────────────────
+let swpcTimeline = [];   // [{t, speed, density, bz}] oldest → newest
+let scrubLive    = true; // true = follow real-time swpc-update events
+
+(async function loadSwpcTimeline() {
+    const PLASMA = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json';
+    const MAG    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json';
+    try {
+        const [pRes, mRes] = await Promise.all([fetch(PLASMA), fetch(MAG)]);
+        if (!pRes.ok) throw new Error('plasma ' + pRes.status);
+        const [pRaw, mRaw] = await Promise.all([pRes.json(), mRes.ok ? mRes.json() : Promise.resolve(null)]);
+
+        // Parse plasma (row[0] = headers)
+        const pH = pRaw[0];
+        const [iTime, iSpd, iDns] = [pH.indexOf('time_tag'), pH.indexOf('speed'), pH.indexOf('density')];
+        const plasma = pRaw.slice(1)
+            .map(r => ({ t: r[iTime], speed: parseFloat(r[iSpd]), density: parseFloat(r[iDns]) }))
+            .filter(r => r.speed > 0 && r.density > 0);
+
+        // Parse mag → timestamp→bz map (key = "YYYY-MM-DD HH:MM")
+        let magMap = new Map();
+        if (mRaw) {
+            const mH = mRaw[0];
+            const [iMT, iBz] = [mH.indexOf('time_tag'), mH.indexOf('bz_gsm')];
+            mRaw.slice(1).forEach(r => {
+                const bz = parseFloat(r[iBz]);
+                if (!isNaN(bz) && Math.abs(bz) < 500)
+                    magMap.set(String(r[iMT]).slice(0,16), bz);
+            });
+        }
+
+        swpcTimeline = plasma.map(r => ({
+            t:       r.t,
+            speed:   r.speed,
+            density: r.density,
+            bz:      magMap.get(String(r.t).slice(0,16)) ?? null,
+        }));
+
+        const sl = document.getElementById('sl-scrub');
+        sl.max   = Math.max(0, swpcTimeline.length - 1);
+        sl.value = sl.max;   // start at live (rightmost)
+        console.log('[SWPC] 7-day timeline loaded:', swpcTimeline.length, 'readings');
+
+        // Mark wind + IMF feeds as live
+        ['fd-wind','fd-imf'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.className = 'feed-dot live';
+        });
+    } catch(e) {
+        console.warn('[SWPC] 7-day timeline fetch failed:', e.message);
+        ['fd-wind','fd-imf'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.className = 'feed-dot err';
+        });
+    }
+})();
+
+document.getElementById('sl-scrub').addEventListener('input', function() {
+    const idx    = +this.value;
+    const maxIdx = swpcTimeline.length - 1;
+    scrubLive    = (idx >= maxIdx);
+
+    const lbl = document.getElementById('scrub-time-lbl');
+    if (scrubLive || swpcTimeline.length === 0) {
+        lbl.textContent = '● LIVE';
+        lbl.style.color = '#44bb66';
+        document.getElementById('scrub-vals').style.display = 'none';
+        return;
+    }
+
+    const pt = swpcTimeline[Math.min(idx, maxIdx)];
+    if (!pt) return;
+
+    const d   = new Date(pt.t.replace(' ', 'T') + 'Z');
+    const lbl_str = d.toLocaleDateString('en-US', { month:'short', day:'numeric' })
+                  + ' ' + d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:false });
+    lbl.textContent = lbl_str;
+    lbl.style.color = '#ff9944';
+
+    document.getElementById('scrub-vals').style.display = 'flex';
+    document.getElementById('scrub-v-speed').textContent = pt.speed?.toFixed(0)   ?? '—';
+    document.getElementById('scrub-v-dens').textContent  = pt.density?.toFixed(1) ?? '—';
+    document.getElementById('scrub-v-bz').textContent    = pt.bz != null ? pt.bz.toFixed(1) : '—';
+
+    // Drive simulation with historical data
+    uniforms.u_wind_speed_norm.value   = Math.max(0, Math.min(1, (pt.speed   - 250) / 650));
+    uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, (pt.density ?? 5)  / 25));
+    if (pt.bz != null)
+        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -pt.bz / 30));
+});
 
 // SDO drawer toggle
 const sdoDrawer = document.getElementById('sdo-drawer');
@@ -1211,6 +1421,27 @@ const uniforms = {
     u_kp_norm:           { value: 0.22 },  // Kp/9 [0-1]
     // ── Flare white-light intensity — brief whole-disk flash at flare onset ──
     u_flare_intensity:   { value: 0.0  },  // 0-1, decays exponentially ~3 s
+
+    // ── F10.7 solar radio flux — chromospheric/coronal solar-cycle activity proxy ──
+    u_f107_norm:         { value: 0.30 },  // (f107-65)/235 [0-1]; 0=solar min, 1=solar max
+
+    // ── OVATION Prime auroral power — polar coronal-hole / open-field brightness ──
+    u_aurora_north:      { value: 0.0  },  // GW/600 [0-1] north hemisphere
+    u_aurora_south:      { value: 0.0  },  // GW/600 [0-1] south hemisphere
+
+    // ── GOES energetic particle fluxes ──
+    u_electron_norm:     { value: 0.0  },  // >2 MeV electron flux log-norm [0-1]
+    u_proton_norm:       { value: 0.0  },  // >10 MeV proton flux log-norm [0-1]
+
+    // ── NOAA G-scale geomagnetic storm level (integer 0–5) ──
+    u_storm_level:       { value: 0.0  },  // 0=quiet … 5=extreme G5
+
+    // ── Total IMF magnitude + IMF By sector polarity ──
+    u_bt_norm:           { value: 0.17 },  // bt/30 nT [0-1]
+    u_by_sw:             { value: 0.0  },  // IMF By/20 nT, signed [-1, +1]
+
+    // ── Kyoto Dst ring-current index ──
+    u_dst_norm:          { value: 0.025 }, // -dst/200 nT [0-1]; 1 = severe storm
 };
 
 // SCENE
@@ -1424,6 +1655,9 @@ const sunFS = /* glsl */`
     uniform float u_rot;
     uniform float u_showSpots;
     uniform float u_showFlares;
+    uniform float u_f107_norm;       // F10.7 solar cycle proxy [0-1]: 0=min, 1=max
+    uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
+    uniform float u_proton_norm;     // GOES >10MeV proton flux [0-1]
     // Flare ribbon uniforms
     uniform float u_flare_lat;       // heliographic latitude of most recent M/X flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
@@ -1695,6 +1929,18 @@ const sunFS = /* glsl */`
         // for large X-class events, but visually dramatic).
         col *= 2.55 + u_flare_intensity * 0.90;
 
+        // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
+        // Higher radio flux index → more magnetic heating → brighter surface
+        col *= 1.0 + u_f107_norm * 0.30;
+        // Shift slightly toward blue-white at solar maximum (hotter effective temperature)
+        col = mix(col, col * vec3(0.98, 0.99, 1.04), u_f107_norm * 0.18);
+
+        // ── SEP / energetic electron impact — brief UV brightening during radiation storms ──
+        // Energetic electrons precipitating along open field lines produce
+        // localised UV flashes visible as bright patches near active region footpoints.
+        float sepUV = (u_electron_norm + u_proton_norm * 0.5) * 0.12;
+        col += vec3(0.90, 0.95, 1.20) * sepUV * (0.5 + u_activity * 0.5);
+
         // ── Chromospheric / transition-region emission at extreme limb ─────────
         // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
         float fr = pow(max(1.0 - mu, 0.0), 3.5);
@@ -1722,6 +1968,9 @@ const chromoFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
+    uniform float u_f107_norm;       // F10.7 solar cycle [0-1]
+    uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
+    uniform float u_kp_norm;         // Kp/9 [0-1] — storm-time heating
     uniform float u_flare_t;         // sim-time since flare (0 = just fired, 999 = none)
     uniform float u_flare_lat;       // heliographic latitude of last flare (radians)
     uniform float u_flare_lon;       // heliographic longitude (radians)
@@ -1783,6 +2032,23 @@ const chromoFS = /* glsl */`
         col = mix(col, hAlpha * 1.5, chromoFl * 0.85);
         col = mix(col, euv * 1.2, globalFl * 0.5);
 
+        // ── F10.7 solar-cycle: hotter chromosphere at solar maximum ─────────────
+        // At high F10.7 the chromospheric network is more visible and the Ca H&K
+        // emission is stronger — boost the orange-pink limb brightening.
+        float cycleBoost = 1.0 + u_f107_norm * 0.55;
+        alpha = clamp(alpha * cycleBoost, 0.0, 0.92);
+        col   = mix(col, col * vec3(1.08, 0.90, 0.78), u_f107_norm * 0.25);
+
+        // ── Electron flux: energetic electrons excite EUV emission ──────────────
+        // Energetic electrons from solar wind precipitation create additional
+        // blue-UV chromospheric glow, especially near pole and limb regions.
+        vec3 euvBlue = vec3(0.55, 0.75, 1.20);
+        col   += euvBlue * u_electron_norm * rim * 0.20;
+        alpha  = clamp(alpha + u_electron_norm * rim * 0.08, 0.0, 0.92);
+
+        // ── Kp storm heating: chromospheric network brightens during storms ──────
+        col *= 1.0 + u_kp_norm * u_kp_norm * 0.15;
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -1805,6 +2071,9 @@ const trFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
+    uniform float u_f107_norm;       // F10.7 [0-1]
+    uniform float u_electron_norm;   // GOES electron flux [0-1]
+    uniform float u_kp_norm;         // Kp/9 [0-1]
     uniform float u_flare_t;
     uniform float u_flare_lat;
     uniform float u_flare_lon;
@@ -1856,6 +2125,19 @@ const trFS = /* glsl */`
         vec3 col = mix(trOrange, tr171, u_activity * 0.35 + pow(rim, 4.0) * 0.20);
         col = mix(col, trUV, (localFl + globalFl * 0.5) * 0.80);
 
+        // ── F10.7 solar cycle: hotter TR at solar maximum ─────────────────────
+        // More loop footpoints, stronger He II 304 Å emission ring
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.45), 0.0, 0.90);
+        col   = mix(col, tr171 * 1.2, u_f107_norm * 0.20);
+
+        // ── Electron flux: EUV / soft X-ray brightening from SEP events ────────
+        // Penetrating energetic electrons produce intense EUV at loop footpoints
+        col  += vec3(0.60, 0.88, 1.20) * u_electron_norm * pow(rim, 3.0) * 0.35;
+        alpha = clamp(alpha + u_electron_norm * pow(rim, 3.5) * 0.12, 0.0, 0.90);
+
+        // ── Kp geomagnetic activity: broader TR ring during storms ─────────────
+        alpha = clamp(alpha * (1.0 + u_kp_norm * 0.22), 0.0, 0.90);
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -1874,10 +2156,18 @@ const coronaFS = /* glsl */`
     uniform float u_rot;
     uniform float u_wind_speed_norm;
     uniform float u_bz_sw;
-    uniform float u_kp_norm;     // Kp/9 — geomagnetic storm intensity [0-1]
-    uniform float u_flare_lat;   // active flare position — same as sunFS
+    uniform float u_kp_norm;        // Kp/9 — geomagnetic storm intensity [0-1]
+    uniform float u_flare_lat;      // active flare position — same as sunFS
     uniform float u_flare_lon;
     uniform float u_flare_t;
+    // ── Additional live NOAA channels ──
+    uniform float u_aurora_north;   // OVATION north aurora power/600 [0-1]
+    uniform float u_aurora_south;   // OVATION south aurora power/600 [0-1]
+    uniform float u_storm_level;    // NOAA G-scale 0-5
+    uniform float u_bt_norm;        // total IMF / 30 nT [0-1]
+    uniform float u_f107_norm;      // F10.7 solar cycle [0-1]
+    uniform float u_electron_norm;  // GOES >2MeV electron flux [0-1]
+    uniform float u_dst_norm;       // -Dst/200 nT [0-1]
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -2016,6 +2306,51 @@ const coronaFS = /* glsl */`
             alpha += cGlow * pow(rim, 1.6) * 0.35;
         }
 
+        // ── OVATION aurora power → polar coronal hole brightening ─────────────────
+        // High aurora power = more open field at poles = brighter polar plumes.
+        // At the Sun: polar coronal holes are the source of fast solar wind and
+        // the origin of the aurora-producing field lines at Earth.
+        float poleFac_n = smoothstep(0.55, 0.92, lat);    // North polar region
+        float poleFac_s = smoothstep(0.55, 0.92, -lat);   // South polar region
+        float auroraGlow = poleFac_n * u_aurora_north * 0.70
+                         + poleFac_s * u_aurora_south * 0.70;
+        // Coronal hole fast-wind streams: cool blue-green polar plumes
+        vec3 plumeCol = mix(vec3(0.55, 0.88, 1.00), vec3(0.45, 1.00, 0.75),
+                            (u_aurora_north + u_aurora_south) * 0.5);
+        col   += plumeCol * auroraGlow * pow(rim, 1.8) * 1.2;
+        alpha += auroraGlow * pow(rim, 2.2) * 0.30;
+
+        // ── G-scale geomagnetic storm: corona-wide brightening + red-orange tint ─
+        // During major storms, the compressed dayside corona and enhanced current
+        // sheet glow brighter; the electron density increases.
+        float stormNorm = u_storm_level / 5.0;
+        col   = mix(col, col * vec3(1.35, 0.82, 0.60), stormNorm * 0.38);
+        alpha *= 1.0 + stormNorm * 0.28;
+
+        // ── Total IMF: stronger B-field → brighter/sharper streamer belt ─────────
+        // Stronger total IMF means more compressed magnetic flux in the HCS,
+        // making the streamer belt denser and the HCS tilt angle more pronounced.
+        col   *= 1.0 + helmetBelt * u_bt_norm * 0.50;
+        alpha *= 1.0 + u_bt_norm * 0.20;
+
+        // ── F10.7 solar cycle: global corona brightness ────────────────────────
+        // At solar maximum the corona is hotter, denser, and more structured.
+        col   *= 1.0 + u_f107_norm * 0.35;
+        alpha *= 1.0 + u_f107_norm * 0.28;
+
+        // ── Energetic electron flux: blue-white coronal hazing ─────────────────
+        // High-energy electrons scatter off the coronal plasma adding a faint
+        // blue-UV glow; also signals enhanced solar activity.
+        col  = mix(col, vec3(0.55, 0.80, 1.20) * (col * 0.6 + 0.4), u_electron_norm * 0.30);
+        alpha += u_electron_norm * pow(rim, 2.5) * 0.10;
+
+        // ── Dst ring-current: sub-storm magnetospheric injection glow ─────────
+        // Negative Dst (ring-current injection) comes from the solar wind
+        // energizing Earth's magnetosphere — reflects extreme solar wind pressure.
+        float dstBoost = u_dst_norm * helmetBelt;
+        col  = mix(col, vec3(0.80, 0.55, 1.10), dstBoost * 0.22);
+        alpha += dstBoost * pow(rim, 2.8) * 0.12;
+
         gl_FragColor = vec4(col * pulse, alpha);
     }
 `;
@@ -2037,6 +2372,13 @@ const outerGlowFS = /* glsl */`
     uniform float u_wind_density_norm;
     uniform float u_bz_sw;
     uniform float u_flare_intensity;
+    // ── Additional live channels ──
+    uniform float u_aurora_north;   // OVATION north [0-1]
+    uniform float u_aurora_south;   // OVATION south [0-1]
+    uniform float u_bt_norm;        // total IMF [0-1]
+    uniform float u_storm_level;    // G-scale 0-5
+    uniform float u_electron_norm;  // GOES >2MeV electrons [0-1]
+    uniform float u_f107_norm;      // F10.7 solar cycle [0-1]
 
     void main() {
         vec3 N = normalize(vNormal);
@@ -2076,6 +2418,29 @@ const outerGlowFS = /* glsl */`
         // Flare EUV blast — brief global brightening
         alpha = clamp(alpha + pow(rim, 4.0) * u_flare_intensity * 0.30, 0.0, 0.65);
 
+        // ── OVATION aurora: bright polar fast-wind plume streamers ─────────────
+        float polN = smoothstep(0.50, 0.95, N.y);
+        float polS = smoothstep(0.50, 0.95, -N.y);
+        vec3 auroraCol = mix(vec3(0.48, 0.92, 0.78), vec3(0.55, 0.88, 1.00), 0.5);
+        col   = mix(col, auroraCol, (polN * u_aurora_north + polS * u_aurora_south) * 0.32);
+        alpha += (polN * u_aurora_north + polS * u_aurora_south) * pow(rim, 2.8) * 0.15;
+
+        // ── G-scale storm: broad equatorial brightening + warm tint ───────────
+        float stNorm = u_storm_level / 5.0;
+        col   = mix(col, vec3(1.08, 0.78, 0.55), stNorm * beltW * 0.35);
+        alpha = clamp(alpha * (1.0 + stNorm * 0.38), 0.0, 0.75);
+
+        // ── Total IMF: stronger field = tighter, brighter streamer belt ────────
+        alpha += beltAlph * u_bt_norm * 0.55;
+        col    = mix(col, vec3(1.05, 0.95, 0.80), u_bt_norm * beltW * 0.18);
+
+        // ── F10.7 solar cycle: global heliospheric glow intensity ──────────────
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.30), 0.0, 0.75);
+
+        // ── Energetic electron flux: faint blue-violet outer heliosphere haze ──
+        col   = mix(col, vec3(0.62, 0.76, 1.12), u_electron_norm * 0.22);
+        alpha += u_electron_norm * pow(rim, 3.5) * 0.08;
+
         gl_FragColor = vec4(col, alpha);
     }
 `;
@@ -2097,6 +2462,13 @@ const solarWindVS = /* glsl */`
     uniform float u_wind_density_norm;// 0=calm, 1=25 n/cc (DSCOVR L1)
     uniform float u_wind_temp_norm;   // 0=50kK slow wind, 1=500kK+ fast/CME wind
     uniform float u_bz_sw;            // 0=northward, 1=30 nT southward
+    uniform float u_by_sw;            // IMF By / 20 nT, signed [-1,+1]
+    uniform float u_bt_norm;          // total IMF / 30 nT [0-1]
+    uniform float u_electron_norm;    // GOES >2MeV electron flux [0-1]
+    uniform float u_f107_norm;        // F10.7 solar cycle [0-1]
+    uniform float u_aurora_north;     // OVATION north aurora [0-1]
+    uniform float u_aurora_south;     // OVATION south aurora [0-1]
+    uniform float u_proton_norm;      // GOES >10MeV proton flux [0-1]
 
     varying float vProgress;
     varying vec3  vColor;
@@ -2114,8 +2486,12 @@ const solarWindVS = /* glsl */`
         // Slow-wind / fast-wind bifurcation:
         // Near equator: slow solar wind (~400 km/s); polar regions: fast wind (~750 km/s)
         float sinLat = abs(aDir.y);   // 0=equator, 1=pole
+        // Aurora power → faster open-field polar streams (coronal-hole fast wind)
+        float auroraBoost = mix(u_aurora_south, u_aurora_north, step(0.0, aDir.y));
         // Live speed boosts max reach — CME/fast streams reach farther
-        float R_far = mix(4.8, 6.5, sinLat * sinLat) + u_wind_speed_norm * 1.2;
+        // Aurora-driven polar coronal holes also extend fast-wind reach
+        float R_far = mix(4.8, 6.5, sinLat * sinLat) + u_wind_speed_norm * 1.2
+                    + auroraBoost * sinLat * sinLat * 0.80;
         float r = 1.0 + (R_far - 1.0) * s * s;   // quadratic acceleration
 
         vProgress  = s;
@@ -2132,6 +2508,11 @@ const solarWindVS = /* glsl */`
         // Southward Bz warps equatorial wind slightly (reconnection-driven asymmetry)
         float bzSkew = u_bz_sw * 0.04 * (1.0 - sinLat * sinLat) * sin(aPhase * 6.28);
         phi_parker += bzSkew;
+
+        // IMF By sector polarity: dawn-dusk asymmetry in the Parker spiral
+        // Positive By → spiral biased toward +z (dusk-side); negative → dawn-side
+        float bySkew = u_by_sw * 0.07 * (1.0 - sinLat * sinLat);
+        phi_parker  += bySkew;
 
         // Rotate aDir around the star's Y-axis by phi_parker
         float cp  = cos(phi_parker);
@@ -2168,6 +2549,19 @@ const solarWindVS = /* glsl */`
 
         // High-density slow-wind: warm orange-gold tint at launch
         vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.22 * (1.0 - s) * (1.0 - u_wind_temp_norm));
+
+        // ── F10.7 solar cycle: brighter, warmer particles at solar maximum ──────
+        vColor *= 1.0 + u_f107_norm * 0.22;
+        // ── Energetic electron flux: blue-white stream colour shift ──────────────
+        // High-energy electron beams ride with the solar wind, slightly shifting
+        // the bulk colour toward blue-white especially in the inner corona region.
+        vColor  = mix(vColor, vec3(0.72, 0.88, 1.15), u_electron_norm * 0.22 * (1.0 - s * 0.6));
+        // ── Aurora-driven polar plumes: teal-blue fast-wind colour ───────────────
+        vColor  = mix(vColor, vec3(0.48, 0.92, 1.00), auroraBoost * sinLat * sinLat * 0.35);
+        // ── SEP proton storm: bright white-gold high-energy particles ─────────────
+        vColor  = mix(vColor, vec3(1.10, 1.00, 0.75), u_proton_norm * 0.28 * (1.0 - s));
+        // ── Total IMF: stronger B-field → tighter, more structured spiral ────────
+        vColor  = mix(vColor, vColor * vec3(1.0, 0.97, 0.92), u_bt_norm * 0.12);
 
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
@@ -2381,6 +2775,139 @@ function spawnCMEShock(speedNorm) {
     scene.add(mesh);
     cmeShockWaves.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm });
     console.log(`[CME Shock] Spawned — speed_norm=${speedNorm.toFixed(2)}`);
+}
+
+// ─── CME MAGNETIC FLUX ROPE ───────────────────────────────────────────────────
+// When an Earth-directed CME is detected, spawn a glowing twisted flux rope
+// that rises from the solar surface and expands into the heliosphere.
+//
+// Physics: A CME flux rope is a coherent bundle of helically twisted magnetic
+// field lines erupting from the solar corona. It appears in LASCO imagery as
+// a bright, curved loop with a dark void (the driver region) and bright sheath.
+//
+// Geometry: CatmullRom arch with two footpoints anchored near the surface and
+// an apex that expands outward along the CME propagation direction.
+// The twisted field-line appearance is encoded in the GLSL UV-based stripe pattern.
+
+const cmeFluxRopes = [];  // [{ mesh, t0, speed, lat, lon }]
+const FLUX_ROPE_LIFE = 35.0;   // sim-time units before removal
+
+const fluxRopeVS = /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    void main() {
+        vUv      = uv;
+        vNormal  = normalize(normalMatrix * normal);
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const fluxRopeFS = /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vWorldPos;
+    uniform float u_age;
+    uniform float u_speed;
+    uniform float u_time;
+    uniform vec3  u_cam;
+
+    void main() {
+        float prog   = clamp(u_age / ${FLUX_ROPE_LIFE.toFixed(1)}, 0.0, 1.0);
+        float life   = ${FLUX_ROPE_LIFE.toFixed(1)};
+
+        // Limb / rim brightening — glows brightest edge-on (like real coronagraph)
+        vec3 camDir = normalize(u_cam - vWorldPos);
+        float rim   = 1.0 - abs(dot(normalize(vNormal), camDir));
+
+        // Helical field-line twist pattern
+        // vUv.x : 0→1 along the tube spine (foot1 → apex → foot2)
+        // vUv.y : 0→1 around the tube cross-section
+        float axialPhase = vUv.x * 3.14159 * 10.0;    // 5 full cycles along tube
+        float azimuth    = vUv.y * 3.14159 * 2.0;     // full cross-section wrap
+        float twist      = sin(axialPhase + azimuth * 3.0 + u_time * 0.7) * 0.5 + 0.5;
+        float stripe     = pow(twist, 3.2) * 0.75;
+
+        // Fade: quick rise-in, slow fallout; brighter at footpoints
+        float riseIn  = min(1.0, u_age * 3.0);
+        float fadeOut = pow(1.0 - prog, 1.5);
+        float footBrt = 1.0 - sin(vUv.x * 3.14159) * 0.28; // brighter at feet & apex
+
+        float alpha = (pow(rim, 1.35) * 0.55 + stripe * 0.30 + 0.06) * riseIn * fadeOut * footBrt;
+
+        // Colour: white-gold rope body; violet rim (like LASCO CME imagery)
+        vec3 cBody = mix(vec3(1.00, 0.92, 0.58), vec3(1.00, 0.65, 0.22), prog * 0.75);
+        vec3 cRim  = mix(vec3(0.72, 0.60, 1.00), vec3(0.50, 0.35, 0.88), prog);
+        vec3 cFL   = mix(vec3(1.00, 0.88, 0.40), vec3(0.82, 0.50, 1.00), prog * 0.5);
+
+        vec3 col = mix(cBody, cRim, pow(rim, 1.5));
+        col = mix(col, cFL, stripe * 0.38);
+        col *= (1.0 + u_speed * 0.55);   // faster CME = brighter rope
+
+        if (alpha < 0.004) discard;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.68));
+    }
+`;
+
+/**
+ * Build the 7 control points for the flux rope arch.
+ * @param {number} latRad   Heliographic latitude of the CME source
+ * @param {number} lonRad   Heliographic longitude of the CME source
+ * @param {number} speedNorm  0-1 normalised CME speed (faster → higher apex)
+ */
+function _buildFluxRopePts(latRad, lonRad, speedNorm) {
+    // Propagation axis direction in heliocentric Cartesian
+    const cL = Math.cos(latRad), sL = Math.sin(latRad);
+    const cO = Math.cos(lonRad), sO = Math.sin(lonRad);
+    const axis = new THREE.Vector3(cL * sO, sL, cL * cO).normalize();
+
+    // Orthonormal frame: axis + perpendicular "side" + "up" vectors
+    const ref  = Math.abs(sL) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+    const side = new THREE.Vector3().crossVectors(axis, ref).normalize();
+
+    // Half-separation between footpoints (solar radii)
+    const hw     = 0.18 + speedNorm * 0.08;
+    const apexH  = 1.85 + speedNorm * 2.8;   // apex radius from sun centre
+
+    const pt = (axF, sdF) =>
+        new THREE.Vector3()
+            .addScaledVector(axis, axF)
+            .addScaledVector(side, sdF);
+
+    // 7-point smooth arch: foot → rise → apex → descent → foot
+    return [
+        pt(1.02,  -hw),          // foot 1 on surface
+        pt(1.18,  -hw * 0.70),   // first kink
+        pt(1.50,  -hw * 0.28),   // flank left
+        pt(apexH,  0.0),         // apex (highest point)
+        pt(1.50,   hw * 0.28),   // flank right
+        pt(1.18,   hw * 0.70),   // second kink
+        pt(1.02,   hw),          // foot 2 on surface
+    ];
+}
+
+function spawnFluxRope(latRad, lonRad, speedNorm) {
+    const pts    = _buildFluxRopePts(latRad, lonRad, speedNorm);
+    const curve  = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.45);
+    const tubeR  = 0.042 + speedNorm * 0.032;   // thicker for faster CMEs
+    const geo    = new THREE.TubeGeometry(curve, 72, tubeR, 14, false);
+    const su     = {
+        u_age:   { value: 0.0 },
+        u_speed: { value: speedNorm },
+        u_time:  uniforms.u_time,            // shared with scene
+        u_cam:   { value: new THREE.Vector3() },
+    };
+    const mat  = new THREE.ShaderMaterial({
+        vertexShader: fluxRopeVS, fragmentShader: fluxRopeFS,
+        uniforms: su,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    scene.add(mesh);
+    cmeFluxRopes.push({ mesh, t0: uniforms.u_time.value, speed: speedNorm, lat: latRad, lon: lonRad });
+    console.log(`[FluxRope] Spawned at lat=${(latRad*180/Math.PI).toFixed(1)}° lon=${(lonRad*180/Math.PI).toFixed(1)}° apex=${(1.85+speedNorm*2.8).toFixed(1)} R☉`);
 }
 
 // ─── SEP SOLAR ENERGETIC PARTICLES ───────────────────────────────────────────
@@ -2881,7 +3408,7 @@ let solarRotAngle = 0;    // accumulated rotation matching photosphere UV shift
 // ANIMATE
 function animate() {
     requestAnimationFrame(animate);
-    const dt = 0.010;
+    const dt = 0.010 * simSpeed;
     uniforms.u_time.value += dt;
 
     // Accumulate solar rotation to match photosphere UV scroll rate:
@@ -2988,6 +3515,25 @@ function animate() {
         // Expand: r = 1.15 at birth, ~5.8 at life end (faster for higher-speed CMEs)
         const expandRate = 0.15 + sh.speed * 0.08;
         sh.mesh.scale.setScalar(1.15 + age * expandRate);
+    }
+
+    // ── CME Flux Rope expansion ───────────────────────────────────────────────
+    for (let i = cmeFluxRopes.length - 1; i >= 0; i--) {
+        const fr  = cmeFluxRopes[i];
+        const age = t - fr.t0;
+        if (age > FLUX_ROPE_LIFE) {
+            scene.remove(fr.mesh);
+            fr.mesh.geometry.dispose();
+            fr.mesh.material.dispose();
+            cmeFluxRopes.splice(i, 1);
+            continue;
+        }
+        fr.mesh.material.uniforms.u_age.value = age;
+        fr.mesh.material.uniforms.u_cam.value.copy(camera.position);
+        // Expand the rope outward as the CME propagates — scale along propagation axis
+        // Use non-uniform scale: rope expands mostly along its axis direction
+        const growFactor = 1.0 + (age / FLUX_ROPE_LIFE) * (fr.speed * 2.0 + 1.5);
+        fr.mesh.scale.setScalar(growFactor);
     }
 
     // Flare ribbon timer — increments each frame; capped at 999
@@ -3340,19 +3886,20 @@ async function fetchLiveSolarData() {
     st.className   = 'live-status';
     st.textContent = 'Fetching NOAA/SWPC…';
 
+    // Helper: fetch JSON, return null on any error (network or HTTP 4xx/5xx)
+    const tryFetch = url => fetch(url, { cache: 'no-cache' })
+        .then(r => r.ok ? r.json() : null)
+        .catch(() => null);
+
     try {
-        const [rR, eR, xR] = await Promise.all([
-            fetch(SWPC + '/products/solar-regions.json'),
-            fetch(SWPC + '/json/edited_events.json'),
-            fetch(SWPC + '/json/goes/primary/xray-1-day.json'),
+        const [rJ, eJ, xJ] = await Promise.all([
+            tryFetch(SWPC + '/products/solar-regions.json'),
+            tryFetch(SWPC + '/json/goes/primary/xray-flares-7day.json'),
+            tryFetch(SWPC + '/json/goes/primary/xray-1-day.json'),
         ]);
 
-        // Check HTTP status before parsing — fetch() doesn't throw on 4xx/5xx
-        if (!rR.ok || !eR.ok || !xR.ok) {
-            throw new Error(`NOAA HTTP ${rR.status}/${eR.status}/${xR.status}`);
-        }
-
-        const [rJ, eJ, xJ] = await Promise.all([rR.json(), eR.json(), xR.json()]);
+        // Fail only if every endpoint returned nothing useful
+        if (!rJ && !eJ && !xJ) throw new Error('All NOAA endpoints returned null');
 
         // Active regions — first row is header array, rest are data
         // NOAA solar-regions.json column layout:
@@ -3375,20 +3922,22 @@ async function fetchLiveSolarData() {
         }
         // If server returned an empty list keep default — quiet day data is still useful
 
-        // Flares from edited_events — last 48h, type 'FL'
+        // Flares from xray-flares-7day.json — last 48h
+        // Schema: [{begin_time, class, begin_location, active_region_num, ...}]
         const cutoff = Date.now() - 48 * 3600e3;
         const parsedFlares = (Array.isArray(eJ) ? eJ : [])
             .filter(e => {
-                const isFlare = (e.eventType || e.type || '').toUpperCase().startsWith('FL');
-                const d = new Date(e.eventTime || e.beginTime || 0);
-                return isFlare && d.getTime() > cutoff;
+                const t = new Date((e.begin_time ?? e.eventTime ?? e.beginTime ?? 0)
+                    .replace ? (e.begin_time ?? '').replace(' ', 'T') + 'Z' : 0);
+                const cls = e.class ?? e.severity ?? '';
+                return cls && t.getTime() > cutoff;
             })
             .slice(-14).reverse()
             .map(e => ({
-                time: e.eventTime || e.beginTime || '',
-                cls:  e.severity  || e.class || '?',
-                loc:  e.location  || '—',
-                reg:  e.activeRegion || '—',
+                time: (e.begin_time ?? e.eventTime ?? '').replace(' ', 'T'),
+                cls:  e.class ?? e.severity ?? '?',
+                loc:  e.begin_location ?? e.location ?? '—',
+                reg:  String(e.active_region_num ?? e.activeRegion ?? '—'),
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
 
@@ -3514,9 +4063,12 @@ updateFlareActivityBar();
 replayRecentFlares();
 document.getElementById('live-status').textContent = 'Default data · fetching live…';
 
-document.getElementById('btn-live-refresh').addEventListener('click', fetchLiveSolarData);
+document.getElementById('btn-live-refresh').addEventListener('click', () => {
+    fetchLiveSolarData();
+    _swFeed.refresh();   // also kick SpaceWeatherFeed for immediate wind data
+});
 fetchLiveSolarData();                         // attempt live update on load
-setInterval(fetchLiveSolarData, 10 * 60 * 1000); // refresh every 10 min
+setInterval(fetchLiveSolarData, 5 * 60 * 1000);  // refresh every 5 min
 
 // Refresh SDO/SOHO thumbnail images every 15 min (SDO updates ~every 12 min)
 setInterval(() => {
@@ -3527,6 +4079,38 @@ setInterval(() => {
         img.src = img.src.split('?')[0] + '?_=' + t;
     });
 }, 15 * 60 * 1000);
+
+// ── Wind pipeline supplemental feed ────────────────────────────────────────────
+// wind-pipeline-update comes from the Vercel Edge Function (api/solar-wind/wind-speed)
+// or the local FastAPI server. Provides processed trend + alert level data.
+// Only overrides live uniforms when scrubLive is true (not scrubbing history).
+window.addEventListener('wind-pipeline-update', (ev) => {
+    const wp = ev.detail;
+    if (!wp || wp.status === 'offline' || wp.freshness === 'expired') return;
+    if (!scrubLive) return;   // don't override historical scrubbing
+
+    if (wp.speed_km_s > 0) {
+        const sn = wp.speed_norm ?? Math.max(0, Math.min(1, (wp.speed_km_s - 250) / 650));
+        uniforms.u_wind_speed_norm.value = sn;
+    }
+    if ((wp.density_cc ?? 0) > 0) {
+        uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, wp.density_cc / 25));
+    }
+    if (wp.bz_nT != null) {
+        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -wp.bz_nT / 30));
+    }
+    // Reflect trend direction in a subtle pulsing speed boost
+    if (wp.trend?.direction === 'RISING') {
+        uniforms.u_wind_speed_norm.value = Math.min(1, uniforms.u_wind_speed_norm.value + 0.02);
+    }
+    // Update pipeline feed dot
+    const fdW = document.getElementById('fd-wind');
+    if (fdW) fdW.className = wp.freshness === 'fresh' ? 'feed-dot live' : 'feed-dot stale';
+});
+
+// ── Start SpaceWeatherFeed FIRST — this is the primary NOAA data pipeline ──────
+// Must be started before the optional wind-pipeline so any startup error in the
+// wind pipeline (server not running) cannot block the primary feed.
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
@@ -3597,8 +4181,36 @@ function _updateRibbonXray() {
 }
 
 // SpaceWeatherFeed provides solar wind, Kp, Bz — same feed as Earth view
-const _swFeed = new SpaceWeatherFeed();
+// Primary NOAA real-time feed — must start unconditionally
+// 60-second poll: NOAA rtsw_wind_1m.json updates every 60 s at source.
+const _swFeed = new SpaceWeatherFeed({ pollInterval: 60_000 });
 _swFeed.start();
+
+// Optional processed wind pipeline (local FastAPI / Vercel edge) — fails silently
+// when the server isn't running so it never blocks the primary NOAA feed.
+try {
+    new WindPipelineFeed().start();
+} catch (e) {
+    console.debug('[WindPipeline] server not available, using NOAA data only:', e.message);
+}
+
+// ── Live countdown ticker — shows "Next NOAA refresh in Xs" ──────────────────
+// Gives the user clear feedback that the feed is active even between polls.
+let _lastSwpcFireAt = Date.now();
+window.addEventListener('swpc-update', () => { _lastSwpcFireAt = Date.now(); }, true);
+setInterval(() => {
+    const el = document.getElementById('swpc-countdown');
+    if (!el) return;
+    const ageS   = Math.round((Date.now() - _lastSwpcFireAt) / 1000);
+    const nextS  = Math.max(0, 60 - ageS);  // 60 s poll interval
+    const ageStr = ageS < 60 ? `${ageS}s ago` : `${Math.floor(ageS / 60)}m ${ageS % 60}s ago`;
+    el.textContent = `Updated ${ageStr} · next in ${nextS}s`;
+    el.style.color = nextS < 10 ? '#4eda90' : '#443322';
+}, 1000);
+
+// Set of "cls|timestamp" keys for flares already given a 3D ring — prevents
+// duplicate rings when swpc-update fires repeatedly on the same flare data.
+const _shownFlareKeys = new Set();
 
 window.addEventListener('swpc-update', (ev) => {
     const sw  = ev.detail;
@@ -3606,6 +4218,10 @@ window.addEventListener('swpc-update', (ev) => {
     const kp  = sw.kp ?? 0;
     const bz  = sw.solar_wind?.bz  ?? 0;
     const spd = sw.solar_wind?.speed       ?? 400;
+
+    // ── Diagnostic: confirm event is firing + log key values ─────────────────
+    console.log(`[SWPC] ${sw.status} | wind ${spd} km/s | kp ${kp} | bz ${bz.toFixed(1)} nT | xray ${sw.xray_class ?? '?'}`);
+
     const dns = sw.solar_wind?.density     ?? 5;
     const bt  = sw.solar_wind?.bt          ?? 5;
     const tmp = sw.solar_wind?.temperature ?? 1e5;
@@ -3613,31 +4229,72 @@ window.addEventListener('swpc-update', (ev) => {
     const gl  = Math.min(5, Math.floor(kp / 1.67));
     const gc  = _G_COLS_SUN[gl];
 
-    // ── Update wind live-status badge ──────────────────────────────────────────
+    // ── Update feed status dots ────────────────────────────────────────────────
+    const _fd    = id => document.getElementById(id);
+    const _setFd = (id, on) => { const el = _fd(id); if (el) el.className = on ? 'feed-dot live' : 'feed-dot'; };
+    _setFd('fd-wind',     spd > 0);
+    _setFd('fd-imf',      bt  > 0);
+    _setFd('fd-kp',       kp  >= 0);
+    _setFd('fd-kp1m',     (sw.kp_1min ?? -1) >= 0);
+    _setFd('fd-xray',     !!sw.xray_flux);
+    _setFd('fd-flares',   !!(sw.recent_flares?.length));
+    _setFd('fd-regions',  !!(sw.active_regions?.length));
+    _setFd('fd-aurora',   (sw.aurora_power_north ?? -1) >= 0);
+    _setFd('fd-cme',      !!(sw.earth_directed_cme || sw.recent_cmes?.length));
+    _setFd('fd-sep',      (sw.sep_storm_level ?? 0) >= 0);
+    _setFd('fd-electron', (sw.electron_flux_2mev ?? -1) >= 0);
+    _setFd('fd-dst',      sw.dst_index != null);
+    _setFd('fd-f107',     (sw.f107_flux ?? -1) > 0);
+    const updEl = document.getElementById('swpc-last-upd');
+    if (updEl) updEl.textContent = 'NOAA ' + new Date().toLocaleTimeString();
+    // Live badge — turns green when data arrives
+    const badge = document.getElementById('swpc-live-badge');
+    if (badge) {
+        const isLive = sw.status === 'live';
+        badge.textContent = isLive ? '⬤ LIVE' : sw.status === 'stale' ? '⬤ STALE' : '⬤ OFFLINE';
+        badge.style.background = isLive ? 'rgba(60,200,100,.18)' : 'rgba(200,120,40,.18)';
+        badge.style.borderColor = isLive ? 'rgba(60,200,100,.4)' : 'rgba(200,120,40,.4)';
+        badge.style.color = isLive ? '#4eda90' : '#cc8844';
+    }
+    // Legacy wind-live-status badge
     const windBadge = document.getElementById('wind-live-status');
     if (windBadge) {
         const status = sw.status ?? 'connecting';
         if (status === 'live') {
             const t = sw.lastUpdated;
             const ts = t ? t.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
-            windBadge.textContent  = `● Live ${ts}`;
-            windBadge.className    = 'live-status ok';
+            windBadge.textContent = `● Live ${ts}`;
+            windBadge.className   = 'live-status ok';
         } else if (status === 'stale' || status === 'offline') {
-            windBadge.textContent  = '⚠ NOAA offline';
-            windBadge.className    = 'live-status err';
+            windBadge.textContent = '⚠ NOAA offline';
+            windBadge.className   = 'live-status err';
         } else {
-            windBadge.textContent  = '○ connecting…';
-            windBadge.className    = 'live-status';
+            windBadge.textContent = '○ connecting…';
+            windBadge.className   = 'live-status';
         }
     }
 
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
-    uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
-    uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
-    // Temperature: 50 kK (slow) → 500 kK (fast/CME) mapped to 0-1
-    uniforms.u_wind_temp_norm.value    = Math.max(0, Math.min(1, (tmp - 50e3) / 450e3));
-    uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+    // Skip wind/IMF uniforms when user is scrubbing historical data
+    if (typeof scrubLive === 'undefined' || scrubLive) {
+        uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
+        uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
+        // Temperature: 50 kK (slow) → 500 kK (fast/CME) mapped to 0-1
+        uniforms.u_wind_temp_norm.value    = Math.max(0, Math.min(1, (tmp - 50e3) / 450e3));
+        uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+    }
     uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
+
+    // ── Wire all remaining NOAA channels to shader uniforms ──────────────────
+    uniforms.u_f107_norm.value     = d.f107_norm         ?? 0.30;
+    uniforms.u_aurora_north.value  = d.aurora_north_norm ?? 0.0;
+    uniforms.u_aurora_south.value  = d.aurora_south_norm ?? 0.0;
+    uniforms.u_electron_norm.value = d.electron_2mev_norm ?? 0.0;
+    uniforms.u_proton_norm.value   = d.proton_10mev_norm  ?? 0.0;
+    uniforms.u_storm_level.value   = d.storm_level        ?? 0.0;
+    uniforms.u_bt_norm.value       = d.bt_norm            ?? Math.max(0, Math.min(1, bt / 30));
+    uniforms.u_by_sw.value         = Math.max(-1, Math.min(1, (sw.solar_wind?.by ?? 0) / 20));
+    uniforms.u_dst_norm.value      = d.dst_norm           ?? 0.025;
 
     // S-scale drives SEP particle system
     const sepLevel = sw.sep_storm_level ?? 0;
@@ -3791,6 +4448,15 @@ window.addEventListener('swpc-update', (ev) => {
     if (spdEl) spdEl.textContent = `${Math.round(spd)} km/s`;
     if (dnsEl) dnsEl.textContent = `${dns.toFixed(1)} /cc`;
 
+    // ── NOAA feed timestamp — proves data is live ──────────────────────────────
+    const noaaTimeEl = document.getElementById('sw-noaa-ts');
+    if (noaaTimeEl) {
+        const t   = sw.lastUpdated ? new Date(sw.lastUpdated) : new Date();
+        const age = Math.round((Date.now() - t.getTime()) / 1000);
+        noaaTimeEl.textContent = `NOAA ${sw.status ?? '?'} · ${t.toLocaleTimeString()} (${age}s ago)`;
+        noaaTimeEl.style.color = sw.status === 'live' ? '#44cc66' : '#cc8844';
+    }
+
     // IMF Bz (color: red=southward, blue=northward)
     const bzEl = document.getElementById('sw-bz');
     if (bzEl) {
@@ -3875,6 +4541,38 @@ window.addEventListener('swpc-update', (ev) => {
     // ── Wind latitude chart ───────────────────────────────────────────────────
     renderWindLatChart(spd);
 
+    // ── Position rings for ALL recent flares (< 3h old) ─────────────────────
+    // The swpc-update event fires every 60 s. We track shown flare keys so we
+    // only trigger a ring once per unique flare event, not on every poll.
+    if (sw.recent_flares?.length) {
+        const cutoff3h = Date.now() - 3 * 3600e3;
+        sw.recent_flares.forEach(f => {
+            if (!f.location) return;
+            const ft  = f.time instanceof Date ? f.time.getTime() : new Date(f.time).getTime();
+            if (ft < cutoff3h) return;
+            const key = `${f.cls}|${ft}`;
+            if (_shownFlareKeys.has(key)) return;
+            _shownFlareKeys.add(key);
+            const loc = parseLoc(f.location);
+            if (!loc) return;
+            const clsCh = (f.cls ?? f.parsed?.letter ?? 'C')[0]?.toUpperCase() ?? 'C';
+            const ageMs  = Date.now() - ft;
+            const simAge = Math.min(800, (ageMs / 1000) * 0.35);
+            // Place 3D ring flash at this exact NOAA location
+            triggerPositionFlare(loc.lat, loc.lon, clsCh);
+            // Also drive ribbon shader to this site if it's the newest flare
+            if (!sw.new_major_flare && ft === Math.max(...sw.recent_flares.map(x => {
+                const xt = x.time instanceof Date ? x.time.getTime() : new Date(x.time).getTime();
+                return xt;
+            }))) {
+                uniforms.u_flare_lat.value = loc.lat * Math.PI / 180;
+                uniforms.u_flare_lon.value = loc.lon * Math.PI / 180;
+                uniforms.u_flare_t.value   = simAge;
+            }
+            console.log(`[Flare] ${f.cls} at ${f.location} — ${Math.round(ageMs/60000)}m ago → ring placed`);
+        });
+    }
+
     // ── Visual flare/CME burst ───────────────────────────────────────────────
     // Trigger a sun flash when a new major flare is detected via SpaceWeatherFeed
     if (sw.new_major_flare) {
@@ -3909,13 +4607,30 @@ window.addEventListener('swpc-update', (ev) => {
         showFlareAlertBanner(sw.flare_class ?? 'M-class', sw.flare_location);
     }
     if (sw.new_cme_detected && sw.earth_directed_cme) {
-        console.log('[Sun] New Earth-directed CME from DONKI — shock wave + CME panel');
-        // Spawn expanding shock wave shell
+        console.log('[Sun] New Earth-directed CME from DONKI — flux rope + shock wave');
         const cmeSpeedNorm = Math.max(0, Math.min(1, ((sw.earth_directed_cme.speed ?? 800) - 300) / 2200));
+        // Spawn the 3D flux rope (twisted magnetic field tube)
+        const cmeLat = sw.earth_directed_cme.lat_rad ?? (sw.flare_direction?.lat_rad ?? 0);
+        const cmeLon = sw.earth_directed_cme.lon_rad ?? (sw.flare_direction?.lon_rad ?? 0);
+        spawnFluxRope(cmeLat, cmeLon, cmeSpeedNorm);
+        // Also spawn the expanding shock wave shell
         spawnCMEShock(cmeSpeedNorm);
-        // Also spawn one without new_cme_detected if u_cme_active just turned on
         const secCme = document.getElementById('sec-cme');
         if (secCme?.classList.contains('closed')) secCme.classList.remove('closed');
+    }
+
+    // Also spawn a flux rope on strong flares even without DONKI CME confirmation
+    // (M5+ and all X-class flares are associated with CMEs >90% of the time)
+    if (sw.new_major_flare && sw.flare_direction) {
+        const cls = (sw.flare_class ?? 'M')[0];
+        if (cls === 'X' || (cls === 'M' && parseFloat(sw.flare_class?.slice(1) ?? 0) >= 3)) {
+            const sn = Math.max(0, Math.min(1, (liveXrayFlux ?? 1e-5) / 1e-4));
+            spawnFluxRope(
+                sw.flare_direction.lat_rad,
+                sw.flare_direction.lon_rad,
+                sn
+            );
+        }
     }
 });
 

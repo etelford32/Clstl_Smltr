@@ -2,9 +2,24 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- Space Weather is now the home page — redirect immediately -->
+    <meta http-equiv="refresh" content="0; url=space-weather.html">
     <title>Parker Physics App — Interactive Celestial Simulations</title>
     <meta name="description" content="Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data. Explore stars, black holes, solar wind, and the galactic map interactively.">
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0a0a1a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Parker Physics">
+    <link rel="apple-touch-icon" href="ParkersPhysics_logo2.jpg">
+    <!-- Open Graph -->
+    <meta property="og:title" content="Parker Physics App — Interactive Celestial Simulations">
+    <meta property="og:description" content="Real-time astrophysics simulations powered by WebGL, Rust/WASM, and live NASA/NOAA space weather data.">
+    <meta property="og:image" content="ParkersPhysics_logo2.jpg">
+    <meta property="og:type" content="website">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -155,25 +170,49 @@ nav {
         .swpc-status.live    { background: rgba(0,200,100,.18); color:#4eff91; border: 1px solid rgba(0,200,100,.3); }
         .swpc-status.stale   { background: rgba(255,200,0,.15); color:#ffd700; border: 1px solid rgba(255,200,0,.3); }
         .swpc-status.offline { background: rgba(255,60,60,.15); color:#ff6060; border: 1px solid rgba(255,60,60,.3); }
+        /* Alert level badge colouring (applied to #sw-alert span) */
+        .alert-quiet    { color: #4eff91; }
+        .alert-moderate { color: #a0d8f0; }
+        .alert-high     { color: #ffd700; }
+        .alert-extreme  { color: #ff4444; font-weight: 700; }
 
         /* ─── Hero ────────────────────────────────────────────────────────── */
         .hero {
-            text-align: center;
-            padding: 3.5rem 2rem 1.5rem;
-            animation: fadeIn 1s ease-in;
             position: relative;
+            overflow: hidden;
+            min-height: 580px;
+            display: flex;
+            flex-direction: column;
+            animation: fadeIn 1s ease-in;
+            /* Deep-space base colour — visible while WebGL loads or as fallback */
+            background: radial-gradient(ellipse at 60% 40%, #0a0a2a 0%, #010209 100%);
         }
-        .hero-logo {
-            width: min(340px, 75vw);
-            height: auto;
-            margin: 0 auto 1.5rem;
+        /* Gradient overlay ensures hero text stays readable over the 3D scene */
+        .hero::before {
+            content: '';
+            position: absolute; inset: 0; z-index: 0;
+            background: linear-gradient(
+                180deg,
+                rgba(1,2,9,0.20)  0%,
+                rgba(1,2,9,0.05) 35%,
+                rgba(1,2,9,0.55) 70%,
+                rgba(1,2,9,0.95) 100%
+            );
+        }
+        /* 3D WebGL canvas — fills the hero entirely */
+        #hero-solar-canvas {
+            position: absolute; inset: 0; z-index: 1;
+            width: 100%; height: 100%;
             display: block;
-            filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3));
-            animation: logoPulse 4s ease-in-out infinite;
         }
-        @keyframes logoPulse {
-            0%,100% { filter: drop-shadow(0 0 40px rgba(255,180,0,.45)) drop-shadow(0 0 80px rgba(128,64,255,.3)); }
-            50%      { filter: drop-shadow(0 0 60px rgba(255,200,0,.65)) drop-shadow(0 0 110px rgba(160,80,255,.45)); }
+        /* Text block anchored to the bottom of the hero */
+        .hero-text {
+            position: relative; z-index: 2;
+            text-align: center;
+            margin-top: auto;
+            padding: 1.2rem 2rem 2.4rem;
+            /* Gradient mask so text appears on a readable dark strip */
+            background: linear-gradient(transparent, rgba(3,1,14,0.55) 25%, rgba(3,1,14,0.82) 70%);
         }
         .hero-title {
             font-size: 3rem;
@@ -492,6 +531,45 @@ nav {
             .simulators-grid { grid-template-columns: 1fr; }
             #swpc-bar { gap: 10px; }
         }
+
+        /* ─── Mobile: Tablet ─────────────────────────────────────────── */
+        @media (max-width: 600px) {
+            .hero { padding: 2.5rem 1.2rem 1.2rem; }
+            .hero-logo-wrap { width: min(280px, 82vw); height: min(280px, 82vw); }
+            .hero-title { font-size: 1.9rem; }
+            .hero-tagline { font-size: .95rem; }
+            .hero-sub { font-size: .85rem; }
+            .hero-badges { gap: 6px; }
+            .hero-badge { font-size: .75rem; padding: 5px 10px; }
+            #swpc-bar { padding: 5px 12px; gap: 8px; font-size: .68rem; }
+            .swpc-label { font-size: .64rem; }
+        }
+
+        /* ─── Mobile: Phone ──────────────────────────────────────────── */
+        @media (max-width: 480px) {
+            .hero { padding: 2rem 1rem 1rem; }
+            .hero-logo-wrap { width: min(240px, 80vw); height: min(240px, 80vw); }
+            .hero-title { font-size: 1.65rem; }
+            .hero-tagline { font-size: .9rem; }
+            .hero-sub { font-size: .82rem; }
+            nav { padding: 0 10px; gap: 6px; }
+            .nav-brand { font-size: .85rem; }
+            /* Simplify orbital rings on low-end mobile for perf */
+            .hero-logo-ring-3 { display: none; }
+        }
+
+        /* ─── Mobile: Small Phone ────────────────────────────────────── */
+        @media (max-width: 375px) {
+            .hero-title { font-size: 1.4rem; }
+            .hero-tagline { font-size: .82rem; }
+            .hero-badge { font-size: .7rem; padding: 4px 8px; }
+            nav { height: 48px; min-height: 48px; }
+            .nav-logo-wrap { width: 30px; height: 30px; }
+            .nav-logo-img { height: 30px; width: 30px; }
+            /* Hide outermost hero ring on tiny screens */
+            .hero-logo-ring-2 { display: none; }
+            #swpc-bar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        }
     </style>
 </head>
 <body>
@@ -499,7 +577,7 @@ nav {
 <!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
 <nav>
     <a href="index.html" class="nav-brand">
-        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics">
         Parker Physics
     </a>
     <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
@@ -585,6 +663,8 @@ nav {
 <div id="swpc-bar">
     <span class="swpc-label">&#9729; LIVE SPACE WEATHER</span>
     <span class="swpc-stat">Wind <span id="sw-speed">—</span> km/s</span>
+    <span class="swpc-stat" id="sw-alert-wrap" style="display:none">Alert <span id="sw-alert">—</span></span>
+    <span class="swpc-stat" id="sw-trend-wrap" style="display:none">Trend <span id="sw-trend">—</span></span>
     <span class="swpc-stat">Bz <span id="sw-bz">—</span> nT</span>
     <span class="swpc-stat">Density <span id="sw-dens">—</span> n/cc</span>
     <span class="swpc-stat">Kp <span id="sw-kp">—</span></span>
@@ -595,19 +675,24 @@ nav {
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
-<div class="hero">
-    <img src="ParkerPhaysics_logo1.png" class="hero-logo" alt="Parker Physics App Logo">
-    <h1 class="hero-title">Parker Physics App</h1>
-    <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
-    <p class="hero-sub">
-        Explore the universe through scientifically grounded, interactive simulations.
-        From solar wind physics to galactic structure — all running live in your browser.
-    </p>
-    <div class="hero-badges">
-        <span class="hero-badge gold">&#9728;&#65039; Live Solar Data</span>
-        <span class="hero-badge purple">&#128640; Rust / WASM</span>
-        <span class="hero-badge blue">&#127760; WebGL 3D</span>
-        <span class="hero-badge green">&#128295; Open Source</span>
+<div class="hero" id="hero">
+    <!-- Live solar canvas — animation drawn here; photo background set via CSS -->
+    <canvas id="hero-solar-canvas" aria-label="Live solar disk with NOAA space weather data" role="img"></canvas>
+
+    <!-- Text overlay anchored to hero bottom -->
+    <div class="hero-text">
+        <h1 class="hero-title">Parker Physics App</h1>
+        <p class="hero-tagline">Real-time Astrophysics Simulations — Powered by WebGL &amp; Live NASA/NOAA Data</p>
+        <p class="hero-sub">
+            Explore the universe through scientifically grounded, interactive simulations.
+            From solar wind physics to galactic structure — all running live in your browser.
+        </p>
+        <div class="hero-badges">
+            <span class="hero-badge gold">&#9728;&#65039; Live Solar Data</span>
+            <span class="hero-badge purple">&#128640; Rust / WASM</span>
+            <span class="hero-badge blue">&#127760; WebGL 3D</span>
+            <span class="hero-badge green">&#128295; Open Source</span>
+        </div>
     </div>
 </div>
 
@@ -1029,6 +1114,12 @@ nav {
         Parker Physics App — Built with Three.js, WebGL, Rust/Bevy &amp; WebAssembly<br>
         Live data from NOAA Space Weather Prediction Center &amp; NASA DONKI
     </p>
+    <p class="footer-copy" style="margin-top:.5rem;">
+        <a href="privacy.html" style="color:#666;">Privacy Policy</a> &nbsp;·&nbsp;
+        <a href="eula.html" style="color:#666;">EULA</a> &nbsp;·&nbsp;
+        <a href="api-policy.html" style="color:#666;">API Policy</a> &nbsp;·&nbsp;
+        © 2026 Parker Physics App
+    </p>
 </footer>
 
 <!-- ═══════════════════════════════════════════ NAV SCRIPT ═══ -->
@@ -1059,6 +1150,17 @@ nav {
         });
     });
 })();
+</script>
+
+<!-- ═══════════════════════════════════════════════ THREE.JS IMPORT MAP ═══ -->
+<!-- Required for hero-space-weather.js → magnetosphere-engine.js → 'three'  -->
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
 </script>
 
 <!-- ══════════════════════════════ EXTENDED FEEDS (Horizons · NEO · SOHO) ═══ -->
@@ -1183,17 +1285,59 @@ new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 
 <!-- ═══════════════════════════════════════ LIVE SPACE WEATHER BAR ═══ -->
 <script type="module">
-import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { SpaceWeatherFeed }   from './js/swpc-feed.js';
+import { HeroSpaceWeather }  from './js/hero-space-weather.js';
 
-const elSpeed  = document.getElementById('sw-speed');
-const elBz     = document.getElementById('sw-bz');
-const elDens   = document.getElementById('sw-dens');
-const elKp     = document.getElementById('sw-kp');
-const elXray   = document.getElementById('sw-xray');
-const elFlare  = document.getElementById('sw-flare');
-const elRegions= document.getElementById('sw-regions');
-const elRegWrap= document.getElementById('sw-region-wrap');
-const elStatus = document.getElementById('sw-status');
+const elSpeed     = document.getElementById('sw-speed');
+const elBz        = document.getElementById('sw-bz');
+const elDens      = document.getElementById('sw-dens');
+const elKp        = document.getElementById('sw-kp');
+const elXray      = document.getElementById('sw-xray');
+const elFlare     = document.getElementById('sw-flare');
+const elRegions   = document.getElementById('sw-regions');
+const elRegWrap   = document.getElementById('sw-region-wrap');
+const elStatus    = document.getElementById('sw-status');
+const elAlert     = document.getElementById('sw-alert');
+const elAlertWrap = document.getElementById('sw-alert-wrap');
+const elTrend     = document.getElementById('sw-trend');
+const elTrendWrap = document.getElementById('sw-trend-wrap');
+
+// ── In-browser rolling window for trend + alert (replaces FastAPI pipeline) ──
+// NOAA blocks server-side fetches (403 host_not_allowed), so all processing
+// must happen client-side. We keep the last 30 readings in memory.
+const TREND_WINDOW  = 30;
+const SLOPE_BAND    = 2.0;   // km/s per reading — threshold for STEADY
+const speedHistory  = [];    // [{ t: Date, v: number }]
+
+function pushSpeed(speed) {
+    if (speed == null || speed <= 0) return;
+    speedHistory.push({ t: Date.now(), v: speed });
+    if (speedHistory.length > TREND_WINDOW) speedHistory.shift();
+}
+
+function computeTrend() {
+    if (speedHistory.length < 3) return null;
+    const n  = speedHistory.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    speedHistory.forEach((p, i) => { sumX += i; sumY += p.v; sumXY += i * p.v; sumXX += i * i; });
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    const dir   = slope >  SLOPE_BAND ? 'RISING'
+                : slope < -SLOPE_BAND ? 'FALLING'
+                : 'STEADY';
+    return { slope, dir };
+}
+
+function alertLevel(speed, bz) {
+    const s = speed ?? 400;
+    const b = bz    ?? 0;
+    if (s >= 800 || (s >= 600 && b < -15)) return 'EXTREME';
+    if (s >= 600 || (s >= 400 && b < -10)) return 'HIGH';
+    if (s >= 400 || b < -10)               return 'MODERATE';
+    return 'QUIET';
+}
+
+const ALERT_CLASS = { QUIET: 'alert-quiet', MODERATE: 'alert-moderate', HIGH: 'alert-high', EXTREME: 'alert-extreme' };
+const TREND_ARROW = { RISING: '↑', FALLING: '↓', STEADY: '→' };
 
 function colourKp(kp) {
     if (kp >= 7) return 'val-alert';
@@ -1212,43 +1356,73 @@ function colourFlare(letter) {
 }
 
 window.addEventListener('swpc-update', e => {
-    const d = e.detail;
+    const d  = e.detail;
     const sw = d.solar_wind;
 
-    elSpeed.textContent = sw.speed ? sw.speed.toFixed(0) : '—';
-    elSpeed.className = '';
+    // ── Speed ──
+    const speed = sw.speed && sw.speed > 0 ? sw.speed : null;
+    elSpeed.textContent = speed ? speed.toFixed(0) : '—';
+    elSpeed.className   = '';
 
+    // ── Bz / Density / Kp / X-ray / Flare ──
     const bzVal = sw.bz != null ? sw.bz.toFixed(1) : '—';
-    elBz.textContent = bzVal + (sw.bz != null ? ' nT' : '');
-    elBz.className = sw.bz != null ? colourBz(sw.bz) : '';
-
+    elBz.textContent  = bzVal + (sw.bz != null ? ' nT' : '');
+    elBz.className    = sw.bz != null ? colourBz(sw.bz) : '';
     elDens.textContent = sw.density != null ? sw.density.toFixed(1) : '—';
-
-    elKp.textContent = d.kp != null ? d.kp.toFixed(1) : '—';
-    elKp.className = d.kp != null ? colourKp(d.kp) : '';
-
+    elKp.textContent   = d.kp != null ? d.kp.toFixed(1) : '—';
+    elKp.className     = d.kp != null ? colourKp(d.kp) : '';
     elXray.textContent = d.xray_class ?? '—';
-    elXray.className = colourFlare(d.flare_letter);
-
+    elXray.className   = colourFlare(d.flare_letter);
     if (d.flare_class) {
         elFlare.textContent = d.flare_class + (d.flare_location ? ' ' + d.flare_location : '');
-        elFlare.className = colourFlare(d.flare_letter);
+        elFlare.className   = colourFlare(d.flare_letter);
     } else {
         elFlare.textContent = 'none';
-        elFlare.className = '';
+        elFlare.className   = '';
+    }
+    if (d.active_regions?.length > 0) {
+        elRegions.textContent    = d.active_regions.length + ' active';
+        elRegWrap.style.display  = '';
     }
 
-    if (d.active_regions && d.active_regions.length > 0) {
-        elRegions.textContent = d.active_regions.length + ' active';
-        elRegWrap.style.display = '';
+    // ── In-browser trend + alert (replaces FastAPI wind-pipeline-feed) ──
+    if (speed) {
+        pushSpeed(speed);
+        const trend = computeTrend();
+        if (trend) {
+            elTrend.textContent       = `${TREND_ARROW[trend.dir]} ${trend.dir}`;
+            elTrend.className         = trend.dir === 'RISING'  ? 'val-warn'
+                                      : trend.dir === 'FALLING' ? 'val-good' : '';
+            elTrendWrap.style.display = '';
+        }
+        const lvl = alertLevel(speed, sw.bz);
+        elAlert.textContent       = lvl;
+        elAlert.className         = ALERT_CLASS[lvl] ?? '';
+        elAlertWrap.style.display = '';
     }
 
+    // ── Status ──
     elStatus.textContent = d.status;
-    elStatus.className = 'swpc-status ' + d.status;
+    elStatus.className   = 'swpc-status ' + d.status;
 });
 
-const feed = new SpaceWeatherFeed({ pollInterval: 5 * 60 * 1000 });
+// Poll at 90 s — NOAA rtsw_wind_1m.json updates every 60 s from user's browser.
+// Server-side fetches blocked by NOAA WAF (403 host_not_allowed), so all data
+// fetching must stay client-side (browser → NOAA directly, CORS works).
+const feed = new SpaceWeatherFeed({ pollInterval: 90 * 1000 });
 feed.start();
+
+// ── Hero 3D space-weather scene ────────────────────────────────────────────
+// Three.js WebGL canvas: Earth + magnetosphere + solar-wind particles.
+// Driven by the same swpc-update events the feed dispatches.
+// Gracefully hides itself if WebGL is unavailable (hero photo shows instead).
+const heroCanvas = document.getElementById('hero-solar-canvas');
+if (heroCanvas) new HeroSpaceWeather(heroCanvas).start();
 </script>
+
+<!-- Wind pipeline feed removed: NOAA WAF (403 host_not_allowed) blocks all
+     server-side fetches, so the FastAPI backend cannot proxy NOAA data from
+     Vercel. Trend + alert level are now computed in-browser in the swpc block
+     above. wind-pipeline-feed.js remains for local/self-hosted deployments. -->
 </body>
 </html>

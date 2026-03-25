@@ -43,6 +43,11 @@ pub struct VelocityField {
     cells: Vec<Vec3>,
     /// Accumulated simulation time driving time-varying features.
     time: f32,
+    /// Live wind speed multiplier driven by the NOAA pipeline.
+    ///
+    /// 1.0 = nominal (450 km/s).  Ranges from ~0.5 (slow, 250 km/s) to
+    /// ~2.5 (extreme storm, 900 km/s) as set by [`crate::apply_live_wind_scale`].
+    pub wind_speed_scale: f32,
 }
 
 impl VelocityField {
@@ -50,6 +55,7 @@ impl VelocityField {
         let mut field = Self {
             cells: vec![Vec3::ZERO; GRID_RES * GRID_RES * GRID_RES],
             time: 0.0,
+            wind_speed_scale: 1.0,
         };
         field.rebuild();
         field
@@ -109,6 +115,7 @@ impl VelocityField {
         let g = GRID_RES;
         let half = DOMAIN_RADIUS;
         let t = self.time;
+        let scale = self.wind_speed_scale;
 
         for iz in 0..g {
             for iy in 0..g {
@@ -119,7 +126,7 @@ impl VelocityField {
                         (iy as f32 / (g as f32 - 1.0)) * 2.0 * half - half,
                         (iz as f32 / (g as f32 - 1.0)) * 2.0 * half - half,
                     );
-                    self.cells[iz * g * g + iy * g + ix] = velocity_at(pos, t);
+                    self.cells[iz * g * g + iy * g + ix] = velocity_at(pos, t, scale);
                 }
             }
         }
@@ -130,7 +137,7 @@ impl VelocityField {
 
 /// Compute the velocity at an arbitrary world position.
 /// This function is also mirrored in `assets/shaders/fluid_advect.wgsl`.
-fn velocity_at(pos: Vec3, t: f32) -> Vec3 {
+fn velocity_at(pos: Vec3, t: f32, wind_scale: f32) -> Vec3 {
     let dist = pos.length();
     if dist < 0.01 {
         return Vec3::ZERO;
@@ -138,7 +145,7 @@ fn velocity_at(pos: Vec3, t: f32) -> Vec3 {
     let r_hat = pos / dist;
     let star_r = crate::STAR_RADIUS;
 
-    let wind = solar_wind(dist, r_hat, star_r);
+    let wind = solar_wind(dist, r_hat, star_r, wind_scale);
     let rot = differential_rotation(pos, dist);
     let conv = supergranule_field(pos, r_hat, dist, star_r, t);
 
@@ -156,13 +163,15 @@ fn velocity_at(pos: Vec3, t: f32) -> Vec3 {
 /// Radial solar-wind outflow.
 ///
 /// Zero beneath the photosphere; accelerates via a √-ramp through the corona,
-/// reaching [`WIND_SPEED_MAX`] at the domain boundary.
-fn solar_wind(dist: f32, r_hat: Vec3, star_r: f32) -> Vec3 {
+/// reaching [`WIND_SPEED_MAX`] × `scale` at the domain boundary.
+/// `scale` is driven live from NOAA DSCOVR/ACE measurements via
+/// [`crate::prediction::solar_wind::LiveWindSpeed`].
+fn solar_wind(dist: f32, r_hat: Vec3, star_r: f32, scale: f32) -> Vec3 {
     if dist <= star_r {
         return Vec3::ZERO;
     }
     let frac = ((dist - star_r) / (DOMAIN_RADIUS - star_r)).clamp(0.0, 1.0);
-    r_hat * WIND_SPEED_MAX * frac.sqrt()
+    r_hat * WIND_SPEED_MAX * frac.sqrt() * scale
 }
 
 /// Azimuthal rotation following the Sun's Carrington differential-rotation law:

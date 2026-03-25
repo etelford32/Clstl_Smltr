@@ -1,319 +1,159 @@
 /**
- * nasa-feed.js — NASA Space Weather Database Of Notifications, Knowledge,
- *                Information (DONKI) real-time data pipeline
+ * nasa-feed.js — NASA DONKI fetch-function module (thin wrapper)
  *
- * Polls four public NASA DONKI REST endpoints and dispatches a 'nasa-update'
- * CustomEvent on window each time new data arrives.
+ * This module is intentionally NOT a standalone class with its own scheduler.
+ * All DONKI calls are owned by SpaceWeatherFeed (swpc-feed.js) in the T3 tier,
+ * which calls our /api/donki/* Vercel Edge Functions.
  *
- * ENDPOINTS (all public, CORS-enabled; free API key required — see below)
- * ─────────────────────────────────────────────────────────────────────────
- *  FLR   — Solar Flare events (NASA catalogued, with CME links)
- *  CME   — Coronal Mass Ejections (speed, half-angle, direction)
- *  GST   — Geomagnetic Storm events (Kp onset/recovery times)
- *  SEP   — Solar Energetic Particle events (onset, instruments)
+ * The edge functions inject the NASA API key server-side from the NASA_API_KEY
+ * Vercel environment variable — the key is NEVER exposed to the browser.
  *
- * API KEY
- * ─────────────────────────────────────────────────────────────────────────
- *  NASA DONKI requires a free API key from https://api.nasa.gov/.
- *  Registration is instant — enter your email and you get a key immediately.
- *  While developing you can use 'DEMO_KEY' (30 req/hr, 50 req/day limit).
- *  Pass your key in the constructor: new NasaFeed({ apiKey: 'YOUR_KEY' })
+ * WHAT THIS MODULE PROVIDES
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  donkiState()   — returns a blank DONKI state object (used for type reference)
+ *  NasaFeed       — legacy-compatible shim so existing callers don't break.
+ *                   Internally delegates to SpaceWeatherFeed's T3 scheduler
+ *                   rather than polling independently.
  *
- * HOW TO ADD MORE NASA DATA STREAMS
- * ─────────────────────────────────────────────────────────────────────────
- *  1. Browse available DONKI types at: https://api.nasa.gov/DONKI/
- *     Types: FLR, CME, CMEAnalysis, GST, IPS, MPC, RBE, HSS, notifications
- *  2. Add a new key to ENDPOINTS below with the correct path.
- *  3. Write a small async fetchXxx(state, url) function (see examples below).
- *  4. Add it to the tasks[] array in _poll().
- *  5. Surface the new field in _buildState() and dispatch it in the event.
+ * HOW TO ADD NEW DONKI DATA STREAMS
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  1. Create api/donki/<type>.js following the pattern in api/donki/cme.js
+ *  2. Add the route to API in js/config.js
+ *  3. Write a fetchXxx(state) function below
+ *  4. Add it to SpaceWeatherFeed._runT3() in swpc-feed.js
  *
- *  Other NASA open data sources you can add the same way:
- *  • NASA SDO/HMI imagery:  https://sdo.gsfc.nasa.gov/assets/img/latest/
- *  • NASA SOHO LASCO:       https://soho.nascom.nasa.gov/data/realtime/
- *  • NASA Eyes on the Heliosphere: https://eyes.nasa.gov/
- *  • STEREO beacon wind:    https://stereo-ssc.nascom.nasa.gov/
- *  • JPL Horizons (planets): https://ssd.jpl.nasa.gov/api/horizons.api
- *  • NEO Asteroid feed:      https://api.nasa.gov/neo/rest/v1/feed
- *
- * STATE OBJECT  (event.detail)
- * ─────────────────────────────────────────────────────────────────────────
- *  flares          [{ beginTime, classType, sourceLocation, linkedCMEs }]
- *  cmes            [{ startTime, speed, halfAngle, type, note }]
- *  geomag_storms   [{ startTime, allKpIndex }]
- *  sep_events      [{ eventTime, instruments, linkedEvents }]
- *  latest_cme      { startTime, speed, halfAngle, type } | null
- *  latest_gst_kp   number | null  — peak Kp of most recent geomagnetic storm
- *  status          'live' | 'stale' | 'offline' | 'connecting'
- *  lastUpdated     Date
- *
- * USAGE
- * ─────────────────────────────────────────────────────────────────────────
- *  import { NasaFeed } from './js/nasa-feed.js';
- *  const feed = new NasaFeed({ apiKey: 'YOUR_KEY' });   // or 'DEMO_KEY'
- *  window.addEventListener('nasa-update', e => console.log(e.detail));
- *  feed.start();
+ * OTHER NASA OPEN DATA SOURCES (for future edge routes)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  NASA SDO/HMI imagery:         https://sdo.gsfc.nasa.gov/assets/img/latest/
+ *  NASA SOHO LASCO:              https://soho.nascom.nasa.gov/data/realtime/
+ *  STEREO beacon wind:           https://stereo-ssc.nascom.nasa.gov/
+ *  JPL Horizons (planets):       https://ssd.jpl.nasa.gov/api/horizons.api
+ *  NEO Asteroid feed:            https://api.nasa.gov/neo/rest/v1/feed
+ *  DONKI HSS (solar wind streams): https://api.nasa.gov/DONKI/HSS
+ *  DONKI IPS (interplanetary shocks): https://api.nasa.gov/DONKI/IPS
  */
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+import { API } from './config.js';
 
-/** Return ISO date string N days before today (YYYY-MM-DD). */
-function daysAgo(n) {
-    const d = new Date(Date.now() - n * 86400e3);
-    return d.toISOString().slice(0, 10);
-}
-
-async function fetchJSON(url) {
-    const res = await fetch(url, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} — ${url}`);
-    return res.json();
-}
-
-// ── Endpoint builder ──────────────────────────────────────────────────────────
-
-function buildEndpoints(apiKey, lookbackDays = 7) {
-    const start = daysAgo(lookbackDays);
-    const today = daysAgo(0);
-    const base  = 'https://api.nasa.gov/DONKI';
-    const q     = `startDate=${start}&endDate=${today}&api_key=${apiKey}`;
+// ── Blank DONKI state shape ───────────────────────────────────────────────────
+export function donkiState() {
     return {
-        /** Solar Flare events (NASA DONKI) */
-        flares: `${base}/FLR?${q}`,
-        /** Coronal Mass Ejection events */
-        cmes:   `${base}/CME?${q}`,
-        /** Geomagnetic Storm events */
-        gst:    `${base}/GST?${q}`,
-        /** Solar Energetic Particle events */
-        sep:    `${base}/SEP?${q}`,
+        flares:          [],
+        cmes:            [],
+        geomag_storms:   [],
+        sep_events:      [],
+        latest_cme:      null,
+        latest_gst_kp:   null,
     };
 }
 
-// ── Individual fetchers ───────────────────────────────────────────────────────
+// ── Internal helper ───────────────────────────────────────────────────────────
+async function fetchEdge(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
+    return res.json();
+}
+
+// ── Fetch functions (called by swpc-feed.js T3 scheduler) ────────────────────
 
 /**
- * NASA DONKI Solar Flare catalogue.
- * Fields: flrID, beginTime, peakTime, endTime, classType, sourceLocation,
- *         activeRegionNum, linkedEvents (CME associations).
+ * Fetch CME analysis from /api/donki/cme edge route.
+ * Writes into the shared SpaceWeatherFeed state object.
  */
-async function fetchFlares(state, url) {
-    const data = await fetchJSON(url);
-    if (!Array.isArray(data)) { state.flares = []; return; }
-    state.flares = data
-        .filter(f => f.beginTime && f.classType)
-        .map(f => ({
-            flrID:          f.flrID ?? null,
-            beginTime:      new Date(f.beginTime),
-            peakTime:       f.peakTime   ? new Date(f.peakTime)  : null,
-            endTime:        f.endTime    ? new Date(f.endTime)   : null,
-            classType:      f.classType,
-            sourceLocation: f.sourceLocation ?? null,
-            activeRegion:   f.activeRegionNum ?? null,
-            // IDs of associated CMEs (if any)
-            linkedCMEs:     (f.linkedEvents ?? [])
-                                .filter(e => e.activityID?.includes('CME'))
-                                .map(e => e.activityID),
-        }))
-        .sort((a, b) => b.beginTime - a.beginTime)
-        .slice(0, 20);
+export async function fetchDONKICME(state) {
+    const json = await fetchEdge(API.donkiCME);
+    const list = json?.data?.cmes;
+    if (!Array.isArray(list)) { state.recent_cmes = []; return; }
+
+    const now    = Date.now();
+    const parsed = list.map(c => {
+        const t21_5      = c.time ? new Date(c.time) : null;
+        const speed      = c.speed_km_s ?? 400;
+        const etaMs      = t21_5 ? (1.345e8 / Math.max(speed, 50)) * 1e6 : null;
+        const arrival    = etaMs ? new Date(t21_5.getTime() + etaMs) : null;
+        const hoursUntil = arrival ? (arrival.getTime() - now) / 3.6e6 : null;
+        return {
+            time:          c.time            ?? null,
+            speed:         speed,
+            latitude:      c.latitude_deg    ?? 0,
+            longitude:     c.longitude_deg   ?? 0,
+            halfAngle:     c.half_angle_deg  ?? 30,
+            type:          c.type            ?? 'S',
+            earthDirected: c.earth_directed  ?? false,
+            arrivalTime:   arrival?.toISOString() ?? null,
+            hoursUntil,
+            note:          c.note  ?? '',
+            lat_rad:       (c.latitude_deg  ?? 0) * Math.PI / 180,
+            lon_rad:       (c.longitude_deg ?? 0) * Math.PI / 180,
+        };
+    });
+
+    state.recent_cmes        = parsed;
+    const edList             = parsed.filter(c => c.earthDirected && (c.hoursUntil ?? 0) > -24);
+    state.earth_directed_cme = edList[0] ?? null;
+    state.cme_eta_hours      = state.earth_directed_cme?.hoursUntil ?? null;
 }
 
 /**
- * NASA DONKI CME catalogue.
- * Key sub-array: cmeAnalyses — pick fastest analysis per event.
+ * Fetch DONKI notifications from /api/donki/notifications edge route.
  */
-async function fetchCMEs(state, url) {
-    const data = await fetchJSON(url);
-    if (!Array.isArray(data)) { state.cmes = []; return; }
-    state.cmes = data
-        .filter(c => c.startTime)
-        .map(c => {
-            // Pick the analysis with highest speed
-            const analyses = c.cmeAnalyses ?? [];
-            const best = analyses.length
-                ? analyses.reduce((a, b) => ((b.speed ?? 0) > (a.speed ?? 0) ? b : a))
-                : null;
-            return {
-                cmeID:     c.activityID ?? null,
-                startTime: new Date(c.startTime),
-                speed:     best?.speed     ?? null,   // km/s
-                halfAngle: best?.halfAngle ?? null,   // degrees
-                type:      best?.type      ?? null,   // 'C'=cone, 'S'=spherical
-                note:      c.note          ?? null,
-            };
-        })
-        .sort((a, b) => b.startTime - a.startTime)
-        .slice(0, 15);
-
-    state.latest_cme = state.cmes[0] ?? null;
+export async function fetchDONKINotifications(state) {
+    const json = await fetchEdge(API.donkiNotify);
+    const list = json?.data?.notifications;
+    if (!Array.isArray(list)) { state.donki_notifications = []; return; }
+    state.donki_notifications = list.map(n => ({
+        type: n.type,
+        time: new Date(n.issue_time ?? 0),
+        body: String(n.body ?? '').slice(0, 280),
+        url:  n.url ?? null,
+    })).slice(0, 12);
 }
 
-/**
- * NASA DONKI Geomagnetic Storm events.
- * allKpIndex is an array of [{observedTime, kpIndex, source}] over the storm.
- */
-async function fetchGST(state, url) {
-    const data = await fetchJSON(url);
-    if (!Array.isArray(data)) { state.geomag_storms = []; return; }
-    state.geomag_storms = data
-        .filter(g => g.startTime)
-        .map(g => {
-            const kpArr = g.allKpIndex ?? [];
-            const peakKp = kpArr.reduce((mx, r) => Math.max(mx, parseFloat(r.kpIndex ?? 0)), 0);
-            return {
-                gstID:     g.gstID ?? null,
-                startTime: new Date(g.startTime),
-                peakKp,
-                allKpIndex: kpArr.map(r => ({
-                    time:   new Date(r.observedTime),
-                    kp:     parseFloat(r.kpIndex ?? 0),
-                    source: r.source ?? null,
-                })),
-            };
-        })
-        .sort((a, b) => b.startTime - a.startTime)
-        .slice(0, 5);
-
-    state.latest_gst_kp = state.geomag_storms[0]?.peakKp ?? null;
-}
-
-/**
- * NASA DONKI Solar Energetic Particle events.
- */
-async function fetchSEP(state, url) {
-    const data = await fetchJSON(url);
-    if (!Array.isArray(data)) { state.sep_events = []; return; }
-    state.sep_events = data
-        .filter(s => s.eventTime)
-        .map(s => ({
-            sepID:        s.sepID        ?? null,
-            eventTime:    new Date(s.eventTime),
-            instruments:  (s.instruments ?? []).map(i => i.displayName ?? i),
-            linkedEvents: (s.linkedEvents ?? []).map(e => e.activityID),
-        }))
-        .sort((a, b) => b.eventTime - a.eventTime)
-        .slice(0, 10);
-}
-
-// ── NasaFeed class ────────────────────────────────────────────────────────────
+// ── NasaFeed shim — legacy compatibility ─────────────────────────────────────
+// Callers that do `new NasaFeed({ apiKey }).start()` will still work.
+// The shim emits 'nasa-update' events by forwarding 'swpc-update' data so
+// existing listeners don't need to change until they're migrated.
 
 export class NasaFeed {
     /**
      * @param {object} opts
-     * @param {string} opts.apiKey       NASA API key (default: 'DEMO_KEY')
-     * @param {number} opts.lookbackDays Days of history to request (default: 7)
-     * @param {number} opts.pollInterval Milliseconds between polls (default: 15 min)
-     *
-     * TIP: Register a free key at https://api.nasa.gov/ to raise rate limits.
-     *      DEMO_KEY allows 30 requests/hour and 50 requests/day.
-     *      Each poll makes 4 requests, so DEMO_KEY supports ~7 polls/hour.
+     * @param {string} [opts.apiKey]  Ignored — key is now a Vercel env var.
+     *                                Kept for call-site compatibility only.
      */
-    constructor({
-        apiKey       = 'DEMO_KEY',
-        lookbackDays = 7,
-        pollInterval = 15 * 60 * 1000,
-    } = {}) {
-        this.apiKey       = apiKey;
-        this.lookbackDays = lookbackDays;
-        this.pollInterval = pollInterval;
-        this._timer       = null;
-        this.status       = 'connecting';
-        this.lastUpdated  = null;
-        this.failStreak   = 0;
-        this._raw = {
-            flares:        [],
-            cmes:          [],
-            geomag_storms: [],
-            sep_events:    [],
-            latest_cme:    null,
-            latest_gst_kp: null,
-        };
+    constructor({ apiKey: _ignored } = {}) {
+        this._handler = null;
     }
 
-    /** Start polling. Returns `this` for chaining. */
+    /** Forwards 'swpc-update' → 'nasa-update' so legacy listeners still fire. */
     start() {
-        this._poll();
-        this._timer = setInterval(() => this._poll(), this.pollInterval);
+        this._handler = e => {
+            const detail = e.detail ?? {};
+            window.dispatchEvent(new CustomEvent('nasa-update', {
+                detail: {
+                    flares:         detail.recent_flares         ?? [],
+                    cmes:           detail.recent_cmes           ?? [],
+                    geomag_storms:  [],
+                    sep_events:     [],
+                    latest_cme:     detail.recent_cmes?.[0]     ?? null,
+                    latest_gst_kp:  null,
+                    notifications:  detail.donki_notifications  ?? [],
+                    status:         detail.status,
+                    lastUpdated:    detail.lastUpdated,
+                },
+            }));
+        };
+        window.addEventListener('swpc-update', this._handler);
         return this;
     }
 
-    /** Stop polling. */
     stop() {
-        clearInterval(this._timer);
-        this._timer = null;
-    }
-
-    /** Trigger an immediate out-of-band refresh. */
-    refresh() { return this._poll(); }
-
-    /** Current state snapshot without triggering a fetch. */
-    get state() { return this._buildState(); }
-
-    async _poll() {
-        const ep = buildEndpoints(this.apiKey, this.lookbackDays);
-        const tasks = [
-            fetchFlares(this._raw, ep.flares),
-            fetchCMEs(this._raw,   ep.cmes),
-            fetchGST(this._raw,    ep.gst),
-            fetchSEP(this._raw,    ep.sep),
-        ];
-        const results = await Promise.allSettled(tasks);
-        const ok  = results.some(r => r.status === 'fulfilled');
-        const all = results.every(r => r.status === 'rejected');
-
-        if (ok) {
-            this.status      = 'live';
-            this.lastUpdated = new Date();
-            this.failStreak  = 0;
-        } else if (all) {
-            this.failStreak++;
-            this.status = this.failStreak > 2 ? 'offline' : 'stale';
+        if (this._handler) {
+            window.removeEventListener('swpc-update', this._handler);
+            this._handler = null;
         }
-
-        results.forEach((r, i) => {
-            if (r.status === 'rejected')
-                console.debug(`[NASA] ${Object.keys(ep)[i]}: ${r.reason?.message ?? r.reason}`);
-        });
-
-        window.dispatchEvent(new CustomEvent('nasa-update', { detail: this._buildState() }));
     }
 
-    _buildState() {
-        const raw = this._raw;
-        return {
-            flares:        raw.flares,
-            cmes:          raw.cmes,
-            geomag_storms: raw.geomag_storms,
-            sep_events:    raw.sep_events,
-            latest_cme:    raw.latest_cme,
-            latest_gst_kp: raw.latest_gst_kp,
-            status:        this.status,
-            lastUpdated:   this.lastUpdated,
-        };
-    }
+    refresh() {}  // no-op; refresh via SpaceWeatherFeed.refresh()
 }
 
 export default NasaFeed;
-
-/* ── QUICK-START EXAMPLE ─────────────────────────────────────────────────────
- *
- *  import { NasaFeed }         from './js/nasa-feed.js';
- *  import { SpaceWeatherFeed } from './js/swpc-feed.js';
- *
- *  // NOAA — free, no key, 5-minute poll
- *  const noaa = new SpaceWeatherFeed().start();
- *
- *  // NASA DONKI — free key from api.nasa.gov, 15-minute poll
- *  const nasa = new NasaFeed({ apiKey: 'YOUR_KEY_HERE' }).start();
- *
- *  window.addEventListener('swpc-update', e => {
- *      const { solar_wind, kp, xray_class, aurora_activity,
- *              sep_storm_level, active_alerts } = e.detail;
- *      // → drive shaders / UI with live NOAA data
- *  });
- *
- *  window.addEventListener('nasa-update', e => {
- *      const { latest_cme, cmes, flares, geomag_storms } = e.detail;
- *      if (latest_cme && latest_cme.speed > 1500) triggerCMEAnimation(latest_cme);
- *  });
- *
- * ──────────────────────────────────────────────────────────────────────────── */

@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>API &amp; Data Policy — Parker Physics App</title>
+    <meta name="description" content="Parker Physics App API and Data Policy. How we use NASA, NOAA, JPL, and SOHO data feeds, attribution requirements, and developer API terms.">
+    <meta name="theme-color" content="#0a0a1a">
+    <link rel="manifest" href="/manifest.json">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        nav {
+            position: sticky; top: 0; z-index: 600;
+            height: 54px; min-height: 54px;
+            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,200,0,.12);
+            display: flex; align-items: center; padding: 0 16px; gap: 10px;
+        }
+        .nav-logo-wrap { position: relative; width: 36px; height: 36px; flex-shrink: 0; }
+        .nav-logo-wrap::before {
+            content: ''; position: absolute; inset: -5px; border-radius: 50%;
+            border: 1.5px solid transparent;
+            border-top-color: rgba(255,180,0,.85); border-right-color: rgba(128,64,255,.55);
+            animation: navRingSpin 3s linear infinite; pointer-events: none;
+        }
+        .nav-logo-wrap::after {
+            content: ''; position: absolute; inset: -9px; border-radius: 50%;
+            border: 1px solid transparent;
+            border-bottom-color: rgba(64,128,255,.45); border-left-color: rgba(255,100,80,.35);
+            animation: navRingSpin 5.5s linear infinite reverse; pointer-events: none;
+        }
+        @keyframes navRingSpin { to { transform: rotate(360deg); } }
+        .nav-logo-img { height: 36px; width: 36px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 0 6px rgba(255,180,0,.5)); display: block; }
+        .nav-brand {
+            font-size: .95rem; font-weight: 700; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.cta { background: linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#0a0a1a; font-weight:700; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; transition: background .2s;
+        }
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 54px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item { padding: 11px 14px; font-size: .9rem; }
+        }
+
+        .legal-hero {
+            padding: 3rem 2rem 1.5rem; text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,.07);
+        }
+        .legal-hero h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: .5rem;
+        }
+        .legal-meta { color: #666; font-size: .85rem; }
+        .legal-meta strong { color: #888; }
+
+        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; }
+        .toc {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2.5rem;
+        }
+        .toc h3 { font-size: .85rem; color: #ffd700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .75rem; }
+        .toc ol { padding-left: 1.2rem; }
+        .toc li { margin-bottom: .3rem; }
+        .toc a { color: #a080ff; text-decoration: none; font-size: .88rem; }
+        .toc a:hover { color: #ffd700; text-decoration: underline; }
+
+        .legal-section { margin-bottom: 2.5rem; }
+        .legal-section h2 {
+            font-size: 1.15rem; color: #ffd700;
+            border-bottom: 1px solid rgba(255,200,0,.18);
+            padding-bottom: .4rem; margin-bottom: 1rem;
+        }
+        .legal-section p, .legal-section li { color: #b0b0c8; font-size: .92rem; line-height: 1.75; }
+        .legal-section ul, .legal-section ol { padding-left: 1.4rem; margin: .6rem 0; }
+        .legal-section li { margin-bottom: .3rem; }
+        .legal-section strong { color: #ddd; }
+        .legal-section a { color: #a080ff; }
+        .legal-section a:hover { color: #ffd700; }
+        .highlight-box {
+            background: rgba(128,64,255,.08); border: 1px solid rgba(128,64,255,.22);
+            border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0;
+            color: #c0a0ff; font-size: .88rem; line-height: 1.65;
+        }
+        .warning-box {
+            background: rgba(255,100,0,.08); border: 1px solid rgba(255,100,0,.25);
+            border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0;
+            color: #ffb080; font-size: .88rem; line-height: 1.65;
+        }
+
+        /* Source attribution table */
+        .api-table {
+            width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .87rem;
+        }
+        .api-table th {
+            background: rgba(255,200,0,.08); color: #ffd700; font-weight: 600;
+            padding: 10px 12px; text-align: left;
+            border-bottom: 1px solid rgba(255,200,0,.2);
+        }
+        .api-table td {
+            padding: 9px 12px; color: #b0b0c8;
+            border-bottom: 1px solid rgba(255,255,255,.05);
+            vertical-align: top;
+        }
+        .api-table tr:last-child td { border-bottom: none; }
+        .api-table a { color: #a080ff; }
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 3px;
+            font-size: .75rem; font-weight: 600; white-space: nowrap;
+        }
+        .badge-free { background: rgba(0,200,100,.15); color: #4eff91; border: 1px solid rgba(0,200,100,.3); }
+        .badge-key  { background: rgba(255,180,0,.15); color: #ffd700; border: 1px solid rgba(255,180,0,.3); }
+        .badge-open { background: rgba(64,128,255,.15); color: #80b0ff; border: 1px solid rgba(64,128,255,.3); }
+
+        footer {
+            background: rgba(0,0,0,.4); border-top: 1px solid rgba(255,255,255,.07);
+            padding: 1.5rem 2rem; text-align: center; color: #555; font-size: .82rem;
+        }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+
+        @media (max-width: 480px) {
+            .legal-hero h1 { font-size: 1.8rem; }
+            .legal-body { padding: 1.5rem 1rem 3rem; }
+            .api-table th, .api-table td { padding: 8px 8px; font-size: .8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
+<nav>
+    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <div class="nav-logo-wrap">
+            <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics Logo">
+        </div>
+        <span class="nav-brand">Parker Physics</span>
+    </a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu">
+        <a href="index.html" class="nav-item">Home</a>
+        <a href="pricing.html" class="nav-item">Pricing</a>
+        <a href="signin.html" class="nav-item">Sign In</a>
+        <a href="signup.html" class="nav-item cta">Get Started</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════ HERO ═══ -->
+<div class="legal-hero">
+    <h1>API &amp; Data Policy</h1>
+    <p class="legal-meta"><strong>Effective Date:</strong> March 20, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 1.0</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ BODY ═══ -->
+<div class="legal-body">
+
+    <div class="highlight-box">
+        Parker Physics App aggregates live data from multiple public scientific APIs provided by NASA, NOAA, JPL, and ESA. This policy explains which data sources we use, how we access them, attribution requirements, and the terms governing developer access to our own API (Advanced plan).
+    </div>
+
+    <nav class="toc" aria-label="Table of Contents">
+        <h3>Contents</h3>
+        <ol>
+            <li><a href="#sources">Third-Party Data Sources</a></li>
+            <li><a href="#attribution">Attribution Requirements</a></li>
+            <li><a href="#accuracy">Data Accuracy &amp; Availability</a></li>
+            <li><a href="#our-api">Parker Physics API Access</a></li>
+            <li><a href="#rate-limits">Rate Limits</a></li>
+            <li><a href="#prohibited-api">Prohibited API Uses</a></li>
+            <li><a href="#keys">API Key Management</a></li>
+            <li><a href="#changes">Data Source Changes</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ol>
+    </nav>
+
+    <section class="legal-section" id="sources">
+        <h2>1. Third-Party Data Sources</h2>
+        <p>Parker Physics App uses the following public scientific data sources. All data remains the property of the originating agency and is used in compliance with each agency's terms of service.</p>
+
+        <table class="api-table">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Data Provided</th>
+                    <th>Access</th>
+                    <th>Agency Terms</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>NOAA SWPC</strong></td>
+                    <td>Solar wind speed, Bz, density; Kp index; X-ray flux; geomagnetic alerts; flare classifications</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://www.swpc.noaa.gov/products-and-data" target="_blank" rel="noopener">swpc.noaa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>NASA DONKI</strong></td>
+                    <td>CME catalog, SEP events, geomagnetic storm records</td>
+                    <td><span class="badge badge-key">API Key</span></td>
+                    <td><a href="https://api.nasa.gov" target="_blank" rel="noopener">api.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>JPL Horizons</strong></td>
+                    <td>Planetary ephemerides, near-Earth object positions, orbital elements</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://ssd.jpl.nasa.gov/horizons/" target="_blank" rel="noopener">ssd.jpl.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>NASA NeoWs</strong></td>
+                    <td>Near-Earth object approach data, hazard classification</td>
+                    <td><span class="badge badge-key">API Key</span></td>
+                    <td><a href="https://api.nasa.gov" target="_blank" rel="noopener">api.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>SOHO / LASCO</strong></td>
+                    <td>Solar coronagraph imagery (C2, C3), real-time solar disk images</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://soho.nascom.nasa.gov" target="_blank" rel="noopener">soho.nascom.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>NASA SDO</strong></td>
+                    <td>Solar Dynamics Observatory imagery (AIA, HMI wavelengths)</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://sdo.gsfc.nasa.gov" target="_blank" rel="noopener">sdo.gsfc.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>STEREO</strong></td>
+                    <td>Stereoscopic solar imagery from L4/L5 viewpoints</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://stereo.gsfc.nasa.gov" target="_blank" rel="noopener">stereo.gsfc.nasa.gov</a></td>
+                </tr>
+                <tr>
+                    <td><strong>NWS / weather.gov</strong></td>
+                    <td>Space weather alerts and watches</td>
+                    <td><span class="badge badge-open">Open</span></td>
+                    <td><a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noopener">weather.gov API</a></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p>We access these APIs in good faith as a display and educational aggregation service. We do not cache data beyond what is necessary for performance (typically 60 seconds for real-time feeds), and we do not redistribute raw API data for commercial purposes.</p>
+    </section>
+
+    <section class="legal-section" id="attribution">
+        <h2>2. Attribution Requirements</h2>
+        <p>When sharing or publishing content derived from Parker Physics App simulations or data displays, you must include appropriate attribution:</p>
+        <ul>
+            <li><strong>For simulation screenshots or exports:</strong> "Visualization: Parker Physics App (parkerphysics.app)"</li>
+            <li><strong>For space weather data shown:</strong> "Data: NOAA/SWPC" or "Data: NASA/DONKI" as appropriate to the source displayed</li>
+            <li><strong>For solar imagery:</strong> "Imagery: NASA/SOHO," "NASA/SDO," or "NASA/STEREO" per the specific image source</li>
+            <li><strong>For orbital data:</strong> "Ephemeris: NASA/JPL Horizons"</li>
+        </ul>
+        <p>Use of NASA imagery and data is subject to NASA's <a href="https://www.nasa.gov/multimedia/guidelines/index.html" target="_blank" rel="noopener">Media Usage Guidelines</a>. NOAA data is in the public domain as a product of the U.S. Government.</p>
+    </section>
+
+    <section class="legal-section" id="accuracy">
+        <h2>3. Data Accuracy &amp; Availability</h2>
+        <div class="warning-box">
+            Live data feeds are provided on a best-effort basis. Parker Physics App is not responsible for gaps, delays, or inaccuracies in data originating from third-party APIs. Feed latency typically ranges from 60 seconds to 15 minutes depending on the source's own update cadence.
+        </div>
+        <ul>
+            <li><strong>Solar wind data (SWPC):</strong> Updates every 60 seconds from ACE/DSCOVR L1 measurements. Real-world propagation delay to Earth is ~15–60 minutes.</li>
+            <li><strong>Kp index:</strong> Updated every 3 hours (estimated) or post-interval (final).</li>
+            <li><strong>X-ray flux / flare classification:</strong> Updates every 1 minute from GOES satellites.</li>
+            <li><strong>CME catalog (DONKI):</strong> Analyst-reviewed entries, typically updated within hours of an event.</li>
+            <li><strong>Planetary positions (Horizons):</strong> Computed ephemeris — highly accurate, updated on request.</li>
+            <li><strong>Near-Earth Objects (NeoWs):</strong> Updated daily by JPL Center for Near Earth Object Studies.</li>
+        </ul>
+        <p>When data feeds are unavailable, the application degrades gracefully and indicates the status as "stale" or "offline" in the live data bar.</p>
+    </section>
+
+    <section class="legal-section" id="our-api">
+        <h2>4. Parker Physics API Access</h2>
+        <p>The Parker Physics App <strong>Advanced plan</strong> includes access to our internal data pipeline API, which provides processed and quality-controlled solar wind data (including the wind speed pipeline developed with SWPC data). This API is intended for:</p>
+        <ul>
+            <li>Personal research dashboards and custom visualizations</li>
+            <li>Academic projects with proper attribution</li>
+            <li>Integration into non-commercial educational tools</li>
+        </ul>
+        <p>API access is granted per the terms of your subscription. Each Advanced account receives a unique API key. Access is scoped to your account's authorized endpoints and rate limits.</p>
+        <p>Commercial use of our API — including embedding in products distributed to paying customers — requires a separate <strong>Enterprise License Agreement</strong>. Contact <a href="mailto:api@parkerphysics.app">api@parkerphysics.app</a> to discuss enterprise terms.</p>
+    </section>
+
+    <section class="legal-section" id="rate-limits">
+        <h2>5. Rate Limits</h2>
+        <p>To ensure fair access and protect upstream API quotas, the following rate limits apply:</p>
+        <ul>
+            <li><strong>Free Tier:</strong> No direct API access. Data is served through the application UI only.</li>
+            <li><strong>Basic Plan:</strong> No direct API access.</li>
+            <li><strong>Advanced Plan:</strong> 1,000 requests per day; 60 requests per minute. Burst allowance of 10 requests per second for up to 5 seconds.</li>
+            <li><strong>Enterprise:</strong> Custom limits negotiated per agreement.</li>
+        </ul>
+        <p>Requests that exceed rate limits will receive HTTP <code>429 Too Many Requests</code> responses. Repeated or intentional abuse of rate limits may result in API key revocation and account suspension.</p>
+    </section>
+
+    <section class="legal-section" id="prohibited-api">
+        <h2>6. Prohibited API Uses</h2>
+        <ul>
+            <li>Reselling or resyndication of API responses to third parties</li>
+            <li>Automated scraping, spidering, or bulk harvesting of data beyond your rate limit</li>
+            <li>Using API data to build or train machine learning models without explicit written consent</li>
+            <li>Circumventing rate limits through key sharing, credential rotation, or proxy networks</li>
+            <li>Using API data in any application that presents it as official government data without clear third-party attribution</li>
+            <li>Any use that violates the upstream terms of the source agencies (NASA, NOAA, JPL)</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="keys">
+        <h2>7. API Key Management</h2>
+        <ul>
+            <li>API keys are tied to your account and must not be shared or published publicly (e.g., in public GitHub repositories).</li>
+            <li>If you suspect your key has been compromised, regenerate it immediately from your account dashboard or contact support.</li>
+            <li>We reserve the right to rotate or revoke API keys at any time for security or policy violation reasons.</li>
+            <li>Leaked API keys that result in unauthorized usage may incur overage charges billed to the account holder.</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="changes">
+        <h2>8. Data Source Changes</h2>
+        <p>Third-party data sources are outside our direct control. We make reasonable efforts to maintain live feed availability, but we cannot guarantee continuity if an upstream provider changes their API, imposes access restrictions, or decommissions a feed. We will communicate known disruptions via the application status bar and, for significant changes, via email to subscribed users.</p>
+        <p>We may add, modify, or remove data sources at any time. When adding new sources, we will update this policy accordingly.</p>
+    </section>
+
+    <section class="legal-section" id="contact">
+        <h2>9. Contact</h2>
+        <p>For API access questions, enterprise licensing, or data policy inquiries:</p>
+        <ul>
+            <li><strong>API &amp; Developer:</strong> <a href="mailto:api@parkerphysics.app">api@parkerphysics.app</a></li>
+            <li><strong>General Support:</strong> <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a></li>
+            <li><strong>Legal:</strong> <a href="mailto:legal@parkerphysics.app">legal@parkerphysics.app</a></li>
+        </ul>
+    </section>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+    <p>© 2026 Parker Physics App &nbsp;·&nbsp;
+        <a href="index.html">Home</a> &nbsp;·&nbsp;
+        <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+        <a href="eula.html">EULA</a> &nbsp;·&nbsp;
+        <a href="api-policy.html">API Policy</a> &nbsp;·&nbsp;
+        <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
+        <a href="mailto:support@parkerphysics.app">Contact</a>
+    </p>
+</footer>
+
+<script>
+    const burger = document.getElementById('nav-burger');
+    const navMenu = document.getElementById('nav-menu');
+    burger.addEventListener('click', () => {
+        const open = navMenu.classList.toggle('open');
+        burger.setAttribute('aria-expanded', open);
+    });
+</script>
+</body>
+</html>
