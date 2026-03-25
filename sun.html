@@ -849,7 +849,7 @@ nav {
 
             <!-- Solar Wind Live ────────────────────────────────── -->
             <div class="sec" id="sec-wind-live">
-                <div class="sec-hd"><span>☉ Solar Wind Live</span><span class="arrow">▼</span></div>
+                <div class="sec-hd"><span>☉ Solar Wind Live</span><span class="live-status" id="wind-live-status" style="margin-left:6px;font-size:9px">connecting…</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
                     <!-- Speed gauge -->
                     <div class="wind-gauge-row">
@@ -914,9 +914,45 @@ nav {
                         <div class="sep-dot"></div>
                         <span id="sep-txt">S0 — No radiation storm</span>
                     </div>
-                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
+                    <!-- Derived solar wind diagnostics ──────────────────── -->
+                    <div style="margin:8px 0 2px;font-size:9px;color:#664433;text-transform:uppercase;letter-spacing:.5px">
+                        Derived plasma diagnostics
+                    </div>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px">
+                        <!-- Dynamic pressure -->
+                        <div style="background:rgba(255,140,0,.06);border:1px solid rgba(255,140,0,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#664433;letter-spacing:.4px">DYN. PRESSURE</div>
+                            <div style="font-size:12px;font-weight:700;color:#ffaa44" id="wv-pdyn">—</div>
+                            <div style="font-size:8px;color:#443322">nPa · ½·m_p·n·v²</div>
+                        </div>
+                        <!-- Alfvénic Mach number -->
+                        <div style="background:rgba(100,180,255,.05);border:1px solid rgba(100,180,255,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#336677;letter-spacing:.4px">ALFVÉN MACH</div>
+                            <div style="font-size:12px;font-weight:700;color:#88ccff" id="wv-mach">—</div>
+                            <div style="font-size:8px;color:#334455">M_A = v/v_A</div>
+                        </div>
+                        <!-- Wind transit time from Sun -->
+                        <div style="background:rgba(255,200,80,.05);border:1px solid rgba(255,200,80,.12);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#665522;letter-spacing:.4px">TRANSIT AGE</div>
+                            <div style="font-size:12px;font-weight:700;color:#ffdd88" id="wv-transit">—</div>
+                            <div style="font-size:8px;color:#554422">days from Sun</div>
+                        </div>
+                        <!-- Wind type classifier -->
+                        <div style="background:rgba(200,255,200,.04);border:1px solid rgba(100,255,100,.10);border-radius:5px;padding:5px 7px">
+                            <div style="font-size:8.5px;color:#336633;letter-spacing:.4px">WIND TYPE</div>
+                            <div style="font-size:10px;font-weight:700;color:#88ee88;line-height:1.3" id="wv-type">—</div>
+                        </div>
+                    </div>
+                    <!-- Proton flux (SEP context) -->
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:9.5px;color:#666;margin:4px 0 8px">
+                        <span>p⁺ &gt;10 MeV:</span>
+                        <span style="font-weight:700;color:#ffaa66" id="wv-proton10">— pfu</span>
+                        <span style="margin-left:8px">p⁺ &gt;100 MeV:</span>
+                        <span style="font-weight:700;color:#ffddaa" id="wv-proton100">— pfu</span>
+                    </div>
+                    <div style="font-size:9px;color:#443322;margin-top:4px;line-height:1.5">
                         Gauges driven by DSCOVR/ACE L1 real-time data.<br>
-                        Particle shader uses live speed/density &amp; Parker spiral.
+                        Particle colors encode temperature (gold=cool SB, blue=hot CH/CME).
                     </div>
                 </div>
             </div>
@@ -1048,6 +1084,7 @@ const uniforms = {
     // ── Live solar wind uniforms (driven by DSCOVR/ACE L1 pipeline) ──
     u_wind_speed_norm:   { value: 0.23 },  // (400-250)/650 ≈ 0.23 nominal slow wind
     u_wind_density_norm: { value: 0.20 },  // 5/25 = 0.20 nominal background
+    u_wind_temp_norm:    { value: 0.17 },  // (100kK-50kK)/500kK ≈ 0.10; hot CME ~1.0
     u_bz_sw:             { value: 0.0  },  // 0=northward, 1=30 nT southward
     // ── CME directional burst ──
     u_cme_active:        { value: 0.0  },  // 0=off, 1=on
@@ -1098,7 +1135,10 @@ let composer, bloomPass;
     // (not screen-space blur) carries the ambient glow.
     // threshold 0.88 — only the sub-percent of pixels that exceed ~2.25× HDR
     // get bloomed (granule centres, umbral contrasts, active-region UV kernels).
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.45, 0.32, 0.88);
+    // strength 0.65 (was 0.45) — more visible solar halo
+    // radius   0.45 (was 0.32) — wider bloom kernel for softer corona edge
+    // threshold 0.82 (was 0.88) — slightly lower threshold catches more bright surface pixels
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.65, 0.45, 0.82);
     composer.addPass(bloomPass);
 
     // ── Vectorised limb-corona scatter ───────────────────────────────────────
@@ -1176,20 +1216,79 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.07;
 controls.minDistance = 1.3; controls.maxDistance = 60;
 
-// BACKGROUND STARS
+// BACKGROUND STARS — spectral-type colour + size variation
 {
-    const n = 3500, pos = new Float32Array(n * 3);
+    const n = 4500;
+    const pos = new Float32Array(n * 3);
+    const col = new Float32Array(n * 3);
+    const siz = new Float32Array(n);
+
+    // Stellar spectral-class colour palette (approximate sRGB, log-boosted for visibility)
+    const starPalette = [
+        // [r,g,b, weight]   O/B = blue-white, A = white, F = yellow-white, G = yellow, K = orange, M = red
+        [0.64, 0.74, 1.00, 4 ],   // B  – blue-white
+        [0.78, 0.87, 1.00, 8 ],   // A  – white-blue
+        [1.00, 0.97, 0.90, 14],   // F  – white-yellow
+        [1.00, 0.93, 0.70, 18],   // G  – yellow (like our sun)
+        [1.00, 0.80, 0.42, 14],   // K  – orange
+        [1.00, 0.55, 0.28, 8 ],   // M  – orange-red
+        [0.90, 0.80, 1.00, 6 ],   // WR/hot subdwarf – blue-violet
+        [1.00, 1.00, 1.00, 5 ],   // white dwarf – pure white
+    ];
+    const totalW = starPalette.reduce((s, p) => s + p[3], 0);
+    function pickStarColor() {
+        let r = Math.random() * totalW;
+        for (const [cr, cg, cb, w] of starPalette) {
+            r -= w; if (r <= 0) return [cr, cg, cb];
+        }
+        return [1, 1, 1];
+    }
+
     for (let i = 0; i < n; i++) {
-        const r = 250 + Math.random() * 400;
+        const radius = 250 + Math.random() * 450;
         const th = Math.random() * Math.PI * 2;
         const ph = Math.acos(2 * Math.random() - 1);
-        pos[i*3] = r*Math.sin(ph)*Math.cos(th);
-        pos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
-        pos[i*3+2] = r*Math.cos(ph);
+        pos[i*3]   = radius * Math.sin(ph) * Math.cos(th);
+        pos[i*3+1] = radius * Math.sin(ph) * Math.sin(th);
+        pos[i*3+2] = radius * Math.cos(ph);
+        const [cr, cg, cb] = pickStarColor();
+        col[i*3] = cr; col[i*3+1] = cg; col[i*3+2] = cb;
+        // Most stars small (0.4-0.9), rare bright ones up to 1.6
+        siz[i] = Math.random() < 0.06 ? 1.1 + Math.random() * 0.6 : 0.35 + Math.random() * 0.55;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ color:0xffffff, size:0.4, sizeAttenuation:false })));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.Float32BufferAttribute(siz, 1));
+    const starMat = new THREE.ShaderMaterial({
+        vertexColors: true,
+        transparent: true,
+        depthWrite: false,
+        vertexShader: `
+            attribute float size;
+            varying vec3 vColor;
+            uniform float u_time;
+            void main() {
+                vColor = color;
+                // subtle twinkle driven by position hash
+                float tw = sin(u_time * 1.4 + position.x * 0.031 + position.z * 0.027) * 0.08 + 0.92;
+                vec4 mv = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * tw * (600.0 / -mv.z);
+                gl_Position = projectionMatrix * mv;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vColor;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                a = pow(a, 1.6);
+                gl_FragColor = vec4(vColor, a);
+            }
+        `,
+        uniforms: { u_time: uniforms.u_time },
+    });
+    scene.add(new THREE.Points(geo, starMat));
 }
 
 // ─── SOLAR PHOTOSPHERE — Voronoi granulation + faculae + 5-term limb darkening ─
@@ -1317,11 +1416,18 @@ const sunFS = /* glsl */`
         float superGran = smoothstep(0.0, 0.55, sgCell.x) * 0.05;  // very subtle (~2%)
 
         // ── Granulation (~1 000 km cells) ─────────────────────────────────────
-        vec3 gPos   = vPosition * 9.5 + vec3(u_time * 0.0055 * u_rot);
+        // Domain-warp: slow turbulent deformation gives a "boiling" look
+        vec3 dwarp = vec3(
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 1.7), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 3.4), 3)
+        ) * 0.12;
+        vec3 gPos   = vPosition * 9.5 + dwarp + vec3(u_time * 0.0055 * u_rot);
         vec2 gCell  = voronoi(gPos);
-        // Interior: bright hot upwelling. Boundary lanes: dark and narrow.
-        float lane      = 1.0 - smoothstep(0.0, 0.38, gCell.x);  // 1 = lane, 0 = interior — tighter lanes
-        float granLight = 1.0 - lane * 0.47;                       // darker intergranular lanes
+        // Use d2-d1 for cell-boundary detection: dark narrow lanes where d2≈d1,
+        // bright broad interiors where d2>>d1 — matches SDO/HMI granulation morphology.
+        float laneD  = smoothstep(0.05, 0.30, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
+        float granLight = mix(0.50, 1.0, laneD);                    // lane contrast: 50% → 100%
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
         float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.009), 4) * 0.06;
@@ -1329,7 +1435,8 @@ const sunFS = /* glsl */`
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
         float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.025));
-        float mbp = smoothstep(0.86, 0.94, mbpNoise) * lane * 0.40;
+        float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
+        float mbp = smoothstep(0.86, 0.94, mbpNoise) * laneMask * 0.40;
 
         // ── Active latitude belt ───────────────────────────────────────────────
         float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
@@ -1373,10 +1480,19 @@ const sunFS = /* glsl */`
         // Facular brightening near limb
         col += baseCol * facular * 0.55;
 
-        // ── Sunspot umbra (T_umbra ~ 0.62 × T_eff ≈ 3580 K) ──────────────────
+        // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
-        col = mix(col, blackbody(max(umbraT, 3000.0)) * 0.50,
+        col = mix(col, blackbody(max(umbraT, 3000.0)) * 0.48,
                   umbra * smoothstep(0.0, 0.20, mu) * u_showSpots);
+
+        // ── Umbral dots — bright granule-like specks inside umbra ─────────────
+        // Real solar umbrae contain ~100–300 K bright dots (unresolved convection).
+        // Visible in high-resolution magnetograms as sub-arcsecond bright points.
+        float udNoise = vnoise(vec3(rotLon * 42.0, lat * 42.0, u_time * 0.018));
+        float udNoise2= vnoise(vec3(rotLon * 38.0, lat * 36.0, u_time * 0.014 + 7.3));
+        float uDots   = smoothstep(0.76, 0.85, udNoise) * smoothstep(0.78, 0.86, udNoise2);
+        vec3 udCol    = blackbody(u_teff * 0.72);  // ~4160 K — cool but brighter than umbra
+        col = mix(col, udCol * 0.85, uDots * umbra * 0.65 * u_showSpots);
 
         // ── Sunspot penumbra (T ~ 0.82 × T_eff) with radial fibrils ──────────
         float penT = u_teff * 0.82;
@@ -1444,6 +1560,22 @@ const sunFS = /* glsl */`
                                    vec3(1.00, 0.80, 0.30),  // AIA 171 gold (1 MK)
                                    clamp(u_flare_t / 250.0, 0.0, 1.0));
             col += arcadeCol * arcadeGlow * u_showFlares;
+
+            // ── EIT wave / Moreton wave ──────────────────────────────────────
+            // A coronal pressure wave (EIT wave) propagates globally from the flare
+            // site at ~400–1000 km/s ≈ 0.00057–0.0014 R_sun/s.
+            // In sim-time: wave front at radius r_w = u_flare_t * 0.005 radians
+            // (reaches antipodal point ~π rad in ~630 sim units ≈ 6s at 100Hz clock)
+            // Visible as a faint circular brightening ring in EUV (AIA 193/211).
+            float eitDecay = exp(-u_flare_t / 220.0) * u_flare_intensity;
+            if (eitDecay > 0.01) {
+                float r_wave  = u_flare_t * 0.0055;               // expanding radius (rad)
+                float dr      = abs(df - r_wave);                  // distance from wave front
+                float waveSig = 0.06 + u_flare_t * 2.5e-4;        // front widens as it ages
+                float eitWave = exp(-dr * dr / (waveSig * waveSig)) * eitDecay * 0.55;
+                // EIT 193 Å colour: teal-green (hot Fe XII, 1.5 MK)
+                col += vec3(0.30, 1.10, 0.80) * eitWave * u_showFlares;
+            }
         }
 
         // ── Limb darkening ─────────────────────────────────────────────────────
@@ -1708,6 +1840,15 @@ const coronaFS = /* glsl */`
         float pseudoStr = fbm4(vec3(lon * 3.5, lat * 4.5, u_time * 0.005))
                         * smoothstep(0.3, 0.5, abs(lat)) * smoothstep(0.7, 0.5, abs(lat));
 
+        // ── Coronal bright points (CBP) — X-ray/EUV-bright compact loops ─────
+        // ~100–200 present on the sun at any time; lifetime hours–days; size ~5–10 Mm.
+        // In the corona shell (r=2.5) they appear as tiny bright dots scattered
+        // across the disk, more numerous during high activity.
+        float cbp1 = vn(vec3(lon * 22.0 + u_time * 0.006, lat * 22.0, u_time * 0.004));
+        float cbp2 = vn(vec3(lon * 18.0 - u_time * 0.005, lat * 18.0 + u_time * 0.003, 1.7));
+        float cbpMask = smoothstep(0.88, 0.96, cbp1) * smoothstep(0.86, 0.94, cbp2);
+        cbpMask *= (0.4 + u_activity * 0.9) * (1.0 - poleHole * 0.5);
+
         // ── Compose alpha ────────────────────────────────────────────────────
         float base = pow(rim, 2.4) * 0.42;
         float alpha = base * (
@@ -1720,7 +1861,9 @@ const coronaFS = /* glsl */`
             // Pseudo-streamers
             pseudoStr * 0.35 * u_activity
         );
-        alpha = clamp(alpha, 0.0, 0.90);
+        // Coronal bright points add localised alpha spikes on/near disk face
+        alpha += cbpMask * pow(max(1.0 - rim, 0.0), 0.5) * 0.35;
+        alpha = clamp(alpha, 0.0, 0.92);
 
         // ── Colour ───────────────────────────────────────────────────────────
         // K-corona (Thomson-scattered photospheric light): warm yellow-white.
@@ -1730,10 +1873,12 @@ const coronaFS = /* glsl */`
         vec3 outerCor  = vec3(0.88, 0.92, 1.00);  // outer corona / F-corona dust scatter
         vec3 plumeCol  = vec3(0.90, 0.95, 1.00);  // polar plume — blue-white
         vec3 hcsCol    = vec3(1.05, 0.98, 0.72);  // HCS ridge — enhanced yellow
+        vec3 cbpCol    = vec3(0.60, 1.00, 0.90);  // CBP — AIA 193 Å blue-green
 
         vec3 col = mix(kCorona, outerCor, rim * rim);
         col = mix(col, plumeCol, plume * 0.55);
         col = mix(col, hcsCol, hcs * 0.4);
+        col = mix(col, cbpCol, cbpMask * pow(max(1.0 - rim, 0.0), 0.4) * 0.70);
 
         // CME / fast solar wind: outer corona shifts blue-white (hot electrons)
         // u_wind_speed_norm: 0=slow wind, 1=CME/fast stream
@@ -1841,6 +1986,7 @@ const solarWindVS = /* glsl */`
     uniform float u_rot;              // rotation rate multiplier
     uniform float u_wind_speed_norm;  // 0=250 km/s, 1=900 km/s (DSCOVR L1)
     uniform float u_wind_density_norm;// 0=calm, 1=25 n/cc (DSCOVR L1)
+    uniform float u_wind_temp_norm;   // 0=50kK slow wind, 1=500kK+ fast/CME wind
     uniform float u_bz_sw;            // 0=northward, 1=30 nT southward
 
     varying float vProgress;
@@ -1893,17 +2039,26 @@ const solarWindVS = /* glsl */`
         float cir = sin(aPhase * 7.3 + u_time * 0.4) * turbScale * (1.0 - s);
         deflected += vec3(-deflected.z, 0.0, deflected.x) * cir;
 
-        // Color: hot yellow-white at surface → pale gold → blue-white at distance
-        // Dense slow wind: richer gold; fast stream: cooler blue-white
-        vec3 nearCol = mix(vec3(1.00, 0.88, 0.50), vec3(1.00, 0.95, 0.70), u_wind_speed_norm);
-        vec3 farCol  = mix(vec3(0.72, 0.82, 0.98), vec3(0.55, 0.70, 1.00), u_wind_speed_norm);
+        // ── Temperature-driven particle color ─────────────────────────────────────
+        // u_wind_temp_norm: 0 = 50 kK (cool slow-wind streamer belt) → gold/orange
+        //                   0.5 = 250 kK (warm fast coronal-hole stream) → yellow-white
+        //                   1.0 = 500 kK+ (hot CME sheath/ejecta) → blue-white
+        // Near-sun always hot (corona T ~ several MK); cools as plasma expands
+        vec3 coolNear = mix(vec3(1.00, 0.70, 0.30), vec3(1.00, 0.88, 0.50), u_wind_speed_norm);
+        vec3 hotNear  = mix(vec3(1.00, 0.94, 0.78), vec3(0.90, 0.95, 1.00), u_wind_temp_norm);
+        vec3 nearCol  = mix(coolNear, hotNear, u_wind_temp_norm);
+
+        vec3 coolFar  = mix(vec3(0.88, 0.74, 0.40), vec3(0.72, 0.82, 0.95), u_wind_speed_norm);
+        vec3 hotFar   = mix(vec3(0.65, 0.80, 1.00), vec3(0.50, 0.65, 1.00), u_wind_temp_norm);
+        vec3 farCol   = mix(coolFar, hotFar, u_wind_temp_norm);
+
         vColor = mix(nearCol, farCol, pow(s, 0.7));
 
-        // Boost color in fast-wind streams (polar regions)
-        vColor = mix(vColor, vec3(0.80, 0.90, 1.00), sinLat * sinLat * 0.45);
+        // Polar fast-wind brightness boost (field-aligned fast streams)
+        vColor = mix(vColor, vec3(0.80, 0.90, 1.00), sinLat * sinLat * 0.40 * (0.5 + u_wind_temp_norm * 0.5));
 
-        // High-density stream tint: slightly warmer gold
-        vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.20 * (1.0 - s));
+        // High-density slow-wind: warm orange-gold tint at launch
+        vColor = mix(vColor, vec3(1.0, 0.82, 0.40), u_wind_density_norm * 0.22 * (1.0 - s) * (1.0 - u_wind_temp_norm));
 
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
@@ -3349,9 +3504,29 @@ window.addEventListener('swpc-update', (ev) => {
     const gl  = Math.min(5, Math.floor(kp / 1.67));
     const gc  = _G_COLS_SUN[gl];
 
+    // ── Update wind live-status badge ──────────────────────────────────────────
+    const windBadge = document.getElementById('wind-live-status');
+    if (windBadge) {
+        const status = sw.status ?? 'connecting';
+        if (status === 'live') {
+            const t = sw.lastUpdated;
+            const ts = t ? t.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
+            windBadge.textContent  = `● Live ${ts}`;
+            windBadge.className    = 'live-status ok';
+        } else if (status === 'stale' || status === 'offline') {
+            windBadge.textContent  = '⚠ NOAA offline';
+            windBadge.className    = 'live-status err';
+        } else {
+            windBadge.textContent  = '○ connecting…';
+            windBadge.className    = 'live-status';
+        }
+    }
+
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
     uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
     uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
+    // Temperature: 50 kK (slow) → 500 kK (fast/CME) mapped to 0-1
+    uniforms.u_wind_temp_norm.value    = Math.max(0, Math.min(1, (tmp - 50e3) / 450e3));
     uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
     uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
 
@@ -3413,6 +3588,60 @@ window.addEventListener('swpc-update', (ev) => {
     // Temperature
     const tempK = tmp >= 1e6 ? `${(tmp / 1e6).toFixed(2)} MK` : `${Math.round(tmp / 1e3)} kK`;
     setV('wv-temp', tempK);
+
+    // ── Derived plasma diagnostics ────────────────────────────────────────────
+    // Dynamic ram pressure: P_dyn = ½ × m_p × n × v²  [nPa]
+    //   m_p = 1.673e-27 kg; n [cm⁻³] → [m⁻³]: ×1e6; v [km/s] → [m/s]: ×1e3; 1 Pa = 1e9 nPa
+    const pdyn = 0.5 * 1.673e-27 * dns * 1e6 * (spd * 1e3) ** 2 * 1e9;   // nPa
+    const pdynEl = document.getElementById('wv-pdyn');
+    if (pdynEl) {
+        pdynEl.textContent = pdyn.toFixed(2) + ' nPa';
+        pdynEl.style.color = pdyn > 12 ? '#ff4400' : pdyn > 6 ? '#ff9900' : pdyn > 2 ? '#ffcc44' : '#ffaa44';
+    }
+
+    // Alfvénic speed: v_A = |B| / sqrt(μ₀ × n × m_p)   [km/s]
+    //   Bt [nT] → [T]: ×1e-9; n [cm⁻³] → [m⁻³]: ×1e6; result in m/s → /1e3 for km/s
+    const mu0    = 4 * Math.PI * 1e-7;
+    const vAlfvn = (bt * 1e-9) / Math.sqrt(mu0 * dns * 1e6 * 1.673e-27) / 1e3;   // km/s
+    const mAlfvn = vAlfvn > 0 ? spd / vAlfvn : 0;
+    const machEl = document.getElementById('wv-mach');
+    if (machEl) {
+        machEl.textContent = mAlfvn.toFixed(1);
+        machEl.style.color = mAlfvn < 4 ? '#ff8844' : mAlfvn > 12 ? '#88ddff' : '#88ccff';
+    }
+
+    // Transit time from Sun: T = 1 AU / v
+    const transitDays = (1.496e8 / spd) / 86400;
+    setV('wv-transit', transitDays.toFixed(1) + ' d');
+
+    // Wind type classification
+    const windTypeEl = document.getElementById('wv-type');
+    if (windTypeEl) {
+        let wType, wColor;
+        if (spd > 600 && tmp > 400e3) {
+            wType = 'CME Sheath'; wColor = '#ff8888';
+        } else if (spd > 500 && dns < 8) {
+            wType = 'Fast CH Stream'; wColor = '#88ddff';
+        } else if (spd < 380 && tmp < 80e3) {
+            wType = 'Slow SB Wind'; wColor = '#ffcc66';
+        } else if (spd > 450 && dns > 12) {
+            wType = 'Dense HCS Crossing'; wColor = '#ffaa44';
+        } else {
+            wType = 'Mixed/Transition'; wColor = '#aaaaaa';
+        }
+        windTypeEl.textContent = wType;
+        windTypeEl.style.color = wColor;
+    }
+
+    // Proton flux (SEP context)
+    const pf10  = sw.proton_flux_10mev  ?? 0.1;
+    const pf100 = sw.proton_flux_100mev ?? 0.01;
+    const pf10El  = document.getElementById('wv-proton10');
+    const pf100El = document.getElementById('wv-proton100');
+    if (pf10El)  pf10El.textContent  = pf10  >= 10 ? pf10.toFixed(0)  : pf10.toFixed(2)  + ' pfu';
+    if (pf100El) pf100El.textContent = pf100 >= 1  ? pf100.toFixed(1) : pf100.toFixed(3) + ' pfu';
+    if (pf10El)  pf10El.style.color  = pf10  > 100 ? '#ff5500' : pf10  > 10 ? '#ffaa44' : '#ffcc88';
+    if (pf100El) pf100El.style.color = pf100 > 1   ? '#ff8800' : pf100 > 0.1 ? '#ffcc88' : '#888888';
 
     // Parker spiral angle (at 1 AU ≈ 215 R☉): φ = Ω·(215 R☉) / v_wind
     // Ω_sun = 2π / (25.4 × 86400) rad/s, 1 AU in km = 1.496e8

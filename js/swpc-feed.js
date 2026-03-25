@@ -215,7 +215,9 @@ async function fetchWind(state) {
     if (rec.bz          != null) state.bz          = rec.bz;
     if (rec.bx_gse      != null) state.bx          = rec.bx_gse;
     if (rec.by_gse      != null) state.by          = rec.by_gse;
-    state.wind_timestamp = new Date((rec.time_tag ?? '').replace(' ', 'T') + 'Z');
+    const ts = (rec.time_tag ?? '').replace(' ', 'T');
+    const tsDate = ts ? new Date(ts.endsWith('Z') ? ts : ts + 'Z') : new Date(0);
+    state.wind_timestamp = isNaN(tsDate.getTime()) ? new Date(0) : tsDate;
 }
 
 /**
@@ -377,14 +379,19 @@ async function fetchAlerts(state) {
     state.active_alerts = data
         .filter(a => a.message && !/CANCEL/i.test(a.message))
         .slice(0, 10)
-        .map(a => ({
-            issued: new Date((a.issue_datetime ?? '').replace(' ', 'T') + 'Z'),
-            text:   String(a.message ?? '').trim(),
-            // Classify severity by first line of message
-            level:  /WARNING|WATCH/i.test(a.message) ? 'warning'
-                  : /ALERT/i.test(a.message)         ? 'alert'
-                  : 'info',
-        }));
+        .map(a => {
+            // issue_datetime may be null/undefined/empty — guard against invalid Date
+            const raw = a.issue_datetime ?? a.issued_at ?? '';
+            const isoStr = raw ? raw.replace(' ', 'T').replace(/(?<!\+\d{2}:\d{2})$/, 'Z').replace('ZZ', 'Z') : '';
+            const issued = isoStr ? new Date(isoStr) : new Date(0);
+            return {
+                issued: isNaN(issued.getTime()) ? new Date(0) : issued,
+                text:   String(a.message ?? '').trim(),
+                level:  /WARNING|WATCH/i.test(a.message) ? 'warning'
+                      : /ALERT/i.test(a.message)         ? 'alert'
+                      : 'info',
+            };
+        });
 }
 
 /**
