@@ -1310,33 +1310,33 @@ nav {
         initParticles();
         animate();
 
-        // Nav — hamburger + touch dropdown
-        (function() {
-            var burger  = document.getElementById('nav-burger');
-            var navMenu = document.getElementById('nav-menu');
-            burger.addEventListener('click', function() {
-                var open = navMenu.classList.toggle('open');
-                burger.textContent = open ? '✕' : '☰';
-                burger.setAttribute('aria-expanded', String(open));
-            });
-            document.addEventListener('click', function(e) {
-                if (!e.target.closest('nav')) {
-                    navMenu.classList.remove('open');
-                    burger.textContent = '☰';
-                    burger.setAttribute('aria-expanded', 'false');
-                }
-            });
-            document.querySelectorAll('.nav-drop-btn').forEach(function(btn) {
-                btn.addEventListener('click', function(e) {
-                    if (window.innerWidth > 768) return;
-                    e.stopPropagation();
-                    var drop = btn.closest('.nav-drop');
-                    var opening = !drop.classList.contains('open');
-                    document.querySelectorAll('.nav-drop').forEach(function(d) { d.classList.remove('open'); });
-                    if (opening) drop.classList.add('open');
-                });
-            });
-        })();
+        // ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '✕' : '☰';
+        _navBurger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '☰';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
 
         console.log('🌊 Advanced Solar Physics Simulator loaded!');
         console.log('Features: Parker Spirals, CMEs, Solar Flares, Fluid Dynamics');
