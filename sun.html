@@ -542,6 +542,61 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 }
 @keyframes flare-banner-pulse { 0%,100%{opacity:1;box-shadow:0 0 22px rgba(255,60,0,.55)} 50%{opacity:.82;box-shadow:0 0 36px rgba(255,100,0,.85)} }
 
+/* ── Region / Flare Analysis Popup ──────────────────────────── */
+#sun-analysis-popup {
+    display:none; position:absolute; z-index:300;
+    top:70px; right:16px; width:252px;
+    background:rgba(4,2,16,.96); backdrop-filter:blur(20px);
+    border:1px solid rgba(255,140,0,.28); border-radius:10px;
+    padding:13px 15px 15px; font-size:11px; color:#bbb;
+    box-shadow:0 8px 36px rgba(0,0,0,.85), 0 0 0 0.5px rgba(255,140,0,.10);
+    pointer-events:auto;
+}
+#sun-analysis-popup.show { display:block; }
+#sap-close {
+    position:absolute; top:8px; right:10px;
+    background:none; border:none; color:#444; font-size:13px;
+    cursor:pointer; padding:2px 6px; border-radius:4px;
+    transition:color .15s;
+}
+#sap-close:hover { color:#ff6060; }
+.sap-title { font-size:13px; font-weight:700; color:#ffcc88; margin-bottom:2px; }
+.sap-sub   { font-size:9.5px; color:#664433; margin-bottom:9px; line-height:1.4; }
+.sap-row   { display:flex; justify-content:space-between; align-items:baseline;
+             padding:2.5px 0; border-bottom:1px solid rgba(255,255,255,.04); }
+.sap-key   { color:#554433; font-size:10px; }
+.sap-val   { font-weight:700; color:#ddaa77; font-size:11px; }
+.sap-val.good   { color:#44ff88; }
+.sap-val.warn   { color:#ffcc44; }
+.sap-val.danger { color:#ff5544; }
+.sap-divider { font-size:9px; color:#443322; text-transform:uppercase;
+               letter-spacing:.5px; margin:9px 0 4px; }
+.sap-pot-bar { height:4px; border-radius:2px; margin:4px 0 9px;
+               background:rgba(255,255,255,.07); overflow:hidden; }
+.sap-pot-fill { height:100%; border-radius:2px; transition:width .4s; }
+.sap-flare-item {
+    display:flex; gap:6px; align-items:center; padding:3px 5px;
+    border-radius:4px; cursor:pointer; font-size:10px;
+    transition:background .12s;
+}
+.sap-flare-item:hover { background:rgba(255,140,0,.14); }
+.sap-flare-cls { font-weight:800; min-width:30px; }
+.sap-flare-time { color:#554433; flex:1; }
+.sap-flare-loc  { color:#445566; }
+.sap-fly-btn {
+    display:block; margin-top:11px; width:100%;
+    padding:6px 0; background:rgba(255,140,0,.13);
+    border:1px solid rgba(255,140,0,.28); border-radius:6px;
+    color:#ffaa55; font-size:10.5px; font-weight:700;
+    cursor:pointer; text-align:center; letter-spacing:.3px;
+    transition:background .15s, border-color .15s;
+}
+.sap-fly-btn:hover { background:rgba(255,140,0,.26); border-color:rgba(255,140,0,.55); color:#ffd088; }
+.sap-no-data { font-size:10px; color:#443322; padding:4px 0; }
+/* Clickable flare rows (panel + popup) */
+.flare-row[data-lat] { cursor:pointer; }
+.flare-row[data-lat]:hover { background:rgba(255,140,0,.09); border-radius:3px; }
+
 /* ── Wind speed dial ───────────────────────────────────────── */
 .wind-dial-wrap { display:flex; align-items:center; gap:10px; margin:6px 0 10px; }
 .wind-dial-svg  { flex-shrink:0; }
@@ -657,6 +712,13 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
         </div>
         <!-- Flare Alert Banner -->
         <div id="flare-alert-banner"></div>
+
+        <!-- Analysis popup — region / flare detail on 3-D click or list-row click -->
+        <div id="sun-analysis-popup">
+            <button id="sap-close" title="Close">✕</button>
+            <div id="sap-content"></div>
+        </div>
+
         <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
         <button class="cv-btn" id="btn-sdo" title="Live SDO imagery">🔭 SDO Live</button>
@@ -3853,12 +3915,15 @@ function updateLivePanel(failed = false) {
     if (!liveFlares.length) {
         fl.innerHTML = '<div class="no-data">No significant flares in past 48h.</div>';
     } else {
-        fl.innerHTML = liveFlares.map(f => {
+        fl.innerHTML = liveFlares.map((f, i) => {
             const tc = (f.cls || '?')[0].toUpperCase();
             const t  = new Date(f.time);
             const ts = isNaN(t) ? f.time
                 : t.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-            return `<div class="flare-row">
+            const fc = parseLoc(f.loc);
+            // data-lat/lon/fidx enable click-to-fly; title gives hover hint
+            return `<div class="flare-row" data-lat="${fc?.lat ?? 0}" data-lon="${fc?.lon ?? 0}" data-fidx="${i}"
+                         title="Click to fly to ${f.loc || 'flare site'}">
                 <span class="flare-class ${tc}">${f.cls}</span>
                 <span class="flare-time">${ts}</span>
                 <span class="flare-loc">${f.loc}</span>
@@ -4869,6 +4934,285 @@ function showFlareAlertBanner(cls, loc) {
 }
 
 console.log('%c[Sun · G2V Simulator]', 'color:#ffb830;font-weight:bold;font-size:13px');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FLARE / REGION ANALYSIS POPUP
+// ─ Click any 3-D region marker on the sphere → fly there + show popup
+// ─ Click any flare row in the sidebar panel  → fly to source + show popup
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const _sapEl      = document.getElementById('sun-analysis-popup');
+const _sapContent = document.getElementById('sap-content');
+document.getElementById('sap-close').addEventListener('click', () => _sapEl.classList.remove('show'));
+
+/** Flare-potential label from magnetic + McIntosh z class. */
+function _sapPotential(mag, z) {
+    const m = (mag ?? '').toLowerCase();
+    const zU = (z ?? '').toUpperCase();
+    if (m.includes('delta') || /^[EFG]/.test(zU))      return { label: 'EXTREME', css: 'danger', pct: 92 };
+    if (m.includes('gamma'))                             return { label: 'HIGH',    css: 'danger', pct: 73 };
+    if (m.includes('beta') && m.includes('gamma'))       return { label: 'HIGH',    css: 'danger', pct: 68 };
+    if (m.includes('beta'))                              return { label: 'MODERATE', css: 'warn',  pct: 38 };
+    return { label: 'LOW', css: 'good', pct: 12 };
+}
+
+/** Format milliseconds → human age string. */
+function _sapAge(ms) {
+    if (ms == null || isNaN(ms)) return '?';
+    if (ms < 3600e3)  return `${Math.round(ms / 60000)} min ago`;
+    if (ms < 86400e3) return `${Math.round(ms / 3600e3)} h ago`;
+    return `${Math.round(ms / 86400e3)} d ago`;
+}
+
+/** W/m² → formatted GOES class string with scientific notation. */
+function _sapFluxStr(cls) {
+    const scale = { A: 1e-8, B: 1e-7, C: 1e-6, M: 1e-5, X: 1e-4 };
+    const letter = (cls ?? 'A')[0].toUpperCase();
+    const num    = parseFloat((cls ?? '1').slice(1)) || 1;
+    const w      = (scale[letter] ?? 1e-8) * num;
+    const exp    = Math.floor(Math.log10(w));
+    const mant   = (w / Math.pow(10, exp)).toFixed(1);
+    return `${mant}×10<sup>${exp}</sup> W/m²`;
+}
+
+/** Popup CSS colour per flare class letter. */
+const _SAP_CLS_COL = { X:'#ff3300', M:'#ff8800', C:'#ffee44', B:'#88ddaa', A:'#44ff88' };
+
+// ── Show region analysis popup ────────────────────────────────────────────────
+function showRegionAnalysis(regData) {
+    // regData comes from: regionGroup child g.userData  → { regNum, lat, lon, idx, mc }
+    const num = String(regData.regNum ?? '');
+    const idx = regData.idx ?? liveRegions.findIndex(r => String(r.num) === num);
+    const reg = liveRegions[idx] ?? liveRegions.find(r => String(r.num) === num);
+    if (!reg) { _sapEl.classList.remove('show'); return; }
+
+    const c    = parseLoc(reg.loc);
+    const lat  = regData.lat ?? c?.lat ?? 0;
+    const lon  = regData.lon ?? c?.lon ?? 0;
+    const pot  = _sapPotential(reg.mag, reg.z);
+    const potCol = pot.css === 'danger' ? '#ff4400' : pot.css === 'warn' ? '#ffcc00' : '#44ff88';
+
+    // Flares linked to this region (by region# or by proximity)
+    const linkedFlares = liveFlares.filter(f => f.reg && String(f.reg) === num).slice(0, 5);
+    const nearFlares   = linkedFlares.length === 0
+        ? liveFlares.filter(f => {
+            const fc = parseLoc(f.loc);
+            return fc && c && Math.abs(fc.lat - c.lat) < 10 && Math.abs(fc.lon - c.lon) < 25;
+          }).slice(0, 4)
+        : [];
+    const shownFlares = [...linkedFlares, ...nearFlares].slice(0, 5);
+
+    const flareRows = shownFlares.length > 0
+        ? shownFlares.map(f => {
+            const tc  = (f.cls || '?')[0].toUpperCase();
+            const fc  = parseLoc(f.loc);
+            const ageMs = f.time ? Date.now() - new Date(f.time).getTime() : null;
+            return `<div class="sap-flare-item"
+                         data-lat="${fc?.lat ?? 0}" data-lon="${fc?.lon ?? 0}" data-cls="${tc}"
+                         title="${f.cls} at ${f.loc} — ${_sapAge(ageMs)}">
+                <span class="sap-flare-cls" style="color:${_SAP_CLS_COL[tc] ?? '#ccc'}">${f.cls}</span>
+                <span class="sap-flare-time">${_sapAge(ageMs)}</span>
+                <span class="sap-flare-loc">${f.loc}</span>
+            </div>`;
+        }).join('')
+        : '<div class="sap-no-data">No flares from this region in 48h</div>';
+
+    _sapContent.innerHTML = `
+        <div class="sap-title">AR ${reg.num}</div>
+        <div class="sap-sub">${reg.loc} · ${reg.mag || reg.z || 'unipolar'}</div>
+        <div class="sap-row">
+            <span class="sap-key">McIntosh class</span>
+            <span class="sap-val">${reg.z || '—'}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Magnetic class</span>
+            <span class="sap-val">${reg.mag || '—'}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Area</span>
+            <span class="sap-val">${reg.area} µhem</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Sunspots</span>
+            <span class="sap-val">${reg.nspot}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Flare potential</span>
+            <span class="sap-val ${pot.css}">${pot.label}</span>
+        </div>
+        <div class="sap-pot-bar">
+            <div class="sap-pot-fill" style="width:${pot.pct}%;background:${potCol}"></div>
+        </div>
+        <div class="sap-divider">Recent flares (48h)</div>
+        ${flareRows}
+        <button class="sap-fly-btn" id="sap-fly">⊙ Fly to AR ${reg.num}</button>
+    `;
+
+    // "Fly here" button
+    document.getElementById('sap-fly').addEventListener('click', () => flyToRegion(lat, lon));
+
+    // Flare items in popup → fly to that flare site + drive shader
+    _sapContent.querySelectorAll('.sap-flare-item').forEach(el => {
+        el.addEventListener('click', () => {
+            const flat = +el.dataset.lat, flon = +el.dataset.lon;
+            if (!isNaN(flat) && !isNaN(flon)) {
+                flyToRegion(flat, flon);
+                uniforms.u_flare_lat.value = flat * Math.PI / 180;
+                uniforms.u_flare_lon.value = flon * Math.PI / 180;
+                uniforms.u_flare_t.value   = 50;   // show ribbons at a partially-aged state
+                triggerPositionFlare(flat, flon, el.dataset.cls || 'C');
+            }
+        });
+    });
+
+    _sapEl.classList.add('show');
+}
+
+// ── Show flare analysis popup ─────────────────────────────────────────────────
+function showFlareAnalysis(f) {
+    const tc    = (f.cls || '?')[0].toUpperCase();
+    const t     = new Date(f.time);
+    const ageMs = isNaN(t) ? null : Date.now() - t.getTime();
+    const ts    = isNaN(t) ? (f.time ?? '?')
+        : t.toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', timeZoneName:'short' });
+    const fc    = parseLoc(f.loc);
+    const lat   = fc?.lat ?? 0;
+    const lon   = fc?.lon ?? 0;
+
+    // Intensity bar width (A=10% → X1=83%, X10=100%)
+    const logScales = { A:0, B:1, C:2, M:3, X:4 };
+    const logBase   = (logScales[tc] ?? 0) + Math.log10(parseFloat((f.cls ?? '1').slice(1)) || 1);
+    const barPct    = Math.round(Math.min(100, Math.max(5, (logBase + 1) * 18)));
+    const barCol    = _SAP_CLS_COL[tc] ?? '#ffcc44';
+
+    _sapContent.innerHTML = `
+        <div class="sap-title">
+            <span style="color:${barCol};font-size:15px;margin-right:4px">${f.cls}</span> Solar Flare
+        </div>
+        <div class="sap-sub">${_sapAge(ageMs)}</div>
+        <div class="sap-row">
+            <span class="sap-key">Peak time</span>
+            <span class="sap-val">${ts}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Location</span>
+            <span class="sap-val">${f.loc || '—'}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">NOAA region</span>
+            <span class="sap-val">${f.reg && f.reg !== '—' ? 'AR ' + f.reg : '—'}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Peak flux (GOES)</span>
+            <span class="sap-val">${_sapFluxStr(f.cls)}</span>
+        </div>
+        <div class="sap-row">
+            <span class="sap-key">Band</span>
+            <span class="sap-val">1–8 Å (0.1–0.8 nm)</span>
+        </div>
+        <div class="sap-pot-bar" style="margin-top:8px">
+            <div class="sap-pot-fill" style="width:${barPct}%;background:${barCol}"></div>
+        </div>
+        <button class="sap-fly-btn" id="sap-fly">⊙ Fly to ${f.loc || 'flare site'}</button>
+    `;
+
+    document.getElementById('sap-fly').addEventListener('click', () => {
+        flyToRegion(lat, lon);
+        uniforms.u_flare_lat.value = lat * Math.PI / 180;
+        uniforms.u_flare_lon.value = lon * Math.PI / 180;
+        uniforms.u_flare_t.value   = ageMs != null ? Math.min(800, (ageMs / 1000) * 0.35) : 120;
+        triggerPositionFlare(lat, lon, tc);
+    });
+
+    _sapEl.classList.add('show');
+}
+
+// ── Raycasting: click 3-D region markers on the sphere ───────────────────────
+{
+    const _rc = new THREE.Raycaster();
+    // Widen the ray slightly so small rings are easier to click
+    _rc.params.Line  = { threshold: 0.04 };
+    _rc.params.Points = { threshold: 0.04 };
+
+    const _ptrDown = { x: 0, y: 0, t: 0 };
+
+    renderer.domElement.addEventListener('pointerdown', e => {
+        _ptrDown.x = e.clientX;
+        _ptrDown.y = e.clientY;
+        _ptrDown.t = performance.now();
+    });
+
+    renderer.domElement.addEventListener('pointerup', e => {
+        // Ignore drags — only treat as click if movement < 6px and duration < 500ms
+        if (Math.hypot(e.clientX - _ptrDown.x, e.clientY - _ptrDown.y) > 6) return;
+        if (performance.now() - _ptrDown.t > 500) return;
+
+        const rect = renderer.domElement.getBoundingClientRect();
+        const ndc  = new THREE.Vector2(
+             (e.clientX - rect.left) / rect.width  * 2 - 1,
+            -((e.clientY - rect.top) / rect.height) * 2 + 1
+        );
+        _rc.setFromCamera(ndc, camera);
+
+        if (!regionGroup) return;
+
+        // Test all region group children (torus rings, discs, aura rings)
+        const hits = _rc.intersectObjects(regionGroup.children, true);
+        if (!hits.length) return;
+
+        // Walk up from the hit mesh to the Group that has regNum
+        let g = hits[0].object;
+        for (let depth = 0; depth < 4 && g && !g.userData?.regNum; depth++) g = g.parent;
+        if (!g?.userData?.regNum) return;
+
+        flyToRegion(g.userData.lat, g.userData.lon);
+        showRegionAnalysis(g.userData);
+        e.stopPropagation();
+    });
+}
+
+// ── Flare-list panel: click row → fly + show analysis popup ─────────────────
+// Uses event delegation so it survives list re-renders.
+document.getElementById('flare-list').addEventListener('click', e => {
+    const row = e.target.closest('.flare-row[data-lat]');
+    if (!row) return;
+    const lat  = +row.dataset.lat;
+    const lon  = +row.dataset.lon;
+    const fidx = +row.dataset.fidx;
+    if (!isNaN(lat) && !isNaN(lon)) flyToRegion(lat, lon);
+    if (!isNaN(fidx) && liveFlares[fidx]) {
+        showFlareAnalysis(liveFlares[fidx]);
+    }
+    // Drive shader ribbon to this flare site with its real age
+    const f = liveFlares[fidx];
+    if (f) {
+        const ageMs  = f.time ? Date.now() - new Date(f.time).getTime() : 0;
+        const simAge = Math.min(800, (ageMs / 1000) * 0.35);
+        uniforms.u_flare_lat.value = lat * Math.PI / 180;
+        uniforms.u_flare_lon.value = lon * Math.PI / 180;
+        uniforms.u_flare_t.value   = simAge;
+        triggerPositionFlare(lat, lon, (f.cls ?? 'C')[0].toUpperCase());
+    }
+});
+
+// ── Keep flare list fresh from swpc-update feed ──────────────────────────────
+// swpc-feed T3 (15 min) is less frequent than fetchLiveSolarData (5 min), so
+// we only fill in the flare list from swpc-update when the panel is still empty
+// (no live NOAA fetch has succeeded yet).
+window.addEventListener('swpc-update', (ev) => {
+    const rf = ev.detail?.recent_flares;
+    if (!Array.isArray(rf) || rf.length === 0 || liveFlares.length > 0) return;
+    // Convert swpc-feed format → panel format
+    liveFlares = rf.map(f => ({
+        time: f.time instanceof Date ? f.time.toISOString() : String(f.time ?? ''),
+        cls:  f.cls ?? '?',
+        loc:  f.location ?? '—',
+        reg:  f.region   != null ? String(f.region) : '—',
+    }));
+    updateLivePanel(false);
+});
+
+console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
 </script>
 </body>
 </html>
