@@ -59,19 +59,25 @@ export const FREE_LIMITS = Object.freeze({
     series_points: 60,       // wind/xray history points (24-hr for PRO)
 });
 
-// ── Edge API base paths (browser calls these, never NOAA/NASA directly) ──────
+// ── NOAA SWPC direct URLs (browser fetches these directly — CORS enabled) ─────
+// Server-side fetches are blocked by NOAA WAF (403 host_not_allowed); the
+// browser must hit these endpoints directly.
+export const NOAA = Object.freeze({
+    wind:      'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',
+    kp1m:      'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json',
+    xray:      'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json',
+    protons:   'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json',
+    electrons: 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json',
+    aurora:    'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
+    alerts:    'https://services.swpc.noaa.gov/products/alerts.json',
+    dst:       'https://services.swpc.noaa.gov/products/kyoto-dst.json',
+    flares:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json',
+    regions:   'https://services.swpc.noaa.gov/json/solar_regions.json',
+    radioFlux: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
+});
+
+// ── Edge API paths (DONKI only — NASA API key must stay server-side) ──────────
 export const API = Object.freeze({
-    wind:           '/api/solar-wind/wind-speed',
-    kp1m:           '/api/noaa/kp-1m',
-    xray:           '/api/noaa/xray',
-    protons:        '/api/noaa/protons',
-    electrons:      '/api/noaa/electrons',
-    aurora:         '/api/noaa/aurora',
-    alerts:         '/api/noaa/alerts',
-    dst:            '/api/noaa/dst',
-    flares:         '/api/noaa/flares',
-    regions:        '/api/noaa/regions',
-    radioFlux:      '/api/noaa/radio-flux',
     donkiCME:       '/api/donki/cme',
     donkiNotify:    '/api/donki/notifications',
     donkiFlares:    '/api/donki/flares',
