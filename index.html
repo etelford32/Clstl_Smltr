@@ -654,8 +654,8 @@ nav {
         <!-- Auth pushed to the far right by the spacer -->
         <div class="nav-spacer"></div>
         <div class="nav-auth-sep"></div>
-        <a href="#login"  class="nav-item nav-login">Log In</a>
-        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
+        <a href="signin.html"  class="nav-item nav-login">Log In</a>
+        <a href="signup.html" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -1151,6 +1151,30 @@ if (_navBurger && _navMenu) {
         });
     });
 }
+
+// ─── Auth state ──────────────────────────────────────────────────────────────
+(function() {
+    try {
+        const auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null');
+        if (auth && auth.signedIn) {
+            const loginBtn  = document.querySelector('a.nav-login');
+            const signupBtn = document.querySelector('a.nav-signup');
+            if (loginBtn && signupBtn) {
+                const name = auth.name || auth.email.split('@')[0];
+                loginBtn.textContent = '👤 ' + name;
+                loginBtn.href = '#';
+                loginBtn.style.cssText = 'background:rgba(78,255,145,.12)!important;border-color:rgba(78,255,145,.35)!important;color:#4eff91!important;';
+                loginBtn.addEventListener('click', e => {
+                    e.preventDefault();
+                    sessionStorage.removeItem('pp_auth');
+                    window.location.reload();
+                });
+                signupBtn.textContent = 'Launch App →';
+                signupBtn.href = 'sun.html';
+            }
+        }
+    } catch(_) {}
+})();
 </script>
 
 <!-- ═══════════════════════════════════════════════ THREE.JS IMPORT MAP ═══ -->
