@@ -214,11 +214,15 @@ async function fetchKp1m(state) {
 
 async function fetchXray(state) {
     const raw = await fetchNoaa(NOAA.xray);
-    // Format: 2D array; row[0] = headers including time_tag, satellite, flux, wavelength/energy
-    // The long-band (0.1-0.8 nm) is the standard X-class measurement channel.
+    // Format: object-array OR 2D array depending on NOAA product version
     if (!Array.isArray(raw) || raw.length < 2) return;
 
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
     // Filter to long-band rows if a wavelength/band column exists
     const hasWl = rows[0] && ('wavelength' in rows[0] || 'band' in rows[0]);
     const longBand = hasWl
@@ -243,9 +247,14 @@ async function fetchXray(state) {
 
 async function fetchProtons(state) {
     const raw = await fetchNoaa(NOAA.protons);
-    // Format: 2D array with energy column (e.g. ">=10 MeV", ">=50 MeV", ">=100 MeV")
+    // Format: object-array OR 2D array with energy column
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
 
     const byEnergy = {};
     for (const r of rows) {
@@ -270,9 +279,14 @@ async function fetchProtons(state) {
 
 async function fetchElectrons(state) {
     const raw = await fetchNoaa(NOAA.electrons);
-    // Format: 2D array with energy column (">0.8 MeV", ">2.0 MeV")
+    // Format: object-array OR 2D array with energy column
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
 
     let latest2mev = null;
     for (const r of rows) {
@@ -329,9 +343,14 @@ async function fetchAlerts(state) {
 
 async function fetchDst(state) {
     const raw = await fetchNoaa(NOAA.dst);
-    // Format: 2D array [time_tag, dst]; fill |dst| > 1000
+    // Format: object-array OR 2D array [time_tag, dst]; fill |dst| > 1000
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
     for (let i = rows.length - 1; i >= 0; i--) {
         const r   = rows[i];
         const dst = Number(r.dst ?? r.dst_index ?? NaN);
@@ -647,7 +666,7 @@ export class SpaceWeatherFeed {
         }
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -662,7 +681,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -681,7 +700,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -694,7 +713,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._dispatch();
     }
