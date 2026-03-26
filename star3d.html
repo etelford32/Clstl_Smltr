@@ -370,7 +370,18 @@ nav {
             flex: 1;
             min-width: 80px;
         }
-    </style>
+    
+/* ─── Space Weather link button ─────────────────────────────────── */
+        .cv-btn {
+            position: absolute; z-index: 60;
+            background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,215,0,.30); border-radius: 7px;
+            color: #ffd700; cursor: pointer; font-family: inherit;
+            font-size: 12px; padding: 6px 11px; transition: all .2s;
+            touch-action: manipulation; text-decoration: none; display: inline-block;
+        }
+        .cv-btn:hover { background: rgba(255,215,0,.15); border-color:#ffd700; }
+</style>
 </head>
 <body>
 <nav>
@@ -452,8 +463,8 @@ nav {
         <!-- Auth pushed to the far right by the spacer -->
         <div class="nav-spacer"></div>
         <div class="nav-auth-sep"></div>
-        <a href="#login"  class="nav-item nav-login">Log In</a>
-        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
+        <a href="signin.html"  class="nav-item nav-login">Log In</a>
+        <a href="signup.html" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
     <div id="app">
@@ -1106,6 +1117,7 @@ nav {
         </div><!-- end #sidebar -->
 
         <button id="sidebar-toggle">&#9776; Panel</button>
+        <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:16px;right:120px;">⚡ Weather</a>
     </div>
 
     <!-- HUD overlay -->

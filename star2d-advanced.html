@@ -175,6 +175,7 @@ nav {
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 0 30px rgba(255, 140, 0, 0.3);
+            position: relative;
         }
 
         canvas {
@@ -334,7 +335,18 @@ nav {
             font-weight: bold;
             color: #ff8c00;
         }
-    </style>
+    
+/* ─── Space Weather link button ─────────────────────────────────── */
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid #ffb830; border-radius: 7px;
+    color: #ffb830; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation; text-decoration: none; display: inline-block;
+}
+.cv-btn:hover { background: rgba(255,140,0,.15); border-color:#ff8c00; color:#ffb830; }
+</style>
 </head>
 <body>
     <nav>
@@ -416,8 +428,8 @@ nav {
         <!-- Auth pushed to the far right by the spacer -->
         <div class="nav-spacer"></div>
         <div class="nav-auth-sep"></div>
-        <a href="#login"  class="nav-item nav-login">Log In</a>
-        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
+        <a href="signin.html"  class="nav-item nav-login">Log In</a>
+        <a href="signup.html" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -429,7 +441,9 @@ nav {
 
     <div class="container">
         <div class="canvas-container">
-            <canvas id="starCanvas" width="900" height="700"></canvas>
+            <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:12px; right:12px;">⚡ Weather</a>
+
+        <canvas id="starCanvas" width="900" height="700"></canvas>
         </div>
 
         <div class="controls">

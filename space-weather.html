@@ -533,6 +533,18 @@ nav {
 @media (max-width: 600px) {
     #sw-globe-canvas { height: 340px; }
 }
+
+/* ─── Floating control buttons ──────────────────────────────────── */
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(0,10,30,.80); backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,160,255,.30); border-radius: 7px;
+    color: #60c0ff; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation; text-decoration: none; display: inline-block;
+}
+.cv-btn:hover { background: rgba(0,140,255,.18); border-color:#0088ff; }
+#btn-sw-here { top:12px; right:12px; }
 </style>
 </head>
 <body>
@@ -617,8 +629,8 @@ nav {
         <!-- Auth pushed to the far right by the spacer -->
         <div class="nav-spacer"></div>
         <div class="nav-auth-sep"></div>
-        <a href="#login"  class="nav-item nav-login">Log In</a>
-        <a href="#signup" class="nav-item nav-signup">Sign Up</a>
+        <a href="signin.html"  class="nav-item nav-login">Log In</a>
+        <a href="signup.html" class="nav-item nav-signup">Sign Up</a>
     </div>
 </nav>
 
@@ -649,6 +661,8 @@ nav {
     <!-- 3D inner solar system: real ephemeris orbits, 3D Parker spiral wind,  -->
     <!-- Earth magnetosphere (Shue model), CME shells, flare events.           -->
     <div class="helio-hero-wrap">
+        
+        <button class="cv-btn" id="btn-sw-here" title="Current Space Weather" style="top:12px;right:12px;" onclick="document.getElementById('helio-canvas').dispatchEvent(new Event('reset'))">⊙ Reset View</button>
         <canvas id="helio-canvas"
                 aria-label="3D inner solar system — Parker spiral solar wind, Earth magnetosphere, planetary positions"
                 role="img"></canvas>

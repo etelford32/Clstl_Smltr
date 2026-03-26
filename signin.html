@@ -270,6 +270,11 @@
                 <div class="auth-alert" id="login-alert">
                     <span>⚠</span> <span id="alert-msg">Invalid email or password.</span>
                 </div>
+                <div class="auth-success" id="login-success" style="display:none; text-align:center; padding:28px 0;">
+                    <div style="font-size:2.5rem; margin-bottom:10px;">✅</div>
+                    <h3 style="color:#4eff91; margin-bottom:8px;">Signed in!</h3>
+                    <p style="color:#888; font-size:.9rem;">Redirecting you to the app…</p>
+                </div>
 
                 <form id="signin-form" novalidate>
                     <div class="form-group">
@@ -392,16 +397,21 @@
         btn.disabled = true;
         btn.textContent = 'Signing in…';
 
-        // Simulate auth (replace with real API call)
+        // TODO: Replace with real API call (POST /api/auth/signin)
         setTimeout(() => {
-            // Demo: show error for non-demo emails, success for anything else
-            btn.disabled = false;
-            btn.textContent = 'Sign In →';
-            // In production, redirect on success: window.location.href = '/dashboard';
-            document.getElementById('login-alert').classList.add('show');
-            document.getElementById('alert-msg').textContent = 'Authentication not yet wired up — this is a UI demo.';
-            email.classList.add('error');
-            pw.classList.add('error');
+            // Store session flag (replace with real JWT/session management)
+            try {
+                sessionStorage.setItem('pp_auth', JSON.stringify({
+                    email: email.value,
+                    signedIn: true,
+                    ts: Date.now()
+                }));
+            } catch(_) {}
+            // Show success state
+            document.getElementById('signin-form').style.display = 'none';
+            document.getElementById('login-success').style.display = 'block';
+            // Redirect after brief pause
+            setTimeout(() => { window.location.href = 'index.html'; }, 1500);
         }, 900);
     });
 

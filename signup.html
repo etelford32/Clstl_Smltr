@@ -348,7 +348,7 @@
             <div class="success-overlay" id="success-view">
                 <div class="success-icon">🎉</div>
                 <h3>You're in!</h3>
-                <p>Your account has been created.<br>Check your inbox to verify your email, then<br><a href="index.html" style="color:#a080ff;">launch your first simulation →</a></p>
+                <p>Your account has been created.<br>Redirecting you to the app in a moment…<br><a href="index.html" style="color:#a080ff;">Or click here to continue →</a></p>
             </div>
         </div>
 
@@ -439,10 +439,24 @@
         btn.disabled = true;
         btn.textContent = 'Creating account…';
 
-        // Simulate account creation (replace with real API call)
+        // TODO: Replace with real API call (POST /api/auth/signup)
         setTimeout(() => {
+            // Store session flag (replace with real JWT/session management)
+            try {
+                const plan = document.querySelector('.plan-pill.selected input')?.value || 'free';
+                const firstName = document.getElementById('first-name').value;
+                sessionStorage.setItem('pp_auth', JSON.stringify({
+                    email: document.getElementById('email').value,
+                    name: firstName,
+                    plan,
+                    signedIn: true,
+                    ts: Date.now()
+                }));
+            } catch(_) {}
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
+            // Auto-redirect to home after 3s
+            setTimeout(() => { window.location.href = 'index.html'; }, 3000);
         }, 1200);
     });
 </script>
