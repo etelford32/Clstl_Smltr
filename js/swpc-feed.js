@@ -1,15 +1,18 @@
 /**
  * swpc-feed.js — Tiered space weather data pipeline
  *
- * All data now flows through Vercel Edge Functions (api/noaa/*, api/donki/*,
- * api/solar-wind/*) rather than hitting NOAA / NASA directly from the browser.
- * Benefits: CDN caching, payload slicing, NASA key isolation, CORS guarantee.
+ * NOAA data is fetched directly from the browser (CORS enabled on all
+ * services.swpc.noaa.gov endpoints).  Server-side fetches via Vercel edge
+ * functions are blocked by NOAA WAF (403 host_not_allowed).
+ *
+ * DONKI (NASA) data still flows through /api/donki/* edge functions because
+ * the NASA_API_KEY must stay server-side and is not affected by WAF.
  *
  * THREE POLL TIERS
  * ─────────────────────────────────────────────────────────────────────────────
- *  T1 — 60 s   wind, Kp-1m, X-ray  (drives live globe shader; GOES products update ~1 min)
+ *  T1 — 60 s   wind, Kp-1m, X-ray  (drives live globe shader; GOES ~1-min)
  *  T2 —  5 min protons, electrons, aurora, alerts
- *  T3 — 15 min flares, regions, Dst (1-hr product), DONKI CME, DONKI notifications
+ *  T3 — 15 min flares, regions, Dst, DONKI CME/notify/flares/GST/SEP
  *
  *  T2 fires 5 s after T1; T3 fires 10 s after T1 (staggered to avoid burst).
  *  Storm-mode escalation compresses all intervals when Kp ≥ 6, X-class flare,
@@ -29,7 +32,7 @@
  *  feed.start();
  */
 
-import { API, INTERVALS, STORM, STORM_TRIGGERS, TIER } from './config.js';
+import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER } from './config.js';
 
 // ── Quiet-Sun fallback state ──────────────────────────────────────────────────
 export const FALLBACK = {
@@ -133,117 +136,229 @@ function parseLocation(loc) {
     return { lat_rad: lat * Math.PI / 180, lon_rad: lon * Math.PI / 180 };
 }
 
-// ── Edge API fetchers ─────────────────────────────────────────────────────────
-// Each function calls one of our Vercel edge routes and writes normalised values
-// into the shared mutable `state` object.  All throw on network/parse failure
-// so Promise.allSettled can catch them individually.
+// ── Fetch helpers ─────────────────────────────────────────────────────────────
 
+/** Direct browser→NOAA fetch (CORS enabled; WAF only blocks server-side). */
+async function fetchNoaa(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`NOAA ${url} → HTTP ${res.status}`);
+    return res.json();
+}
+
+/** Edge function fetch (DONKI only — NASA key stays server-side). */
 async function fetchEdge(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
     return res.json();
 }
 
+// ── 2D-array helpers (NOAA "CSV-in-JSON" format used by several endpoints) ───
+
+/** Parse a NOAA 2D-array response into an array of plain objects. */
+function parse2D(raw) {
+    if (!Array.isArray(raw) || raw.length < 2) return [];
+    const headers = raw[0].map(h => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
+    return raw.slice(1).map(row =>
+        Object.fromEntries(headers.map((h, i) => [h, row[i]]))
+    );
+}
+
+/** Fill sentinel for NOAA numeric columns (values ≤ −9990 or > 1e20). */
+const noaaFill = v => (v == null || Number(v) <= -9990 || Number(v) > 1e20) ? null : Number(v);
+
 // ── T1 fetchers ───────────────────────────────────────────────────────────────
 
 async function fetchWind(state) {
-    const json = await fetchEdge(API.wind);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.speed_km_s    != null) state.speed       = cur.speed_km_s;
-    if (cur.density_cc    != null) state.density     = cur.density_cc;
-    if (cur.temperature_K != null) state.temperature = cur.temperature_K;
-    if (cur.bt_nT         != null) state.bt          = cur.bt_nT;
-    if (cur.bz_nT         != null) state.bz          = cur.bz_nT;
-    if (cur.bx_nT         != null) state.bx          = cur.bx_nT;
-    if (cur.by_nT         != null) state.by          = cur.by_nT;
-    state.wind_timestamp = new Date(json.data.updated);
+    const raw = await fetchNoaa(NOAA.wind);
+    // Format: array of objects {time_tag, speed, density, temperature, bt, bz_gsm, bx_gsm, by_gsm}
+    // Rows are 1-minute samples; last non-fill entry is current.
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    // Walk backwards to find the most recent row with a valid speed
+    for (let i = raw.length - 1; i >= 0; i--) {
+        const r   = raw[i];
+        const spd = noaaFill(r.speed ?? r.proton_speed);
+        if (spd == null) continue;
+        if (spd > 0)     state.speed = spd;
+        const den = noaaFill(r.density ?? r.proton_density);
+        if (den != null && den > 0) state.density = den;
+        const tmp = noaaFill(r.temperature ?? r.proton_temperature);
+        if (tmp != null && tmp > 0) state.temperature = tmp;
+        const bt  = noaaFill(r.bt);
+        if (bt  != null) state.bt = Math.abs(bt);
+        const bz  = noaaFill(r.bz_gsm ?? r.bz);
+        if (bz  != null) state.bz = bz;
+        const bx  = noaaFill(r.bx_gsm ?? r.bx);
+        if (bx  != null) state.bx = bx;
+        const by  = noaaFill(r.by_gsm ?? r.by);
+        if (by  != null) state.by = by;
+        if (r.time_tag) state.wind_timestamp = new Date(r.time_tag);
+        break;
+    }
 }
 
 async function fetchKp1m(state) {
-    const json = await fetchEdge(API.kp1m);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.kp != null) {
-        state.kp_1min = cur.kp;
-        state.kp      = cur.kp;   // use 1-min Kp as primary
+    const raw = await fetchNoaa(NOAA.kp1m);
+    // Format: array of objects {time_tag, estimated_kp, kp_index, kp}
+    if (!Array.isArray(raw) || raw.length === 0) return;
+    for (let i = raw.length - 1; i >= 0; i--) {
+        const r  = raw[i];
+        const kp = noaaFill(r.estimated_kp ?? r.kp_index ?? r.kp);
+        if (kp == null) continue;
+        state.kp_1min = kp;
+        state.kp      = kp;   // use 1-min Kp as primary
+        break;
     }
 }
 
 // ── T2 fetchers ───────────────────────────────────────────────────────────────
 
 async function fetchXray(state) {
-    const json = await fetchEdge(API.xray);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.flux_W_m2  != null) state.xray_flux  = cur.flux_W_m2;
-    if (cur.xray_class != null) state.xray_class = cur.xray_class;
-    if (cur.xray_letter != null) {
-        // derive flare_letter from current background X-ray for shader
-        state.flare_letter = state.flare_letter ?? cur.xray_letter;
+    const raw = await fetchNoaa(NOAA.xray);
+    // Format: 2D array; row[0] = headers including time_tag, satellite, flux, wavelength/energy
+    // The long-band (0.1-0.8 nm) is the standard X-class measurement channel.
+    if (!Array.isArray(raw) || raw.length < 2) return;
+
+    const rows = parse2D(raw);
+    // Filter to long-band rows if a wavelength/band column exists
+    const hasWl = rows[0] && ('wavelength' in rows[0] || 'band' in rows[0]);
+    const longBand = hasWl
+        ? rows.filter(r => {
+            const w = String(r.wavelength ?? r.band ?? '');
+            return w.includes('0.1') || w.includes('long') || w.includes('1-8');
+          })
+        : rows;
+    const candidates = longBand.length > 0 ? longBand : rows;
+
+    for (let i = candidates.length - 1; i >= 0; i--) {
+        const r    = candidates[i];
+        const flux = noaaFill(r.flux ?? r.observed_flux);
+        if (flux == null || flux <= 0) continue;
+        state.xray_flux  = flux;
+        state.xray_class = fluxToClass(flux);
+        // Seed flare_letter from background X-ray (won't overwrite real flare data)
+        state.flare_letter = state.flare_letter ?? state.xray_class[0];
+        break;
     }
 }
 
 async function fetchProtons(state) {
-    const json = await fetchEdge(API.protons);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.flux_10mev_pfu  != null) state.proton_flux_10mev  = cur.flux_10mev_pfu;
-    if (cur.flux_100mev_pfu != null) state.proton_flux_100mev = cur.flux_100mev_pfu;
-    if (cur.sep_storm_level != null) state.sep_storm_level    = cur.sep_storm_level;
+    const raw = await fetchNoaa(NOAA.protons);
+    // Format: 2D array with energy column (e.g. ">=10 MeV", ">=50 MeV", ">=100 MeV")
+    if (!Array.isArray(raw) || raw.length < 2) return;
+    const rows = parse2D(raw);
+
+    const byEnergy = {};
+    for (const r of rows) {
+        const e   = String(r.energy ?? r.channel ?? '');
+        const fl  = noaaFill(r.flux);
+        if (fl == null) continue;
+        if (!byEnergy[e] || r.time_tag > byEnergy[e].time_tag) byEnergy[e] = { flux: fl, time_tag: r.time_tag };
+    }
+
+    // Map energy labels to state fields
+    for (const [energy, val] of Object.entries(byEnergy)) {
+        if (/>=?\s*10\s*MeV/i.test(energy))  state.proton_flux_10mev  = val.flux;
+        if (/>=?\s*50\s*MeV/i.test(energy))  { /* 50 MeV stored in diff slot if needed */ }
+        if (/>=?\s*100\s*MeV/i.test(energy)) state.proton_flux_100mev = val.flux;
+    }
+
+    // S-scale SEP storm level based on >=10 MeV channel
+    const p10 = state.proton_flux_10mev ?? 0;
+    state.sep_storm_level = p10 >= 100000 ? 5 : p10 >= 10000 ? 4 : p10 >= 1000 ? 3 :
+                            p10 >=    100 ? 2 : p10 >= 10    ? 1 : 0;
 }
 
 async function fetchElectrons(state) {
-    const json = await fetchEdge(API.electrons);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.flux_2mev_pfu != null) state.electron_flux_2mev = cur.flux_2mev_pfu;
+    const raw = await fetchNoaa(NOAA.electrons);
+    // Format: 2D array with energy column (">0.8 MeV", ">2.0 MeV")
+    if (!Array.isArray(raw) || raw.length < 2) return;
+    const rows = parse2D(raw);
+
+    let latest2mev = null;
+    for (const r of rows) {
+        const e  = String(r.energy ?? r.channel ?? '');
+        if (!/2\.0|>2/i.test(e)) continue;
+        const fl = noaaFill(r.flux);
+        if (fl == null) continue;
+        if (!latest2mev || r.time_tag > latest2mev.time_tag) latest2mev = { flux: fl, time_tag: r.time_tag };
+    }
+    if (latest2mev) state.electron_flux_2mev = latest2mev.flux;
 }
 
 async function fetchAurora(state) {
-    const json = await fetchEdge(API.aurora);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.aurora_power_north_GW != null) state.aurora_power_north = cur.aurora_power_north_GW;
-    if (cur.aurora_power_south_GW != null) state.aurora_power_south = cur.aurora_power_south_GW;
-    if (cur.aurora_activity       != null) state.aurora_activity    = cur.aurora_activity;
+    const raw = await fetchNoaa(NOAA.aurora);
+    // Format: JSON object with hemispheric power fields
+    if (!raw || typeof raw !== 'object') return;
+    const north = noaaFill(
+        raw['Hemispheric Power North'] ??
+        raw['hemispheric_power_north'] ??
+        raw.north_power
+    );
+    const south = noaaFill(
+        raw['Hemispheric Power South'] ??
+        raw['hemispheric_power_south'] ??
+        raw.south_power
+    );
+    if (north != null) state.aurora_power_north = north;
+    if (south != null) state.aurora_power_south = south;
+
+    // Derive activity label from total hemispheric power
+    const total = (north ?? 0) + (south ?? 0);
+    state.aurora_activity = total > 200 ? 'severe'
+        : total > 100 ? 'active'
+        : total > 40  ? 'moderate'
+        : total > 10  ? 'low'
+        : 'quiet';
 }
 
 async function fetchAlerts(state) {
-    const json = await fetchEdge(API.alerts);
-    const list = json?.data?.alerts;
-    if (!Array.isArray(list)) { state.active_alerts = []; return; }
-    state.active_alerts = list.map(a => ({
-        issued: new Date(a.issue_time),
-        text:   String(a.message ?? a.body ?? '').trim(),
-        level:  /WARNING|WATCH/i.test(a.message ?? a.body ?? '') ? 'warning'
-              : /ALERT/i.test(a.message ?? a.body ?? '')          ? 'alert'
-              : 'info',
-    }));
+    const raw = await fetchNoaa(NOAA.alerts);
+    // Format: array of objects {product_id, issue_datetime, message}
+    if (!Array.isArray(raw)) { state.active_alerts = []; return; }
+    state.active_alerts = raw.map(a => {
+        const msg = String(a.message ?? a.body ?? '').trim();
+        return {
+            issued: new Date(a.issue_datetime ?? a.issue_time ?? 0),
+            text:   msg,
+            level:  /WARNING|WATCH/i.test(msg) ? 'warning'
+                  : /ALERT/i.test(msg)          ? 'alert'
+                  : 'info',
+        };
+    }).slice(0, 20);
 }
 
 async function fetchDst(state) {
-    const json = await fetchEdge(API.dst);
-    const cur  = json?.data?.current;
-    if (!cur) return;
-    if (cur.dst_nT != null) state.dst_index = cur.dst_nT;
+    const raw = await fetchNoaa(NOAA.dst);
+    // Format: 2D array [time_tag, dst]; fill |dst| > 1000
+    if (!Array.isArray(raw) || raw.length < 2) return;
+    const rows = parse2D(raw);
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const r   = rows[i];
+        const dst = Number(r.dst ?? r.dst_index ?? NaN);
+        if (isNaN(dst) || Math.abs(dst) > 1000) continue;
+        state.dst_index = dst;
+        break;
+    }
 }
 
 // ── T3 fetchers ───────────────────────────────────────────────────────────────
 
 async function fetchFlares(state) {
-    const json = await fetchEdge(API.flares);
-    const list = json?.data?.flares;
-    if (!Array.isArray(list)) { state.recent_flares = []; return; }
+    const raw = await fetchNoaa(NOAA.flares);
+    // Format: array of objects {begin_time, peak_time, end_time, max_class,
+    //         goes_location, noaa_active_region}
+    if (!Array.isArray(raw)) { state.recent_flares = []; return; }
 
-    const parsed = list
+    const parsed = raw
         .map(f => ({
             time:     new Date(f.peak_time ?? f.begin_time ?? 0),
-            cls:      f.flare_class ?? null,
-            location: f.location    ?? null,
-            parsed:   parseFlareClass(f.flare_class),
+            cls:      f.max_class ?? f.flare_class ?? null,
+            location: f.goes_location ?? f.location ?? null,
+            region:   f.noaa_active_region ?? f.region ?? null,
+            parsed:   parseFlareClass(f.max_class ?? f.flare_class),
         }))
         .filter(f => f.cls)
+        .sort((a, b) => b.time - a.time)   // most recent first
         .slice(0, 12);
 
     state.recent_flares = parsed;
@@ -258,20 +373,26 @@ async function fetchFlares(state) {
 }
 
 async function fetchRegions(state) {
-    const json = await fetchEdge(API.regions);
-    const list = json?.data?.regions;
-    if (!Array.isArray(list)) { state.active_regions = []; return; }
-    state.active_regions = list.slice(0, 5).map(r => ({
-        region:     r.region,
-        lat_deg:    r.latitude_deg      ?? 0,
-        lon_deg:    r.carrington_lon_deg ?? 0,
-        lat_rad:    (r.latitude_deg      ?? 0) * Math.PI / 180,
-        lon_rad:    (r.carrington_lon_deg ?? 0) * Math.PI / 180,
-        area_norm:  Math.min((r.area ?? 20) / 400, 1.0),
-        mag_class:  r.mag_class ?? '',
-        is_complex: (r.mag_class ?? '').includes('amma'),
-        num_spots:  r.num_spots ?? 1,
-    }));
+    const raw = await fetchNoaa(NOAA.regions);
+    // Format: array of objects {region/Region, location/Location, latitude,
+    //         carrington_longitude, area, z_class/Z, mag_class/Mag, num_spots/Spots}
+    if (!Array.isArray(raw)) { state.active_regions = []; return; }
+    state.active_regions = raw.slice(0, 5).map(r => {
+        const lat = Number(r.latitude         ?? r.Latitude  ?? 0);
+        const lon = Number(r.carrington_longitude ?? r.Longitude ?? r.carrington_lon ?? 0);
+        const mag = String(r.mag_class ?? r.Mag ?? r.magclass ?? '');
+        return {
+            region:     r.region     ?? r.Region     ?? null,
+            lat_deg:    lat,
+            lon_deg:    lon,
+            lat_rad:    lat * Math.PI / 180,
+            lon_rad:    lon * Math.PI / 180,
+            area_norm:  Math.min((Number(r.area ?? r.Area ?? 20)) / 400, 1.0),
+            mag_class:  mag,
+            is_complex: mag.includes('gamma') || mag.includes('delta'),
+            num_spots:  Number(r.num_spots ?? r.Spots ?? r.numspot ?? 1),
+        };
+    });
 }
 
 async function fetchDONKICME(state) {
@@ -372,21 +493,56 @@ async function fetchDONKISEP(state) {
 // ── T4 fetchers (PRO only, 60-min cadence) ────────────────────────────────────
 
 async function fetchRadioFlux(state) {
-    const json = await fetchEdge(API.radioFlux);
-    const cur  = json?.data?.current;
+    const raw = await fetchNoaa(NOAA.radioFlux);
+    // Format: either array of objects [{time_tag, flux, adjusted_flux}]
+    //         OR 2D array [[headers], [row], …]
+    let rows;
+    if (Array.isArray(raw) && Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else if (Array.isArray(raw)) {
+        rows = raw;
+    } else {
+        return;
+    }
+    if (rows.length === 0) return;
+
+    // Most recent valid flux entry
+    let cur = null;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const fl = noaaFill(rows[i].flux ?? rows[i].observed_flux);
+        if (fl != null && fl > 0) { cur = rows[i]; break; }
+    }
     if (!cur) return;
-    if (cur.flux_sfu != null) {
-        state.f107_flux          = cur.flux_sfu;
-        state.f107_adjusted_sfu  = cur.flux_adjusted_sfu ?? null;
-        state.f107_activity      = cur.activity_label    ?? null;
+
+    const flux = noaaFill(cur.flux ?? cur.observed_flux);
+    if (flux != null) {
+        state.f107_flux = flux;
+        state.f107_adjusted_sfu = noaaFill(cur.adjusted_flux ?? cur.flux_adjusted) ?? null;
+        // Activity label from flux level
+        state.f107_activity = flux >= 200 ? 'very high'
+            : flux >= 150 ? 'high'
+            : flux >= 120 ? 'moderate'
+            : flux >= 80  ? 'low'
+            : 'very low';
     }
-    const trend = json?.data?.trend;
-    if (trend) {
-        state.f107_slope_sfu_per_day = trend.slope_sfu_per_day ?? null;
-        state.f107_trend_direction   = trend.direction          ?? null;
+
+    // Simple trend: slope over last N entries
+    const recent = rows
+        .filter(r => noaaFill(r.flux ?? r.observed_flux) != null)
+        .slice(-30)
+        .map(r => ({ t: new Date(r.time_tag).getTime(), f: Number(r.flux ?? r.observed_flux) }))
+        .filter(r => !isNaN(r.t) && !isNaN(r.f));
+    if (recent.length >= 2) {
+        const n      = recent.length;
+        const dt_ms  = recent[n - 1].t - recent[0].t;
+        const df     = recent[n - 1].f - recent[0].f;
+        const slope  = dt_ms > 0 ? df / (dt_ms / 86400000) : 0;
+        state.f107_slope_sfu_per_day = parseFloat(slope.toFixed(2));
+        state.f107_trend_direction   = slope >  1 ? 'rising'
+                                     : slope < -1 ? 'falling'
+                                     : 'steady';
     }
-    const recent = json?.data?.recent;
-    if (Array.isArray(recent)) state.f107_recent = recent;
+    state.f107_recent = recent.slice(-10).map(r => ({ flux: r.f }));
 }
 
 // ── SpaceWeatherFeed ──────────────────────────────────────────────────────────
