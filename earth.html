@@ -292,6 +292,191 @@ nav {
     touch-action: manipulation; text-decoration: none; display: inline-block;
 }
 .cv-btn:hover { background: rgba(0,200,255,.15); border-color:#00c6ff; }
+
+/* ─── Panel minimize / drag chrome ──────────────────────────────── */
+.panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; padding-bottom: 2px;
+}
+.panel-header h3 { margin: 0; flex: 1; }
+.panel-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.panel-btn {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 4px; color: #6a8a9a; cursor: pointer; font-size: 11px;
+    width: 22px; height: 22px; display: flex; align-items: center;
+    justify-content: center; padding: 0; touch-action: manipulation;
+    transition: background .15s, color .15s; flex-shrink: 0; line-height: 1;
+}
+.panel-btn:hover { background: rgba(0,200,255,.15); color: #00c6ff; }
+.panel-body { overflow: hidden; transition: max-height .3s ease, opacity .25s; }
+.panel-minimized .panel-body { max-height: 0 !important; opacity: 0; }
+
+/* Data source status badges */
+.ds-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; padding: 2px 6px; border-radius: 3px;
+    font-weight: 600; letter-spacing: .3px;
+}
+.ds-badge.ok      { background: rgba(0,255,136,.08); color: #00ff88; border: 1px solid rgba(0,255,136,.2); }
+.ds-badge.fetching{ background: rgba(255,200,0,.08);  color: #ffcc00; border: 1px solid rgba(255,200,0,.2); }
+.ds-badge.error   { background: rgba(255,50,50,.08);  color: #ff5555; border: 1px solid rgba(255,50,50,.2); }
+
+/* Earthquake info popup */
+#eq-popup {
+    position: absolute; z-index: 90; pointer-events: none;
+    background: rgba(0,0,0,.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,100,0,.4); border-radius: 8px;
+    padding: 9px 12px; font-size: 11px; max-width: 200px;
+    line-height: 1.55; opacity: 0; transition: opacity .15s;
+    white-space: nowrap;
+}
+#eq-popup.show { opacity: 1; pointer-events: none; }
+.eq-mag  { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+.eq-place{ color: #aac; font-size: 10px; }
+.eq-meta { color: #556; font-size: 9px; margin-top: 3px; }
+
+/* ISS info overlay (fixed top-center on mobile) */
+#iss-hud {
+    display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,200,255,.25); border-radius: 7px;
+    padding: 5px 12px; font-size: 10px; z-index: 55; pointer-events: none;
+    white-space: nowrap; color: #a0d8f0;
+}
+#iss-hud.visible { display: block; }
+#iss-hud strong  { color: #00ffcc; }
+
+/* ─── Panel close buttons ────────────────────────────────────────── */
+.panel-close {
+    display: none; position: absolute; top: 10px; right: 10px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 50%; width: 26px; height: 26px; cursor: pointer;
+    color: #aac; font-size: 13px; line-height: 1; text-align: center;
+    padding: 0; touch-action: manipulation;
+}
+.panel-close:hover { background: rgba(255,80,80,.2); color: #fff; }
+
+/* ─── My Location section (inside wx-panel) ─────────────────────── */
+.loc-section-hdr {
+    font-size: 9px; color: #336a8a; letter-spacing: .07em;
+    text-transform: uppercase; margin: 8px 0 6px;
+}
+.loc-row { display: flex; gap: 5px; margin-bottom: 4px; }
+#loc-input {
+    flex: 1; background: rgba(0,150,200,.10);
+    border: 1px solid rgba(0,200,255,.2); border-radius: 4px;
+    color: #ddf; padding: 5px 7px; font-size: 10px;
+    font-family: inherit; outline: none; min-width: 0;
+}
+#loc-input:focus { border-color: rgba(0,200,255,.55); }
+#loc-search {
+    background: rgba(0,180,255,.15); border: 1px solid rgba(0,200,255,.3);
+    border-radius: 4px; color: #00ccff; padding: 5px 9px;
+    font-size: 11px; cursor: pointer; flex-shrink: 0;
+    touch-action: manipulation; min-height: 32px;
+}
+#loc-search:hover { background: rgba(0,180,255,.28); }
+#loc-result { display: none; margin-top: 5px; }
+.loc-city   { color: #eef; font-weight: 600; font-size: 10px; margin-bottom: 1px; }
+.loc-coords { color: #557788; font-size: 9px; margin-bottom: 4px; }
+.loc-aurora { font-size: 10px; font-weight: 600; }
+.loc-btns   { display: flex; gap: 5px; margin-top: 6px; }
+.loc-btn {
+    flex: 1; background: rgba(0,150,180,.12);
+    border: 1px solid rgba(0,200,255,.18); border-radius: 4px;
+    color: #88ccdd; font-size: 10px; padding: 5px 0;
+    cursor: pointer; touch-action: manipulation;
+}
+.loc-btn:hover { background: rgba(0,150,180,.28); color: #fff; }
+.loc-btn.danger { color: #ff8888; border-color: rgba(255,80,80,.25); }
+.loc-btn.danger:hover { background: rgba(255,80,80,.12); }
+#loc-error  { color: #ff8888; font-size: 9px; margin-top: 3px; display: none; }
+
+/* ─── Mobile bottom toolbar ──────────────────────────────────────── */
+#mobile-toolbar {
+    display: none;
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 80;
+    height: 56px; background: rgba(2,1,12,.95); backdrop-filter: blur(14px);
+    border-top: 1px solid rgba(0,200,255,.15);
+    align-items: center; justify-content: space-around; padding: 0 8px;
+}
+.mtb-btn {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: none; border: none; color: #6a8a9a; cursor: pointer;
+    font-size: 9px; font-family: inherit; padding: 6px 10px;
+    border-radius: 8px; min-width: 56px; touch-action: manipulation;
+    transition: color .2s, background .2s;
+}
+.mtb-btn .mtb-icon { font-size: 18px; line-height: 1; }
+.mtb-btn.active, .mtb-btn:hover { color: #00c6ff; background: rgba(0,200,255,.1); }
+
+/* ─── Panel backdrop (mobile) ────────────────────────────────────── */
+#panel-backdrop {
+    display: none; position: absolute; inset: 0; z-index: 70;
+    background: rgba(0,0,0,.45);
+}
+
+/* ─── Responsive: mobile layout ─────────────────────────────────── */
+@media (max-width: 768px) {
+    /* Show mobile toolbar; hide the ⚡Weather floating button */
+    #mobile-toolbar { display: flex; }
+    #btn-sw { display: none; }
+
+    /* HUD: compact 2-column grid in top-left */
+    #hud {
+        top: 8px; left: 8px; right: 8px;
+        min-width: unset; max-width: unset;
+        padding: 8px 10px; font-size: 10px; line-height: 1.65;
+        display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px;
+        pointer-events: none;
+    }
+    .hud-title { grid-column: 1 / -1; margin-bottom: 2px; }
+
+    /* All side panels: slide up from bottom as sheets */
+    #layer-panel, #info-panel, #wx-panel {
+        position: absolute; z-index: 75;
+        left: 0; right: 0; bottom: 56px; top: auto;
+        width: 100%; max-height: 72vh; overflow-y: auto;
+        border-radius: 18px 18px 0 0; padding: 14px 16px 20px;
+        transform: translateY(110%);
+        transition: transform .3s cubic-bezier(.4,0,.2,1);
+        box-shadow: 0 -8px 40px rgba(0,0,0,.6);
+    }
+    #layer-panel.panel-open,
+    #info-panel.panel-open,
+    #wx-panel.panel-open { transform: translateY(0); }
+
+    /* Show close button on mobile */
+    .panel-close { display: block; }
+
+    /* Layer panel: two-column grid for checkboxes */
+    #layer-panel .lyr-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
+        margin-bottom: 4px;
+    }
+
+    /* Touch-friendly checkbox rows */
+    .lyr { margin-bottom: 4px; }
+    .lyr label { font-size: 12px; }
+
+    /* Info panel: remove hard max-height (sheet already scrolls) */
+    #info-panel { max-height: 72vh; }
+
+    /* Space weather bar: tighter on mobile */
+    #sw-bar {
+        bottom: 56px; font-size: 10px; gap: 10px; padding: 4px 12px;
+        border-radius: 10px 10px 0 0;
+    }
+
+    /* Coord tooltip hidden on touch (no hover) */
+    #coord-tip { display: none; }
+}
+
+@media (max-width: 480px) {
+    #hud { font-size: 9px; line-height: 1.6; }
+    .mtb-btn { min-width: 46px; font-size: 8px; padding: 4px 6px; }
+    .mtb-btn .mtb-icon { font-size: 16px; }
+}
 </style>
 </head>
 <body>
@@ -396,10 +581,14 @@ nav {
         <div class="hud-title">Earth View</div>
         <div><span class="hk">Date&nbsp;&nbsp;</span><span class="hv" id="h-date">—</span></div>
         <div><span class="hk">UTC&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-utc">—</span></div>
+        <div><span class="hk">Local&nbsp;</span><span class="hv" id="h-local">—</span></div>
         <div><span class="hk">Lat&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lat">—</span></div>
         <div><span class="hk">Lon&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lon">—</span></div>
         <div><span class="hk">LT&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lt">—</span></div>
         <div><span class="hk">Alt&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-alt">—</span></div>
+        <div id="h-user-loc" style="display:none;grid-column:1/-1;margin-top:2px;padding-top:4px;border-top:1px solid rgba(0,200,255,.1)">
+            <span class="hk">📍&nbsp;</span><span class="hv" id="h-user-loc-name" style="color:#00ffcc;font-size:9px;">—</span>
+        </div>
     </div>
 
     <!-- Coordinate tooltip (follows cursor) -->
@@ -413,34 +602,47 @@ nav {
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
     <div id="layer-panel">
-        <h3>Layers</h3>
+        <div class="panel-header" data-minimize="layer-panel">
+            <h3>Layers</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="layer-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="layer-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
+        <div class="lyr-grid">
         <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora Borealis / Australis</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
-        <hr class="lyr-sep">
-        <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat / Lon Grid</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics &amp; Polar Circles</label></label>
-        <hr class="lyr-sep">
-        <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather Layer (temp)</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-isobars"      checked><label for="lyr-isobars">Isobar Contours</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-alerts"       checked><label for="lyr-alerts">Storm Alerts (NWS)</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-magnetopause" checked><label for="lyr-magnetopause">Magnetopause</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-bowshock"     checked><label for="lyr-bowshock">Bow Shock</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Radiation Belts</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Rad. Belts</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+        </div>
+    </div>
     </div>
 
     <!-- Info panel — Space Weather HUD -->
     <div id="info-panel">
-
-        <!-- Header row: title + G-scale badge -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+        <div class="panel-header" data-minimize="info-panel">
             <h3>Space Weather</h3>
-            <span class="g-badge" id="ip-g-badge">Quiet</span>
+            <div class="panel-actions">
+                <span class="g-badge" id="ip-g-badge" style="margin-right:2px;">Quiet</span>
+                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="info-panel" title="Close">✕</button>
+            </div>
         </div>
+        <div class="panel-body">
 
         <!-- Kp gauge -->
         <div style="margin-bottom:7px;">
@@ -559,13 +761,19 @@ nav {
             <a href="space-weather.html" style="color:#00c6ff;text-decoration:none;">→ Full space weather dashboard</a>
         </div>
 
-    </div>
+    </div><!-- /panel-body -->
+    </div><!-- /info-panel -->
 
     <!-- Weather analysis panel -->
     <div id="wx-panel">
-        <h3>
-            <span id="wx-status-dot" class="offline"></span>Weather Analysis
-        </h3>
+        <div class="panel-header" data-minimize="wx-panel">
+            <h3><span id="wx-status-dot" class="offline"></span>Weather Analysis</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="wx-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="wx-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <hr class="ir-sep">
@@ -607,7 +815,56 @@ nav {
         </div>
         <div id="wx-alert-badges" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px;"></div>
         <button id="wx-refresh">↺ Refresh Data</button>
+
+        <hr class="ir-sep">
+
+        <!-- My Location -->
+        <div class="loc-section-hdr">📍 My Location</div>
+        <div class="loc-row">
+            <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+            <button id="loc-search" title="Search location">↵</button>
+        </div>
+        <div id="loc-error"></div>
+        <div id="loc-result">
+            <div class="loc-city"   id="loc-city"></div>
+            <div class="loc-coords" id="loc-coords"></div>
+            <div class="loc-aurora" id="loc-aurora"></div>
+            <div class="loc-btns">
+                <button class="loc-btn" id="loc-fly">📍 Fly here</button>
+                <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
+            </div>
+        </div>
+    </div><!-- /panel-body -->
+    </div><!-- /wx-panel -->
+
+    <!-- Panel backdrop (mobile tap-to-close) -->
+    <div id="panel-backdrop"></div>
+
+    <!-- Mobile bottom toolbar -->
+    <div id="mobile-toolbar">
+        <button class="mtb-btn" data-panel="info-panel">
+            <span class="mtb-icon">🌍</span>Space Wx
+        </button>
+        <button class="mtb-btn" data-panel="layer-panel">
+            <span class="mtb-icon">🗂</span>Layers
+        </button>
+        <button class="mtb-btn" data-panel="wx-panel">
+            <span class="mtb-icon">🌦</span>Weather
+        </button>
+        <a href="space-weather.html" class="mtb-btn" style="text-decoration:none">
+            <span class="mtb-icon">⚡</span>Full Data
+        </a>
     </div>
+
+    <!-- Earthquake info popup -->
+    <div id="eq-popup">
+        <div class="eq-mag" id="eq-mag">M—</div>
+        <div class="eq-place" id="eq-place">—</div>
+        <div class="eq-meta" id="eq-meta">—</div>
+    </div>
+
+    <!-- ISS info overlay -->
+    <div id="iss-hud"></div>
 
     <!-- Alert hover tooltip -->
     <div id="alert-tip">
@@ -640,6 +897,10 @@ import './js/live-status-bar.js';
 import * as THREE from 'three';
 import { OrbitControls }   from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import {
+    geocodeQuery, saveUserLocation, loadUserLocation,
+    clearUserLocation, auroraVisibility,
+} from './js/user-location.js';
 import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER } from './js/nws-alerts.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -650,6 +911,7 @@ import {
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
 import { initScaleNav } from './js/scale-nav.js';
+import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -659,6 +921,7 @@ initScaleNav('earth');
 // ═══════════════════════════════════════════════════════════════
 const R_EARTH  = 1.0;
 const R_CLOUDS = 1.009;   // cloud shell just above surface
+const R_STRAT  = 1.015;   // stratosphere haze (between clouds and outer atm)
 const R_ATM    = 1.026;   // atmosphere rim sphere
 const TWO_PI   = Math.PI * 2;
 const DEG      = Math.PI / 180;
@@ -848,7 +1111,7 @@ void main() {
 
     // ── Weather temperature overlay ───────────────────────────
     if (u_weather_on > 0.5) {
-        base = mix(base, weatherOverlay(vUv), 0.50);
+        base = mix(base, weatherOverlay(vUv), 0.28);
     }
 
     // ── Aurora (night & twilight side only) ───────────────────
@@ -885,10 +1148,18 @@ void main() {
         base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
     }
 
-    // ── Very faint earthshine fill on night side ──────────────
-    float ambient = 0.035;
-    float lit = max(NdotL, 0.0) * (1.0 - ambient) + ambient;
+    // ── Improved diffuse: half-Lambert keeps oblique-lit land bright ──
+    // Half-Lambert: remap [-1,1]→[0,1], then square for gentle contrast.
+    // At NdotL=0.3 (N. America, mid-lat): old=32%, new=42% brightness.
+    float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
+    float diffuse  = halfLamb * halfLamb;
+    // Night-side ambient earthshine (reflected moonlight / city scatter)
+    float lit = mix(0.07, diffuse, dayMix);
     base *= lit;
+
+    // ── Terminator twilight warm glow (orange band at dawn/dusk) ──
+    float termZone = smoothstep(-0.08, 0.0, NdotL) * smoothstep(0.18, 0.06, NdotL);
+    base += vec3(0.55, 0.25, 0.04) * termZone * 0.22;
 
     gl_FragColor = vec4(base, 1.0);
 }`;
@@ -907,19 +1178,47 @@ void main() {
 const cloudFS = /* glsl */`
 precision mediump float;
 uniform sampler2D u_clouds;
+uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity
 uniform vec3  u_sun_dir;
 uniform float u_time;
+uniform float u_weather_on;
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 void main() {
-    vec3  N   = normalize(vWorldNormal);
-    float lit = max(dot(N, u_sun_dir), 0.0);
-    // Slow westward drift
-    vec2  drift = vec2(u_time * 0.000065, 0.0);
-    float alpha  = texture2D(u_clouds, vUv + drift).r;
-    alpha = pow(alpha, 1.6) * 0.88;
-    // Shadowed on night side
-    vec3 col = mix(vec3(0.50, 0.58, 0.70), vec3(1.0), lit);
+    vec3  N     = normalize(vWorldNormal);
+    float NdotL = dot(N, u_sun_dir);
+    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);   // half-Lambert
+    lit = lit * lit;
+
+    // Two drift speeds: lower clouds slow, upper cirrus faster
+    vec2 driftLow  = vec2(u_time *  0.000055, u_time * 0.000008);
+    vec2 driftHigh = vec2(u_time *  0.000095, u_time * 0.000012);
+    float a0 = texture2D(u_clouds, vUv + driftLow ).r;
+    float a1 = texture2D(u_clouds, vUv + driftHigh).r * 0.55;
+    float alpha = pow(max(a0, a1), 1.4) * 0.90;
+
+    // Pressure modulation: low pressure (G near 0) → thicker/darker storm clouds,
+    // high pressure (G near 1) → thinner, fewer clouds.
+    if (u_weather_on > 0.5) {
+        float pressure = texture2D(u_weather, vUv).g;   // 0=low, 1=high
+        // Suppress clouds slightly in high-pressure regions
+        float clearFactor = mix(1.0, 0.55, pressure);
+        alpha *= clearFactor;
+        // In low-pressure cells, push clouds denser (storms)
+        float stormBoost  = max(0.0, 0.45 - pressure) * 2.2;
+        alpha = clamp(alpha + alpha * stormBoost, 0.0, 1.0);
+    }
+
+    // Dayside: bright white. Night underside: grey-blue shadow.
+    vec3 dayCol   = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
+    vec3 nightCol = vec3(0.26, 0.30, 0.40);
+    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
+    vec3  col     = mix(nightCol, dayCol, dayMix);
+
+    // Warm golden tint at terminator (sunrise/sunset through clouds)
+    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
+    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.35);
+
     gl_FragColor = vec4(col, alpha);
 }`;
 
@@ -943,13 +1242,61 @@ varying vec3 vViewDir;
 void main() {
     vec3  N   = normalize(vWorldNormal);
     vec3  V   = normalize(vViewDir);
-    float rim = pow(1.0 - abs(dot(V, N)), 2.6);
-    float NdotL = dot(N, u_sun_dir);
-    // Rayleigh blue on day side, dim purple on night
-    vec3 day   = vec3(0.18, 0.46, 1.00);
-    vec3 night = vec3(0.04, 0.02, 0.10);
-    vec3 col   = mix(night, day, clamp(NdotL * 2.0 + 0.5, 0.0, 1.0));
-    gl_FragColor = vec4(col * rim, rim * 0.78);
+    // Rim strength: sharper falloff gives thinner atmospheric limb
+    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
+
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
+
+    // ── Rayleigh: blue daytime limb, dim purple night ──────────────
+    vec3 rayleighDay   = vec3(0.14, 0.42, 1.00);
+    vec3 rayleighNight = vec3(0.03, 0.01, 0.08);
+    vec3 rayleigh = mix(rayleighNight, rayleighDay, dayMix);
+
+    // ── Mie forward scattering: bright halo when viewing near sun ──
+    float LdotV  = dot(u_sun_dir, -V);               // 1 when looking at sun
+    float miePhase = 0.6 / pow(1.06 - 0.96 * LdotV, 1.5);  // Henyey-Greenstein
+    float mieRim = pow(1.0 - abs(dot(V, N)), 1.5) * miePhase * dayMix;
+    vec3  mie    = vec3(0.90, 0.82, 0.55) * mieRim * 0.35;
+
+    // ── Twilight: amber-orange band at terminator ───────────────────
+    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.25, 0.06, NdotL);
+    vec3  twilight = vec3(0.88, 0.42, 0.10) * termZone * rim * 1.8;
+
+    vec3 col = rayleigh * rim + mie + twilight;
+    float a  = rim * 0.72;
+    gl_FragColor = vec4(col, a);
+}`;
+
+// ═══════════════════════════════════════════════════════════════
+//  GLSL — STRATOSPHERE HAZE  (thin shell between clouds & atm rim)
+// ═══════════════════════════════════════════════════════════════
+const stratVS = /* glsl */`
+varying vec3 vWorldNormal;
+varying vec3 vViewDir;
+void main() {
+    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
+    vViewDir = normalize(cameraPosition - wp);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const stratFS = /* glsl */`
+precision mediump float;
+uniform vec3 u_sun_dir;
+varying vec3 vWorldNormal;
+varying vec3 vViewDir;
+void main() {
+    vec3  N   = normalize(vWorldNormal);
+    vec3  V   = normalize(vViewDir);
+    // Thinner rim than outer atmosphere (sharper, denser haze band)
+    float rim    = pow(1.0 - abs(dot(V, N)), 4.0);
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = clamp(NdotL * 3.0 + 0.5, 0.0, 1.0);
+    // Pale violet-blue stratospheric haze
+    vec3 day   = vec3(0.16, 0.36, 0.78);
+    vec3 night = vec3(0.02, 0.01, 0.05);
+    vec3 col   = mix(night, day, dayMix);
+    gl_FragColor = vec4(col * rim, rim * 0.28);
 }`;
 
 // ═══════════════════════════════════════════════════════════════
@@ -957,7 +1304,7 @@ void main() {
 // ═══════════════════════════════════════════════════════════════
 const canvas   = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene  = new THREE.Scene();
@@ -1041,11 +1388,16 @@ const earthU = {
     u_dst_norm:     { value: 0.0 },    // ring current:  0 (quiet) → 1 (−200 nT)
 };
 const cloudU = {
-    u_clouds:  { value: null },
-    u_sun_dir: { value: SUN_EQ.clone() },
-    u_time:    { value: 0 },
+    u_clouds:     { value: null },
+    u_weather:    { value: null },   // shared with earthU.u_weather
+    u_sun_dir:    { value: SUN_EQ.clone() },
+    u_time:       { value: 0 },
+    u_weather_on: { value: 0.0 },
 };
 const atmU = {
+    u_sun_dir: { value: SUN_EQ.clone() },
+};
+const stratU = {
     u_sun_dir: { value: SUN_EQ.clone() },
 };
 
@@ -1072,6 +1424,14 @@ const cloudMat = new THREE.ShaderMaterial({
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
 scene.add(cloudMesh);
 
+const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
+const stratMat = new THREE.ShaderMaterial({
+    vertexShader: stratVS, fragmentShader: stratFS,
+    uniforms: stratU, transparent: true, depthWrite: false,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending,
+});
+scene.add(new THREE.Mesh(stratGeo, stratMat));
+
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
     vertexShader: atmVS, fragmentShader: atmFS,
@@ -1093,6 +1453,8 @@ earthU.u_weather.value = new THREE.DataTexture(
     THREE.RGBAFormat, THREE.FloatType
 );
 earthU.u_weather.value.needsUpdate = true;
+// Share the same DataTexture with cloud shader for pressure-modulated clouds
+cloudU.u_weather.value = earthU.u_weather.value;
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -1119,8 +1481,8 @@ for (let lon = -180; lon < 180; lon += 10) {
     const lats = [], lons = [];
     for (let lat = -90; lat <= 90; lat += 2) { lats.push(lat); lons.push(lon); }
     const major = lon % 30 === 0;
-    const col   = lon === 0 ? 0xffd700 : (major ? 0x2a5080 : 0x112030);
-    const opc   = lon === 0 ? 0.8 : (major ? 0.45 : 0.18);
+    const col   = lon === 0 ? 0xffd700 : (major ? 0x2a5080 : 0x152535);
+    const opc   = lon === 0 ? 0.8 : (major ? 0.55 : 0.25);
     gridGroup.add(latLonLine(lats, lons, col, opc));
 }
 
@@ -1129,8 +1491,8 @@ for (let lat = -80; lat <= 80; lat += 10) {
     const lats = [], lons = [];
     for (let lon = 0; lon <= 360; lon += 2) { lats.push(lat); lons.push(lon); }
     const major = lat % 30 === 0;
-    const col   = lat === 0 ? 0x00c6ff : (major ? 0x2a5080 : 0x112030);
-    const opc   = lat === 0 ? 0.8 : (major ? 0.45 : 0.18);
+    const col   = lat === 0 ? 0x00c6ff : (major ? 0x2a5080 : 0x152535);
+    const opc   = lat === 0 ? 0.8 : (major ? 0.55 : 0.25);
     gridGroup.add(latLonLine(lats, lons, col, opc));
 }
 scene.add(gridGroup);
@@ -1391,6 +1753,9 @@ window.addEventListener('swpc-update', e => {
         }
     }
 
+    // ── Aurora visibility for user's location
+    updateUserAuroraVis(kp);
+
     // ── Magnetosphere geometry + ionosphere analysis
     magnetosphere.update(sw);
     updateMagnetospherePanel();
@@ -1421,13 +1786,21 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
     tropicGroup.visible = e.target.checked;
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
-    earthU.u_weather_on.value = e.target.checked ? 1.0 : 0.0;
+    const v = e.target.checked ? 1.0 : 0.0;
+    earthU.u_weather_on.value = v;
+    cloudU.u_weather_on.value = v;   // sync cloud pressure modulation
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
 });
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
+});
+document.getElementById('lyr-earthquakes').addEventListener('change', e => {
+    eqMarkers.setVisible(e.target.checked);
+});
+document.getElementById('lyr-iss').addEventListener('change', e => {
+    issMarker.setVisible(e.target.checked);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1729,7 +2102,7 @@ document.addEventListener('weather-update', e => {
     dot.className = live ? 'live' : 'offline';
     document.getElementById('wx-src').textContent  = meta.source;
     document.getElementById('wx-upd').textContent  = meta.fetchTime
-        ? meta.fetchTime.toUTCString().slice(17, 25) + ' UTC' : '—';
+        ? meta.fetchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
 
     if (meta.tempMin != null) {
         document.getElementById('wx-tmin').textContent  = `${meta.tempMin.toFixed(1)} °C`;
@@ -1846,6 +2219,169 @@ class AlertMarkers {
 }
 
 const alertMarkers = new AlertMarkers(earthMesh);
+
+// ═══════════════════════════════════════════════════════════════
+//  EARTHQUAKE MARKERS  (InstancedMesh — single draw call)
+// ═══════════════════════════════════════════════════════════════
+class EarthquakeMarkers {
+    constructor(parentMesh) {
+        this._quakes  = [];
+        this._count   = 0;
+        this._visible = true;
+        this._dummy   = new THREE.Object3D();
+        const geo = new THREE.SphereGeometry(1, 7, 7);
+        const mat = new THREE.MeshBasicMaterial({
+            transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._mesh = new THREE.InstancedMesh(geo, mat, 300);
+        this._mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this._mesh.count = 0;
+        this._mesh.renderOrder = 10;
+        parentMesh.add(this._mesh);   // child of earthMesh → rotates with globe
+    }
+
+    update(quakes) {
+        this._quakes = quakes;
+        const n = Math.min(quakes.length, 300);
+        this._mesh.count = n;
+        for (let i = 0; i < n; i++) {
+            const q   = quakes[i];
+            const pos = geoToXYZ(q.lat, q.lon).multiplyScalar(1.005);
+            const r   = eqMarkerRadius(q.mag);
+            this._dummy.position.copy(pos);
+            this._dummy.scale.setScalar(r);
+            this._dummy.updateMatrix();
+            this._mesh.setMatrixAt(i, this._dummy.matrix);
+            this._mesh.setColorAt(i, eqMagColorTHREE(THREE, q.mag));
+        }
+        this._mesh.instanceMatrix.needsUpdate = true;
+        if (this._mesh.instanceColor) this._mesh.instanceColor.needsUpdate = true;
+        this._count = n;
+    }
+
+    tick(t) {
+        if (this._mesh) this._mesh.material.opacity = 0.55 + Math.sin(t * 2.5) * 0.3;
+    }
+
+    setVisible(v) { this._visible = v; if (this._mesh) this._mesh.visible = v; }
+
+    getHovered(raycaster) {
+        if (!this._mesh || !this._visible || this._count === 0) return null;
+        const hits = raycaster.intersectObject(this._mesh);
+        if (!hits.length) return null;
+        const idx = hits[0].instanceId;
+        return (idx != null && idx < this._quakes.length) ? this._quakes[idx] : null;
+    }
+}
+
+const eqMarkers = new EarthquakeMarkers(earthMesh);
+const _eqPopup  = document.getElementById('eq-popup');
+let   _eqHovered = null;
+
+function _showEqPopup(q, cx, cy) {
+    const r = renderer.domElement.getBoundingClientRect();
+    document.getElementById('eq-mag').textContent   = `M${q.mag.toFixed(1)}`;
+    document.getElementById('eq-mag').style.color   = `#${eqMagColorTHREE(THREE, q.mag).getHexString()}`;
+    document.getElementById('eq-place').textContent = q.place;
+    const depthStr = `${Math.round(q.depth)} km depth · `;
+    const timeStr  = q.time.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    document.getElementById('eq-meta').textContent  = depthStr + timeStr;
+    _eqPopup.style.left = `${Math.min(cx - r.left + 12, r.width - 210)}px`;
+    _eqPopup.style.top  = `${Math.max(cy - r.top  - 8, 8)}px`;
+    _eqPopup.classList.add('show');
+    _eqHovered = q;
+}
+function _hideEqPopup() { _eqPopup?.classList.remove('show'); _eqHovered = null; }
+
+// ═══════════════════════════════════════════════════════════════
+//  ISS MARKER
+// ═══════════════════════════════════════════════════════════════
+class ISSMarker {
+    constructor(scene) {
+        this._lat = null; this._lon = null; this._alt = 408;
+        this._vel = 27600; this._visible = true;
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x00ffcc, transparent: true, opacity: 0.92,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._sphere = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), mat);
+        this._sphere.visible = false;
+        this._sphere.renderOrder = 11;
+        scene.add(this._sphere);
+
+        // Simple equatorial orbit ring as orientation reference
+        const pts = [];
+        const rOrb = 1.0 + 408 / 6371;
+        for (let i = 0; i <= 64; i++) {
+            const a = (i / 64) * Math.PI * 2;
+            pts.push(new THREE.Vector3(Math.cos(a) * rOrb, 0, Math.sin(a) * rOrb));
+        }
+        const trailGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        this._trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+            color: 0x005544, transparent: true, opacity: 0.22,
+        }));
+        this._trail.rotation.x = 51.6 * Math.PI / 180;  // ISS inclination
+        this._trail.visible = false;
+        scene.add(this._trail);
+    }
+
+    update(data) {
+        this._lat = data.lat; this._lon = data.lon;
+        this._alt = data.alt ?? 408; this._vel = data.vel ?? 27600;
+        const hud = document.getElementById('iss-hud');
+        if (hud) {
+            hud.classList.add('visible');
+            hud.innerHTML = `<strong>ISS</strong> · Alt: ${Math.round(this._alt)} km · ` +
+                `${(this._vel / 1).toFixed(0)} km/h · ` +
+                `${fmtLat(this._lat)}, ${fmtLon(this._lon)}`;
+        }
+    }
+
+    tick() {
+        if (this._lat == null || !this._visible) return;
+        const r        = 1.0 + this._alt / 6371;
+        const localPos = geoToXYZ(this._lat, this._lon).multiplyScalar(r);
+        const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
+        this._sphere.position.copy(worldPos);
+        this._sphere.visible = true;
+        this._trail.visible  = true;
+    }
+
+    setVisible(v) {
+        this._visible = v;
+        if (!v) {
+            this._sphere.visible = false;
+            this._trail.visible  = false;
+            const hud = document.getElementById('iss-hud');
+            if (hud) hud.classList.remove('visible');
+        }
+    }
+}
+
+const issMarker = new ISSMarker(scene);
+
+// ── EarthFeeds: USGS earthquakes + ISS position ───────────────────────────────
+const earthFeeds = new EarthFeeds().start();
+
+window.addEventListener('earthquake-update', e => {
+    eqMarkers.update(e.detail);
+}, { passive: true });
+
+window.addEventListener('iss-update', e => {
+    issMarker.update(e.detail);
+}, { passive: true });
+
+// ── EarthFeeds status badges ──────────────────────────────────────────────────
+const _eqBadge = document.createElement('span');
+_eqBadge.title = 'USGS earthquake data';
+_eqBadge.style.cssText = 'position:absolute;bottom:4px;right:10px;font-size:9px;color:#446;';
+window.addEventListener('feeds-status', e => {
+    const d = e.detail;
+    if (d.source === 'USGS') {
+        _eqBadge.textContent = d.status === 'ok' ? `EQ: ${d.count}` : `EQ: ${d.status}`;
+    }
+}, { passive: true });
 
 // Alert tooltip element
 const alertTipEl  = document.getElementById('alert-tip');
@@ -2027,6 +2563,16 @@ renderer.domElement.addEventListener('mousemove', e => {
     const alertRay = new THREE.Raycaster();
     alertRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
 
+    // Intersect earthquake markers first (higher priority)
+    const eqHovered = eqMarkers.getHovered(alertRay);
+    if (eqHovered) {
+        _showEqPopup(eqHovered, e.clientX, e.clientY);
+        hideAlertTip();
+        return;
+    } else {
+        _hideEqPopup();
+    }
+
     // Intersect alert dots (must account for earthMesh rotation)
     const hovered = alertMarkers.getHovered(alertRay);
     if (hovered) {
@@ -2035,7 +2581,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         hideAlertTip();
     }
 });
-renderer.domElement.addEventListener('mouseleave', hideAlertTip);
+renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); });
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATE
@@ -2050,7 +2596,7 @@ function updateAstroHUD(now) {
     const dc = solarDeclination(jd);
 
     document.getElementById('h-date').textContent =
-        now.toISOString().slice(0, 10);
+        now.toLocaleDateString([], { year: 'numeric', month: '2-digit', day: '2-digit' });
     document.getElementById('h-utc').textContent  =
         now.toUTCString().slice(17, 25);
 
@@ -2109,8 +2655,31 @@ function animate() {
     // ── Alert marker pulse
     alertMarkers.tick(t);
 
+    // ── Earthquake markers pulse
+    eqMarkers.tick(t);
+
+    // ── ISS position update (world-space, depends on earthMesh.rotation)
+    issMarker.tick();
+
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
+
+    // ── User location pin pulse
+    if (_userPinRing) {
+        const pulse = Math.sin(t * 2.2) * 0.5 + 0.5;
+        const s = 1 + pulse * 2.4;
+        _userPinRing.scale.set(s, s, 1);
+        _userPinRing.material.opacity = 0.75 * (1 - pulse * 0.87);
+    }
+
+    // ── Fly-to animation
+    if (_flyTarget && _flyProgress < 1) {
+        _flyProgress = Math.min(1, _flyProgress + 0.018);
+        const ease = 1 - Math.pow(1 - _flyProgress, 3);
+        camera.position.lerpVectors(_flyFrom, _flyTarget, ease);
+        controls.target.lerp(_flyAimAt, ease);
+        if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
+    }
 
     // ── Astro HUD (every 5 s)
     if (t - lastAstro > 5) {
@@ -2122,9 +2691,280 @@ function animate() {
     renderer.render(scene, camera);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  USER LOCATION PIN  (must be declared before animate() runs)
+// ═══════════════════════════════════════════════════════════════
+let _userPinGroup = null;
+let _userPinRing  = null;
+let _userLat = null, _userLon = null;
+let _currentKp = 2;
+
+// Fly-to state
+let _flyTarget   = null;
+let _flyFrom     = new THREE.Vector3();
+let _flyAimAt    = new THREE.Vector3();
+let _flyProgress = 0;
+
 // ── First HUD update immediately
 updateAstroHUD(new Date());
 animate();
+
+// ═══════════════════════════════════════════════════════════════
+//  LOCAL CLOCK  (updates every second)
+// ═══════════════════════════════════════════════════════════════
+function _tickLocalClock() {
+    const el = document.getElementById('h-local');
+    if (el) el.textContent = new Date().toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
+    });
+}
+_tickLocalClock();
+setInterval(_tickLocalClock, 1000);
+
+function _setUserPin(lat, lon) {
+    if (_userPinGroup) {
+        earthMesh.remove(_userPinGroup);
+        _userPinGroup.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
+        _userPinGroup = null;
+        _userPinRing  = null;
+    }
+    if (lat == null || lon == null) return;
+    _userLat = lat; _userLon = lon;
+
+    // Position on unit sphere surface (earthMesh is R=1)
+    const pos = geoToXYZ(lat, lon).multiplyScalar(1.003);
+
+    _userPinGroup = new THREE.Group();
+
+    // Core dot — bright teal
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+    const dot    = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 10), dotMat);
+    dot.position.copy(pos);
+    _userPinGroup.add(dot);
+
+    // Pulse ring — tangent to sphere surface
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0x00ffcc, transparent: true, opacity: 0.7,
+        side: THREE.DoubleSide, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    _userPinRing = new THREE.Mesh(new THREE.RingGeometry(0.024, 0.042, 32), ringMat);
+    _userPinRing.position.copy(pos);
+    _userPinRing.lookAt(new THREE.Vector3(0, 0, 0));   // tangent to sphere
+    _userPinGroup.add(_userPinRing);
+
+    earthMesh.add(_userPinGroup);
+}
+
+function _flyToUserLocation() {
+    if (_userLat == null) return;
+    // Transform geographic coords through current Earth rotation to world space
+    const localPos = geoToXYZ(_userLat, _userLon);
+    const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
+
+    _flyFrom.copy(camera.position);
+    _flyAimAt.copy(worldPos).multiplyScalar(0.1);      // aim near surface centre
+    _flyTarget   = worldPos.clone().multiplyScalar(4.2);
+    _flyProgress = 0;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  AURORA VISIBILITY FOR USER'S LOCATION
+// ═══════════════════════════════════════════════════════════════
+function updateUserAuroraVis(kp) {
+    _currentKp = kp ?? _currentKp;
+    const el  = document.getElementById('loc-aurora');
+    if (!el) return;
+    const loc = loadUserLocation();
+    if (!loc) { el.textContent = ''; return; }
+    const vis = auroraVisibility(loc.lat, _currentKp);
+    el.textContent  = vis.visible ? '🌌 ' + vis.label : '🔭 ' + vis.label;
+    el.style.color  = vis.color;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOCATION PANEL LOGIC
+// ═══════════════════════════════════════════════════════════════
+function _showLocResult(loc) {
+    if (!loc) {
+        document.getElementById('loc-result').style.display = 'none';
+        document.getElementById('h-user-loc').style.display = 'none';
+        _setUserPin(null, null);
+        return;
+    }
+    const latStr = `${Math.abs(loc.lat).toFixed(4)}° ${loc.lat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(loc.lon).toFixed(4)}° ${loc.lon >= 0 ? 'E' : 'W'}`;
+    document.getElementById('loc-city').textContent   = loc.city;
+    document.getElementById('loc-coords').textContent = latStr + ', ' + lonStr;
+    document.getElementById('loc-result').style.display = 'block';
+
+    // Show in HUD
+    document.getElementById('h-user-loc').style.display = '';
+    document.getElementById('h-user-loc-name').textContent = loc.city;
+
+    _setUserPin(loc.lat, loc.lon);
+    updateUserAuroraVis(_currentKp);
+}
+
+async function _doGeocode() {
+    const q = document.getElementById('loc-input').value.trim();
+    if (!q) return;
+    const btn = document.getElementById('loc-search');
+    const err = document.getElementById('loc-error');
+    err.style.display = 'none';
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const loc = await geocodeQuery(q);
+        saveUserLocation(loc);
+        _showLocResult(loc);
+    } catch (e) {
+        err.textContent   = e.message;
+        err.style.display = 'block';
+    } finally {
+        btn.textContent = '↵'; btn.disabled = false;
+    }
+}
+
+document.getElementById('loc-search').addEventListener('click', _doGeocode);
+document.getElementById('loc-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') _doGeocode();
+});
+document.getElementById('loc-fly').addEventListener('click', _flyToUserLocation);
+document.getElementById('loc-clear').addEventListener('click', () => {
+    clearUserLocation();
+    document.getElementById('loc-input').value = '';
+    document.getElementById('loc-error').style.display = 'none';
+    _showLocResult(null);
+});
+
+window.addEventListener('user-location-changed', e => {
+    const loc = e.detail;
+    if (loc) {
+        document.getElementById('loc-input').value = loc.city || '';
+        _showLocResult(loc);
+    } else {
+        _showLocResult(null);
+    }
+});
+
+// Restore saved location on load
+(function() {
+    const saved = loadUserLocation();
+    if (saved) {
+        document.getElementById('loc-input').value = saved.city || '';
+        _showLocResult(saved);
+    }
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  MOBILE PANEL TOGGLES
+// ═══════════════════════════════════════════════════════════════
+const _backdrop = document.getElementById('panel-backdrop');
+let   _openPanel = null;
+
+function _openMobilePanel(id) {
+    if (_openPanel) {
+        document.getElementById(_openPanel)?.classList.remove('panel-open');
+        document.querySelector(`.mtb-btn[data-panel="${_openPanel}"]`)?.classList.remove('active');
+    }
+    if (_openPanel === id) {
+        // toggling same panel → close
+        _backdrop.style.display = 'none';
+        _openPanel = null;
+        return;
+    }
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    panel.classList.add('panel-open');
+    _backdrop.style.display = 'block';
+    document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.add('active');
+    _openPanel = id;
+}
+
+function _closeMobilePanel() {
+    if (_openPanel) {
+        document.getElementById(_openPanel)?.classList.remove('panel-open');
+        document.querySelector(`.mtb-btn[data-panel="${_openPanel}"]`)?.classList.remove('active');
+        _openPanel = null;
+    }
+    _backdrop.style.display = 'none';
+}
+
+// Toolbar button clicks
+document.querySelectorAll('.mtb-btn[data-panel]').forEach(btn => {
+    btn.addEventListener('click', () => _openMobilePanel(btn.dataset.panel));
+});
+
+// Panel close buttons
+document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const id = btn.dataset.close;
+        document.getElementById(id)?.classList.remove('panel-open');
+        if (_openPanel === id) {
+            _openPanel = null;
+            _backdrop.style.display = 'none';
+            document.querySelector(`.mtb-btn[data-panel="${id}"]`)?.classList.remove('active');
+        }
+    });
+});
+
+// Backdrop tap → close
+_backdrop.addEventListener('click', _closeMobilePanel);
+
+// ═══════════════════════════════════════════════════════════════
+//  PANEL MINIMIZE
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const id    = btn.dataset.minimizeBtn;
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const minimized = panel.classList.toggle('panel-minimized');
+        btn.textContent = minimized ? '▸' : '▾';
+        try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
+    });
+});
+
+// Restore minimized states on load
+['layer-panel', 'info-panel', 'wx-panel'].forEach(id => {
+    try {
+        if (localStorage.getItem('earth-panel-min-' + id) === '1') {
+            const panel = document.getElementById(id);
+            if (!panel) return;
+            panel.classList.add('panel-minimized');
+            const btn = panel.querySelector('[data-minimize-btn]');
+            if (btn) btn.textContent = '▸';
+        }
+    } catch {}
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MOBILE SWIPE-DOWN TO CLOSE PANELS
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    let _swipeY = null;
+    document.querySelectorAll('#layer-panel, #info-panel, #wx-panel').forEach(panel => {
+        panel.addEventListener('touchstart', e => {
+            _swipeY = e.touches[0].clientY;
+        }, { passive: true });
+        panel.addEventListener('touchmove', e => {
+            if (_swipeY == null) return;
+            if (e.touches[0].clientY - _swipeY > 60) {
+                _closeMobilePanel();
+                _swipeY = null;
+            }
+        }, { passive: true });
+        panel.addEventListener('touchend', () => { _swipeY = null; }, { passive: true });
+    });
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  VISIBILITY API — pause rendering when tab is hidden
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clock.stop(); else clock.start();
+});
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');

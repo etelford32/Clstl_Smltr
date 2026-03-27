@@ -1,44 +1,49 @@
 /**
  * horizons.js — Real-time planetary ephemeris for the Celestial Simulator
  *
- * Provides precise positions for the inner solar system at the current instant.
+ * Provides precise positions for all 8 planets + Moon at the current instant.
  *
  * PRIMARY   NASA JPL Horizons Web API (state vectors, ECLIPJ2000 frame)
  *           https://ssd.jpl.nasa.gov/horizons/manual.html
- *           Earth heliocentric (CENTER='500@10', COMMAND='399')
- *           Moon geocentric   (CENTER='500@399', COMMAND='301')
+ *           Earth heliocentric   (CENTER='500@10',  COMMAND='399')
+ *           Moon  geocentric     (CENTER='500@399', COMMAND='301')
+ *           Outer planets helio  (CENTER='500@10',  COMMAND='5xx/6xx/7xx/8xx')
  *           Response units: AU for heliocentric, km for geocentric.
  *
  * FALLBACK  On-device Meeus algorithms (Astronomical Algorithms, 2nd ed.)
  *           Earth    Ch.25 — accurate to ~0.01° for 1950–2050
  *           Moon     Ch.47 — accurate to ~1° (16-term longitude series)
- *           Mercury, Venus, Mars — simplified Kepler, accurate to ~0.5–2°
+ *           Inner planets — simplified Kepler + full 3D orbital rotation
+ *           Outer planets — simplified Kepler + full 3D orbital rotation
+ *           All planet positions include ecliptic latitude from inclination.
  *           Always works offline; no network latency.
  *
  * OUTPUT (ephemeris-ready CustomEvent on window)
  * ─────────────────────────────────────────────────────────────────
- *  detail.mercury  { lon_rad, lat_rad, dist_AU }  heliocentric ecliptic
- *  detail.venus    { lon_rad, lat_rad, dist_AU }
+ *  detail.mercury  { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }  heliocentric ecliptic
+ *  detail.venus    { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
  *  detail.earth    { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
- *  detail.moon     { lon_rad, lat_rad, dist_km, dist_AU }  geocentric
- *  detail.mars     { lon_rad, lat_rad, dist_AU }
+ *  detail.moon     { lon_rad, lat_rad, dist_km, dist_AU }            geocentric
+ *  detail.mars     { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
+ *  detail.jupiter  { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
+ *  detail.saturn   { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
+ *  detail.uranus   { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
+ *  detail.neptune  { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }
  *  detail.jd       number — Julian Day of fetch
- *  detail.source   'horizons' | 'meeus'
+ *  detail.source   'horizons' | 'meeus' | 'mixed'
  *  detail.timestamp  Date
  *
  * USAGE
  * ─────────────────────────────────────────────────────────────────
- *  import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
- *           mercuryHeliocentric, venusHeliocentric, marsHeliocentric }
- *      from './js/horizons.js';
+ *  import { EphemerisService } from './js/horizons.js';
  *
  *  const svc = new EphemerisService();
- *  svc.load();   // fires 'ephemeris-ready' on window when done
- *  svc.startLive(60);  // refresh every N seconds
+ *  svc.startLive(60);   // fires 'ephemeris-ready' every 60 s
  *
  *  window.addEventListener('ephemeris-ready', ev => {
- *      const { mercury, venus, earth, moon, mars, source } = ev.detail;
- *      // earth.lon_rad  → current heliocentric ecliptic longitude (radians)
+ *      const { mercury, venus, earth, moon, mars,
+ *              jupiter, saturn, uranus, neptune, source } = ev.detail;
+ *      // earth.x_AU, earth.y_AU, earth.z_AU  → ECLIPJ2000 Cartesian (AU)
  *  });
  */
 
@@ -72,7 +77,8 @@ const R2D = 180 / Math.PI;
  * Accuracy: ~0.01° for years 1950–2050.
  *
  * @param {number} jd  Julian Day Number (default: now)
- * @returns {{ lon: number, lon_rad: number, dist_AU: number }}
+ * @returns {{ lon: number, lon_rad: number, lat_rad: number, dist_AU: number,
+ *             x_AU: number, y_AU: number, z_AU: number }}
  */
 export function earthHeliocentric(jd = jdNow()) {
     const T = (jd - 2451545.0) / 36525.0;  // Julian centuries since J2000.0
@@ -103,7 +109,13 @@ export function earthHeliocentric(jd = jdNow()) {
     const e = 0.016708634 - 0.000042037 * T - 0.0000001267 * T * T;
     const dist_AU = (1.000001018 * (1 - e * e)) / (1 + e * Math.cos(M));
 
-    return { lon, lon_rad: lon * D2R, lat_rad: 0, dist_AU };
+    // Earth's orbit is nearly circular and lies in the ecliptic (i ≈ 0°)
+    const lon_rad = lon * D2R;
+    const x_AU = dist_AU * Math.cos(lon_rad);
+    const y_AU = dist_AU * Math.sin(lon_rad);
+    const z_AU = 0;
+
+    return { lon, lon_rad, lat_rad: 0, dist_AU, x_AU, y_AU, z_AU };
 }
 
 /**
@@ -189,21 +201,29 @@ export function moonGeocentric(jd = jdNow()) {
 }
 
 /**
- * Generic heliocentric position from simplified Keplerian elements.
+ * Generic heliocentric 3D position from simplified Keplerian elements.
  *
- * Uses a 3-term equation of center: accurate to ~0.1° for low-eccentricity
- * orbits (Venus, Earth, Mars) and ~0.5° for Mercury (e ≈ 0.206).
+ * Computes the full ecliptic XYZ position including orbital inclination
+ * via the standard orbital-plane → ecliptic rotation:
+ *   x = r[cosΩ·cos(ω+ν) − sinΩ·sin(ω+ν)·cosi]
+ *   y = r[sinΩ·cos(ω+ν) + cosΩ·sin(ω+ν)·cosi]
+ *   z = r[sin(ω+ν)·sini]
+ *
+ * Equation of center: 3-term series, accurate to ~0.01° for e < 0.1,
+ * ~0.3° for Mercury (e ≈ 0.206).
  *
  * Source: Meeus, "Astronomical Algorithms" 2nd ed., Table 31.a (J2000 epoch).
  *
  * @param {number} jd
- * @param {{ L0, Ldot, a, e, omega }} el  Orbital elements at J2000
+ * @param {{ L0, Ldot, a, e, omega, i, node }} el  Orbital elements at J2000
  *   L0:    Mean longitude at J2000 (degrees)
  *   Ldot:  Rate of mean longitude (degrees / Julian century)
  *   a:     Semi-major axis (AU)
  *   e:     Eccentricity
- *   omega: Longitude of perihelion (degrees)
- * @returns {{ lon_rad, lat_rad, dist_AU, lon, dist_AU }}
+ *   omega: Longitude of perihelion ω̄ = Ω + ω (degrees)
+ *   i:     Inclination to ecliptic (degrees)
+ *   node:  Longitude of ascending node Ω (degrees)
+ * @returns {{ lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }}
  */
 function planetHeliocentric(jd, el) {
     const T = (jd - 2451545.0) / 36525.0;
@@ -219,25 +239,48 @@ function planetHeliocentric(jd, el) {
                      + (5/4)  * e*e         * Math.sin(2 * Mr)
                      + (13/12) * e*e*e      * Math.sin(3 * Mr);
 
-    const nu  = Mr + nu_minus_M;              // true anomaly (radians)
-    const lon = ((el.omega + nu * R2D) % 360 + 360) % 360;
-
-    // Heliocentric distance
+    const nu      = Mr + nu_minus_M;                               // true anomaly (rad)
     const dist_AU = (el.a * (1 - e * e)) / (1 + e * Math.cos(nu));
 
-    return { lon, lon_rad: lon * D2R, lat_rad: 0, dist_AU };
+    // Orbital-plane → heliocentric ecliptic XYZ
+    // argument of perihelion ω (lowercase) = ω̄ − Ω
+    const nodeR  = el.node  * D2R;
+    const iR     = el.i     * D2R;
+    const argPer = (el.omega - el.node) * D2R;   // ω in radians
+    const u      = argPer + nu;                    // argument of latitude
+
+    const cosO = Math.cos(nodeR), sinO = Math.sin(nodeR);
+    const cosU = Math.cos(u),     sinU = Math.sin(u);
+    const cosI = Math.cos(iR),    sinI = Math.sin(iR);
+
+    const x_AU = dist_AU * (cosO * cosU - sinO * sinU * cosI);
+    const y_AU = dist_AU * (sinO * cosU + cosO * sinU * cosI);
+    const z_AU = dist_AU * (sinU * sinI);
+
+    const lon_rad = Math.atan2(y_AU, x_AU);
+    const lat_rad = Math.asin(Math.max(-1, Math.min(1, z_AU / dist_AU)));
+    const lon     = ((lon_rad * R2D) % 360 + 360) % 360;
+
+    return { lon, lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU };
 }
 
 // ── Orbital elements at J2000.0  (Meeus Table 31.a) ─────────────────────────
-// L0: mean longitude (°)  |  Ldot: rate (°/Julian century)
-// a: semi-major axis (AU) |  e: eccentricity  |  omega: perihelion longitude (°)
+// L0:    mean longitude (°)      Ldot:  rate (°/Julian century)
+// a:     semi-major axis (AU)    e:     eccentricity
+// omega: longitude of perihelion (°) = Ω + ω
+// i:     inclination to ecliptic (°)
+// node:  longitude of ascending node Ω (°)
 
-const MERCURY_EL = { L0: 252.250906, Ldot: 149472.6746358, a: 0.38709831, e: 0.20563175, omega: 77.456119 };
-const VENUS_EL   = { L0: 181.979801, Ldot:  58517.8156760, a: 0.72332982, e: 0.00677323, omega: 131.563703 };
-const MARS_EL    = { L0: 355.433275, Ldot:  19140.2993313, a: 1.52366231, e: 0.09341233, omega: 336.060234 };
+const MERCURY_EL = { L0: 252.250906, Ldot: 149472.6746358, a: 0.38709831, e: 0.20563175, omega: 77.456119,  i: 7.004986, node:  48.330893 };
+const VENUS_EL   = { L0: 181.979801, Ldot:  58517.8156760, a: 0.72332982, e: 0.00677323, omega: 131.563703, i: 3.394662, node:  76.679920 };
+const MARS_EL    = { L0: 355.433275, Ldot:  19140.2993313, a: 1.52366231, e: 0.09341233, omega: 336.060234, i: 1.849726, node:  49.558093 };
+const JUPITER_EL = { L0:  34.351519, Ldot:   3034.9056606, a: 5.20260319, e: 0.04849793, omega:  14.331309, i: 1.303270, node: 100.464441 };
+const SATURN_EL  = { L0:  50.077444, Ldot:   1222.1138488, a: 9.55491122, e: 0.05550825, omega:  93.056787, i: 2.488879, node: 113.665527 };
+const URANUS_EL  = { L0: 314.055005, Ldot:    428.4669983, a: 19.2184461, e: 0.04629590, omega: 173.005291, i: 0.773197, node:  74.005957 };
+const NEPTUNE_EL = { L0: 304.348665, Ldot:    218.4862002, a: 30.1103869, e: 0.00898809, omega:  48.120275, i: 1.769953, node: 131.784057 };
 
 /**
- * Mercury's heliocentric ecliptic position.
+ * Mercury's heliocentric ecliptic position (full 3D).
  * Accuracy: ~0.5° for 1950–2050.
  */
 export function mercuryHeliocentric(jd = jdNow()) {
@@ -245,7 +288,7 @@ export function mercuryHeliocentric(jd = jdNow()) {
 }
 
 /**
- * Venus's heliocentric ecliptic position.
+ * Venus's heliocentric ecliptic position (full 3D).
  * Accuracy: ~0.1° for 1950–2050.
  */
 export function venusHeliocentric(jd = jdNow()) {
@@ -253,11 +296,43 @@ export function venusHeliocentric(jd = jdNow()) {
 }
 
 /**
- * Mars's heliocentric ecliptic position.
+ * Mars's heliocentric ecliptic position (full 3D).
  * Accuracy: ~0.3° for 1950–2050.
  */
 export function marsHeliocentric(jd = jdNow()) {
     return planetHeliocentric(jd, MARS_EL);
+}
+
+/**
+ * Jupiter's heliocentric ecliptic position (full 3D).
+ * Accuracy: ~0.5° for 1950–2050.
+ */
+export function jupiterHeliocentric(jd = jdNow()) {
+    return planetHeliocentric(jd, JUPITER_EL);
+}
+
+/**
+ * Saturn's heliocentric ecliptic position (full 3D).
+ * Accuracy: ~0.5° for 1950–2050.
+ */
+export function saturnHeliocentric(jd = jdNow()) {
+    return planetHeliocentric(jd, SATURN_EL);
+}
+
+/**
+ * Uranus's heliocentric ecliptic position (full 3D).
+ * Accuracy: ~0.5° for 1950–2050.
+ */
+export function uranusHeliocentric(jd = jdNow()) {
+    return planetHeliocentric(jd, URANUS_EL);
+}
+
+/**
+ * Neptune's heliocentric ecliptic position (full 3D).
+ * Accuracy: ~0.5° for 1950–2050.
+ */
+export function neptuneHeliocentric(jd = jdNow()) {
+    return planetHeliocentric(jd, NEPTUNE_EL);
 }
 
 // ── NASA JPL Horizons REST API ────────────────────────────────────────────────
@@ -330,16 +405,21 @@ export class EphemerisService {
     }
 
     /**
-     * Asynchronously load current ephemeris for all inner planets.
-     * 1. Attempts JPL Horizons API for Earth + Moon (highest accuracy)
-     * 2. Uses Meeus on-device algorithms for Mercury, Venus, Mars
-     * 3. Falls back to Meeus for Earth/Moon if Horizons unavailable
+     * Asynchronously load current ephemeris for all 8 planets + Moon.
+     *
+     * Strategy:
+     *  • Earth + Moon      — JPL Horizons primary, Meeus fallback
+     *  • Outer planets     — JPL Horizons attempted in parallel (Promise.allSettled);
+     *                        Meeus used for any that fail or timeout
+     *  • Mercury/Venus/Mars — Meeus algorithms (sub-degree accuracy, sufficient for
+     *                         real-time heliospheric visualization)
      *
      * Fires 'ephemeris-ready' on window when complete.
      */
     async load() {
         const jd = jdNow();
-        let earth, moon, source;
+        let earth, moon, jupiter, saturn, uranus, neptune;
+        let horizonsSucceeded = false;
 
         // ── Attempt Horizons for Earth + Moon ─────────────────────────────
         try {
@@ -362,20 +442,43 @@ export class EphemerisService {
                 source: 'horizons',
             };
 
-            source = 'horizons';
+            horizonsSucceeded = true;
             console.log(
                 `[Horizons] Earth lon=${(earth.lon_rad * R2D).toFixed(2)}°`,
                 `r=${earth.dist_AU.toFixed(5)} AU | Moon r=${moon.dist_km.toFixed(0)} km`,
             );
 
         } catch (err) {
-            console.warn('[Horizons] Unavailable — using Meeus fallback:', err.message);
+            console.warn('[Horizons] Earth/Moon unavailable — using Meeus fallback:', err.message);
         }
+
+        // ── Attempt Horizons for outer planets (non-blocking) ────────────
+        // Each fetch is independent; Meeus is used if any fail.
+        const outerIds = [
+            { name: 'jupiter', cmd: "'599'" },
+            { name: 'saturn',  cmd: "'699'" },
+            { name: 'uranus',  cmd: "'799'" },
+            { name: 'neptune', cmd: "'899'" },
+        ];
+        const outerResults = await Promise.allSettled(
+            outerIds.map(({ cmd }) => _fetchVec(cmd, "'500@10'"))
+        );
+
+        const outerHorizons = {};
+        outerIds.forEach(({ name }, idx) => {
+            const result = outerResults[idx];
+            if (result.status === 'fulfilled') {
+                outerHorizons[name] = _vecToHelioEcliptic(result.value);
+                console.log(`[Horizons] ${name} r=${outerHorizons[name].dist_AU.toFixed(3)} AU`);
+            } else {
+                console.warn(`[Horizons] ${name} failed — using Meeus:`, result.reason?.message);
+            }
+        });
 
         // ── Meeus fallback for Earth + Moon ───────────────────────────────
         if (!earth) {
             const e = earthHeliocentric(jd);
-            earth = { lon_rad: e.lon_rad, lat_rad: 0, dist_AU: e.dist_AU, source: 'meeus' };
+            earth = { ...e, source: 'meeus' };
         }
         if (!moon) {
             const m = moonGeocentric(jd);
@@ -384,25 +487,39 @@ export class EphemerisService {
                 dist_km: m.dist_km, dist_AU: m.dist_AU,
                 source: 'meeus',
             };
-            if (!source) source = 'meeus';
         }
 
-        // ── Inner planets — Meeus algorithms (no Horizons fetch needed) ───
-        // Meeus is accurate to < 1° for 1950–2050 — sufficient for real-time
-        // solar wind & heliospheric visualization.
+        // ── Inner planets — Meeus algorithms ─────────────────────────────
         const mercury = { ...mercuryHeliocentric(jd), source: 'meeus' };
         const venus   = { ...venusHeliocentric(jd),   source: 'meeus' };
         const mars    = { ...marsHeliocentric(jd),    source: 'meeus' };
 
+        // ── Outer planets — Horizons or Meeus ────────────────────────────
+        jupiter = outerHorizons.jupiter ?? { ...jupiterHeliocentric(jd), source: 'meeus' };
+        saturn  = outerHorizons.saturn  ?? { ...saturnHeliocentric(jd),  source: 'meeus' };
+        uranus  = outerHorizons.uranus  ?? { ...uranusHeliocentric(jd),  source: 'meeus' };
+        neptune = outerHorizons.neptune ?? { ...neptuneHeliocentric(jd), source: 'meeus' };
+
+        const anyOuter = Object.values(outerHorizons).length > 0;
+        const source = horizonsSucceeded
+            ? (anyOuter ? 'horizons' : 'mixed')
+            : 'meeus';
+
         console.log(
-            `[Ephemeris] Mercury lon=${(mercury.lon_rad * R2D).toFixed(1)}°`,
-            `Venus=${( venus.lon_rad * R2D).toFixed(1)}°`,
-            `Mars=${ ( mars.lon_rad  * R2D).toFixed(1)}°`,
+            `[Ephemeris] ${source} |`,
+            `Jup=${(jupiter.lon_rad * R2D).toFixed(1)}°`,
+            `Sat=${(saturn.lon_rad  * R2D).toFixed(1)}°`,
+            `Ura=${(uranus.lon_rad  * R2D).toFixed(1)}°`,
+            `Nep=${(neptune.lon_rad * R2D).toFixed(1)}°`,
         );
 
         this.source  = source;
         this._loaded = true;
-        this.data    = { jd, mercury, venus, earth, moon, mars, timestamp: new Date(), source };
+        this.data    = {
+            jd, source, timestamp: new Date(),
+            mercury, venus, earth, moon, mars,
+            jupiter, saturn, uranus, neptune,
+        };
 
         window.dispatchEvent(new CustomEvent('ephemeris-ready', { detail: this.data }));
         return this.data;

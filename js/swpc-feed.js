@@ -140,16 +140,24 @@ function parseLocation(loc) {
 
 /** Direct browser→NOAA fetch (CORS enabled; WAF only blocks server-side). */
 async function fetchNoaa(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`NOAA ${url} → HTTP ${res.status}`);
-    return res.json();
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`NOAA HTTP ${res.status} — ${url}`);
+    try {
+        return await res.json();
+    } catch (e) {
+        throw new Error(`NOAA bad JSON from ${url}: ${e.message}`);
+    }
 }
 
 /** Edge function fetch (DONKI only — NASA key stays server-side). */
 async function fetchEdge(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
-    return res.json();
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Edge HTTP ${res.status} — ${url}`);
+    try {
+        return await res.json();
+    } catch (e) {
+        throw new Error(`Edge bad JSON from ${url}: ${e.message}`);
+    }
 }
 
 // ── 2D-array helpers (NOAA "CSV-in-JSON" format used by several endpoints) ───
@@ -214,17 +222,25 @@ async function fetchKp1m(state) {
 
 async function fetchXray(state) {
     const raw = await fetchNoaa(NOAA.xray);
-    // Format: 2D array; row[0] = headers including time_tag, satellite, flux, wavelength/energy
-    // The long-band (0.1-0.8 nm) is the standard X-class measurement channel.
+    // Format: object-array OR 2D array depending on NOAA product version
     if (!Array.isArray(raw) || raw.length < 2) return;
 
-    const rows = parse2D(raw);
-    // Filter to long-band rows if a wavelength/band column exists
-    const hasWl = rows[0] && ('wavelength' in rows[0] || 'band' in rows[0]);
-    const longBand = hasWl
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
+    // Filter to long-band (0.1–0.8 nm) rows; NOAA uses 'energy', 'wavelength', or 'band'
+    const bandKey = rows[0] && (
+        'energy'     in rows[0] ? 'energy'     :
+        'wavelength' in rows[0] ? 'wavelength' :
+        'band'       in rows[0] ? 'band'        : null
+    );
+    const longBand = bandKey
         ? rows.filter(r => {
-            const w = String(r.wavelength ?? r.band ?? '');
-            return w.includes('0.1') || w.includes('long') || w.includes('1-8');
+            const w = String(r[bandKey] ?? '').toLowerCase();
+            return w.includes('0.1') || w.includes('long') || w.includes('1-8') || w.includes('0.8');
           })
         : rows;
     const candidates = longBand.length > 0 ? longBand : rows;
@@ -243,9 +259,14 @@ async function fetchXray(state) {
 
 async function fetchProtons(state) {
     const raw = await fetchNoaa(NOAA.protons);
-    // Format: 2D array with energy column (e.g. ">=10 MeV", ">=50 MeV", ">=100 MeV")
+    // Format: object-array OR 2D array with energy column
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
 
     const byEnergy = {};
     for (const r of rows) {
@@ -255,11 +276,11 @@ async function fetchProtons(state) {
         if (!byEnergy[e] || r.time_tag > byEnergy[e].time_tag) byEnergy[e] = { flux: fl, time_tag: r.time_tag };
     }
 
-    // Map energy labels to state fields
+    // Map energy labels to state fields — NOAA uses formats like ">=10 MeV", "P10", "10 MeV"
     for (const [energy, val] of Object.entries(byEnergy)) {
-        if (/>=?\s*10\s*MeV/i.test(energy))  state.proton_flux_10mev  = val.flux;
-        if (/>=?\s*50\s*MeV/i.test(energy))  { /* 50 MeV stored in diff slot if needed */ }
-        if (/>=?\s*100\s*MeV/i.test(energy)) state.proton_flux_100mev = val.flux;
+        const e = energy.toLowerCase().replace(/\s/g, '');
+        if (/p10$|>=?10m|^10m/.test(e))  state.proton_flux_10mev  = val.flux;
+        if (/p100$|>=?100m|^100m/.test(e)) state.proton_flux_100mev = val.flux;
     }
 
     // S-scale SEP storm level based on >=10 MeV channel
@@ -270,14 +291,19 @@ async function fetchProtons(state) {
 
 async function fetchElectrons(state) {
     const raw = await fetchNoaa(NOAA.electrons);
-    // Format: 2D array with energy column (">0.8 MeV", ">2.0 MeV")
+    // Format: object-array OR 2D array with energy column
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
 
     let latest2mev = null;
     for (const r of rows) {
-        const e  = String(r.energy ?? r.channel ?? '');
-        if (!/2\.0|>2/i.test(e)) continue;
+        const e  = String(r.energy ?? r.channel ?? '').toLowerCase().replace(/\s/g, '');
+        if (!/e2$|>=?2\.?0?m|^2\.?0?m/.test(e)) continue;
         const fl = noaaFill(r.flux);
         if (fl == null) continue;
         if (!latest2mev || r.time_tag > latest2mev.time_tag) latest2mev = { flux: fl, time_tag: r.time_tag };
@@ -329,9 +355,14 @@ async function fetchAlerts(state) {
 
 async function fetchDst(state) {
     const raw = await fetchNoaa(NOAA.dst);
-    // Format: 2D array [time_tag, dst]; fill |dst| > 1000
+    // Format: object-array OR 2D array [time_tag, dst]; fill |dst| > 1000
     if (!Array.isArray(raw) || raw.length < 2) return;
-    const rows = parse2D(raw);
+    let rows;
+    if (Array.isArray(raw[0])) {
+        rows = parse2D(raw);
+    } else {
+        rows = raw.filter(r => r && typeof r === 'object');
+    }
     for (let i = rows.length - 1; i >= 0; i--) {
         const r   = rows[i];
         const dst = Number(r.dst ?? r.dst_index ?? NaN);
@@ -469,9 +500,8 @@ async function fetchDONKIGST(state) {
         g_scale:    g.g_scale    ?? 0,
         linked_cme: g.linked_cme ?? false,
     }));
-    state.current_gst = json?.data?.current_storm
-        ? { ...json.data.current_storm, start_time: new Date(json.data.current_storm.start_time ?? 0) }
-        : null;
+    const cs = json?.data?.current_storm ?? null;
+    state.current_gst = cs ? { ...cs, start_time: new Date(cs.start_time ?? 0) } : null;
 }
 
 async function fetchDONKISEP(state) {
@@ -484,9 +514,8 @@ async function fetchDONKISEP(state) {
         linked_flare: s.linked_flare ?? false,
         linked_cme:   s.linked_cme   ?? false,
     }));
-    state.recent_sep_event      = json?.data?.recent_event
-        ? { ...json.data.recent_event, event_time: new Date(json.data.recent_event.event_time ?? 0) }
-        : null;
+    const re = json?.data?.recent_event ?? null;
+    state.recent_sep_event = re ? { ...re, event_time: new Date(re.event_time ?? 0) } : null;
     state.radiation_storm_active = json?.data?.radiation_storm_active ?? false;
 }
 
@@ -647,7 +676,7 @@ export class SpaceWeatherFeed {
         }
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T1] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -662,7 +691,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T2] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -681,7 +710,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T3] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._checkStormMode();
         this._dispatch();
@@ -694,7 +723,7 @@ export class SpaceWeatherFeed {
         ]);
         results.forEach((r, i) => {
             if (r.status === 'rejected')
-                console.debug(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
+                console.warn(`[SWPC T4] feed ${i}: ${r.reason?.message ?? r.reason}`);
         });
         this._dispatch();
     }
