@@ -56,10 +56,18 @@ const R = {
     earth:   0.78,
     mars:    0.48,
     moon:    0.22,
+    // Outer planets — still exaggerated but proportionally larger
+    jupiter: 1.80,
+    saturn:  1.50,
+    uranus:  1.10,
+    neptune: 1.00,
 };
 
 /** Orbital semi-major axes (AU) — mean values for orbit ring geometry */
-const ORBIT_AU = { mercury: 0.387, venus: 0.723, earth: 1.000, mars: 1.524 };
+const ORBIT_AU = {
+    mercury: 0.387, venus: 0.723, earth: 1.000, mars:    1.524,
+    jupiter: 5.203, saturn: 9.537, uranus: 19.191, neptune: 30.069,
+};
 
 /** Planet colours */
 const COL = {
@@ -68,6 +76,10 @@ const COL = {
     earth:   0x1a6ad8,
     mars:    0xcc4422,
     moon:    0x888888,
+    jupiter: 0xc88b3a,
+    saturn:  0xe4d191,
+    uranus:  0x7de8e8,
+    neptune: 0x4b70dd,
 };
 
 const N_WIND    = 3000;   // solar wind particles
@@ -105,7 +117,10 @@ export class Heliosphere3D {
         };
 
         // ── Ephemeris state ───────────────────────────────────────────────────
-        this._eph = { mercury: null, venus: null, earth: null, moon: null, mars: null };
+        this._eph = {
+            mercury: null, venus: null, earth: null, moon: null, mars: null,
+            jupiter: null, saturn: null, uranus: null, neptune: null,
+        };
 
         // ── Internal bookkeeping ──────────────────────────────────────────────
         this._t        = 0;       // elapsed seconds
@@ -229,6 +244,10 @@ export class Heliosphere3D {
         this._eph.earth   = d.earth   ?? null;
         this._eph.moon    = d.moon    ?? null;
         this._eph.mars    = d.mars    ?? null;
+        this._eph.jupiter = d.jupiter ?? null;
+        this._eph.saturn  = d.saturn  ?? null;
+        this._eph.uranus  = d.uranus  ?? null;
+        this._eph.neptune = d.neptune ?? null;
         this._updateEphemerisPositions();
     }
 
@@ -258,7 +277,8 @@ export class Heliosphere3D {
         const rect = this._canvas.getBoundingClientRect();
         this._renderer.setSize(rect.width, rect.height, false);
 
-        this._camera = new THREE.PerspectiveCamera(45, rect.width / rect.height, 0.05, 1200);
+        // Far plane 4500 units covers Neptune at ~30 AU = 3000 units with margin
+        this._camera = new THREE.PerspectiveCamera(45, rect.width / rect.height, 0.05, 4500);
         // Start slightly above the ecliptic plane looking toward the inner system
         this._camera.position.set(0, 80, 250);
         this._camera.lookAt(0, 0, 0);
@@ -267,7 +287,7 @@ export class Heliosphere3D {
         this._controls.enableDamping  = true;
         this._controls.dampingFactor  = 0.07;
         this._controls.minDistance    = 2;
-        this._controls.maxDistance    = 700;
+        this._controls.maxDistance    = 3500;
         this._controls.autoRotate     = false;
         this._controls.zoomSpeed      = 1.2;
     }
@@ -346,8 +366,12 @@ export class Heliosphere3D {
     }
 
     _buildOrbitRings() {
+        const RING_COL = {
+            mercury: 0x4a3a2a, venus:   0x5a4a20, earth:   0x1a3a6a, mars:    0x4a1a0a,
+            jupiter: 0x6a4a18, saturn:  0x6a6030, uranus:  0x206060, neptune: 0x1a2a6a,
+        };
         for (const [name, dist] of Object.entries(ORBIT_AU)) {
-            const col = { mercury: 0x4a3a2a, venus: 0x5a4a20, earth: 0x1a3a6a, mars: 0x4a1a0a }[name];
+            const col = RING_COL[name] ?? 0x333333;
             const mat = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.28, depthWrite: false });
             const pts = [];
             for (let i = 0; i <= 128; i++) {
@@ -422,13 +446,52 @@ export class Heliosphere3D {
 
         // Default earth position (overwritten by ephemeris)
         this._earthGroup.position.set(AU, 0, 0);
+
+        // ── Outer planets ─────────────────────────────────────────────────────
+        for (const name of ['jupiter', 'uranus', 'neptune']) {
+            this._planetMeshes[name] = mkPlanet(name, R[name], COL[name]);
+        }
+
+        // Saturn — group containing the sphere + ring system
+        const saturnGroup = new THREE.Group();
+        saturnGroup.name = 'saturn_group';
+        this._scene.add(saturnGroup);
+
+        const saturnSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R.saturn, 24, 24),
+            new THREE.MeshStandardMaterial({ color: COL.saturn, roughness: 0.75, metalness: 0.05 })
+        );
+        saturnSphere.name = 'saturn';
+        saturnGroup.add(saturnSphere);
+
+        // Saturn's ring system: two concentric ring bands, tilted ~27° to ecliptic
+        // Inner ring (B ring proxy): 1.55–2.05 Rs; outer ring (A ring proxy): 2.1–2.4 Rs
+        const ringTilt = 27 * Math.PI / 180;
+        for (const [inner, outer, opacity] of [
+            [R.saturn * 1.55, R.saturn * 2.05, 0.55],
+            [R.saturn * 2.10, R.saturn * 2.40, 0.35],
+        ]) {
+            const ringGeo = new THREE.RingGeometry(inner, outer, 80);
+            const ringMat = new THREE.MeshBasicMaterial({
+                color:       0xd4c88a,
+                side:        THREE.DoubleSide,
+                transparent: true,
+                opacity,
+                depthWrite:  false,
+            });
+            const ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.rotation.x = Math.PI / 2 - ringTilt;  // tilt ring plane ~27° from orbital plane
+            saturnGroup.add(ring);
+        }
+
+        this._planetMeshes.saturn = saturnGroup;
     }
 
     _setDefaultPlanetPositions() {
         for (const [name, dist] of Object.entries(ORBIT_AU)) {
             if (name === 'earth') continue;
-            const mesh = this._planetMeshes[name];
-            if (mesh) mesh.position.set(dist * AU, 0, 0);
+            const obj = this._planetMeshes[name];
+            if (obj) obj.position.set(dist * AU, 0, 0);
         }
     }
 
@@ -998,23 +1061,38 @@ export class Heliosphere3D {
 
     // ── Ephemeris positions ───────────────────────────────────────────────────
 
-    /** Convert { lon_rad, lat_rad, dist_AU } → Three.js position in ecliptic XZ */
+    /**
+     * Convert ephemeris body → Three.js position in ecliptic XZ scene.
+     *
+     * Preferred: use x_AU/y_AU/z_AU (ECLIPJ2000 Cartesian) when present.
+     * Mapping: ecliptic-X → Three.x, ecliptic-Y → Three.z, ecliptic-Z → Three.y
+     * (Three.js scene has ecliptic plane = XZ, +Y = ecliptic north.)
+     *
+     * Fallback: spherical (lon_rad, lat_rad, dist_AU).
+     */
     _ephToPos(body) {
         if (!body) return null;
+        if (body.x_AU != null) {
+            return new THREE.Vector3(
+                body.x_AU * AU,
+                body.z_AU * AU,   // ecliptic north (Z_ecl) → Three.js +Y
+                body.y_AU * AU,   // ecliptic Y → Three.js Z
+            );
+        }
         const { lon_rad, lat_rad = 0, dist_AU } = body;
         const d = dist_AU * AU;
         return new THREE.Vector3(
             d * Math.cos(lat_rad) * Math.cos(lon_rad),
             d * Math.sin(lat_rad),
-            d * Math.cos(lat_rad) * Math.sin(lon_rad),   // note: ecliptic lon → XZ
+            d * Math.cos(lat_rad) * Math.sin(lon_rad),
         );
     }
 
     _updateEphemerisPositions() {
         const eph = this._eph;
 
-        // Simple planets
-        for (const name of ['mercury', 'venus', 'mars']) {
+        // All non-Earth, non-Moon planets (inner + outer)
+        for (const name of ['mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']) {
             const pos = this._ephToPos(eph[name]);
             if (pos && this._planetMeshes[name]) {
                 this._planetMeshes[name].position.copy(pos);
