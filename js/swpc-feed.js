@@ -52,6 +52,7 @@ export const FALLBACK = {
     flare_letter: 'A',
     flare_location: null,
     flare_watts:  1e-8,
+    flares:         [],
     recent_flares:  [],
     active_regions: [],
     proton_flux_10mev:  0.1,
@@ -100,6 +101,99 @@ function parseFlareClass(cls) {
     const number = parseFloat(cls.slice(1)) || 1.0;
     const watts  = (CLASS_SCALE[letter] ?? 1e-8) * number;
     return { letter, number, watts };
+}
+
+// ── Flare deduplication ────────────────────────────────────────────────────────
+
+/**
+ * Merge NOAA and DONKI flare arrays into one deduplicated list.
+ *
+ * Strategy:
+ *   • NOAA flares are the primary record (real-time GOES peak times).
+ *   • Each NOAA flare is matched to at most one DONKI flare whose peak
+ *     (or begin) time falls within FLARE_MERGE_WINDOW_MS; the pair is
+ *     enriched with DONKI's id and linked_cme flag.
+ *   • Unmatched DONKI flares are appended (DONKI may cover events outside
+ *     the NOAA 24-hour window or not yet catalogued by NOAA).
+ *   • Result is sorted most-recent-first and capped at 15 entries.
+ *
+ * Unified flare shape:
+ *   { time, cls, parsed, location, region, linked_cme, donki_id, source }
+ *   source: 'merged' | 'noaa' | 'donki'
+ */
+const FLARE_MERGE_WINDOW_MS = 5 * 60 * 1000;   // ±5 min — NOAA/DONKI peak times can differ
+
+function mergeFlares(noaaFlares, donkiFlares) {
+    const noaa  = Array.isArray(noaaFlares)  ? noaaFlares  : [];
+    const donki = Array.isArray(donkiFlares) ? donkiFlares : [];
+
+    const matched = new Set();   // indices into donki already consumed
+
+    const out = noaa.map(nf => {
+        const nfMs = nf.time instanceof Date ? nf.time.getTime() : 0;
+
+        // Find the closest DONKI flare within the merge window
+        let bestIdx = -1;
+        let bestDt  = FLARE_MERGE_WINDOW_MS + 1;
+        for (let i = 0; i < donki.length; i++) {
+            if (matched.has(i)) continue;
+            const df   = donki[i];
+            const dfMs = df.peak_time instanceof Date ? df.peak_time.getTime()
+                       : df.begin_time instanceof Date ? df.begin_time.getTime() : 0;
+            const dt = Math.abs(nfMs - dfMs);
+            if (dt < bestDt) { bestDt = dt; bestIdx = i; }
+        }
+
+        if (bestIdx >= 0 && bestDt <= FLARE_MERGE_WINDOW_MS) {
+            matched.add(bestIdx);
+            const df = donki[bestIdx];
+            return {
+                time:       nf.time,
+                cls:        nf.cls,
+                parsed:     nf.parsed,
+                location:   nf.location        ?? df.location       ?? null,
+                region:     nf.region          ?? df.active_region  ?? null,
+                linked_cme: df.linked_cme      ?? false,
+                donki_id:   df.id              ?? null,
+                source:     'merged',
+            };
+        }
+
+        return {
+            time:       nf.time,
+            cls:        nf.cls,
+            parsed:     nf.parsed,
+            location:   nf.location ?? null,
+            region:     nf.region   ?? null,
+            linked_cme: false,
+            donki_id:   null,
+            source:     'noaa',
+        };
+    });
+
+    // Append DONKI flares that had no NOAA counterpart
+    for (let i = 0; i < donki.length; i++) {
+        if (matched.has(i)) continue;
+        const df  = donki[i];
+        const cls = df.flare_class ?? null;
+        if (!cls) continue;
+        out.push({
+            time:       df.peak_time instanceof Date  ? df.peak_time
+                      : df.begin_time instanceof Date ? df.begin_time : null,
+            cls,
+            parsed:     parseFlareClass(cls),
+            location:   df.location      ?? null,
+            region:     df.active_region ?? null,
+            linked_cme: df.linked_cme    ?? false,
+            donki_id:   df.id            ?? null,
+            source:     'donki',
+        });
+    }
+
+    return out
+        .filter(f => f.cls && f.time)
+        .sort((a, b) => b.time.getTime() - a.time.getTime())
+        .slice(0, 15);
 }
 
 // ── Normalisation helpers ─────────────────────────────────────────────────────
@@ -764,8 +858,9 @@ export class SpaceWeatherFeed {
         const raw = this._raw;
         const d   = derivedFields(raw);
 
-        // Detect new M/X flare
-        const topFlare   = raw.recent_flares[0] ?? null;
+        // Detect new M/X flare — use merged flares so DONKI-only events also trigger
+        const flares     = mergeFlares(raw.recent_flares, raw.donki_flares);
+        const topFlare   = flares[0] ?? null;
         const flareKey   = topFlare ? `${topFlare.cls}|${topFlare.time?.toISOString()}` : null;
         const newMajor   = !!(
             topFlare &&
@@ -801,7 +896,8 @@ export class SpaceWeatherFeed {
             flare_location: raw.flare_location ?? null,
             flare_watts:    raw.flare_watts  ?? 1e-8,
             active_regions: raw.active_regions ?? [],
-            recent_flares:  raw.recent_flares  ?? [],
+            flares,                             // unified NOAA+DONKI, deduped by peak time
+            recent_flares:  raw.recent_flares  ?? [],   // raw NOAA source (backward compat)
             derived:        d,
             status:         this.status,
             lastUpdated:    this.lastUpdated,
