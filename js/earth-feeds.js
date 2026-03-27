@@ -28,7 +28,10 @@ async function fetchEarthquakes() {
         const gj = await res.json();
 
         const quakes = (gj.features ?? [])
-            .filter(f => f.properties.mag >= 2.5 && f.geometry)
+            .filter(f =>
+                f.properties?.mag >= 2.5 &&
+                f.geometry?.coordinates?.length >= 3
+            )
             .map(f => ({
                 id:    f.id,
                 lat:   f.geometry.coordinates[1],
@@ -66,8 +69,9 @@ async function fetchISS() {
             timestamp: new Date(),
         });
     } catch (err) {
-        // ISS API can be flaky; fail silently so it doesn't spam the console
+        // ISS API can be flaky; debug-log but surface status event so UI can react
         console.debug('[EarthFeeds] ISS fetch failed:', err.message);
+        _dispatch('feeds-status', { source: 'ISS', status: 'error', error: err.message });
     }
 }
 

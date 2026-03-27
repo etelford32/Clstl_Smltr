@@ -140,16 +140,24 @@ function parseLocation(loc) {
 
 /** Direct browser→NOAA fetch (CORS enabled; WAF only blocks server-side). */
 async function fetchNoaa(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`NOAA ${url} → HTTP ${res.status}`);
-    return res.json();
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`NOAA HTTP ${res.status} — ${url}`);
+    try {
+        return await res.json();
+    } catch (e) {
+        throw new Error(`NOAA bad JSON from ${url}: ${e.message}`);
+    }
 }
 
 /** Edge function fetch (DONKI only — NASA key stays server-side). */
 async function fetchEdge(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${url} → HTTP ${res.status}`);
-    return res.json();
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Edge HTTP ${res.status} — ${url}`);
+    try {
+        return await res.json();
+    } catch (e) {
+        throw new Error(`Edge bad JSON from ${url}: ${e.message}`);
+    }
 }
 
 // ── 2D-array helpers (NOAA "CSV-in-JSON" format used by several endpoints) ───
@@ -223,12 +231,16 @@ async function fetchXray(state) {
     } else {
         rows = raw.filter(r => r && typeof r === 'object');
     }
-    // Filter to long-band rows if a wavelength/band column exists
-    const hasWl = rows[0] && ('wavelength' in rows[0] || 'band' in rows[0]);
-    const longBand = hasWl
+    // Filter to long-band (0.1–0.8 nm) rows; NOAA uses 'energy', 'wavelength', or 'band'
+    const bandKey = rows[0] && (
+        'energy'     in rows[0] ? 'energy'     :
+        'wavelength' in rows[0] ? 'wavelength' :
+        'band'       in rows[0] ? 'band'        : null
+    );
+    const longBand = bandKey
         ? rows.filter(r => {
-            const w = String(r.wavelength ?? r.band ?? '');
-            return w.includes('0.1') || w.includes('long') || w.includes('1-8');
+            const w = String(r[bandKey] ?? '').toLowerCase();
+            return w.includes('0.1') || w.includes('long') || w.includes('1-8') || w.includes('0.8');
           })
         : rows;
     const candidates = longBand.length > 0 ? longBand : rows;
@@ -264,11 +276,11 @@ async function fetchProtons(state) {
         if (!byEnergy[e] || r.time_tag > byEnergy[e].time_tag) byEnergy[e] = { flux: fl, time_tag: r.time_tag };
     }
 
-    // Map energy labels to state fields
+    // Map energy labels to state fields — NOAA uses formats like ">=10 MeV", "P10", "10 MeV"
     for (const [energy, val] of Object.entries(byEnergy)) {
-        if (/>=?\s*10\s*MeV/i.test(energy))  state.proton_flux_10mev  = val.flux;
-        if (/>=?\s*50\s*MeV/i.test(energy))  { /* 50 MeV stored in diff slot if needed */ }
-        if (/>=?\s*100\s*MeV/i.test(energy)) state.proton_flux_100mev = val.flux;
+        const e = energy.toLowerCase().replace(/\s/g, '');
+        if (/p10$|>=?10m|^10m/.test(e))  state.proton_flux_10mev  = val.flux;
+        if (/p100$|>=?100m|^100m/.test(e)) state.proton_flux_100mev = val.flux;
     }
 
     // S-scale SEP storm level based on >=10 MeV channel
@@ -290,8 +302,8 @@ async function fetchElectrons(state) {
 
     let latest2mev = null;
     for (const r of rows) {
-        const e  = String(r.energy ?? r.channel ?? '');
-        if (!/2\.0|>2/i.test(e)) continue;
+        const e  = String(r.energy ?? r.channel ?? '').toLowerCase().replace(/\s/g, '');
+        if (!/e2$|>=?2\.?0?m|^2\.?0?m/.test(e)) continue;
         const fl = noaaFill(r.flux);
         if (fl == null) continue;
         if (!latest2mev || r.time_tag > latest2mev.time_tag) latest2mev = { flux: fl, time_tag: r.time_tag };
@@ -488,9 +500,8 @@ async function fetchDONKIGST(state) {
         g_scale:    g.g_scale    ?? 0,
         linked_cme: g.linked_cme ?? false,
     }));
-    state.current_gst = json?.data?.current_storm
-        ? { ...json.data.current_storm, start_time: new Date(json.data.current_storm.start_time ?? 0) }
-        : null;
+    const cs = json?.data?.current_storm ?? null;
+    state.current_gst = cs ? { ...cs, start_time: new Date(cs.start_time ?? 0) } : null;
 }
 
 async function fetchDONKISEP(state) {
@@ -503,9 +514,8 @@ async function fetchDONKISEP(state) {
         linked_flare: s.linked_flare ?? false,
         linked_cme:   s.linked_cme   ?? false,
     }));
-    state.recent_sep_event      = json?.data?.recent_event
-        ? { ...json.data.recent_event, event_time: new Date(json.data.recent_event.event_time ?? 0) }
-        : null;
+    const re = json?.data?.recent_event ?? null;
+    state.recent_sep_event = re ? { ...re, event_time: new Date(re.event_time ?? 0) } : null;
     state.radiation_storm_active = json?.data?.radiation_storm_active ?? false;
 }
 
