@@ -293,6 +293,59 @@ nav {
 }
 .cv-btn:hover { background: rgba(0,200,255,.15); border-color:#00c6ff; }
 
+/* ─── Panel minimize / drag chrome ──────────────────────────────── */
+.panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; padding-bottom: 2px;
+}
+.panel-header h3 { margin: 0; flex: 1; }
+.panel-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.panel-btn {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 4px; color: #6a8a9a; cursor: pointer; font-size: 11px;
+    width: 22px; height: 22px; display: flex; align-items: center;
+    justify-content: center; padding: 0; touch-action: manipulation;
+    transition: background .15s, color .15s; flex-shrink: 0; line-height: 1;
+}
+.panel-btn:hover { background: rgba(0,200,255,.15); color: #00c6ff; }
+.panel-body { overflow: hidden; transition: max-height .3s ease, opacity .25s; }
+.panel-minimized .panel-body { max-height: 0 !important; opacity: 0; }
+
+/* Data source status badges */
+.ds-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; padding: 2px 6px; border-radius: 3px;
+    font-weight: 600; letter-spacing: .3px;
+}
+.ds-badge.ok      { background: rgba(0,255,136,.08); color: #00ff88; border: 1px solid rgba(0,255,136,.2); }
+.ds-badge.fetching{ background: rgba(255,200,0,.08);  color: #ffcc00; border: 1px solid rgba(255,200,0,.2); }
+.ds-badge.error   { background: rgba(255,50,50,.08);  color: #ff5555; border: 1px solid rgba(255,50,50,.2); }
+
+/* Earthquake info popup */
+#eq-popup {
+    position: absolute; z-index: 90; pointer-events: none;
+    background: rgba(0,0,0,.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,100,0,.4); border-radius: 8px;
+    padding: 9px 12px; font-size: 11px; max-width: 200px;
+    line-height: 1.55; opacity: 0; transition: opacity .15s;
+    white-space: nowrap;
+}
+#eq-popup.show { opacity: 1; pointer-events: none; }
+.eq-mag  { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+.eq-place{ color: #aac; font-size: 10px; }
+.eq-meta { color: #556; font-size: 9px; margin-top: 3px; }
+
+/* ISS info overlay (fixed top-center on mobile) */
+#iss-hud {
+    display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(0,200,255,.25); border-radius: 7px;
+    padding: 5px 12px; font-size: 10px; z-index: 55; pointer-events: none;
+    white-space: nowrap; color: #a0d8f0;
+}
+#iss-hud.visible { display: block; }
+#iss-hud strong  { color: #00ffcc; }
+
 /* ─── Panel close buttons ────────────────────────────────────────── */
 .panel-close {
     display: none; position: absolute; top: 10px; right: 10px;
@@ -549,8 +602,14 @@ nav {
     <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="bottom:16px;right:12px;">⚡ Weather</a>
 
     <div id="layer-panel">
-        <button class="panel-close" data-close="layer-panel">✕</button>
-        <h3>Layers</h3>
+        <div class="panel-header" data-minimize="layer-panel">
+            <h3>Layers</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="layer-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="layer-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
         <div class="lyr-grid">
         <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
@@ -567,18 +626,23 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Rad. Belts</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
         </div>
+    </div>
     </div>
 
     <!-- Info panel — Space Weather HUD -->
     <div id="info-panel">
-        <button class="panel-close" data-close="info-panel">✕</button>
-
-        <!-- Header row: title + G-scale badge -->
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;">
+        <div class="panel-header" data-minimize="info-panel">
             <h3>Space Weather</h3>
-            <span class="g-badge" id="ip-g-badge">Quiet</span>
+            <div class="panel-actions">
+                <span class="g-badge" id="ip-g-badge" style="margin-right:2px;">Quiet</span>
+                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="info-panel" title="Close">✕</button>
+            </div>
         </div>
+        <div class="panel-body">
 
         <!-- Kp gauge -->
         <div style="margin-bottom:7px;">
@@ -697,14 +761,19 @@ nav {
             <a href="space-weather.html" style="color:#00c6ff;text-decoration:none;">→ Full space weather dashboard</a>
         </div>
 
-    </div>
+    </div><!-- /panel-body -->
+    </div><!-- /info-panel -->
 
     <!-- Weather analysis panel -->
     <div id="wx-panel">
-        <button class="panel-close" data-close="wx-panel">✕</button>
-        <h3>
-            <span id="wx-status-dot" class="offline"></span>Weather Analysis
-        </h3>
+        <div class="panel-header" data-minimize="wx-panel">
+            <h3><span id="wx-status-dot" class="offline"></span>Weather Analysis</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="wx-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="wx-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <hr class="ir-sep">
@@ -765,7 +834,8 @@ nav {
                 <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
             </div>
         </div>
-    </div>
+    </div><!-- /panel-body -->
+    </div><!-- /wx-panel -->
 
     <!-- Panel backdrop (mobile tap-to-close) -->
     <div id="panel-backdrop"></div>
@@ -785,6 +855,16 @@ nav {
             <span class="mtb-icon">⚡</span>Full Data
         </a>
     </div>
+
+    <!-- Earthquake info popup -->
+    <div id="eq-popup">
+        <div class="eq-mag" id="eq-mag">M—</div>
+        <div class="eq-place" id="eq-place">—</div>
+        <div class="eq-meta" id="eq-meta">—</div>
+    </div>
+
+    <!-- ISS info overlay -->
+    <div id="iss-hud"></div>
 
     <!-- Alert hover tooltip -->
     <div id="alert-tip">
@@ -831,6 +911,7 @@ import {
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
 import { initScaleNav } from './js/scale-nav.js';
+import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -1138,7 +1219,7 @@ void main() {
 // ═══════════════════════════════════════════════════════════════
 const canvas   = document.getElementById('c');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(devicePixelRatio, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene  = new THREE.Scene();
@@ -1613,6 +1694,12 @@ document.getElementById('lyr-wind').addEventListener('change', e => {
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
 });
+document.getElementById('lyr-earthquakes').addEventListener('change', e => {
+    eqMarkers.setVisible(e.target.checked);
+});
+document.getElementById('lyr-iss').addEventListener('change', e => {
+    issMarker.setVisible(e.target.checked);
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR WIND PARTICLES
@@ -2031,6 +2118,169 @@ class AlertMarkers {
 
 const alertMarkers = new AlertMarkers(earthMesh);
 
+// ═══════════════════════════════════════════════════════════════
+//  EARTHQUAKE MARKERS  (InstancedMesh — single draw call)
+// ═══════════════════════════════════════════════════════════════
+class EarthquakeMarkers {
+    constructor(parentMesh) {
+        this._quakes  = [];
+        this._count   = 0;
+        this._visible = true;
+        this._dummy   = new THREE.Object3D();
+        const geo = new THREE.SphereGeometry(1, 7, 7);
+        const mat = new THREE.MeshBasicMaterial({
+            transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._mesh = new THREE.InstancedMesh(geo, mat, 300);
+        this._mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        this._mesh.count = 0;
+        this._mesh.renderOrder = 10;
+        parentMesh.add(this._mesh);   // child of earthMesh → rotates with globe
+    }
+
+    update(quakes) {
+        this._quakes = quakes;
+        const n = Math.min(quakes.length, 300);
+        this._mesh.count = n;
+        for (let i = 0; i < n; i++) {
+            const q   = quakes[i];
+            const pos = geoToXYZ(q.lat, q.lon).multiplyScalar(1.005);
+            const r   = eqMarkerRadius(q.mag);
+            this._dummy.position.copy(pos);
+            this._dummy.scale.setScalar(r);
+            this._dummy.updateMatrix();
+            this._mesh.setMatrixAt(i, this._dummy.matrix);
+            this._mesh.setColorAt(i, eqMagColorTHREE(THREE, q.mag));
+        }
+        this._mesh.instanceMatrix.needsUpdate = true;
+        if (this._mesh.instanceColor) this._mesh.instanceColor.needsUpdate = true;
+        this._count = n;
+    }
+
+    tick(t) {
+        if (this._mesh) this._mesh.material.opacity = 0.55 + Math.sin(t * 2.5) * 0.3;
+    }
+
+    setVisible(v) { this._visible = v; if (this._mesh) this._mesh.visible = v; }
+
+    getHovered(raycaster) {
+        if (!this._mesh || !this._visible || this._count === 0) return null;
+        const hits = raycaster.intersectObject(this._mesh);
+        if (!hits.length) return null;
+        const idx = hits[0].instanceId;
+        return (idx != null && idx < this._quakes.length) ? this._quakes[idx] : null;
+    }
+}
+
+const eqMarkers = new EarthquakeMarkers(earthMesh);
+const _eqPopup  = document.getElementById('eq-popup');
+let   _eqHovered = null;
+
+function _showEqPopup(q, cx, cy) {
+    const r = renderer.domElement.getBoundingClientRect();
+    document.getElementById('eq-mag').textContent   = `M${q.mag.toFixed(1)}`;
+    document.getElementById('eq-mag').style.color   = `#${eqMagColorTHREE(THREE, q.mag).getHexString()}`;
+    document.getElementById('eq-place').textContent = q.place;
+    const depthStr = `${Math.round(q.depth)} km depth · `;
+    const timeStr  = q.time.toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    document.getElementById('eq-meta').textContent  = depthStr + timeStr;
+    _eqPopup.style.left = `${Math.min(cx - r.left + 12, r.width - 210)}px`;
+    _eqPopup.style.top  = `${Math.max(cy - r.top  - 8, 8)}px`;
+    _eqPopup.classList.add('show');
+    _eqHovered = q;
+}
+function _hideEqPopup() { _eqPopup?.classList.remove('show'); _eqHovered = null; }
+
+// ═══════════════════════════════════════════════════════════════
+//  ISS MARKER
+// ═══════════════════════════════════════════════════════════════
+class ISSMarker {
+    constructor(scene) {
+        this._lat = null; this._lon = null; this._alt = 408;
+        this._vel = 27600; this._visible = true;
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x00ffcc, transparent: true, opacity: 0.92,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._sphere = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), mat);
+        this._sphere.visible = false;
+        this._sphere.renderOrder = 11;
+        scene.add(this._sphere);
+
+        // Simple equatorial orbit ring as orientation reference
+        const pts = [];
+        const rOrb = 1.0 + 408 / 6371;
+        for (let i = 0; i <= 64; i++) {
+            const a = (i / 64) * Math.PI * 2;
+            pts.push(new THREE.Vector3(Math.cos(a) * rOrb, 0, Math.sin(a) * rOrb));
+        }
+        const trailGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        this._trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
+            color: 0x005544, transparent: true, opacity: 0.22,
+        }));
+        this._trail.rotation.x = 51.6 * Math.PI / 180;  // ISS inclination
+        this._trail.visible = false;
+        scene.add(this._trail);
+    }
+
+    update(data) {
+        this._lat = data.lat; this._lon = data.lon;
+        this._alt = data.alt ?? 408; this._vel = data.vel ?? 27600;
+        const hud = document.getElementById('iss-hud');
+        if (hud) {
+            hud.classList.add('visible');
+            hud.innerHTML = `<strong>ISS</strong> · Alt: ${Math.round(this._alt)} km · ` +
+                `${(this._vel / 1).toFixed(0)} km/h · ` +
+                `${fmtLat(this._lat)}, ${fmtLon(this._lon)}`;
+        }
+    }
+
+    tick() {
+        if (this._lat == null || !this._visible) return;
+        const r        = 1.0 + this._alt / 6371;
+        const localPos = geoToXYZ(this._lat, this._lon).multiplyScalar(r);
+        const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
+        this._sphere.position.copy(worldPos);
+        this._sphere.visible = true;
+        this._trail.visible  = true;
+    }
+
+    setVisible(v) {
+        this._visible = v;
+        if (!v) {
+            this._sphere.visible = false;
+            this._trail.visible  = false;
+            const hud = document.getElementById('iss-hud');
+            if (hud) hud.classList.remove('visible');
+        }
+    }
+}
+
+const issMarker = new ISSMarker(scene);
+
+// ── EarthFeeds: USGS earthquakes + ISS position ───────────────────────────────
+const earthFeeds = new EarthFeeds().start();
+
+window.addEventListener('earthquake-update', e => {
+    eqMarkers.update(e.detail);
+}, { passive: true });
+
+window.addEventListener('iss-update', e => {
+    issMarker.update(e.detail);
+}, { passive: true });
+
+// ── EarthFeeds status badges ──────────────────────────────────────────────────
+const _eqBadge = document.createElement('span');
+_eqBadge.title = 'USGS earthquake data';
+_eqBadge.style.cssText = 'position:absolute;bottom:4px;right:10px;font-size:9px;color:#446;';
+window.addEventListener('feeds-status', e => {
+    const d = e.detail;
+    if (d.source === 'USGS') {
+        _eqBadge.textContent = d.status === 'ok' ? `EQ: ${d.count}` : `EQ: ${d.status}`;
+    }
+}, { passive: true });
+
 // Alert tooltip element
 const alertTipEl  = document.getElementById('alert-tip');
 let   _alertTipShowing = false;
@@ -2211,6 +2461,16 @@ renderer.domElement.addEventListener('mousemove', e => {
     const alertRay = new THREE.Raycaster();
     alertRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
 
+    // Intersect earthquake markers first (higher priority)
+    const eqHovered = eqMarkers.getHovered(alertRay);
+    if (eqHovered) {
+        _showEqPopup(eqHovered, e.clientX, e.clientY);
+        hideAlertTip();
+        return;
+    } else {
+        _hideEqPopup();
+    }
+
     // Intersect alert dots (must account for earthMesh rotation)
     const hovered = alertMarkers.getHovered(alertRay);
     if (hovered) {
@@ -2219,7 +2479,7 @@ renderer.domElement.addEventListener('mousemove', e => {
         hideAlertTip();
     }
 });
-renderer.domElement.addEventListener('mouseleave', hideAlertTip);
+renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); });
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATE
@@ -2292,6 +2552,12 @@ function animate() {
 
     // ── Alert marker pulse
     alertMarkers.tick(t);
+
+    // ── Earthquake markers pulse
+    eqMarkers.tick(t);
+
+    // ── ISS position update (world-space, depends on earthMesh.rotation)
+    issMarker.tick();
 
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
@@ -2542,6 +2808,61 @@ document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
 
 // Backdrop tap → close
 _backdrop.addEventListener('click', _closeMobilePanel);
+
+// ═══════════════════════════════════════════════════════════════
+//  PANEL MINIMIZE
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
+    btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const id    = btn.dataset.minimizeBtn;
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const minimized = panel.classList.toggle('panel-minimized');
+        btn.textContent = minimized ? '▸' : '▾';
+        try { localStorage.setItem('earth-panel-min-' + id, minimized ? '1' : '0'); } catch {}
+    });
+});
+
+// Restore minimized states on load
+['layer-panel', 'info-panel', 'wx-panel'].forEach(id => {
+    try {
+        if (localStorage.getItem('earth-panel-min-' + id) === '1') {
+            const panel = document.getElementById(id);
+            if (!panel) return;
+            panel.classList.add('panel-minimized');
+            const btn = panel.querySelector('[data-minimize-btn]');
+            if (btn) btn.textContent = '▸';
+        }
+    } catch {}
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MOBILE SWIPE-DOWN TO CLOSE PANELS
+// ═══════════════════════════════════════════════════════════════
+(function() {
+    let _swipeY = null;
+    document.querySelectorAll('#layer-panel, #info-panel, #wx-panel').forEach(panel => {
+        panel.addEventListener('touchstart', e => {
+            _swipeY = e.touches[0].clientY;
+        }, { passive: true });
+        panel.addEventListener('touchmove', e => {
+            if (_swipeY == null) return;
+            if (e.touches[0].clientY - _swipeY > 60) {
+                _closeMobilePanel();
+                _swipeY = null;
+            }
+        }, { passive: true });
+        panel.addEventListener('touchend', () => { _swipeY = null; }, { passive: true });
+    });
+})();
+
+// ═══════════════════════════════════════════════════════════════
+//  VISIBILITY API — pause rendering when tab is hidden
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clock.stop(); else clock.start();
+});
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
