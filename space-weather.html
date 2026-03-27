@@ -670,7 +670,9 @@ nav {
         <div class="helio-live-hud">
             <span class="hl">Wind</span><span class="hv" id="h3d-speed">–</span> km/s &nbsp;
             <span class="hl">Bz</span><span class="hv" id="h3d-bz">–</span> nT &nbsp;
-            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span>
+            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span> &nbsp;
+            <span class="hl">r</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
+            <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min
         </div>
         <!-- Controls hint -->
         <div class="helio-hint">
@@ -1067,6 +1069,7 @@ import { SohoFeed }          from './js/extended-feeds.js';
 import { NasaFeed }          from './js/nasa-feed.js';
 import { Heliosphere3D }     from './js/heliosphere3d.js';
 import { EphemerisService }    from './js/horizons.js';
+import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 
@@ -1485,6 +1488,18 @@ window.addEventListener('soho-update', e => {
     }
 });
 
+// ── Helio-state HUD — r_AU and propagation delay ─────────────────────────────
+window.addEventListener('helio-state-update', e => {
+    const hs = e.detail;
+    const rEl    = el('h3d-rau');
+    const delEl  = el('h3d-delay');
+    const spdEl  = el('h3d-speed');
+    if (rEl   && hs.r_AU     != null) rEl.textContent   = hs.r_AU.toFixed(3);
+    if (delEl && hs.delay_min != null) delEl.textContent = hs.delay_min.toFixed(1);
+    // Override wind speed HUD with Parker-corrected value
+    if (spdEl && hs.v_sw     != null) spdEl.textContent = Math.round(hs.v_sw);
+});
+
 // ── Start all feeds ───────────────────────────────────────────────────────────
 // SpaceWeatherFeed now owns all NOAA + DONKI polling via tiered edge routes.
 // NasaFeed is a legacy shim that forwards swpc-update → nasa-update for any
@@ -1505,6 +1520,11 @@ try {
 
 // ── Ephemeris — real planet positions for the heliosphere canvas ──────────────
 new EphemerisService().startLive(120);
+
+// ── Heliospheric state bridge (Parker-corrected solar wind at Earth's position) ──
+// Listens to ephemeris-ready + swpc-update; fires helio-state-update consumed by
+// Heliosphere3D._tickWind() for physically-correct distance-scaled wind rendering.
+new SolarWindState().start();
 
 // ── 3D Heliosphere hero (inner solar system, Three.js) ───────────────────────
 // Heliosphere3D: 3D Parker spiral solar wind, real ephemeris planetary orbits,
