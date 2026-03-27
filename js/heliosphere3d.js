@@ -32,6 +32,7 @@
 import * as THREE from 'three';
 import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
+import { FlareRing3D }         from './flare-ring.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -148,8 +149,8 @@ export class Heliosphere3D {
         // CME animation
         this._cme      = null;    // null | { mesh, r_AU, auPerFrame }
 
-        // Flare animation
-        this._flare    = null;    // null | { mesh, life, maxLife }
+        // Flare animation (FlareRing3D — lazily constructed after scene is built)
+        this._flare3d  = null;
         this._lastXray = '';
 
         // Three.js objects (set by _build*)
@@ -1078,67 +1079,13 @@ export class Heliosphere3D {
     // ── Flare ─────────────────────────────────────────────────────────────────
 
     _triggerFlare(extreme = false) {
-        if (this._flare) {
-            this._scene.remove(this._flare.ring);
-            this._scene.remove(this._flare.flash);
-            this._flare.ring.geometry.dispose();
-            this._flare.ring.material.dispose();
-            this._flare.flash.geometry.dispose();
-            this._flare.flash.material.dispose();
-        }
-        const col = extreme ? 0xffffff : 0xffdd44;
-
-        // Expanding ring on sun surface
-        const ring = new THREE.Mesh(
-            new THREE.RingGeometry(0.01, 0.12, 32),
-            new THREE.MeshBasicMaterial({
-                color: col, transparent: true, opacity: 0.9,
-                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
-            })
-        );
-        ring.position.set(R.sun * 0.78, R.sun * 0.55, 0);   // AR-like placement
-        ring.lookAt(new THREE.Vector3(0, 0, 30));
-        ring.renderOrder = 5;
-        this._scene.add(ring);
-
-        // Bright flash sphere
-        const flash = new THREE.Mesh(
-            new THREE.SphereGeometry(R.sun * 0.18, 12, 12),
-            new THREE.MeshBasicMaterial({
-                color: col, transparent: true, opacity: 0.7,
-                blending: THREE.AdditiveBlending, depthWrite: false,
-            })
-        );
-        flash.position.copy(ring.position);
-        flash.renderOrder = 5;
-        this._scene.add(flash);
-
-        const maxLife = extreme ? 6.0 : 4.0;
-        this._flare = { ring, flash, life: 0, maxLife };
+        if (!this._flare3d)
+            this._flare3d = new FlareRing3D(this._scene, THREE, R.sun);
+        this._flare3d.trigger(extreme);
     }
 
     _tickFlare(dt) {
-        if (!this._flare) return;
-        const f = this._flare;
-        f.life += dt;
-        const p = f.life / f.maxLife;    // 0 → 1
-        if (p >= 1) {
-            this._scene.remove(f.ring);
-            this._scene.remove(f.flash);
-            f.ring.geometry.dispose();
-            f.ring.material.dispose();
-            f.flash.geometry.dispose();
-            f.flash.material.dispose();
-            this._flare = null;
-            return;
-        }
-        // Ring expands and fades
-        const ringScale = 1 + p * 8;
-        f.ring.scale.setScalar(ringScale);
-        f.ring.material.opacity = (1 - p) * 0.9;
-        // Flash: bright then fade quickly
-        f.flash.material.opacity = p < 0.25 ? 0.7 : 0.7 * (1 - (p - 0.25) / 0.75);
-        f.flash.scale.setScalar(1 + p * 1.5);
+        this._flare3d?.tick(dt);
     }
 
     // ── Ephemeris positions ───────────────────────────────────────────────────

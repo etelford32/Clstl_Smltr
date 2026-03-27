@@ -425,61 +425,6 @@ export class SolarLiveCanvas {
         ctx.restore();
     }
 
-    // ── Flare burst animations ─────────────────────────────────────────────────
-
-    _drawFlares(ctx, cx, cy, R) {
-        this._flareAnims = this._flareAnims.filter(f => f.t < f.duration);
-
-        const CLS_COL = {
-            A: [130,255,130], B: [55,190,255],
-            C: [255,245,70],  M: [255,140,35],
-            X: [255,35,35],
-        };
-
-        this._flareAnims.forEach(f => {
-            const { x, y } = this._project(f.lat, f.lon);
-            const prog      = f.t / f.duration;
-            const [r, g, b] = CLS_COL[f.cls] ?? [255,200,100];
-
-            // Expanding wavefront ring from source
-            const ringR = R * 1.3 * prog;
-            const ringA = (1 - prog) * 0.75;
-            ctx.beginPath();
-            ctx.arc(x, y, ringR, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(${r},${g},${b},${ringA})`;
-            ctx.lineWidth   = 1.5 + (1 - prog) * 2.5;
-            ctx.stroke();
-
-            // CME global shock ring (M/X only — centred on disk)
-            if (f.cls === 'X' || f.cls === 'M') {
-                const cmeR = R * (1.05 + prog * 2.8);
-                const cmeA = Math.max(0, 1 - prog) * 0.28;
-                ctx.beginPath();
-                ctx.arc(cx, cy, cmeR, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(${r},${g},${b},${cmeA})`;
-                ctx.lineWidth   = 1;
-                ctx.stroke();
-            }
-
-            // Bright flash at source (first 30% of lifetime)
-            if (prog < 0.3) {
-                const fp    = prog / 0.3;
-                const fR    = R * 0.14 * (1 - fp * 0.55);
-                const fA    = 1 - fp;
-                const flash = ctx.createRadialGradient(x, y, 0, x, y, fR);
-                flash.addColorStop(0,   `rgba(255,255,255,${fA * 0.95})`);
-                flash.addColorStop(0.35,`rgba(${r},${g},${b},${fA * 0.6})`);
-                flash.addColorStop(1,   'rgba(255,255,255,0)');
-                ctx.beginPath();
-                ctx.arc(x, y, fR, 0, Math.PI * 2);
-                ctx.fillStyle = flash;
-                ctx.fill();
-            }
-
-            f.t++;
-        });
-    }
-
     // ── Solar wind particles (Parker-spiral geometry) ─────────────────────────
 
     _drawParticles(ctx, cx, cy, R, behindSun) {
