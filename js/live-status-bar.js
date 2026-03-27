@@ -294,9 +294,11 @@ function updateBar(d) {
     if (kp != null && kp >= 5) bar.classList.add('lsb-storm');
     else bar.classList.remove('lsb-storm');
 
-    // Timestamp
-    const ts = d.lastUpdated ? new Date(d.lastUpdated) : new Date();
-    updatedEl.textContent = 'Updated ' + ts.toISOString().slice(11, 16) + ' UTC';
+    // Timestamp — show local browser time, with UTC in parentheses
+    const ts       = d.lastUpdated ? new Date(d.lastUpdated) : new Date();
+    const localStr = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
+    const utcStr   = ts.toISOString().slice(11, 16) + ' UTC';
+    updatedEl.textContent = 'Updated ' + localStr + ' (' + utcStr + ')';
 }
 
 // ── Auto-start: if no swpc-update fires within 2.5 s, start our own feed ─────
