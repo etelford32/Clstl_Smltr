@@ -1190,8 +1190,9 @@ if (_navBurger && _navMenu) {
 
 <!-- ══════════════════════════════ EXTENDED FEEDS (Horizons · NEO · SOHO) ═══ -->
 <script type="module">
-import { SohoFeed, HorizonsFeed, NeoFeed, SOHO_IMAGES, STEREO_IMAGES }
-    from './js/extended-feeds.js';
+import { SohoFeed, SOHO_IMAGES, STEREO_IMAGES } from './js/soho-feed.js';
+import { HorizonsFeed }                        from './js/horizons-extended.js';
+import { NeoFeed }                             from './js/neo-feed.js';
 
 // ── SOHO / SDO image strip ────────────────────────────────────────────────────
 const SOHO_LABELS = {
