@@ -921,6 +921,7 @@ initScaleNav('earth');
 // ═══════════════════════════════════════════════════════════════
 const R_EARTH  = 1.0;
 const R_CLOUDS = 1.009;   // cloud shell just above surface
+const R_STRAT  = 1.015;   // stratosphere haze (between clouds and outer atm)
 const R_ATM    = 1.026;   // atmosphere rim sphere
 const TWO_PI   = Math.PI * 2;
 const DEG      = Math.PI / 180;
@@ -1110,7 +1111,7 @@ void main() {
 
     // ── Weather temperature overlay ───────────────────────────
     if (u_weather_on > 0.5) {
-        base = mix(base, weatherOverlay(vUv), 0.50);
+        base = mix(base, weatherOverlay(vUv), 0.28);
     }
 
     // ── Aurora (night & twilight side only) ───────────────────
@@ -1147,10 +1148,18 @@ void main() {
         base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
     }
 
-    // ── Very faint earthshine fill on night side ──────────────
-    float ambient = 0.035;
-    float lit = max(NdotL, 0.0) * (1.0 - ambient) + ambient;
+    // ── Improved diffuse: half-Lambert keeps oblique-lit land bright ──
+    // Half-Lambert: remap [-1,1]→[0,1], then square for gentle contrast.
+    // At NdotL=0.3 (N. America, mid-lat): old=32%, new=42% brightness.
+    float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
+    float diffuse  = halfLamb * halfLamb;
+    // Night-side ambient earthshine (reflected moonlight / city scatter)
+    float lit = mix(0.07, diffuse, dayMix);
     base *= lit;
+
+    // ── Terminator twilight warm glow (orange band at dawn/dusk) ──
+    float termZone = smoothstep(-0.08, 0.0, NdotL) * smoothstep(0.18, 0.06, NdotL);
+    base += vec3(0.55, 0.25, 0.04) * termZone * 0.22;
 
     gl_FragColor = vec4(base, 1.0);
 }`;
@@ -1169,19 +1178,47 @@ void main() {
 const cloudFS = /* glsl */`
 precision mediump float;
 uniform sampler2D u_clouds;
+uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity
 uniform vec3  u_sun_dir;
 uniform float u_time;
+uniform float u_weather_on;
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 void main() {
-    vec3  N   = normalize(vWorldNormal);
-    float lit = max(dot(N, u_sun_dir), 0.0);
-    // Slow westward drift
-    vec2  drift = vec2(u_time * 0.000065, 0.0);
-    float alpha  = texture2D(u_clouds, vUv + drift).r;
-    alpha = pow(alpha, 1.6) * 0.88;
-    // Shadowed on night side
-    vec3 col = mix(vec3(0.50, 0.58, 0.70), vec3(1.0), lit);
+    vec3  N     = normalize(vWorldNormal);
+    float NdotL = dot(N, u_sun_dir);
+    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);   // half-Lambert
+    lit = lit * lit;
+
+    // Two drift speeds: lower clouds slow, upper cirrus faster
+    vec2 driftLow  = vec2(u_time *  0.000055, u_time * 0.000008);
+    vec2 driftHigh = vec2(u_time *  0.000095, u_time * 0.000012);
+    float a0 = texture2D(u_clouds, vUv + driftLow ).r;
+    float a1 = texture2D(u_clouds, vUv + driftHigh).r * 0.55;
+    float alpha = pow(max(a0, a1), 1.4) * 0.90;
+
+    // Pressure modulation: low pressure (G near 0) → thicker/darker storm clouds,
+    // high pressure (G near 1) → thinner, fewer clouds.
+    if (u_weather_on > 0.5) {
+        float pressure = texture2D(u_weather, vUv).g;   // 0=low, 1=high
+        // Suppress clouds slightly in high-pressure regions
+        float clearFactor = mix(1.0, 0.55, pressure);
+        alpha *= clearFactor;
+        // In low-pressure cells, push clouds denser (storms)
+        float stormBoost  = max(0.0, 0.45 - pressure) * 2.2;
+        alpha = clamp(alpha + alpha * stormBoost, 0.0, 1.0);
+    }
+
+    // Dayside: bright white. Night underside: grey-blue shadow.
+    vec3 dayCol   = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
+    vec3 nightCol = vec3(0.26, 0.30, 0.40);
+    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
+    vec3  col     = mix(nightCol, dayCol, dayMix);
+
+    // Warm golden tint at terminator (sunrise/sunset through clouds)
+    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
+    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.35);
+
     gl_FragColor = vec4(col, alpha);
 }`;
 
@@ -1205,13 +1242,61 @@ varying vec3 vViewDir;
 void main() {
     vec3  N   = normalize(vWorldNormal);
     vec3  V   = normalize(vViewDir);
-    float rim = pow(1.0 - abs(dot(V, N)), 2.6);
-    float NdotL = dot(N, u_sun_dir);
-    // Rayleigh blue on day side, dim purple on night
-    vec3 day   = vec3(0.18, 0.46, 1.00);
-    vec3 night = vec3(0.04, 0.02, 0.10);
-    vec3 col   = mix(night, day, clamp(NdotL * 2.0 + 0.5, 0.0, 1.0));
-    gl_FragColor = vec4(col * rim, rim * 0.78);
+    // Rim strength: sharper falloff gives thinner atmospheric limb
+    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
+
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
+
+    // ── Rayleigh: blue daytime limb, dim purple night ──────────────
+    vec3 rayleighDay   = vec3(0.14, 0.42, 1.00);
+    vec3 rayleighNight = vec3(0.03, 0.01, 0.08);
+    vec3 rayleigh = mix(rayleighNight, rayleighDay, dayMix);
+
+    // ── Mie forward scattering: bright halo when viewing near sun ──
+    float LdotV  = dot(u_sun_dir, -V);               // 1 when looking at sun
+    float miePhase = 0.6 / pow(1.06 - 0.96 * LdotV, 1.5);  // Henyey-Greenstein
+    float mieRim = pow(1.0 - abs(dot(V, N)), 1.5) * miePhase * dayMix;
+    vec3  mie    = vec3(0.90, 0.82, 0.55) * mieRim * 0.35;
+
+    // ── Twilight: amber-orange band at terminator ───────────────────
+    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.25, 0.06, NdotL);
+    vec3  twilight = vec3(0.88, 0.42, 0.10) * termZone * rim * 1.8;
+
+    vec3 col = rayleigh * rim + mie + twilight;
+    float a  = rim * 0.72;
+    gl_FragColor = vec4(col, a);
+}`;
+
+// ═══════════════════════════════════════════════════════════════
+//  GLSL — STRATOSPHERE HAZE  (thin shell between clouds & atm rim)
+// ═══════════════════════════════════════════════════════════════
+const stratVS = /* glsl */`
+varying vec3 vWorldNormal;
+varying vec3 vViewDir;
+void main() {
+    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
+    vViewDir = normalize(cameraPosition - wp);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+const stratFS = /* glsl */`
+precision mediump float;
+uniform vec3 u_sun_dir;
+varying vec3 vWorldNormal;
+varying vec3 vViewDir;
+void main() {
+    vec3  N   = normalize(vWorldNormal);
+    vec3  V   = normalize(vViewDir);
+    // Thinner rim than outer atmosphere (sharper, denser haze band)
+    float rim    = pow(1.0 - abs(dot(V, N)), 4.0);
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = clamp(NdotL * 3.0 + 0.5, 0.0, 1.0);
+    // Pale violet-blue stratospheric haze
+    vec3 day   = vec3(0.16, 0.36, 0.78);
+    vec3 night = vec3(0.02, 0.01, 0.05);
+    vec3 col   = mix(night, day, dayMix);
+    gl_FragColor = vec4(col * rim, rim * 0.28);
 }`;
 
 // ═══════════════════════════════════════════════════════════════
@@ -1303,11 +1388,16 @@ const earthU = {
     u_dst_norm:     { value: 0.0 },    // ring current:  0 (quiet) → 1 (−200 nT)
 };
 const cloudU = {
-    u_clouds:  { value: null },
-    u_sun_dir: { value: SUN_EQ.clone() },
-    u_time:    { value: 0 },
+    u_clouds:     { value: null },
+    u_weather:    { value: null },   // shared with earthU.u_weather
+    u_sun_dir:    { value: SUN_EQ.clone() },
+    u_time:       { value: 0 },
+    u_weather_on: { value: 0.0 },
 };
 const atmU = {
+    u_sun_dir: { value: SUN_EQ.clone() },
+};
+const stratU = {
     u_sun_dir: { value: SUN_EQ.clone() },
 };
 
@@ -1334,6 +1424,14 @@ const cloudMat = new THREE.ShaderMaterial({
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
 scene.add(cloudMesh);
 
+const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
+const stratMat = new THREE.ShaderMaterial({
+    vertexShader: stratVS, fragmentShader: stratFS,
+    uniforms: stratU, transparent: true, depthWrite: false,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending,
+});
+scene.add(new THREE.Mesh(stratGeo, stratMat));
+
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
     vertexShader: atmVS, fragmentShader: atmFS,
@@ -1355,6 +1453,8 @@ earthU.u_weather.value = new THREE.DataTexture(
     THREE.RGBAFormat, THREE.FloatType
 );
 earthU.u_weather.value.needsUpdate = true;
+// Share the same DataTexture with cloud shader for pressure-modulated clouds
+cloudU.u_weather.value = earthU.u_weather.value;
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -1381,8 +1481,8 @@ for (let lon = -180; lon < 180; lon += 10) {
     const lats = [], lons = [];
     for (let lat = -90; lat <= 90; lat += 2) { lats.push(lat); lons.push(lon); }
     const major = lon % 30 === 0;
-    const col   = lon === 0 ? 0xffd700 : (major ? 0x2a5080 : 0x112030);
-    const opc   = lon === 0 ? 0.8 : (major ? 0.45 : 0.18);
+    const col   = lon === 0 ? 0xffd700 : (major ? 0x2a5080 : 0x152535);
+    const opc   = lon === 0 ? 0.8 : (major ? 0.55 : 0.25);
     gridGroup.add(latLonLine(lats, lons, col, opc));
 }
 
@@ -1391,8 +1491,8 @@ for (let lat = -80; lat <= 80; lat += 10) {
     const lats = [], lons = [];
     for (let lon = 0; lon <= 360; lon += 2) { lats.push(lat); lons.push(lon); }
     const major = lat % 30 === 0;
-    const col   = lat === 0 ? 0x00c6ff : (major ? 0x2a5080 : 0x112030);
-    const opc   = lat === 0 ? 0.8 : (major ? 0.45 : 0.18);
+    const col   = lat === 0 ? 0x00c6ff : (major ? 0x2a5080 : 0x152535);
+    const opc   = lat === 0 ? 0.8 : (major ? 0.55 : 0.25);
     gridGroup.add(latLonLine(lats, lons, col, opc));
 }
 scene.add(gridGroup);
@@ -1686,7 +1786,9 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
     tropicGroup.visible = e.target.checked;
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
-    earthU.u_weather_on.value = e.target.checked ? 1.0 : 0.0;
+    const v = e.target.checked ? 1.0 : 0.0;
+    earthU.u_weather_on.value = v;
+    cloudU.u_weather_on.value = v;   // sync cloud pressure modulation
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
