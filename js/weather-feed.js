@@ -90,6 +90,7 @@ export class WeatherFeed {
         } catch (err) {
             console.warn('[WeatherFeed] Falling back to procedural data:', err.message);
             this._buildProcedural();
+            this._meta.loaded    = false;
             this._meta.source    = 'procedural (GFS unavailable)';
             this._meta.fetchTime = new Date();
         }
@@ -125,7 +126,11 @@ export class WeatherFeed {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const body = await res.json();
-        // Open-Meteo returns array for multi-location, object for single location
+        // Open-Meteo returns { error: true, reason: "…" } on bad requests
+        if (body && !Array.isArray(body) && body.error) {
+            throw new Error(`Open-Meteo: ${body.reason ?? body.error}`);
+        }
+        // Multi-location → array; single location → wrap in array
         return Array.isArray(body) ? body : [body];
     }
 
