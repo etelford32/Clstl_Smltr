@@ -1066,7 +1066,6 @@ nav {
 import './js/live-status-bar.js';
 import { SpaceWeatherFeed }  from './js/swpc-feed.js';
 import { SohoFeed }          from './js/soho-feed.js';
-import { NasaFeed }          from './js/nasa-feed.js';
 import { Heliosphere3D }     from './js/heliosphere3d.js';
 import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
@@ -1408,19 +1407,32 @@ window.addEventListener('swpc-update', e => {
         }).join('');
     }
 
+    // CME panel — most recent event from DONKI (arrives via swpc-update T3)
+    const cme = d.recent_cmes?.[0] ?? null;
+    if (cme) {
+        el('cme-content').innerHTML = `
+            <div class="param-row"><span class="param-name">Start time</span>
+                <span class="param-val">${fmtDate(cme.time)}</span></div>
+            <div class="param-row"><span class="param-name">Speed</span>
+                <span class="param-val ${cme.speed > 1000 ? 'danger' : cme.speed > 600 ? 'warn' : 'ok'}">${cme.speed ? Math.round(cme.speed) + ' km/s' : '–'}</span></div>
+            <div class="param-row"><span class="param-name">Half-angle</span>
+                <span class="param-val">${cme.halfAngle ? cme.halfAngle + '°' : '–'}</span></div>
+            <div class="param-row"><span class="param-name">Type</span>
+                <span class="param-val">${cme.type || '–'}</span></div>
+        `;
+    } else {
+        el('cme-content').innerHTML = '<div style="color:#445;font-size:.8rem;padding:8px 0">No recent CME data available.</div>';
+    }
+
     // ── Source chips + offline/stale banner ──────────────────────────────────
     const st = d.status || 'live';
 
-    // All NOAA-sourced chips reflect the same feed status
-    ['src-wind','src-kp','src-ar','src-flares',
-     'ds-wind','ds-kp','ds-xray','ds-ar','ds-sep'].forEach(id => {
+    // All NOAA + DONKI chips reflect the same swpc-update feed status
+    ['src-wind','src-kp','src-ar','src-flares','src-cme',
+     'ds-wind','ds-kp','ds-xray','ds-ar','ds-sep','ds-cme'].forEach(id => {
         const chip = el(id);
         if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g, '') + ' ' + st;
     });
-
-    // NASA DONKI chip — always 'live' if we got the event (nasa-update handles its own)
-    const cmeChip = el('src-cme');
-    if (cmeChip) cmeChip.className = cmeChip.className.replace(/\b(live|stale|offline)\b/g, '') + ' live';
 
     // Offline / stale data banner
     const banner  = el('data-status-banner');
@@ -1436,31 +1448,6 @@ window.addEventListener('swpc-update', e => {
             dsbAge.textContent  = d.lastUpdated ? 'Last data: ' + fmtTime(d.lastUpdated) + ' UTC' : '';
         }
     }
-});
-
-// ── NASA DONKI update ─────────────────────────────────────────────────────────
-window.addEventListener('nasa-update', e => {
-    const d = e.detail;
-    const cme = d.latest_cme;
-    if (cme) {
-        el('cme-content').innerHTML = `
-            <div class="param-row"><span class="param-name">Start time</span>
-                <span class="param-val">${fmtDate(cme.startTime)}</span></div>
-            <div class="param-row"><span class="param-name">Speed</span>
-                <span class="param-val ${cme.speed > 1000 ? 'danger' : cme.speed > 600 ? 'warn' : 'ok'}">${cme.speed ? Math.round(cme.speed) + ' km/s' : '–'}</span></div>
-            <div class="param-row"><span class="param-name">Half-angle</span>
-                <span class="param-val">${cme.halfAngle ? cme.halfAngle + '°' : '–'}</span></div>
-            <div class="param-row"><span class="param-name">Type</span>
-                <span class="param-val">${cme.type || '–'}</span></div>
-        `;
-    } else {
-        el('cme-content').innerHTML = '<div style="color:#445;font-size:.8rem;padding:8px 0">No recent CME data available.</div>';
-    }
-    // Mark NASA DONKI source as live
-    ['src-cme','ds-cme'].forEach(id => {
-        const chip = el(id);
-        if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g,'') + ' live';
-    });
 });
 
 // ── SOHO/SDO imagery ──────────────────────────────────────────────────────────
@@ -1501,12 +1488,9 @@ window.addEventListener('helio-state-update', e => {
 });
 
 // ── Start all feeds ───────────────────────────────────────────────────────────
-// SpaceWeatherFeed now owns all NOAA + DONKI polling via tiered edge routes.
-// NasaFeed is a legacy shim that forwards swpc-update → nasa-update for any
-// remaining listeners; it no longer polls independently or needs an API key.
+// SpaceWeatherFeed owns all NOAA + DONKI polling via tiered edge routes.
 new SpaceWeatherFeed().start();
 new SohoFeed().start();
-new NasaFeed().start();
 
 // ── Wind-speed pipeline (Vercel Edge /api/solar-wind/wind-speed) ──────────────
 // Provides enriched solar wind data: trend direction, alert level, 60-min series.
