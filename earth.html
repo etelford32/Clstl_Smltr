@@ -2691,6 +2691,20 @@ function animate() {
     renderer.render(scene, camera);
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  USER LOCATION PIN  (must be declared before animate() runs)
+// ═══════════════════════════════════════════════════════════════
+let _userPinGroup = null;
+let _userPinRing  = null;
+let _userLat = null, _userLon = null;
+let _currentKp = 2;
+
+// Fly-to state
+let _flyTarget   = null;
+let _flyFrom     = new THREE.Vector3();
+let _flyAimAt    = new THREE.Vector3();
+let _flyProgress = 0;
+
 // ── First HUD update immediately
 updateAstroHUD(new Date());
 animate();
@@ -2706,20 +2720,6 @@ function _tickLocalClock() {
 }
 _tickLocalClock();
 setInterval(_tickLocalClock, 1000);
-
-// ═══════════════════════════════════════════════════════════════
-//  USER LOCATION PIN
-// ═══════════════════════════════════════════════════════════════
-let _userPinGroup = null;
-let _userPinRing  = null;
-let _userLat = null, _userLon = null;
-let _currentKp = 2;
-
-// Fly-to state
-let _flyTarget   = null;
-let _flyFrom     = new THREE.Vector3();
-let _flyAimAt    = new THREE.Vector3();
-let _flyProgress = 0;
 
 function _setUserPin(lat, lon) {
     if (_userPinGroup) {
