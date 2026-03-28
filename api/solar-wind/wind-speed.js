@@ -130,25 +130,26 @@ export default async function handler(request) {
     }
 
     // ── Parse rows ────────────────────────────────────────────────────────────
-    // rtsw_wind_1m.json is a JSON array of objects (NOT a header-row 2-D array).
-    // Each object: { time_tag, speed, density, temperature, bt, bz_gsm, bx_gsm, by_gsm }
-    // Null/fill values arrive as -9999.0 or null.
-    const fill = v => (v == null || v <= -9990) ? null : v;
+    // rtsw_wind_1m.json is a JSON array of objects.
+    // DSCOVR format uses proton_speed / proton_density / proton_temperature.
+    // Legacy ACE format used speed / density / temperature.  Handle both.
+    const fill = v => (v == null || Number(v) <= -9990 || Number(v) > 1e20) ? null : Number(v);
 
     const rows = raw
         .filter(r => r?.time_tag)
         .map(r => ({
             time_tag:    r.time_tag,
-            speed:       fill(r.speed),
-            density:     fill(r.density),
-            temperature: fill(r.temperature),
+            speed:       fill(r.speed ?? r.proton_speed),
+            density:     fill(r.density ?? r.proton_density),
+            temperature: fill(r.temperature ?? r.proton_temperature),
             bt:          fill(r.bt),
             bz:          fill(r.bz_gsm ?? r.bz),
             bx:          fill(r.bx_gsm ?? r.bx),
             by:          fill(r.by_gsm ?? r.by),
         }));
 
-    const valid = rows.filter(r => r.speed != null && r.speed > 0 && r.density != null);
+    // Require only a valid, positive speed (density may gap without invalidating the reading)
+    const valid = rows.filter(r => r.speed != null && r.speed > 0);
     if (valid.length === 0) {
         return jsonResp({ error: 'no_valid_data', detail: 'All wind readings are null/fill' }, 503, 30);
     }
