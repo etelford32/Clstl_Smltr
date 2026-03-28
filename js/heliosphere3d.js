@@ -189,6 +189,7 @@ export class Heliosphere3D {
         this._windVY       = null;  // (unused — kept for shape compat)
         this._windPY       = null;  // sin(latitude) for constant-lat trajectory
         this._windJitter   = null;  // per-particle angular offset from field line (rad)
+        this._windArmIdx   = null;  // Int16Array — source arm index per particle
         // Parker spiral field-line samples (backbone)
         this._spiralLines    = null;
         this._spiralLinePts  = null;
@@ -199,6 +200,11 @@ export class Heliosphere3D {
         this._hcsTilt    = 0;      // current warp amplitude (rad)
         // Parker transonic speed profile (precomputed LUT)
         this._parkerLUT  = null;
+        // Per-arm stream speeds (bimodal: fast coronal-hole / slow streamer-belt)
+        this._armBaseSpeeds = null;  // Float32Array[N_SPIRAL]
+        this._armTypes      = null;  // Uint8Array[N_SPIRAL] — 0=slow, 1=fast
+        // Flare-driven speed pulses propagating along the spiral
+        this._flarePulses = [];      // [{ srcLon, r_AU, shockSpeed, intensity, age }]
         // Sweet-Parker / Petschek reconnection events at HCS
         this._reconnEvents = [];
         this._planetMeshes = {};
@@ -766,14 +772,31 @@ export class Heliosphere3D {
         // creating a physically-correct dense coronal glow that thins into the outer wind.
         this._parkerLUT = buildParkerLUT(200, 0.002, 2.1, 1.5e6);
 
+        // ── Per-arm bimodal stream-speed distribution ─────────────────────────
+        // Solar wind is bimodal:  fast wind from coronal holes (500–750 km/s,
+        // hotter corona, thinner Parker spiral)  vs  slow wind from the streamer
+        // belt (300–450 km/s, denser, wider spiral).  Boundaries between fast and
+        // slow arms create Corotating Interaction Regions (CIRs) — the dominant
+        // ambient structure between solar minimum storms.
+        this._armBaseSpeeds = new Float32Array(N_SPIRAL);
+        this._armTypes      = new Uint8Array(N_SPIRAL);
+        for (let a = 0; a < N_SPIRAL; a++) {
+            const isFast = Math.random() < 0.40;
+            this._armTypes[a]      = isFast ? 1 : 0;
+            this._armBaseSpeeds[a] = isFast
+                ? 500 + Math.random() * 250   // fast:  500–750 km/s
+                : 300 + Math.random() * 150;  // slow:  300–450 km/s
+        }
+
         const N = N_WIND;
         this._windPos    = new Float32Array(N * 3);
         this._windCol    = new Float32Array(N * 3);
         this._windR      = new Float32Array(N);   // r_AU along spiral
         this._windPY     = new Float32Array(N);   // sin(latitude) — constant per particle
         this._windVY     = new Float32Array(N);   // unused; retained for shape compat
-        this._windArm    = new Float32Array(N);     // source longitude (rad, 0–2π) — continuous per-particle
+        this._windArm    = new Float32Array(N);   // source longitude (rad, 0–2π) — continuous per-particle
         this._windJitter = new Float32Array(N);   // fixed angular jitter from arm centre
+        this._windArmIdx = new Int16Array(N);     // index into _armBaseSpeeds for this particle
         this._windAge    = new Float32Array(N);   // age (s) — used for fade-in only
         this._windMaxAge = new Float32Array(N);   // max age (s)
 
@@ -840,6 +863,12 @@ export class Heliosphere3D {
         // emission — the Parker spiral equation applies equally to every longitude.
         // The N_SPIRAL backbone lines are purely a visual guide overlay.
         this._windArm[i]    = Math.random() * Math.PI * 2;   // source longitude (rad)
+        // Snap to nearest backbone arm to inherit its stream speed class
+        if (this._armBaseSpeeds) {
+            this._windArmIdx[i] = Math.round(
+                this._windArm[i] / (Math.PI * 2 / N_SPIRAL)
+            ) % N_SPIRAL;
+        }
         // Start at the coronal base (~0.008–0.02 AU ≈ 1.7–4 R☉).
         // Scatter=true seeds the initial cloud spread across the full disc.
         this._windR[i]      = scatter
@@ -876,16 +905,27 @@ export class Heliosphere3D {
         const density = hs?.n     ?? this._sw.density ?? 5;
         const bt      = Math.max(1, hs?.bt ?? this._sw.bt ?? 5);
 
-        // Base advection step at measured DSCOVR equatorial speed
+        // Base advection step — scaled by measured speed
         const dr_base  = (speed / 450) * 0.0028 * dt * 60;
 
         // Derived scalars
-        const bzSouth  = Math.max(0, Math.min(1, -bz / 30));  // 0=quiet, 1=southward storm
-        const btNorm   = Math.min(1, bt / 20);                 // |B| ∕ 20 nT
+        const bzSouth  = Math.max(0, Math.min(1, -bz / 30));
+        const btNorm   = Math.min(1, bt / 20);
         const dFactor  = Math.max(0.4, Math.min(2.5, density / 5));
 
-        // ── IMF sector polarity colours for field-line backbone (By-based) ──────
-        // Field lines show MAGNETIC structure. Particles show THERMAL structure (below).
+        // ── Advance flare pulses ───────────────────────────────────────────────
+        // Each pulse propagates at its shock speed (ratio to nominal 450 km/s).
+        // Pulses older than 25 min or beyond MAX_R_AU are discarded.
+        for (let p = this._flarePulses.length - 1; p >= 0; p--) {
+            const fp = this._flarePulses[p];
+            fp.r_AU += (fp.shockSpeed / 450) * dr_base * 2.5;
+            fp.age  += dt;
+            if (fp.r_AU > MAX_R_AU || fp.age > 1500) {
+                this._flarePulses.splice(p, 1);
+            }
+        }
+
+        // ── IMF sector polarity colours (By-based) ────────────────────────────
         const awayR  = (0.95 + bzSouth * 0.05) * btNorm;
         const awayG  = (0.68 - bzSouth * 0.55) * btNorm;
         const awayB  = (0.08 - bzSouth * 0.06) * btNorm;
@@ -894,20 +934,53 @@ export class Heliosphere3D {
         const towdB  = (0.95 - bzSouth * 0.60) * btNorm;
         const awayFirst = by >= 0;
 
-        // ── N_SPIRAL field-line backbone lines (magnetic structure) ──────────────
+        // ── N_SPIRAL field-line backbone (magnetic + stream-speed structure) ──
+        //
+        // Each arm now carries its own characteristic speed (fast coronal-hole
+        // or slow streamer-belt wind).  The Parker winding angle φ = Ω r / v
+        // differs per arm — fast arms wind less tightly, slow arms more tightly.
+        // At the boundary between a fast arm and the next (slower) arm, a
+        // Corotating Interaction Region (CIR) compression zone is visible as
+        // a brighter interface line.
         if (this._spiralLines) {
             for (let arm = 0; arm < N_SPIRAL; arm++) {
                 const pts  = this._spiralLinePts[arm];
                 const cols = this._spiralLineCols[arm];
+
+                // Per-arm speed: measured speed scales the arm's characteristic
+                const armV  = this._armBaseSpeeds
+                    ? this._armBaseSpeeds[arm] * (speed / 450)
+                    : speed;
+                const isFast = this._armTypes ? this._armTypes[arm] === 1 : false;
+
+                // Base polarity colour tinted by stream type
                 const inAwayHalf = (arm < N_SPIRAL / 2) === awayFirst;
-                const sR = inAwayHalf ? awayR : towdR;
-                const sG = inAwayHalf ? awayG : towdG;
-                const sB = inAwayHalf ? awayB : towdB;
+                let sR = inAwayHalf ? awayR : towdR;
+                let sG = inAwayHalf ? awayG : towdG;
+                let sB = inAwayHalf ? awayB : towdB;
+
+                // Fast-stream tint: hotter (more gold/white), slow-stream: cooler (orange-red)
+                if (isFast) {
+                    sR = Math.min(1, sR * 1.25);
+                    sG = Math.min(1, sG * 1.18);
+                    sB = Math.min(1, sB * 1.30);
+                } else {
+                    sR = Math.min(1, sR * 1.10);
+                    sG = Math.max(0, sG * 0.80);
+                    sB = Math.max(0, sB * 0.50);
+                }
+
+                // CIR check: is the NEXT arm slow while this arm is fast?
+                // If so, the trailing edge of this fast arm is a CIR forward shock.
+                const nextArm  = (arm + 1) % N_SPIRAL;
+                const nextFast = this._armTypes ? this._armTypes[nextArm] === 1 : false;
+                const isCIR    = isFast && !nextFast;
+
                 const srcLon = arm * (Math.PI * 2 / N_SPIRAL);
 
                 for (let j = 0; j < N_LINE; j++) {
                     const r_AU = (j / (N_LINE - 1)) * MAX_R_AU;
-                    const ang  = srcLon + this._rot - (428.6 / speed) * r_AU;
+                    const ang  = srcLon + this._rot - (428.6 / armV) * r_AU;
                     const rp   = r_AU * AU;
                     pts[j * 3]     = rp * Math.cos(ang);
                     pts[j * 3 + 1] = 0;
@@ -915,103 +988,144 @@ export class Heliosphere3D {
 
                     const tIn  = Math.min(j / 10, 1.0);
                     const tOut = 1.0 - Math.pow(j / N_LINE, 1.6);
-                    const brt  = tIn * tOut * 0.78;
-                    cols[j * 3]     = Math.max(0, sR * brt);
-                    cols[j * 3 + 1] = Math.max(0, sG * brt);
-                    cols[j * 3 + 2] = Math.max(0, sB * brt);
+                    let   brt  = tIn * tOut * 0.78;
+
+                    // CIR compression brightening: a dense, bright band grows with r
+                    // (compression ratio peaks around 2–4 AU but we cap at MAX_R_AU)
+                    if (isCIR) {
+                        const cirGrow = Math.min(1, r_AU / 0.6);  // grows beyond 0.6 AU
+                        brt = Math.min(1.8, brt + cirGrow * 0.55);
+                    }
+
+                    // Flare pulse brightening on this arm's field line
+                    let pulseBoost = 0;
+                    for (const fp of this._flarePulses) {
+                        const lonDelta = Math.abs(((srcLon - fp.srcLon + Math.PI) % (Math.PI * 2)) - Math.PI);
+                        if (lonDelta < 0.6) {
+                            const rDiff = r_AU - fp.r_AU;
+                            // Gaussian envelope around the pulse front (half-width ~0.05 AU)
+                            const pf = Math.exp(-rDiff * rDiff / 0.004) * fp.intensity
+                                     * Math.max(0, 1 - lonDelta / 0.6);
+                            pulseBoost = Math.max(pulseBoost, pf);
+                        }
+                    }
+
+                    const b = brt + pulseBoost * 1.2;
+                    // Pulse front: hot shock → white-blue flash
+                    cols[j * 3]     = Math.max(0, Math.min(1, sR * b + pulseBoost * 0.6));
+                    cols[j * 3 + 1] = Math.max(0, Math.min(1, sG * b + pulseBoost * 0.7));
+                    cols[j * 3 + 2] = Math.max(0, Math.min(1, sB * b + pulseBoost * 1.0));
                 }
                 this._spiralLines[arm].geometry.attributes.position.needsUpdate = true;
                 this._spiralLines[arm].geometry.attributes.color.needsUpdate    = true;
             }
         }
 
-        // ── Solar wind particles (Parker-CGL Thermal Differentiation model) ──────
+        // ── Solar wind particles ──────────────────────────────────────────────
         //
-        // Position:  uses Parker transonic speed profile to modulate dr per particle.
-        //   Near sun (r ≈ 0.01 AU): Parker ratio ≈ 0.06 → very slow (subsonic corona)
-        //   At critical point (r_c ≈ 0.018 AU at 1.5 MK): ratio ≈ 0.35
-        //   At 1 AU: ratio = 1.0 (normalised to DSCOVR measurement)
-        //   Visual: dense glowing corona that thins into the outer wind — physically correct
+        // Each particle inherits the characteristic speed of its source arm.
+        // Fast-stream particles: hotter corona, tighter Parker spiral, more gold/white.
+        // Slow-stream particles: denser, wider spiral, more orange-red.
         //
-        // Colour: derived from first-principles temperature via the Parker-CGL model:
-        //   T(r) = T_corona × (r₀/r)^0.74 + Alfvénic wave heating  (Helios/PSP fit)
-        //   Temperature → thermal spectral colour via tempToRGB()
-        //   Sector polarity tint (±12% brightness shift) on top of thermal base
-        //   Southward Bz brightens and reddens (reconnection heating)
-        //
-        // CGL anisotropy tint: T_⊥/T_∥ profile mapped to a slight blue↔red shift
-        //   Near sun: T_⊥ ≫ T_∥ (oblate) → slight blue-green tint
-        //   At 1 AU : T_⊥/T_∥ ≈ 0.4 (prolate) → slight warm shift
+        // CGL thermal model and anisotropy tints are still applied per-particle.
+        // Flare pulse front: particles within the shock radius get a temperature
+        // spike (white-blue) and brightness boost proportional to pulse intensity.
 
         const TWO_PI = Math.PI * 2;
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
 
-            const r = this._windR[i];
+            const r       = this._windR[i];
+            const armIdx  = this._windArmIdx ? this._windArmIdx[i] : 0;
+            // Per-particle characteristic speed scaled by measured wind
+            const armV    = this._armBaseSpeeds
+                ? this._armBaseSpeeds[armIdx] * (speed / 450)
+                : speed;
+            const isFast  = this._armTypes ? this._armTypes[armIdx] === 1 : false;
 
-            // Parker transonic advection: scale radial step by V(r)/V(1 AU)
-            // Particles automatically pile up near the corona (subsonic crowding)
             const parker = this._parkerLUT
                 ? parkerSpeedRatio(r, this._parkerLUT)
                 : 1.0;
-            const latFrac = Math.min(1, Math.abs(this._windPY[i]) / 0.5);
-            // Polar wind travels faster (up to 1.65× equatorial)
+            const latFrac      = Math.min(1, Math.abs(this._windPY[i]) / 0.5);
             const V_local_frac = 1 + latFrac * 0.65;
-            this._windR[i] += dr_base * parker * V_local_frac;
+            // Radial step uses per-arm speed ratio relative to nominal 450 km/s
+            this._windR[i] += (armV / 450) * 0.0028 * dt * 60 * parker * V_local_frac;
 
-            if (this._windR[i] > MAX_R_AU) {
-                this._spawnWind(i, false);
-            }
+            if (this._windR[i] > MAX_R_AU) this._spawnWind(i, false);
 
             const r_new  = this._windR[i];
             const srcLon = this._windArm[i];
             const sinLat = this._windPY[i];
             const cosLat = Math.sqrt(Math.max(0, 1 - sinLat * sinLat));
 
-            // Parker spiral angle
-            const V_lat   = speed * V_local_frac;
-            const ang     = srcLon + this._rot - (428.6 / V_lat) * r_new + this._windJitter[i];
-            const rPx     = r_new * AU;
+            // Parker spiral angle — per-arm speed gives different winding
+            const V_lat = armV * V_local_frac;
+            const ang   = srcLon + this._rot - (428.6 / V_lat) * r_new + this._windJitter[i];
+            const rPx   = r_new * AU;
 
             this._windPos[i * 3]     = rPx * cosLat * Math.cos(ang);
             this._windPos[i * 3 + 1] = rPx * sinLat;
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
 
             // ── Parker-CGL thermal colour ──────────────────────────────────────
-            // Base colour from first-principles temperature model
-            const T_K          = plasmaTemp(r_new, 1.5e6);
+            // Fast-stream: higher corona temp (2 MK coronal holes vs 1.5 MK streamers)
+            const T_corona = isFast ? 2.0e6 : 1.3e6;
+            const T_K      = plasmaTemp(r_new, T_corona);
             const [tR, tG, tB] = tempToRGB(T_K);
 
-            // Sector polarity tint: Away = marginally warmer (+12%), Toward = cooler
+            // Sector polarity tint
             const heliogLon = ((srcLon - this._rot) % TWO_PI + TWO_PI) % TWO_PI;
             const inAway    = (heliogLon < Math.PI) === awayFirst;
-            const polShift  = inAway ? 0.12 : -0.12;  // ±12% warmth shift
+            const polShift  = inAway ? 0.12 : -0.12;
             const pR = Math.min(1, tR + polShift * (1 - tR));
             const pG = tG;
             const pB = Math.max(0, tB - polShift * 0.4);
 
-            // CGL anisotropy tint: near-sun oblate (T_⊥>T_∥) → slight blue-green
-            // distant prolate (T_∥>T_⊥) → slight warm shift
+            // CGL anisotropy tint
             const aniso     = cglAnisotropy(r_new);
             const anisoTint = Math.max(-0.08, Math.min(0.08, (aniso - 1) * 0.015));
             const aR = Math.max(0, pR - anisoTint * 0.5);
             const aG = Math.max(0, pG + anisoTint * 0.3);
             const aB = Math.max(0, pB + anisoTint);
 
-            // Storm modifier: Bz southward → reconnection heating → brighter, redder
+            // Storm modifier
             const stR = Math.min(1, aR + bzSouth * 0.22);
             const stG = Math.max(0, aG - bzSouth * 0.18);
             const stB = Math.max(0, aB - bzSouth * 0.25);
 
-            // Fade-in from birth; position-based fade at domain edge
+            // ── Flare pulse contribution ───────────────────────────────────────
+            // Particles near the pulse front get a temperature spike (shock heating)
+            // and brightness boost.  The pulse front has a Gaussian spatial envelope.
+            let pulseGlow = 0;
+            let pulseBlue = 0;
+            for (const fp of this._flarePulses) {
+                const lonDelta = Math.abs(((srcLon - fp.srcLon + Math.PI) % TWO_PI) - Math.PI);
+                if (lonDelta < 0.55) {
+                    const rDiff = r_new - fp.r_AU;
+                    const pf    = Math.exp(-rDiff * rDiff / 0.003)
+                                * fp.intensity * Math.max(0, 1 - lonDelta / 0.55);
+                    pulseGlow = Math.max(pulseGlow, pf);
+                    // Shock sheath: ahead of the front (rDiff > 0) is compressed → blue-white
+                    // Driver gas: behind the front (rDiff < 0) is hot ejecta → orange-red
+                    pulseBlue = Math.max(pulseBlue, pf * Math.max(0, Math.sign(rDiff)));
+                }
+            }
+
+            // Density factor modulates overall brightness; fast stream slightly sparser
+            const streamDensity = isFast ? dFactor * 0.75 : dFactor * 1.15;
             const fadeIn  = Math.min(1.0, this._windAge[i] / 1.5);
             const rNorm   = r_new / MAX_R_AU;
             const fadeOut = Math.pow(Math.max(0, 1.0 - rNorm), 0.5);
-            const fade    = fadeIn * fadeOut * dFactor;
+            const fade    = fadeIn * fadeOut * streamDensity;
 
-            this._windCol[i * 3]     = Math.min(1, stR * fade);
-            this._windCol[i * 3 + 1] = Math.min(1, stG * fade);
-            this._windCol[i * 3 + 2] = Math.min(1, stB * fade);
+            // Blend thermal colour with shock colours
+            const fR = Math.min(1, stR * fade + pulseGlow * 0.9  - pulseBlue * 0.4);
+            const fG = Math.min(1, stG * fade + pulseGlow * 0.85 + pulseBlue * 0.1);
+            const fB = Math.min(1, stB * fade + pulseGlow * 0.5  + pulseBlue * 0.9);
+
+            this._windCol[i * 3]     = Math.max(0, fR);
+            this._windCol[i * 3 + 1] = Math.max(0, fG);
+            this._windCol[i * 3 + 2] = Math.max(0, fB);
         }
 
         const geo = this._windPoints.geometry;
@@ -1169,6 +1283,18 @@ export class Heliosphere3D {
         if (!this._flare3d)
             this._flare3d = new FlareRing3D(this._scene, THREE, R.sun);
         this._flare3d.trigger(extreme);
+
+        // Inject a speed pulse that propagates along the Parker spiral.
+        // The flare source longitude is the Sun-facing heliographic direction
+        // (opposite of _rot, which tracks solar rotation).
+        // X-class: ~2000 km/s shock (fast CME), M-class: ~1200 km/s.
+        this._flarePulses.push({
+            srcLon:     (-this._rot % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2),
+            r_AU:       0.008,                           // starts at corona
+            shockSpeed: extreme ? 2000 : 1200,           // km/s — shock propagation
+            intensity:  extreme ? 1.0 : 0.65,
+            age:        0,
+        });
     }
 
     _tickFlare(dt) {
