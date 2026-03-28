@@ -18,6 +18,12 @@
  *           All planet positions include ecliptic latitude from inclination.
  *           Always works offline; no network latency.
  *
+ * OWNERSHIP
+ * ─────────────────────────────────────────────────────────────────
+ *  This file owns planet body IDs 199 (Mercury) through 899 (Neptune) and
+ *  Moon (301).  extended-feeds.js / HorizonsFeed must NOT poll these IDs —
+ *  it handles spacecraft (-234 STEREO-A, etc.) only via 'horizons-update'.
+ *
  * OUTPUT (ephemeris-ready CustomEvent on window)
  * ─────────────────────────────────────────────────────────────────
  *  detail.mercury  { lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }  heliocentric ecliptic

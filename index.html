@@ -1193,6 +1193,7 @@ if (_navBurger && _navMenu) {
 import { SohoFeed, SOHO_IMAGES, STEREO_IMAGES } from './js/soho-feed.js';
 import { HorizonsFeed }                        from './js/horizons-extended.js';
 import { NeoFeed }                             from './js/neo-feed.js';
+import { EphemerisService }                    from './js/horizons.js';
 
 // ── SOHO / SDO image strip ────────────────────────────────────────────────────
 const SOHO_LABELS = {
@@ -1249,26 +1250,60 @@ const PLANET_EMOJI = {
 };
 const BODY_ORDER = ['mercury','venus','earth','mars','jupiter','saturn','uranus','neptune','moon','stereo_a'];
 
-window.addEventListener('horizons-update', e => {
-    const el  = document.getElementById('hor-body');
-    const sta = document.getElementById('hor-status');
-    if (!el) return;
-    const b = e.detail.bodies;
-    sta.textContent = e.detail.status;
-    sta.className   = 'widget-status ' + e.detail.status;
-    if (!Object.keys(b).length) return;
-    el.innerHTML = BODY_ORDER.map(name => {
-        const p = b[name];
+// Shared cache: normalised { dist_AU, lon_deg } per body name.
+// Populated by ephemeris-ready (planets/moon) and horizons-update (spacecraft).
+const _bodyCache  = {};
+let   _horStatus  = 'connecting';
+
+function _renderPlanetWidget() {
+    const bodyEl = document.getElementById('hor-body');
+    const staEl  = document.getElementById('hor-status');
+    if (!bodyEl) return;
+    staEl.textContent = _horStatus;
+    staEl.className   = 'widget-status ' + _horStatus;
+    bodyEl.innerHTML = BODY_ORDER.map(name => {
+        const p = _bodyCache[name];
         if (!p) return '';
-        const distStr = p.r != null ? p.r.toFixed(3) + ' AU' : '—';
-        const lonStr  = p.lon_deg != null ? p.lon_deg.toFixed(1) + '°' : '';
-        const label   = name.replace('_',' ').replace(/\b\w/g,c=>c.toUpperCase());
+        const distStr = p.dist_AU != null ? p.dist_AU.toFixed(3) + ' AU' : '—';
+        const lonStr  = p.lon_deg  != null ? p.lon_deg.toFixed(1)  + '°' : '';
+        const label   = name.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase());
         return `<div class="planet-row">
             <span class="planet-name">${PLANET_EMOJI[name]??'●'} ${label}</span>
             <span class="planet-dist">${distStr}</span>
             <span class="planet-lon">${lonStr}</span>
         </div>`;
     }).join('');
+}
+
+// ── EphemerisService → planets + Moon ────────────────────────────────────────
+// Shape: e.detail.<name>.dist_AU, e.detail.<name>.lon_rad
+window.addEventListener('ephemeris-ready', e => {
+    const d = e.detail;
+    const PLANETS = ['mercury','venus','earth','mars','jupiter','saturn','uranus','neptune','moon'];
+    PLANETS.forEach(name => {
+        const p = d[name];
+        if (!p) return;
+        _bodyCache[name] = {
+            dist_AU: p.dist_AU ?? null,
+            lon_deg: p.lon_rad != null ? p.lon_rad * 180 / Math.PI : null,
+        };
+    });
+    _horStatus = d.source === 'horizons' ? 'live' : d.source === 'mixed' ? 'live' : 'live';
+    _renderPlanetWidget();
+});
+
+// ── HorizonsFeed → spacecraft (stereo_a etc.) ─────────────────────────────────
+// Shape: e.detail.bodies.<name>.r (AU), e.detail.bodies.<name>.lon_deg
+window.addEventListener('horizons-update', e => {
+    const b = e.detail.bodies ?? {};
+    Object.entries(b).forEach(([name, p]) => {
+        _bodyCache[name] = {
+            dist_AU: p.r     ?? null,
+            lon_deg: p.lon_deg ?? (p.lon_rad != null ? p.lon_rad * 180 / Math.PI : null),
+        };
+    });
+    if (e.detail.status) _horStatus = e.detail.status;
+    _renderPlanetWidget();
 });
 
 // ── NeoWs asteroid list ───────────────────────────────────────────────────────
@@ -1305,7 +1340,8 @@ window.addEventListener('neo-update', e => {
 
 // Start feeds
 new SohoFeed().start();
-new HorizonsFeed().start();
+new EphemerisService().startLive(60);  // planets + Moon via ephemeris-ready
+new HorizonsFeed().start();            // spacecraft (STEREO-A etc.) via horizons-update
 new NeoFeed({ apiKey: 'DEMO_KEY' }).start();
 </script>
 

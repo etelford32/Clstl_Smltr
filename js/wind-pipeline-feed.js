@@ -1,11 +1,14 @@
 /**
- * wind-pipeline-feed.js — Parker Physics live wind speed pipeline client
+ * wind-pipeline-feed.js — Solar wind pipeline client
  * ========================================================================
- * Polls the local FastAPI results server (/v1/solar-wind/wind-speed) and
- * dispatches a 'wind-pipeline-update' CustomEvent on window each time fresh
- * data arrives.  Designed to complement swpc-feed.js — the pipeline feed
- * provides alert classification and trend direction derived from 24-hour
- * rolling history, whereas swpc-feed.js hits NOAA endpoints directly.
+ * Polls the /api/solar-wind/wind-speed Vercel edge function and dispatches
+ * a 'wind-pipeline-update' CustomEvent on window each time fresh data arrives.
+ * Designed to complement swpc-feed.js — the pipeline feed provides alert
+ * classification and trend direction derived from rolling NOAA history,
+ * whereas swpc-feed.js provides raw NOAA values directly.
+ *
+ * In local dev you can override apiBase to point at a local FastAPI server:
+ *   new WindPipelineFeed({ apiBase: 'http://localhost:8000', endpoint: '/v1/solar-wind/wind-speed' }).start();
  *
  * USAGE
  * ─────
@@ -30,19 +33,22 @@
  *   updated       string  ISO timestamp of last reading
  */
 
-// Default API base — empty string uses same origin (works with uvicorn on localhost:8000).
+// Production endpoint — Vercel edge function at same origin.
+// Override apiBase + endpoint in constructor for local dev (FastAPI on localhost:8000).
 const DEFAULT_API_BASE = '';
-const ENDPOINT         = '/v1/solar-wind/wind-speed';
-const DEFAULT_INTERVAL = 60_000;   // 60 seconds — matches ingest_l1 cadence
+const ENDPOINT         = '/api/solar-wind/wind-speed';
+const DEFAULT_INTERVAL = 60_000;   // 60 seconds — matches NOAA 1-min product cadence
 
 export class WindPipelineFeed {
     /**
      * @param {object} opts
-     * @param {string} [opts.apiBase]       Base URL, e.g. 'http://localhost:8000'
+     * @param {string} [opts.apiBase]       Base URL override, e.g. 'http://localhost:8000'
+     * @param {string} [opts.endpoint]      Path override for local FastAPI dev, e.g. '/v1/solar-wind/wind-speed'
      * @param {number} [opts.pollInterval]  Milliseconds between polls (default 60 000)
      */
-    constructor({ apiBase = DEFAULT_API_BASE, pollInterval = DEFAULT_INTERVAL } = {}) {
+    constructor({ apiBase = DEFAULT_API_BASE, endpoint = ENDPOINT, pollInterval = DEFAULT_INTERVAL } = {}) {
         this.apiBase      = apiBase;
+        this._endpoint    = endpoint;
         this.pollInterval = pollInterval;
         this._timer       = null;
         this._failStreak  = 0;
@@ -67,7 +73,7 @@ export class WindPipelineFeed {
     // ── Internal ────────────────────────────────────────────────────────────
 
     async _poll() {
-        const url = `${this.apiBase}${ENDPOINT}`;
+        const url = `${this.apiBase}${this._endpoint}`;
         try {
             const res = await fetch(url, { cache: 'no-cache' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
