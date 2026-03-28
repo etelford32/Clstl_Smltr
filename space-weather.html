@@ -485,6 +485,19 @@ nav {
 }
 .helio-live-hud .hv { color: #aef; font-weight: 600; font-family: monospace; }
 .helio-live-hud .hl { color: #aaa; font-size: .64rem; margin-right: 6px; }
+.helio-timewarp {
+    position: absolute; bottom: 36px; left: 14px; z-index: 10;
+    display: flex; align-items: center; gap: 5px;
+    pointer-events: all;
+}
+.tw-btn {
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.18); border-radius: 5px;
+    color: #8ab; font-size: .68rem; font-family: monospace;
+    padding: 3px 8px; cursor: pointer; transition: all .15s;
+}
+.tw-btn:hover  { border-color: rgba(174,238,255,.5); color: #fff; }
+.tw-btn.active { background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef; }
 
 /* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
 .earth-section {
@@ -671,8 +684,18 @@ nav {
             <span class="hl">Wind</span><span class="hv" id="h3d-speed">–</span> km/s &nbsp;
             <span class="hl">Bz</span><span class="hv" id="h3d-bz">–</span> nT &nbsp;
             <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span> &nbsp;
-            <span class="hl">r</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
-            <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min
+            <span class="hl">r⊕</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
+            <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min &nbsp;
+            <span class="hl">Date</span><span class="hv" id="h3d-date">–</span> &nbsp;
+            <span class="hv" id="h3d-src" style="font-size:0.7em;opacity:0.6;">–</span>
+        </div>
+        <!-- Time warp controls -->
+        <div class="helio-timewarp" id="helio-timewarp">
+            <span style="opacity:.55;font-size:.75em;">Time:</span>
+            <button class="tw-btn active" data-scale="1">1×</button>
+            <button class="tw-btn" data-scale="1000">1k×</button>
+            <button class="tw-btn" data-scale="100000">100k×</button>
+            <button class="tw-btn" data-scale="10000000">10M×</button>
         </div>
         <!-- Controls hint -->
         <div class="helio-hint">
@@ -1517,7 +1540,26 @@ new SolarWindState().start();
 // Earth magnetosphere via MagnetosphereEngine, CME shells, flare bursts.
 // Listens to swpc-update + ephemeris-ready events automatically.
 const helioCanvas = document.getElementById('helio-canvas');
-if (helioCanvas) new Heliosphere3D(helioCanvas).start();
+let _helio = null;
+if (helioCanvas) _helio = new Heliosphere3D(helioCanvas).start();
+
+// ── Helio HUD: date display + ephemeris source ────────────────────────────────
+window.addEventListener('helio-time-update', e => {
+    const { date, source } = e.detail;
+    const dateEl = el('h3d-date');
+    const srcEl  = el('h3d-src');
+    if (dateEl) dateEl.textContent = date.toISOString().slice(0, 10);
+    if (srcEl)  srcEl.textContent  = source === 'horizons' ? 'JPL' : 'Meeus';
+});
+
+// ── Time-warp buttons ─────────────────────────────────────────────────────────
+document.getElementById('helio-timewarp')?.addEventListener('click', e => {
+    const btn = e.target.closest('.tw-btn');
+    if (!btn || !_helio) return;
+    const scale = parseInt(btn.dataset.scale, 10);
+    _helio.setTimeScale(scale);
+    document.querySelectorAll('.tw-btn').forEach(b => b.classList.toggle('active', b === btn));
+});
 
 // ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
 // SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.

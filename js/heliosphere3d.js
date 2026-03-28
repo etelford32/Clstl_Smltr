@@ -104,6 +104,13 @@ const ORBIT_INCL = {
     neptune: { i: 1.770  * D2R, node: 131.784 * D2R },
 };
 
+/**
+ * Visual Moon orbit radius (scene units).
+ * Real Moon orbit is 0.00257 AU = 0.257 scene units, which is INSIDE Earth's
+ * sphere (R.earth = 0.78).  Scale up ~12× for visibility.
+ */
+const MOON_VIS_AU = 0.032;
+
 const N_WIND    = 3000;   // solar wind particles
 const MAX_R_AU  = 1.65;   // kill particles beyond this
 const N_LINE    = 90;     // points per spiral field-line sample
@@ -143,7 +150,9 @@ export class Heliosphere3D {
             mercury: null, venus: null, earth: null, moon: null, mars: null,
             jupiter: null, saturn: null, uranus: null, neptune: null,
         };
-        this._lastMeeusJD = null;   // JD of last Meeus per-frame update
+        this._simJD       = jdNow(); // current simulation Julian Day (advances with time warp)
+        this._timeScale   = 1;       // simulation speed multiplier (1 = real-time)
+        this._lastMeeusMs = null;    // performance.now() of last Meeus 1-Hz tick
 
         /** Latest heliospheric state from SolarWindState (Parker-corrected) */
         this._helioState = null;
@@ -236,6 +245,16 @@ export class Heliosphere3D {
         this._renderer?.dispose();
     }
 
+    /**
+     * Set the simulation time multiplier.
+     * @param {number} x  1 = real-time, 1000 = 1000× (planets visibly orbit)
+     */
+    setTimeScale(x) {
+        this._timeScale = x;
+        // Snap simJD back to real time when returning to 1×
+        if (x === 1) this._simJD = jdNow();
+    }
+
     // ── Event handlers ────────────────────────────────────────────────────────
 
     _onSwpc(ev) {
@@ -302,58 +321,52 @@ export class Heliosphere3D {
     /**
      * Synchronously seed all planet/moon positions from Meeus at startup.
      * Runs immediately after scene objects are built so planets appear at the
-     * correct location before any network data arrives.
+     * correct real-time location before any network data arrives.
      */
     _seedMeeusPositions() {
-        const jd = jdNow();
+        this._simJD = jdNow();
+        this._meeusUpdate(this._simJD, true);
+    }
+
+    /**
+     * Core Meeus position update.
+     * @param {number}  jd        Julian Day to compute for
+     * @param {boolean} forceAll  When true, compute all 8 planets (used during time warp)
+     */
+    _meeusUpdate(jd, forceAll = false) {
         const mk = fn => ({ ...fn(jd), source: 'meeus' });
         const m  = moonGeocentric(jd);
+
+        // Inner planets + Earth + Moon: always Meeus
         this._eph.mercury = mk(mercuryHeliocentric);
         this._eph.venus   = mk(venusHeliocentric);
         this._eph.earth   = mk(earthHeliocentric);
         this._eph.mars    = mk(marsHeliocentric);
-        this._eph.jupiter = mk(jupiterHeliocentric);
-        this._eph.saturn  = mk(saturnHeliocentric);
-        this._eph.uranus  = mk(uranusHeliocentric);
-        this._eph.neptune = mk(neptuneHeliocentric);
         this._eph.moon    = { lon_rad: m.lon_rad, lat_rad: m.lat_rad,
                                dist_km: m.dist_km,  dist_AU: m.dist_AU, source: 'meeus' };
+
+        // Outer planets: keep JPL Horizons at 1× speed; force Meeus during time warp
+        if (forceAll || !this._eph.jupiter) this._eph.jupiter = mk(jupiterHeliocentric);
+        if (forceAll || !this._eph.saturn)  this._eph.saturn  = mk(saturnHeliocentric);
+        if (forceAll || !this._eph.uranus)  this._eph.uranus  = mk(uranusHeliocentric);
+        if (forceAll || !this._eph.neptune) this._eph.neptune = mk(neptuneHeliocentric);
+
         this._updateEphemerisPositions();
     }
 
     /**
-     * Per-frame live planet update (throttled to 1 Hz).
-     *
-     * Inner planets + Earth + Moon are always re-derived from Meeus (instant,
-     * no network required). Outer planets keep the latest JPL Horizons data
-     * from _onEph; Meeus is used only as a seed when Horizons hasn't loaded yet.
-     *
-     * At solar-system scale the fastest-moving body (Mercury) travels < 0.003°/s,
-     * so 1 Hz gives sub-pixel accuracy for any reasonable viewport.
+     * Per-frame planet tick.  Throttled to 1 Hz at real-time speed; runs every
+     * frame during time warp.  Uses this._simJD which advances at
+     * (timeScale × real-time) rate.
      */
     _tickLivePlanets() {
-        const jd = jdNow();
-        if (this._lastMeeusJD != null && (jd - this._lastMeeusJD) * 86400 < 1) return;
-        this._lastMeeusJD = jd;
-
-        const mk = fn => ({ ...fn(jd), source: 'meeus' });
-        const m  = moonGeocentric(jd);
-
-        // Inner planets and Earth: always Meeus (EphemerisService also uses Meeus for these)
-        this._eph.mercury = mk(mercuryHeliocentric);
-        this._eph.venus   = mk(venusHeliocentric);
-        this._eph.earth   = mk(earthHeliocentric);
-        this._eph.mars    = mk(marsHeliocentric);
-        this._eph.moon    = { lon_rad: m.lon_rad, lat_rad: m.lat_rad,
-                               dist_km: m.dist_km,  dist_AU: m.dist_AU, source: 'meeus' };
-
-        // Outer planets: keep JPL Horizons data when available; seed Meeus otherwise
-        if (!this._eph.jupiter) this._eph.jupiter = mk(jupiterHeliocentric);
-        if (!this._eph.saturn)  this._eph.saturn  = mk(saturnHeliocentric);
-        if (!this._eph.uranus)  this._eph.uranus  = mk(uranusHeliocentric);
-        if (!this._eph.neptune) this._eph.neptune = mk(neptuneHeliocentric);
-
-        this._updateEphemerisPositions();
+        const warp = this._timeScale > 1;
+        if (!warp) {
+            const now = performance.now();
+            if (this._lastMeeusMs != null && now - this._lastMeeusMs < 1000) return;
+            this._lastMeeusMs = now;
+        }
+        this._meeusUpdate(this._simJD, warp);
     }
 
     _buildRenderer() {
@@ -1199,7 +1212,6 @@ export class Heliosphere3D {
             const pos = this._ephToPos(eph[name]);
             if (pos && this._planetMeshes[name]) {
                 this._planetMeshes[name].position.copy(pos);
-                // Update label position: offset above the planet sphere
                 const lbl = this._planetLabels?.[name];
                 if (lbl) lbl.position.set(pos.x, pos.y + R[name] * 2.2, pos.z);
             }
@@ -1213,14 +1225,39 @@ export class Heliosphere3D {
             if (earthLbl) earthLbl.position.set(earthPos.x, earthPos.y + R.earth * 2.5, earthPos.z);
         }
 
-        // Moon — geocentric lon/lat, dist in AU (already converted by horizons.js)
+        // Moon — geocentric direction scaled to MOON_VIS_AU for visibility.
+        // Real orbit (0.00257 AU = 0.257 scene units) is smaller than Earth's sphere.
         if (eph.moon) {
-            const moonPos = this._ephToPos(eph.moon);
-            if (moonPos && this._moonMesh) {
-                this._moonMesh.position.copy(moonPos);
+            const moonDir = this._ephToPos(eph.moon);
+            if (moonDir && this._moonMesh) {
+                moonDir.normalize().multiplyScalar(MOON_VIS_AU * AU);
+                this._moonMesh.position.copy(moonDir);
                 this._moonOrbit = eph.moon.lon_rad;
             }
         }
+
+        // ── Update HUD elements ──────────────────────────────────────────────
+        if (eph.earth) {
+            const rEl = document.getElementById('h3d-rau');
+            if (rEl) rEl.textContent = eph.earth.dist_AU.toFixed(4);
+
+            const dEl = document.getElementById('h3d-delay');
+            if (dEl) {
+                const L1_km    = 1500000;   // L1 is ~1.5 Mkm from Earth toward Sun
+                const delayMin = L1_km / (this._sw.speed || 450) / 60;
+                dEl.textContent = delayMin.toFixed(0);
+            }
+        }
+
+        // ── Dispatch time event for date display ─────────────────────────────
+        const simDate = new Date((this._simJD - 2440587.5) * 86400000);
+        window.dispatchEvent(new CustomEvent('helio-time-update', {
+            detail: {
+                jd:     this._simJD,
+                date:   simDate,
+                source: eph.earth?.source ?? 'meeus',
+            }
+        }));
     }
 
     // ── Moon animation (when no live ephemeris) ───────────────────────────────
@@ -1291,6 +1328,9 @@ export class Heliosphere3D {
         this._resize();
         this._t    += dt;
         this._rot  += 0.0003 * dt * 60;   // Parker spiral rotation
+
+        // Advance simulation clock (real-time at 1×, faster during time warp)
+        this._simJD += dt / 86400 * this._timeScale;
 
         this._tickLivePlanets();
         this._tickSun();
