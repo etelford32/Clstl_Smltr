@@ -28,9 +28,6 @@ import {
     createEarthUniforms, loadEarthTextures,
 } from './earth-skin.js';
 
-// ── Procedural Earth shaders (removed) — now using shared earth-skin.js ───────
-// Preserved for reference; EARTH_VERT and EARTH_FRAG imported above.
-const _PROCEDURAL_VERT_STUB = /* glsl */`
 // ── Atmosphere shaders ────────────────────────────────────────────────────────
 const ATMO_VERT = /* glsl */`
 varying vec3 vNormal;
