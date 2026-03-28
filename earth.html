@@ -2371,10 +2371,17 @@ function animate() {
         if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
     }
 
-    // ── Astro HUD (every 5 s)
+    // ── Astro HUD + sun direction (every 5 s)
+    // Sun moves ~1°/24 min — 5 s update keeps terminator error < 0.003°.
     if (t - lastAstro > 5) {
         lastAstro = t;
-        updateAstroHUD(new Date());
+        const _now = new Date();
+        updateAstroHUD(_now);
+        const _sunDir = sunDirectionEquatorial(julianDay(_now));
+        earthU.u_sun_dir.value.copy(_sunDir);
+        cloudU.u_sun_dir.value.copy(_sunDir);
+        atmU.u_sun_dir.value.copy(_sunDir);
+        stratU.u_sun_dir.value.copy(_sunDir);
     }
 
     controls.update();
