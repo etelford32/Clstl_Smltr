@@ -912,6 +912,11 @@ import {
 } from './js/magnetosphere-engine.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
+import {
+    EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
+    createEarthUniforms, createCloudUniforms, loadEarthTextures,
+} from './js/earth-skin.js';
+import { StormFeed } from './js/storm-feed.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -926,8 +931,7 @@ const R_ATM    = 1.026;   // atmosphere rim sphere
 const TWO_PI   = Math.PI * 2;
 const DEG      = Math.PI / 180;
 
-// CDN base for NASA Blue Marble / city-lights textures
-const CDN = 'https://unpkg.com/three-globe/example/img/';
+// Textures loaded via earth-skin.js (version-pinned CDN, RepeatWrapping, safe fallbacks)
 
 // ═══════════════════════════════════════════════════════════════
 //  ASTRONOMY HELPERS  (current-date sun position)
@@ -1009,295 +1013,10 @@ function fmtLT(lon, utcH) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GLSL — EARTH SURFACE
+//  GLSL shaders — imported from js/earth-skin.js
+//  EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG
 // ═══════════════════════════════════════════════════════════════
-const earthVS = /* glsl */`
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-varying vec3 vWorldPos;
-void main() {
-    vUv         = uv;
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
 
-const earthFS = /* glsl */`
-precision highp float;
-
-uniform sampler2D u_day;
-uniform sampler2D u_night;
-uniform sampler2D u_specular;   // ocean mask (r=ocean)
-uniform sampler2D u_weather;    // R=temp, G=pressure, B=humidity, A=wind
-uniform vec3  u_sun_dir;        // unit vector FROM Earth TO Sun (world space)
-uniform float u_time;
-uniform float u_kp;             // Kp index [0–9]
-uniform float u_xray;           // normalised X-ray intensity [0–1]
-uniform float u_city_lights;    // 1=on, 0=off
-uniform float u_aurora_on;      // 1=on, 0=off
-uniform float u_weather_on;     // 1=on, 0=off
-uniform float u_aurora_power;   // live aurora power [0–1]
-uniform float u_bz_south;       // southward IMF Bz [0–1]  (0.0=north, 1.0=–30 nT)
-uniform float u_dst_norm;       // ring current |Dst|/200   [0–1]
-
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-varying vec3 vWorldPos;
-
-// ── Aurora curtains ───────────────────────────────────────────
-vec3 auroraColor(float sinAbsLat, float lon, float kp) {
-    // Southward Bz expands and brightens the oval
-    float kpEff  = kp + u_bz_south * 2.5;
-    float ovalCtr = 0.940 - clamp(kpEff, 0.0, 9.0) * 0.0197;
-    float ovalW   = 0.045 + (kpEff / 9.0) * 0.055;
-
-    float zone = smoothstep(ovalCtr - ovalW * 1.5, ovalCtr, sinAbsLat)
-               * (1.0 - smoothstep(ovalCtr + ovalW * 0.4, ovalCtr + ovalW * 1.5, sinAbsLat));
-    if (zone < 0.001) return vec3(0.0);
-
-    // Animated curtains — phase varies with lon & time
-    float phase  = u_time * 1.4 + lon * 9.0;
-    float anim   = (0.55 + 0.45 * sin(phase)) * (0.7 + 0.3 * sin(phase * 2.1 + 1.0));
-
-    // Scale by live aurora power (floor of 0.3 so Kp always shows some glow)
-    float powerScale = 0.30 + 0.70 * u_aurora_power;
-    float bright = zone * anim * powerScale;
-
-    // Green (quiet) → magenta (storm) driven by Kp + Bz
-    vec3 lo = vec3(0.05, 0.95, 0.15);   // green
-    vec3 hi = vec3(0.90, 0.10, 0.80);   // magenta
-    float stormMix = clamp((kpEff - 3.0) / 6.0, 0.0, 1.0);
-    return mix(lo, hi, stormMix) * bright * 0.90;
-}
-
-// ── Weather / temperature overlay (placeholder for real data) ─
-vec3 weatherOverlay(vec2 uv) {
-    // Sample the pre-computed data texture (R = normalised temperature)
-    float temp = texture2D(u_weather, uv).r;
-
-    // Colour ramp: polar blue → temperate green → tropical orange → equatorial red
-    vec3 polar    = vec3(0.05, 0.15, 0.80);
-    vec3 tempZone = vec3(0.20, 0.75, 0.30);
-    vec3 subtrop  = vec3(0.95, 0.60, 0.05);
-    vec3 tropic   = vec3(0.85, 0.05, 0.10);
-
-    vec3 c;
-    if (temp < 0.33) c = mix(polar, tempZone, temp / 0.33);
-    else if (temp < 0.66) c = mix(tempZone, subtrop, (temp - 0.33) / 0.33);
-    else c = mix(subtrop, tropic, (temp - 0.66) / 0.34);
-    return c;
-}
-
-void main() {
-    vec3 N = normalize(vWorldNormal);
-
-    // ── Day / night terminator ────────────────────────────────
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = smoothstep(-0.10, 0.20, NdotL);  // soft 18° twilight band
-
-    // ── Texture samples ───────────────────────────────────────
-    vec3 dayCol   = texture2D(u_day, vUv).rgb;
-    vec3 nightCol = texture2D(u_night, vUv).rgb * 2.5;  // boost city lights
-    float oceanMask = texture2D(u_specular, vUv).r;
-
-    // ── Blend day & night ─────────────────────────────────────
-    vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
-
-    // ── Ocean specular glint ──────────────────────────────────
-    vec3  V    = normalize(cameraPosition - vWorldPos);
-    vec3  H    = normalize(u_sun_dir + V);
-    float spec = pow(max(dot(N, H), 0.0), 90.0) * oceanMask * dayMix * 0.60;
-    base += vec3(spec * 0.7, spec * 0.85, spec);
-
-    // ── Weather temperature overlay ───────────────────────────
-    if (u_weather_on > 0.5) {
-        base = mix(base, weatherOverlay(vUv), 0.28);
-    }
-
-    // ── Aurora (night & twilight side only) ───────────────────
-    if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        // Geographic lat from UV (stable, rotation-independent)
-        float lat    = (0.5 - vUv.y) * 3.14159265;
-        float lon    = (vUv.x - 0.5) * 6.28318530;
-        float sinAbs = abs(sin(lat));
-        // Mask to dark/twilight hemisphere
-        float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
-        base += auroraColor(sinAbs, lon, u_kp) * nightM;
-    }
-
-    // ── X-ray ionospheric flash (dayside HF blackout) ─────────
-    if (u_xray > 0.25 && dayMix > 0.4) {
-        float flash = (u_xray - 0.25) / 0.75 * dayMix;
-        base += vec3(0.3, 0.5, 1.0) * flash * 0.30;
-    }
-
-    // ── Ring current heating: equatorial nightside reddish glow ─
-    //   Peaks at ±20° latitude, strengthens with |Dst|
-    if (u_dst_norm > 0.08) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
-        float absLat = abs(lat);
-        // Glow peaks at ±20° (~0.35 rad) equatorial band on night side
-        float rcZone  = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
-        base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
-    }
-
-    // ── Southward Bz: faint particle injection on nightside ───
-    if (u_bz_south > 0.15) {
-        float bzGlow = (u_bz_south - 0.15) / 0.85;
-        float nightM = 1.0 - smoothstep(-0.25, 0.10, NdotL);
-        base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
-    }
-
-    // ── Improved diffuse: half-Lambert keeps oblique-lit land bright ──
-    // Half-Lambert: remap [-1,1]→[0,1], then square for gentle contrast.
-    // At NdotL=0.3 (N. America, mid-lat): old=32%, new=42% brightness.
-    float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float diffuse  = halfLamb * halfLamb;
-    // Night-side ambient earthshine (reflected moonlight / city scatter)
-    float lit = mix(0.07, diffuse, dayMix);
-    base *= lit;
-
-    // ── Terminator twilight warm glow (orange band at dawn/dusk) ──
-    float termZone = smoothstep(-0.08, 0.0, NdotL) * smoothstep(0.18, 0.06, NdotL);
-    base += vec3(0.55, 0.25, 0.04) * termZone * 0.22;
-
-    gl_FragColor = vec4(base, 1.0);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — CLOUDS
-// ═══════════════════════════════════════════════════════════════
-const cloudVS = /* glsl */`
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-void main() {
-    vUv         = uv;
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const cloudFS = /* glsl */`
-precision mediump float;
-uniform sampler2D u_clouds;
-uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity
-uniform vec3  u_sun_dir;
-uniform float u_time;
-uniform float u_weather_on;
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-void main() {
-    vec3  N     = normalize(vWorldNormal);
-    float NdotL = dot(N, u_sun_dir);
-    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);   // half-Lambert
-    lit = lit * lit;
-
-    // Two drift speeds: lower clouds slow, upper cirrus faster
-    vec2 driftLow  = vec2(u_time *  0.000055, u_time * 0.000008);
-    vec2 driftHigh = vec2(u_time *  0.000095, u_time * 0.000012);
-    float a0 = texture2D(u_clouds, vUv + driftLow ).r;
-    float a1 = texture2D(u_clouds, vUv + driftHigh).r * 0.55;
-    float alpha = pow(max(a0, a1), 1.4) * 0.90;
-
-    // Pressure modulation: low pressure (G near 0) → thicker/darker storm clouds,
-    // high pressure (G near 1) → thinner, fewer clouds.
-    if (u_weather_on > 0.5) {
-        float pressure = texture2D(u_weather, vUv).g;   // 0=low, 1=high
-        // Suppress clouds slightly in high-pressure regions
-        float clearFactor = mix(1.0, 0.55, pressure);
-        alpha *= clearFactor;
-        // In low-pressure cells, push clouds denser (storms)
-        float stormBoost  = max(0.0, 0.45 - pressure) * 2.2;
-        alpha = clamp(alpha + alpha * stormBoost, 0.0, 1.0);
-    }
-
-    // Dayside: bright white. Night underside: grey-blue shadow.
-    vec3 dayCol   = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    vec3 nightCol = vec3(0.26, 0.30, 0.40);
-    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
-    vec3  col     = mix(nightCol, dayCol, dayMix);
-
-    // Warm golden tint at terminator (sunrise/sunset through clouds)
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.35);
-
-    gl_FragColor = vec4(col, alpha);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — ATMOSPHERE RIM
-// ═══════════════════════════════════════════════════════════════
-const atmVS = /* glsl */`
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
-    vViewDir = normalize(cameraPosition - wp);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const atmFS = /* glsl */`
-precision mediump float;
-uniform vec3 u_sun_dir;
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    // Rim strength: sharper falloff gives thinner atmospheric limb
-    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
-
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
-
-    // ── Rayleigh: blue daytime limb, dim purple night ──────────────
-    vec3 rayleighDay   = vec3(0.14, 0.42, 1.00);
-    vec3 rayleighNight = vec3(0.03, 0.01, 0.08);
-    vec3 rayleigh = mix(rayleighNight, rayleighDay, dayMix);
-
-    // ── Mie forward scattering: bright halo when viewing near sun ──
-    float LdotV  = dot(u_sun_dir, -V);               // 1 when looking at sun
-    float miePhase = 0.6 / pow(1.06 - 0.96 * LdotV, 1.5);  // Henyey-Greenstein
-    float mieRim = pow(1.0 - abs(dot(V, N)), 1.5) * miePhase * dayMix;
-    vec3  mie    = vec3(0.90, 0.82, 0.55) * mieRim * 0.35;
-
-    // ── Twilight: amber-orange band at terminator ───────────────────
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.25, 0.06, NdotL);
-    vec3  twilight = vec3(0.88, 0.42, 0.10) * termZone * rim * 1.8;
-
-    vec3 col = rayleigh * rim + mie + twilight;
-    float a  = rim * 0.72;
-    gl_FragColor = vec4(col, a);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — STRATOSPHERE HAZE  (thin shell between clouds & atm rim)
-// ═══════════════════════════════════════════════════════════════
-const stratVS = /* glsl */`
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
-    vViewDir = normalize(cameraPosition - wp);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const stratFS = /* glsl */`
-precision mediump float;
-uniform vec3 u_sun_dir;
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    // Thinner rim than outer atmosphere (sharper, denser haze band)
-    float rim    = pow(1.0 - abs(dot(V, N)), 4.0);
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 3.0 + 0.5, 0.0, 1.0);
-    // Pale violet-blue stratospheric haze
-    vec3 day   = vec3(0.16, 0.36, 0.78);
-    vec3 night = vec3(0.02, 0.01, 0.05);
-    vec3 col   = mix(night, day, dayMix);
-    gl_FragColor = vec4(col * rim, rim * 0.28);
-}`;
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER + CAMERA + CONTROLS
@@ -1371,54 +1090,30 @@ const windTexture = new THREE.DataTexture(
 );
 windTexture.needsUpdate = true;
 
-const earthU = {
-    u_day:          { value: null },
-    u_night:        { value: null },
-    u_specular:     { value: null },
-    u_weather:      { value: null },
-    u_sun_dir:      { value: SUN_EQ.clone() },
-    u_time:         { value: 0 },
-    u_kp:           { value: 1 },
-    u_xray:         { value: 0 },
-    u_city_lights:  { value: 1.0 },
-    u_aurora_on:    { value: 1.0 },
-    u_weather_on:   { value: 0.0 },
-    u_aurora_power: { value: 0.0 },    // live aurora power: 0 (quiet) → 1 (600 GW)
-    u_bz_south:     { value: 0.0 },    // southward IMF: 0 (north) → 1 (−30 nT)
-    u_dst_norm:     { value: 0.0 },    // ring current:  0 (quiet) → 1 (−200 nT)
-};
-const cloudU = {
-    u_clouds:     { value: null },
-    u_weather:    { value: null },   // shared with earthU.u_weather
-    u_sun_dir:    { value: SUN_EQ.clone() },
-    u_time:       { value: 0 },
-    u_weather_on: { value: 0.0 },
-};
-const atmU = {
-    u_sun_dir: { value: SUN_EQ.clone() },
-};
-const stratU = {
-    u_sun_dir: { value: SUN_EQ.clone() },
-};
+// Uniforms — created via earth-skin.js factories (include safe fallback textures)
+const earthU = createEarthUniforms(SUN_EQ.clone());
+earthU.u_kp.value = 1;  // set non-zero default so aurora is ready
+const cloudU = createCloudUniforms(SUN_EQ.clone());
+// Share weather texture between Earth surface and cloud shaders
+// (set after weather DataTexture is created below)
+const atmU   = { u_sun_dir: { value: SUN_EQ.clone() } };
+const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
 const earthGeo = new THREE.SphereGeometry(R_EARTH, 80, 80);
 const earthMat = new THREE.ShaderMaterial({
-    vertexShader: earthVS, fragmentShader: earthFS,
+    vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
-// Earth's axial tilt: 23.44° toward the vernal equinox direction (+X)
-// We approximate by tilting the mesh Z-axis so the pole tilts correctly.
-// Actually we keep geometry upright and bake tilt into sun direction calc.
-// The geographic Y-axis (spin axis) is world Y — standard equatorial frame.
+// Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
 const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 60, 60);
 const cloudMat = new THREE.ShaderMaterial({
-    vertexShader: cloudVS, fragmentShader: cloudFS,
+    vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
@@ -1426,7 +1121,7 @@ scene.add(cloudMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
 const stratMat = new THREE.ShaderMaterial({
-    vertexShader: stratVS, fragmentShader: stratFS,
+    vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,  // reuse rim shader at tighter radius
     uniforms: stratU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
@@ -1434,7 +1129,7 @@ scene.add(new THREE.Mesh(stratGeo, stratMat));
 
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
-    vertexShader: atmVS, fragmentShader: atmFS,
+    vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,
     uniforms: atmU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
@@ -1508,35 +1203,30 @@ scene.add(tropicGroup);
 // ═══════════════════════════════════════════════════════════════
 //  TEXTURE LOADING
 // ═══════════════════════════════════════════════════════════════
-let texturesLoaded = 0;
-const TEXTURES_NEEDED = 4;
+// Load textures via shared earth-skin.js loader
+// — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
+loadEarthTextures(earthU, cloudU).then(() => {
+    document.getElementById('loading').classList.add('done');
+});
 
-function onTexLoad() {
-    texturesLoaded++;
-    if (texturesLoaded >= TEXTURES_NEEDED) {
-        document.getElementById('loading').classList.add('done');
+// ── Storm-update: push active cyclone positions into cloud shader ─────────────
+new StormFeed().start();
+window.addEventListener('storm-update', e => {
+    const storms = e.detail.storms ?? [];
+    const arr = cloudU.u_storms.value;
+    const n   = Math.min(storms.length, 8);
+    for (let i = 0; i < n; i++) {
+        const s = storms[i];
+        arr[i].set(
+            (s.lon + 180) / 360,          // UV u
+            (90 - s.lat) / 180,           // UV v
+            Math.min(Math.max((s.intensityKt - 35) / 122, 0), 1),  // intensity 0-1
+            s.lat >= 0 ? 1.0 : -1.0       // spin: +1 CCW (NH), -1 CW (SH)
+        );
     }
-}
-
-const loader = new THREE.TextureLoader();
-
-loader.load(CDN + 'earth-blue-marble.jpg', t => {
-    t.colorSpace = THREE.SRGBColorSpace;
-    earthU.u_day.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'earth-night.jpg', t => {
-    t.colorSpace = THREE.SRGBColorSpace;
-    earthU.u_night.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'earth-water.png', t => {
-    earthU.u_specular.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'clouds.png', t => {
-    cloudU.u_clouds.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
+    for (let i = n; i < 8; i++) arr[i].set(0, 0, 0, 1);
+    cloudU.u_storm_count.value = n;
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)
