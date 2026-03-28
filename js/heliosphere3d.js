@@ -35,6 +35,12 @@ import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { FlareRing3D }         from './flare-ring.js';
 import { EARTH_VERT, EARTH_FRAG, createEarthUniforms, loadEarthTextures } from './earth-skin.js';
 import {
+    jdNow,
+    earthHeliocentric, moonGeocentric,
+    mercuryHeliocentric, venusHeliocentric, marsHeliocentric,
+    jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
+} from './horizons.js';
+import {
     buildParkerLUT,
     parkerSpeedRatio,
     alfvenSpeed,
@@ -137,6 +143,7 @@ export class Heliosphere3D {
             mercury: null, venus: null, earth: null, moon: null, mars: null,
             jupiter: null, saturn: null, uranus: null, neptune: null,
         };
+        this._lastMeeusJD = null;   // JD of last Meeus per-frame update
 
         /** Latest heliospheric state from SolarWindState (Parker-corrected) */
         this._helioState = null;
@@ -289,6 +296,64 @@ export class Heliosphere3D {
         this._buildPlanets();
         this._buildHCS();          // heliospheric current sheet — below field lines
         this._buildSolarWind();    // field lines + particles on top
+        this._seedMeeusPositions(); // set correct positions before first ephemeris-ready
+    }
+
+    /**
+     * Synchronously seed all planet/moon positions from Meeus at startup.
+     * Runs immediately after scene objects are built so planets appear at the
+     * correct location before any network data arrives.
+     */
+    _seedMeeusPositions() {
+        const jd = jdNow();
+        const mk = fn => ({ ...fn(jd), source: 'meeus' });
+        const m  = moonGeocentric(jd);
+        this._eph.mercury = mk(mercuryHeliocentric);
+        this._eph.venus   = mk(venusHeliocentric);
+        this._eph.earth   = mk(earthHeliocentric);
+        this._eph.mars    = mk(marsHeliocentric);
+        this._eph.jupiter = mk(jupiterHeliocentric);
+        this._eph.saturn  = mk(saturnHeliocentric);
+        this._eph.uranus  = mk(uranusHeliocentric);
+        this._eph.neptune = mk(neptuneHeliocentric);
+        this._eph.moon    = { lon_rad: m.lon_rad, lat_rad: m.lat_rad,
+                               dist_km: m.dist_km,  dist_AU: m.dist_AU, source: 'meeus' };
+        this._updateEphemerisPositions();
+    }
+
+    /**
+     * Per-frame live planet update (throttled to 1 Hz).
+     *
+     * Inner planets + Earth + Moon are always re-derived from Meeus (instant,
+     * no network required). Outer planets keep the latest JPL Horizons data
+     * from _onEph; Meeus is used only as a seed when Horizons hasn't loaded yet.
+     *
+     * At solar-system scale the fastest-moving body (Mercury) travels < 0.003°/s,
+     * so 1 Hz gives sub-pixel accuracy for any reasonable viewport.
+     */
+    _tickLivePlanets() {
+        const jd = jdNow();
+        if (this._lastMeeusJD != null && (jd - this._lastMeeusJD) * 86400 < 1) return;
+        this._lastMeeusJD = jd;
+
+        const mk = fn => ({ ...fn(jd), source: 'meeus' });
+        const m  = moonGeocentric(jd);
+
+        // Inner planets and Earth: always Meeus (EphemerisService also uses Meeus for these)
+        this._eph.mercury = mk(mercuryHeliocentric);
+        this._eph.venus   = mk(venusHeliocentric);
+        this._eph.earth   = mk(earthHeliocentric);
+        this._eph.mars    = mk(marsHeliocentric);
+        this._eph.moon    = { lon_rad: m.lon_rad, lat_rad: m.lat_rad,
+                               dist_km: m.dist_km,  dist_AU: m.dist_AU, source: 'meeus' };
+
+        // Outer planets: keep JPL Horizons data when available; seed Meeus otherwise
+        if (!this._eph.jupiter) this._eph.jupiter = mk(jupiterHeliocentric);
+        if (!this._eph.saturn)  this._eph.saturn  = mk(saturnHeliocentric);
+        if (!this._eph.uranus)  this._eph.uranus  = mk(uranusHeliocentric);
+        if (!this._eph.neptune) this._eph.neptune = mk(neptuneHeliocentric);
+
+        this._updateEphemerisPositions();
     }
 
     _buildRenderer() {
@@ -1227,6 +1292,7 @@ export class Heliosphere3D {
         this._t    += dt;
         this._rot  += 0.0003 * dt * 60;   // Parker spiral rotation
 
+        this._tickLivePlanets();
         this._tickSun();
         this._tickMoon(dt);
         this._tickHCS();
