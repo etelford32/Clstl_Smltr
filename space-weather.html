@@ -1282,12 +1282,15 @@ window.addEventListener('wind-pipeline-update', ev => {
     }
 
     // Trend line in metric-sub: arrow + slope + density from pipeline
-    const dir    = d.trend?.direction ?? 'STEADY';
-    const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
-    const slope  = d.trend?.slope_km_s_per_min;
-    const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
-    const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
-    el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+    // Only write when live — don't overwrite NOAA fallback with stale/offline data.
+    if (d.status === 'live') {
+        const dir    = d.trend?.direction ?? 'STEADY';
+        const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
+        const slope  = d.trend?.slope_km_s_per_min;
+        const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
+        const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
+        el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+    }
 
     // Alert badge
     const badge = el('wind-alert-badge');
@@ -1331,11 +1334,10 @@ window.addEventListener('swpc-update', e => {
     const bt      = sw.bt ?? 0;
     const windNorm = Math.min((spd - 250) / 650, 1);
 
-    // Only update the trend line from NOAA if the pipeline hasn't already enriched it
-    // (pipeline handler replaces this with trend arrow + slope when available).
+    // NOAA fallback trend line — always update so real density/temp shows
+    // when the pipeline is offline.  Pipeline handler overwrites this when live.
     const trendEl = el('wind-trend');
-    if (!trendEl.textContent || trendEl.textContent === '–')
-        trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
+    trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
     el('p-speed').textContent   = `${Math.round(spd)} km/s`;
     el('p-speed').className     = `param-val ${spd > 700 ? 'danger' : spd > 500 ? 'warn' : 'ok'}`;
     el('p-density').textContent = `${density.toFixed(2)} n/cc`;
