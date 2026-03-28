@@ -168,10 +168,10 @@ void main() {
         base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
     }
 
-    // Lighting: half-Lambert
+    // Lighting: half-Lambert without squaring — Blue Marble is already a daylit photo;
+    // squaring creates a harsh spotlight effect.  Keep a gentle falloff + raised ambient.
     float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float diffuse  = halfLamb * halfLamb;
-    float lit      = mix(0.07, diffuse, dayMix);
+    float lit      = mix(0.10, halfLamb, dayMix);
     base *= lit;
 
     // Terminator warm glow
@@ -361,7 +361,7 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_day:          { value: blackFallback },
         u_night:        { value: blackFallback },
         u_specular:     { value: blackFallback },
-        u_weather:      { value: null },
+        u_weather:      { value: _blackTex() },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
         u_kp:           { value: 0 },
@@ -379,7 +379,7 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
 export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
         u_clouds:      { value: _grayTex() },
-        u_weather:     { value: null },
+        u_weather:     { value: _blackTex() },
         u_sun_dir:     { value: sunDir.clone() },
         u_time:        { value: 0 },
         u_weather_on:  { value: 0 },

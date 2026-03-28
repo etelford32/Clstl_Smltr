@@ -28,28 +28,6 @@ import {
     createEarthUniforms, loadEarthTextures,
 } from './earth-skin.js';
 
-// ── Atmosphere shaders ────────────────────────────────────────────────────────
-const ATMO_VERT = /* glsl */`
-varying vec3 vNormal;
-varying vec3 vView;
-void main() {
-    vNormal = normalize(normalMatrix * normal);
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    vView   = normalize(-mv.xyz);
-    gl_Position = projectionMatrix * mv;
-}`;
-
-const ATMO_FRAG = /* glsl */`
-precision mediump float;
-uniform vec3 u_sunDir;
-varying vec3 vNormal; varying vec3 vView;
-void main() {
-    float rim  = 1.0 - abs(dot(normalize(vNormal), normalize(vView)));
-    rim = pow(rim, 2.4);
-    float day  = smoothstep(-0.3, 0.55, dot(normalize(vNormal), normalize(u_sunDir)));
-    vec3  col  = mix(vec3(0.04, 0.09, 0.32), vec3(0.12, 0.40, 1.00), day);
-    gl_FragColor = vec4(col, rim * (0.30 + day * 0.28));
-}`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 export class SpaceWeatherGlobe {
@@ -86,6 +64,7 @@ export class SpaceWeatherGlobe {
             logarithmicDepthBuffer: true,
         });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this._renderer.outputColorSpace = THREE.SRGBColorSpace;
         this._renderer.setClearColor(0x010812);
     }
 
@@ -169,10 +148,12 @@ export class SpaceWeatherGlobe {
 
     _buildAtmosphere() {
         const geo = new THREE.SphereGeometry(1.095, 48, 48);
+        // ATM_VERT/ATM_FRAG from earth-skin.js compute world-space normals so the
+        // atmosphere lighting stays fixed to the sun regardless of camera orbit.
         this._atmoMat = new THREE.ShaderMaterial({
-            vertexShader:   ATMO_VERT,
-            fragmentShader: ATMO_FRAG,
-            uniforms: { u_sunDir: { value: this._sunDir.clone() } },
+            vertexShader:   ATM_VERT,
+            fragmentShader: ATM_FRAG,
+            uniforms: { u_sun_dir: { value: this._sunDir.clone() } },
             transparent: true,
             depthWrite:  false,
             side:        THREE.BackSide,
@@ -330,7 +311,7 @@ export class SpaceWeatherGlobe {
         // Push current time + sun direction to shaders
         this._earthU.u_time.value = t;
         this._earthU.u_sun_dir.value.copy(this._sunDir);
-        this._atmoMat.uniforms.u_sunDir.value.copy(this._sunDir);
+        this._atmoMat.uniforms.u_sun_dir.value.copy(this._sunDir);
 
         // Aurora pulse
         const a0 = this._auroraAlpha;
