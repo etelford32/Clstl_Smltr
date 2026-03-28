@@ -33,6 +33,7 @@ import * as THREE from 'three';
 import { OrbitControls }       from 'three/addons/controls/OrbitControls.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { FlareRing3D }         from './flare-ring.js';
+import { EARTH_VERT, EARTH_FRAG, createEarthUniforms, loadEarthTextures } from './earth-skin.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -474,13 +475,21 @@ export class Heliosphere3D {
         this._earthGroup.name = 'earth_group';
         this._scene.add(this._earthGroup);
 
-        // Earth sphere
+        // Earth sphere — shared Blue Marble skin (aurora + city lights off at this scale)
+        this._earthSkinU = createEarthUniforms(new THREE.Vector3(1, 0, 0));
+        this._earthSkinU.u_aurora_on.value   = 0;
+        this._earthSkinU.u_city_lights.value = 1;
         const earthMesh = new THREE.Mesh(
             new THREE.SphereGeometry(R.earth, 28, 28),
-            new THREE.MeshStandardMaterial({ color: COL.earth, roughness: 0.8, metalness: 0 })
+            new THREE.ShaderMaterial({
+                vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
+                uniforms: this._earthSkinU,
+            })
         );
         earthMesh.name = 'earth';
         this._earthGroup.add(earthMesh);
+        // Load textures asynchronously — shows blue fallback until ready
+        loadEarthTextures(this._earthSkinU, null);
 
         // Thin atmosphere rim (additive glow)
         const atmo = new THREE.Mesh(
@@ -1226,6 +1235,15 @@ export class Heliosphere3D {
         this._tickCME(dt);
         this._tickFlare(dt);
         this._tickMagnetosphere(dt);
+
+        // Update shared Earth skin uniforms (time for aurora animation, sun dir for day/night)
+        if (this._earthSkinU) {
+            this._earthSkinU.u_time.value = this._t;
+            const ep = this._earthGroup.position;
+            if (ep.length() > 0) {
+                this._earthSkinU.u_sun_dir.value.copy(ep).negate().normalize();
+            }
+        }
 
         this._controls.update();
         this._renderer.render(this._scene, this._camera);

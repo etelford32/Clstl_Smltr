@@ -23,91 +23,14 @@
 import * as THREE from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
+import {
+    EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
+    createEarthUniforms, loadEarthTextures,
+} from './earth-skin.js';
 
-// ── Earth fragment shader ─────────────────────────────────────────────────────
-const EARTH_VERT = /* glsl */`
-varying vec3 vNormal;
-varying vec3 vWorldPos;
-void main() {
-    vNormal   = normalize(normalMatrix * normal);
-    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-
-const EARTH_FRAG = /* glsl */`
-precision highp float;
-uniform vec3  u_sunDir;
-uniform float u_time;
-uniform float u_kpNorm;   // 0–1 (Kp / 9)
-uniform float u_bzNorm;   // 0 = full southward,  1 = full northward
-varying vec3 vNormal;
-varying vec3 vWorldPos;
-
-// ── Tiny value-noise ──────────────────────────────────────────────────────────
-float hash(vec2 p) {
-    p = fract(p * vec2(127.1, 311.7));
-    p += dot(p, p + 19.19);
-    return fract(p.x * p.y);
-}
-float noise(vec2 p) {
-    vec2 i = floor(p); vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i),           hash(i+vec2(1,0)), f.x),
-               mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
-}
-
-void main() {
-    vec3  N      = normalize(vNormal);
-    float lon    = atan(N.z, N.x);
-    float lat    = asin(clamp(N.y, -1.0, 1.0));
-    vec2  uv     = vec2(lon * 1.5, lat * 2.5);
-
-    // ── Surface noise → ocean / land / ice ───────────────────────────────────
-    float n = noise(uv * 2.0) * 0.50
-            + noise(uv * 4.0) * 0.30
-            + noise(uv * 8.0) * 0.20;
-
-    float isLand  = step(0.455, n);
-    float isCap   = smoothstep(0.70, 0.90, abs(N.y));
-
-    vec3 oceanCol = vec3(0.030, 0.075, 0.200);
-    vec3 landCol  = vec3(0.055, 0.125, 0.090);
-    vec3 capCol   = vec3(0.280, 0.320, 0.440);
-    vec3 dayBase  = mix(oceanCol, landCol, isLand);
-    dayBase       = mix(dayBase, capCol, isCap);
-
-    // ── Day / night terminator ────────────────────────────────────────────────
-    float sunDot  = dot(N, normalize(u_sunDir));
-    float day     = smoothstep(-0.10, 0.22, sunDot);
-    dayBase      += sunDot * 0.055 * vec3(0.75, 0.88, 1.0);   // sunlit tint
-
-    // Night: very dark with faint city-light glow at mid-latitudes
-    float city = noise(uv * 5.5) * (1.0 - isCap)
-               * smoothstep(0.50, 0.65, abs(N.y) + n * 0.25) * 0.8;
-    vec3 nightCol = vec3(0.003, 0.004, 0.009)
-                  + city * vec3(0.10, 0.07, 0.015);
-
-    vec3 surf = mix(nightCol, dayBase, day);
-
-    // ── Aurora in shader — equatorward lat = 72° - Kp×17/9 ──────────────────
-    float aLat   = (1.257 - u_kpNorm * 0.297);   // radians (72°→55° mapped to radians)
-    float coLat  = acos(clamp(abs(N.y), 0.0, 1.0));
-    float aWidth = 0.12 + u_kpNorm * 0.08;
-    float aGlow  = exp(-pow((coLat - aLat) / aWidth, 2.0));
-    aGlow       *= (0.25 + u_kpNorm * 0.75)
-               *  (0.55 + 0.45 * sin(u_time * 2.4 + lon * 5.0));   // shimmer
-
-    // Colour: green → teal → magenta as Kp climbs
-    vec3 aCol = mix(mix(vec3(0.0, 1.0, 0.5), vec3(0.0, 0.7, 1.0), u_kpNorm * 2.0),
-                    vec3(1.0, 0.2, 0.6), max(0.0, u_kpNorm * 2.0 - 1.0));
-    surf += aCol * aGlow * 0.65 * (1.0 - day * 0.75);
-
-    // ── Slight blue tinge on dayside when Bz is southward ────────────────────
-    surf.b += (1.0 - u_bzNorm) * 0.05 * day;
-
-    gl_FragColor = vec4(surf, 1.0);
-}`;
-
+// ── Procedural Earth shaders (removed) — now using shared earth-skin.js ───────
+// Preserved for reference; EARTH_VERT and EARTH_FRAG imported above.
+const _PROCEDURAL_VERT_STUB = /* glsl */`
 // ── Atmosphere shaders ────────────────────────────────────────────────────────
 const ATMO_VERT = /* glsl */`
 varying vec3 vNormal;
@@ -195,20 +118,22 @@ export class SpaceWeatherGlobe {
     }
 
     _buildEarth() {
+        // Shared textured Earth skin — same Blue Marble + aurora shaders as earth.html
+        this._earthU = createEarthUniforms(this._sunDir);
+        this._earthU.u_kp.value       = 2;     // show some aurora by default
+        this._earthU.u_aurora_on.value = 1;
+        this._earthU.u_city_lights.value = 1;
         const geo = new THREE.SphereGeometry(1, 96, 96);
-        this._earthMat = new THREE.ShaderMaterial({
-            vertexShader:   EARTH_VERT,
-            fragmentShader: EARTH_FRAG,
-            uniforms: {
-                u_sunDir: { value: this._sunDir.clone() },
-                u_time:   { value: 0 },
-                u_kpNorm: { value: 0.22 },
-                u_bzNorm: { value: 0.50 },
-            },
+        this._earthMat  = new THREE.ShaderMaterial({
+            vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
+            uniforms: this._earthU,
         });
         this._earthMesh = new THREE.Mesh(geo, this._earthMat);
         this._earthMesh.rotation.z = 23.5 * Math.PI / 180;   // axial tilt
         this._scene.add(this._earthMesh);
+
+        // Load Blue Marble textures (no clouds needed at this scale)
+        loadEarthTextures(this._earthU, null);
 
         // Lat / lon grid (cyan-blue, subtle)
         const gm = new THREE.LineBasicMaterial({
@@ -352,10 +277,10 @@ export class SpaceWeatherGlobe {
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
 
-        // Earth shader uniforms
-        this._earthMat.uniforms.u_kpNorm.value = kp / 9;
-        this._earthMat.uniforms.u_bzNorm.value =
-            Math.max(0, Math.min(1, (-bz + 30) / 60));
+        // Earth shader uniforms (shared earth-skin.js format)
+        this._earthU.u_kp.value       = kp;
+        this._earthU.u_bz_south.value = Math.max(0, Math.min(1, -bz / 30));
+        this._earthU.u_aurora_power.value = Math.min(1, kp / 9);
 
         // Wind particle colour: blue → cyan → orange at high speeds
         const wMat = this._windPts.material;
@@ -406,8 +331,8 @@ export class SpaceWeatherGlobe {
         this._earthMesh.rotation.y = t * 0.048;
 
         // Push current time + sun direction to shaders
-        this._earthMat.uniforms.u_time.value = t;
-        this._earthMat.uniforms.u_sunDir.value.copy(this._sunDir);
+        this._earthU.u_time.value = t;
+        this._earthU.u_sun_dir.value.copy(this._sunDir);
         this._atmoMat.uniforms.u_sunDir.value.copy(this._sunDir);
 
         // Aurora pulse
