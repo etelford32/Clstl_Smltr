@@ -50,6 +50,7 @@ import {
     plasmaBeta,
     cglAnisotropy,
 } from './helio-physics.js';
+import { SUN_VERT, SUN_FRAG, createSunUniforms } from './sun-shader.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -170,6 +171,13 @@ export class Heliosphere3D {
         this._flare3d  = null;
         this._lastXray = '';
 
+        // Sun shader uniforms + flare flash decay
+        this._sunUniforms  = null;
+        this._sunFlareT    = 0;    // 0–1 flash intensity, decays each frame
+
+        // Solar prominences (animated arc loops at the limb)
+        this._prominences  = [];   // [{ line, pts, lat, lon, maxH, age, maxAge, phase }]
+
         // Three.js objects (set by _build*)
         this._renderer    = null;
         this._scene       = null;
@@ -248,6 +256,12 @@ export class Heliosphere3D {
             ev.mesh.material.dispose();
         }
         this._reconnEvents = [];
+        for (const p of this._prominences) {
+            this._scene?.remove(p.line);
+            p.line.geometry.dispose();
+            p.line.material.dispose();
+        }
+        this._prominences = [];
         this._renderer?.dispose();
     }
 
@@ -443,27 +457,35 @@ export class Heliosphere3D {
     }
 
     _buildSun() {
-        // Core photosphere
+        // ── Photosphere — custom GLSL shader ─────────────────────────────────────
+        // Replaces MeshStandardMaterial with a procedural sun surface:
+        // granulation cells, limb darkening, chromosphere gradient, active regions.
+        this._sunUniforms = createSunUniforms(THREE);
         const core = new THREE.Mesh(
-            new THREE.SphereGeometry(R.sun, 32, 32),
-            new THREE.MeshStandardMaterial({
-                color:     0xffcc44,
-                emissive:  0xff8800,
-                emissiveIntensity: 1.8,
-                roughness: 1,
-                metalness: 0,
+            new THREE.SphereGeometry(R.sun, 48, 48),
+            new THREE.ShaderMaterial({
+                vertexShader:   SUN_VERT,
+                fragmentShader: SUN_FRAG,
+                uniforms:       this._sunUniforms,
             })
         );
         core.name = 'sun_core';
         this._scene.add(core);
         this._sunCore = core;
 
-        // Outer corona glow — two nested additive spheres
-        for (const [scale, opacity] of [[1.35, 0.18], [1.8, 0.07], [2.6, 0.03]]) {
+        // ── Corona glow — three nested additive halos ─────────────────────────────
+        // The innermost halo (1.35×) mimics the chromosphere / transition region;
+        // the outer two model the K-corona and F-corona structure.
+        this._coronaMeshes = [];
+        for (const [scale, opacity, color] of [
+            [1.35, 0.22, 0xff7700],   // chromosphere / inner K-corona
+            [1.80, 0.09, 0xff5500],   // K-corona
+            [2.60, 0.04, 0xff3300],   // outer corona / F-corona
+        ]) {
             const glow = new THREE.Mesh(
                 new THREE.SphereGeometry(R.sun * scale, 24, 24),
                 new THREE.MeshBasicMaterial({
-                    color:       0xff6600,
+                    color,
                     transparent: true,
                     opacity,
                     blending:    THREE.AdditiveBlending,
@@ -473,6 +495,7 @@ export class Heliosphere3D {
             );
             glow.renderOrder = 2;
             this._scene.add(glow);
+            this._coronaMeshes.push({ mesh: glow, baseOpacity: opacity });
         }
     }
 
@@ -1284,6 +1307,9 @@ export class Heliosphere3D {
             this._flare3d = new FlareRing3D(this._scene, THREE, R.sun);
         this._flare3d.trigger(extreme);
 
+        // Trigger sun shader white-flash
+        this._sunFlareT = extreme ? 1.0 : 0.65;
+
         // Inject a speed pulse that propagates along the Parker spiral.
         // The flare source longitude is the Sun-facing heliographic direction
         // (opposite of _rot, which tracks solar rotation).
@@ -1403,14 +1429,158 @@ export class Heliosphere3D {
         }
     }
 
-    // ── Sun pulse animation ───────────────────────────────────────────────────
+    // ── Sun animation ─────────────────────────────────────────────────────────
 
-    _tickSun() {
-        if (!this._sunCore) return;
-        const fluxN = Math.min(1, Math.log10(Math.max(1e-9, this._sw.xrayFlux) / 1e-9) / 4);
-        const pulse = 1 + 0.04 * Math.sin(this._t * 1.2);
-        const boost = 1 + fluxN * 0.35;
-        this._sunCore.material.emissiveIntensity = 1.8 * pulse * boost;
+    _tickSun(dt) {
+        if (!this._sunCore || !this._sunUniforms) return;
+
+        // ── Solar rotation ────────────────────────────────────────────────────
+        // Co-rotate with the Parker spiral arms (this._rot) so the surface
+        // texture, active regions, and field lines all share the same phase.
+        this._sunCore.rotation.y = this._rot;
+
+        // ── Flare flash decay ─────────────────────────────────────────────────
+        if (this._sunFlareT > 0) {
+            this._sunFlareT = Math.max(0, this._sunFlareT - dt * 0.8);
+        }
+
+        // ── X-ray flux normalisation (log scale: C1→0.25, M1→0.50, X1→0.75) ─
+        const flux   = Math.max(1e-9, this._sw.xrayFlux ?? 1e-9);
+        const xNorm  = Math.min(1, Math.log10(flux / 1e-9) / 4);
+
+        // ── Update shader uniforms ────────────────────────────────────────────
+        const u = this._sunUniforms;
+        u.u_time.value      = this._t;
+        u.u_xray_norm.value = xNorm;
+        u.u_flare_t.value   = this._sunFlareT;
+        u.u_kp_norm.value   = Math.min(1, (this._sw.kp ?? 2) / 9);
+
+        // ── Active region positions ───────────────────────────────────────────
+        // Convert heliographic lat/lon (Carrington frame) to local unit-sphere
+        // vectors.  The sphere mesh rotates at this._rot so we subtract the
+        // current rotation to keep regions locked to the solar surface.
+        const regions = this._sw.regions ?? [];
+        const nReg    = Math.min(8, regions.length);
+        for (let k = 0; k < nReg; k++) {
+            const reg    = regions[k];
+            const lat    = reg.lat_rad ?? 0;
+            // Carrington lon is heliocentric; subtract current rotation phase so
+            // regions appear fixed on the rotating sphere.
+            const lon    = (reg.lon_rad ?? 0) - this._rot;
+            const cosLat = Math.cos(lat);
+            u.u_regions.value[k].set(
+                cosLat * Math.cos(lon),   // x
+                Math.sin(lat),            // y (ecliptic north = sphere up)
+                cosLat * Math.sin(lon),   // z
+                // Intensity: complex regions (gamma/delta class) pulse brighter
+                (reg.area_norm ?? 0.3) * (reg.is_complex ? 1.0 : 0.55),
+            );
+        }
+        u.u_nRegions.value = nReg;
+
+        // ── Corona glow opacity — pulsed by xray flux ─────────────────────────
+        if (this._coronaMeshes) {
+            const coronaBoost = 1.0 + xNorm * 0.55 + this._sunFlareT * 0.8;
+            for (const c of this._coronaMeshes) {
+                c.mesh.material.opacity = Math.min(1, c.baseOpacity * coronaBoost);
+            }
+        }
+    }
+
+    // ── Solar prominences ─────────────────────────────────────────────────────
+    //
+    // Prominences are semi-circular arc loops that rise above the limb, hang for
+    // 30–90 seconds, then fade.  Up to 5 are alive at once.  They're modelled as
+    // CatmullRom arcs of N_PROM_PTS points rotating with the sun.
+    //
+    // Visual: deep red / fuchsia (Hα at 656 nm), additive blending.
+
+    _spawnProminence() {
+        const N   = 18;                          // points along arc
+        const lat = (Math.random() - 0.5) * 1.2; // ±34° — mostly equatorial
+        const lon = Math.random() * Math.PI * 2;  // random longitude
+        // Arc height above surface: 0.25–0.75 R.sun
+        const maxH  = R.sun * (0.25 + Math.random() * 0.50);
+        const phase = Math.random() * Math.PI * 2;  // loop plane orientation
+
+        // Build arc in the tangent plane at the footpoint on the solar surface
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+            const a     = (i / N) * Math.PI;          // 0 → π over the arch
+            const rSurf = R.sun + maxH * Math.sin(a); // radial distance
+            const dLat  = (a - Math.PI * 0.5) * 0.2 * Math.cos(phase); // slight footpoint spread
+            const dLon  = (a - Math.PI * 0.5) * 0.2 * Math.sin(phase);
+            const lt    = lat + dLat;
+            const ln    = lon + dLon;
+            pts.push(new THREE.Vector3(
+                rSurf * Math.cos(lt) * Math.cos(ln),
+                rSurf * Math.sin(lt),
+                rSurf * Math.cos(lt) * Math.sin(ln),
+            ));
+        }
+
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+            color:       0xff2266,
+            transparent: true,
+            opacity:     0.0,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+            linewidth:   1,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.renderOrder = 5;
+        this._scene.add(line);
+
+        this._prominences.push({
+            line,
+            lat, lon, maxH, phase,
+            age:    0,
+            maxAge: 35 + Math.random() * 55,   // 35–90 s lifetime
+        });
+    }
+
+    _tickProminences(dt) {
+        // Spawn: keep 2–4 alive; spawn one when below min
+        if (this._prominences.length < 2 && Math.random() < dt * 0.15) {
+            this._spawnProminence();
+        } else if (this._prominences.length < 4 && Math.random() < dt * 0.04) {
+            this._spawnProminence();
+        }
+
+        for (let i = this._prominences.length - 1; i >= 0; i--) {
+            const p = this._prominences[i];
+            p.age += dt;
+
+            if (p.age >= p.maxAge) {
+                this._scene.remove(p.line);
+                p.line.geometry.dispose();
+                p.line.material.dispose();
+                this._prominences.splice(i, 1);
+                continue;
+            }
+
+            // Co-rotate with the sun mesh
+            p.line.rotation.y = this._rot;
+
+            // Opacity: fade in over first 8s, hold, fade out over last 12s
+            const t = p.age / p.maxAge;
+            let opacity;
+            if (p.age < 8)                       opacity = p.age / 8 * 0.7;
+            else if (p.age > p.maxAge - 12)      opacity = (p.maxAge - p.age) / 12 * 0.7;
+            else                                 opacity = 0.7;
+            // Pulse slightly to mimic plasma dynamics
+            opacity *= 0.7 + 0.3 * Math.sin(this._t * 0.8 + p.phase);
+            p.line.material.opacity = Math.max(0, opacity);
+
+            // Subtle colour shift: red → orange under high X-ray activity
+            const xNorm = this._sunUniforms?.u_xray_norm.value ?? 0;
+            p.line.material.color.setHSL(
+                0.94 - xNorm * 0.06,   // hue: red → more orange-red
+                1.0,
+                0.55 + xNorm * 0.15,   // brighter under activity
+            );
+        }
     }
 
     // ── Magnetosphere ─────────────────────────────────────────────────────────
@@ -1459,7 +1629,8 @@ export class Heliosphere3D {
         this._simJD += dt / 86400 * this._timeScale;
 
         this._tickLivePlanets();
-        this._tickSun();
+        this._tickSun(dt);
+        this._tickProminences(dt);
         this._tickMoon(dt);
         this._tickHCS();
         this._tickWind(dt);
