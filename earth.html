@@ -621,13 +621,16 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetopause" checked><label for="lyr-magnetopause">Magnetopause</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-bowshock"     checked><label for="lyr-bowshock">Bow Shock</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Rad. Belts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-exosphere"    checked><label for="lyr-exosphere">Exosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-geocorona"    checked><label for="lyr-geocorona">Geocorona</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-chex"         checked><label for="lyr-chex">Charge Exchange</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
@@ -715,6 +718,51 @@ nav {
         <div class="ir" title="Joule heating in auroral ionosphere">
             <span class="ik">Joule heat</span>
             <span class="iv" id="ip-joule">— GW</span>
+        </div>
+
+        <hr class="ir-sep">
+
+        <!-- Sun → Earth Coupling analytics -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px;">Sun → Earth Coupling</div>
+        <div class="ir" title="Akasofu (1981) solar wind–magnetosphere energy input: ε = l₀² v B² sin⁴(θ/2)">
+            <span class="ik">Energy input ε</span>
+            <span class="iv" id="ip-epsilon">— GW</span>
+        </div>
+        <div class="ir" title="IMF clock angle in GSM Y-Z plane: 0°=northward, ±180°=southward (maximum reconnection)">
+            <span class="ik">IMF clock θ</span>
+            <span class="iv" id="ip-clock">—°</span>
+        </div>
+        <div class="ir" title="Newell et al. (2007) dayside reconnection flux rate — strongest Dst predictor">
+            <span class="ik">Merging rate</span>
+            <span class="iv" id="ip-merging">—</span>
+        </div>
+        <div class="ir" title="Petschek fast reconnection at dayside X-line (anomalous resistivity regime)">
+            <span class="ik">X-line Vᵣ</span>
+            <span class="iv" id="ip-reconn">— km/s</span>
+        </div>
+        <div class="ir" title="Iijima-Potemra (1976) total Region 1+2 Birkeland field-aligned current">
+            <span class="ik">FAC R1+R2</span>
+            <span class="iv" id="ip-fac">— MA</span>
+        </div>
+        <div class="ir" title="McPherron substorm onset likelihood index based on lobe flux accumulation">
+            <span class="ik">Substorm idx</span>
+            <span class="iv" id="ip-substorm">—</span>
+        </div>
+        <div class="ir" title="Solar wind Alfvén speed at magnetopause: V_A = B / √(μ₀ρ)">
+            <span class="ik">Alfvén speed</span>
+            <span class="iv" id="ip-va">— km/s</span>
+        </div>
+        <div class="ir" title="Solar wind plasma beta β = P_thermal / P_magnetic (β > 1 = thermally dominated)">
+            <span class="ik">Plasma β</span>
+            <span class="iv" id="ip-beta">—</span>
+        </div>
+        <div class="ir" title="L1 Lagrange-point to Earth propagation delay (Δt = 1.5×10⁶ km / v_sw)">
+            <span class="ik">L1 lag</span>
+            <span class="iv" id="ip-lag">— min</span>
+        </div>
+        <div id="ip-cme-eta" style="display:none;margin-top:4px;padding:3px 5px;border-radius:3px;
+            background:rgba(255,120,0,.08);border:1px solid rgba(255,120,0,.22);font-size:9px;color:#ffaa44;">
+            CME ETA: <span id="ip-cme-eta-val">—</span>
         </div>
 
         <hr class="ir-sep">
@@ -914,6 +962,11 @@ import {
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
 import { ExosphereEngine, computeExopause } from './js/exosphere-engine.js';
+import {
+    SunEarthCoupling,
+    akasofuEpsilon, newellMergingRate,
+    fieldAlignedCurrent, substormIndex, cmeTransitTime,
+} from './js/solar-wind-magnetosphere.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 import {
@@ -1450,8 +1503,10 @@ window.addEventListener('swpc-update', e => {
     // ── Aurora visibility for user's location
     updateUserAuroraVis(kp);
 
-    // ── Magnetosphere geometry + ionosphere analysis
-    magnetosphere.update(sw);
+    // ── Magnetosphere geometry: driven by SunEarthCoupling (lag-corrected)
+    // SunEarthCoupling.start() listens to 'swpc-update' and calls
+    // magnetosphere.update() with the L1-propagation-delay-corrected state.
+    // We still need to call updateMagnetospherePanel() here for the panel values.
     updateMagnetospherePanel();
 
     // ── Exosphere / geocorona boundary (solar-wind pressure balance)
@@ -2172,6 +2227,108 @@ document.getElementById('lyr-belts').addEventListener('change', e =>
     magnetosphere.setLayerVisible('belts', e.target.checked));
 document.getElementById('lyr-plasma').addEventListener('change', e =>
     magnetosphere.setLayerVisible('plasmasphere', e.target.checked));
+
+// New magnetosphere layer toggles
+document.getElementById('lyr-magnetosheath').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('magnetosheath', e.target.checked));
+document.getElementById('lyr-reconnection').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('reconnection', e.target.checked));
+document.getElementById('lyr-cusps').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('cusps', e.target.checked));
+
+// ═══════════════════════════════════════════════════════════════
+//  SUN → EARTH COUPLING ENGINE
+//  Applies L1 propagation delay to magnetosphere updates and
+//  computes plasma coupling analytics (Akasofu ε, Newell, FAC…)
+// ═══════════════════════════════════════════════════════════════
+const sunEarth = new SunEarthCoupling(magnetosphere);
+sunEarth.start();
+
+// ── Coupling analytics panel update ─────────────────────────────
+function updateCouplingPanel(c) {
+    // Energy coupling ε
+    const epsEl = document.getElementById('ip-epsilon');
+    if (epsEl) {
+        const eps = c.epsilon_GW;
+        epsEl.textContent = eps >= 1000 ? `${(eps / 1000).toFixed(1)} TW`
+                           : `${eps.toFixed(0)} GW`;
+        epsEl.style.color = eps > 500 ? '#ff4422'
+                          : eps > 150 ? '#ffaa22'
+                          : eps > 50  ? '#ffee55'
+                          : '#88ccaa';
+    }
+
+    // IMF clock angle — colour by coupling effectiveness
+    const clkEl = document.getElementById('ip-clock');
+    if (clkEl) {
+        const deg = c.clock_angle_deg;
+        clkEl.textContent = `${deg >= 0 ? '+' : ''}${deg.toFixed(0)}°`;
+        const southward = Math.abs(deg) > 90;
+        clkEl.style.color = southward ? '#ff6644' : '#88ccaa';
+    }
+
+    // Newell merging rate (normalised bar-style)
+    const mrgEl = document.getElementById('ip-merging');
+    if (mrgEl) {
+        const pct = Math.round(c.merging_norm * 100);
+        const col = c.merging_norm > 0.7 ? '#ff4422'
+                  : c.merging_norm > 0.4 ? '#ffaa22' : '#88ccaa';
+        mrgEl.innerHTML = `<span style="display:inline-block;width:${pct}%;max-width:100%;`
+            + `height:4px;background:${col};border-radius:2px;vertical-align:middle;"></span>`
+            + `<span style="margin-left:4px;">${pct}%</span>`;
+    }
+
+    // Reconnection rate at X-line
+    const rcEl = document.getElementById('ip-reconn');
+    if (rcEl) rcEl.textContent = `${c.reconnection_kms.toFixed(2)} km/s`;
+
+    // Field-aligned current
+    const facEl = document.getElementById('ip-fac');
+    if (facEl) {
+        facEl.textContent = `${c.fac_MA.toFixed(2)} MA`;
+        facEl.style.color = c.fac_MA > 3 ? '#ff6644'
+                          : c.fac_MA > 1 ? '#ffaa22' : '#88ccaa';
+    }
+
+    // Substorm index (progress bar)
+    const subEl = document.getElementById('ip-substorm');
+    if (subEl) {
+        const pct = Math.round(c.substorm_index * 100);
+        const col = c.substorm_index > 0.7 ? '#ff4422'
+                  : c.substorm_index > 0.4 ? '#ffaa22'
+                  : c.substorm_index > 0.2 ? '#ffee55' : '#557766';
+        subEl.innerHTML = `<span style="display:inline-block;width:${pct}%;max-width:100%;`
+            + `height:4px;background:${col};border-radius:2px;vertical-align:middle;"></span>`
+            + `<span style="margin-left:4px;">${pct}%</span>`;
+    }
+
+    // Alfvén speed
+    const vaEl = document.getElementById('ip-va');
+    if (vaEl) vaEl.textContent = `${Math.round(c.v_alfven)} km/s`;
+
+    // Plasma beta
+    const betaEl = document.getElementById('ip-beta');
+    if (betaEl) {
+        betaEl.textContent = c.beta.toFixed(2);
+        betaEl.style.color = c.beta > 2 ? '#ffaa22' : '#88ccaa';
+    }
+
+    // L1 lag
+    const lagEl = document.getElementById('ip-lag');
+    if (lagEl) lagEl.textContent = `${c.lag_min.toFixed(0)} min`;
+
+    // CME ETA banner
+    const cmeBox = document.getElementById('ip-cme-eta');
+    const cmeVal = document.getElementById('ip-cme-eta-val');
+    if (cmeBox && c.cme_eta_h !== null) {
+        cmeBox.style.display = 'block';
+        cmeVal.textContent   = `${c.cme_eta_h.toFixed(1)} h`;
+    } else if (cmeBox && c.cme_eta_h === null) {
+        cmeBox.style.display = 'none';
+    }
+}
+
+window.addEventListener('sw-magnet-coupling', e => updateCouplingPanel(e.detail));
 
 // ═══════════════════════════════════════════════════════════════
 //  EXOSPHERE ENGINE  (solar-wind-driven geocorona boundary)
