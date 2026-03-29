@@ -625,6 +625,9 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-bowshock"     checked><label for="lyr-bowshock">Bow Shock</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Rad. Belts</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-exosphere"    checked><label for="lyr-exosphere">Exosphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-geocorona"    checked><label for="lyr-geocorona">Geocorona</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-chex"         checked><label for="lyr-chex">Charge Exchange</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
@@ -910,6 +913,7 @@ import {
     computeRingCurrentDst, computeJouleHeating,
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
+import { ExosphereEngine, computeExopause } from './js/exosphere-engine.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 import {
@@ -1449,6 +1453,9 @@ window.addEventListener('swpc-update', e => {
     // ── Magnetosphere geometry + ionosphere analysis
     magnetosphere.update(sw);
     updateMagnetospherePanel();
+
+    // ── Exosphere / geocorona boundary (solar-wind pressure balance)
+    exosphere.update(sw);
 
     // ── Solar wind particle stream params
     solarWindParticles.setParams(sw, magnetosphere.analysis);
@@ -2166,6 +2173,18 @@ document.getElementById('lyr-belts').addEventListener('change', e =>
 document.getElementById('lyr-plasma').addEventListener('change', e =>
     magnetosphere.setLayerVisible('plasmasphere', e.target.checked));
 
+// ═══════════════════════════════════════════════════════════════
+//  EXOSPHERE ENGINE  (solar-wind-driven geocorona boundary)
+// ═══════════════════════════════════════════════════════════════
+const exosphere = new ExosphereEngine(scene);
+
+document.getElementById('lyr-exosphere').addEventListener('change', e =>
+    exosphere.setLayerVisible('exosphere', e.target.checked));
+document.getElementById('lyr-geocorona').addEventListener('change', e =>
+    exosphere.setLayerVisible('geocorona', e.target.checked));
+document.getElementById('lyr-chex').addEventListener('change', e =>
+    exosphere.setLayerVisible('chex', e.target.checked));
+
 function updateMagnetospherePanel() {
     const a = magnetosphere.analysis;
     if (!a) return;
@@ -2353,6 +2372,9 @@ function animate() {
 
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
+
+    // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
+    exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
     // ── User location pin pulse
     if (_userPinRing) {
