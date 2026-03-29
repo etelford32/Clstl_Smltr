@@ -277,6 +277,7 @@ export function cglAnisotropy(r_AU) {
  * @returns {{ compression: number, r_merge_AU: number }}
  */
 export function cirCompression(v_fast_km_s, v_slow_km_s, r_AU, dPhi_deg = 45) {
+    const D2R  = Math.PI / 180;
     const dv   = Math.max(10, v_fast_km_s - v_slow_km_s);   // speed shear (km/s)
     const dPhi = dPhi_deg * D2R;
     // Stream interaction starts when the leading edge of the fast stream

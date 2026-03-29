@@ -4,9 +4,12 @@
  * Scene layout (Earth at origin, R_E = 1 Three.js unit):
  *
  *   _solarGroup  (world-space Group, Y-axis aligned toward sun each frame)
+ *     ├─ magnetosheath      compressed solar wind between bow shock and magnetopause
  *     ├─ magnetopauseFill   Shue-1998 parametric surface, translucent fill
  *     ├─ magnetopauseWire   same surface, wireframe overlay
  *     ├─ bowShockWire       Farris-Russell bow shock, wireframe
+ *     ├─ reconnXLine        dayside X-line reconnection glow (Bz-southward driven)
+ *     ├─ polarCusps         pair of funnel cones at ±magnetic cusp entry regions
  *     └─ tail               flattened cylinder in the anti-solar lobe
  *
  *   _eqGroup  (world-space Group at origin, equatorial-plane objects, no rotation)
@@ -220,6 +223,121 @@ function buildShueMesh(r0, alpha, color, opacity, wireframe = false) {
     return mesh;
 }
 
+/**
+ * Magnetosheath fill — compressed, heated solar wind plasma occupying the
+ * region between the bow shock and magnetopause.
+ * Rendered as the bow-shock LatheGeometry with BackSide + additive blending
+ * so only the gap outside the opaque magnetopause fill is visible.
+ */
+function buildMagnetosheath(bs_r0, bs_alpha) {
+    const profile = shueProfile(bs_r0, bs_alpha);
+    const geo     = new THREE.LatheGeometry(profile, 32);
+    const mat     = new THREE.MeshBasicMaterial({
+        color:      0xff9944,
+        transparent: true,
+        opacity:    0.045,
+        side:       THREE.BackSide,
+        depthWrite: false,
+        blending:   THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 3;
+    return mesh;
+}
+
+/**
+ * Dayside reconnection X-line glow.
+ * A small emissive sphere sitting at the subsolar magnetopause nose (+Y in
+ * the solarGroup).  Opacity and radius are driven by southward Bz in tick().
+ * Two "jet" line segments extend from the nose along the magnetopause flanks
+ * (±X), representing accelerated plasma outflow from the X-line.
+ */
+function buildReconnXLine(r0) {
+    const group = new THREE.Group();
+    group.name  = 'reconnXLine';
+
+    // Glowing blob at the X-line
+    const sGeo = new THREE.SphereGeometry(0.28, 10, 7);
+    const sMat = new THREE.MeshBasicMaterial({
+        color:      0xffffff,
+        transparent: true,
+        opacity:    0.0,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const blob = new THREE.Mesh(sGeo, sMat);
+    blob.name = 'blob';
+    blob.position.set(0, r0, 0);
+    group.add(blob);
+
+    // Reconnection outflow jets (±X flanks, 2 Re long each)
+    const jetPts = [
+        new THREE.Vector3(-2.2, r0 * 0.97, 0),
+        new THREE.Vector3( 0,   r0,        0),
+        new THREE.Vector3( 2.2, r0 * 0.97, 0),
+    ];
+    const jGeo = new THREE.BufferGeometry().setFromPoints(jetPts);
+    const jMat = new THREE.LineBasicMaterial({
+        color:      0xffffff,
+        transparent: true,
+        opacity:    0.0,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const jets = new THREE.Line(jGeo, jMat);
+    jets.name = 'jets';
+    group.add(jets);
+
+    group.renderOrder = 8;
+    return group;
+}
+
+/**
+ * Polar cusp funnels — two open wireframe cones marking the dayside
+ * magnetospheric cusps where solar wind particles directly enter along
+ * open magnetic field lines.
+ *
+ * In the _solarGroup's local frame (+Y toward sun), the cusps sit at
+ * approximately ±Z (roughly corresponding to geographic north and south),
+ * offset sunward by ~0.75 × r0.  The cones open toward Earth (origin).
+ */
+function buildPolarCusps(r0, alpha) {
+    const group = new THREE.Group();
+    group.name  = 'polarCusps';
+
+    // Cusp throat latitude ≈ 75–80° → θ ≈ 35° in Shue angle
+    const thetaCusp = 36 * (Math.PI / 180);
+    const r_c       = r0 * Math.pow(2 / (1 + Math.cos(thetaCusp)), alpha);
+    const Y_cusp    = r_c * Math.cos(thetaCusp);   // along-sun offset
+    const Z_cusp    = r_c * Math.sin(thetaCusp);   // north/south transverse
+
+    for (const sign of [+1, -1]) {
+        // Open wireframe cone, apex toward Earth, base outward
+        const cGeo = new THREE.ConeGeometry(1.0, 2.2, 14, 1, true);
+        const cMat = new THREE.MeshBasicMaterial({
+            color:      0x44ffee,
+            transparent: true,
+            opacity:    0.12,
+            wireframe:  true,
+            depthWrite: false,
+            blending:   THREE.AdditiveBlending,
+        });
+        const cone = new THREE.Mesh(cGeo, cMat);
+
+        // Position cone at cusp entry; tilt apex toward Earth-centre
+        cone.position.set(0, Y_cusp, sign * Z_cusp);
+        // ConeGeometry points along +Y by default; rotate to point at origin
+        const dir = new THREE.Vector3(0, -Y_cusp, -sign * Z_cusp).normalize();
+        const q   = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0), dir
+        );
+        cone.setRotationFromQuaternion(q);
+        cone.renderOrder = 7;
+        group.add(cone);
+    }
+    return group;
+}
+
 function buildTorus(radius, tube, color, opacity, segments = 48) {
     const geo  = new THREE.TorusGeometry(radius, tube, 16, segments);
     const mat  = new THREE.MeshBasicMaterial({
@@ -264,10 +382,13 @@ export class MagnetosphereEngine {
         this._lastKp    = -1;
 
         this._layers = {
-            magnetopause: true,
-            bowShock:     true,
-            belts:        true,
-            plasmasphere: true,
+            magnetopause:  true,
+            bowShock:      true,
+            belts:         true,
+            plasmasphere:  true,
+            magnetosheath: true,
+            cusps:         true,
+            reconnection:  true,
         };
 
         this.analysis = null;
@@ -372,10 +493,61 @@ export class MagnetosphereEngine {
             this._bsWire.material.color.setRGB(1.0, g / 255, 0.2 - pdynNorm * 0.1);
         }
 
-        // ── Radiation belt glow pulses + storm enhancement ─────────────────
+        // Hoist kpNorm / sepNorm so all new blocks below can use them
         const kpNorm  = Math.min(1, kp / 9);
         const sepNorm = Math.min(1, sep / 5);
 
+        // ── Magnetosheath — brightens with dynamic pressure ────────────────
+        if (this._magnetosheath) {
+            const msPulse = 0.5 + 0.5 * Math.sin(t * 0.6 + pdynNorm * 2.5);
+            this._magnetosheath.material.opacity = 0.028 + pdynNorm * 0.030 + msPulse * 0.010;
+            // Colour: cools from orange toward yellow under high density
+            const densNorm = Math.min(1, density / 20);
+            this._magnetosheath.material.color.setRGB(
+                1.0,
+                0.50 + densNorm * 0.30,
+                0.10 + densNorm * 0.10,
+            );
+        }
+
+        // ── Dayside reconnection X-line ────────────────────────────────────
+        // Only activated by southward Bz (magnetic reconnection requires Bz < 0)
+        if (this._reconnXLine) {
+            const blob = this._reconnXLine.getObjectByName('blob');
+            const jets = this._reconnXLine.getObjectByName('jets');
+            // Reconnection intensity: peaks at Bz ≈ −15 nT, saturates beyond
+            const reconn = bzSouth * bzSouth;   // quadratic: more sensitive at onset
+            const pulse  = 0.5 + 0.5 * Math.sin(t * 3.5 + reconn * Math.PI);
+            if (blob) {
+                blob.material.opacity = reconn * (0.55 + pulse * 0.30);
+                // Colour: white-hot at peak reconnection, fades to pale blue
+                const r = 0.70 + reconn * 0.30;
+                const g = 0.55 + reconn * 0.25;
+                const b = 1.00;
+                blob.material.color.setRGB(r, g, b);
+                blob.scale.setScalar(1 + reconn * 0.6 + pulse * 0.2);
+            }
+            if (jets) {
+                jets.material.opacity = reconn * (0.35 + pulse * 0.20);
+                jets.material.color.setRGB(0.6 + reconn * 0.4, 0.7, 1.0);
+            }
+        }
+
+        // ── Polar cusps — widen + brighten during storms ───────────────────
+        if (this._polarCusps) {
+            this._polarCusps.children.forEach(cone => {
+                // Cusps open wider and glow more during active conditions
+                const cuspOpen = 0.08 + kpNorm * 0.12 + bzSouth * 0.08;
+                cone.material.opacity = cuspOpen;
+                // Electric cyan during quiet times, shift toward white-green in storms
+                const r = kpNorm * 0.30;
+                const g = 0.85 + kpNorm * 0.15;
+                const b = 0.85 + (1 - kpNorm) * 0.15;
+                cone.material.color.setRGB(r, g, b);
+            });
+        }
+
+        // ── Radiation belt glow pulses + storm enhancement ─────────────────
         if (this._outerBelt) {
             this._outerBelt.material.opacity =
                 0.16 + 0.07 * Math.sin(t * 1.7) + kpNorm * 0.12 + sepNorm * 0.08;
@@ -414,6 +586,15 @@ export class MagnetosphereEngine {
             case 'plasmasphere':
                 if (this._plasmasphere) this._plasmasphere.visible = v;
                 break;
+            case 'magnetosheath':
+                if (this._magnetosheath) this._magnetosheath.visible = v;
+                break;
+            case 'cusps':
+                if (this._polarCusps) this._polarCusps.visible = v;
+                break;
+            case 'reconnection':
+                if (this._reconnXLine) this._reconnXLine.visible = v;
+                break;
         }
     }
 
@@ -438,6 +619,13 @@ export class MagnetosphereEngine {
             this._solarGroup.remove(c);
         }
 
+        // Bow shock parameters needed for magnetosheath + wire
+        const bs = computeBowShock(r0, alpha);
+
+        // Magnetosheath fill (compressed solar-wind plasma between bow shock and magnetopause)
+        this._magnetosheath = buildMagnetosheath(bs.r0, bs.alpha);
+        this._solarGroup.add(this._magnetosheath);
+
         // Magnetopause fill (semi-transparent blue-purple)
         this._mpFill = buildShueMesh(r0, alpha, 0x334477, 0.09, false);
         this._solarGroup.add(this._mpFill);
@@ -447,9 +635,16 @@ export class MagnetosphereEngine {
         this._solarGroup.add(this._mpWire);
 
         // Bow shock wireframe (orange, wider and more blunt)
-        const bs = computeBowShock(r0, alpha);
         this._bsWire = buildShueMesh(bs.r0, bs.alpha, 0xee8833, 0.22, true);
         this._solarGroup.add(this._bsWire);
+
+        // Dayside reconnection X-line glow (active only when Bz southward)
+        this._reconnXLine = buildReconnXLine(r0);
+        this._solarGroup.add(this._reconnXLine);
+
+        // Polar cusp funnels
+        this._polarCusps = buildPolarCusps(r0, alpha);
+        this._solarGroup.add(this._polarCusps);
 
         // Magnetotail — two elliptical lobes in the anti-solar direction (-Y)
         // Modelled as a flattened cylinder extending -Y from just behind Earth
@@ -471,7 +666,10 @@ export class MagnetosphereEngine {
             this._mpWire.visible = false;
             this._tail.visible   = false;
         }
-        if (!this._layers.bowShock) this._bsWire.visible = false;
+        if (!this._layers.bowShock)      this._bsWire.visible       = false;
+        if (!this._layers.magnetosheath) this._magnetosheath.visible = false;
+        if (!this._layers.cusps)         this._polarCusps.visible    = false;
+        if (!this._layers.reconnection)  this._reconnXLine.visible   = false;
     }
 
     _rebuildEarthShells(kp, lpp) {
