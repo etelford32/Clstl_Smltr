@@ -1013,6 +1013,7 @@ import {
 } from './js/solar-wind-magnetosphere.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { SatelliteFeed } from './js/satellite-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 import {
@@ -1253,6 +1254,14 @@ earthU.u_weather.value = new THREE.DataTexture(
 earthU.u_weather.value.needsUpdate = true;
 // Share the same DataTexture with cloud shader for pressure-modulated clouds
 cloudU.u_weather.value = earthU.u_weather.value;
+
+// Cloud-layer DataTexture (R=cl_low, G=cl_mid, B=cl_high, A=precip)
+// Populated by WeatherFeed on each weather-update event.
+cloudU.u_cloud_layers.value = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+cloudU.u_cloud_layers.value.needsUpdate = true;
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -1585,8 +1594,10 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
     const v = e.target.checked ? 1.0 : 0.0;
-    earthU.u_weather_on.value = v;
-    cloudU.u_weather_on.value = v;   // sync cloud pressure modulation
+    earthU.u_weather_on.value  = v;
+    cloudU.u_weather_on.value  = v;   // sync cloud layer + precip modulation
+    // Keep satellite blend active regardless of weather toggle
+    // (satellite gives correct large-scale cloud structure independently)
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
@@ -1876,7 +1887,24 @@ const solarWindParticles = new SolarWindParticles(scene, 3000);
 const wxFeed = new WeatherFeed();
 wxFeed.start();
 
-function updateWeatherTextures(weatherBuf, wBuf) {
+// ═══════════════════════════════════════════════════════════════
+//  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
+// ═══════════════════════════════════════════════════════════════
+const satFeed = new SatelliteFeed();
+satFeed.start();
+
+window.addEventListener('satellite-update', e => {
+    const { primaryTex, goesTex, modisTex, source } = e.detail;
+    // Prefer GOES (near-real-time) over MODIS (daily)
+    const tex = goesTex ?? modisTex ?? null;
+    if (tex) {
+        cloudU.u_satellite.value   = tex;
+        cloudU.u_satellite_on.value = 1.0;
+        console.info(`[Satellite] cloud texture updated — ${source}`);
+    }
+});
+
+function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
     // Update weather DataTexture (temperature/pressure/humidity overlay)
     earthU.u_weather.value.image.data.set(weatherBuf);
     earthU.u_weather.value.needsUpdate = true;
@@ -1884,11 +1912,16 @@ function updateWeatherTextures(weatherBuf, wBuf) {
     windTexture.image.data.set(wBuf);
     windTexture.needsUpdate = true;
     windParticles.setWindData(wBuf);
+    // Update cloud-layer fractions (low/mid/high clouds + precipitation)
+    if (cloudBuf && cloudU.u_cloud_layers.value) {
+        cloudU.u_cloud_layers.value.image.data.set(cloudBuf);
+        cloudU.u_cloud_layers.value.needsUpdate = true;
+    }
 }
 
 document.addEventListener('weather-update', e => {
-    const { weatherBuffer, windBuffer, meta } = e.detail;
-    updateWeatherTextures(weatherBuffer, windBuffer);
+    const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
+    updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);

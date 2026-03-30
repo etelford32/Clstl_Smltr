@@ -34,7 +34,7 @@ const GRID_H       = 18;                // latitude  grid points (10° spacing)
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 const MAX_WIND_MS  = 60;                // m/s — normalisation ceiling
-const REFRESH_MS   = 30 * 60 * 1000;   // re-fetch every 30 minutes
+const REFRESH_MS   = 10 * 60 * 1000;   // re-fetch every 10 minutes
 
 // ─────────────────────────────────────────────────────────────────────────────
 export class WeatherFeed {
@@ -42,6 +42,8 @@ export class WeatherFeed {
         this._timer      = null;
         this._weatherBuf = new Float32Array(TEX_W * TEX_H * 4);
         this._windBuf    = new Float32Array(TEX_W * TEX_H * 4);
+        // cloudBuf: R=cloud_low, G=cloud_mid, B=cloud_high, A=precipitation_rate
+        this._cloudBuf   = new Float32Array(TEX_W * TEX_H * 4);
         this._meta       = {
             loaded:    false,
             source:    'procedural',
@@ -49,6 +51,7 @@ export class WeatherFeed {
             tempMin:   null, tempMax:  null, tempMean: null,
             presMin:   null, presMax:  null,
             windMax:   null,
+            cloudMax:  null,
         };
 
         // Build coarse grid lat/lon arrays (row-major: lat varies slowest)
@@ -72,6 +75,7 @@ export class WeatherFeed {
 
     get weatherBuffer() { return this._weatherBuf; }
     get windBuffer()    { return this._windBuf; }
+    get cloudBuffer()   { return this._cloudBuf; }
     get meta()          { return this._meta; }
 
     // ── Fetch → process ──────────────────────────────────────────────────────
@@ -97,6 +101,7 @@ export class WeatherFeed {
         this._dispatch('weather-update', {
             weatherBuffer: this._weatherBuf,
             windBuffer:    this._windBuf,
+            cloudBuffer:   this._cloudBuf,
             meta:          this._meta,
             texW:          TEX_W,
             texH:          TEX_H,
@@ -116,6 +121,11 @@ export class WeatherFeed {
             'surface_pressure',
             'wind_speed_10m',
             'wind_direction_10m',
+            'cloud_cover_low',
+            'cloud_cover_mid',
+            'cloud_cover_high',
+            'precipitation',
+            'cape',
         ].join(','));
         params.set('wind_speed_unit', 'ms');
         params.set('timezone',        'UTC');
@@ -142,15 +152,23 @@ export class WeatherFeed {
         const pres = new Float32Array(N).fill(NaN);
         const wspd = new Float32Array(N).fill(NaN);
         const wdir = new Float32Array(N).fill(NaN);
+        const clLow  = new Float32Array(N).fill(0);
+        const clMid  = new Float32Array(N).fill(0);
+        const clHigh = new Float32Array(N).fill(0);
+        const precip = new Float32Array(N).fill(0);
 
         rows.forEach((loc, idx) => {
             if (idx >= N) return;
             const c = loc.current ?? {};
-            temp[idx] = c.temperature_2m        ?? NaN;
-            hum[idx]  = c.relative_humidity_2m  ?? 50;
-            pres[idx] = c.surface_pressure       ?? 1013;
-            wspd[idx] = c.wind_speed_10m         ?? 0;
-            wdir[idx] = c.wind_direction_10m     ?? 0;
+            temp[idx]   = c.temperature_2m        ?? NaN;
+            hum[idx]    = c.relative_humidity_2m  ?? 50;
+            pres[idx]   = c.surface_pressure       ?? 1013;
+            wspd[idx]   = c.wind_speed_10m         ?? 0;
+            wdir[idx]   = c.wind_direction_10m     ?? 0;
+            clLow[idx]  = c.cloud_cover_low        ?? 0;
+            clMid[idx]  = c.cloud_cover_mid        ?? 0;
+            clHigh[idx] = c.cloud_cover_high       ?? 0;
+            precip[idx] = c.precipitation          ?? 0;
         });
 
         // Fill any NaN gaps (missing ocean cells, polar regions, etc.)
@@ -166,8 +184,10 @@ export class WeatherFeed {
         this._meta.presMin  = Math.min(...vp);
         this._meta.presMax  = Math.max(...vp);
         this._meta.windMax  = Math.max(...vw);
+        this._meta.cloudMax = Math.max(...Array.from(clLow), ...Array.from(clMid), ...Array.from(clHigh));
 
         this._interpolateToTextures(temp, hum, pres, wspd, wdir);
+        this._interpolateCloudTexture(clLow, clMid, clHigh, precip);
     }
 
     // ── Bilinear interpolation: inW×inH → outW×outH ──────────────────────────
@@ -238,6 +258,21 @@ export class WeatherFeed {
         }
     }
 
+    // ── Pack cloud-layer fractions + precipitation into cloudBuf ─────────────
+    _interpolateCloudTexture(rawLow, rawMid, rawHigh, rawPrecip) {
+        const low    = this._bilinear(rawLow,    GRID_W, GRID_H, TEX_W, TEX_H);
+        const mid    = this._bilinear(rawMid,    GRID_W, GRID_H, TEX_W, TEX_H);
+        const high   = this._bilinear(rawHigh,   GRID_W, GRID_H, TEX_W, TEX_H);
+        const precip = this._bilinear(rawPrecip, GRID_W, GRID_H, TEX_W, TEX_H);
+        for (let k = 0; k < TEX_W * TEX_H; k++) {
+            const t4 = k * 4;
+            this._cloudBuf[t4+0] = Math.max(0, Math.min(1, low[k]    / 100));
+            this._cloudBuf[t4+1] = Math.max(0, Math.min(1, mid[k]    / 100));
+            this._cloudBuf[t4+2] = Math.max(0, Math.min(1, high[k]   / 100));
+            this._cloudBuf[t4+3] = Math.max(0, Math.min(1, precip[k] / 10));  // cap 10 mm/hr
+        }
+    }
+
     // ── Procedural fallback: physically motivated zonal circulation ───────────
     // Reproduces major features: Hadley cell, Ferrel cell, polar cell,
     // trade winds, mid-latitude westerlies, Intertropical Convergence Zone.
@@ -281,6 +316,18 @@ export class WeatherFeed {
                 this._windBuf[t4+1] = windV;
                 this._windBuf[t4+2] = spd;
                 this._windBuf[t4+3] = 1.0;
+
+                // Procedural cloud layers: low cloud in ITCZ + mid-lat storms,
+                // high cirrus in subtropics and polar front
+                const itcz    = Math.max(0, 1.0 - Math.abs(lat) * 3.8); // near equator
+                const midLat  = Math.max(0, Math.abs(lat) - 0.5) * 1.2; // >30°
+                const cLow    = Math.max(0, Math.min(1, itcz * 0.9 + midLat * 0.55 * (1 - pNorm)));
+                const cMid    = Math.max(0, Math.min(1, midLat * 0.5 + (1 - pNorm) * 0.3));
+                const cHigh   = Math.max(0, Math.min(1, 0.25 + 0.35 * Math.abs(Math.sin(lat * 2))));
+                this._cloudBuf[t4+0] = cLow;
+                this._cloudBuf[t4+1] = cMid;
+                this._cloudBuf[t4+2] = cHigh;
+                this._cloudBuf[t4+3] = cLow * 0.4;  // precip proportional to low cloud
             }
         }
     }

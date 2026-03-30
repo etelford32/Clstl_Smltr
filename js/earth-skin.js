@@ -198,10 +198,13 @@ export const CLOUD_FRAG = /* glsl */`
 precision mediump float;
 
 uniform sampler2D u_clouds;
-uniform sampler2D u_weather;    // G = pressure [0=low,1=high], B = humidity
+uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
+uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip [0-1]
+uniform sampler2D u_satellite;     // GOES/MODIS cloud image (grayscale brightness)
 uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_weather_on;
+uniform float u_satellite_on;      // blend satellite into cloud appearance
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -281,40 +284,88 @@ void main() {
     // Compute cyclonic UV swirl from active storm systems
     vec2 swirl = (u_storm_count > 0) ? stormSwirl(vUv) : vec2(0.0);
 
-    // Two-layer drift: lower clouds slow, upper cirrus faster
-    vec2 driftLow  = vec2(u_time *  0.000055, u_time * 0.000008);
-    vec2 driftHigh = vec2(u_time *  0.000095, u_time * 0.000012);
-    float a0 = texture2D(u_clouds, vUv + driftLow  + swirl).r;
-    float a1 = texture2D(u_clouds, vUv + driftHigh + swirl * 0.6).r * 0.55;
-    float alpha = pow(max(a0, a1), 1.4) * 0.90;
+    // Three-layer drift: low clouds slow, mid medium, high cirrus fastest
+    vec2 driftLow  = vec2(u_time * 0.000050, u_time * 0.000007);
+    vec2 driftMid  = vec2(u_time * 0.000072, u_time * 0.000010);
+    vec2 driftHigh = vec2(u_time * 0.000100, u_time * 0.000014);
 
-    // Pressure modulation: low pressure → thicker/denser storm clouds
+    // Noise texture samples per layer
+    float noiseLow  = texture2D(u_clouds, vUv + driftLow  + swirl).r;
+    float noiseMid  = texture2D(u_clouds, vUv + driftMid  + swirl * 0.7).r;
+    float noiseHigh = texture2D(u_clouds, vUv + driftHigh + swirl * 0.4).r;
+
+    float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
+    float precip   = 0.0;
+
     if (u_weather_on > 0.5) {
-        float pressure   = texture2D(u_weather, vUv).g;   // 0=low, 1=high
-        float humidity   = texture2D(u_weather, vUv).b;   // 0-1
-        float clearFactor = mix(1.0, 0.55, pressure);
-        alpha *= clearFactor;
-        float stormBoost  = max(0.0, 0.45 - pressure) * 2.2;
-        alpha = clamp(alpha + alpha * stormBoost, 0.0, 1.0);
-        // Humidity thickens clouds in moisture-rich regions
-        alpha = clamp(alpha * (0.7 + humidity * 0.5), 0.0, 1.0);
+        // Real cloud fraction data from weather feed
+        vec4  cl      = texture2D(u_cloud_layers, vUv);
+        float clLow   = cl.r;   // 0-1 low-cloud fraction  (cumulus/stratus)
+        float clMid   = cl.g;   // 0-1 mid-cloud fraction  (altostratus)
+        float clHigh  = cl.b;   // 0-1 high-cloud fraction (cirrus/cirrostratus)
+        precip        = cl.a;   // 0-1 precipitation rate
+
+        // Low clouds: dense white cumulus, driven by actual cloud fraction
+        alphaLow  = clLow  * pow(noiseLow,  1.2) * 0.94;
+        // Mid clouds: semi-transparent altostratus
+        alphaMid  = clMid  * pow(noiseMid,  1.5) * 0.72;
+        // High cirrus: thin, wispy, translucent
+        alphaHigh = clHigh * pow(noiseHigh, 2.0) * 0.50;
+    } else {
+        // Fallback to legacy pressure/humidity modulation when weather off
+        float pressure = texture2D(u_weather, vUv).g;
+        float humidity = texture2D(u_weather, vUv).b;
+        float base     = pow(max(noiseLow, noiseHigh * 0.55), 1.4) * 0.90;
+        float clear    = mix(1.0, 0.55, pressure);
+        float boost    = max(0.0, 0.45 - pressure) * 2.2;
+        base = clamp(base * clear + base * boost, 0.0, 1.0);
+        base = clamp(base * (0.7 + humidity * 0.5), 0.0, 1.0);
+        alphaLow  = base;
+        alphaHigh = noiseHigh * 0.3;
     }
+
+    // Satellite data blending: replaces noise-driven alpha with observed cloud density
+    if (u_satellite_on > 0.5) {
+        float satCloud = texture2D(u_satellite, vUv).r;
+        // Blend: satellite gives large-scale structure; noise adds fine detail
+        alphaLow  = mix(alphaLow,  satCloud * 0.95, 0.55);
+        alphaMid  = mix(alphaMid,  satCloud * 0.60, 0.30);
+    }
+
+    // Composite layers: opaque low clouds dominate, cirrus adds on top
+    float alpha = max(alphaLow, alphaMid);
+    alpha = clamp(alpha + alphaHigh * (1.0 - alpha * 0.55), 0.0, 0.95);
 
     // Eye/eyewall structure for active hurricanes/typhoons
     if (u_storm_count > 0) {
         alpha *= stormStructure(vUv);
-        alpha = clamp(alpha, 0.0, 1.0);
+        alpha  = clamp(alpha, 0.0, 0.95);
     }
 
-    // Day/night shading
-    vec3 dayCol   = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    vec3 nightCol = vec3(0.26, 0.30, 0.40);
+    // ── Cloud colour ──────────────────────────────────────────────────────────
+    // Day colour: bright white for thick clouds, ice-blue tint for cirrus
+    vec3 cloudWhite = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
+    // Precipitation: grey-blue underbelly on raining clouds
+    vec3 rainGrey   = vec3(0.50, 0.53, 0.62);
+    // Cirrus tint: slight blue-white at high altitude
+    vec3 cirrusTint = vec3(0.88, 0.92, 1.00);
+    // Night: dark grey-blue
+    vec3 nightCol   = vec3(0.22, 0.26, 0.38);
+
     float dayMix  = smoothstep(-0.12, 0.20, NdotL);
-    vec3  col     = mix(nightCol, dayCol, dayMix);
+    vec3  col     = mix(nightCol, cloudWhite, dayMix);
+
+    // Blend in precipitation darkening (only visible side)
+    float precipVis = precip * dayMix;
+    col = mix(col, rainGrey, precipVis * 0.55);
+
+    // Blend in cirrus tint where high-cloud fraction dominates
+    float cirrusDom = alphaHigh / max(0.01, alpha);
+    col = mix(col, cirrusTint, cirrusDom * dayMix * 0.35);
 
     // Warm golden tint at terminator (sunrise/sunset through clouds)
     float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.35);
+    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.32 * (1.0 - precipVis * 0.5));
 
     gl_FragColor = vec4(col, alpha);
 }`;
@@ -378,13 +429,16 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
 /** Default cloud layer uniforms. */
 export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
-        u_clouds:      { value: _grayTex() },
-        u_weather:     { value: _blackTex() },
-        u_sun_dir:     { value: sunDir.clone() },
-        u_time:        { value: 0 },
-        u_weather_on:  { value: 0 },
-        u_storms:      { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
-        u_storm_count: { value: 0 },
+        u_clouds:        { value: _grayTex() },
+        u_weather:       { value: _blackTex() },
+        u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
+        u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
+        u_sun_dir:       { value: sunDir.clone() },
+        u_time:          { value: 0 },
+        u_weather_on:    { value: 0 },
+        u_satellite_on:  { value: 0 },            // off until satellite texture arrives
+        u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
+        u_storm_count:   { value: 0 },
     };
 }
 
