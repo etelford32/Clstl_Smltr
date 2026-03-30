@@ -812,6 +812,50 @@ nav {
             <a href="space-weather.html" style="color:#00c6ff;text-decoration:none;">→ Full space weather dashboard</a>
         </div>
 
+        <hr class="ir-sep">
+
+        <!-- ── Solar Weather Time Analysis ─────────────────────────── -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;">
+            Solar Forecast &amp; Time Analysis
+        </div>
+
+        <!-- Kp history + forecast chart (72h back / 72h ahead) -->
+        <canvas id="kp-forecast-chart" width="252" height="88"
+            style="display:block;width:100%;border-radius:3px;margin-bottom:6px;
+                   background:rgba(0,10,20,.55);border:1px solid rgba(0,198,255,.08);"
+            title="Cyan = observed Kp (last 72 h) | Orange = AR(6) forecast | Band = 80% prediction interval"></canvas>
+
+        <div class="ir">
+            <span class="ik">Kp (24h forecast)</span>
+            <span class="iv" id="fp-kp24">—</span>
+        </div>
+        <div class="ir">
+            <span class="ik">Trend (H-W)</span>
+            <span class="iv" id="fp-trend">—</span>
+        </div>
+        <div class="ir" title="Probability of at least one hourly Kp ≥ 5 (G1 geomagnetic storm) in the next 24 h">
+            <span class="ik">G1+ storm / 24h</span>
+            <span class="iv" id="fp-g1-24">—</span>
+        </div>
+        <div class="ir" title="Probability of G2+ storm (Kp ≥ 6) within 72 h">
+            <span class="ik">G2+ storm / 72h</span>
+            <span class="iv" id="fp-g2-72">—</span>
+        </div>
+        <div class="ir" title="27-day solar rotation recurrence signal (Carrington co-rotation)">
+            <span class="ik">27-d echo</span>
+            <span class="iv" id="fp-echo">—</span>
+        </div>
+        <div class="ir" title="Solar Cycle 25 current phase and predicted sunspot number">
+            <span class="ik">SC25 phase</span>
+            <span class="iv" id="fp-cycle">—</span>
+        </div>
+        <div id="fp-bulletin"
+             style="margin-top:5px;padding:5px 7px;border-radius:4px;font-size:8.5px;
+                    line-height:1.55;color:#8ab;white-space:pre-line;
+                    background:rgba(0,80,130,.10);border:1px solid rgba(0,198,255,.09);">
+            Initialising forecast…
+        </div>
+
     </div><!-- /panel-body -->
     </div><!-- /info-panel -->
 
@@ -967,6 +1011,8 @@ import {
     akasofuEpsilon, newellMergingRate,
     fieldAlignedCurrent, substormIndex, cmeTransitTime,
 } from './js/solar-wind-magnetosphere.js';
+import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 import {
@@ -2328,7 +2374,195 @@ function updateCouplingPanel(c) {
     }
 }
 
-window.addEventListener('sw-magnet-coupling', e => updateCouplingPanel(e.detail));
+window.addEventListener('sw-magnet-coupling', e => {
+    updateCouplingPanel(e.detail);
+    // Feed raw SW + coupling analytics into the time-series history
+    if (wxHistory.isReady) {
+        const sw = _lastSwState.solar_wind ?? {};
+        sw.kp    = _lastSwState.kp ?? 0;
+        wxHistory.ingest(sw, e.detail);
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR WEATHER TIME ANALYSIS  (history + statistical forecast)
+// ═══════════════════════════════════════════════════════════════
+
+const wxHistory    = new SolarWeatherHistory();
+const wxForecaster = new SolarWeatherForecaster();
+
+// Open IndexedDB; if this is a first-ever launch seed synthetic history
+// so the forecasting engine has data to work with immediately.
+wxHistory.open().then(() => {
+    const tier1Size = wxHistory.getTier(1).length;
+    if (tier1Size < 48) {
+        console.info('[SolarForecast] Seeding synthetic history (tier1 empty)…');
+        seedSyntheticHistory(wxHistory, 90);
+    }
+    // Run first forecast immediately, then every 5 minutes
+    _refreshForecast();
+    setInterval(_refreshForecast, 5 * 60_000);
+});
+
+function _refreshForecast() {
+    try {
+        const result = wxForecaster.update(wxHistory);
+        updateForecastPanel(result);
+    } catch (err) {
+        console.warn('[SolarForecast] forecast error:', err);
+    }
+}
+
+// ── Kp sparkline chart (Canvas 2D) ───────────────────────────────────────────
+function drawKpChart(result) {
+    const canvas = document.getElementById('kp-forecast-chart');
+    if (!canvas || !result) return;
+    const ctx = canvas.getContext('2d');
+    const W   = canvas.width;
+    const H   = canvas.height;
+    const P   = { t: 6, r: 4, b: 14, l: 18 };
+    const cW  = W - P.l - P.r;
+    const cH  = H - P.t - P.b;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const hist = result.kpHistory  ?? [];
+    const fc   = result.kpForecast ?? [];
+    const lo   = result.kpFcLo80  ?? [];
+    const hi   = result.kpFcHi80  ?? [];
+    const total = hist.length + fc.length;
+    if (!total) return;
+
+    const kpY  = kp => P.t + cH - Math.min(1, kp / 9) * cH;
+    const iX   = i  => P.l + (i / total) * cW;
+    const nowX = iX(hist.length);
+
+    // G-scale threshold dashes
+    const thresholds = [
+        { kp: 5, color: 'rgba(255,200,40,.35)', label: 'G1' },
+        { kp: 6, color: 'rgba(255,130,30,.40)', label: 'G2' },
+        { kp: 7, color: 'rgba(255, 60,60,.40)', label: 'G3' },
+    ];
+    ctx.font = '6px sans-serif';
+    for (const th of thresholds) {
+        const y = kpY(th.kp);
+        ctx.strokeStyle = th.color;
+        ctx.lineWidth   = 0.7;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + cW, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = th.color;
+        ctx.fillText(th.label, P.l + cW + 1, y + 3);
+    }
+
+    // 80 % confidence band
+    if (fc.length && lo.length && hi.length) {
+        ctx.fillStyle = 'rgba(255,130,40,.13)';
+        ctx.beginPath();
+        for (let i = 0; i < fc.length; i++) ctx.lineTo(iX(hist.length + i), kpY(hi[i]));
+        for (let i = fc.length - 1; i >= 0; i--) ctx.lineTo(iX(hist.length + i), kpY(lo[i]));
+        ctx.closePath(); ctx.fill();
+    }
+
+    // History line
+    if (hist.length) {
+        ctx.strokeStyle = '#00c6ff'; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+        ctx.beginPath();
+        hist.forEach((kp, i) => i === 0 ? ctx.moveTo(iX(i), kpY(kp)) : ctx.lineTo(iX(i), kpY(kp)));
+        ctx.stroke();
+    }
+
+    // Forecast line (dashed orange)
+    if (fc.length) {
+        ctx.strokeStyle = '#ff9040'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        if (hist.length) ctx.moveTo(iX(hist.length - 1), kpY(hist[hist.length - 1]));
+        fc.forEach((kp, i) => ctx.lineTo(iX(hist.length + i), kpY(kp)));
+        ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // "Now" separator
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(nowX, P.t); ctx.lineTo(nowX, P.t + cH); ctx.stroke();
+
+    // Y-axis labels
+    ctx.fillStyle = 'rgba(160,200,230,.55)'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+    for (const kp of [0, 3, 6, 9]) {
+        ctx.fillText(kp, P.l - 2, kpY(kp) + 3);
+        ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(P.l, kpY(kp)); ctx.lineTo(P.l + cW, kpY(kp)); ctx.stroke();
+    }
+
+    // X-axis labels
+    ctx.fillStyle = 'rgba(160,200,230,.45)'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('-72h', P.l,       H - 2);
+    ctx.fillText('now',  nowX,      H - 2);
+    ctx.fillText('+72h', P.l + cW,  H - 2);
+}
+
+// ── Forecast panel text update ───────────────────────────────────────────────
+function updateForecastPanel(result) {
+    drawKpChart(result);
+
+    const { summary, storm, recurrence, cycle, hw } = result;
+
+    // Kp 24h forecast ± sigma
+    const el_kp24 = document.getElementById('fp-kp24');
+    if (el_kp24) {
+        const kp = summary.kpFC24h ?? '—';
+        const sg = summary.sigma24h ?? '';
+        el_kp24.textContent = sg ? `${kp} ± ${sg}` : kp;
+        el_kp24.style.color = kp >= 7 ? '#ff4040'
+            : kp >= 5 ? '#ffaa20' : kp >= 3 ? '#ffdd60' : '#60d090';
+    }
+
+    // Holt-Winters trend
+    const el_trend = document.getElementById('fp-trend');
+    if (el_trend) {
+        const t = hw.trend;
+        el_trend.textContent = t > 0.05 ? `↑ +${t.toFixed(2)}/hr`
+            : t < -0.05 ? `↓ ${t.toFixed(2)}/hr` : '→ stable';
+        el_trend.style.color = t > 0.1 ? '#ffaa20' : t < -0.1 ? '#60d090' : '#8ab';
+    }
+
+    // Storm probabilities
+    const el_g1 = document.getElementById('fp-g1-24');
+    if (el_g1) {
+        const p = Math.round(storm.g1_24h * 100);
+        el_g1.textContent = `${p}%`;
+        el_g1.style.color = p > 50 ? '#ff4040' : p > 25 ? '#ffaa20' : '#8ab';
+    }
+    const el_g2 = document.getElementById('fp-g2-72');
+    if (el_g2) {
+        const p = Math.round(storm.g2_72h * 100);
+        el_g2.textContent = `${p}%`;
+        el_g2.style.color = p > 40 ? '#ff6060' : p > 15 ? '#ffcc40' : '#8ab';
+    }
+
+    // 27-day recurrence
+    const el_echo = document.getElementById('fp-echo');
+    if (el_echo) {
+        const s = recurrence.signal;
+        el_echo.textContent = s === 'none' ? '—'
+            : `${s} (r=${recurrence.corr27})`;
+        el_echo.style.color = s === 'strong' ? '#ffaa20'
+            : s === 'moderate' ? '#ffdd60' : '#8ab';
+    }
+
+    // Solar cycle phase
+    const el_cycle = document.getElementById('fp-cycle');
+    if (el_cycle) {
+        const sign = cycle.yearsToMax < 0 ? '-' : '+';
+        const abs  = Math.abs(cycle.yearsToMax).toFixed(1);
+        el_cycle.textContent = `SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+        el_cycle.style.color = cycle.phaseName === 'maximum' ? '#ffaa20'
+            : cycle.phaseName === 'rising' ? '#ffdd60' : '#8ab';
+    }
+
+    // Bulletin
+    const el_bul = document.getElementById('fp-bulletin');
+    if (el_bul) el_bul.textContent = wxForecaster.bulletin(result);
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  EXOSPHERE ENGINE  (solar-wind-driven geocorona boundary)
