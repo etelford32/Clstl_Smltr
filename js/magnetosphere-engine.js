@@ -484,8 +484,8 @@ export class MagnetosphereEngine {
         }
 
         // ── Bow shock wire — intensity pulses with dynamic pressure ────────
+        const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression — hoisted to tick() scope
         if (this._bsWire) {
-            const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression
             const pulse    = 0.5 + 0.5 * Math.sin(t * 0.8 + pdynNorm * 3);
             this._bsWire.material.opacity = 0.12 + pdynNorm * 0.22 + pulse * 0.08;
             // Hotter orange → yellow at high pressure
