@@ -53,6 +53,8 @@
  *  });
  */
 
+import { vsop87Earth } from './earth-orbit.js';
+
 // ── Julian Day helpers ────────────────────────────────────────────────────────
 
 /** Julian Day Number from current UTC instant. */
@@ -76,52 +78,27 @@ const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
 /**
- * Earth's heliocentric ecliptic longitude (degrees, radians) and
- * distance from the Sun (AU).
+ * Earth's heliocentric ecliptic position via VSOP87D truncated series.
  *
- * Source: Meeus, "Astronomical Algorithms" 2nd ed., Chapter 25.
- * Accuracy: ~0.01° for years 1950–2050.
+ * Replaces the Meeus Ch.25 three-term equation of center.
+ * Accuracy: < 1″ heliocentric longitude, < 0.000001 AU radius (1900–2100).
  *
  * @param {number} jd  Julian Day Number (default: now)
  * @returns {{ lon: number, lon_rad: number, lat_rad: number, dist_AU: number,
  *             x_AU: number, y_AU: number, z_AU: number }}
  */
 export function earthHeliocentric(jd = jdNow()) {
-    const T = (jd - 2451545.0) / 36525.0;  // Julian centuries since J2000.0
-
-    // ── Mean longitude of the Sun (geometric, degrees) ────────────────────
-    const L0 = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
-
-    // ── Mean anomaly of the Sun (degrees → radians) ───────────────────────
-    const M_deg = 357.52911 + 35999.05029 * T - 0.0001537 * T * T;
-    const M     = M_deg * D2R;
-
-    // ── Equation of center (degrees) ─────────────────────────────────────
-    const C = (1.914602 - 0.004817 * T - 0.000014 * T * T) * Math.sin(M)
-            + (0.019993 - 0.000101 * T)                     * Math.sin(2 * M)
-            + 0.000289                                       * Math.sin(3 * M);
-
-    // ── Sun's true longitude (degrees) ───────────────────────────────────
-    const sunTrue = L0 + C;
-
-    // ── Apparent longitude — nutation + aberration (degrees) ─────────────
-    const omega  = (125.04 - 1934.136 * T) * D2R;
-    const sunApp = sunTrue - 0.00569 - 0.00478 * Math.sin(omega);
-
-    // ── Earth's heliocentric ecliptic longitude = sunApp + 180° ──────────
-    const lon = ((sunApp + 180) % 360 + 360) % 360;
-
-    // ── Earth–Sun distance (AU) ────────────────────────────────────────────
-    const e = 0.016708634 - 0.000042037 * T - 0.0000001267 * T * T;
-    const dist_AU = (1.000001018 * (1 - e * e)) / (1 + e * Math.cos(M));
-
-    // Earth's orbit is nearly circular and lies in the ecliptic (i ≈ 0°)
-    const lon_rad = lon * D2R;
-    const x_AU = dist_AU * Math.cos(lon_rad);
-    const y_AU = dist_AU * Math.sin(lon_rad);
-    const z_AU = 0;
-
-    return { lon, lon_rad, lat_rad: 0, dist_AU, x_AU, y_AU, z_AU };
+    const v = vsop87Earth(jd);
+    const lon = ((v.L_rad * R2D) % 360 + 360) % 360;
+    return {
+        lon,
+        lon_rad:  v.L_rad,
+        lat_rad:  v.B_rad,
+        dist_AU:  v.R_AU,
+        x_AU:     v.x_AU,
+        y_AU:     v.y_AU,
+        z_AU:     v.z_AU,
+    };
 }
 
 /**
