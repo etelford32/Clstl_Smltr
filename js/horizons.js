@@ -14,7 +14,7 @@
  *           Earth    Ch.25 — accurate to ~0.01° for 1950–2050
  *           Moon     Ch.47 — accurate to ~1° (16-term longitude series)
  *           Inner planets — simplified Kepler + full 3D orbital rotation
- *           Outer planets — simplified Kepler + full 3D orbital rotation
+ *           Outer planets — VSOP87D truncated series (~0.05–0.1° accuracy)
  *           All planet positions include ecliptic latitude from inclination.
  *           Always works offline; no network latency.
  *
@@ -54,6 +54,7 @@
  */
 
 import { vsop87Earth } from './earth-orbit.js';
+import { jupiterVSOP, saturnVSOP, uranusVSOP, neptuneVSOP } from './outer-planets.js';
 
 // ── Julian Day helpers ────────────────────────────────────────────────────────
 
@@ -287,35 +288,36 @@ export function marsHeliocentric(jd = jdNow()) {
 }
 
 /**
- * Jupiter's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Jupiter's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.05° for 1800–2200.
  */
 export function jupiterHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, JUPITER_EL);
+    return jupiterVSOP(jd);
 }
 
 /**
- * Saturn's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Saturn's heliocentric ecliptic position — VSOP87D truncated series.
+ * Includes the "great inequality" term (±0.81° error without it).
+ * Accuracy: ~0.05° for 1800–2200.
  */
 export function saturnHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, SATURN_EL);
+    return saturnVSOP(jd);
 }
 
 /**
- * Uranus's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Uranus's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.1° for 1800–2200.
  */
 export function uranusHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, URANUS_EL);
+    return uranusVSOP(jd);
 }
 
 /**
- * Neptune's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Neptune's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.1° for 1800–2200.
  */
 export function neptuneHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, NEPTUNE_EL);
+    return neptuneVSOP(jd);
 }
 
 // ── NASA JPL Horizons REST API ────────────────────────────────────────────────
