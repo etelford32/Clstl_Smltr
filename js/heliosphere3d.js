@@ -66,6 +66,8 @@ const R = {
     earth:   0.78,
     mars:    0.48,
     moon:    0.22,
+    phobos:  0.11,
+    deimos:  0.09,
     // Outer planets — still exaggerated but proportionally larger
     jupiter: 1.80,
     saturn:  1.50,
@@ -112,6 +114,21 @@ const ORBIT_INCL = {
  * sphere (R.earth = 0.78).  Scale up ~12× for visibility.
  */
 const MOON_VIS_AU = 0.032;
+
+/**
+ * Mars moon orbital data (J2000 epoch, simplified synodic elements).
+ * Orbits are prograde, nearly equatorial.  Mars' equatorial pole points to
+ * RA=317.68° Dec=52.89° (J2000) — tilt ~25.2° from Mars orbital normal.
+ * We approximate both moons in the Mars orbital plane, tilted 26° from ecliptic.
+ *
+ *                  a_km    period_d   L0_deg    n_deg_per_day   color
+ */
+const MARS_MOONS = {
+    phobos: { a_scene: R.mars * 3.2,  period_d: 0.31891, L0_deg: 92.47,  color: 0xb0a898 },
+    deimos: { a_scene: R.mars * 6.8,  period_d: 1.26244, L0_deg: 296.23, color: 0x9a9080 },
+};
+// Mars equatorial tilt relative to ecliptic plane (approximate, scene Y-axis tilt)
+const MARS_MOON_TILT = 26 * D2R;
 
 const N_WIND    = 3000;   // solar wind particles
 const MAX_R_AU  = 1.65;   // kill particles beyond this
@@ -276,6 +293,40 @@ export class Heliosphere3D {
         if (x === 1) this._simJD = jdNow();
     }
 
+    /**
+     * Jump to a specific date/time and freeze (timeScale=0).
+     * @param {Date} date
+     */
+    setSimDate(date) {
+        this._simJD    = date.getTime() / 86400000 + 2440587.5;
+        this._timeScale = 0;
+        this._meeusUpdate(this._simJD, true);
+    }
+
+    /**
+     * Jump to a specific Julian Day and freeze (timeScale=0).
+     * @param {number} jd
+     */
+    setSimJD(jd) {
+        this._simJD    = jd;
+        this._timeScale = 0;
+        this._meeusUpdate(this._simJD, true);
+    }
+
+    /**
+     * Return current simulation Julian Day.
+     * @returns {number}
+     */
+    getSimJD() { return this._simJD; }
+
+    /**
+     * Snap back to real-time at 1× speed.
+     */
+    goLive() {
+        this._simJD    = jdNow();
+        this._timeScale = 1;
+    }
+
     // ── Event handlers ────────────────────────────────────────────────────────
 
     _onSwpc(ev) {
@@ -388,6 +439,7 @@ export class Heliosphere3D {
         if (forceAll || !this._eph.neptune) this._eph.neptune = mk(neptuneHeliocentric);
 
         this._updateEphemerisPositions();
+        this._tickMarsSystem();
     }
 
     /**
@@ -695,7 +747,41 @@ export class Heliosphere3D {
 
         this._planetMeshes.mercury = mkPlanet('mercury', R.mercury, COL.mercury);
         this._planetMeshes.venus   = mkPlanet('venus',   R.venus,   COL.venus);
-        this._planetMeshes.mars    = mkPlanet('mars',    R.mars,    COL.mars);
+
+        // ── Mars system — group holds Mars + Phobos + Deimos ─────────────────
+        this._marsGroup = new THREE.Group();
+        this._marsGroup.name = 'mars_group';
+        this._scene.add(this._marsGroup);
+
+        const marsSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R.mars, 20, 20),
+            new THREE.MeshStandardMaterial({ color: COL.mars, roughness: 0.9, metalness: 0 })
+        );
+        marsSphere.name = 'mars';
+        this._marsGroup.add(marsSphere);
+        // Keep the reference for position updates (marsGroup is the positionable object)
+        this._planetMeshes.mars = this._marsGroup;
+
+        // Phobos and Deimos — tiny moons in tilted equatorial orbital plane
+        // Their local orbit plane is rotated MARS_MOON_TILT around local X
+        const moonPlane = new THREE.Group();
+        moonPlane.name  = 'mars_moon_plane';
+        moonPlane.rotation.x = MARS_MOON_TILT;
+        this._marsGroup.add(moonPlane);
+
+        this._phobos = new THREE.Mesh(
+            new THREE.SphereGeometry(R.phobos, 8, 8),
+            new THREE.MeshStandardMaterial({ color: MARS_MOONS.phobos.color, roughness: 0.95 })
+        );
+        this._phobos.name = 'phobos';
+        moonPlane.add(this._phobos);
+
+        this._deimos = new THREE.Mesh(
+            new THREE.SphereGeometry(R.deimos, 8, 8),
+            new THREE.MeshStandardMaterial({ color: MARS_MOONS.deimos.color, roughness: 0.95 })
+        );
+        this._deimos.name = 'deimos';
+        moonPlane.add(this._deimos);
 
         // Planet labels (canvas Sprite above each body)
         this._planetLabels = {};
@@ -1560,6 +1646,33 @@ export class Heliosphere3D {
         }
     }
 
+    // ── Mars moon animation ───────────────────────────────────────────────────
+
+    /**
+     * Position Phobos and Deimos using current simulated JD.
+     * Mean longitude L = L0 + n*(JD - J2000) where n = 360/period °/day.
+     * Positions are in the mars_moon_plane group (tilted MARS_MOON_TILT from
+     * Mars orbital plane), so local X/Z = within-plane, Y = out of plane.
+     */
+    _tickMarsSystem() {
+        if (!this._phobos || !this._deimos) return;
+        const jd   = this._simJD;
+        const dt_d = jd - 2451545.0;   // days since J2000
+
+        for (const [mesh, cfg] of [
+            [this._phobos, MARS_MOONS.phobos],
+            [this._deimos, MARS_MOONS.deimos],
+        ]) {
+            const L_deg = ((cfg.L0_deg + (360 / cfg.period_d) * dt_d) % 360 + 360) % 360;
+            const L_rad = L_deg * D2R;
+            mesh.position.set(
+                cfg.a_scene * Math.cos(L_rad),
+                0,
+                cfg.a_scene * Math.sin(L_rad),
+            );
+        }
+    }
+
     // ── Sun animation ─────────────────────────────────────────────────────────
 
     _tickSun(dt) {
@@ -1763,6 +1876,17 @@ export class Heliosphere3D {
         this._tickSun(dt);
         this._tickProminences(dt);
         this._tickMoon(dt);
+        // Fire time-update every frame for HUD / date picker / epoch badge
+        // (the listener in space-weather.html throttles DOM writes to 4×/sec)
+        if (now != null) {
+            window.dispatchEvent(new CustomEvent('helio-time-update', {
+                detail: {
+                    jd:     this._simJD,
+                    date:   new Date((this._simJD - 2440587.5) * 86400000),
+                    source: this._eph.earth?.source ?? 'vsop87',
+                }
+            }));
+        }
         this._tickHCS();
         this._tickWind(dt);
         this._tickReconnection(dt);

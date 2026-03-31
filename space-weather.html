@@ -487,7 +487,8 @@ nav {
 .helio-live-hud .hl { color: #aaa; font-size: .64rem; margin-right: 6px; }
 .helio-timewarp {
     position: absolute; bottom: 36px; left: 14px; z-index: 10;
-    display: flex; align-items: center; gap: 5px;
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+    max-width: calc(100% - 28px);
     pointer-events: all;
 }
 .tw-btn {
@@ -496,8 +497,26 @@ nav {
     color: #8ab; font-size: .68rem; font-family: monospace;
     padding: 3px 8px; cursor: pointer; transition: all .15s;
 }
-.tw-btn:hover  { border-color: rgba(174,238,255,.5); color: #fff; }
-.tw-btn.active { background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef; }
+.tw-btn:hover        { border-color: rgba(174,238,255,.5); color: #fff; }
+.tw-btn.active       { background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef; }
+.tw-btn.tw-live      { color: #4f8; border-color: rgba(60,255,120,.35); }
+.tw-btn.tw-live:hover{ border-color: rgba(60,255,120,.7); color: #8fc; }
+.tw-sep { width: 1px; height: 16px; background: rgba(255,255,255,.12); margin: 0 2px; }
+.tw-date-input {
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.18); border-radius: 5px;
+    color: #aef; font-size: .68rem; font-family: monospace;
+    padding: 3px 6px; cursor: pointer; outline: none;
+    color-scheme: dark;
+}
+.tw-date-input:focus { border-color: rgba(174,238,255,.5); }
+#tw-epoch-badge {
+    font-size:.62rem; font-family: monospace; padding: 2px 6px;
+    border-radius: 4px; letter-spacing: .04em;
+}
+#tw-epoch-badge.tw-past   { background: rgba(255,180,60,.18); color: #f90; border: 1px solid rgba(255,180,60,.35); }
+#tw-epoch-badge.tw-future { background: rgba(120,80,255,.20); color: #c8a0ff; border: 1px solid rgba(160,100,255,.4); }
+#tw-epoch-badge.tw-live   { background: rgba(40,220,100,.15); color: #4f8; border: 1px solid rgba(60,255,120,.3); }
 
 /* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
 .earth-section {
@@ -689,13 +708,33 @@ nav {
             <span class="hl">Date</span><span class="hv" id="h3d-date">–</span> &nbsp;
             <span class="hv" id="h3d-src" style="font-size:0.7em;opacity:0.6;">–</span>
         </div>
-        <!-- Time warp controls -->
+        <!-- Time warp + date travel controls -->
         <div class="helio-timewarp" id="helio-timewarp">
-            <span style="opacity:.55;font-size:.75em;">Time:</span>
-            <button class="tw-btn active" data-scale="1">1×</button>
-            <button class="tw-btn" data-scale="1000">1k×</button>
-            <button class="tw-btn" data-scale="100000">100k×</button>
-            <button class="tw-btn" data-scale="10000000">10M×</button>
+            <!-- Navigation -->
+            <button class="tw-btn" id="tw-prev-yr"  title="Back 1 year">−1yr</button>
+            <button class="tw-btn" id="tw-prev-mo"  title="Back 1 month">−1mo</button>
+            <button class="tw-btn" id="tw-prev-wk"  title="Back 1 week">−1wk</button>
+            <div class="tw-sep"></div>
+            <!-- Date picker -->
+            <input type="datetime-local" class="tw-date-input" id="tw-date-picker"
+                   title="Jump to date/time" step="60">
+            <div class="tw-sep"></div>
+            <button class="tw-btn tw-live" id="tw-live" title="Snap to real-time">⊙ Live</button>
+            <div class="tw-sep"></div>
+            <button class="tw-btn" id="tw-next-wk"  title="Forward 1 week">+1wk</button>
+            <button class="tw-btn" id="tw-next-mo"  title="Forward 1 month">+1mo</button>
+            <button class="tw-btn" id="tw-next-yr"  title="Forward 1 year">+1yr</button>
+            <div class="tw-sep"></div>
+            <!-- Warp speed -->
+            <span style="opacity:.45;font-size:.65em;">warp:</span>
+            <button class="tw-btn" id="tw-pause"    data-scale="0"        title="Pause">⏸</button>
+            <button class="tw-btn active" data-scale="1"       title="Real-time">1×</button>
+            <button class="tw-btn" data-scale="1000"           title="1000× warp">1k×</button>
+            <button class="tw-btn" data-scale="100000"         title="100 000× warp">100k×</button>
+            <button class="tw-btn" data-scale="10000000"       title="10 million× warp">10M×</button>
+            <div class="tw-sep"></div>
+            <!-- Epoch badge -->
+            <span id="tw-epoch-badge" class="tw-live"></span>
         </div>
         <!-- Controls hint -->
         <div class="helio-hint">
@@ -1660,22 +1699,118 @@ let _helio = null;
 if (helioCanvas) _helio = new Heliosphere3D(helioCanvas).start();
 
 // ── Helio HUD: date display + ephemeris source ────────────────────────────────
+
+/** Format a Date as a datetime-local string (YYYY-MM-DDTHH:MM). */
+function _toDatetimeLocal(d) {
+    return d.toISOString().slice(0, 16);
+}
+
+let _lastHudUpdate = 0;
 window.addEventListener('helio-time-update', e => {
-    const { date, source } = e.detail;
-    const dateEl = el('h3d-date');
-    const srcEl  = el('h3d-src');
-    if (dateEl) dateEl.textContent = date.toISOString().slice(0, 10);
-    if (srcEl)  srcEl.textContent  = source === 'horizons' ? 'JPL' : 'Meeus';
+    const { date, source, jd } = e.detail;
+    const now = Date.now();
+
+    // Throttle HUD DOM writes to 4×/sec (RAF fires 60fps, no need to paint every frame)
+    if (now - _lastHudUpdate < 250) return;
+    _lastHudUpdate = now;
+
+    const dateEl  = el('h3d-date');
+    const srcEl   = el('h3d-src');
+    const badge   = el('tw-epoch-badge');
+    const picker  = el('tw-date-picker');
+
+    if (dateEl) {
+        // Show full datetime: YYYY-MM-DD HH:MM UTC
+        const iso = date.toISOString();
+        dateEl.textContent = iso.slice(0, 10) + ' ' + iso.slice(11, 16) + ' UTC';
+    }
+    if (srcEl) srcEl.textContent = source === 'horizons' ? 'JPL' : 'VSOP87';
+
+    // Sync picker to current sim time without triggering 'change' event
+    if (picker && document.activeElement !== picker) {
+        picker.value = _toDatetimeLocal(date);
+    }
+
+    // Epoch badge: LIVE / PAST / FUTURE
+    if (badge) {
+        const realJD  = Date.now() / 86400000 + 2440587.5;
+        const diffDays = (jd ?? 0) - realJD;
+        if (Math.abs(diffDays) < 0.01) {   // within 15 minutes = "live"
+            badge.textContent = 'LIVE';
+            badge.className   = 'tw-live';
+        } else if (diffDays < 0) {
+            const d = Math.abs(diffDays);
+            badge.textContent = d < 365
+                ? `PAST −${Math.round(d)}d`
+                : `PAST −${(d/365.25).toFixed(1)}yr`;
+            badge.className   = 'tw-past';
+        } else {
+            const d = diffDays;
+            badge.textContent = d < 365
+                ? `FUTURE +${Math.round(d)}d`
+                : `FUTURE +${(d/365.25).toFixed(1)}yr`;
+            badge.className   = 'tw-future';
+        }
+    }
 });
 
-// ── Time-warp buttons ─────────────────────────────────────────────────────────
-document.getElementById('helio-timewarp')?.addEventListener('click', e => {
-    const btn = e.target.closest('.tw-btn');
-    if (!btn || !_helio) return;
-    const scale = parseInt(btn.dataset.scale, 10);
-    _helio.setTimeScale(scale);
-    document.querySelectorAll('.tw-btn').forEach(b => b.classList.toggle('active', b === btn));
-});
+// ── Time controls — warp speed buttons + date navigation ─────────────────────
+{
+    const twrap = document.getElementById('helio-timewarp');
+
+    // Date picker direct input
+    el('tw-date-picker')?.addEventListener('change', e => {
+        if (!_helio || !e.target.value) return;
+        _helio.setSimDate(new Date(e.target.value));
+        // Mark pause button active
+        twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
+            b.classList.toggle('active', b.dataset.scale === '0'));
+    });
+
+    // ⊙ Live button
+    el('tw-live')?.addEventListener('click', () => {
+        if (!_helio) return;
+        _helio.goLive();
+        twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
+            b.classList.toggle('active', b.dataset.scale === '1'));
+    });
+
+    // Step/offset buttons
+    const STEP_MS = {
+        'tw-prev-yr': -365.25 * 86400e3, 'tw-next-yr': +365.25 * 86400e3,
+        'tw-prev-mo': -30.44  * 86400e3, 'tw-next-mo': +30.44  * 86400e3,
+        'tw-prev-wk': -7      * 86400e3, 'tw-next-wk': +7      * 86400e3,
+    };
+    for (const [id, ms] of Object.entries(STEP_MS)) {
+        el(id)?.addEventListener('click', () => {
+            if (!_helio) return;
+            const curJD  = _helio.getSimJD();
+            const curMs  = (curJD - 2440587.5) * 86400000;
+            _helio.setSimDate(new Date(curMs + ms));
+            twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
+                b.classList.toggle('active', b.dataset.scale === '0'));
+        });
+    }
+
+    // Warp speed buttons
+    twrap?.addEventListener('click', e => {
+        const btn = e.target.closest('.tw-btn[data-scale]');
+        if (!btn || !_helio) return;
+        const scale = parseFloat(btn.dataset.scale);
+        if (scale === 0) {
+            _helio.setTimeScale(0);
+        } else {
+            // Warp ≥ 1: if currently frozen, warp from current frozen time
+            _helio.setTimeScale(scale);
+        }
+        twrap.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
+            b.classList.toggle('active', b === btn));
+    });
+
+    // Seed the picker with today's datetime
+    const picker = el('tw-date-picker');
+    if (picker) picker.value = _toDatetimeLocal(new Date());
+}
 
 // ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
 // SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.
