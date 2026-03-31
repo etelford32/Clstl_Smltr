@@ -485,11 +485,15 @@ nav {
 }
 .helio-live-hud .hv { color: #aef; font-weight: 600; font-family: monospace; }
 .helio-live-hud .hl { color: #aaa; font-size: .64rem; margin-right: 6px; }
+/* ── Timeline controls wrapper ───────────────────────────────────────────── */
 .helio-timewarp {
     position: absolute; bottom: 36px; left: 14px; z-index: 10;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+    width: calc(100% - 28px); pointer-events: all;
+}
+/* Row 1: nav buttons + date picker + warp speed */
+.tw-nav-row {
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
-    max-width: calc(100% - 28px);
-    pointer-events: all;
 }
 .tw-btn {
     background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
@@ -517,6 +521,66 @@ nav {
 #tw-epoch-badge.tw-past   { background: rgba(255,180,60,.18); color: #f90; border: 1px solid rgba(255,180,60,.35); }
 #tw-epoch-badge.tw-future { background: rgba(120,80,255,.20); color: #c8a0ff; border: 1px solid rgba(160,100,255,.4); }
 #tw-epoch-badge.tw-live   { background: rgba(40,220,100,.15); color: #4f8; border: 1px solid rgba(60,255,120,.3); }
+
+/* Row 2: timeline scrubber */
+.tw-timeline-row {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,.10); border-radius: 7px;
+    padding: 5px 8px; box-sizing: border-box;
+}
+.tw-win-grp { display: flex; gap: 3px; flex-shrink: 0; }
+.tw-btn.tw-win-active {
+    background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef;
+}
+/* slider labels */
+.tw-tl-label {
+    font-size: .58rem; font-family: monospace; color: #556; white-space: nowrap;
+    flex-shrink: 0; min-width: 58px; text-align: right;
+    background: rgba(0,0,0,.3); border-radius: 3px; padding: 1px 4px;
+}
+.tw-tl-label.tw-tl-start { text-align: left; }
+/* slider track + thumb */
+.tw-slider-wrap {
+    flex: 1; position: relative; min-width: 80px;
+    padding-bottom: 18px; /* room for ticks */
+}
+.tw-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+    display: block; position: relative; z-index: 2;
+    /* filled track via CSS variable --pct updated by JS */
+    background: linear-gradient(90deg,
+        rgba(80,160,255,.55) 0%, rgba(80,160,255,.55) var(--pct,50%),
+        rgba(255,255,255,.12) var(--pct,50%), rgba(255,255,255,.12) 100%);
+}
+.tw-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #aef; border: 2px solid rgba(80,160,255,.9);
+    cursor: grab; box-shadow: 0 0 7px rgba(80,160,255,.7); transition: transform .1s;
+}
+.tw-slider:active::-webkit-slider-thumb { cursor: grabbing; background: #fff; transform: scale(1.25); }
+.tw-slider::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #aef; border: 2px solid rgba(80,160,255,.9); cursor: grab;
+}
+/* tick marks */
+.tw-ticks {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: space-between; pointer-events: none;
+}
+.tw-tick { display: flex; flex-direction: column; align-items: center; }
+.tw-tick-mark { width: 1px; height: 5px; background: rgba(255,255,255,.18); }
+.tw-tick-lbl  { font-size: .52rem; font-family: monospace; color: #445; white-space: nowrap; margin-top: 1px; }
+.tw-tick:first-child .tw-tick-lbl,
+.tw-tick:last-child  .tw-tick-lbl { visibility: hidden; }
+/* step badge */
+.tw-step-badge {
+    font-size: .58rem; font-family: monospace; color: #445;
+    background: rgba(255,255,255,.05); border-radius: 3px; padding: 1px 4px;
+    flex-shrink: 0; white-space: nowrap;
+}
 
 /* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
 .earth-section {
@@ -710,31 +774,74 @@ nav {
         </div>
         <!-- Time warp + date travel controls -->
         <div class="helio-timewarp" id="helio-timewarp">
-            <!-- Navigation -->
-            <button class="tw-btn" id="tw-prev-yr"  title="Back 1 year">−1yr</button>
-            <button class="tw-btn" id="tw-prev-mo"  title="Back 1 month">−1mo</button>
-            <button class="tw-btn" id="tw-prev-wk"  title="Back 1 week">−1wk</button>
-            <div class="tw-sep"></div>
-            <!-- Date picker -->
-            <input type="datetime-local" class="tw-date-input" id="tw-date-picker"
-                   title="Jump to date/time" step="60">
-            <div class="tw-sep"></div>
-            <button class="tw-btn tw-live" id="tw-live" title="Snap to real-time">⊙ Live</button>
-            <div class="tw-sep"></div>
-            <button class="tw-btn" id="tw-next-wk"  title="Forward 1 week">+1wk</button>
-            <button class="tw-btn" id="tw-next-mo"  title="Forward 1 month">+1mo</button>
-            <button class="tw-btn" id="tw-next-yr"  title="Forward 1 year">+1yr</button>
-            <div class="tw-sep"></div>
-            <!-- Warp speed -->
-            <span style="opacity:.45;font-size:.65em;">warp:</span>
-            <button class="tw-btn" id="tw-pause"    data-scale="0"        title="Pause">⏸</button>
-            <button class="tw-btn active" data-scale="1"       title="Real-time">1×</button>
-            <button class="tw-btn" data-scale="1000"           title="1000× warp">1k×</button>
-            <button class="tw-btn" data-scale="100000"         title="100 000× warp">100k×</button>
-            <button class="tw-btn" data-scale="10000000"       title="10 million× warp">10M×</button>
-            <div class="tw-sep"></div>
-            <!-- Epoch badge -->
-            <span id="tw-epoch-badge" class="tw-live"></span>
+
+            <!-- ── Row 1: Navigation + date picker + warp speed ── -->
+            <div class="tw-nav-row">
+                <button class="tw-btn" id="tw-prev-yr"  title="Back 1 year">−1yr</button>
+                <button class="tw-btn" id="tw-prev-mo"  title="Back 1 month">−1mo</button>
+                <button class="tw-btn" id="tw-prev-wk"  title="Back 1 week">−1wk</button>
+                <button class="tw-btn" id="tw-prev-day" title="Back 1 day">−1d</button>
+                <div class="tw-sep"></div>
+                <input type="datetime-local" class="tw-date-input" id="tw-date-picker"
+                       title="Jump to any date/time" step="60">
+                <div class="tw-sep"></div>
+                <button class="tw-btn tw-live" id="tw-live" title="Snap to real-time">⊙ Live</button>
+                <div class="tw-sep"></div>
+                <button class="tw-btn" id="tw-next-day" title="Forward 1 day">+1d</button>
+                <button class="tw-btn" id="tw-next-wk"  title="Forward 1 week">+1wk</button>
+                <button class="tw-btn" id="tw-next-mo"  title="Forward 1 month">+1mo</button>
+                <button class="tw-btn" id="tw-next-yr"  title="Forward 1 year">+1yr</button>
+                <div class="tw-sep"></div>
+                <!-- Warp speed -->
+                <span style="opacity:.45;font-size:.63em;">warp:</span>
+                <button class="tw-btn" id="tw-pause" data-scale="0"
+                        title="Pause simulation">⏸</button>
+                <button class="tw-btn active" data-scale="1"
+                        title="Real-time (1×)">1×</button>
+                <button class="tw-btn" data-scale="3600"
+                        title="1 sim-hour per real second (3600×)">1h/s</button>
+                <button class="tw-btn" data-scale="86400"
+                        title="1 sim-day per real second (86 400×)">1d/s</button>
+                <button class="tw-btn" data-scale="2592000"
+                        title="1 sim-month per real second (2.6M×)">1mo/s</button>
+                <button class="tw-btn" data-scale="31557600"
+                        title="1 sim-year per real second (31.6M×)">1yr/s</button>
+                <div class="tw-sep"></div>
+                <span id="tw-epoch-badge" class="tw-live"></span>
+            </div>
+
+            <!-- ── Row 2: Timeline scrubber ── -->
+            <div class="tw-timeline-row" id="tw-timeline-row">
+                <!-- Window-size presets -->
+                <div class="tw-win-grp" id="tw-win-grp">
+                    <button class="tw-btn" data-window="3600"
+                            title="1-hour window">1h</button>
+                    <button class="tw-btn tw-win-active" data-window="86400"
+                            title="24-hour window">24h</button>
+                    <button class="tw-btn" data-window="604800"
+                            title="1-week window">1wk</button>
+                    <button class="tw-btn" data-window="2592000"
+                            title="1-month window">1mo</button>
+                    <button class="tw-btn" data-window="31557600"
+                            title="1-year window">1yr</button>
+                </div>
+                <div class="tw-sep"></div>
+                <!-- Start label -->
+                <span class="tw-tl-label tw-tl-start" id="tw-tl-start">–</span>
+                <!-- Slider + tick marks -->
+                <div class="tw-slider-wrap" id="tw-slider-wrap">
+                    <input type="range" class="tw-slider" id="tw-slider"
+                           min="0" max="10000" value="5000"
+                           title="Drag to travel through time">
+                    <div class="tw-ticks" id="tw-ticks"></div>
+                </div>
+                <!-- End label -->
+                <span class="tw-tl-label" id="tw-tl-end">–</span>
+                <div class="tw-sep"></div>
+                <!-- Step granularity badge -->
+                <span class="tw-step-badge" id="tw-step-badge">–</span>
+            </div>
+
         </div>
         <!-- Controls hint -->
         <div class="helio-hint">
@@ -1754,62 +1861,230 @@ window.addEventListener('helio-time-update', e => {
     }
 });
 
-// ── Time controls — warp speed buttons + date navigation ─────────────────────
+// ── Time controls — full timeline scrubber + nav + warp speed ────────────────
 {
-    const twrap = document.getElementById('helio-timewarp');
+    // ── Timeline state ────────────────────────────────────────────────────────
+    // _twWindowSec  : visible range of the slider in seconds
+    // _twWinStartJD : JD of the slider's left edge
+    // _sliderDragging: true while the user's pointer is on the slider
 
-    // Date picker direct input
+    let _twWindowSec    = 86400;  // default: 24-hour window
+    let _twWinStartJD   = 0;      // set on first update
+    let _sliderDragging = false;
+
+    const SLIDER_MAX = 10000;     // high resolution for smooth scrubbing
+
+    // Step granularity and tick config for each window size
+    const WIN_CFG = {
+        3600    : { step: 300,      tickCount: 12, stepLabel: 'step 5min', fmtTick: d => d.toISOString().slice(11,16) },
+        86400   : { step: 3600,     tickCount: 24, stepLabel: 'step 1hr',  fmtTick: d => d.toISOString().slice(11,16) },
+        604800  : { step: 86400,    tickCount: 7,  stepLabel: 'step 1day', fmtTick: d => d.toISOString().slice(5,10).replace('-','/') },
+        2592000 : { step: 86400,    tickCount: 10, stepLabel: 'step 1day', fmtTick: d => d.toISOString().slice(5,10).replace('-','/') },
+        31557600: { step: 2592000,  tickCount: 12, stepLabel: 'step 1mo',  fmtTick: d => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()] },
+    };
+
+    // ── Helper: JD ↔ ms ──────────────────────────────────────────────────────
+    const jdToMs  = jd  => (jd - 2440587.5) * 86400000;
+    const msToJD  = ms  => ms / 86400000 + 2440587.5;
+    const nowJD   = ()  => Date.now() / 86400000 + 2440587.5;
+
+    // ── Format date label for start/end of slider ─────────────────────────────
+    function _fmtEndLabel(jd) {
+        const d   = new Date(jdToMs(jd));
+        const iso = d.toISOString();
+        // For year-window show YYYY-MM; for shorter show MM-DD HH:MM
+        return _twWindowSec >= 31557600
+            ? iso.slice(0, 7)
+            : _twWindowSec >= 2592000
+                ? iso.slice(5, 10)
+                : iso.slice(5, 16).replace('T', ' ');
+    }
+
+    // ── Rebuild tick marks from current window + start ────────────────────────
+    function _rebuildTicks() {
+        const ticksEl = el('tw-ticks');
+        if (!ticksEl) return;
+        const cfg = WIN_CFG[_twWindowSec] ?? WIN_CFG[86400];
+        const n   = cfg.tickCount;
+
+        ticksEl.innerHTML = '';
+        for (let i = 0; i <= n; i++) {
+            const frac  = i / n;
+            const tickJD = _twWinStartJD + frac * (_twWindowSec / 86400);
+            const d     = new Date(jdToMs(tickJD));
+            const div   = document.createElement('div');
+            div.className = 'tw-tick';
+            div.innerHTML = `<div class="tw-tick-mark"></div>
+                             <div class="tw-tick-lbl">${cfg.fmtTick(d)}</div>`;
+            ticksEl.appendChild(div);
+        }
+    }
+
+    // ── Update slider fill gradient ───────────────────────────────────────────
+    function _setSliderPct(val) {
+        const slider = el('tw-slider');
+        if (slider) slider.style.setProperty('--pct', (val / SLIDER_MAX * 100).toFixed(2) + '%');
+    }
+
+    // ── Update slider thumb + labels from a given sim JD ─────────────────────
+    function _updateSliderFromJD(jd) {
+        if (_sliderDragging) return;          // don't fight the user's drag
+        const slider   = el('tw-slider');
+        const startEl  = el('tw-tl-start');
+        const endEl    = el('tw-tl-end');
+        const stepEl   = el('tw-step-badge');
+        if (!slider) return;
+
+        const winDays  = _twWindowSec / 86400;
+
+        // If sim time is outside the current window, re-center
+        const frac = (jd - _twWinStartJD) / winDays;
+        if (frac < 0 || frac > 1) {
+            // Re-center: put simJD at midpoint
+            _twWinStartJD = jd - winDays * 0.5;
+            _rebuildTicks();
+        }
+
+        const fracClamped = Math.max(0, Math.min(1, (jd - _twWinStartJD) / winDays));
+        const val = Math.round(fracClamped * SLIDER_MAX);
+        slider.value = val;
+        _setSliderPct(val);
+
+        // Start / end labels
+        const endJD = _twWinStartJD + winDays;
+        if (startEl) startEl.textContent = _fmtEndLabel(_twWinStartJD);
+        if (endEl)   endEl.textContent   = _fmtEndLabel(endJD);
+
+        // Step badge
+        const cfg = WIN_CFG[_twWindowSec] ?? WIN_CFG[86400];
+        if (stepEl) stepEl.textContent = cfg.stepLabel;
+    }
+
+    // ── Switch window size ────────────────────────────────────────────────────
+    function _setWindow(windowSec) {
+        _twWindowSec = windowSec;
+        // Re-center on current sim time
+        const simJD  = _helio?.getSimJD() ?? nowJD();
+        _twWinStartJD = simJD - (windowSec / 86400) * 0.5;
+        _rebuildTicks();
+        _updateSliderFromJD(simJD);
+        // Update window button active states
+        el('tw-win-grp')?.querySelectorAll('.tw-btn[data-window]').forEach(b =>
+            b.classList.toggle('tw-win-active', Number(b.dataset.window) === windowSec));
+    }
+
+    // ── Mark warp scale button active ─────────────────────────────────────────
+    const twrap = document.getElementById('helio-timewarp');
+    function _setScaleActive(scale) {
+        twrap?.querySelectorAll('.tw-nav-row .tw-btn[data-scale]').forEach(b =>
+            b.classList.toggle('active', Number(b.dataset.scale) === scale));
+    }
+
+    // ── Initialise window on first JD ────────────────────────────────────────
+    function _initWindow(jd) {
+        if (_twWinStartJD === 0) {
+            _twWinStartJD = jd - (_twWindowSec / 86400) * 0.5;
+            _rebuildTicks();
+        }
+        _updateSliderFromJD(jd);
+    }
+
+    // ── Date picker ───────────────────────────────────────────────────────────
     el('tw-date-picker')?.addEventListener('change', e => {
         if (!_helio || !e.target.value) return;
-        _helio.setSimDate(new Date(e.target.value));
-        // Mark pause button active
-        twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
-            b.classList.toggle('active', b.dataset.scale === '0'));
+        const d = new Date(e.target.value);
+        _helio.setSimDate(d);
+        _updateSliderFromJD(msToJD(d.getTime()));
+        _setScaleActive(0);
     });
 
-    // ⊙ Live button
+    // ── Live button ───────────────────────────────────────────────────────────
     el('tw-live')?.addEventListener('click', () => {
         if (!_helio) return;
         _helio.goLive();
-        twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
-            b.classList.toggle('active', b.dataset.scale === '1'));
+        const jd = nowJD();
+        // Re-center window on now
+        _twWinStartJD = jd - (_twWindowSec / 86400) * 0.5;
+        _rebuildTicks();
+        _updateSliderFromJD(jd);
+        _setScaleActive(1);
     });
 
-    // Step/offset buttons
+    // ── Step / jump buttons ───────────────────────────────────────────────────
     const STEP_MS = {
-        'tw-prev-yr': -365.25 * 86400e3, 'tw-next-yr': +365.25 * 86400e3,
-        'tw-prev-mo': -30.44  * 86400e3, 'tw-next-mo': +30.44  * 86400e3,
-        'tw-prev-wk': -7      * 86400e3, 'tw-next-wk': +7      * 86400e3,
+        'tw-prev-yr':  -365.25 * 86400e3,
+        'tw-next-yr':  +365.25 * 86400e3,
+        'tw-prev-mo':  -30.44  * 86400e3,
+        'tw-next-mo':  +30.44  * 86400e3,
+        'tw-prev-wk':  -7      * 86400e3,
+        'tw-next-wk':  +7      * 86400e3,
+        'tw-prev-day': -1      * 86400e3,
+        'tw-next-day': +1      * 86400e3,
     };
     for (const [id, ms] of Object.entries(STEP_MS)) {
         el(id)?.addEventListener('click', () => {
             if (!_helio) return;
-            const curJD  = _helio.getSimJD();
-            const curMs  = (curJD - 2440587.5) * 86400000;
-            _helio.setSimDate(new Date(curMs + ms));
-            twrap?.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
-                b.classList.toggle('active', b.dataset.scale === '0'));
+            const curJD = _helio.getSimJD();
+            const newJD = msToJD(jdToMs(curJD) + ms);
+            _helio.setSimDate(new Date(jdToMs(newJD)));
+            _updateSliderFromJD(newJD);
+            _setScaleActive(0);
         });
     }
 
-    // Warp speed buttons
-    twrap?.addEventListener('click', e => {
+    // ── Warp speed buttons (in nav row) ───────────────────────────────────────
+    el('tw-nav-row')?.addEventListener('click', e => {
         const btn = e.target.closest('.tw-btn[data-scale]');
         if (!btn || !_helio) return;
         const scale = parseFloat(btn.dataset.scale);
-        if (scale === 0) {
-            _helio.setTimeScale(0);
-        } else {
-            // Warp ≥ 1: if currently frozen, warp from current frozen time
-            _helio.setTimeScale(scale);
-        }
-        twrap.querySelectorAll('.tw-btn[data-scale]').forEach(b =>
-            b.classList.toggle('active', b === btn));
+        _helio.setTimeScale(scale);
+        _setScaleActive(scale);
     });
 
-    // Seed the picker with today's datetime
+    // ── Window preset buttons (in timeline row) ───────────────────────────────
+    el('tw-win-grp')?.addEventListener('click', e => {
+        const btn = e.target.closest('.tw-btn[data-window]');
+        if (!btn) return;
+        _setWindow(Number(btn.dataset.window));
+    });
+
+    // ── Timeline slider ───────────────────────────────────────────────────────
+    const sliderEl = el('tw-slider');
+
+    // Pointer down: begin drag — note start JD so we can compute delta later
+    sliderEl?.addEventListener('pointerdown', () => { _sliderDragging = true; });
+
+    // Input: scrub — convert slider value → JD and update sim
+    sliderEl?.addEventListener('input', () => {
+        if (!_helio) return;
+        const frac  = sliderEl.valueAsNumber / SLIDER_MAX;
+        const newJD = _twWinStartJD + frac * (_twWindowSec / 86400);
+        _helio.setSimDate(new Date(jdToMs(newJD)));
+        _setSliderPct(sliderEl.valueAsNumber);
+        _setScaleActive(0);   // counts as a "pause" — warp stops
+
+        // Update start/end labels in real-time during drag
+        const endJD = _twWinStartJD + _twWindowSec / 86400;
+        const s = el('tw-tl-start'); if (s) s.textContent = _fmtEndLabel(_twWinStartJD);
+        const f = el('tw-tl-end');   if (f) f.textContent = _fmtEndLabel(endJD);
+    });
+
+    // Pointer up / cancel: end drag
+    const _endDrag = () => { _sliderDragging = false; };
+    sliderEl?.addEventListener('pointerup',     _endDrag);
+    sliderEl?.addEventListener('pointercancel', _endDrag);
+
+    // ── helio-time-update → sync slider + HUD + picker ────────────────────────
+    // (This replaces / extends the existing helio-time-update handler above)
+    window.addEventListener('helio-time-update', e => {
+        const { jd } = e.detail ?? {};
+        if (jd != null) _initWindow(jd);
+    });
+
+    // ── Seed picker + slider with current time ────────────────────────────────
     const picker = el('tw-date-picker');
     if (picker) picker.value = _toDatetimeLocal(new Date());
+    _setWindow(_twWindowSec);  // build initial ticks and labels
 }
 
 // ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
