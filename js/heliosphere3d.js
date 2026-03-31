@@ -432,11 +432,13 @@ export class Heliosphere3D {
         this._eph.moon    = { lon_rad: m.lon_rad, lat_rad: m.lat_rad,
                                dist_km: m.dist_km,  dist_AU: m.dist_AU, source: 'meeus' };
 
-        // Outer planets: keep JPL Horizons at 1× speed; force Meeus during time warp
-        if (forceAll || !this._eph.jupiter) this._eph.jupiter = mk(jupiterHeliocentric);
-        if (forceAll || !this._eph.saturn)  this._eph.saturn  = mk(saturnHeliocentric);
-        if (forceAll || !this._eph.uranus)  this._eph.uranus  = mk(uranusHeliocentric);
-        if (forceAll || !this._eph.neptune) this._eph.neptune = mk(neptuneHeliocentric);
+        // Outer planets: always compute from VSOP87D unless we have live Horizons data.
+        // (Horizons data has source='horizons'; VSOP87D has source='vsop87'.)
+        const noHorizons = name => this._eph[name]?.source !== 'horizons';
+        if (forceAll || noHorizons('jupiter')) this._eph.jupiter = mk(jupiterHeliocentric);
+        if (forceAll || noHorizons('saturn'))  this._eph.saturn  = mk(saturnHeliocentric);
+        if (forceAll || noHorizons('uranus'))  this._eph.uranus  = mk(uranusHeliocentric);
+        if (forceAll || noHorizons('neptune')) this._eph.neptune = mk(neptuneHeliocentric);
 
         this._updateEphemerisPositions();
         this._tickMarsSystem();
