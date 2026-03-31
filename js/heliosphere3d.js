@@ -40,6 +40,7 @@ import {
     mercuryHeliocentric, venusHeliocentric, marsHeliocentric,
     jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
 } from './horizons.js';
+import { earthOrbitFull } from './earth-orbit.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -317,6 +318,15 @@ export class Heliosphere3D {
         this._eph.uranus  = d.uranus  ?? null;
         this._eph.neptune = d.neptune ?? null;
         this._updateEphemerisPositions();
+
+        // Compute full Earth orbital state and fire event for the orbit panel
+        try {
+            const orb = earthOrbitFull(d.jd ?? jdNow());
+            this._updateOrbitalMarkers(orb);
+            window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: orb }));
+        } catch (err) {
+            console.debug('[Heliosphere3D] earth-orbit-update skipped:', err.message);
+        }
     }
 
     /** Receive Parker-corrected heliospheric state from SolarWindState. */
@@ -346,6 +356,12 @@ export class Heliosphere3D {
     _seedMeeusPositions() {
         this._simJD = jdNow();
         this._meeusUpdate(this._simJD, true);
+        // Seed orbital markers and dispatch initial orbit event
+        try {
+            const orb = earthOrbitFull(this._simJD);
+            this._updateOrbitalMarkers(orb);
+            window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: orb }));
+        } catch (_e) { /* no-op */ }
     }
 
     /**
@@ -509,26 +525,141 @@ export class Heliosphere3D {
             const incl = ORBIT_INCL[name] ?? { i: 0, node: 0 };
             const mat  = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.28, depthWrite: false });
             const pts  = [];
-            const N    = 128;
-            for (let k = 0; k <= N; k++) {
-                // Build ring in ecliptic plane then rotate by (Ω, i)
-                // Standard Keplerian rotation: first Ω around ecliptic-north (Three.js Y),
-                // then i around the ascending node (local X after Ω rotation).
-                const a   = (k / N) * Math.PI * 2;
-                const x0  = dist * AU * Math.cos(a);
-                const z0  = dist * AU * Math.sin(a);
-                // Rotate by inclination i around local X (ascending node direction)
-                const cosI = Math.cos(incl.i), sinI = Math.sin(incl.i);
-                const x1 = x0, y1 = -z0 * sinI, z1 = z0 * cosI;
-                // Rotate by Ω around Y
-                const cosO = Math.cos(incl.node), sinO = Math.sin(incl.node);
-                const xw = x1 * cosO - z1 * sinO;
-                const yw = y1;
-                const zw = x1 * sinO + z1 * cosO;
-                pts.push(new THREE.Vector3(xw, yw, zw));
+            const N    = 180;
+
+            if (name === 'earth') {
+                // ── True ellipse for Earth via VSOP87 orbital elements ────────
+                // e ≈ 0.01671, ω̄ ≈ 102.94° at J2000.  Use current-epoch values.
+                const orb  = earthOrbitFull(jdNow());
+                const a_au = orb.a;
+                const e    = orb.e;
+                const b_au = a_au * Math.sqrt(1 - e * e);   // semi-minor axis
+                const omR  = orb.omega_bar_rad;              // longitude of perihelion
+
+                // Parametric ellipse in perifocal frame, rotated by ω̄
+                // x_peri = a*cos(E) − a*e,  y_peri = b*sin(E)
+                // Then rotate by ω̄ in ecliptic plane:
+                //   x_ecl = x_p*cos(ω̄) − y_p*sin(ω̄)
+                //   y_ecl = x_p*sin(ω̄) + y_p*cos(ω̄)
+                // Three.js mapping: scene.x=ecl.x, scene.y=ecl.z≈0, scene.z=ecl.y
+                const cosOm = Math.cos(omR), sinOm = Math.sin(omR);
+                for (let k = 0; k <= N; k++) {
+                    const E  = (k / N) * 2 * Math.PI;
+                    const xp = a_au * Math.cos(E) - a_au * e;
+                    const yp = b_au * Math.sin(E);
+                    const xe = (xp * cosOm - yp * sinOm) * AU;
+                    const ye = (xp * sinOm + yp * cosOm) * AU;
+                    pts.push(new THREE.Vector3(xe, 0, ye));   // ecl.z ≈ 0
+                }
+                this._earthOrbitEllipse = { a_au, e, b_au, omega_bar_rad: omR };
+            } else {
+                // Circular approximation for all other planets
+                for (let k = 0; k <= N; k++) {
+                    const a   = (k / N) * Math.PI * 2;
+                    const x0  = dist * AU * Math.cos(a);
+                    const z0  = dist * AU * Math.sin(a);
+                    const cosI = Math.cos(incl.i), sinI = Math.sin(incl.i);
+                    const x1 = x0, y1 = -z0 * sinI, z1 = z0 * cosI;
+                    const cosO = Math.cos(incl.node), sinO = Math.sin(incl.node);
+                    const xw = x1 * cosO - z1 * sinO;
+                    const yw = y1;
+                    const zw = x1 * sinO + z1 * cosO;
+                    pts.push(new THREE.Vector3(xw, yw, zw));
+                }
             }
             this._scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
         }
+
+        // ── Orbital markers (perihelion, aphelion, L1, L2, velocity arrow) ──
+        this._buildOrbitalMarkers();
+    }
+
+    /** Build/update perihelion, aphelion, L1, L2 markers and velocity arrow. */
+    _buildOrbitalMarkers() {
+        // Lazily create marker group
+        if (!this._orbitMarkers) {
+            this._orbitMarkers = new THREE.Group();
+            this._orbitMarkers.name = 'orbit_markers';
+            this._scene.add(this._orbitMarkers);
+        }
+        // Will be populated/updated on first ephemeris-ready via _updateOrbitalMarkers()
+    }
+
+    /** Update orbital markers from full Earth orbit state. */
+    _updateOrbitalMarkers(orb) {
+        if (!this._orbitMarkers) return;
+
+        // Remove old children
+        while (this._orbitMarkers.children.length) {
+            const c = this._orbitMarkers.children[0];
+            c.geometry?.dispose();
+            c.material?.dispose();
+            this._orbitMarkers.remove(c);
+        }
+
+        const { a_au, e, omega_bar_rad: omR } = this._earthOrbitEllipse
+            ?? { a_au: orb.a, e: orb.e, omega_bar_rad: orb.omega_bar_rad };
+
+        const cosOm = Math.cos(omR), sinOm = Math.sin(omR);
+
+        // ── Perihelion marker (ν = 0, E = 0) ─────────────────────────────────
+        const peri_x = (a_au * (1 - e) * cosOm) * AU;
+        const peri_z = (a_au * (1 - e) * sinOm) * AU;
+        this._orbitMarkers.add(this._makeOrbitDot(
+            new THREE.Vector3(peri_x, 0, peri_z),
+            0xffcc44, 0.9, 'perihelion'
+        ));
+
+        // ── Aphelion marker (ν = π, E = π) ───────────────────────────────────
+        const aph_x = (-a_au * (1 + e) * cosOm) * AU;
+        const aph_z = (-a_au * (1 + e) * sinOm) * AU;
+        this._orbitMarkers.add(this._makeOrbitDot(
+            new THREE.Vector3(aph_x, 0, aph_z),
+            0x6699ff, 0.9, 'aphelion'
+        ));
+
+        // ── L1 marker (between Sun and Earth, ~0.99 AU) ───────────────────────
+        const L1 = orb.lagrange.L1;
+        this._orbitMarkers.add(this._makeOrbitDot(
+            new THREE.Vector3(L1.x_AU * AU, L1.z_AU * AU, L1.y_AU * AU),
+            0x00ffcc, 0.7, 'L1'
+        ));
+
+        // ── L2 marker (anti-Sun, ~1.01 AU) ────────────────────────────────────
+        const L2 = orb.lagrange.L2;
+        this._orbitMarkers.add(this._makeOrbitDot(
+            new THREE.Vector3(L2.x_AU * AU, L2.z_AU * AU, L2.y_AU * AU),
+            0xff88ff, 0.7, 'L2'
+        ));
+
+        // ── Velocity arrow at Earth's current position ─────────────────────────
+        const ep = this._earthGroup.position;
+        if (ep && orb.speed_km_s > 0) {
+            // Velocity direction in ecliptic → Three.js space
+            const vmag = Math.sqrt(orb.vx_km_s ** 2 + orb.vy_km_s ** 2 + orb.vz_km_s ** 2);
+            const vDir = new THREE.Vector3(
+                orb.vx_km_s / vmag,
+                orb.vz_km_s / vmag,   // ecl.Z → scene.Y
+                orb.vy_km_s / vmag,   // ecl.Y → scene.Z
+            );
+            const arrowLen = R.earth * 6;
+            const arrow = new THREE.ArrowHelper(
+                vDir, ep.clone(), arrowLen,
+                0x44ff88, arrowLen * 0.25, arrowLen * 0.12
+            );
+            arrow.name = 'velocity_arrow';
+            this._orbitMarkers.add(arrow);
+        }
+    }
+
+    /** Small labelled dot sprite for orbit markers. */
+    _makeOrbitDot(pos, color, opacity, label) {
+        const geo  = new THREE.SphereGeometry(0.45, 8, 8);
+        const mat  = new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(pos);
+        mesh.name = label;
+        return mesh;
     }
 
     /** Create a canvas-texture Sprite label for a planet. */

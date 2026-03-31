@@ -913,6 +913,79 @@ nav {
             </div>
         </div>
 
+        <!-- ── Earth Orbit (VSOP87) ───────────────────────────────────────────── -->
+        <div class="data-card" id="earth-orbit-card">
+            <h3>Earth Orbital State · VSOP87D<span class="src-chip live" id="src-orbit" title="Source: VSOP87D truncated series (Bretagnon &amp; Francou 1988) · &lt;1 arcsec accuracy">VSOP87D · on-device</span></h3>
+
+            <div class="param-row">
+                <span class="param-name">Helio longitude</span>
+                <span class="param-val" id="orb-lon">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Helio latitude</span>
+                <span class="param-val" id="orb-lat">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Distance</span>
+                <span class="param-val" id="orb-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Orbital speed</span>
+                <span class="param-val" id="orb-speed">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">True anomaly  ν</span>
+                <span class="param-val" id="orb-nu">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Mean anomaly  M</span>
+                <span class="param-val" id="orb-m">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Eccentricity  e</span>
+                <span class="param-val" id="orb-ecc">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Perihelion  q</span>
+                <span class="param-val" id="orb-peri-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Aphelion  Q</span>
+                <span class="param-val" id="orb-aph-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Next perihelion</span>
+                <span class="param-val" id="orb-next-peri">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Next aphelion</span>
+                <span class="param-val" id="orb-next-aph">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Carrington rot.</span>
+                <span class="param-val" id="orb-cr">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Carrington lon.</span>
+                <span class="param-val" id="orb-cr-lon">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Obliquity  ε</span>
+                <span class="param-val" id="orb-obliq">–</span>
+            </div>
+            <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.07);padding-top:10px">
+                <div style="font-size:.72rem;color:#445;margin-bottom:5px;font-weight:600;letter-spacing:.06em">LAGRANGE POINTS</div>
+                <div class="param-row">
+                    <span class="param-name">L1 (Sun–Earth)</span>
+                    <span class="param-val" id="orb-l1">–</span>
+                </div>
+                <div class="param-row">
+                    <span class="param-name">L2 (anti-Sun)</span>
+                    <span class="param-val" id="orb-l2">–</span>
+                </div>
+            </div>
+        </div>
+
     </div><!-- /data-grid -->
 
     <!-- ── SDO / SOHO LIVE IMAGERY ──────────────────────────────────────────── -->
@@ -1094,6 +1167,7 @@ import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
+import { earthOrbitFull }       from './js/earth-orbit.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -1125,6 +1199,12 @@ if (_navBurger && _navMenu) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
+
+// Seed orbit panel immediately without waiting for ephemeris-ready
+try {
+    const _initOrb = earthOrbitFull();
+    window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: _initOrb }));
+} catch (_e) { /* no-op */ }
 
 function fmtTime(d) {
     if (!d) return '–';
@@ -1497,6 +1577,42 @@ window.addEventListener('soho-update', e => {
             const img = el(id);
             if (img) img.src = src;
         }
+    }
+});
+
+// ── Earth Orbit Panel (VSOP87) ────────────────────────────────────────────────
+window.addEventListener('earth-orbit-update', e => {
+    const o = e.detail;
+    if (!o) return;
+    const R2D = 180 / Math.PI;
+    const fmt2 = v => (typeof v === 'number' ? v.toFixed(2) : '–');
+    const fmt4 = v => (typeof v === 'number' ? v.toFixed(4) : '–');
+    const fmtDays = d => d != null ? (d < 1 ? Math.round(d * 24) + ' h' : Math.round(d) + ' d') : '–';
+    const fmtDate = dt => dt instanceof Date && !isNaN(dt)
+        ? dt.toISOString().slice(0, 10)
+        : '–';
+
+    if (el('orb-lon'))       el('orb-lon').textContent       = fmt2(((o.L_rad ?? 0) * R2D % 360 + 360) % 360) + '°';
+    if (el('orb-lat'))       el('orb-lat').textContent       = fmt2((o.B_rad ?? 0) * R2D * 3600) + '″';
+    if (el('orb-dist'))      el('orb-dist').textContent      = fmt4(o.R_AU) + ' AU  (' + Math.round(o.R_AU * 149597870.7 / 1e6) + ' M km)';
+    if (el('orb-speed'))     el('orb-speed').textContent     = fmt2(o.speed_km_s) + ' km/s';
+    if (el('orb-nu'))        el('orb-nu').textContent        = fmt2(((o.nu_deg ?? 0) + 360) % 360) + '°';
+    if (el('orb-m'))         el('orb-m').textContent         = fmt2(o.M_deg ?? 0) + '°';
+    if (el('orb-ecc'))       el('orb-ecc').textContent       = (o.e ?? 0).toFixed(6);
+    if (el('orb-peri-dist')) el('orb-peri-dist').textContent = fmt4(o.r_perihelion_AU) + ' AU';
+    if (el('orb-aph-dist'))  el('orb-aph-dist').textContent  = fmt4(o.r_aphelion_AU)  + ' AU';
+    if (el('orb-next-peri')) el('orb-next-peri').textContent = fmtDays(o.days_to_perihelion) + '  (' + fmtDate(o.date_next_perihelion) + ')';
+    if (el('orb-next-aph'))  el('orb-next-aph').textContent  = fmtDays(o.days_to_aphelion)  + '  (' + fmtDate(o.date_next_aphelion)  + ')';
+    if (el('orb-cr'))        el('orb-cr').textContent        = 'CR ' + (o.carrington_number ?? '–');
+    if (el('orb-cr-lon'))    el('orb-cr-lon').textContent    = fmt2(o.carrington_lon) + '°';
+    if (el('orb-obliq'))     el('orb-obliq').textContent     = fmt2(o.obliquity_deg) + '°';
+    if (el('orb-l1') && o.lagrange?.L1) {
+        const d1_km = Math.round((o.R_AU - o.lagrange.L1.dist_AU) * 149597870.7 / 1e3);
+        el('orb-l1').textContent = fmt4(o.lagrange.L1.dist_AU) + ' AU  (−' + d1_km.toLocaleString() + ' k km)';
+    }
+    if (el('orb-l2') && o.lagrange?.L2) {
+        const d2_km = Math.round((o.lagrange.L2.dist_AU - o.R_AU) * 149597870.7 / 1e3);
+        el('orb-l2').textContent = fmt4(o.lagrange.L2.dist_AU) + ' AU  (+' + d2_km.toLocaleString() + ' k km)';
     }
 });
 
