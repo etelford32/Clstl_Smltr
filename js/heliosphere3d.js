@@ -360,6 +360,21 @@ export class Heliosphere3D {
         // CME animation (two-layer: shockMesh + driverMesh)
         this._cme      = null;    // null | { shockMesh, driverMesh, r_AU, auPerFrame }
 
+        // Sun bloom level (0.3–3.0; 1.0 default)
+        this._bloomLevel = 1.0;
+
+        // Post-flare UV arcade state (null | { lat, lon, t })
+        this._flareArcade  = null;
+        this._flareArcLat  = 0;
+        this._flareArcLon  = 0;
+        this._flareArcT    = 0;    // 0–1 decay
+
+        // Flare SEP ray (thin line along field direction)
+        this._flareSEP     = null; // null | { line, age, maxAge }
+
+        // Flare ribbon pair (two bright arcs at footpoints)
+        this._flareRibbons = [];   // [{ line, age, maxAge }]
+
         // Flare animation (FlareRing3D — lazily constructed after scene is built)
         this._flare3d  = null;
         this._lastXray = '';
@@ -455,11 +470,25 @@ export class Heliosphere3D {
         }
         this._reconnEvents = [];
         for (const p of this._prominences) {
-            this._scene?.remove(p.line);
-            p.line.geometry.dispose();
-            p.line.material.dispose();
+            for (const l of (p.strands ?? [p.line])) {
+                this._scene?.remove(l);
+                l.geometry.dispose();
+                l.material.dispose();
+            }
         }
         this._prominences = [];
+        for (const r of this._flareRibbons) {
+            this._scene?.remove(r.line);
+            r.line.geometry.dispose();
+            r.line.material.dispose();
+        }
+        this._flareRibbons = [];
+        if (this._flareSEP) {
+            this._scene?.remove(this._flareSEP.line);
+            this._flareSEP.line.geometry.dispose();
+            this._flareSEP.line.material.dispose();
+            this._flareSEP = null;
+        }
         this._renderer?.dispose();
     }
 
@@ -708,8 +737,8 @@ export class Heliosphere3D {
 
     _buildSun() {
         // ── Photosphere — custom GLSL shader ─────────────────────────────────────
-        // Replaces MeshStandardMaterial with a procedural sun surface:
-        // granulation cells, limb darkening, chromosphere gradient, active regions.
+        // Two-tier convection (supergranulation + granulation), limb darkening,
+        // chromospheric spicules, active-region sunspots, flare UV arc glow.
         this._sunUniforms = createSunUniforms(THREE);
         const core = new THREE.Mesh(
             new THREE.SphereGeometry(R.sun, 48, 48),
@@ -723,21 +752,29 @@ export class Heliosphere3D {
         this._scene.add(core);
         this._sunCore = core;
 
-        // ── Corona glow — three nested additive halos ─────────────────────────────
-        // The innermost halo (1.35×) mimics the chromosphere / transition region;
-        // the outer two model the K-corona and F-corona structure.
+        // ── Corona glow layers — 4 nested additive halos ─────────────────────────
+        // Layout:
+        //   [0] Chromosphere / transition region (1.25×) — always present
+        //   [1] Inner K-corona                  (1.65×) — bloom-scaled
+        //   [2] K-corona                        (2.30×) — bloom-scaled
+        //   [3] Outer F-corona                  (3.40×) — bloom-scaled, dimmer
+        //
+        // The baseScale and baseOpacity are stored so setBloom() can rescale
+        // them without rebuilding geometry.
+        this._coronaDef = [
+            { baseScale: 1.25, baseOpacity: 0.28, color: 0xff8800 },
+            { baseScale: 1.65, baseOpacity: 0.11, color: 0xff6600 },
+            { baseScale: 2.30, baseOpacity: 0.055, color: 0xff4400 },
+            { baseScale: 3.40, baseOpacity: 0.022, color: 0xff2200 },
+        ];
         this._coronaMeshes = [];
-        for (const [scale, opacity, color] of [
-            [1.35, 0.22, 0xff7700],   // chromosphere / inner K-corona
-            [1.80, 0.09, 0xff5500],   // K-corona
-            [2.60, 0.04, 0xff3300],   // outer corona / F-corona
-        ]) {
+        for (const def of this._coronaDef) {
             const glow = new THREE.Mesh(
-                new THREE.SphereGeometry(R.sun * scale, 24, 24),
+                new THREE.SphereGeometry(R.sun * def.baseScale, 24, 24),
                 new THREE.MeshBasicMaterial({
-                    color,
+                    color:       def.color,
                     transparent: true,
-                    opacity,
+                    opacity:     def.baseOpacity,
                     blending:    THREE.AdditiveBlending,
                     depthWrite:  false,
                     side:        THREE.BackSide,
@@ -745,7 +782,27 @@ export class Heliosphere3D {
             );
             glow.renderOrder = 2;
             this._scene.add(glow);
-            this._coronaMeshes.push({ mesh: glow, baseOpacity: opacity });
+            this._coronaMeshes.push({ mesh: glow, baseOpacity: def.baseOpacity, baseScale: def.baseScale });
+        }
+    }
+
+    /**
+     * Set the corona bloom level (0.3 = minimal, 1.0 = default, 3.0 = max).
+     * Scales all four corona halo layers proportionally and updates the sun
+     * shader's u_bloom uniform so granulation/spicule brightness tracks too.
+     * Exposed to space-weather.html via window._helio3d.setBloom(v).
+     * @param {number} v  Bloom level clamped to [0.3, 3.0]
+     */
+    setBloom(v) {
+        this._bloomLevel = Math.max(0.3, Math.min(3.0, v));
+        if (this._sunUniforms?.u_bloom) {
+            this._sunUniforms.u_bloom.value = this._bloomLevel;
+        }
+        // Outer F-corona (index 3) only becomes visible above bloom ~0.7
+        if (this._coronaMeshes) {
+            this._coronaMeshes.forEach((c, i) => {
+                c.mesh.material.opacity = c.baseOpacity * this._bloomLevel;
+            });
         }
     }
 
@@ -1791,20 +1848,151 @@ export class Heliosphere3D {
             this._flare3d = new FlareRing3D(this._scene, THREE, R.sun);
         this._flare3d.trigger(extreme);
 
-        // Trigger sun shader white-flash
+        // ── Sun surface flash ─────────────────────────────────────────────────
         this._sunFlareT = extreme ? 1.0 : 0.65;
 
-        // Inject a speed pulse that propagates along the Parker spiral.
-        // The flare source longitude is the Sun-facing heliographic direction
-        // (opposite of _rot, which tracks solar rotation).
-        // X-class: ~2000 km/s shock (fast CME), M-class: ~1200 km/s.
+        // ── Post-flare UV arcade on photosphere ───────────────────────────────
+        // Random active-region latitude; longitude is the Earth-facing hemisphere
+        // (opposite of _rot — most visible on the near side).
+        this._flareArcLat = (Math.random() - 0.5) * 0.70;   // ±20° latitude
+        this._flareArcLon = (-this._rot + Math.PI * 2) % (Math.PI * 2) + (Math.random() - 0.5) * 0.5;
+        this._flareArcT   = extreme ? 1.0 : 0.70;
+
+        // ── Post-flare prominence arcade (low bright UV loops) ────────────────
+        this._spawnProminence('arcade', {
+            lat: this._flareArcLat,
+            lon: this._flareArcLon,
+        });
+
+        // ── Flare ribbons (two parallel arcs at footpoints) ───────────────────
+        this._spawnFlareRibbons(this._flareArcLat, this._flareArcLon, extreme);
+
+        // ── SEP ray (Solar Energetic Particle stream along field line) ─────────
+        this._spawnFlareSEP(this._flareArcLon, extreme);
+
+        // ── Wind pulse along Parker spiral ────────────────────────────────────
         this._flarePulses.push({
-            srcLon:     (-this._rot % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2),
-            r_AU:       0.008,                           // starts at corona
-            shockSpeed: extreme ? 2000 : 1200,           // km/s — shock propagation
+            srcLon:     this._flareArcLon,
+            r_AU:       0.008,
+            shockSpeed: extreme ? 2000 : 1200,
             intensity:  extreme ? 1.0 : 0.65,
             age:        0,
         });
+    }
+
+    // ── Flare ribbon pair (two bright parallel arcs at active-region footpoints) ──
+    // Observed as two bright Hα/UV strips flanking the magnetic neutral line that
+    // brighten during the impulsive phase and separate slowly as the arcade grows.
+
+    _spawnFlareRibbons(lat, lon, extreme) {
+        const N     = 14;
+        const col   = extreme ? 0xffffff : 0xffcc44;
+        const halfW = 0.055;   // half-separation in latitude (scene rad)
+
+        for (const side of [-1, 1]) {
+            const ribbonLat = lat + side * halfW;
+            const pts = [];
+            for (let i = 0; i <= N; i++) {
+                const dl  = ((i / N) - 0.5) * 0.40;   // span ±0.2 rad in longitude
+                const rl  = lon + dl;
+                const rlt = ribbonLat;
+                pts.push(new THREE.Vector3(
+                    R.sun * 1.01 * Math.cos(rlt) * Math.cos(rl),
+                    R.sun * 1.01 * Math.sin(rlt),
+                    R.sun * 1.01 * Math.cos(rlt) * Math.sin(rl),
+                ));
+            }
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({
+                color: col, transparent: true, opacity: 0.95,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            });
+            const line = new THREE.Line(geo, mat);
+            line.renderOrder = 6;
+            this._scene.add(line);
+            this._flareRibbons.push({ line, age: 0, maxAge: extreme ? 12.0 : 7.0 });
+        }
+    }
+
+    _tickFlareRibbons(dt) {
+        for (let i = this._flareRibbons.length - 1; i >= 0; i--) {
+            const r  = this._flareRibbons[i];
+            r.age   += dt;
+            const t  = r.age / r.maxAge;
+            if (t >= 1.0) {
+                this._scene.remove(r.line);
+                r.line.geometry.dispose();
+                r.line.material.dispose();
+                this._flareRibbons.splice(i, 1);
+                continue;
+            }
+            // Co-rotate with sun
+            r.line.rotation.y = this._rot;
+            // Fade: fast bright peak → slow decay (thermal bremsstrahlung cooling)
+            const fade = t < 0.15
+                ? t / 0.15             // fast ramp-in
+                : Math.pow(1 - (t - 0.15) / 0.85, 1.8);
+            r.line.material.opacity = Math.max(0, fade * 0.95);
+            // Colour: bright white → cooling orange-red
+            r.line.material.color.setHSL(
+                0.07 - t * 0.04,   // white → gold → orange
+                t < 0.15 ? 0.0 : Math.min(1, (t - 0.15) * 2.5),
+                0.9 - t * 0.35
+            );
+        }
+    }
+
+    // ── SEP ray — bright line from flare site along Parker spiral field line ──
+    // Solar Energetic Particles accelerated at the flare shock stream outward
+    // preferentially along the IMF field line connecting to Earth.
+    // Visual: thin bright blue-white ray, fades over ~20 s.
+
+    _spawnFlareSEP(srcLon, extreme) {
+        // Remove previous SEP ray if still present
+        if (this._flareSEP) {
+            this._scene.remove(this._flareSEP.line);
+            this._flareSEP.line.geometry.dispose();
+            this._flareSEP.line.material.dispose();
+            this._flareSEP = null;
+        }
+
+        const M   = 40;   // points along ray
+        const pts = [];
+        const speed = 450;   // nominal wind speed for winding
+        for (let j = 0; j <= M; j++) {
+            const r_AU = (j / M) * MAX_R_AU;
+            const ang  = srcLon + this._rot - (428.6 / speed) * r_AU;
+            const rPx  = r_AU * AU;
+            pts.push(new THREE.Vector3(rPx * Math.cos(ang), 0, rPx * Math.sin(ang)));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+            color: extreme ? 0xaaccff : 0x88aaff,
+            transparent: true, opacity: 0.80,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.renderOrder = 4;
+        this._scene.add(line);
+        this._flareSEP = { line, age: 0, maxAge: extreme ? 22.0 : 14.0 };
+    }
+
+    _tickFlareSEP(dt) {
+        if (!this._flareSEP) return;
+        this._flareSEP.age += dt;
+        const t = this._flareSEP.age / this._flareSEP.maxAge;
+        if (t >= 1.0) {
+            this._scene.remove(this._flareSEP.line);
+            this._flareSEP.line.geometry.dispose();
+            this._flareSEP.line.material.dispose();
+            this._flareSEP = null;
+            return;
+        }
+        // Fade: ramp-in over first 15%, slow decay
+        const fade = t < 0.15 ? t / 0.15 : Math.pow(1 - (t - 0.15) / 0.85, 1.5);
+        this._flareSEP.line.material.opacity = Math.max(0, fade * 0.80);
+        // Colour shifts from blue-white (accelerated electrons) → teal (protons)
+        this._flareSEP.line.material.color.setHSL(0.58 + t * 0.08, 0.9, 0.72 - t * 0.15);
     }
 
     _tickFlare(dt) {
@@ -1965,6 +2153,15 @@ export class Heliosphere3D {
         u.u_xray_norm.value = xNorm;
         u.u_flare_t.value   = this._sunFlareT;
         u.u_kp_norm.value   = Math.min(1, (this._sw.kp ?? 2) / 9);
+        u.u_bloom.value     = this._bloomLevel;
+
+        // Post-flare UV arcade glow on sun surface — decays after trigger
+        if (this._flareArcT > 0) {
+            this._flareArcT = Math.max(0, this._flareArcT - dt * 0.25);
+        }
+        u.u_flare_arc.value    = this._flareArcT;
+        u.u_flare_lon.value.x  = this._flareArcLat;
+        u.u_flare_lon.value.y  = this._flareArcLon;
 
         // ── Active region positions ───────────────────────────────────────────
         // Convert heliographic lat/lon (Carrington frame) to local unit-sphere
@@ -1989,73 +2186,144 @@ export class Heliosphere3D {
         }
         u.u_nRegions.value = nReg;
 
-        // ── Corona glow opacity — pulsed by xray flux ─────────────────────────
+        // ── Corona glow opacity — bloom × activity pulse ─────────────────────
         if (this._coronaMeshes) {
             const coronaBoost = 1.0 + xNorm * 0.55 + this._sunFlareT * 0.8;
             for (const c of this._coronaMeshes) {
-                c.mesh.material.opacity = Math.min(1, c.baseOpacity * coronaBoost);
+                c.mesh.material.opacity = Math.min(1, c.baseOpacity * this._bloomLevel * coronaBoost);
             }
         }
+
+        // ── Flare SEP ray tick ────────────────────────────────────────────────
+        this._tickFlareSEP(dt);
+
+        // ── Flare ribbon tick ─────────────────────────────────────────────────
+        this._tickFlareRibbons(dt);
     }
 
     // ── Solar prominences ─────────────────────────────────────────────────────
     //
-    // Prominences are semi-circular arc loops that rise above the limb, hang for
-    // 30–90 seconds, then fade.  Up to 5 are alive at once.  They're modelled as
-    // CatmullRom arcs of N_PROM_PTS points rotating with the sun.
+    // Three biophysically-distinct prominence types:
     //
-    // Visual: deep red / fuchsia (Hα at 656 nm), additive blending.
+    //   'quiescent'  — Stable Hα loop hanging above the polarity inversion
+    //     line.  Slow-growing, lasts 60–120 s.  Deep red-rose (656 nm).
+    //     Multi-strand: 3 offset lines form a tube-like structure.
+    //
+    //   'eruptive'   — Unstable filament that rises rapidly and erupts.
+    //     Starts rose-red, turns UV blue-white as it heats during eruption.
+    //     Triggers an extra wind pulse on eruption.  Lasts 20–40 s.
+    //     Max height up to 1.8 R_sun — visually dramatic.
+    //
+    //   'arcade'     — Post-flare cusp arcade: a row of short bright loops at
+    //     a flare site.  Spawned explicitly by _triggerFlare().  UV blue,
+    //     lasts 30–60 s, sits low above the surface.
+    //
+    // Each prominence stores N arc points that are rebuilt each frame for
+    // eruptive types (height grows); quiescent geometry is static.
 
-    _spawnProminence() {
-        const N   = 18;                          // points along arc
-        const lat = (Math.random() - 0.5) * 1.2; // ±34° — mostly equatorial
-        const lon = Math.random() * Math.PI * 2;  // random longitude
-        // Arc height above surface: 0.25–0.75 R.sun
-        const maxH  = R.sun * (0.25 + Math.random() * 0.50);
-        const phase = Math.random() * Math.PI * 2;  // loop plane orientation
-
-        // Build arc in the tangent plane at the footpoint on the solar surface
+    _buildPromArc(lat, lon, maxH, footSpread, N = 22) {
+        // Returns array of THREE.Vector3 along the arch in world-space.
+        // footSpread: angular separation of footpoints (radians)
         const pts = [];
         for (let i = 0; i <= N; i++) {
-            const a     = (i / N) * Math.PI;          // 0 → π over the arch
-            const rSurf = R.sun + maxH * Math.sin(a); // radial distance
-            const dLat  = (a - Math.PI * 0.5) * 0.2 * Math.cos(phase); // slight footpoint spread
-            const dLon  = (a - Math.PI * 0.5) * 0.2 * Math.sin(phase);
-            const lt    = lat + dLat;
-            const ln    = lon + dLon;
+            const a     = (i / N) * Math.PI;
+            const rSurf = R.sun + maxH * Math.sin(a);
+            const dLat  = (a - Math.PI * 0.5) * footSpread * 0.55;
+            const dLon  = 0;
+            const lt    = lat  + dLat;
+            const ln    = lon  + dLon;
             pts.push(new THREE.Vector3(
                 rSurf * Math.cos(lt) * Math.cos(ln),
                 rSurf * Math.sin(lt),
                 rSurf * Math.cos(lt) * Math.sin(ln),
             ));
         }
+        return pts;
+    }
 
-        const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const mat = new THREE.LineBasicMaterial({
-            color:       0xff2266,
-            transparent: true,
-            opacity:     0.0,
-            blending:    THREE.AdditiveBlending,
-            depthWrite:  false,
-            linewidth:   1,
+    _spawnProminence(type = null, options = {}) {
+        // Weighted random type selection
+        if (!type) {
+            const r = Math.random();
+            type = r < 0.65 ? 'quiescent' : r < 0.90 ? 'eruptive' : 'arcade';
+        }
+
+        const lat = options.lat ?? (Math.random() - 0.5) * 1.2;   // ±34° heliographic
+        const lon = options.lon ?? Math.random() * Math.PI * 2;
+        const N   = 22;
+
+        let maxH, maxAge, color0, footSpread;
+        if (type === 'quiescent') {
+            maxH       = R.sun * (0.22 + Math.random() * 0.45);
+            maxAge     = 60 + Math.random() * 60;
+            color0     = new THREE.Color(1.0, 0.08, 0.28);   // deep rose Hα
+            footSpread = 0.22 + Math.random() * 0.18;
+        } else if (type === 'eruptive') {
+            maxH       = R.sun * (0.45 + Math.random() * 1.35);  // can reach 1.8 R_sun
+            maxAge     = 20 + Math.random() * 20;
+            color0     = new THREE.Color(1.0, 0.12, 0.35);
+            footSpread = 0.14 + Math.random() * 0.12;
+        } else {   // arcade
+            maxH       = R.sun * (0.10 + Math.random() * 0.15);  // low flat loops
+            maxAge     = 30 + Math.random() * 30;
+            color0     = new THREE.Color(0.30, 0.65, 1.00);      // UV blue
+            footSpread = 0.08 + Math.random() * 0.10;
+        }
+
+        // ── Main strand ───────────────────────────────────────────────────────
+        const pts  = this._buildPromArc(lat, lon, maxH, footSpread, N);
+        const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat  = new THREE.LineBasicMaterial({
+            color: color0.clone(), transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
         });
         const line = new THREE.Line(geo, mat);
         line.renderOrder = 5;
         this._scene.add(line);
 
+        // ── Secondary strands (quiescent and eruptive only) ───────────────────
+        // Offset slightly in lon/lat to mimic the multi-strand flux-tube structure
+        // seen in Hα coronagraphs.
+        const strands = [line];
+        if (type !== 'arcade') {
+            for (const [dLat, dLon, opFrac] of [
+                [ 0.022, -0.016, 0.55],
+                [-0.018,  0.020, 0.45],
+            ]) {
+                const spts = this._buildPromArc(lat + dLat, lon + dLon,
+                                                maxH * (0.88 + Math.random() * 0.12),
+                                                footSpread, N);
+                const sgeo = new THREE.BufferGeometry().setFromPoints(spts);
+                const smat = new THREE.LineBasicMaterial({
+                    color: color0.clone(), transparent: true, opacity: 0.0,
+                    blending: THREE.AdditiveBlending, depthWrite: false,
+                });
+                const sl = new THREE.Line(sgeo, smat);
+                sl.renderOrder = 5;
+                this._scene.add(sl);
+                strands.push(sl);
+                strands[strands.length - 1]._opFrac = opFrac;
+            }
+        }
+
         this._prominences.push({
-            line,
-            lat, lon, maxH, phase,
+            strands, type, lat, lon, maxH, footSpread, N,
+            color0: color0.clone(),
+            phase:  Math.random() * Math.PI * 2,
             age:    0,
-            maxAge: 35 + Math.random() * 55,   // 35–90 s lifetime
+            maxAge,
+            erupted: false,   // for 'eruptive' type — marks when eruption fired
         });
     }
 
     _tickProminences(dt) {
-        // Spawn: keep 2–4 alive; spawn one when below min
-        if (this._prominences.length < 2 && Math.random() < dt * 0.15) {
+        // Activity-scaled max population: more solar activity → more prominences
+        const xNorm   = this._sunUniforms?.u_xray_norm.value ?? 0;
+        const maxProm = 3 + Math.round(xNorm * 3);   // 3 quiet → 6 active
+
+        if (this._prominences.length < Math.max(2, Math.floor(maxProm * 0.5)) && Math.random() < dt * 0.12) {
             this._spawnProminence();
-        } else if (this._prominences.length < 4 && Math.random() < dt * 0.04) {
+        } else if (this._prominences.length < maxProm && Math.random() < dt * 0.035) {
             this._spawnProminence();
         }
 
@@ -2064,33 +2332,82 @@ export class Heliosphere3D {
             p.age += dt;
 
             if (p.age >= p.maxAge) {
-                this._scene.remove(p.line);
-                p.line.geometry.dispose();
-                p.line.material.dispose();
+                for (const l of p.strands) {
+                    this._scene.remove(l);
+                    l.geometry.dispose();
+                    l.material.dispose();
+                }
                 this._prominences.splice(i, 1);
                 continue;
             }
 
-            // Co-rotate with the sun mesh
-            p.line.rotation.y = this._rot;
+            const t = p.age / p.maxAge;   // 0 → 1
 
-            // Opacity: fade in over first 8s, hold, fade out over last 12s
-            const t = p.age / p.maxAge;
-            let opacity;
-            if (p.age < 8)                       opacity = p.age / 8 * 0.7;
-            else if (p.age > p.maxAge - 12)      opacity = (p.maxAge - p.age) / 12 * 0.7;
-            else                                 opacity = 0.7;
-            // Pulse slightly to mimic plasma dynamics
-            opacity *= 0.7 + 0.3 * Math.sin(this._t * 0.8 + p.phase);
-            p.line.material.opacity = Math.max(0, opacity);
+            // ── Rotation ─────────────────────────────────────────────────────
+            for (const l of p.strands) l.rotation.y = this._rot;
 
-            // Subtle colour shift: red → orange under high X-ray activity
-            const xNorm = this._sunUniforms?.u_xray_norm.value ?? 0;
-            p.line.material.color.setHSL(
-                0.94 - xNorm * 0.06,   // hue: red → more orange-red
-                1.0,
-                0.55 + xNorm * 0.15,   // brighter under activity
-            );
+            // ── Fade envelope ─────────────────────────────────────────────────
+            const fadeIn  = Math.min(1, p.age / 6.0);
+            const fadeOut = (t > 0.75) ? (1 - (t - 0.75) / 0.25) : 1.0;
+            const pulse   = 0.75 + 0.25 * Math.sin(this._t * 0.9 + p.phase);
+            const baseOp  = fadeIn * fadeOut * pulse;
+
+            // ── Type-specific behaviour ───────────────────────────────────────
+            if (p.type === 'quiescent') {
+                const hue = 0.94 - xNorm * 0.06;
+                const lit = 0.52 + xNorm * 0.18;
+                for (let si = 0; si < p.strands.length; si++) {
+                    p.strands[si].material.color.setHSL(hue, 1.0, lit);
+                    const frac = si === 0 ? 1.0 : (p.strands[si]._opFrac ?? 0.5);
+                    p.strands[si].material.opacity = Math.max(0, baseOp * 0.75 * frac);
+                }
+
+            } else if (p.type === 'eruptive') {
+                // Rising: height increases with age using sigmoid acceleration
+                const riseT   = Math.pow(t, 0.55);
+                const curH    = p.maxH * Math.min(1, riseT * 1.5);
+
+                // Colour: starts rose-red → heats to UV blue-white during eruption
+                const heatFrac = Math.min(1, t * 2.2);
+                const hue     = 0.94 - heatFrac * 0.56;   // rose(0.94) → blue(0.38)
+                const sat     = 1.0;
+                const lit     = 0.45 + heatFrac * 0.45;
+
+                for (let si = 0; si < p.strands.length; si++) {
+                    p.strands[si].material.color.setHSL(hue, sat, lit);
+                    const frac = si === 0 ? 1.0 : (p.strands[si]._opFrac ?? 0.5);
+                    p.strands[si].material.opacity = Math.max(0, baseOp * 0.85 * frac);
+
+                    // Rebuild geometry to reflect current height
+                    const offset = si === 0 ? [0, 0] : [(si === 1 ? 0.022 : -0.018), (si === 1 ? -0.016 : 0.020)];
+                    const npts = this._buildPromArc(
+                        p.lat + offset[0], p.lon + offset[1],
+                        curH * (si === 0 ? 1.0 : (0.88 + (si - 1) * 0.06)),
+                        p.footSpread, p.N
+                    );
+                    p.strands[si].geometry.setFromPoints(npts);
+                }
+
+                // Fire eruption wind pulse once when height passes 70% max
+                if (!p.erupted && curH > p.maxH * 0.70) {
+                    p.erupted = true;
+                    this._flarePulses.push({
+                        srcLon:     p.lon,
+                        r_AU:       0.008,
+                        shockSpeed: 600 + Math.random() * 400,   // slower than big CME
+                        intensity:  0.25 + Math.random() * 0.25,
+                        age:        0,
+                    });
+                }
+
+            } else {   // arcade
+                // Bright UV arcade: slight brightness pulsation as loops cool
+                const hue = 0.60 - t * 0.08;   // blue → blue-teal
+                for (const l of p.strands) {
+                    l.material.color.setHSL(hue, 0.9, 0.60 + 0.20 * Math.sin(this._t * 1.8 + p.phase));
+                    l.material.opacity = Math.max(0, baseOp * 0.90);
+                }
+            }
         }
     }
 
