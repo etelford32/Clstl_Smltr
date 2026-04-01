@@ -123,11 +123,19 @@ nav {
     .nav-auth-sep { display:none; }
 }
 
-#app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
+#app { position: relative; width: 100%; height: calc(100vh - 50px); overflow: hidden; }
+/* On mobile the canvas is ~78 % of the viewport so the description section
+   peeks below the fold — giving touch users a visible scroll target outside
+   the orbit canvas (OrbitControls captures all touch on the canvas itself). */
+@media (max-width: 768px) { #app { height: 78svh; } }
 #canvas-wrap {
     position: absolute; inset: 0;
     background: radial-gradient(ellipse at 40% 50%, #0d0500 0%, #050200 60%, #000 100%);
 }
+/* touch-action:none tells the browser to hand all touch gestures to JS
+   (OrbitControls), so the browser doesn't try to scroll the page when
+   the user drags on the canvas. */
+#canvas-wrap, #canvas-wrap canvas { touch-action: none; }
 #canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
 
 #hud {
@@ -677,6 +685,26 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
     transition: background .2s, border-color .2s;
 }
 .sim-link:hover { background: rgba(255,140,0,.18); border-color: rgba(255,140,0,.45); color: #ffb830; }
+
+/* ── Scroll-down affordance ─────────────────────────────────────────────── */
+/* Sits at the bottom of #app; pointer-events:none so it never blocks canvas
+   interaction. Fades out after the user has scrolled 60 px. */
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none;
+    transition: opacity .4s;
+}
+#scroll-hint span {
+    font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(255,180,60,.55); white-space: nowrap;
+}
+#scroll-hint svg { opacity: .5; }
+@keyframes bounce-arrow {
+    0%,100% { transform: translateY(0); }
+    50%      { transform: translateY(5px); }
+}
+#scroll-hint svg { animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -766,6 +794,13 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 </nav>
 
 <div id="app">
+    <!-- scroll affordance: absolute, pointer-events:none — never blocks canvas -->
+    <div id="scroll-hint">
+        <span>scroll for more</span>
+        <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+            <polyline points="2,2 9,8 16,2" stroke="rgba(255,180,60,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
     <div id="canvas-wrap">
         <div id="hud">
             <h3>Sol — G2V</h3>
@@ -5282,6 +5317,15 @@ window.addEventListener('swpc-update', (ev) => {
 });
 
 console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
+
+// Fade scroll hint once user has scrolled past the canvas section
+(function() {
+    const hint = document.getElementById('scroll-hint');
+    if (!hint) return;
+    window.addEventListener('scroll', () => {
+        hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+    }, { passive: true });
+})();
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->
