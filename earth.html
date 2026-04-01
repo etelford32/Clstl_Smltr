@@ -124,8 +124,10 @@ nav {
 }
 
 /* ─── App shell ──────────────────────────────────────────────── */
-#app { position:relative; width:100%; height:calc(100vh - 48px); overflow:hidden; }
+#app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; }
+@media (max-width: 768px) { #app { height: 78svh; } }
 #canvas-wrap { position:absolute; inset:0; background:#000; }
+#canvas-wrap, #canvas-wrap canvas { touch-action: none; }
 #canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
 
 /* ─── HUD ────────────────────────────────────────────────────── */
@@ -536,6 +538,15 @@ nav {
     transition: background .2s, border-color .2s;
 }
 .sim-link:hover { background: rgba(0,198,255,.18); border-color: rgba(0,198,255,.45); color: #00c6ff; }
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none; transition: opacity .4s;
+}
+#scroll-hint span { font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(0,200,255,.55); white-space: nowrap; }
+@keyframes bounce-arrow { 0%,100%{transform:translateY(0)} 50%{transform:translateY(5px)} }
+#scroll-hint svg { opacity: .5; animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -627,6 +638,12 @@ nav {
 
 <!-- ─── App ──────────────────────────────────────────────────── -->
 <div id="app">
+    <div id="scroll-hint">
+        <span>scroll for more</span>
+        <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+            <polyline points="2,2 9,8 16,2" stroke="rgba(0,200,255,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
     <div id="canvas-wrap"><canvas id="c"></canvas></div>
 
     <!-- Loading screen -->
@@ -3195,6 +3212,15 @@ if (_navBurger && _navMenu) {
         });
     });
 }
+
+// Fade scroll hint once user scrolls past canvas
+(function() {
+    const hint = document.getElementById('scroll-hint');
+    if (!hint) return;
+    window.addEventListener('scroll', () => {
+        hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+    }, { passive: true });
+})();
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->

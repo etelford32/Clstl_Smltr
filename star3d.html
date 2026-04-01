@@ -132,11 +132,13 @@ nav {
             width: 100%;
             height: calc(100vh - 50px);
         }
+        @media (max-width: 768px) { #app { height: 78svh; } }
 
         #canvas-container {
             flex: 1;
             position: relative;
             background: linear-gradient(135deg, #000000 0%, #0a0a1a 50%, #000510 100%);
+            touch-action: none;
         }
 
         /* --- HUD overlay (top-left) --- */
@@ -440,6 +442,15 @@ nav {
     transition: background .2s, border-color .2s;
 }
 .sim-link:hover { background: rgba(255,215,0,.16); border-color: rgba(255,215,0,.45); color: #ffd700; }
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none; transition: opacity .4s;
+}
+#scroll-hint span { font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(255,215,0,.5); white-space: nowrap; }
+@keyframes bounce-arrow { 0%,100%{transform:translateY(0)} 50%{transform:translateY(5px)} }
+#scroll-hint svg { opacity: .45; animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -527,6 +538,12 @@ nav {
     </div>
 </nav>
     <div id="app">
+        <div id="scroll-hint">
+            <span>scroll for more</span>
+            <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+                <polyline points="2,2 9,8 16,2" stroke="rgba(255,215,0,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
         <div id="canvas-container"></div>
 
         <div id="sidebar">
@@ -4623,6 +4640,15 @@ if (_navBurger && _navMenu) {
         setMode('sirius');
         handleResize();
         animate();
+
+        // Fade scroll hint after user scrolls
+        (function() {
+            const hint = document.getElementById('scroll-hint');
+            if (!hint) return;
+            window.addEventListener('scroll', () => {
+                hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+            }, { passive: true });
+        })();
 
         console.log('Sirius Binary System Simulator loaded');
         console.log('Orbital parameters: P=50.13yr, e=0.5914, a=20AU');
