@@ -804,6 +804,7 @@ nav {
             <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span> &nbsp;
             <span class="hl">r⊕</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
             <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min &nbsp;
+            <span class="hl">Substorm</span><span class="hv" id="h3d-substorm" title="McPherron substorm onset likelihood">–</span> &nbsp;
             <span class="hl">Date</span><span class="hv" id="h3d-date">–</span> &nbsp;
             <span class="hv" id="h3d-src" style="font-size:0.7em;opacity:0.6;">–</span>
         </div>
@@ -1356,6 +1357,7 @@ import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
+import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -1595,6 +1597,12 @@ window.addEventListener('wind-pipeline-update', ev => {
     if (d.series?.length) drawWindSparkline(d.series);
 });
 
+// ── Substorm rolling Bz accumulator (mirrors SunEarthCoupling logic) ─────────
+// Maintains a 30-sample rolling average of normalised southward Bz drive so the
+// substorm index reflects accumulated energy loading, not just instantaneous Bz.
+const _sbBzBuf = [];
+const _SB_BUF_N = 30;
+
 // ── SWPC update handler ────────────────────────────────────────────────────────
 window.addEventListener('swpc-update', e => {
     const d = e.detail;
@@ -1726,6 +1734,38 @@ window.addEventListener('swpc-update', e => {
         const chip = el(id);
         if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g, '') + ' ' + st;
     });
+
+    // ── Substorm index → 3D magnetosphere aurora flash ────────────────────────
+    // Compute and forward to Heliosphere3D so aurora curtains + plasma sheet respond.
+    {
+        const v  = sw.speed   ?? 450;
+        const bt = sw.bt      ?? 5;
+        const bz = sw.bz      ?? 0;
+        const by = sw.by      ?? 0;
+        const kp = d.kp       ?? 2;
+
+        // Accumulate rolling southward Bz drive
+        _sbBzBuf.push(Math.max(0, -bz) / 20);
+        if (_sbBzBuf.length > _SB_BUF_N) _sbBzBuf.shift();
+        const bzCumulNorm = _sbBzBuf.reduce((s, x) => s + x, 0) / _sbBzBuf.length;
+
+        const epsilon = akasofuEpsilon(v, bt, bz, by);
+        const sbIdx   = substormIndex(epsilon, bzCumulNorm, kp);
+
+        // Push to heliosphere aurora engine
+        window._helio3d?.setSubstormIndex(sbIdx);
+
+        // Update substorm HUD chip
+        const sbEl = el('h3d-substorm');
+        if (sbEl) {
+            const pct = (sbIdx * 100).toFixed(0);
+            sbEl.textContent = pct + '%';
+            sbEl.style.color = sbIdx > 0.75 ? '#ff4488'
+                             : sbIdx > 0.50 ? '#ffaa22'
+                             : sbIdx > 0.25 ? '#88ff88'
+                             : '#445566';
+        }
+    }
 
     // Offline / stale data banner
     const banner  = el('data-status-banner');
