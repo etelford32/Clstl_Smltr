@@ -130,12 +130,187 @@ const MARS_MOONS = {
 // Mars equatorial tilt relative to ecliptic plane (approximate, scene Y-axis tilt)
 const MARS_MOON_TILT = 26 * D2R;
 
-const N_WIND    = 3000;   // solar wind particles
+const N_WIND    = 8000;   // solar wind particles
 const MAX_R_AU  = 1.65;   // kill particles beyond this
 const N_LINE    = 90;     // points per spiral field-line sample
 const N_SPIRAL  = 8;      // field lines sampled (uniformly around the solar disk)
 const HCS_NR    = 48;     // HCS mesh — radial segments
 const HCS_NPHI  = 80;     // HCS mesh — azimuthal segments
+
+// ── Solar wind GLSL shaders ───────────────────────────────────────────────────
+//
+// Vertex shader: per-particle size from corona fall-off, full thermal colour
+// pipeline (Parker-CGL temperature → RGB, IMF polarity, storm, flare pulses,
+// CGL anisotropy, shimmer) moved entirely to GPU — eliminates ~40 CPU ops/particle.
+//
+// Fragment shader: soft glowing disc  (core pow(1−r,2.2) + halo pow(1−r,0.8))
+// with discard outside unit circle → clean alpha-edge, no hard square sprites.
+
+const _WIND_VERT = /* glsl */`
+#define MAX_PULSES 6
+
+attribute float a_r;       // heliocentric distance (AU)
+attribute float a_lat;     // sin(heliographic latitude)
+attribute float a_src_lon; // source longitude on solar surface (rad)
+attribute float a_age;     // particle age (seconds)
+attribute float a_speed;   // 0 = slow stream, 1 = fast stream
+
+uniform float u_bz;        // measured IMF Bz (nT, south negative)
+uniform float u_by;        // measured IMF By (nT)
+uniform float u_bt;        // |B| total (nT)
+uniform float u_density;   // solar wind density (cm⁻³)
+uniform float u_time;      // cumulative simulation time (s)
+uniform float u_scale;     // perspective scale = 0.5 * renderer.height (px)
+uniform float u_rot;       // solar rotation phase (rad)
+uniform int   u_awayFirst; // By >= 0 → 1, else 0
+uniform vec4  u_pulses[MAX_PULSES]; // .x=r_AU .y=srcLon .z=intensity .w=unused
+uniform int   u_pulse_n;   // active pulse count
+uniform float u_maxR;      // MAX_R_AU kill radius
+
+varying vec3  vColor;
+varying float vFade;
+
+// log₁₀ (GLSL 100 has no built-in)
+float log10v(float x) { return log(max(x, 1e-30)) * 0.4342944819; }
+
+// Parker-CGL plasma temperature (K) at heliocentric r (AU)
+float plasmaTemp(float r) {
+    float rr = max(r, 0.046);
+    float r0 = 0.046;
+    // fast stream (coronal holes): T_corona ≈ 2 MK; slow: ≈ 1.3 MK
+    float T_c = mix(1.3e6, 2.0e6, a_speed);
+    float T_p = T_c * pow(r0 / rr, 0.74);
+    float T_w = T_c * 0.28 * pow(r0 / rr, 0.35) * exp(-rr / 0.40);
+    return max(5000.0, T_p + T_w);
+}
+
+// Blackbody-inspired thermal RGB (matches CPU tempToRGB in helio-physics.js)
+vec3 tempToRGB(float T_K) {
+    float logT = log10v(clamp(T_K, 3000.0, 3.0e6));
+    float t    = (logT - 3.70) / 2.48;   // 0 = 5 kK, 1 = 1.5 MK
+    vec3  col;
+    if (t < 0.25) {
+        float s = t / 0.25;
+        col = vec3(0.30 + 0.52*s, 0.0,           0.0);
+    } else if (t < 0.50) {
+        float s = (t - 0.25) / 0.25;
+        col = vec3(0.82 + 0.12*s, 0.06 + 0.14*s, 0.0);
+    } else if (t < 0.75) {
+        float s = (t - 0.50) / 0.25;
+        col = vec3(0.94 + 0.04*s, 0.20 + 0.52*s, 0.16*s);
+    } else {
+        float s = (t - 0.75) / 0.25;
+        col = vec3(0.98,          0.72 + 0.26*s,  0.16 + 0.82*s);
+    }
+    return clamp(col, 0.0, 1.0);
+}
+
+// CGL anisotropy T_perp/T_parallel (Helios observations fit)
+float cglAnisotropy(float r) {
+    float rr = max(0.01, r);
+    if (rr < 0.3) return max(1.0, 20.0 * pow(0.046 / rr, 1.6));
+    return max(0.15, pow(0.3 / rr, 0.7));
+}
+
+void main() {
+    vec4  mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+
+    float r = a_r;
+
+    // ── Perspective-correct size with corona brightness fall-off ────────────
+    // Particles glow large near the corona (r~0.008 AU) and shrink to subtle
+    // points at MAX_R_AU.  Clamp prevents GPU point-size overflow on some drivers.
+    float baseSize  = 2.0 + 5.0 / (1.0 + r * 3.5);
+    gl_PointSize = clamp(baseSize * u_scale / max(0.001, -mvPos.z), 1.0, 96.0);
+
+    // ── Thermal colour (Parker-CGL) ─────────────────────────────────────────
+    float T_K = plasmaTemp(r);
+    vec3  col = tempToRGB(T_K);
+
+    // ── IMF sector polarity tint (By-based) ─────────────────────────────────
+    const float TWO_PI = 6.28318530718;
+    float bzSouth   = clamp(-u_bz / 30.0, 0.0, 1.0);
+    float btNorm    = clamp(u_bt  / 20.0, 0.0, 1.0);
+    float heliogLon = mod(mod(a_src_lon - u_rot, TWO_PI) + TWO_PI, TWO_PI);
+    bool  inAway    = (heliogLon < 3.14159265) == (u_awayFirst != 0);
+    float polShift  = inAway ? 0.12 : -0.12;
+    col.r = clamp(col.r + polShift * (1.0 - col.r), 0.0, 1.0);
+    col.b = clamp(col.b - polShift * 0.4,            0.0, 1.0);
+
+    // ── CGL anisotropy tint ──────────────────────────────────────────────────
+    float aniso     = cglAnisotropy(r);
+    float anisoTint = clamp((aniso - 1.0) * 0.015, -0.08, 0.08);
+    col.r = clamp(col.r - anisoTint * 0.5, 0.0, 1.0);
+    col.g = clamp(col.g + anisoTint * 0.3, 0.0, 1.0);
+    col.b = clamp(col.b + anisoTint,        0.0, 1.0);
+
+    // ── Geomagnetic storm modifier (south Bz reddens the wind) ──────────────
+    col.r = clamp(col.r + bzSouth * 0.22, 0.0, 1.0);
+    col.g = clamp(col.g - bzSouth * 0.18, 0.0, 1.0);
+    col.b = clamp(col.b - bzSouth * 0.25, 0.0, 1.0);
+
+    // ── Flare / CME pulse front (shock heating → blue-white flash) ───────────
+    // Up to MAX_PULSES active pulses, each encoded as vec4(r_AU, srcLon, intensity, 0).
+    // Particles at the shock radius flash white-blue; driver gas behind glows orange.
+    float pulseGlow = 0.0;
+    float pulseBlue = 0.0;
+    for (int p = 0; p < MAX_PULSES; p++) {
+        if (p >= u_pulse_n) break;
+        float pR      = u_pulses[p].x;
+        float pLon    = u_pulses[p].y;
+        float pInt    = u_pulses[p].z;
+        float lonDelta = abs(mod(abs(a_src_lon - pLon) + 3.14159265, TWO_PI) - 3.14159265);
+        if (lonDelta < 0.55) {
+            float rDiff = r - pR;
+            float pf    = exp(-rDiff * rDiff / 0.003)
+                        * pInt * max(0.0, 1.0 - lonDelta / 0.55);
+            pulseGlow = max(pulseGlow, pf);
+            pulseBlue = max(pulseBlue, pf * max(0.0, sign(rDiff)));
+        }
+    }
+    col.r = clamp(col.r + pulseGlow * 0.9  - pulseBlue * 0.4, 0.0, 1.0);
+    col.g = clamp(col.g + pulseGlow * 0.85 + pulseBlue * 0.1, 0.0, 1.0);
+    col.b = clamp(col.b + pulseGlow * 0.5  + pulseBlue * 0.9, 0.0, 1.0);
+
+    // ── Coronal shimmer — subtle time-varying brightness turbulence ──────────
+    // Driven by distinct per-particle frequencies so no two particles pulse together.
+    float shimmer = 0.018 * sin(u_time * 8.7  + a_src_lon * 31.4 + r * 45.0)
+                  + 0.012 * sin(u_time * 13.1 + a_src_lon * 17.2 + r * 29.0);
+    col = clamp(col + shimmer, 0.0, 1.0);
+
+    // ── Density-modulated fade envelope ─────────────────────────────────────
+    float dFactor    = clamp(u_density / 5.0, 0.4, 2.5);
+    float streamDens = mix(1.15, 0.75, a_speed) * dFactor;
+    float fadeIn     = clamp(a_age / 1.5, 0.0, 1.0);
+    float rNorm      = r / u_maxR;
+    float fadeOut    = pow(max(0.0, 1.0 - rNorm), 0.5);
+    float fade       = clamp(fadeIn * fadeOut * streamDens + pulseGlow * 1.2, 0.0, 1.0);
+
+    vColor = col;
+    vFade  = fade;
+}
+`;
+
+const _WIND_FRAG = /* glsl */`
+varying vec3  vColor;
+varying float vFade;
+
+void main() {
+    // Soft glowing disc: discard outside unit circle, blend a bright core with
+    // a wide halo for the characteristic solar wind particle glow.
+    vec2  uv = gl_PointCoord * 2.0 - 1.0;
+    float d  = dot(uv, uv);
+    if (d > 1.0) discard;
+    float rr   = sqrt(d);
+    // Core: tight bright centre (pow 2.2 for perceptually linear fade)
+    // Halo: wide soft bloom (pow 0.8 = broad shoulder)
+    float core = pow(1.0 - rr, 2.2);
+    float halo = pow(1.0 - rr, 0.8) * 0.45;
+    float disc = core + halo;
+    gl_FragColor = vec4(vColor * disc, vFade * disc);
+}
+`;
 
 // ── Heliosphere3D ─────────────────────────────────────────────────────────────
 
@@ -182,8 +357,8 @@ export class Heliosphere3D {
         this._rafId    = null;
         this._prevNow  = null;
 
-        // CME animation
-        this._cme      = null;    // null | { mesh, r_AU, auPerFrame }
+        // CME animation (two-layer: shockMesh + driverMesh)
+        this._cme      = null;    // null | { shockMesh, driverMesh, r_AU, auPerFrame }
 
         // Flare animation (FlareRing3D — lazily constructed after scene is built)
         this._flare3d  = null;
@@ -205,17 +380,22 @@ export class Heliosphere3D {
         this._moonMesh    = null;
         this._moonOrbit   = 0;    // current moon angle (rad), animated
         this._magnetosphere = null;
-        this._windPoints   = null;
-        this._windPos      = null;
-        this._windCol      = null;
-        this._windAge      = null;
-        this._windMaxAge   = null;
-        this._windArm      = null;
-        this._windR        = null;  // r_AU for each particle
-        this._windVY       = null;  // (unused — kept for shape compat)
-        this._windPY       = null;  // sin(latitude) for constant-lat trajectory
-        this._windJitter   = null;  // per-particle angular offset from field line (rad)
-        this._windArmIdx   = null;  // Int16Array — source arm index per particle
+        this._windPoints     = null;
+        this._windPos        = null;
+        this._windAge        = null;
+        this._windMaxAge     = null;
+        this._windArm        = null;
+        this._windR          = null;  // r_AU for each particle
+        this._windVY         = null;  // (unused — kept for shape compat)
+        this._windPY         = null;  // sin(latitude) for constant-lat trajectory
+        this._windJitter     = null;  // per-particle angular offset from field line (rad)
+        this._windArmIdx     = null;  // Int16Array — source arm index per particle
+        this._windSpeedAttr  = null;  // Float32Array — 0=slow / 1=fast for GPU shader
+        this._windUniforms   = null;  // ShaderMaterial uniform object
+        // Alfvén surface (translucent sphere at ~0.075 AU)
+        this._alfvenMesh     = null;
+        this._alfvenRing     = null;
+        this._alfvenPhase    = 0;
         // Parker spiral field-line samples (backbone)
         this._spiralLines    = null;
         this._spiralLinePts  = null;
@@ -1031,39 +1211,63 @@ export class Heliosphere3D {
         }
 
         const N = N_WIND;
-        this._windPos    = new Float32Array(N * 3);
-        this._windCol    = new Float32Array(N * 3);
-        this._windR      = new Float32Array(N);   // r_AU along spiral
-        this._windPY     = new Float32Array(N);   // sin(latitude) — constant per particle
-        this._windVY     = new Float32Array(N);   // unused; retained for shape compat
-        this._windArm    = new Float32Array(N);   // source longitude (rad, 0–2π) — continuous per-particle
-        this._windJitter = new Float32Array(N);   // fixed angular jitter from arm centre
-        this._windArmIdx = new Int16Array(N);     // index into _armBaseSpeeds for this particle
-        this._windAge    = new Float32Array(N);   // age (s) — used for fade-in only
-        this._windMaxAge = new Float32Array(N);   // max age (s)
+        this._windPos       = new Float32Array(N * 3);
+        this._windR         = new Float32Array(N);   // r_AU along spiral
+        this._windPY        = new Float32Array(N);   // sin(latitude) — constant per particle
+        this._windVY        = new Float32Array(N);   // unused; retained for shape compat
+        this._windArm       = new Float32Array(N);   // source longitude (rad, 0–2π)
+        this._windJitter    = new Float32Array(N);   // fixed angular jitter
+        this._windArmIdx    = new Int16Array(N);     // index into _armBaseSpeeds
+        this._windAge       = new Float32Array(N);   // age (s)
+        this._windMaxAge    = new Float32Array(N);   // max age (s)
+        this._windSpeedAttr = new Float32Array(N);   // 0=slow stream, 1=fast stream (GPU)
 
         for (let i = 0; i < N; i++) this._spawnWind(i, true);
 
+        // ── GPU buffer geometry ───────────────────────────────────────────────
+        // Shader attributes reuse the same typed arrays that the CPU tick updates,
+        // so no extra copying — just mark needsUpdate each frame.
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(this._windPos, 3));
-        geo.setAttribute('color',    new THREE.BufferAttribute(this._windCol, 3));
+        geo.setAttribute('position',  new THREE.BufferAttribute(this._windPos,       3));
+        geo.setAttribute('a_r',       new THREE.BufferAttribute(this._windR,         1));
+        geo.setAttribute('a_lat',     new THREE.BufferAttribute(this._windPY,        1));
+        geo.setAttribute('a_src_lon', new THREE.BufferAttribute(this._windArm,       1));
+        geo.setAttribute('a_age',     new THREE.BufferAttribute(this._windAge,       1));
+        geo.setAttribute('a_speed',   new THREE.BufferAttribute(this._windSpeedAttr, 1));
 
-        const mat = new THREE.PointsMaterial({
-            size:            2.2,
-            vertexColors:    true,
-            blending:        THREE.AdditiveBlending,
-            depthWrite:      false,
-            sizeAttenuation: true,
-            transparent:     true,
-            opacity:         0.9,
+        // ── Initial u_scale (updated every _resize()) ────────────────────────
+        const initScale = 0.5 * this._renderer.domElement.height;
+
+        this._windUniforms = {
+            u_bz:       { value: 0 },
+            u_by:       { value: 5 },
+            u_bt:       { value: 5 },
+            u_density:  { value: 5 },
+            u_time:     { value: 0 },
+            u_scale:    { value: initScale },
+            u_rot:      { value: 0 },
+            u_awayFirst:{ value: 1 },
+            u_pulses:   { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 0, 0)) },
+            u_pulse_n:  { value: 0 },
+            u_maxR:     { value: MAX_R_AU },
+        };
+
+        const mat = new THREE.ShaderMaterial({
+            vertexShader:   _WIND_VERT,
+            fragmentShader: _WIND_FRAG,
+            uniforms:       this._windUniforms,
+            blending:       THREE.AdditiveBlending,
+            depthWrite:     false,
+            transparent:    true,
         });
 
         this._windPoints = new THREE.Points(geo, mat);
         this._windPoints.renderOrder = 3;
         this._scene.add(this._windPoints);
 
-        // Build the 4 Parker spiral arm backbone lines
+        // Build the Parker spiral arm backbone lines + Alfvén surface
         this._buildSpiralLines();
+        this._buildAlvenSurface();
     }
 
     _buildSpiralLines() {
@@ -1097,6 +1301,69 @@ export class Heliosphere3D {
             this._spiralLinePts.push(pts);
             this._spiralLineCols.push(cols);
         }
+    }
+
+    // ── Alfvén surface ────────────────────────────────────────────────────────
+    //
+    // The Alfvén surface is where the solar wind speed equals the Alfvén wave
+    // speed V_A = B/√(μ₀ρ).  Inside this surface the solar corona is
+    // magnetically coupled to the Sun — it's where the Sun loses its angular
+    // momentum.  Parker Solar Probe (2021) measured it at 13–20 R☉ ≈ 0.06–0.09 AU.
+    // We render it as a translucent cyan sphere that gently pulsates with solar
+    // activity, providing a reference boundary for the inner corona region.
+
+    _buildAlvenSurface() {
+        const r = 0.075 * AU;   // 0.075 AU ≈ 16 R☉ — median PSP measurement
+        const geo = new THREE.SphereGeometry(r, 48, 32);
+        const mat = new THREE.MeshBasicMaterial({
+            color:       0x00e8ff,
+            transparent: true,
+            opacity:     0.045,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+            side:        THREE.DoubleSide,
+        });
+        this._alfvenMesh     = new THREE.Mesh(geo, mat);
+        this._alfvenMesh.renderOrder = 1;
+        this._alfvenMesh.scale.setScalar(1.0);
+        this._scene.add(this._alfvenMesh);
+
+        // Ring wireframe at the equatorial crossing — highlights the HCS boundary
+        const ringGeo = new THREE.TorusGeometry(r, r * 0.012, 8, 80);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color:       0x44ffff,
+            transparent: true,
+            opacity:     0.18,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        this._alfvenRing = new THREE.Mesh(ringGeo, ringMat);
+        this._alfvenRing.renderOrder = 2;
+        this._scene.add(this._alfvenRing);
+
+        this._alfvenPhase = 0;
+        this._alfvenBaseR = r;
+    }
+
+    // Gently oscillate the Alfvén surface — radius and opacity track solar activity
+    _tickAlvenSurface(dt) {
+        if (!this._alfvenMesh) return;
+        this._alfvenPhase += dt * 0.35;
+
+        // Activity-driven radius: solar wind speed pushes the Alfvén surface inward
+        const speed   = this._helioState?.v_sw ?? this._sw.speed ?? 450;
+        const density = this._helioState?.n    ?? this._sw.density ?? 5;
+        // Higher speed / lower density → larger Alfvén radius (closer to Sun)
+        const actFrac = Math.min(1, (speed / 750) * Math.sqrt(5 / Math.max(1, density)));
+        // Oscillate ±8% around activity-modulated radius
+        const pulse   = 1.0 + 0.08 * Math.sin(this._alfvenPhase) - actFrac * 0.12;
+        this._alfvenMesh.scale.setScalar(pulse);
+
+        // Opacity: brighter during storms, dim during quiet sun
+        const bzSouth = Math.max(0, -(this._helioState?.bz ?? this._sw.bz ?? 0) / 20);
+        this._alfvenMesh.material.opacity = 0.035 + bzSouth * 0.06 + 0.015 * Math.sin(this._alfvenPhase * 1.7);
+        this._alfvenRing.material.opacity = 0.12  + bzSouth * 0.10 + 0.04  * Math.sin(this._alfvenPhase * 2.3);
+        this._alfvenRing.scale.setScalar(pulse);
     }
 
     _spawnWind(i, scatter = false) {
@@ -1134,6 +1401,14 @@ export class Heliosphere3D {
         this._windVY[i]     = 0;
         this._windAge[i]    = scatter ? 2.0 : 0;
         this._windMaxAge[i] = 9999;  // position-based kill only
+
+        // GPU speed attribute: fast-stream (1.0) vs slow-stream (0.0)
+        // Used in vertex shader to choose coronal temperature (2 MK vs 1.3 MK)
+        // and stream density weight (sparser vs denser).
+        if (this._windSpeedAttr) {
+            const armIdx = this._windArmIdx[i];
+            this._windSpeedAttr[i] = (this._armTypes && this._armTypes[armIdx] === 1) ? 1.0 : 0.0;
+        }
     }
 
     _tickWind(dt) {
@@ -1263,36 +1538,29 @@ export class Heliosphere3D {
             }
         }
 
-        // ── Solar wind particles ──────────────────────────────────────────────
+        // ── Solar wind particles — position advection only ────────────────────
         //
-        // Each particle inherits the characteristic speed of its source arm.
-        // Fast-stream particles: hotter corona, tighter Parker spiral, more gold/white.
-        // Slow-stream particles: denser, wider spiral, more orange-red.
-        //
-        // CGL thermal model and anisotropy tints are still applied per-particle.
-        // Flare pulse front: particles within the shock radius get a temperature
-        // spike (white-blue) and brightness boost proportional to pulse intensity.
+        // All colour, fade, and brightness computation has moved to the vertex
+        // shader (_WIND_VERT).  The CPU loop only advances the Parker spiral
+        // position each frame and respawns particles that have exited MAX_R_AU.
+        // Per-particle GPU attributes (a_r, a_lat, a_src_lon, a_age, a_speed)
+        // are updated by writing into the same Float32Arrays the BufferAttributes
+        // wrap — needsUpdate flags sync them to the GPU.
 
-        const TWO_PI = Math.PI * 2;
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
 
-            const r       = this._windR[i];
-            const armIdx  = this._windArmIdx ? this._windArmIdx[i] : 0;
-            // Per-particle characteristic speed scaled by measured wind
-            const armV    = this._armBaseSpeeds
+            const armIdx       = this._windArmIdx ? this._windArmIdx[i] : 0;
+            const armV         = this._armBaseSpeeds
                 ? this._armBaseSpeeds[armIdx] * (speed / 450)
                 : speed;
-            const isFast  = this._armTypes ? this._armTypes[armIdx] === 1 : false;
-
-            const parker = this._parkerLUT
-                ? parkerSpeedRatio(r, this._parkerLUT)
+            const parker       = this._parkerLUT
+                ? parkerSpeedRatio(this._windR[i], this._parkerLUT)
                 : 1.0;
             const latFrac      = Math.min(1, Math.abs(this._windPY[i]) / 0.5);
             const V_local_frac = 1 + latFrac * 0.65;
-            // Radial step uses per-arm speed ratio relative to nominal 450 km/s
-            this._windR[i] += (armV / 450) * 0.0028 * dt * 60 * parker * V_local_frac;
 
+            this._windR[i] += (armV / 450) * 0.0028 * dt * 60 * parker * V_local_frac;
             if (this._windR[i] > MAX_R_AU) this._spawnWind(i, false);
 
             const r_new  = this._windR[i];
@@ -1300,7 +1568,6 @@ export class Heliosphere3D {
             const sinLat = this._windPY[i];
             const cosLat = Math.sqrt(Math.max(0, 1 - sinLat * sinLat));
 
-            // Parker spiral angle — per-arm speed gives different winding
             const V_lat = armV * V_local_frac;
             const ang   = srcLon + this._rot - (428.6 / V_lat) * r_new + this._windJitter[i];
             const rPx   = r_new * AU;
@@ -1308,97 +1575,86 @@ export class Heliosphere3D {
             this._windPos[i * 3]     = rPx * cosLat * Math.cos(ang);
             this._windPos[i * 3 + 1] = rPx * sinLat;
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
+        }
 
-            // ── Parker-CGL thermal colour ──────────────────────────────────────
-            // Fast-stream: higher corona temp (2 MK coronal holes vs 1.5 MK streamers)
-            const T_corona = isFast ? 2.0e6 : 1.3e6;
-            const T_K      = plasmaTemp(r_new, T_corona);
-            const [tR, tG, tB] = tempToRGB(T_K);
+        // ── Update shader uniforms ────────────────────────────────────────────
+        if (this._windUniforms) {
+            const U = this._windUniforms;
+            U.u_bz.value       = bz;
+            U.u_by.value       = by;
+            U.u_bt.value       = bt;
+            U.u_density.value  = density;
+            U.u_time.value     = this._t;
+            U.u_rot.value      = this._rot;
+            U.u_awayFirst.value = (by >= 0) ? 1 : 0;
 
-            // Sector polarity tint
-            const heliogLon = ((srcLon - this._rot) % TWO_PI + TWO_PI) % TWO_PI;
-            const inAway    = (heliogLon < Math.PI) === awayFirst;
-            const polShift  = inAway ? 0.12 : -0.12;
-            const pR = Math.min(1, tR + polShift * (1 - tR));
-            const pG = tG;
-            const pB = Math.max(0, tB - polShift * 0.4);
-
-            // CGL anisotropy tint
-            const aniso     = cglAnisotropy(r_new);
-            const anisoTint = Math.max(-0.08, Math.min(0.08, (aniso - 1) * 0.015));
-            const aR = Math.max(0, pR - anisoTint * 0.5);
-            const aG = Math.max(0, pG + anisoTint * 0.3);
-            const aB = Math.max(0, pB + anisoTint);
-
-            // Storm modifier
-            const stR = Math.min(1, aR + bzSouth * 0.22);
-            const stG = Math.max(0, aG - bzSouth * 0.18);
-            const stB = Math.max(0, aB - bzSouth * 0.25);
-
-            // ── Flare pulse contribution ───────────────────────────────────────
-            // Particles near the pulse front get a temperature spike (shock heating)
-            // and brightness boost.  The pulse front has a Gaussian spatial envelope.
-            let pulseGlow = 0;
-            let pulseBlue = 0;
-            for (const fp of this._flarePulses) {
-                const lonDelta = Math.abs(((srcLon - fp.srcLon + Math.PI) % TWO_PI) - Math.PI);
-                if (lonDelta < 0.55) {
-                    const rDiff = r_new - fp.r_AU;
-                    const pf    = Math.exp(-rDiff * rDiff / 0.003)
-                                * fp.intensity * Math.max(0, 1 - lonDelta / 0.55);
-                    pulseGlow = Math.max(pulseGlow, pf);
-                    // Shock sheath: ahead of the front (rDiff > 0) is compressed → blue-white
-                    // Driver gas: behind the front (rDiff < 0) is hot ejecta → orange-red
-                    pulseBlue = Math.max(pulseBlue, pf * Math.max(0, Math.sign(rDiff)));
-                }
+            // Pack up to 6 active flare pulses into vec4 uniforms
+            const np = Math.min(6, this._flarePulses.length);
+            U.u_pulse_n.value = np;
+            for (let p = 0; p < 6; p++) {
+                const fp = this._flarePulses[p];
+                U.u_pulses.value[p].set(
+                    fp ? fp.r_AU      : 0,
+                    fp ? fp.srcLon    : 0,
+                    fp ? fp.intensity : 0,
+                    0
+                );
             }
-
-            // Density factor modulates overall brightness; fast stream slightly sparser
-            const streamDensity = isFast ? dFactor * 0.75 : dFactor * 1.15;
-            const fadeIn  = Math.min(1.0, this._windAge[i] / 1.5);
-            const rNorm   = r_new / MAX_R_AU;
-            const fadeOut = Math.pow(Math.max(0, 1.0 - rNorm), 0.5);
-            const fade    = fadeIn * fadeOut * streamDensity;
-
-            // Blend thermal colour with shock colours
-            const fR = Math.min(1, stR * fade + pulseGlow * 0.9  - pulseBlue * 0.4);
-            const fG = Math.min(1, stG * fade + pulseGlow * 0.85 + pulseBlue * 0.1);
-            const fB = Math.min(1, stB * fade + pulseGlow * 0.5  + pulseBlue * 0.9);
-
-            this._windCol[i * 3]     = Math.max(0, fR);
-            this._windCol[i * 3 + 1] = Math.max(0, fG);
-            this._windCol[i * 3 + 2] = Math.max(0, fB);
         }
 
         const geo = this._windPoints.geometry;
-        geo.attributes.position.needsUpdate = true;
-        geo.attributes.color.needsUpdate    = true;
+        geo.attributes.position.needsUpdate  = true;
+        geo.attributes.a_r.needsUpdate       = true;
+        geo.attributes.a_lat.needsUpdate     = true;
+        geo.attributes.a_src_lon.needsUpdate = true;
+        geo.attributes.a_age.needsUpdate     = true;
+        geo.attributes.a_speed.needsUpdate   = true;
     }
 
     // ── CME ───────────────────────────────────────────────────────────────────
 
     _triggerCME() {
-        // Remove previous CME if still present
+        // Remove previous CME layers if still present
         if (this._cme) {
-            this._scene.remove(this._cme.mesh);
-            this._cme.mesh.geometry.dispose();
-            this._cme.mesh.material.dispose();
+            this._scene.remove(this._cme.shockMesh);
+            this._scene.remove(this._cme.driverMesh);
+            this._cme.shockMesh.geometry.dispose();  this._cme.shockMesh.material.dispose();
+            this._cme.driverMesh.geometry.dispose(); this._cme.driverMesh.material.dispose();
         }
-        const geo  = new THREE.SphereGeometry(0.3, 32, 20);
-        const mat  = new THREE.MeshBasicMaterial({
-            color:       0xff5500,
+
+        // ── Outer shock sheath (fast magnetosonic shock, ~1.2× ahead of driver) ──
+        // The shock compresses the ambient solar wind: hot, bright orange-white.
+        const shockGeo  = new THREE.SphereGeometry(0.3, 40, 24);
+        const shockMat  = new THREE.MeshBasicMaterial({
+            color:       0xff9922,
             transparent: true,
-            opacity:     0.38,
+            opacity:     0.55,
             blending:    THREE.AdditiveBlending,
             depthWrite:  false,
             wireframe:   true,
         });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.renderOrder = 4;
-        this._scene.add(mesh);
+        const shockMesh = new THREE.Mesh(shockGeo, shockMat);
+        shockMesh.renderOrder = 4;
+        this._scene.add(shockMesh);
+
+        // ── Inner driver gas (magnetic flux rope / ejecta core, ~0.85× shock radius) ──
+        // Hot magnetised ejecta with a distinct red-orange colour.
+        const driverGeo  = new THREE.SphereGeometry(0.24, 32, 20);
+        const driverMat  = new THREE.MeshBasicMaterial({
+            color:       0xff3300,
+            transparent: true,
+            opacity:     0.22,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        const driverMesh = new THREE.Mesh(driverGeo, driverMat);
+        driverMesh.renderOrder = 4;
+        this._scene.add(driverMesh);
+
         this._cme = {
-            mesh,
-            r_AU:      0.003,
+            shockMesh,
+            driverMesh,
+            r_AU:       0.003,
             auPerFrame: (this._sw.cmeSpeed / 450) * 0.004,
         };
     }
@@ -1507,14 +1763,23 @@ export class Heliosphere3D {
         if (!this._cme) return;
         const c = this._cme;
         c.r_AU += c.auPerFrame * dt * 60;
-        const r = c.r_AU * AU;
-        c.mesh.scale.setScalar(r / 0.3);
-        // Fade as it moves past Earth
-        c.mesh.material.opacity = Math.max(0, 0.38 * (1 - c.r_AU / MAX_R_AU));
+        const shockR  = c.r_AU * AU;
+        const driverR = shockR * 0.82;   // driver gas ~82% of shock radius
+        const fade    = Math.max(0, 1 - c.r_AU / MAX_R_AU);
+
+        c.shockMesh.scale.setScalar(shockR / 0.3);
+        c.driverMesh.scale.setScalar(driverR / 0.24);
+
+        // Shock: stays visible across the full journey
+        c.shockMesh.material.opacity  = Math.max(0, 0.55 * fade);
+        // Driver: fades faster — ejecta disperses into the ambient wind by ~0.8 AU
+        c.driverMesh.material.opacity = Math.max(0, 0.22 * Math.pow(Math.max(0, 1 - c.r_AU / 0.9), 1.5));
+
         if (c.r_AU > MAX_R_AU) {
-            this._scene.remove(c.mesh);
-            c.mesh.geometry.dispose();
-            c.mesh.material.dispose();
+            this._scene.remove(c.shockMesh);
+            this._scene.remove(c.driverMesh);
+            c.shockMesh.geometry.dispose();  c.shockMesh.material.dispose();
+            c.driverMesh.geometry.dispose(); c.driverMesh.material.dispose();
             this._cme = null;
         }
     }
@@ -1854,6 +2119,13 @@ export class Heliosphere3D {
         this._renderer.setSize(W, H, false);
         this._camera.aspect = W / H;
         this._camera.updateProjectionMatrix();
+
+        // Refresh perspective scale for the solar wind particle shader.
+        // u_scale = 0.5 * physical-pixel-height so that gl_PointSize = size * u_scale / -z
+        // matches Three.js PointsMaterial's built-in sizeAttenuation formula.
+        if (this._windUniforms?.u_scale) {
+            this._windUniforms.u_scale.value = 0.5 * this._renderer.domElement.height;
+        }
     }
 
     // ── Main loop ─────────────────────────────────────────────────────────────
@@ -1891,6 +2163,7 @@ export class Heliosphere3D {
         }
         this._tickHCS();
         this._tickWind(dt);
+        this._tickAlvenSurface(dt);
         this._tickReconnection(dt);
         this._tickCME(dt);
         this._tickFlare(dt);
