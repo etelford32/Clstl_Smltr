@@ -469,6 +469,8 @@ async function fetchDst(state) {
 // ── T3 fetchers ───────────────────────────────────────────────────────────────
 
 async function fetchFlares(state) {
+    // NOAA retired xray-flares-7day.json; rely on DONKI flares (fetched separately)
+    if (!NOAA.flares) { return; }
     const raw = await fetchNoaa(NOAA.flares);
     // Format: array of objects {begin_time, peak_time, end_time, max_class,
     //         goes_location, noaa_active_region}
@@ -529,10 +531,12 @@ async function fetchDONKICME(state) {
     const parsed = list.map(c => {
         // Kinematic arrival estimate: distance from 21.5 Rs to Earth ≈ 1.345 × 10⁸ km
         const t21_5      = c.time ? new Date(c.time) : null;
+        const t21_5Valid = t21_5 !== null && !isNaN(t21_5.getTime());
         const speed      = c.speed_km_s ?? 400;
-        const etaMs      = t21_5 ? (1.345e8 / Math.max(speed, 50)) * 1e6 : null;
+        const etaMs      = t21_5Valid ? (1.345e8 / Math.max(speed, 50)) * 1e6 : null;
         const arrival    = etaMs ? new Date(t21_5.getTime() + etaMs) : null;
-        const hoursUntil = arrival ? (arrival.getTime() - now) / 3.6e6 : null;
+        const arrivalValid = arrival !== null && !isNaN(arrival.getTime());
+        const hoursUntil = arrivalValid ? (arrival.getTime() - now) / 3.6e6 : null;
         return {
             time:          c.time ?? null,
             speed:         speed,
@@ -541,7 +545,7 @@ async function fetchDONKICME(state) {
             halfAngle:     c.half_angle_deg ?? 30,
             type:          c.type           ?? 'S',
             earthDirected: c.earth_directed ?? false,
-            arrivalTime:   arrival?.toISOString() ?? null,
+            arrivalTime:   arrivalValid ? arrival.toISOString() : null,
             hoursUntil,
             note:          c.note ?? '',
             lat_rad:       (c.latitude_deg  ?? 0) * Math.PI / 180,
@@ -861,7 +865,7 @@ export class SpaceWeatherFeed {
         // Detect new M/X flare — use merged flares so DONKI-only events also trigger
         const flares     = mergeFlares(raw.recent_flares, raw.donki_flares);
         const topFlare   = flares[0] ?? null;
-        const flareKey   = topFlare ? `${topFlare.cls}|${topFlare.time?.toISOString()}` : null;
+        const flareKey   = topFlare ? `${topFlare.cls}|${topFlare.time instanceof Date && !isNaN(topFlare.time) ? topFlare.time.toISOString() : topFlare.time}` : null;
         const newMajor   = !!(
             topFlare &&
             (topFlare.parsed.letter === 'M' || topFlare.parsed.letter === 'X') &&

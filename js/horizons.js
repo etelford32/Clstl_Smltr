@@ -410,8 +410,8 @@ export class EphemerisService {
         try {
             console.log('[Horizons] Fetching Earth + Moon vectors…');
             const [ev, mv] = await Promise.all([
-                _fetchVec("'399'", "'500@10'"),   // Earth, heliocentric, AU
-                _fetchVec("'301'", "'500@399'"),  // Moon,  geocentric,   km
+                _fetchVec('399', '500@10'),   // Earth, heliocentric, AU
+                _fetchVec('301', '500@399'),  // Moon,  geocentric,   km
             ]);
 
             earth = _vecToHelioEcliptic(ev);
@@ -440,10 +440,10 @@ export class EphemerisService {
         // ── Attempt Horizons for outer planets (non-blocking) ────────────
         // Each fetch is independent; Meeus is used if any fail.
         const outerIds = [
-            { name: 'jupiter', cmd: "'599'" },
-            { name: 'saturn',  cmd: "'699'" },
-            { name: 'uranus',  cmd: "'799'" },
-            { name: 'neptune', cmd: "'899'" },
+            { name: 'jupiter', cmd: '599' },
+            { name: 'saturn',  cmd: '699' },
+            { name: 'uranus',  cmd: '799' },
+            { name: 'neptune', cmd: '899' },
         ];
         const outerResults = await Promise.allSettled(
             outerIds.map(({ cmd }) => _fetchVec(cmd, "'500@10'"))

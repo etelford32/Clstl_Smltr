@@ -71,7 +71,7 @@ export const NOAA = Object.freeze({
     aurora:    'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
     alerts:    'https://services.swpc.noaa.gov/products/alerts.json',
     dst:       'https://services.swpc.noaa.gov/products/kyoto-dst.json',
-    flares:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
+    flares:    null,  // NOAA retired xray-flares-7day.json — DONKI flares used instead
     regions:   'https://services.swpc.noaa.gov/json/solar_regions.json',
     radioFlux: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
 });
