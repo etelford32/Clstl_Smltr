@@ -218,15 +218,31 @@ void main() {
 
     float r = a_r;
 
+    // ── Magnetosheath detection ───────────────────────────────────────────────
+    // CPU _tickWind() sets a_speed = 0.3 when a particle is inside the Earth's
+    // bow shock.  We render these as compressed, shock-heated plasma.
+    bool inMagsheath = (a_speed > 0.15 && a_speed < 0.45);
+
     // ── Perspective-correct size with corona brightness fall-off ────────────
     // Particles glow large near the corona (r~0.008 AU) and shrink to subtle
     // points at MAX_R_AU.  Clamp prevents GPU point-size overflow on some drivers.
-    float baseSize  = 2.0 + 5.0 / (1.0 + r * 3.5);
+    // Magnetosheath particles are ~50% larger (compressed, denser plasma).
+    float baseSize  = inMagsheath
+        ? 3.5 + 6.0 / (1.0 + r * 3.5)
+        : 2.0 + 5.0 / (1.0 + r * 3.5);
     gl_PointSize = clamp(baseSize * u_scale / max(0.001, -mvPos.z), 1.0, 96.0);
 
     // ── Thermal colour (Parker-CGL) ─────────────────────────────────────────
     float T_K = plasmaTemp(r);
     vec3  col = tempToRGB(T_K);
+
+    // ── Magnetosheath colour override ─────────────────────────────────────────
+    // Post-bow-shock compression heats the plasma ~4-8× (Rankine-Hugoniot).
+    // Render as orange-yellow compressed plasma distinct from ambient wind.
+    if (inMagsheath) {
+        float T_ms = T_K * 5.0;
+        col = mix(tempToRGB(T_ms), vec3(1.0, 0.58, 0.08), 0.50);
+    }
 
     // ── IMF sector polarity tint (By-based) ─────────────────────────────────
     const float TWO_PI = 6.28318530718;
@@ -281,11 +297,13 @@ void main() {
 
     // ── Density-modulated fade envelope ─────────────────────────────────────
     float dFactor    = clamp(u_density / 5.0, 0.4, 2.5);
-    float streamDens = mix(1.15, 0.75, a_speed) * dFactor;
+    float streamDens = inMagsheath ? 2.0 * dFactor : mix(1.15, 0.75, a_speed) * dFactor;
     float fadeIn     = clamp(a_age / 1.5, 0.0, 1.0);
     float rNorm      = r / u_maxR;
     float fadeOut    = pow(max(0.0, 1.0 - rNorm), 0.5);
     float fade       = clamp(fadeIn * fadeOut * streamDens + pulseGlow * 1.2, 0.0, 1.0);
+    // Magnetosheath particles are always fully visible (no radial fade beyond bow shock)
+    if (inMagsheath) fade = clamp(fade * 1.6 + 0.25, 0.0, 1.0);
 
     vColor = col;
     vFade  = fade;
@@ -793,6 +811,16 @@ export class Heliosphere3D {
      * Exposed to space-weather.html via window._helio3d.setBloom(v).
      * @param {number} v  Bloom level clamped to [0.3, 3.0]
      */
+    /**
+     * Forward a substorm onset index [0,1] to the MagnetosphereEngine so the
+     * aurora curtains flash and the plasma sheet brightens.
+     * Call this from 'sw-magnet-coupling' event handler in space-weather.html.
+     * @param {number} idx  substorm index [0,1]
+     */
+    setSubstormIndex(idx) {
+        this._magnetosphere?.setSubstorm(idx);
+    }
+
     setBloom(v) {
         this._bloomLevel = Math.max(0.3, Math.min(3.0, v));
         if (this._sunUniforms?.u_bloom) {
@@ -1634,6 +1662,40 @@ export class Heliosphere3D {
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
         }
 
+        // ── Earth bow shock — magnetosheath particle marking ─────────────────
+        //
+        // Particles whose Parker-spiral position lands inside the bow shock are
+        // compressed and shock-heated at the magnetosheath.  We flag them with
+        // a_speed = 0.3 so the vertex shader renders them as hot orange plasma.
+        // The physical bow shock radius (Farris-Russell) comes from the live
+        // MagnetosphereEngine analysis; fallback is 13 Re (scene units).
+        //
+        // Implementation note: we do NOT override _windPos — particles continue
+        // along their natural Parker spiral.  Only the shader colour/size changes
+        // to visualise the interaction zone.  This avoids discontinuities.
+        if (this._earthGroup && this._windSpeedAttr) {
+            const ep  = this._earthGroup.position;
+            const bsR = (this._magnetosphere?.analysis?.bowShockR0 ?? 13) * 1.1; // slight padding
+            const bsR2 = bsR * bsR;
+
+            for (let i = 0; i < N_WIND; i++) {
+                const px = this._windPos[i * 3]     - ep.x;
+                const py = this._windPos[i * 3 + 1] - ep.y;
+                const pz = this._windPos[i * 3 + 2] - ep.z;
+                const d2 = px * px + py * py + pz * pz;
+
+                if (d2 < bsR2) {
+                    // Inside bow shock — mark as magnetosheath plasma
+                    this._windSpeedAttr[i] = 0.3;
+                } else if (this._windSpeedAttr[i] > 0.15 && this._windSpeedAttr[i] < 0.45) {
+                    // Exited bow shock — restore normal fast/slow stream type
+                    const armIdx = this._windArmIdx ? this._windArmIdx[i] : 0;
+                    this._windSpeedAttr[i] =
+                        (this._armTypes && this._armTypes[armIdx] === 1) ? 1.0 : 0.0;
+                }
+            }
+        }
+
         // ── Update shader uniforms ────────────────────────────────────────────
         if (this._windUniforms) {
             const U = this._windUniforms;
@@ -2421,7 +2483,7 @@ export class Heliosphere3D {
         this._magnetosphere.tick(this._t, sunDir, {
             solar_wind: { bz: this._sw.bz, speed: this._sw.speed, density: this._sw.density },
             kp:         this._sw.kp,
-        });
+        }, dt);
     }
 
     // ── Resize ────────────────────────────────────────────────────────────────
