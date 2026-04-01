@@ -6,7 +6,7 @@
 <title>The Sun — G2V · Parker Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+html, body { width:100%; min-height:100%; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
 /* ─── Nav ────────────────────────────────────────────────────── */
@@ -608,6 +608,74 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 .sparkline-lbl  { font-size:9px; color:#664433; margin-bottom:3px; }
 #xray-sparkline { width:100%; height:36px; border-radius:4px; display:block;
                   background:rgba(0,0,0,.35); border:1px solid rgba(255,140,0,.08); }
+
+/* ── Simulation description section ────────────────────────────────────── */
+.sim-info {
+    background: #050200;
+    border-top: 1px solid rgba(255,140,0,.15);
+    padding: 48px 20px 64px;
+    color: #cba;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.sim-info-inner {
+    max-width: 1100px; margin: 0 auto;
+}
+.sim-info-header {
+    margin-bottom: 32px;
+}
+.sim-info-title {
+    font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+    background: linear-gradient(135deg, #ffb830, #ff6600);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: 10px;
+}
+.sim-info-lead {
+    font-size: .95rem; color: #aa8866; line-height: 1.7; max-width: 780px;
+}
+.sim-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px; margin-bottom: 36px;
+}
+.sim-card {
+    background: rgba(255,140,0,.04);
+    border: 1px solid rgba(255,140,0,.12);
+    border-radius: 12px; padding: 20px 22px;
+}
+.sim-card-icon { font-size: 1.4rem; margin-bottom: 10px; }
+.sim-card-title {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: #ffb830; margin-bottom: 8px;
+}
+.sim-card-body {
+    font-size: .83rem; color: #997755; line-height: 1.65;
+}
+.sim-card-body strong { color: #cc9944; font-weight: 600; }
+.sim-controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 20px;
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+}
+.sim-ctrl-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 0; font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sim-ctrl-row:last-child { border-bottom: none; }
+.sim-ctrl-key {
+    background: rgba(255,180,0,.12); border: 1px solid rgba(255,180,0,.28);
+    border-radius: 4px; padding: 1px 7px; font-family: monospace;
+    font-size: .72rem; color: #ffb830; white-space: nowrap; flex-shrink: 0;
+}
+.sim-ctrl-desc { color: #886644; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px;
+    background: rgba(255,140,0,.08); border: 1px solid rgba(255,140,0,.22);
+    color: #cc8833; font-size: .82rem; text-decoration: none;
+    transition: background .2s, border-color .2s;
+}
+.sim-link:hover { background: rgba(255,140,0,.18); border-color: rgba(255,140,0,.45); color: #ffb830; }
 </style>
 </head>
 <body>
@@ -5214,5 +5282,92 @@ window.addEventListener('swpc-update', (ev) => {
 
 console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
 </script>
+
+<!-- ── Simulation description ──────────────────────────────────────────── -->
+<section class="sim-info">
+  <div class="sim-info-inner">
+    <div class="sim-info-header">
+      <div class="sim-info-title">Parker Solar Physics Engine</div>
+      <p class="sim-info-lead">
+        A real-time 3D magnetohydrodynamic simulation of our Sun — from sub-surface convection cells
+        to the heliospheric current sheet and beyond. Solar wind acceleration follows Parker's 1958
+        spiral model, with live NOAA/SWPC data driving X-ray flux, active region positions, and
+        geomagnetic storm indices.
+      </p>
+    </div>
+
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">☀️</div>
+        <div class="sim-card-title">Corona &amp; Wind</div>
+        <div class="sim-card-body">
+          The solar corona reaches <strong>1–3 million K</strong> via Alfvén wave heating.
+          Wind particles accelerate outward along the Parker spiral — a direct consequence of the
+          Sun's rotation coupled with radial outflow. Typical solar wind speed: <strong>400–800 km/s</strong>.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🔴</div>
+        <div class="sim-card-title">Active Regions &amp; Flares</div>
+        <div class="sim-card-body">
+          Active regions (sunspot groups) are mapped using <strong>live NOAA data</strong> and
+          rendered as 3D magnetic flux concentrations. Flare class (A→X) is pulled from GOES
+          X-ray flux. X-class events trigger the corona bloom and ribbon alert animations.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">💨</div>
+        <div class="sim-card-title">CME &amp; Particle Events</div>
+        <div class="sim-card-body">
+          Coronal Mass Ejections are drawn from the DONKI catalog with estimated arrival times
+          at L1. Solar Energetic Particle (SEP) events and radio blackout levels (NOAA
+          <strong>R1–R5 scale</strong>) are displayed in the right panel.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌐</div>
+        <div class="sim-card-title">Heliospheric Current Sheet</div>
+        <div class="sim-card-body">
+          The wavy HCS separates inward and outward magnetic field sectors. Its geometry is
+          driven by solar tilt angle and Parker spiral physics. The simulation renders both the
+          current sheet surface and the sector boundary crossings.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🛰️</div>
+        <div class="sim-card-title">SDO Live Imagery</div>
+        <div class="sim-card-body">
+          Real-time images from NASA's Solar Dynamics Observatory in multiple wavelengths:
+          <strong>AIA 304 Å</strong> (chromosphere), <strong>AIA 171 Å</strong> (corona),
+          <strong>AIA 193 Å</strong>, and <strong>HMI magnetogram</strong> (surface field).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">📡</div>
+        <div class="sim-card-title">Live Data Sources</div>
+        <div class="sim-card-body">
+          Data refreshes every <strong>5 minutes</strong> from NOAA/SWPC. Sources: GOES
+          X-ray flux, DONKI CME catalog, Solar Region Summary, 3-day particle flux, and
+          ACE/DSCOVR solar wind measurements at L1.
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-controls-grid">
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Orbit the camera around the Sun</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">SDO</span><span class="sim-ctrl-desc">Open live solar imagery strip</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⚡ Weather</span><span class="sim-ctrl-desc">Jump to full space weather dashboard</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Panel →</span><span class="sim-ctrl-desc">Open data panel (live readings)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⊙ Re-center</span><span class="sim-ctrl-desc">Reset camera to default view</span></div>
+    </div>
+
+    <div class="sim-links">
+      <a href="space-weather.html" class="sim-link">⚡ Space Weather Dashboard</a>
+      <a href="earth.html" class="sim-link">🌍 Earth Magnetosphere</a>
+      <a href="index.html" class="sim-link">🌌 Heliosphere 3D</a>
+    </div>
+  </div>
+</section>
 </body>
 </html>

@@ -6,7 +6,7 @@
 <title>Earth View — Parker Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+html, body { width:100%; min-height:100%; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
 /* ─── Nav ────────────────────────────────────────────────────── */
@@ -477,6 +477,64 @@ nav {
     .mtb-btn { min-width: 46px; font-size: 8px; padding: 4px 6px; }
     .mtb-btn .mtb-icon { font-size: 16px; }
 }
+
+/* ── Simulation description section ────────────────────────────────────── */
+.sim-info {
+    background: #010812;
+    border-top: 1px solid rgba(0,198,255,.15);
+    padding: 48px 20px 64px;
+    color: #9bc;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.sim-info-inner { max-width: 1100px; margin: 0 auto; }
+.sim-info-header { margin-bottom: 32px; }
+.sim-info-title {
+    font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+    background: linear-gradient(135deg, #00c6ff, #7b2ff7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: 10px;
+}
+.sim-info-lead { font-size: .95rem; color: #6699aa; line-height: 1.7; max-width: 780px; }
+.sim-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px; margin-bottom: 36px;
+}
+.sim-card {
+    background: rgba(0,198,255,.04); border: 1px solid rgba(0,198,255,.12);
+    border-radius: 12px; padding: 20px 22px;
+}
+.sim-card-icon { font-size: 1.4rem; margin-bottom: 10px; }
+.sim-card-title {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: #00c6ff; margin-bottom: 8px;
+}
+.sim-card-body { font-size: .83rem; color: #4a6e80; line-height: 1.65; }
+.sim-card-body strong { color: #5599bb; font-weight: 600; }
+.sim-controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 20px;
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+}
+.sim-ctrl-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 0; font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sim-ctrl-row:last-child { border-bottom: none; }
+.sim-ctrl-key {
+    background: rgba(0,198,255,.12); border: 1px solid rgba(0,198,255,.28);
+    border-radius: 4px; padding: 1px 7px; font-family: monospace;
+    font-size: .72rem; color: #00c6ff; white-space: nowrap; flex-shrink: 0;
+}
+.sim-ctrl-desc { color: #446677; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px;
+    background: rgba(0,198,255,.08); border: 1px solid rgba(0,198,255,.22);
+    color: #3388aa; font-size: .82rem; text-decoration: none;
+    transition: background .2s, border-color .2s;
+}
+.sim-link:hover { background: rgba(0,198,255,.18); border-color: rgba(0,198,255,.45); color: #00c6ff; }
 </style>
 </head>
 <body>
@@ -3137,5 +3195,97 @@ if (_navBurger && _navMenu) {
     });
 }
 </script>
+
+<!-- ── Simulation description ──────────────────────────────────────────── -->
+<section class="sim-info">
+  <div class="sim-info-inner">
+    <div class="sim-info-header">
+      <div class="sim-info-title">Earth Magnetosphere &amp; Space Weather</div>
+      <p class="sim-info-lead">
+        A real-time 3D simulation of Earth's magnetic shield — from the bow shock where solar wind
+        first strikes, through the compressed magnetosheath, magnetopause boundary, and out to the
+        elongated magnetotail. Aurora, substorm dynamics, and Kp index are driven by live NOAA data.
+      </p>
+    </div>
+
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">🛡️</div>
+        <div class="sim-card-title">Bow Shock &amp; Magnetosheath</div>
+        <div class="sim-card-body">
+          The bow shock forms at roughly <strong>13–14 Earth radii</strong> (Re) sunward, where
+          supersonic solar wind (~400 km/s) is abruptly decelerated. The Rankine-Hugoniot jump
+          conditions heat and deflect plasma into the magnetosheath — visualized as orange-tinted
+          shocked particles.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌀</div>
+        <div class="sim-card-title">Magnetopause (Shue Model)</div>
+        <div class="sim-card-body">
+          The magnetopause boundary is calculated using the <strong>Shue et al. (1998)</strong>
+          empirical model, parameterized by solar wind dynamic pressure and the IMF Bz component.
+          Southward Bz compresses the dayside boundary; strong storms push it inside geostationary
+          orbit (~6.6 Re).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌌</div>
+        <div class="sim-card-title">Magnetotail &amp; Plasma Sheet</div>
+        <div class="sim-card-body">
+          On the nightside, the magnetotail stretches to <strong>80+ Re</strong> — far beyond the
+          Moon's orbit. The central plasma sheet (high-density, ~1–5 keV particles) brightens
+          during substorms as stored magnetic energy explosively reconnects and accelerates
+          particles toward the poles.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌠</div>
+        <div class="sim-card-title">Aurora &amp; Substorms</div>
+        <div class="sim-card-body">
+          3D auroral curtains expand equatorward as Kp rises (<strong>Kp ≥ 5 = G1 storm</strong>).
+          Color gradients reflect emission height: green O 557.7 nm at 100–150 km, shifting to
+          purple N₂⁺ + red O 630 nm above 200 km. Substorm onset (McPherron heuristic) triggers
+          a ripple flash across both ovals.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🗺️</div>
+        <div class="sim-card-title">3D Globe &amp; Ground Effects</div>
+        <div class="sim-card-body">
+          The interactive globe shows live <strong>earthquake events</strong> (USGS feed),
+          geomagnetic storm impact zones, aurora visibility oval, and atmospheric layers.
+          Overlays include field-aligned current regions and ground-level induction risk during
+          severe storms.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">📊</div>
+        <div class="sim-card-title">Live Geomagnetic Data</div>
+        <div class="sim-card-body">
+          Kp index, Dst, IMF Bz, solar wind speed and density all update every
+          <strong>5 minutes</strong> from NOAA/SWPC. Storm levels follow the
+          <strong>NOAA G1–G5 scale</strong>, from minor (Kp 5) to extreme (Kp 9), with
+          real-time aurora visibility latitude estimates.
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-controls-grid">
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Rotate camera around Earth</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Layers</span><span class="sim-ctrl-desc">Toggle bow shock, aurora, tail, field lines</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Info</span><span class="sim-ctrl-desc">Live Kp, Bz, storm level readings</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⚡ Weather</span><span class="sim-ctrl-desc">Full space weather data dashboard</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">📍 Here</span><span class="sim-ctrl-desc">Show your location on the globe</span></div>
+    </div>
+
+    <div class="sim-links">
+      <a href="space-weather.html" class="sim-link">⚡ Space Weather Dashboard</a>
+      <a href="sun.html" class="sim-link">☀️ Solar Physics Engine</a>
+      <a href="index.html" class="sim-link">🌌 Heliosphere 3D</a>
+    </div>
+  </div>
+</section>
 </body>
 </html>
