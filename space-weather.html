@@ -475,6 +475,41 @@ nav {
     font-size: .68rem; color: rgba(255,255,255,0.22); font-family: monospace;
     pointer-events: none; line-height: 1.6;
 }
+/* ── Corona bloom slider ─────────────────────────────────────────────────── */
+.helio-bloom-ctrl {
+    position: absolute; top: 12px; right: 14px; z-index: 10;
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(0,0,0,0.50); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,200,80,0.15); border-radius: 7px;
+    padding: 5px 11px; pointer-events: all;
+}
+.bloom-label {
+    font-size: .63rem; color: rgba(255,200,100,0.55);
+    font-family: monospace; white-space: nowrap;
+}
+.bloom-val {
+    font-size: .65rem; color: rgba(255,220,120,0.80);
+    font-family: monospace; min-width: 28px; text-align: right;
+}
+#bloom-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 90px; height: 3px; cursor: pointer;
+    background: linear-gradient(90deg,
+        rgba(255,200,60,.55) 0%, rgba(255,200,60,.55) var(--pct,50%),
+        rgba(255,255,255,.12) var(--pct,50%), rgba(255,255,255,.12) 100%);
+    border-radius: 2px; outline: none; border: none;
+}
+#bloom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: rgba(255,210,80,0.90);
+    box-shadow: 0 0 6px rgba(255,200,60,0.7);
+    cursor: pointer;
+}
+#bloom-slider::-moz-range-thumb {
+    width: 11px; height: 11px; border-radius: 50%;
+    background: rgba(255,210,80,0.90); border: none; cursor: pointer;
+}
 /* Live data badge over canvas */
 .helio-live-hud {
     position: absolute; top: 12px; left: 14px; z-index: 10;
@@ -846,6 +881,13 @@ nav {
         <!-- Controls hint -->
         <div class="helio-hint">
             Drag to orbit &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Zoom in toward Earth to explore the magnetosphere
+        </div>
+        <!-- Corona bloom control -->
+        <div class="helio-bloom-ctrl" id="helio-bloom-ctrl">
+            <span class="bloom-label">Corona bloom</span>
+            <input type="range" id="bloom-slider" min="3" max="30" value="10" step="1"
+                   title="Adjust corona and solar wind brightness">
+            <span class="bloom-val" id="bloom-val">1.0×</span>
         </div>
         <a class="helio-corner-link" href="earth.html" title="Open Earth detail view">Earth View →</a>
     </div>
@@ -1803,7 +1845,30 @@ new SolarWindState().start();
 // Listens to swpc-update + ephemeris-ready events automatically.
 const helioCanvas = document.getElementById('helio-canvas');
 let _helio = null;
-if (helioCanvas) _helio = new Heliosphere3D(helioCanvas).start();
+if (helioCanvas) {
+    _helio = new Heliosphere3D(helioCanvas).start();
+    // Expose globally so the bloom slider can call setBloom()
+    window._helio3d = _helio;
+}
+
+// ── Corona bloom slider ───────────────────────────────────────────────────────
+{
+    const bloomSlider = document.getElementById('bloom-slider');
+    const bloomVal    = document.getElementById('bloom-val');
+    if (bloomSlider && bloomVal) {
+        function _applyBloom(raw) {
+            // Slider range 3–30 maps to bloom 0.3–3.0
+            const v   = raw / 10;
+            const pct = ((raw - 3) / 27 * 100).toFixed(1);
+            bloomSlider.style.setProperty('--pct', pct + '%');
+            bloomVal.textContent = v.toFixed(1) + '×';
+            window._helio3d?.setBloom(v);
+        }
+        bloomSlider.addEventListener('input', () => _applyBloom(+bloomSlider.value));
+        // Set initial state
+        _applyBloom(+bloomSlider.value);
+    }
+}
 
 // ── Helio HUD: date display + ephemeris source ────────────────────────────────
 
