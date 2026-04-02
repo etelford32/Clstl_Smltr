@@ -211,9 +211,14 @@ export class SunEarthCoupling {
         this._l1Buf  = this._l1Buf.filter(r => r.t_ms >= cutoff);
 
         // ── Compute propagation delay ──────────────────────────────────────
-        // Δt = L1 offset / observed solar wind speed
-        const delay_s   = L1_OFFSET_KM / speed;    // seconds
-        const delay_min = delay_s / 60;
+        // Use a fixed nominal delay of 60 minutes (~3600 s).
+        // Previously this used Δt = L1 / v_current, but that creates a
+        // circular dependency: fast wind shortens the delay, pulling a
+        // different (possibly slower) reading that should lengthen it.
+        // A fixed 60-minute lag matches the median transit time across
+        // typical solar wind speeds (300–700 km/s → 36–83 min, median ~55 min).
+        const delay_s   = 3600;    // fixed 60-minute nominal delay
+        const delay_min = 60;
 
         // Find the L1 reading that was observed ~delay_s ago
         const target_ms   = now_ms - delay_s * 1000;

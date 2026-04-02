@@ -1698,7 +1698,7 @@ document.getElementById('lyr-iss').addEventListener('change', e => {
 //  magnetotail.  All quantities in Earth-radii (scene units).
 // ═══════════════════════════════════════════════════════════════
 class SolarWindParticles {
-    constructor(scene, N = 3000) {
+    constructor(scene, N = 3000, initialSunDir = null) {
         this.N  = N;
         this._px = new Float32Array(N); this._py = new Float32Array(N);
         this._pz = new Float32Array(N);
@@ -1708,11 +1708,16 @@ class SolarWindParticles {
         this._maxA = new Float32Array(N);
 
         // Live state (updated from feed)
-        this._speed   = 400;     // km/s
-        this._density = 5.0;     // n/cc
-        this._r0      = 10.9;    // magnetopause standoff (Re)
-        this._alpha   = 0.58;    // Shue flaring
-        this._sunDir  = new THREE.Vector3(1, 0, 0);
+        this._speed    = 400;     // km/s
+        this._density  = 5.0;     // n/cc
+        this._r0       = 10.9;    // magnetopause standoff (Re)
+        this._alpha    = 0.58;    // Shue flaring
+        this._rBs      = 13.4;    // bow shock standoff (Re)
+        this._alphaBs  = 0.50;    // bow shock flaring
+        this._pdyn     = 2.0;     // dynamic pressure (nPa)
+        this._sunDir   = initialSunDir
+            ? initialSunDir.clone().normalize()
+            : new THREE.Vector3(1, 0, 0);
 
         this._t1 = new THREE.Vector3();
         this._t2 = new THREE.Vector3();
@@ -1745,8 +1750,11 @@ class SolarWindParticles {
         this._speed   = wind.speed   ?? 400;
         this._density = wind.density ?? 5.0;
         if (analysis) {
-            this._r0    = analysis.r0    ?? 10.9;
-            this._alpha = analysis.alpha ?? 0.58;
+            this._r0      = analysis.r0       ?? 10.9;
+            this._alpha   = analysis.alpha     ?? 0.58;
+            this._rBs     = analysis.bowShockR0 ?? Math.max(this._r0 + 1.5, this._r0 * 1.14 + 1.0);
+            this._alphaBs = Math.max(0.30, this._alpha - 0.08);
+            this._pdyn    = analysis.pdyn      ?? 2.0;
         }
     }
 
@@ -1761,10 +1769,15 @@ class SolarWindParticles {
         const sd = this._sunDir;
         const t1 = this._t1, t2 = this._t2;
 
-        // Spawn disk centred on sun side: distance = bow shock + 2 Re
-        const spawnDist = this._r0 * 1.22 + 3.5;
-        const diskR     = this._r0 * 1.35 * Math.sqrt(Math.random());
-        const angle     = Math.random() * Math.PI * 2;
+        // Spawn well upstream of the bow shock (5–8 Re ahead).
+        // Solar wind originates from the sun, not from inside the magnetosheath.
+        const spawnDist = this._rBs + 5.0 + Math.random() * 3.0;
+
+        // Narrower cone than before: ~30° half-angle from the sun line,
+        // matching the real solar wind's finite angular extent at 1 AU.
+        const maxR  = spawnDist * Math.tan(0.52);   // ~30° half-angle
+        const diskR = maxR * Math.sqrt(Math.random());
+        const angle = Math.random() * Math.PI * 2;
 
         this._px[i] = sd.x * spawnDist + t1.x * Math.cos(angle) * diskR + t2.x * Math.sin(angle) * diskR;
         this._py[i] = sd.y * spawnDist + t1.y * Math.cos(angle) * diskR + t2.y * Math.sin(angle) * diskR;
@@ -1772,26 +1785,48 @@ class SolarWindParticles {
 
         // Visual speed: compress ~100× for animation (particles cross ~6 Re in ~2 s)
         const speedVis = (this._speed / 400) * 4.2;
-        const lat = (Math.random() - 0.5) * 0.018;
-        this._vx[i] = -sd.x * speedVis + t1.x * lat + (Math.random() - 0.5) * 0.04;
-        this._vy[i] = -sd.y * speedVis + t1.y * lat + (Math.random() - 0.5) * 0.04;
-        this._vz[i] = -sd.z * speedVis + t1.z * lat + (Math.random() - 0.5) * 0.04;
+        const jitter = (Math.random() - 0.5) * 0.04;
+        this._vx[i] = -sd.x * speedVis + t1.x * jitter + (Math.random() - 0.5) * 0.03;
+        this._vy[i] = -sd.y * speedVis + t1.y * jitter + (Math.random() - 0.5) * 0.03;
+        this._vz[i] = -sd.z * speedVis + t1.z * jitter + (Math.random() - 0.5) * 0.03;
 
-        this._age[i]  = randomAge ? Math.random() * 35 : 0;
-        this._maxA[i] = 28 + Math.random() * 22;
+        this._age[i]  = randomAge ? Math.random() * 45 : 0;
+        this._maxA[i] = 35 + Math.random() * 25;   // 35–60 s lifetime for longer tail
     }
 
     /** Call from animate() every frame.  sunDir must be the world-space unit vector toward sun. */
     tick(dt, sunDir) {
         this._sunDir.copy(sunDir).normalize();
         this._buildBasis();
-        const r0    = this._r0;
-        const alpha = this._alpha;
-        const sx    = sunDir.x, sy = sunDir.y, sz = sunDir.z;
+        const r0      = this._r0;
+        const alpha   = this._alpha;
+        const rBs     = this._rBs;
+        const alphaBs = this._alphaBs;
+        const sx = sunDir.x, sy = sunDir.y, sz = sunDir.z;
+
+        // Current visual speed — used to update in-flight particles
+        const speedVis = (this._speed / 400) * 4.2;
+
+        // Deflection force scales with dynamic pressure:
+        //   Higher pdyn → stronger pressure at magnetopause → harder deflection.
+        //   Normalised so pdyn=2 nPa (typical quiet) gives ~1.0× strength.
+        const pdynScale = Math.max(0.5, Math.min(4.0, this._pdyn / 2.0));
 
         for (let i = 0; i < this.N; i++) {
             this._age[i] += dt;
             if (this._age[i] > this._maxA[i]) { this._spawn(i); continue; }
+
+            // ── Update in-flight velocity to track current solar wind speed ──
+            // Smoothly steer the sunward component toward the current speed,
+            // preserving any perpendicular (deflected) velocity.
+            // This avoids the two-population artifact when speed changes.
+            const vSun = this._vx[i]*sx + this._vy[i]*sy + this._vz[i]*sz;
+            const targetVSun = -speedVis;
+            const blend = Math.min(1, 2.5 * dt);   // ~0.4 s time constant
+            const correction = (targetVSun - vSun) * blend;
+            this._vx[i] += correction * sx;
+            this._vy[i] += correction * sy;
+            this._vz[i] += correction * sz;
 
             // Integrate position
             this._px[i] += this._vx[i] * dt;
@@ -1803,17 +1838,37 @@ class SolarWindParticles {
 
             // Projection along sun–Earth line (positive = sun side)
             const sunDot = px*sx + py*sy + pz*sz;
-
-            // Shue-model magnetopause radius at this particle's polar angle
             const cosTheta = Math.max(-1, Math.min(1, sunDot / rp));
-            const rMp      = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
+            const nr = 1 / rp;
 
-            // Deflect / exclude particles inside the magnetopause
+            // ── Bow shock deceleration ──────────────────────────────────
+            // The bow shock is a collisionless shock: supersonic → subsonic.
+            // Real compression ratio ~4:1.  We apply a gradual deceleration
+            // zone of ~1.5 Re thickness around the bow shock surface.
+            const rBsHere = rBs * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alphaBs);
+            if (rp < rBsHere + 0.8 && rp > rBsHere - 0.8) {
+                // Inside the shock transition zone: decelerate the sunward
+                // component by ~60% (compression ratio ~2.5:1 visually).
+                const shockDepth = 1.0 - Math.abs(rp - rBsHere) / 0.8;
+                const decel = shockDepth * 0.55 * dt * 3.0;
+                // Only decelerate the anti-sunward (inward) component
+                const vInward = -(this._vx[i]*sx + this._vy[i]*sy + this._vz[i]*sz);
+                if (vInward > 0) {
+                    const brake = Math.min(decel, vInward * 0.6);
+                    this._vx[i] += brake * sx;
+                    this._vy[i] += brake * sy;
+                    this._vz[i] += brake * sz;
+                }
+            }
+
+            // ── Shue magnetopause deflection ────────────────────────────
+            const rMp = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
+
             if (rp < rMp * 1.08) {
-                // Radial outward force — pushes particle along magnetopause surface
-                const nr     = 1 / rp;
+                // Radial outward force — pushes particle along magnetopause surface.
+                // Force scales with dynamic pressure: dense/fast wind pushes harder.
                 const excess = Math.max(0, 1.0 - rp / (rMp * 1.08));
-                const force  = excess * 6.0 * dt;
+                const force  = excess * 5.0 * pdynScale * dt;
                 this._vx[i] += px * nr * force;
                 this._vy[i] += py * nr * force;
                 this._vz[i] += pz * nr * force;
@@ -1827,8 +1882,10 @@ class SolarWindParticles {
                 }
             }
 
-            // Kill particles deep in magnetosphere or far down tail
-            if (rp < r0 * 0.55 || (sunDot < -r0 * 3.0 && rp > r0 * 2.5)) {
+            // Kill particles deep in magnetosphere or far down tail.
+            // Extended tail cutoff to ~8× r0 (≈ 80–90 Re) for a more
+            // realistic magnetotail length.
+            if (rp < r0 * 0.55 || (sunDot < -r0 * 8.0 && rp > r0 * 2.0)) {
                 this._spawn(i);
             }
         }
@@ -1958,7 +2015,7 @@ class WindParticles {
 }
 
 const windParticles    = new WindParticles(earthMesh, 4000);
-const solarWindParticles = new SolarWindParticles(scene, 3000);
+const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 
 // ═══════════════════════════════════════════════════════════════
 //  DATA RECENCY TRACKING — tooltips show how fresh each layer is
