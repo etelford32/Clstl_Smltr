@@ -1414,6 +1414,9 @@ window.addEventListener('storm-update', e => {
     }
     for (let i = n; i < 8; i++) arr[i].set(0, 0, 0, 1);
     cloudU.u_storm_count.value = n;
+    // Track storm recency
+    _dataRecency.storms = { count: n, updated: new Date() };
+    _updateLayerTooltips();
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -1958,6 +1961,69 @@ const windParticles    = new WindParticles(earthMesh, 4000);
 const solarWindParticles = new SolarWindParticles(scene, 3000);
 
 // ═══════════════════════════════════════════════════════════════
+//  DATA RECENCY TRACKING — tooltips show how fresh each layer is
+// ═══════════════════════════════════════════════════════════════
+const _dataRecency = {
+    weather:   null,   // { source, fetchTime }
+    satellite: null,   // { source, goesTime, modisDate, updated }
+    storms:    null,   // { count, updated }
+    alerts:    null,   // { count, updated }
+};
+
+function _timeAgo(date) {
+    if (!date) return 'not yet loaded';
+    const sec = Math.round((Date.now() - date.getTime()) / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+    return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function _updateLayerTooltips() {
+    const wx = _dataRecency.weather;
+    const sat = _dataRecency.satellite;
+    const st = _dataRecency.storms;
+    const al = _dataRecency.alerts;
+
+    const wxTip = wx
+        ? `Source: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Weather data not yet loaded';
+    const satTip = sat
+        ? `Source: ${sat.source}\n` +
+          (sat.goesTime ? `GOES-East: ${_timeAgo(sat.goesTime)} (updates every 10 min)\n` : '') +
+          (sat.modisDate ? `MODIS: ${sat.modisDate} (daily composite)\n` : '') +
+          `Last fetch: ${_timeAgo(sat.updated)}`
+        : 'Satellite data not yet loaded';
+    const windTip = wx
+        ? `Wind field: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Wind data not yet loaded';
+    const isoTip = wx
+        ? `Pressure contours from ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Isobar data not yet loaded';
+    const stormTip = st
+        ? `${st.count} active storm${st.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(st.updated)}\nRefreshes every 30 min`
+        : 'Storm data not yet loaded';
+    const alertTip = al
+        ? `${al.count} active alert${al.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(al.updated)}\nRefreshes every 5 min`
+        : 'Alert data not yet loaded';
+
+    const tips = {
+        'lyr-clouds':  `Cloud Cover\n${satTip}\n\nCloud fractions: ${wxTip}`,
+        'lyr-weather': `Weather (temp)\n${wxTip}`,
+        'lyr-wind':    `Wind Particles\n${windTip}`,
+        'lyr-isobars': `Isobars\n${isoTip}`,
+        'lyr-alerts':  `Storm Alerts\n${alertTip}\n\nTropical storms: ${stormTip}`,
+    };
+    for (const [id, tip] of Object.entries(tips)) {
+        const el = document.getElementById(id);
+        if (el?.parentElement) el.parentElement.title = tip;
+    }
+}
+
+// Refresh tooltip "Xm ago" text every 30 seconds
+setInterval(_updateLayerTooltips, 30_000);
+
+// ═══════════════════════════════════════════════════════════════
 //  WEATHER FEED — real-time Open-Meteo / GFS data
 // ═══════════════════════════════════════════════════════════════
 const wxFeed = new WeatherFeed();
@@ -1970,14 +2036,22 @@ const satFeed = new SatelliteFeed();
 satFeed.start();
 
 window.addEventListener('satellite-update', e => {
-    const { primaryTex, goesTex, modisTex, source } = e.detail;
-    // Prefer GOES (near-real-time) over MODIS (daily)
-    const tex = goesTex ?? modisTex ?? null;
+    const { compositeTex, goesTex, modisTex, source, goesTime, modisDate } = e.detail;
+    // Prefer composite (GOES+MODIS merged), then individual sources
+    const tex = compositeTex ?? goesTex ?? modisTex ?? null;
     if (tex) {
-        cloudU.u_satellite.value   = tex;
+        cloudU.u_satellite.value    = tex;
         cloudU.u_satellite_on.value = 1.0;
         console.info(`[Satellite] cloud texture updated — ${source}`);
     }
+    // Update data recency tracker
+    _dataRecency.satellite = {
+        source,
+        goesTime:  goesTime ?? null,
+        modisDate: modisDate ?? null,
+        updated:   new Date(),
+    };
+    _updateLayerTooltips();
 });
 
 function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
@@ -2002,6 +2076,10 @@ document.addEventListener('weather-update', e => {
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
     updateIsobarPanel();
+
+    // Track data recency for layer tooltips
+    _dataRecency.weather = { source: meta.source, fetchTime: meta.fetchTime };
+    _updateLayerTooltips();
 
     // Weather analysis panel
     const dot  = document.getElementById('wx-status-dot');
@@ -2720,6 +2798,10 @@ document.addEventListener('nws-status', e => {
 
 document.addEventListener('nws-alerts-update', e => {
     const { alerts, meta, error } = e.detail;
+
+    // Track alert recency for layer tooltips
+    _dataRecency.alerts = { count: meta.count ?? 0, updated: new Date() };
+    _updateLayerTooltips();
 
     // Update 3-D markers
     alertMarkers.rebuild(alerts);

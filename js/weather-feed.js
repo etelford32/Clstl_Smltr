@@ -147,6 +147,7 @@ export class WeatherFeed {
     // ── Parse location array → coarse grid → interpolated textures ───────────
     _processRows(rows) {
         const N    = GRID_W * GRID_H;
+        const DEG  = Math.PI / 180;
         const temp = new Float32Array(N).fill(NaN);
         const hum  = new Float32Array(N).fill(NaN);
         const pres = new Float32Array(N).fill(NaN);
@@ -174,6 +175,19 @@ export class WeatherFeed {
         // Fill any NaN gaps (missing ocean cells, polar regions, etc.)
         [temp, hum, pres, wspd, wdir].forEach(a => this._fillNaN(a, GRID_W, GRID_H));
 
+        // Decompose wind speed+direction into U/V on the coarse grid BEFORE
+        // interpolation.  Bilinear interpolation of angles is wrong because
+        // degrees wrap at 360°→0° (e.g. avg of 350° and 10° gives 180° not 0°).
+        // Interpolating the Cartesian components avoids this entirely.
+        const windUCoarse = new Float32Array(N);
+        const windVCoarse = new Float32Array(N);
+        for (let k = 0; k < N; k++) {
+            const dir = wdir[k] * DEG;
+            // Meteorological convention: FROM direction → negate for velocity
+            windUCoarse[k] = -wspd[k] * Math.sin(dir);  // eastward  m/s
+            windVCoarse[k] = -wspd[k] * Math.cos(dir);  // northward m/s
+        }
+
         // Compute global stats for the analysis panel
         const vt = Array.from(temp).filter(isFinite);
         const vp = Array.from(pres).filter(isFinite);
@@ -186,12 +200,15 @@ export class WeatherFeed {
         this._meta.windMax  = Math.max(...vw);
         this._meta.cloudMax = Math.max(...Array.from(clLow), ...Array.from(clMid), ...Array.from(clHigh));
 
-        this._interpolateToTextures(temp, hum, pres, wspd, wdir);
+        this._interpolateToTextures(temp, hum, pres, wspd, windUCoarse, windVCoarse);
         this._interpolateCloudTexture(clLow, clMid, clHigh, precip);
     }
 
     // ── Bilinear interpolation: inW×inH → outW×outH ──────────────────────────
-    _bilinear(src, inW, inH, outW, outH) {
+    // wrapX: when true, longitude (x axis) wraps so column 0 is adjacent to
+    //        column inW-1 (periodic boundary).  This eliminates the 10° seam
+    //        at the antimeridian where -175° meets +175°.
+    _bilinear(src, inW, inH, outW, outH, wrapX = false) {
         const dst = new Float32Array(outW * outH);
         for (let j = 0; j < outH; j++) {
             const fy = (j / (outH - 1)) * (inH - 1);
@@ -199,7 +216,8 @@ export class WeatherFeed {
             const ty = fy - y0;
             for (let i = 0; i < outW; i++) {
                 const fx = (i / (outW - 1)) * (inW - 1);
-                const x0 = Math.floor(fx), x1 = Math.min(x0 + 1, inW - 1);
+                const x0 = Math.floor(fx);
+                const x1 = wrapX ? (x0 + 1) % inW : Math.min(x0 + 1, inW - 1);
                 const tx = fx - x0;
                 dst[j * outW + i] =
                     (1-tx)*(1-ty)*src[y0*inW+x0] + tx*(1-ty)*src[y0*inW+x1] +
@@ -229,20 +247,18 @@ export class WeatherFeed {
     }
 
     // ── Write interpolated data into Float32 texture buffers ──────────────────
-    _interpolateToTextures(rawTemp, rawHum, rawPres, rawWSpd, rawWDir) {
-        const DEG  = Math.PI / 180;
-        const temp = this._bilinear(rawTemp, GRID_W, GRID_H, TEX_W, TEX_H);
-        const hum  = this._bilinear(rawHum,  GRID_W, GRID_H, TEX_W, TEX_H);
-        const pres = this._bilinear(rawPres, GRID_W, GRID_H, TEX_W, TEX_H);
-        const wspd = this._bilinear(rawWSpd, GRID_W, GRID_H, TEX_W, TEX_H);
-        const wdir = this._bilinear(rawWDir, GRID_W, GRID_H, TEX_W, TEX_H);
+    // Wind U/V are now pre-decomposed on the coarse grid and interpolated
+    // as Cartesian components (no angle-wrapping artifacts).
+    _interpolateToTextures(rawTemp, rawHum, rawPres, rawWSpd, rawWindU, rawWindV) {
+        const temp  = this._bilinear(rawTemp,  GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const hum   = this._bilinear(rawHum,   GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const pres  = this._bilinear(rawPres,  GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const wspd  = this._bilinear(rawWSpd,  GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const windU = this._bilinear(rawWindU, GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const windV = this._bilinear(rawWindV, GRID_W, GRID_H, TEX_W, TEX_H, true);
 
         for (let k = 0; k < TEX_W * TEX_H; k++) {
-            const t4  = k * 4;
-            const dir = wdir[k] * DEG;
-            // Meteorological convention: FROM direction → negate for velocity
-            const windU = -wspd[k] * Math.sin(dir);  // eastward  m/s
-            const windV = -wspd[k] * Math.cos(dir);  // northward m/s
+            const t4 = k * 4;
 
             // weatherBuffer — normalised scalars for colour overlays
             this._weatherBuf[t4+0] = Math.max(0, Math.min(1, (temp[k] + 60) / 110)); // -60…+50 °C
@@ -250,27 +266,75 @@ export class WeatherFeed {
             this._weatherBuf[t4+2] = Math.max(0, Math.min(1,  hum[k] / 100));
             this._weatherBuf[t4+3] = Math.max(0, Math.min(1,  wspd[k] / MAX_WIND_MS));
 
-            // windBuffer — signed U,V for particle advection
-            this._windBuf[t4+0] = windU / MAX_WIND_MS;   // [-1, 1]
-            this._windBuf[t4+1] = windV / MAX_WIND_MS;   // [-1, 1]
-            this._windBuf[t4+2] = wspd[k] / MAX_WIND_MS; // [0, 1]
+            // windBuffer — signed U,V for particle advection (already in m/s)
+            this._windBuf[t4+0] = windU[k] / MAX_WIND_MS;   // [-1, 1]
+            this._windBuf[t4+1] = windV[k] / MAX_WIND_MS;   // [-1, 1]
+            this._windBuf[t4+2] = wspd[k]  / MAX_WIND_MS;   // [0, 1]
             this._windBuf[t4+3] = 1.0;
         }
     }
 
     // ── Pack cloud-layer fractions + precipitation into cloudBuf ─────────────
+    // After bilinear interpolation, apply a box-blur smoothing pass to reduce
+    // visible 10° grid-cell blockiness in the cloud fraction data.
     _interpolateCloudTexture(rawLow, rawMid, rawHigh, rawPrecip) {
-        const low    = this._bilinear(rawLow,    GRID_W, GRID_H, TEX_W, TEX_H);
-        const mid    = this._bilinear(rawMid,    GRID_W, GRID_H, TEX_W, TEX_H);
-        const high   = this._bilinear(rawHigh,   GRID_W, GRID_H, TEX_W, TEX_H);
-        const precip = this._bilinear(rawPrecip, GRID_W, GRID_H, TEX_W, TEX_H);
+        const low    = this._bilinear(rawLow,    GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const mid    = this._bilinear(rawMid,    GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const high   = this._bilinear(rawHigh,   GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const precip = this._bilinear(rawPrecip, GRID_W, GRID_H, TEX_W, TEX_H, true);
+
+        // Smooth cloud fractions to soften grid-cell boundaries.
+        // Two passes of 5×5 box blur is equivalent to ~10×10 Gaussian and
+        // eliminates the visible 10°-spaced block edges.
+        const sLow    = this._boxBlur(this._boxBlur(low,    TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
+        const sMid    = this._boxBlur(this._boxBlur(mid,    TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
+        const sHigh   = this._boxBlur(this._boxBlur(high,   TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
+        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, 2);  // single pass for precip
+
         for (let k = 0; k < TEX_W * TEX_H; k++) {
             const t4 = k * 4;
-            this._cloudBuf[t4+0] = Math.max(0, Math.min(1, low[k]    / 100));
-            this._cloudBuf[t4+1] = Math.max(0, Math.min(1, mid[k]    / 100));
-            this._cloudBuf[t4+2] = Math.max(0, Math.min(1, high[k]   / 100));
-            this._cloudBuf[t4+3] = Math.max(0, Math.min(1, precip[k] / 10));  // cap 10 mm/hr
+            this._cloudBuf[t4+0] = Math.max(0, Math.min(1, sLow[k]    / 100));
+            this._cloudBuf[t4+1] = Math.max(0, Math.min(1, sMid[k]    / 100));
+            this._cloudBuf[t4+2] = Math.max(0, Math.min(1, sHigh[k]   / 100));
+            this._cloudBuf[t4+3] = Math.max(0, Math.min(1, sPrecip[k] / 10));  // cap 10 mm/hr
         }
+    }
+
+    // ── Separable box blur (radius R → kernel width 2R+1) ───────────────────
+    // Wraps longitude (x axis); clamps latitude (y axis).
+    _boxBlur(src, W, H, R) {
+        const tmp = new Float32Array(W * H);
+        const dst = new Float32Array(W * H);
+        const diam = 2 * R + 1;
+
+        // Horizontal pass (wrap longitude)
+        for (let j = 0; j < H; j++) {
+            let sum = 0;
+            // Seed with first window
+            for (let dx = -R; dx <= R; dx++) {
+                sum += src[j * W + ((dx % W) + W) % W];
+            }
+            tmp[j * W + 0] = sum / diam;
+            for (let i = 1; i < W; i++) {
+                sum += src[j * W + ((i + R) % W)] - src[j * W + (((i - R - 1) % W) + W) % W];
+                tmp[j * W + i] = sum / diam;
+            }
+        }
+
+        // Vertical pass (clamp latitude)
+        for (let i = 0; i < W; i++) {
+            let sum = 0;
+            for (let dy = -R; dy <= R; dy++) {
+                sum += tmp[Math.max(0, Math.min(H - 1, dy)) * W + i];
+            }
+            dst[0 * W + i] = sum / diam;
+            for (let j = 1; j < H; j++) {
+                sum += tmp[Math.min(H - 1, j + R) * W + i] - tmp[Math.max(0, j - R - 1) * W + i];
+                dst[j * W + i] = sum / diam;
+            }
+        }
+
+        return dst;
     }
 
     // ── Procedural fallback: physically motivated zonal circulation ───────────
