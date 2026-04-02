@@ -287,41 +287,44 @@ async function fetchWind(state) {
         console.log('Total rows:', raw.length);
         console.log('Last row keys:', Object.keys(last));
         console.log('Last row full:', JSON.parse(JSON.stringify(last)));
+        // Dump ALL 31 field names and values from the last row
+        console.log('ALL FIELDS in last row:');
+        for (const [k, v] of Object.entries(last)) {
+            console.log(`  ${k}: ${JSON.stringify(v)} (${typeof v})`);
+        }
         console.table(last5.map(r => ({
             time_tag:          r.time_tag,
-            speed:             r.speed,
+            active:            r.active,
+            source:            r.source,
             proton_speed:      r.proton_speed,
-            density:           r.density,
             proton_density:    r.proton_density,
-            temperature:       r.temperature,
             proton_temperature:r.proton_temperature,
+            // Check ALL possible IMF field names
             bt:                r.bt,
             bz_gsm:            r.bz_gsm,
             bz:                r.bz,
+            bt_gsm:            r.bt_gsm,
+            bx_gse:            r.bx_gse,
+            by_gse:            r.by_gse,
+            bz_gse:            r.bz_gse,
+            bx_gsm:            r.bx_gsm,
+            by_gsm:            r.by_gsm,
         })));
-        // Check for field presence mismatch
-        const hasSpeed = 'speed' in last;
-        const hasProtonSpeed = 'proton_speed' in last;
-        const hasDensity = 'density' in last;
-        const hasProtonDensity = 'proton_density' in last;
-        console.log('Field presence:', {
-            hasSpeed, hasProtonSpeed, hasDensity, hasProtonDensity,
-            speedValue: last.speed, protonSpeedValue: last.proton_speed,
-            speedType: typeof last.speed, protonSpeedType: typeof last.proton_speed,
-        });
-        // Nullish coalescing test: would r.speed ?? r.proton_speed pick the right one?
-        const coalesced = last.speed ?? last.proton_speed;
-        const filled    = noaaFill(coalesced);
-        console.log('Nullish coalesce test:', { coalesced, afterNoaaFill: filled });
+        // Summarize which fields exist vs are undefined
+        const allKeys = Object.keys(last);
+        const magKeys = allKeys.filter(k => k.startsWith('b') || k.includes('mag') || k.includes('imf'));
+        console.log('Magnetic/IMF field names found:', magKeys);
+        console.log('Active flag:', last.active, '| Source:', last.source);
         console.groupEnd();
     }
 
-    // Walk backwards to find the most recent row with a valid speed.
-    // Use noaaFill on BOTH fields independently, then prefer whichever is valid.
-    // This avoids the ?? operator silently choosing a fill-value field over a
-    // valid proton_speed (since ?? only skips null/undefined, not -99999 or 0).
+    // Walk backwards to find the most recent ACTIVE row with a valid speed.
+    // Rows with active=false may be from an inactive instrument or data gap.
+    // Prefer DSCOVR proton_* fields; apply noaaFill to each independently.
     for (let i = raw.length - 1; i >= 0; i--) {
         const r   = raw[i];
+        // Skip inactive rows (instrument offline or data gap)
+        if (r.active === false) continue;
         const spd = noaaFill(r.proton_speed) ?? noaaFill(r.speed);
         if (spd == null) continue;
         if (spd > 0)     state.speed = spd;
@@ -329,15 +332,60 @@ async function fetchWind(state) {
         if (den != null && den > 0) state.density = den;
         const tmp = noaaFill(r.proton_temperature) ?? noaaFill(r.temperature);
         if (tmp != null && tmp > 0) state.temperature = tmp;
-        const bt  = noaaFill(r.bt);
+        // IMF data: rtsw_wind_1m.json may NOT include bt/bz — those are in
+        // rtsw_mag_1m.json.  Try all known field name variants.
+        const bt  = noaaFill(r.bt) ?? noaaFill(r.bt_gsm);
         if (bt  != null) state.bt = Math.abs(bt);
-        const bz  = noaaFill(r.bz_gsm) ?? noaaFill(r.bz);
+        const bz  = noaaFill(r.bz_gsm) ?? noaaFill(r.bz) ?? noaaFill(r.bz_gse);
         if (bz  != null) state.bz = bz;
-        const bx  = noaaFill(r.bx_gsm) ?? noaaFill(r.bx);
+        const bx  = noaaFill(r.bx_gsm) ?? noaaFill(r.bx) ?? noaaFill(r.bx_gse);
         if (bx  != null) state.bx = bx;
-        const by  = noaaFill(r.by_gsm) ?? noaaFill(r.by);
+        const by  = noaaFill(r.by_gsm) ?? noaaFill(r.by) ?? noaaFill(r.by_gse);
         if (by  != null) state.by = by;
         if (r.time_tag) state.wind_timestamp = new Date(r.time_tag);
+        break;
+    }
+}
+
+// ── IMF magnetometer data (separate NOAA endpoint) ──────────────────────────
+// rtsw_wind_1m.json contains PLASMA data only (speed, density, temperature).
+// IMF Bt/Bz/Bx/By come from the MAGNETOMETER on a separate endpoint.
+// This was previously assumed to be in the same file but NOAA splits them.
+async function fetchMag(state) {
+    const MAG_URL = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json';
+    let raw;
+    try {
+        raw = await fetchNoaa(MAG_URL);
+    } catch {
+        return;  // mag data unavailable — retain previous values
+    }
+    if (!Array.isArray(raw) || raw.length === 0) return;
+
+    // ── DIAGNOSTIC: dump mag structure on first fetch ──────────────────────
+    if (!fetchMag._diagnosed) {
+        fetchMag._diagnosed = true;
+        const last = raw[raw.length - 1];
+        console.group('%c[SWPC MAG DIAGNOSTIC] Raw NOAA rtsw_mag_1m.json', 'color:#cc44ff;font-weight:bold');
+        console.log('Total rows:', raw.length);
+        console.log('Last row keys:', Object.keys(last));
+        console.log('Last row:', JSON.parse(JSON.stringify(last)));
+        console.groupEnd();
+    }
+
+    for (let i = raw.length - 1; i >= 0; i--) {
+        const r = raw[i];
+        if (r.active === false) continue;
+        // Try all known IMF field name variants
+        const bt = noaaFill(r.bt) ?? noaaFill(r.bt_gsm);
+        if (bt == null) continue;
+        state.bt = Math.abs(bt);
+        const bz = noaaFill(r.bz_gsm) ?? noaaFill(r.bz) ?? noaaFill(r.bz_gse);
+        if (bz != null) state.bz = bz;
+        const bx = noaaFill(r.bx_gsm) ?? noaaFill(r.bx) ?? noaaFill(r.bx_gse);
+        if (bx != null) state.bx = bx;
+        const by = noaaFill(r.by_gsm) ?? noaaFill(r.by) ?? noaaFill(r.by_gse);
+        if (by != null) state.by = by;
+        if (r.time_tag) state.mag_timestamp = new Date(r.time_tag);
         break;
     }
 }
@@ -804,6 +852,7 @@ export class SpaceWeatherFeed {
     async _runT1() {
         const results = await Promise.allSettled([
             fetchWind(this._raw),
+            fetchMag(this._raw),      // IMF Bt/Bz — separate from plasma data
             fetchKp1m(this._raw),
             fetchXray(this._raw),
         ]);

@@ -121,7 +121,7 @@ export class WindPipelineFeed {
         // Apply noaaFill to each field independently before coalescing, so fill
         // values (-99999) don't shadow valid proton_* readings via the ?? operator.
         const rows = raw
-            .filter(r => r?.time_tag)
+            .filter(r => r?.time_tag && r.active !== false)  // skip inactive instruments
             .map(r => {
                 const spd = _fill(r.proton_speed) ?? _fill(r.speed);
                 const den = _fill(r.proton_density) ?? _fill(r.density);
@@ -129,6 +129,9 @@ export class WindPipelineFeed {
                     timestamp:  new Date(String(r.time_tag).replace(' ', 'T') + 'Z'),
                     speed_km_s: spd,
                     density_cc: den,
+                    // NOTE: IMF bt/bz may not be in rtsw_wind_1m.json (plasma only);
+                    // they come from rtsw_mag_1m.json via swpc-feed.js fetchMag().
+                    // Include here for rows that have them (some NOAA versions merge both).
                     bz_nT:      _fill(r.bz_gsm) ?? _fill(r.bz),
                     bt_nT:      _fill(r.bt),
                 };
