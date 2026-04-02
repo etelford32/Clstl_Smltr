@@ -275,23 +275,67 @@ async function fetchWind(state) {
     // Format: array of objects {time_tag, speed, density, temperature, bt, bz_gsm, bx_gsm, by_gsm}
     // Rows are 1-minute samples; last non-fill entry is current.
     if (!Array.isArray(raw) || raw.length === 0) return;
-    // Walk backwards to find the most recent row with a valid speed
+
+    // ── DIAGNOSTIC: dump raw NOAA structure on first fetch ─────────────────
+    // Remove after debugging — logs the actual field names NOAA is sending
+    // so we can verify our field mapping is correct.
+    if (!fetchWind._diagnosed) {
+        fetchWind._diagnosed = true;
+        const last = raw[raw.length - 1];
+        const last5 = raw.slice(-5);
+        console.group('%c[SWPC WIND DIAGNOSTIC] Raw NOAA rtsw_wind_1m.json', 'color:#ff8c00;font-weight:bold');
+        console.log('Total rows:', raw.length);
+        console.log('Last row keys:', Object.keys(last));
+        console.log('Last row full:', JSON.parse(JSON.stringify(last)));
+        console.table(last5.map(r => ({
+            time_tag:          r.time_tag,
+            speed:             r.speed,
+            proton_speed:      r.proton_speed,
+            density:           r.density,
+            proton_density:    r.proton_density,
+            temperature:       r.temperature,
+            proton_temperature:r.proton_temperature,
+            bt:                r.bt,
+            bz_gsm:            r.bz_gsm,
+            bz:                r.bz,
+        })));
+        // Check for field presence mismatch
+        const hasSpeed = 'speed' in last;
+        const hasProtonSpeed = 'proton_speed' in last;
+        const hasDensity = 'density' in last;
+        const hasProtonDensity = 'proton_density' in last;
+        console.log('Field presence:', {
+            hasSpeed, hasProtonSpeed, hasDensity, hasProtonDensity,
+            speedValue: last.speed, protonSpeedValue: last.proton_speed,
+            speedType: typeof last.speed, protonSpeedType: typeof last.proton_speed,
+        });
+        // Nullish coalescing test: would r.speed ?? r.proton_speed pick the right one?
+        const coalesced = last.speed ?? last.proton_speed;
+        const filled    = noaaFill(coalesced);
+        console.log('Nullish coalesce test:', { coalesced, afterNoaaFill: filled });
+        console.groupEnd();
+    }
+
+    // Walk backwards to find the most recent row with a valid speed.
+    // Use noaaFill on BOTH fields independently, then prefer whichever is valid.
+    // This avoids the ?? operator silently choosing a fill-value field over a
+    // valid proton_speed (since ?? only skips null/undefined, not -99999 or 0).
     for (let i = raw.length - 1; i >= 0; i--) {
         const r   = raw[i];
-        const spd = noaaFill(r.speed ?? r.proton_speed);
+        const spd = noaaFill(r.proton_speed) ?? noaaFill(r.speed);
         if (spd == null) continue;
         if (spd > 0)     state.speed = spd;
-        const den = noaaFill(r.density ?? r.proton_density);
+        const den = noaaFill(r.proton_density) ?? noaaFill(r.density);
         if (den != null && den > 0) state.density = den;
-        const tmp = noaaFill(r.temperature ?? r.proton_temperature);
+        const tmp = noaaFill(r.proton_temperature) ?? noaaFill(r.temperature);
         if (tmp != null && tmp > 0) state.temperature = tmp;
         const bt  = noaaFill(r.bt);
         if (bt  != null) state.bt = Math.abs(bt);
-        const bz  = noaaFill(r.bz_gsm ?? r.bz);
+        const bz  = noaaFill(r.bz_gsm) ?? noaaFill(r.bz);
         if (bz  != null) state.bz = bz;
-        const bx  = noaaFill(r.bx_gsm ?? r.bx);
+        const bx  = noaaFill(r.bx_gsm) ?? noaaFill(r.bx);
         if (bx  != null) state.bx = bx;
-        const by  = noaaFill(r.by_gsm ?? r.by);
+        const by  = noaaFill(r.by_gsm) ?? noaaFill(r.by);
         if (by  != null) state.by = by;
         if (r.time_tag) state.wind_timestamp = new Date(r.time_tag);
         break;
