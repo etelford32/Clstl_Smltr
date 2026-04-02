@@ -1100,6 +1100,79 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
+            <div class="sec" id="sec-atmosphere">
+                <div class="sec-hd"><span>Solar Atmosphere</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Height explorer slider -->
+                    <div class="ctrl">
+                        <label>Height</label>
+                        <input type="range" id="sl-atm-height" min="0" max="500000" step="10" value="2150">
+                        <span class="vdisp" id="disp-atm-height">2150 km</span>
+                    </div>
+                    <div id="atm-layer-badge" style="text-align:center;margin:-2px 0 8px">
+                        <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:rgba(204,68,255,.14);border:1px solid rgba(204,68,255,.32);color:#cc44ff">TRANSITION REGION</span>
+                    </div>
+                    <table class="dtbl" id="atm-table">
+                        <tr><td>Temperature</td><td id="atm-T">–</td></tr>
+                        <tr><td>Electron density</td><td id="atm-ne">–</td></tr>
+                        <tr><td>Pressure</td><td id="atm-P">–</td></tr>
+                        <tr><td>Scale height</td><td id="atm-H">–</td></tr>
+                        <tr><td>Local gravity</td><td id="atm-g">–</td></tr>
+                    </table>
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">DOMINANT EMISSION</div>
+                        <div id="atm-emission" style="font-size:10px;color:#ffd080;line-height:1.6">–</div>
+                    </div>
+
+                    <!-- Layer quick-jump buttons -->
+                    <div class="btn-row" style="margin-top:8px">
+                        <button class="atm-jump" data-h="250">Photosphere</button>
+                        <button class="atm-jump" data-h="1200">Chromosphere</button>
+                        <button class="atm-jump" data-h="2150">TR</button>
+                        <button class="atm-jump" data-h="10000">Corona</button>
+                    </div>
+
+                    <!-- Chromosphere details -->
+                    <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CHROMOSPHERE (0–2100 km)</div>
+                        <table class="dtbl">
+                            <tr><td>T range</td><td>4 400 → 25 000 K</td></tr>
+                            <tr><td>n<sub>e</sub> range</td><td>~10¹³ → 10¹⁰ cm⁻³</td></tr>
+                            <tr><td>Key lines</td><td>H-α 656.3 nm, Ca II H&K</td></tr>
+                            <tr><td>Spicule height</td><td id="atm-spic-h">–</td></tr>
+                            <tr><td>Spicule velocity</td><td id="atm-spic-v">–</td></tr>
+                            <tr><td>Spicule density</td><td id="atm-spic-n">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Transition Region details -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">TRANSITION REGION (~100 km)</div>
+                        <table class="dtbl">
+                            <tr><td>T jump</td><td>25 000 → <span id="atm-tr-tcor">1.5M</span> K</td></tr>
+                            <tr><td>Gradient</td><td>~100 K/m (steepest in nature)</td></tr>
+                            <tr><td>Key lines</td><td>C IV 154.9 nm, O VI 103.2 nm</td></tr>
+                            <tr><td>Thickness</td><td>~100 km</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Corona details -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CORONA (> 2200 km)</div>
+                        <table class="dtbl">
+                            <tr><td>Temperature</td><td id="atm-cor-T">1–3 MK</td></tr>
+                            <tr><td>Base density</td><td>~10⁸ cm⁻³</td></tr>
+                            <tr><td>Heating required</td><td id="atm-cor-heat">–</td></tr>
+                            <tr><td>Heating source</td><td id="atm-cor-src" style="font-size:9px">–</td></tr>
+                            <tr><td>Radiative loss</td><td id="atm-cor-rad">–</td></tr>
+                            <tr><td>Conductive loss</td><td id="atm-cor-cond">–</td></tr>
+                            <tr><td>Wind enthalpy</td><td id="atm-cor-wind">–</td></tr>
+                            <tr><td>Key lines</td><td style="font-size:9px">Fe IX 171 Å, Fe XII 193 Å</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="sec closed">
                 <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -1354,6 +1427,10 @@ import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
 import WindPipelineFeed        from './js/wind-pipeline-feed.js';
 import { SohoFeed }           from './js/soho-feed.js';
+import {
+    solarAtmosphereTemp, solarAtmosphereDensity, solarAtmospherePressure,
+    layerAt, dominantEmission, spiculeParams, coronalHeatingBudget, stateAt,
+} from './js/solar-atmosphere.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -5317,6 +5394,129 @@ window.addEventListener('swpc-update', (ev) => {
 });
 
 console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR ATMOSPHERE PANEL — live physics calculations
+// ═══════════════════════════════════════════════════════════════
+
+let _atmTcorona = 1.5e6;
+let _atmXrayFlux = 1e-7;
+let _atmF107 = 150;
+let _atmKp = 2;
+
+function _fmtSci(v, digits = 2) {
+    if (v === 0) return '0';
+    const exp = Math.floor(Math.log10(Math.abs(v)));
+    const man = v / Math.pow(10, exp);
+    const supDigits = String(exp).split('').map(c => c === '-' ? '⁻' : '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] || c).join('');
+    return `${man.toFixed(digits)}×10${supDigits}`;
+}
+
+function _fmtTemp(T) {
+    if (T >= 1e6) return `${(T / 1e6).toFixed(2)} MK`;
+    if (T >= 1e3) return `${Math.round(T).toLocaleString()} K`;
+    return `${T.toFixed(0)} K`;
+}
+
+function updateAtmospherePanel() {
+    const slider = document.getElementById('sl-atm-height');
+    if (!slider) return;
+    const h = parseFloat(slider.value);
+    const state = stateAt(h, _atmTcorona);
+
+    // Height display
+    const hDisp = document.getElementById('disp-atm-height');
+    if (hDisp) {
+        if (h >= 1e6) hDisp.textContent = `${(h / 1e6).toFixed(1)} M km`;
+        else if (h >= 1000) hDisp.textContent = `${(h / 1000).toFixed(1)}k km`;
+        else hDisp.textContent = `${Math.round(h)} km`;
+    }
+
+    // Layer badge
+    const badge = document.getElementById('atm-layer-badge');
+    if (badge) {
+        badge.innerHTML = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:${state.layer.color}22;border:1px solid ${state.layer.color}55;color:${state.layer.color}">${state.layer.name.toUpperCase()}</span>`;
+    }
+
+    // State values
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('atm-T',  _fmtTemp(state.T_K));
+    _s('atm-ne', _fmtSci(state.n_e_cm3) + ' cm⁻³');
+    _s('atm-P',  _fmtSci(state.P_Pa, 3) + ' Pa');
+    _s('atm-H',  state.scaleHeight_km >= 1000
+        ? `${(state.scaleHeight_km / 1000).toFixed(1)}k km`
+        : `${Math.round(state.scaleHeight_km)} km`);
+    _s('atm-g',  state.gravity_ms2.toFixed(1) + ' m/s²');
+
+    // Emission lines
+    const emEl = document.getElementById('atm-emission');
+    if (emEl) {
+        emEl.innerHTML = state.emission.map(e =>
+            `<div style="margin-bottom:2px"><strong>${e.ion}</strong> ${e.wavelength_nm >= 100 ? e.wavelength_nm + ' nm' : (e.wavelength_nm * 10).toFixed(0) + ' Å'} — <span style="color:#998">${e.name}</span></div>`
+        ).join('');
+    }
+
+    // Spicule data
+    const spic = spiculeParams(_atmKp, _atmF107);
+    _s('atm-spic-h', `${(spic.type1.height_km / 1000).toFixed(1)}–${(spic.type2.height_km / 1000).toFixed(1)} Mm`);
+    _s('atm-spic-v', `${Math.round(spic.type1.velocity_kms)}–${Math.round(spic.type2.velocity_kms)} km/s`);
+    _s('atm-spic-n', `~${spic.density_per_Mm2}/Mm² (${Math.round(spic.type2_fraction * 100)}% Type II)`);
+
+    // Coronal temperature label
+    _s('atm-tr-tcor', _fmtTemp(_atmTcorona));
+    _s('atm-cor-T', _fmtTemp(_atmTcorona));
+
+    // Coronal heating budget
+    const heat = coronalHeatingBudget(_atmTcorona, _atmXrayFlux);
+    _s('atm-cor-heat', `${Math.round(heat.total_W_m2)} W/m²`);
+    _s('atm-cor-src', heat.source);
+    _s('atm-cor-rad', `${Math.round(heat.radiative)} W/m²`);
+    _s('atm-cor-cond', `${Math.round(heat.conductive)} W/m²`);
+    _s('atm-cor-wind', `${Math.round(heat.wind)} W/m²`);
+}
+
+// Slider input
+document.getElementById('sl-atm-height')?.addEventListener('input', updateAtmospherePanel);
+
+// Quick-jump buttons
+document.querySelectorAll('.atm-jump').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const slider = document.getElementById('sl-atm-height');
+        if (slider) {
+            slider.value = btn.dataset.h;
+            updateAtmospherePanel();
+        }
+    });
+});
+
+// Wire SWPC data to update coronal temperature estimate
+window.addEventListener('swpc-update', e => {
+    const sw = e.detail;
+    const xray = sw.xray_flux ?? 1e-7;
+    _atmXrayFlux = xray;
+    _atmF107 = sw.f107_flux ?? 150;
+    _atmKp = sw.kp ?? 2;
+
+    // Estimate coronal temperature from X-ray flux:
+    // Quiet sun (A/B class): ~1.0 MK
+    // Active (C class): ~1.5 MK
+    // Flaring (M/X class): 2–3 MK (active region corona)
+    const xLog = Math.log10(Math.max(1e-9, xray));
+    if (xLog > -4) {
+        _atmTcorona = 3.0e6;       // X-class: 3 MK
+    } else if (xLog > -5) {
+        _atmTcorona = 2.0e6;       // M-class: 2 MK
+    } else if (xLog > -6) {
+        _atmTcorona = 1.5e6;       // C-class: 1.5 MK
+    } else {
+        _atmTcorona = 1.0e6;       // A/B-class: 1.0 MK
+    }
+
+    updateAtmospherePanel();
+}, { passive: true });
+
+// Initial render
+updateAtmospherePanel();
 
 // Fade scroll hint once user has scrolled past the canvas section
 (function() {
