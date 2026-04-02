@@ -1038,7 +1038,7 @@ nav {
             <div class="transit-node">
                 <div class="transit-node-icon l1">L1</div>
                 <div class="transit-node-name">DSCOVR</div>
-                <div class="transit-node-sub">Measured here</div>
+                <div class="transit-node-sub" id="tr-l1-sub">Measured here</div>
             </div>
 
             <!-- Segment 2: L1 → Earth -->
@@ -1057,7 +1057,7 @@ nav {
             <div class="transit-node">
                 <div class="transit-node-icon earth">&#127758;</div>
                 <div class="transit-node-name">Earth</div>
-                <div class="transit-node-sub">Magnetopause</div>
+                <div class="transit-node-sub" id="tr-earth-sub">Magnetopause</div>
             </div>
         </div>
 
@@ -1069,8 +1069,13 @@ nav {
                 <span class="transit-stat-k">km</span>
             </div>
             <div class="transit-stat">
-                <span class="transit-stat-k">Wind speed</span>
+                <span class="transit-stat-k">L1 speed</span>
                 <span class="transit-stat-v" id="tr-wind-speed">–</span>
+                <span class="transit-stat-k">km/s</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">At Earth</span>
+                <span class="transit-stat-v" id="tr-wind-earth">–</span>
                 <span class="transit-stat-k">km/s</span>
             </div>
             <div class="transit-stat">
@@ -2048,14 +2053,17 @@ window.addEventListener('helio-state-update', e => {
     const spdEl  = el('h3d-speed');
     if (rEl   && hs.r_AU     != null) rEl.textContent   = hs.r_AU.toFixed(3);
     if (delEl && hs.delay_min != null) delEl.textContent = hs.delay_min.toFixed(1);
-    // Override wind speed HUD with Parker-corrected value
-    if (spdEl && hs.v_sw     != null) spdEl.textContent = Math.round(hs.v_sw);
+    // HUD wind speed: show raw L1 measurement (matches SWPC dashboard).
+    // Previously this was overridden with the Parker-corrected lagged value,
+    // which caused confusion vs the SWPC numbers.
+    if (spdEl && hs.l1_raw?.v_sw != null) spdEl.textContent = Math.round(hs.l1_raw.v_sw);
 
     // ── Transit diagram live values ─────────────────────────────────────
     const AU_KM   = 149_597_870.7;
     const L1_KM   = 1_500_000;
     const r_km    = (hs.r_AU ?? 1.0) * AU_KM;
-    const v_sw    = hs.v_sw ?? 400;
+    const v_raw   = hs.l1_raw?.v_sw ?? 400;      // current L1 measurement
+    const v_earth = hs.v_sw ?? 400;               // Parker-corrected at Earth
     const delayMin = hs.delay_min ?? 60;
 
     // Sun → L1 distance
@@ -2064,7 +2072,7 @@ window.addEventListener('helio-state-update', e => {
     if (sunL1El) sunL1El.textContent = (sunL1Km / 1e6).toFixed(1) + 'M';
 
     // Sun → L1 transit time at current wind speed
-    const sunL1Hr = sunL1Km / v_sw / 3600;
+    const sunL1Hr = sunL1Km / v_raw / 3600;
     const sunL1TimeEl = el('tr-sun-l1-time');
     if (sunL1TimeEl) {
         if (sunL1Hr < 48) {
@@ -2082,16 +2090,27 @@ window.addEventListener('helio-state-update', e => {
     const l1DelEl = el('tr-l1-delay');
     if (l1DelEl) l1DelEl.textContent = Math.round(delayMin);
 
-    // Bottom stats
+    // Bottom stats — show both L1 raw and Earth-corrected speeds
     const tdEl = el('tr-total-dist');
     if (tdEl) tdEl.textContent = (r_km / 1e6).toFixed(1) + 'M';
 
+    // L1 measured speed (raw DSCOVR — matches SWPC)
     const twEl = el('tr-wind-speed');
-    if (twEl) twEl.textContent = Math.round(v_sw);
+    if (twEl) twEl.textContent = Math.round(v_raw);
+
+    // Parker-corrected speed at Earth (lagged + distance-scaled)
+    const teEl = el('tr-wind-earth');
+    if (teEl) teEl.textContent = Math.round(v_earth);
+
+    // Node sub-labels: show live speed at each point
+    const l1Sub = el('tr-l1-sub');
+    if (l1Sub) l1Sub.textContent = `${Math.round(v_raw)} km/s (live)`;
+    const earthSub = el('tr-earth-sub');
+    if (earthSub) earthSub.textContent = `${Math.round(v_earth)} km/s (corrected)`;
 
     const tfEl = el('tr-full-transit');
     if (tfEl) {
-        const totalHr = r_km / v_sw / 3600;
+        const totalHr = r_km / v_raw / 3600;
         if (totalHr < 48) {
             tfEl.textContent = `~${Math.round(totalHr)} hr`;
         } else {
