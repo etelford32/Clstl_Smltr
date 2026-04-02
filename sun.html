@@ -1100,6 +1100,82 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
+            <div class="sec" id="sec-interior">
+                <div class="sec-hd"><span>Solar Interior</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Radius explorer slider -->
+                    <div class="ctrl">
+                        <label>r / R<sub>☉</sub></label>
+                        <input type="range" id="sl-int-radius" min="0" max="1.0" step="0.002" value="0.50">
+                        <span class="vdisp" id="disp-int-radius">0.50 R☉</span>
+                    </div>
+                    <div id="int-layer-badge" style="text-align:center;margin:-2px 0 8px">
+                        <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:rgba(255,136,0,.14);border:1px solid rgba(255,136,0,.32);color:#ff8800">RADIATIVE ZONE</span>
+                    </div>
+                    <table class="dtbl" id="int-table">
+                        <tr><td>Temperature</td><td id="int-T">–</td></tr>
+                        <tr><td>Density</td><td id="int-rho">–</td></tr>
+                        <tr><td>Pressure</td><td id="int-P">–</td></tr>
+                        <tr><td>Gravity</td><td id="int-g">–</td></tr>
+                        <tr><td>Depth below surface</td><td id="int-depth">–</td></tr>
+                    </table>
+
+                    <!-- Energy generation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ENERGY GENERATION</div>
+                        <table class="dtbl">
+                            <tr><td>Fusion rate ε</td><td id="int-eps">–</td></tr>
+                            <tr><td>L enclosed / L<sub>☉</sub></td><td id="int-L">–</td></tr>
+                            <tr><td>Photon escape</td><td id="int-escape">–</td></tr>
+                            <tr><td>Transport</td><td id="int-transport">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Rotation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ROTATION</div>
+                        <table class="dtbl">
+                            <tr><td>Period (eq.)</td><td id="int-rot-per">–</td></tr>
+                            <tr><td>Ω</td><td id="int-rot-omega">–</td></tr>
+                            <tr><td>Regime</td><td id="int-rot-zone" style="font-size:9px">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Convection (shown when in convective zone) -->
+                    <div id="int-conv-section" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;display:none">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CONVECTION</div>
+                        <table class="dtbl">
+                            <tr><td>Velocity</td><td id="int-conv-v">–</td></tr>
+                            <tr><td>Mixing length</td><td id="int-conv-l">–</td></tr>
+                            <tr><td>Scale height H<sub>P</sub></td><td id="int-conv-hp">–</td></tr>
+                            <tr><td>Overturn time</td><td id="int-conv-over">–</td></tr>
+                            <tr><td>Cell scale</td><td id="int-conv-gran">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Layer quick-jump buttons -->
+                    <div class="btn-row" style="margin-top:8px">
+                        <button class="int-jump" data-r="0.10">Core</button>
+                        <button class="int-jump" data-r="0.50">Radiative</button>
+                        <button class="int-jump" data-r="0.713">Tachocline</button>
+                        <button class="int-jump" data-r="0.85">Convective</button>
+                        <button class="int-jump" data-r="0.999">Surface</button>
+                    </div>
+
+                    <!-- Layer summary table -->
+                    <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">LAYER SUMMARY</div>
+                        <table class="dtbl" style="font-size:9.5px">
+                            <tr style="color:#ff4400"><td>Core</td><td>0–0.25 R, 15.7 MK, 150 g/cm³</td></tr>
+                            <tr style="color:#ff8800"><td>Radiative</td><td>0.25–0.71 R, ~170k yr escape</td></tr>
+                            <tr style="color:#ffaa00"><td>Tachocline</td><td>~0.71 R, dynamo source</td></tr>
+                            <tr style="color:#ffcc00"><td>Convective</td><td>0.71–1.0 R, ~10 day overturn</td></tr>
+                            <tr style="color:#ffd700"><td>Photosphere</td><td>Surface, 5778 K, G2V</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="sec" id="sec-atmosphere">
                 <div class="sec-hd"><span>Solar Atmosphere</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -1430,6 +1506,9 @@ import { SohoFeed }           from './js/soho-feed.js';
 import {
     solarAtmosphereTemp, solarAtmosphereDensity, solarAtmospherePressure,
     layerAt, dominantEmission, spiculeParams, coronalHeatingBudget, stateAt,
+    interiorTemp, interiorDensity, interiorPressure, interiorGravity,
+    fusionRate, cumulativeLuminosity, photonEscapeTime, rotationRate,
+    convectiveProperties, interiorLayerAt, interiorStateAt,
 } from './js/solar-atmosphere.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
@@ -5394,6 +5473,116 @@ window.addEventListener('swpc-update', (ev) => {
 });
 
 console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR INTERIOR PANEL — live physics calculations
+// ═══════════════════════════════════════════════════════════════
+
+function _fmtSciI(v, digits = 2) {
+    if (v === 0) return '0';
+    const exp = Math.floor(Math.log10(Math.abs(v)));
+    const man = v / Math.pow(10, exp);
+    const supDigits = String(exp).split('').map(c => c === '-' ? '⁻' : '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] || c).join('');
+    return `${man.toFixed(digits)}×10${supDigits}`;
+}
+
+function _fmtTempI(T) {
+    if (T >= 1e6) return `${(T / 1e6).toFixed(2)} MK`;
+    if (T >= 1e3) return `${Math.round(T).toLocaleString()} K`;
+    return `${T.toFixed(0)} K`;
+}
+
+function updateInteriorPanel() {
+    const slider = document.getElementById('sl-int-radius');
+    if (!slider) return;
+    const r = parseFloat(slider.value);
+    const state = interiorStateAt(r);
+
+    // Radius display
+    const rDisp = document.getElementById('disp-int-radius');
+    if (rDisp) rDisp.textContent = `${r.toFixed(3)} R☉`;
+
+    // Layer badge
+    const badge = document.getElementById('int-layer-badge');
+    if (badge) {
+        badge.innerHTML = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:${state.layer.color}22;border:1px solid ${state.layer.color}55;color:${state.layer.color}">${state.layer.name.toUpperCase()}</span>`;
+    }
+
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+    _s('int-T', _fmtTempI(state.T_K));
+    _s('int-rho', state.rho_gcm3 >= 0.01
+        ? `${state.rho_gcm3.toFixed(1)} g/cm³`
+        : _fmtSciI(state.rho_gcm3) + ' g/cm³');
+    _s('int-P', _fmtSciI(state.P_Pa) + ' Pa');
+    _s('int-g', state.g_ms2.toFixed(1) + ' m/s²');
+    _s('int-depth', state.depth_km >= 1000
+        ? `${(state.depth_km / 1000).toFixed(0)}k km`
+        : `${Math.round(state.depth_km)} km`);
+
+    // Energy generation
+    _s('int-eps', state.eps_Wkg > 0
+        ? _fmtSciI(state.eps_Wkg) + ' W/kg'
+        : '0 (no fusion)');
+    _s('int-L', (state.L_frac * 100).toFixed(1) + '% of L☉');
+    const esc = state.escape;
+    if (esc.diffusion_yr > 1000) {
+        _s('int-escape', `~${(esc.diffusion_yr / 1000).toFixed(0)}k yr`);
+    } else if (esc.diffusion_yr > 1) {
+        _s('int-escape', `~${Math.round(esc.diffusion_yr)} yr`);
+    } else {
+        _s('int-escape', `~${(esc.diffusion_yr * 365.25).toFixed(1)} days`);
+    }
+    _s('int-transport', esc.mechanism);
+
+    // Rotation
+    _s('int-rot-per', state.rotation.period_days.toFixed(1) + ' days');
+    _s('int-rot-omega', state.rotation.omega_deg_day.toFixed(2) + ' °/day');
+    _s('int-rot-zone', state.rotation.zone);
+
+    // Convection section: show/hide based on layer
+    const convSec = document.getElementById('int-conv-section');
+    if (convSec) {
+        if (state.convection) {
+            convSec.style.display = '';
+            const c = state.convection;
+            _s('int-conv-v', c.v_conv_ms >= 1000
+                ? `${(c.v_conv_ms / 1000).toFixed(1)} km/s`
+                : `${Math.round(c.v_conv_ms)} m/s`);
+            _s('int-conv-l', c.l_mix_km >= 1000
+                ? `${(c.l_mix_km / 1000).toFixed(0)}k km`
+                : `${Math.round(c.l_mix_km)} km`);
+            _s('int-conv-hp', c.H_P_km >= 1000
+                ? `${(c.H_P_km / 1000).toFixed(0)}k km`
+                : `${Math.round(c.H_P_km)} km`);
+            _s('int-conv-over', c.overturn_days >= 1
+                ? `${c.overturn_days.toFixed(1)} days`
+                : `${(c.overturn_days * 24 * 60).toFixed(0)} min`);
+            _s('int-conv-gran', c.granule_km >= 1000
+                ? `~${(c.granule_km / 1000).toFixed(0)} Mm`
+                : `~${Math.round(c.granule_km)} km`);
+        } else {
+            convSec.style.display = 'none';
+        }
+    }
+}
+
+// Slider input
+document.getElementById('sl-int-radius')?.addEventListener('input', updateInteriorPanel);
+
+// Quick-jump buttons
+document.querySelectorAll('.int-jump').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const slider = document.getElementById('sl-int-radius');
+        if (slider) {
+            slider.value = btn.dataset.r;
+            updateInteriorPanel();
+        }
+    });
+});
+
+// Initial render
+updateInteriorPanel();
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR ATMOSPHERE PANEL — live physics calculations
