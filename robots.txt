@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /dashboard.html
+Disallow: /rust/
+
+Sitemap: https://parkersphysics.com/sitemap.xml
