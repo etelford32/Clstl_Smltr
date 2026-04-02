@@ -80,6 +80,10 @@
       "destination": "/signin.html"
     },
     {
+      "source": "/dashboard",
+      "destination": "/dashboard.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },
