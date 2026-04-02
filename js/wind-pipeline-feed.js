@@ -106,17 +106,30 @@ export class WindPipelineFeed {
     }
 
     _dispatch(raw) {
-        // Parse every row; handle both 'speed' (ACE legacy) and 'proton_speed' (DSCOVR)
+        // ── DIAGNOSTIC: dump raw NOAA structure on first dispatch ──────────
+        if (!this._diagnosed) {
+            this._diagnosed = true;
+            const last = raw[raw.length - 1];
+            console.group('%c[WIND PIPELINE DIAGNOSTIC] Raw NOAA rtsw_wind_1m.json', 'color:#00ccff;font-weight:bold');
+            console.log('Total rows:', raw.length);
+            console.log('Last row keys:', Object.keys(last ?? {}));
+            console.log('Last row:', JSON.parse(JSON.stringify(last)));
+            console.groupEnd();
+        }
+
+        // Parse every row; prefer DSCOVR proton_* fields over ACE legacy fields.
+        // Apply noaaFill to each field independently before coalescing, so fill
+        // values (-99999) don't shadow valid proton_* readings via the ?? operator.
         const rows = raw
             .filter(r => r?.time_tag)
             .map(r => {
-                const spd = _fill(r.speed ?? r.proton_speed);
-                const den = _fill(r.density ?? r.proton_density);
+                const spd = _fill(r.proton_speed) ?? _fill(r.speed);
+                const den = _fill(r.proton_density) ?? _fill(r.density);
                 return {
                     timestamp:  new Date(String(r.time_tag).replace(' ', 'T') + 'Z'),
                     speed_km_s: spd,
                     density_cc: den,
-                    bz_nT:      _fill(r.bz_gsm ?? r.bz),
+                    bz_nT:      _fill(r.bz_gsm) ?? _fill(r.bz),
                     bt_nT:      _fill(r.bt),
                 };
             })
