@@ -666,6 +666,20 @@ export class Heliosphere3D {
             this._updateOrbitalMarkers(orb);
             window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: orb }));
         } catch (_e) { /* no-op */ }
+
+        // Log real-time planet positions for verification
+        const _deg = r => ((r * 180 / Math.PI) % 360 + 360) % 360;
+        const _au  = v => v?.toFixed(3) ?? '?';
+        const date = new Date((this._simJD - 2440587.5) * 86400000);
+        console.group(`%c[Heliosphere] Planet positions at ${date.toISOString().slice(0, 16)} UTC`, 'color:#4fc3f7;font-weight:bold');
+        for (const name of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']) {
+            const e = this._eph[name];
+            if (e) {
+                console.log(`  ${name.padEnd(8)} lon=${_deg(e.lon_rad).toFixed(1).padStart(6)}°  r=${_au(e.dist_AU)} AU  (${e.source})`);
+            }
+        }
+        console.log(`  ${'moon'.padEnd(8)} lon=${_deg(this._eph.moon?.lon_rad).toFixed(1).padStart(6)}°  r=${_au(this._eph.moon?.dist_AU)} AU`);
+        console.groupEnd();
     }
 
     /**
@@ -698,6 +712,20 @@ export class Heliosphere3D {
 
         // Update orbit trail precession (only rebuilds if epoch changed >1 day)
         if (this._orbitTrails) this._orbitTrails.update(jd);
+
+        // Update orbital markers (perihelion, aphelion, L1, L2) during time warp
+        if (forceAll) {
+            try {
+                const orb = earthOrbitFull(jd);
+                this._updateOrbitalMarkers(orb);
+                this._earthOrbitEllipse = {
+                    a_au: orb.a, e: orb.e,
+                    b_au: orb.a * Math.sqrt(1 - orb.e * orb.e),
+                    omega_bar_rad: orb.omega_bar_rad,
+                };
+                window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: orb }));
+            } catch (_e) { /* orb panel unavailable */ }
+        }
     }
 
     /**
