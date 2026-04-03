@@ -376,14 +376,118 @@ async function doSearch() {
         document.getElementById('sp-peri').textContent = sat.perigee_km + ' km';
         document.getElementById('sp-apo').textContent = sat.apogee_km + ' km';
 
-        // TODO: propagate to get current lat/lon/alt/speed
-        document.getElementById('sp-alt').textContent = '—';
-        document.getElementById('sp-latlon').textContent = '—';
-        document.getElementById('sp-speed').textContent = '—';
+        // Add to tracker for live propagation
+        const tracked = await tracker.loadNorad(sat.norad_id);
+        _selectedNorad = sat.norad_id;
+
+        // Draw orbit trail for selected satellite
+        _drawOrbitTrail(sat);
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
     }
+}
+
+let _selectedNorad = null;
+let _orbitTrailLine = null;
+
+/** Draw a full orbit trail for a satellite (one complete revolution). */
+function _drawOrbitTrail(sat) {
+    // Remove old trail
+    if (_orbitTrailLine) {
+        scene.remove(_orbitTrailLine);
+        _orbitTrailLine.geometry.dispose();
+        _orbitTrailLine = null;
+    }
+
+    if (!sat.line1 || !sat.line2) return;
+
+    const periodMin = sat.period_min || 90;
+    const STEPS = 180;
+    const epochJd = _computeEpochJd(sat.epoch_yr);
+    const nowJd = Date.now() / 86400000 + 2440587.5;
+    const tsinceBase = (nowJd - epochJd) * 1440;
+
+    const points = [];
+    for (let i = 0; i <= STEPS; i++) {
+        const t = tsinceBase + (i / STEPS) * periodMin;
+        // Use JS fallback for orbit trail (consistent, no async needed)
+        const teme = _quickPropagate(sat, t);
+        if (!teme) continue;
+        const ecef = _temeToEcef(teme.x, teme.y, teme.z, nowJd + (i / STEPS) * periodMin / 1440);
+        const lla = _ecefToLla(ecef.x, ecef.y, ecef.z);
+        const r = 1.0 * (1 + lla.alt / 6378.135);
+        const latR = lla.lat * Math.PI / 180;
+        const lonR = lla.lon * Math.PI / 180;
+        points.push(new THREE.Vector3(
+            r * Math.cos(latR) * Math.cos(lonR),
+            r * Math.sin(latR),
+            r * Math.cos(latR) * Math.sin(lonR)
+        ));
+    }
+
+    if (points.length > 2) {
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({
+            color: 0x00ffcc, transparent: true, opacity: 0.35, depthWrite: false,
+        });
+        _orbitTrailLine = new THREE.Line(geo, mat);
+        _orbitTrailLine.renderOrder = 5;
+        scene.add(_orbitTrailLine);
+    }
+}
+
+function _computeEpochJd(epochYr) {
+    const yr = Math.floor(epochYr);
+    const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
+    const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
+    return jdJan1 + dayFrac;
+}
+
+function _quickPropagate(tle, tsince) {
+    const TWOPI = 2 * Math.PI;
+    const n0 = tle.mean_motion * TWOPI / 1440;
+    const e0 = tle.eccentricity;
+    const i0 = tle.inclination * Math.PI / 180;
+    const raan0 = tle.raan * Math.PI / 180;
+    const argp0 = tle.arg_perigee * Math.PI / 180;
+    const M0 = tle.mean_anomaly * Math.PI / 180;
+    const J2 = 0.001082616;
+    const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1/3);
+    const p = a * (1 - e0 * e0);
+    const cosI = Math.cos(i0);
+    const n_corr = n0 * (1 + 1.5 * J2 * (6378.135/p)**2 * (1 - 1.5*(1-cosI*cosI)));
+    const raanDot = -1.5 * J2 * (6378.135/p)**2 * n0 * cosI;
+    const argpDot = 0.75 * J2 * (6378.135/p)**2 * n0 * (5*cosI*cosI - 1);
+    const M = M0 + n_corr * tsince;
+    const raan = raan0 + raanDot * tsince;
+    const argp = argp0 + argpDot * tsince;
+    let E = M;
+    for (let k = 0; k < 8; k++) E -= (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
+    const nu = Math.atan2(Math.sqrt(1-e0*e0)*Math.sin(E), Math.cos(E)-e0);
+    const r = a * (1 - e0*Math.cos(E));
+    const u = argp + nu;
+    const cosU = Math.cos(u), sinU = Math.sin(u);
+    const cosR = Math.cos(raan), sinR = Math.sin(raan);
+    const cosI2 = Math.cos(i0), sinI2 = Math.sin(i0);
+    return {
+        x: r * (cosR*cosU - sinR*sinU*cosI2),
+        y: r * (sinR*cosU + cosR*sinU*cosI2),
+        z: r * sinU * sinI2,
+    };
+}
+
+function _temeToEcef(x, y, z, jd) {
+    const T = (jd - 2451545.0) / 36525.0;
+    let theta = 67310.54841 + (876600*3600 + 8640184.812866)*T + 0.093104*T*T - 6.2e-6*T*T*T;
+    theta = ((theta % 86400) / 240) * Math.PI / 180;
+    const c = Math.cos(theta), s = Math.sin(theta);
+    return { x: c*x + s*y, y: -s*x + c*y, z };
+}
+
+function _ecefToLla(x, y, z) {
+    const r = Math.sqrt(x*x + y*y + z*z);
+    return { lat: Math.asin(z/r) * 180/Math.PI, lon: Math.atan2(y,x) * 180/Math.PI, alt: r - 6378.135 };
 }
 
 document.getElementById('sp-search-btn')?.addEventListener('click', doSearch);
@@ -404,6 +508,18 @@ function animate() {
 
     // Propagate satellites
     tracker.tick();
+
+    // Update selected satellite info panel
+    if (_selectedNorad) {
+        const sats = tracker.getSatellites();
+        const sel = sats.find(s => s.norad_id === _selectedNorad);
+        if (sel) {
+            document.getElementById('sp-alt').textContent = `${Math.round(sel.alt)} km`;
+            document.getElementById('sp-latlon').textContent = `${sel.lat.toFixed(2)}°, ${sel.lon.toFixed(2)}°`;
+            const speedKms = sel.alt > 0 ? Math.sqrt(398600.8 / (6378.135 + sel.alt)).toFixed(1) : '—';
+            document.getElementById('sp-speed').textContent = `${speedKms} km/s`;
+        }
+    }
 
     renderer.render(scene, camera);
 }

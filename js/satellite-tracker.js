@@ -40,6 +40,44 @@ const DEG2RAD  = Math.PI / 180;
 const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard)
 const MIN_PER_DAY = 1440;
 
+// ── Rust WASM SGP4 (high-performance, loaded async) ────────────────────────
+// Falls back to the JS propagator if WASM isn't available.
+let _wasmSgp4 = null;
+let _wasmLoading = false;
+
+async function _loadWasmSgp4() {
+    if (_wasmSgp4 || _wasmLoading) return _wasmSgp4;
+    _wasmLoading = true;
+    try {
+        const mod = await import('./sgp4-wasm/sgp4_wasm.js');
+        await mod.default();  // init WASM
+        _wasmSgp4 = mod;
+        console.info('[SatTracker] Rust SGP4 WASM loaded — high-performance propagation active');
+    } catch (err) {
+        console.debug('[SatTracker] WASM SGP4 not available, using JS fallback:', err.message);
+    }
+    _wasmLoading = false;
+    return _wasmSgp4;
+}
+
+// Try to load WASM immediately (non-blocking)
+_loadWasmSgp4();
+
+/** Propagate using WASM if available, else JS fallback. */
+function propagate(tle, tsince_min) {
+    if (_wasmSgp4 && tle.line1 && tle.line2) {
+        try {
+            const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
+            if (result && result.length >= 3 && isFinite(result[0])) {
+                return { x: result[0], y: result[1], z: result[2] };
+            }
+        } catch (_) {
+            // WASM propagation failed — fall through to JS
+        }
+    }
+    return jsFallbackPropagate(tle, tsince_min);
+}
+
 // ── Pure JS SGP4 fallback (simplified Brouwer mean elements) ─────────────────
 // This is a simplified propagator for when the Rust WASM module isn't loaded.
 // Uses the same Keplerian mean motion + J2 secular perturbations, but skips
@@ -246,8 +284,8 @@ export class SatelliteTracker {
             const sat = this._satellites[i];
             const tsince = (jd - sat.epochJd) * MIN_PER_DAY;  // minutes since TLE epoch
 
-            // Propagate (JS fallback — WASM would be faster for large catalogs)
-            const teme = jsFallbackPropagate(sat.tle, tsince);
+            // Propagate via WASM SGP4 (if loaded) or JS fallback
+            const teme = propagate(sat.tle, tsince);
 
             // TEME → ECEF → lat/lon/alt
             const ecef = temeToEcef(teme.x, teme.y, teme.z, jd);
