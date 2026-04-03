@@ -84,3 +84,16 @@ export const API = Object.freeze({
     donkiGST:       '/api/donki/gst',
     donkiSEP:       '/api/donki/sep',
 });
+
+// ── NASA Earthdata ──────────────────────────────────────────────────────────
+// GIBS (imagery browse) is public and CORS-enabled — no token needed.
+// The Earthdata Bearer token is for raw science data via OPeNDAP / GES DISC
+// (quantitative grids, not colour-mapped imagery).  Store in Vercel env var
+// NASA_EARTHDATA_TOKEN; edge functions inject it server-side.
+//
+// Register / manage tokens: https://urs.earthdata.nasa.gov/
+export const EARTHDATA = Object.freeze({
+    gibsSnapshot: 'https://wvs.earthdata.nasa.gov/api/v1/snapshot',
+    gibsWms:      'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+    gesDisc:      'https://disc.gsfc.nasa.gov',   // future: OPeNDAP numeric grids
+});
