@@ -44,6 +44,10 @@ import { earthOrbitFull } from './earth-orbit.js';
 import { EphemerisService } from './horizons.js';
 import { OrbitTrails } from './orbit-trails.js';
 import {
+    MoonSystem, JUPITER_MOONS, SATURN_MOONS, URANUS_MOONS, NEPTUNE_MOONS,
+    createUranusRings, applyPlanetSpin, PLANET_SPIN,
+} from './planet-moons.js';
+import {
     buildParkerLUT,
     parkerSpeedRatio,
     alfvenSpeed,
@@ -710,6 +714,27 @@ export class Heliosphere3D {
         this._updateEphemerisPositions();
         this._tickMarsSystem();
 
+        // Tick all moon systems at the current simulation JD
+        this._jupiterMoons?.tick(jd);
+        this._saturnMoons?.tick(jd);
+        this._uranusMoons?.tick(jd);
+        this._neptuneMoons?.tick(jd);
+
+        // Apply axial tilt + rotation to all planets
+        for (const name of ['mercury', 'venus', 'mars']) {
+            applyPlanetSpin(this._planetMeshes[name], name, jd);
+        }
+        // For grouped planets, apply spin to the sphere child (not the group)
+        for (const [name, group] of [
+            ['jupiter', this._planetMeshes.jupiter],
+            ['saturn',  this._planetMeshes.saturn],
+            ['uranus',  this._planetMeshes.uranus],
+            ['neptune', this._planetMeshes.neptune],
+        ]) {
+            const sphere = group?.children?.find(c => c.name === name);
+            if (sphere) applyPlanetSpin(sphere, name, jd);
+        }
+
         // Update orbit trail precession (only rebuilds if epoch changed >1 day)
         if (this._orbitTrails) this._orbitTrails.update(jd);
 
@@ -1137,19 +1162,26 @@ export class Heliosphere3D {
         // Default earth position (overwritten by ephemeris)
         this._earthGroup.position.set(AU, 0, 0);
 
-        // ── Outer planets ─────────────────────────────────────────────────────
-        for (const name of ['jupiter', 'uranus', 'neptune']) {
-            this._planetMeshes[name] = mkPlanet(name, R[name], COL[name]);
-            const lbl = this._makeLabelSprite(name);
-            this._scene.add(lbl);
-            this._planetLabels[name] = lbl;
-        }
+        // ── Jupiter — group with Galilean moons ──────────────────────────────
+        const jupiterGroup = new THREE.Group();
+        jupiterGroup.name = 'jupiter_group';
+        this._scene.add(jupiterGroup);
+        const jupiterSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R.jupiter, 24, 24),
+            new THREE.MeshStandardMaterial({ color: COL.jupiter, roughness: 0.80, metalness: 0 })
+        );
+        jupiterSphere.name = 'jupiter';
+        jupiterGroup.add(jupiterSphere);
+        this._planetMeshes.jupiter = jupiterGroup;
+        this._jupiterMoons = new MoonSystem(
+            jupiterGroup, JUPITER_MOONS, AU, R.jupiter,
+            PLANET_SPIN.jupiter.obliquity * D2R
+        );
 
-        // Saturn — group containing the sphere + ring system
+        // ── Saturn — group with rings + Titan/Rhea/Dione ────────────────────
         const saturnGroup = new THREE.Group();
         saturnGroup.name = 'saturn_group';
         this._scene.add(saturnGroup);
-
         const saturnSphere = new THREE.Mesh(
             new THREE.SphereGeometry(R.saturn, 24, 24),
             new THREE.MeshStandardMaterial({ color: COL.saturn, roughness: 0.75, metalness: 0.05 })
@@ -1157,8 +1189,7 @@ export class Heliosphere3D {
         saturnSphere.name = 'saturn';
         saturnGroup.add(saturnSphere);
 
-        // Saturn's ring system: two concentric ring bands, tilted ~27° to ecliptic
-        // Inner ring (B ring proxy): 1.55–2.05 Rs; outer ring (A ring proxy): 2.1–2.4 Rs
+        // Saturn's ring system
         const ringTilt = 27 * Math.PI / 180;
         for (const [inner, outer, opacity] of [
             [R.saturn * 1.55, R.saturn * 2.05, 0.55],
@@ -1173,16 +1204,53 @@ export class Heliosphere3D {
                 depthWrite:  false,
             });
             const ring = new THREE.Mesh(ringGeo, ringMat);
-            ring.rotation.x = Math.PI / 2 - ringTilt;  // tilt ring plane ~27° from orbital plane
+            ring.rotation.x = Math.PI / 2 - ringTilt;
             saturnGroup.add(ring);
         }
-
         this._planetMeshes.saturn = saturnGroup;
+        this._saturnMoons = new MoonSystem(
+            saturnGroup, SATURN_MOONS, AU, R.saturn, ringTilt
+        );
 
-        // Saturn label
-        const saturnLabel = this._makeLabelSprite('saturn');
-        this._scene.add(saturnLabel);
-        this._planetLabels.saturn = saturnLabel;
+        // ── Uranus — group with faint rings + Titania/Oberon ────────────────
+        const uranusGroup = new THREE.Group();
+        uranusGroup.name = 'uranus_group';
+        this._scene.add(uranusGroup);
+        const uranusSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R.uranus, 20, 20),
+            new THREE.MeshStandardMaterial({ color: COL.uranus, roughness: 0.85, metalness: 0 })
+        );
+        uranusSphere.name = 'uranus';
+        uranusGroup.add(uranusSphere);
+        createUranusRings(uranusGroup, R.uranus);
+        this._planetMeshes.uranus = uranusGroup;
+        this._uranusMoons = new MoonSystem(
+            uranusGroup, URANUS_MOONS, AU, R.uranus,
+            PLANET_SPIN.uranus.obliquity * D2R
+        );
+
+        // ── Neptune — group with Triton ──────────────────────────────────────
+        const neptuneGroup = new THREE.Group();
+        neptuneGroup.name = 'neptune_group';
+        this._scene.add(neptuneGroup);
+        const neptuneSphere = new THREE.Mesh(
+            new THREE.SphereGeometry(R.neptune, 20, 20),
+            new THREE.MeshStandardMaterial({ color: COL.neptune, roughness: 0.85, metalness: 0 })
+        );
+        neptuneSphere.name = 'neptune';
+        neptuneGroup.add(neptuneSphere);
+        this._planetMeshes.neptune = neptuneGroup;
+        this._neptuneMoons = new MoonSystem(
+            neptuneGroup, NEPTUNE_MOONS, AU, R.neptune,
+            PLANET_SPIN.neptune.obliquity * D2R
+        );
+
+        // Labels for all outer planets
+        for (const name of ['jupiter', 'saturn', 'uranus', 'neptune']) {
+            const lbl = this._makeLabelSprite(name);
+            this._scene.add(lbl);
+            this._planetLabels[name] = lbl;
+        }
     }
 
     _setDefaultPlanetPositions() {
