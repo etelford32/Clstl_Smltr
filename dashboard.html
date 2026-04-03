@@ -246,6 +246,70 @@ footer a:hover{color:var(--text)}
 
   </div><!-- /top-row -->
 
+  <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
+  <div class="card" id="alert-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Your Space Weather Report</span>
+      <span class="card-link" id="alert-loc-name" style="font-size:.72rem;color:var(--muted)">Set location above</span>
+    </div>
+    <div class="card-body" id="alert-card-body">
+
+      <!-- Aurora forecast -->
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
+        <div id="alert-aurora-icon" style="font-size:2rem;line-height:1">🔭</div>
+        <div style="flex:1">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:2px" id="alert-aurora-title">Aurora Visibility</div>
+          <div style="font-size:.75rem;color:var(--muted);line-height:1.5" id="alert-aurora-desc">
+            Enter your city or zip code in the Location card above to see your personalized aurora forecast.
+          </div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap" id="alert-aurora-tags"></div>
+        </div>
+      </div>
+
+      <!-- Condition grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">
+        <!-- HF Radio -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">HF Radio</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-hf">Normal</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-hf-desc">No blackout</div>
+        </div>
+        <!-- GPS/GNSS -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">GPS Accuracy</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-gps">Nominal</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-gps-desc">Normal precision</div>
+        </div>
+        <!-- Power Grid -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Power Grid</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-grid">No Impact</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-grid-desc">GIC risk low</div>
+        </div>
+        <!-- Spacecraft -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Spacecraft</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-craft">Low Risk</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-craft-desc">Surface charging minimal</div>
+        </div>
+      </div>
+
+      <!-- Aurora viewing tip -->
+      <div id="alert-tip" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.72rem;color:var(--muted);line-height:1.5;display:none">
+        <strong style="color:var(--accent)">Viewing Tip:</strong> <span id="alert-tip-text"></span>
+      </div>
+
+      <!-- Shareable summary -->
+      <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+        <button id="alert-share-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;font-family:inherit;font-size:.7rem;padding:5px 12px;transition:all .15s">
+          Share Report
+        </button>
+        <span id="alert-share-msg" style="font-size:.65rem;color:var(--green);display:none">Copied to clipboard!</span>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── SIMULATIONS ── -->
   <p class="section-label">Simulations</p>
   <div class="sim-grid">
@@ -675,8 +739,182 @@ function _initSpaceWeather() {
     const hh = String(ts.getHours()).padStart(2,'0');
     const mm = String(ts.getMinutes()).padStart(2,'0');
     document.getElementById('sw-status').textContent = `Updated ${hh}:${mm}`;
+
+    // ── Update personalized alert card ──────────────────────────
+    _updateAlertCard(sw);
   });
 }
+
+/* ════════════════════════════════════════════════════════════
+   PERSONALIZED SPACE WEATHER REPORT
+═════════════════════════════════════════════════════════════ */
+let _lastAlertSw = null;
+
+function _updateAlertCard(sw) {
+  _lastAlertSw = sw;
+  const loc = loadUserLocation();
+  const kp = sw?.kp ?? 0;
+  const kpI = Math.floor(kp);
+  const xray = sw?.xray_flux ?? 1e-8;
+  const xInt = Math.min(1, Math.log10(Math.max(xray, 1e-9) / 1e-9) / 4);
+  const bz = sw?.solar_wind?.bz ?? 0;
+
+  // Location name
+  const locEl = document.getElementById('alert-loc-name');
+  if (locEl) {
+    locEl.textContent = loc ? loc.city : 'Set location above';
+  }
+
+  // ── Aurora section ──────────────────────────────────────────
+  const aIcon = document.getElementById('alert-aurora-icon');
+  const aTitle = document.getElementById('alert-aurora-title');
+  const aDesc = document.getElementById('alert-aurora-desc');
+  const aTags = document.getElementById('alert-aurora-tags');
+
+  if (loc) {
+    const vis = auroraVisibility(loc.lat, kp);
+    aIcon.textContent = vis.visible ? '🌌' : '🔭';
+
+    if (vis.visible) {
+      aTitle.textContent = 'Aurora Likely Visible Tonight!';
+      aTitle.style.color = '#00ff88';
+      aDesc.innerHTML = `The auroral oval extends to <strong style="color:#ddd">${vis.boundaryDeg.toFixed(0)}° latitude</strong>. `
+        + `Your location at <strong style="color:#ddd">${Math.abs(loc.lat).toFixed(1)}°${loc.lat >= 0 ? 'N' : 'S'}</strong> is within the viewing zone. `
+        + `Look north after dark for best results!`;
+    } else {
+      aTitle.textContent = 'Aurora Not Visible';
+      aTitle.style.color = vis.color;
+      aDesc.innerHTML = `Current auroral oval boundary: <strong style="color:#ddd">${vis.boundaryDeg.toFixed(0)}° latitude</strong>. `
+        + `Your location at <strong style="color:#ddd">${Math.abs(loc.lat).toFixed(1)}°${loc.lat >= 0 ? 'N' : 'S'}</strong> needs Kp ≥ ${vis.neededKp} `
+        + `(currently ${kp.toFixed(1)}).`;
+    }
+
+    // Tags
+    let tags = '';
+    if (vis.visible) tags += '<span style="background:#00ff8822;color:#00ff88;border:1px solid #00ff8844;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">AURORA ALERT</span>';
+    if (kpI >= 5) tags += `<span style="background:#ff880022;color:#ff8800;border:1px solid #ff880044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">G${Math.min(5,kpI-4)} STORM</span>`;
+    if (xInt > 0.3) tags += '<span style="background:#ff440022;color:#ff4444;border:1px solid #ff440044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">SOLAR FLARE</span>';
+    if (bz < -10) tags += '<span style="background:#ff660022;color:#ff6644;border:1px solid #ff660044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">Bz SOUTH</span>';
+    aTags.innerHTML = tags;
+  } else {
+    aIcon.textContent = '📍';
+    aTitle.textContent = 'Set Your Location';
+    aTitle.style.color = 'var(--text)';
+    aDesc.textContent = 'Enter your city or zip code in the Location card above to get your personalized aurora forecast, HF radio conditions, and GPS accuracy estimate.';
+    aTags.innerHTML = '';
+  }
+
+  // ── HF Radio ────────────────────────────────────────────────
+  const hfEl = document.getElementById('alert-hf');
+  const hfDesc = document.getElementById('alert-hf-desc');
+  if (xInt > 0.5) {
+    hfEl.textContent = 'Severe Blackout'; hfEl.style.color = '#ff2200';
+    hfDesc.textContent = 'HF radio unusable on sunlit side';
+  } else if (xInt > 0.3) {
+    hfEl.textContent = 'Moderate Blackout'; hfEl.style.color = '#ff6600';
+    hfDesc.textContent = 'HF degraded for 10-60 min';
+  } else if (xInt > 0.15) {
+    hfEl.textContent = 'Minor Degradation'; hfEl.style.color = '#ffaa00';
+    hfDesc.textContent = 'Brief HF fadeout possible';
+  } else {
+    hfEl.textContent = 'Normal'; hfEl.style.color = '#00cc88';
+    hfDesc.textContent = 'No blackout';
+  }
+
+  // ── GPS / GNSS ──────────────────────────────────────────────
+  const gpsEl = document.getElementById('alert-gps');
+  const gpsDesc = document.getElementById('alert-gps-desc');
+  if (kpI >= 8) {
+    gpsEl.textContent = 'Possible Outage'; gpsEl.style.color = '#ff2200';
+    gpsDesc.textContent = 'Ionospheric scintillation severe';
+  } else if (kpI >= 6) {
+    gpsEl.textContent = 'Degraded ~50m'; gpsEl.style.color = '#ff8800';
+    gpsDesc.textContent = 'Accuracy reduced by scintillation';
+  } else if (kpI >= 4) {
+    gpsEl.textContent = 'Minor Errors'; gpsEl.style.color = '#ffcc44';
+    gpsDesc.textContent = 'Occasional position jumps';
+  } else {
+    gpsEl.textContent = 'Nominal'; gpsEl.style.color = '#00cc88';
+    gpsDesc.textContent = 'Normal precision';
+  }
+
+  // ── Power Grid ──────────────────────────────────────────────
+  const gridEl = document.getElementById('alert-grid');
+  const gridDesc = document.getElementById('alert-grid-desc');
+  if (kpI >= 9) {
+    gridEl.textContent = 'Collapse Risk'; gridEl.style.color = '#ff2200';
+    gridDesc.textContent = 'Widespread GIC, transformer risk';
+  } else if (kpI >= 7) {
+    gridEl.textContent = 'Voltage Issues'; gridEl.style.color = '#ff6600';
+    gridDesc.textContent = 'Geomagnetically induced currents';
+  } else if (kpI >= 5) {
+    gridEl.textContent = 'Minor GIC'; gridEl.style.color = '#ffcc44';
+    gridDesc.textContent = 'Weak induced currents possible';
+  } else {
+    gridEl.textContent = 'No Impact'; gridEl.style.color = '#00cc88';
+    gridDesc.textContent = 'GIC risk low';
+  }
+
+  // ── Spacecraft ──────────────────────────────────────────────
+  const craftEl = document.getElementById('alert-craft');
+  const craftDesc = document.getElementById('alert-craft-desc');
+  if (kpI >= 7) {
+    craftEl.textContent = 'High Risk'; craftEl.style.color = '#ff2200';
+    craftDesc.textContent = 'Deep dielectric + surface charging';
+  } else if (kpI >= 5) {
+    craftEl.textContent = 'Elevated'; craftEl.style.color = '#ffaa00';
+    craftDesc.textContent = 'Surface charging events likely';
+  } else {
+    craftEl.textContent = 'Low Risk'; craftEl.style.color = '#00cc88';
+    craftDesc.textContent = 'Surface charging minimal';
+  }
+
+  // ── Viewing tip ─────────────────────────────────────────────
+  const tipEl = document.getElementById('alert-tip');
+  const tipText = document.getElementById('alert-tip-text');
+  if (loc) {
+    tipEl.style.display = '';
+    const vis = auroraVisibility(loc.lat, kp);
+    if (vis.visible) {
+      tipText.textContent = `Best viewing is 10 PM – 2 AM local time, away from city lights. Look toward the northern horizon (southern if in the Southern Hemisphere). The aurora may appear as a green/pink glow or dancing curtains.`;
+    } else if (vis.neededKp <= kp + 3) {
+      tipText.textContent = `Aurora is close to being visible at your latitude. A Kp increase of just ${vis.neededKp - Math.floor(kp)} points would bring it into view. Check back during active geomagnetic conditions.`;
+    } else {
+      tipText.textContent = `At your latitude (${Math.abs(loc.lat).toFixed(0)}°), aurora requires a major geomagnetic storm (Kp ≥ ${vis.neededKp}). These occur a few times per solar cycle — follow the Space Weather dashboard for alerts.`;
+    }
+  } else {
+    tipEl.style.display = 'none';
+  }
+}
+
+// ── Share button ────────────────────────────────────────────────────────────
+document.getElementById('alert-share-btn')?.addEventListener('click', () => {
+  const loc = loadUserLocation();
+  const sw = _lastAlertSw;
+  if (!sw) return;
+  const kp = sw.kp ?? 0;
+  const vis = loc ? auroraVisibility(loc.lat, kp) : null;
+  const city = loc?.city ?? 'Unknown';
+
+  let text = `Space Weather Report for ${city}\n`;
+  text += `Kp: ${kp.toFixed(1)} | Wind: ${sw.solar_wind?.speed ?? '?'} km/s | Bz: ${sw.solar_wind?.bz?.toFixed(1) ?? '?'} nT\n`;
+  if (vis) {
+    text += vis.visible
+      ? `Aurora: VISIBLE from ${city}! Look north tonight.\n`
+      : `Aurora: Needs Kp ≥ ${vis.neededKp} (current ${kp.toFixed(1)})\n`;
+  }
+  text += `\nLive at parkersphysics.com/dashboard.html`;
+
+  navigator.clipboard.writeText(text).then(() => {
+    const msg = document.getElementById('alert-share-msg');
+    if (msg) { msg.style.display = 'inline'; setTimeout(() => msg.style.display = 'none', 2000); }
+  }).catch(() => {});
+});
+
+// Re-update alert card when location changes
+window.addEventListener('user-location-changed', () => {
+  if (_lastAlertSw) _updateAlertCard(_lastAlertSw);
+});
 
 /* ════════════════════════════════════════════════════════════
    INIT
