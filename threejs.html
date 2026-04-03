@@ -204,6 +204,54 @@ nav {
 #speed-ctrl label { font-size:10px; color:#888; }
 #speed-ctrl input[type=range] { width:80px; accent-color:#ffd700; }
 #speed-ctrl span { font-size:10px; color:#ffd700; font-weight:600; min-width:28px; }
+
+/* ─── Time controls bar ──────────────────────────────────── */
+#time-controls {
+    position:absolute; bottom:44px; left:12px; z-index:15;
+    display:flex; align-items:center; gap:4px; flex-wrap:wrap;
+    pointer-events:auto; max-width:calc(100% - 24px);
+}
+.tc-btn {
+    background:rgba(255,200,0,.08); border:1px solid rgba(255,200,0,.2);
+    border-radius:4px; color:#cca; cursor:pointer; font-family:inherit;
+    font-size:9px; padding:3px 7px; transition:all .15s; white-space:nowrap;
+}
+.tc-btn:hover { background:rgba(255,200,0,.18); color:#ffd700; }
+.tc-btn.active { background:rgba(255,200,0,.25); border-color:#ffd700; color:#ffd700; }
+.tc-sep { width:1px; height:16px; background:rgba(255,255,255,.08); margin:0 2px; }
+#tc-date-picker {
+    background:rgba(0,0,0,.4); border:1px solid rgba(255,200,0,.2);
+    border-radius:4px; color:#ddc; font-family:monospace; font-size:9px;
+    padding:2px 5px; outline:none; width:135px;
+}
+#tc-date-picker:focus { border-color:#ffd700; }
+#tc-epoch { font-size:8px; padding:2px 6px; border-radius:8px; font-weight:600; letter-spacing:.4px; }
+#tc-epoch.live { background:rgba(40,220,100,.15); color:#4f8; border:1px solid rgba(60,255,120,.3); }
+#tc-epoch.past { background:rgba(255,180,60,.15); color:#f90; border:1px solid rgba(255,180,60,.3); }
+#tc-epoch.future { background:rgba(120,80,255,.18); color:#c8a0ff; border:1px solid rgba(160,100,255,.35); }
+
+/* ─── Data section below canvas ──────────────────────────── */
+#solar-data-section {
+    max-width:1200px; margin:0 auto; padding:20px 16px 40px;
+    color:#ccc; font-family:'Segoe UI',system-ui,sans-serif;
+}
+.sd-card {
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,200,0,.10);
+    border-radius:12px; padding:16px 18px; margin-bottom:12px;
+}
+.sd-card h3 {
+    font-size:.76rem; text-transform:uppercase; letter-spacing:.08em;
+    color:#aa9944; margin-bottom:10px; padding-bottom:6px;
+    border-bottom:1px solid rgba(255,200,0,.08);
+}
+.sd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; }
+.sd-stat { display:flex; justify-content:space-between; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.03); font-size:.78rem; }
+.sd-stat-k { color:#887; }
+.sd-stat-v { color:#ddc; font-weight:600; font-family:monospace; font-variant-numeric:tabular-nums; }
+.sd-planet-row { display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.03); font-size:.75rem; }
+.sd-planet-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.sd-planet-name { width:65px; font-weight:600; }
+.sd-planet-val { color:#aab; font-family:monospace; font-variant-numeric:tabular-nums; }
 #backdrop {
     display:none; position:absolute; inset:0; z-index:25;
     background:rgba(0,0,0,.45); cursor:pointer;
@@ -432,6 +480,31 @@ nav {
         <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
         <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
 
+        <!-- Time controls -->
+        <div id="time-controls">
+            <button class="tc-btn" id="tc-prev-yr" title="Back 1 year">−1yr</button>
+            <button class="tc-btn" id="tc-prev-mo" title="Back 1 month">−1mo</button>
+            <button class="tc-btn" id="tc-prev-wk" title="Back 1 week">−1wk</button>
+            <button class="tc-btn" id="tc-prev-day" title="Back 1 day">−1d</button>
+            <div class="tc-sep"></div>
+            <input type="datetime-local" id="tc-date-picker" title="Jump to date" step="60">
+            <div class="tc-sep"></div>
+            <button class="tc-btn" id="tc-live" title="Snap to real-time">⊙ Live</button>
+            <div class="tc-sep"></div>
+            <button class="tc-btn" id="tc-next-day" title="Forward 1 day">+1d</button>
+            <button class="tc-btn" id="tc-next-wk" title="Forward 1 week">+1wk</button>
+            <button class="tc-btn" id="tc-next-mo" title="Forward 1 month">+1mo</button>
+            <button class="tc-btn" id="tc-next-yr" title="Forward 1 year">+1yr</button>
+            <div class="tc-sep"></div>
+            <button class="tc-btn" data-spd="0" title="Pause">⏸</button>
+            <button class="tc-btn active" data-spd="1">1×</button>
+            <button class="tc-btn" data-spd="5">5×</button>
+            <button class="tc-btn" data-spd="20">20×</button>
+            <button class="tc-btn" data-spd="50">50×</button>
+            <div class="tc-sep"></div>
+            <span id="tc-epoch" class="live">LIVE</span>
+        </div>
+
         <!-- Speed slider -->
         <div class="cv-btn" id="speed-ctrl">
             <label>Speed</label>
@@ -578,6 +651,72 @@ nav {
 
         </div>
     </aside>
+</div>
+
+<!-- ═══ SOLAR SYSTEM DATA & ANALYTICS ═══ -->
+<div id="solar-data-section">
+
+    <!-- Live Planet Positions -->
+    <div class="sd-card">
+        <h3>Planet Positions <span style="font-weight:400;color:#665;text-transform:none;letter-spacing:0">(real-time ephemeris · VSOP87D / Meeus)</span></h3>
+        <div id="sd-planet-table"></div>
+    </div>
+
+    <!-- Simulation Info -->
+    <div class="sd-grid">
+        <div class="sd-card">
+            <h3>Ephemeris Engine</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Earth position</span><span class="sd-stat-v" id="sd-earth-src">VSOP87D</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Inner planets</span><span class="sd-stat-v">Meeus Kepler (3-term)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Outer planets</span><span class="sd-stat-v">VSOP87D truncated</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Moon</span><span class="sd-stat-v">Meeus Ch.47 (16-term)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Accuracy (lon)</span><span class="sd-stat-v">&lt; 0.3° all planets</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Accuracy (dist)</span><span class="sd-stat-v">&lt; 0.1% all planets</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Valid range</span><span class="sd-stat-v">1800 – 2200 AD</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">JPL Horizons</span><span class="sd-stat-v" id="sd-horizons-status">checking…</span></div>
+        </div>
+
+        <div class="sd-card">
+            <h3>Live Space Weather</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Solar wind</span><span class="sd-stat-v" id="sd-sw-speed">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">IMF Bz</span><span class="sd-stat-v" id="sd-sw-bz">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Kp index</span><span class="sd-stat-v" id="sd-sw-kp">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">X-ray class</span><span class="sd-stat-v" id="sd-sw-xray">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Storm level</span><span class="sd-stat-v" id="sd-sw-storm">Quiet</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Source</span><span class="sd-stat-v">NOAA DSCOVR L1</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Cadence</span><span class="sd-stat-v">60s (T1 tier)</span></div>
+        </div>
+
+        <div class="sd-card">
+            <h3>Orbital Mechanics</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Orbit type</span><span class="sd-stat-v">True Keplerian ellipse</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">3D orientation</span><span class="sd-stat-v">i + Ω + ω (full)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Precession</span><span class="sd-stat-v">Standish 1992 rates</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Earth eccentricity</span><span class="sd-stat-v" id="sd-earth-ecc">0.0167</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Earth perihelion</span><span class="sd-stat-v" id="sd-earth-peri">—</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Earth aphelion</span><span class="sd-stat-v" id="sd-earth-aph">—</span></div>
+        </div>
+
+        <div class="sd-card">
+            <h3>Moon Systems (14 satellites)</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Earth</span><span class="sd-stat-v">Moon (Meeus Ch.47)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Mars</span><span class="sd-stat-v">Phobos, Deimos</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Jupiter</span><span class="sd-stat-v">Io, Europa, Ganymede, Callisto</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Saturn</span><span class="sd-stat-v">Enceladus, Rhea, Titan</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Uranus</span><span class="sd-stat-v">Ariel, Umbriel, Titania, Oberon</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Neptune</span><span class="sd-stat-v">Triton (retrograde ↺)</span></div>
+        </div>
+    </div>
+
+    <!-- Data Sources -->
+    <div class="sd-card" style="font-size:.7rem;color:#665;line-height:1.7">
+        <h3>Data Sources & References</h3>
+        <p><strong style="color:#887">Ephemeris:</strong> Bretagnon & Francou (1988) VSOP87D · Meeus (1998) "Astronomical Algorithms" 2nd ed. · Standish (1992) JPL secular corrections · NASA JPL Horizons REST API (when available)</p>
+        <p style="margin-top:4px"><strong style="color:#887">Space Weather:</strong> NOAA SWPC DSCOVR/ACE rtsw_wind_1m + rtsw_mag_1m · GOES X-ray 1-day · Planetary Kp 1-min · NASA DONKI CME/Flares/SEP</p>
+        <p style="margin-top:4px"><strong style="color:#887">Planet Data:</strong> NASA Planetary Fact Sheets (rotation, obliquity, radii) · Murray & Dermott (1999) "Solar System Dynamics" (moon orbits) · IAU/IAG 2015 report (pole orientations)</p>
+        <p style="margin-top:4px"><strong style="color:#887">Accuracy Notes:</strong> Planet longitudes accurate to &lt;0.3° for 1800–2200 AD. Earth VSOP87D &lt;1″. Secular precession rates are linear approximations — over millennia, mutual planetary perturbations (especially Jupiter-Saturn great inequality) cause additional drift. Moon orbital elements are mean Keplerian — Laplace resonance perturbations not modeled (~0.5°/yr drift for Io).</p>
+    </div>
+
 </div>
 
 <script type="importmap">
@@ -2699,6 +2838,172 @@ function resize() {
 const ro = new ResizeObserver(resize);
 ro.observe(cWrap);
 resize();
+
+// ═══════════════════════════════════════════════════════
+//  TIME CONTROLS — jump, warp, date picker
+// ═══════════════════════════════════════════════════════
+
+// Jump by a delta in years (modifies simTime)
+function _jumpSimTime(deltaYears) {
+    simTime += deltaYears;
+    _ephemEpoch = _ephemEpoch ?? { simTime: 0, date: new Date() };
+}
+
+// Jump to a specific Date
+function _jumpToDate(date) {
+    if (!_ephemEpoch) return;
+    const deltaMs = date.getTime() - _ephemEpoch.date.getTime();
+    simTime = _ephemEpoch.simTime + deltaMs / (365.25 * 86400e3);
+}
+
+// Snap to real-time
+function _goLive() {
+    const e0 = earthHeliocentric(jdNow());
+    simTime = e0.lon_rad / (Math.PI * 2);
+    _ephemEpoch = { simTime, date: new Date() };
+    simSpeed = 1;
+    document.getElementById('sl-speed').value = 1;
+    document.getElementById('disp-speed').textContent = '1×';
+    document.getElementById('hud-speed').textContent = '1×';
+}
+
+// Navigation buttons
+document.getElementById('tc-prev-yr')?.addEventListener('click',  () => _jumpSimTime(-1));
+document.getElementById('tc-prev-mo')?.addEventListener('click',  () => _jumpSimTime(-1/12));
+document.getElementById('tc-prev-wk')?.addEventListener('click',  () => _jumpSimTime(-7/365.25));
+document.getElementById('tc-prev-day')?.addEventListener('click', () => _jumpSimTime(-1/365.25));
+document.getElementById('tc-next-day')?.addEventListener('click', () => _jumpSimTime(1/365.25));
+document.getElementById('tc-next-wk')?.addEventListener('click',  () => _jumpSimTime(7/365.25));
+document.getElementById('tc-next-mo')?.addEventListener('click',  () => _jumpSimTime(1/12));
+document.getElementById('tc-next-yr')?.addEventListener('click',  () => _jumpSimTime(1));
+document.getElementById('tc-live')?.addEventListener('click', _goLive);
+
+// Date picker
+document.getElementById('tc-date-picker')?.addEventListener('change', function() {
+    if (this.value) _jumpToDate(new Date(this.value));
+});
+
+// Speed preset buttons
+document.querySelectorAll('#time-controls [data-spd]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const spd = parseFloat(btn.dataset.spd);
+        simSpeed = spd;
+        document.getElementById('sl-speed').value = spd;
+        document.getElementById('disp-speed').textContent = spd === 0 ? '⏸' : spd + '×';
+        document.getElementById('hud-speed').textContent = spd === 0 ? '⏸' : spd + '×';
+        // Highlight active
+        document.querySelectorAll('#time-controls [data-spd]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    });
+});
+
+// Seed date picker with current time
+{
+    const picker = document.getElementById('tc-date-picker');
+    if (picker) {
+        const d = new Date();
+        picker.value = d.toISOString().slice(0, 16);
+    }
+}
+
+// ═══════════════════════════════════════════════════════
+//  LIVE DATA TABLE + EPOCH BADGE  (updates every 500ms)
+// ═══════════════════════════════════════════════════════
+
+const _PCOLORS = {
+    Mercury:'#9a8875', Venus:'#e8c97a', Earth:'#4488dd', Mars:'#cc4422',
+    Jupiter:'#c88b3a', Saturn:'#e4d191', Uranus:'#7de8e8', Neptune:'#4b70dd',
+};
+const _PTILTS = {
+    Mercury:'0.0°', Venus:'177.4°', Earth:'23.4°', Mars:'25.2°',
+    Jupiter:'3.1°', Saturn:'26.7°', Uranus:'97.8°', Neptune:'28.3°',
+};
+
+const _ephFnMap = {
+    Mercury: mercuryHeliocentric, Venus: venusHeliocentric,
+    Earth: earthHeliocentric, Mars: marsHeliocentric,
+    Jupiter: jupiterHeliocentric, Saturn: saturnHeliocentric,
+    Uranus: uranusHeliocentric, Neptune: neptuneHeliocentric,
+};
+
+function _updateDataSection() {
+    // Current sim date
+    const _R2D = 180 / Math.PI;
+    let simDate = new Date();
+    if (_ephemEpoch) {
+        const dt = simTime - _ephemEpoch.simTime;
+        simDate = new Date(_ephemEpoch.date.getTime() + dt * 365.25 * 86400e3);
+    }
+    const simJD = simDate.getTime() / 86400000 + 2440587.5;
+
+    // Epoch badge
+    const badge = document.getElementById('tc-epoch');
+    if (badge) {
+        const realMs = Date.now();
+        const diffHr = (simDate.getTime() - realMs) / 3600000;
+        if (Math.abs(diffHr) < 0.25) {
+            badge.textContent = 'LIVE'; badge.className = 'live';
+        } else if (diffHr < 0) {
+            const d = Math.abs(diffHr / 24);
+            badge.textContent = d < 365 ? `PAST −${Math.round(d)}d` : `PAST −${(d/365.25).toFixed(1)}yr`;
+            badge.className = 'past';
+        } else {
+            const d = diffHr / 24;
+            badge.textContent = d < 365 ? `FUTURE +${Math.round(d)}d` : `FUTURE +${(d/365.25).toFixed(1)}yr`;
+            badge.className = 'future';
+        }
+    }
+
+    // Sync date picker (unless focused)
+    const picker = document.getElementById('tc-date-picker');
+    if (picker && document.activeElement !== picker) {
+        picker.value = simDate.toISOString().slice(0, 16);
+    }
+
+    // Planet table
+    const tbody = document.getElementById('sd-planet-table');
+    if (tbody) {
+        let html = '';
+        for (const name of ['Mercury','Venus','Earth','Mars','Jupiter','Saturn','Uranus','Neptune']) {
+            const fn = _ephFnMap[name];
+            if (!fn) continue;
+            const p = fn(simJD);
+            const lon = (((p.lon_rad ?? 0) * _R2D) % 360 + 360) % 360;
+            html += `<div class="sd-planet-row">
+                <span class="sd-planet-dot" style="background:${_PCOLORS[name]}"></span>
+                <span class="sd-planet-name" style="color:${_PCOLORS[name]}">${name}</span>
+                <span class="sd-planet-val" style="width:65px">${lon.toFixed(1)}°</span>
+                <span class="sd-planet-val" style="width:75px">${p.dist_AU.toFixed(4)} AU</span>
+                <span class="sd-planet-val" style="width:40px;color:#667">${_PTILTS[name]}</span>
+            </div>`;
+        }
+        tbody.innerHTML = html;
+    }
+}
+
+setInterval(_updateDataSection, 500);
+
+// ── Space weather stats in data section ───────────────────────────────────────
+window.addEventListener('swpc-update', ev => {
+    const sw = ev.detail;
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('sd-sw-speed', (sw.solar_wind?.speed ?? '—') + ' km/s');
+    _s('sd-sw-bz', (sw.solar_wind?.bz?.toFixed(1) ?? '—') + ' nT');
+    _s('sd-sw-kp', sw.kp?.toFixed(1) ?? '—');
+    _s('sd-sw-xray', sw.xray_class ?? '—');
+    const gl = sw.derived?.storm_level ?? 0;
+    _s('sd-sw-storm', gl === 0 ? 'Quiet' : `G${gl}`);
+});
+
+// ── Horizons status ───────────────────────────────────────────────────────────
+window.addEventListener('ephemeris-ready', ev => {
+    const el = document.getElementById('sd-horizons-status');
+    if (el) {
+        const src = ev.detail?.source ?? 'meeus';
+        el.textContent = src === 'horizons' ? '✓ Connected' : 'Fallback (Meeus)';
+        el.style.color = src === 'horizons' ? '#4f8' : '#aa8844';
+    }
+});
 
 // ─── FPS ─────────────────────────────────────────────────────
 let fF=0,fT=performance.now();
