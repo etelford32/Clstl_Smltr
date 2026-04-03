@@ -711,6 +711,17 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
         </div>
+        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
+            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">NASA EARTH OBSERVATIONS</div>
+            <div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><label for="lyr-obs-snow">Snow Cover</label></label>
+            </div>
+        </div>
     </div>
     </div>
 
@@ -988,6 +999,11 @@ nav {
         <button id="wx-refresh">↺ Refresh Data</button>
 
         <hr class="ir-sep">
+        <!-- NASA Earth Observation status -->
+        <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px">NASA EARTH OBSERVATIONS</div>
+        <div id="obs-status-list" style="font-size:10px;color:#778;line-height:1.7"></div>
+
+        <hr class="ir-sep">
 
         <!-- My Location -->
         <div class="loc-section-hdr">📍 My Location</div>
@@ -1090,6 +1106,7 @@ import {
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
+import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
 import {
@@ -2091,6 +2108,87 @@ wxFeed.start();
 // ═══════════════════════════════════════════════════════════════
 const satFeed = new SatelliteFeed();
 satFeed.start();
+
+// ═══════════════════════════════════════════════════════════════
+//  NASA EARTH OBSERVATIONS — multi-layer GIBS feed
+//  Precipitation, SST, aerosol, cloud thickness, fires, snow
+// ═══════════════════════════════════════════════════════════════
+const earthObsFeed = new EarthObsFeed();
+// Don't auto-start any layers — user toggles them on via the layer panel.
+// The feed starts with an empty enabled set until a checkbox fires.
+
+// Observation overlay meshes — transparent sphere shells above the cloud layer
+const _obsOverlays = {};
+
+function _createObsOverlay(layerId) {
+    if (_obsOverlays[layerId]) return _obsOverlays[layerId];
+    const mat = new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0.6, depthWrite: false,
+        side: THREE.FrontSide, blending: THREE.NormalBlending,
+    });
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(1.012, 60, 60),  // just above clouds (1.009)
+        mat
+    );
+    mesh.visible = false;
+    mesh.renderOrder = 5;
+    scene.add(mesh);
+    _obsOverlays[layerId] = { mesh, mat };
+    return _obsOverlays[layerId];
+}
+
+// Layer toggle handlers
+for (const layer of EARTH_OBS_LAYERS) {
+    const checkbox = document.getElementById(`lyr-obs-${layer.id}`);
+    if (!checkbox) continue;
+    checkbox.addEventListener('change', e => {
+        const on = e.target.checked;
+        earthObsFeed.setEnabled(layer.id, on);
+        if (on) {
+            earthObsFeed.start();  // safe to call multiple times
+        }
+        const overlay = _obsOverlays[layer.id];
+        if (overlay) overlay.mesh.visible = on;
+    });
+}
+
+// Handle texture updates from the feed
+window.addEventListener('earth-obs-update', e => {
+    const { textures, meta, enabled } = e.detail;
+
+    for (const layerId of enabled) {
+        const tex = textures[layerId];
+        if (!tex) continue;
+
+        const overlay = _createObsOverlay(layerId);
+        overlay.mat.map = tex;
+        overlay.mat.needsUpdate = true;
+        overlay.mesh.visible = true;
+    }
+
+    // Update the observation status panel
+    _updateObsStatusPanel(meta);
+});
+
+function _updateObsStatusPanel(meta) {
+    const el = document.getElementById('obs-status-list');
+    if (!el) return;
+
+    const entries = Object.entries(meta);
+    if (entries.length === 0) {
+        el.innerHTML = '<span style="color:#445">No layers active</span>';
+        return;
+    }
+
+    el.innerHTML = entries.map(([id, m]) => {
+        const dot = m.status === 'live'
+            ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4fc97f;margin-right:4px"></span>'
+            : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff4444;margin-right:4px"></span>';
+        const ago = m.updated ? _timeAgo(m.updated) : '—';
+        const layer = m.layer;
+        return `<div style="margin-bottom:3px" title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">${dot}<strong>${layer?.name ?? id}</strong> <span style="color:#556">· ${ago} · ${layer?.latency ?? ''}</span></div>`;
+    }).join('');
+}
 
 window.addEventListener('satellite-update', e => {
     const { compositeTex, goesTex, modisTex, source, goesTime, modisDate } = e.detail;
