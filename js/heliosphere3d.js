@@ -41,6 +41,7 @@ import {
     jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
 } from './horizons.js';
 import { earthOrbitFull } from './earth-orbit.js';
+import { EphemerisService } from './horizons.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -552,6 +553,30 @@ export class Heliosphere3D {
     goLive() {
         this._simJD    = jdNow();
         this._timeScale = 1;
+    }
+
+    /**
+     * Fetch high-accuracy Horizons ephemeris at a specific Julian Day.
+     * Falls back to Meeus if Horizons is unavailable.
+     * Use this when the user jumps to a distant date where cached
+     * Horizons data (which is always for "today") would be stale.
+     * @param {number} jd  Julian Day to query
+     */
+    async fetchEphemerisAtJD(jd) {
+        this._simJD = jd;
+        this._timeScale = 0;  // freeze while fetching
+        try {
+            const svc = new EphemerisService();
+            const data = await svc.load(jd);
+            // Feed the result through the same handler as live data
+            if (data) {
+                this._onEph({ detail: data });
+                console.info(`[Heliosphere] Horizons ephemeris loaded for JD ${jd.toFixed(1)}`);
+            }
+        } catch (err) {
+            console.warn(`[Heliosphere] Horizons unavailable for JD ${jd}:`, err.message);
+            this._meeusUpdate(jd, true);  // Meeus fallback
+        }
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
