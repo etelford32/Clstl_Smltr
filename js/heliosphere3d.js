@@ -1100,8 +1100,9 @@ export class Heliosphere3D {
             this._planetLabels[name] = lbl;
         }
 
-        // Place at default positions (overwritten by ephemeris)
-        this._setDefaultPlanetPositions();
+        // NOTE: default positions are no longer needed here — _seedMeeusPositions()
+        // (called at the end of _build()) computes real-time positions for all
+        // planets synchronously before the first frame renders.
 
         // ── Earth ─────────────────────────────────────────────────────────────
         this._earthGroup = new THREE.Group();

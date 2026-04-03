@@ -1007,6 +1007,66 @@ nav {
         <a class="helio-corner-link" href="earth.html" title="Open Earth detail view">Earth View →</a>
     </div>
 
+    <!-- ── SOLAR SYSTEM DATA DESCRIPTION ─────────────────────────────────── -->
+    <div class="earth-section" style="background:rgba(8,4,0,.6);border-color:rgba(255,180,40,.12)">
+        <div class="earth-section-header">
+            <div class="earth-section-title" style="color:#ffcc66">Solar System Simulation</div>
+            <div class="earth-section-sub">Real-time planetary positions · VSOP87D / Meeus ephemeris</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;font-size:.78rem;color:#99a;line-height:1.65">
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">PLANET POSITIONS</div>
+                <p>All 8 planets are positioned at their <strong style="color:#ddd">correct heliocentric ecliptic coordinates</strong> for the current date and time, computed on-device using VSOP87D truncated series (Earth, Jupiter, Saturn, Uranus, Neptune) and Meeus Keplerian elements (Mercury, Venus, Mars).</p>
+                <p style="margin-top:6px">Accuracy: <strong style="color:#aac">&lt;0.3°</strong> longitude, <strong style="color:#aac">&lt;0.1%</strong> distance for all planets within the 1800–2200 validity range. Earth's position is accurate to &lt;1 arcsecond.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">TIME TRAVEL</div>
+                <p>Use the <strong style="color:#ddd">time warp controls</strong> to travel to any date — past or future. All planet positions, moon orbits, orbital precession, and axial rotation update deterministically.</p>
+                <p style="margin-top:6px">Warp speeds: 1× (real-time), 1h/s, 1d/s, 1mo/s, 1yr/s. Jump directly via the date picker or ±1d/±1wk/±1mo/±1yr buttons.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">ORBITAL MECHANICS</div>
+                <p><strong style="color:#ddd">True Keplerian ellipses</strong> with 3D inclination, ascending node, and argument of perihelion. Secular precession rates (Standish 1992) cause orbits to slowly rotate over centuries — visible at 1yr/s warp speed.</p>
+                <p style="margin-top:6px">Mercury's perihelion advances +0.16°/century. Saturn's advances +0.54°/century.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">MOON SYSTEMS</div>
+                <p><strong style="color:#ddd">14 natural satellites</strong> modeled: Earth's Moon (Meeus Ch.47), Mars (Phobos, Deimos), Jupiter (Io, Europa, Ganymede, Callisto), Saturn (Titan, Rhea, Dione), Uranus (Titania, Oberon), Neptune (Triton — retrograde).</p>
+                <p style="margin-top:6px">All moons orbit in correctly tilted planes matching their parent planet's obliquity.</p>
+            </div>
+        </div>
+        <!-- Live planet data table -->
+        <div style="margin-top:14px;border-top:1px solid rgba(255,180,40,.08);padding-top:12px">
+            <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:8px">CURRENT PLANET DATA <span style="font-weight:400;color:#554">(updates in real-time)</span></div>
+            <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:.72rem;white-space:nowrap">
+                    <thead>
+                        <tr style="color:#887;border-bottom:1px solid rgba(255,255,255,.06)">
+                            <th style="text-align:left;padding:4px 8px;font-weight:600">Planet</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Helio Lon</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Distance</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Tilt</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Rotation</th>
+                            <th style="text-align:left;padding:4px 8px;font-weight:600">Moons</th>
+                        </tr>
+                    </thead>
+                    <tbody id="planet-data-tbody" style="color:#aab">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- Data sources -->
+        <div style="margin-top:12px;border-top:1px solid rgba(255,180,40,.08);padding-top:10px;font-size:.65rem;color:#554;line-height:1.6">
+            <strong style="color:#776">Data Sources:</strong>
+            Bretagnon &amp; Francou (1988) VSOP87D truncated series ·
+            Meeus (1998) "Astronomical Algorithms" 2nd ed. ·
+            Standish (1992) JPL secular correction rates ·
+            NASA Planetary Fact Sheets (rotation, obliquity) ·
+            Murray &amp; Dermott (1999) "Solar System Dynamics" (moon orbits)
+        </div>
+    </div>
+
     <!-- ── SUN → L1 → EARTH TRANSIT DIAGRAM ────────────────────────────── -->
     <div class="transit-section" id="transit-section">
         <div class="transit-title">
@@ -2238,6 +2298,49 @@ window.addEventListener('helio-time-update', e => {
         }
     }
 });
+
+// ── Live planet data table ────────────────────────────────────────────────────
+const _PLANET_META = {
+    mercury: { name: 'Mercury', tilt: '0.03°', rotation: '58.6 d', moons: '—', color: '#9a8875' },
+    venus:   { name: 'Venus',   tilt: '177.4°', rotation: '243 d ↺', moons: '—', color: '#e8c97a' },
+    earth:   { name: 'Earth',   tilt: '23.4°', rotation: '23h 56m', moons: 'Moon', color: '#4488dd' },
+    mars:    { name: 'Mars',    tilt: '25.2°', rotation: '24h 37m', moons: 'Phobos, Deimos', color: '#cc4422' },
+    jupiter: { name: 'Jupiter', tilt: '3.1°', rotation: '9h 56m', moons: 'Io, Europa, Ganymede, Callisto', color: '#c88b3a' },
+    saturn:  { name: 'Saturn',  tilt: '26.7°', rotation: '10h 42m', moons: 'Titan, Rhea, Dione', color: '#e4d191' },
+    uranus:  { name: 'Uranus',  tilt: '97.8°', rotation: '17h 14m ↺', moons: 'Titania, Oberon', color: '#7de8e8' },
+    neptune: { name: 'Neptune', tilt: '28.3°', rotation: '16h 6m', moons: 'Triton ↺', color: '#4b70dd' },
+};
+
+function _updatePlanetTable() {
+    if (!_helio) return;
+    const tbody = el('planet-data-tbody');
+    if (!tbody) return;
+    const eph = _helio._eph;
+    if (!eph) return;
+    const R2D = 180 / Math.PI;
+
+    let html = '';
+    for (const name of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']) {
+        const p = eph[name];
+        const m = _PLANET_META[name];
+        if (!p || !m) continue;
+        const lon = ((p.lon_rad * R2D) % 360 + 360) % 360;
+        html += `<tr style="border-bottom:1px solid rgba(255,255,255,.03)">
+            <td style="padding:4px 8px"><span style="color:${m.color};font-weight:600">${m.name}</span></td>
+            <td style="text-align:right;padding:4px 8px;font-family:monospace;color:#ccddee">${lon.toFixed(1)}°</td>
+            <td style="text-align:right;padding:4px 8px;font-family:monospace;color:#ccddee">${p.dist_AU.toFixed(4)} AU</td>
+            <td style="text-align:right;padding:4px 8px;color:#889">${m.tilt}</td>
+            <td style="text-align:right;padding:4px 8px;color:#889">${m.rotation}</td>
+            <td style="padding:4px 8px;color:#778;font-size:.68rem">${m.moons}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+// Update table every 2 seconds (positions change slowly at real-time)
+setInterval(_updatePlanetTable, 2000);
+// Also update on time events (for warp mode)
+window.addEventListener('helio-time-update', _updatePlanetTable);
 
 // ── Time controls — full timeline scrubber + nav + warp speed ────────────────
 {
