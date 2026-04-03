@@ -156,11 +156,14 @@ export default async function handler(request) {
     const url = new URL(request.url);
     const group = url.searchParams.get('group') || 'stations';
     const norad = url.searchParams.get('norad');
+    const search = url.searchParams.get('search');
     const fmt = url.searchParams.get('format') || 'json';
 
     let celestrakUrl;
     if (norad) {
         celestrakUrl = `${CELESTRAK_BASE}?CATNR=${norad}&FORMAT=TLE`;
+    } else if (search) {
+        celestrakUrl = `${CELESTRAK_BASE}?NAME=${encodeURIComponent(search)}&FORMAT=TLE`;
     } else {
         const groupParam = GROUP_MAP[group];
         if (!groupParam) {

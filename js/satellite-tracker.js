@@ -173,8 +173,11 @@ export class SatelliteTracker {
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
                 detail: { group, count: this._satellites.length, satellites: this._satellites.map(s => s.tle) },
             }));
+
+            return this._satellites.length;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
+            return 0;
         }
     }
 
@@ -189,10 +192,47 @@ export class SatelliteTracker {
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            this._setupSatellites(data.satellites ?? []);
+            const sats = data.satellites ?? [];
+            // Add to existing catalog rather than replacing
+            this._addSatellites(sats);
+            return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);
+            return null;
         }
+    }
+
+    /** Add satellites to the existing catalog (for searched individual sats). */
+    _addSatellites(tles) {
+        for (const tle of tles) {
+            // Skip if already tracked
+            if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
+
+            const epochYr = tle.epoch_yr ?? 2026;
+            const yr = Math.floor(epochYr);
+            const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
+            const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
+            const epochJd = jdJan1 + dayFrac;
+
+            this._satellites.push({ tle, epochJd, lat: 0, lon: 0, alt: 400 });
+        }
+        this._rebuildPoints();
+    }
+
+    /** Rebuild the Points mesh after adding satellites. */
+    _rebuildPoints() {
+        if (this._pointsMesh) {
+            this._group.remove(this._pointsMesh);
+            this._pointsMesh.geometry.dispose();
+        }
+        const n = this._satellites.length;
+        const posArr = new Float32Array(n * 3);
+        this._positions = new THREE.BufferAttribute(posArr, 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', this._positions);
+        this._pointsMesh = new THREE.Points(geo, this._dotMat);
+        this._pointsMesh.renderOrder = 10;
+        this._group.add(this._pointsMesh);
     }
 
     /** Update satellite positions to current time. Call every frame. */
