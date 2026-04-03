@@ -40,6 +40,44 @@ const DEG2RAD  = Math.PI / 180;
 const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard)
 const MIN_PER_DAY = 1440;
 
+// ── Rust WASM SGP4 (high-performance, loaded async) ────────────────────────
+// Falls back to the JS propagator if WASM isn't available.
+let _wasmSgp4 = null;
+let _wasmLoading = false;
+
+async function _loadWasmSgp4() {
+    if (_wasmSgp4 || _wasmLoading) return _wasmSgp4;
+    _wasmLoading = true;
+    try {
+        const mod = await import('./sgp4-wasm/sgp4_wasm.js');
+        await mod.default();  // init WASM
+        _wasmSgp4 = mod;
+        console.info('[SatTracker] Rust SGP4 WASM loaded — high-performance propagation active');
+    } catch (err) {
+        console.debug('[SatTracker] WASM SGP4 not available, using JS fallback:', err.message);
+    }
+    _wasmLoading = false;
+    return _wasmSgp4;
+}
+
+// Try to load WASM immediately (non-blocking)
+_loadWasmSgp4();
+
+/** Propagate using WASM if available, else JS fallback. */
+function propagate(tle, tsince_min) {
+    if (_wasmSgp4 && tle.line1 && tle.line2) {
+        try {
+            const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
+            if (result && result.length >= 3 && isFinite(result[0])) {
+                return { x: result[0], y: result[1], z: result[2] };
+            }
+        } catch (_) {
+            // WASM propagation failed — fall through to JS
+        }
+    }
+    return jsFallbackPropagate(tle, tsince_min);
+}
+
 // ── Pure JS SGP4 fallback (simplified Brouwer mean elements) ─────────────────
 // This is a simplified propagator for when the Rust WASM module isn't loaded.
 // Uses the same Keplerian mean motion + J2 secular perturbations, but skips
@@ -173,8 +211,11 @@ export class SatelliteTracker {
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
                 detail: { group, count: this._satellites.length, satellites: this._satellites.map(s => s.tle) },
             }));
+
+            return this._satellites.length;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
+            return 0;
         }
     }
 
@@ -189,10 +230,47 @@ export class SatelliteTracker {
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            this._setupSatellites(data.satellites ?? []);
+            const sats = data.satellites ?? [];
+            // Add to existing catalog rather than replacing
+            this._addSatellites(sats);
+            return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);
+            return null;
         }
+    }
+
+    /** Add satellites to the existing catalog (for searched individual sats). */
+    _addSatellites(tles) {
+        for (const tle of tles) {
+            // Skip if already tracked
+            if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
+
+            const epochYr = tle.epoch_yr ?? 2026;
+            const yr = Math.floor(epochYr);
+            const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
+            const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
+            const epochJd = jdJan1 + dayFrac;
+
+            this._satellites.push({ tle, epochJd, lat: 0, lon: 0, alt: 400 });
+        }
+        this._rebuildPoints();
+    }
+
+    /** Rebuild the Points mesh after adding satellites. */
+    _rebuildPoints() {
+        if (this._pointsMesh) {
+            this._group.remove(this._pointsMesh);
+            this._pointsMesh.geometry.dispose();
+        }
+        const n = this._satellites.length;
+        const posArr = new Float32Array(n * 3);
+        this._positions = new THREE.BufferAttribute(posArr, 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', this._positions);
+        this._pointsMesh = new THREE.Points(geo, this._dotMat);
+        this._pointsMesh.renderOrder = 10;
+        this._group.add(this._pointsMesh);
     }
 
     /** Update satellite positions to current time. Call every frame. */
@@ -206,8 +284,8 @@ export class SatelliteTracker {
             const sat = this._satellites[i];
             const tsince = (jd - sat.epochJd) * MIN_PER_DAY;  // minutes since TLE epoch
 
-            // Propagate (JS fallback — WASM would be faster for large catalogs)
-            const teme = jsFallbackPropagate(sat.tle, tsince);
+            // Propagate via WASM SGP4 (if loaded) or JS fallback
+            const teme = propagate(sat.tle, tsince);
 
             // TEME → ECEF → lat/lon/alt
             const ecef = temeToEcef(teme.x, teme.y, teme.z, jd);

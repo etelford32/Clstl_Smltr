@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Satellite Tracker — Parker Physics App</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ─── Nav ────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
+}
+.nav-brand { display:flex; align-items:center; gap:8px; font-size:.95rem; font-weight:700;
+    text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-right:2px; }
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.nav-item { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12);
+    border-radius:5px; color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0; }
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-spacer { flex:1; }
+.nav-burger { display:none; margin-left:auto; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem; cursor:pointer; line-height:1; }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu { display:none; position:absolute; top:50px; left:0; right:0; flex-direction:column;
+        background:rgba(4,2,16,.97); padding:8px 12px; gap:4px; z-index:700; }
+    .nav-menu.open { display:flex; }
+}
+
+/* ─── App layout ─────────────────────────────────────── */
+#app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; }
+#sat-canvas { display:block; width:100%; height:100%; cursor:grab; background:#000; }
+#sat-canvas:active { cursor:grabbing; }
+
+/* ─── HUD overlay ────────────────────────────────────── */
+#sat-hud {
+    position:absolute; top:12px; left:12px; z-index:10;
+    background:rgba(0,0,0,.7); backdrop-filter:blur(8px);
+    border:1px solid rgba(0,200,200,.15); border-radius:8px;
+    padding:8px 12px; font-size:.72rem; line-height:1.7; color:#8ab;
+    pointer-events:none; max-width:300px;
+}
+#sat-hud .val { color:#0ee; font-weight:600; font-family:monospace; }
+#sat-hud .dim { color:#556; }
+
+/* ─── Control panel (right side) ─────────────────────── */
+#sat-panel {
+    position:absolute; top:12px; right:12px; z-index:10;
+    background:rgba(0,0,0,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,200,.15); border-radius:10px;
+    padding:12px 14px; width:280px; max-height:calc(100vh - 80px);
+    overflow-y:auto; font-size:.75rem;
+}
+#sat-panel::-webkit-scrollbar { width:4px; }
+#sat-panel::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:2px; }
+.sp-title { font-size:.82rem; font-weight:700; color:#0cc; margin-bottom:8px; letter-spacing:.03em; }
+.sp-section { margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.06); }
+.sp-label { font-size:.62rem; color:#556; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; font-weight:600; }
+.sp-row { display:flex; justify-content:space-between; padding:2px 0; }
+.sp-k { color:#778; }
+.sp-v { color:#aee; font-weight:600; font-family:monospace; }
+
+/* Search input */
+.sp-search { display:flex; gap:4px; margin-bottom:8px; }
+.sp-search input {
+    flex:1; background:rgba(0,200,200,.06); border:1px solid rgba(0,200,200,.2);
+    border-radius:5px; color:#ddd; font-family:monospace; font-size:.78rem;
+    padding:6px 8px; outline:none;
+}
+.sp-search input:focus { border-color:#0cc; }
+.sp-search button {
+    background:rgba(0,200,200,.15); border:1px solid rgba(0,200,200,.3);
+    border-radius:5px; color:#0cc; cursor:pointer; font-size:.72rem; padding:6px 12px;
+    font-weight:600; transition:all .15s; white-space:nowrap;
+}
+.sp-search button:hover { background:rgba(0,200,200,.25); }
+
+/* Group toggles */
+.sp-toggle { display:flex; align-items:center; gap:6px; padding:3px 0; cursor:pointer; }
+.sp-toggle input { accent-color:#0cc; width:14px; height:14px; cursor:pointer; }
+.sp-toggle label { cursor:pointer; color:#99a; font-size:.72rem; }
+.sp-toggle .count { margin-left:auto; color:#445; font-size:.62rem; font-family:monospace; }
+
+/* Conjunction results */
+.cj-result {
+    padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04);
+    display:flex; justify-content:space-between; align-items:center;
+}
+.cj-dist { font-weight:700; font-family:monospace; min-width:50px; }
+.cj-name { color:#99a; flex:1; margin:0 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cj-time { color:#667; font-family:monospace; font-size:.65rem; }
+
+/* Data section below canvas */
+#sat-data {
+    max-width:1100px; margin:0 auto; padding:20px 16px 40px; color:#ccc;
+}
+.sd-card { background:rgba(0,200,200,.03); border:1px solid rgba(0,200,200,.08); border-radius:10px;
+    padding:14px 16px; margin-bottom:10px; }
+.sd-card h3 { font-size:.72rem; color:#0aa; text-transform:uppercase; letter-spacing:.08em;
+    margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(0,200,200,.08); }
+.sd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+.sd-stat { display:flex; justify-content:space-between; padding:2px 0; font-size:.74rem; }
+.sd-stat-k { color:#667; }
+.sd-stat-v { color:#aee; font-weight:600; font-family:monospace; }
+</style>
+</head>
+<body>
+
+<nav>
+    <a href="index.html" class="nav-brand">
+        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
+        Parker Physics
+    </a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">&#9776;</button>
+    <div class="nav-menu" id="nav-menu">
+        <a href="index.html" class="nav-item">Home</a>
+        <a href="space-weather.html" class="nav-item">Space Weather</a>
+        <a href="threejs.html" class="nav-item">Solar System</a>
+        <a href="sun.html" class="nav-item">The Sun</a>
+        <a href="earth.html" class="nav-item">Earth View</a>
+        <a href="satellites.html" class="nav-item active">Satellites</a>
+        <span class="nav-spacer"></span>
+        <a href="dashboard.html" class="nav-item">Dashboard</a>
+    </div>
+</nav>
+
+<div id="app">
+    <canvas id="sat-canvas"></canvas>
+
+    <!-- HUD (top-left) -->
+    <div id="sat-hud">
+        <div><strong style="color:#0cc">Satellite Tracker</strong></div>
+        <div>Tracked: <span class="val" id="hud-count">0</span> objects</div>
+        <div>Groups: <span class="val" id="hud-groups">—</span></div>
+        <div>Source: <span class="dim">CelesTrak / 18th SDS</span></div>
+        <div>Updated: <span class="val" id="hud-updated">—</span></div>
+    </div>
+
+    <!-- Control panel (right side) -->
+    <div id="sat-panel">
+        <div class="sp-title">Satellite Tracker</div>
+
+        <!-- Search -->
+        <div class="sp-section">
+            <div class="sp-label">Search by NORAD ID or Name</div>
+            <div class="sp-search">
+                <input id="sp-search-input" type="text" placeholder="25544 or ISS">
+                <button id="sp-search-btn">Track</button>
+            </div>
+            <div id="sp-search-result" style="color:#667;font-size:.65rem;line-height:1.5"></div>
+        </div>
+
+        <!-- Satellite groups -->
+        <div class="sp-section">
+            <div class="sp-label">Satellite Groups</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-stations" checked><label for="grp-stations">Space Stations</label><span class="count" id="cnt-stations">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-starlink"><label for="grp-starlink">Starlink</label><span class="count" id="cnt-starlink">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-weather"><label for="grp-weather">Weather Sats</label><span class="count" id="cnt-weather">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-gps-ops"><label for="grp-gps-ops">GPS / GNSS</label><span class="count" id="cnt-gps-ops">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-science"><label for="grp-science">Science Missions</label><span class="count" id="cnt-science">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-resource"><label for="grp-resource">Earth Resources</label><span class="count" id="cnt-resource">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
+        </div>
+
+        <!-- Selected satellite info -->
+        <div class="sp-section" id="sp-sat-info" style="display:none">
+            <div class="sp-label">Selected Satellite</div>
+            <div class="sp-row"><span class="sp-k">Name</span><span class="sp-v" id="sp-name">—</span></div>
+            <div class="sp-row"><span class="sp-k">NORAD ID</span><span class="sp-v" id="sp-norad">—</span></div>
+            <div class="sp-row"><span class="sp-k">Inclination</span><span class="sp-v" id="sp-incl">—</span></div>
+            <div class="sp-row"><span class="sp-k">Period</span><span class="sp-v" id="sp-period">—</span></div>
+            <div class="sp-row"><span class="sp-k">Perigee</span><span class="sp-v" id="sp-peri">—</span></div>
+            <div class="sp-row"><span class="sp-k">Apogee</span><span class="sp-v" id="sp-apo">—</span></div>
+            <div class="sp-row"><span class="sp-k">Altitude</span><span class="sp-v" id="sp-alt">—</span></div>
+            <div class="sp-row"><span class="sp-k">Lat / Lon</span><span class="sp-v" id="sp-latlon">—</span></div>
+            <div class="sp-row"><span class="sp-k">Speed</span><span class="sp-v" id="sp-speed">—</span></div>
+        </div>
+
+        <!-- Conjunction screening -->
+        <div class="sp-section" id="sp-conj-section" style="display:none">
+            <div class="sp-label">Conjunction Screening (72 hr)</div>
+            <div id="sp-conj-status" style="color:#556;font-size:.65rem">—</div>
+            <div id="sp-conj-results"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Data section below canvas -->
+<div id="sat-data">
+    <div class="sd-grid">
+        <div class="sd-card">
+            <h3>Data Source</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Catalog</span><span class="sd-stat-v">CelesTrak GP Elements</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Origin</span><span class="sd-stat-v">18th Space Defense Squadron</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Update cadence</span><span class="sd-stat-v">~8 hours</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Total tracked</span><span class="sd-stat-v" id="sd-total">~30,000 objects</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Format</span><span class="sd-stat-v">TLE (Two-Line Element)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Propagator</span><span class="sd-stat-v">SGP4 (J2 perturbations)</span></div>
+        </div>
+        <div class="sd-card">
+            <h3>Conjunction Screening</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Look-ahead</span><span class="sd-stat-v">72 hours</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Step size</span><span class="sd-stat-v">10 minutes</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Threshold</span><span class="sd-stat-v">25 km</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Pre-filter</span><span class="sd-stat-v">±200 km altitude</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Method</span><span class="sd-stat-v">SGP4 propagation + ECEF distance</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Note</span><span class="sd-stat-v" style="color:#887;font-weight:400">Simplified — not production CDM</span></div>
+        </div>
+        <div class="sd-card">
+            <h3>Coordinate Frames</h3>
+            <div class="sd-stat"><span class="sd-stat-k">TLE reference</span><span class="sd-stat-v">TEME (True Equator Mean Equinox)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Display</span><span class="sd-stat-v">ECEF → geodetic lat/lon/alt</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">GMST rotation</span><span class="sd-stat-v">Simplified (no nutation)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Position accuracy</span><span class="sd-stat-v">~1 km at epoch</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Degradation</span><span class="sd-stat-v">~1-2 km/day (LEO)</span></div>
+        </div>
+    </div>
+    <div class="sd-card" style="font-size:.68rem;color:#556;line-height:1.6;margin-top:6px">
+        <h3>References & Accuracy</h3>
+        <p><strong style="color:#778">SGP4:</strong> Hoots & Roehrich (1980) "Spacetrack Report No. 3" · Vallado et al. (2006) "Revisiting Spacetrack Report #3" · AFSPC (now USSF) standard propagator for TLE data</p>
+        <p style="margin-top:3px"><strong style="color:#778">CelesTrak:</strong> Dr. T.S. Kelso, Center for Space Standards & Innovation · Mirrors 18th Space Defense Squadron catalog · celestrak.org</p>
+        <p style="margin-top:3px"><strong style="color:#778">Limitations:</strong> TLEs are mean elements — SGP4 is the ONLY correct propagator. Position accuracy ~1 km at epoch, degrades ~1-2 km/day for LEO. Conjunction screening uses simplified J2 propagation; production CDM generation requires full SGP4 for both target AND catalog with proper covariance estimation.</p>
+    </div>
+</div>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { SatelliteTracker } from './js/satellite-tracker.js';
+
+// ── Nav burger ──────────────────────────────────────────────────────────────
+const _burger = document.getElementById('nav-burger');
+const _menu   = document.getElementById('nav-menu');
+_burger?.addEventListener('click', () => {
+    const open = _menu.classList.toggle('open');
+    _burger.textContent = open ? '\u2715' : '\u2630';
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  THREE.JS SCENE — Earth globe with satellite overlay
+// ═══════════════════════════════════════════════════════════════
+
+const canvas   = document.getElementById('sat-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x000005);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 100);
+camera.position.set(0, 1.5, 3.5);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.2;
+controls.maxDistance = 20;
+
+// Lights
+scene.add(new THREE.AmbientLight(0x334466, 0.4));
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+sunLight.position.set(5, 2, 3);
+scene.add(sunLight);
+
+// Earth sphere — Blue Marble texture from CDN
+const earthGeo = new THREE.SphereGeometry(1, 64, 64);
+const earthTex = new THREE.TextureLoader().load(
+    'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
+    tex => { tex.colorSpace = THREE.SRGBColorSpace; }
+);
+const earthMat = new THREE.MeshStandardMaterial({ map: earthTex, roughness: 0.85 });
+const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+scene.add(earthMesh);
+
+// Atmosphere glow
+const atmMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.025, 48, 48),
+    new THREE.MeshBasicMaterial({
+        color: 0x4488ff, transparent: true, opacity: 0.08,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+    })
+);
+scene.add(atmMesh);
+
+// ═══════════════════════════════════════════════════════════════
+//  SATELLITE TRACKER
+// ═══════════════════════════════════════════════════════════════
+
+const tracker = new SatelliteTracker(scene, 1.0, {
+    maxSatellites: 2000,
+    showOrbits: true,
+    dotSize: 0.006,
+});
+
+const _loadedGroups = new Map();
+
+async function loadGroup(name) {
+    if (_loadedGroups.has(name)) return;
+    const countEl = document.getElementById(`cnt-${name}`);
+    if (countEl) countEl.textContent = '…';
+    const count = await tracker.loadGroup(name);
+    _loadedGroups.set(name, count);
+    if (countEl) countEl.textContent = count;
+    _updateHud();
+}
+
+function _updateHud() {
+    const total = tracker.getSatellites().length;
+    document.getElementById('hud-count').textContent = total;
+    document.getElementById('hud-groups').textContent = [..._loadedGroups.keys()].join(', ') || '—';
+    document.getElementById('hud-updated').textContent = new Date().toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit',
+    });
+    document.getElementById('sd-total').textContent = `${total} loaded`;
+}
+
+// Auto-load stations
+loadGroup('stations');
+
+// Group toggle handlers
+for (const name of ['stations', 'starlink', 'weather', 'gps-ops', 'science', 'resource', 'last-30-days']) {
+    document.getElementById(`grp-${name}`)?.addEventListener('change', async e => {
+        if (e.target.checked) {
+            await loadGroup(name);
+        }
+        // TODO: toggle visibility per group
+    });
+}
+
+// Search handler
+async function doSearch() {
+    const input = document.getElementById('sp-search-input');
+    const resultEl = document.getElementById('sp-search-result');
+    const infoEl = document.getElementById('sp-sat-info');
+    if (!input?.value.trim()) return;
+    const query = input.value.trim();
+    resultEl.textContent = 'Searching…';
+
+    try {
+        const param = /^\d+$/.test(query) ? `norad=${query}` : `search=${encodeURIComponent(query)}`;
+        const res = await fetch(`/api/celestrak/tle?${param}`);
+        const data = await res.json();
+        if (data.error || !data.satellites?.length) {
+            resultEl.textContent = 'Not found — try a different NORAD ID or name';
+            infoEl.style.display = 'none';
+            return;
+        }
+        const sat = data.satellites[0];
+        resultEl.innerHTML = `Found: <strong style="color:#0cc">${sat.name}</strong>`;
+
+        // Show info panel
+        infoEl.style.display = '';
+        document.getElementById('sp-name').textContent = sat.name;
+        document.getElementById('sp-norad').textContent = sat.norad_id;
+        document.getElementById('sp-incl').textContent = sat.inclination.toFixed(2) + '°';
+        document.getElementById('sp-period').textContent = sat.period_min.toFixed(1) + ' min';
+        document.getElementById('sp-peri').textContent = sat.perigee_km + ' km';
+        document.getElementById('sp-apo').textContent = sat.apogee_km + ' km';
+
+        // Add to tracker for live propagation
+        const tracked = await tracker.loadNorad(sat.norad_id);
+        _selectedNorad = sat.norad_id;
+
+        // Draw orbit trail for selected satellite
+        _drawOrbitTrail(sat);
+
+    } catch (err) {
+        resultEl.textContent = `Error: ${err.message}`;
+    }
+}
+
+let _selectedNorad = null;
+let _orbitTrailLine = null;
+
+/** Draw a full orbit trail for a satellite (one complete revolution). */
+function _drawOrbitTrail(sat) {
+    // Remove old trail
+    if (_orbitTrailLine) {
+        scene.remove(_orbitTrailLine);
+        _orbitTrailLine.geometry.dispose();
+        _orbitTrailLine = null;
+    }
+
+    if (!sat.line1 || !sat.line2) return;
+
+    const periodMin = sat.period_min || 90;
+    const STEPS = 180;
+    const epochJd = _computeEpochJd(sat.epoch_yr);
+    const nowJd = Date.now() / 86400000 + 2440587.5;
+    const tsinceBase = (nowJd - epochJd) * 1440;
+
+    const points = [];
+    for (let i = 0; i <= STEPS; i++) {
+        const t = tsinceBase + (i / STEPS) * periodMin;
+        // Use JS fallback for orbit trail (consistent, no async needed)
+        const teme = _quickPropagate(sat, t);
+        if (!teme) continue;
+        const ecef = _temeToEcef(teme.x, teme.y, teme.z, nowJd + (i / STEPS) * periodMin / 1440);
+        const lla = _ecefToLla(ecef.x, ecef.y, ecef.z);
+        const r = 1.0 * (1 + lla.alt / 6378.135);
+        const latR = lla.lat * Math.PI / 180;
+        const lonR = lla.lon * Math.PI / 180;
+        points.push(new THREE.Vector3(
+            r * Math.cos(latR) * Math.cos(lonR),
+            r * Math.sin(latR),
+            r * Math.cos(latR) * Math.sin(lonR)
+        ));
+    }
+
+    if (points.length > 2) {
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({
+            color: 0x00ffcc, transparent: true, opacity: 0.35, depthWrite: false,
+        });
+        _orbitTrailLine = new THREE.Line(geo, mat);
+        _orbitTrailLine.renderOrder = 5;
+        scene.add(_orbitTrailLine);
+    }
+}
+
+function _computeEpochJd(epochYr) {
+    const yr = Math.floor(epochYr);
+    const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
+    const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
+    return jdJan1 + dayFrac;
+}
+
+function _quickPropagate(tle, tsince) {
+    const TWOPI = 2 * Math.PI;
+    const n0 = tle.mean_motion * TWOPI / 1440;
+    const e0 = tle.eccentricity;
+    const i0 = tle.inclination * Math.PI / 180;
+    const raan0 = tle.raan * Math.PI / 180;
+    const argp0 = tle.arg_perigee * Math.PI / 180;
+    const M0 = tle.mean_anomaly * Math.PI / 180;
+    const J2 = 0.001082616;
+    const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1/3);
+    const p = a * (1 - e0 * e0);
+    const cosI = Math.cos(i0);
+    const n_corr = n0 * (1 + 1.5 * J2 * (6378.135/p)**2 * (1 - 1.5*(1-cosI*cosI)));
+    const raanDot = -1.5 * J2 * (6378.135/p)**2 * n0 * cosI;
+    const argpDot = 0.75 * J2 * (6378.135/p)**2 * n0 * (5*cosI*cosI - 1);
+    const M = M0 + n_corr * tsince;
+    const raan = raan0 + raanDot * tsince;
+    const argp = argp0 + argpDot * tsince;
+    let E = M;
+    for (let k = 0; k < 8; k++) E -= (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
+    const nu = Math.atan2(Math.sqrt(1-e0*e0)*Math.sin(E), Math.cos(E)-e0);
+    const r = a * (1 - e0*Math.cos(E));
+    const u = argp + nu;
+    const cosU = Math.cos(u), sinU = Math.sin(u);
+    const cosR = Math.cos(raan), sinR = Math.sin(raan);
+    const cosI2 = Math.cos(i0), sinI2 = Math.sin(i0);
+    return {
+        x: r * (cosR*cosU - sinR*sinU*cosI2),
+        y: r * (sinR*cosU + cosR*sinU*cosI2),
+        z: r * sinU * sinI2,
+    };
+}
+
+function _temeToEcef(x, y, z, jd) {
+    const T = (jd - 2451545.0) / 36525.0;
+    let theta = 67310.54841 + (876600*3600 + 8640184.812866)*T + 0.093104*T*T - 6.2e-6*T*T*T;
+    theta = ((theta % 86400) / 240) * Math.PI / 180;
+    const c = Math.cos(theta), s = Math.sin(theta);
+    return { x: c*x + s*y, y: -s*x + c*y, z };
+}
+
+function _ecefToLla(x, y, z) {
+    const r = Math.sqrt(x*x + y*y + z*z);
+    return { lat: Math.asin(z/r) * 180/Math.PI, lon: Math.atan2(y,x) * 180/Math.PI, alt: r - 6378.135 };
+}
+
+document.getElementById('sp-search-btn')?.addEventListener('click', doSearch);
+document.getElementById('sp-search-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+
+    // Slow Earth rotation
+    earthMesh.rotation.y += 0.0001;
+
+    // Propagate satellites
+    tracker.tick();
+
+    // Update selected satellite info panel
+    if (_selectedNorad) {
+        const sats = tracker.getSatellites();
+        const sel = sats.find(s => s.norad_id === _selectedNorad);
+        if (sel) {
+            document.getElementById('sp-alt').textContent = `${Math.round(sel.alt)} km`;
+            document.getElementById('sp-latlon').textContent = `${sel.lat.toFixed(2)}°, ${sel.lon.toFixed(2)}°`;
+            const speedKms = sel.alt > 0 ? Math.sqrt(398600.8 / (6378.135 + sel.alt)).toFixed(1) : '—';
+            document.getElementById('sp-speed').textContent = `${speedKms} km/s`;
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+
+// Resize
+function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvas.parentElement);
+resize();
+
+animate();
+</script>
+</body>
+</html>
