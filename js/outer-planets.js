@@ -283,6 +283,14 @@ const NEP_R1 = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 function _vsop87(jd, L0, L1, L2, B0, R0, R1) {
+    // VSOP87D truncated series are valid 1800–2200.  Beyond this range
+    // accuracy degrades — the truncated harmonic terms accumulate error.
+    // We warn but don't refuse (Meeus fallback in horizons.js handles gracefully).
+    const yr = (jd - 2451545.0) / 365.25 + 2000;
+    if ((yr < 1800 || yr > 2200) && !_vsop87._warned) {
+        _vsop87._warned = true;
+        console.warn(`[VSOP87D] Epoch ${Math.round(yr)} is outside the 1800–2200 validity range. Positions may drift by several degrees.`);
+    }
     const tau  = (jd - 2451545.0) / 365250.0;
     const tau2 = tau * tau;
 
