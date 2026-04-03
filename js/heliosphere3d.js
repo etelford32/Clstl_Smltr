@@ -2216,6 +2216,10 @@ export class Heliosphere3D {
         u.u_flare_t.value   = this._sunFlareT;
         u.u_kp_norm.value   = Math.min(1, (this._sw.kp ?? 2) / 9);
         u.u_bloom.value     = this._bloomLevel;
+        // New uniforms from upgraded sun-shader.js:
+        u.u_f107_norm.value = Math.min(1, ((this._sw.f107 ?? 150) - 65) / 235);
+        u.u_activity.value  = Math.min(1, xNorm * 0.6 + u.u_kp_norm.value * 0.4);
+        u.u_rot_phase.value = this._rot;
 
         // Post-flare UV arcade glow on sun surface — decays after trigger
         if (this._flareArcT > 0) {

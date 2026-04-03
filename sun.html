@@ -1103,6 +1103,10 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <div class="sec" id="sec-interior">
                 <div class="sec-hd"><span>Solar Interior</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
+                    <!-- Cross-section cutaway diagram -->
+                    <canvas id="interior-cutaway" width="260" height="140"
+                        style="width:100%;height:auto;display:block;margin:0 0 8px;border-radius:6px;background:#0a0500"
+                        title="Solar interior cross-section — click to set radius"></canvas>
                     <!-- Radius explorer slider -->
                     <div class="ctrl">
                         <label>r / R<sub>☉</sub></label>
@@ -5567,6 +5571,135 @@ function updateInteriorPanel() {
     }
 }
 
+// ── Interior cross-section cutaway canvas ─────────────────────────────────────
+const _cutawayCanvas = document.getElementById('interior-cutaway');
+const _cutawayCtx    = _cutawayCanvas?.getContext('2d');
+
+const _INTERIOR_LAYERS = [
+    { rMin: 0,     rMax: 0.25,  color: '#ff2200', name: 'Core' },
+    { rMin: 0.25,  rMax: 0.713, color: '#ff7700', name: 'Radiative' },
+    { rMin: 0.713, rMax: 0.72,  color: '#ffaa00', name: 'Tachocline' },
+    { rMin: 0.72,  rMax: 1.0,   color: '#ffcc00', name: 'Convective' },
+];
+
+function drawCutaway(selectedR) {
+    if (!_cutawayCtx) return;
+    const cvs = _cutawayCanvas;
+    const W = cvs.width, H = cvs.height;
+    const ctx = _cutawayCtx;
+    ctx.clearRect(0, 0, W, H);
+
+    const cx = 10;               // left edge for the half-circle
+    const cy = H / 2;
+    const R  = H * 0.88;         // full sun radius in pixels
+
+    // Draw each layer as a filled half-circle arc
+    for (let i = _INTERIOR_LAYERS.length - 1; i >= 0; i--) {
+        const layer = _INTERIOR_LAYERS[i];
+        const rPx = R * layer.rMax;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(cx, cy - R * layer.rMin);
+        ctx.closePath();
+
+        // Radial gradient for each layer
+        const grad = ctx.createRadialGradient(cx, cy, R * layer.rMin, cx, cy, rPx);
+        const baseAlpha = (i === 0) ? 0.85 : 0.65 - i * 0.08;
+        grad.addColorStop(0, layer.color + 'cc');
+        grad.addColorStop(1, layer.color + '88');
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+
+    // Layer boundary lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 0.5;
+    for (const layer of _INTERIOR_LAYERS) {
+        if (layer.rMin > 0) {
+            const rPx = R * layer.rMin;
+            ctx.beginPath();
+            ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+            ctx.stroke();
+        }
+    }
+
+    // Photosphere edge (solid outer circle)
+    ctx.strokeStyle = 'rgba(255,220,100,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+
+    // Selected radius indicator
+    if (selectedR >= 0 && selectedR <= 1) {
+        const rPx = R * selectedR;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Radius label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`r = ${selectedR.toFixed(3)} R☉`, cx + rPx + 4, cy - 2);
+    }
+
+    // Layer labels (right side)
+    ctx.textAlign = 'left';
+    ctx.font = '8px sans-serif';
+    const labels = [
+        { r: 0.12, name: 'Core', color: '#ff6644' },
+        { r: 0.48, name: 'Radiative Zone', color: '#ffaa66' },
+        { r: 0.716, name: 'Tachocline', color: '#ffcc77' },
+        { r: 0.86, name: 'Convective', color: '#ffdd88' },
+    ];
+    for (const lbl of labels) {
+        const y = cy - R * lbl.r * 0.4;
+        const x = cx + R * lbl.r + 8;
+        if (x > W - 50) continue;
+        ctx.fillStyle = lbl.color;
+        ctx.fillText(lbl.name, x, y);
+    }
+
+    // Temperature scale on the right edge
+    ctx.fillStyle = '#554';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'right';
+    const temps = [
+        { r: 0,    T: '15.7 MK' },
+        { r: 0.25, T: '~7 MK' },
+        { r: 0.71, T: '~2 MK' },
+        { r: 1.0,  T: '5 778 K' },
+    ];
+    for (const t of temps) {
+        const y = cy + (t.r - 0.5) * R * 1.1;
+        ctx.fillText(t.T, W - 4, y);
+    }
+}
+
+// Click on canvas to set radius
+_cutawayCanvas?.addEventListener('click', e => {
+    const rect = _cutawayCanvas.getBoundingClientRect();
+    const scaleX = _cutawayCanvas.width / rect.width;
+    const scaleY = _cutawayCanvas.height / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
+    const cx = 10, cy = _cutawayCanvas.height / 2;
+    const R = _cutawayCanvas.height * 0.88;
+    const dx = px - cx, dy = py - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const r = Math.min(1, Math.max(0, dist / R));
+    const slider = document.getElementById('sl-int-radius');
+    if (slider) {
+        slider.value = r.toFixed(3);
+        updateInteriorPanel();
+    }
+});
+
 // Slider input
 document.getElementById('sl-int-radius')?.addEventListener('input', updateInteriorPanel);
 
@@ -5580,6 +5713,18 @@ document.querySelectorAll('.int-jump').forEach(btn => {
         }
     });
 });
+
+// Hook cutaway redraw into the panel update
+const _origUpdateInterior = updateInteriorPanel;
+// Patch: also draw cutaway when panel updates
+{
+    const origFn = updateInteriorPanel;
+    updateInteriorPanel = function() {
+        origFn();
+        const slider = document.getElementById('sl-int-radius');
+        drawCutaway(slider ? parseFloat(slider.value) : 0.5);
+    };
+}
 
 // Initial render
 updateInteriorPanel();
