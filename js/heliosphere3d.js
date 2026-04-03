@@ -47,6 +47,7 @@ import {
     MoonSystem, JUPITER_MOONS, SATURN_MOONS, URANUS_MOONS, NEPTUNE_MOONS,
     createUranusRings, applyPlanetSpin, PLANET_SPIN,
 } from './planet-moons.js';
+import { JupiterSkin } from './jupiter-skin.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -724,9 +725,9 @@ export class Heliosphere3D {
         for (const name of ['mercury', 'venus', 'mars']) {
             applyPlanetSpin(this._planetMeshes[name], name, jd);
         }
-        // For grouped planets, apply spin to the sphere child (not the group)
+        // For grouped planets, apply spin to the sphere child (not the group).
+        // Skip Jupiter — JupiterSkin handles its own rotation via shader uniforms.
         for (const [name, group] of [
-            ['jupiter', this._planetMeshes.jupiter],
             ['saturn',  this._planetMeshes.saturn],
             ['uranus',  this._planetMeshes.uranus],
             ['neptune', this._planetMeshes.neptune],
@@ -1163,16 +1164,17 @@ export class Heliosphere3D {
         // Default earth position (overwritten by ephemeris)
         this._earthGroup.position.set(AU, 0, 0);
 
-        // ── Jupiter — group with Galilean moons ──────────────────────────────
+        // ── Jupiter — full cloud band shader + GRS + atmosphere + faint rings ──
         const jupiterGroup = new THREE.Group();
         jupiterGroup.name = 'jupiter_group';
         this._scene.add(jupiterGroup);
-        const jupiterSphere = new THREE.Mesh(
-            new THREE.SphereGeometry(R.jupiter, 24, 24),
-            new THREE.MeshStandardMaterial({ color: COL.jupiter, roughness: 0.80, metalness: 0 })
-        );
-        jupiterSphere.name = 'jupiter';
-        jupiterGroup.add(jupiterSphere);
+        this._jupiterSkin = new JupiterSkin(jupiterGroup, {
+            radius:   R.jupiter,
+            quality:  'medium',
+            rings:    true,
+            atmosphere: true,
+            segments: 32,
+        });
         this._planetMeshes.jupiter = jupiterGroup;
         this._jupiterMoons = new MoonSystem(
             jupiterGroup, JUPITER_MOONS, AU, R.jupiter,
@@ -2617,6 +2619,7 @@ export class Heliosphere3D {
 
         this._tickLivePlanets();
         this._tickSun(dt);
+        if (this._jupiterSkin) this._jupiterSkin.update(this._t);
         this._tickProminences(dt);
         this._tickMoon(dt);
         // Fire time-update every frame for HUD / date picker / epoch badge
