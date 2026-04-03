@@ -593,7 +593,10 @@ import './js/live-status-bar.js';
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initScaleNav, navigateTo } from './js/scale-nav.js';
-import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric }
+import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
+         mercuryHeliocentric, venusHeliocentric, marsHeliocentric,
+         jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric,
+         neptuneHeliocentric }
     from './js/horizons.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
@@ -1293,10 +1296,48 @@ const PLANETS = [
     },
 ];
 
+// ── Compute real planet angles from ephemeris at current time ─────────────────
+// Each planet needs an angle0 offset so that (simTime/period)*2π + angle0
+// gives the correct heliocentric ecliptic longitude at the current epoch.
+{
+    const _jdInit = jdNow();
+    const _ephFns = {
+        'Mercury': mercuryHeliocentric, 'Venus': venusHeliocentric,
+        'Earth': earthHeliocentric, 'Mars': marsHeliocentric,
+        'Jupiter': jupiterHeliocentric, 'Saturn': saturnHeliocentric,
+        'Uranus': uranusHeliocentric, 'Neptune': neptuneHeliocentric,
+    };
+    const _e0Init = earthHeliocentric(_jdInit);
+    const _simTimeInit = _e0Init.lon_rad / (Math.PI * 2);
+
+    PLANETS.forEach(p => {
+        const fn = _ephFns[p.name];
+        if (fn) {
+            const eph = fn(_jdInit);
+            // angle0 = realLongitude - (simTime/period)*2π
+            const orbAngle = (_simTimeInit / p.period) * Math.PI * 2;
+            p.angle0 = eph.lon_rad - orbAngle;
+        } else {
+            p.angle0 = 0;
+        }
+    });
+
+    console.group('%c[Solar System] Real-time planet positions (Meeus/VSOP87D)', 'color:#ffd700;font-weight:bold');
+    const R2D = 180 / Math.PI;
+    PLANETS.forEach(p => {
+        const fn = _ephFns[p.name];
+        if (fn) {
+            const eph = fn(_jdInit);
+            const lon = ((eph.lon_rad * R2D) % 360 + 360) % 360;
+            console.log(`  ${p.name.padEnd(8)} lon=${lon.toFixed(1).padStart(6)}°  r=${eph.dist_AU.toFixed(4)} AU`);
+        }
+    });
+    console.groupEnd();
+}
+
 // Build orbit rings and planet meshes
 PLANETS.forEach(p => {
     p.dist  = simDist(p.dAU);
-    p.angle = Math.random() * Math.PI * 2;
 
     // Orbit ring
     const og = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
@@ -2615,7 +2656,7 @@ function animate() {
 
     // Move planets + update wind-shader uniforms
     PLANETS.forEach(p => {
-        const angle = (simTime / p.period) * Math.PI * 2;
+        const angle = (simTime / p.period) * Math.PI * 2 + (p.angle0 ?? 0);
         p.mesh.position.set(p.dist * Math.cos(angle), 0, p.dist * Math.sin(angle));
         p.mesh.rotation.y += 0.005 / p.period;
         if (p.uniforms) p.uniforms.u_time.value = t;
