@@ -42,6 +42,7 @@ import {
 } from './horizons.js';
 import { earthOrbitFull } from './earth-orbit.js';
 import { EphemerisService } from './horizons.js';
+import { OrbitTrails } from './orbit-trails.js';
 import {
     buildParkerLUT,
     parkerSpeedRatio,
@@ -644,7 +645,7 @@ export class Heliosphere3D {
         this._buildScene();
         this._buildStarfield();
         this._buildSun();
-        this._buildOrbitRings();
+        this._buildOrbitTrails();
         this._buildPlanets();
         this._buildHCS();          // heliospheric current sheet — below field lines
         this._buildSolarWind();    // field lines + particles on top
@@ -694,6 +695,9 @@ export class Heliosphere3D {
 
         this._updateEphemerisPositions();
         this._tickMarsSystem();
+
+        // Update orbit trail precession (only rebuilds if epoch changed >1 day)
+        if (this._orbitTrails) this._orbitTrails.update(jd);
     }
 
     /**
@@ -859,60 +863,20 @@ export class Heliosphere3D {
         }
     }
 
-    _buildOrbitRings() {
-        const RING_COL = {
-            mercury: 0x4a3a2a, venus:   0x5a4a20, earth:   0x1a3a6a, mars:    0x4a1a0a,
-            jupiter: 0x6a4a18, saturn:  0x6a6030, uranus:  0x206060, neptune: 0x1a2a6a,
+    _buildOrbitTrails() {
+        // 3D precessing orbital ellipses for all 8 planets.
+        // Uses orbit-trails.js which computes true Keplerian ellipses with
+        // secular correction rates — orbits precess during time warp.
+        this._orbitTrails = new OrbitTrails(this._scene, AU, { samples: 256 });
+        this._orbitTrails.update(this._simJD);
+
+        // Store Earth ellipse params for orbital markers (backward compat)
+        const orb = earthOrbitFull(jdNow());
+        this._earthOrbitEllipse = {
+            a_au: orb.a, e: orb.e,
+            b_au: orb.a * Math.sqrt(1 - orb.e * orb.e),
+            omega_bar_rad: orb.omega_bar_rad,
         };
-        for (const [name, dist] of Object.entries(ORBIT_AU)) {
-            const col  = RING_COL[name] ?? 0x333333;
-            const incl = ORBIT_INCL[name] ?? { i: 0, node: 0 };
-            const mat  = new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.28, depthWrite: false });
-            const pts  = [];
-            const N    = 180;
-
-            if (name === 'earth') {
-                // ── True ellipse for Earth via VSOP87 orbital elements ────────
-                // e ≈ 0.01671, ω̄ ≈ 102.94° at J2000.  Use current-epoch values.
-                const orb  = earthOrbitFull(jdNow());
-                const a_au = orb.a;
-                const e    = orb.e;
-                const b_au = a_au * Math.sqrt(1 - e * e);   // semi-minor axis
-                const omR  = orb.omega_bar_rad;              // longitude of perihelion
-
-                // Parametric ellipse in perifocal frame, rotated by ω̄
-                // x_peri = a*cos(E) − a*e,  y_peri = b*sin(E)
-                // Then rotate by ω̄ in ecliptic plane:
-                //   x_ecl = x_p*cos(ω̄) − y_p*sin(ω̄)
-                //   y_ecl = x_p*sin(ω̄) + y_p*cos(ω̄)
-                // Three.js mapping: scene.x=ecl.x, scene.y=ecl.z≈0, scene.z=ecl.y
-                const cosOm = Math.cos(omR), sinOm = Math.sin(omR);
-                for (let k = 0; k <= N; k++) {
-                    const E  = (k / N) * 2 * Math.PI;
-                    const xp = a_au * Math.cos(E) - a_au * e;
-                    const yp = b_au * Math.sin(E);
-                    const xe = (xp * cosOm - yp * sinOm) * AU;
-                    const ye = (xp * sinOm + yp * cosOm) * AU;
-                    pts.push(new THREE.Vector3(xe, 0, ye));   // ecl.z ≈ 0
-                }
-                this._earthOrbitEllipse = { a_au, e, b_au, omega_bar_rad: omR };
-            } else {
-                // Circular approximation for all other planets
-                for (let k = 0; k <= N; k++) {
-                    const a   = (k / N) * Math.PI * 2;
-                    const x0  = dist * AU * Math.cos(a);
-                    const z0  = dist * AU * Math.sin(a);
-                    const cosI = Math.cos(incl.i), sinI = Math.sin(incl.i);
-                    const x1 = x0, y1 = -z0 * sinI, z1 = z0 * cosI;
-                    const cosO = Math.cos(incl.node), sinO = Math.sin(incl.node);
-                    const xw = x1 * cosO - z1 * sinO;
-                    const yw = y1;
-                    const zw = x1 * sinO + z1 * cosO;
-                    pts.push(new THREE.Vector3(xw, yw, zw));
-                }
-            }
-            this._scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
-        }
 
         // ── Orbital markers (perihelion, aphelion, L1, L2, velocity arrow) ──
         this._buildOrbitalMarkers();
