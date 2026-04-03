@@ -593,8 +593,13 @@ import './js/live-status-bar.js';
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initScaleNav, navigateTo } from './js/scale-nav.js';
-import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric }
+import { EphemerisService, jdNow, earthHeliocentric, moonGeocentric,
+         mercuryHeliocentric, venusHeliocentric, marsHeliocentric,
+         jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric,
+         neptuneHeliocentric }
     from './js/horizons.js';
+import { JUPITER_VERT, JUPITER_FRAG, createJupiterUniforms } from './js/jupiter-shader.js';
+import { PLANET_SPIN } from './js/planet-moons.js';
 
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('solar');
@@ -1293,10 +1298,48 @@ const PLANETS = [
     },
 ];
 
+// ── Compute real planet angles from ephemeris at current time ─────────────────
+// Each planet needs an angle0 offset so that (simTime/period)*2π + angle0
+// gives the correct heliocentric ecliptic longitude at the current epoch.
+{
+    const _jdInit = jdNow();
+    const _ephFns = {
+        'Mercury': mercuryHeliocentric, 'Venus': venusHeliocentric,
+        'Earth': earthHeliocentric, 'Mars': marsHeliocentric,
+        'Jupiter': jupiterHeliocentric, 'Saturn': saturnHeliocentric,
+        'Uranus': uranusHeliocentric, 'Neptune': neptuneHeliocentric,
+    };
+    const _e0Init = earthHeliocentric(_jdInit);
+    const _simTimeInit = _e0Init.lon_rad / (Math.PI * 2);
+
+    PLANETS.forEach(p => {
+        const fn = _ephFns[p.name];
+        if (fn) {
+            const eph = fn(_jdInit);
+            // angle0 = realLongitude - (simTime/period)*2π
+            const orbAngle = (_simTimeInit / p.period) * Math.PI * 2;
+            p.angle0 = eph.lon_rad - orbAngle;
+        } else {
+            p.angle0 = 0;
+        }
+    });
+
+    console.group('%c[Solar System] Real-time planet positions (Meeus/VSOP87D)', 'color:#ffd700;font-weight:bold');
+    const R2D = 180 / Math.PI;
+    PLANETS.forEach(p => {
+        const fn = _ephFns[p.name];
+        if (fn) {
+            const eph = fn(_jdInit);
+            const lon = ((eph.lon_rad * R2D) % 360 + 360) % 360;
+            console.log(`  ${p.name.padEnd(8)} lon=${lon.toFixed(1).padStart(6)}°  r=${eph.dist_AU.toFixed(4)} AU`);
+        }
+    });
+    console.groupEnd();
+}
+
 // Build orbit rings and planet meshes
 PLANETS.forEach(p => {
     p.dist  = simDist(p.dAU);
-    p.angle = Math.random() * Math.PI * 2;
 
     // Orbit ring
     const og = new THREE.RingGeometry(p.dist - 0.012, p.dist + 0.012, 128);
@@ -1305,35 +1348,105 @@ PLANETS.forEach(p => {
     orb.rotation.x = Math.PI / 2;
     scene.add(orb);
 
-    // Planet sphere — custom wind-interaction shader material
+    // Planet sphere — Jupiter gets its own cloud-band shader; others get the
+    // general-purpose wind-interaction shader.
     const pg = new THREE.SphereGeometry(p.radius, 48, 48);
-    const cBase = new THREE.Color(p.color);
-    p.uniforms = {
-        u_base:    { value: new THREE.Vector3(cBase.r, cBase.g, cBase.b) },
-        u_time:    { value: 0.0 },
-        u_windStr: { value: p.windStr },
-        u_mag:     { value: p.magField },
-        u_atm:     { value: p.atmos },
-        u_windClr: { value: new THREE.Vector3(...p.windColor) },
-    };
-    const pm = new THREE.ShaderMaterial({
-        vertexShader:   planetVS,
-        fragmentShader: planetFS,
-        uniforms: p.uniforms,
-    });
+    let pm;
+
+    if (p.name === 'Jupiter') {
+        // Jupiter: banded cloud shader with GRS, zonal winds, atmospheric haze
+        p.jupiterU = createJupiterUniforms(THREE);
+        p.jupiterU.u_quality.value = 1;   // medium quality
+        pm = new THREE.ShaderMaterial({
+            vertexShader:   JUPITER_VERT,
+            fragmentShader: JUPITER_FRAG,
+            uniforms:       p.jupiterU,
+        });
+        // Also keep standard uniforms for the animation loop (u_time)
+        const cBase = new THREE.Color(p.color);
+        p.uniforms = {
+            u_base: { value: new THREE.Vector3(cBase.r, cBase.g, cBase.b) },
+            u_time: { value: 0.0 },
+            u_windStr: { value: p.windStr }, u_mag: { value: p.magField },
+            u_atm: { value: p.atmos }, u_windClr: { value: new THREE.Vector3(...p.windColor) },
+        };
+    } else {
+        const cBase = new THREE.Color(p.color);
+        p.uniforms = {
+            u_base:    { value: new THREE.Vector3(cBase.r, cBase.g, cBase.b) },
+            u_time:    { value: 0.0 },
+            u_windStr: { value: p.windStr },
+            u_mag:     { value: p.magField },
+            u_atm:     { value: p.atmos },
+            u_windClr: { value: new THREE.Vector3(...p.windColor) },
+        };
+        pm = new THREE.ShaderMaterial({
+            vertexShader:   planetVS,
+            fragmentShader: planetFS,
+            uniforms: p.uniforms,
+        });
+    }
+
     p.mesh = new THREE.Mesh(pg, pm);
     p.mesh.userData = p;
+
+    // Apply axial tilt from planet-moons.js data
+    const spin = PLANET_SPIN[p.name.toLowerCase()];
+    if (spin) {
+        p.mesh.rotation.x = spin.obliquity * Math.PI / 180;
+    }
+
     scene.add(p.mesh);
 
-    // Saturn rings
-    if (p.rings) {
-        const rg = new THREE.RingGeometry(p.radius * 1.4, p.radius * 2.4, 64);
-        const rm = new THREE.MeshBasicMaterial({
-            color:0xc8a850, transparent:true, opacity:0.45, side:THREE.DoubleSide
-        });
-        const ring = new THREE.Mesh(rg, rm);
-        ring.rotation.x = Math.PI / 2.4;
-        p.mesh.add(ring);
+    // Saturn rings — tilted to obliquity
+    if (p.name === 'Saturn') {
+        const satTilt = (PLANET_SPIN.saturn?.obliquity ?? 26.73) * Math.PI / 180;
+        for (const [inner, outer, opacity] of [
+            [p.radius * 1.4, p.radius * 2.05, 0.50],
+            [p.radius * 2.10, p.radius * 2.40, 0.32],
+        ]) {
+            const rg = new THREE.RingGeometry(inner, outer, 64);
+            const rm = new THREE.MeshBasicMaterial({
+                color: 0xd4c88a, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(rg, rm);
+            ring.rotation.x = Math.PI / 2 - satTilt;
+            p.mesh.add(ring);
+        }
+    }
+
+    // Uranus rings — extremely tilted (97.8°), faint
+    if (p.name === 'Uranus') {
+        const uraTilt = (PLANET_SPIN.uranus?.obliquity ?? 97.77) * Math.PI / 180;
+        for (const [inner, outer, opacity] of [
+            [p.radius * 1.55, p.radius * 1.70, 0.15],
+            [p.radius * 1.80, p.radius * 2.00, 0.10],
+        ]) {
+            const rg = new THREE.RingGeometry(inner, outer, 64);
+            const rm = new THREE.MeshBasicMaterial({
+                color: 0x8899aa, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(rg, rm);
+            ring.rotation.x = Math.PI / 2 - uraTilt;
+            p.mesh.add(ring);
+        }
+    }
+
+    // Jupiter faint rings
+    if (p.name === 'Jupiter') {
+        const jupTilt = (PLANET_SPIN.jupiter?.obliquity ?? 3.13) * Math.PI / 180;
+        for (const [inner, outer, opacity, color] of [
+            [p.radius * 1.72, p.radius * 1.81, 0.04, 0x8888aa],
+            [p.radius * 1.40, p.radius * 1.72, 0.02, 0x777799],
+        ]) {
+            const rg = new THREE.RingGeometry(inner, outer, 64);
+            const rm = new THREE.MeshBasicMaterial({
+                color, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false,
+            });
+            const ring = new THREE.Mesh(rg, rm);
+            ring.rotation.x = Math.PI / 2 - jupTilt;
+            p.mesh.add(ring);
+        }
     }
 });
 
@@ -2597,8 +2710,12 @@ function tickFPS(){fF++;const n=performance.now();if(n-fT>=500){fEl.textContent=
 // ═══════════════════════════════════════════════════════
 const hudYear = document.getElementById('hud-year');
 
+let _prevFrameMs = performance.now();
 function animate() {
     requestAnimationFrame(animate);
+    const _nowMs = performance.now();
+    const _frameDt = Math.min(0.1, (_nowMs - _prevFrameMs) / 1000);  // seconds, capped at 100ms
+    _prevFrameMs = _nowMs;
 
     sunUniforms.u_time.value += 0.01;
     const t = sunUniforms.u_time.value;
@@ -2615,10 +2732,20 @@ function animate() {
 
     // Move planets + update wind-shader uniforms
     PLANETS.forEach(p => {
-        const angle = (simTime / p.period) * Math.PI * 2;
+        const angle = (simTime / p.period) * Math.PI * 2 + (p.angle0 ?? 0);
         p.mesh.position.set(p.dist * Math.cos(angle), 0, p.dist * Math.sin(angle));
-        p.mesh.rotation.y += 0.005 / p.period;
+        // Rotation: use real sidereal period from PLANET_SPIN data
+        // Scale by simSpeed so planets spin faster during time warp
+        const _sp = PLANET_SPIN[p.name.toLowerCase()];
+        if (_sp && _sp.period_d !== 0) {
+            const rotRate = (2 * Math.PI) / (Math.abs(_sp.period_d) * 86400) * _frameDt * simSpeed;
+            p.mesh.rotation.y += _sp.period_d < 0 ? -rotRate : rotRate;
+        } else {
+            p.mesh.rotation.y += 0.005 / p.period;
+        }
         if (p.uniforms) p.uniforms.u_time.value = t;
+        // Jupiter cloud shader tick
+        if (p.jupiterU) p.jupiterU.u_time.value = t;
 
         // ── Moon orbits ──────────────────────────────────────────────
         if (p.moons) {

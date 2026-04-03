@@ -75,13 +75,13 @@ nav {
 .ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
 .ndl-body  { display:flex; flex-direction:column; gap:1px; }
 .ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
-.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.ndl-sub   { color:#7a8095; font-size:.70rem; line-height:1.2; }
 .nav-drop-link:hover .ndl-title { color:#fff; }
 .nav-drop-link:hover .ndl-sub   { color:#7a8090; }
 /* Section label inside dropdown */
 .nav-drop-section {
     padding:7px 16px 3px; font-size:.63rem; font-weight:700;
-    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    letter-spacing:.09em; color:#6a7090; text-transform:uppercase;
     border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
 }
 .nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
@@ -144,7 +144,7 @@ nav {
     background: linear-gradient(135deg,#00c6ff,#7b2ff7);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-.sw-subtitle { font-size:.85rem; color:#667; }
+.sw-subtitle { font-size:.85rem; color:#889; }
 .live-badge {
     display:flex; align-items:center; gap:6px;
     padding:4px 10px; background:rgba(0,255,136,.08);
@@ -158,6 +158,106 @@ nav {
 }
 @keyframes livepulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 #last-update { color:#8af0b0; font-variant-numeric: tabular-nums; }
+
+/* ── SOLAR WIND TRANSIT DIAGRAM ──────────────────────────────────────────── */
+.transit-section {
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    padding: 18px 24px 16px;
+    margin-bottom: 14px;
+    position: relative;
+    overflow: hidden;
+}
+.transit-section::before {
+    content:''; position:absolute; inset:0;
+    background: linear-gradient(90deg, rgba(255,160,0,.04) 0%, rgba(0,198,255,.03) 50%, rgba(0,180,120,.04) 100%);
+    pointer-events: none;
+}
+.transit-title {
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#889; margin-bottom:14px; display:flex; align-items:center; gap:8px;
+}
+.transit-title .live-pip {
+    width:6px; height:6px; border-radius:50%; background:#4fc97f;
+    box-shadow:0 0 6px #4fc97f; animation: pip-pulse 2s ease-in-out infinite;
+}
+@keyframes pip-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+/* The track: Sun ────── L1 ────── Earth */
+.transit-track {
+    display: flex; align-items: center; gap: 0;
+    position: relative; margin: 0 0 6px;
+    min-height: 72px;
+}
+.transit-node {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 3px; flex-shrink: 0; z-index: 2; min-width: 68px;
+}
+.transit-node-icon {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1;
+}
+.transit-node-icon.sun   { background: radial-gradient(circle, #ffdd44, #ff8c00); box-shadow: 0 0 16px rgba(255,180,0,.45); }
+.transit-node-icon.l1    { background: rgba(0,255,200,.12); border: 1.5px solid rgba(0,255,200,.4); box-shadow: 0 0 8px rgba(0,255,200,.2); font-size:11px; font-weight:700; color:#00ffc8; }
+.transit-node-icon.earth { background: radial-gradient(circle, #2266cc, #0a3366); border: 1.5px solid rgba(80,160,255,.35); box-shadow: 0 0 10px rgba(50,130,255,.25); }
+.transit-node-name { font-size:.68rem; color:#99b; font-weight:600; letter-spacing:.04em; }
+.transit-node-sub  { font-size:.62rem; color:#556; line-height:1.3; text-align:center; max-width:100px; }
+
+/* Connecting segments */
+.transit-seg {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; position: relative; min-width: 60px;
+}
+.transit-line {
+    width: 100%; height: 2px; position: relative; overflow: hidden;
+    border-radius: 1px;
+}
+.transit-line-bg {
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, rgba(255,180,0,.25), rgba(0,198,255,.25));
+}
+.transit-line.seg2 .transit-line-bg {
+    background: linear-gradient(90deg, rgba(0,198,255,.25), rgba(0,180,120,.25));
+}
+/* Animated particle dot traveling along the line */
+.transit-line-dot {
+    position: absolute; top: -2px; width: 6px; height: 6px;
+    border-radius: 50%; background: #00d4ff;
+    box-shadow: 0 0 8px #00d4ff;
+    animation: transit-dot 3s linear infinite;
+}
+@keyframes transit-dot { 0%{left:-6px} 100%{left:100%} }
+.transit-seg-label {
+    font-size:.65rem; color:#778; margin-top:5px; text-align:center; line-height:1.35;
+    font-variant-numeric: tabular-nums;
+}
+.transit-seg-val {
+    font-size:.82rem; font-weight:700; color:#c8e0f0;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Bottom stats row */
+.transit-stats {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid rgba(255,255,255,.05);
+}
+.transit-stat {
+    display: flex; align-items: baseline; gap: 5px;
+    font-size: .72rem;
+}
+.transit-stat-k { color: #667; }
+.transit-stat-v { color: #aac; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+@media (max-width:600px) {
+    .transit-section { padding: 14px 12px 12px; }
+    .transit-node-icon { width: 28px; height: 28px; font-size: 14px; }
+    .transit-node-name { font-size: .6rem; }
+    .transit-seg-label { font-size: .58rem; }
+    .transit-stats { gap: 4px 12px; }
+}
 
 /* ── HERO METRICS ───────────────────────────────────────────────────────────── */
 .hero-row {
@@ -180,15 +280,15 @@ nav {
 .metric-card:hover { border-color: rgba(0,198,255,.25); }
 .metric-label {
     font-size:.72rem; text-transform:uppercase; letter-spacing:.1em;
-    color:#667; margin-bottom:10px;
+    color:#889; margin-bottom:10px;
 }
 .metric-big {
     font-size:2.1rem; font-weight:700; letter-spacing:-.02em;
     font-variant-numeric:tabular-nums; color:#e8f4ff; line-height:1;
     margin-bottom:4px;
 }
-.metric-unit { font-size:.85rem; color:#778; font-weight:400; }
-.metric-sub { font-size:.78rem; color:#556; margin-top:6px; line-height:1.5; }
+.metric-unit { font-size:.85rem; color:#99b; font-weight:400; }
+.metric-sub { font-size:.78rem; color:#889; margin-top:6px; line-height:1.5; }
 .metric-badge {
     display:inline-block; padding:3px 10px; border-radius:4px;
     font-size:1.6rem; font-weight:800; letter-spacing:.05em;
@@ -217,7 +317,7 @@ nav {
 .kp-cell.active-6,.kp-cell.active-7 { background:#ff4400; border-color:#ff4400; box-shadow:0 0 10px rgba(255,68,0,.5); }
 .kp-cell.active-8,.kp-cell.active-9 { background:#ff00aa; border-color:#ff00aa; box-shadow:0 0 12px rgba(255,0,170,.6); }
 .kp-num { font-size:2rem; font-weight:700; color:#e8f4ff; line-height:1; }
-.kp-label { font-size:.78rem; color:#778; }
+.kp-label { font-size:.78rem; color:#99b; }
 
 /* Bz direction */
 .bz-bar {
@@ -244,7 +344,7 @@ nav {
 }
 .data-card h3 {
     font-size:.82rem; text-transform:uppercase; letter-spacing:.08em;
-    color:#778; margin-bottom:14px; padding-bottom:8px;
+    color:#99b; margin-bottom:14px; padding-bottom:8px;
     border-bottom:1px solid rgba(255,255,255,.06);
 }
 .param-row {
@@ -252,7 +352,7 @@ nav {
     padding:5px 0; border-bottom:1px solid rgba(255,255,255,.04);
 }
 .param-row:last-child { border-bottom:none; }
-.param-name { font-size:.8rem; color:#778; }
+.param-name { font-size:.8rem; color:#99b; }
 .param-val { font-size:.88rem; font-weight:600; color:#c8e0f0; font-variant-numeric:tabular-nums; }
 .param-val.danger { color:#ff4444; }
 .param-val.warn   { color:#ff9900; }
@@ -270,7 +370,7 @@ nav {
 }
 .imagery-section h3 {
     font-size:.82rem; text-transform:uppercase; letter-spacing:.08em;
-    color:#778; margin-bottom:14px; padding-bottom:8px;
+    color:#99b; margin-bottom:14px; padding-bottom:8px;
     border-bottom:1px solid rgba(255,255,255,.06);
 }
 .images-strip {
@@ -306,13 +406,13 @@ nav {
 }
 .table-card h3 {
     font-size:.82rem; text-transform:uppercase; letter-spacing:.08em;
-    color:#778; margin-bottom:12px; padding-bottom:8px;
+    color:#99b; margin-bottom:12px; padding-bottom:8px;
     border-bottom:1px solid rgba(255,255,255,.06);
 }
 .sw-table { width:100%; border-collapse:collapse; font-size:.8rem; }
 .sw-table th {
     text-align:left; padding:5px 8px;
-    color:#556; font-weight:600; font-size:.72rem; text-transform:uppercase;
+    color:#889; font-weight:600; font-size:.72rem; text-transform:uppercase;
     border-bottom:1px solid rgba(255,255,255,.07);
 }
 .sw-table td { padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.04); color:#a8c0d0; }
@@ -414,7 +514,7 @@ nav {
 }
 .data-sources-panel h4 {
     font-size:.72rem; text-transform:uppercase; letter-spacing:.09em;
-    color:#446; margin-bottom:10px;
+    color:#778; margin-bottom:10px;
 }
 .ds-grid {
     display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
@@ -426,8 +526,8 @@ nav {
     font-size:.75rem;
 }
 .ds-row:last-child { border-bottom:none; }
-.ds-name  { color:#556; }
-.ds-val   { color:#778; font-family:'Courier New',monospace; font-size:.68rem; }
+.ds-name  { color:#889; }
+.ds-val   { color:#99b; font-family:'Courier New',monospace; font-size:.68rem; }
 .ds-badge {
     font-size:.6rem; padding:1px 5px; border-radius:2px;
     margin-left:6px; font-family:'Courier New',monospace;
@@ -449,9 +549,9 @@ nav {
 .sw-footer {
     text-align:center; margin-top:32px; padding-top:16px;
     border-top:1px solid rgba(255,255,255,.05);
-    font-size:.74rem; color:#445; line-height:2;
+    font-size:.74rem; color:#778; line-height:2;
 }
-.sw-footer a { color:#667; }
+.sw-footer a { color:#99b; }
 
 /* ── HELIOSPHERE HERO CANVAS ─────────────────────────────────────────────── */
 .helio-hero-wrap {
@@ -460,31 +560,175 @@ nav {
     border: 1px solid rgba(255,180,40,0.14); background: #02010a;
     box-shadow: 0 4px 40px rgba(0,0,0,0.8), inset 0 0 100px rgba(255,100,20,0.03);
 }
-@media (max-width: 700px) { .helio-hero-wrap { height: 420px; } }
+@media (max-width: 700px) { .helio-hero-wrap { height: 460px; } }
+@media (max-width: 480px) { .helio-hero-wrap { height: 380px; } }
 #helio-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
 #helio-canvas:active { cursor: grabbing; }
-.helio-corner-link {
-    position: absolute; bottom: 12px; right: 14px; z-index: 10;
-    font-size: .72rem; color: rgba(255,180,60,0.45);
-    text-decoration: none; font-family: monospace; transition: color .2s;
+/* Corner link removed from canvas — accessible via nav menu */
+.helio-corner-link { display: none; }
+/* Controls hint — hidden; drag-to-orbit is standard learned UX */
+.helio-hint { display: none; }
+/* ── Corona bloom slider ─────────────────────────────────────────────────── */
+.helio-bloom-ctrl {
+    position: absolute; top: 12px; right: 14px; z-index: 10;
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(0,0,0,0.60); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,200,80,0.22); border-radius: 7px;
+    padding: 6px 11px; pointer-events: all;
 }
-.helio-corner-link:hover { color: rgba(255,200,80,0.9); }
-/* Controls hint overlay */
-.helio-hint {
-    position: absolute; bottom: 12px; left: 14px; z-index: 10;
-    font-size: .68rem; color: rgba(255,255,255,0.22); font-family: monospace;
-    pointer-events: none; line-height: 1.6;
+.bloom-label {
+    font-size: .63rem; color: rgba(255,200,100,0.78);
+    font-family: monospace; white-space: nowrap;
+}
+.bloom-val {
+    font-size: .65rem; color: rgba(255,225,130,0.92);
+    font-family: monospace; min-width: 28px; text-align: right;
+}
+#bloom-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 80px; height: 3px; cursor: pointer;
+    background: linear-gradient(90deg,
+        rgba(255,200,60,.55) 0%, rgba(255,200,60,.55) var(--pct,50%),
+        rgba(255,255,255,.12) var(--pct,50%), rgba(255,255,255,.12) 100%);
+    border-radius: 2px; outline: none; border: none;
+}
+#bloom-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(255,210,80,0.92);
+    box-shadow: 0 0 6px rgba(255,200,60,0.7);
+    cursor: pointer;
+}
+#bloom-slider::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(255,210,80,0.92); border: none; cursor: pointer;
 }
 /* Live data badge over canvas */
 .helio-live-hud {
-    position: absolute; top: 12px; left: 14px; z-index: 10;
-    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 7px;
-    padding: 7px 12px; font-size: .70rem; line-height: 1.8;
+    position: absolute; top: 12px; left: 10px; z-index: 10;
+    /* max-width keeps it from running into the bloom ctrl on the right */
+    max-width: calc(100% - 185px);
+    background: rgba(0,0,0,0.60); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.10); border-radius: 7px;
+    padding: 6px 11px; font-size: .70rem; line-height: 1.75;
     pointer-events: none; color: #8ab;
 }
 .helio-live-hud .hv { color: #aef; font-weight: 600; font-family: monospace; }
-.helio-live-hud .hl { color: #aaa; font-size: .64rem; margin-right: 6px; }
+.helio-live-hud .hl { color: #bbb; font-size: .63rem; margin-right: 4px; }
+/* Secondary HUD fields — hidden on narrow viewports */
+.hud-extra { display: inline; }
+@media (max-width: 620px) { .hud-extra { display: none; } }
+@media (max-width: 480px) { .helio-bloom-ctrl .bloom-label { display: none; } #bloom-slider { width: 60px; } }
+
+/* ── Timeline controls wrapper ───────────────────────────────────────────── */
+.helio-timewarp {
+    position: absolute; bottom: 10px; left: 10px; z-index: 10;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+    width: calc(100% - 20px); pointer-events: all;
+}
+/* Row 1: nav buttons + date picker + warp speed */
+.tw-nav-row {
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+/* On narrow screens, scroll the nav row horizontally rather than
+   wrapping to many rows that push buttons off-canvas. */
+@media (max-width: 700px) {
+    .tw-nav-row {
+        flex-wrap: nowrap; overflow-x: auto; overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none; padding-bottom: 2px;
+    }
+    .tw-nav-row::-webkit-scrollbar { display: none; }
+}
+.tw-btn {
+    background: rgba(0,0,0,0.60); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.20); border-radius: 6px;
+    color: #9bc; font-size: .68rem; font-family: monospace;
+    /* min touch target: 28px height with padding */
+    padding: 5px 10px; cursor: pointer; transition: all .15s;
+    touch-action: manipulation; white-space: nowrap; flex-shrink: 0;
+    user-select: none; -webkit-user-select: none;
+}
+.tw-btn:hover        { border-color: rgba(174,238,255,.5); color: #fff; }
+.tw-btn.active       { background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef; }
+.tw-btn.tw-live      { color: #4f8; border-color: rgba(60,255,120,.35); }
+.tw-btn.tw-live:hover{ border-color: rgba(60,255,120,.7); color: #8fc; }
+.tw-sep { width: 1px; height: 16px; background: rgba(255,255,255,.12); margin: 0 2px; }
+.tw-date-input {
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,0.18); border-radius: 5px;
+    color: #aef; font-size: .68rem; font-family: monospace;
+    padding: 3px 6px; cursor: pointer; outline: none;
+    color-scheme: dark;
+}
+.tw-date-input:focus { border-color: rgba(174,238,255,.5); }
+#tw-epoch-badge {
+    font-size:.62rem; font-family: monospace; padding: 2px 6px;
+    border-radius: 4px; letter-spacing: .04em;
+}
+#tw-epoch-badge.tw-past   { background: rgba(255,180,60,.18); color: #f90; border: 1px solid rgba(255,180,60,.35); }
+#tw-epoch-badge.tw-future { background: rgba(120,80,255,.20); color: #c8a0ff; border: 1px solid rgba(160,100,255,.4); }
+#tw-epoch-badge.tw-live   { background: rgba(40,220,100,.15); color: #4f8; border: 1px solid rgba(60,255,120,.3); }
+
+/* Row 2: timeline scrubber */
+.tw-timeline-row {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 7px;
+    padding: 6px 10px; box-sizing: border-box;
+}
+.tw-win-grp { display: flex; gap: 3px; flex-shrink: 0; }
+.tw-btn.tw-win-active {
+    background: rgba(80,160,255,.25); border-color: rgba(174,238,255,.6); color: #aef;
+}
+/* slider labels */
+.tw-tl-label {
+    font-size: .58rem; font-family: monospace; color: #778; white-space: nowrap;
+    flex-shrink: 0; min-width: 58px; text-align: right;
+    background: rgba(0,0,0,.3); border-radius: 3px; padding: 1px 4px;
+}
+.tw-tl-label.tw-tl-start { text-align: left; }
+/* slider track + thumb */
+.tw-slider-wrap {
+    flex: 1; position: relative; min-width: 80px;
+    padding-bottom: 18px; /* room for ticks */
+}
+.tw-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+    display: block; position: relative; z-index: 2;
+    /* filled track via CSS variable --pct updated by JS */
+    background: linear-gradient(90deg,
+        rgba(80,160,255,.55) 0%, rgba(80,160,255,.55) var(--pct,50%),
+        rgba(255,255,255,.12) var(--pct,50%), rgba(255,255,255,.12) 100%);
+}
+.tw-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #aef; border: 2px solid rgba(80,160,255,.9);
+    cursor: grab; box-shadow: 0 0 7px rgba(80,160,255,.7); transition: transform .1s;
+}
+.tw-slider:active::-webkit-slider-thumb { cursor: grabbing; background: #fff; transform: scale(1.25); }
+.tw-slider::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #aef; border: 2px solid rgba(80,160,255,.9); cursor: grab;
+}
+/* tick marks */
+.tw-ticks {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: space-between; pointer-events: none;
+}
+.tw-tick { display: flex; flex-direction: column; align-items: center; }
+.tw-tick-mark { width: 1px; height: 5px; background: rgba(255,255,255,.18); }
+.tw-tick-lbl  { font-size: .52rem; font-family: monospace; color: #667; white-space: nowrap; margin-top: 1px; }
+.tw-tick:first-child .tw-tick-lbl,
+.tw-tick:last-child  .tw-tick-lbl { visibility: hidden; }
+/* step badge */
+.tw-step-badge {
+    font-size: .58rem; font-family: monospace; color: #667;
+    background: rgba(255,255,255,.05); border-radius: 3px; padding: 1px 4px;
+    flex-shrink: 0; white-space: nowrap;
+}
 
 /* ── EARTH CROSS-SECTION SECTION ─────────────────────────────────────────── */
 .earth-section {
@@ -499,7 +743,7 @@ nav {
     font-size: .82rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
     color: #9cf;
 }
-.earth-section-sub { font-size: .72rem; color: #445; }
+.earth-section-sub { font-size: .72rem; color: #778; }
 /* ── 3D Globe canvas ─────────────────────────────────────────────────────── */
 #sw-globe-canvas {
     display: block; width: 100%; height: 520px;
@@ -525,14 +769,13 @@ nav {
 /* Legend below the globe */
 .globe-legend {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
-    font-size: .70rem; color: #556; margin-top: 12px;
+    font-size: .70rem; color: #889; margin-top: 12px;
 }
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
-@media (max-width: 600px) {
-    #sw-globe-canvas { height: 340px; }
-}
+@media (max-width: 700px) { #sw-globe-canvas { height: 420px; } }
+@media (max-width: 480px) { #sw-globe-canvas { height: 320px; } }
 
 /* ─── Floating control buttons ──────────────────────────────────── */
 .cv-btn {
@@ -666,19 +909,249 @@ nav {
         <canvas id="helio-canvas"
                 aria-label="3D inner solar system — Parker spiral solar wind, Earth magnetosphere, planetary positions"
                 role="img"></canvas>
-        <!-- Live data HUD -->
+        <!-- Live data HUD — primary fields always visible; .hud-extra hidden on narrow screens -->
         <div class="helio-live-hud">
             <span class="hl">Wind</span><span class="hv" id="h3d-speed">–</span> km/s &nbsp;
             <span class="hl">Bz</span><span class="hv" id="h3d-bz">–</span> nT &nbsp;
-            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span> &nbsp;
-            <span class="hl">r</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
-            <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min
+            <span class="hl">Kp</span><span class="hv" id="h3d-kp">–</span>
+            <span class="hud-extra">&nbsp;
+            <span class="hl">r⊕</span><span class="hv" id="h3d-rau">–</span> AU &nbsp;
+            <span class="hl">L1 delay</span><span class="hv" id="h3d-delay">–</span> min &nbsp;
+            <span class="hl">Substorm</span><span class="hv" id="h3d-substorm" title="McPherron substorm onset likelihood">–</span> &nbsp;
+            <span class="hl">Date</span><span class="hv" id="h3d-date">–</span> &nbsp;
+            <span class="hv" id="h3d-src" style="font-size:0.7em;opacity:0.6;">–</span>
+            </span>
+        </div>
+        <!-- Time warp + date travel controls -->
+        <div class="helio-timewarp" id="helio-timewarp">
+
+            <!-- ── Row 1: Navigation + date picker + warp speed ── -->
+            <div class="tw-nav-row">
+                <button class="tw-btn" id="tw-prev-yr"  title="Back 1 year">−1yr</button>
+                <button class="tw-btn" id="tw-prev-mo"  title="Back 1 month">−1mo</button>
+                <button class="tw-btn" id="tw-prev-wk"  title="Back 1 week">−1wk</button>
+                <button class="tw-btn" id="tw-prev-day" title="Back 1 day">−1d</button>
+                <div class="tw-sep"></div>
+                <input type="datetime-local" class="tw-date-input" id="tw-date-picker"
+                       title="Jump to any date/time" step="60">
+                <div class="tw-sep"></div>
+                <button class="tw-btn tw-live" id="tw-live" title="Snap to real-time">⊙ Live</button>
+                <div class="tw-sep"></div>
+                <button class="tw-btn" id="tw-next-day" title="Forward 1 day">+1d</button>
+                <button class="tw-btn" id="tw-next-wk"  title="Forward 1 week">+1wk</button>
+                <button class="tw-btn" id="tw-next-mo"  title="Forward 1 month">+1mo</button>
+                <button class="tw-btn" id="tw-next-yr"  title="Forward 1 year">+1yr</button>
+                <div class="tw-sep"></div>
+                <!-- Warp speed -->
+                <span style="opacity:.45;font-size:.63em;">warp:</span>
+                <button class="tw-btn" id="tw-pause" data-scale="0"
+                        title="Pause simulation">⏸</button>
+                <button class="tw-btn active" data-scale="1"
+                        title="Real-time (1×)">1×</button>
+                <button class="tw-btn" data-scale="3600"
+                        title="1 sim-hour per real second (3600×)">1h/s</button>
+                <button class="tw-btn" data-scale="86400"
+                        title="1 sim-day per real second (86 400×)">1d/s</button>
+                <button class="tw-btn" data-scale="2592000"
+                        title="1 sim-month per real second (2.6M×)">1mo/s</button>
+                <button class="tw-btn" data-scale="31557600"
+                        title="1 sim-year per real second (31.6M×)">1yr/s</button>
+                <div class="tw-sep"></div>
+                <span id="tw-epoch-badge" class="tw-live"></span>
+            </div>
+
+            <!-- ── Row 2: Timeline scrubber ── -->
+            <div class="tw-timeline-row" id="tw-timeline-row">
+                <!-- Window-size presets -->
+                <div class="tw-win-grp" id="tw-win-grp">
+                    <button class="tw-btn" data-window="3600"
+                            title="1-hour window">1h</button>
+                    <button class="tw-btn tw-win-active" data-window="86400"
+                            title="24-hour window">24h</button>
+                    <button class="tw-btn" data-window="604800"
+                            title="1-week window">1wk</button>
+                    <button class="tw-btn" data-window="2592000"
+                            title="1-month window">1mo</button>
+                    <button class="tw-btn" data-window="31557600"
+                            title="1-year window">1yr</button>
+                </div>
+                <div class="tw-sep"></div>
+                <!-- Start label -->
+                <span class="tw-tl-label tw-tl-start" id="tw-tl-start">–</span>
+                <!-- Slider + tick marks -->
+                <div class="tw-slider-wrap" id="tw-slider-wrap">
+                    <input type="range" class="tw-slider" id="tw-slider"
+                           min="0" max="10000" value="5000"
+                           title="Drag to travel through time">
+                    <div class="tw-ticks" id="tw-ticks"></div>
+                </div>
+                <!-- End label -->
+                <span class="tw-tl-label" id="tw-tl-end">–</span>
+                <div class="tw-sep"></div>
+                <!-- Step granularity badge -->
+                <span class="tw-step-badge" id="tw-step-badge">–</span>
+            </div>
+
         </div>
         <!-- Controls hint -->
         <div class="helio-hint">
             Drag to orbit &nbsp;·&nbsp; Scroll to zoom &nbsp;·&nbsp; Zoom in toward Earth to explore the magnetosphere
         </div>
+        <!-- Corona bloom control -->
+        <div class="helio-bloom-ctrl" id="helio-bloom-ctrl">
+            <span class="bloom-label">Corona bloom</span>
+            <input type="range" id="bloom-slider" min="3" max="30" value="10" step="1"
+                   title="Adjust corona and solar wind brightness">
+            <span class="bloom-val" id="bloom-val">1.0×</span>
+        </div>
         <a class="helio-corner-link" href="earth.html" title="Open Earth detail view">Earth View →</a>
+    </div>
+
+    <!-- ── SOLAR SYSTEM DATA DESCRIPTION ─────────────────────────────────── -->
+    <div class="earth-section" style="background:rgba(8,4,0,.6);border-color:rgba(255,180,40,.12)">
+        <div class="earth-section-header">
+            <div class="earth-section-title" style="color:#ffcc66">Solar System Simulation</div>
+            <div class="earth-section-sub">Real-time planetary positions · VSOP87D / Meeus ephemeris</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;font-size:.78rem;color:#99a;line-height:1.65">
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">PLANET POSITIONS</div>
+                <p>All 8 planets are positioned at their <strong style="color:#ddd">correct heliocentric ecliptic coordinates</strong> for the current date and time, computed on-device using VSOP87D truncated series (Earth, Jupiter, Saturn, Uranus, Neptune) and Meeus Keplerian elements (Mercury, Venus, Mars).</p>
+                <p style="margin-top:6px">Accuracy: <strong style="color:#aac">&lt;0.3°</strong> longitude, <strong style="color:#aac">&lt;0.1%</strong> distance for all planets within the 1800–2200 validity range. Earth's position is accurate to &lt;1 arcsecond.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">TIME TRAVEL</div>
+                <p>Use the <strong style="color:#ddd">time warp controls</strong> to travel to any date — past or future. All planet positions, moon orbits, orbital precession, and axial rotation update deterministically.</p>
+                <p style="margin-top:6px">Warp speeds: 1× (real-time), 1h/s, 1d/s, 1mo/s, 1yr/s. Jump directly via the date picker or ±1d/±1wk/±1mo/±1yr buttons.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">ORBITAL MECHANICS</div>
+                <p><strong style="color:#ddd">True Keplerian ellipses</strong> with 3D inclination, ascending node, and argument of perihelion. Secular precession rates (Standish 1992) cause orbits to slowly rotate over centuries — visible at 1yr/s warp speed.</p>
+                <p style="margin-top:6px">Mercury's perihelion advances +0.16°/century. Saturn's advances +0.54°/century.</p>
+            </div>
+            <div>
+                <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:6px">MOON SYSTEMS</div>
+                <p><strong style="color:#ddd">14 natural satellites</strong> modeled: Earth's Moon (Meeus Ch.47), Mars (Phobos, Deimos), Jupiter (Io, Europa, Ganymede, Callisto), Saturn (Titan, Rhea, Dione), Uranus (Titania, Oberon), Neptune (Triton — retrograde).</p>
+                <p style="margin-top:6px">All moons orbit in correctly tilted planes matching their parent planet's obliquity.</p>
+            </div>
+        </div>
+        <!-- Live planet data table -->
+        <div style="margin-top:14px;border-top:1px solid rgba(255,180,40,.08);padding-top:12px">
+            <div style="font-size:.68rem;color:#665;font-weight:600;letter-spacing:.08em;margin-bottom:8px">CURRENT PLANET DATA <span style="font-weight:400;color:#554">(updates in real-time)</span></div>
+            <div style="overflow-x:auto">
+                <table style="width:100%;border-collapse:collapse;font-size:.72rem;white-space:nowrap">
+                    <thead>
+                        <tr style="color:#887;border-bottom:1px solid rgba(255,255,255,.06)">
+                            <th style="text-align:left;padding:4px 8px;font-weight:600">Planet</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Helio Lon</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Distance</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Tilt</th>
+                            <th style="text-align:right;padding:4px 8px;font-weight:600">Rotation</th>
+                            <th style="text-align:left;padding:4px 8px;font-weight:600">Moons</th>
+                        </tr>
+                    </thead>
+                    <tbody id="planet-data-tbody" style="color:#aab">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- Data sources -->
+        <div style="margin-top:12px;border-top:1px solid rgba(255,180,40,.08);padding-top:10px;font-size:.65rem;color:#554;line-height:1.6">
+            <strong style="color:#776">Data Sources:</strong>
+            Bretagnon &amp; Francou (1988) VSOP87D truncated series ·
+            Meeus (1998) "Astronomical Algorithms" 2nd ed. ·
+            Standish (1992) JPL secular correction rates ·
+            NASA Planetary Fact Sheets (rotation, obliquity) ·
+            Murray &amp; Dermott (1999) "Solar System Dynamics" (moon orbits)
+        </div>
+    </div>
+
+    <!-- ── SUN → L1 → EARTH TRANSIT DIAGRAM ────────────────────────────── -->
+    <div class="transit-section" id="transit-section">
+        <div class="transit-title">
+            <span class="live-pip"></span>
+            Solar Wind Transit · Sun → L1 (DSCOVR) → Earth
+        </div>
+
+        <div class="transit-track">
+            <!-- Sun node -->
+            <div class="transit-node">
+                <div class="transit-node-icon sun">&#9788;</div>
+                <div class="transit-node-name">Sun</div>
+                <div class="transit-node-sub">Surface</div>
+            </div>
+
+            <!-- Segment 1: Sun → L1 -->
+            <div class="transit-seg">
+                <div class="transit-line">
+                    <div class="transit-line-bg"></div>
+                    <div class="transit-line-dot"></div>
+                </div>
+                <div class="transit-seg-label">
+                    <span class="transit-seg-val" id="tr-sun-l1-dist">148.1M</span> km<br>
+                    <span id="tr-sun-l1-time">~2–4 days</span> transit
+                </div>
+            </div>
+
+            <!-- L1 node (DSCOVR) -->
+            <div class="transit-node">
+                <div class="transit-node-icon l1">L1</div>
+                <div class="transit-node-name">DSCOVR</div>
+                <div class="transit-node-sub" id="tr-l1-sub">Measured here</div>
+            </div>
+
+            <!-- Segment 2: L1 → Earth -->
+            <div class="transit-seg">
+                <div class="transit-line seg2">
+                    <div class="transit-line-bg"></div>
+                    <div class="transit-line-dot" style="animation-duration:1.5s"></div>
+                </div>
+                <div class="transit-seg-label">
+                    <span class="transit-seg-val" id="tr-l1-earth-dist">1.5M</span> km<br>
+                    ~<span class="transit-seg-val" id="tr-l1-delay">60</span> min arrival
+                </div>
+            </div>
+
+            <!-- Earth node -->
+            <div class="transit-node">
+                <div class="transit-node-icon earth">&#127758;</div>
+                <div class="transit-node-name">Earth</div>
+                <div class="transit-node-sub" id="tr-earth-sub">Magnetopause</div>
+            </div>
+        </div>
+
+        <!-- Live computed stats -->
+        <div class="transit-stats">
+            <div class="transit-stat">
+                <span class="transit-stat-k">Sun–Earth</span>
+                <span class="transit-stat-v" id="tr-total-dist">–</span>
+                <span class="transit-stat-k">km</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">L1 speed</span>
+                <span class="transit-stat-v" id="tr-wind-speed">–</span>
+                <span class="transit-stat-k">km/s</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">At Earth</span>
+                <span class="transit-stat-v" id="tr-wind-earth">–</span>
+                <span class="transit-stat-k">km/s</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">Full transit</span>
+                <span class="transit-stat-v" id="tr-full-transit">–</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">Spiral angle</span>
+                <span class="transit-stat-v" id="tr-spiral">–</span>
+            </div>
+            <div class="transit-stat">
+                <span class="transit-stat-k">Pdyn</span>
+                <span class="transit-stat-v" id="tr-pdyn">–</span>
+                <span class="transit-stat-k">nPa</span>
+            </div>
+        </div>
     </div>
 
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
@@ -890,6 +1363,79 @@ nav {
             </div>
         </div>
 
+        <!-- ── Earth Orbit (VSOP87) ───────────────────────────────────────────── -->
+        <div class="data-card" id="earth-orbit-card">
+            <h3>Earth Orbital State · VSOP87D<span class="src-chip live" id="src-orbit" title="Source: VSOP87D truncated series (Bretagnon &amp; Francou 1988) · &lt;1 arcsec accuracy">VSOP87D · on-device</span></h3>
+
+            <div class="param-row">
+                <span class="param-name">Helio longitude</span>
+                <span class="param-val" id="orb-lon">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Helio latitude</span>
+                <span class="param-val" id="orb-lat">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Distance</span>
+                <span class="param-val" id="orb-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Orbital speed</span>
+                <span class="param-val" id="orb-speed">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">True anomaly  ν</span>
+                <span class="param-val" id="orb-nu">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Mean anomaly  M</span>
+                <span class="param-val" id="orb-m">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Eccentricity  e</span>
+                <span class="param-val" id="orb-ecc">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Perihelion  q</span>
+                <span class="param-val" id="orb-peri-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Aphelion  Q</span>
+                <span class="param-val" id="orb-aph-dist">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Next perihelion</span>
+                <span class="param-val" id="orb-next-peri">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Next aphelion</span>
+                <span class="param-val" id="orb-next-aph">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Carrington rot.</span>
+                <span class="param-val" id="orb-cr">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Carrington lon.</span>
+                <span class="param-val" id="orb-cr-lon">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Obliquity  ε</span>
+                <span class="param-val" id="orb-obliq">–</span>
+            </div>
+            <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.07);padding-top:10px">
+                <div style="font-size:.72rem;color:#445;margin-bottom:5px;font-weight:600;letter-spacing:.06em">LAGRANGE POINTS</div>
+                <div class="param-row">
+                    <span class="param-name">L1 (Sun–Earth)</span>
+                    <span class="param-val" id="orb-l1">–</span>
+                </div>
+                <div class="param-row">
+                    <span class="param-name">L2 (anti-Sun)</span>
+                    <span class="param-val" id="orb-l2">–</span>
+                </div>
+            </div>
+        </div>
+
     </div><!-- /data-grid -->
 
     <!-- ── SDO / SOHO LIVE IMAGERY ──────────────────────────────────────────── -->
@@ -1071,6 +1617,8 @@ import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
+import { earthOrbitFull }       from './js/earth-orbit.js';
+import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -1102,6 +1650,12 @@ if (_navBurger && _navMenu) {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
+
+// Seed orbit panel immediately without waiting for ephemeris-ready
+try {
+    const _initOrb = earthOrbitFull();
+    window.dispatchEvent(new CustomEvent('earth-orbit-update', { detail: _initOrb }));
+} catch (_e) { /* no-op */ }
 
 function fmtTime(d) {
     if (!d) return '–';
@@ -1282,12 +1836,15 @@ window.addEventListener('wind-pipeline-update', ev => {
     }
 
     // Trend line in metric-sub: arrow + slope + density from pipeline
-    const dir    = d.trend?.direction ?? 'STEADY';
-    const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
-    const slope  = d.trend?.slope_km_s_per_min;
-    const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
-    const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
-    el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+    // Only write when live — don't overwrite NOAA fallback with stale/offline data.
+    if (d.status === 'live') {
+        const dir    = d.trend?.direction ?? 'STEADY';
+        const arrow  = { RISING: '↑', STEADY: '→', FALLING: '↓' }[dir] ?? '→';
+        const slope  = d.trend?.slope_km_s_per_min;
+        const slopeS = slope != null ? `  ${Math.abs(slope).toFixed(1)} km/s/min` : '';
+        const densS  = d.density_cc != null ? `  ·  ${d.density_cc.toFixed(1)} n/cc` : '';
+        el('wind-trend').textContent = `${arrow} ${dir}${slopeS}${densS}`;
+    }
 
     // Alert badge
     const badge = el('wind-alert-badge');
@@ -1300,6 +1857,12 @@ window.addEventListener('wind-pipeline-update', ev => {
     // Sparkline
     if (d.series?.length) drawWindSparkline(d.series);
 });
+
+// ── Substorm rolling Bz accumulator (mirrors SunEarthCoupling logic) ─────────
+// Maintains a 30-sample rolling average of normalised southward Bz drive so the
+// substorm index reflects accumulated energy loading, not just instantaneous Bz.
+const _sbBzBuf = [];
+const _SB_BUF_N = 30;
 
 // ── SWPC update handler ────────────────────────────────────────────────────────
 window.addEventListener('swpc-update', e => {
@@ -1331,11 +1894,10 @@ window.addEventListener('swpc-update', e => {
     const bt      = sw.bt ?? 0;
     const windNorm = Math.min((spd - 250) / 650, 1);
 
-    // Only update the trend line from NOAA if the pipeline hasn't already enriched it
-    // (pipeline handler replaces this with trend arrow + slope when available).
+    // NOAA fallback trend line — always update so real density/temp shows
+    // when the pipeline is offline.  Pipeline handler overwrites this when live.
     const trendEl = el('wind-trend');
-    if (!trendEl.textContent || trendEl.textContent === '–')
-        trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
+    trendEl.textContent = `Density: ${density.toFixed(1)} n/cc  ·  Temp: ${(sw.temperature/1000||0).toFixed(0)} kK`;
     el('p-speed').textContent   = `${Math.round(spd)} km/s`;
     el('p-speed').className     = `param-val ${spd > 700 ? 'danger' : spd > 500 ? 'warn' : 'ok'}`;
     el('p-density').textContent = `${density.toFixed(2)} n/cc`;
@@ -1434,6 +1996,38 @@ window.addEventListener('swpc-update', e => {
         if (chip) chip.className = chip.className.replace(/\b(live|stale|offline)\b/g, '') + ' ' + st;
     });
 
+    // ── Substorm index → 3D magnetosphere aurora flash ────────────────────────
+    // Compute and forward to Heliosphere3D so aurora curtains + plasma sheet respond.
+    {
+        const v  = sw.speed   ?? 450;
+        const bt = sw.bt      ?? 5;
+        const bz = sw.bz      ?? 0;
+        const by = sw.by      ?? 0;
+        const kp = d.kp       ?? 2;
+
+        // Accumulate rolling southward Bz drive
+        _sbBzBuf.push(Math.max(0, -bz) / 20);
+        if (_sbBzBuf.length > _SB_BUF_N) _sbBzBuf.shift();
+        const bzCumulNorm = _sbBzBuf.reduce((s, x) => s + x, 0) / _sbBzBuf.length;
+
+        const epsilon = akasofuEpsilon(v, bt, bz, by);
+        const sbIdx   = substormIndex(epsilon, bzCumulNorm, kp);
+
+        // Push to heliosphere aurora engine
+        window._helio3d?.setSubstormIndex(sbIdx);
+
+        // Update substorm HUD chip
+        const sbEl = el('h3d-substorm');
+        if (sbEl) {
+            const pct = (sbIdx * 100).toFixed(0);
+            sbEl.textContent = pct + '%';
+            sbEl.style.color = sbIdx > 0.75 ? '#ff4488'
+                             : sbIdx > 0.50 ? '#ffaa22'
+                             : sbIdx > 0.25 ? '#88ff88'
+                             : '#445566';
+        }
+    }
+
     // Offline / stale data banner
     const banner  = el('data-status-banner');
     const dsbText = el('dsb-text');
@@ -1475,7 +2069,43 @@ window.addEventListener('soho-update', e => {
     }
 });
 
-// ── Helio-state HUD — r_AU and propagation delay ─────────────────────────────
+// ── Earth Orbit Panel (VSOP87) ────────────────────────────────────────────────
+window.addEventListener('earth-orbit-update', e => {
+    const o = e.detail;
+    if (!o) return;
+    const R2D = 180 / Math.PI;
+    const fmt2 = v => (typeof v === 'number' ? v.toFixed(2) : '–');
+    const fmt4 = v => (typeof v === 'number' ? v.toFixed(4) : '–');
+    const fmtDays = d => d != null ? (d < 1 ? Math.round(d * 24) + ' h' : Math.round(d) + ' d') : '–';
+    const fmtDate = dt => dt instanceof Date && !isNaN(dt)
+        ? dt.toISOString().slice(0, 10)
+        : '–';
+
+    if (el('orb-lon'))       el('orb-lon').textContent       = fmt2(((o.L_rad ?? 0) * R2D % 360 + 360) % 360) + '°';
+    if (el('orb-lat'))       el('orb-lat').textContent       = fmt2((o.B_rad ?? 0) * R2D * 3600) + '″';
+    if (el('orb-dist'))      el('orb-dist').textContent      = fmt4(o.R_AU) + ' AU  (' + Math.round(o.R_AU * 149597870.7 / 1e6) + ' M km)';
+    if (el('orb-speed'))     el('orb-speed').textContent     = fmt2(o.speed_km_s) + ' km/s';
+    if (el('orb-nu'))        el('orb-nu').textContent        = fmt2(((o.nu_deg ?? 0) + 360) % 360) + '°';
+    if (el('orb-m'))         el('orb-m').textContent         = fmt2(o.M_deg ?? 0) + '°';
+    if (el('orb-ecc'))       el('orb-ecc').textContent       = (o.e ?? 0).toFixed(6);
+    if (el('orb-peri-dist')) el('orb-peri-dist').textContent = fmt4(o.r_perihelion_AU) + ' AU';
+    if (el('orb-aph-dist'))  el('orb-aph-dist').textContent  = fmt4(o.r_aphelion_AU)  + ' AU';
+    if (el('orb-next-peri')) el('orb-next-peri').textContent = fmtDays(o.days_to_perihelion) + '  (' + fmtDate(o.date_next_perihelion) + ')';
+    if (el('orb-next-aph'))  el('orb-next-aph').textContent  = fmtDays(o.days_to_aphelion)  + '  (' + fmtDate(o.date_next_aphelion)  + ')';
+    if (el('orb-cr'))        el('orb-cr').textContent        = 'CR ' + (o.carrington_number ?? '–');
+    if (el('orb-cr-lon'))    el('orb-cr-lon').textContent    = fmt2(o.carrington_lon) + '°';
+    if (el('orb-obliq'))     el('orb-obliq').textContent     = fmt2(o.obliquity_deg) + '°';
+    if (el('orb-l1') && o.lagrange?.L1) {
+        const d1_km = Math.round((o.R_AU - o.lagrange.L1.dist_AU) * 149597870.7 / 1e3);
+        el('orb-l1').textContent = fmt4(o.lagrange.L1.dist_AU) + ' AU  (−' + d1_km.toLocaleString() + ' k km)';
+    }
+    if (el('orb-l2') && o.lagrange?.L2) {
+        const d2_km = Math.round((o.lagrange.L2.dist_AU - o.R_AU) * 149597870.7 / 1e3);
+        el('orb-l2').textContent = fmt4(o.lagrange.L2.dist_AU) + ' AU  (+' + d2_km.toLocaleString() + ' k km)';
+    }
+});
+
+// ── Helio-state HUD — r_AU, propagation delay, and transit diagram ───────────
 window.addEventListener('helio-state-update', e => {
     const hs = e.detail;
     const rEl    = el('h3d-rau');
@@ -1483,8 +2113,80 @@ window.addEventListener('helio-state-update', e => {
     const spdEl  = el('h3d-speed');
     if (rEl   && hs.r_AU     != null) rEl.textContent   = hs.r_AU.toFixed(3);
     if (delEl && hs.delay_min != null) delEl.textContent = hs.delay_min.toFixed(1);
-    // Override wind speed HUD with Parker-corrected value
-    if (spdEl && hs.v_sw     != null) spdEl.textContent = Math.round(hs.v_sw);
+    // HUD wind speed: show raw L1 measurement (matches SWPC dashboard).
+    // Previously this was overridden with the Parker-corrected lagged value,
+    // which caused confusion vs the SWPC numbers.
+    if (spdEl && hs.l1_raw?.v_sw != null) spdEl.textContent = Math.round(hs.l1_raw.v_sw);
+
+    // ── Transit diagram live values ─────────────────────────────────────
+    const AU_KM   = 149_597_870.7;
+    const L1_KM   = 1_500_000;
+    const r_km    = (hs.r_AU ?? 1.0) * AU_KM;
+    const v_raw   = hs.l1_raw?.v_sw ?? 400;      // current L1 measurement
+    const v_earth = hs.v_sw ?? 400;               // Parker-corrected at Earth
+    const delayMin = hs.delay_min ?? 60;
+
+    // Sun → L1 distance
+    const sunL1Km = r_km - L1_KM;
+    const sunL1El = el('tr-sun-l1-dist');
+    if (sunL1El) sunL1El.textContent = (sunL1Km / 1e6).toFixed(1) + 'M';
+
+    // Sun → L1 transit time at current wind speed
+    const sunL1Hr = sunL1Km / v_raw / 3600;
+    const sunL1TimeEl = el('tr-sun-l1-time');
+    if (sunL1TimeEl) {
+        if (sunL1Hr < 48) {
+            sunL1TimeEl.textContent = `~${Math.round(sunL1Hr)} hr`;
+        } else {
+            sunL1TimeEl.textContent = `~${(sunL1Hr / 24).toFixed(1)} days`;
+        }
+    }
+
+    // L1 → Earth distance
+    const l1DistEl = el('tr-l1-earth-dist');
+    if (l1DistEl) l1DistEl.textContent = (L1_KM / 1e6).toFixed(1) + 'M';
+
+    // L1 → Earth delay
+    const l1DelEl = el('tr-l1-delay');
+    if (l1DelEl) l1DelEl.textContent = Math.round(delayMin);
+
+    // Bottom stats — show both L1 raw and Earth-corrected speeds
+    const tdEl = el('tr-total-dist');
+    if (tdEl) tdEl.textContent = (r_km / 1e6).toFixed(1) + 'M';
+
+    // L1 measured speed (raw DSCOVR — matches SWPC)
+    const twEl = el('tr-wind-speed');
+    if (twEl) twEl.textContent = Math.round(v_raw);
+
+    // Parker-corrected speed at Earth (lagged + distance-scaled)
+    const teEl = el('tr-wind-earth');
+    if (teEl) teEl.textContent = Math.round(v_earth);
+
+    // Node sub-labels: show live speed at each point
+    const l1Sub = el('tr-l1-sub');
+    if (l1Sub) l1Sub.textContent = `${Math.round(v_raw)} km/s (live)`;
+    const earthSub = el('tr-earth-sub');
+    if (earthSub) earthSub.textContent = `${Math.round(v_earth)} km/s (corrected)`;
+
+    const tfEl = el('tr-full-transit');
+    if (tfEl) {
+        const totalHr = r_km / v_raw / 3600;
+        if (totalHr < 48) {
+            tfEl.textContent = `~${Math.round(totalHr)} hr`;
+        } else {
+            tfEl.textContent = `~${(totalHr / 24).toFixed(1)} days`;
+        }
+    }
+
+    const tsEl = el('tr-spiral');
+    if (tsEl && hs.spiral_angle_rad != null) {
+        tsEl.textContent = (hs.spiral_angle_rad * 180 / Math.PI).toFixed(1) + '°';
+    }
+
+    const tpEl = el('tr-pdyn');
+    if (tpEl && hs.p_dyn != null) {
+        tpEl.textContent = hs.p_dyn.toFixed(2);
+    }
 });
 
 // ── Start all feeds ───────────────────────────────────────────────────────────
@@ -1515,7 +2217,391 @@ new SolarWindState().start();
 // Earth magnetosphere via MagnetosphereEngine, CME shells, flare bursts.
 // Listens to swpc-update + ephemeris-ready events automatically.
 const helioCanvas = document.getElementById('helio-canvas');
-if (helioCanvas) new Heliosphere3D(helioCanvas).start();
+let _helio = null;
+if (helioCanvas) {
+    _helio = new Heliosphere3D(helioCanvas).start();
+    // Expose globally so the bloom slider can call setBloom()
+    window._helio3d = _helio;
+}
+
+// ── Corona bloom slider ───────────────────────────────────────────────────────
+{
+    const bloomSlider = document.getElementById('bloom-slider');
+    const bloomVal    = document.getElementById('bloom-val');
+    if (bloomSlider && bloomVal) {
+        function _applyBloom(raw) {
+            // Slider range 3–30 maps to bloom 0.3–3.0
+            const v   = raw / 10;
+            const pct = ((raw - 3) / 27 * 100).toFixed(1);
+            bloomSlider.style.setProperty('--pct', pct + '%');
+            bloomVal.textContent = v.toFixed(1) + '×';
+            window._helio3d?.setBloom(v);
+        }
+        bloomSlider.addEventListener('input', () => _applyBloom(+bloomSlider.value));
+        // Set initial state
+        _applyBloom(+bloomSlider.value);
+    }
+}
+
+// ── Helio HUD: date display + ephemeris source ────────────────────────────────
+
+/** Format a Date as a datetime-local string (YYYY-MM-DDTHH:MM). */
+function _toDatetimeLocal(d) {
+    return d.toISOString().slice(0, 16);
+}
+
+let _lastHudUpdate = 0;
+window.addEventListener('helio-time-update', e => {
+    const { date, source, jd } = e.detail;
+    const now = Date.now();
+
+    // Throttle HUD DOM writes to 4×/sec (RAF fires 60fps, no need to paint every frame)
+    if (now - _lastHudUpdate < 250) return;
+    _lastHudUpdate = now;
+
+    const dateEl  = el('h3d-date');
+    const srcEl   = el('h3d-src');
+    const badge   = el('tw-epoch-badge');
+    const picker  = el('tw-date-picker');
+
+    if (dateEl) {
+        // Show full datetime: YYYY-MM-DD HH:MM UTC
+        const iso = date.toISOString();
+        dateEl.textContent = iso.slice(0, 10) + ' ' + iso.slice(11, 16) + ' UTC';
+    }
+    if (srcEl) srcEl.textContent = source === 'horizons' ? 'JPL' : 'VSOP87';
+
+    // Sync picker to current sim time without triggering 'change' event
+    if (picker && document.activeElement !== picker) {
+        picker.value = _toDatetimeLocal(date);
+    }
+
+    // Epoch badge: LIVE / PAST / FUTURE
+    if (badge) {
+        const realJD  = Date.now() / 86400000 + 2440587.5;
+        const diffDays = (jd ?? 0) - realJD;
+        if (Math.abs(diffDays) < 0.01) {   // within 15 minutes = "live"
+            badge.textContent = 'LIVE';
+            badge.className   = 'tw-live';
+        } else if (diffDays < 0) {
+            const d = Math.abs(diffDays);
+            badge.textContent = d < 365
+                ? `PAST −${Math.round(d)}d`
+                : `PAST −${(d/365.25).toFixed(1)}yr`;
+            badge.className   = 'tw-past';
+        } else {
+            const d = diffDays;
+            badge.textContent = d < 365
+                ? `FUTURE +${Math.round(d)}d`
+                : `FUTURE +${(d/365.25).toFixed(1)}yr`;
+            badge.className   = 'tw-future';
+        }
+    }
+});
+
+// ── Live planet data table ────────────────────────────────────────────────────
+const _PLANET_META = {
+    mercury: { name: 'Mercury', tilt: '0.03°', rotation: '58.6 d', moons: '—', color: '#9a8875' },
+    venus:   { name: 'Venus',   tilt: '177.4°', rotation: '243 d ↺', moons: '—', color: '#e8c97a' },
+    earth:   { name: 'Earth',   tilt: '23.4°', rotation: '23h 56m', moons: 'Moon', color: '#4488dd' },
+    mars:    { name: 'Mars',    tilt: '25.2°', rotation: '24h 37m', moons: 'Phobos, Deimos', color: '#cc4422' },
+    jupiter: { name: 'Jupiter', tilt: '3.1°', rotation: '9h 56m', moons: 'Io, Europa, Ganymede, Callisto', color: '#c88b3a' },
+    saturn:  { name: 'Saturn',  tilt: '26.7°', rotation: '10h 42m', moons: 'Titan, Rhea, Dione', color: '#e4d191' },
+    uranus:  { name: 'Uranus',  tilt: '97.8°', rotation: '17h 14m ↺', moons: 'Titania, Oberon', color: '#7de8e8' },
+    neptune: { name: 'Neptune', tilt: '28.3°', rotation: '16h 6m', moons: 'Triton ↺', color: '#4b70dd' },
+};
+
+function _updatePlanetTable() {
+    if (!_helio) return;
+    const tbody = el('planet-data-tbody');
+    if (!tbody) return;
+    const eph = _helio._eph;
+    if (!eph) return;
+    const R2D = 180 / Math.PI;
+
+    let html = '';
+    for (const name of ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']) {
+        const p = eph[name];
+        const m = _PLANET_META[name];
+        if (!p || !m) continue;
+        const lon = ((p.lon_rad * R2D) % 360 + 360) % 360;
+        html += `<tr style="border-bottom:1px solid rgba(255,255,255,.03)">
+            <td style="padding:4px 8px"><span style="color:${m.color};font-weight:600">${m.name}</span></td>
+            <td style="text-align:right;padding:4px 8px;font-family:monospace;color:#ccddee">${lon.toFixed(1)}°</td>
+            <td style="text-align:right;padding:4px 8px;font-family:monospace;color:#ccddee">${p.dist_AU.toFixed(4)} AU</td>
+            <td style="text-align:right;padding:4px 8px;color:#889">${m.tilt}</td>
+            <td style="text-align:right;padding:4px 8px;color:#889">${m.rotation}</td>
+            <td style="padding:4px 8px;color:#778;font-size:.68rem">${m.moons}</td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+// Update table every 2 seconds (positions change slowly at real-time)
+setInterval(_updatePlanetTable, 2000);
+// Also update on time events (for warp mode)
+window.addEventListener('helio-time-update', _updatePlanetTable);
+
+// ── Time controls — full timeline scrubber + nav + warp speed ────────────────
+{
+    // ── Timeline state ────────────────────────────────────────────────────────
+    // _twWindowSec  : visible range of the slider in seconds
+    // _twWinStartJD : JD of the slider's left edge
+    // _sliderDragging: true while the user's pointer is on the slider
+
+    let _twWindowSec    = 86400;  // default: 24-hour window
+    let _twWinStartJD   = 0;      // set on first update
+    let _sliderDragging = false;
+
+    const SLIDER_MAX = 10000;     // high resolution for smooth scrubbing
+
+    // Step granularity and tick config for each window size
+    const WIN_CFG = {
+        3600    : { step: 300,      tickCount: 12, stepLabel: 'step 5min', fmtTick: d => d.toISOString().slice(11,16) },
+        86400   : { step: 3600,     tickCount: 24, stepLabel: 'step 1hr',  fmtTick: d => d.toISOString().slice(11,16) },
+        604800  : { step: 86400,    tickCount: 7,  stepLabel: 'step 1day', fmtTick: d => d.toISOString().slice(5,10).replace('-','/') },
+        2592000 : { step: 86400,    tickCount: 10, stepLabel: 'step 1day', fmtTick: d => d.toISOString().slice(5,10).replace('-','/') },
+        31557600: { step: 2592000,  tickCount: 12, stepLabel: 'step 1mo',  fmtTick: d => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()] },
+    };
+
+    // ── Helper: JD ↔ ms ──────────────────────────────────────────────────────
+    const jdToMs  = jd  => (jd - 2440587.5) * 86400000;
+    const msToJD  = ms  => ms / 86400000 + 2440587.5;
+    const nowJD   = ()  => Date.now() / 86400000 + 2440587.5;
+
+    // ── Format date label for start/end of slider ─────────────────────────────
+    function _fmtEndLabel(jd) {
+        const d   = new Date(jdToMs(jd));
+        const iso = d.toISOString();
+        // For year-window show YYYY-MM; for shorter show MM-DD HH:MM
+        return _twWindowSec >= 31557600
+            ? iso.slice(0, 7)
+            : _twWindowSec >= 2592000
+                ? iso.slice(5, 10)
+                : iso.slice(5, 16).replace('T', ' ');
+    }
+
+    // ── Rebuild tick marks from current window + start ────────────────────────
+    function _rebuildTicks() {
+        const ticksEl = el('tw-ticks');
+        if (!ticksEl) return;
+        const cfg = WIN_CFG[_twWindowSec] ?? WIN_CFG[86400];
+        const n   = cfg.tickCount;
+
+        ticksEl.innerHTML = '';
+        for (let i = 0; i <= n; i++) {
+            const frac  = i / n;
+            const tickJD = _twWinStartJD + frac * (_twWindowSec / 86400);
+            const d     = new Date(jdToMs(tickJD));
+            const div   = document.createElement('div');
+            div.className = 'tw-tick';
+            div.innerHTML = `<div class="tw-tick-mark"></div>
+                             <div class="tw-tick-lbl">${cfg.fmtTick(d)}</div>`;
+            ticksEl.appendChild(div);
+        }
+    }
+
+    // ── Update slider fill gradient ───────────────────────────────────────────
+    function _setSliderPct(val) {
+        const slider = el('tw-slider');
+        if (slider) slider.style.setProperty('--pct', (val / SLIDER_MAX * 100).toFixed(2) + '%');
+    }
+
+    // ── Update slider thumb + labels from a given sim JD ─────────────────────
+    function _updateSliderFromJD(jd) {
+        if (_sliderDragging) return;          // don't fight the user's drag
+        const slider   = el('tw-slider');
+        const startEl  = el('tw-tl-start');
+        const endEl    = el('tw-tl-end');
+        const stepEl   = el('tw-step-badge');
+        if (!slider) return;
+
+        const winDays  = _twWindowSec / 86400;
+
+        // If sim time is outside the current window, re-center
+        const frac = (jd - _twWinStartJD) / winDays;
+        if (frac < 0 || frac > 1) {
+            // Re-center: put simJD at midpoint
+            _twWinStartJD = jd - winDays * 0.5;
+            _rebuildTicks();
+        }
+
+        const fracClamped = Math.max(0, Math.min(1, (jd - _twWinStartJD) / winDays));
+        const val = Math.round(fracClamped * SLIDER_MAX);
+        slider.value = val;
+        _setSliderPct(val);
+
+        // Start / end labels
+        const endJD = _twWinStartJD + winDays;
+        if (startEl) startEl.textContent = _fmtEndLabel(_twWinStartJD);
+        if (endEl)   endEl.textContent   = _fmtEndLabel(endJD);
+
+        // Step badge
+        const cfg = WIN_CFG[_twWindowSec] ?? WIN_CFG[86400];
+        if (stepEl) stepEl.textContent = cfg.stepLabel;
+    }
+
+    // ── Switch window size ────────────────────────────────────────────────────
+    function _setWindow(windowSec) {
+        _twWindowSec = windowSec;
+        // Re-center on current sim time
+        const simJD  = _helio?.getSimJD() ?? nowJD();
+        _twWinStartJD = simJD - (windowSec / 86400) * 0.5;
+        _rebuildTicks();
+        _updateSliderFromJD(simJD);
+        // Update window button active states
+        el('tw-win-grp')?.querySelectorAll('.tw-btn[data-window]').forEach(b =>
+            b.classList.toggle('tw-win-active', Number(b.dataset.window) === windowSec));
+    }
+
+    // ── Mark warp scale button active ─────────────────────────────────────────
+    const twrap = document.getElementById('helio-timewarp');
+    function _setScaleActive(scale) {
+        twrap?.querySelectorAll('.tw-nav-row .tw-btn[data-scale]').forEach(b =>
+            b.classList.toggle('active', Number(b.dataset.scale) === scale));
+    }
+
+    // ── Initialise window on first JD ────────────────────────────────────────
+    function _initWindow(jd) {
+        if (_twWinStartJD === 0) {
+            _twWinStartJD = jd - (_twWindowSec / 86400) * 0.5;
+            _rebuildTicks();
+        }
+        _updateSliderFromJD(jd);
+    }
+
+    // ── Date picker ───────────────────────────────────────────────────────────
+    el('tw-date-picker')?.addEventListener('change', e => {
+        if (!_helio || !e.target.value) return;
+        const d = new Date(e.target.value);
+        _helio.setSimDate(d);
+        _updateSliderFromJD(msToJD(d.getTime()));
+        _setScaleActive(0);
+    });
+
+    // ── Live button ───────────────────────────────────────────────────────────
+    el('tw-live')?.addEventListener('click', () => {
+        if (!_helio) return;
+        _helio.goLive();
+        const jd = nowJD();
+        // Re-center window on now
+        _twWinStartJD = jd - (_twWindowSec / 86400) * 0.5;
+        _rebuildTicks();
+        _updateSliderFromJD(jd);
+        _setScaleActive(1);
+    });
+
+    // ── Step / jump buttons ───────────────────────────────────────────────────
+    const STEP_MS = {
+        'tw-prev-yr':  -365.25 * 86400e3,
+        'tw-next-yr':  +365.25 * 86400e3,
+        'tw-prev-mo':  -30.44  * 86400e3,
+        'tw-next-mo':  +30.44  * 86400e3,
+        'tw-prev-wk':  -7      * 86400e3,
+        'tw-next-wk':  +7      * 86400e3,
+        'tw-prev-day': -1      * 86400e3,
+        'tw-next-day': +1      * 86400e3,
+    };
+    for (const [id, ms] of Object.entries(STEP_MS)) {
+        el(id)?.addEventListener('click', () => {
+            if (!_helio) return;
+            const curJD = _helio.getSimJD();
+            const newJD = msToJD(jdToMs(curJD) + ms);
+            _helio.setSimDate(new Date(jdToMs(newJD)));
+            _updateSliderFromJD(newJD);
+            _setScaleActive(0);
+        });
+    }
+
+    // ── Warp speed buttons (in nav row) ───────────────────────────────────────
+    el('tw-nav-row')?.addEventListener('click', e => {
+        const btn = e.target.closest('.tw-btn[data-scale]');
+        if (!btn || !_helio) return;
+        const scale = parseFloat(btn.dataset.scale);
+        _helio.setTimeScale(scale);
+        _setScaleActive(scale);
+    });
+
+    // ── Window preset buttons (in timeline row) ───────────────────────────────
+    el('tw-win-grp')?.addEventListener('click', e => {
+        const btn = e.target.closest('.tw-btn[data-window]');
+        if (!btn) return;
+        _setWindow(Number(btn.dataset.window));
+    });
+
+    // ── Timeline slider ───────────────────────────────────────────────────────
+    const sliderEl = el('tw-slider');
+
+    // Pointer down: begin drag — note start JD so we can compute delta later
+    sliderEl?.addEventListener('pointerdown', () => { _sliderDragging = true; });
+
+    // Input: scrub — convert slider value → JD and update sim
+    sliderEl?.addEventListener('input', () => {
+        if (!_helio) return;
+        const frac  = sliderEl.valueAsNumber / SLIDER_MAX;
+        const newJD = _twWinStartJD + frac * (_twWindowSec / 86400);
+        const newDate = new Date(jdToMs(newJD));
+        _helio.setSimDate(newDate);
+        _setSliderPct(sliderEl.valueAsNumber);
+        _setScaleActive(0);   // counts as a "pause" — warp stops
+
+        // Sync date picker to the slider position
+        const picker = el('tw-date-picker');
+        if (picker && document.activeElement !== picker) {
+            picker.value = _toDatetimeLocal(newDate);
+        }
+
+        // Update start/end labels in real-time during drag
+        const endJD = _twWinStartJD + _twWindowSec / 86400;
+        const s = el('tw-tl-start'); if (s) s.textContent = _fmtEndLabel(_twWinStartJD);
+        const f = el('tw-tl-end');   if (f) f.textContent = _fmtEndLabel(endJD);
+    });
+
+    // Pointer up / cancel: end drag
+    const _endDrag = () => { _sliderDragging = false; };
+    // Track pointer release on document (not just slider) so fast drags
+    // that release outside the slider element still clear the dragging flag.
+    // Bug fix: previously only listened on sliderEl, causing _sliderDragging
+    // to stay true permanently after a fast drag, blocking all slider updates.
+    document.addEventListener('pointerup',     _endDrag);
+    document.addEventListener('pointercancel', _endDrag);
+
+    // ── helio-time-update → keep slider + picker synced during playback ────────
+    window.addEventListener('helio-time-update', e => {
+        const { jd, date } = e.detail ?? {};
+        if (jd == null) return;
+
+        // First call: initialize the slider window centered on sim time
+        _initWindow(jd);
+
+        // During warp/playback (not dragging): update slider position to track sim
+        if (!_sliderDragging && sliderEl) {
+            const endJD = _twWinStartJD + _twWindowSec / 86400;
+            if (jd >= _twWinStartJD && jd <= endJD) {
+                const frac = (jd - _twWinStartJD) / (_twWindowSec / 86400);
+                const val  = Math.round(frac * SLIDER_MAX);
+                sliderEl.value = val;
+                _setSliderPct(val);
+            } else {
+                // Sim time has moved outside the current window — re-center
+                _setWindow(_twWindowSec);
+            }
+        }
+
+        // Keep date picker synced (unless user is actively typing in it)
+        if (date) {
+            const pickerEl = el('tw-date-picker');
+            if (pickerEl && document.activeElement !== pickerEl) {
+                pickerEl.value = _toDatetimeLocal(date);
+            }
+        }
+    });
+
+    // ── Seed picker + slider with current time ────────────────────────────────
+    const picker = el('tw-date-picker');
+    if (picker) picker.value = _toDatetimeLocal(new Date());
+    _setWindow(_twWindowSec);  // build initial ticks and labels
+}
 
 // ── 3D Magnetosphere Globe ────────────────────────────────────────────────────
 // SpaceWeatherGlobe (space-weather-globe.js) — Three.js Earth + magnetosphere.

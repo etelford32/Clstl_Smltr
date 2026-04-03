@@ -1,14 +1,23 @@
 /**
- * horizons-extended.js — JPL Horizons real-time planetary ephemeris
+ * horizons-extended.js — JPL Horizons spacecraft / small-body ephemeris
+ *
+ * ── OWNERSHIP SPLIT ──────────────────────────────────────────────────────────
+ *  horizons.js / EphemerisService  owns all 8 planets (199–899) + Moon (301).
+ *                                  Uses /api/horizons Vercel proxy + Meeus fallback.
+ *                                  Fires: 'ephemeris-ready'
+ *
+ *  horizons-extended.js (this file) owns spacecraft and small bodies ONLY.
+ *                                  Calls JPL Horizons directly (no API key).
+ *                                  Do NOT add planet IDs (199–899) or Moon (301).
+ *                                  Fires: 'horizons-update'
  *
  * Polls the JPL HORIZONS REST API for real-time heliocentric XYZ positions
- * (AU) of all 8 planets, the Moon, and STEREO-A.  No API key required.
- * Poll default: 60 min (positions change slowly).
+ * (AU).  No API key required.  Poll default: 60 min (positions change slowly).
  *
  * STATE EVENT
  * ─────────────────────────────────────────────────────────────────────────────
- *  'horizons-update'  { bodies: { mercury, venus, earth, … stereo_a },
- *                       status, lastUpdated }
+ *  'horizons-update'  { bodies: { stereo_a, … spacecraft }, status, lastUpdated }
+ *  Planets/Moon come via 'ephemeris-ready' from EphemerisService in horizons.js.
  *
  *  Each body: { x, y, z (AU), r (AU from Sun), lon_rad, lat_rad,
  *               lon_deg, lat_deg }
@@ -19,14 +28,14 @@
  *
  *  new HorizonsFeed().start();
  *  window.addEventListener('horizons-update', e => {
- *      const { mars, stereo_a } = e.detail.bodies;
- *      console.log(`Mars: ${mars.x.toFixed(3)} AU from Sun`);
+ *      const { stereo_a } = e.detail.bodies;
+ *      console.log(`STEREO-A: ${stereo_a.r.toFixed(3)} AU from Sun`);
  *  });
  *
  * HOW TO ADD MORE BODIES
  * ─────────────────────────────────────────────────────────────────────────────
- *  Add an entry to HORIZONS_BODIES with any valid Horizons COMMAND string:
- *    Planets:   199=Mercury  299=Venus  499=Mars  599=Jupiter  …
+ *  Add spacecraft or small-body entries to HORIZONS_BODIES ONLY.
+ *  Do NOT add planet IDs (199–899) or Moon (301) — use EphemerisService instead.
  *    Spacecraft: -234=STEREO-A  -227=STEREO-B  -82=Cassini  -159=JWST
  *    Comets:    'DES=1995 O1' (Hale-Bopp)   'NAME=Halley'
  *    Asteroids: '1;' (Ceres)  '2;' (Pallas)  '433;' (Eros)
@@ -123,26 +132,19 @@ function parseHorizonsVectors(text) {
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 /**
- * Solar-system bodies to fetch.  Key = friendly name used in event.detail.bodies.
- * Value = Horizons COMMAND string (integer body IDs, or quoted strings for names).
+ * Spacecraft / small-body IDs for this feed.
+ * Key = friendly name used in event.detail.bodies.
+ * Value = Horizons COMMAND string.
  *
- * Horizons body ID reference:
- *   10   Sun          199  Mercury     299  Venus      399  Earth
- *   499  Mars         599  Jupiter     699  Saturn     799  Uranus
- *   899  Neptune      301  Moon        -234 STEREO-A   -159 JWST
- *   1;   Ceres (dwarf planet)          -82  Cassini
+ * !! Do NOT add planet IDs (199–899) or Moon (301) here.
+ * !! Those are owned exclusively by horizons.js / EphemerisService.
+ *
+ * Spacecraft ID reference:
+ *   -234  STEREO-A      -227  STEREO-B     -159  JWST
+ *   -82   Cassini        -48  Ulysses       -31  Voyager 1
  */
 export const HORIZONS_BODIES = {
-    mercury:  '199',
-    venus:    '299',
-    earth:    '399',
-    mars:     '499',
-    jupiter:  '599',
-    saturn:   '699',
-    uranus:   '799',
-    neptune:  '899',
-    moon:     '301',
-    stereo_a: '-234',  // STEREO-A spacecraft — gives its position relative to Sun
+    stereo_a: '-234',  // STEREO-A spacecraft — heliocentric position relative to Sun
 };
 
 export class HorizonsFeed {
@@ -180,6 +182,13 @@ export class HorizonsFeed {
     async _poll() {
         const entries = Object.entries(this.bodies);
 
+        // Guard: planet IDs belong to EphemerisService in horizons.js — not this feed.
+        const PLANET_IDS = new Set(['199','299','399','499','599','699','799','899','301']);
+        entries.forEach(([name, cmd]) => {
+            if (PLANET_IDS.has(String(cmd)))
+                console.warn(`[HorizonsFeed] body '${name}' (${cmd}) is a planet/moon — use EphemerisService in horizons.js instead.`);
+        });
+
         // Fetch all bodies in parallel — Horizons handles concurrent requests fine
         const results = await Promise.allSettled(
             entries.map(async ([name, command]) => {
@@ -212,7 +221,7 @@ export class HorizonsFeed {
 
     _buildState() {
         return {
-            /** Keyed by body name (e.g. 'mars', 'stereo_a').
+            /** Keyed by body name (e.g. 'stereo_a').
              *  Each value: { x, y, z (AU), r (AU from Sun), lon_deg, lat_deg } */
             bodies:      { ...this._raw },
             status:      this.status,

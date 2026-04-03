@@ -4,9 +4,12 @@
  * Scene layout (Earth at origin, R_E = 1 Three.js unit):
  *
  *   _solarGroup  (world-space Group, Y-axis aligned toward sun each frame)
+ *     ├─ magnetosheath      compressed solar wind between bow shock and magnetopause
  *     ├─ magnetopauseFill   Shue-1998 parametric surface, translucent fill
  *     ├─ magnetopauseWire   same surface, wireframe overlay
  *     ├─ bowShockWire       Farris-Russell bow shock, wireframe
+ *     ├─ reconnXLine        dayside X-line reconnection glow (Bz-southward driven)
+ *     ├─ polarCusps         pair of funnel cones at ±magnetic cusp entry regions
  *     └─ tail               flattened cylinder in the anti-solar lobe
  *
  *   _eqGroup  (world-space Group at origin, equatorial-plane objects, no rotation)
@@ -178,6 +181,78 @@ export function computeIonoLayers(f107 = 150, kp = 2, xray = 1e-8, szaDeg = 50) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Aurora curtain GLSL shaders
+//
+//  Physical aurora spectral lines (nanometres):
+//    O(¹S) 557.7 nm  → green    dominant, 100–200 km altitude
+//    O(¹D) 630.0 nm  → red      diffuse, > 200 km
+//    N₂⁺   427.8 nm  → blue-violet  lower edge, < 100 km
+//
+//  The curtain geometry runs from R_BASE (surface) to R_TOP (~1.8 Re) at the
+//  magnetic oval colatitude.  vHeight (0=bottom, 1=top) drives the colour
+//  gradient and is the proxy for altitude in the fragment shader.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _AURORA_VERT = /* glsl */`
+    attribute float a_height;
+    varying float   vHeight;
+
+    void main() {
+        vHeight     = a_height;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const _AURORA_FRAG = /* glsl */`
+    precision highp float;
+
+    uniform float u_time;
+    uniform float u_kp_norm;
+    uniform float u_bz_south;
+    uniform float u_substorm_t;
+
+    varying float vHeight;
+
+    void main() {
+        // ── Altitude-dependent spectral colours ──────────────────────────────
+        // Low  : green   O(¹S) 557.7 nm  (100–200 km)
+        // Mid  : cyan-green transition
+        // High : purple  N₂⁺ + O(¹D) blending above 200 km
+        vec3 lowCol  = vec3(0.03, 1.00, 0.28);
+        vec3 midCol  = vec3(0.10, 0.82, 0.55);
+        vec3 highCol = vec3(0.62, 0.14, 0.88);
+
+        vec3 col;
+        if (vHeight < 0.45) {
+            col = mix(lowCol, midCol, vHeight / 0.45);
+        } else {
+            col = mix(midCol, highCol, (vHeight - 0.45) / 0.55);
+        }
+
+        // ── Curtain shimmer — rapid vertical streaks ──────────────────────────
+        float s1 = 0.60 + 0.40 * sin(u_time * 5.4  + vHeight * 14.0);
+        float s2 = 0.72 + 0.28 * sin(u_time * 9.1  + vHeight * 23.0 + 1.57);
+        float s3 = 0.80 + 0.20 * sin(u_time * 14.0 + vHeight *  8.0 + 0.88);
+
+        // ── Vertical intensity profile: bright band in middle, fade at edges ──
+        float vFade = sin(vHeight * 3.14159) * (0.50 + 0.50 * pow(1.0 - vHeight, 0.6));
+
+        // ── Kp + storm driving ────────────────────────────────────────────────
+        float quiet  = 0.12 + u_kp_norm * 0.60;
+        float stormy = u_bz_south * 0.38;
+        float base   = clamp(quiet + stormy, 0.0, 1.2);
+
+        // ── Substorm flash: brief surge (ripple up curtain height) ────────────
+        float sbRipple = u_substorm_t * (0.5 + 0.5 * sin(u_time * 10.0 + vHeight * 10.0));
+        float sbBoost  = sbRipple * 0.65;
+
+        float alpha  = clamp(vFade * base * s1 * s2 * s3 + sbBoost, 0.0, 0.90);
+
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Geometry builders
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -217,6 +292,199 @@ function buildShueMesh(r0, alpha, color, opacity, wireframe = false) {
     });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.renderOrder = wireframe ? 5 : 4;
+    return mesh;
+}
+
+/**
+ * Magnetosheath fill — compressed, heated solar wind plasma occupying the
+ * region between the bow shock and magnetopause.
+ * Rendered as the bow-shock LatheGeometry with BackSide + additive blending
+ * so only the gap outside the opaque magnetopause fill is visible.
+ */
+function buildMagnetosheath(bs_r0, bs_alpha) {
+    const profile = shueProfile(bs_r0, bs_alpha);
+    const geo     = new THREE.LatheGeometry(profile, 32);
+    const mat     = new THREE.MeshBasicMaterial({
+        color:      0xff9944,
+        transparent: true,
+        opacity:    0.045,
+        side:       THREE.BackSide,
+        depthWrite: false,
+        blending:   THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 3;
+    return mesh;
+}
+
+/**
+ * Dayside reconnection X-line glow.
+ * A small emissive sphere sitting at the subsolar magnetopause nose (+Y in
+ * the solarGroup).  Opacity and radius are driven by southward Bz in tick().
+ * Two "jet" line segments extend from the nose along the magnetopause flanks
+ * (±X), representing accelerated plasma outflow from the X-line.
+ */
+function buildReconnXLine(r0) {
+    const group = new THREE.Group();
+    group.name  = 'reconnXLine';
+
+    // Glowing blob at the X-line
+    const sGeo = new THREE.SphereGeometry(0.28, 10, 7);
+    const sMat = new THREE.MeshBasicMaterial({
+        color:      0xffffff,
+        transparent: true,
+        opacity:    0.0,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const blob = new THREE.Mesh(sGeo, sMat);
+    blob.name = 'blob';
+    blob.position.set(0, r0, 0);
+    group.add(blob);
+
+    // Reconnection outflow jets (±X flanks, 2 Re long each)
+    const jetPts = [
+        new THREE.Vector3(-2.2, r0 * 0.97, 0),
+        new THREE.Vector3( 0,   r0,        0),
+        new THREE.Vector3( 2.2, r0 * 0.97, 0),
+    ];
+    const jGeo = new THREE.BufferGeometry().setFromPoints(jetPts);
+    const jMat = new THREE.LineBasicMaterial({
+        color:      0xffffff,
+        transparent: true,
+        opacity:    0.0,
+        blending:   THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const jets = new THREE.Line(jGeo, jMat);
+    jets.name = 'jets';
+    group.add(jets);
+
+    group.renderOrder = 8;
+    return group;
+}
+
+/**
+ * Polar cusp funnels — two open wireframe cones marking the dayside
+ * magnetospheric cusps where solar wind particles directly enter along
+ * open magnetic field lines.
+ *
+ * In the _solarGroup's local frame (+Y toward sun), the cusps sit at
+ * approximately ±Z (roughly corresponding to geographic north and south),
+ * offset sunward by ~0.75 × r0.  The cones open toward Earth (origin).
+ */
+function buildPolarCusps(r0, alpha) {
+    const group = new THREE.Group();
+    group.name  = 'polarCusps';
+
+    // Cusp throat latitude ≈ 75–80° → θ ≈ 35° in Shue angle
+    const thetaCusp = 36 * (Math.PI / 180);
+    const r_c       = r0 * Math.pow(2 / (1 + Math.cos(thetaCusp)), alpha);
+    const Y_cusp    = r_c * Math.cos(thetaCusp);   // along-sun offset
+    const Z_cusp    = r_c * Math.sin(thetaCusp);   // north/south transverse
+
+    for (const sign of [+1, -1]) {
+        // Open wireframe cone, apex toward Earth, base outward
+        const cGeo = new THREE.ConeGeometry(1.0, 2.2, 14, 1, true);
+        const cMat = new THREE.MeshBasicMaterial({
+            color:      0x44ffee,
+            transparent: true,
+            opacity:    0.12,
+            wireframe:  true,
+            depthWrite: false,
+            blending:   THREE.AdditiveBlending,
+        });
+        const cone = new THREE.Mesh(cGeo, cMat);
+
+        // Position cone at cusp entry; tilt apex toward Earth-centre
+        cone.position.set(0, Y_cusp, sign * Z_cusp);
+        // ConeGeometry points along +Y by default; rotate to point at origin
+        const dir = new THREE.Vector3(0, -Y_cusp, -sign * Z_cusp).normalize();
+        const q   = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(0, 1, 0), dir
+        );
+        cone.setRotationFromQuaternion(q);
+        cone.renderOrder = 7;
+        group.add(cone);
+    }
+    return group;
+}
+
+/**
+ * Build a 3D auroral curtain mesh for one hemisphere.
+ *
+ * The curtain is a ring of vertical quads placed at the auroral oval colatitude
+ * (from the geographic pole).  Each quad extends radially from R_BASE to R_TOP
+ * along the same polar direction vector, creating the characteristic "curtain"
+ * morphology.  The GLSL shader maps height (0=base, 1=top) to spectral colour
+ * and adds fast shimmer for realism.
+ *
+ * @param {number}  kp       Planetary K-index (0–9) — sets oval latitude
+ * @param {boolean} isNorth  true = northern oval, false = southern oval
+ * @returns {THREE.Mesh}
+ */
+function buildAuroralCurtains(kp, isNorth) {
+    const N_SEG  = 120;     // segments around the oval
+    const R_BASE = 1.02;    // curtain bottom (just above surface, Re)
+    const R_TOP  = 1.82;    // curtain top  (~5 000 km altitude, exaggerated Re)
+
+    // Auroral oval colatitude θ from pole: expands equatorward during storms
+    const auroralLat_deg = Math.max(50, 67 - kp * 1.5);   // geographic latitude of oval centre
+    const colatDeg       = 90 - auroralLat_deg;            // colatitude from pole
+    const theta          = colatDeg * DEG;                  // radians
+    const sign           = isNorth ? 1 : -1;               // pole direction
+    const sinT           = Math.sin(theta);
+    const cosT           = Math.cos(theta);
+
+    // Build interleaved (base, top) vertex ring + height attribute
+    const posArr = [];
+    const hArr   = [];
+    const idxArr = [];
+
+    for (let k = 0; k <= N_SEG; k++) {
+        const phi  = (k / N_SEG) * Math.PI * 2;
+        const cosP = Math.cos(phi);
+        const sinP = Math.sin(phi);
+
+        // Base vertex at R_BASE along the polar unit vector
+        posArr.push(R_BASE * sinT * cosP, R_BASE * cosT * sign, R_BASE * sinT * sinP);
+        hArr.push(0.0);
+
+        // Top vertex at R_TOP along the same polar unit vector
+        posArr.push(R_TOP * sinT * cosP, R_TOP * cosT * sign, R_TOP * sinT * sinP);
+        hArr.push(1.0);
+    }
+
+    // Quad strip: base[k]=k*2, top[k]=k*2+1, base[k+1]=(k+1)*2, top[k+1]=(k+1)*2+1
+    for (let k = 0; k < N_SEG; k++) {
+        const b0 = k * 2,       t0 = k * 2 + 1;
+        const b1 = (k + 1) * 2, t1 = (k + 1) * 2 + 1;
+        idxArr.push(b0, t0, t1,  b0, t1, b1);
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
+    geo.setAttribute('a_height', new THREE.BufferAttribute(new Float32Array(hArr),   1));
+    geo.setIndex(idxArr);
+
+    const mat = new THREE.ShaderMaterial({
+        uniforms: {
+            u_time:       { value: 0 },
+            u_kp_norm:    { value: Math.min(1, kp / 9) },
+            u_bz_south:   { value: 0 },
+            u_substorm_t: { value: 0 },
+        },
+        vertexShader:   _AURORA_VERT,
+        fragmentShader: _AURORA_FRAG,
+        transparent:    true,
+        depthWrite:     false,
+        side:           THREE.DoubleSide,
+        blending:       THREE.AdditiveBlending,
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name        = isNorth ? 'aurora_N' : 'aurora_S';
+    mesh.renderOrder = 9;
     return mesh;
 }
 
@@ -264,13 +532,20 @@ export class MagnetosphereEngine {
         this._lastKp    = -1;
 
         this._layers = {
-            magnetopause: true,
-            bowShock:     true,
-            belts:        true,
-            plasmasphere: true,
+            magnetopause:  true,
+            bowShock:      true,
+            belts:         true,
+            plasmasphere:  true,
+            magnetosheath: true,
+            cusps:         true,
+            reconnection:  true,
+            aurora:        true,
         };
 
         this.analysis = null;
+
+        // Substorm flash state: set via setSubstorm(); decays in tick()
+        this._substormT = 0;  // 0–1 flash intensity
 
         // Build with fallback values
         this._rebuildSolarShells(10.9, 0.58);
@@ -328,8 +603,9 @@ export class MagnetosphereEngine {
      * @param {number}          t       elapsed seconds
      * @param {THREE.Vector3}   sunDir  world-space unit vector toward sun
      * @param {object}          sw      swpc-feed state (optional; uses last if omitted)
+     * @param {number}          dt      frame delta-time (s, default 1/60)
      */
-    tick(t, sunDir, sw = {}) {
+    tick(t, sunDir, sw = {}, dt = 1 / 60) {
         // Orient solar group: +Y → sun direction
         const q = new THREE.Quaternion().setFromUnitVectors(
             new THREE.Vector3(0, 1, 0),
@@ -363,8 +639,8 @@ export class MagnetosphereEngine {
         }
 
         // ── Bow shock wire — intensity pulses with dynamic pressure ────────
+        const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression — hoisted to tick() scope
         if (this._bsWire) {
-            const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression
             const pulse    = 0.5 + 0.5 * Math.sin(t * 0.8 + pdynNorm * 3);
             this._bsWire.material.opacity = 0.12 + pdynNorm * 0.22 + pulse * 0.08;
             // Hotter orange → yellow at high pressure
@@ -372,10 +648,61 @@ export class MagnetosphereEngine {
             this._bsWire.material.color.setRGB(1.0, g / 255, 0.2 - pdynNorm * 0.1);
         }
 
-        // ── Radiation belt glow pulses + storm enhancement ─────────────────
+        // Hoist kpNorm / sepNorm so all new blocks below can use them
         const kpNorm  = Math.min(1, kp / 9);
         const sepNorm = Math.min(1, sep / 5);
 
+        // ── Magnetosheath — brightens with dynamic pressure ────────────────
+        if (this._magnetosheath) {
+            const msPulse = 0.5 + 0.5 * Math.sin(t * 0.6 + pdynNorm * 2.5);
+            this._magnetosheath.material.opacity = 0.028 + pdynNorm * 0.030 + msPulse * 0.010;
+            // Colour: cools from orange toward yellow under high density
+            const densNorm = Math.min(1, density / 20);
+            this._magnetosheath.material.color.setRGB(
+                1.0,
+                0.50 + densNorm * 0.30,
+                0.10 + densNorm * 0.10,
+            );
+        }
+
+        // ── Dayside reconnection X-line ────────────────────────────────────
+        // Only activated by southward Bz (magnetic reconnection requires Bz < 0)
+        if (this._reconnXLine) {
+            const blob = this._reconnXLine.getObjectByName('blob');
+            const jets = this._reconnXLine.getObjectByName('jets');
+            // Reconnection intensity: peaks at Bz ≈ −15 nT, saturates beyond
+            const reconn = bzSouth * bzSouth;   // quadratic: more sensitive at onset
+            const pulse  = 0.5 + 0.5 * Math.sin(t * 3.5 + reconn * Math.PI);
+            if (blob) {
+                blob.material.opacity = reconn * (0.55 + pulse * 0.30);
+                // Colour: white-hot at peak reconnection, fades to pale blue
+                const r = 0.70 + reconn * 0.30;
+                const g = 0.55 + reconn * 0.25;
+                const b = 1.00;
+                blob.material.color.setRGB(r, g, b);
+                blob.scale.setScalar(1 + reconn * 0.6 + pulse * 0.2);
+            }
+            if (jets) {
+                jets.material.opacity = reconn * (0.35 + pulse * 0.20);
+                jets.material.color.setRGB(0.6 + reconn * 0.4, 0.7, 1.0);
+            }
+        }
+
+        // ── Polar cusps — widen + brighten during storms ───────────────────
+        if (this._polarCusps) {
+            this._polarCusps.children.forEach(cone => {
+                // Cusps open wider and glow more during active conditions
+                const cuspOpen = 0.08 + kpNorm * 0.12 + bzSouth * 0.08;
+                cone.material.opacity = cuspOpen;
+                // Electric cyan during quiet times, shift toward white-green in storms
+                const r = kpNorm * 0.30;
+                const g = 0.85 + kpNorm * 0.15;
+                const b = 0.85 + (1 - kpNorm) * 0.15;
+                cone.material.color.setRGB(r, g, b);
+            });
+        }
+
+        // ── Radiation belt glow pulses + storm enhancement ─────────────────
         if (this._outerBelt) {
             this._outerBelt.material.opacity =
                 0.16 + 0.07 * Math.sin(t * 1.7) + kpNorm * 0.12 + sepNorm * 0.08;
@@ -393,6 +720,42 @@ export class MagnetosphereEngine {
             const dstNorm = Math.min(1, Math.max(0, -dst) / 200);
             this._ringCurrent.material.opacity =
                 dstNorm * 0.28 + 0.03 * Math.sin(t * 1.1) * dstNorm;
+        }
+
+        // ── Aurora curtains — update GLSL uniforms every frame ────────────────
+        // Substorm flash decays with τ ≈ 8 s; aurora pulsation driven by Kp + Bz.
+        this._substormT = Math.max(0, this._substormT - dt * 0.125);  // 8 s decay
+
+        if (this._auroraN?.material?.uniforms) {
+            const U = this._auroraN.material.uniforms;
+            U.u_time.value       = t;
+            U.u_kp_norm.value    = kpNorm;
+            U.u_bz_south.value   = bzSouth;
+            U.u_substorm_t.value = this._substormT;
+        }
+        if (this._auroraS?.material?.uniforms) {
+            const U = this._auroraS.material.uniforms;
+            U.u_time.value       = t;
+            U.u_kp_norm.value    = kpNorm;
+            U.u_bz_south.value   = bzSouth;
+            U.u_substorm_t.value = this._substormT;
+        }
+
+        // ── Plasma sheet — brightens with dynamic pressure + substorm flash ────
+        if (this._plasmaSheet) {
+            const psBase  = 0.018 + pdynNorm * 0.025;
+            const psStorm = bzSouth * 0.030;
+            const psPulse = 0.5 + 0.5 * Math.sin(t * 0.4 + pdynNorm * 2.0);
+            const sbGlow  = this._substormT * 0.12;
+            this._plasmaSheet.material.opacity =
+                psBase + psStorm + psPulse * 0.008 + sbGlow;
+            // Colour: quiet blue → hot cyan during substorm
+            const sbFrac = Math.min(1, this._substormT * 2);
+            this._plasmaSheet.material.color.setRGB(
+                0.20 + sbFrac * 0.55,
+                0.55 + sbFrac * 0.35,
+                1.00,
+            );
         }
     }
 
@@ -414,7 +777,29 @@ export class MagnetosphereEngine {
             case 'plasmasphere':
                 if (this._plasmasphere) this._plasmasphere.visible = v;
                 break;
+            case 'magnetosheath':
+                if (this._magnetosheath) this._magnetosheath.visible = v;
+                break;
+            case 'cusps':
+                if (this._polarCusps) this._polarCusps.visible = v;
+                break;
+            case 'reconnection':
+                if (this._reconnXLine) this._reconnXLine.visible = v;
+                break;
+            case 'aurora':
+                if (this._auroraN) this._auroraN.visible = v;
+                if (this._auroraS) this._auroraS.visible = v;
+                break;
         }
+    }
+
+    /**
+     * Trigger a substorm brightening on the aurora curtains.
+     * @param {number} idx  substorm index [0,1]
+     */
+    setSubstorm(idx) {
+        // Latch to a minimum of the current value so surges don't interrupt decay
+        this._substormT = Math.max(this._substormT, Math.min(1.0, idx));
     }
 
     dispose() {
@@ -438,6 +823,13 @@ export class MagnetosphereEngine {
             this._solarGroup.remove(c);
         }
 
+        // Bow shock parameters needed for magnetosheath + wire
+        const bs = computeBowShock(r0, alpha);
+
+        // Magnetosheath fill (compressed solar-wind plasma between bow shock and magnetopause)
+        this._magnetosheath = buildMagnetosheath(bs.r0, bs.alpha);
+        this._solarGroup.add(this._magnetosheath);
+
         // Magnetopause fill (semi-transparent blue-purple)
         this._mpFill = buildShueMesh(r0, alpha, 0x334477, 0.09, false);
         this._solarGroup.add(this._mpFill);
@@ -447,17 +839,25 @@ export class MagnetosphereEngine {
         this._solarGroup.add(this._mpWire);
 
         // Bow shock wireframe (orange, wider and more blunt)
-        const bs = computeBowShock(r0, alpha);
         this._bsWire = buildShueMesh(bs.r0, bs.alpha, 0xee8833, 0.22, true);
         this._solarGroup.add(this._bsWire);
 
-        // Magnetotail — two elliptical lobes in the anti-solar direction (-Y)
-        // Modelled as a flattened cylinder extending -Y from just behind Earth
-        const tailLen = 22;
-        const tailR   = Math.min(15, r0 * 2.0 * Math.pow(2, alpha));
-        const tailGeo = new THREE.CylinderGeometry(tailR * 0.85, tailR, tailLen, 32, 1, true);
+        // Dayside reconnection X-line glow (active only when Bz southward)
+        this._reconnXLine = buildReconnXLine(r0);
+        this._solarGroup.add(this._reconnXLine);
+
+        // Polar cusp funnels
+        this._polarCusps = buildPolarCusps(r0, alpha);
+        this._solarGroup.add(this._polarCusps);
+
+        // Magnetotail — extended lobe structure, anti-solar direction (-Y)
+        // Real magnetotail extends 200–600 Re downstream; we show to ~80 Re
+        // for the dramatic long-tail morphology (previously was 22 Re).
+        const tailLen = 80;
+        const tailR   = Math.min(20, r0 * 2.2 * Math.pow(2, alpha));
+        const tailGeo = new THREE.CylinderGeometry(tailR * 0.55, tailR, tailLen, 32, 1, true);
         const tailMat = new THREE.MeshBasicMaterial({
-            color: 0x223355, transparent: true, opacity: 0.07,
+            color: 0x1a2a44, transparent: true, opacity: 0.065,
             side: THREE.BackSide, depthWrite: false,
         });
         this._tail = new THREE.Mesh(tailGeo, tailMat);
@@ -465,13 +865,33 @@ export class MagnetosphereEngine {
         this._tail.renderOrder = 3;
         this._solarGroup.add(this._tail);
 
+        // Plasma sheet — thin, flat current sheet bisecting the magnetotail lobes.
+        // The neutral sheet is the boundary between the two tail lobes: hot dense
+        // plasma separates the open field lines of the North and South lobe.
+        // Rendered as a glowing blue-white disc in the equatorial XZ plane of the tail.
+        const psLen    = tailLen * 0.92;
+        const psGeo    = new THREE.CylinderGeometry(tailR * 0.42, tailR * 0.52, 0.6, 48, 1, false);
+        const psMat    = new THREE.MeshBasicMaterial({
+            color: 0x4488cc, transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._plasmaSheet = new THREE.Mesh(psGeo, psMat);
+        // Position flat disc at mid-tail; rotated so it lies in the XZ plane
+        this._plasmaSheet.position.set(0, -(psLen / 2 + r0 * 0.15), 0);
+        this._plasmaSheet.renderOrder = 4;
+        this._solarGroup.add(this._plasmaSheet);
+
         // Apply layer visibility
         if (!this._layers.magnetopause) {
-            this._mpFill.visible = false;
-            this._mpWire.visible = false;
-            this._tail.visible   = false;
+            this._mpFill.visible      = false;
+            this._mpWire.visible      = false;
+            this._tail.visible        = false;
+            this._plasmaSheet.visible = false;
         }
-        if (!this._layers.bowShock) this._bsWire.visible = false;
+        if (!this._layers.bowShock)      this._bsWire.visible       = false;
+        if (!this._layers.magnetosheath) this._magnetosheath.visible = false;
+        if (!this._layers.cusps)         this._polarCusps.visible    = false;
+        if (!this._layers.reconnection)  this._reconnXLine.visible   = false;
     }
 
     _rebuildEarthShells(kp, lpp) {
@@ -508,12 +928,24 @@ export class MagnetosphereEngine {
         this._ringCurrent = buildTorus(3.6, 0.38, 0xff4400, 0.0, 48);
         this._eqGroup.add(this._ringCurrent);
 
+        // ── 3D Auroral curtains (North + South ovals) ─────────────────────────
+        // Placed in _eqGroup which is Earth-local space centred at origin.
+        // The curtain oval colatitude contracts equatorward with rising Kp.
+        this._auroraN = buildAuroralCurtains(kp, true);
+        this._eqGroup.add(this._auroraN);
+        this._auroraS = buildAuroralCurtains(kp, false);
+        this._eqGroup.add(this._auroraS);
+
         // Apply layer visibility
         if (!this._layers.belts) {
             this._innerBelt.visible = false;
             this._outerBelt.visible = false;
         }
         if (!this._layers.plasmasphere) this._plasmasphere.visible = false;
+        if (!this._layers.aurora) {
+            this._auroraN.visible = false;
+            this._auroraS.visible = false;
+        }
     }
 }
 

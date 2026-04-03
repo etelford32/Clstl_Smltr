@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard — Parker Physics</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06030f;--surface:#0d0820;--border:rgba(255,255,255,.07);
+  --text:#d0cce8;--muted:#6a6488;--accent:#ffb830;--accent2:#4fc3f7;
+  --green:#4fc97f;--card-bg:#0f0c21;
+}
+html{height:auto;overflow-y:auto}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+
+/* ── NAV ── */
+nav#dash-nav{position:sticky;top:0;z-index:100;background:rgba(6,3,15,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between}
+.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.nav-logo img{height:32px;width:32px;border-radius:50%;object-fit:cover}
+.nav-logo-text{font-size:.95rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.nav-actions{display:flex;align-items:center;gap:12px}
+.nav-user{font-size:.82rem;color:var(--muted)}
+.nav-user strong{color:var(--text)}
+.btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);transition:border-color .2s,color .2s}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── LAYOUT ── */
+main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
+
+/* ── WELCOME ── */
+.welcome{margin-bottom:36px}
+.welcome h1{font-size:1.85rem;font-weight:800;background:linear-gradient(100deg,#fff 40%,#aaa9cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2;margin-bottom:6px}
+.welcome-sub{font-size:.9rem;color:var(--muted);display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.plan-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.plan-free{background:#1a3a1a;color:#6fcf6f}
+.plan-basic{background:#1a2a3a;color:#4fc3f7}
+.plan-advanced{background:#2a1a3a;color:#c77dff}
+
+/* ── SECTION LABELS ── */
+.section-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700;margin-bottom:14px}
+
+/* ── TOP ROW (location + space weather) ── */
+.top-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:36px}
+@media(max-width:860px){.top-row{grid-template-columns:1fr}}
+
+/* ── CARDS ── */
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.card-head{padding:16px 18px 0;display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.card-link{font-size:.75rem;color:var(--accent2);text-decoration:none;opacity:.8;transition:opacity .2s}
+.card-link:hover{opacity:1}
+.card-body{padding:16px 18px 18px}
+
+/* ── LOCATION CARD ── */
+#loc-map-canvas{display:block;width:100%;height:140px;border-radius:8px;margin-bottom:14px;background:#030612}
+.loc-info{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;min-height:38px}
+.loc-pin{font-size:1.3rem;flex-shrink:0;margin-top:1px}
+.loc-city{font-size:1.05rem;font-weight:700;line-height:1.2}
+.loc-coords-txt{font-size:.73rem;color:var(--muted);margin-top:2px;font-family:monospace}
+.loc-time{font-size:.75rem;color:var(--accent2);margin-top:2px}
+.loc-none{color:var(--muted);font-size:.85rem;font-style:italic}
+
+.loc-search-row{display:flex;gap:6px}
+.loc-input{flex:1;background:#08051a;border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:.82rem;outline:none;transition:border-color .2s}
+.loc-input:focus{border-color:rgba(0,200,255,.45)}
+.loc-input::placeholder{color:var(--muted)}
+.loc-btn{background:rgba(0,180,255,.15);border:1px solid rgba(0,180,255,.25);border-radius:8px;color:var(--accent2);cursor:pointer;padding:7px 11px;font-size:.82rem;white-space:nowrap;transition:background .2s}
+.loc-btn:hover{background:rgba(0,180,255,.28)}
+.loc-err{color:#ff6666;font-size:.73rem;margin-top:5px;display:none}
+.loc-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.loc-action-btn{font-size:.75rem;padding:5px 12px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-decoration:none;transition:border-color .2s,color .2s}
+.loc-action-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+.loc-action-btn.danger{border-color:rgba(255,80,80,.3);color:#ff8888}
+.loc-action-btn.danger:hover{border-color:#ff5555;color:#ff5555}
+
+/* ── SPACE WEATHER CARD ── */
+.sw-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.sw-cell{flex:1;min-width:80px;background:#080518;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.sw-lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);display:block;margin-bottom:3px}
+.sw-val{font-size:1.1rem;font-weight:700;font-family:monospace}
+.kp-cells{display:flex;gap:2px;margin:4px 0 2px}
+.kp-cell{flex:1;height:7px;border-radius:2px;opacity:.18;transition:opacity .4s,box-shadow .4s}
+.kp-cell.active{opacity:1}
+.storm-badge{display:inline-block;padding:3px 10px;border-radius:10px;font-size:.72rem;font-weight:700;border:1px solid;margin-bottom:10px}
+.aurora-row{background:#080518;border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.aurora-icon{font-size:1.3rem;flex-shrink:0}
+.aurora-text{font-size:.8rem;line-height:1.4}
+.aurora-loc{font-size:.7rem;color:var(--muted)}
+.sw-footer{margin-top:12px;font-size:.74rem;color:var(--muted)}
+.sw-footer a{color:var(--accent2);text-decoration:none}
+.sw-footer a:hover{text-decoration:underline}
+
+/* ── SIM GRID ── */
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:14px;margin-bottom:48px}
+.sim-card{background:var(--card-bg);border:1px solid var(--border);border-radius:14px;overflow:hidden;text-decoration:none;color:var(--text);transition:transform .2s,box-shadow .2s,border-color .2s}
+.sim-card:hover{transform:translateY(-3px);box-shadow:0 8px 32px rgba(0,0,0,.5);border-color:var(--accent)}
+.sim-thumb{height:105px;display:flex;align-items:center;justify-content:center;font-size:2.2rem;position:relative;overflow:hidden}
+.sim-thumb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,var(--card-bg))}
+.sim-info{padding:11px 14px 13px}
+.sim-name{font-size:.86rem;font-weight:700;margin-bottom:2px}
+.sim-desc{font-size:.72rem;color:var(--muted);line-height:1.4}
+.sim-badge{position:absolute;top:8px;right:8px;z-index:1;padding:2px 8px;border-radius:10px;font-size:.62rem;font-weight:700;text-transform:uppercase}
+.badge-live{background:#1a3030;color:#4fc3f7;border:1px solid #2a5050}
+.th-earth{background:linear-gradient(135deg,#0d2137,#1a4a6e,#0d3352)}
+.th-sun{background:linear-gradient(135deg,#2a1200,#b34700,#ff6a00)}
+.th-sw{background:linear-gradient(135deg,#050a1a,#0d1f3c,#1a3a6e)}
+.th-star{background:linear-gradient(135deg,#0a0014,#2a0050,#6600cc)}
+.th-galactic{background:linear-gradient(135deg,#000508,#001a2a,#002a1a)}
+
+/* ── FOOTER ── */
+footer{padding:22px;text-align:center;font-size:.74rem;color:var(--muted);border-top:1px solid var(--border)}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--text)}
+
+/* ── AUTH GATE ── */
+#auth-gate{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#auth-gate h2{font-size:1.55rem;font-weight:800;margin-bottom:10px}
+#auth-gate p{color:var(--muted);margin-bottom:26px;max-width:360px;font-size:.9rem}
+.gate-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.gate-actions a{padding:10px 24px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none}
+.gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.gate-signup{background:var(--accent);color:#0a0510}
+
+@media(max-width:600px){
+  .welcome h1{font-size:1.35rem}
+  main{padding:22px 14px 48px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH GATE ── -->
+<div id="auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
+  <h2>Sign in to access your dashboard</h2>
+  <p>Your personal hub for live space weather, location data, and simulation access.</p>
+  <div class="gate-actions">
+    <a href="signin.html" class="gate-signin">Sign In</a>
+    <a href="signup.html" class="gate-signup">Create Free Account</a>
+  </div>
+</div>
+
+<!-- ── NAV ── -->
+<nav id="dash-nav" aria-label="Dashboard navigation">
+  <a href="index.html" class="nav-logo" aria-label="Parker Physics home">
+    <img src="ParkersPhysics_logo2.jpg" alt="">
+    <span class="nav-logo-text">Parker Physics</span>
+  </a>
+  <div class="nav-actions">
+    <span class="nav-user">Welcome, <strong id="user-name">–</strong></span>
+    <button class="btn-sm btn-outline" id="signout-btn" aria-label="Sign out">Sign Out</button>
+  </div>
+</nav>
+
+<!-- ── MAIN ── -->
+<main>
+
+  <div class="welcome">
+    <h1 id="welcome-heading">Good morning, Explorer</h1>
+    <p class="welcome-sub">
+      Your astrophysics command center.
+      <span class="plan-badge plan-free" id="plan-badge">Free</span>
+    </p>
+  </div>
+
+  <!-- ── TOP ROW ── -->
+  <div class="top-row">
+
+    <!-- Location card -->
+    <div class="card" id="location-card">
+      <div class="card-head">
+        <span class="card-title">Your Location</span>
+        <a href="earth.html" class="card-link" id="earth-link">View on Earth →</a>
+      </div>
+      <div class="card-body">
+        <canvas id="loc-map-canvas" aria-label="Mini world map showing your location"></canvas>
+
+        <div class="loc-info" id="loc-info">
+          <span class="loc-pin">📍</span>
+          <div>
+            <div class="loc-city" id="loc-city-name"><span class="loc-none">No location set</span></div>
+            <div class="loc-coords-txt" id="loc-coords-txt"></div>
+            <div class="loc-time" id="loc-time-txt"></div>
+          </div>
+        </div>
+
+        <div class="loc-search-row">
+          <input class="loc-input" id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off" aria-label="Search for a location">
+          <button class="loc-btn" id="loc-search-btn" aria-label="Search">↵</button>
+          <button class="loc-btn" id="loc-gps-btn" title="Detect my location" aria-label="Use GPS to detect location">⊕</button>
+        </div>
+        <div class="loc-err" id="loc-err" role="alert"></div>
+
+        <div class="loc-actions">
+          <a href="earth.html" class="loc-action-btn" id="loc-earth-btn" style="display:none">🌍 Open Earth Sim</a>
+          <button class="loc-action-btn danger" id="loc-clear-btn" style="display:none">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Space weather card -->
+    <div class="card" id="sw-card">
+      <div class="card-head">
+        <span class="card-title">Space Weather</span>
+        <a href="space-weather.html" class="card-link">Full Dashboard →</a>
+      </div>
+      <div class="card-body">
+
+        <div class="sw-row">
+          <div class="sw-cell">
+            <span class="sw-lbl">Kp Index</span>
+            <span class="sw-val" id="sw-kp" style="color:#4fc3f7">—</span>
+            <div class="kp-cells" id="kp-cells"></div>
+          </div>
+          <div class="sw-cell">
+            <span class="sw-lbl">Solar Wind</span>
+            <span class="sw-val" id="sw-speed" style="color:#ffd700">—</span>
+            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">km/s</div>
+          </div>
+          <div class="sw-cell">
+            <span class="sw-lbl">IMF Bz</span>
+            <span class="sw-val" id="sw-bz">—</span>
+            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">nT</div>
+          </div>
+        </div>
+
+        <div class="storm-badge" id="storm-badge" style="color:#4fc3f7;border-color:#4fc3f722;background:#4fc3f708">Quiet</div>
+
+        <div class="aurora-row" id="aurora-row">
+          <span class="aurora-icon" id="aurora-icon">🔭</span>
+          <div>
+            <div class="aurora-text" id="aurora-text" style="color:var(--muted)">Set your location to check aurora visibility</div>
+            <div class="aurora-loc" id="aurora-loc"></div>
+          </div>
+        </div>
+
+        <div class="sw-footer" id="sw-footer" style="margin-top:12px">
+          <span id="sw-status">Connecting to NOAA SWPC…</span>
+          &nbsp;·&nbsp; <a href="space-weather.html">Full space weather dashboard →</a>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /top-row -->
+
+  <!-- ── SIMULATIONS ── -->
+  <p class="section-label">Simulations</p>
+  <div class="sim-grid">
+
+    <a href="earth.html" class="sim-card" aria-label="Launch Earth Magnetosphere simulation">
+      <div class="sim-thumb th-earth">
+        <span>🌍</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Earth Magnetosphere</p>
+        <p class="sim-desc">Real-time field lines, particle trapping &amp; Van Allen belts</p>
+      </div>
+    </a>
+
+    <a href="sun.html" class="sim-card" aria-label="Launch Solar Surface simulation">
+      <div class="sim-thumb th-sun">
+        <span>☀️</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Solar Surface</p>
+        <p class="sim-desc">Solar flares, CMEs, active regions from NOAA SWPC</p>
+      </div>
+    </a>
+
+    <a href="space-weather.html" class="sim-card" aria-label="Launch Space Weather dashboard">
+      <div class="sim-thumb th-sw">
+        <span>🌌</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Space Weather</p>
+        <p class="sim-desc">Kp index, solar wind speed, geomagnetic storm alerts</p>
+      </div>
+    </a>
+
+    <a href="star3d.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
+      <div class="sim-thumb th-star">
+        <span>⭐</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Stellar Physics</p>
+        <p class="sim-desc">3D stellar evolution, HR diagram, spectral classification</p>
+      </div>
+    </a>
+
+    <a href="galactic-map.html" class="sim-card" aria-label="Launch Galactic Map simulation">
+      <div class="sim-thumb th-galactic">
+        <span>🌠</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Galactic Map</p>
+        <p class="sim-desc">Milky Way structure, stellar populations &amp; arm dynamics</p>
+      </div>
+    </a>
+
+  </div>
+
+</main>
+
+<footer>
+  <a href="index.html">Parker Physics</a> &nbsp;·&nbsp;
+  <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
+  <a href="privacy.html">Privacy</a> &nbsp;·&nbsp;
+  <a href="terms.html">Terms</a>
+</footer>
+
+<script type="module">
+import { geocodeQuery, saveUserLocation, loadUserLocation,
+         clearUserLocation, auroraVisibility } from './js/user-location.js';
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+
+/* ════════════════════════════════════════════════════════════
+   AUTH GATE
+═════════════════════════════════════════════════════════════ */
+let _auth = null;
+try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(e){}
+
+if (!_auth || !_auth.signedIn) {
+  document.getElementById('dash-nav').style.visibility = 'hidden';
+  document.querySelector('main').style.visibility = 'hidden';
+  document.querySelector('footer').style.visibility = 'hidden';
+} else {
+  document.getElementById('auth-gate').style.display = 'none';
+
+  const name  = _auth.name || _auth.email || 'Explorer';
+  const first = name.split(' ')[0];
+  document.getElementById('user-name').textContent = first;
+
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
+
+  const plan  = (_auth.plan || 'free').toLowerCase();
+  const badge = document.getElementById('plan-badge');
+  badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+  badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
+
+  function signOut() {
+    sessionStorage.removeItem('pp_auth');
+    window.location.href = 'index.html';
+  }
+  document.getElementById('signout-btn').addEventListener('click', signOut);
+  initAll();
+}
+
+/* ════════════════════════════════════════════════════════════
+   MINI WORLD MAP CANVAS
+   Equirectangular projection, lat/lon grid, glowing user pin.
+═════════════════════════════════════════════════════════════ */
+const _canvas = document.getElementById('loc-map-canvas');
+const _ctx    = _canvas.getContext('2d');
+let   _pinLat = null, _pinLon = null, _pulseT = 0, _mapRaf = null;
+
+function _resizeMap() {
+  _canvas.width  = _canvas.offsetWidth  * devicePixelRatio;
+  _canvas.height = _canvas.offsetHeight * devicePixelRatio;
+  _drawMap();
+}
+
+function _ll2xy(lat, lon) {
+  const W = _canvas.width, H = _canvas.height;
+  const x = ((lon + 180) / 360) * W;
+  const y = ((90 - lat) / 180) * H;
+  return { x, y };
+}
+
+function _drawMap() {
+  const W = _canvas.width, H = _canvas.height;
+  const ctx = _ctx;
+
+  // Background gradient
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0,   '#030818');
+  bg.addColorStop(1,   '#060c24');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.lineWidth = 1;
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const { x } = _ll2xy(0, lon);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    const prime = lon === 0;
+    ctx.strokeStyle = prime ? 'rgba(255,215,0,.35)' : 'rgba(255,255,255,.08)';
+    ctx.stroke();
+  }
+  for (let lat = -90; lat <= 90; lat += 30) {
+    const { y } = _ll2xy(lat, 0);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y);
+    const equator  = lat === 0;
+    const tropics  = Math.abs(lat) === 30;
+    ctx.strokeStyle = equator  ? 'rgba(0,200,255,.4)'
+                    : tropics  ? 'rgba(255,140,0,.18)'
+                    :            'rgba(255,255,255,.07)';
+    ctx.stroke();
+  }
+
+  if (_pinLat !== null) {
+    // Pulse animation
+    const pulse = 0.4 + 0.3 * Math.sin(_pulseT * 3);
+    const { x, y } = _ll2xy(_pinLat, _pinLon);
+
+    // Outer glow ring
+    const ring = ctx.createRadialGradient(x, y, 0, x, y, 22 * devicePixelRatio);
+    ring.addColorStop(0,   `rgba(79,195,247,${0.18 + pulse * 0.12})`);
+    ring.addColorStop(1,   'transparent');
+    ctx.beginPath();
+    ctx.arc(x, y, 22 * devicePixelRatio, 0, Math.PI * 2);
+    ctx.fillStyle = ring;
+    ctx.fill();
+
+    // Inner dot
+    ctx.beginPath();
+    ctx.arc(x, y, 5 * devicePixelRatio, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(79,195,247,${0.75 + pulse * 0.25})`;
+    ctx.shadowBlur  = 10 * devicePixelRatio;
+    ctx.shadowColor = '#4fc3f7';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Coordinates label
+    const latStr = `${Math.abs(_pinLat).toFixed(2)}°${_pinLat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(_pinLon).toFixed(2)}°${_pinLon >= 0 ? 'E' : 'W'}`;
+    const label  = `${latStr} ${lonStr}`;
+    ctx.font      = `${10 * devicePixelRatio}px monospace`;
+    ctx.fillStyle = 'rgba(79,195,247,.8)';
+    const tx = Math.min(x + 8 * devicePixelRatio, W - 90 * devicePixelRatio);
+    const ty = Math.max(y - 8 * devicePixelRatio, 12 * devicePixelRatio);
+    ctx.fillText(label, tx, ty);
+  } else {
+    ctx.font      = `${11 * devicePixelRatio}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle = 'rgba(100,90,136,.8)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Search a city or use GPS to set your location', W / 2, H / 2);
+    ctx.textAlign = 'left';
+  }
+}
+
+function _startMapAnimation() {
+  if (_mapRaf) return;
+  function tick() {
+    _pulseT += 0.04;
+    _drawMap();
+    _mapRaf = requestAnimationFrame(tick);
+  }
+  _mapRaf = requestAnimationFrame(tick);
+}
+
+function _stopMapAnimation() {
+  cancelAnimationFrame(_mapRaf);
+  _mapRaf = null;
+}
+
+/* ════════════════════════════════════════════════════════════
+   LOCATION DISPLAY
+═════════════════════════════════════════════════════════════ */
+function _fmtLatLon(lat, lon) {
+  return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'},  `
+       + `${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
+}
+
+function _showLocation(loc) {
+  if (!loc) {
+    document.getElementById('loc-city-name').innerHTML = '<span class="loc-none">No location set</span>';
+    document.getElementById('loc-coords-txt').textContent = '';
+    document.getElementById('loc-time-txt').textContent   = '';
+    document.getElementById('loc-earth-btn').style.display  = 'none';
+    document.getElementById('loc-clear-btn').style.display  = 'none';
+    _pinLat = _pinLon = null;
+    _stopMapAnimation();
+    _drawMap();
+    _updateAuroraDisplay(null);
+    return;
+  }
+
+  document.getElementById('loc-city-name').textContent      = loc.city;
+  document.getElementById('loc-coords-txt').textContent     = _fmtLatLon(loc.lat, loc.lon);
+  document.getElementById('loc-earth-btn').style.display    = '';
+  document.getElementById('loc-clear-btn').style.display    = '';
+
+  _pinLat = loc.lat; _pinLon = loc.lon;
+  _startMapAnimation();
+  _updateLocalTime(loc.lon);
+  _updateAuroraDisplay(loc);
+}
+
+function _updateLocalTime(lon) {
+  // Approximate offset from meridian (±12h)
+  const offsetH = Math.round(lon / 15);
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const localD = new Date(utcMs + offsetH * 3600000);
+  const hh = String(localD.getHours()).padStart(2, '0');
+  const mm = String(localD.getMinutes()).padStart(2, '0');
+  const sign = offsetH >= 0 ? '+' : '';
+  document.getElementById('loc-time-txt').textContent = `Local time ~${hh}:${mm} (UTC${sign}${offsetH})`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   KP GAUGE COLORS
+═════════════════════════════════════════════════════════════ */
+const KP_COLORS = [
+  '#00e676','#69f0ae','#b2ff59','#fff176',
+  '#ffa726','#ff7043','#ef5350','#e040fb','#aa00ff','#7c00ff'
+];
+
+const STORM_LABELS = [
+  'Quiet','Quiet','Unsettled','Active',
+  'G1 Minor Storm','G2 Moderate Storm','G3 Strong Storm',
+  'G4 Severe Storm','G5 Extreme Storm','G5 Extreme Storm'
+];
+
+function _buildKpCells() {
+  const wrap = document.getElementById('kp-cells');
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement('div');
+    c.className = 'kp-cell';
+    c.style.background = KP_COLORS[i];
+    wrap.appendChild(c);
+  }
+}
+
+let _currentKp = 0;
+
+function _updateKpGauge(kp) {
+  _currentKp = kp ?? 0;
+  const idx   = Math.min(9, Math.floor(_currentKp));
+  const cells = document.getElementById('kp-cells').children;
+  for (let i = 0; i < cells.length; i++) {
+    cells[i].classList.toggle('active', i === idx);
+    cells[i].style.boxShadow = i === idx ? `0 0 5px ${KP_COLORS[i]}` : 'none';
+  }
+  document.getElementById('sw-kp').textContent = _currentKp.toFixed(1);
+  document.getElementById('sw-kp').style.color = KP_COLORS[idx];
+
+  // Storm badge
+  const badge = document.getElementById('storm-badge');
+  badge.textContent    = STORM_LABELS[idx];
+  badge.style.color    = KP_COLORS[idx];
+  badge.style.borderColor = KP_COLORS[idx] + '44';
+  badge.style.background  = KP_COLORS[idx] + '14';
+}
+
+/* ════════════════════════════════════════════════════════════
+   AURORA VISIBILITY
+═════════════════════════════════════════════════════════════ */
+function _updateAuroraDisplay(loc) {
+  const textEl = document.getElementById('aurora-text');
+  const locEl  = document.getElementById('aurora-loc');
+  const icon   = document.getElementById('aurora-icon');
+  if (!loc) {
+    textEl.textContent   = 'Set your location to check aurora visibility';
+    textEl.style.color   = 'var(--muted)';
+    locEl.textContent    = '';
+    icon.textContent     = '🔭';
+    return;
+  }
+  const vis = auroraVisibility(loc.lat, _currentKp);
+  icon.textContent   = vis.visible ? '🌌' : '🔭';
+  textEl.textContent = vis.visible
+    ? `Aurora likely visible from ${loc.city}!`
+    : `${vis.label} for aurora at ${loc.city}`;
+  textEl.style.color = vis.color;
+  locEl.textContent  = `Your latitude: ${Math.abs(loc.lat).toFixed(1)}° ${loc.lat >= 0 ? 'N' : 'S'} · Boundary: ${vis.boundaryDeg.toFixed(0)}°`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   GEOCODING / GPS
+═════════════════════════════════════════════════════════════ */
+async function _doSearch() {
+  const q   = document.getElementById('loc-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('loc-search-btn');
+  const err = document.getElementById('loc-err');
+  err.style.display = 'none';
+  btn.textContent = '…'; btn.disabled = true;
+  try {
+    const loc = await geocodeQuery(q);
+    saveUserLocation(loc);
+    document.getElementById('loc-input').value = loc.city;
+  } catch(e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+  } finally {
+    btn.textContent = '↵'; btn.disabled = false;
+  }
+}
+
+function _doGPS() {
+  const btn = document.getElementById('loc-gps-btn');
+  const err = document.getElementById('loc-err');
+  err.style.display = 'none';
+  if (!navigator.geolocation) {
+    err.textContent   = 'Geolocation not supported by this browser';
+    err.style.display = 'block';
+    return;
+  }
+  btn.textContent = '…'; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    async pos => {
+      try {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        // Reverse geocode via Nominatim
+        const res  = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = res.ok ? await res.json() : {};
+        const adr  = data.address ?? {};
+        const city = adr.city || adr.town || adr.village || adr.county || adr.state || 'Your location';
+        const loc  = { lat, lon, city, displayName: data.display_name || city };
+        saveUserLocation(loc);
+        document.getElementById('loc-input').value = city;
+      } catch(e) {
+        // Save coords even if reverse geocode fails
+        const { latitude: lat, longitude: lon } = pos.coords;
+        const loc = { lat, lon, city: `${lat.toFixed(2)}, ${lon.toFixed(2)}`, displayName: '' };
+        saveUserLocation(loc);
+      } finally {
+        btn.textContent = '⊕'; btn.disabled = false;
+      }
+    },
+    geoErr => {
+      const msgs = {
+        1: 'Location access denied — please allow location in browser settings',
+        2: 'Location unavailable',
+        3: 'Location request timed out'
+      };
+      err.textContent   = msgs[geoErr.code] || 'GPS error';
+      err.style.display = 'block';
+      btn.textContent = '⊕'; btn.disabled = false;
+    },
+    { timeout: 10000 }
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   SPACE WEATHER FEED
+═════════════════════════════════════════════════════════════ */
+function _initSpaceWeather() {
+  _buildKpCells();
+  const feed = new SpaceWeatherFeed();
+  feed.start();
+
+  window.addEventListener('swpc-update', e => {
+    const sw  = e.detail;
+    const kp  = sw.kp ?? 0;
+    const spd = sw.solar_wind?.speed ?? null;
+    const bz  = sw.solar_wind?.bz  ?? null;
+
+    _updateKpGauge(kp);
+
+    document.getElementById('sw-speed').textContent = spd != null ? Math.round(spd).toString() : '—';
+    const bzEl = document.getElementById('sw-bz');
+    bzEl.textContent = bz != null ? bz.toFixed(1) : '—';
+    bzEl.style.color = bz != null ? (bz < 0 ? '#ff6b6b' : '#4fc97f') : 'var(--text)';
+
+    // Re-run aurora with new Kp
+    const loc = loadUserLocation();
+    if (loc) _updateAuroraDisplay(loc);
+
+    const ts = sw.fetchedAt ? new Date(sw.fetchedAt) : new Date();
+    const hh = String(ts.getHours()).padStart(2,'0');
+    const mm = String(ts.getMinutes()).padStart(2,'0');
+    document.getElementById('sw-status').textContent = `Updated ${hh}:${mm}`;
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   INIT
+═════════════════════════════════════════════════════════════ */
+function initAll() {
+  // Map canvas
+  new ResizeObserver(_resizeMap).observe(_canvas);
+  _resizeMap();
+
+  // Location search events
+  document.getElementById('loc-search-btn').addEventListener('click', _doSearch);
+  document.getElementById('loc-input').addEventListener('keydown', e => { if (e.key === 'Enter') _doSearch(); });
+  document.getElementById('loc-gps-btn').addEventListener('click', _doGPS);
+  document.getElementById('loc-clear-btn').addEventListener('click', () => {
+    clearUserLocation();
+    document.getElementById('loc-input').value = '';
+    document.getElementById('loc-err').style.display = 'none';
+  });
+
+  // Sync location display whenever it changes (from this page or earth.html in same session)
+  window.addEventListener('user-location-changed', e => _showLocation(e.detail));
+
+  // Restore saved location
+  const saved = loadUserLocation();
+  if (saved) {
+    document.getElementById('loc-input').value = saved.city || '';
+    _showLocation(saved);
+  } else {
+    _showLocation(null);
+  }
+
+  // Space weather
+  _initSpaceWeather();
+
+  // Local time refresh every minute
+  setInterval(() => {
+    const loc = loadUserLocation();
+    if (loc) _updateLocalTime(loc.lon);
+  }, 60000);
+
+  // Pause map animation when tab hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) _stopMapAnimation();
+    else if (_pinLat !== null) _startMapAnimation();
+  });
+}
+</script>
+</body>
+</html>

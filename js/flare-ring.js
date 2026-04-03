@@ -148,99 +148,193 @@ export class FlareRing {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
-// FlareRing3D — Three.js single-instance burst
+// FlareRing3D — Three.js multi-phase flare burst
+//
+// Three sequential phases mimicking real solar flare morphology:
+//
+//   Phase 0 — Impulsive (0–25% of lifetime)
+//     UV/EUV flash sphere at active region: peak brightness, blue-white
+//     EUV expanding ring (Moreton wave / EIT wave analog)
+//
+//   Phase 1 — Gradual (25–80%)
+//     EUV ring continues expanding and fading
+//     Post-flare arcade glow at source: hot loop emission, decays slowly
+//
+//   Phase 2 — Decay (80–100%)
+//     Arcade fades; only the wide EUV halo remains
+//
+// For X-class events, an additional outer shock sphere is rendered
+// (separate from the CME shell in heliosphere3d._triggerCME) representing
+// the EUV wave (Moreton wave) propagating across the chromosphere.
 // ══════════════════════════════════════════════════════════════════════════════
 
 export class FlareRing3D {
     /**
      * @param {THREE.Scene} scene   Scene to add meshes to
-     * @param {object}      THREE   Three.js namespace (avoids a hard import dep)
-     * @param {number}      sunR    Sun radius in scene units (sets ring placement)
+     * @param {object}      THREE   Three.js namespace
+     * @param {number}      sunR    Sun radius in scene units
      */
     constructor(scene, THREE, sunR) {
-        this._scene = scene;
-        this._T     = THREE;
-        this._sunR  = sunR;
-        this._state = null;   // null | { ring, flash, life, maxLife }
+        this._scene  = scene;
+        this._T      = THREE;
+        this._sunR   = sunR;
+        this._states = [];   // supports concurrent M + X bursts
     }
 
     /**
-     * Spawn (or replace) a flare burst.
-     * @param {boolean}         extreme   true = X-class (white, 6 s); false = M-class (yellow, 4 s)
-     * @param {THREE.Vector3}  [position] World position; defaults to AR-like limb offset
+     * Spawn a new flare burst.  Previous bursts may still be running.
+     * @param {boolean}        extreme   true = X-class; false = M-class
+     * @param {THREE.Vector3} [position] World-space source; defaults to limb AR offset
      */
     trigger(extreme = false, position = null) {
-        this._dispose();
-
         const T   = this._T;
         const R   = this._sunR;
-        const col = extreme ? 0xffffff : 0xffdd44;
 
-        // ── Expanding ring on sun surface ─────────────────────────────────────
-        const ring = new T.Mesh(
-            new T.RingGeometry(0.01, 0.12, 32),
-            new T.MeshBasicMaterial({
-                color: col, transparent: true, opacity: 0.9,
-                blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide,
-            })
+        // AR source point: slightly above limb, random hemisphere
+        const sign = Math.random() < 0.5 ? 1 : -1;
+        const latOff = 0.30 + Math.random() * 0.40;   // 0.3–0.7 R from equator
+        const pos  = position ?? new T.Vector3(
+            R * (0.55 + Math.random() * 0.35),
+            R * latOff * sign,
+            R * (Math.random() - 0.5) * 0.30
         );
-        const pos = position ?? new T.Vector3(R * 0.78, R * 0.55, 0);
-        ring.position.copy(pos);
-        ring.lookAt(new T.Vector3(0, 0, 30));
-        ring.renderOrder = 5;
-        this._scene.add(ring);
 
-        // ── Bright flash sphere ────────────────────────────────────────────────
-        const flash = new T.Mesh(
-            new T.SphereGeometry(R * 0.18, 12, 12),
+        // ── UV flash sphere (impulsive phase) ────────────────────────────────
+        const flashCol = extreme ? 0xffffff : 0xffd060;
+        const flash    = new T.Mesh(
+            new T.SphereGeometry(R * 0.16, 16, 12),
             new T.MeshBasicMaterial({
-                color: col, transparent: true, opacity: 0.7,
+                color: flashCol, transparent: true, opacity: 0.85,
                 blending: T.AdditiveBlending, depthWrite: false,
             })
         );
         flash.position.copy(pos);
-        flash.renderOrder = 5;
+        flash.renderOrder = 6;
         this._scene.add(flash);
 
-        this._state = { ring, flash, life: 0, maxLife: extreme ? 6.0 : 4.0 };
+        // ── EUV expanding ring (Moreton / EIT wave) ────────────────────────
+        // Centred on the sun, grows to cover the disk and beyond.
+        const euvRing = new T.Mesh(
+            new T.RingGeometry(0.01, R * 0.18, 48),
+            new T.MeshBasicMaterial({
+                color:    extreme ? 0x88ccff : 0xffcc44,
+                transparent: true, opacity: 0.75,
+                blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide,
+            })
+        );
+        // Orient ring normal toward the camera (face the ecliptic-XZ plane)
+        euvRing.position.copy(pos);
+        euvRing.lookAt(new T.Vector3(0, 0, 0));
+        euvRing.renderOrder = 5;
+        this._scene.add(euvRing);
+
+        // ── Post-flare arcade glow (hot loop emission at footpoints) ──────────
+        const arcade = new T.Mesh(
+            new T.SphereGeometry(R * 0.22, 16, 12),
+            new T.MeshBasicMaterial({
+                color:    0x4499ff,
+                transparent: true, opacity: 0.0,
+                blending: T.AdditiveBlending, depthWrite: false,
+            })
+        );
+        arcade.position.copy(pos);
+        arcade.renderOrder = 5;
+        this._scene.add(arcade);
+
+        // ── X-class: wide outer EUV shock halo ────────────────────────────────
+        let shock = null;
+        if (extreme) {
+            shock = new T.Mesh(
+                new T.SphereGeometry(R * 0.30, 24, 16),
+                new T.MeshBasicMaterial({
+                    color: 0xffffff, transparent: true, opacity: 0.45,
+                    blending: T.AdditiveBlending, depthWrite: false, wireframe: true,
+                })
+            );
+            shock.position.copy(pos);
+            shock.renderOrder = 5;
+            this._scene.add(shock);
+        }
+
+        this._states.push({
+            flash, euvRing, arcade, shock,
+            life:    0,
+            maxLife: extreme ? 8.0 : 5.0,
+            extreme,
+        });
+
+        // Keep at most 3 concurrent burst states (GC oldest if exceeded)
+        if (this._states.length > 3) {
+            this._disposeState(this._states.shift());
+        }
     }
 
-    /**
-     * Advance animation by dt seconds.  Call once per RAF frame.
-     * No-op when no animation is active.
-     * @param {number} dt  Elapsed time in seconds since last frame
-     */
     tick(dt) {
-        if (!this._state) return;
-        const s = this._state;
-        s.life += dt;
-        const p = s.life / s.maxLife;   // 0 → 1
-        if (p >= 1) { this._dispose(); return; }
+        for (let si = this._states.length - 1; si >= 0; si--) {
+            const s = this._states[si];
+            s.life += dt;
+            const p = s.life / s.maxLife;   // 0 → 1
 
-        // Ring expands and fades
-        s.ring.scale.setScalar(1 + p * 8);
-        s.ring.material.opacity = (1 - p) * 0.9;
+            if (p >= 1.0) {
+                this._disposeState(s);
+                this._states.splice(si, 1);
+                continue;
+            }
 
-        // Flash: bright burst then fade
-        s.flash.material.opacity = p < 0.25 ? 0.7 : 0.7 * (1 - (p - 0.25) / 0.75);
-        s.flash.scale.setScalar(1 + p * 1.5);
+            // ── Phase 0: Impulsive (0–0.25) ────────────────────────────────
+            if (p < 0.25) {
+                const fp = p / 0.25;   // 0→1 within phase
+                s.flash.material.opacity  = 0.85 * (1 - fp);
+                s.flash.scale.setScalar(1 + fp * 2.2);
+                s.euvRing.scale.setScalar(1 + fp * 3.5);
+                s.euvRing.material.opacity = 0.75 * (1 - fp * 0.4);
+                s.arcade.material.opacity  = fp * 0.45;  // ramp in arcade
+                s.arcade.scale.setScalar(1 + fp * 0.8);
+
+            // ── Phase 1: Gradual (0.25–0.80) ───────────────────────────────
+            } else if (p < 0.80) {
+                const fp = (p - 0.25) / 0.55;
+                s.flash.material.opacity  = 0;
+                s.euvRing.scale.setScalar(4.5 + fp * 4.0);
+                s.euvRing.material.opacity = Math.max(0, 0.45 * (1 - fp));
+                // Arcade: peak opacity, slight pulsation (plasma cooling oscillation)
+                s.arcade.material.opacity  = 0.45 * (1 - fp * 0.5) * (0.8 + 0.2 * Math.sin(fp * 12));
+                s.arcade.scale.setScalar(1.8 + fp * 0.5);
+                // Arcade colour transition: UV blue → orange-white (cooling)
+                const hue = 0.60 - fp * 0.22;
+                s.arcade.material.color.setHSL(hue, 0.9, 0.6 + fp * 0.1);
+
+            // ── Phase 2: Decay (0.80–1.0) ───────────────────────────────────
+            } else {
+                const fp = (p - 0.80) / 0.20;
+                s.flash.material.opacity  = 0;
+                s.euvRing.material.opacity = 0;
+                s.arcade.material.opacity  = Math.max(0, 0.22 * (1 - fp));
+            }
+
+            // X-class shock halo: expands rapidly, fades over full lifetime
+            if (s.shock) {
+                s.shock.scale.setScalar(1 + p * 12);
+                s.shock.material.opacity = Math.max(0, 0.45 * (1 - p * 1.4));
+            }
+        }
     }
 
-    /** Remove meshes from scene and free GPU memory. */
-    dispose() { this._dispose(); }
+    /** Remove all active burst states. */
+    dispose() {
+        for (const s of this._states) this._disposeState(s);
+        this._states = [];
+    }
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    _dispose() {
-        if (!this._state) return;
-        const { ring, flash } = this._state;
-        this._scene.remove(ring);
-        this._scene.remove(flash);
-        ring.geometry.dispose();
-        ring.material.dispose();
-        flash.geometry.dispose();
-        flash.material.dispose();
-        this._state = null;
+    _disposeState(s) {
+        for (const mesh of [s.flash, s.euvRing, s.arcade, s.shock]) {
+            if (!mesh) continue;
+            this._scene.remove(mesh);
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        }
     }
 }
 

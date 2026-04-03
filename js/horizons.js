@@ -14,9 +14,15 @@
  *           Earth    Ch.25 — accurate to ~0.01° for 1950–2050
  *           Moon     Ch.47 — accurate to ~1° (16-term longitude series)
  *           Inner planets — simplified Kepler + full 3D orbital rotation
- *           Outer planets — simplified Kepler + full 3D orbital rotation
+ *           Outer planets — VSOP87D truncated series (~0.05–0.1° accuracy)
  *           All planet positions include ecliptic latitude from inclination.
  *           Always works offline; no network latency.
+ *
+ * OWNERSHIP
+ * ─────────────────────────────────────────────────────────────────
+ *  This file owns planet body IDs 199 (Mercury) through 899 (Neptune) and
+ *  Moon (301).  extended-feeds.js / HorizonsFeed must NOT poll these IDs —
+ *  it handles spacecraft (-234 STEREO-A, etc.) only via 'horizons-update'.
  *
  * OUTPUT (ephemeris-ready CustomEvent on window)
  * ─────────────────────────────────────────────────────────────────
@@ -47,6 +53,9 @@
  *  });
  */
 
+import { vsop87Earth } from './earth-orbit.js';
+import { jupiterVSOP, saturnVSOP, uranusVSOP, neptuneVSOP } from './outer-planets.js';
+
 // ── Julian Day helpers ────────────────────────────────────────────────────────
 
 /** Julian Day Number from current UTC instant. */
@@ -70,52 +79,27 @@ const D2R = Math.PI / 180;
 const R2D = 180 / Math.PI;
 
 /**
- * Earth's heliocentric ecliptic longitude (degrees, radians) and
- * distance from the Sun (AU).
+ * Earth's heliocentric ecliptic position via VSOP87D truncated series.
  *
- * Source: Meeus, "Astronomical Algorithms" 2nd ed., Chapter 25.
- * Accuracy: ~0.01° for years 1950–2050.
+ * Replaces the Meeus Ch.25 three-term equation of center.
+ * Accuracy: < 1″ heliocentric longitude, < 0.000001 AU radius (1900–2100).
  *
  * @param {number} jd  Julian Day Number (default: now)
  * @returns {{ lon: number, lon_rad: number, lat_rad: number, dist_AU: number,
  *             x_AU: number, y_AU: number, z_AU: number }}
  */
 export function earthHeliocentric(jd = jdNow()) {
-    const T = (jd - 2451545.0) / 36525.0;  // Julian centuries since J2000.0
-
-    // ── Mean longitude of the Sun (geometric, degrees) ────────────────────
-    const L0 = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
-
-    // ── Mean anomaly of the Sun (degrees → radians) ───────────────────────
-    const M_deg = 357.52911 + 35999.05029 * T - 0.0001537 * T * T;
-    const M     = M_deg * D2R;
-
-    // ── Equation of center (degrees) ─────────────────────────────────────
-    const C = (1.914602 - 0.004817 * T - 0.000014 * T * T) * Math.sin(M)
-            + (0.019993 - 0.000101 * T)                     * Math.sin(2 * M)
-            + 0.000289                                       * Math.sin(3 * M);
-
-    // ── Sun's true longitude (degrees) ───────────────────────────────────
-    const sunTrue = L0 + C;
-
-    // ── Apparent longitude — nutation + aberration (degrees) ─────────────
-    const omega  = (125.04 - 1934.136 * T) * D2R;
-    const sunApp = sunTrue - 0.00569 - 0.00478 * Math.sin(omega);
-
-    // ── Earth's heliocentric ecliptic longitude = sunApp + 180° ──────────
-    const lon = ((sunApp + 180) % 360 + 360) % 360;
-
-    // ── Earth–Sun distance (AU) ────────────────────────────────────────────
-    const e = 0.016708634 - 0.000042037 * T - 0.0000001267 * T * T;
-    const dist_AU = (1.000001018 * (1 - e * e)) / (1 + e * Math.cos(M));
-
-    // Earth's orbit is nearly circular and lies in the ecliptic (i ≈ 0°)
-    const lon_rad = lon * D2R;
-    const x_AU = dist_AU * Math.cos(lon_rad);
-    const y_AU = dist_AU * Math.sin(lon_rad);
-    const z_AU = 0;
-
-    return { lon, lon_rad, lat_rad: 0, dist_AU, x_AU, y_AU, z_AU };
+    const v = vsop87Earth(jd);
+    const lon = ((v.L_rad * R2D) % 360 + 360) % 360;
+    return {
+        lon,
+        lon_rad:  v.L_rad,
+        lat_rad:  v.B_rad,
+        dist_AU:  v.R_AU,
+        x_AU:     v.x_AU,
+        y_AU:     v.y_AU,
+        z_AU:     v.z_AU,
+    };
 }
 
 /**
@@ -215,38 +199,54 @@ export function moonGeocentric(jd = jdNow()) {
  * Source: Meeus, "Astronomical Algorithms" 2nd ed., Table 31.a (J2000 epoch).
  *
  * @param {number} jd
- * @param {{ L0, Ldot, a, e, omega, i, node }} el  Orbital elements at J2000
- *   L0:    Mean longitude at J2000 (degrees)
- *   Ldot:  Rate of mean longitude (degrees / Julian century)
- *   a:     Semi-major axis (AU)
- *   e:     Eccentricity
- *   omega: Longitude of perihelion ω̄ = Ω + ω (degrees)
- *   i:     Inclination to ecliptic (degrees)
- *   node:  Longitude of ascending node Ω (degrees)
+ * @param {object} el  Orbital elements at J2000 with optional secular rates
+ *   L0:       Mean longitude at J2000 (degrees)
+ *   Ldot:     Rate of mean longitude (degrees / Julian century)
+ *   a:        Semi-major axis (AU)
+ *   e:        Eccentricity at J2000
+ *   omega:    Longitude of perihelion ω̄ = Ω + ω (degrees) at J2000
+ *   i:        Inclination to ecliptic (degrees) at J2000
+ *   node:     Longitude of ascending node Ω (degrees) at J2000
+ *   --- optional secular rates (per Julian century) ---
+ *   adot:     Semi-major axis rate (AU/cy) — usually ~0
+ *   edot:     Eccentricity rate (/cy)
+ *   omegadot: Perihelion longitude rate (°/cy)
+ *   idot:     Inclination rate (°/cy)
+ *   nodedot:  Node longitude rate (°/cy)
+ *
+ * Secular rates from Standish (1992) "Keplerian Elements for Approximate
+ * Positions of the Major Planets" (JPL Solar System Dynamics).
+ * Extends accuracy from ±50 years to ±3000 years for outer planets.
+ *
  * @returns {{ lon_rad, lat_rad, dist_AU, x_AU, y_AU, z_AU }}
  */
 function planetHeliocentric(jd, el) {
     const T = (jd - 2451545.0) / 36525.0;
 
+    // Apply secular corrections if provided
+    const a     = el.a     + (el.adot     ?? 0) * T;
+    const e     = el.e     + (el.edot     ?? 0) * T;
+    const omega = el.omega + (el.omegadot ?? 0) * T;
+    const inc   = el.i     + (el.idot     ?? 0) * T;
+    const node  = el.node  + (el.nodedot  ?? 0) * T;
+
     // Mean longitude and anomaly
     const L   = ((el.L0 + el.Ldot * T) % 360 + 360) % 360;
-    const M   = ((L - el.omega) % 360 + 360) % 360;
+    const M   = ((L - omega) % 360 + 360) % 360;
     const Mr  = M * D2R;
-    const e   = el.e;
-
     // Equation of center (3-term, good to ~0.01° for e < 0.1; ~0.3° for Mercury)
     const nu_minus_M = (2 * e - e*e*e / 4) * Math.sin(Mr)
                      + (5/4)  * e*e         * Math.sin(2 * Mr)
                      + (13/12) * e*e*e      * Math.sin(3 * Mr);
 
     const nu      = Mr + nu_minus_M;                               // true anomaly (rad)
-    const dist_AU = (el.a * (1 - e * e)) / (1 + e * Math.cos(nu));
+    const dist_AU = (a * (1 - e * e)) / (1 + e * Math.cos(nu));
 
     // Orbital-plane → heliocentric ecliptic XYZ
     // argument of perihelion ω (lowercase) = ω̄ − Ω
-    const nodeR  = el.node  * D2R;
-    const iR     = el.i     * D2R;
-    const argPer = (el.omega - el.node) * D2R;   // ω in radians
+    const nodeR  = node  * D2R;
+    const iR     = inc   * D2R;
+    const argPer = (omega - node) * D2R;   // ω in radians
     const u      = argPer + nu;                    // argument of latitude
 
     const cosO = Math.cos(nodeR), sinO = Math.sin(nodeR);
@@ -271,13 +271,53 @@ function planetHeliocentric(jd, el) {
 // i:     inclination to ecliptic (°)
 // node:  longitude of ascending node Ω (°)
 
-const MERCURY_EL = { L0: 252.250906, Ldot: 149472.6746358, a: 0.38709831, e: 0.20563175, omega: 77.456119,  i: 7.004986, node:  48.330893 };
-const VENUS_EL   = { L0: 181.979801, Ldot:  58517.8156760, a: 0.72332982, e: 0.00677323, omega: 131.563703, i: 3.394662, node:  76.679920 };
-const MARS_EL    = { L0: 355.433275, Ldot:  19140.2993313, a: 1.52366231, e: 0.09341233, omega: 336.060234, i: 1.849726, node:  49.558093 };
-const JUPITER_EL = { L0:  34.351519, Ldot:   3034.9056606, a: 5.20260319, e: 0.04849793, omega:  14.331309, i: 1.303270, node: 100.464441 };
-const SATURN_EL  = { L0:  50.077444, Ldot:   1222.1138488, a: 9.55491122, e: 0.05550825, omega:  93.056787, i: 2.488879, node: 113.665527 };
-const URANUS_EL  = { L0: 314.055005, Ldot:    428.4669983, a: 19.2184461, e: 0.04629590, omega: 173.005291, i: 0.773197, node:  74.005957 };
-const NEPTUNE_EL = { L0: 304.348665, Ldot:    218.4862002, a: 30.1103869, e: 0.00898809, omega:  48.120275, i: 1.769953, node: 131.784057 };
+// Orbital elements at J2000.0 with secular correction rates (per Julian century).
+// Base elements: Meeus Table 31.a.
+// Secular rates: Standish (1992) "Keplerian Elements for Approximate Positions
+// of the Major Planets" + E.M. Standish & J.G. Williams (JPL).
+// These rates extend accuracy from ±50 yr to ±3000 yr for outer planets.
+//
+// DATA QUALITY NOTE: The 3-term equation of center used here gives ~0.3°
+// accuracy for Mercury (e≈0.206) and ~0.01° for Venus (e≈0.007).  For
+// sub-arcminute accuracy, a full Kepler equation solver would be needed.
+// The secular rates are first-order (linear); over millennia, higher-order
+// perturbation terms (mutual gravitational interactions) become important.
+
+const MERCURY_EL = {
+    L0: 252.250906, Ldot: 149472.6746358, a: 0.38709831, e: 0.20563175,
+    omega: 77.456119,  i: 7.004986, node: 48.330893,
+    adot: 0, edot: 0.00002123, omegadot: 0.16047, idot: -0.00594, nodedot: -0.12534,
+};
+const VENUS_EL = {
+    L0: 181.979801, Ldot: 58517.8156760, a: 0.72332982, e: 0.00677323,
+    omega: 131.563703, i: 3.394662, node: 76.679920,
+    adot: 0, edot: -0.00004938, omegadot: 0.00268, idot: -0.00078, nodedot: -0.27769,
+};
+const MARS_EL = {
+    L0: 355.433275, Ldot: 19140.2993313, a: 1.52366231, e: 0.09341233,
+    omega: 336.060234, i: 1.849726, node: 49.558093,
+    adot: 0, edot: 0.00007882, omegadot: 0.44441, idot: -0.00813, nodedot: -0.29257,
+};
+const JUPITER_EL = {
+    L0: 34.351519, Ldot: 3034.9056606, a: 5.20260319, e: 0.04849793,
+    omega: 14.331309, i: 1.303270, node: 100.464441,
+    adot: -0.00012880, edot: 0.00018026, omegadot: 0.21252, idot: -0.00198, nodedot: 0.13665,
+};
+const SATURN_EL = {
+    L0: 50.077444, Ldot: 1222.1138488, a: 9.55491122, e: 0.05550825,
+    omega: 93.056787, i: 2.488879, node: 113.665527,
+    adot: -0.00003065, edot: -0.00032044, omegadot: 0.54196, idot: 0.00175, nodedot: -0.24688,
+};
+const URANUS_EL = {
+    L0: 314.055005, Ldot: 428.4669983, a: 19.2184461, e: 0.04629590,
+    omega: 173.005291, i: 0.773197, node: 74.005957,
+    adot: -0.00020455, edot: -0.00015503, omegadot: 0.09266, idot: -0.00255, nodedot: 0.04240,
+};
+const NEPTUNE_EL = {
+    L0: 304.348665, Ldot: 218.4862002, a: 30.1103869, e: 0.00898809,
+    omega: 48.120275, i: 1.769953, node: 131.784057,
+    adot: 0.00006447, edot: 0.00000818, omegadot: 0.01009, idot: -0.00255, nodedot: -0.00598,
+};
 
 /**
  * Mercury's heliocentric ecliptic position (full 3D).
@@ -304,35 +344,36 @@ export function marsHeliocentric(jd = jdNow()) {
 }
 
 /**
- * Jupiter's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Jupiter's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.05° for 1800–2200.
  */
 export function jupiterHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, JUPITER_EL);
+    return jupiterVSOP(jd);
 }
 
 /**
- * Saturn's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Saturn's heliocentric ecliptic position — VSOP87D truncated series.
+ * Includes the "great inequality" term (±0.81° error without it).
+ * Accuracy: ~0.05° for 1800–2200.
  */
 export function saturnHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, SATURN_EL);
+    return saturnVSOP(jd);
 }
 
 /**
- * Uranus's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Uranus's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.1° for 1800–2200.
  */
 export function uranusHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, URANUS_EL);
+    return uranusVSOP(jd);
 }
 
 /**
- * Neptune's heliocentric ecliptic position (full 3D).
- * Accuracy: ~0.5° for 1950–2050.
+ * Neptune's heliocentric ecliptic position — VSOP87D truncated series.
+ * Accuracy: ~0.1° for 1800–2200.
  */
 export function neptuneHeliocentric(jd = jdNow()) {
-    return planetHeliocentric(jd, NEPTUNE_EL);
+    return neptuneVSOP(jd);
 }
 
 // ── NASA JPL Horizons REST API ────────────────────────────────────────────────
@@ -340,10 +381,12 @@ export function neptuneHeliocentric(jd = jdNow()) {
 // Falls back to direct JPL if the proxy is unavailable (caught upstream).
 const HORIZONS_URL = '/api/horizons';
 
-function _horizonsParams(command, center) {
-    const now   = new Date();
-    const start = now.toISOString().slice(0, 10);
-    const stop  = new Date(now.getTime() + 86400e3).toISOString().slice(0, 10);
+function _horizonsParams(command, center, jd = null) {
+    // If a JD is provided, compute start/stop dates from it.
+    // Otherwise use current time (real-time mode).
+    const d     = jd != null ? dateFromJD(jd) : new Date();
+    const start = d.toISOString().slice(0, 10);
+    const stop  = new Date(d.getTime() + 86400e3).toISOString().slice(0, 10);
     return new URLSearchParams({
         format:     'json',
         COMMAND:    command,
@@ -372,12 +415,19 @@ function _parseVec(text) {
     return { x: parseFloat(xm[1]), y: parseFloat(ym[1]), z: parseFloat(zm[1]) };
 }
 
-async function _fetchVec(command, center) {
-    const params = _horizonsParams(command, center);
+async function _fetchVec(command, center, jd = null) {
+    const params = _horizonsParams(command, center, jd);
     const url    = `${HORIZONS_URL}?${params}`;
     const resp   = await fetch(url, { cache: 'no-cache' });
-    if (!resp.ok) throw new Error(`Horizons HTTP ${resp.status}`);
+    if (!resp.ok) {
+        // Log the upstream error body for debugging
+        let body = '';
+        try { body = await resp.text(); } catch (_) {}
+        const detail = body.slice(0, 200);
+        throw new Error(`Horizons HTTP ${resp.status}: ${detail}`);
+    }
     const json = await resp.json();
+    if (json.error) throw new Error(`Horizons API: ${json.error}`);
     if (typeof json.result !== 'string') throw new Error('Horizons: no result string');
     return _parseVec(json.result);
 }
@@ -416,8 +466,14 @@ export class EphemerisService {
      *
      * Fires 'ephemeris-ready' on window when complete.
      */
-    async load() {
-        const jd = jdNow();
+    /**
+     * Load ephemeris for all 8 planets + Moon at a given Julian Day.
+     * @param {number} [jd]  Julian Day to compute for (default: now).
+     *                        Enables time-travel: pass any JD and Horizons
+     *                        will query that epoch, with Meeus fallback.
+     */
+    async load(jd = null) {
+        if (jd == null) jd = jdNow();
         let earth, moon, jupiter, saturn, uranus, neptune;
         let horizonsSucceeded = false;
 
@@ -425,8 +481,8 @@ export class EphemerisService {
         try {
             console.log('[Horizons] Fetching Earth + Moon vectors…');
             const [ev, mv] = await Promise.all([
-                _fetchVec("'399'", "'500@10'"),   // Earth, heliocentric, AU
-                _fetchVec("'301'", "'500@399'"),  // Moon,  geocentric,   km
+                _fetchVec('399', '500@10', jd),   // Earth, heliocentric, AU
+                _fetchVec('301', '500@399', jd),   // Moon,  geocentric,   km
             ]);
 
             earth = _vecToHelioEcliptic(ev);
@@ -455,13 +511,13 @@ export class EphemerisService {
         // ── Attempt Horizons for outer planets (non-blocking) ────────────
         // Each fetch is independent; Meeus is used if any fail.
         const outerIds = [
-            { name: 'jupiter', cmd: "'599'" },
-            { name: 'saturn',  cmd: "'699'" },
-            { name: 'uranus',  cmd: "'799'" },
-            { name: 'neptune', cmd: "'899'" },
+            { name: 'jupiter', cmd: '599' },
+            { name: 'saturn',  cmd: '699' },
+            { name: 'uranus',  cmd: '799' },
+            { name: 'neptune', cmd: '899' },
         ];
         const outerResults = await Promise.allSettled(
-            outerIds.map(({ cmd }) => _fetchVec(cmd, "'500@10'"))
+            outerIds.map(({ cmd }) => _fetchVec(cmd, "'500@10'", jd))
         );
 
         const outerHorizons = {};

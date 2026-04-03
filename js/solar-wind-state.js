@@ -165,16 +165,29 @@ export class SolarWindState {
         const r_AU = this._earth?.r_AU ?? 1.0;
 
         // ── Propagation delay: L1 → Earth ─────────────────────────────────
-        // Δt = L1_offset_km / v_sw  (simple ballistic approximation)
-        const v_l1    = Math.max(150, this._l1Now.v_sw);
-        const delay_s = L1_OFFSET_KM / v_l1;   // seconds
+        // Fixed 60-minute nominal delay.  Previously this used Δt = L1 / v_now,
+        // which created a circular dependency: fast wind shortened the delay,
+        // pulling a different (possibly slower) historical reading from the
+        // buffer, which should have lengthened the delay.  A fixed 60-min lag
+        // matches the median transit time across typical solar wind speeds
+        // (300–700 km/s → 36–83 min, median ~55 min) and is consistent with
+        // the same fix applied in solar-wind-magnetosphere.js.
+        const delay_s = 3600;   // fixed 60-minute nominal delay
 
         // Retrieve the L1 reading that departed ~delay_s ago
         const l1 = this._laggedReading(delay_s);
 
+        // Raw (unlagged) L1 reading — preserve for transparent display
+        const l1_raw = this._l1Now;
+
         // ── Solar wind speed at Earth's actual distance ────────────────────
         // Parker profile: V(r) = V_L1 × f(r) / f(1 AU)
         // Since the LUT is normalised so f(1 AU) = 1.0:
+        //
+        // NOTE: L1 sits at ~0.99 AU, so parkerSpeedRatio(0.99) ≈ 0.998 — the
+        // correction is <1% for Earth's orbital range (0.983–1.017 AU).
+        // For the "Earth-arrival" speed we use the LAGGED reading (what has
+        // actually arrived), while for "L1 current" we pass through raw.
         const v_sw = l1.v_sw * parkerSpeedRatio(r_AU, _PARKER_LUT);
 
         // ── Plasma density (inverse-square radial expansion) ───────────────
@@ -250,7 +263,27 @@ export class SolarWindState {
             delay_s,
             delay_min: delay_s / 60,
 
-            // Raw L1 values (for reference)
+            // Raw L1 values — current (unlagged) DSCOVR/ACE measurement
+            // This is what NOAA shows on their dashboard right now.
+            l1_raw: {
+                v_sw: l1_raw.v_sw,
+                n:    l1_raw.n,
+                bz:   l1_raw.bz,
+                bt:   l1_raw.bt,
+                by:   l1_raw.by,
+            },
+
+            // Lagged L1 values — the reading from ~60 min ago that has
+            // physically arrived at Earth by now (propagation-corrected)
+            l1_lagged: {
+                v_sw: l1.v_sw,
+                n:    l1.n,
+                bz:   l1.bz,
+                bt:   l1.bt,
+                by:   l1.by,
+            },
+
+            // Backward-compat alias
             l1: { v_sw: l1.v_sw, n: l1.n, bz: l1.bz, bt: l1.bt },
 
             source: this._earth ? 'live' : 'default',

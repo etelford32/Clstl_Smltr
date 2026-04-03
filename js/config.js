@@ -71,7 +71,7 @@ export const NOAA = Object.freeze({
     aurora:    'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json',
     alerts:    'https://services.swpc.noaa.gov/products/alerts.json',
     dst:       'https://services.swpc.noaa.gov/products/kyoto-dst.json',
-    flares:    'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7day.json',
+    flares:    null,  // NOAA retired xray-flares-7day.json — DONKI flares used instead
     regions:   'https://services.swpc.noaa.gov/json/solar_regions.json',
     radioFlux: 'https://services.swpc.noaa.gov/json/f107_cm_flux.json',
 });
@@ -83,4 +83,17 @@ export const API = Object.freeze({
     donkiFlares:    '/api/donki/flares',
     donkiGST:       '/api/donki/gst',
     donkiSEP:       '/api/donki/sep',
+});
+
+// ── NASA Earthdata ──────────────────────────────────────────────────────────
+// GIBS (imagery browse) is public and CORS-enabled — no token needed.
+// The Earthdata Bearer token is for raw science data via OPeNDAP / GES DISC
+// (quantitative grids, not colour-mapped imagery).  Store in Vercel env var
+// NASA_EARTHDATA_TOKEN; edge functions inject it server-side.
+//
+// Register / manage tokens: https://urs.earthdata.nasa.gov/
+export const EARTHDATA = Object.freeze({
+    gibsSnapshot: 'https://wvs.earthdata.nasa.gov/api/v1/snapshot',
+    gibsWms:      'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi',
+    gesDisc:      'https://disc.gsfc.nasa.gov',   // future: OPeNDAP numeric grids
 });

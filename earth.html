@@ -6,7 +6,8 @@
 <title>Earth View — Parker Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
 /* ─── Nav ────────────────────────────────────────────────────── */
@@ -123,8 +124,10 @@ nav {
 }
 
 /* ─── App shell ──────────────────────────────────────────────── */
-#app { position:relative; width:100%; height:calc(100vh - 48px); overflow:hidden; }
+#app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; }
+@media (max-width: 768px) { #app { height: 78svh; } }
 #canvas-wrap { position:absolute; inset:0; background:#000; }
+#canvas-wrap, #canvas-wrap canvas { touch-action: none; }
 #canvas-wrap canvas { display:block; width:100% !important; height:100% !important; }
 
 /* ─── HUD ────────────────────────────────────────────────────── */
@@ -477,6 +480,73 @@ nav {
     .mtb-btn { min-width: 46px; font-size: 8px; padding: 4px 6px; }
     .mtb-btn .mtb-icon { font-size: 16px; }
 }
+
+/* ── Simulation description section ────────────────────────────────────── */
+.sim-info {
+    background: #010812;
+    border-top: 1px solid rgba(0,198,255,.15);
+    padding: 48px 20px 64px;
+    color: #9bc;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.sim-info-inner { max-width: 1100px; margin: 0 auto; }
+.sim-info-header { margin-bottom: 32px; }
+.sim-info-title {
+    font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+    background: linear-gradient(135deg, #00c6ff, #7b2ff7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: 10px;
+}
+.sim-info-lead { font-size: .95rem; color: #6699aa; line-height: 1.7; max-width: 780px; }
+.sim-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px; margin-bottom: 36px;
+}
+.sim-card {
+    background: rgba(0,198,255,.04); border: 1px solid rgba(0,198,255,.12);
+    border-radius: 12px; padding: 20px 22px;
+}
+.sim-card-icon { font-size: 1.4rem; margin-bottom: 10px; }
+.sim-card-title {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: #00c6ff; margin-bottom: 8px;
+}
+.sim-card-body { font-size: .83rem; color: #4a6e80; line-height: 1.65; }
+.sim-card-body strong { color: #5599bb; font-weight: 600; }
+.sim-controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 20px;
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+}
+.sim-ctrl-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 0; font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sim-ctrl-row:last-child { border-bottom: none; }
+.sim-ctrl-key {
+    background: rgba(0,198,255,.12); border: 1px solid rgba(0,198,255,.28);
+    border-radius: 4px; padding: 1px 7px; font-family: monospace;
+    font-size: .72rem; color: #00c6ff; white-space: nowrap; flex-shrink: 0;
+}
+.sim-ctrl-desc { color: #446677; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px;
+    background: rgba(0,198,255,.08); border: 1px solid rgba(0,198,255,.22);
+    color: #3388aa; font-size: .82rem; text-decoration: none;
+    transition: background .2s, border-color .2s;
+}
+.sim-link:hover { background: rgba(0,198,255,.18); border-color: rgba(0,198,255,.45); color: #00c6ff; }
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none; transition: opacity .4s;
+}
+#scroll-hint span { font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(0,200,255,.55); white-space: nowrap; }
+@keyframes bounce-arrow { 0%,100%{transform:translateY(0)} 50%{transform:translateY(5px)} }
+#scroll-hint svg { opacity: .5; animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -568,6 +638,12 @@ nav {
 
 <!-- ─── App ──────────────────────────────────────────────────── -->
 <div id="app">
+    <div id="scroll-hint">
+        <span>scroll for more</span>
+        <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+            <polyline points="2,2 9,8 16,2" stroke="rgba(0,200,255,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
     <div id="canvas-wrap"><canvas id="c"></canvas></div>
 
     <!-- Loading screen -->
@@ -621,13 +697,30 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetopause" checked><label for="lyr-magnetopause">Magnetopause</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-bowshock"     checked><label for="lyr-bowshock">Bow Shock</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-belts"        checked><label for="lyr-belts">Rad. Belts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-plasma"       checked><label for="lyr-plasma">Plasmasphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+        </div>
+        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
+            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">NASA EARTH OBSERVATIONS</div>
+            <div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><label for="lyr-obs-snow">Snow Cover</label></label>
+            </div>
         </div>
     </div>
     </div>
@@ -716,6 +809,51 @@ nav {
 
         <hr class="ir-sep">
 
+        <!-- Sun → Earth Coupling analytics -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:5px;">Sun → Earth Coupling</div>
+        <div class="ir" title="Akasofu (1981) solar wind–magnetosphere energy input: ε = l₀² v B² sin⁴(θ/2)">
+            <span class="ik">Energy input ε</span>
+            <span class="iv" id="ip-epsilon">— GW</span>
+        </div>
+        <div class="ir" title="IMF clock angle in GSM Y-Z plane: 0°=northward, ±180°=southward (maximum reconnection)">
+            <span class="ik">IMF clock θ</span>
+            <span class="iv" id="ip-clock">—°</span>
+        </div>
+        <div class="ir" title="Newell et al. (2007) dayside reconnection flux rate — strongest Dst predictor">
+            <span class="ik">Merging rate</span>
+            <span class="iv" id="ip-merging">—</span>
+        </div>
+        <div class="ir" title="Petschek fast reconnection at dayside X-line (anomalous resistivity regime)">
+            <span class="ik">X-line Vᵣ</span>
+            <span class="iv" id="ip-reconn">— km/s</span>
+        </div>
+        <div class="ir" title="Iijima-Potemra (1976) total Region 1+2 Birkeland field-aligned current">
+            <span class="ik">FAC R1+R2</span>
+            <span class="iv" id="ip-fac">— MA</span>
+        </div>
+        <div class="ir" title="McPherron substorm onset likelihood index based on lobe flux accumulation">
+            <span class="ik">Substorm idx</span>
+            <span class="iv" id="ip-substorm">—</span>
+        </div>
+        <div class="ir" title="Solar wind Alfvén speed at magnetopause: V_A = B / √(μ₀ρ)">
+            <span class="ik">Alfvén speed</span>
+            <span class="iv" id="ip-va">— km/s</span>
+        </div>
+        <div class="ir" title="Solar wind plasma beta β = P_thermal / P_magnetic (β > 1 = thermally dominated)">
+            <span class="ik">Plasma β</span>
+            <span class="iv" id="ip-beta">—</span>
+        </div>
+        <div class="ir" title="L1 Lagrange-point to Earth propagation delay (Δt = 1.5×10⁶ km / v_sw)">
+            <span class="ik">L1 lag</span>
+            <span class="iv" id="ip-lag">— min</span>
+        </div>
+        <div id="ip-cme-eta" style="display:none;margin-top:4px;padding:3px 5px;border-radius:3px;
+            background:rgba(255,120,0,.08);border:1px solid rgba(255,120,0,.22);font-size:9px;color:#ffaa44;">
+            CME ETA: <span id="ip-cme-eta-val">—</span>
+        </div>
+
+        <hr class="ir-sep">
+
         <!-- Ionospheric layers -->
         <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:3px;">Ionospheric Layers</div>
         <div id="ip-iono-layers">—</div>
@@ -759,6 +897,50 @@ nav {
 
         <div style="margin-top:6px;font-size:9px;color:#3a5a6a;">
             <a href="space-weather.html" style="color:#00c6ff;text-decoration:none;">→ Full space weather dashboard</a>
+        </div>
+
+        <hr class="ir-sep">
+
+        <!-- ── Solar Weather Time Analysis ─────────────────────────── -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;">
+            Solar Forecast &amp; Time Analysis
+        </div>
+
+        <!-- Kp history + forecast chart (72h back / 72h ahead) -->
+        <canvas id="kp-forecast-chart" width="252" height="88"
+            style="display:block;width:100%;border-radius:3px;margin-bottom:6px;
+                   background:rgba(0,10,20,.55);border:1px solid rgba(0,198,255,.08);"
+            title="Cyan = observed Kp (last 72 h) | Orange = AR(6) forecast | Band = 80% prediction interval"></canvas>
+
+        <div class="ir">
+            <span class="ik">Kp (24h forecast)</span>
+            <span class="iv" id="fp-kp24">—</span>
+        </div>
+        <div class="ir">
+            <span class="ik">Trend (H-W)</span>
+            <span class="iv" id="fp-trend">—</span>
+        </div>
+        <div class="ir" title="Probability of at least one hourly Kp ≥ 5 (G1 geomagnetic storm) in the next 24 h">
+            <span class="ik">G1+ storm / 24h</span>
+            <span class="iv" id="fp-g1-24">—</span>
+        </div>
+        <div class="ir" title="Probability of G2+ storm (Kp ≥ 6) within 72 h">
+            <span class="ik">G2+ storm / 72h</span>
+            <span class="iv" id="fp-g2-72">—</span>
+        </div>
+        <div class="ir" title="27-day solar rotation recurrence signal (Carrington co-rotation)">
+            <span class="ik">27-d echo</span>
+            <span class="iv" id="fp-echo">—</span>
+        </div>
+        <div class="ir" title="Solar Cycle 25 current phase and predicted sunspot number">
+            <span class="ik">SC25 phase</span>
+            <span class="iv" id="fp-cycle">—</span>
+        </div>
+        <div id="fp-bulletin"
+             style="margin-top:5px;padding:5px 7px;border-radius:4px;font-size:8.5px;
+                    line-height:1.55;color:#8ab;white-space:pre-line;
+                    background:rgba(0,80,130,.10);border:1px solid rgba(0,198,255,.09);">
+            Initialising forecast…
         </div>
 
     </div><!-- /panel-body -->
@@ -815,6 +997,11 @@ nav {
         </div>
         <div id="wx-alert-badges" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px;"></div>
         <button id="wx-refresh">↺ Refresh Data</button>
+
+        <hr class="ir-sep">
+        <!-- NASA Earth Observation status -->
+        <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px">NASA EARTH OBSERVATIONS</div>
+        <div id="obs-status-list" style="font-size:10px;color:#778;line-height:1.7"></div>
 
         <hr class="ir-sep">
 
@@ -910,8 +1097,23 @@ import {
     computeRingCurrentDst, computeJouleHeating,
     renderIonoHTML,
 } from './js/magnetosphere-engine.js';
+import { ExosphereEngine, computeExopause } from './js/exosphere-engine.js';
+import {
+    SunEarthCoupling,
+    akasofuEpsilon, newellMergingRate,
+    fieldAlignedCurrent, substormIndex, cmeTransitTime,
+} from './js/solar-wind-magnetosphere.js';
+import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { SatelliteFeed } from './js/satellite-feed.js';
+import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius } from './js/earth-feeds.js';
+import {
+    EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
+    createEarthUniforms, createCloudUniforms, loadEarthTextures,
+} from './js/earth-skin.js';
+import { StormFeed } from './js/storm-feed.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -926,8 +1128,7 @@ const R_ATM    = 1.026;   // atmosphere rim sphere
 const TWO_PI   = Math.PI * 2;
 const DEG      = Math.PI / 180;
 
-// CDN base for NASA Blue Marble / city-lights textures
-const CDN = 'https://unpkg.com/three-globe/example/img/';
+// Textures loaded via earth-skin.js (version-pinned CDN, RepeatWrapping, safe fallbacks)
 
 // ═══════════════════════════════════════════════════════════════
 //  ASTRONOMY HELPERS  (current-date sun position)
@@ -1009,295 +1210,10 @@ function fmtLT(lon, utcH) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  GLSL — EARTH SURFACE
+//  GLSL shaders — imported from js/earth-skin.js
+//  EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG
 // ═══════════════════════════════════════════════════════════════
-const earthVS = /* glsl */`
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-varying vec3 vWorldPos;
-void main() {
-    vUv         = uv;
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
 
-const earthFS = /* glsl */`
-precision highp float;
-
-uniform sampler2D u_day;
-uniform sampler2D u_night;
-uniform sampler2D u_specular;   // ocean mask (r=ocean)
-uniform sampler2D u_weather;    // R=temp, G=pressure, B=humidity, A=wind
-uniform vec3  u_sun_dir;        // unit vector FROM Earth TO Sun (world space)
-uniform float u_time;
-uniform float u_kp;             // Kp index [0–9]
-uniform float u_xray;           // normalised X-ray intensity [0–1]
-uniform float u_city_lights;    // 1=on, 0=off
-uniform float u_aurora_on;      // 1=on, 0=off
-uniform float u_weather_on;     // 1=on, 0=off
-uniform float u_aurora_power;   // live aurora power [0–1]
-uniform float u_bz_south;       // southward IMF Bz [0–1]  (0.0=north, 1.0=–30 nT)
-uniform float u_dst_norm;       // ring current |Dst|/200   [0–1]
-
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-varying vec3 vWorldPos;
-
-// ── Aurora curtains ───────────────────────────────────────────
-vec3 auroraColor(float sinAbsLat, float lon, float kp) {
-    // Southward Bz expands and brightens the oval
-    float kpEff  = kp + u_bz_south * 2.5;
-    float ovalCtr = 0.940 - clamp(kpEff, 0.0, 9.0) * 0.0197;
-    float ovalW   = 0.045 + (kpEff / 9.0) * 0.055;
-
-    float zone = smoothstep(ovalCtr - ovalW * 1.5, ovalCtr, sinAbsLat)
-               * (1.0 - smoothstep(ovalCtr + ovalW * 0.4, ovalCtr + ovalW * 1.5, sinAbsLat));
-    if (zone < 0.001) return vec3(0.0);
-
-    // Animated curtains — phase varies with lon & time
-    float phase  = u_time * 1.4 + lon * 9.0;
-    float anim   = (0.55 + 0.45 * sin(phase)) * (0.7 + 0.3 * sin(phase * 2.1 + 1.0));
-
-    // Scale by live aurora power (floor of 0.3 so Kp always shows some glow)
-    float powerScale = 0.30 + 0.70 * u_aurora_power;
-    float bright = zone * anim * powerScale;
-
-    // Green (quiet) → magenta (storm) driven by Kp + Bz
-    vec3 lo = vec3(0.05, 0.95, 0.15);   // green
-    vec3 hi = vec3(0.90, 0.10, 0.80);   // magenta
-    float stormMix = clamp((kpEff - 3.0) / 6.0, 0.0, 1.0);
-    return mix(lo, hi, stormMix) * bright * 0.90;
-}
-
-// ── Weather / temperature overlay (placeholder for real data) ─
-vec3 weatherOverlay(vec2 uv) {
-    // Sample the pre-computed data texture (R = normalised temperature)
-    float temp = texture2D(u_weather, uv).r;
-
-    // Colour ramp: polar blue → temperate green → tropical orange → equatorial red
-    vec3 polar    = vec3(0.05, 0.15, 0.80);
-    vec3 tempZone = vec3(0.20, 0.75, 0.30);
-    vec3 subtrop  = vec3(0.95, 0.60, 0.05);
-    vec3 tropic   = vec3(0.85, 0.05, 0.10);
-
-    vec3 c;
-    if (temp < 0.33) c = mix(polar, tempZone, temp / 0.33);
-    else if (temp < 0.66) c = mix(tempZone, subtrop, (temp - 0.33) / 0.33);
-    else c = mix(subtrop, tropic, (temp - 0.66) / 0.34);
-    return c;
-}
-
-void main() {
-    vec3 N = normalize(vWorldNormal);
-
-    // ── Day / night terminator ────────────────────────────────
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = smoothstep(-0.10, 0.20, NdotL);  // soft 18° twilight band
-
-    // ── Texture samples ───────────────────────────────────────
-    vec3 dayCol   = texture2D(u_day, vUv).rgb;
-    vec3 nightCol = texture2D(u_night, vUv).rgb * 2.5;  // boost city lights
-    float oceanMask = texture2D(u_specular, vUv).r;
-
-    // ── Blend day & night ─────────────────────────────────────
-    vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
-
-    // ── Ocean specular glint ──────────────────────────────────
-    vec3  V    = normalize(cameraPosition - vWorldPos);
-    vec3  H    = normalize(u_sun_dir + V);
-    float spec = pow(max(dot(N, H), 0.0), 90.0) * oceanMask * dayMix * 0.60;
-    base += vec3(spec * 0.7, spec * 0.85, spec);
-
-    // ── Weather temperature overlay ───────────────────────────
-    if (u_weather_on > 0.5) {
-        base = mix(base, weatherOverlay(vUv), 0.28);
-    }
-
-    // ── Aurora (night & twilight side only) ───────────────────
-    if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        // Geographic lat from UV (stable, rotation-independent)
-        float lat    = (0.5 - vUv.y) * 3.14159265;
-        float lon    = (vUv.x - 0.5) * 6.28318530;
-        float sinAbs = abs(sin(lat));
-        // Mask to dark/twilight hemisphere
-        float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
-        base += auroraColor(sinAbs, lon, u_kp) * nightM;
-    }
-
-    // ── X-ray ionospheric flash (dayside HF blackout) ─────────
-    if (u_xray > 0.25 && dayMix > 0.4) {
-        float flash = (u_xray - 0.25) / 0.75 * dayMix;
-        base += vec3(0.3, 0.5, 1.0) * flash * 0.30;
-    }
-
-    // ── Ring current heating: equatorial nightside reddish glow ─
-    //   Peaks at ±20° latitude, strengthens with |Dst|
-    if (u_dst_norm > 0.08) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
-        float absLat = abs(lat);
-        // Glow peaks at ±20° (~0.35 rad) equatorial band on night side
-        float rcZone  = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
-        base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
-    }
-
-    // ── Southward Bz: faint particle injection on nightside ───
-    if (u_bz_south > 0.15) {
-        float bzGlow = (u_bz_south - 0.15) / 0.85;
-        float nightM = 1.0 - smoothstep(-0.25, 0.10, NdotL);
-        base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
-    }
-
-    // ── Improved diffuse: half-Lambert keeps oblique-lit land bright ──
-    // Half-Lambert: remap [-1,1]→[0,1], then square for gentle contrast.
-    // At NdotL=0.3 (N. America, mid-lat): old=32%, new=42% brightness.
-    float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float diffuse  = halfLamb * halfLamb;
-    // Night-side ambient earthshine (reflected moonlight / city scatter)
-    float lit = mix(0.07, diffuse, dayMix);
-    base *= lit;
-
-    // ── Terminator twilight warm glow (orange band at dawn/dusk) ──
-    float termZone = smoothstep(-0.08, 0.0, NdotL) * smoothstep(0.18, 0.06, NdotL);
-    base += vec3(0.55, 0.25, 0.04) * termZone * 0.22;
-
-    gl_FragColor = vec4(base, 1.0);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — CLOUDS
-// ═══════════════════════════════════════════════════════════════
-const cloudVS = /* glsl */`
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-void main() {
-    vUv         = uv;
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const cloudFS = /* glsl */`
-precision mediump float;
-uniform sampler2D u_clouds;
-uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity
-uniform vec3  u_sun_dir;
-uniform float u_time;
-uniform float u_weather_on;
-varying vec2 vUv;
-varying vec3 vWorldNormal;
-void main() {
-    vec3  N     = normalize(vWorldNormal);
-    float NdotL = dot(N, u_sun_dir);
-    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);   // half-Lambert
-    lit = lit * lit;
-
-    // Two drift speeds: lower clouds slow, upper cirrus faster
-    vec2 driftLow  = vec2(u_time *  0.000055, u_time * 0.000008);
-    vec2 driftHigh = vec2(u_time *  0.000095, u_time * 0.000012);
-    float a0 = texture2D(u_clouds, vUv + driftLow ).r;
-    float a1 = texture2D(u_clouds, vUv + driftHigh).r * 0.55;
-    float alpha = pow(max(a0, a1), 1.4) * 0.90;
-
-    // Pressure modulation: low pressure (G near 0) → thicker/darker storm clouds,
-    // high pressure (G near 1) → thinner, fewer clouds.
-    if (u_weather_on > 0.5) {
-        float pressure = texture2D(u_weather, vUv).g;   // 0=low, 1=high
-        // Suppress clouds slightly in high-pressure regions
-        float clearFactor = mix(1.0, 0.55, pressure);
-        alpha *= clearFactor;
-        // In low-pressure cells, push clouds denser (storms)
-        float stormBoost  = max(0.0, 0.45 - pressure) * 2.2;
-        alpha = clamp(alpha + alpha * stormBoost, 0.0, 1.0);
-    }
-
-    // Dayside: bright white. Night underside: grey-blue shadow.
-    vec3 dayCol   = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    vec3 nightCol = vec3(0.26, 0.30, 0.40);
-    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
-    vec3  col     = mix(nightCol, dayCol, dayMix);
-
-    // Warm golden tint at terminator (sunrise/sunset through clouds)
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.35);
-
-    gl_FragColor = vec4(col, alpha);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — ATMOSPHERE RIM
-// ═══════════════════════════════════════════════════════════════
-const atmVS = /* glsl */`
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
-    vViewDir = normalize(cameraPosition - wp);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const atmFS = /* glsl */`
-precision mediump float;
-uniform vec3 u_sun_dir;
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    // Rim strength: sharper falloff gives thinner atmospheric limb
-    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
-
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
-
-    // ── Rayleigh: blue daytime limb, dim purple night ──────────────
-    vec3 rayleighDay   = vec3(0.14, 0.42, 1.00);
-    vec3 rayleighNight = vec3(0.03, 0.01, 0.08);
-    vec3 rayleigh = mix(rayleighNight, rayleighDay, dayMix);
-
-    // ── Mie forward scattering: bright halo when viewing near sun ──
-    float LdotV  = dot(u_sun_dir, -V);               // 1 when looking at sun
-    float miePhase = 0.6 / pow(1.06 - 0.96 * LdotV, 1.5);  // Henyey-Greenstein
-    float mieRim = pow(1.0 - abs(dot(V, N)), 1.5) * miePhase * dayMix;
-    vec3  mie    = vec3(0.90, 0.82, 0.55) * mieRim * 0.35;
-
-    // ── Twilight: amber-orange band at terminator ───────────────────
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.25, 0.06, NdotL);
-    vec3  twilight = vec3(0.88, 0.42, 0.10) * termZone * rim * 1.8;
-
-    vec3 col = rayleigh * rim + mie + twilight;
-    float a  = rim * 0.72;
-    gl_FragColor = vec4(col, a);
-}`;
-
-// ═══════════════════════════════════════════════════════════════
-//  GLSL — STRATOSPHERE HAZE  (thin shell between clouds & atm rim)
-// ═══════════════════════════════════════════════════════════════
-const stratVS = /* glsl */`
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
-    vViewDir = normalize(cameraPosition - wp);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const stratFS = /* glsl */`
-precision mediump float;
-uniform vec3 u_sun_dir;
-varying vec3 vWorldNormal;
-varying vec3 vViewDir;
-void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    // Thinner rim than outer atmosphere (sharper, denser haze band)
-    float rim    = pow(1.0 - abs(dot(V, N)), 4.0);
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 3.0 + 0.5, 0.0, 1.0);
-    // Pale violet-blue stratospheric haze
-    vec3 day   = vec3(0.16, 0.36, 0.78);
-    vec3 night = vec3(0.02, 0.01, 0.05);
-    vec3 col   = mix(night, day, dayMix);
-    gl_FragColor = vec4(col * rim, rim * 0.28);
-}`;
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDERER + CAMERA + CONTROLS
@@ -1371,54 +1287,30 @@ const windTexture = new THREE.DataTexture(
 );
 windTexture.needsUpdate = true;
 
-const earthU = {
-    u_day:          { value: null },
-    u_night:        { value: null },
-    u_specular:     { value: null },
-    u_weather:      { value: null },
-    u_sun_dir:      { value: SUN_EQ.clone() },
-    u_time:         { value: 0 },
-    u_kp:           { value: 1 },
-    u_xray:         { value: 0 },
-    u_city_lights:  { value: 1.0 },
-    u_aurora_on:    { value: 1.0 },
-    u_weather_on:   { value: 0.0 },
-    u_aurora_power: { value: 0.0 },    // live aurora power: 0 (quiet) → 1 (600 GW)
-    u_bz_south:     { value: 0.0 },    // southward IMF: 0 (north) → 1 (−30 nT)
-    u_dst_norm:     { value: 0.0 },    // ring current:  0 (quiet) → 1 (−200 nT)
-};
-const cloudU = {
-    u_clouds:     { value: null },
-    u_weather:    { value: null },   // shared with earthU.u_weather
-    u_sun_dir:    { value: SUN_EQ.clone() },
-    u_time:       { value: 0 },
-    u_weather_on: { value: 0.0 },
-};
-const atmU = {
-    u_sun_dir: { value: SUN_EQ.clone() },
-};
-const stratU = {
-    u_sun_dir: { value: SUN_EQ.clone() },
-};
+// Uniforms — created via earth-skin.js factories (include safe fallback textures)
+const earthU = createEarthUniforms(SUN_EQ.clone());
+earthU.u_kp.value = 1;  // set non-zero default so aurora is ready
+const cloudU = createCloudUniforms(SUN_EQ.clone());
+// Share weather texture between Earth surface and cloud shaders
+// (set after weather DataTexture is created below)
+const atmU   = { u_sun_dir: { value: SUN_EQ.clone() } };
+const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
 const earthGeo = new THREE.SphereGeometry(R_EARTH, 80, 80);
 const earthMat = new THREE.ShaderMaterial({
-    vertexShader: earthVS, fragmentShader: earthFS,
+    vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
-// Earth's axial tilt: 23.44° toward the vernal equinox direction (+X)
-// We approximate by tilting the mesh Z-axis so the pole tilts correctly.
-// Actually we keep geometry upright and bake tilt into sun direction calc.
-// The geographic Y-axis (spin axis) is world Y — standard equatorial frame.
+// Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
 const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 60, 60);
 const cloudMat = new THREE.ShaderMaterial({
-    vertexShader: cloudVS, fragmentShader: cloudFS,
+    vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
@@ -1426,7 +1318,7 @@ scene.add(cloudMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
 const stratMat = new THREE.ShaderMaterial({
-    vertexShader: stratVS, fragmentShader: stratFS,
+    vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,  // reuse rim shader at tighter radius
     uniforms: stratU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
@@ -1434,7 +1326,7 @@ scene.add(new THREE.Mesh(stratGeo, stratMat));
 
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
-    vertexShader: atmVS, fragmentShader: atmFS,
+    vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,
     uniforms: atmU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
@@ -1455,6 +1347,14 @@ earthU.u_weather.value = new THREE.DataTexture(
 earthU.u_weather.value.needsUpdate = true;
 // Share the same DataTexture with cloud shader for pressure-modulated clouds
 cloudU.u_weather.value = earthU.u_weather.value;
+
+// Cloud-layer DataTexture (R=cl_low, G=cl_mid, B=cl_high, A=precip)
+// Populated by WeatherFeed on each weather-update event.
+cloudU.u_cloud_layers.value = new THREE.DataTexture(
+    new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
+    THREE.RGBAFormat, THREE.FloatType
+);
+cloudU.u_cloud_layers.value.needsUpdate = true;
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -1508,35 +1408,33 @@ scene.add(tropicGroup);
 // ═══════════════════════════════════════════════════════════════
 //  TEXTURE LOADING
 // ═══════════════════════════════════════════════════════════════
-let texturesLoaded = 0;
-const TEXTURES_NEEDED = 4;
+// Load textures via shared earth-skin.js loader
+// — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
+loadEarthTextures(earthU, cloudU).then(() => {
+    document.getElementById('loading').classList.add('done');
+});
 
-function onTexLoad() {
-    texturesLoaded++;
-    if (texturesLoaded >= TEXTURES_NEEDED) {
-        document.getElementById('loading').classList.add('done');
+// ── Storm-update: push active cyclone positions into cloud shader ─────────────
+new StormFeed().start();
+window.addEventListener('storm-update', e => {
+    const storms = e.detail.storms ?? [];
+    const arr = cloudU.u_storms.value;
+    const n   = Math.min(storms.length, 8);
+    for (let i = 0; i < n; i++) {
+        const s = storms[i];
+        arr[i].set(
+            (s.lon + 180) / 360,          // UV u
+            (90 - s.lat) / 180,           // UV v
+            Math.min(Math.max((s.intensityKt - 35) / 122, 0), 1),  // intensity 0-1
+            s.lat >= 0 ? 1.0 : -1.0       // spin: +1 CCW (NH), -1 CW (SH)
+        );
     }
-}
-
-const loader = new THREE.TextureLoader();
-
-loader.load(CDN + 'earth-blue-marble.jpg', t => {
-    t.colorSpace = THREE.SRGBColorSpace;
-    earthU.u_day.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'earth-night.jpg', t => {
-    t.colorSpace = THREE.SRGBColorSpace;
-    earthU.u_night.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'earth-water.png', t => {
-    earthU.u_specular.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
-
-loader.load(CDN + 'clouds.png', t => {
-    cloudU.u_clouds.value = t; onTexLoad();
-}, undefined, () => onTexLoad());
+    for (let i = n; i < 8; i++) arr[i].set(0, 0, 0, 1);
+    cloudU.u_storm_count.value = n;
+    // Track storm recency
+    _dataRecency.storms = { count: n, updated: new Date() };
+    _updateLayerTooltips();
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  MOUSE → LAT/LON (raycaster)
@@ -1756,9 +1654,14 @@ window.addEventListener('swpc-update', e => {
     // ── Aurora visibility for user's location
     updateUserAuroraVis(kp);
 
-    // ── Magnetosphere geometry + ionosphere analysis
-    magnetosphere.update(sw);
+    // ── Magnetosphere geometry: driven by SunEarthCoupling (lag-corrected)
+    // SunEarthCoupling.start() listens to 'swpc-update' and calls
+    // magnetosphere.update() with the L1-propagation-delay-corrected state.
+    // We still need to call updateMagnetospherePanel() here for the panel values.
     updateMagnetospherePanel();
+
+    // ── Exosphere / geocorona boundary (solar-wind pressure balance)
+    exosphere.update(sw);
 
     // ── Solar wind particle stream params
     solarWindParticles.setParams(sw, magnetosphere.analysis);
@@ -1787,8 +1690,10 @@ document.getElementById('lyr-tropic').addEventListener('change', e => {
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
     const v = e.target.checked ? 1.0 : 0.0;
-    earthU.u_weather_on.value = v;
-    cloudU.u_weather_on.value = v;   // sync cloud pressure modulation
+    earthU.u_weather_on.value  = v;
+    cloudU.u_weather_on.value  = v;   // sync cloud layer + precip modulation
+    // Keep satellite blend active regardless of weather toggle
+    // (satellite gives correct large-scale cloud structure independently)
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
@@ -1810,7 +1715,7 @@ document.getElementById('lyr-iss').addEventListener('change', e => {
 //  magnetotail.  All quantities in Earth-radii (scene units).
 // ═══════════════════════════════════════════════════════════════
 class SolarWindParticles {
-    constructor(scene, N = 3000) {
+    constructor(scene, N = 3000, initialSunDir = null) {
         this.N  = N;
         this._px = new Float32Array(N); this._py = new Float32Array(N);
         this._pz = new Float32Array(N);
@@ -1820,11 +1725,16 @@ class SolarWindParticles {
         this._maxA = new Float32Array(N);
 
         // Live state (updated from feed)
-        this._speed   = 400;     // km/s
-        this._density = 5.0;     // n/cc
-        this._r0      = 10.9;    // magnetopause standoff (Re)
-        this._alpha   = 0.58;    // Shue flaring
-        this._sunDir  = new THREE.Vector3(1, 0, 0);
+        this._speed    = 400;     // km/s
+        this._density  = 5.0;     // n/cc
+        this._r0       = 10.9;    // magnetopause standoff (Re)
+        this._alpha    = 0.58;    // Shue flaring
+        this._rBs      = 13.4;    // bow shock standoff (Re)
+        this._alphaBs  = 0.50;    // bow shock flaring
+        this._pdyn     = 2.0;     // dynamic pressure (nPa)
+        this._sunDir   = initialSunDir
+            ? initialSunDir.clone().normalize()
+            : new THREE.Vector3(1, 0, 0);
 
         this._t1 = new THREE.Vector3();
         this._t2 = new THREE.Vector3();
@@ -1857,8 +1767,11 @@ class SolarWindParticles {
         this._speed   = wind.speed   ?? 400;
         this._density = wind.density ?? 5.0;
         if (analysis) {
-            this._r0    = analysis.r0    ?? 10.9;
-            this._alpha = analysis.alpha ?? 0.58;
+            this._r0      = analysis.r0       ?? 10.9;
+            this._alpha   = analysis.alpha     ?? 0.58;
+            this._rBs     = analysis.bowShockR0 ?? Math.max(this._r0 + 1.5, this._r0 * 1.14 + 1.0);
+            this._alphaBs = Math.max(0.30, this._alpha - 0.08);
+            this._pdyn    = analysis.pdyn      ?? 2.0;
         }
     }
 
@@ -1873,10 +1786,15 @@ class SolarWindParticles {
         const sd = this._sunDir;
         const t1 = this._t1, t2 = this._t2;
 
-        // Spawn disk centred on sun side: distance = bow shock + 2 Re
-        const spawnDist = this._r0 * 1.22 + 3.5;
-        const diskR     = this._r0 * 1.35 * Math.sqrt(Math.random());
-        const angle     = Math.random() * Math.PI * 2;
+        // Spawn well upstream of the bow shock (5–8 Re ahead).
+        // Solar wind originates from the sun, not from inside the magnetosheath.
+        const spawnDist = this._rBs + 5.0 + Math.random() * 3.0;
+
+        // Narrower cone than before: ~30° half-angle from the sun line,
+        // matching the real solar wind's finite angular extent at 1 AU.
+        const maxR  = spawnDist * Math.tan(0.52);   // ~30° half-angle
+        const diskR = maxR * Math.sqrt(Math.random());
+        const angle = Math.random() * Math.PI * 2;
 
         this._px[i] = sd.x * spawnDist + t1.x * Math.cos(angle) * diskR + t2.x * Math.sin(angle) * diskR;
         this._py[i] = sd.y * spawnDist + t1.y * Math.cos(angle) * diskR + t2.y * Math.sin(angle) * diskR;
@@ -1884,26 +1802,48 @@ class SolarWindParticles {
 
         // Visual speed: compress ~100× for animation (particles cross ~6 Re in ~2 s)
         const speedVis = (this._speed / 400) * 4.2;
-        const lat = (Math.random() - 0.5) * 0.018;
-        this._vx[i] = -sd.x * speedVis + t1.x * lat + (Math.random() - 0.5) * 0.04;
-        this._vy[i] = -sd.y * speedVis + t1.y * lat + (Math.random() - 0.5) * 0.04;
-        this._vz[i] = -sd.z * speedVis + t1.z * lat + (Math.random() - 0.5) * 0.04;
+        const jitter = (Math.random() - 0.5) * 0.04;
+        this._vx[i] = -sd.x * speedVis + t1.x * jitter + (Math.random() - 0.5) * 0.03;
+        this._vy[i] = -sd.y * speedVis + t1.y * jitter + (Math.random() - 0.5) * 0.03;
+        this._vz[i] = -sd.z * speedVis + t1.z * jitter + (Math.random() - 0.5) * 0.03;
 
-        this._age[i]  = randomAge ? Math.random() * 35 : 0;
-        this._maxA[i] = 28 + Math.random() * 22;
+        this._age[i]  = randomAge ? Math.random() * 45 : 0;
+        this._maxA[i] = 35 + Math.random() * 25;   // 35–60 s lifetime for longer tail
     }
 
     /** Call from animate() every frame.  sunDir must be the world-space unit vector toward sun. */
     tick(dt, sunDir) {
         this._sunDir.copy(sunDir).normalize();
         this._buildBasis();
-        const r0    = this._r0;
-        const alpha = this._alpha;
-        const sx    = sunDir.x, sy = sunDir.y, sz = sunDir.z;
+        const r0      = this._r0;
+        const alpha   = this._alpha;
+        const rBs     = this._rBs;
+        const alphaBs = this._alphaBs;
+        const sx = sunDir.x, sy = sunDir.y, sz = sunDir.z;
+
+        // Current visual speed — used to update in-flight particles
+        const speedVis = (this._speed / 400) * 4.2;
+
+        // Deflection force scales with dynamic pressure:
+        //   Higher pdyn → stronger pressure at magnetopause → harder deflection.
+        //   Normalised so pdyn=2 nPa (typical quiet) gives ~1.0× strength.
+        const pdynScale = Math.max(0.5, Math.min(4.0, this._pdyn / 2.0));
 
         for (let i = 0; i < this.N; i++) {
             this._age[i] += dt;
             if (this._age[i] > this._maxA[i]) { this._spawn(i); continue; }
+
+            // ── Update in-flight velocity to track current solar wind speed ──
+            // Smoothly steer the sunward component toward the current speed,
+            // preserving any perpendicular (deflected) velocity.
+            // This avoids the two-population artifact when speed changes.
+            const vSun = this._vx[i]*sx + this._vy[i]*sy + this._vz[i]*sz;
+            const targetVSun = -speedVis;
+            const blend = Math.min(1, 2.5 * dt);   // ~0.4 s time constant
+            const correction = (targetVSun - vSun) * blend;
+            this._vx[i] += correction * sx;
+            this._vy[i] += correction * sy;
+            this._vz[i] += correction * sz;
 
             // Integrate position
             this._px[i] += this._vx[i] * dt;
@@ -1915,17 +1855,37 @@ class SolarWindParticles {
 
             // Projection along sun–Earth line (positive = sun side)
             const sunDot = px*sx + py*sy + pz*sz;
-
-            // Shue-model magnetopause radius at this particle's polar angle
             const cosTheta = Math.max(-1, Math.min(1, sunDot / rp));
-            const rMp      = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
+            const nr = 1 / rp;
 
-            // Deflect / exclude particles inside the magnetopause
+            // ── Bow shock deceleration ──────────────────────────────────
+            // The bow shock is a collisionless shock: supersonic → subsonic.
+            // Real compression ratio ~4:1.  We apply a gradual deceleration
+            // zone of ~1.5 Re thickness around the bow shock surface.
+            const rBsHere = rBs * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alphaBs);
+            if (rp < rBsHere + 0.8 && rp > rBsHere - 0.8) {
+                // Inside the shock transition zone: decelerate the sunward
+                // component by ~60% (compression ratio ~2.5:1 visually).
+                const shockDepth = 1.0 - Math.abs(rp - rBsHere) / 0.8;
+                const decel = shockDepth * 0.55 * dt * 3.0;
+                // Only decelerate the anti-sunward (inward) component
+                const vInward = -(this._vx[i]*sx + this._vy[i]*sy + this._vz[i]*sz);
+                if (vInward > 0) {
+                    const brake = Math.min(decel, vInward * 0.6);
+                    this._vx[i] += brake * sx;
+                    this._vy[i] += brake * sy;
+                    this._vz[i] += brake * sz;
+                }
+            }
+
+            // ── Shue magnetopause deflection ────────────────────────────
+            const rMp = r0 * Math.pow(Math.max(0.01, 2.0 / (1.0 + cosTheta)), alpha);
+
             if (rp < rMp * 1.08) {
-                // Radial outward force — pushes particle along magnetopause surface
-                const nr     = 1 / rp;
+                // Radial outward force — pushes particle along magnetopause surface.
+                // Force scales with dynamic pressure: dense/fast wind pushes harder.
                 const excess = Math.max(0, 1.0 - rp / (rMp * 1.08));
-                const force  = excess * 6.0 * dt;
+                const force  = excess * 5.0 * pdynScale * dt;
                 this._vx[i] += px * nr * force;
                 this._vy[i] += py * nr * force;
                 this._vz[i] += pz * nr * force;
@@ -1939,8 +1899,10 @@ class SolarWindParticles {
                 }
             }
 
-            // Kill particles deep in magnetosphere or far down tail
-            if (rp < r0 * 0.55 || (sunDot < -r0 * 3.0 && rp > r0 * 2.5)) {
+            // Kill particles deep in magnetosphere or far down tail.
+            // Extended tail cutoff to ~8× r0 (≈ 80–90 Re) for a more
+            // realistic magnetotail length.
+            if (rp < r0 * 0.55 || (sunDot < -r0 * 8.0 && rp > r0 * 2.0)) {
                 this._spawn(i);
             }
         }
@@ -2070,7 +2032,70 @@ class WindParticles {
 }
 
 const windParticles    = new WindParticles(earthMesh, 4000);
-const solarWindParticles = new SolarWindParticles(scene, 3000);
+const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
+
+// ═══════════════════════════════════════════════════════════════
+//  DATA RECENCY TRACKING — tooltips show how fresh each layer is
+// ═══════════════════════════════════════════════════════════════
+const _dataRecency = {
+    weather:   null,   // { source, fetchTime }
+    satellite: null,   // { source, goesTime, modisDate, updated }
+    storms:    null,   // { count, updated }
+    alerts:    null,   // { count, updated }
+};
+
+function _timeAgo(date) {
+    if (!date) return 'not yet loaded';
+    const sec = Math.round((Date.now() - date.getTime()) / 1000);
+    if (sec < 60) return 'just now';
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+    return `${Math.floor(sec / 86400)}d ago`;
+}
+
+function _updateLayerTooltips() {
+    const wx = _dataRecency.weather;
+    const sat = _dataRecency.satellite;
+    const st = _dataRecency.storms;
+    const al = _dataRecency.alerts;
+
+    const wxTip = wx
+        ? `Source: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Weather data not yet loaded';
+    const satTip = sat
+        ? `Source: ${sat.source}\n` +
+          (sat.goesTime ? `GOES-East: ${_timeAgo(sat.goesTime)} (updates every 10 min)\n` : '') +
+          (sat.modisDate ? `MODIS: ${sat.modisDate} (daily composite)\n` : '') +
+          `Last fetch: ${_timeAgo(sat.updated)}`
+        : 'Satellite data not yet loaded';
+    const windTip = wx
+        ? `Wind field: ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Wind data not yet loaded';
+    const isoTip = wx
+        ? `Pressure contours from ${wx.source}\nUpdated: ${_timeAgo(wx.fetchTime)}\nRefreshes every 10 min`
+        : 'Isobar data not yet loaded';
+    const stormTip = st
+        ? `${st.count} active storm${st.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(st.updated)}\nRefreshes every 30 min`
+        : 'Storm data not yet loaded';
+    const alertTip = al
+        ? `${al.count} active alert${al.count !== 1 ? 's' : ''}\nUpdated: ${_timeAgo(al.updated)}\nRefreshes every 5 min`
+        : 'Alert data not yet loaded';
+
+    const tips = {
+        'lyr-clouds':  `Cloud Cover\n${satTip}\n\nCloud fractions: ${wxTip}`,
+        'lyr-weather': `Weather (temp)\n${wxTip}`,
+        'lyr-wind':    `Wind Particles\n${windTip}`,
+        'lyr-isobars': `Isobars\n${isoTip}`,
+        'lyr-alerts':  `Storm Alerts\n${alertTip}\n\nTropical storms: ${stormTip}`,
+    };
+    for (const [id, tip] of Object.entries(tips)) {
+        const el = document.getElementById(id);
+        if (el?.parentElement) el.parentElement.title = tip;
+    }
+}
+
+// Refresh tooltip "Xm ago" text every 30 seconds
+setInterval(_updateLayerTooltips, 30_000);
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER FEED — real-time Open-Meteo / GFS data
@@ -2078,7 +2103,113 @@ const solarWindParticles = new SolarWindParticles(scene, 3000);
 const wxFeed = new WeatherFeed();
 wxFeed.start();
 
-function updateWeatherTextures(weatherBuf, wBuf) {
+// ═══════════════════════════════════════════════════════════════
+//  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
+// ═══════════════════════════════════════════════════════════════
+const satFeed = new SatelliteFeed();
+satFeed.start();
+
+// ═══════════════════════════════════════════════════════════════
+//  NASA EARTH OBSERVATIONS — multi-layer GIBS feed
+//  Precipitation, SST, aerosol, cloud thickness, fires, snow
+// ═══════════════════════════════════════════════════════════════
+const earthObsFeed = new EarthObsFeed();
+// Don't auto-start any layers — user toggles them on via the layer panel.
+// The feed starts with an empty enabled set until a checkbox fires.
+
+// Observation overlay meshes — transparent sphere shells above the cloud layer
+const _obsOverlays = {};
+
+function _createObsOverlay(layerId) {
+    if (_obsOverlays[layerId]) return _obsOverlays[layerId];
+    const mat = new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0.6, depthWrite: false,
+        side: THREE.FrontSide, blending: THREE.NormalBlending,
+    });
+    const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(1.012, 60, 60),  // just above clouds (1.009)
+        mat
+    );
+    mesh.visible = false;
+    mesh.renderOrder = 5;
+    scene.add(mesh);
+    _obsOverlays[layerId] = { mesh, mat };
+    return _obsOverlays[layerId];
+}
+
+// Layer toggle handlers
+for (const layer of EARTH_OBS_LAYERS) {
+    const checkbox = document.getElementById(`lyr-obs-${layer.id}`);
+    if (!checkbox) continue;
+    checkbox.addEventListener('change', e => {
+        const on = e.target.checked;
+        earthObsFeed.setEnabled(layer.id, on);
+        if (on) {
+            earthObsFeed.start();  // safe to call multiple times
+        }
+        const overlay = _obsOverlays[layer.id];
+        if (overlay) overlay.mesh.visible = on;
+    });
+}
+
+// Handle texture updates from the feed
+window.addEventListener('earth-obs-update', e => {
+    const { textures, meta, enabled } = e.detail;
+
+    for (const layerId of enabled) {
+        const tex = textures[layerId];
+        if (!tex) continue;
+
+        const overlay = _createObsOverlay(layerId);
+        overlay.mat.map = tex;
+        overlay.mat.needsUpdate = true;
+        overlay.mesh.visible = true;
+    }
+
+    // Update the observation status panel
+    _updateObsStatusPanel(meta);
+});
+
+function _updateObsStatusPanel(meta) {
+    const el = document.getElementById('obs-status-list');
+    if (!el) return;
+
+    const entries = Object.entries(meta);
+    if (entries.length === 0) {
+        el.innerHTML = '<span style="color:#445">No layers active</span>';
+        return;
+    }
+
+    el.innerHTML = entries.map(([id, m]) => {
+        const dot = m.status === 'live'
+            ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4fc97f;margin-right:4px"></span>'
+            : '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ff4444;margin-right:4px"></span>';
+        const ago = m.updated ? _timeAgo(m.updated) : '—';
+        const layer = m.layer;
+        return `<div style="margin-bottom:3px" title="${layer?.description ?? ''}\nLatency: ${layer?.latency ?? '?'}\nUnit: ${layer?.unit ?? '?'}\nColor: ${layer?.colorRamp ?? '?'}">${dot}<strong>${layer?.name ?? id}</strong> <span style="color:#556">· ${ago} · ${layer?.latency ?? ''}</span></div>`;
+    }).join('');
+}
+
+window.addEventListener('satellite-update', e => {
+    const { compositeTex, goesTex, modisTex, source, goesTime, modisDate } = e.detail;
+    // Prefer composite (GOES+MODIS merged), then individual sources
+    const tex = compositeTex ?? goesTex ?? modisTex ?? null;
+    if (tex) {
+        cloudU.u_satellite.value    = tex;
+        cloudU.u_satellite_on.value = 1.0;
+        console.info(`[Satellite] cloud texture updated — ${source}`);
+    }
+    // Update data recency tracker
+    _dataRecency.satellite = {
+        source,
+        goesTime:  goesTime ?? null,
+        modisDate: modisDate ?? null,
+        updated:   new Date(),
+    };
+    _updateLayerTooltips();
+});
+
+function updateWeatherTextures(weatherBuf, wBuf, cloudBuf) {
     // Update weather DataTexture (temperature/pressure/humidity overlay)
     earthU.u_weather.value.image.data.set(weatherBuf);
     earthU.u_weather.value.needsUpdate = true;
@@ -2086,15 +2217,24 @@ function updateWeatherTextures(weatherBuf, wBuf) {
     windTexture.image.data.set(wBuf);
     windTexture.needsUpdate = true;
     windParticles.setWindData(wBuf);
+    // Update cloud-layer fractions (low/mid/high clouds + precipitation)
+    if (cloudBuf && cloudU.u_cloud_layers.value) {
+        cloudU.u_cloud_layers.value.image.data.set(cloudBuf);
+        cloudU.u_cloud_layers.value.needsUpdate = true;
+    }
 }
 
 document.addEventListener('weather-update', e => {
-    const { weatherBuffer, windBuffer, meta } = e.detail;
-    updateWeatherTextures(weatherBuffer, windBuffer);
+    const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
+    updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
     updateIsobarPanel();
+
+    // Track data recency for layer tooltips
+    _dataRecency.weather = { source: meta.source, fetchTime: meta.fetchTime };
+    _updateLayerTooltips();
 
     // Weather analysis panel
     const dot  = document.getElementById('wx-status-dot');
@@ -2476,6 +2616,308 @@ document.getElementById('lyr-belts').addEventListener('change', e =>
 document.getElementById('lyr-plasma').addEventListener('change', e =>
     magnetosphere.setLayerVisible('plasmasphere', e.target.checked));
 
+// New magnetosphere layer toggles
+document.getElementById('lyr-magnetosheath').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('magnetosheath', e.target.checked));
+document.getElementById('lyr-reconnection').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('reconnection', e.target.checked));
+document.getElementById('lyr-cusps').addEventListener('change', e =>
+    magnetosphere.setLayerVisible('cusps', e.target.checked));
+
+// ═══════════════════════════════════════════════════════════════
+//  SUN → EARTH COUPLING ENGINE
+//  Applies L1 propagation delay to magnetosphere updates and
+//  computes plasma coupling analytics (Akasofu ε, Newell, FAC…)
+// ═══════════════════════════════════════════════════════════════
+const sunEarth = new SunEarthCoupling(magnetosphere);
+sunEarth.start();
+
+// ── Coupling analytics panel update ─────────────────────────────
+function updateCouplingPanel(c) {
+    // Energy coupling ε
+    const epsEl = document.getElementById('ip-epsilon');
+    if (epsEl) {
+        const eps = c.epsilon_GW;
+        epsEl.textContent = eps >= 1000 ? `${(eps / 1000).toFixed(1)} TW`
+                           : `${eps.toFixed(0)} GW`;
+        epsEl.style.color = eps > 500 ? '#ff4422'
+                          : eps > 150 ? '#ffaa22'
+                          : eps > 50  ? '#ffee55'
+                          : '#88ccaa';
+    }
+
+    // IMF clock angle — colour by coupling effectiveness
+    const clkEl = document.getElementById('ip-clock');
+    if (clkEl) {
+        const deg = c.clock_angle_deg;
+        clkEl.textContent = `${deg >= 0 ? '+' : ''}${deg.toFixed(0)}°`;
+        const southward = Math.abs(deg) > 90;
+        clkEl.style.color = southward ? '#ff6644' : '#88ccaa';
+    }
+
+    // Newell merging rate (normalised bar-style)
+    const mrgEl = document.getElementById('ip-merging');
+    if (mrgEl) {
+        const pct = Math.round(c.merging_norm * 100);
+        const col = c.merging_norm > 0.7 ? '#ff4422'
+                  : c.merging_norm > 0.4 ? '#ffaa22' : '#88ccaa';
+        mrgEl.innerHTML = `<span style="display:inline-block;width:${pct}%;max-width:100%;`
+            + `height:4px;background:${col};border-radius:2px;vertical-align:middle;"></span>`
+            + `<span style="margin-left:4px;">${pct}%</span>`;
+    }
+
+    // Reconnection rate at X-line
+    const rcEl = document.getElementById('ip-reconn');
+    if (rcEl) rcEl.textContent = `${c.reconnection_kms.toFixed(2)} km/s`;
+
+    // Field-aligned current
+    const facEl = document.getElementById('ip-fac');
+    if (facEl) {
+        facEl.textContent = `${c.fac_MA.toFixed(2)} MA`;
+        facEl.style.color = c.fac_MA > 3 ? '#ff6644'
+                          : c.fac_MA > 1 ? '#ffaa22' : '#88ccaa';
+    }
+
+    // Substorm index (progress bar)
+    const subEl = document.getElementById('ip-substorm');
+    if (subEl) {
+        const pct = Math.round(c.substorm_index * 100);
+        const col = c.substorm_index > 0.7 ? '#ff4422'
+                  : c.substorm_index > 0.4 ? '#ffaa22'
+                  : c.substorm_index > 0.2 ? '#ffee55' : '#557766';
+        subEl.innerHTML = `<span style="display:inline-block;width:${pct}%;max-width:100%;`
+            + `height:4px;background:${col};border-radius:2px;vertical-align:middle;"></span>`
+            + `<span style="margin-left:4px;">${pct}%</span>`;
+    }
+
+    // Alfvén speed
+    const vaEl = document.getElementById('ip-va');
+    if (vaEl) vaEl.textContent = `${Math.round(c.v_alfven)} km/s`;
+
+    // Plasma beta
+    const betaEl = document.getElementById('ip-beta');
+    if (betaEl) {
+        betaEl.textContent = c.beta.toFixed(2);
+        betaEl.style.color = c.beta > 2 ? '#ffaa22' : '#88ccaa';
+    }
+
+    // L1 lag
+    const lagEl = document.getElementById('ip-lag');
+    if (lagEl) lagEl.textContent = `${c.lag_min.toFixed(0)} min`;
+
+    // CME ETA banner
+    const cmeBox = document.getElementById('ip-cme-eta');
+    const cmeVal = document.getElementById('ip-cme-eta-val');
+    if (cmeBox && c.cme_eta_h !== null) {
+        cmeBox.style.display = 'block';
+        cmeVal.textContent   = `${c.cme_eta_h.toFixed(1)} h`;
+    } else if (cmeBox && c.cme_eta_h === null) {
+        cmeBox.style.display = 'none';
+    }
+}
+
+window.addEventListener('sw-magnet-coupling', e => {
+    updateCouplingPanel(e.detail);
+    // Feed raw SW + coupling analytics into the time-series history
+    if (wxHistory.isReady) {
+        const sw = _lastSwState.solar_wind ?? {};
+        sw.kp    = _lastSwState.kp ?? 0;
+        wxHistory.ingest(sw, e.detail);
+    }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR WEATHER TIME ANALYSIS  (history + statistical forecast)
+// ═══════════════════════════════════════════════════════════════
+
+const wxHistory    = new SolarWeatherHistory();
+const wxForecaster = new SolarWeatherForecaster();
+
+// Open IndexedDB; if this is a first-ever launch seed synthetic history
+// so the forecasting engine has data to work with immediately.
+wxHistory.open().then(() => {
+    const tier1Size = wxHistory.getTier(1).length;
+    if (tier1Size < 48) {
+        console.info('[SolarForecast] Seeding synthetic history (tier1 empty)…');
+        seedSyntheticHistory(wxHistory, 90);
+    }
+    // Run first forecast immediately, then every 5 minutes
+    _refreshForecast();
+    setInterval(_refreshForecast, 5 * 60_000);
+});
+
+function _refreshForecast() {
+    try {
+        const result = wxForecaster.update(wxHistory);
+        updateForecastPanel(result);
+    } catch (err) {
+        console.warn('[SolarForecast] forecast error:', err);
+    }
+}
+
+// ── Kp sparkline chart (Canvas 2D) ───────────────────────────────────────────
+function drawKpChart(result) {
+    const canvas = document.getElementById('kp-forecast-chart');
+    if (!canvas || !result) return;
+    const ctx = canvas.getContext('2d');
+    const W   = canvas.width;
+    const H   = canvas.height;
+    const P   = { t: 6, r: 4, b: 14, l: 18 };
+    const cW  = W - P.l - P.r;
+    const cH  = H - P.t - P.b;
+
+    ctx.clearRect(0, 0, W, H);
+
+    const hist = result.kpHistory  ?? [];
+    const fc   = result.kpForecast ?? [];
+    const lo   = result.kpFcLo80  ?? [];
+    const hi   = result.kpFcHi80  ?? [];
+    const total = hist.length + fc.length;
+    if (!total) return;
+
+    const kpY  = kp => P.t + cH - Math.min(1, kp / 9) * cH;
+    const iX   = i  => P.l + (i / total) * cW;
+    const nowX = iX(hist.length);
+
+    // G-scale threshold dashes
+    const thresholds = [
+        { kp: 5, color: 'rgba(255,200,40,.35)', label: 'G1' },
+        { kp: 6, color: 'rgba(255,130,30,.40)', label: 'G2' },
+        { kp: 7, color: 'rgba(255, 60,60,.40)', label: 'G3' },
+    ];
+    ctx.font = '6px sans-serif';
+    for (const th of thresholds) {
+        const y = kpY(th.kp);
+        ctx.strokeStyle = th.color;
+        ctx.lineWidth   = 0.7;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + cW, y); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = th.color;
+        ctx.fillText(th.label, P.l + cW + 1, y + 3);
+    }
+
+    // 80 % confidence band
+    if (fc.length && lo.length && hi.length) {
+        ctx.fillStyle = 'rgba(255,130,40,.13)';
+        ctx.beginPath();
+        for (let i = 0; i < fc.length; i++) ctx.lineTo(iX(hist.length + i), kpY(hi[i]));
+        for (let i = fc.length - 1; i >= 0; i--) ctx.lineTo(iX(hist.length + i), kpY(lo[i]));
+        ctx.closePath(); ctx.fill();
+    }
+
+    // History line
+    if (hist.length) {
+        ctx.strokeStyle = '#00c6ff'; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+        ctx.beginPath();
+        hist.forEach((kp, i) => i === 0 ? ctx.moveTo(iX(i), kpY(kp)) : ctx.lineTo(iX(i), kpY(kp)));
+        ctx.stroke();
+    }
+
+    // Forecast line (dashed orange)
+    if (fc.length) {
+        ctx.strokeStyle = '#ff9040'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        if (hist.length) ctx.moveTo(iX(hist.length - 1), kpY(hist[hist.length - 1]));
+        fc.forEach((kp, i) => ctx.lineTo(iX(hist.length + i), kpY(kp)));
+        ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // "Now" separator
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(nowX, P.t); ctx.lineTo(nowX, P.t + cH); ctx.stroke();
+
+    // Y-axis labels
+    ctx.fillStyle = 'rgba(160,200,230,.55)'; ctx.font = '8px monospace'; ctx.textAlign = 'right';
+    for (const kp of [0, 3, 6, 9]) {
+        ctx.fillText(kp, P.l - 2, kpY(kp) + 3);
+        ctx.strokeStyle = 'rgba(255,255,255,.05)'; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(P.l, kpY(kp)); ctx.lineTo(P.l + cW, kpY(kp)); ctx.stroke();
+    }
+
+    // X-axis labels
+    ctx.fillStyle = 'rgba(160,200,230,.45)'; ctx.font = '7px monospace'; ctx.textAlign = 'center';
+    ctx.fillText('-72h', P.l,       H - 2);
+    ctx.fillText('now',  nowX,      H - 2);
+    ctx.fillText('+72h', P.l + cW,  H - 2);
+}
+
+// ── Forecast panel text update ───────────────────────────────────────────────
+function updateForecastPanel(result) {
+    drawKpChart(result);
+
+    const { summary, storm, recurrence, cycle, hw } = result;
+
+    // Kp 24h forecast ± sigma
+    const el_kp24 = document.getElementById('fp-kp24');
+    if (el_kp24) {
+        const kp = summary.kpFC24h ?? '—';
+        const sg = summary.sigma24h ?? '';
+        el_kp24.textContent = sg ? `${kp} ± ${sg}` : kp;
+        el_kp24.style.color = kp >= 7 ? '#ff4040'
+            : kp >= 5 ? '#ffaa20' : kp >= 3 ? '#ffdd60' : '#60d090';
+    }
+
+    // Holt-Winters trend
+    const el_trend = document.getElementById('fp-trend');
+    if (el_trend) {
+        const t = hw.trend;
+        el_trend.textContent = t > 0.05 ? `↑ +${t.toFixed(2)}/hr`
+            : t < -0.05 ? `↓ ${t.toFixed(2)}/hr` : '→ stable';
+        el_trend.style.color = t > 0.1 ? '#ffaa20' : t < -0.1 ? '#60d090' : '#8ab';
+    }
+
+    // Storm probabilities
+    const el_g1 = document.getElementById('fp-g1-24');
+    if (el_g1) {
+        const p = Math.round(storm.g1_24h * 100);
+        el_g1.textContent = `${p}%`;
+        el_g1.style.color = p > 50 ? '#ff4040' : p > 25 ? '#ffaa20' : '#8ab';
+    }
+    const el_g2 = document.getElementById('fp-g2-72');
+    if (el_g2) {
+        const p = Math.round(storm.g2_72h * 100);
+        el_g2.textContent = `${p}%`;
+        el_g2.style.color = p > 40 ? '#ff6060' : p > 15 ? '#ffcc40' : '#8ab';
+    }
+
+    // 27-day recurrence
+    const el_echo = document.getElementById('fp-echo');
+    if (el_echo) {
+        const s = recurrence.signal;
+        el_echo.textContent = s === 'none' ? '—'
+            : `${s} (r=${recurrence.corr27})`;
+        el_echo.style.color = s === 'strong' ? '#ffaa20'
+            : s === 'moderate' ? '#ffdd60' : '#8ab';
+    }
+
+    // Solar cycle phase
+    const el_cycle = document.getElementById('fp-cycle');
+    if (el_cycle) {
+        const sign = cycle.yearsToMax < 0 ? '-' : '+';
+        const abs  = Math.abs(cycle.yearsToMax).toFixed(1);
+        el_cycle.textContent = `SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+        el_cycle.style.color = cycle.phaseName === 'maximum' ? '#ffaa20'
+            : cycle.phaseName === 'rising' ? '#ffdd60' : '#8ab';
+    }
+
+    // Bulletin
+    const el_bul = document.getElementById('fp-bulletin');
+    if (el_bul) el_bul.textContent = wxForecaster.bulletin(result);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  EXOSPHERE ENGINE  (solar-wind-driven geocorona boundary)
+// ═══════════════════════════════════════════════════════════════
+const exosphere = new ExosphereEngine(scene);
+
+document.getElementById('lyr-exosphere').addEventListener('change', e =>
+    exosphere.setLayerVisible('exosphere', e.target.checked));
+document.getElementById('lyr-geocorona').addEventListener('change', e =>
+    exosphere.setLayerVisible('geocorona', e.target.checked));
+document.getElementById('lyr-chex').addEventListener('change', e =>
+    exosphere.setLayerVisible('chex', e.target.checked));
+
 function updateMagnetospherePanel() {
     const a = magnetosphere.analysis;
     if (!a) return;
@@ -2511,6 +2953,10 @@ document.addEventListener('nws-status', e => {
 
 document.addEventListener('nws-alerts-update', e => {
     const { alerts, meta, error } = e.detail;
+
+    // Track alert recency for layer tooltips
+    _dataRecency.alerts = { count: meta.count ?? 0, updated: new Date() };
+    _updateLayerTooltips();
 
     // Update 3-D markers
     alertMarkers.rebuild(alerts);
@@ -2664,6 +3110,9 @@ function animate() {
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
+    // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
+    exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
+
     // ── User location pin pulse
     if (_userPinRing) {
         const pulse = Math.sin(t * 2.2) * 0.5 + 0.5;
@@ -2681,10 +3130,17 @@ function animate() {
         if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
     }
 
-    // ── Astro HUD (every 5 s)
+    // ── Astro HUD + sun direction (every 5 s)
+    // Sun moves ~1°/24 min — 5 s update keeps terminator error < 0.003°.
     if (t - lastAstro > 5) {
         lastAstro = t;
-        updateAstroHUD(new Date());
+        const _now = new Date();
+        updateAstroHUD(_now);
+        const _sunDir = sunDirectionEquatorial(julianDay(_now));
+        earthU.u_sun_dir.value.copy(_sunDir);
+        cloudU.u_sun_dir.value.copy(_sunDir);
+        atmU.u_sun_dir.value.copy(_sunDir);
+        stratU.u_sun_dir.value.copy(_sunDir);
     }
 
     controls.update();
@@ -2993,6 +3449,107 @@ if (_navBurger && _navMenu) {
         });
     });
 }
+
+// Fade scroll hint once user scrolls past canvas
+(function() {
+    const hint = document.getElementById('scroll-hint');
+    if (!hint) return;
+    window.addEventListener('scroll', () => {
+        hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+    }, { passive: true });
+})();
 </script>
+
+<!-- ── Simulation description ──────────────────────────────────────────── -->
+<section class="sim-info">
+  <div class="sim-info-inner">
+    <div class="sim-info-header">
+      <div class="sim-info-title">Earth Magnetosphere &amp; Space Weather</div>
+      <p class="sim-info-lead">
+        A real-time 3D simulation of Earth's magnetic shield — from the bow shock where solar wind
+        first strikes, through the compressed magnetosheath, magnetopause boundary, and out to the
+        elongated magnetotail. Aurora, substorm dynamics, and Kp index are driven by live NOAA data.
+      </p>
+    </div>
+
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">🛡️</div>
+        <div class="sim-card-title">Bow Shock &amp; Magnetosheath</div>
+        <div class="sim-card-body">
+          The bow shock forms at roughly <strong>13–14 Earth radii</strong> (Re) sunward, where
+          supersonic solar wind (~400 km/s) is abruptly decelerated. The Rankine-Hugoniot jump
+          conditions heat and deflect plasma into the magnetosheath — visualized as orange-tinted
+          shocked particles.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌀</div>
+        <div class="sim-card-title">Magnetopause (Shue Model)</div>
+        <div class="sim-card-body">
+          The magnetopause boundary is calculated using the <strong>Shue et al. (1998)</strong>
+          empirical model, parameterized by solar wind dynamic pressure and the IMF Bz component.
+          Southward Bz compresses the dayside boundary; strong storms push it inside geostationary
+          orbit (~6.6 Re).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌌</div>
+        <div class="sim-card-title">Magnetotail &amp; Plasma Sheet</div>
+        <div class="sim-card-body">
+          On the nightside, the magnetotail stretches to <strong>80+ Re</strong> — far beyond the
+          Moon's orbit. The central plasma sheet (high-density, ~1–5 keV particles) brightens
+          during substorms as stored magnetic energy explosively reconnects and accelerates
+          particles toward the poles.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌠</div>
+        <div class="sim-card-title">Aurora &amp; Substorms</div>
+        <div class="sim-card-body">
+          3D auroral curtains expand equatorward as Kp rises (<strong>Kp ≥ 5 = G1 storm</strong>).
+          Color gradients reflect emission height: green O 557.7 nm at 100–150 km, shifting to
+          purple N₂⁺ + red O 630 nm above 200 km. Substorm onset (McPherron heuristic) triggers
+          a ripple flash across both ovals.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🗺️</div>
+        <div class="sim-card-title">3D Globe &amp; Ground Effects</div>
+        <div class="sim-card-body">
+          The interactive globe shows live <strong>earthquake events</strong> (USGS feed),
+          geomagnetic storm impact zones, aurora visibility oval, and atmospheric layers.
+          Overlays include field-aligned current regions and ground-level induction risk during
+          severe storms.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">📊</div>
+        <div class="sim-card-title">Live Geomagnetic Data</div>
+        <div class="sim-card-body">
+          Kp index, Dst, IMF Bz, solar wind speed and density all update every
+          <strong>5 minutes</strong> from NOAA/SWPC. Storm levels follow the
+          <strong>NOAA G1–G5 scale</strong>, from minor (Kp 5) to extreme (Kp 9), with
+          real-time aurora visibility latitude estimates.
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-controls-grid">
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Rotate camera around Earth</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Layers</span><span class="sim-ctrl-desc">Toggle bow shock, aurora, tail, field lines</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Info</span><span class="sim-ctrl-desc">Live Kp, Bz, storm level readings</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⚡ Weather</span><span class="sim-ctrl-desc">Full space weather data dashboard</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">📍 Here</span><span class="sim-ctrl-desc">Show your location on the globe</span></div>
+    </div>
+
+    <div class="sim-links">
+      <a href="space-weather.html" class="sim-link">⚡ Space Weather Dashboard</a>
+      <a href="sun.html" class="sim-link">☀️ Solar Physics Engine</a>
+      <a href="index.html" class="sim-link">🌌 Heliosphere 3D</a>
+    </div>
+  </div>
+</section>
 </body>
 </html>

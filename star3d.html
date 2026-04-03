@@ -6,8 +6,9 @@
     <title>Sirius Planetary — Parker Physics App</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html { height: auto; overflow-y: auto; }
         body {
-            overflow: hidden;
+            min-height: 100vh; overflow-x: hidden;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #000;
             color: #ddd;
@@ -128,14 +129,16 @@ nav {
 
         #app {
             display: flex;
-            width: 100vw;
-            height: calc(100vh - 48px);
+            width: 100%;
+            height: calc(100vh - 50px);
         }
+        @media (max-width: 768px) { #app { height: 78svh; } }
 
         #canvas-container {
             flex: 1;
             position: relative;
             background: linear-gradient(135deg, #000000 0%, #0a0a1a 50%, #000510 100%);
+            touch-action: none;
         }
 
         /* --- HUD overlay (top-left) --- */
@@ -381,6 +384,73 @@ nav {
             touch-action: manipulation; text-decoration: none; display: inline-block;
         }
         .cv-btn:hover { background: rgba(255,215,0,.15); border-color:#ffd700; }
+
+/* ── Simulation description section ────────────────────────────────────── */
+.sim-info {
+    background: #04040f;
+    border-top: 1px solid rgba(255,215,0,.15);
+    padding: 48px 20px 64px;
+    color: #ccc;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.sim-info-inner { max-width: 1100px; margin: 0 auto; }
+.sim-info-header { margin-bottom: 32px; }
+.sim-info-title {
+    font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+    background: linear-gradient(135deg, #ffd700, #a060ff);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: 10px;
+}
+.sim-info-lead { font-size: .95rem; color: #887788; line-height: 1.7; max-width: 780px; }
+.sim-cards {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px; margin-bottom: 36px;
+}
+.sim-card {
+    background: rgba(255,215,0,.04); border: 1px solid rgba(255,215,0,.12);
+    border-radius: 12px; padding: 20px 22px;
+}
+.sim-card-icon { font-size: 1.4rem; margin-bottom: 10px; }
+.sim-card-title {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: #ffd700; margin-bottom: 8px;
+}
+.sim-card-body { font-size: .83rem; color: #665577; line-height: 1.65; }
+.sim-card-body strong { color: #998855; font-weight: 600; }
+.sim-controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 20px;
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+}
+.sim-ctrl-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 0; font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sim-ctrl-row:last-child { border-bottom: none; }
+.sim-ctrl-key {
+    background: rgba(255,215,0,.12); border: 1px solid rgba(255,215,0,.28);
+    border-radius: 4px; padding: 1px 7px; font-family: monospace;
+    font-size: .72rem; color: #ffd700; white-space: nowrap; flex-shrink: 0;
+}
+.sim-ctrl-desc { color: #554455; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px;
+    background: rgba(255,215,0,.07); border: 1px solid rgba(255,215,0,.22);
+    color: #998833; font-size: .82rem; text-decoration: none;
+    transition: background .2s, border-color .2s;
+}
+.sim-link:hover { background: rgba(255,215,0,.16); border-color: rgba(255,215,0,.45); color: #ffd700; }
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none; transition: opacity .4s;
+}
+#scroll-hint span { font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(255,215,0,.5); white-space: nowrap; }
+@keyframes bounce-arrow { 0%,100%{transform:translateY(0)} 50%{transform:translateY(5px)} }
+#scroll-hint svg { opacity: .45; animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -468,6 +538,12 @@ nav {
     </div>
 </nav>
     <div id="app">
+        <div id="scroll-hint">
+            <span>scroll for more</span>
+            <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+                <polyline points="2,2 9,8 16,2" stroke="rgba(255,215,0,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </div>
         <div id="canvas-container"></div>
 
         <div id="sidebar">
@@ -4565,6 +4641,15 @@ if (_navBurger && _navMenu) {
         handleResize();
         animate();
 
+        // Fade scroll hint after user scrolls
+        (function() {
+            const hint = document.getElementById('scroll-hint');
+            if (!hint) return;
+            window.addEventListener('scroll', () => {
+                hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+            }, { passive: true });
+        })();
+
         console.log('Sirius Binary System Simulator loaded');
         console.log('Orbital parameters: P=50.13yr, e=0.5914, a=20AU');
         console.log('Sirius A: A1V, 9940K, 2.06 M\u2609 | Sirius B: DA2, 25000K, 1.018 M\u2609');
@@ -4573,5 +4658,98 @@ if (_navBurger && _navMenu) {
         console.log('  Siwarha companion: 5.94-yr orbit, ~6.5 AU | Howell et al. ApJL 2025');
         console.log('  Pulsation: P1=417d, P2=185d, LSP=2170d | 3D Voronoi convection GLSL');
     </script>
+
+<!-- ── Simulation description ──────────────────────────────────────────── -->
+<section class="sim-info">
+  <div class="sim-info-inner">
+    <div class="sim-info-header">
+      <div class="sim-info-title">Stellar Physics Simulator</div>
+      <p class="sim-info-lead">
+        An interactive 3D stellar physics engine spanning multiple star systems — from our own Sun
+        to exotic stars across the H-R diagram. Switch between Sirius A/B binary orbital mechanics,
+        the Sun's Parker spiral wind, Betelgeuse's red supergiant convection, Vega's rapid-rotator
+        oblateness, and the extreme Wolf-Rayet wind of WR 102.
+      </p>
+    </div>
+
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">✦</div>
+        <div class="sim-card-title">Sirius Binary System</div>
+        <div class="sim-card-body">
+          The brightest star in Earth's night sky is actually a binary: <strong>Sirius A</strong>
+          (A1V, 9940 K, 2.06 M☉) and <strong>Sirius B</strong> (DA2 white dwarf, 25,000 K,
+          1.018 M☉). Their orbit has a <strong>50.13-year period</strong>, eccentricity 0.5914,
+          and semi-major axis of 20 AU.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">☀️</div>
+        <div class="sim-card-title">Solar Parker Spiral</div>
+        <div class="sim-card-body">
+          The Sun preset renders <strong>Parker's 1958 spiral wind model</strong> with
+          4 spiral arms following the interplanetary magnetic field geometry. Wind particles
+          are color-coded by speed and temperature, with the heliospheric current sheet visible
+          as the sector boundary.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🔴</div>
+        <div class="sim-card-title">Betelgeuse Supergiant</div>
+        <div class="sim-card-body">
+          α Orionis: <strong>764 R☉, 3500 K, ~15 M☉</strong>. The simulation features
+          3D Voronoi convection cells (GLSL), dual pulsation periods (P1=417d, P2=185d),
+          a long secondary period of 2170d, and the newly confirmed <strong>Siwarha companion</strong>
+          on a 5.94-year orbit at ~6.5 AU (Howell et al. 2025).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">⚪</div>
+        <div class="sim-card-title">Vega Rapid Rotator</div>
+        <div class="sim-card-body">
+          Vega (A0Vp, 9600 K) spins at <strong>~270 km/s</strong> — about 87% of its breakup
+          velocity. This extreme rotation flattens the star into an oblate spheroid, creates
+          gravity darkening at the equator (cooler by ~2000 K), and drives a strong stellar
+          wind simulation.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">💜</div>
+        <div class="sim-card-title">WR 102 Wolf-Rayet</div>
+        <div class="sim-card-body">
+          WR 102 is one of the hottest known stars at <strong>~210,000 K</strong>. Wolf-Rayet
+          stars lose mass at a rate up to 10⁻⁵ M☉/yr via a dense, fast stellar wind
+          (~2000 km/s). The simulation renders the thick wind envelope and characteristic
+          broad emission line spectrum.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">📐</div>
+        <div class="sim-card-title">Orbital Mechanics</div>
+        <div class="sim-card-body">
+          All orbits are integrated using <strong>Kepler's laws</strong> with eccentric anomaly
+          solved via Newton-Raphson iteration. The orbital plane, apsidal line, and true anomaly
+          are displayed in real time. Adjustable simulation speed from 1× to 1000× real time.
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-controls-grid">
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Orbit the camera</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Star Preset</span><span class="sim-ctrl-desc">Switch between stellar systems in the sidebar</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Speed</span><span class="sim-ctrl-desc">Adjust simulation time rate</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Camera</span><span class="sim-ctrl-desc">Free orbit, follow star A/B, or face-on view</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Labels</span><span class="sim-ctrl-desc">Toggle star labels and orbital elements display</span></div>
+    </div>
+
+    <div class="sim-links">
+      <a href="sirius.html" class="sim-link">✦ Sirius A 3D System</a>
+      <a href="betelgeuse.html" class="sim-link">🔴 Betelgeuse</a>
+      <a href="sun.html" class="sim-link">☀️ Solar Physics Engine</a>
+      <a href="star2d-advanced.html" class="sim-link">📐 2D Solar Modeler</a>
+    </div>
+  </div>
+</section>
 </body>
 </html>

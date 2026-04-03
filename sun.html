@@ -6,7 +6,8 @@
 <title>The Sun — G2V · Parker Physics App</title>
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
     font-family:'Segoe UI',system-ui,sans-serif; }
 
 /* ─── Nav ────────────────────────────────────────────────────── */
@@ -122,11 +123,19 @@ nav {
     .nav-auth-sep { display:none; }
 }
 
-#app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
+#app { position: relative; width: 100%; height: calc(100vh - 50px); overflow: hidden; }
+/* On mobile the canvas is ~78 % of the viewport so the description section
+   peeks below the fold — giving touch users a visible scroll target outside
+   the orbit canvas (OrbitControls captures all touch on the canvas itself). */
+@media (max-width: 768px) { #app { height: 78svh; } }
 #canvas-wrap {
     position: absolute; inset: 0;
     background: radial-gradient(ellipse at 40% 50%, #0d0500 0%, #050200 60%, #000 100%);
 }
+/* touch-action:none tells the browser to hand all touch gestures to JS
+   (OrbitControls), so the browser doesn't try to scroll the page when
+   the user drags on the canvas. */
+#canvas-wrap, #canvas-wrap canvas { touch-action: none; }
 #canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
 
 #hud {
@@ -608,6 +617,94 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 .sparkline-lbl  { font-size:9px; color:#664433; margin-bottom:3px; }
 #xray-sparkline { width:100%; height:36px; border-radius:4px; display:block;
                   background:rgba(0,0,0,.35); border:1px solid rgba(255,140,0,.08); }
+
+/* ── Simulation description section ────────────────────────────────────── */
+.sim-info {
+    background: #050200;
+    border-top: 1px solid rgba(255,140,0,.15);
+    padding: 48px 20px 64px;
+    color: #cba;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.sim-info-inner {
+    max-width: 1100px; margin: 0 auto;
+}
+.sim-info-header {
+    margin-bottom: 32px;
+}
+.sim-info-title {
+    font-size: 1.55rem; font-weight: 700; letter-spacing: -.02em;
+    background: linear-gradient(135deg, #ffb830, #ff6600);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-bottom: 10px;
+}
+.sim-info-lead {
+    font-size: .95rem; color: #aa8866; line-height: 1.7; max-width: 780px;
+}
+.sim-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 14px; margin-bottom: 36px;
+}
+.sim-card {
+    background: rgba(255,140,0,.04);
+    border: 1px solid rgba(255,140,0,.12);
+    border-radius: 12px; padding: 20px 22px;
+}
+.sim-card-icon { font-size: 1.4rem; margin-bottom: 10px; }
+.sim-card-title {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; color: #ffb830; margin-bottom: 8px;
+}
+.sim-card-body {
+    font-size: .83rem; color: #997755; line-height: 1.65;
+}
+.sim-card-body strong { color: #cc9944; font-weight: 600; }
+.sim-controls-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 6px 20px;
+    background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 28px;
+}
+.sim-ctrl-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 4px 0; font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.sim-ctrl-row:last-child { border-bottom: none; }
+.sim-ctrl-key {
+    background: rgba(255,180,0,.12); border: 1px solid rgba(255,180,0,.28);
+    border-radius: 4px; padding: 1px 7px; font-family: monospace;
+    font-size: .72rem; color: #ffb830; white-space: nowrap; flex-shrink: 0;
+}
+.sim-ctrl-desc { color: #886644; }
+.sim-links { display: flex; flex-wrap: wrap; gap: 8px; }
+.sim-link {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: 7px;
+    background: rgba(255,140,0,.08); border: 1px solid rgba(255,140,0,.22);
+    color: #cc8833; font-size: .82rem; text-decoration: none;
+    transition: background .2s, border-color .2s;
+}
+.sim-link:hover { background: rgba(255,140,0,.18); border-color: rgba(255,140,0,.45); color: #ffb830; }
+
+/* ── Scroll-down affordance ─────────────────────────────────────────────── */
+/* Sits at the bottom of #app; pointer-events:none so it never blocks canvas
+   interaction. Fades out after the user has scrolled 60 px. */
+#scroll-hint {
+    position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    pointer-events: none; user-select: none;
+    transition: opacity .4s;
+}
+#scroll-hint span {
+    font-size: .62rem; font-family: monospace; letter-spacing: .08em;
+    color: rgba(255,180,60,.55); white-space: nowrap;
+}
+#scroll-hint svg { opacity: .5; }
+@keyframes bounce-arrow {
+    0%,100% { transform: translateY(0); }
+    50%      { transform: translateY(5px); }
+}
+#scroll-hint svg { animation: bounce-arrow 1.6s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -697,6 +794,13 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
 </nav>
 
 <div id="app">
+    <!-- scroll affordance: absolute, pointer-events:none — never blocks canvas -->
+    <div id="scroll-hint">
+        <span>scroll for more</span>
+        <svg width="18" height="10" viewBox="0 0 18 10" fill="none">
+            <polyline points="2,2 9,8 16,2" stroke="rgba(255,180,60,.7)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </div>
     <div id="canvas-wrap">
         <div id="hud">
             <h3>Sol — G2V</h3>
@@ -996,6 +1100,159 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
+            <div class="sec" id="sec-interior">
+                <div class="sec-hd"><span>Solar Interior</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Cross-section cutaway diagram -->
+                    <canvas id="interior-cutaway" width="260" height="140"
+                        style="width:100%;height:auto;display:block;margin:0 0 8px;border-radius:6px;background:#0a0500"
+                        title="Solar interior cross-section — click to set radius"></canvas>
+                    <!-- Radius explorer slider -->
+                    <div class="ctrl">
+                        <label>r / R<sub>☉</sub></label>
+                        <input type="range" id="sl-int-radius" min="0" max="1.0" step="0.002" value="0.50">
+                        <span class="vdisp" id="disp-int-radius">0.50 R☉</span>
+                    </div>
+                    <div id="int-layer-badge" style="text-align:center;margin:-2px 0 8px">
+                        <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:rgba(255,136,0,.14);border:1px solid rgba(255,136,0,.32);color:#ff8800">RADIATIVE ZONE</span>
+                    </div>
+                    <table class="dtbl" id="int-table">
+                        <tr><td>Temperature</td><td id="int-T">–</td></tr>
+                        <tr><td>Density</td><td id="int-rho">–</td></tr>
+                        <tr><td>Pressure</td><td id="int-P">–</td></tr>
+                        <tr><td>Gravity</td><td id="int-g">–</td></tr>
+                        <tr><td>Depth below surface</td><td id="int-depth">–</td></tr>
+                    </table>
+
+                    <!-- Energy generation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ENERGY GENERATION</div>
+                        <table class="dtbl">
+                            <tr><td>Fusion rate ε</td><td id="int-eps">–</td></tr>
+                            <tr><td>L enclosed / L<sub>☉</sub></td><td id="int-L">–</td></tr>
+                            <tr><td>Photon escape</td><td id="int-escape">–</td></tr>
+                            <tr><td>Transport</td><td id="int-transport">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Rotation -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">ROTATION</div>
+                        <table class="dtbl">
+                            <tr><td>Period (eq.)</td><td id="int-rot-per">–</td></tr>
+                            <tr><td>Ω</td><td id="int-rot-omega">–</td></tr>
+                            <tr><td>Regime</td><td id="int-rot-zone" style="font-size:9px">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Convection (shown when in convective zone) -->
+                    <div id="int-conv-section" style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px;display:none">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CONVECTION</div>
+                        <table class="dtbl">
+                            <tr><td>Velocity</td><td id="int-conv-v">–</td></tr>
+                            <tr><td>Mixing length</td><td id="int-conv-l">–</td></tr>
+                            <tr><td>Scale height H<sub>P</sub></td><td id="int-conv-hp">–</td></tr>
+                            <tr><td>Overturn time</td><td id="int-conv-over">–</td></tr>
+                            <tr><td>Cell scale</td><td id="int-conv-gran">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Layer quick-jump buttons -->
+                    <div class="btn-row" style="margin-top:8px">
+                        <button class="int-jump" data-r="0.10">Core</button>
+                        <button class="int-jump" data-r="0.50">Radiative</button>
+                        <button class="int-jump" data-r="0.713">Tachocline</button>
+                        <button class="int-jump" data-r="0.85">Convective</button>
+                        <button class="int-jump" data-r="0.999">Surface</button>
+                    </div>
+
+                    <!-- Layer summary table -->
+                    <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">LAYER SUMMARY</div>
+                        <table class="dtbl" style="font-size:9.5px">
+                            <tr style="color:#ff4400"><td>Core</td><td>0–0.25 R, 15.7 MK, 150 g/cm³</td></tr>
+                            <tr style="color:#ff8800"><td>Radiative</td><td>0.25–0.71 R, ~170k yr escape</td></tr>
+                            <tr style="color:#ffaa00"><td>Tachocline</td><td>~0.71 R, dynamo source</td></tr>
+                            <tr style="color:#ffcc00"><td>Convective</td><td>0.71–1.0 R, ~10 day overturn</td></tr>
+                            <tr style="color:#ffd700"><td>Photosphere</td><td>Surface, 5778 K, G2V</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec" id="sec-atmosphere">
+                <div class="sec-hd"><span>Solar Atmosphere</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <!-- Height explorer slider -->
+                    <div class="ctrl">
+                        <label>Height</label>
+                        <input type="range" id="sl-atm-height" min="0" max="500000" step="10" value="2150">
+                        <span class="vdisp" id="disp-atm-height">2150 km</span>
+                    </div>
+                    <div id="atm-layer-badge" style="text-align:center;margin:-2px 0 8px">
+                        <span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:rgba(204,68,255,.14);border:1px solid rgba(204,68,255,.32);color:#cc44ff">TRANSITION REGION</span>
+                    </div>
+                    <table class="dtbl" id="atm-table">
+                        <tr><td>Temperature</td><td id="atm-T">–</td></tr>
+                        <tr><td>Electron density</td><td id="atm-ne">–</td></tr>
+                        <tr><td>Pressure</td><td id="atm-P">–</td></tr>
+                        <tr><td>Scale height</td><td id="atm-H">–</td></tr>
+                        <tr><td>Local gravity</td><td id="atm-g">–</td></tr>
+                    </table>
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">DOMINANT EMISSION</div>
+                        <div id="atm-emission" style="font-size:10px;color:#ffd080;line-height:1.6">–</div>
+                    </div>
+
+                    <!-- Layer quick-jump buttons -->
+                    <div class="btn-row" style="margin-top:8px">
+                        <button class="atm-jump" data-h="250">Photosphere</button>
+                        <button class="atm-jump" data-h="1200">Chromosphere</button>
+                        <button class="atm-jump" data-h="2150">TR</button>
+                        <button class="atm-jump" data-h="10000">Corona</button>
+                    </div>
+
+                    <!-- Chromosphere details -->
+                    <div style="margin-top:10px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CHROMOSPHERE (0–2100 km)</div>
+                        <table class="dtbl">
+                            <tr><td>T range</td><td>4 400 → 25 000 K</td></tr>
+                            <tr><td>n<sub>e</sub> range</td><td>~10¹³ → 10¹⁰ cm⁻³</td></tr>
+                            <tr><td>Key lines</td><td>H-α 656.3 nm, Ca II H&K</td></tr>
+                            <tr><td>Spicule height</td><td id="atm-spic-h">–</td></tr>
+                            <tr><td>Spicule velocity</td><td id="atm-spic-v">–</td></tr>
+                            <tr><td>Spicule density</td><td id="atm-spic-n">–</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Transition Region details -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">TRANSITION REGION (~100 km)</div>
+                        <table class="dtbl">
+                            <tr><td>T jump</td><td>25 000 → <span id="atm-tr-tcor">1.5M</span> K</td></tr>
+                            <tr><td>Gradient</td><td>~100 K/m (steepest in nature)</td></tr>
+                            <tr><td>Key lines</td><td>C IV 154.9 nm, O VI 103.2 nm</td></tr>
+                            <tr><td>Thickness</td><td>~100 km</td></tr>
+                        </table>
+                    </div>
+
+                    <!-- Corona details -->
+                    <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,.06);padding-top:8px">
+                        <div style="font-size:9px;color:#665;font-weight:600;letter-spacing:.06em;margin-bottom:4px">CORONA (> 2200 km)</div>
+                        <table class="dtbl">
+                            <tr><td>Temperature</td><td id="atm-cor-T">1–3 MK</td></tr>
+                            <tr><td>Base density</td><td>~10⁸ cm⁻³</td></tr>
+                            <tr><td>Heating required</td><td id="atm-cor-heat">–</td></tr>
+                            <tr><td>Heating source</td><td id="atm-cor-src" style="font-size:9px">–</td></tr>
+                            <tr><td>Radiative loss</td><td id="atm-cor-rad">–</td></tr>
+                            <tr><td>Conductive loss</td><td id="atm-cor-cond">–</td></tr>
+                            <tr><td>Wind enthalpy</td><td id="atm-cor-wind">–</td></tr>
+                            <tr><td>Key lines</td><td style="font-size:9px">Fe IX 171 Å, Fe XII 193 Å</td></tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="sec closed">
                 <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -1250,6 +1507,13 @@ import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
 import WindPipelineFeed        from './js/wind-pipeline-feed.js';
 import { SohoFeed }           from './js/soho-feed.js';
+import {
+    solarAtmosphereTemp, solarAtmosphereDensity, solarAtmospherePressure,
+    layerAt, dominantEmission, spiculeParams, coronalHeatingBudget, stateAt,
+    interiorTemp, interiorDensity, interiorPressure, interiorGravity,
+    fusionRate, cumulativeLuminosity, photonEscapeTime, rotationRate,
+    convectiveProperties, interiorLayerAt, interiorStateAt,
+} from './js/solar-atmosphere.js';
 import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -5213,6 +5477,476 @@ window.addEventListener('swpc-update', (ev) => {
 });
 
 console.log('%c[Sun] Analysis popup + 3-D marker raycasting active', 'color:#ffaa44');
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR INTERIOR PANEL — live physics calculations
+// ═══════════════════════════════════════════════════════════════
+
+function _fmtSciI(v, digits = 2) {
+    if (v === 0) return '0';
+    const exp = Math.floor(Math.log10(Math.abs(v)));
+    const man = v / Math.pow(10, exp);
+    const supDigits = String(exp).split('').map(c => c === '-' ? '⁻' : '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] || c).join('');
+    return `${man.toFixed(digits)}×10${supDigits}`;
+}
+
+function _fmtTempI(T) {
+    if (T >= 1e6) return `${(T / 1e6).toFixed(2)} MK`;
+    if (T >= 1e3) return `${Math.round(T).toLocaleString()} K`;
+    return `${T.toFixed(0)} K`;
+}
+
+function updateInteriorPanel() {
+    const slider = document.getElementById('sl-int-radius');
+    if (!slider) return;
+    const r = parseFloat(slider.value);
+    const state = interiorStateAt(r);
+
+    // Radius display
+    const rDisp = document.getElementById('disp-int-radius');
+    if (rDisp) rDisp.textContent = `${r.toFixed(3)} R☉`;
+
+    // Layer badge
+    const badge = document.getElementById('int-layer-badge');
+    if (badge) {
+        badge.innerHTML = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:${state.layer.color}22;border:1px solid ${state.layer.color}55;color:${state.layer.color}">${state.layer.name.toUpperCase()}</span>`;
+    }
+
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+
+    _s('int-T', _fmtTempI(state.T_K));
+    _s('int-rho', state.rho_gcm3 >= 0.01
+        ? `${state.rho_gcm3.toFixed(1)} g/cm³`
+        : _fmtSciI(state.rho_gcm3) + ' g/cm³');
+    _s('int-P', _fmtSciI(state.P_Pa) + ' Pa');
+    _s('int-g', state.g_ms2.toFixed(1) + ' m/s²');
+    _s('int-depth', state.depth_km >= 1000
+        ? `${(state.depth_km / 1000).toFixed(0)}k km`
+        : `${Math.round(state.depth_km)} km`);
+
+    // Energy generation
+    _s('int-eps', state.eps_Wkg > 0
+        ? _fmtSciI(state.eps_Wkg) + ' W/kg'
+        : '0 (no fusion)');
+    _s('int-L', (state.L_frac * 100).toFixed(1) + '% of L☉');
+    const esc = state.escape;
+    if (esc.diffusion_yr > 1000) {
+        _s('int-escape', `~${(esc.diffusion_yr / 1000).toFixed(0)}k yr`);
+    } else if (esc.diffusion_yr > 1) {
+        _s('int-escape', `~${Math.round(esc.diffusion_yr)} yr`);
+    } else {
+        _s('int-escape', `~${(esc.diffusion_yr * 365.25).toFixed(1)} days`);
+    }
+    _s('int-transport', esc.mechanism);
+
+    // Rotation
+    _s('int-rot-per', state.rotation.period_days.toFixed(1) + ' days');
+    _s('int-rot-omega', state.rotation.omega_deg_day.toFixed(2) + ' °/day');
+    _s('int-rot-zone', state.rotation.zone);
+
+    // Convection section: show/hide based on layer
+    const convSec = document.getElementById('int-conv-section');
+    if (convSec) {
+        if (state.convection) {
+            convSec.style.display = '';
+            const c = state.convection;
+            _s('int-conv-v', c.v_conv_ms >= 1000
+                ? `${(c.v_conv_ms / 1000).toFixed(1)} km/s`
+                : `${Math.round(c.v_conv_ms)} m/s`);
+            _s('int-conv-l', c.l_mix_km >= 1000
+                ? `${(c.l_mix_km / 1000).toFixed(0)}k km`
+                : `${Math.round(c.l_mix_km)} km`);
+            _s('int-conv-hp', c.H_P_km >= 1000
+                ? `${(c.H_P_km / 1000).toFixed(0)}k km`
+                : `${Math.round(c.H_P_km)} km`);
+            _s('int-conv-over', c.overturn_days >= 1
+                ? `${c.overturn_days.toFixed(1)} days`
+                : `${(c.overturn_days * 24 * 60).toFixed(0)} min`);
+            _s('int-conv-gran', c.granule_km >= 1000
+                ? `~${(c.granule_km / 1000).toFixed(0)} Mm`
+                : `~${Math.round(c.granule_km)} km`);
+        } else {
+            convSec.style.display = 'none';
+        }
+    }
+}
+
+// ── Interior cross-section cutaway canvas ─────────────────────────────────────
+const _cutawayCanvas = document.getElementById('interior-cutaway');
+const _cutawayCtx    = _cutawayCanvas?.getContext('2d');
+
+const _INTERIOR_LAYERS = [
+    { rMin: 0,     rMax: 0.25,  color: '#ff2200', name: 'Core' },
+    { rMin: 0.25,  rMax: 0.713, color: '#ff7700', name: 'Radiative' },
+    { rMin: 0.713, rMax: 0.72,  color: '#ffaa00', name: 'Tachocline' },
+    { rMin: 0.72,  rMax: 1.0,   color: '#ffcc00', name: 'Convective' },
+];
+
+function drawCutaway(selectedR) {
+    if (!_cutawayCtx) return;
+    const cvs = _cutawayCanvas;
+    const W = cvs.width, H = cvs.height;
+    const ctx = _cutawayCtx;
+    ctx.clearRect(0, 0, W, H);
+
+    const cx = 10;               // left edge for the half-circle
+    const cy = H / 2;
+    const R  = H * 0.88;         // full sun radius in pixels
+
+    // Draw each layer as a filled half-circle arc
+    for (let i = _INTERIOR_LAYERS.length - 1; i >= 0; i--) {
+        const layer = _INTERIOR_LAYERS[i];
+        const rPx = R * layer.rMax;
+        ctx.beginPath();
+        ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(cx, cy - R * layer.rMin);
+        ctx.closePath();
+
+        // Radial gradient for each layer
+        const grad = ctx.createRadialGradient(cx, cy, R * layer.rMin, cx, cy, rPx);
+        const baseAlpha = (i === 0) ? 0.85 : 0.65 - i * 0.08;
+        grad.addColorStop(0, layer.color + 'cc');
+        grad.addColorStop(1, layer.color + '88');
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+
+    // Layer boundary lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 0.5;
+    for (const layer of _INTERIOR_LAYERS) {
+        if (layer.rMin > 0) {
+            const rPx = R * layer.rMin;
+            ctx.beginPath();
+            ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+            ctx.stroke();
+        }
+    }
+
+    // Photosphere edge (solid outer circle)
+    ctx.strokeStyle = 'rgba(255,220,100,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, -Math.PI / 2, Math.PI / 2);
+    ctx.stroke();
+
+    // Selected radius indicator
+    if (selectedR >= 0 && selectedR <= 1) {
+        const rPx = R * selectedR;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, rPx, -Math.PI / 2, Math.PI / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Radius label
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(`r = ${selectedR.toFixed(3)} R☉`, cx + rPx + 4, cy - 2);
+    }
+
+    // Layer labels (right side)
+    ctx.textAlign = 'left';
+    ctx.font = '8px sans-serif';
+    const labels = [
+        { r: 0.12, name: 'Core', color: '#ff6644' },
+        { r: 0.48, name: 'Radiative Zone', color: '#ffaa66' },
+        { r: 0.716, name: 'Tachocline', color: '#ffcc77' },
+        { r: 0.86, name: 'Convective', color: '#ffdd88' },
+    ];
+    for (const lbl of labels) {
+        const y = cy - R * lbl.r * 0.4;
+        const x = cx + R * lbl.r + 8;
+        if (x > W - 50) continue;
+        ctx.fillStyle = lbl.color;
+        ctx.fillText(lbl.name, x, y);
+    }
+
+    // Temperature scale on the right edge
+    ctx.fillStyle = '#554';
+    ctx.font = '7px monospace';
+    ctx.textAlign = 'right';
+    const temps = [
+        { r: 0,    T: '15.7 MK' },
+        { r: 0.25, T: '~7 MK' },
+        { r: 0.71, T: '~2 MK' },
+        { r: 1.0,  T: '5 778 K' },
+    ];
+    for (const t of temps) {
+        const y = cy + (t.r - 0.5) * R * 1.1;
+        ctx.fillText(t.T, W - 4, y);
+    }
+}
+
+// Click on canvas to set radius
+_cutawayCanvas?.addEventListener('click', e => {
+    const rect = _cutawayCanvas.getBoundingClientRect();
+    const scaleX = _cutawayCanvas.width / rect.width;
+    const scaleY = _cutawayCanvas.height / rect.height;
+    const px = (e.clientX - rect.left) * scaleX;
+    const py = (e.clientY - rect.top) * scaleY;
+    const cx = 10, cy = _cutawayCanvas.height / 2;
+    const R = _cutawayCanvas.height * 0.88;
+    const dx = px - cx, dy = py - cy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const r = Math.min(1, Math.max(0, dist / R));
+    const slider = document.getElementById('sl-int-radius');
+    if (slider) {
+        slider.value = r.toFixed(3);
+        updateInteriorPanel();
+    }
+});
+
+// Slider input
+document.getElementById('sl-int-radius')?.addEventListener('input', updateInteriorPanel);
+
+// Quick-jump buttons
+document.querySelectorAll('.int-jump').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const slider = document.getElementById('sl-int-radius');
+        if (slider) {
+            slider.value = btn.dataset.r;
+            updateInteriorPanel();
+        }
+    });
+});
+
+// Hook cutaway redraw into the panel update
+const _origUpdateInterior = updateInteriorPanel;
+// Patch: also draw cutaway when panel updates
+{
+    const origFn = updateInteriorPanel;
+    updateInteriorPanel = function() {
+        origFn();
+        const slider = document.getElementById('sl-int-radius');
+        drawCutaway(slider ? parseFloat(slider.value) : 0.5);
+    };
+}
+
+// Initial render
+updateInteriorPanel();
+
+// ═══════════════════════════════════════════════════════════════
+//  SOLAR ATMOSPHERE PANEL — live physics calculations
+// ═══════════════════════════════════════════════════════════════
+
+let _atmTcorona = 1.5e6;
+let _atmXrayFlux = 1e-7;
+let _atmF107 = 150;
+let _atmKp = 2;
+
+function _fmtSci(v, digits = 2) {
+    if (v === 0) return '0';
+    const exp = Math.floor(Math.log10(Math.abs(v)));
+    const man = v / Math.pow(10, exp);
+    const supDigits = String(exp).split('').map(c => c === '-' ? '⁻' : '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] || c).join('');
+    return `${man.toFixed(digits)}×10${supDigits}`;
+}
+
+function _fmtTemp(T) {
+    if (T >= 1e6) return `${(T / 1e6).toFixed(2)} MK`;
+    if (T >= 1e3) return `${Math.round(T).toLocaleString()} K`;
+    return `${T.toFixed(0)} K`;
+}
+
+function updateAtmospherePanel() {
+    const slider = document.getElementById('sl-atm-height');
+    if (!slider) return;
+    const h = parseFloat(slider.value);
+    const state = stateAt(h, _atmTcorona);
+
+    // Height display
+    const hDisp = document.getElementById('disp-atm-height');
+    if (hDisp) {
+        if (h >= 1e6) hDisp.textContent = `${(h / 1e6).toFixed(1)} M km`;
+        else if (h >= 1000) hDisp.textContent = `${(h / 1000).toFixed(1)}k km`;
+        else hDisp.textContent = `${Math.round(h)} km`;
+    }
+
+    // Layer badge
+    const badge = document.getElementById('atm-layer-badge');
+    if (badge) {
+        badge.innerHTML = `<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.06em;background:${state.layer.color}22;border:1px solid ${state.layer.color}55;color:${state.layer.color}">${state.layer.name.toUpperCase()}</span>`;
+    }
+
+    // State values
+    const _s = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+    _s('atm-T',  _fmtTemp(state.T_K));
+    _s('atm-ne', _fmtSci(state.n_e_cm3) + ' cm⁻³');
+    _s('atm-P',  _fmtSci(state.P_Pa, 3) + ' Pa');
+    _s('atm-H',  state.scaleHeight_km >= 1000
+        ? `${(state.scaleHeight_km / 1000).toFixed(1)}k km`
+        : `${Math.round(state.scaleHeight_km)} km`);
+    _s('atm-g',  state.gravity_ms2.toFixed(1) + ' m/s²');
+
+    // Emission lines
+    const emEl = document.getElementById('atm-emission');
+    if (emEl) {
+        emEl.innerHTML = state.emission.map(e =>
+            `<div style="margin-bottom:2px"><strong>${e.ion}</strong> ${e.wavelength_nm >= 100 ? e.wavelength_nm + ' nm' : (e.wavelength_nm * 10).toFixed(0) + ' Å'} — <span style="color:#998">${e.name}</span></div>`
+        ).join('');
+    }
+
+    // Spicule data
+    const spic = spiculeParams(_atmKp, _atmF107);
+    _s('atm-spic-h', `${(spic.type1.height_km / 1000).toFixed(1)}–${(spic.type2.height_km / 1000).toFixed(1)} Mm`);
+    _s('atm-spic-v', `${Math.round(spic.type1.velocity_kms)}–${Math.round(spic.type2.velocity_kms)} km/s`);
+    _s('atm-spic-n', `~${spic.density_per_Mm2}/Mm² (${Math.round(spic.type2_fraction * 100)}% Type II)`);
+
+    // Coronal temperature label
+    _s('atm-tr-tcor', _fmtTemp(_atmTcorona));
+    _s('atm-cor-T', _fmtTemp(_atmTcorona));
+
+    // Coronal heating budget
+    const heat = coronalHeatingBudget(_atmTcorona, _atmXrayFlux);
+    _s('atm-cor-heat', `${Math.round(heat.total_W_m2)} W/m²`);
+    _s('atm-cor-src', heat.source);
+    _s('atm-cor-rad', `${Math.round(heat.radiative)} W/m²`);
+    _s('atm-cor-cond', `${Math.round(heat.conductive)} W/m²`);
+    _s('atm-cor-wind', `${Math.round(heat.wind)} W/m²`);
+}
+
+// Slider input
+document.getElementById('sl-atm-height')?.addEventListener('input', updateAtmospherePanel);
+
+// Quick-jump buttons
+document.querySelectorAll('.atm-jump').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const slider = document.getElementById('sl-atm-height');
+        if (slider) {
+            slider.value = btn.dataset.h;
+            updateAtmospherePanel();
+        }
+    });
+});
+
+// Wire SWPC data to update coronal temperature estimate
+window.addEventListener('swpc-update', e => {
+    const sw = e.detail;
+    const xray = sw.xray_flux ?? 1e-7;
+    _atmXrayFlux = xray;
+    _atmF107 = sw.f107_flux ?? 150;
+    _atmKp = sw.kp ?? 2;
+
+    // Estimate coronal temperature from X-ray flux:
+    // Quiet sun (A/B class): ~1.0 MK
+    // Active (C class): ~1.5 MK
+    // Flaring (M/X class): 2–3 MK (active region corona)
+    const xLog = Math.log10(Math.max(1e-9, xray));
+    if (xLog > -4) {
+        _atmTcorona = 3.0e6;       // X-class: 3 MK
+    } else if (xLog > -5) {
+        _atmTcorona = 2.0e6;       // M-class: 2 MK
+    } else if (xLog > -6) {
+        _atmTcorona = 1.5e6;       // C-class: 1.5 MK
+    } else {
+        _atmTcorona = 1.0e6;       // A/B-class: 1.0 MK
+    }
+
+    updateAtmospherePanel();
+}, { passive: true });
+
+// Initial render
+updateAtmospherePanel();
+
+// Fade scroll hint once user has scrolled past the canvas section
+(function() {
+    const hint = document.getElementById('scroll-hint');
+    if (!hint) return;
+    window.addEventListener('scroll', () => {
+        hint.style.opacity = window.scrollY > 40 ? '0' : '1';
+    }, { passive: true });
+})();
 </script>
+
+<!-- ── Simulation description ──────────────────────────────────────────── -->
+<section class="sim-info">
+  <div class="sim-info-inner">
+    <div class="sim-info-header">
+      <div class="sim-info-title">Parker Solar Physics Engine</div>
+      <p class="sim-info-lead">
+        A real-time 3D magnetohydrodynamic simulation of our Sun — from sub-surface convection cells
+        to the heliospheric current sheet and beyond. Solar wind acceleration follows Parker's 1958
+        spiral model, with live NOAA/SWPC data driving X-ray flux, active region positions, and
+        geomagnetic storm indices.
+      </p>
+    </div>
+
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">☀️</div>
+        <div class="sim-card-title">Corona &amp; Wind</div>
+        <div class="sim-card-body">
+          The solar corona reaches <strong>1–3 million K</strong> via Alfvén wave heating.
+          Wind particles accelerate outward along the Parker spiral — a direct consequence of the
+          Sun's rotation coupled with radial outflow. Typical solar wind speed: <strong>400–800 km/s</strong>.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🔴</div>
+        <div class="sim-card-title">Active Regions &amp; Flares</div>
+        <div class="sim-card-body">
+          Active regions (sunspot groups) are mapped using <strong>live NOAA data</strong> and
+          rendered as 3D magnetic flux concentrations. Flare class (A→X) is pulled from GOES
+          X-ray flux. X-class events trigger the corona bloom and ribbon alert animations.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">💨</div>
+        <div class="sim-card-title">CME &amp; Particle Events</div>
+        <div class="sim-card-body">
+          Coronal Mass Ejections are drawn from the DONKI catalog with estimated arrival times
+          at L1. Solar Energetic Particle (SEP) events and radio blackout levels (NOAA
+          <strong>R1–R5 scale</strong>) are displayed in the right panel.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌐</div>
+        <div class="sim-card-title">Heliospheric Current Sheet</div>
+        <div class="sim-card-body">
+          The wavy HCS separates inward and outward magnetic field sectors. Its geometry is
+          driven by solar tilt angle and Parker spiral physics. The simulation renders both the
+          current sheet surface and the sector boundary crossings.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🛰️</div>
+        <div class="sim-card-title">SDO Live Imagery</div>
+        <div class="sim-card-body">
+          Real-time images from NASA's Solar Dynamics Observatory in multiple wavelengths:
+          <strong>AIA 304 Å</strong> (chromosphere), <strong>AIA 171 Å</strong> (corona),
+          <strong>AIA 193 Å</strong>, and <strong>HMI magnetogram</strong> (surface field).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">📡</div>
+        <div class="sim-card-title">Live Data Sources</div>
+        <div class="sim-card-body">
+          Data refreshes every <strong>5 minutes</strong> from NOAA/SWPC. Sources: GOES
+          X-ray flux, DONKI CME catalog, Solar Region Summary, 3-day particle flux, and
+          ACE/DSCOVR solar wind measurements at L1.
+        </div>
+      </div>
+    </div>
+
+    <div class="sim-controls-grid">
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Orbit the camera around the Sun</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">SDO</span><span class="sim-ctrl-desc">Open live solar imagery strip</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⚡ Weather</span><span class="sim-ctrl-desc">Jump to full space weather dashboard</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Panel →</span><span class="sim-ctrl-desc">Open data panel (live readings)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⊙ Re-center</span><span class="sim-ctrl-desc">Reset camera to default view</span></div>
+    </div>
+
+    <div class="sim-links">
+      <a href="space-weather.html" class="sim-link">⚡ Space Weather Dashboard</a>
+      <a href="earth.html" class="sim-link">🌍 Earth Magnetosphere</a>
+      <a href="index.html" class="sim-link">🌌 Heliosphere 3D</a>
+    </div>
+  </div>
+</section>
 </body>
 </html>

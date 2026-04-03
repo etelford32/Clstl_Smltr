@@ -253,6 +253,70 @@ export function cglAnisotropy(r_AU) {
     return Math.max(0.15, Math.pow(0.3 / r, 0.7));
 }
 
+// ── 4. Corotating Interaction Regions (CIRs) ─────────────────────────────────
+//
+// When a fast coronal-hole stream (v_fast > 500 km/s) overtakes a slow streamer-
+// belt stream (v_slow < 450 km/s), mass conservation forces a compression region
+// to form.  The compression ratio increases with heliocentric distance as the
+// streams have more time to interact.
+//
+// Simplified 1-D stream-interaction model (Jian et al. 2006 scaling):
+//   r_merge ≈ v_slow × Δφ / (v_fast − v_slow) × (r / AU_M)
+//   density compression C = (v_fast / v_slow)^0.8 × min(1, r_AU / r_merge)
+//   field compression    Bc = C^(2/3)  (for tangential field, B_φ ∝ C^{2/3})
+//
+// Returns { compression, r_merge_AU } where compression = local density ratio.
+// compression = 1.0 means no interaction yet, 3–4 = strong CIR (observed max ≈ 3.5)
+
+/**
+ * CIR density compression ratio at heliocentric distance r_AU.
+ * @param {number} v_fast_km_s  Fast stream speed (km/s) — coronal hole wind
+ * @param {number} v_slow_km_s  Slow stream speed (km/s) — streamer belt wind
+ * @param {number} r_AU         Current heliocentric distance (AU)
+ * @param {number} dPhi_deg     Angular separation between stream boundaries (degrees)
+ * @returns {{ compression: number, r_merge_AU: number }}
+ */
+export function cirCompression(v_fast_km_s, v_slow_km_s, r_AU, dPhi_deg = 45) {
+    const D2R  = Math.PI / 180;
+    const dv   = Math.max(10, v_fast_km_s - v_slow_km_s);   // speed shear (km/s)
+    const dPhi = dPhi_deg * D2R;
+    // Stream interaction starts when the leading edge of the fast stream
+    // catches the trailing edge of the slow stream (ballistic corotation approx)
+    const r_merge_AU = (v_slow_km_s / dv) * (dPhi / (2 * Math.PI)) * 1.0;
+    const r_merge    = Math.max(0.2, r_merge_AU);
+    const maturity   = Math.min(1, r_AU / r_merge);           // 0 = no interaction, 1 = fully formed
+    const C = 1 + (Math.pow(v_fast_km_s / Math.max(50, v_slow_km_s), 0.8) - 1) * maturity;
+    return { compression: Math.min(4.0, C), r_merge_AU: r_merge };
+}
+
+/**
+ * Solar Energetic Particle (SEP) intensity enhancement at distance r_AU
+ * following a flare/CME.  Uses a simplified 1/r² geometric dilution with
+ * an exponential decay in time from event onset.
+ *
+ * @param {string}  flareClass  GOES X-ray class string, e.g. 'X5.2' or 'M3.1'
+ * @param {number}  r_AU        Heliocentric distance (AU)
+ * @param {number}  dt_min      Minutes since flare onset
+ * @returns {number}  Relative SEP intensity (1.0 = quiet background)
+ */
+export function sepIntensity(flareClass, r_AU, dt_min) {
+    const letter  = (flareClass?.[0] ?? 'C').toUpperCase();
+    const number  = parseFloat(flareClass?.slice(1) ?? '1') || 1;
+    // GOES peak flux (W/m²): C=10⁻⁶, M=10⁻⁵, X=10⁻⁴ × number
+    const peakMap = { 'B': 1e-7, 'C': 1e-6, 'M': 1e-5, 'X': 1e-4 };
+    const flux    = (peakMap[letter] ?? 1e-6) * number;
+    // SEP onset delay: ~20 min for X, ~40 min for M (Parker spiral transit ~20 min/AU)
+    const onset   = letter === 'X' ? 20 : 40;   // minutes
+    if (dt_min < onset) return 1.0;
+    // Peak ~2–3 hours post-onset, exponential decay with 12-hour e-folding
+    const t_rel   = (dt_min - onset) / 60;       // hours
+    const profile = Math.exp(-t_rel * t_rel / 2) + Math.exp(-t_rel / 12) * 0.3;
+    // Geometric dilution over r_AU, normalised to intensity at 1 AU
+    const geoFac  = 1 / Math.max(0.1, r_AU * r_AU);
+    // Scale: X10 → ~1000× background; normalised to flux / 1e-5
+    return 1 + (flux / 1e-5) * profile * geoFac * 8000;
+}
+
 /**
  * Debye length (m) — quantum-thermal electrostatic screening scale.
  *   λ_D = √(ε₀ k_B T_e / (n e²))   ≈ 7.43 √(T_e[eV] / n[cm⁻³])  metres
