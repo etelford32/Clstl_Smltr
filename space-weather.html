@@ -2437,9 +2437,16 @@ window.addEventListener('helio-time-update', e => {
         if (!_helio) return;
         const frac  = sliderEl.valueAsNumber / SLIDER_MAX;
         const newJD = _twWinStartJD + frac * (_twWindowSec / 86400);
-        _helio.setSimDate(new Date(jdToMs(newJD)));
+        const newDate = new Date(jdToMs(newJD));
+        _helio.setSimDate(newDate);
         _setSliderPct(sliderEl.valueAsNumber);
         _setScaleActive(0);   // counts as a "pause" — warp stops
+
+        // Sync date picker to the slider position
+        const picker = el('tw-date-picker');
+        if (picker && document.activeElement !== picker) {
+            picker.value = _toDatetimeLocal(newDate);
+        }
 
         // Update start/end labels in real-time during drag
         const endJD = _twWinStartJD + _twWindowSec / 86400;
@@ -2449,14 +2456,42 @@ window.addEventListener('helio-time-update', e => {
 
     // Pointer up / cancel: end drag
     const _endDrag = () => { _sliderDragging = false; };
-    sliderEl?.addEventListener('pointerup',     _endDrag);
-    sliderEl?.addEventListener('pointercancel', _endDrag);
+    // Track pointer release on document (not just slider) so fast drags
+    // that release outside the slider element still clear the dragging flag.
+    // Bug fix: previously only listened on sliderEl, causing _sliderDragging
+    // to stay true permanently after a fast drag, blocking all slider updates.
+    document.addEventListener('pointerup',     _endDrag);
+    document.addEventListener('pointercancel', _endDrag);
 
-    // ── helio-time-update → sync slider + HUD + picker ────────────────────────
-    // (This replaces / extends the existing helio-time-update handler above)
+    // ── helio-time-update → keep slider + picker synced during playback ────────
     window.addEventListener('helio-time-update', e => {
-        const { jd } = e.detail ?? {};
-        if (jd != null) _initWindow(jd);
+        const { jd, date } = e.detail ?? {};
+        if (jd == null) return;
+
+        // First call: initialize the slider window centered on sim time
+        _initWindow(jd);
+
+        // During warp/playback (not dragging): update slider position to track sim
+        if (!_sliderDragging && sliderEl) {
+            const endJD = _twWinStartJD + _twWindowSec / 86400;
+            if (jd >= _twWinStartJD && jd <= endJD) {
+                const frac = (jd - _twWinStartJD) / (_twWindowSec / 86400);
+                const val  = Math.round(frac * SLIDER_MAX);
+                sliderEl.value = val;
+                _setSliderPct(val);
+            } else {
+                // Sim time has moved outside the current window — re-center
+                _setWindow(_twWindowSec);
+            }
+        }
+
+        // Keep date picker synced (unless user is actively typing in it)
+        if (date) {
+            const pickerEl = el('tw-date-picker');
+            if (pickerEl && document.activeElement !== pickerEl) {
+                pickerEl.value = _toDatetimeLocal(date);
+            }
+        }
     });
 
     // ── Seed picker + slider with current time ────────────────────────────────
