@@ -419,8 +419,15 @@ async function _fetchVec(command, center, jd = null) {
     const params = _horizonsParams(command, center, jd);
     const url    = `${HORIZONS_URL}?${params}`;
     const resp   = await fetch(url, { cache: 'no-cache' });
-    if (!resp.ok) throw new Error(`Horizons HTTP ${resp.status}`);
+    if (!resp.ok) {
+        // Log the upstream error body for debugging
+        let body = '';
+        try { body = await resp.text(); } catch (_) {}
+        const detail = body.slice(0, 200);
+        throw new Error(`Horizons HTTP ${resp.status}: ${detail}`);
+    }
     const json = await resp.json();
+    if (json.error) throw new Error(`Horizons API: ${json.error}`);
     if (typeof json.result !== 'string') throw new Error('Horizons: no result string');
     return _parseVec(json.result);
 }
