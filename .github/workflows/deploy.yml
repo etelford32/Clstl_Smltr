@@ -5,9 +5,7 @@ on:
     branches:
       - main
       - master
-      - claude/sun-animation-preset-nkx5Y
       - claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU
-      - claude/solar-wind-parker-spiral-jLLtK
   workflow_dispatch:
 
 permissions:
@@ -41,7 +39,7 @@ jobs:
 
       - name: Copy all static HTML/JS/CSS files to web build
         run: |
-          # Copy all top-level HTML files (star3d, star2d, solar-fluid, etc.)
+          # Copy all top-level HTML files
           for f in *.html; do
             cp "$f" build/web/ && echo "Copied $f"
           done
@@ -49,23 +47,45 @@ jobs:
           for f in *.css *.js 2>/dev/null; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
+          # Copy JS modules directory
+          if [ -d "js" ]; then
+            cp -r js build/web/js && echo "Copied js/"
+          fi
+          # Copy API routes
+          if [ -d "api" ]; then
+            cp -r api build/web/api && echo "Copied api/"
+          fi
+          # Copy Rust WASM build output if present
+          if [ -d "rust/www" ]; then
+            mkdir -p build/web/rust/www
+            cp -r rust/www/* build/web/rust/www/ && echo "Copied rust/www/"
+          fi
+          # Copy static assets (images, logos, etc.)
+          for f in *.png *.jpg *.svg *.ico *.webp 2>/dev/null; do
+            [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
+          done
+          # Copy sitemap/robots
+          for f in sitemap.xml robots.txt 2>/dev/null; do
+            [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
+          done
           # List what we're deploying
           echo "--- build/web contents ---"
-          ls -lh build/web/
+          ls -lhR build/web/ | head -60
 
       - name: Create project README in build
         run: |
           cat > build/web/README.md << 'EOF'
-          # Celestial Simulator — etelford32
+          # Parker Physics App — etelford32
 
-          Interactive 3D/2D celestial simulations:
-          - **star3d.html** — Three.js 3D simulator: Sirius Binary, Sun, Betelgeuse
-          - **star2d.html** — 2D stellar classification
-          - **star2d-advanced.html** — Parker spirals, CME, fluid dynamics
-          - **solar-fluid.html** — Navier-Stokes fluid solver
-          - **threejs.html** — Three.js demo
+          Interactive 3D/2D celestial simulations and real-time space weather:
+          - **threejs.html** — Solar System simulation (real-time planet positions)
+          - **earth.html** — Earth magnetosphere, weather, satellite data
+          - **sun.html** — Solar physics (chromosphere, corona, interior)
+          - **space-weather.html** — Space weather dashboard (NOAA/NASA live data)
+          - **star3d.html** — Three.js 3D stellar simulator
+          - **dashboard.html** — User dashboard
 
-          https://etelford32.github.io/Clstl_Smltr/
+          https://parkersphysics.com
           EOF
 
       - name: Deploy to GitHub Pages
@@ -75,10 +95,14 @@ jobs:
           publish_dir: ./build/web
           user_name: 'github-actions[bot]'
           user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_message: 'Deploy Celestial Simulator — ${{ github.ref_name }}'
+          commit_message: 'Deploy Parker Physics App — ${{ github.ref_name }}'
 
   build-docker:
     runs-on: ubuntu-latest
+    # Only run Docker build if Docker Hub secrets are configured.
+    # This prevents the job from failing when secrets are missing.
+    if: ${{ secrets.DOCKER_USERNAME != '' }}
+    continue-on-error: true  # Don't fail the entire workflow if Docker build fails
     steps:
       - uses: actions/checkout@v4
 
