@@ -1,51 +1,99 @@
 /**
- * auth.js — Client-side authentication manager
+ * auth.js — Client-side authentication manager (Supabase-integrated)
  *
- * Manages user session state across all pages. Uses localStorage for
- * persistent sessions ("Remember me") and sessionStorage for tab-only sessions.
+ * Uses Supabase Auth when configured (real email/password auth with JWT),
+ * falls back to localStorage mock when Supabase isn't set up.
  *
- * ── Session Storage ──────────────────────────────────────────────────────────
- *   Remember me OFF → sessionStorage (cleared on tab close)
- *   Remember me ON  → localStorage (persists across browser restarts)
+ * ── How It Works ─────────────────────────────────────────────────────────────
+ *   Supabase mode (production):
+ *     signIn  → supabase.auth.signInWithPassword() → JWT stored by Supabase client
+ *     signUp  → supabase.auth.signUp() → user created in auth.users + user_profiles
+ *     signOut → supabase.auth.signOut() → JWT cleared
+ *     reset   → supabase.auth.resetPasswordForEmail() → real email sent
+ *     session → supabase.auth.getSession() → auto-refreshing JWT
  *
- *   Key: 'pp_auth'
- *   Value: { email, name, plan, signedIn, ts, remember }
+ *   Mock mode (development / no Supabase):
+ *     Same interface, data stored in localStorage/sessionStorage.
+ *     No real auth — any email/password combination "works".
  *
  * ── Usage ────────────────────────────────────────────────────────────────────
  *   import { auth } from './js/auth.js';
  *
- *   // Check if signed in
  *   if (auth.isSignedIn()) { ... }
- *
- *   // Get user info
- *   const user = auth.getUser();  // { email, name, plan, ... }
- *
- *   // Sign in (after form validation)
- *   auth.signIn({ email, name, plan, remember });
- *
- *   // Sign out
- *   auth.signOut();  // clears session, redirects to index
- *
- *   // Require auth (redirect to signin if not logged in)
- *   auth.requireAuth();  // call at top of protected pages
- *
- * ── Future Backend Integration ──────────────────────────────────────────────
- *   Replace signIn() internals with POST /api/auth/signin → JWT token.
- *   Replace signUp() with POST /api/auth/signup → create user + JWT.
- *   Store JWT in httpOnly cookie (not localStorage) for production security.
+ *   await auth.signIn({ email, password, remember });
+ *   await auth.signUp({ email, password, name, plan });
+ *   auth.signOut();
+ *   auth.requireAuth();
  */
+
+import { getSupabase, isConfigured } from './supabase-config.js';
 
 const AUTH_KEY = 'pp_auth';
 
 class AuthManager {
     constructor() {
         this._user = null;
-        this._load();
+        this._supabase = null;
+        this._initialized = false;
+        this._initPromise = this._init();
     }
 
-    /** Load session from storage. */
-    _load() {
-        // Try localStorage first (persistent), then sessionStorage (tab-only)
+    async _init() {
+        if (isConfigured()) {
+            try {
+                this._supabase = await getSupabase();
+                const { data: { session } } = await this._supabase.auth.getSession();
+                if (session?.user) {
+                    this._user = this._mapSupabaseUser(session.user);
+                    console.info('[Auth] Supabase session restored:', this._user.email);
+                }
+
+                // Listen for auth state changes (login, logout, token refresh)
+                this._supabase.auth.onAuthStateChange((event, session) => {
+                    if (session?.user) {
+                        this._user = this._mapSupabaseUser(session.user);
+                    } else {
+                        this._user = null;
+                    }
+                    window.dispatchEvent(new CustomEvent('auth-changed', {
+                        detail: { event, user: this._user }
+                    }));
+                });
+
+                this._initialized = true;
+                console.info('[Auth] Supabase auth active');
+            } catch (err) {
+                console.warn('[Auth] Supabase init failed, using mock auth:', err.message);
+                this._loadMock();
+                this._initialized = true;
+            }
+        } else {
+            console.info('[Auth] Supabase not configured — using mock auth');
+            this._loadMock();
+            this._initialized = true;
+        }
+    }
+
+    /** Wait for initialization to complete. */
+    async ready() {
+        await this._initPromise;
+    }
+
+    /** Map Supabase user object to our app's user shape. */
+    _mapSupabaseUser(supaUser) {
+        return {
+            id: supaUser.id,
+            email: supaUser.email,
+            name: supaUser.user_metadata?.name || supaUser.email?.split('@')[0],
+            plan: supaUser.user_metadata?.plan || 'free',
+            signedIn: true,
+            provider: 'supabase',
+            ts: Date.now(),
+        };
+    }
+
+    /** Load session from localStorage/sessionStorage (mock mode). */
+    _loadMock() {
         let raw = null;
         try { raw = localStorage.getItem(AUTH_KEY); } catch (_) {}
         if (!raw) {
@@ -54,16 +102,14 @@ class AuthManager {
         if (raw) {
             try {
                 const data = JSON.parse(raw);
-                if (data && data.signedIn) {
-                    this._user = data;
-                }
+                if (data?.signedIn) this._user = data;
             } catch (_) {}
         }
     }
 
     /** Check if user is signed in. */
     isSignedIn() {
-        return !!(this._user && this._user.signedIn);
+        return !!(this._user?.signedIn);
     }
 
     /** Get current user data (or null). */
@@ -71,44 +117,50 @@ class AuthManager {
         return this._user ? { ...this._user } : null;
     }
 
-    /** Get user's display name. */
     getDisplayName() {
         if (!this._user) return 'Guest';
         return this._user.name || this._user.email?.split('@')[0] || 'Explorer';
     }
 
-    /** Get user's first name. */
     getFirstName() {
-        const name = this.getDisplayName();
-        return name.split(' ')[0];
+        return this.getDisplayName().split(' ')[0];
     }
 
-    /** Get user's plan. */
     getPlan() {
         return (this._user?.plan || 'free').toLowerCase();
     }
 
     /**
-     * Sign in — store session data.
-     * @param {object} opts
-     * @param {string} opts.email
-     * @param {string} [opts.name]
-     * @param {string} [opts.plan='free']
-     * @param {boolean} [opts.remember=false]
+     * Sign in with email and password.
+     * @returns {{ success: boolean, error?: string }}
      */
-    signIn({ email, name, plan = 'free', remember = false }) {
-        const data = {
+    async signIn({ email, password, remember = false }) {
+        if (this._supabase) {
+            try {
+                const { data, error } = await this._supabase.auth.signInWithPassword({
+                    email,
+                    password,
+                });
+                if (error) return { success: false, error: error.message };
+                this._user = this._mapSupabaseUser(data.user);
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        // Mock mode: accept any credentials
+        const userData = {
             email,
-            name: name || email.split('@')[0],
-            plan,
+            name: email.split('@')[0],
+            plan: 'free',
             signedIn: true,
             remember,
+            provider: 'mock',
             ts: Date.now(),
         };
-
-        this._user = data;
-        const json = JSON.stringify(data);
-
+        this._user = userData;
+        const json = JSON.stringify(userData);
         try {
             if (remember) {
                 localStorage.setItem(AUTH_KEY, json);
@@ -119,96 +171,153 @@ class AuthManager {
             }
         } catch (_) {}
 
-        window.dispatchEvent(new CustomEvent('auth-changed', { detail: data }));
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'SIGNED_IN', user: userData } }));
+        return { success: true };
     }
 
     /**
-     * Sign up — same as signIn but for new accounts.
-     * In a real system this would POST to /api/auth/signup first.
+     * Sign up with email, password, and profile data.
+     * @returns {{ success: boolean, error?: string, needsConfirmation?: boolean }}
      */
-    signUp({ email, name, plan = 'free', remember = false }) {
-        // TODO: POST /api/auth/signup → create account → return JWT
-        this.signIn({ email, name, plan, remember });
+    async signUp({ email, password, name, plan = 'free' }) {
+        if (this._supabase) {
+            try {
+                const { data, error } = await this._supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: { name, plan },  // stored in user_metadata
+                    },
+                });
+                if (error) return { success: false, error: error.message };
+
+                // Check if email confirmation is required
+                if (data.user && !data.session) {
+                    return {
+                        success: true,
+                        needsConfirmation: true,
+                        message: 'Check your email for a confirmation link.',
+                    };
+                }
+
+                if (data.user) {
+                    this._user = this._mapSupabaseUser(data.user);
+                }
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        // Mock mode
+        return this.signIn({ email, password: '', remember: true });
     }
 
-    /** Sign out — clear all session data and redirect. */
-    signOut(redirectUrl = 'index.html') {
+    /** Sign out — clear session and redirect. */
+    async signOut(redirectUrl = 'index.html') {
+        if (this._supabase) {
+            await this._supabase.auth.signOut();
+        }
+
         this._user = null;
         try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
         try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
-        window.dispatchEvent(new CustomEvent('auth-changed', { detail: null }));
-        if (redirectUrl) {
-            window.location.href = redirectUrl;
-        }
+
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'SIGNED_OUT', user: null } }));
+
+        if (redirectUrl) window.location.href = redirectUrl;
     }
 
-    /**
-     * Require authentication — redirect to signin if not logged in.
-     * Call this at the top of any protected page.
-     * @param {string} [redirectUrl='signin.html'] Where to redirect if not authed
-     */
+    /** Redirect to signin if not logged in. */
     requireAuth(redirectUrl = 'signin.html') {
         if (!this.isSignedIn()) {
-            // Store the intended destination so we can redirect back after login
-            try {
-                sessionStorage.setItem('pp_auth_redirect', window.location.href);
-            } catch (_) {}
+            try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
             window.location.href = redirectUrl;
             return false;
         }
         return true;
     }
 
-    /**
-     * Get the redirect URL stored before auth redirect (if any).
-     * Called after successful sign-in to redirect back to the original page.
-     */
+    /** Get stored post-login redirect URL. */
     getPostLoginRedirect() {
         try {
             const url = sessionStorage.getItem('pp_auth_redirect');
             sessionStorage.removeItem('pp_auth_redirect');
             return url;
-        } catch (_) {
-            return null;
-        }
+        } catch (_) { return null; }
     }
 
     /**
-     * Request password reset (simulated).
-     * In a real system this would POST to /api/auth/reset-password.
-     * @param {string} email
-     * @returns {Promise<{success: boolean, message: string}>}
+     * Request password reset email.
+     * @returns {{ success: boolean, message: string }}
      */
     async requestPasswordReset(email) {
-        // TODO: POST /api/auth/reset-password → send email with reset link
-        // For now, simulate the flow
-        await new Promise(r => setTimeout(r, 800));
+        if (this._supabase) {
+            try {
+                const { error } = await this._supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: `${window.location.origin}/reset-password.html`,
+                });
+                if (error) return { success: false, message: error.message };
+                return {
+                    success: true,
+                    message: `Password reset link sent to ${email}. Check your inbox.`,
+                };
+            } catch (err) {
+                return { success: false, message: err.message };
+            }
+        }
 
-        // Always return success to prevent email enumeration
+        // Mock mode
+        await new Promise(r => setTimeout(r, 600));
         return {
             success: true,
-            message: `If an account exists for ${email}, we've sent a password reset link. Check your inbox.`,
+            message: `If an account exists for ${email}, we've sent a reset link.`,
         };
     }
 
     /**
-     * Update user profile data.
-     * @param {object} updates  Fields to update (name, plan, etc.)
+     * Update user profile (name, plan, location, preferences).
+     * Writes to both Supabase user_profiles table and local state.
      */
-    updateProfile(updates) {
+    async updateProfile(updates) {
         if (!this._user) return;
         Object.assign(this._user, updates, { ts: Date.now() });
 
-        const json = JSON.stringify(this._user);
-        try {
-            if (this._user.remember) {
-                localStorage.setItem(AUTH_KEY, json);
-            } else {
-                sessionStorage.setItem(AUTH_KEY, json);
+        if (this._supabase) {
+            try {
+                // Update user_metadata (name, plan)
+                if (updates.name || updates.plan) {
+                    await this._supabase.auth.updateUser({
+                        data: { name: updates.name, plan: updates.plan },
+                    });
+                }
+                // Update user_profiles table (location, prefs)
+                await this._supabase.from('user_profiles').upsert({
+                    id: this._user.id,
+                    display_name: this._user.name,
+                    plan: this._user.plan,
+                    location_lat: updates.location_lat,
+                    location_lon: updates.location_lon,
+                    location_city: updates.location_city,
+                    notify_aurora: updates.notify_aurora,
+                    notify_conjunction: updates.notify_conjunction,
+                    aurora_kp_threshold: updates.aurora_kp_threshold,
+                    conjunction_threshold_km: updates.conjunction_threshold_km,
+                    updated_at: new Date().toISOString(),
+                });
+            } catch (err) {
+                console.warn('[Auth] Profile update failed:', err.message);
             }
-        } catch (_) {}
+        } else {
+            // Mock: store in localStorage
+            const json = JSON.stringify(this._user);
+            try {
+                if (this._user.remember) localStorage.setItem(AUTH_KEY, json);
+                else sessionStorage.setItem(AUTH_KEY, json);
+            } catch (_) {}
+        }
 
-        window.dispatchEvent(new CustomEvent('auth-changed', { detail: this._user }));
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'PROFILE_UPDATED', user: this._user } }));
     }
 }
 

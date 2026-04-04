@@ -357,7 +357,8 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
-    // If already signed in, redirect to dashboard
+    // Wait for Supabase to initialize, then check if already signed in
+    await auth.ready();
     if (auth.isSignedIn()) {
         window.location.href = 'dashboard.html';
     }
@@ -407,25 +408,32 @@
         btn.disabled = true;
         btn.textContent = 'Signing in…';
 
-        // TODO: Replace with real API call (POST /api/auth/signin)
-        // For now, simulate auth with a short delay
-        setTimeout(() => {
-            // Use the auth module for session management
+        // Sign in via Supabase (or mock if not configured)
+        (async () => {
             const { auth } = window._ppAuth || {};
-            if (auth) {
-                auth.signIn({
-                    email: email.value,
-                    remember,
-                });
-            } else {
-                // Fallback: direct storage (in case auth module didn't load)
-                const storage = remember ? localStorage : sessionStorage;
-                storage.setItem('pp_auth', JSON.stringify({
-                    email: email.value,
-                    signedIn: true,
-                    remember,
-                    ts: Date.now()
-                }));
+            if (!auth) {
+                btn.textContent = 'Error — reload page';
+                btn.disabled = false;
+                return;
+            }
+
+            const result = await auth.signIn({
+                email: email.value,
+                password: pw.value,
+                remember,
+            });
+
+            if (!result.success) {
+                // Show error
+                btn.disabled = false;
+                btn.textContent = 'Sign In →';
+                const errEl = document.getElementById('err-pw');
+                if (errEl) {
+                    errEl.textContent = result.error || 'Invalid email or password';
+                    errEl.classList.add('visible');
+                    pw.classList.add('error');
+                }
+                return;
             }
 
             // Show success state
@@ -433,9 +441,9 @@
             document.getElementById('login-success').style.display = 'block';
 
             // Redirect: check for post-login redirect, else go to dashboard
-            const redirect = auth?.getPostLoginRedirect?.() || 'dashboard.html';
+            const redirect = auth.getPostLoginRedirect() || 'dashboard.html';
             setTimeout(() => { window.location.href = redirect; }, 1200);
-        }, 700);
+        })();
     });
 
     // ── Reset form ──────────────────────────────────────────────────

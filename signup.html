@@ -366,6 +366,7 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
+    await auth.ready();
     if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
     window._ppAuth = { auth };
 </script>
@@ -444,27 +445,47 @@
         btn.disabled = true;
         btn.textContent = 'Creating account…';
 
-        // TODO: Replace with real API call (POST /api/auth/signup)
-        setTimeout(() => {
-            // Use auth module for session management
+        // Sign up via Supabase (or mock)
+        (async () => {
             const plan = document.querySelector('.plan-pill.selected input')?.value || 'free';
             const firstName = document.getElementById('first-name').value;
             const lastName = document.getElementById('last-name').value;
-            const email = document.getElementById('email').value;
+            const emailVal = document.getElementById('email').value;
+            const passwordVal = document.getElementById('password').value;
 
             const { auth } = window._ppAuth || {};
-            if (auth) {
-                auth.signUp({
-                    email,
-                    name: `${firstName} ${lastName}`.trim(),
-                    plan,
-                    remember: true,  // new accounts default to persistent session
-                });
-            } else {
-                // Fallback
-                localStorage.setItem('pp_auth', JSON.stringify({
-                    email, name: firstName, plan, signedIn: true, ts: Date.now()
-                }));
+            if (!auth) {
+                btn.textContent = 'Error — reload page';
+                btn.disabled = false;
+                return;
+            }
+
+            const result = await auth.signUp({
+                email: emailVal,
+                password: passwordVal,
+                name: `${firstName} ${lastName}`.trim(),
+                plan,
+            });
+
+            if (!result.success) {
+                btn.disabled = false;
+                btn.textContent = 'Create Account →';
+                const errEl = document.getElementById('err-pw');
+                if (errEl) {
+                    errEl.textContent = result.error || 'Signup failed — try a different email';
+                    errEl.classList.add('visible');
+                }
+                return;
+            }
+
+            if (result.needsConfirmation) {
+                // Email confirmation required — show message
+                document.getElementById('form-view').style.display = 'none';
+                document.getElementById('success-view').classList.add('show');
+                const msgEl = document.querySelector('#success-view p');
+                if (msgEl) msgEl.textContent = result.message || 'Check your email for a confirmation link.';
+                // Don't auto-redirect — user needs to confirm email first
+                return;
             }
 
             document.getElementById('form-view').style.display = 'none';
