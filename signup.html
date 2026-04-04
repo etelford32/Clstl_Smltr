@@ -364,6 +364,11 @@
     </p>
 </footer>
 
+<script type="module">
+    import { auth } from './js/auth.js';
+    if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
+    window._ppAuth = { auth };
+</script>
 <script>
     // ── Nav burger ──────────────────────────────────────────────────
     document.getElementById('nav-burger').addEventListener('click', function() {
@@ -441,22 +446,30 @@
 
         // TODO: Replace with real API call (POST /api/auth/signup)
         setTimeout(() => {
-            // Store session flag (replace with real JWT/session management)
-            try {
-                const plan = document.querySelector('.plan-pill.selected input')?.value || 'free';
-                const firstName = document.getElementById('first-name').value;
-                sessionStorage.setItem('pp_auth', JSON.stringify({
-                    email: document.getElementById('email').value,
-                    name: firstName,
+            // Use auth module for session management
+            const plan = document.querySelector('.plan-pill.selected input')?.value || 'free';
+            const firstName = document.getElementById('first-name').value;
+            const lastName = document.getElementById('last-name').value;
+            const email = document.getElementById('email').value;
+
+            const { auth } = window._ppAuth || {};
+            if (auth) {
+                auth.signUp({
+                    email,
+                    name: `${firstName} ${lastName}`.trim(),
                     plan,
-                    signedIn: true,
-                    ts: Date.now()
+                    remember: true,  // new accounts default to persistent session
+                });
+            } else {
+                // Fallback
+                localStorage.setItem('pp_auth', JSON.stringify({
+                    email, name: firstName, plan, signedIn: true, ts: Date.now()
                 }));
-            } catch(_) {}
+            }
+
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
-            // Auto-redirect to home after 3s
-            setTimeout(() => { window.location.href = 'dashboard.html'; }, 3000);
+            setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
         }, 1200);
     });
 </script>

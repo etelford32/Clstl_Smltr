@@ -355,6 +355,15 @@
     </p>
 </footer>
 
+<script type="module">
+    import { auth } from './js/auth.js';
+    // If already signed in, redirect to dashboard
+    if (auth.isSignedIn()) {
+        window.location.href = 'dashboard.html';
+    }
+    // Expose auth to the non-module script below
+    window._ppAuth = { auth };
+</script>
 <script>
     // ── Nav burger ──────────────────────────────────────────────────
     document.getElementById('nav-burger').addEventListener('click', function() {
@@ -380,6 +389,7 @@
 
         const email = document.getElementById('email');
         const pw    = document.getElementById('password');
+        const remember = document.getElementById('remember')?.checked ?? false;
 
         const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value);
         email.classList.toggle('error', !emailOk);
@@ -398,25 +408,38 @@
         btn.textContent = 'Signing in…';
 
         // TODO: Replace with real API call (POST /api/auth/signin)
+        // For now, simulate auth with a short delay
         setTimeout(() => {
-            // Store session flag (replace with real JWT/session management)
-            try {
-                sessionStorage.setItem('pp_auth', JSON.stringify({
+            // Use the auth module for session management
+            const { auth } = window._ppAuth || {};
+            if (auth) {
+                auth.signIn({
+                    email: email.value,
+                    remember,
+                });
+            } else {
+                // Fallback: direct storage (in case auth module didn't load)
+                const storage = remember ? localStorage : sessionStorage;
+                storage.setItem('pp_auth', JSON.stringify({
                     email: email.value,
                     signedIn: true,
+                    remember,
                     ts: Date.now()
                 }));
-            } catch(_) {}
+            }
+
             // Show success state
             document.getElementById('signin-form').style.display = 'none';
             document.getElementById('login-success').style.display = 'block';
-            // Redirect after brief pause
-            setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
-        }, 900);
+
+            // Redirect: check for post-login redirect, else go to dashboard
+            const redirect = auth?.getPostLoginRedirect?.() || 'dashboard.html';
+            setTimeout(() => { window.location.href = redirect; }, 1200);
+        }, 700);
     });
 
     // ── Reset form ──────────────────────────────────────────────────
-    document.getElementById('reset-form').addEventListener('submit', function(e) {
+    document.getElementById('reset-form').addEventListener('submit', async function(e) {
         e.preventDefault();
         const resetEmail = document.getElementById('reset-email');
         const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resetEmail.value);
@@ -424,7 +447,18 @@
         document.getElementById('err-reset-email').classList.toggle('visible', !ok);
         if (!ok) return;
 
-        // Simulate sending email
+        // Disable submit while processing
+        const btn = this.querySelector('button[type=submit]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+        // Use auth module for password reset
+        const { auth } = window._ppAuth || {};
+        if (auth) {
+            const result = await auth.requestPasswordReset(resetEmail.value);
+            console.log('[Auth] Password reset:', result.message);
+        }
+
+        // Show success regardless (prevents email enumeration)
         document.getElementById('reset-form-wrap').style.display = 'none';
         document.getElementById('reset-success').style.display = 'block';
     });
