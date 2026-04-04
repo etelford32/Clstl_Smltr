@@ -1,0 +1,71 @@
+/* ── Shared Navigation Styles ─────────────────────────────────────────────── */
+/* Imported or inlined by all pages for consistent nav appearance.            */
+
+nav {
+    position: sticky; top: 0; z-index: 600;
+    height: 50px; min-height: 50px;
+    background: rgba(4,2,16,.93); backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; padding: 0 16px; gap: 6px;
+}
+.nav-brand {
+    display: flex; align-items: center; gap: 8px;
+    font-size: .95rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+    background: linear-gradient(45deg, #ffd700, #ff8c00);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    margin-right: 2px;
+}
+.nav-logo-img { height: 30px; width: auto; border-radius: 50%; flex-shrink: 0; }
+.nav-menu { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.nav-item {
+    padding: 5px 10px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+    color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+    transition: background .2s, border-color .2s; flex-shrink: 0;
+    font-family: inherit; cursor: pointer;
+}
+.nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color: #fff; }
+.nav-item.active { background: linear-gradient(45deg, #ff8c00, #ffd700); border-color: #ff8c00; color: #000; font-weight: 600; }
+.nav-spacer { flex: 1; }
+.nav-auth-sep { width: 1px; height: 22px; background: rgba(255,255,255,.15); margin: 0 3px; flex-shrink: 0; }
+.nav-login { background: transparent !important; border-color: rgba(255,255,255,.22) !important; color: #bbb !important; }
+.nav-login:hover { background: rgba(255,255,255,.1) !important; color: #fff !important; border-color: rgba(255,255,255,.4) !important; }
+.nav-signup { background: linear-gradient(45deg, #ff8c00, #ffd700) !important; border-color: #ff8c00 !important; color: #000 !important; font-weight: 700 !important; letter-spacing: .01em; }
+.nav-signup:hover { filter: brightness(1.12) !important; }
+.nav-dash { background: rgba(0,200,200,.1) !important; border-color: rgba(0,200,200,.25) !important; color: #0cc !important; }
+.nav-dash:hover { background: rgba(0,200,200,.2) !important; }
+.nav-signout { background: transparent !important; border-color: rgba(255,80,80,.2) !important; color: #a88 !important; }
+.nav-signout:hover { background: rgba(255,80,80,.1) !important; color: #f88 !important; }
+
+/* Locked / PRO badge */
+.nav-locked { opacity: 0.5; cursor: pointer; position: relative; }
+.nav-locked:hover { opacity: 0.7; }
+.nav-badge-pro {
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    font-size: .55rem; font-weight: 700; letter-spacing: .06em;
+    background: rgba(255,180,0,.12); color: #ffa500; border: 1px solid rgba(255,180,0,.25);
+    margin-left: 3px; vertical-align: middle; line-height: 1.4;
+}
+
+/* Burger menu (mobile) */
+.nav-burger {
+    display: none; margin-left: auto;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+    border-radius: 5px; color: #fff; padding: 5px 10px; font-size: 1.1rem;
+    cursor: pointer; line-height: 1; transition: background .2s;
+}
+.nav-burger:hover { background: rgba(255,255,255,.18); }
+@media (max-width: 860px) {
+    .nav-burger { display: block; }
+    .nav-spacer, .nav-auth-sep { display: none; }
+    .nav-menu {
+        display: none; flex-direction: column; align-items: stretch;
+        position: absolute; top: 50px; left: 0; right: 0;
+        background: rgba(3,1,14,.98); backdrop-filter: blur(18px);
+        border-bottom: 1px solid rgba(255,255,255,.1);
+        padding: 8px 12px 14px; gap: 3px; z-index: 700;
+        max-height: calc(100vh - 50px); overflow-y: auto;
+    }
+    .nav-menu.open { display: flex; }
+    .nav-item { padding: 11px 14px; font-size: .9rem; }
+}
