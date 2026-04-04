@@ -1,65 +1,79 @@
 /**
- * nav.js — Shared navigation component with tier-gated items
+ * nav.js — Shared navigation component with rich dropdowns + tier gating
  *
- * Injects a consistent navigation bar across all pages.
- * Handles:
- *   - Unified logo + branding
- *   - Tier-gated nav items (free, intro, advanced)
- *   - Auth state (Sign In / Sign Up vs Dashboard / Sign Out)
- *   - Mobile burger menu
- *   - Active page highlighting
- *
- * ── Plan Tiers ──────────────────────────────────────────────────────────────
- *   Free (signed up):
- *     Home, Space Weather, Solar System, The Sun, Earth View, Dashboard
- *
- *   Intro ($10/mo — future):
- *     + Galactic Map, Stars (dropdown)
- *
- *   Advanced ($100/mo):
- *     + Satellites (conjunction screening, CDM export, PRO analytics)
- *
- * ── Usage ────────────────────────────────────────────────────────────────────
- *   <script type="module">
- *     import { initNav } from './js/nav.js';
- *     initNav('earth');  // highlights "Earth View" as active
- *   </script>
+ * Generates a full navigation bar with:
+ *   - Logo + brand
+ *   - Top-level links (public simulations)
+ *   - Dropdown menus: Stars, Tools, Simulations
+ *   - Tier-gated items (free, intro, advanced)
+ *   - Auth state (Sign In / Dashboard / Admin badge)
+ *   - Mobile burger with full menu expansion
  */
 
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
-const LOGO_ALT = 'Parker Physics';
 
-// Navigation items with tier requirements
-// tier: 'public' = visible to everyone, 'free' = signed up, 'intro' = $10/mo, 'advanced' = $100/mo
-const NAV_ITEMS = [
-    { href: 'index.html',          label: 'Home',           id: 'home',         tier: 'public' },
-    { href: 'space-weather.html',  label: 'Space Weather',  id: 'weather',      tier: 'public' },
-    { href: 'threejs.html',        label: 'Solar System',   id: 'solar',        tier: 'public' },
-    { href: 'sun.html',            label: 'The Sun',        id: 'sun',          tier: 'public' },
-    { href: 'earth.html',          label: 'Earth View',     id: 'earth',        tier: 'public' },
-    { href: 'satellites.html',     label: 'Satellites',     id: 'satellites',   tier: 'advanced',
-      badge: 'PRO' },
-    { href: 'galactic-map.html',   label: 'Galactic Map',   id: 'galactic',     tier: 'free' },
+// ── Navigation Structure ─────────────────────────────────────────────────────
+
+const NAV_TOP = [
+    { href: 'space-weather.html', label: 'Space Weather', id: 'weather', tier: 'public' },
+    { href: 'threejs.html',       label: 'Solar System',  id: 'solar',   tier: 'public' },
+    { href: 'earth.html',         label: 'Earth',         id: 'earth',   tier: 'public' },
+    { href: 'sun.html',           label: 'The Sun',       id: 'sun',     tier: 'public' },
 ];
+
+const NAV_DROPDOWNS = [
+    {
+        label: 'Stars',
+        id: 'stars',
+        items: [
+            { href: 'sirius.html',     label: 'Sirius Binary',   sub: 'A1V + white dwarf system',    tier: 'public', icon: '⭐' },
+            { href: 'betelgeuse.html', label: 'Betelgeuse',      sub: 'Red supergiant · M1-2 Ia',    tier: 'public', icon: '🔴' },
+            { href: 'vega.html',       label: 'Vega',            sub: 'Rapid rotator · A0V',          tier: 'public', icon: '💫' },
+            { href: 'wr102.html',      label: 'WR-102',          sub: 'Wolf-Rayet · hottest known',   tier: 'free',   icon: '🌟' },
+            { href: 'star3d.html',     label: 'Sirius Planetary', sub: '3D stellar system simulator', tier: 'free',   icon: '🪐' },
+        ],
+    },
+    {
+        label: 'Simulations',
+        id: 'sims',
+        items: [
+            { href: 'solar-fluid.html',     label: 'Solar Fluid',         sub: 'Navier-Stokes MHD solver',      tier: 'public', icon: '🌊' },
+            { href: 'stellar-wind.html',     label: 'Stellar Wind',        sub: 'Parker spiral + wind stream',   tier: 'public', icon: '💨' },
+            { href: 'star2d.html',           label: '2D Stellar Modeler',  sub: 'HR diagram + classification',   tier: 'public', icon: '📊' },
+            { href: 'star2d-advanced.html',  label: 'Advanced 2D Solar',   sub: 'CME, Parker spirals, fluid',    tier: 'free',   icon: '🔬' },
+            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',   tier: 'free',   icon: '🕳️' },
+            { href: 'galactic-map.html',     label: 'Galactic Map',        sub: '3D Milky Way neighborhood',     tier: 'free',   icon: '🌌' },
+        ],
+    },
+    {
+        label: 'Tools',
+        id: 'tools',
+        items: [
+            { href: 'satellites.html', label: 'Satellite Tracker',  sub: 'LEO/MEO/GEO tracking + CDM',   tier: 'advanced', icon: '🛰️', badge: 'PRO' },
+            { href: 'dashboard.html',  label: 'Dashboard',          sub: 'Your space weather report',     tier: 'free',     icon: '📋' },
+            { href: 'pricing.html',    label: 'Pricing',            sub: 'Free, Intro, Advanced plans',   tier: 'public',   icon: '💰' },
+            { href: 'rust.html',       label: 'Rust/WASM Engine',   sub: 'WebAssembly compute module',    tier: 'free',     icon: '⚙️' },
+        ],
+    },
+];
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
 const AUTH_KEY = 'pp_auth';
 
 function _getAuth() {
     let auth = null;
     try { auth = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
-    if (!auth) {
-        try { auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
-    }
+    if (!auth) { try { auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {} }
     return auth?.signedIn ? auth : null;
 }
 
 function _tierLevel(plan, role) {
-    // Admins and superadmins get full access regardless of plan
     if (role === 'admin' || role === 'superadmin') return 99;
     if (plan === 'advanced') return 3;
     if (plan === 'basic' || plan === 'intro') return 2;
     if (plan === 'free') return 1;
-    return 0;  // public / not signed in
+    return 0;
 }
 
 function _tierRequired(tier) {
@@ -69,10 +83,8 @@ function _tierRequired(tier) {
     return 0;
 }
 
-/**
- * Initialize the navigation bar.
- * @param {string} activeId  ID of the currently active page (from NAV_ITEMS)
- */
+// ── Nav Builder ──────────────────────────────────────────────────────────────
+
 export function initNav(activeId = '') {
     const nav = document.querySelector('nav');
     if (!nav) return;
@@ -82,76 +94,118 @@ export function initNav(activeId = '') {
     const isSignedIn = !!auth;
     const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
 
-    // Build nav HTML
     let html = `
         <a href="index.html" class="nav-brand" aria-label="Parker Physics home">
-            <img src="${LOGO_IMG}" class="nav-logo-img" alt="${LOGO_ALT}">
+            <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
             Parker Physics
         </a>
         <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">&#9776;</button>
         <div class="nav-menu" id="nav-menu">
     `;
 
-    // Nav items
-    for (const item of NAV_ITEMS) {
-        const required = _tierRequired(item.tier);
-        const hasAccess = userTier >= required || item.tier === 'public';
-        const isActive = item.id === activeId;
+    // Home link
+    html += `<a href="index.html" class="nav-item${activeId === 'home' ? ' active' : ''}">Home</a>`;
 
-        if (!hasAccess && item.tier === 'advanced') {
-            // Show locked item with PRO badge
-            html += `<a href="pricing.html" class="nav-item nav-locked" title="Available on Advanced plan ($100/mo)">
-                ${item.label} <span class="nav-badge-pro">PRO</span>
-            </a>`;
-        } else if (!hasAccess) {
-            // Hidden for lower tiers
-            continue;
-        } else {
-            html += `<a href="${item.href}" class="nav-item${isActive ? ' active' : ''}">${item.label}`;
-            if (item.badge && hasAccess) {
-                html += ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.15);color:#0cc;border-color:rgba(0,200,200,.3)">PRO</span>`;
-            }
-            html += `</a>`;
-        }
+    // Top-level items
+    for (const item of NAV_TOP) {
+        const isActive = item.id === activeId;
+        html += `<a href="${item.href}" class="nav-item${isActive ? ' active' : ''}">${item.label}</a>`;
     }
 
-    // Spacer + auth buttons
+    // Dropdown menus
+    for (const dd of NAV_DROPDOWNS) {
+        const anyActive = dd.items.some(i => i.href.replace('.html', '') === activeId ||
+            i.label.toLowerCase().includes(activeId));
+
+        html += `<div class="nav-drop">`;
+        html += `<button class="nav-drop-btn${anyActive ? ' active' : ''}" aria-haspopup="true">${dd.label} ▾</button>`;
+        html += `<div class="nav-drop-menu">`;
+
+        for (const item of dd.items) {
+            const required = _tierRequired(item.tier);
+            const hasAccess = userTier >= required || item.tier === 'public';
+
+            if (!hasAccess && item.tier === 'advanced') {
+                // Locked — show with PRO badge, link to pricing
+                html += `<a href="pricing.html" class="nav-drop-link" style="opacity:0.5" title="Available on Advanced plan">
+                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-body">
+                        <span class="ndl-title">${item.label} <span class="nav-badge-pro">PRO</span></span>
+                        <span class="ndl-sub">${item.sub}</span>
+                    </span>
+                </a>`;
+            } else if (!hasAccess) {
+                // Hidden for lower tiers — show as locked
+                html += `<a href="signin.html" class="nav-drop-link" style="opacity:0.4" title="Sign up for free to access">
+                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-body">
+                        <span class="ndl-title">${item.label} <span style="font-size:.6rem;color:#665">Sign up</span></span>
+                        <span class="ndl-sub">${item.sub}</span>
+                    </span>
+                </a>`;
+            } else {
+                html += `<a href="${item.href}" class="nav-drop-link${item.href.replace('.html','') === activeId ? ' active' : ''}">
+                    <span class="ndl-icon">${item.icon || ''}</span>
+                    <span class="ndl-body">
+                        <span class="ndl-title">${item.label}${item.badge ? ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>` : ''}</span>
+                        <span class="ndl-sub">${item.sub}</span>
+                    </span>
+                </a>`;
+            }
+        }
+
+        html += `</div></div>`;
+    }
+
+    // Spacer + auth
     html += '<span class="nav-spacer"></span>';
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
-        html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
         if (isAdmin) {
-            html += `<span class="nav-badge-pro" style="background:rgba(255,60,60,.12);color:#f66;border-color:rgba(255,60,60,.25);margin-right:4px">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</span>`;
+            html += `<span class="nav-badge-pro" style="background:rgba(255,60,60,.12);color:#f66;border-color:rgba(255,60,60,.25);padding:3px 8px;border-radius:4px;font-size:.65rem;margin-right:4px">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</span>`;
         }
-        html += `<button class="nav-item nav-signout" id="nav-signout-btn" aria-label="Sign out">Sign Out</button>`;
+        html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
+        html += `<button class="nav-item nav-signout" id="nav-signout-btn">Sign Out</button>`;
     } else {
         html += `<a href="signin.html" class="nav-item nav-login">Sign In</a>`;
-        html += `<a href="signup.html" class="nav-item nav-signup">Sign Up</a>`;
+        html += `<a href="signup.html" class="nav-item nav-signup">Sign Up Free</a>`;
     }
 
     html += '</div>';
     nav.innerHTML = html;
 
-    // ── Burger menu toggle ────────────────────────────────────────────────
+    // ── Event handlers ────────────────────────────────────────────────────
+
+    // Burger
     const burger = document.getElementById('nav-burger');
     const menu   = document.getElementById('nav-menu');
-    if (burger && menu) {
-        burger.addEventListener('click', () => {
-            const open = menu.classList.toggle('open');
-            burger.textContent = open ? '\u2715' : '\u2630';
-            burger.setAttribute('aria-expanded', open);
-        });
-        document.addEventListener('click', e => {
-            if (!e.target.closest('nav')) {
-                menu.classList.remove('open');
-                burger.textContent = '\u2630';
-                burger.setAttribute('aria-expanded', 'false');
-            }
-        });
-    }
+    burger?.addEventListener('click', () => {
+        const open = menu.classList.toggle('open');
+        burger.textContent = open ? '\u2715' : '\u2630';
+        burger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            menu?.classList.remove('open');
+            if (burger) { burger.textContent = '\u2630'; burger.setAttribute('aria-expanded', 'false'); }
+            // Close any open dropdowns
+            nav.querySelectorAll('.nav-drop.open').forEach(d => d.classList.remove('open'));
+        }
+    });
 
-    // ── Sign out button ───────────────────────────────────────────────────
+    // Dropdown hover/click
+    nav.querySelectorAll('.nav-drop').forEach(drop => {
+        const btn = drop.querySelector('.nav-drop-btn');
+        btn?.addEventListener('click', e => {
+            e.stopPropagation();
+            // Close others
+            nav.querySelectorAll('.nav-drop.open').forEach(d => { if (d !== drop) d.classList.remove('open'); });
+            drop.classList.toggle('open');
+        });
+    });
+
+    // Sign out
     document.getElementById('nav-signout-btn')?.addEventListener('click', () => {
         try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
         try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
