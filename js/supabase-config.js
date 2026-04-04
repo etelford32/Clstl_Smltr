@@ -32,8 +32,8 @@
 // Replace these with your project's values from:
 //   Supabase Dashboard → Settings → API
 
-export const SUPABASE_URL  = 'https://osvrbwvxnbpwsmgvdmkm.supabase.co';
-export const SUPABASE_ANON_KEY = 'sb_publishable_S-AUeHUK7G-LDgOPIs3v2g_1NAbdp6r';
+export const SUPABASE_URL  = 'https://aijsboodkivnhzfstvdq.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_1cC1HAb6xTdX3ZafOM-_mg_DrftgLA5';
 
 // CDN URL for the Supabase JS client
 const SUPABASE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
