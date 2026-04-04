@@ -381,15 +381,36 @@ footer a:hover{color:var(--text)}
 </footer>
 
 <script type="module">
+import { auth } from './js/auth.js';
 import { geocodeQuery, saveUserLocation, loadUserLocation,
          clearUserLocation, auroraVisibility } from './js/user-location.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 
+// Expose auth for the inline script sections
+window._ppAuth = { auth };
+
 /* ════════════════════════════════════════════════════════════
-   AUTH GATE
+   AUTH GATE — uses auth.js for consistent session management
 ═════════════════════════════════════════════════════════════ */
+
+// Import auth module
+let _authMod = null;
+try {
+    // Auth module loaded via module script at top of page
+    _authMod = window._ppAuth?.auth ?? null;
+} catch (_) {}
+
+// Fallback: check both storage types (auth.js may use localStorage for "Remember me")
 let _auth = null;
-try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(e){}
+if (_authMod && _authMod.isSignedIn()) {
+    _auth = _authMod.getUser();
+} else {
+    // Legacy fallback — check both storages
+    try { _auth = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
+    if (!_auth) {
+        try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
+    }
+}
 
 if (!_auth || !_auth.signedIn) {
   document.getElementById('dash-nav').style.visibility = 'hidden';
@@ -412,8 +433,14 @@ if (!_auth || !_auth.signedIn) {
   badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
 
   function signOut() {
-    sessionStorage.removeItem('pp_auth');
-    window.location.href = 'index.html';
+    if (_authMod) {
+        _authMod.signOut('index.html');
+    } else {
+        // Fallback: clear both storages
+        try { localStorage.removeItem('pp_auth'); } catch(_){}
+        try { sessionStorage.removeItem('pp_auth'); } catch(_){}
+        window.location.href = 'index.html';
+    }
   }
   document.getElementById('signout-btn').addEventListener('click', signOut);
   initAll();

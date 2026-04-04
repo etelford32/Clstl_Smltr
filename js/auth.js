@@ -1,0 +1,325 @@
+/**
+ * auth.js — Client-side authentication manager (Supabase-integrated)
+ *
+ * Uses Supabase Auth when configured (real email/password auth with JWT),
+ * falls back to localStorage mock when Supabase isn't set up.
+ *
+ * ── How It Works ─────────────────────────────────────────────────────────────
+ *   Supabase mode (production):
+ *     signIn  → supabase.auth.signInWithPassword() → JWT stored by Supabase client
+ *     signUp  → supabase.auth.signUp() → user created in auth.users + user_profiles
+ *     signOut → supabase.auth.signOut() → JWT cleared
+ *     reset   → supabase.auth.resetPasswordForEmail() → real email sent
+ *     session → supabase.auth.getSession() → auto-refreshing JWT
+ *
+ *   Mock mode (development / no Supabase):
+ *     Same interface, data stored in localStorage/sessionStorage.
+ *     No real auth — any email/password combination "works".
+ *
+ * ── Usage ────────────────────────────────────────────────────────────────────
+ *   import { auth } from './js/auth.js';
+ *
+ *   if (auth.isSignedIn()) { ... }
+ *   await auth.signIn({ email, password, remember });
+ *   await auth.signUp({ email, password, name, plan });
+ *   auth.signOut();
+ *   auth.requireAuth();
+ */
+
+import { getSupabase, isConfigured } from './supabase-config.js';
+
+const AUTH_KEY = 'pp_auth';
+
+class AuthManager {
+    constructor() {
+        this._user = null;
+        this._supabase = null;
+        this._initialized = false;
+        this._initPromise = this._init();
+    }
+
+    async _init() {
+        if (isConfigured()) {
+            try {
+                this._supabase = await getSupabase();
+                const { data: { session } } = await this._supabase.auth.getSession();
+                if (session?.user) {
+                    this._user = this._mapSupabaseUser(session.user);
+                    console.info('[Auth] Supabase session restored:', this._user.email);
+                }
+
+                // Listen for auth state changes (login, logout, token refresh)
+                this._supabase.auth.onAuthStateChange((event, session) => {
+                    if (session?.user) {
+                        this._user = this._mapSupabaseUser(session.user);
+                    } else {
+                        this._user = null;
+                    }
+                    window.dispatchEvent(new CustomEvent('auth-changed', {
+                        detail: { event, user: this._user }
+                    }));
+                });
+
+                this._initialized = true;
+                console.info('[Auth] Supabase auth active');
+            } catch (err) {
+                console.warn('[Auth] Supabase init failed, using mock auth:', err.message);
+                this._loadMock();
+                this._initialized = true;
+            }
+        } else {
+            console.info('[Auth] Supabase not configured — using mock auth');
+            this._loadMock();
+            this._initialized = true;
+        }
+    }
+
+    /** Wait for initialization to complete. */
+    async ready() {
+        await this._initPromise;
+    }
+
+    /** Map Supabase user object to our app's user shape. */
+    _mapSupabaseUser(supaUser) {
+        return {
+            id: supaUser.id,
+            email: supaUser.email,
+            name: supaUser.user_metadata?.name || supaUser.email?.split('@')[0],
+            plan: supaUser.user_metadata?.plan || 'free',
+            signedIn: true,
+            provider: 'supabase',
+            ts: Date.now(),
+        };
+    }
+
+    /** Load session from localStorage/sessionStorage (mock mode). */
+    _loadMock() {
+        let raw = null;
+        try { raw = localStorage.getItem(AUTH_KEY); } catch (_) {}
+        if (!raw) {
+            try { raw = sessionStorage.getItem(AUTH_KEY); } catch (_) {}
+        }
+        if (raw) {
+            try {
+                const data = JSON.parse(raw);
+                if (data?.signedIn) this._user = data;
+            } catch (_) {}
+        }
+    }
+
+    /** Check if user is signed in. */
+    isSignedIn() {
+        return !!(this._user?.signedIn);
+    }
+
+    /** Get current user data (or null). */
+    getUser() {
+        return this._user ? { ...this._user } : null;
+    }
+
+    getDisplayName() {
+        if (!this._user) return 'Guest';
+        return this._user.name || this._user.email?.split('@')[0] || 'Explorer';
+    }
+
+    getFirstName() {
+        return this.getDisplayName().split(' ')[0];
+    }
+
+    getPlan() {
+        return (this._user?.plan || 'free').toLowerCase();
+    }
+
+    /**
+     * Sign in with email and password.
+     * @returns {{ success: boolean, error?: string }}
+     */
+    async signIn({ email, password, remember = false }) {
+        if (this._supabase) {
+            try {
+                const { data, error } = await this._supabase.auth.signInWithPassword({
+                    email,
+                    password,
+                });
+                if (error) return { success: false, error: error.message };
+                this._user = this._mapSupabaseUser(data.user);
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        // Mock mode: accept any credentials
+        const userData = {
+            email,
+            name: email.split('@')[0],
+            plan: 'free',
+            signedIn: true,
+            remember,
+            provider: 'mock',
+            ts: Date.now(),
+        };
+        this._user = userData;
+        const json = JSON.stringify(userData);
+        try {
+            if (remember) {
+                localStorage.setItem(AUTH_KEY, json);
+                sessionStorage.removeItem(AUTH_KEY);
+            } else {
+                sessionStorage.setItem(AUTH_KEY, json);
+                localStorage.removeItem(AUTH_KEY);
+            }
+        } catch (_) {}
+
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'SIGNED_IN', user: userData } }));
+        return { success: true };
+    }
+
+    /**
+     * Sign up with email, password, and profile data.
+     * @returns {{ success: boolean, error?: string, needsConfirmation?: boolean }}
+     */
+    async signUp({ email, password, name, plan = 'free' }) {
+        if (this._supabase) {
+            try {
+                const { data, error } = await this._supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: { name, plan },  // stored in user_metadata
+                    },
+                });
+                if (error) return { success: false, error: error.message };
+
+                // Check if email confirmation is required
+                if (data.user && !data.session) {
+                    return {
+                        success: true,
+                        needsConfirmation: true,
+                        message: 'Check your email for a confirmation link.',
+                    };
+                }
+
+                if (data.user) {
+                    this._user = this._mapSupabaseUser(data.user);
+                }
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        // Mock mode
+        return this.signIn({ email, password: '', remember: true });
+    }
+
+    /** Sign out — clear session and redirect. */
+    async signOut(redirectUrl = 'index.html') {
+        if (this._supabase) {
+            await this._supabase.auth.signOut();
+        }
+
+        this._user = null;
+        try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
+        try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
+
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'SIGNED_OUT', user: null } }));
+
+        if (redirectUrl) window.location.href = redirectUrl;
+    }
+
+    /** Redirect to signin if not logged in. */
+    requireAuth(redirectUrl = 'signin.html') {
+        if (!this.isSignedIn()) {
+            try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
+            window.location.href = redirectUrl;
+            return false;
+        }
+        return true;
+    }
+
+    /** Get stored post-login redirect URL. */
+    getPostLoginRedirect() {
+        try {
+            const url = sessionStorage.getItem('pp_auth_redirect');
+            sessionStorage.removeItem('pp_auth_redirect');
+            return url;
+        } catch (_) { return null; }
+    }
+
+    /**
+     * Request password reset email.
+     * @returns {{ success: boolean, message: string }}
+     */
+    async requestPasswordReset(email) {
+        if (this._supabase) {
+            try {
+                const { error } = await this._supabase.auth.resetPasswordForEmail(email, {
+                    redirectTo: `${window.location.origin}/reset-password.html`,
+                });
+                if (error) return { success: false, message: error.message };
+                return {
+                    success: true,
+                    message: `Password reset link sent to ${email}. Check your inbox.`,
+                };
+            } catch (err) {
+                return { success: false, message: err.message };
+            }
+        }
+
+        // Mock mode
+        await new Promise(r => setTimeout(r, 600));
+        return {
+            success: true,
+            message: `If an account exists for ${email}, we've sent a reset link.`,
+        };
+    }
+
+    /**
+     * Update user profile (name, plan, location, preferences).
+     * Writes to both Supabase user_profiles table and local state.
+     */
+    async updateProfile(updates) {
+        if (!this._user) return;
+        Object.assign(this._user, updates, { ts: Date.now() });
+
+        if (this._supabase) {
+            try {
+                // Update user_metadata (name, plan)
+                if (updates.name || updates.plan) {
+                    await this._supabase.auth.updateUser({
+                        data: { name: updates.name, plan: updates.plan },
+                    });
+                }
+                // Update user_profiles table (location, prefs)
+                await this._supabase.from('user_profiles').upsert({
+                    id: this._user.id,
+                    display_name: this._user.name,
+                    plan: this._user.plan,
+                    location_lat: updates.location_lat,
+                    location_lon: updates.location_lon,
+                    location_city: updates.location_city,
+                    notify_aurora: updates.notify_aurora,
+                    notify_conjunction: updates.notify_conjunction,
+                    aurora_kp_threshold: updates.aurora_kp_threshold,
+                    conjunction_threshold_km: updates.conjunction_threshold_km,
+                    updated_at: new Date().toISOString(),
+                });
+            } catch (err) {
+                console.warn('[Auth] Profile update failed:', err.message);
+            }
+        } else {
+            // Mock: store in localStorage
+            const json = JSON.stringify(this._user);
+            try {
+                if (this._user.remember) localStorage.setItem(AUTH_KEY, json);
+                else sessionStorage.setItem(AUTH_KEY, json);
+            } catch (_) {}
+        }
+
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'PROFILE_UPDATED', user: this._user } }));
+    }
+}
+
+/** Singleton auth manager instance. */
+export const auth = new AuthManager();

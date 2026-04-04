@@ -460,101 +460,272 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   </div>
 </footer>
 
-<script>
-/* ── PARKER SPIRAL HERO CANVAS ─────────────────────────────────────────── */
-(function(){
-  const canvas = document.getElementById('hero-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  let W, H, raf;
+<script type="importmap">
+{"imports":{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">
+/* ── BLACK HOLE HERO — Gravitational lensing + accretion disk ────────────── */
+/* Penrose-inspired twistor geometry: light rays curve through Kerr spacetime */
+import * as THREE from 'three';
 
-  function resize(){
-    W = canvas.width  = canvas.offsetWidth;
-    H = canvas.height = canvas.offsetHeight;
-  }
-  resize();
-  window.addEventListener('resize', resize);
+const canvas = document.getElementById('hero-canvas');
+if (canvas) {
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
 
-  // Spiral arms: angle offset, hue, alpha
-  const ARMS = [
-    { offset: 0,              hue: 200, a: 0.55 },
-    { offset: Math.PI * 0.5,  hue: 180, a: 0.35 },
-    { offset: Math.PI,        hue: 220, a: 0.45 },
-    { offset: Math.PI * 1.5,  hue: 160, a: 0.25 },
-  ];
-  const B = 0.22;   // spiral tightness
-  let t = 0;
+    const scene  = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
+    camera.position.set(0, 2.5, 6);
+    camera.lookAt(0, 0, 0);
 
-  // Particle stream along spiral arms
-  const PARTS = [];
-  const NPARTS = 55;
-  for (let i = 0; i < NPARTS; i++){
-    PARTS.push({
-      arm:    Math.floor(Math.random() * ARMS.length),
-      r:      Math.random() * 0.55 + 0.08,   // 0–1 normalised radius
-      speed:  Math.random() * 0.0008 + 0.0003,
-      size:   Math.random() * 2.2 + 0.8,
-      alpha:  Math.random() * 0.7 + 0.3,
+    // ── Black hole event horizon ──────────────────────────────────────────
+    const bhGeo = new THREE.SphereGeometry(0.5, 48, 48);
+    const bhMat = new THREE.ShaderMaterial({
+        vertexShader: `
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vNormal;
+            varying vec3 vWorldPos;
+            void main() {
+                // Pure black with faint Hawking radiation at the rim
+                float rim = 1.0 - abs(dot(normalize(cameraPosition - vWorldPos), vNormal));
+                float hawking = pow(rim, 6.0) * 0.15;
+                gl_FragColor = vec4(hawking * 0.3, hawking * 0.4, hawking * 0.8, 1.0);
+            }
+        `,
     });
-  }
+    const blackHole = new THREE.Mesh(bhGeo, bhMat);
+    scene.add(blackHole);
 
-  function draw(){
-    ctx.clearRect(0, 0, W, H);
-    const cx = W * 0.5, cy = H * 0.55;
-    const maxR = Math.hypot(cx, cy) * 0.88;
-
-    // Draw spiral arms
-    ARMS.forEach(arm => {
-      for (let i = 0; i < 180; i++){
-        const frac = i / 179;
-        const r    = frac * maxR;
-        const theta = Math.log(r / 8 + 1) / B + arm.offset + t * 0.18;
-        const x = cx + r * Math.cos(theta);
-        const y = cy + r * Math.sin(theta);
-        const alpha = arm.a * (1 - frac * 0.6);
-        ctx.beginPath();
-        ctx.arc(x, y, 1.1, 0, Math.PI * 2);
-        ctx.fillStyle = `hsla(${arm.hue},80%,65%,${alpha})`;
-        ctx.fill();
-      }
+    // ── Photon sphere glow (gravitational lensing ring) ───────────────────
+    const photonGeo = new THREE.TorusGeometry(0.78, 0.03, 16, 100);
+    const photonMat = new THREE.MeshBasicMaterial({
+        color: 0xffcc44, transparent: true, opacity: 0.6,
+        blending: THREE.AdditiveBlending, depthWrite: false,
     });
+    const photonRing = new THREE.Mesh(photonGeo, photonMat);
+    photonRing.rotation.x = Math.PI * 0.5;
+    scene.add(photonRing);
 
-    // Draw streaming particles
-    PARTS.forEach(p => {
-      p.r += p.speed;
-      if (p.r > 0.95) p.r = 0.05 + Math.random() * 0.08;
-      const arm   = ARMS[p.arm];
-      const r     = p.r * maxR;
-      const theta = Math.log(r / 8 + 1) / B + arm.offset + t * 0.18;
-      const x = cx + r * Math.cos(theta);
-      const y = cy + r * Math.sin(theta);
-      ctx.beginPath();
-      ctx.arc(x, y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${arm.hue + 20},90%,80%,${p.alpha * (0.4 + p.r * 0.6)})`;
-      ctx.fill();
+    // ── Accretion disk ────────────────────────────────────────────────────
+    const diskGeo = new THREE.RingGeometry(0.8, 3.5, 128, 3);
+    const diskMat = new THREE.ShaderMaterial({
+        vertexShader: `
+            varying vec2 vUv;
+            varying float vDist;
+            void main() {
+                vUv = uv;
+                vec4 wp = modelMatrix * vec4(position, 1.0);
+                vDist = length(wp.xz);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: `
+            uniform float u_time;
+            varying vec2 vUv;
+            varying float vDist;
+
+            float hash(vec2 p) {
+                p = fract(p * vec2(127.1, 311.7));
+                return fract(sin(dot(p, p + 19.19)) * 43758.5453);
+            }
+            float noise(vec2 p) {
+                vec2 i = floor(p), f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(mix(hash(i), hash(i + vec2(1,0)), f.x),
+                           mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
+            }
+
+            void main() {
+                // Radial distance from center
+                float r = vDist;
+                float angle = atan(vUv.y - 0.5, vUv.x - 0.5);
+
+                // Keplerian velocity: inner disk orbits faster
+                float orbSpeed = 1.0 / (r * r + 0.1);
+                float phase = angle + u_time * orbSpeed * 0.3;
+
+                // Turbulent accretion structure
+                float turb = noise(vec2(phase * 3.0, r * 8.0 + u_time * 0.2)) * 0.6
+                           + noise(vec2(phase * 7.0, r * 15.0 - u_time * 0.15)) * 0.3;
+
+                // Temperature color: hot inner (white-blue) → cool outer (orange-red)
+                float temp = 1.0 / (r * 0.8 + 0.3);
+                vec3 hot  = vec3(0.9, 0.95, 1.0);   // inner: white-blue
+                vec3 warm = vec3(1.0, 0.7, 0.2);     // mid: gold
+                vec3 cool = vec3(0.8, 0.2, 0.05);    // outer: red-orange
+                vec3 col = mix(cool, warm, smoothstep(1.5, 0.9, r));
+                col = mix(col, hot, smoothstep(1.0, 0.5, r));
+
+                // Brightness: falls off with distance, modulated by turbulence
+                float brightness = (0.5 + turb * 0.5) * temp * 0.35;
+                brightness *= smoothstep(3.5, 2.5, r);  // fade at outer edge
+                brightness *= smoothstep(0.7, 0.9, r);  // fade at inner edge (ISCO)
+
+                // Doppler beaming: one side brighter (approaching), other dimmer
+                float doppler = 0.7 + 0.3 * sin(phase * 2.0);
+                brightness *= doppler;
+
+                gl_FragColor = vec4(col * brightness, brightness * 0.85);
+            }
+        `,
+        uniforms: { u_time: { value: 0 } },
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
     });
+    const disk = new THREE.Mesh(diskGeo, diskMat);
+    disk.rotation.x = -Math.PI * 0.42;  // tilted for dramatic view
+    scene.add(disk);
 
-    // Radial glow at center
-    const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR * 0.25);
-    grd.addColorStop(0,   'hsla(50,100%,85%,0.25)');
-    grd.addColorStop(0.4, 'hsla(40,90%,60%,0.08)');
-    grd.addColorStop(1,   'transparent');
-    ctx.beginPath();
-    ctx.arc(cx, cy, maxR * 0.25, 0, Math.PI * 2);
-    ctx.fillStyle = grd;
-    ctx.fill();
+    // ── Twistor light rays (Penrose-inspired null geodesics) ──────────────
+    // Curved light paths near the black hole, showing gravitational lensing
+    const twistorGroup = new THREE.Group();
+    scene.add(twistorGroup);
 
-    t += 0.016;
-    raf = requestAnimationFrame(draw);
-  }
-  draw();
+    for (let i = 0; i < 12; i++) {
+        const pts = [];
+        const baseAngle = (i / 12) * Math.PI * 2;
+        const impactParam = 1.2 + Math.random() * 1.5;  // how close to BH
 
-  // Pause when tab hidden
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden){ cancelAnimationFrame(raf); }
-    else { draw(); }
-  });
-})();
+        for (let j = 0; j <= 80; j++) {
+            const t = j / 80;
+            // Schwarzschild-like deflection: closer rays bend more
+            const deflection = 2.0 / (impactParam * impactParam) * t * t;
+            const angle = baseAngle + deflection * Math.sign(Math.sin(baseAngle));
+            const r = impactParam + t * 4.0 - deflection * 0.8;
+            const y = (t - 0.5) * 2.0 * Math.sin(baseAngle * 0.5) * 0.3;
+            pts.push(new THREE.Vector3(
+                r * Math.cos(angle),
+                y,
+                r * Math.sin(angle)
+            ));
+        }
+
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        const hue = 0.55 + Math.random() * 0.15;  // cyan-blue range
+        const lineMat = new THREE.LineBasicMaterial({
+            color: new THREE.Color().setHSL(hue, 0.8, 0.6),
+            transparent: true, opacity: 0.12 + Math.random() * 0.08,
+            depthWrite: false,
+        });
+        twistorGroup.add(new THREE.Line(lineGeo, lineMat));
+    }
+
+    // ── Particle jets (relativistic bipolar outflow) ──────────────────────
+    const jetParticles = 200;
+    const jetPos = new Float32Array(jetParticles * 3);
+    const jetCol = new Float32Array(jetParticles * 3);
+    const jetVel = new Float32Array(jetParticles);
+
+    for (let i = 0; i < jetParticles; i++) {
+        const up = i < jetParticles / 2 ? 1 : -1;
+        jetPos[i * 3]     = (Math.random() - 0.5) * 0.15;
+        jetPos[i * 3 + 1] = up * (Math.random() * 3.0 + 0.3);
+        jetPos[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
+        jetVel[i] = 0.01 + Math.random() * 0.03;
+        const t = Math.abs(jetPos[i * 3 + 1]) / 3.5;
+        jetCol[i * 3]     = 0.3 + t * 0.5;  // blue → cyan
+        jetCol[i * 3 + 1] = 0.5 + t * 0.4;
+        jetCol[i * 3 + 2] = 1.0;
+    }
+
+    const jetGeo = new THREE.BufferGeometry();
+    jetGeo.setAttribute('position', new THREE.BufferAttribute(jetPos, 3));
+    jetGeo.setAttribute('color', new THREE.BufferAttribute(jetCol, 3));
+    const jetMat = new THREE.PointsMaterial({
+        size: 0.04, vertexColors: true, transparent: true, opacity: 0.6,
+        blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    });
+    const jets = new THREE.Points(jetGeo, jetMat);
+    scene.add(jets);
+
+    // ── Background star field ─────────────────────────────────────────────
+    const starCount = 800;
+    const starPos = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const r = 20 + Math.random() * 30;
+        starPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
+        starPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+        starPos[i * 3 + 2] = r * Math.cos(phi);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+        size: 0.08, color: 0xffffff, transparent: true, opacity: 0.7,
+        sizeAttenuation: true,
+    })));
+
+    // ── Animation loop ────────────────────────────────────────────────────
+    let t = 0;
+    let raf;
+
+    function animate() {
+        raf = requestAnimationFrame(animate);
+        t += 0.008;
+
+        // Accretion disk rotation
+        diskMat.uniforms.u_time.value = t * 2;
+
+        // Twistor light rays slowly rotate
+        twistorGroup.rotation.y = t * 0.15;
+
+        // Jet particles stream outward
+        const jp = jets.geometry.attributes.position.array;
+        for (let i = 0; i < jetParticles; i++) {
+            const up = jp[i * 3 + 1] > 0 ? 1 : -1;
+            jp[i * 3 + 1] += up * jetVel[i];
+            // Spread slightly as they go out
+            jp[i * 3]     += (Math.random() - 0.5) * 0.002;
+            jp[i * 3 + 2] += (Math.random() - 0.5) * 0.002;
+            // Respawn at center
+            if (Math.abs(jp[i * 3 + 1]) > 4.0) {
+                jp[i * 3]     = (Math.random() - 0.5) * 0.15;
+                jp[i * 3 + 1] = up * (Math.random() * 0.3);
+                jp[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
+            }
+        }
+        jets.geometry.attributes.position.needsUpdate = true;
+
+        // Gentle camera orbit
+        camera.position.x = Math.sin(t * 0.08) * 1.5;
+        camera.position.z = 6 + Math.sin(t * 0.05) * 0.5;
+        camera.lookAt(0, 0, 0);
+
+        // Photon ring pulse
+        photonRing.material.opacity = 0.4 + Math.sin(t * 3) * 0.15;
+
+        renderer.render(scene, camera);
+    }
+
+    function resize() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    }
+    new ResizeObserver(resize).observe(canvas.parentElement);
+    resize();
+    animate();
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) cancelAnimationFrame(raf);
+        else animate();
+    });
+}
+</script>
 
 /* ── MOBILE NAV BURGER ─────────────────────────────────────────────────── */
 (function(){
@@ -575,16 +746,19 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   });
 })();
 
-/* ── AUTH STATE ────────────────────────────────────────────────────────── */
+/* ── AUTH STATE (check both localStorage and sessionStorage) ─────────── */
 (function(){
-  let auth = null;
-  try { auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(e){}
+  let authData = null;
+  try { authData = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
+  if (!authData) {
+    try { authData = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
+  }
   const signinBtn  = document.getElementById('nav-signin-btn');
   const signupBtn  = document.getElementById('nav-signup-btn');
   const dashBtn    = document.getElementById('nav-dash-btn');
   const heroSignup = document.getElementById('hero-signup-btn');
 
-  if (auth && auth.signedIn){
+  if (authData && authData.signedIn){
     if (signinBtn)  signinBtn.style.display  = 'none';
     if (signupBtn)  signupBtn.style.display  = 'none';
     if (dashBtn)    dashBtn.style.display    = '';
