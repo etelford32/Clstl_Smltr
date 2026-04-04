@@ -86,10 +86,55 @@ class AuthManager {
             email: supaUser.email,
             name: supaUser.user_metadata?.name || supaUser.email?.split('@')[0],
             plan: supaUser.user_metadata?.plan || 'free',
+            role: supaUser.user_metadata?.role || 'user',
             signedIn: true,
             provider: 'supabase',
             ts: Date.now(),
         };
+    }
+
+    /** Check if current user has admin role. */
+    isAdmin() {
+        return this._user?.role === 'admin' || this._user?.role === 'superadmin';
+    }
+
+    /** Check if current user has superadmin role. */
+    isSuperAdmin() {
+        return this._user?.role === 'superadmin';
+    }
+
+    /** Get user's role. */
+    getRole() {
+        return this._user?.role || 'user';
+    }
+
+    /**
+     * Fetch the user's profile from the user_profiles table (includes role).
+     * Call after sign-in to get the server-side role (not just user_metadata).
+     */
+    async fetchProfile() {
+        if (!this._supabase || !this._user?.id) return null;
+        try {
+            const { data, error } = await this._supabase
+                .from('user_profiles')
+                .select('role, plan, display_name, location_lat, location_lon, location_city')
+                .eq('id', this._user.id)
+                .single();
+            if (error) { console.warn('[Auth] Profile fetch failed:', error.message); return null; }
+            if (data) {
+                // Merge server-side role/plan into local state
+                this._user.role = data.role || 'user';
+                this._user.plan = data.plan || this._user.plan;
+                if (data.display_name) this._user.name = data.display_name;
+                this._user.location = data.location_lat ? {
+                    lat: data.location_lat, lon: data.location_lon, city: data.location_city
+                } : null;
+            }
+            return data;
+        } catch (err) {
+            console.warn('[Auth] Profile fetch error:', err.message);
+            return null;
+        }
     }
 
     /** Load session from localStorage/sessionStorage (mock mode). */
@@ -143,6 +188,8 @@ class AuthManager {
                 });
                 if (error) return { success: false, error: error.message };
                 this._user = this._mapSupabaseUser(data.user);
+                // Fetch server-side profile (role, plan — not just user_metadata)
+                await this.fetchProfile();
                 return { success: true };
             } catch (err) {
                 return { success: false, error: err.message };

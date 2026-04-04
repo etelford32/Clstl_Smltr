@@ -220,19 +220,9 @@
 <body>
 
 <!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
-<nav>
-    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
-        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics Logo">
-        <span class="nav-brand">Parker Physics</span>
-    </a>
-    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu" role="navigation">
-        <a href="index.html" class="nav-item">Home</a>
-        <a href="pricing.html" class="nav-item">Pricing</a>
-        <a href="signin.html" class="nav-item active">Sign In</a>
-        <a href="signup.html" class="nav-item cta">Get Started</a>
-    </div>
-</nav>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("");</script>
 
 <!-- ═══════════════════════════════════════════════════════ MAIN ═══ -->
 <main class="auth-page">
