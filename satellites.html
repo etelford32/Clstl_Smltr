@@ -114,6 +114,12 @@ nav {
 .sd-stat { display:flex; justify-content:space-between; padding:2px 0; font-size:.74rem; }
 .sd-stat-k { color:#667; }
 .sd-stat-v { color:#aee; font-weight:600; font-family:monospace; }
+.sp-export-btn {
+    background:rgba(0,170,170,.08); border:1px solid rgba(0,170,170,.2);
+    border-radius:4px; color:#0aa; cursor:pointer; font-family:inherit;
+    font-size:.62rem; padding:3px 8px; transition:all .15s;
+}
+.sp-export-btn:hover { background:rgba(0,170,170,.18); color:#0ee; }
 </style>
 </head>
 <body>
@@ -194,6 +200,32 @@ nav {
             <div id="sp-conj-status" style="color:#556;font-size:.65rem">—</div>
             <div id="sp-conj-results"></div>
         </div>
+
+        <!-- PRO Analytics (shown when satellite selected) -->
+        <div class="sp-section" id="sp-analytics" style="display:none">
+            <div class="sp-label">Orbital Analytics <span style="color:#0aa;font-weight:400;letter-spacing:0">(PRO)</span></div>
+            <div class="sp-row"><span class="sp-k">SMA</span><span class="sp-v" id="sp-sma">—</span></div>
+            <div class="sp-row"><span class="sp-k">Velocity</span><span class="sp-v" id="sp-vel">—</span></div>
+            <div class="sp-row"><span class="sp-k">Revs/day</span><span class="sp-v" id="sp-revs">—</span></div>
+            <div class="sp-row"><span class="sp-k">RAAN drift</span><span class="sp-v" id="sp-raan-drift">—</span></div>
+            <div class="sp-row"><span class="sp-k">Arg.P drift</span><span class="sp-v" id="sp-argp-drift">—</span></div>
+            <div class="sp-row"><span class="sp-k">Sun-sync</span><span class="sp-v" id="sp-sunsync">—</span></div>
+            <div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.04);padding-top:6px">
+                <div style="font-size:.58rem;color:#445;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Orbit Lifetime</div>
+                <div class="sp-row"><span class="sp-k">Estimate</span><span class="sp-v" id="sp-lifetime">—</span></div>
+                <div class="sp-row"><span class="sp-k">Decay rate</span><span class="sp-v" id="sp-decay-rate">—</span></div>
+                <div class="sp-row"><span class="sp-k">Density</span><span class="sp-v" id="sp-atm-rho">—</span></div>
+            </div>
+            <div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.04);padding-top:6px">
+                <div style="font-size:.58rem;color:#445;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Pass Predictions (your location)</div>
+                <div id="sp-passes" style="font-size:.65rem;color:#667"></div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
+                <button class="sp-export-btn" id="sp-export-json" title="Export full analysis as JSON">Export JSON</button>
+                <button class="sp-export-btn" id="sp-export-csv" title="Export conjunctions as CSV">Export CSV</button>
+                <button class="sp-export-btn" id="sp-export-cdm" title="Export CDM for closest conjunction">Export CDM</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -246,6 +278,10 @@ nav {
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SatelliteTracker, isWasmLoaded } from './js/satellite-tracker.js';
+import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
+         estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV
+       } from './js/orbital-analytics.js';
+import { loadUserLocation, auroraVisibility } from './js/user-location.js';
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -385,8 +421,11 @@ async function doSearch() {
         // Draw orbit trail + ground track using tracker methods
         _drawVisuals(sat.norad_id);
 
-        // Run conjunction screening
+        // Run conjunction screening + PRO analytics
         _runConjunctionScreening(sat.norad_id, sat.name);
+
+        // PRO analytics (orbital rates, lifetime, passes)
+        _updateAnalytics(sat);
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
@@ -434,6 +473,7 @@ async function _runConjunctionScreening(noradId, name) {
 
     const t0 = performance.now();
     const conjunctions = await tracker.screenConjunctions(noradId, 72, 10, 25);
+    _lastConjunctions = conjunctions;
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
 
     const wasmActive = isWasmLoaded();
@@ -463,6 +503,150 @@ async function _runConjunctionScreening(noradId, name) {
 document.getElementById('sp-search-btn')?.addEventListener('click', doSearch);
 document.getElementById('sp-search-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') doSearch();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  PRO ORBITAL ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+
+let _lastAnalysisTle = null;
+let _lastConjunctions = [];
+let _lastPasses = [];
+
+function _updateAnalytics(tle) {
+    _lastAnalysisTle = tle;
+    const analyticsEl = document.getElementById('sp-analytics');
+    if (!analyticsEl) return;
+    analyticsEl.style.display = '';
+
+    // Orbital rates
+    const rates = orbitalRates(tle);
+    document.getElementById('sp-sma').textContent = `${rates.sma_km.toFixed(1)} km`;
+    document.getElementById('sp-vel').textContent = `${rates.velocity_kms} km/s`;
+    document.getElementById('sp-revs').textContent = rates.revs_per_day;
+    document.getElementById('sp-raan-drift').textContent = `${rates.raanDot_deg} °/day`;
+    document.getElementById('sp-argp-drift').textContent = `${rates.argpDot_deg} °/day`;
+    document.getElementById('sp-sunsync').textContent = rates.isSunSync ? 'Yes' : 'No';
+
+    // Lifetime
+    const life = estimateOrbitLifetime(tle);
+    document.getElementById('sp-lifetime').textContent = life.lifetime_str;
+    document.getElementById('sp-decay-rate').textContent = `${life.decay_rate_km_day} km/day`;
+    document.getElementById('sp-atm-rho').textContent = life.atm_density_kg_m3.toExponential(2) + ' kg/m³';
+
+    // Pass predictions (if user has location set)
+    const loc = loadUserLocation();
+    const passesEl = document.getElementById('sp-passes');
+    if (loc && passesEl) {
+        // Use JS fallback for pass prediction (no async needed)
+        const jsFn = (t, tsince) => {
+            // Inline propagate using the fallback
+            const n0 = t.mean_motion * TWOPI / MIN_PER_DAY;
+            const e0 = t.eccentricity;
+            const i0 = t.inclination * DEG2RAD;
+            const raan0 = t.raan * DEG2RAD;
+            const argp0 = t.arg_perigee * DEG2RAD;
+            const M0 = t.mean_anomaly * DEG2RAD;
+            const cosI = Math.cos(i0);
+            const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1/3);
+            const p = a * (1 - e0 * e0);
+            const J2v = 0.001082616;
+            const n_c = n0 * (1 + 1.5 * J2v * (6378.135/p)**2 * (1 - 1.5*(1-cosI*cosI)));
+            const rdot = -1.5 * J2v * (6378.135/p)**2 * n0 * cosI;
+            const adot = 0.75 * J2v * (6378.135/p)**2 * n0 * (5*cosI*cosI - 1);
+            const M = M0 + n_c * tsince;
+            const raan = raan0 + rdot * tsince;
+            const argp = argp0 + adot * tsince;
+            let E = M;
+            for (let k = 0; k < 8; k++) E -= (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
+            const nu = Math.atan2(Math.sqrt(1-e0*e0)*Math.sin(E), Math.cos(E)-e0);
+            const r = a * (1 - e0*Math.cos(E));
+            const u = argp + nu;
+            const cU = Math.cos(u), sU = Math.sin(u);
+            const cR = Math.cos(raan), sR = Math.sin(raan);
+            const cI = Math.cos(i0), sI = Math.sin(i0);
+            return { x: r*(cR*cU - sR*sU*cI), y: r*(sR*cU + cR*sU*cI), z: r*sU*sI };
+        };
+
+        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, jsFn);
+        _lastPasses = passes;
+        if (passes.length === 0) {
+            passesEl.textContent = `No passes above 10° in next 24h from ${loc.city || 'your location'}`;
+        } else {
+            passesEl.innerHTML = passes.slice(0, 5).map(p => {
+                const rise = new Date(p.rise_utc);
+                const time = rise.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return `<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)">`
+                    + `<span style="color:#0cc">${time}</span>`
+                    + ` — ${p.duration_min} min, max elev ${p.max_elev_deg}°</div>`;
+            }).join('');
+        }
+    } else if (passesEl) {
+        passesEl.innerHTML = '<span style="color:#445">Set location on dashboard for pass predictions</span>';
+    }
+
+    console.info(`[Analytics] ${tle.name}: SMA=${rates.sma_km.toFixed(0)}km, `
+        + `lifetime=${life.lifetime_str}, RAAN=${rates.raanDot_deg}°/day`);
+}
+
+// Hook analytics into search — call after conjunction screening
+const _origRunConj = _runConjunctionScreening;
+async function _runConjunctionWithAnalytics(noradId, name) {
+    await _origRunConj(noradId, name);
+
+    // Get the TLE for analytics
+    const sat = tracker.getSatellite(noradId);
+    if (sat?.tle) {
+        _updateAnalytics(sat.tle);
+    }
+}
+// Replace the conjunction function reference
+window._runConjAndAnalytics = _runConjunctionWithAnalytics;
+
+// ── Export handlers ──────────────────────────────────────────────────────────
+
+document.getElementById('sp-export-json')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle) return;
+    const report = buildAnalysisReport(_lastAnalysisTle, _lastConjunctions, _lastPasses, loadUserLocation());
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `orbital-analysis-${_lastAnalysisTle.norad_id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('sp-export-csv')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle) return;
+    const csv = conjunctionsToCSV(_lastConjunctions, _lastAnalysisTle.name, _lastAnalysisTle.norad_id);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conjunctions-${_lastAnalysisTle.norad_id}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('sp-export-cdm')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle || _lastConjunctions.length === 0) {
+        alert('No conjunctions to export. Run a conjunction screening first.');
+        return;
+    }
+    const closest = _lastConjunctions[0];
+    const cdm = generateCDM(
+        { name: _lastAnalysisTle.name, norad_id: _lastAnalysisTle.norad_id },
+        { name: closest.name, norad_id: closest.norad_id },
+        closest
+    );
+    const blob = new Blob([JSON.stringify(cdm, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CDM-${_lastAnalysisTle.norad_id}-${closest.norad_id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
 });
 
 // ═══════════════════════════════════════════════════════════════
