@@ -547,24 +547,14 @@ if (canvas) {
     // ── ISCO ring (Innermost Stable Circular Orbit) ───────────────────────
     // For Kerr a=0.9 prograde: r_ISCO ≈ 2.32M
     const iscoR = BH_RADIUS * 2.32;
-    const iscoMat = new THREE.ShaderMaterial({
-        vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-        fragmentShader: `
-            uniform float u_time; varying vec2 vUv;
-            void main(){
-                float r = length(vUv - 0.5) * 2.0;
-                float ring = smoothstep(0.4, 0.48, r) * (1.0 - smoothstep(0.52, 0.6, r));
-                float pulse = 0.7 + 0.3 * sin(u_time * 5.0 + r * 20.0);
-                vec3 col = vec3(1.0, 0.85, 0.4) * ring * pulse * 1.5;
-                gl_FragColor = vec4(col, ring * 0.8);
-            }`,
-        uniforms: { u_time: { value: 0 } },
-        transparent: true, depthWrite: false, side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
+    const iscoGeo = new THREE.TorusGeometry(iscoR, 0.025, 12, 120);
+    const iscoMat = new THREE.MeshBasicMaterial({
+        color: 0xffdd66, transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending, depthWrite: false,
     });
-    const iscoPlane = new THREE.Mesh(new THREE.PlaneGeometry(iscoR * 2.4, iscoR * 2.4), iscoMat);
-    iscoPlane.rotation.x = -Math.PI * 0.42;
-    scene.add(iscoPlane);
+    const iscoRing = new THREE.Mesh(iscoGeo, iscoMat);
+    iscoRing.rotation.x = -Math.PI * 0.42 + Math.PI / 2;
+    scene.add(iscoRing);
 
     // ── Photon sphere (r = 1.5 r_s for Schwarzschild) ────────────────────
     for (let i = 0; i < 3; i++) {
@@ -667,11 +657,17 @@ if (canvas) {
     scene.add(disk);
 
     // Second thin disk layer (back side visible through lensing)
-    const disk2 = disk.clone();
-    disk2.material = diskMat.clone();
-    disk2.rotation.x = -Math.PI * 0.42 + Math.PI;  // flipped
-    disk2.material.uniforms.u_time = diskMat.uniforms.u_time;  // share time
-    disk2.scale.set(0.95, 0.95, 0.95);
+    const disk2Geo = new THREE.RingGeometry(BH_RADIUS * 2.8, BH_RADIUS * 8.0, 200, 6);
+    const disk2Mat = new THREE.ShaderMaterial({
+        vertexShader: diskMat.vertexShader,
+        fragmentShader: diskMat.fragmentShader,
+        uniforms: { u_time: diskMat.uniforms.u_time },   // share the SAME uniform object
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+    });
+    const disk2 = new THREE.Mesh(disk2Geo, disk2Mat);
+    disk2.rotation.x = -Math.PI * 0.42 + Math.PI;  // flipped — visible "behind" the BH
+    disk2.scale.set(0.9, 0.9, 0.9);
     scene.add(disk2);
 
     // ── Twistor null geodesics (Penrose) ──────────────────────────────────
@@ -797,6 +793,15 @@ if (canvas) {
     });
     scene.add(new THREE.Mesh(coronaGeo, coronaMat));
 
+    // ── Mouse interaction ────────────────────────────────────────────────
+    let mouseX = 0, mouseY = 0;
+    canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        mouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+        mouseY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+    });
+    canvas.addEventListener('mouseleave', () => { mouseX = 0; mouseY = 0; });
+
     // ── Animation ─────────────────────────────────────────────────────────
     let t = 0, raf;
 
@@ -806,25 +811,34 @@ if (canvas) {
 
         bhMat.uniforms.u_time.value = t;
         diskMat.uniforms.u_time.value = t * 1.5;
-        iscoMat.uniforms.u_time.value = t;
+
+        // ISCO ring pulses
+        iscoMat.opacity = 0.5 + Math.sin(t * 5) * 0.2;
 
         // Twistors: fade in/out in waves (light pulses along null geodesics)
         for (const td of twistorData) {
-            const wave = Math.sin(t * td.speed + td.phase);
-            td.line.material.opacity = Math.max(0, wave * 0.18);
+            const wave = Math.sin(t * td.speed * 2.0 + td.phase);
+            td.line.material.opacity = Math.max(0, wave * 0.22 + 0.04);
         }
-        twistorGroup.rotation.y = t * 0.06;
+        twistorGroup.rotation.y = t * 0.08;
+        twistorGroup.rotation.z = Math.sin(t * 0.03) * 0.05;
 
         // Jets: stream outward with magnetic confinement spiral
         const jp = jets.geometry.attributes.position.array;
+        const jc = jets.geometry.attributes.color.array;
         for (let i = 0; i < JET_N; i++) {
             const up = jp[i*3+1] > 0 ? 1 : -1;
             jp[i*3+1] += up * jetVel[i];
             // Helical magnetic field confinement
             const angle = t * 3.0 + jp[i*3+1] * 2.0;
-            const spiralR = 0.04 * Math.abs(jp[i*3+1]);
-            jp[i*3]   += (Math.cos(angle) * spiralR - jp[i*3]) * 0.02;
-            jp[i*3+2] += (Math.sin(angle) * spiralR - jp[i*3+2]) * 0.02;
+            const spiralR = 0.05 * Math.abs(jp[i*3+1]);
+            jp[i*3]   += (Math.cos(angle) * spiralR - jp[i*3]) * 0.03;
+            jp[i*3+2] += (Math.sin(angle) * spiralR - jp[i*3+2]) * 0.03;
+            // Update colors based on height (fade with distance)
+            const h = Math.min(1, Math.abs(jp[i*3+1]) / 5.5);
+            jc[i*3]   = 0.15 + h * 0.65;
+            jc[i*3+1] = 0.3 + h * 0.6;
+            jc[i*3+2] = 0.9 + h * 0.1;
             if (Math.abs(jp[i*3+1]) > 6.0) {
                 jp[i*3]   = (Math.random()-0.5) * 0.08;
                 jp[i*3+1] = up * Math.random() * 0.2;
@@ -832,13 +846,25 @@ if (canvas) {
             }
         }
         jets.geometry.attributes.position.needsUpdate = true;
+        jets.geometry.attributes.color.needsUpdate = true;
 
-        // Camera: slow cinematic orbit
+        // Camera: cinematic orbit with mouse parallax
         const camAngle = t * 0.04;
-        camera.position.x = Math.sin(camAngle) * 2.0;
-        camera.position.y = 2.8 + Math.sin(t * 0.03) * 0.3;
-        camera.position.z = 7.0 + Math.cos(camAngle) * 1.0;
-        camera.lookAt(0, -0.2, 0);
+        const baseCamX = Math.sin(camAngle) * 2.5;
+        const baseCamY = 3.0 + Math.sin(t * 0.025) * 0.4;
+        const baseCamZ = 7.5 + Math.cos(camAngle) * 1.2;
+        // Mouse parallax: subtle camera displacement following cursor
+        camera.position.x = baseCamX + mouseX * 0.8;
+        camera.position.y = baseCamY - mouseY * 0.5;
+        camera.position.z = baseCamZ;
+        camera.lookAt(mouseX * 0.15, -0.2 + mouseY * 0.1, 0);
+
+        // Photon sphere rings slowly precess
+        scene.children.forEach(child => {
+            if (child.geometry?.type === 'TorusGeometry' && child !== iscoRing) {
+                child.rotation.z = t * 0.02 + (child.rotation.x - Math.PI/2) * 3;
+            }
+        });
 
         composer.render();
     }
