@@ -53,7 +53,9 @@ function _getAuth() {
     return auth?.signedIn ? auth : null;
 }
 
-function _tierLevel(plan) {
+function _tierLevel(plan, role) {
+    // Admins and superadmins get full access regardless of plan
+    if (role === 'admin' || role === 'superadmin') return 99;
     if (plan === 'advanced') return 3;
     if (plan === 'basic' || plan === 'intro') return 2;
     if (plan === 'free') return 1;
@@ -76,8 +78,9 @@ export function initNav(activeId = '') {
     if (!nav) return;
 
     const auth = _getAuth();
-    const userTier = _tierLevel(auth?.plan);
+    const userTier = _tierLevel(auth?.plan, auth?.role);
     const isSignedIn = !!auth;
+    const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
 
     // Build nav HTML
     let html = `
@@ -118,6 +121,9 @@ export function initNav(activeId = '') {
 
     if (isSignedIn) {
         html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
+        if (isAdmin) {
+            html += `<span class="nav-badge-pro" style="background:rgba(255,60,60,.12);color:#f66;border-color:rgba(255,60,60,.25);margin-right:4px">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</span>`;
+        }
         html += `<button class="nav-item nav-signout" id="nav-signout-btn" aria-label="Sign out">Sign Out</button>`;
     } else {
         html += `<a href="signin.html" class="nav-item nav-login">Sign In</a>`;
