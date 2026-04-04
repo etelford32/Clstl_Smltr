@@ -114,8 +114,10 @@ export function initNav(activeId = '') {
 
     // Dropdown menus
     for (const dd of NAV_DROPDOWNS) {
-        const anyActive = dd.items.some(i => i.href.replace('.html', '') === activeId ||
-            i.label.toLowerCase().includes(activeId));
+        const anyActive = dd.items.some(i => {
+            const hrefId = i.href.replace('.html', '');
+            return hrefId === activeId || hrefId.startsWith(activeId) || activeId.startsWith(hrefId);
+        });
 
         html += `<div class="nav-drop">`;
         html += `<button class="nav-drop-btn${anyActive ? ' active' : ''}" aria-haspopup="true">${dd.label} ▾</button>`;
@@ -144,7 +146,9 @@ export function initNav(activeId = '') {
                     </span>
                 </a>`;
             } else {
-                html += `<a href="${item.href}" class="nav-drop-link${item.href.replace('.html','') === activeId ? ' active' : ''}">
+                const _hid = item.href.replace('.html','');
+                const _isAct = _hid === activeId || _hid.startsWith(activeId) || activeId.startsWith(_hid);
+                html += `<a href="${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
                         <span class="ndl-title">${item.label}${item.badge ? ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>` : ''}</span>
