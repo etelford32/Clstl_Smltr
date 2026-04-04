@@ -63,6 +63,12 @@ async function _loadWasmSgp4() {
 // Try to load WASM immediately (non-blocking)
 _loadWasmSgp4();
 
+/** Check if WASM SGP4 is loaded. */
+export function isWasmLoaded() { return _wasmSgp4 !== null; }
+
+/** Get the WASM module (or null). */
+export function getWasmSgp4() { return _wasmSgp4; }
+
 /** Propagate using WASM if available, else JS fallback. */
 function propagate(tle, tsince_min) {
     if (_wasmSgp4 && tle.line1 && tle.line2) {
@@ -324,8 +330,205 @@ export class SatelliteTracker {
         }));
     }
 
+    /** Get a single satellite by NORAD ID. */
+    getSatellite(noradId) {
+        const s = this._satellites.find(s => s.tle.norad_id === noradId);
+        if (!s) return null;
+        return {
+            name: s.tle.name, norad_id: s.tle.norad_id,
+            lat: s.lat, lon: s.lon, alt: s.alt,
+            period_min: s.tle.period_min, inclination: s.tle.inclination,
+            tle: s.tle,
+        };
+    }
+
     /** Set visibility. */
     setVisible(v) { this._group.visible = v; }
+
+    /**
+     * Compute ground track for a satellite (one full orbit).
+     * Returns array of { lat, lon, alt } at N equally-spaced time steps.
+     * @param {number} noradId  NORAD ID of the satellite
+     * @param {number} [steps=360]  Number of points along the orbit
+     * @returns {Array<{lat:number, lon:number, alt:number}>|null}
+     */
+    computeGroundTrack(noradId, steps = 360) {
+        const sat = this._satellites.find(s => s.tle.norad_id === noradId);
+        if (!sat) return null;
+
+        const periodMin = sat.tle.period_min || 90;
+        const jd = Date.now() / 86400000 + 2440587.5;
+        const tsinceBase = (jd - sat.epochJd) * MIN_PER_DAY;
+        const track = [];
+
+        for (let i = 0; i <= steps; i++) {
+            const tsince = tsinceBase + (i / steps) * periodMin;
+            const teme = propagate(sat.tle, tsince);
+            const jdStep = jd + (i / steps) * periodMin / MIN_PER_DAY;
+            const ecef = temeToEcef(teme.x, teme.y, teme.z, jdStep);
+            const lla = ecefToLatLonAlt(ecef.x, ecef.y, ecef.z);
+            track.push(lla);
+        }
+        return track;
+    }
+
+    /**
+     * Build a Three.js line for the ground track projected onto the globe surface.
+     * @param {number} noradId
+     * @param {number} [heightOffset=0.002] Extra height above the globe surface
+     * @returns {THREE.Line|null}
+     */
+    buildGroundTrackLine(noradId, heightOffset = 0.002) {
+        const track = this.computeGroundTrack(noradId, 360);
+        if (!track) return null;
+
+        const points = [];
+        let prevLon = null;
+        for (const pt of track) {
+            // Detect antimeridian crossing — break the line to avoid wraparound artifact
+            if (prevLon !== null && Math.abs(pt.lon - prevLon) > 180) {
+                // Insert NaN to break the line (Three.js Line will gap here)
+                points.push(new THREE.Vector3(NaN, NaN, NaN));
+            }
+            prevLon = pt.lon;
+
+            const r = this._earthR + heightOffset;  // on the surface
+            const latR = pt.lat * DEG2RAD;
+            const lonR = pt.lon * DEG2RAD;
+            points.push(new THREE.Vector3(
+                r * Math.cos(latR) * Math.cos(lonR),
+                r * Math.sin(latR),
+                r * Math.cos(latR) * Math.sin(lonR)
+            ));
+        }
+
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({
+            color: 0xffcc00, transparent: true, opacity: 0.5, depthWrite: false,
+        });
+        return new THREE.Line(geo, mat);
+    }
+
+    /**
+     * Build a Three.js line for the orbital path (above the surface, at altitude).
+     * @param {number} noradId
+     * @returns {THREE.Line|null}
+     */
+    buildOrbitLine(noradId) {
+        const track = this.computeGroundTrack(noradId, 360);
+        if (!track) return null;
+
+        const points = [];
+        for (const pt of track) {
+            const r = this._earthR * (1 + pt.alt / RE_KM);
+            const latR = pt.lat * DEG2RAD;
+            const lonR = pt.lon * DEG2RAD;
+            points.push(new THREE.Vector3(
+                r * Math.cos(latR) * Math.cos(lonR),
+                r * Math.sin(latR),
+                r * Math.cos(latR) * Math.sin(lonR)
+            ));
+        }
+
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({
+            color: 0x00ffcc, transparent: true, opacity: 0.35, depthWrite: false,
+        });
+        return new THREE.Line(geo, mat);
+    }
+
+    /**
+     * Conjunction screening: find close approaches between a target satellite
+     * and all loaded catalog objects over the next N hours.
+     *
+     * Uses WASM batch propagation when available for ~100× speed.
+     *
+     * @param {number} targetNoradId   NORAD ID of the target satellite
+     * @param {number} [hoursAhead=72] Look-ahead window
+     * @param {number} [stepMin=10]    Time step in minutes
+     * @param {number} [thresholdKm=25] Distance threshold
+     * @returns {Array<{name, norad_id, dist_km, hours_ahead, tca_jd}>}
+     */
+    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25) {
+        const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
+        if (!target) return [];
+
+        const nSteps = Math.ceil(hoursAhead * 60 / stepMin);
+        const jd = Date.now() / 86400000 + 2440587.5;
+        const tsinceBase = (jd - target.epochJd) * MIN_PER_DAY;
+
+        // Generate time array
+        const times = new Float64Array(nSteps);
+        for (let i = 0; i < nSteps; i++) {
+            times[i] = tsinceBase + i * stepMin;
+        }
+
+        // Propagate target at all time steps
+        let targetPositions;  // Array of {x, y, z} per step
+
+        if (_wasmSgp4 && target.tle.line1 && target.tle.line2) {
+            try {
+                const result = _wasmSgp4.propagate_batch(target.tle.line1, target.tle.line2, times);
+                targetPositions = [];
+                for (let i = 0; i < nSteps; i++) {
+                    const off = i * 6;
+                    targetPositions.push({ x: result[off], y: result[off + 1], z: result[off + 2] });
+                }
+                console.debug(`[Conjunction] Target propagated via WASM: ${nSteps} steps`);
+            } catch (_) {
+                targetPositions = null;  // fall through to JS
+            }
+        }
+
+        if (!targetPositions) {
+            // JS fallback — propagate one step at a time
+            targetPositions = times.map(t => propagate(target.tle, t));
+            console.debug(`[Conjunction] Target propagated via JS fallback: ${nSteps} steps`);
+        }
+
+        // Screen all catalog objects
+        const conjunctions = [];
+        const targetAltAvg = (target.tle.perigee_km + target.tle.apogee_km) / 2;
+
+        for (const cat of this._satellites) {
+            if (cat.tle.norad_id === targetNoradId) continue;
+
+            // Pre-filter: skip if altitude difference > 200 km
+            const catAltAvg = (cat.tle.perigee_km + cat.tle.apogee_km) / 2;
+            if (Math.abs(catAltAvg - targetAltAvg) > 200) continue;
+
+            // Propagate catalog object at each step
+            const catTsinceBase = (jd - cat.epochJd) * MIN_PER_DAY;
+
+            for (let i = 0; i < nSteps; i++) {
+                const tgt = targetPositions[i];
+                if (!isFinite(tgt.x)) continue;
+
+                const catTsince = catTsinceBase + i * stepMin;
+                const catPos = propagate(cat.tle, catTsince);
+                if (!isFinite(catPos.x)) continue;
+
+                const dx = tgt.x - catPos.x;
+                const dy = tgt.y - catPos.y;
+                const dz = tgt.z - catPos.z;
+                const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+                if (dist < thresholdKm) {
+                    conjunctions.push({
+                        name: cat.tle.name,
+                        norad_id: cat.tle.norad_id,
+                        dist_km: Math.round(dist * 10) / 10,
+                        hours_ahead: Math.round(i * stepMin / 60 * 10) / 10,
+                        tca_jd: jd + i * stepMin / MIN_PER_DAY,
+                    });
+                    break;  // one conjunction per object (closest approach)
+                }
+            }
+        }
+
+        conjunctions.sort((a, b) => a.dist_km - b.dist_km);
+        return conjunctions;
+    }
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
