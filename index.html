@@ -467,252 +467,386 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 }}
 </script>
 <script type="module">
-/* ── BLACK HOLE HERO — Gravitational lensing + accretion disk ────────────── */
-/* Penrose-inspired twistor geometry: light rays curve through Kerr spacetime */
+/* ════════════════════════════════════════════════════════════════════════════
+   BLACK HOLE HERO — Kerr spacetime visualization
+   ════════════════════════════════════════════════════════════════════════════
+   Full-screen shader-based black hole with:
+     • Gravitational lensing of background starfield (Einstein ring)
+     • Multi-layered accretion disk with Keplerian shear + MHD turbulence
+     • Kerr metric frame-dragging (spin parameter a = 0.9)
+     • Relativistic Doppler beaming + gravitational redshift
+     • Penrose twistor null geodesics (animated light ray bundles)
+     • Bipolar relativistic jets with magnetic confinement
+     • Innermost Stable Circular Orbit (ISCO) glow
+     • Hawking radiation rim emission
+
+   Physics references:
+     Kerr (1963) Phys. Rev. Lett. 11 — rotating black hole metric
+     Penrose (1967) J. Math. Phys. 8 — twistor theory foundation
+     Luminet (1979) A&A 75 — first image of a black hole accretion disk
+     Thorne (2014) "The Science of Interstellar" — visualisation approach
+   ════════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 const canvas = document.getElementById('hero-canvas');
 if (canvas) {
+    // ── Renderer + post-processing ────────────────────────────────────────
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 0);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
 
     const scene  = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clientHeight, 0.1, 100);
-    camera.position.set(0, 2.5, 6);
+    const camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.1, 200);
+    camera.position.set(0, 3.0, 7);
     camera.lookAt(0, 0, 0);
 
-    // ── Black hole event horizon ──────────────────────────────────────────
-    const bhGeo = new THREE.SphereGeometry(0.5, 48, 48);
+    // Bloom for the glow effects
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloom = new UnrealBloomPass(
+        new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
+        0.8,   // strength
+        0.4,   // radius
+        0.85   // threshold
+    );
+    composer.addPass(bloom);
+
+    // ── Event horizon (Kerr, spin a=0.9) ──────────────────────────────────
+    // r+ = M + sqrt(M² - a²) ≈ 1.436M for a=0.9M
+    const BH_RADIUS = 0.5;
     const bhMat = new THREE.ShaderMaterial({
         vertexShader: `
-            varying vec3 vNormal;
-            varying vec3 vWorldPos;
+            varying vec3 vNormal; varying vec3 vViewDir;
             void main() {
                 vNormal = normalize(normalMatrix * normal);
-                vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-        fragmentShader: `
-            varying vec3 vNormal;
-            varying vec3 vWorldPos;
-            void main() {
-                // Pure black with faint Hawking radiation at the rim
-                float rim = 1.0 - abs(dot(normalize(cameraPosition - vWorldPos), vNormal));
-                float hawking = pow(rim, 6.0) * 0.15;
-                gl_FragColor = vec4(hawking * 0.3, hawking * 0.4, hawking * 0.8, 1.0);
-            }
-        `,
-    });
-    const blackHole = new THREE.Mesh(bhGeo, bhMat);
-    scene.add(blackHole);
-
-    // ── Photon sphere glow (gravitational lensing ring) ───────────────────
-    const photonGeo = new THREE.TorusGeometry(0.78, 0.03, 16, 100);
-    const photonMat = new THREE.MeshBasicMaterial({
-        color: 0xffcc44, transparent: true, opacity: 0.6,
-        blending: THREE.AdditiveBlending, depthWrite: false,
-    });
-    const photonRing = new THREE.Mesh(photonGeo, photonMat);
-    photonRing.rotation.x = Math.PI * 0.5;
-    scene.add(photonRing);
-
-    // ── Accretion disk ────────────────────────────────────────────────────
-    const diskGeo = new THREE.RingGeometry(0.8, 3.5, 128, 3);
-    const diskMat = new THREE.ShaderMaterial({
-        vertexShader: `
-            varying vec2 vUv;
-            varying float vDist;
-            void main() {
-                vUv = uv;
                 vec4 wp = modelMatrix * vec4(position, 1.0);
-                vDist = length(wp.xz);
+                vViewDir = normalize(cameraPosition - wp.xyz);
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
+            }`,
         fragmentShader: `
             uniform float u_time;
-            varying vec2 vUv;
-            varying float vDist;
-
-            float hash(vec2 p) {
-                p = fract(p * vec2(127.1, 311.7));
-                return fract(sin(dot(p, p + 19.19)) * 43758.5453);
-            }
-            float noise(vec2 p) {
-                vec2 i = floor(p), f = fract(p);
-                f = f * f * (3.0 - 2.0 * f);
-                return mix(mix(hash(i), hash(i + vec2(1,0)), f.x),
-                           mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
-            }
-
+            varying vec3 vNormal; varying vec3 vViewDir;
             void main() {
-                // Radial distance from center
-                float r = vDist;
-                float angle = atan(vUv.y - 0.5, vUv.x - 0.5);
+                float rim = 1.0 - abs(dot(vViewDir, vNormal));
+                // Hawking radiation: faint quantum glow at the horizon rim
+                float hawking = pow(rim, 8.0) * 0.3;
+                // Frame-dragging ergosphere shimmer (Kerr a=0.9)
+                float ergo = pow(rim, 4.0) * 0.06 * (0.8 + 0.2 * sin(u_time * 4.0 + vNormal.y * 8.0));
+                vec3 col = vec3(0.15, 0.2, 0.6) * hawking + vec3(0.5, 0.3, 0.1) * ergo;
+                gl_FragColor = vec4(col, 1.0);
+            }`,
+        uniforms: { u_time: { value: 0 } },
+    });
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(BH_RADIUS, 64, 64), bhMat));
 
-                // Keplerian velocity: inner disk orbits faster
-                float orbSpeed = 1.0 / (r * r + 0.1);
-                float phase = angle + u_time * orbSpeed * 0.3;
+    // ── ISCO ring (Innermost Stable Circular Orbit) ───────────────────────
+    // For Kerr a=0.9 prograde: r_ISCO ≈ 2.32M
+    const iscoR = BH_RADIUS * 2.32;
+    const iscoMat = new THREE.ShaderMaterial({
+        vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+        fragmentShader: `
+            uniform float u_time; varying vec2 vUv;
+            void main(){
+                float r = length(vUv - 0.5) * 2.0;
+                float ring = smoothstep(0.4, 0.48, r) * (1.0 - smoothstep(0.52, 0.6, r));
+                float pulse = 0.7 + 0.3 * sin(u_time * 5.0 + r * 20.0);
+                vec3 col = vec3(1.0, 0.85, 0.4) * ring * pulse * 1.5;
+                gl_FragColor = vec4(col, ring * 0.8);
+            }`,
+        uniforms: { u_time: { value: 0 } },
+        transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+    });
+    const iscoPlane = new THREE.Mesh(new THREE.PlaneGeometry(iscoR * 2.4, iscoR * 2.4), iscoMat);
+    iscoPlane.rotation.x = -Math.PI * 0.42;
+    scene.add(iscoPlane);
 
-                // Turbulent accretion structure
-                float turb = noise(vec2(phase * 3.0, r * 8.0 + u_time * 0.2)) * 0.6
-                           + noise(vec2(phase * 7.0, r * 15.0 - u_time * 0.15)) * 0.3;
+    // ── Photon sphere (r = 1.5 r_s for Schwarzschild) ────────────────────
+    for (let i = 0; i < 3; i++) {
+        const pr = BH_RADIUS * (1.5 + i * 0.08);
+        const geo = new THREE.TorusGeometry(pr, 0.012 + i * 0.005, 12, 120);
+        const mat = new THREE.MeshBasicMaterial({
+            color: new THREE.Color().setHSL(0.12 - i * 0.03, 0.9, 0.7),
+            transparent: true, opacity: 0.5 - i * 0.12,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const ring = new THREE.Mesh(geo, mat);
+        ring.rotation.x = Math.PI / 2 + i * 0.04;
+        scene.add(ring);
+    }
 
-                // Temperature color: hot inner (white-blue) → cool outer (orange-red)
-                float temp = 1.0 / (r * 0.8 + 0.3);
-                vec3 hot  = vec3(0.9, 0.95, 1.0);   // inner: white-blue
-                vec3 warm = vec3(1.0, 0.7, 0.2);     // mid: gold
-                vec3 cool = vec3(0.8, 0.2, 0.05);    // outer: red-orange
-                vec3 col = mix(cool, warm, smoothstep(1.5, 0.9, r));
-                col = mix(col, hot, smoothstep(1.0, 0.5, r));
+    // ── Accretion disk — multi-layer shader ──────────────────────────────
+    const diskGeo = new THREE.RingGeometry(BH_RADIUS * 2.5, BH_RADIUS * 9.0, 256, 8);
+    const diskMat = new THREE.ShaderMaterial({
+        vertexShader: `
+            varying vec2 vUv; varying vec3 vWorldPos;
+            void main(){
+                vUv = uv;
+                vWorldPos = (modelMatrix * vec4(position,1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+            }`,
+        fragmentShader: `
+            uniform float u_time;
+            varying vec2 vUv; varying vec3 vWorldPos;
 
-                // Brightness: falls off with distance, modulated by turbulence
-                float brightness = (0.5 + turb * 0.5) * temp * 0.35;
-                brightness *= smoothstep(3.5, 2.5, r);  // fade at outer edge
-                brightness *= smoothstep(0.7, 0.9, r);  // fade at inner edge (ISCO)
-
-                // Doppler beaming: one side brighter (approaching), other dimmer
-                float doppler = 0.7 + 0.3 * sin(phase * 2.0);
-                brightness *= doppler;
-
-                gl_FragColor = vec4(col * brightness, brightness * 0.85);
+            // ── Noise functions ───────────────────────────────────────────
+            float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+            float noise(vec2 p){
+                vec2 i=floor(p), f=fract(p);
+                f = f*f*(3.0-2.0*f);
+                return mix(mix(hash(i), hash(i+vec2(1,0)), f.x),
+                           mix(hash(i+vec2(0,1)), hash(i+vec2(1,1)), f.x), f.y);
             }
-        `,
+            float fbm(vec2 p){
+                float v=0.0, a=0.5;
+                for(int i=0; i<5; i++){ v+=a*noise(p); p*=2.1; a*=0.45; }
+                return v;
+            }
+
+            void main(){
+                float r = length(vWorldPos.xz);
+                float angle = atan(vWorldPos.z, vWorldPos.x);
+
+                // Keplerian angular velocity: ω ∝ r^(-3/2)
+                float omega = pow(r + 0.5, -1.5);
+                float phase = angle + u_time * omega * 1.5;
+
+                // MHD turbulence: multi-octave FBM with shear
+                float shear = fbm(vec2(phase * 4.0 + r * 2.0, r * 6.0 + u_time * 0.15));
+                float fine = fbm(vec2(phase * 12.0 - r * 3.0, r * 18.0 + u_time * 0.08));
+                float turb = shear * 0.65 + fine * 0.35;
+
+                // Spiral arm structure (m=2 mode, like NGC 4258)
+                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(r + 0.3) * 4.0);
+                turb = mix(turb, turb * spiral, 0.4);
+
+                // Temperature profile: T ∝ r^(-3/4) (Shakura-Sunyaev thin disk)
+                float temp = pow(max(r, 0.3), -0.75);
+
+                // Color: blackbody-like progression
+                vec3 hottest = vec3(0.85, 0.92, 1.0);   // ~30,000 K — blue-white
+                vec3 hot     = vec3(1.0, 0.92, 0.7);     // ~10,000 K — white-gold
+                vec3 warm    = vec3(1.0, 0.55, 0.12);    // ~5,000 K — orange
+                vec3 cool    = vec3(0.7, 0.15, 0.03);    // ~2,000 K — deep red
+                vec3 col;
+                float t = clamp(temp, 0.0, 3.0) / 3.0;
+                if(t > 0.66) col = mix(hot, hottest, (t - 0.66) / 0.34);
+                else if(t > 0.33) col = mix(warm, hot, (t - 0.33) / 0.33);
+                else col = mix(cool, warm, t / 0.33);
+
+                // Brightness
+                float brightness = (0.3 + turb * 0.7) * temp * 0.22;
+                brightness *= smoothstep(4.5, 3.0, r);   // outer fade
+                brightness *= smoothstep(0.9, 1.4, r);   // ISCO fade
+
+                // Relativistic Doppler beaming: D⁴ factor
+                // Approaching side (v·n > 0) is brighter, receding dimmer
+                float v_orb = omega * r * 0.8;  // orbital velocity (fraction of c)
+                float cosAngle = sin(phase);     // radial projection
+                float doppler4 = pow(1.0 / (1.0 - v_orb * cosAngle * 0.3), 4.0);
+                doppler4 = clamp(doppler4, 0.3, 3.0);
+                brightness *= doppler4;
+
+                // Gravitational redshift: z = 1/sqrt(1 - r_s/r) - 1
+                float redshift = 1.0 / sqrt(max(0.01, 1.0 - 1.0 / (r + 0.8)));
+                col = mix(col, col * vec3(1.0, 0.8, 0.6), clamp(redshift - 1.0, 0.0, 0.5));
+
+                gl_FragColor = vec4(col * brightness, brightness * 0.9);
+            }`,
         uniforms: { u_time: { value: 0 } },
         transparent: true, depthWrite: false, side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
     });
     const disk = new THREE.Mesh(diskGeo, diskMat);
-    disk.rotation.x = -Math.PI * 0.42;  // tilted for dramatic view
+    disk.rotation.x = -Math.PI * 0.42;
     scene.add(disk);
 
-    // ── Twistor light rays (Penrose-inspired null geodesics) ──────────────
-    // Curved light paths near the black hole, showing gravitational lensing
+    // Second thin disk layer (back side visible through lensing)
+    const disk2 = disk.clone();
+    disk2.material = diskMat.clone();
+    disk2.rotation.x = -Math.PI * 0.42 + Math.PI;  // flipped
+    disk2.material.uniforms.u_time = diskMat.uniforms.u_time;  // share time
+    disk2.scale.set(0.95, 0.95, 0.95);
+    scene.add(disk2);
+
+    // ── Twistor null geodesics (Penrose) ──────────────────────────────────
+    // These represent null twistors Z^α = (ω^A, π_A') where ω^A = ix^{AA'}π_A'
+    // Visually: animated light ray bundles curving through the Kerr geometry
     const twistorGroup = new THREE.Group();
     scene.add(twistorGroup);
 
-    for (let i = 0; i < 12; i++) {
-        const pts = [];
-        const baseAngle = (i / 12) * Math.PI * 2;
-        const impactParam = 1.2 + Math.random() * 1.5;  // how close to BH
+    const TWISTOR_RAYS = 24;
+    const twistorData = [];
 
-        for (let j = 0; j <= 80; j++) {
-            const t = j / 80;
-            // Schwarzschild-like deflection: closer rays bend more
-            const deflection = 2.0 / (impactParam * impactParam) * t * t;
-            const angle = baseAngle + deflection * Math.sign(Math.sin(baseAngle));
-            const r = impactParam + t * 4.0 - deflection * 0.8;
-            const y = (t - 0.5) * 2.0 * Math.sin(baseAngle * 0.5) * 0.3;
-            pts.push(new THREE.Vector3(
-                r * Math.cos(angle),
-                y,
-                r * Math.sin(angle)
-            ));
+    for (let i = 0; i < TWISTOR_RAYS; i++) {
+        const pts = [];
+        const baseAngle = (i / TWISTOR_RAYS) * Math.PI * 2;
+        const impact = 0.8 + (i % 5) * 0.4;  // impact parameter b
+        const elevation = (Math.random() - 0.5) * 0.6;
+
+        for (let j = 0; j <= 120; j++) {
+            const s = j / 120;  // affine parameter along null geodesic
+            // Schwarzschild deflection angle: Δφ = 4M/b + 15π M²/(4b²) + ...
+            const M = BH_RADIUS;
+            const deflect = 4.0 * M / impact * s * s + 15 * Math.PI * M * M / (4 * impact * impact) * s * s * s;
+            const frameD = 0.3 * s * s * Math.sin(baseAngle);  // Kerr frame-dragging
+            const angle = baseAngle + deflect + frameD;
+            const r = impact + s * 6.0 - deflect * impact * 0.3;
+            if (r < BH_RADIUS * 0.8) break;  // captured by horizon
+            const y = elevation * (1.0 - s * 0.3) + s * 0.1 * Math.sin(angle * 2.0);
+            pts.push(new THREE.Vector3(r * Math.cos(angle), y, r * Math.sin(angle)));
         }
 
-        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
-        const hue = 0.55 + Math.random() * 0.15;  // cyan-blue range
-        const lineMat = new THREE.LineBasicMaterial({
-            color: new THREE.Color().setHSL(hue, 0.8, 0.6),
-            transparent: true, opacity: 0.12 + Math.random() * 0.08,
-            depthWrite: false,
-        });
-        twistorGroup.add(new THREE.Line(lineGeo, lineMat));
+        if (pts.length > 10) {
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const hue = 0.52 + (i % 7) * 0.04;
+            const mat = new THREE.LineBasicMaterial({
+                color: new THREE.Color().setHSL(hue, 0.7, 0.55),
+                transparent: true, opacity: 0.0, depthWrite: false,
+            });
+            const line = new THREE.Line(geo, mat);
+            twistorGroup.add(line);
+            twistorData.push({ line, phase: Math.random() * Math.PI * 2, speed: 0.3 + Math.random() * 0.4 });
+        }
     }
 
-    // ── Particle jets (relativistic bipolar outflow) ──────────────────────
-    const jetParticles = 200;
-    const jetPos = new Float32Array(jetParticles * 3);
-    const jetCol = new Float32Array(jetParticles * 3);
-    const jetVel = new Float32Array(jetParticles);
+    // ── Relativistic jets ─────────────────────────────────────────────────
+    const JET_N = 400;
+    const jetPos = new Float32Array(JET_N * 3);
+    const jetCol = new Float32Array(JET_N * 3);
+    const jetVel = new Float32Array(JET_N);
+    const jetAge = new Float32Array(JET_N);
 
-    for (let i = 0; i < jetParticles; i++) {
-        const up = i < jetParticles / 2 ? 1 : -1;
-        jetPos[i * 3]     = (Math.random() - 0.5) * 0.15;
-        jetPos[i * 3 + 1] = up * (Math.random() * 3.0 + 0.3);
-        jetPos[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
-        jetVel[i] = 0.01 + Math.random() * 0.03;
-        const t = Math.abs(jetPos[i * 3 + 1]) / 3.5;
-        jetCol[i * 3]     = 0.3 + t * 0.5;  // blue → cyan
-        jetCol[i * 3 + 1] = 0.5 + t * 0.4;
-        jetCol[i * 3 + 2] = 1.0;
+    for (let i = 0; i < JET_N; i++) {
+        const up = i < JET_N / 2 ? 1 : -1;
+        const angle = Math.random() * Math.PI * 2;
+        const spread = Math.random() * 0.1;
+        jetPos[i*3]   = Math.cos(angle) * spread;
+        jetPos[i*3+1] = up * (Math.random() * 5.0 + 0.2);
+        jetPos[i*3+2] = Math.sin(angle) * spread;
+        jetVel[i] = 0.015 + Math.random() * 0.04;
+        jetAge[i] = Math.random();
+        // Color: inner blue-white → outer cyan
+        const h = Math.abs(jetPos[i*3+1]) / 5.5;
+        jetCol[i*3]   = 0.2 + h * 0.6;
+        jetCol[i*3+1] = 0.4 + h * 0.5;
+        jetCol[i*3+2] = 1.0;
     }
 
     const jetGeo = new THREE.BufferGeometry();
     jetGeo.setAttribute('position', new THREE.BufferAttribute(jetPos, 3));
     jetGeo.setAttribute('color', new THREE.BufferAttribute(jetCol, 3));
-    const jetMat = new THREE.PointsMaterial({
-        size: 0.04, vertexColors: true, transparent: true, opacity: 0.6,
+    const jets = new THREE.Points(jetGeo, new THREE.PointsMaterial({
+        size: 0.035, vertexColors: true, transparent: true, opacity: 0.7,
         blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
-    });
-    const jets = new THREE.Points(jetGeo, jetMat);
+    }));
     scene.add(jets);
 
-    // ── Background star field ─────────────────────────────────────────────
-    const starCount = 800;
-    const starPos = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
+    // ── Gravitationally lensed starfield ──────────────────────────────────
+    // Stars near the black hole silhouette appear displaced (Einstein ring)
+    const STARS = 2000;
+    const starPos = new Float32Array(STARS * 3);
+    const starSizes = new Float32Array(STARS);
+    for (let i = 0; i < STARS; i++) {
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
-        const r = 20 + Math.random() * 30;
-        starPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
-        starPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-        starPos[i * 3 + 2] = r * Math.cos(phi);
+        const r = 25 + Math.random() * 50;
+        starPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+        starPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+        starPos[i*3+2] = r * Math.cos(phi);
+        starSizes[i] = 0.05 + Math.random() * 0.12;
     }
     const starGeo = new THREE.BufferGeometry();
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
-        size: 0.08, color: 0xffffff, transparent: true, opacity: 0.7,
-        sizeAttenuation: true,
+    starGeo.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
+    scene.add(new THREE.Points(starGeo, new THREE.ShaderMaterial({
+        vertexShader: `
+            attribute float size;
+            varying float vBright;
+            void main(){
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                // Gravitational lensing: stars near the BH LOS appear brighter/displaced
+                float projDist = length(mvp.xy / -mvp.z);
+                float lensBoost = 1.0 + 2.0 / (projDist * projDist + 0.5);
+                vBright = min(lensBoost, 3.0);
+                gl_PointSize = size * 300.0 / -mvp.z * lensBoost;
+                gl_Position = projectionMatrix * mvp;
+            }`,
+        fragmentShader: `
+            varying float vBright;
+            void main(){
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float alpha = smoothstep(1.0, 0.0, d);
+                // Lensed stars get a warm tint (gravitational redshift of background light)
+                vec3 col = mix(vec3(1.0), vec3(1.0, 0.9, 0.7), clamp(vBright - 1.0, 0.0, 1.0));
+                gl_FragColor = vec4(col * vBright * 0.5, alpha * 0.8);
+            }`,
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
     })));
 
-    // ── Animation loop ────────────────────────────────────────────────────
-    let t = 0;
-    let raf;
+    // ── Accretion disk corona (hot electron scattering halo) ──────────────
+    const coronaGeo = new THREE.SphereGeometry(BH_RADIUS * 5, 32, 32);
+    const coronaMat = new THREE.MeshBasicMaterial({
+        color: 0xff6622, transparent: true, opacity: 0.015,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+    });
+    scene.add(new THREE.Mesh(coronaGeo, coronaMat));
+
+    // ── Animation ─────────────────────────────────────────────────────────
+    let t = 0, raf;
 
     function animate() {
         raf = requestAnimationFrame(animate);
-        t += 0.008;
+        t += 0.006;
 
-        // Accretion disk rotation
-        diskMat.uniforms.u_time.value = t * 2;
+        bhMat.uniforms.u_time.value = t;
+        diskMat.uniforms.u_time.value = t * 1.5;
+        iscoMat.uniforms.u_time.value = t;
 
-        // Twistor light rays slowly rotate
-        twistorGroup.rotation.y = t * 0.15;
+        // Twistors: fade in/out in waves (light pulses along null geodesics)
+        for (const td of twistorData) {
+            const wave = Math.sin(t * td.speed + td.phase);
+            td.line.material.opacity = Math.max(0, wave * 0.18);
+        }
+        twistorGroup.rotation.y = t * 0.06;
 
-        // Jet particles stream outward
+        // Jets: stream outward with magnetic confinement spiral
         const jp = jets.geometry.attributes.position.array;
-        for (let i = 0; i < jetParticles; i++) {
-            const up = jp[i * 3 + 1] > 0 ? 1 : -1;
-            jp[i * 3 + 1] += up * jetVel[i];
-            // Spread slightly as they go out
-            jp[i * 3]     += (Math.random() - 0.5) * 0.002;
-            jp[i * 3 + 2] += (Math.random() - 0.5) * 0.002;
-            // Respawn at center
-            if (Math.abs(jp[i * 3 + 1]) > 4.0) {
-                jp[i * 3]     = (Math.random() - 0.5) * 0.15;
-                jp[i * 3 + 1] = up * (Math.random() * 0.3);
-                jp[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
+        for (let i = 0; i < JET_N; i++) {
+            const up = jp[i*3+1] > 0 ? 1 : -1;
+            jp[i*3+1] += up * jetVel[i];
+            // Helical magnetic field confinement
+            const angle = t * 3.0 + jp[i*3+1] * 2.0;
+            const spiralR = 0.04 * Math.abs(jp[i*3+1]);
+            jp[i*3]   += (Math.cos(angle) * spiralR - jp[i*3]) * 0.02;
+            jp[i*3+2] += (Math.sin(angle) * spiralR - jp[i*3+2]) * 0.02;
+            if (Math.abs(jp[i*3+1]) > 6.0) {
+                jp[i*3]   = (Math.random()-0.5) * 0.08;
+                jp[i*3+1] = up * Math.random() * 0.2;
+                jp[i*3+2] = (Math.random()-0.5) * 0.08;
             }
         }
         jets.geometry.attributes.position.needsUpdate = true;
 
-        // Gentle camera orbit
-        camera.position.x = Math.sin(t * 0.08) * 1.5;
-        camera.position.z = 6 + Math.sin(t * 0.05) * 0.5;
-        camera.lookAt(0, 0, 0);
+        // Camera: slow cinematic orbit
+        const camAngle = t * 0.04;
+        camera.position.x = Math.sin(camAngle) * 2.0;
+        camera.position.y = 2.8 + Math.sin(t * 0.03) * 0.3;
+        camera.position.z = 7.0 + Math.cos(camAngle) * 1.0;
+        camera.lookAt(0, -0.2, 0);
 
-        // Photon ring pulse
-        photonRing.material.opacity = 0.4 + Math.sin(t * 3) * 0.15;
-
-        renderer.render(scene, camera);
+        composer.render();
     }
 
     function resize() {
         const w = canvas.clientWidth, h = canvas.clientHeight;
         renderer.setSize(w, h, false);
+        composer.setSize(w, h);
         camera.aspect = w / h;
         camera.updateProjectionMatrix();
     }
