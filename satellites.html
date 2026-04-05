@@ -126,6 +126,12 @@ nav {
 
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("satellites");</script>
 
@@ -253,14 +259,6 @@ nav {
         <p style="margin-top:3px"><strong style="color:#778">Limitations:</strong> TLEs are mean elements — SGP4 is the ONLY correct propagator. Position accuracy ~1 km at epoch, degrades ~1-2 km/day for LEO. Conjunction screening uses simplified J2 propagation; production CDM generation requires full SGP4 for both target AND catalog with proper covariance estimation.</p>
     </div>
 </div>
-
-<script type="importmap">
-{"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-}}
-</script>
-
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
