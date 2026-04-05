@@ -87,6 +87,9 @@ uniform sampler2D u_night;
 uniform sampler2D u_specular;   // ocean mask (r = ocean)
 uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity, A=wind
 uniform sampler2D u_bump;       // elevation/topology grayscale
+uniform sampler2D u_hires;      // hi-res satellite tile composite (GIBS WMTS)
+uniform float u_hires_on;       // 1 = blend hi-res tiles, 0 = base texture only
+uniform vec4  u_hires_bounds;   // (lonMin, latMin, lonMax, latMax) of visible tile region
 uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_kp;
@@ -233,6 +236,33 @@ void main() {
     vec3  dayCol   = texture2D(u_day,      vUv).rgb;
     vec3  nightCol = texture2D(u_night,    vUv).rgb;
     float oceanMsk = texture2D(u_specular, vUv).r;
+
+    // ── Hi-res satellite tile overlay (NASA GIBS MODIS/VIIRS true-color) ──���─
+    // When zoomed close, blend daily satellite imagery over the base texture
+    // for real-time land detail (vegetation, snow, deserts, urban areas)
+    if (u_hires_on > 0.5) {
+        // Convert UV to geographic coordinates
+        float lon = (vUv.x - 0.5) * 360.0;
+        float lat = (0.5 - vUv.y) * 180.0;
+        // Check if this fragment is within the loaded tile bounds
+        vec4 b = u_hires_bounds;
+        float inBounds = step(b.x, lon) * step(lon, b.z) * step(b.y, lat) * step(lat, b.w);
+        if (inBounds > 0.5) {
+            // Map geographic coords to hi-res texture UV
+            vec2 hiUv = vec2(
+                (lon - b.x) / (b.z - b.x),
+                1.0 - (lat - b.y) / (b.w - b.y)
+            );
+            vec3 hiCol = texture2D(u_hires, hiUv).rgb;
+            // Only blend where the tile has actual data (not black/transparent)
+            float hiLum = dot(hiCol, vec3(0.299, 0.587, 0.114));
+            float hiBlend = smoothstep(0.02, 0.08, hiLum) * inBounds;
+            // Feather at tile edges to avoid hard seams
+            float edgeFade = smoothstep(0.0, 0.05, hiUv.x) * smoothstep(1.0, 0.95, hiUv.x)
+                           * smoothstep(0.0, 0.05, hiUv.y) * smoothstep(1.0, 0.95, hiUv.y);
+            dayCol = mix(dayCol, hiCol, hiBlend * edgeFade * 0.85);
+        }
+    }
 
     // ── Normal perturbation ───────────────────────────────────────────────────
     float bumpStr = u_bump_strength * 2.8;
@@ -968,6 +998,9 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_specular:       { value: blackFallback },
         u_weather:        { value: _blackTex() },
         u_bump:           { value: _blackTex() },
+        u_hires:          { value: _blackTex() },
+        u_hires_on:       { value: 0 },
+        u_hires_bounds:   { value: new THREE.Vector4(-180, -90, 180, 90) },
         u_sun_dir:        { value: sunDir.clone() },
         u_time:           { value: 0 },
         u_kp:             { value: 0 },
