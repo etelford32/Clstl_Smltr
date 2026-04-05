@@ -3257,10 +3257,6 @@ function animate() {
     }
     earthHiRes.update(camera, earthMesh);
     earthU.u_hires_on.value = earthHiRes.active ? 1 : 0;
-    if (earthHiRes.active) {
-        const b = earthHiRes.viewBounds;
-        earthU.u_hires_bounds.value.set(b.west, b.south, b.east, b.north);
-    }
 
     // ── Altitude display (camera distance → km equivalent)
     const altKm = Math.max(0, (dist - R_EARTH) * 6371);
