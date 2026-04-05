@@ -221,6 +221,14 @@ nav {
 <body>
 
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("sirius");</script>
 
@@ -367,15 +375,6 @@ nav {
         </div>
     </aside>
 </div>
-
-<script type="importmap">
-{
-    "imports": {
-        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-}
-</script>
 <script type="module">
 import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
