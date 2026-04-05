@@ -72,10 +72,12 @@ function tileGridSize(z) {
 
 function lonLatToTile(lon, lat, z) {
     const { cols, rows } = tileGridSize(z);
+    // Wrap longitude to [-180, 180] before computing column
+    lon = ((lon + 180) % 360 + 360) % 360 - 180;
     const col = Math.floor((lon + 180) / 360 * cols);
     const row = Math.floor((90 - lat) / 180 * rows);
     return {
-        col: Math.max(0, Math.min(cols - 1, col)),
+        col: ((col % cols) + cols) % cols,  // wrap columns for antimeridian
         row: Math.max(0, Math.min(rows - 1, row)),
     };
 }
@@ -134,6 +136,17 @@ class TileCache {
             }
             if (oldestKey) this._map.delete(oldestKey);
         }
+    }
+}
+
+// ── Tile loading helper (used by update loop) ───────────────────────────────
+function _pushTileIfNeeded(arr, z, row, col, centerTile, cache, pending) {
+    if (!cache.has(z, row, col) && !pending.has(`${z}/${row}/${col}`)) {
+        const dr = Math.abs(row - centerTile.row);
+        // Handle column wrapping distance
+        const { cols } = tileGridSize(z);
+        const dc = Math.min(Math.abs(col - centerTile.col), cols - Math.abs(col - centerTile.col));
+        arr.push({ z, row, col, priority: dr + dc });
     }
 }
 
@@ -271,6 +284,8 @@ export class EarthHiRes {
         // ── Visible angular radius (tighter at close zoom for efficiency) ──
         const viewRadius = Math.max(5, 8 + (dist - 1.015) * 35);
 
+        // Bounds may cross antimeridian (e.g., Japan at lon=140, radius=30 → east=170)
+        // or wrap around (e.g., Fiji at lon=178, radius=10 → east=188 → wraps to -172)
         const bounds = {
             west:  centerLon - viewRadius,
             east:  centerLon + viewRadius,
@@ -279,39 +294,62 @@ export class EarthHiRes {
         };
         this._viewBounds = bounds;
 
-        // ── Determine required tiles ─────────────────────────────────────
-        const tileMin = lonLatToTile(bounds.west, bounds.north, z);
-        const tileMax = lonLatToTile(bounds.east, bounds.south, z);
-
-        // Prioritize tiles near view center (spiral outward)
+        // ── Determine required tiles (handles antimeridian wrapping) ──────
+        const { cols } = tileGridSize(z);
+        const tileNW = lonLatToTile(bounds.west, bounds.north, z);
+        const tileSE = lonLatToTile(bounds.east, bounds.south, z);
         const centerTile = lonLatToTile(centerLon, centerLat, z);
+
+        // Compute column range — may wrap around the grid
+        let colMin = tileNW.col;
+        let colMax = tileSE.col;
+        // If west wraps past antimeridian, colMin may be > colMax
+        // In that case, we need tiles from colMin→(cols-1) AND 0→colMax
+        const wrapsAntimeridian = bounds.east - bounds.west > 0 && colMin > colMax;
+
         const tilesToLoad = [];
-        for (let row = tileMin.row; row <= tileMax.row; row++) {
-            for (let col = tileMin.col; col <= tileMax.col; col++) {
-                if (!this._cache.has(z, row, col) && !this._pending.has(`${z}/${row}/${col}`)) {
-                    const dr = Math.abs(row - centerTile.row);
-                    const dc = Math.abs(col - centerTile.col);
-                    tilesToLoad.push({ z, row, col, priority: dr + dc });
+        for (let row = tileNW.row; row <= tileSE.row; row++) {
+            if (wrapsAntimeridian) {
+                // Two spans: colMin→end, then 0→colMax
+                for (let col = colMin; col < cols; col++) {
+                    _pushTileIfNeeded(tilesToLoad, z, row, col, centerTile, this._cache, this._pending);
+                }
+                for (let col = 0; col <= colMax; col++) {
+                    _pushTileIfNeeded(tilesToLoad, z, row, col, centerTile, this._cache, this._pending);
+                }
+            } else {
+                for (let col = colMin; col <= colMax; col++) {
+                    _pushTileIfNeeded(tilesToLoad, z, row, col, centerTile, this._cache, this._pending);
                 }
             }
         }
+
         // Sort by distance from center (closest first)
         tilesToLoad.sort((a, b) => a.priority - b.priority);
 
-        // Load up to 8 tiles concurrently (fast enough for smooth zoom)
-        const maxConcurrent = 8 - this._pending.size;
+        // Load up to 10 tiles concurrently (covers Asia-scale regions fast)
+        const maxConcurrent = 10 - this._pending.size;
         const batch = tilesToLoad.slice(0, Math.max(0, maxConcurrent));
         for (const t of batch) {
             this._loadTile(t.z, t.row, t.col);
         }
 
         // ── Composite into output texture ────────────────────────────────
-        this._composite(z, tileMin, tileMax);
+        this._compositeView(z);
         this._lastZ = z;
     }
 
     /** Get the visible bounds (for shader UV mapping). */
-    get viewBounds() { return this._viewBounds; }
+    get viewBounds() {
+        // Normalize bounds for the shader (clamp to valid lon/lat range)
+        const b = this._viewBounds;
+        return {
+            west:  ((b.west + 180) % 360 + 360) % 360 - 180,
+            east:  ((b.east + 180) % 360 + 360) % 360 - 180,
+            north: b.north,
+            south: b.south,
+        };
+    }
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
@@ -353,59 +391,53 @@ export class EarthHiRes {
         }
     }
 
-    _composite(z, tileMin, tileMax) {
+    /**
+     * Composite all cached tiles at a given zoom level into the output texture.
+     * Draws ALL cached tiles (not just the current viewport) so panning stays smooth.
+     * Handles antimeridian wrapping naturally since tile bounds are always valid.
+     */
+    _compositeView(z) {
         const ctx = this._ctx;
         const W   = this._canvas.width;
         const H   = this._canvas.height;
 
-        // Clear with transparent black
         ctx.clearRect(0, 0, W, H);
 
-        // First pass: draw any cached tiles from the PREVIOUS zoom level as a base
-        // (prevents black flashing when zooming in before new tiles arrive)
+        // First pass: draw previous zoom level as faded base (smooth transition)
         if (this._lastZ > 0 && this._lastZ !== z) {
-            const prevGrid = tileGridSize(this._lastZ);
-            const prevMin = lonLatToTile(this._viewBounds.west, this._viewBounds.north, this._lastZ);
-            const prevMax = lonLatToTile(this._viewBounds.east, this._viewBounds.south, this._lastZ);
-            ctx.globalAlpha = 0.6;  // faded — new tiles will draw on top
-            for (let pr = prevMin.row; pr <= prevMax.row; pr++) {
-                for (let pc = prevMin.col; pc <= prevMax.col; pc++) {
-                    const entry = this._cache.get(this._lastZ, pr, pc);
-                    if (!entry || !entry.img) continue;
-                    const b = entry.bounds;
-                    const x = (b.west + 180) / 360 * W;
-                    const y = (90 - b.north) / 180 * H;
-                    const w = (b.east - b.west) / 360 * W;
-                    const h = (b.north - b.south) / 180 * H;
-                    ctx.drawImage(entry.img, x, y, w, h);
-                }
-            }
+            ctx.globalAlpha = 0.5;
+            this._drawCachedTilesAtZoom(this._lastZ);
             ctx.globalAlpha = 1.0;
         }
 
-        // Second pass: draw current zoom level tiles (full opacity, on top)
-        let anyDrawn = false;
+        // Second pass: draw current zoom level at full opacity
+        const drawn = this._drawCachedTilesAtZoom(z);
 
-        for (let row = tileMin.row; row <= tileMax.row; row++) {
-            for (let col = tileMin.col; col <= tileMax.col; col++) {
-                const entry = this._cache.get(z, row, col);
-                if (!entry || !entry.img) continue;
-
-                // Map tile bounds to canvas pixel coordinates
-                // Canvas is equirectangular: x=[0,W] = lon [-180,180], y=[0,H] = lat [90,-90]
-                const b = entry.bounds;
-                const x = (b.west + 180) / 360 * W;
-                const y = (90 - b.north) / 180 * H;
-                const w = (b.east - b.west) / 360 * W;
-                const h = (b.north - b.south) / 180 * H;
-
-                ctx.drawImage(entry.img, x, y, w, h);
-                anyDrawn = true;
-            }
-        }
-
-        if (anyDrawn) {
+        if (drawn > 0) {
             this.texture.needsUpdate = true;
         }
+    }
+
+    /** Draw all cached tiles at a specific zoom level. Returns count drawn. */
+    _drawCachedTilesAtZoom(z) {
+        const ctx = this._ctx;
+        const W   = this._canvas.width;
+        const H   = this._canvas.height;
+        let count = 0;
+
+        // Iterate all cached entries (they track their own z/row/col)
+        for (const [key, entry] of this._cache._map) {
+            if (!entry || !entry.img || entry.z !== z) continue;
+
+            const b = entry.bounds;
+            const x = (b.west + 180) / 360 * W;
+            const y = (90 - b.north) / 180 * H;
+            const w = (b.east - b.west) / 360 * W;
+            const h = (b.north - b.south) / 180 * H;
+
+            ctx.drawImage(entry.img, x, y, w, h);
+            count++;
+        }
+        return count;
     }
 }

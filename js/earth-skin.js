@@ -241,27 +241,14 @@ void main() {
     // When zoomed close, blend daily satellite imagery over the base texture
     // for real-time land detail (vegetation, snow, deserts, urban areas)
     if (u_hires_on > 0.5) {
-        // Convert UV to geographic coordinates
-        float lon = (vUv.x - 0.5) * 360.0;
-        float lat = (0.5 - vUv.y) * 180.0;
-        // Check if this fragment is within the loaded tile bounds
-        vec4 b = u_hires_bounds;
-        float inBounds = step(b.x, lon) * step(lon, b.z) * step(b.y, lat) * step(lat, b.w);
-        if (inBounds > 0.5) {
-            // Map geographic coords to hi-res texture UV
-            vec2 hiUv = vec2(
-                (lon - b.x) / (b.z - b.x),
-                1.0 - (lat - b.y) / (b.w - b.y)
-            );
-            vec3 hiCol = texture2D(u_hires, hiUv).rgb;
-            // Only blend where the tile has actual data (not black/transparent)
-            float hiLum = dot(hiCol, vec3(0.299, 0.587, 0.114));
-            float hiBlend = smoothstep(0.02, 0.08, hiLum) * inBounds;
-            // Feather at tile edges to avoid hard seams
-            float edgeFade = smoothstep(0.0, 0.05, hiUv.x) * smoothstep(1.0, 0.95, hiUv.x)
-                           * smoothstep(0.0, 0.05, hiUv.y) * smoothstep(1.0, 0.95, hiUv.y);
-            dayCol = mix(dayCol, hiCol, hiBlend * edgeFade * 0.85);
-        }
+        // Composite texture uses same equirectangular UV as base — just sample directly.
+        // Tiles are drawn at correct geographic positions on the canvas.
+        // Works across antimeridian (Asia, Pacific, etc) with no bounds remapping.
+        vec3 hiCol = texture2D(u_hires, vUv).rgb;
+        // Only blend where composite has actual imagery (not black/empty areas)
+        float hiLum = dot(hiCol, vec3(0.299, 0.587, 0.114));
+        float hiBlend = smoothstep(0.02, 0.10, hiLum);
+        dayCol = mix(dayCol, hiCol, hiBlend * 0.88);
     }
 
     // ── Normal perturbation ───────────────────────────────────────────────────
