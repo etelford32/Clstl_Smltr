@@ -202,7 +202,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       <a href="space-weather.html" class="btn-secondary" aria-label="Explore the live space weather dashboard">Explore Live Demo <span aria-hidden="true">→</span></a>
     </div>
     <div class="hero-stats" role="list" aria-label="App statistics">
-      <div class="hero-stat" role="listitem"><span class="hero-stat-num">17+</span><span class="hero-stat-label">Simulations</span></div>
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">20+</span><span class="hero-stat-label">Simulations</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">60s</span><span class="hero-stat-label">Data Refresh</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">3D</span><span class="hero-stat-label">WebGL Engine</span></div>
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">Free</span><span class="hero-stat-label">to Start</span></div>
@@ -214,7 +214,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <section id="simulations" class="section" aria-labelledby="sims-heading">
   <div class="section-inner">
     <div class="section-label fade-in">Simulations</div>
-    <h2 class="section-h2 fade-in" id="sims-heading">Five windows into the solar system</h2>
+    <h2 class="section-h2 fade-in" id="sims-heading">Eight windows into the cosmos</h2>
     <p class="section-sub fade-in">Each simulation runs on real physics equations and pulls from live satellite feeds. What you see is what's actually happening — right now.</p>
     <div class="sim-grid">
 
@@ -258,11 +258,31 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <a href="star3d.html" class="sim-link" aria-label="Explore Stellar Physics Simulator" style="--accent:#ffd700">Explore simulation <span aria-hidden="true">→</span></a>
       </article>
 
+      <article class="sim-card fade-in" style="--accent:#88aacc;--thumb-bg:linear-gradient(135deg,#0a0a14 0%,#1a1a2a 50%,#0a0a14 100%)">
+        <div class="sim-thumb" aria-hidden="true">🌙<span class="sim-thumb-label">Radiation Lab</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Moon Radiation Lab</h3>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
+        </div>
+        <p class="sim-card-desc">Lunar surface radiation environment driven by live solar weather. GCR flux, SEP events, magnetotail particles. Dose rate models from CRaTER/LRO and Chang'E-4 LND measurements.</p>
+        <a href="moon.html" class="sim-link" aria-label="Explore Moon Radiation Lab" style="--accent:#88aacc">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="sim-card fade-in" style="--accent:#00e8a0;--thumb-bg:linear-gradient(135deg,#001a10 0%,#003828 50%,#001a10 100%)">
+        <div class="sim-thumb" aria-hidden="true">🛰️<span class="sim-thumb-label">Live Tracking</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Satellite Tracker</h3>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
+        </div>
+        <p class="sim-card-desc">Track 30,000+ objects in real-time with SGP4 propagation. ISS pass predictions for your location. Collision analysis, debris field visualization, and CDM export for PRO users.</p>
+        <a href="satellites.html" class="sim-link" aria-label="Explore Satellite Tracker" style="--accent:#00e8a0">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
+
       <article class="sim-card fade-in" style="--accent:#7b2ff7;--thumb-bg:linear-gradient(135deg,#050010 0%,#140030 50%,#050010 100%)">
-        <div class="sim-thumb" aria-hidden="true">🌌<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" aria-hidden="true">🌌<span class="sim-thumb-label">3D Galaxy</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Galactic Map</h3>
-          <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
         </div>
         <p class="sim-card-desc">Navigate the Milky Way's spiral arms, stellar populations, and our position in the galaxy. Positions calculated from VSOP87 ephemeris and parallax-corrected Hipparcos catalog data.</p>
         <a href="galactic-map.html" class="sim-link" aria-label="Explore Galactic Map simulation" style="--accent:#7b2ff7">Explore simulation <span aria-hidden="true">→</span></a>
@@ -280,9 +300,57 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       <div class="stat-item fade-in"><span class="stat-num">50,000</span><span class="stat-desc">GPU particles<br>per scene</span></div>
       <div class="stat-item fade-in"><span class="stat-num">60s</span><span class="stat-desc">Solar wind data<br>refresh rate</span></div>
       <div class="stat-item fade-in"><span class="stat-num">20s</span><span class="stat-desc">Storm mode<br>refresh rate</span></div>
-      <div class="stat-item fade-in"><span class="stat-num">17+</span><span class="stat-desc">Scientific<br>simulations</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">20+</span><span class="stat-desc">Scientific<br>simulations</span></div>
       <div class="stat-item fade-in"><span class="stat-num">11</span><span class="stat-desc">Live data<br>feeds</span></div>
       <div class="stat-item fade-in"><span class="stat-num">6</span><span class="stat-desc">Physics models<br>implemented</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── USE CASES ─────────────────────────────────────────────────────────── -->
+<section class="section" style="background:#040109" aria-labelledby="usecases-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in" style="text-align:center">Who Uses Parker Physics</div>
+    <h2 class="section-h2 fade-in" id="usecases-heading" style="text-align:center">Built for anyone who needs to understand space weather</h2>
+    <p class="section-sub fade-in" style="text-align:center;margin:0 auto 52px">From mission control rooms to university classrooms — the same live data, the same physics engines.</p>
+    <div class="features-grid">
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">🔬</div>
+        <h3 class="feature-title">Researchers & Scientists</h3>
+        <p class="feature-desc">Space physicists, heliophysicists, and magnetosphere researchers use live NOAA/NASA feeds to correlate observations with model predictions. <strong>Export CDM, CSV, and JSON</strong> for downstream analysis pipelines. AR(6) Kp forecast models with 80% confidence intervals.</p>
+      </div>
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">🎓</div>
+        <h3 class="feature-title">Educators & Students</h3>
+        <p class="feature-desc">University STEM courses use our interactive 3D simulations to teach orbital mechanics, plasma physics, and stellar evolution. Students see <strong>real solar flares happen in real-time</strong> instead of reading about them in textbooks. Free tier covers all core physics.</p>
+      </div>
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">🛰️</div>
+        <h3 class="feature-title">Satellite Operators</h3>
+        <p class="feature-desc">Track 30,000+ objects with <strong>SGP4 propagation</strong>, predict conjunctions 72 hours ahead, and generate CDM reports. Radiation environment analysis for mission planning. ISS pass predictions for your ground station. Debris field visualization for situational awareness.</p>
+      </div>
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">📻</div>
+        <h3 class="feature-title">HAM Radio & Communications</h3>
+        <p class="feature-desc">HF propagation depends on ionospheric conditions driven by solar X-ray flux and geomagnetic storms. Our <strong>D-layer blackout visualization</strong> and Kp forecast show when HF radio will be disrupted — critical for emergency communications and DX operations.</p>
+      </div>
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">🌌</div>
+        <h3 class="feature-title">Aurora Chasers</h3>
+        <p class="feature-desc">See aurora probability forecasts for your exact location. <strong>72-hour Kp predictions</strong> with storm probability percentages. Push alerts when Kp exceeds your visibility threshold. Know exactly when and where to look — no more guessing from generic forecasts.</p>
+      </div>
+
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">⚡</div>
+        <h3 class="feature-title">Power Grid & Aviation</h3>
+        <p class="feature-desc">Geomagnetically induced currents (GIC) threaten power infrastructure during G4-G5 storms. Our <strong>real-time Dst monitoring</strong> and storm probability models give grid operators advance warning. Aviation professionals track radiation dose rates and HF blackout zones.</p>
+      </div>
+
     </div>
   </div>
 </section>
@@ -416,9 +484,10 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <p class="footer-col-title">Simulations</p>
         <div class="footer-links">
           <a href="earth.html">Earth Magnetosphere</a>
+          <a href="moon.html">Moon Radiation Lab</a>
           <a href="sun.html">Solar Surface</a>
           <a href="space-weather.html">Space Weather</a>
-          <a href="star3d.html">Stellar Physics</a>
+          <a href="satellites.html">Satellite Tracker</a>
           <a href="galactic-map.html">Galactic Map</a>
         </div>
       </nav>
@@ -437,7 +506,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
         <p class="footer-col-title">Legal</p>
         <div class="footer-links">
           <a href="privacy.html">Privacy Policy</a>
-          <a href="terms.html">Terms of Service</a>
+          <a href="eula.html">Terms of Service</a>
         </div>
         <p class="footer-col-title" style="margin-top:1.4rem">Data Sources</p>
         <div class="footer-links">
@@ -997,45 +1066,16 @@ if (canvas) {
 }
 </script>
 
-/* ── MOBILE NAV BURGER ─────────────────────────────────────────────────── */
-(function(){
-  const burger = document.getElementById('nav-burger');
-  const navLinks = document.getElementById('nav-links');
-  if (!burger || !navLinks) return;
-  burger.addEventListener('click', () => {
-    const open = navLinks.classList.toggle('open');
-    burger.setAttribute('aria-expanded', open);
-    burger.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
-  });
-  // Close on outside click
-  document.addEventListener('click', e => {
-    if (!burger.contains(e.target) && !navLinks.contains(e.target)){
-      navLinks.classList.remove('open');
-      burger.setAttribute('aria-expanded', 'false');
-    }
-  });
-})();
-
-/* ── AUTH STATE (check both localStorage and sessionStorage) ─────────── */
+<script>
+/* ── AUTH-AWARE HERO CTA ──────────────────────────────────────────────── */
 (function(){
   let authData = null;
   try { authData = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
-  if (!authData) {
-    try { authData = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
-  }
-  const signinBtn  = document.getElementById('nav-signin-btn');
-  const signupBtn  = document.getElementById('nav-signup-btn');
-  const dashBtn    = document.getElementById('nav-dash-btn');
-  const heroSignup = document.getElementById('hero-signup-btn');
-
-  if (authData && authData.signedIn){
-    if (signinBtn)  signinBtn.style.display  = 'none';
-    if (signupBtn)  signupBtn.style.display  = 'none';
-    if (dashBtn)    dashBtn.style.display    = '';
-    if (heroSignup){
-      heroSignup.textContent = 'Go to Dashboard';
-      heroSignup.href = 'dashboard.html';
-    }
+  if (!authData) { try { authData = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){} }
+  const heroCta = document.getElementById('hero-cta-primary');
+  if (authData && authData.signedIn && heroCta) {
+    heroCta.textContent = 'Go to Dashboard';
+    heroCta.href = 'dashboard.html';
   }
 })();
 
@@ -1043,14 +1083,9 @@ if (canvas) {
 (function(){
   const els = document.querySelectorAll('.fade-in');
   if (!els.length) return;
-  if (!('IntersectionObserver' in window)){
-    els.forEach(el => el.classList.add('visible'));
-    return;
-  }
+  if (!('IntersectionObserver' in window)){ els.forEach(el => el.classList.add('visible')); return; }
   const obs = new IntersectionObserver((entries) => {
-    entries.forEach(e => {
-      if (e.isIntersecting){ e.target.classList.add('visible'); obs.unobserve(e.target); }
-    });
+    entries.forEach(e => { if (e.isIntersecting){ e.target.classList.add('visible'); obs.unobserve(e.target); } });
   }, { threshold: 0.12 });
   els.forEach(el => obs.observe(el));
 })();

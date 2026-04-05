@@ -46,6 +46,15 @@ class AuthManager {
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
                     console.info('[Auth] Supabase session restored:', this._user.email);
+                } else {
+                    // No Supabase session — check for provisional local session
+                    // (created during signup when email confirmation is pending)
+                    this._loadMock();
+                    if (this._user?.provider === 'supabase-provisional') {
+                        console.info('[Auth] Provisional session found:', this._user.email, '(email confirmation pending)');
+                    } else if (this._user?.provider === 'mock') {
+                        console.info('[Auth] Mock session found:', this._user.email);
+                    }
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
@@ -238,12 +247,33 @@ class AuthManager {
                 });
                 if (error) return { success: false, error: error.message };
 
-                // Check if email confirmation is required
+                // Supabase may require email confirmation (data.user exists but no session).
+                // Auto-sign-in: try password auth immediately so user isn't blocked.
                 if (data.user && !data.session) {
+                    const signInResult = await this.signIn({ email, password, remember: true });
+                    if (signInResult.success) {
+                        return { success: true };
+                    }
+                    // If auto-sign-in fails (e.g., email confirmation enforced at DB level),
+                    // create a provisional local session so the user can explore the app.
+                    // They'll need to confirm email for full Supabase features (API, profile sync).
+                    this._user = {
+                        id: data.user.id,
+                        email,
+                        name: name || email.split('@')[0],
+                        plan,
+                        role: 'user',
+                        signedIn: true,
+                        provider: 'supabase-provisional',
+                        needsEmailConfirmation: true,
+                        ts: Date.now(),
+                    };
+                    const json = JSON.stringify(this._user);
+                    try { localStorage.setItem(AUTH_KEY, json); } catch (_) {}
                     return {
                         success: true,
                         needsConfirmation: true,
-                        message: 'Check your email for a confirmation link.',
+                        message: 'Account created! Please check your email to confirm, but you can start exploring now.',
                     };
                 }
 
