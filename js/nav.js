@@ -18,6 +18,7 @@ const NAV_TOP = [
     { href: 'space-weather.html', label: 'Space Weather', id: 'weather', tier: 'public' },
     { href: 'threejs.html',       label: 'Solar System',  id: 'solar',   tier: 'public' },
     { href: 'earth.html',         label: 'Earth',         id: 'earth',   tier: 'public' },
+    { href: 'moon.html',          label: 'Moon',          id: 'moon',    tier: 'public' },
     { href: 'sun.html',           label: 'The Sun',       id: 'sun',     tier: 'public' },
 ];
 
