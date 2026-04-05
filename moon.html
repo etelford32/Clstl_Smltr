@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>The Moon — Lunar Radiation Environment · Parker Physics App</title>
+<meta name="description" content="Interactive 3D Moon simulation with real-time radiation environment modeling. GCR flux, SEP events, and dose rate measurements from CRaTER/LRO and Chang'E-4 LND.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ─── Layout ────────────────────────────────────────────────── */
+#app { position:relative; width:100%; height:calc(100vh - 50px); }
+#canvas-wrap { position:absolute; inset:0; }
+#canvas-wrap canvas { display:block; width:100%; height:100%; }
+
+/* ─── HUD ───────────────────────────────────────────────────── */
+#hud {
+    position:absolute; top:14px; left:14px; z-index:50;
+    background:rgba(4,2,16,.80); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08); border-radius:10px;
+    padding:12px 15px; font-size:10px; font-family:'Courier New',monospace;
+    color:#8899aa; pointer-events:none; min-width:180px;
+    display:grid; grid-template-columns:auto auto; gap:2px 10px;
+}
+.hud-title { grid-column:1/-1; font-size:13px; font-weight:800; color:#ddeeff;
+    letter-spacing:.04em; margin-bottom:4px; }
+.hk { color:#556677; font-weight:600; }
+.hv { color:#aabbcc; }
+
+/* ─── Info Panel (right) ────────────────────────────────────── */
+#info-panel {
+    position:absolute; top:14px; right:14px; z-index:50;
+    width:280px; max-height:calc(100% - 28px); overflow-y:auto;
+    background:rgba(4,2,16,.88); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.08); border-radius:10px;
+    padding:14px 16px 16px; font-size:11px; color:#8899aa;
+    box-shadow:0 8px 36px rgba(0,0,0,.7);
+}
+#info-panel::-webkit-scrollbar { width:4px; }
+#info-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,.12); border-radius:2px; }
+.ip-section { margin-bottom:14px; }
+.ip-title { font-size:11px; font-weight:700; color:#dde; text-transform:uppercase;
+    letter-spacing:.08em; margin-bottom:8px; padding-bottom:4px;
+    border-bottom:1px solid rgba(255,255,255,.06); }
+.ip-row { display:flex; justify-content:space-between; align-items:center;
+    padding:2px 0; font-size:10px; }
+.ip-k { color:#556677; }
+.ip-v { color:#aabbcc; font-weight:600; font-family:monospace; }
+
+/* ─── Radiation gauge ───────────────────────────────────────── */
+.rad-gauge { margin:8px 0; }
+.rad-bar-wrap { height:8px; background:rgba(255,255,255,.06); border-radius:4px; overflow:hidden; }
+.rad-bar { height:100%; border-radius:4px; transition:width .6s ease; }
+.rad-legend { display:flex; justify-content:space-between; margin-top:3px; font-size:8px; color:#556; }
+
+/* ─── Layer toggles ─────────────────────────────────────────── */
+.lyr-grid { display:flex; flex-direction:column; gap:4px; }
+.lyr { display:flex; align-items:center; gap:6px; cursor:pointer; font-size:10px; color:#8899aa; }
+.lyr input { accent-color:#ffd700; }
+
+/* ─── Dose rate card ────────────────────────────────────────── */
+.dose-card {
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
+    border-radius:8px; padding:10px 12px; margin-bottom:10px;
+}
+.dose-val { font-size:18px; font-weight:800; font-family:monospace; line-height:1; }
+.dose-unit { font-size:9px; color:#667; margin-left:4px; }
+.dose-label { font-size:9px; color:#556; margin-top:4px; }
+.dose-ref { font-size:8px; color:#445; margin-top:6px; font-style:italic; }
+
+/* ─── Loading ───────────────────────────────────────────────── */
+#loading {
+    position:absolute; inset:0; z-index:100;
+    background:#000; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:14px;
+    transition:opacity .6s ease;
+}
+#loading.done { opacity:0; pointer-events:none; }
+#loading p { font-size:12px; color:#667; }
+
+/* ─── Mobile ────────────────────────────────────────────────── */
+@media (max-width:768px) {
+    #info-panel { display:none; }
+    #hud { top:8px; left:8px; font-size:9px; padding:8px 10px; }
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("moon");</script>
+
+<div id="app">
+    <div id="canvas-wrap"><canvas id="c"></canvas></div>
+
+    <div id="loading">
+        <div style="width:50px;height:50px;border-radius:50%;border:3px solid rgba(255,255,255,.1);border-top-color:#aab;animation:spin 1s linear infinite"></div>
+        <style>@keyframes spin { to { transform:rotate(360deg) } }</style>
+        <p>Loading lunar surface textures...</p>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud">
+        <div class="hud-title">Moon — Lunar Radiation Lab</div>
+        <span class="hk">Phase&nbsp;&nbsp;</span><span class="hv" id="h-phase">—</span>
+        <span class="hk">Age&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-age">—</span>
+        <span class="hk">Dist&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dist">—</span>
+        <span class="hk">GCR&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-gcr">—</span>
+        <span class="hk">SEP&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-sep">—</span>
+        <span class="hk">Dose&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-dose">—</span>
+    </div>
+
+    <!-- Info Panel -->
+    <div id="info-panel">
+
+        <!-- Dose Rate -->
+        <div class="ip-section">
+            <div class="ip-title">Lunar Surface Dose Rate</div>
+            <div class="dose-card">
+                <div class="dose-val" id="ip-dose-val" style="color:#4fc97f">13.2 <span class="dose-unit">cGy/yr</span></div>
+                <div class="dose-label">Estimated absorbed dose rate at regolith surface</div>
+                <div class="dose-ref">Ref: Wimmer-Schweingruber et al. 2021 (LND/Chang'E-4)</div>
+            </div>
+
+            <div class="rad-gauge">
+                <div style="font-size:9px;color:#667;margin-bottom:3px">GCR Flux <span id="ip-gcr-pct" style="float:right;color:#4fc3f7">45%</span></div>
+                <div class="rad-bar-wrap">
+                    <div class="rad-bar" id="ip-gcr-bar" style="width:45%;background:linear-gradient(90deg,#2a6090,#4fc3f7)"></div>
+                </div>
+                <div class="rad-legend"><span>Solar Max (low)</span><span>Solar Min (high)</span></div>
+            </div>
+
+            <div class="rad-gauge">
+                <div style="font-size:9px;color:#667;margin-bottom:3px">SEP Event Flux <span id="ip-sep-pct" style="float:right;color:#60d090">0%</span></div>
+                <div class="rad-bar-wrap">
+                    <div class="rad-bar" id="ip-sep-bar" style="width:0%;background:linear-gradient(90deg,#906020,#ff6a00)"></div>
+                </div>
+                <div class="rad-legend"><span>Quiet</span><span>X-class flare</span></div>
+            </div>
+        </div>
+
+        <!-- Radiation Environment -->
+        <div class="ip-section">
+            <div class="ip-title">Radiation Environment</div>
+            <div class="ip-row"><span class="ip-k">GCR Dose Rate</span><span class="ip-v" id="ip-gcr-dose">~13 cGy/yr</span></div>
+            <div class="ip-row"><span class="ip-k">SEP Dose (event)</span><span class="ip-v" id="ip-sep-dose">0 cGy</span></div>
+            <div class="ip-row"><span class="ip-k">Magnetotail</span><span class="ip-v" id="ip-tail">Outside</span></div>
+            <div class="ip-row"><span class="ip-k">Shielding</span><span class="ip-v" style="color:#ff8844">None (no magnetosphere)</span></div>
+            <div class="ip-row"><span class="ip-k">Regolith shield</span><span class="ip-v">~50 cm = 50% GCR reduction</span></div>
+            <div class="ip-row"><span class="ip-k">Annual limit (NASA)</span><span class="ip-v" style="color:#ffcc44">50 cGy/yr career</span></div>
+        </div>
+
+        <!-- Comparison -->
+        <div class="ip-section">
+            <div class="ip-title">Dose Comparison</div>
+            <div class="ip-row"><span class="ip-k">Lunar surface</span><span class="ip-v" style="color:#ffa040">13–38 cGy/yr</span></div>
+            <div class="ip-row"><span class="ip-k">ISS (LEO)</span><span class="ip-v">~15 cGy/yr</span></div>
+            <div class="ip-row"><span class="ip-k">Earth sea level</span><span class="ip-v" style="color:#4fc97f">0.06 cGy/yr</span></div>
+            <div class="ip-row"><span class="ip-k">Chest X-ray</span><span class="ip-v">0.002 cGy</span></div>
+            <div class="ip-row"><span class="ip-k">Mars transit (6mo)</span><span class="ip-v" style="color:#ff6644">~33 cGy</span></div>
+        </div>
+
+        <!-- Layers -->
+        <div class="ip-section">
+            <div class="ip-title">Layers</div>
+            <div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-radiation" checked> Radiation Overlay</label>
+                <label class="lyr"><input type="checkbox" id="lyr-rad-ring" checked> GCR/SEP Flux Shell</label>
+                <label class="lyr"><input type="checkbox" id="lyr-bump" checked> Terrain Relief</label>
+                <label class="lyr"><input type="checkbox" id="lyr-earthshine" checked> Earthshine</label>
+                <label class="lyr"><input type="checkbox" id="lyr-grid"> Lat/Lon Grid</label>
+                <label class="lyr"><input type="checkbox" id="lyr-rotate" checked> Auto-Rotate</label>
+            </div>
+        </div>
+
+        <!-- Data Sources -->
+        <div class="ip-section">
+            <div class="ip-title">Data Sources</div>
+            <div style="font-size:9px;color:#556;line-height:1.6">
+                <div>CRaTER/LRO — Cosmic Ray Telescope (NASA, 2009–present)</div>
+                <div>LND/Chang'E-4 — Lunar Neutron Dosimetry (DLR/CNSA, 2019–)</div>
+                <div>PREDICCS — Predictions of radiation from REleASE/EMMREM</div>
+                <div>NOAA SWPC — Solar wind, X-ray flux, SEP events (live)</div>
+                <div>Schwadron et al. (2018) — GCR dose rate model</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MoonSkin } from './js/moon-skin.js';
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { initScaleNav } from './js/scale-nav.js';
+
+initScaleNav('moon');
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDERER + CAMERA + CONTROLS
+// ═══════════════════════════════════════════════════════════════
+const canvas   = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x000005);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
+camera.position.set(0, 0.5, 3.2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping    = true;
+controls.dampingFactor    = 0.06;
+controls.minDistance       = 1.04;
+controls.maxDistance        = 12.0;
+controls.autoRotate        = true;
+controls.autoRotateSpeed   = 0.15;
+
+function onResize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+new ResizeObserver(onResize).observe(canvas);
+onResize();
+
+// ─── Starfield ───────────────────────────────────────────────
+{
+    const pos = new Float32Array(4000 * 3);
+    for (let i = 0; i < 4000; i++) {
+        const r   = 25 + Math.random() * 50;
+        const th  = Math.acos(2 * Math.random() - 1);
+        const phi = Math.random() * Math.PI * 2;
+        pos[i*3]   = r * Math.sin(th) * Math.cos(phi);
+        pos[i*3+1] = r * Math.sin(th) * Math.sin(phi);
+        pos[i*3+2] = r * Math.cos(th);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+        color: 0xffffff, size: 0.04, sizeAttenuation: true
+    })));
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SUN DIRECTION (fixed for now — updated from lunar ephemeris)
+// ═══════════════════════════════════════════════════════════════
+const DEG = Math.PI / 180;
+const sunDir = new THREE.Vector3(1, 0.15, 0.3).normalize();
+
+// ═══════════════════════════════════════════════════════════════
+//  MOON — using MoonSkin module
+// ═══════════════════════════════════════════════════════════════
+const moon = new MoonSkin(scene, sunDir, {
+    radius: 1.0,
+    segments: 160,
+    radiation: true,
+});
+
+moon.loadTextures(renderer).then(() => {
+    document.getElementById('loading').classList.add('done');
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  LUNAR PHASE + RADIATION MODEL
+// ═══════════════════════════════════════════════════════════════
+// Lunar phase calculation (simplified — synodic month = 29.53 days)
+function lunarPhase(date) {
+    const SYNODIC = 29.53058867;
+    // Known new moon: Jan 6, 2000 18:14 UTC
+    const ref = new Date('2000-01-06T18:14:00Z').getTime();
+    const diff = (date.getTime() - ref) / 86400000;
+    const age = ((diff % SYNODIC) + SYNODIC) % SYNODIC;
+    const illumination = 0.5 * (1 - Math.cos(2 * Math.PI * age / SYNODIC));
+    const phase = age < 1.85 ? 'New Moon'
+        : age < 7.38  ? 'Waxing Crescent'
+        : age < 9.23  ? 'First Quarter'
+        : age < 13.77 ? 'Waxing Gibbous'
+        : age < 15.77 ? 'Full Moon'
+        : age < 22.15 ? 'Waning Gibbous'
+        : age < 23.99 ? 'Last Quarter'
+        :                'Waning Crescent';
+    return { age, illumination, phase };
+}
+
+// GCR flux varies inversely with solar activity (Schwadron model)
+// Solar max → low GCR (~0.28), solar min → high GCR (~0.72)
+function gcrFluxFromSolarCycle() {
+    const now = new Date();
+    // SC25 max approximately July 2025
+    const maxDate = new Date('2025-07-01').getTime();
+    const diffYr = (now.getTime() - maxDate) / (365.25 * 86400000);
+    // ~11 year cycle, sinusoidal modulation
+    const phase = diffYr / 11.0 * 2 * Math.PI;
+    // Inverse: GCR peaks at solar min, troughs at solar max
+    return 0.50 + 0.22 * Math.cos(phase);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SPACE WEATHER FEED — drives SEP flux + Kp
+// ═══════════════════════════════════════════════════════════════
+const swFeed = new SpaceWeatherFeed();
+swFeed.start();
+
+let _sepFlux = 0;
+let _kp = 0;
+let _xrayIntensity = 0;
+
+window.addEventListener('swpc-update', e => {
+    const sw = e.detail ?? {};
+    _kp = sw.kp ?? 0;
+    _xrayIntensity = sw.derived?.xray_intensity ?? 0;
+
+    // SEP flux from proton events (S-scale)
+    const sepLevel = sw.sep_storm_level ?? 0;
+    _sepFlux = Math.min(1, sepLevel / 5);
+
+    // Also boost SEP during M/X class flares
+    if (_xrayIntensity > 0.5) _sepFlux = Math.max(_sepFlux, _xrayIntensity * 0.8);
+
+    moon.setRadiation({ gcrFlux: gcrFluxFromSolarCycle(), sepFlux: _sepFlux, kp: _kp });
+
+    // Update radiation panel
+    _updateRadPanel();
+});
+
+function _updateRadPanel() {
+    const gcr = gcrFluxFromSolarCycle();
+    const gcrDose = 13 + gcr * 35;  // ~13-38 cGy/yr range
+    const sepDose = _sepFlux * 50;   // up to 50 cGy during extreme event
+
+    // HUD
+    document.getElementById('h-gcr').textContent = `${(gcr * 100).toFixed(0)}% flux`;
+    document.getElementById('h-sep').textContent = _sepFlux > 0.01 ? `S${Math.ceil(_sepFlux * 5)} event` : 'Quiet';
+    document.getElementById('h-dose').textContent = `${gcrDose.toFixed(1)} cGy/yr`;
+
+    // Panel dose value
+    const doseEl = document.getElementById('ip-dose-val');
+    doseEl.innerHTML = `${gcrDose.toFixed(1)} <span class="dose-unit">cGy/yr</span>`;
+    doseEl.style.color = gcrDose > 30 ? '#ff8844' : gcrDose > 20 ? '#ffcc44' : '#4fc97f';
+
+    // GCR bar
+    const gcrPct = Math.round(gcr * 100);
+    document.getElementById('ip-gcr-pct').textContent = `${gcrPct}%`;
+    document.getElementById('ip-gcr-bar').style.width = `${gcrPct}%`;
+
+    // SEP bar
+    const sepPct = Math.round(_sepFlux * 100);
+    document.getElementById('ip-sep-pct').textContent = _sepFlux > 0.01 ? `${sepPct}%` : '0%';
+    document.getElementById('ip-sep-pct').style.color = _sepFlux > 0.3 ? '#ff6644' : '#60d090';
+    document.getElementById('ip-sep-bar').style.width = `${sepPct}%`;
+
+    // Detail rows
+    document.getElementById('ip-gcr-dose').textContent = `~${gcrDose.toFixed(0)} cGy/yr`;
+    document.getElementById('ip-sep-dose').textContent = sepDose > 0.1 ? `~${sepDose.toFixed(1)} cGy` : '0 cGy';
+
+    // Magnetotail (Moon is in tail ~4 days around full moon)
+    const lp = lunarPhase(new Date());
+    const inTail = lp.age > 13.5 && lp.age < 17.5;
+    document.getElementById('ip-tail').textContent = inTail ? 'Inside (particle sheet)' : 'Outside';
+    document.getElementById('ip-tail').style.color = inTail ? '#ffaa20' : '#8899aa';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LAYER TOGGLES
+// ═══════════════════════════════════════════════════════════════
+document.getElementById('lyr-radiation').addEventListener('change', e => {
+    moon.setRadiationVisible(e.target.checked);
+});
+document.getElementById('lyr-rad-ring').addEventListener('change', e => {
+    if (moon._radMesh) moon._radMesh.visible = e.target.checked;
+});
+document.getElementById('lyr-bump').addEventListener('change', e => {
+    moon.moonU.u_bump_strength.value = e.target.checked ? 1.0 : 0.0;
+});
+document.getElementById('lyr-earthshine').addEventListener('change', e => {
+    moon.setEarthshine(e.target.checked ? 0.3 : 0.0);
+});
+document.getElementById('lyr-rotate').addEventListener('change', e => {
+    controls.autoRotate = e.target.checked;
+});
+
+// Lat/lon grid
+const gridGroup = new THREE.Group();
+document.getElementById('lyr-grid').addEventListener('change', e => {
+    gridGroup.visible = e.target.checked;
+});
+
+// Simple lat/lon grid
+{
+    const R = 1.001;
+    const mat = new THREE.LineBasicMaterial({ color: 0x334455, opacity: 0.3, transparent: true });
+    for (let lon = -180; lon < 180; lon += 30) {
+        const pts = [];
+        for (let lat = -90; lat <= 90; lat += 2) {
+            const phi = lat * DEG, lam = lon * DEG;
+            pts.push(new THREE.Vector3(
+                R * Math.cos(phi) * Math.sin(lam),
+                R * Math.sin(phi),
+                R * Math.cos(phi) * Math.cos(lam)
+            ));
+        }
+        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    for (let lat = -60; lat <= 60; lat += 30) {
+        const pts = [];
+        for (let lon = 0; lon <= 360; lon += 2) {
+            const phi = lat * DEG, lam = lon * DEG;
+            pts.push(new THREE.Vector3(
+                R * Math.cos(phi) * Math.sin(lam),
+                R * Math.sin(phi),
+                R * Math.cos(phi) * Math.cos(lam)
+            ));
+        }
+        gridGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    }
+    gridGroup.visible = false;
+    scene.add(gridGroup);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const t = clock.getElapsedTime();
+
+    // Slow Moon rotation (synchronous — same face toward Earth)
+    moon.moonMesh.rotation.y = t * 0.02;
+
+    // Update shader time
+    moon.update(t);
+
+    // Phase HUD
+    const lp = lunarPhase(new Date());
+    document.getElementById('h-phase').textContent = lp.phase;
+    document.getElementById('h-age').textContent = `${lp.age.toFixed(1)} days`;
+    document.getElementById('h-dist').textContent = '384,400 km';
+
+    // Earthshine varies with inverse of lunar illumination
+    // (full moon = no earthshine, new moon = max earthshine)
+    moon.setEarthshine((1 - lp.illumination) * 0.35);
+
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+// Initial radiation update
+_updateRadPanel();
+animate();
+</script>
+</body>
+</html>
