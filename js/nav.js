@@ -174,7 +174,7 @@ export function initNav(activeId = '') {
         const planColor = auth.plan === 'advanced' ? '#c080ff' : auth.plan === 'basic' ? '#00c6ff' : '#4dff80';
 
         if (isAdmin) {
-            html += `<span class="nav-badge-pro" style="background:rgba(255,60,60,.12);color:#f66;border-color:rgba(255,60,60,.25);padding:3px 8px;border-radius:4px;font-size:.65rem;margin-right:4px">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</span>`;
+            html += `<a href="admin.html" class="nav-item" style="background:rgba(255,60,60,.1);border-color:rgba(255,60,60,.25);color:#f66;font-size:.72rem;font-weight:700;padding:4px 10px" title="Admin Dashboard">${auth.role === 'superadmin' ? 'SUPER ADMIN' : 'ADMIN'}</a>`;
         }
         html += `<a href="dashboard.html" class="nav-item nav-user-btn" style="display:flex;align-items:center;gap:6px" title="${displayName} · ${planLabel} plan">`;
         html += `<span style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,${planColor}44,${planColor}22);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;color:${planColor};border:1px solid ${planColor}44">${firstName[0].toUpperCase()}</span>`;
@@ -219,8 +219,15 @@ export function initNav(activeId = '') {
         });
     });
 
-    // Sign out
-    document.getElementById('nav-signout-btn')?.addEventListener('click', () => {
+    // Sign out — clear Supabase session + local storage
+    document.getElementById('nav-signout-btn')?.addEventListener('click', async () => {
+        try {
+            const { getSupabase, isConfigured } = await import('./supabase-config.js');
+            if (isConfigured()) {
+                const supabase = await getSupabase();
+                await supabase.auth.signOut();
+            }
+        } catch (_) {}
         try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
         try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
         window.location.href = 'index.html';

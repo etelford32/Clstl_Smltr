@@ -70,3 +70,58 @@ export async function getSupabase() {
 export function isConfigured() {
     return SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE' && SUPABASE_ANON_KEY.length > 20;
 }
+
+/**
+ * Test the Supabase connection and return a detailed status report.
+ * Checks: client init, auth service, database (user_profiles table), latency.
+ * @returns {Promise<{ ok: boolean, checks: Array<{ name: string, ok: boolean, ms: number, detail?: string }> }>}
+ */
+export async function testConnection() {
+    const checks = [];
+
+    // 1. Client initialization
+    let client = null;
+    const t0 = performance.now();
+    try {
+        client = await getSupabase();
+        checks.push({ name: 'Client Init', ok: true, ms: Math.round(performance.now() - t0) });
+    } catch (err) {
+        checks.push({ name: 'Client Init', ok: false, ms: Math.round(performance.now() - t0), detail: err.message });
+        return { ok: false, checks };
+    }
+
+    // 2. Auth service health (getSession should always respond, even with no session)
+    const t1 = performance.now();
+    try {
+        const { error } = await client.auth.getSession();
+        if (error) throw error;
+        checks.push({ name: 'Auth Service', ok: true, ms: Math.round(performance.now() - t1) });
+    } catch (err) {
+        checks.push({ name: 'Auth Service', ok: false, ms: Math.round(performance.now() - t1), detail: err.message });
+    }
+
+    // 3. Database connectivity (query user_profiles — RLS will scope it, but the request itself tests the DB)
+    const t2 = performance.now();
+    try {
+        const { error } = await client.from('user_profiles').select('id').limit(1);
+        if (error) throw error;
+        checks.push({ name: 'Database', ok: true, ms: Math.round(performance.now() - t2) });
+    } catch (err) {
+        checks.push({ name: 'Database', ok: false, ms: Math.round(performance.now() - t2), detail: err.message });
+    }
+
+    // 4. REST endpoint reachability (lightweight ping to the PostgREST root)
+    const t3 = performance.now();
+    try {
+        const resp = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+            method: 'HEAD',
+            headers: { 'apikey': SUPABASE_ANON_KEY },
+        });
+        checks.push({ name: 'REST API', ok: resp.ok, ms: Math.round(performance.now() - t3), detail: resp.ok ? undefined : `HTTP ${resp.status}` });
+    } catch (err) {
+        checks.push({ name: 'REST API', ok: false, ms: Math.round(performance.now() - t3), detail: err.message });
+    }
+
+    const ok = checks.every(c => c.ok);
+    return { ok, checks };
+}
