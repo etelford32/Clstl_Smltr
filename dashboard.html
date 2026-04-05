@@ -426,7 +426,7 @@ import { auth } from './js/auth.js';
 import { geocodeQuery, saveUserLocation, loadUserLocation,
          clearUserLocation, auroraVisibility } from './js/user-location.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
-import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherHistory } from './js/solar-weather-history.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { predictPasses } from './js/orbital-analytics.js';
 
@@ -996,8 +996,11 @@ const _wxForecaster = new SolarWeatherForecaster();
 
 function _initForecast() {
   _wxHistory.open().then(() => {
-    if (_wxHistory.getTier(1).length < 48) {
-      seedSyntheticHistory(_wxHistory, 90);
+    const n = _wxHistory.getTier(1).length;
+    console.info(`[Dashboard] forecast history: ${n} records (need ≥48)`);
+    if (n < 48) {
+      document.getElementById('fc-bulletin').textContent =
+        `Collecting live SWPC data… ${n}/48 records (forecast available in ~${48 - n} min)`;
     }
     _refreshForecast();
     setInterval(_refreshForecast, 5 * 60_000);

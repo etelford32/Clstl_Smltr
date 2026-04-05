@@ -21,16 +21,15 @@
 
 import * as THREE from 'three';
 
-// ── Texture CDNs — NASA-derived, highest free resolution available ────────────
-// Primary: NASA NEO / Visible Earth (3600+ px, no API key, direct HTTP)
-// Fallback: three-globe CDN (~2K, version-pinned)
-const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
-const _NEO = 'https://eoimages.gsfc.nasa.gov/images/imagerecords/';
+// ── Texture CDNs — CORS-enabled sources only ─────────────────────────────────
+// three-globe@2.31.1 (latest) for reliable CDN assets
+// NASA GIBS daily snapshot used as live day texture via earth-hires.js
+const _CDN = 'https://unpkg.com/three-globe@2.31.1/example/img/';
 export const EARTH_TEXTURES = {
-    day:    _NEO + '57000/57752/land_shallow_topo_2048.jpg',
-    night:  _NEO + '79000/79765/dnb_land_ocean_ice.2012.3600x1800.jpg',
+    day:    _CDN + 'earth-blue-marble.jpg',
+    night:  _CDN + 'earth-night.jpg',
     ocean:  _CDN + 'earth-water.png',
-    clouds: _CDN + 'clouds.png',
+    clouds: _CDN + 'earth-topology.png',   // reuse topology as cloud noise seed
     bump:   _CDN + 'earth-topology.png',
 };
 

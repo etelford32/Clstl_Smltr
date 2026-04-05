@@ -1071,6 +1071,29 @@ export class SpaceWeatherFeed {
                 lastUpdated: this.lastUpdated,
                 storm_mode:  this._stormMode,
                 tier:        this.tier,
+                // Data timing & accuracy metadata for downstream consumers
+                timing: {
+                    // When this state was assembled (browser clock)
+                    assembled_at:    new Date().toISOString(),
+                    // NOAA RTSW solar wind: 1-min cadence, ~30s L1-to-Earth propagation delay
+                    // Data at L1 (1.5M km): light travel ~5s, but plasma travel ~30-60 min
+                    wind_cadence_s:  60,
+                    wind_latency:    'L1 measurement, ~30-60 min propagation to Earth bow shock',
+                    // Kp: planetary 3-hour index, 1-min estimate from USAF Wing Kp
+                    kp_cadence_s:    60,
+                    kp_type:         'estimated (Wing Kp 1-min), not definitive 3-hour',
+                    // X-ray: GOES 1-min average, ~0 propagation (photons at c)
+                    xray_cadence_s:  60,
+                    xray_latency:    'real-time (photons at c from Sun, 8.3 min light travel)',
+                    // DONKI: event catalog, 30-min to multi-hour latency
+                    donki_latency:   'catalog-based, 30 min to hours after event detection',
+                    // Protons/electrons: GOES measurements, 5-min cadence
+                    particle_cadence_s: 300,
+                    // Dst: Kyoto WDC provisional, ~1 hour latency
+                    dst_latency:     'provisional (Kyoto WDC), ~1 hour delay',
+                    // Aurora: OVATION model output, ~30 min cadence
+                    aurora_cadence_s: 1800,
+                },
             },
         };
     }
