@@ -611,6 +611,7 @@ nav {
         <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
+        <label class="lyr"><input type="checkbox" id="lyr-terrain" checked><label for="lyr-terrain">Terrain Relief</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
         <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
@@ -1059,7 +1060,7 @@ initScaleNav('earth');
 //  CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 const R_EARTH  = 1.0;
-const R_CLOUDS = 1.009;   // cloud shell just above surface
+const R_CLOUDS = 1.018;   // cloud-top altitude (volumetric shader raymarches down)
 const R_STRAT  = 1.015;   // stratosphere haze (between clouds and outer atm)
 const R_ATM    = 1.026;   // atmosphere rim sphere
 const TWO_PI   = Math.PI * 2;
@@ -1618,6 +1619,9 @@ document.getElementById('lyr-aurora').addEventListener('change', e => {
 });
 document.getElementById('lyr-lights').addEventListener('change', e => {
     earthU.u_city_lights.value = e.target.checked ? 1.0 : 0.0;
+});
+document.getElementById('lyr-terrain').addEventListener('change', e => {
+    earthU.u_bump_strength.value = e.target.checked ? 1.0 : 0.0;
 });
 document.getElementById('lyr-grid').addEventListener('change', e => {
     gridGroup.visible = e.target.checked;

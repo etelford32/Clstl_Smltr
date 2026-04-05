@@ -28,6 +28,7 @@ export const EARTH_TEXTURES = {
     night:  _CDN + 'earth-night.jpg',
     ocean:  _CDN + 'earth-water.png',
     clouds: _CDN + 'clouds.png',
+    bump:   _CDN + 'earth-topology.png',
 };
 
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────
@@ -50,11 +51,26 @@ export const EARTH_VERT = /* glsl */`
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
+varying vec3 vWorldTangent;
+varying vec3 vWorldBitangent;
 void main() {
     vUv          = uv;
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
-    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+
+    // Compute tangent/bitangent from sphere geometry for normal mapping.
+    // On a unit sphere, tangent = dP/dLon (east), bitangent = dP/dLat (north).
+    vec3 N = normalize(normal);
+    // Tangent: perpendicular to N in the horizontal plane (east direction)
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec3 T  = normalize(cross(up, N));
+    // Handle poles where cross product degenerates
+    if (length(cross(up, N)) < 0.001) T = vec3(1.0, 0.0, 0.0);
+    vec3 B = cross(N, T);
+    vWorldTangent   = normalize((modelMatrix * vec4(T, 0.0)).xyz);
+    vWorldBitangent = normalize((modelMatrix * vec4(B, 0.0)).xyz);
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
 export const EARTH_FRAG = /* glsl */`
@@ -64,6 +80,7 @@ uniform sampler2D u_day;
 uniform sampler2D u_night;
 uniform sampler2D u_specular;   // ocean mask (r = ocean)
 uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity, A=wind
+uniform sampler2D u_bump;       // elevation/topology grayscale
 uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_kp;
@@ -74,10 +91,30 @@ uniform float u_weather_on;
 uniform float u_aurora_power;
 uniform float u_bz_south;
 uniform float u_dst_norm;
+uniform float u_bump_strength; // terrain relief intensity (0 = off, 1 = default)
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
+varying vec3 vWorldTangent;
+varying vec3 vWorldBitangent;
+
+// ── Terrain normal perturbation from bump/topology map ─────────────────────────
+vec3 perturbNormal(vec3 N, vec3 T, vec3 B, vec2 uv, float strength) {
+    // Sample height neighbours for central-difference gradient
+    vec2 texel = vec2(1.0 / 2048.0, 1.0 / 1024.0);  // approximate texture size
+    float hL = texture2D(u_bump, uv - vec2(texel.x, 0.0)).r;
+    float hR = texture2D(u_bump, uv + vec2(texel.x, 0.0)).r;
+    float hD = texture2D(u_bump, uv - vec2(0.0, texel.y)).r;
+    float hU = texture2D(u_bump, uv + vec2(0.0, texel.y)).r;
+
+    // Gradient in tangent space
+    float dU = (hR - hL) * strength;
+    float dV = (hU - hD) * strength;
+
+    // Perturbed normal in world space
+    return normalize(N - T * dU - B * dV);
+}
 
 // ── Aurora curtains ────────────────────────────────────────────────────────────
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
@@ -116,7 +153,13 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 void main() {
-    vec3 N = normalize(vWorldNormal);
+    vec3 Nflat = normalize(vWorldNormal);
+    vec3 T     = normalize(vWorldTangent);
+    vec3 B     = normalize(vWorldBitangent);
+
+    // Perturb normal using bump/topology map for terrain relief
+    float bumpStr = u_bump_strength * 2.8;  // scale for visible mountains at terminator
+    vec3 N = (bumpStr > 0.01) ? perturbNormal(Nflat, T, B, vUv, bumpStr) : Nflat;
 
     float NdotL  = dot(N, u_sun_dir);
     float dayMix = smoothstep(-0.10, 0.20, NdotL);
@@ -125,13 +168,28 @@ void main() {
     vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
+    // Suppress bump on ocean (flat water surface)
+    if (oceanMsk > 0.5 && bumpStr > 0.01) {
+        N = Nflat;
+        NdotL  = dot(N, u_sun_dir);
+        dayMix = smoothstep(-0.10, 0.20, NdotL);
+    }
+
     vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
 
-    // Ocean specular glint
+    // Ocean specular glint (Fresnel-enhanced GGX-style)
     vec3  V    = normalize(cameraPosition - vWorldPos);
     vec3  H    = normalize(u_sun_dir + V);
-    float spec = pow(max(dot(N, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
-    base += vec3(spec * 0.7, spec * 0.85, spec);
+    float NdotV = max(dot(Nflat, V), 0.001);
+    float NdotH = max(dot(Nflat, H), 0.0);
+    // Schlick Fresnel approximation — water F0 ≈ 0.02
+    float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+    // GGX-like sharp specular (roughness ≈ 0.08 for calm ocean)
+    float rough2 = 0.08 * 0.08;
+    float denom  = NdotH * NdotH * (rough2 - 1.0) + 1.0;
+    float D      = rough2 / (3.14159265 * denom * denom);
+    float spec   = D * fresnel * oceanMsk * dayMix * 0.45;
+    base += vec3(spec * 0.75, spec * 0.88, spec);
 
     // Weather temperature overlay
     if (u_weather_on > 0.5) {
@@ -188,14 +246,16 @@ void main() {
 export const CLOUD_VERT = /* glsl */`
 varying vec2 vUv;
 varying vec3 vWorldNormal;
+varying vec3 vWorldPos;
 void main() {
     vUv          = uv;
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+    vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
 export const CLOUD_FRAG = /* glsl */`
-precision mediump float;
+precision highp float;
 
 uniform sampler2D u_clouds;
 uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
@@ -212,10 +272,15 @@ uniform int  u_storm_count;
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
+varying vec3 vWorldPos;
+
+// ── Volumetric cloud constants ────────────────────────────────────────────────
+const float R_CLOUD_BOTTOM = 1.005;   // cloud base altitude (≈ 3 km)
+const float R_CLOUD_TOP    = 1.018;   // cloud top altitude (≈ 12 km)
+const int   VOL_STEPS      = 8;       // primary ray march steps through cloud slab
+const int   LIGHT_STEPS    = 4;       // sun-direction steps for self-shadowing
 
 // ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
-// For each active storm, rotate the cloud lookup UV around the storm eye.
-// Northern Hemisphere: CCW (spin=+1). Southern Hemisphere: CW (spin=-1).
 vec2 stormSwirl(vec2 uv) {
     vec2 swirl = vec2(0.0);
     for (int i = 0; i < 8; i++) {
@@ -225,16 +290,15 @@ vec2 stormSwirl(vec2 uv) {
         float spin   = u_storms[i].w;
 
         vec2 d = uv - center;
-        // Wrap longitude seam (UV u is periodic)
         if (d.x >  0.5) d.x -= 1.0;
         if (d.x < -0.5) d.x += 1.0;
 
         float dist   = length(d);
-        float radius = 0.07 + inten * 0.05;   // storm radius in UV space (≈ 700–1200 km)
+        float radius = 0.07 + inten * 0.05;
 
         if (dist < radius * 2.2) {
             float falloff = smoothstep(radius * 2.2, 0.0, dist);
-            float angle   = spin * inten * falloff * 2.2;   // max ~126° spiral
+            float angle   = spin * inten * falloff * 2.2;
             float c = cos(angle), s = sin(angle);
             vec2 rotated = vec2(d.x * c - d.y * s, d.x * s + d.y * c);
             swirl += (rotated - d) * falloff;
@@ -244,28 +308,23 @@ vec2 stormSwirl(vec2 uv) {
 }
 
 // ── Eye / eyewall structure for intense storms ────────────────────────────────
-// Storms with intensity > 0.5 (tropical storm / hurricane threshold) get a
-// clear eye at the center and a dense eyewall ring just outside it.
-// Returns a [0,1] multiplier to apply to cloud alpha.
 float stormStructure(vec2 uv) {
     float mult = 1.0;
     for (int i = 0; i < 8; i++) {
         if (i >= u_storm_count) break;
         vec2  center = u_storms[i].xy;
         float inten  = u_storms[i].z;
-        if (inten < 0.35) continue;   // only TS / hurricane strength
+        if (inten < 0.35) continue;
 
         vec2 d = uv - center;
         if (d.x >  0.5) d.x -= 1.0;
         if (d.x < -0.5) d.x += 1.0;
         float dist = length(d);
 
-        float eyeR   = 0.008 + inten * 0.006;   // eye radius (~60–100 km)
-        float wallR  = eyeR * 2.2;               // eyewall outer edge
+        float eyeR   = 0.008 + inten * 0.006;
+        float wallR  = eyeR * 2.2;
 
-        // Clear eye
         float eyeMask = 1.0 - smoothstep(eyeR * 0.5, eyeR, dist);
-        // Dense eyewall ring: max density between eyeR and wallR
         float wallMask = smoothstep(eyeR, eyeR * 1.2, dist)
                        * (1.0 - smoothstep(wallR, wallR * 1.5, dist));
 
@@ -275,99 +334,231 @@ float stormStructure(vec2 uv) {
     return mult;
 }
 
+// ── Hash-based noise for volumetric detail ────────────────────────────────────
+float hash13(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+}
+
+// Simple 3D value noise (smooth)
+float noise3D(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+
+    float n000 = hash13(i);
+    float n100 = hash13(i + vec3(1,0,0));
+    float n010 = hash13(i + vec3(0,1,0));
+    float n110 = hash13(i + vec3(1,1,0));
+    float n001 = hash13(i + vec3(0,0,1));
+    float n101 = hash13(i + vec3(1,0,1));
+    float n011 = hash13(i + vec3(0,1,1));
+    float n111 = hash13(i + vec3(1,1,1));
+
+    float n00 = mix(n000, n100, f.x);
+    float n01 = mix(n001, n101, f.x);
+    float n10 = mix(n010, n110, f.x);
+    float n11 = mix(n011, n111, f.x);
+
+    float n0 = mix(n00, n10, f.y);
+    float n1 = mix(n01, n11, f.y);
+
+    return mix(n0, n1, f.z);
+}
+
+// Fractal Brownian Motion (3 octaves, cheap)
+float fbm3(vec3 p) {
+    float v = 0.0;
+    v += noise3D(p)       * 0.50;
+    v += noise3D(p * 2.1) * 0.25;
+    v += noise3D(p * 4.3) * 0.125;
+    return v;
+}
+
+// ── Sphere UV from world-space point ──────────────────────────────────────────
+vec2 worldToUV(vec3 p) {
+    vec3 n = normalize(p);
+    float u = atan(n.x, n.z) / (2.0 * 3.14159265) + 0.5;
+    float v = 0.5 - asin(clamp(n.y, -1.0, 1.0)) / 3.14159265;
+    return vec2(u, v);
+}
+
+// ── Sample cloud density at a 3D world-space point ────────────────────────────
+float cloudDensity(vec3 pos, vec2 swirl) {
+    float r = length(pos);
+    // Height fraction within cloud slab [0,1]
+    float hFrac = clamp((r - R_CLOUD_BOTTOM) / (R_CLOUD_TOP - R_CLOUD_BOTTOM), 0.0, 1.0);
+
+    // Vertical profile: denser in the middle, tapering at edges
+    float vProfile = smoothstep(0.0, 0.2, hFrac) * smoothstep(1.0, 0.65, hFrac);
+
+    // UV for texture lookups
+    vec2 uv = worldToUV(pos);
+
+    // Three-layer drift (matches original)
+    vec2 driftLow  = vec2(u_time * 0.000050, u_time * 0.000007);
+    vec2 driftHigh = vec2(u_time * 0.000100, u_time * 0.000014);
+
+    // Cloud noise from texture + 3D procedural detail
+    float texNoise = texture2D(u_clouds, uv + driftLow + swirl).r;
+
+    // 3D volumetric detail noise (adds depth/thickness variation)
+    vec3 noisePos = normalize(pos) * 42.0 + vec3(u_time * 0.008, 0.0, u_time * 0.005);
+    float detailNoise = fbm3(noisePos);
+
+    // Combine: texture gives large-scale cloud patterns, 3D noise gives volumetric edges
+    float density = texNoise * 0.7 + detailNoise * 0.3;
+
+    // Apply weather data or pressure-based modulation
+    float baseDensity;
+    float precipOut = 0.0;
+
+    if (u_weather_on > 0.5) {
+        vec4  cl     = texture2D(u_cloud_layers, uv);
+        float clLow  = cl.r;
+        float clMid  = cl.g;
+        float clHigh = cl.b;
+        precipOut     = cl.a;
+
+        // Layer blending based on altitude within cloud slab
+        float lowW  = smoothstep(0.5, 0.0, hFrac);   // bottom half
+        float midW  = smoothstep(0.0, 0.4, hFrac) * smoothstep(0.9, 0.5, hFrac); // middle
+        float highW = smoothstep(0.5, 1.0, hFrac);    // top
+
+        float coverage = clLow * lowW + clMid * midW + clHigh * highW;
+        baseDensity = density * coverage;
+    } else {
+        float pressure = texture2D(u_weather, uv).g;
+        float humidity = texture2D(u_weather, uv).b;
+        float clear    = mix(1.0, 0.55, pressure);
+        float boost    = max(0.0, 0.45 - pressure) * 2.0;
+        baseDensity = pow(density, 1.3) * (clear + boost) * (0.7 + humidity * 0.5);
+    }
+
+    // Satellite data blending
+    if (u_satellite_on > 0.5) {
+        float satCloud = texture2D(u_satellite, uv).r;
+        baseDensity = mix(baseDensity, satCloud * 0.9, 0.45);
+    }
+
+    // Apply vertical profile and storm structure
+    baseDensity *= vProfile;
+
+    if (u_storm_count > 0) {
+        baseDensity *= stormStructure(uv);
+    }
+
+    return clamp(baseDensity, 0.0, 1.0);
+}
+
+// ── Ray-sphere intersection ───────────────────────────────────────────────────
+bool hitSphere(vec3 o, vec3 d, float r, out float tN, out float tF) {
+    float b = dot(o, d);
+    float c = dot(o, o) - r * r;
+    float disc = b * b - c;
+    if (disc < 0.0) return false;
+    float sq = sqrt(disc);
+    tN = -b - sq;
+    tF = -b + sq;
+    return tF >= 0.0;
+}
+
 void main() {
     vec3  N     = normalize(vWorldNormal);
     float NdotL = dot(N, u_sun_dir);
-    float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    lit = lit * lit;
+    vec3  L     = normalize(u_sun_dir);
 
     // Compute cyclonic UV swirl from active storm systems
     vec2 swirl = (u_storm_count > 0) ? stormSwirl(vUv) : vec2(0.0);
 
-    // Three-layer drift: low clouds slow, mid medium, high cirrus fastest
-    vec2 driftLow  = vec2(u_time * 0.000050, u_time * 0.000007);
-    vec2 driftMid  = vec2(u_time * 0.000072, u_time * 0.000010);
-    vec2 driftHigh = vec2(u_time * 0.000100, u_time * 0.000014);
+    // ── Volumetric ray march through cloud slab ───────────────────────────────
+    vec3 rayOrigin = cameraPosition;
+    vec3 rayDir    = normalize(vWorldPos - cameraPosition);
 
-    // Noise texture samples per layer
-    float noiseLow  = texture2D(u_clouds, vUv + driftLow  + swirl).r;
-    float noiseMid  = texture2D(u_clouds, vUv + driftMid  + swirl * 0.7).r;
-    float noiseHigh = texture2D(u_clouds, vUv + driftHigh + swirl * 0.4).r;
+    // Intersect ray with cloud shell (inner + outer spheres)
+    float tNear, tFar, tInner, tInnerFar;
+    bool hitOuter = hitSphere(rayOrigin, rayDir, R_CLOUD_TOP, tNear, tFar);
+    if (!hitOuter) discard;
 
-    float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
-    float precip   = 0.0;
+    tNear = max(tNear, 0.0);
 
-    if (u_weather_on > 0.5) {
-        // Real cloud fraction data from weather feed
-        vec4  cl      = texture2D(u_cloud_layers, vUv);
-        float clLow   = cl.r;   // 0-1 low-cloud fraction  (cumulus/stratus)
-        float clMid   = cl.g;   // 0-1 mid-cloud fraction  (altostratus)
-        float clHigh  = cl.b;   // 0-1 high-cloud fraction (cirrus/cirrostratus)
-        precip        = cl.a;   // 0-1 precipitation rate
-
-        // Low clouds: dense white cumulus, driven by actual cloud fraction
-        alphaLow  = clLow  * pow(noiseLow,  1.2) * 0.94;
-        // Mid clouds: semi-transparent altostratus
-        alphaMid  = clMid  * pow(noiseMid,  1.5) * 0.72;
-        // High cirrus: thin, wispy, translucent
-        alphaHigh = clHigh * pow(noiseHigh, 2.0) * 0.50;
-    } else {
-        // Fallback to legacy pressure/humidity modulation when weather off
-        float pressure = texture2D(u_weather, vUv).g;
-        float humidity = texture2D(u_weather, vUv).b;
-        float base     = pow(max(noiseLow, noiseHigh * 0.55), 1.4) * 0.90;
-        float clear    = mix(1.0, 0.55, pressure);
-        float boost    = max(0.0, 0.45 - pressure) * 2.2;
-        base = clamp(base * clear + base * boost, 0.0, 1.0);
-        base = clamp(base * (0.7 + humidity * 0.5), 0.0, 1.0);
-        alphaLow  = base;
-        alphaHigh = noiseHigh * 0.3;
+    // Clip to inner sphere (don't march below cloud base)
+    if (hitSphere(rayOrigin, rayDir, R_CLOUD_BOTTOM, tInner, tInnerFar)) {
+        if (tInner > 0.0) tFar = min(tFar, tInner);  // camera outside: stop at inner
+        else tNear = max(tNear, tInnerFar);            // camera inside inner sphere
     }
 
-    // Satellite data blending: replaces noise-driven alpha with observed cloud density
-    if (u_satellite_on > 0.5) {
-        float satCloud = texture2D(u_satellite, vUv).r;
-        // Blend: satellite gives large-scale structure; noise adds fine detail
-        alphaLow  = mix(alphaLow,  satCloud * 0.95, 0.55);
-        alphaMid  = mix(alphaMid,  satCloud * 0.60, 0.30);
+    if (tNear >= tFar) discard;
+
+    float stepLen = (tFar - tNear) / float(VOL_STEPS);
+
+    // Accumulated transmittance and in-scattered light
+    float transmittance = 1.0;
+    vec3  scatteredLight = vec3(0.0);
+    float totalDensity   = 0.0;
+
+    // Cloud colours
+    float dayMix    = smoothstep(-0.12, 0.20, NdotL);
+    vec3  cloudBright = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), dayMix);
+    vec3  cloudDark   = vec3(0.32, 0.35, 0.42);  // self-shadowed / thick cloud underbelly
+    vec3  nightCol    = vec3(0.12, 0.14, 0.22);
+
+    // Beer's law absorption coefficient
+    float sigmaA = 18.0;
+
+    for (int i = 0; i < VOL_STEPS; i++) {
+        float t = tNear + (float(i) + 0.5) * stepLen;
+        vec3  samplePos = rayOrigin + rayDir * t;
+
+        float dens = cloudDensity(samplePos, swirl);
+        if (dens < 0.01) continue;
+
+        totalDensity += dens * stepLen;
+
+        // ── Self-shadowing: march toward sun to estimate optical depth ────────
+        float lightOptDepth = 0.0;
+        float lStepLen = (R_CLOUD_TOP - length(samplePos)) / float(LIGHT_STEPS);
+        lStepLen = max(lStepLen, 0.001);
+
+        for (int j = 0; j < LIGHT_STEPS; j++) {
+            vec3 lPos = samplePos + L * (float(j) + 0.5) * lStepLen;
+            float lr = length(lPos);
+            if (lr > R_CLOUD_TOP) break;
+            if (lr < R_CLOUD_BOTTOM) { lightOptDepth += 2.0; break; }
+            lightOptDepth += cloudDensity(lPos, swirl) * lStepLen;
+        }
+
+        // Light reaching this sample (Beer's law)
+        float lightTransmit = exp(-lightOptDepth * sigmaA * 0.6);
+
+        // Cloud color: bright where sunlit, dark in shadow
+        vec3 sampleCol = mix(cloudDark, cloudBright, lightTransmit * dayMix);
+        sampleCol = mix(nightCol, sampleCol, dayMix);
+
+        // Silver-lining effect at cloud edges (forward scattering)
+        float cosTheta = dot(rayDir, L);
+        float hg = 0.25 / (1.0 + 2.0 * (1.0 - cosTheta));  // simplified HG
+        sampleCol += cloudBright * hg * lightTransmit * dayMix * 0.4;
+
+        // Warm golden tint at terminator
+        float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
+        sampleCol = mix(sampleCol, vec3(0.95, 0.72, 0.28), termZone * 0.30);
+
+        // Accumulate using beer's law
+        float sampleAtten = exp(-dens * stepLen * sigmaA);
+        vec3 integScatter = sampleCol * (1.0 - sampleAtten);
+        scatteredLight += transmittance * integScatter;
+        transmittance  *= sampleAtten;
+
+        // Early exit if nearly opaque
+        if (transmittance < 0.01) break;
     }
 
-    // Composite layers: opaque low clouds dominate, cirrus adds on top
-    float alpha = max(alphaLow, alphaMid);
-    alpha = clamp(alpha + alphaHigh * (1.0 - alpha * 0.55), 0.0, 0.95);
+    float alpha = 1.0 - transmittance;
+    alpha = clamp(alpha, 0.0, 0.95);
 
-    // Eye/eyewall structure for active hurricanes/typhoons
-    if (u_storm_count > 0) {
-        alpha *= stormStructure(vUv);
-        alpha  = clamp(alpha, 0.0, 0.95);
-    }
-
-    // ── Cloud colour ──────────────────────────────────────────────────────────
-    // Day colour: bright white for thick clouds, ice-blue tint for cirrus
-    vec3 cloudWhite = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    // Precipitation: grey-blue underbelly on raining clouds
-    vec3 rainGrey   = vec3(0.50, 0.53, 0.62);
-    // Cirrus tint: slight blue-white at high altitude
-    vec3 cirrusTint = vec3(0.88, 0.92, 1.00);
-    // Night: dark grey-blue
-    vec3 nightCol   = vec3(0.22, 0.26, 0.38);
-
-    float dayMix  = smoothstep(-0.12, 0.20, NdotL);
-    vec3  col     = mix(nightCol, cloudWhite, dayMix);
-
-    // Blend in precipitation darkening (only visible side)
-    float precipVis = precip * dayMix;
-    col = mix(col, rainGrey, precipVis * 0.55);
-
-    // Blend in cirrus tint where high-cloud fraction dominates
-    float cirrusDom = alphaHigh / max(0.01, alpha);
-    col = mix(col, cirrusTint, cirrusDom * dayMix * 0.35);
-
-    // Warm golden tint at terminator (sunrise/sunset through clouds)
-    float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-    col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.32 * (1.0 - precipVis * 0.5));
-
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(scatteredLight / max(alpha, 0.01), alpha);
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -375,30 +566,143 @@ void main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const ATM_VERT = /* glsl */`
+varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
-varying vec3 vViewDir;
 void main() {
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-    vec3 wp  = (modelMatrix * vec4(position, 1.0)).xyz;
-    vViewDir = normalize(cameraPosition - wp);
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
+    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
 export const ATM_FRAG = /* glsl */`
-precision mediump float;
+precision highp float;
+
 uniform vec3 u_sun_dir;
+
+varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
-varying vec3 vViewDir;
+
+// ── Physical constants (Earth-scale, normalised to R_earth = 1.0) ─────────
+const float R_PLANET   = 1.0;
+const float R_ATM      = 1.045;          // atmosphere top (≈ 60 km scaled)
+const float H_RAYLEIGH = 0.012;          // Rayleigh scale height (~8 km / 6371 km)
+const float H_MIE      = 0.004;          // Mie scale height (~1.2 km)
+const int   NUM_STEPS  = 12;             // primary ray march steps
+const int   NUM_LSTEPS = 6;              // light (sun) ray march steps
+
+// Rayleigh scattering coefficients at sea level (λ = 680, 550, 440 nm)
+const vec3  BETA_R0 = vec3(5.8e-3, 13.5e-3, 33.1e-3);
+// Mie scattering coefficient (wavelength-independent)
+const float BETA_M0 = 3.0e-3;
+// Mie preferred scattering direction (Henyey-Greenstein g)
+const float MIE_G   = 0.76;
+
+// ── Ray-sphere intersection (origin, dir, radius) → (t_near, t_far) ──────
+// Returns false if no intersection.
+bool raySphere(vec3 o, vec3 d, float r, out float tN, out float tF) {
+    float b = dot(o, d);
+    float c = dot(o, o) - r * r;
+    float disc = b * b - c;
+    if (disc < 0.0) return false;
+    float sq = sqrt(disc);
+    tN = -b - sq;
+    tF = -b + sq;
+    return tF >= 0.0;
+}
+
+// ── Phase functions ───────────────────────────────────────────────────────
+float phaseR(float cosTheta) {
+    return (3.0 / (16.0 * 3.14159265)) * (1.0 + cosTheta * cosTheta);
+}
+float phaseM(float cosTheta) {
+    float g2 = MIE_G * MIE_G;
+    float num = (1.0 - g2);
+    float den = pow(1.0 + g2 - 2.0 * MIE_G * cosTheta, 1.5);
+    return (3.0 / (8.0 * 3.14159265)) * num / den;
+}
+
 void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
-    vec3 rayleigh = mix(vec3(0.03, 0.01, 0.08), vec3(0.14, 0.42, 1.00), dayMix);
-    float mie = pow(max(dot(-V, normalize(u_sun_dir)), 0.0), 8.0) * dayMix;
-    vec3 col = rayleigh + mie * vec3(0.30, 0.18, 0.06);
-    gl_FragColor = vec4(col * rim, rim * 0.82);
+    vec3 N = normalize(vWorldNormal);
+    vec3 V = normalize(cameraPosition - vWorldPos);
+    vec3 L = normalize(u_sun_dir);
+
+    // Camera position in planet-centred frame
+    vec3 camPos = cameraPosition;
+    vec3 rayDir = normalize(vWorldPos - cameraPosition);
+
+    // Intersect view ray with atmosphere shell
+    float tN, tF;
+    if (!raySphere(camPos, rayDir, R_ATM, tN, tF)) discard;
+
+    // Clamp near intersection to camera (camera may be inside atmosphere)
+    tN = max(tN, 0.0);
+
+    // If ray hits planet surface, clip far intersection
+    float tPN, tPF;
+    if (raySphere(camPos, rayDir, R_PLANET, tPN, tPF) && tPN > 0.0) {
+        tF = min(tF, tPN);
+    }
+
+    float segLen = (tF - tN) / float(NUM_STEPS);
+
+    // Accumulate in-scattering along the view ray
+    vec3  sumR = vec3(0.0);
+    vec3  sumM = vec3(0.0);
+    float optDepthR = 0.0;
+    float optDepthM = 0.0;
+
+    for (int i = 0; i < NUM_STEPS; i++) {
+        float tMid = tN + (float(i) + 0.5) * segLen;
+        vec3  samplePos = camPos + rayDir * tMid;
+        float h = length(samplePos) - R_PLANET;
+
+        // Density at this altitude
+        float densR = exp(-h / H_RAYLEIGH) * segLen;
+        float densM = exp(-h / H_MIE)      * segLen;
+        optDepthR += densR;
+        optDepthM += densM;
+
+        // Light ray from sample point to sun — optical depth through atmosphere
+        float ltN, ltF;
+        raySphere(samplePos, L, R_ATM, ltN, ltF);
+        float lSegLen = ltF / float(NUM_LSTEPS);
+
+        float lOptR = 0.0, lOptM = 0.0;
+        bool  shadow = false;
+        for (int j = 0; j < NUM_LSTEPS; j++) {
+            vec3  lPos = samplePos + L * ((float(j) + 0.5) * lSegLen);
+            float lH   = length(lPos) - R_PLANET;
+            if (lH < 0.0) { shadow = true; break; }
+            lOptR += exp(-lH / H_RAYLEIGH) * lSegLen;
+            lOptM += exp(-lH / H_MIE)      * lSegLen;
+        }
+        if (shadow) continue;
+
+        // Total attenuation: view path + sun path
+        vec3 tau = BETA_R0 * (optDepthR + lOptR) + BETA_M0 * (optDepthM + lOptM);
+        vec3 atten = exp(-tau);
+
+        sumR += densR * atten;
+        sumM += densM * atten;
+    }
+
+    float cosTheta = dot(rayDir, L);
+    vec3 scatter = sumR * BETA_R0 * phaseR(cosTheta)
+                 + sumM * BETA_M0 * phaseM(cosTheta);
+
+    // Exposure tone mapping
+    scatter = 1.0 - exp(-scatter * 28.0);
+
+    // Limb-based alpha: stronger at the edges (grazing angle)
+    float rim = 1.0 - max(dot(V, N), 0.0);
+    float alpha = rim * rim * 0.9;
+
+    // Boost alpha where scattering is strong (sunlit limb)
+    float lum = dot(scatter, vec3(0.299, 0.587, 0.114));
+    alpha = max(alpha, lum * 0.85);
+    alpha = clamp(alpha, 0.0, 0.92);
+
+    gl_FragColor = vec4(scatter, alpha);
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -409,20 +713,22 @@ void main() {
 export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     const blackFallback = _blackTex();
     return {
-        u_day:          { value: blackFallback },
-        u_night:        { value: blackFallback },
-        u_specular:     { value: blackFallback },
-        u_weather:      { value: _blackTex() },
-        u_sun_dir:      { value: sunDir.clone() },
-        u_time:         { value: 0 },
-        u_kp:           { value: 0 },
-        u_xray:         { value: 0 },
-        u_city_lights:  { value: 1 },
-        u_aurora_on:    { value: 1 },
-        u_weather_on:   { value: 0 },
-        u_aurora_power: { value: 0 },
-        u_bz_south:     { value: 0 },
-        u_dst_norm:     { value: 0 },
+        u_day:            { value: blackFallback },
+        u_night:          { value: blackFallback },
+        u_specular:       { value: blackFallback },
+        u_weather:        { value: _blackTex() },
+        u_bump:           { value: _blackTex() },
+        u_sun_dir:        { value: sunDir.clone() },
+        u_time:           { value: 0 },
+        u_kp:             { value: 0 },
+        u_xray:           { value: 0 },
+        u_city_lights:    { value: 1 },
+        u_aurora_on:      { value: 1 },
+        u_weather_on:     { value: 0 },
+        u_aurora_power:   { value: 0 },
+        u_bz_south:       { value: 0 },
+        u_dst_norm:       { value: 0 },
+        u_bump_strength:  { value: 1.0 },
     };
 }
 
@@ -487,6 +793,10 @@ export function loadEarthTextures(earthU, cloudU = null) {
 
         loadTex(EARTH_TEXTURES.ocean, tex => {
             earthU.u_specular.value = tex;
+        }, _blackTex),
+
+        loadTex(EARTH_TEXTURES.bump, tex => {
+            earthU.u_bump.value = tex;
         }, _blackTex),
     ];
 
@@ -558,7 +868,7 @@ export class EarthSkin {
         );
         parent.add(this.earthMesh);
 
-        // Cloud shell (1.009 R⊕ above surface)
+        // Cloud shell — mesh at cloud-top altitude (volumetric shader raymarches down)
         this.cloudU   = null;
         this.cloudMesh = null;
         if (clouds) {
@@ -570,7 +880,7 @@ export class EarthSkin {
                 uniforms: this.cloudU, transparent: true, depthWrite: false,
             });
             this.cloudMesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius * 1.009, Math.round(segments * 0.75), Math.round(segments * 0.75)),
+                new THREE.SphereGeometry(radius * 1.018, Math.round(segments * 0.75), Math.round(segments * 0.75)),
                 cloudMat
             );
             parent.add(this.cloudMesh);
