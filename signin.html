@@ -414,14 +414,14 @@
             });
 
             if (!result.success) {
-                // Show error
                 btn.disabled = false;
                 btn.textContent = 'Sign In →';
-                const errEl = document.getElementById('err-pw');
-                if (errEl) {
-                    errEl.textContent = result.error || 'Invalid email or password';
-                    errEl.classList.add('visible');
-                    pw.classList.add('error');
+                // Show error in the alert banner (not the password field)
+                const alertEl = document.getElementById('login-alert');
+                const alertMsg = document.getElementById('alert-msg');
+                if (alertEl && alertMsg) {
+                    alertMsg.textContent = result.error || 'Invalid email or password.';
+                    alertEl.classList.add('show');
                 }
                 return;
             }
