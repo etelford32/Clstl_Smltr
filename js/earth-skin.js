@@ -21,11 +21,14 @@
 
 import * as THREE from 'three';
 
-// ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
-const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
+// ── Texture CDNs — high-res NASA-derived where available ─────────────────────
+// Primary: Solar System Scope (4K equirectangular, CC BY 4.0 educational)
+// Fallback: three-globe CDN (~2K, version-pinned)
+const _CDN     = 'https://unpkg.com/three-globe@2.31.0/example/img/';
+const _SSS     = 'https://upload.wikimedia.org/wikipedia/commons/thumb/';
 export const EARTH_TEXTURES = {
-    day:    _CDN + 'earth-blue-marble.jpg',
-    night:  _CDN + 'earth-night.jpg',
+    day:    _SSS + '2/23/Blue_Marble_2002.png/2560px-Blue_Marble_2002.png',
+    night:  _SSS + 'b/ba/The_earth_at_night.jpg/2560px-The_earth_at_night.jpg',
     ocean:  _CDN + 'earth-water.png',
     clouds: _CDN + 'clouds.png',
     bump:   _CDN + 'earth-topology.png',
@@ -160,89 +163,164 @@ vec3 weatherOverlay(vec2 uv) {
     return c;
 }
 
+// ── Ocean wave normal micro-perturbation ─────────────────────────────────────
+// Procedural animated ripples for realistic sun-glint sparkle
+vec2 oceanWaveNormal(vec2 uv, float t) {
+    float s1 = sin(uv.x * 320.0 + t * 0.8) * cos(uv.y * 280.0 + t * 0.6);
+    float s2 = sin(uv.x * 510.0 - t * 1.1) * cos(uv.y * 440.0 - t * 0.9);
+    float s3 = sin(uv.x * 190.0 + uv.y * 220.0 + t * 0.5);
+    return vec2(s1 + s2 * 0.5, s2 + s3 * 0.5) * 0.0008;
+}
+
 void main() {
     vec3 Nflat = normalize(vWorldNormal);
     vec3 T     = normalize(vWorldTangent);
     vec3 B     = normalize(vWorldBitangent);
+    vec3 V     = normalize(cameraPosition - vWorldPos);
+    vec3 L     = normalize(u_sun_dir);
 
-    // Perturb normal using bump/topology map for terrain relief
-    float bumpStr = u_bump_strength * 2.8;  // scale for visible mountains at terminator
-    vec3 N = (bumpStr > 0.01) ? perturbNormal(Nflat, T, B, vUv, bumpStr) : Nflat;
-
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = smoothstep(-0.10, 0.20, NdotL);
-
-    vec3 dayCol    = texture2D(u_day,      vUv).rgb;
-    vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
+    // ── Texture sampling ──────────────────────────────────────────────────────
+    vec3  dayCol   = texture2D(u_day,      vUv).rgb;
+    vec3  nightCol = texture2D(u_night,    vUv).rgb;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
-    // Suppress bump on ocean (flat water surface)
-    if (oceanMsk > 0.5 && bumpStr > 0.01) {
-        N = Nflat;
-        NdotL  = dot(N, u_sun_dir);
-        dayMix = smoothstep(-0.10, 0.20, NdotL);
+    // ── Normal perturbation ───────────────────────────────────────────────────
+    float bumpStr = u_bump_strength * 2.8;
+    vec3 N = (bumpStr > 0.01) ? perturbNormal(Nflat, T, B, vUv, bumpStr) : Nflat;
+
+    // Suppress terrain bump on ocean; add wave ripple instead
+    if (oceanMsk > 0.5) {
+        vec2 waveOff = oceanWaveNormal(vUv, u_time);
+        N = normalize(Nflat + T * waveOff.x + B * waveOff.y);
     }
 
-    vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
+    float NdotL  = dot(N, L);
+    float NdotLf = dot(Nflat, L);  // flat normal for global lighting decisions
 
-    // Ocean specular glint (Fresnel-enhanced GGX-style)
-    vec3  V    = normalize(cameraPosition - vWorldPos);
-    vec3  H    = normalize(u_sun_dir + V);
-    float NdotV = max(dot(Nflat, V), 0.001);
-    float NdotH = max(dot(Nflat, H), 0.0);
-    // Schlick Fresnel approximation — water F0 ≈ 0.02
-    float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
-    // GGX-like sharp specular (roughness ≈ 0.08 for calm ocean)
-    float rough2 = 0.08 * 0.08;
-    float denom  = NdotH * NdotH * (rough2 - 1.0) + 1.0;
-    float D      = rough2 / (3.14159265 * denom * denom);
-    float spec   = D * fresnel * oceanMsk * dayMix * 0.45;
-    base += vec3(spec * 0.75, spec * 0.88, spec);
+    // ── Multi-zone terminator transition ──────────────────────────────────────
+    // Real terminator has 3 zones: civil twilight (-6°), nautical (-12°), astronomical (-18°)
+    // NdotL ≈ 0 at terminator; -0.10 ≈ ~6° below horizon
+    float dayFull    = smoothstep(0.0,  0.15, NdotLf);     // full daylight
+    float twilight   = smoothstep(-0.18, 0.0, NdotLf);     // civil+nautical twilight zone
+    float nightFull  = 1.0 - smoothstep(-0.22, -0.05, NdotLf); // deep night
 
-    // Weather temperature overlay
+    // ── Surface colour composition ────────────────────────────────────────────
+    // Day side: Blue Marble is already a photo — apply subtle colour grading
+    vec3 dayGraded = dayCol;
+    // Boost saturation slightly on dayside for vivid continents
+    float dayLum = dot(dayGraded, vec3(0.299, 0.587, 0.114));
+    dayGraded = mix(vec3(dayLum), dayGraded, 1.12);
+
+    // Night side: city lights with brightness boost + warm amber tint
+    // Apply population-density-aware falloff (brighter lights = larger cities)
+    float lightBright = max(nightCol.r, max(nightCol.g, nightCol.b));
+    // Non-linear boost: dim lights stay dim, bright cities pop
+    vec3 cityLights = nightCol * (1.8 + lightBright * 3.5);
+    // Warm amber colour shift for sodium vapor streetlights
+    cityLights *= vec3(1.0, 0.82, 0.55);
+
+    // City lights fade during twilight (not hard cutoff)
+    float cityVis = (1.0 - twilight) * u_city_lights;
+    // Keep some faint lights visible even in civil twilight
+    cityVis = max(cityVis, nightFull * u_city_lights * 0.6);
+
+    // ── Ocean deep colour ─────────────────────────────────────────────────────
+    // Open ocean is darker/bluer than coastal shallows visible in the texture
+    if (oceanMsk > 0.5) {
+        vec3 deepOcean = vec3(0.01, 0.04, 0.12);
+        vec3 shallowOcean = dayCol;
+        // Latitude-based depth approximation (polar waters darker/greener)
+        float lat = abs((0.5 - vUv.y) * 3.14159265);
+        float depthMix = oceanMsk * 0.35 * (1.0 - lat * 0.3);
+        dayGraded = mix(dayGraded, mix(shallowOcean, deepOcean, 0.5), depthMix);
+    }
+
+    // ── Blend day/night ───────────────────────────────────────────────────────
+    vec3 base = mix(cityLights * cityVis, dayGraded, dayFull);
+
+    // ── Lighting model ────────────────────────────────────────────────────────
+    // PBR-inspired: direct sunlight + indirect sky illumination + ground bounce
+    float lambert = max(NdotL, 0.0);
+
+    // Indirect sky illumination: hemisphere integral approximation
+    // Upper hemisphere contributes blue-tinted ambient; ground reflects warm
+    float skyVis = 0.5 + 0.5 * Nflat.y;  // upward-facing = more sky
+    vec3 skyAmbient = mix(vec3(0.02, 0.015, 0.01), vec3(0.04, 0.06, 0.12), skyVis);
+
+    // Direct light: warm-white sunlight (6500K → slight warm bias)
+    vec3 sunCol = vec3(1.0, 0.98, 0.92);
+    vec3 directLight = sunCol * lambert * dayFull;
+
+    // Total illumination
+    vec3 illumination = directLight + skyAmbient;
+    base *= illumination;
+
+    // ── Ocean specular (Fresnel + GGX + wave perturbation) ────────────────────
+    if (oceanMsk > 0.3) {
+        vec3  H2     = normalize(L + V);
+        float NdotV  = max(dot(N, V), 0.001);
+        float NdotH  = max(dot(N, H2), 0.0);
+        // Schlick Fresnel (water F0 ≈ 0.02)
+        float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+        // GGX distribution (roughness 0.06 for open ocean)
+        float rough2 = 0.06 * 0.06;
+        float denom2 = NdotH * NdotH * (rough2 - 1.0) + 1.0;
+        float D      = rough2 / (3.14159265 * denom2 * denom2);
+        float spec   = D * fresnel * oceanMsk * dayFull * 0.55;
+        // Specular is white-blue (sky reflection)
+        base += vec3(spec * 0.80, spec * 0.90, spec);
+    }
+
+    // ── Terminator atmospheric glow ───────────────────────────────────────────
+    // Wide warm band from Rayleigh scattering through ~100 km of atmosphere
+    // at grazing angle. Three-colour gradient: gold core → orange → deep red edge
+    float termCore = smoothstep(-0.04, 0.01, NdotLf) * smoothstep(0.08, 0.02, NdotLf);
+    float termWide = smoothstep(-0.12, -0.02, NdotLf) * smoothstep(0.14, 0.04, NdotLf);
+    vec3 termCol = vec3(0.0);
+    termCol += vec3(0.65, 0.38, 0.08) * termCore * 0.28;  // gold core
+    termCol += vec3(0.50, 0.18, 0.04) * termWide * 0.14;  // orange halo
+    termCol += vec3(0.30, 0.06, 0.02) * smoothstep(-0.18, -0.06, NdotLf)
+             * smoothstep(-0.02, -0.10, NdotLf) * 0.08;   // deep red edge
+    base += termCol;
+
+    // ── Weather temperature overlay ──────────────────────────────────────��────
     if (u_weather_on > 0.5) {
-        base = mix(base, weatherOverlay(vUv), 0.28);
+        base = mix(base, weatherOverlay(vUv) * illumination, 0.28);
     }
 
-    // Aurora
+    // ── Aurora ────────────────────────────────────────────────────────────────
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
         float lat    = (0.5 - vUv.y) * 3.14159265;
         float lon    = (vUv.x - 0.5) * 6.28318530;
         float sinAbs = abs(sin(lat));
-        float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
+        float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotLf);
         base += auroraColor(sinAbs, lon, u_kp) * nightM;
     }
 
-    // X-ray ionospheric flash (dayside HF blackout)
-    if (u_xray > 0.25 && dayMix > 0.4) {
-        float flash = (u_xray - 0.25) / 0.75 * dayMix;
-        base += vec3(0.3, 0.5, 1.0) * flash * 0.30;
+    // ── X-ray ionospheric flash (dayside HF blackout) ─────────────────────────
+    if (u_xray > 0.25 && dayFull > 0.3) {
+        float flash = (u_xray - 0.25) / 0.75 * dayFull;
+        base += vec3(0.3, 0.5, 1.0) * flash * 0.25;
     }
 
-    // Ring current heating: equatorial nightside reddish glow
+    // ── Ring current heating: equatorial nightside reddish glow ───────────────
     if (u_dst_norm > 0.08) {
         float lat    = (0.5 - vUv.y) * 3.14159265;
         float absLat = abs(lat);
-        float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
-        base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
+        float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * nightFull;
+        base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.22;
     }
 
-    // Southward Bz: faint particle injection on nightside
+    // ── Southward Bz particle injection (nightside) ──────────────────────────
     if (u_bz_south > 0.15) {
         float bzGlow = (u_bz_south - 0.15) / 0.85;
-        float nightM = 1.0 - smoothstep(-0.25, 0.10, NdotL);
-        base += vec3(0.10, 0.35, 0.90) * bzGlow * nightM * 0.12;
+        base += vec3(0.10, 0.35, 0.90) * bzGlow * nightFull * 0.10;
     }
 
-    // Lighting: half-Lambert without squaring — Blue Marble is already a daylit photo;
-    // squaring creates a harsh spotlight effect.  Keep a gentle falloff + raised ambient.
-    float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float lit      = mix(0.10, halfLamb, dayMix);
-    base *= lit;
-
-    // Terminator warm glow
-    float termZone = smoothstep(-0.08, 0.0, NdotL) * smoothstep(0.18, 0.06, NdotL);
-    base += vec3(0.55, 0.25, 0.04) * termZone * 0.22;
+    // ── Filmic tone mapping (subtle — keeps HDR highlights without washout) ──
+    // ACES-inspired S-curve on just the highlights
+    vec3 toneMapped = base / (base + 0.6) * 1.1;
+    base = mix(base, toneMapped, 0.3);
 
     gl_FragColor = vec4(base, 1.0);
 }`;
