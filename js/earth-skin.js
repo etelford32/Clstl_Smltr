@@ -21,14 +21,14 @@
 
 import * as THREE from 'three';
 
-// ── Texture CDNs — high-res NASA-derived where available ─────────────────────
-// Primary: Solar System Scope (4K equirectangular, CC BY 4.0 educational)
+// ── Texture CDNs — NASA-derived, highest free resolution available ────────────
+// Primary: NASA NEO / Visible Earth (3600+ px, no API key, direct HTTP)
 // Fallback: three-globe CDN (~2K, version-pinned)
-const _CDN     = 'https://unpkg.com/three-globe@2.31.0/example/img/';
-const _SSS     = 'https://upload.wikimedia.org/wikipedia/commons/thumb/';
+const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
+const _NEO = 'https://eoimages.gsfc.nasa.gov/images/imagerecords/';
 export const EARTH_TEXTURES = {
-    day:    _SSS + '2/23/Blue_Marble_2002.png/2560px-Blue_Marble_2002.png',
-    night:  _SSS + 'b/ba/The_earth_at_night.jpg/2560px-The_earth_at_night.jpg',
+    day:    _NEO + '57000/57752/land_shallow_topo_2048.jpg',
+    night:  _NEO + '79000/79765/dnb_land_ocean_ice.2012.3600x1800.jpg',
     ocean:  _CDN + 'earth-water.png',
     clouds: _CDN + 'clouds.png',
     bump:   _CDN + 'earth-topology.png',

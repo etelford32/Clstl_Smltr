@@ -39,7 +39,8 @@ import * as THREE from 'three';
 
 // ── GIBS Configuration ──────────────────────────────────────────────────────
 
-const GIBS_WMTS = 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best';
+const GIBS_WMTS     = 'https://gibs.earthdata.nasa.gov/wmts/epsg4326/best';
+const GIBS_SNAPSHOT = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
 
 const LAYERS = [
     'MODIS_Terra_CorrectedReflectance_TrueColor',
@@ -176,8 +177,47 @@ export class EarthHiRes {
 
         this.active = false;
 
+        // Daily global snapshot texture (4096×2048 equirectangular)
+        // Used as mid-distance quality tier between base Blue Marble and zoomed tiles
+        this.dailyTexture = null;
+        this.dailyReady   = false;
+        this._loadDailySnapshot();
+
         // Refresh date at midnight
-        setInterval(() => { this._date = gibsDate(1); }, 3600000);
+        setInterval(() => {
+            this._date = gibsDate(1);
+            this._loadDailySnapshot();
+        }, 3600000);
+    }
+
+    /**
+     * Load the daily GIBS snapshot as a full-globe equirectangular texture.
+     * 4096×2048, yesterday's MODIS true-color. Free, no API key.
+     * This provides a huge upgrade over the static Blue Marble at mid-zoom.
+     */
+    _loadDailySnapshot() {
+        const layer = LAYERS[0];
+        const url = `${GIBS_SNAPSHOT}?REQUEST=GetSnapshot`
+            + `&LAYERS=${layer}&CRS=EPSG:4326`
+            + `&TIME=${this._date}`
+            + `&BBOX=-90,-180,90,180`
+            + `&FORMAT=image/jpeg&WIDTH=4096&HEIGHT=2048`;
+
+        const loader = new THREE.TextureLoader();
+        loader.setCrossOrigin('anonymous');
+        loader.load(url, tex => {
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            tex.minFilter = THREE.LinearMipmapLinearFilter;
+            tex.magFilter = THREE.LinearFilter;
+            tex.generateMipmaps = true;
+            tex.colorSpace = THREE.SRGBColorSpace;
+            if (this.dailyTexture) this.dailyTexture.dispose();
+            this.dailyTexture = tex;
+            this.dailyReady   = true;
+            console.info(`[EarthHiRes] Daily GIBS snapshot loaded (${this._date})`);
+        }, undefined, () => {
+            console.warn('[EarthHiRes] Daily GIBS snapshot failed — using base texture');
+        });
     }
 
     /**

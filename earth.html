@@ -3247,7 +3247,14 @@ function animate() {
     const dist = camera.position.length();  // in "Earth radii" units
     cloudU.u_cam_dist.value = dist;
 
-    // ── Hi-res satellite tile update (zoom-dependent GIBS tiles)
+    // ── Hi-res satellite imagery (3-tier LOD) ──────────────────────
+    // Tier 1: base Blue Marble (static, always loaded)
+    // Tier 2: daily GIBS snapshot (4096×2048, replaces base when ready)
+    // Tier 3: GIBS WMTS tiles (250m detail, loaded on zoom)
+    if (earthHiRes.dailyReady && earthHiRes.dailyTexture) {
+        earthU.u_day.value = earthHiRes.dailyTexture;
+        earthHiRes.dailyReady = false;  // only swap once
+    }
     earthHiRes.update(camera, earthMesh);
     earthU.u_hires_on.value = earthHiRes.active ? 1 : 0;
     if (earthHiRes.active) {
