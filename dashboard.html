@@ -15,17 +15,8 @@
 html{height:auto;overflow-y:auto}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
 
-/* ── NAV ── */
-nav#dash-nav{position:sticky;top:0;z-index:100;background:rgba(6,3,15,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between}
-.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
-.nav-logo img{height:32px;width:32px;border-radius:50%;object-fit:cover}
-.nav-logo-text{font-size:.95rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.nav-actions{display:flex;align-items:center;gap:12px}
-.nav-user{font-size:.82rem;color:var(--muted)}
-.nav-user strong{color:var(--text)}
-.btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);transition:border-color .2s,color .2s}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+/* ── NAV (overrides from shared nav-styles.css for dashboard context) ── */
+nav#dash-nav{display:none} /* hidden; shared nav used instead */
 
 /* ── LAYOUT ── */
 main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
@@ -143,17 +134,10 @@ footer a:hover{color:var(--text)}
   </div>
 </div>
 
-<!-- ── NAV ── -->
-<nav id="dash-nav" aria-label="Dashboard navigation">
-  <a href="index.html" class="nav-logo" aria-label="Parker Physics home">
-    <img src="ParkersPhysics_logo2.jpg" alt="">
-    <span class="nav-logo-text">Parker Physics</span>
-  </a>
-  <div class="nav-actions">
-    <span class="nav-user">Welcome, <strong id="user-name">–</strong></span>
-    <button class="btn-sm btn-outline" id="signout-btn" aria-label="Sign out">Sign Out</button>
-  </div>
-</nav>
+<!-- ── Shared Nav ── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("dashboard");</script>
 
 <!-- ── MAIN ── -->
 <main>
@@ -421,7 +405,8 @@ if (!_auth || !_auth.signedIn) {
 
   const name  = _auth.name || _auth.email || 'Explorer';
   const first = name.split(' ')[0];
-  document.getElementById('user-name').textContent = first;
+  const _userNameEl = document.getElementById('user-name');
+  if (_userNameEl) _userNameEl.textContent = first;
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -442,7 +427,7 @@ if (!_auth || !_auth.signedIn) {
         window.location.href = 'index.html';
     }
   }
-  document.getElementById('signout-btn').addEventListener('click', signOut);
+  document.getElementById('signout-btn')?.addEventListener('click', signOut);
   initAll();
 }
 

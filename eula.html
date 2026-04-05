@@ -14,61 +14,7 @@
             background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
             color: #fff; min-height: 100vh; display: flex; flex-direction: column;
         }
-        nav {
-            position: sticky; top: 0; z-index: 600;
-            height: 54px; min-height: 54px;
-            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
-            border-bottom: 1px solid rgba(255,200,0,.12);
-            display: flex; align-items: center; padding: 0 16px; gap: 10px;
-        }
-        .nav-logo-wrap { position: relative; width: 36px; height: 36px; flex-shrink: 0; }
-        .nav-logo-wrap::before {
-            content: ''; position: absolute; inset: -5px; border-radius: 50%;
-            border: 1.5px solid transparent;
-            border-top-color: rgba(255,180,0,.85); border-right-color: rgba(128,64,255,.55);
-            animation: navRingSpin 3s linear infinite; pointer-events: none;
-        }
-        .nav-logo-wrap::after {
-            content: ''; position: absolute; inset: -9px; border-radius: 50%;
-            border: 1px solid transparent;
-            border-bottom-color: rgba(64,128,255,.45); border-left-color: rgba(255,100,80,.35);
-            animation: navRingSpin 5.5s linear infinite reverse; pointer-events: none;
-        }
-        @keyframes navRingSpin { to { transform: rotate(360deg); } }
-        .nav-logo-img { height: 36px; width: 36px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 0 6px rgba(255,180,0,.5)); display: block; }
-        .nav-brand {
-            font-size: .95rem; font-weight: 700; white-space: nowrap;
-            background: linear-gradient(45deg,#ffd700,#ff8c00);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-        }
-        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-        .nav-item {
-            padding: 5px 10px; background: rgba(255,255,255,.07);
-            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
-            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
-            transition: background .2s, border-color .2s;
-        }
-        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
-        .nav-item.cta { background: linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#0a0a1a; font-weight:700; }
-        .nav-burger {
-            display: none; margin-left: auto;
-            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
-            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
-            cursor: pointer; transition: background .2s;
-        }
-        .nav-burger:hover { background: rgba(255,255,255,.18); }
-        @media (max-width: 768px) {
-            .nav-burger { display: block; }
-            .nav-menu {
-                display: none; flex-direction: column; align-items: stretch;
-                position: absolute; top: 54px; left: 0; right: 0;
-                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
-                border-bottom: 1px solid rgba(255,255,255,.1);
-                padding: 8px 12px 12px; gap: 4px; z-index: 700;
-            }
-            .nav-menu.open { display: flex; }
-            .nav-item { padding: 11px 14px; font-size: .9rem; }
-        }
+        /* nav styles loaded from shared nav-styles.css */
 
         .legal-hero {
             padding: 3rem 2rem 1.5rem; text-align: center;
@@ -132,22 +78,10 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
-<nav>
-    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
-        <div class="nav-logo-wrap">
-            <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics Logo">
-        </div>
-        <span class="nav-brand">Parker Physics</span>
-    </a>
-    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu">
-        <a href="index.html" class="nav-item">Home</a>
-        <a href="pricing.html" class="nav-item">Pricing</a>
-        <a href="signin.html" class="nav-item">Sign In</a>
-        <a href="signup.html" class="nav-item cta">Get Started</a>
-    </div>
-</nav>
+<!-- ═══════════════════════════��══════════════════════════��� NAV ═══ -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("eula");</script>
 
 <!-- ═══════════════════════════════════════════════════ HERO ═══ -->
 <div class="legal-hero">
