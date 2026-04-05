@@ -105,9 +105,11 @@ export class SunSkin {
             for (let i = 0; i < CORONA_SHELLS.length; i++) {
                 const r = radius * CORONA_SHELLS[i];
                 const coronaU = {
-                    u_bloom:     this.sunU.u_bloom,
-                    u_xray_norm: this.sunU.u_xray_norm,
-                    u_layer:     { value: i / (CORONA_SHELLS.length - 1) },
+                    u_bloom:       this.sunU.u_bloom,
+                    u_xray_norm:   this.sunU.u_xray_norm,
+                    u_layer:       { value: i / (CORONA_SHELLS.length - 1) },
+                    u_time:        this.sunU.u_time,
+                    u_euv_dimming: this.sunU.u_euv_dimming,
                 };
                 const mat = new THREE.ShaderMaterial({
                     vertexShader:   CORONA_VERT,
@@ -172,19 +174,37 @@ export class SunSkin {
         this.sunU.u_nRegions.value = n;
     }
 
-    /** Trigger a flare animation. */
+    /** Trigger a flare animation with ribbon structure + EUV dimming. */
     triggerFlare(cls, { lat_rad = 0, lon_rad = 0 } = {}) {
         const letter = (cls?.[0] ?? 'C').toUpperCase();
-        this.sunU.u_flare_t.value   = letter === 'X' ? 1.0 : letter === 'M' ? 0.7 : 0.3;
-        this.sunU.u_flare_arc.value = letter === 'X' ? 0.9 : letter === 'M' ? 0.5 : 0.2;
+        this.sunU.u_flare_t.value     = letter === 'X' ? 1.0 : letter === 'M' ? 0.7 : 0.3;
+        this.sunU.u_flare_arc.value   = letter === 'X' ? 0.9 : letter === 'M' ? 0.5 : 0.2;
+        this.sunU.u_flare_phase.value = 0.0;  // start of impulsive phase
         this.sunU.u_flare_lon.value.set(lat_rad, lon_rad);
+        // EUV dimming: CME launches → coronal mass loss (only M/X class)
+        if (letter === 'X' || letter === 'M') {
+            this.sunU.u_euv_dimming.value = letter === 'X' ? 0.8 : 0.4;
+        }
     }
 
     /** Decay flare animation (call each frame). */
     decayFlare(dt) {
         const u = this.sunU;
-        u.u_flare_t.value   = Math.max(0, u.u_flare_t.value   - dt * 0.8);
-        u.u_flare_arc.value = Math.max(0, u.u_flare_arc.value - dt * 0.25);
+        u.u_flare_t.value     = Math.max(0, u.u_flare_t.value     - dt * 0.8);
+        u.u_flare_arc.value   = Math.max(0, u.u_flare_arc.value   - dt * 0.25);
+        // Flare phase advances from impulsive (0) → gradual (0.5) → decay (1)
+        if (u.u_flare_arc.value > 0.005) {
+            u.u_flare_phase.value = Math.min(1, u.u_flare_phase.value + dt * 0.08);
+        }
+        // EUV dimming persists longer than flare (corona refills over ~hours)
+        u.u_euv_dimming.value = Math.max(0, u.u_euv_dimming.value - dt * 0.03);
+
+        // Pass dimming to corona layers
+        for (const cm of this._coronaMeshes) {
+            if (cm.material.uniforms?.u_euv_dimming) {
+                cm.material.uniforms.u_euv_dimming.value = u.u_euv_dimming.value;
+            }
+        }
     }
 
     /** Set bloom / corona brightness. */

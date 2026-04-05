@@ -83,6 +83,8 @@ export const SUN_FRAG = /* glsl */`
     uniform float u_kp_norm;
     uniform float u_bloom;
     uniform float u_flare_arc;
+    uniform float u_flare_phase;   // 0–1 flare evolution (impulsive→gradual→decay)
+    uniform float u_euv_dimming;   // 0–1 coronal dimming intensity (CME mass loss)
     uniform vec2  u_flare_lon;
     uniform vec4  u_regions[8];
     uniform int   u_nRegions;
@@ -127,24 +129,27 @@ export const SUN_FRAG = /* glsl */`
 
     // ── Supergranulation (~35 Mm cells) ────────────────────────────────────────
     float supergranulation(vec2 uv, float t) {
-        float n = vnoise(uv * 2.2  + vec2( t * 0.0018, t * 0.0011)) * 0.55
-                + vnoise(uv * 4.0  + vec2(-t * 0.0025, t * 0.0015)) * 0.35
-                + vnoise(uv * 7.5  + vec2( t * 0.0035, -t * 0.0022)) * 0.10;
+        // ~24 hr lifetime, ~0.3 km/s horizontal flow
+        float n = vnoise(uv * 2.2  + vec2( t * 0.000055, t * 0.000033)) * 0.55
+                + vnoise(uv * 4.0  + vec2(-t * 0.000075, t * 0.000045)) * 0.35
+                + vnoise(uv * 7.5  + vec2( t * 0.000105, -t * 0.000066)) * 0.10;
         return smoothstep(0.32, 0.68, n);
     }
 
     // ── Granulation (~1 Mm cells) ─────────────────────────────────────────────
     float granulation(vec2 uv, float t) {
-        float n = vnoise(uv *  7.0  + vec2( t * 0.016,  t * 0.011)) * 0.50
-                + vnoise(uv * 15.0  + vec2(-t * 0.025,  t * 0.018)) * 0.30
-                + vnoise(uv * 31.0  + vec2( t * 0.041, -t * 0.035)) * 0.20;
+        // ~8 min lifetime, ~1 km/s upflow (was 30-50x too fast)
+        float n = vnoise(uv *  7.0  + vec2( t * 0.00048,  t * 0.00033)) * 0.50
+                + vnoise(uv * 15.0  + vec2(-t * 0.00075,  t * 0.00054)) * 0.30
+                + vnoise(uv * 31.0  + vec2( t * 0.00123, -t * 0.00105)) * 0.20;
         return smoothstep(0.30, 0.70, n);
     }
 
     // ── Chromospheric spicules ─────────────────────────────────────────────────
     float spicules(vec2 uv, float mu, float t) {
-        float n = vnoise(vec2(uv.x * 110.0 + t * 0.008, uv.y * 5.0 + t * 0.003)) * 0.6
-                + vnoise(vec2(uv.x * 220.0 - t * 0.015, uv.y * 2.5))              * 0.4;
+        // ~5 min lifetime, ~25 km/s vertical velocity
+        float n = vnoise(vec2(uv.x * 110.0 + t * 0.0003, uv.y * 5.0 + t * 0.0001)) * 0.6
+                + vnoise(vec2(uv.x * 220.0 - t * 0.0005, uv.y * 2.5))               * 0.4;
         float w = max(0.0, 1.0 - mu / 0.18);
         w = w * w;
         return n * w;
@@ -238,7 +243,11 @@ export const SUN_FRAG = /* glsl */`
         float facLimb = 1.0 + (1.0 - mu) * 0.6;  // limb-brightened faculae
         actCol += blackbodyRGB(u_teff * 1.05) * totalPenumbra * 0.30 * facLimb;
 
-        // ── Post-flare UV arc glow ──
+        // ── Two-ribbon flare structure + post-flare arcade ──
+        // Real solar flares have two parallel chromospheric ribbons that
+        // separate over time as magnetic reconnection proceeds upward.
+        // Phase: 0–0.25 = impulsive (bright kernels), 0.25–0.7 = gradual
+        // (ribbon separation, arcade cooling), 0.7–1.0 = decay (dimming)
         if (u_flare_arc > 0.005) {
             vec3 flareSrc = normalize(vec3(
                 cos(u_flare_lon.x) * cos(u_flare_lon.y),
@@ -247,13 +256,64 @@ export const SUN_FRAG = /* glsl */`
             ));
             float cosFA = clamp(dot(vLocalPos, flareSrc), -1.0, 1.0);
             float arcAng = acos(cosFA);
-            float innerGlow = exp(-arcAng * arcAng / 0.006) * u_flare_arc;
-            float outerGlow = exp(-arcAng * arcAng / 0.045) * u_flare_arc * 0.35;
-            actCol += vec3(0.35, 0.60, 1.00) * innerGlow * 2.2;
-            actCol += vec3(1.00, 0.82, 0.40) * outerGlow * 1.4;
+            float phase  = u_flare_phase;
+
+            // Ribbon separation: starts at 0 Mm, widens to ~20 Mm (0.03 rad)
+            float ribbonSep = phase * 0.032;
+            // Two parallel ribbons along polarity inversion line
+            // Use local tangent direction for PIL orientation
+            vec3 tangent = normalize(cross(flareSrc, vec3(0.0, 1.0, 0.0)));
+            float PIL_dist = abs(dot(vLocalPos - flareSrc, tangent));
+            float ribbon1 = exp(-pow(arcAng - ribbonSep, 2.0) / 0.0003)
+                          * exp(-PIL_dist * PIL_dist / 0.004);
+            float ribbon2 = exp(-pow(arcAng + ribbonSep, 2.0) / 0.0003)
+                          * exp(-PIL_dist * PIL_dist / 0.004);
+            float ribbons = (ribbon1 + ribbon2) * u_flare_arc;
+
+            // Ribbon colour: white-hot (impulsive) → EUV blue-white (gradual) → amber (cooling)
+            vec3 ribbonCol;
+            if (phase < 0.25) {
+                ribbonCol = mix(vec3(1.0, 0.95, 0.8), vec3(1.0, 1.0, 1.0), phase * 4.0);
+            } else if (phase < 0.7) {
+                float t2 = (phase - 0.25) / 0.45;
+                ribbonCol = mix(vec3(0.5, 0.7, 1.0), vec3(1.0, 0.6, 0.2), t2);
+            } else {
+                ribbonCol = vec3(1.0, 0.5, 0.15);
+            }
+            actCol += ribbonCol * ribbons * 3.0;
+
+            // Post-flare arcade: loops connecting the ribbons (broad glow)
+            float arcadeGlow = exp(-arcAng * arcAng / 0.008) * u_flare_arc;
+            vec3 arcadeCol = mix(vec3(0.4, 0.65, 1.0), vec3(1.0, 0.7, 0.3), phase);
+            actCol += arcadeCol * arcadeGlow * 1.2;
+
+            // Post-flare loop oscillation (quasi-periodic pulsation, ~3 min period)
+            float qpp = 0.85 + 0.15 * sin(phase * 40.0 + u_time * 0.035);
+            actCol *= qpp;
         }
 
-        // ── Flare flash ──
+        // ── EUV coronal dimming — dark halo where CME mass evacuated ──
+        // Visible as a dimming region around the flare site after CME launch.
+        // Dimming can persist for hours as corona refills.
+        if (u_euv_dimming > 0.01) {
+            vec3 flareSrc = normalize(vec3(
+                cos(u_flare_lon.x) * cos(u_flare_lon.y),
+                sin(u_flare_lon.x),
+                cos(u_flare_lon.x) * sin(u_flare_lon.y)
+            ));
+            float cosFA = clamp(dot(vLocalPos, flareSrc), -1.0, 1.0);
+            float arcAng = acos(cosFA);
+            // Dimming region: annulus around flare site (5–30° radius)
+            // Inner edge of dimming starts outside the flare arcade
+            float dimmingInner = 0.05;
+            float dimmingOuter = 0.45;
+            float dimmingProfile = smoothstep(dimmingInner, dimmingInner + 0.08, arcAng)
+                                 * smoothstep(dimmingOuter, dimmingOuter - 0.12, arcAng);
+            // Darken the photosphere/corona by up to 35%
+            actCol *= 1.0 - dimmingProfile * u_euv_dimming * 0.35;
+        }
+
+        // ── Flare flash (impulsive white-light) ──
         float flash = u_flare_t * u_flare_t;
         actCol = mix(actCol, vec3(1.0, 0.97, 0.85), flash * 0.80);
 
@@ -281,20 +341,52 @@ export const CORONA_FRAG = /* glsl */`
     precision mediump float;
     uniform float u_bloom;
     uniform float u_xray_norm;
-    uniform float u_layer;   // 0-1 which corona layer (inner→outer)
+    uniform float u_layer;       // 0-1 which corona layer (inner→outer)
+    uniform float u_time;
+    uniform float u_euv_dimming; // coronal mass loss dimming
     varying vec3 vWorldNormal;
     varying vec3 vViewDir;
+
+    // Simple hash for streamer structure
+    float hash1(float n) { return fract(sin(n) * 43758.5453); }
+
     void main() {
         vec3 N = normalize(vWorldNormal);
         vec3 V = normalize(vViewDir);
         float rim = pow(1.0 - abs(dot(V, N)), 2.0);
-        // Inner corona: gold-white, outer: fading orange-red
-        vec3 innerCol = vec3(1.0, 0.88, 0.55);
-        vec3 outerCol = vec3(0.85, 0.35, 0.06);
+
+        // ── Streamer structure: ~8 radial streamers at equator ──
+        // Real corona has helmet streamers along the magnetic neutral line.
+        // Approximate with azimuthal modulation of brightness.
+        float azimuth = atan(N.x, N.z);
+        float latitude = asin(clamp(N.y, -1.0, 1.0));
+        // Streamer pattern: equatorial bias with 8 rays
+        float streamerAz = 0.5 + 0.5 * sin(azimuth * 4.0 + u_time * 0.0003);
+        float streamerLat = exp(-latitude * latitude * 3.0);  // concentrated at equator
+        float streamer = mix(0.6, 1.0, streamerAz * streamerLat);
+
+        // Polar plumes (fast solar wind): dimmer, narrower features at poles
+        float polarPlume = exp(-(1.57 - abs(latitude)) * (1.57 - abs(latitude)) * 6.0);
+        float plumeAz = 0.5 + 0.5 * sin(azimuth * 12.0 + latitude * 3.0);
+        streamer = max(streamer, polarPlume * plumeAz * 0.4);
+
+        // Inner corona: gold-white (K-corona Thomson scattering)
+        // Outer: fading orange-red (F-corona dust scattering)
+        vec3 innerCol = vec3(1.0, 0.90, 0.60);
+        vec3 outerCol = vec3(0.80, 0.30, 0.05);
         vec3 col = mix(innerCol, outerCol, u_layer);
-        // X-ray brightening
-        col += vec3(0.2, 0.3, 0.5) * u_xray_norm * (1.0 - u_layer);
-        float alpha = rim * (0.25 - u_layer * 0.18) * max(0.3, u_bloom);
+
+        // Apply streamer modulation
+        col *= streamer;
+
+        // X-ray brightening (coronal heating)
+        col += vec3(0.15, 0.25, 0.45) * u_xray_norm * (1.0 - u_layer);
+
+        // EUV dimming: corona thins after CME
+        col *= 1.0 - u_euv_dimming * (1.0 - u_layer) * 0.5;
+
+        // Radial falloff: r^{-2.5} for K-corona (steeper than inverse square)
+        float alpha = rim * (0.25 - u_layer * 0.18) * max(0.3, u_bloom) * streamer;
         gl_FragColor = vec4(col * alpha, alpha);
     }
 `;
@@ -317,10 +409,12 @@ export function createSunUniforms(THREE) {
         u_flare_t:   { value: 0.0 },
         u_kp_norm:   { value: 0.0 },
         u_bloom:     { value: 1.0 },
-        u_flare_arc: { value: 0.0 },
-        u_flare_lon: { value: new THREE.Vector2(0, 0) },
-        u_regions:   { value: regions },
-        u_nRegions:  { value: 0 },
-        u_rot_phase: { value: 0.0 },
+        u_flare_arc:    { value: 0.0 },
+        u_flare_phase:  { value: 0.0 },   // 0–1 flare evolution stage
+        u_euv_dimming:  { value: 0.0 },   // 0–1 coronal mass loss dimming
+        u_flare_lon:    { value: new THREE.Vector2(0, 0) },
+        u_regions:      { value: regions },
+        u_nRegions:     { value: 0 },
+        u_rot_phase:    { value: 0.0 },
     };
 }
