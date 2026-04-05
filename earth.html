@@ -1039,7 +1039,7 @@ import {
     akasofuEpsilon, newellMergingRate,
     fieldAlignedCurrent, substormIndex, cmeTransitTime,
 } from './js/solar-wind-magnetosphere.js';
-import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherHistory } from './js/solar-weather-history.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { SatelliteFeed } from './js/satellite-feed.js';
 import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
@@ -1469,6 +1469,13 @@ window.addEventListener('swpc-update', e => {
     const bz  = sw.solar_wind?.bz ?? 0;
     const spd = sw.solar_wind?.speed ?? 400;
     const dns = sw.solar_wind?.density ?? 5;
+
+    // ── Feed live data into forecast history (real data only, no synthetics)
+    wxHistory.push({
+        t: Date.now(), v: spd, bz, by: sw.solar_wind?.by ?? 0,
+        n: dns, pdyn: sw.solar_wind?.pdyn ?? 2,
+        kp, dst: sw.dst_index ?? -5, epsilon: 0, substorm: 0,
+    });
 
     // ── Space weather bar (bottom)
     document.getElementById('sw-speed').textContent = `${Math.round(spd)} km/s`;
@@ -2904,20 +2911,25 @@ window.addEventListener('sw-magnet-coupling', e => {
 const wxHistory    = new SolarWeatherHistory();
 const wxForecaster = new SolarWeatherForecaster();
 
-// Open IndexedDB; if this is a first-ever launch seed synthetic history
-// so the forecasting engine has data to work with immediately.
+// Open IndexedDB — NO synthetic seeding. Real SWPC data only.
+// Forecast engine degrades gracefully: returns null when history < 48 records.
+// History fills from live swpc-update events (~1 record/min → 48 records in 48 min).
 wxHistory.open().then(() => {
     const tier1Size = wxHistory.getTier(1).length;
-    if (tier1Size < 48) {
-        console.info('[SolarForecast] Seeding synthetic history (tier1 empty)…');
-        seedSyntheticHistory(wxHistory, 90);
-    }
-    // Run first forecast immediately, then every 5 minutes
+    console.info(`[SolarForecast] history ready — tier1: ${tier1Size} records (need ≥48 for forecast)`);
+    // Run first forecast attempt, then every 5 minutes
     _refreshForecast();
     setInterval(_refreshForecast, 5 * 60_000);
 });
 
 function _refreshForecast() {
+    const n = wxHistory.getTier(1).length;
+    if (n < 24) {
+        // Not enough data yet — show collecting status
+        const el = document.getElementById('fp-bulletin');
+        if (el) el.textContent = `Collecting live NOAA data… ${n} records (forecast in ~${Math.max(1, 24 - n)} min)`;
+        return;
+    }
     try {
         const result = wxForecaster.update(wxHistory);
         updateForecastPanel(result);
