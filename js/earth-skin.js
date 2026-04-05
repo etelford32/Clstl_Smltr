@@ -592,7 +592,10 @@ void main() {
 export const ATM_FRAG = /* glsl */`
 precision highp float;
 
-uniform vec3 u_sun_dir;
+uniform vec3  u_sun_dir;
+uniform float u_time;
+uniform float u_xray;      // X-ray intensity normalized [0,1] for D-layer blackout
+uniform float u_kp;        // Kp index for aurora airglow intensity
 
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
@@ -612,8 +615,17 @@ const float BETA_M0 = 3.0e-3;
 // Mie preferred scattering direction (Henyey-Greenstein g)
 const float MIE_G   = 0.76;
 
+// Airglow emission altitudes (normalized to R_earth)
+const float H_GREEN_PEAK = 0.015;    // OI 557.7nm peak at ~97 km
+const float H_GREEN_W    = 0.005;    // ~30 km layer width
+const float H_RED_PEAK   = 0.038;    // OI 630.0nm peak at ~250 km
+const float H_RED_W      = 0.018;    // ~120 km layer width
+
+// D-layer absorption altitude
+const float H_DLAYER     = 0.012;    // ~80 km (D-layer peak)
+const float H_DLAYER_W   = 0.006;    // ~40 km width
+
 // ── Ray-sphere intersection (origin, dir, radius) → (t_near, t_far) ──────
-// Returns false if no intersection.
 bool raySphere(vec3 o, vec3 d, float r, out float tN, out float tF) {
     float b = dot(o, d);
     float c = dot(o, o) - r * r;
@@ -636,20 +648,64 @@ float phaseM(float cosTheta) {
     return (3.0 / (8.0 * 3.14159265)) * num / den;
 }
 
+// ── Airglow emission profile ──────────────────────────────────────────────
+// OI 557.7 nm (green line): chemiluminescence from O + O + M → O₂* + M
+//   Peak at ~97 km, FWHM ~30 km, ~250 Rayleighs at night
+// OI 630.0 nm (red line): dissociative recombination of O₂⁺
+//   Peak at ~250 km, FWHM ~120 km, ~100 Rayleighs at night, enhanced by Kp
+vec3 airglowEmission(float h, float NdotL, float kp, float t) {
+    // Nightside only — airglow quenched on dayside by solar UV photoionisation
+    float nightMask = smoothstep(0.15, -0.10, NdotL);
+
+    // Green OI 557.7nm — altitude-dependent Gaussian
+    float greenLayer = exp(-pow((h - H_GREEN_PEAK) / H_GREEN_W, 2.0));
+    // Subtle pulsation from gravity waves (~15 min period)
+    float greenPulse = 0.85 + 0.15 * sin(t * 0.42);
+    vec3 greenCol = vec3(0.15, 0.92, 0.25) * greenLayer * 0.12 * greenPulse;
+
+    // Red OI 630.0nm — broader layer, enhanced during geomagnetic activity
+    float redLayer = exp(-pow((h - H_RED_PEAK) / H_RED_W, 2.0));
+    float kpBoost = 1.0 + clamp(kp - 2.0, 0.0, 7.0) * 0.18;  // Kp > 2 enhances red
+    vec3 redCol = vec3(0.85, 0.18, 0.08) * redLayer * 0.06 * kpBoost;
+
+    return (greenCol + redCol) * nightMask;
+}
+
+// ── D-layer radio blackout glow ───────────────────────────────────────────
+// Solar X-rays (1–8 Å) ionise the D-layer (60–90 km), causing HF absorption.
+// Visible as a faint orange-red glow on the sunlit hemisphere.
+// R1–R5 scale: 0.2 = C-class (R0), 0.5 = M-class (R1-R2), 1.0 = X-class (R3-R5)
+vec3 dLayerBlackout(float h, float NdotL, float xray) {
+    if (xray < 0.15) return vec3(0.0);  // below C-class threshold
+
+    // D-layer altitude profile
+    float dProfile = exp(-pow((h - H_DLAYER) / H_DLAYER_W, 2.0));
+
+    // Dayside only — X-rays can only ionise the sunlit D-layer
+    float dayMask = smoothstep(-0.05, 0.25, NdotL);
+
+    // Intensity scales with X-ray flux (log scale: C→M→X)
+    float intensity = smoothstep(0.15, 1.0, xray);
+
+    // Colour: warm amber at M-class, angry red-orange at X-class
+    vec3 mColor = vec3(1.0, 0.65, 0.15);  // amber (M-class)
+    vec3 xColor = vec3(1.0, 0.25, 0.05);  // red-orange (X-class)
+    vec3 col = mix(mColor, xColor, smoothstep(0.4, 0.85, xray));
+
+    return col * dProfile * dayMask * intensity * 0.18;
+}
+
 void main() {
     vec3 N = normalize(vWorldNormal);
     vec3 V = normalize(cameraPosition - vWorldPos);
     vec3 L = normalize(u_sun_dir);
 
-    // Camera position in planet-centred frame
     vec3 camPos = cameraPosition;
     vec3 rayDir = normalize(vWorldPos - cameraPosition);
 
     // Intersect view ray with atmosphere shell
     float tN, tF;
     if (!raySphere(camPos, rayDir, R_ATM, tN, tF)) discard;
-
-    // Clamp near intersection to camera (camera may be inside atmosphere)
     tN = max(tN, 0.0);
 
     // If ray hits planet surface, clip far intersection
@@ -660,9 +716,10 @@ void main() {
 
     float segLen = (tF - tN) / float(NUM_STEPS);
 
-    // Accumulate in-scattering along the view ray
+    // Accumulate Rayleigh + Mie in-scattering + emission layers
     vec3  sumR = vec3(0.0);
     vec3  sumM = vec3(0.0);
+    vec3  sumEmission = vec3(0.0);  // airglow + D-layer blackout
     float optDepthR = 0.0;
     float optDepthM = 0.0;
 
@@ -671,13 +728,12 @@ void main() {
         vec3  samplePos = camPos + rayDir * tMid;
         float h = length(samplePos) - R_PLANET;
 
-        // Density at this altitude
         float densR = exp(-h / H_RAYLEIGH) * segLen;
         float densM = exp(-h / H_MIE)      * segLen;
         optDepthR += densR;
         optDepthM += densM;
 
-        // Light ray from sample point to sun — optical depth through atmosphere
+        // Light ray from sample to sun
         float ltN, ltF;
         raySphere(samplePos, L, R_ATM, ltN, ltF);
         float lSegLen = ltF / float(NUM_LSTEPS);
@@ -693,17 +749,28 @@ void main() {
         }
         if (shadow) continue;
 
-        // Total attenuation: view path + sun path
         vec3 tau = BETA_R0 * (optDepthR + lOptR) + BETA_M0 * (optDepthM + lOptM);
         vec3 atten = exp(-tau);
 
         sumR += densR * atten;
         sumM += densM * atten;
+
+        // ── Emission layers (self-luminous, no sun illumination needed) ────
+        float sampleNdotL = dot(normalize(samplePos), L);
+
+        // Airglow — nightside OI green + red emission bands
+        sumEmission += airglowEmission(h, sampleNdotL, u_kp, u_time) * segLen * 8.0;
+
+        // D-layer blackout — dayside X-ray ionisation glow
+        sumEmission += dLayerBlackout(h, sampleNdotL, u_xray) * segLen * 8.0;
     }
 
     float cosTheta = dot(rayDir, L);
     vec3 scatter = sumR * BETA_R0 * phaseR(cosTheta)
                  + sumM * BETA_M0 * phaseM(cosTheta);
+
+    // Combine scattering + emission
+    scatter += sumEmission;
 
     // Exposure tone mapping
     scatter = 1.0 - exp(-scatter * 28.0);
@@ -712,7 +779,7 @@ void main() {
     float rim = 1.0 - max(dot(V, N), 0.0);
     float alpha = rim * rim * 0.9;
 
-    // Boost alpha where scattering is strong (sunlit limb)
+    // Boost alpha where scattering or emission is strong
     float lum = dot(scatter, vec3(0.299, 0.587, 0.114));
     alpha = max(alpha, lum * 0.85);
     alpha = clamp(alpha, 0.0, 0.92);
@@ -913,12 +980,18 @@ export class EarthSkin {
             parent.add(this.cloudMesh);
         }
 
-        // Atmosphere rim glow
+        // Atmosphere rim glow (with airglow + D-layer blackout)
+        this._atmU = null;
         if (atmosphere) {
-            const atmU = { u_sun_dir: this.earthU.u_sun_dir };
+            this._atmU = {
+                u_sun_dir: this.earthU.u_sun_dir,
+                u_time:    { value: 0 },
+                u_xray:    { value: 0 },
+                u_kp:      { value: 0 },
+            };
             const atmMat = new THREE.ShaderMaterial({
                 vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,
-                uniforms: atmU, transparent: true, depthWrite: false,
+                uniforms: this._atmU, transparent: true, depthWrite: false,
                 side: THREE.BackSide, blending: THREE.AdditiveBlending,
             });
             this._atmMesh = new THREE.Mesh(
@@ -941,6 +1014,7 @@ export class EarthSkin {
             this.cloudU.u_time.value = t;
             this.cloudU.u_cam_dist.value = camDist;
         }
+        if (this._atmU) this._atmU.u_time.value = t;
     }
 
     /** Update sun direction (call when Earth or camera rotates). */
@@ -960,6 +1034,11 @@ export class EarthSkin {
         u.u_bz_south.value     = bzSouth;
         u.u_xray.value         = xray;
         u.u_aurora_on.value    = auroraOn ? 1 : 0;
+        // Push to atmosphere shader for airglow + D-layer blackout
+        if (this._atmU) {
+            this._atmU.u_kp.value   = kp;
+            this._atmU.u_xray.value = xray;
+        }
         u.u_aurora_power.value = auroraAW;
         u.u_dst_norm.value     = dstNorm;
     }

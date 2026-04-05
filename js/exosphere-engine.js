@@ -325,8 +325,10 @@ export class ExosphereEngine {
             u_sun_dir:     { value: new THREE.Vector3(1, 0, 0) },
         };
 
-        this._lastRNose = -1;
-        this._lastAlpha = -1;
+        this._lastRNose   = -1;
+        this._lastAlpha   = -1;
+        this._targetRNose = null;
+        this._targetAlpha = null;
 
         this._layers = {
             exosphere: true,
@@ -356,7 +358,11 @@ export class ExosphereEngine {
 
         const { r_nose, alpha, pdyn, escape_norm, cx_norm } = computeExopause(n, v, bz, kp);
 
-        // Rebuild geometry only on significant standoff or shape change (avoid GC churn)
+        // Store target for smooth per-frame interpolation ("breathing")
+        this._targetRNose = r_nose;
+        this._targetAlpha = alpha;
+
+        // Rebuild geometry only on large shape changes (avoids GC churn)
         if (Math.abs(r_nose - this._lastRNose) > 0.28 || Math.abs(alpha - this._lastAlpha) > 0.04) {
             this._rebuild(r_nose, alpha);
             this._rebuildEq(r_nose);
@@ -382,6 +388,20 @@ export class ExosphereEngine {
             sunDir.clone().normalize(),
         );
         this._solarGroup.setRotationFromQuaternion(q);
+
+        // ── Smooth breathing: interpolate scale toward target r_nose ──────
+        // This makes the exosphere visibly compress/expand each frame
+        // as solar wind pressure changes, instead of jumping on thresholds.
+        if (this._targetRNose != null && this._lastRNose > 0) {
+            const targetScale = this._targetRNose / this._lastRNose;
+            const currentScale = this._solarGroup.scale.x;
+            // Smooth exponential ease toward target (τ ≈ 0.5 second)
+            const lerp = 1.0 - Math.exp(-3.0 * 0.016);  // ~60 fps
+            const s = currentScale + (targetScale - currentScale) * lerp;
+            this._solarGroup.scale.setScalar(s);
+            // Also breathe the equatorial group
+            if (this._eqGroup) this._eqGroup.scale.setScalar(s);
+        }
 
         // Derive live scalar quantities
         const wind     = sw.solar_wind ?? {};

@@ -150,10 +150,16 @@ export class SpaceWeatherGlobe {
         const geo = new THREE.SphereGeometry(1.095, 48, 48);
         // ATM_VERT/ATM_FRAG from earth-skin.js compute world-space normals so the
         // atmosphere lighting stays fixed to the sun regardless of camera orbit.
+        this._atmoUniforms = {
+            u_sun_dir: { value: this._sunDir.clone() },
+            u_time:    { value: 0 },
+            u_xray:    { value: 0 },
+            u_kp:      { value: 0 },
+        };
         this._atmoMat = new THREE.ShaderMaterial({
             vertexShader:   ATM_VERT,
             fragmentShader: ATM_FRAG,
-            uniforms: { u_sun_dir: { value: this._sunDir.clone() } },
+            uniforms: this._atmoUniforms,
             transparent: true,
             depthWrite:  false,
             side:        THREE.BackSide,
@@ -260,6 +266,11 @@ export class SpaceWeatherGlobe {
         this._earthU.u_bz_south.value = Math.max(0, Math.min(1, -bz / 30));
         this._earthU.u_aurora_power.value = Math.min(1, kp / 9);
 
+        // Atmosphere shader uniforms (airglow + D-layer blackout)
+        const xInt = state.derived?.xray_intensity ?? 0;
+        this._atmoUniforms.u_kp.value   = kp;
+        this._atmoUniforms.u_xray.value = xInt;
+
         // Wind particle colour: blue → cyan → orange at high speeds
         const wMat = this._windPts.material;
         wMat.color.setHSL(0.58 - this._windSpeedNorm * 0.20, 1.0, 0.68);
@@ -311,7 +322,8 @@ export class SpaceWeatherGlobe {
         // Push current time + sun direction to shaders
         this._earthU.u_time.value = t;
         this._earthU.u_sun_dir.value.copy(this._sunDir);
-        this._atmoMat.uniforms.u_sun_dir.value.copy(this._sunDir);
+        this._atmoUniforms.u_sun_dir.value.copy(this._sunDir);
+        this._atmoUniforms.u_time.value = t;
 
         // Aurora pulse
         const a0 = this._auroraAlpha;
