@@ -1052,6 +1052,7 @@ import {
     createEarthUniforms, createCloudUniforms, loadEarthTextures,
 } from './js/earth-skin.js';
 import { StormFeed } from './js/storm-feed.js';
+import { EarthHiRes } from './js/earth-hires.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -1362,6 +1363,14 @@ scene.add(tropicGroup);
 loadEarthTextures(earthU, cloudU, renderer).then(() => {
     document.getElementById('loading').classList.add('done');
 });
+
+// ── Hi-res satellite tile loader (NASA GIBS MODIS true-color) ─────────────
+const earthHiRes = new EarthHiRes(renderer, {
+    compositeSize: 2048,
+    maxZoom: 6,
+    activateDistance: 2.2,
+});
+earthU.u_hires.value = earthHiRes.texture;
 
 // ── Storm-update: push active cyclone positions into cloud shader ─────────────
 new StormFeed().start();
@@ -3237,6 +3246,21 @@ function animate() {
     stratU.u_time.value = t;
     const dist = camera.position.length();  // in "Earth radii" units
     cloudU.u_cam_dist.value = dist;
+
+    // ── Hi-res satellite imagery (3-tier LOD) ──────────────────────
+    // Tier 1: base Blue Marble (static, always loaded)
+    // Tier 2: daily GIBS snapshot (4096×2048, replaces base when ready)
+    // Tier 3: GIBS WMTS tiles (250m detail, loaded on zoom)
+    if (earthHiRes.dailyReady && earthHiRes.dailyTexture) {
+        earthU.u_day.value = earthHiRes.dailyTexture;
+        earthHiRes.dailyReady = false;  // only swap once
+    }
+    earthHiRes.update(camera, earthMesh);
+    earthU.u_hires_on.value = earthHiRes.active ? 1 : 0;
+    if (earthHiRes.active) {
+        const b = earthHiRes.viewBounds;
+        earthU.u_hires_bounds.value.set(b.west, b.south, b.east, b.north);
+    }
 
     // ── Altitude display (camera distance → km equivalent)
     const altKm = Math.max(0, (dist - R_EARTH) * 6371);
