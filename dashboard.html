@@ -294,6 +294,63 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── SOLAR WEATHER FORECAST ── -->
+  <div class="card" id="forecast-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">72-Hour Forecast</span>
+      <a href="earth.html" class="card-link">Full Forecast →</a>
+    </div>
+    <div class="card-body">
+      <canvas id="fc-kp-chart" width="520" height="100" style="width:100%;height:100px;border-radius:6px;background:#080518;margin-bottom:12px" aria-label="Kp index forecast chart"></canvas>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:12px">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Kp 24h Forecast</div>
+          <div style="font-size:.98rem;font-weight:700" id="fc-kp24">—</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Trend</div>
+          <div style="font-size:.98rem;font-weight:700" id="fc-trend">—</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">G1+ Storm (24h)</div>
+          <div style="font-size:.98rem;font-weight:700" id="fc-g1">—</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">G2+ Storm (72h)</div>
+          <div style="font-size:.98rem;font-weight:700" id="fc-g2">—</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <div style="font-size:.72rem;color:var(--muted)">
+          <strong style="color:var(--text)">27-Day Echo:</strong> <span id="fc-echo">—</span>
+        </div>
+        <div style="font-size:.72rem;color:var(--muted)">
+          <strong style="color:var(--text)">Solar Cycle:</strong> <span id="fc-cycle">—</span>
+        </div>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.75rem;color:var(--muted);line-height:1.5">
+        <strong style="color:var(--accent);font-size:.65rem;text-transform:uppercase;letter-spacing:.06em">Forecast Bulletin</strong>
+        <div id="fc-bulletin" style="margin-top:4px">Loading forecast…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ISS PASS PREDICTIONS ── -->
+  <div class="card" id="iss-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">ISS Pass Predictions</span>
+      <a href="satellites.html" class="card-link">Satellite Tracker →</a>
+    </div>
+    <div class="card-body">
+      <div id="iss-passes-list" style="font-size:.8rem;color:var(--muted)">
+        Set your location above to see upcoming ISS passes.
+      </div>
+    </div>
+  </div>
+
   <!-- ── SIMULATIONS ── -->
   <p class="section-label">Simulations</p>
   <div class="sim-grid">
@@ -369,6 +426,9 @@ import { auth } from './js/auth.js';
 import { geocodeQuery, saveUserLocation, loadUserLocation,
          clearUserLocation, auroraVisibility } from './js/user-location.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { predictPasses } from './js/orbital-analytics.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -929,6 +989,311 @@ window.addEventListener('user-location-changed', () => {
 });
 
 /* ════════════════════════════════════════════════════════════
+   SOLAR WEATHER FORECAST  (AR model + storm probabilities)
+═════════════════════════════════════════════════════════════ */
+const _wxHistory    = new SolarWeatherHistory();
+const _wxForecaster = new SolarWeatherForecaster();
+
+function _initForecast() {
+  _wxHistory.open().then(() => {
+    if (_wxHistory.getTier(1).length < 48) {
+      seedSyntheticHistory(_wxHistory, 90);
+    }
+    _refreshForecast();
+    setInterval(_refreshForecast, 5 * 60_000);
+  }).catch(err => {
+    console.warn('[Dashboard] forecast init failed:', err);
+    document.getElementById('fc-bulletin').textContent = 'Forecast unavailable — collecting data…';
+  });
+}
+
+// Feed live SWPC data into history ring buffer
+window.addEventListener('swpc-update', e => {
+  const sw = e.detail ?? {};
+  const wind = sw.solar_wind ?? {};
+  _wxHistory.push({
+    t: Date.now(),
+    v: wind.speed ?? 400, bz: wind.bz ?? 0, by: wind.by ?? 0,
+    n: wind.density ?? 5, pdyn: wind.pdyn ?? 2,
+    kp: sw.kp ?? 0, dst: sw.dst_index ?? -5,
+    epsilon: 0, substorm: 0,
+  });
+});
+
+function _refreshForecast() {
+  try {
+    const result = _wxForecaster.update(_wxHistory);
+    _updateForecastUI(result);
+  } catch (err) {
+    console.warn('[Dashboard] forecast error:', err);
+  }
+}
+
+function _updateForecastUI(result) {
+  if (!result) return;
+  const { summary, storm, recurrence, cycle, hw } = result;
+
+  // Kp 24h forecast
+  const kp24El = document.getElementById('fc-kp24');
+  if (kp24El) {
+    const kp = summary?.kpFC24h;
+    const sg = summary?.sigma24h;
+    kp24El.textContent = kp != null ? (sg ? `${kp} ± ${sg}` : kp) : '—';
+    kp24El.style.color = kp >= 7 ? '#ff4040' : kp >= 5 ? '#ffaa20' : kp >= 3 ? '#ffdd60' : '#60d090';
+  }
+
+  // Trend
+  const trendEl = document.getElementById('fc-trend');
+  if (trendEl && hw) {
+    const t = hw.trend;
+    trendEl.textContent = t > 0.05 ? `↑ +${t.toFixed(2)}/hr` : t < -0.05 ? `↓ ${t.toFixed(2)}/hr` : '→ stable';
+    trendEl.style.color = t > 0.1 ? '#ffaa20' : t < -0.1 ? '#60d090' : '#8ab';
+  }
+
+  // Storm probabilities
+  const g1El = document.getElementById('fc-g1');
+  if (g1El && storm) {
+    const p = Math.round(storm.g1_24h * 100);
+    g1El.textContent = `${p}%`;
+    g1El.style.color = p > 50 ? '#ff4040' : p > 25 ? '#ffaa20' : '#60d090';
+  }
+  const g2El = document.getElementById('fc-g2');
+  if (g2El && storm) {
+    const p = Math.round(storm.g2_72h * 100);
+    g2El.textContent = `${p}%`;
+    g2El.style.color = p > 40 ? '#ff6060' : p > 15 ? '#ffcc40' : '#60d090';
+  }
+
+  // 27-day recurrence
+  const echoEl = document.getElementById('fc-echo');
+  if (echoEl && recurrence) {
+    echoEl.textContent = recurrence.signal === 'none' ? 'None detected'
+      : `${recurrence.signal} (r=${recurrence.corr27})`;
+    echoEl.style.color = recurrence.signal === 'strong' ? '#ffaa20'
+      : recurrence.signal === 'moderate' ? '#ffdd60' : '#8ab';
+  }
+
+  // Solar cycle
+  const cycleEl = document.getElementById('fc-cycle');
+  if (cycleEl && cycle) {
+    cycleEl.textContent = `SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+    cycleEl.style.color = cycle.phaseName === 'maximum' ? '#ffaa20'
+      : cycle.phaseName === 'rising' ? '#ffdd60' : '#8ab';
+  }
+
+  // Bulletin
+  const bulEl = document.getElementById('fc-bulletin');
+  if (bulEl) bulEl.textContent = _wxForecaster.bulletin(result);
+
+  // Kp sparkline chart
+  _drawFcChart(result);
+}
+
+function _drawFcChart(result) {
+  const canvas = document.getElementById('fc-kp-chart');
+  if (!canvas || !result) return;
+  const dpr = devicePixelRatio || 1;
+  canvas.width  = canvas.offsetWidth  * dpr;
+  canvas.height = canvas.offsetHeight * dpr;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const P = { t: 8*dpr, r: 6*dpr, b: 16*dpr, l: 24*dpr };
+  const cW = W - P.l - P.r, cH = H - P.t - P.b;
+
+  ctx.clearRect(0, 0, W, H);
+
+  const hist = result.kpHistory ?? [];
+  const fc   = result.kpForecast ?? [];
+  const lo   = result.kpFcLo80 ?? [];
+  const hi   = result.kpFcHi80 ?? [];
+  const total = hist.length + fc.length;
+  if (!total) return;
+
+  const kpY = kp => P.t + cH - Math.min(1, kp / 9) * cH;
+  const iX  = i  => P.l + (i / total) * cW;
+  const nowX = iX(hist.length);
+
+  // G-scale thresholds
+  const thresholds = [
+    { kp: 5, color: 'rgba(255,200,40,.30)', label: 'G1' },
+    { kp: 7, color: 'rgba(255,60,60,.30)',  label: 'G3' },
+  ];
+  ctx.font = `${7*dpr}px monospace`;
+  for (const th of thresholds) {
+    const y = kpY(th.kp);
+    ctx.strokeStyle = th.color; ctx.lineWidth = 0.7 * dpr;
+    ctx.setLineDash([2*dpr, 3*dpr]);
+    ctx.beginPath(); ctx.moveTo(P.l, y); ctx.lineTo(P.l + cW, y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = th.color;
+    ctx.fillText(th.label, P.l + cW + 2*dpr, y + 3*dpr);
+  }
+
+  // 80% confidence band
+  if (fc.length && lo.length && hi.length) {
+    ctx.fillStyle = 'rgba(255,130,40,.10)';
+    ctx.beginPath();
+    for (let i = 0; i < fc.length; i++) ctx.lineTo(iX(hist.length + i), kpY(hi[i] ?? 0));
+    for (let i = fc.length - 1; i >= 0; i--) ctx.lineTo(iX(hist.length + i), kpY(lo[i] ?? 0));
+    ctx.closePath(); ctx.fill();
+  }
+
+  // Now line
+  ctx.strokeStyle = 'rgba(255,255,255,.2)'; ctx.lineWidth = dpr;
+  ctx.setLineDash([2*dpr, 2*dpr]);
+  ctx.beginPath(); ctx.moveTo(nowX, P.t); ctx.lineTo(nowX, P.t + cH); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.font = `${7*dpr}px monospace`; ctx.fillStyle = 'rgba(255,255,255,.4)';
+  ctx.fillText('now', nowX + 2*dpr, P.t + 8*dpr);
+
+  // History line
+  if (hist.length > 1) {
+    ctx.strokeStyle = '#4fc3f7'; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    for (let i = 0; i < hist.length; i++) ctx.lineTo(iX(i), kpY(hist[i]));
+    ctx.stroke();
+  }
+
+  // Forecast line
+  if (fc.length > 1) {
+    ctx.strokeStyle = '#ffaa20'; ctx.lineWidth = 1.5 * dpr;
+    ctx.beginPath();
+    if (hist.length) ctx.moveTo(iX(hist.length - 1), kpY(hist[hist.length - 1]));
+    for (let i = 0; i < fc.length; i++) ctx.lineTo(iX(hist.length + i), kpY(fc[i]));
+    ctx.stroke();
+  }
+
+  // Y-axis labels
+  ctx.font = `${7*dpr}px monospace`; ctx.fillStyle = 'rgba(255,255,255,.3)'; ctx.textAlign = 'right';
+  for (let kp = 0; kp <= 9; kp += 3) {
+    ctx.fillText(String(kp), P.l - 3*dpr, kpY(kp) + 3*dpr);
+  }
+  ctx.textAlign = 'left';
+
+  // Labels
+  ctx.font = `${7*dpr}px monospace`; ctx.fillStyle = 'rgba(79,195,247,.6)';
+  ctx.fillText('History', P.l + 4*dpr, P.t + cH + 11*dpr);
+  ctx.fillStyle = 'rgba(255,170,32,.6)';
+  ctx.fillText('Forecast 72h', nowX + 16*dpr, P.t + cH + 11*dpr);
+}
+
+/* ════════════════════════════════════════════════════════════
+   ISS PASS PREDICTIONS
+   Uses CelesTrak TLE + simplified J2 propagator (no WASM needed)
+═════════════════════════════════════════════════════════════ */
+const _ISS_NORAD = 25544;
+const _ISS_TLE_URL = '/api/celestrak/tle?group=stations';
+
+// Minimal J2 propagator for dashboard (no WASM dependency)
+function _j2Propagate(tle, tsince_min) {
+  const TWOPI = 2 * Math.PI;
+  const DEG2RAD = Math.PI / 180;
+  const MU = 398600.8;
+  const RE = 6378.135;
+  const J2 = 0.001082616;
+  const MPD = 1440;
+
+  const n0 = tle.mean_motion * TWOPI / MPD;
+  const e0 = tle.eccentricity;
+  const i0 = tle.inclination * DEG2RAD;
+  const raan0 = tle.raan * DEG2RAD;
+  const argp0 = tle.arg_perigee * DEG2RAD;
+  const M0 = tle.mean_anomaly * DEG2RAD;
+  const cosI = Math.cos(i0);
+  const a = Math.pow(MU / (n0 * n0 / 3600), 1/3);
+  const p = a * (1 - e0 * e0);
+
+  const n0c = n0 * (1 + 1.5 * J2 * (RE/p)**2 * (1 - 1.5*(1 - cosI*cosI)));
+  const raanDot = -1.5 * J2 * (RE/p)**2 * n0 * cosI;
+  const argpDot = 0.75 * J2 * (RE/p)**2 * n0 * (5*cosI*cosI - 1);
+
+  const t = tsince_min;
+  const M = M0 + n0c * t;
+  const raan = raan0 + raanDot * t;
+  const argp = argp0 + argpDot * t;
+
+  let E = M;
+  for (let k = 0; k < 10; k++) {
+    const dE = (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
+    E -= dE;
+    if (Math.abs(dE) < 1e-12) break;
+  }
+  const cosE = Math.cos(E), sinE = Math.sin(E);
+  const nu = Math.atan2(Math.sqrt(1 - e0*e0) * sinE, cosE - e0);
+  const r = a * (1 - e0 * cosE);
+  const u = argp + nu;
+  const cosU = Math.cos(u), sinU = Math.sin(u);
+  const cosR = Math.cos(raan), sinR = Math.sin(raan);
+  const cosI2 = cosI, sinI = Math.sin(i0);
+
+  return {
+    x: r * (cosR*cosU - sinR*sinU*cosI2),
+    y: r * (sinR*cosU + cosR*sinU*cosI2),
+    z: r * sinU * sinI,
+  };
+}
+
+async function _refreshISSPasses() {
+  const loc = loadUserLocation();
+  const list = document.getElementById('iss-passes-list');
+  if (!loc) {
+    list.innerHTML = '<span style="color:var(--muted)">Set your location above to see upcoming ISS passes.</span>';
+    return;
+  }
+
+  list.innerHTML = '<span style="color:var(--muted)">Computing ISS passes…</span>';
+
+  try {
+    // Fetch ISS TLE from CelesTrak proxy
+    const resp = await fetch(_ISS_TLE_URL);
+    const tles = await resp.json();
+    const issTle = tles.find(t => t.norad_id === _ISS_NORAD || t.name?.includes('ISS'));
+    if (!issTle) {
+      list.innerHTML = '<span style="color:#ff8888">ISS TLE not available</span>';
+      return;
+    }
+
+    const passes = predictPasses(issTle, loc.lat, loc.lon, 0, 48, 10, _j2Propagate);
+
+    if (passes.length === 0) {
+      list.innerHTML = '<span style="color:var(--muted)">No visible ISS passes in the next 48 hours from your location.</span>';
+      return;
+    }
+
+    let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+    const maxShow = Math.min(passes.length, 5);
+    for (let i = 0; i < maxShow; i++) {
+      const p = passes[i];
+      const rise = new Date(p.rise_utc);
+      const dateStr = rise.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      const timeStr = rise.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      const elevColor = p.max_elev_deg >= 60 ? '#4fc97f' : p.max_elev_deg >= 30 ? '#ffd700' : '#8ab';
+      const bright = p.max_elev_deg >= 40 ? ' — <strong style="color:#4fc97f">Bright pass!</strong>' : '';
+
+      html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;display:flex;align-items:center;gap:12px">
+        <div style="font-size:1.4rem">🛰️</div>
+        <div style="flex:1">
+          <div style="font-size:.82rem;font-weight:700;color:var(--text)">${dateStr} at ${timeStr}</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:2px">
+            Max elevation: <span style="color:${elevColor};font-weight:600">${p.max_elev_deg}°</span>
+            &nbsp;·&nbsp; Duration: ${p.duration_min} min${bright}
+          </div>
+        </div>
+      </div>`;
+    }
+    if (passes.length > maxShow) {
+      html += `<div style="font-size:.7rem;color:var(--muted);text-align:center">${passes.length - maxShow} more passes in next 48h</div>`;
+    }
+    html += '</div>';
+    list.innerHTML = html;
+  } catch (err) {
+    console.warn('[Dashboard] ISS pass prediction failed:', err);
+    list.innerHTML = '<span style="color:var(--muted)">Pass prediction unavailable — try again later.</span>';
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    INIT
 ═════════════════════════════════════════════════════════════ */
 function initAll() {
@@ -960,6 +1325,13 @@ function initAll() {
 
   // Space weather
   _initSpaceWeather();
+
+  // Solar weather forecast engine
+  _initForecast();
+
+  // ISS pass predictions (after location is restored)
+  _refreshISSPasses();
+  window.addEventListener('user-location-changed', () => _refreshISSPasses());
 
   // Local time refresh every minute
   setInterval(() => {
