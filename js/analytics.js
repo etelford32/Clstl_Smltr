@@ -31,7 +31,7 @@
 // ── Configuration ────────────────────────────────────────────────────────────
 
 /** Set this to your GA4 Measurement ID to enable Google Analytics. */
-export const GA_MEASUREMENT_ID = '';  // e.g. 'G-XXXXXXXXXX'
+export const GA_MEASUREMENT_ID = 'G-W8WFYFDDGC';
 
 /** Flush interval (ms) — sends buffered events to Supabase. */
 const FLUSH_INTERVAL = 30_000;
