@@ -795,6 +795,14 @@ nav {
 <!-- ── NAV ─────────────────────────────────────────────────────────────────── -->
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("weather");</script>
 
@@ -1521,14 +1529,6 @@ nav {
     <img id="overlay-img" style="max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 0 60px rgba(0,150,255,.3)">
 </div>
 
-<script type="importmap">
-{
-    "imports": {
-        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-    }
-}
-</script>
 <script type="module">
 import './js/live-status-bar.js';
 import { SpaceWeatherFeed }  from './js/swpc-feed.js';
