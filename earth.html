@@ -1169,7 +1169,7 @@ camera.position.set(0, 0.4, 3.0);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance   = 1.025;  // close enough to see terrain detail
+controls.minDistance   = 1.012;  // ~76 km altitude — see terrain + satellite detail
 controls.maxDistance   = 10.0;
 controls.autoRotate      = true;
 controls.autoRotateSpeed = 0.25; // slow sidereal drift
@@ -1366,9 +1366,9 @@ loadEarthTextures(earthU, cloudU, renderer).then(() => {
 
 // ── Hi-res satellite tile loader (NASA GIBS MODIS true-color) ─────────────
 const earthHiRes = new EarthHiRes(renderer, {
-    compositeSize: 2048,
-    maxZoom: 6,
-    activateDistance: 2.2,
+    compositeSize: 4096,
+    maxZoom: 8,
+    activateDistance: 2.5,
 });
 earthU.u_hires.value = earthHiRes.texture;
 

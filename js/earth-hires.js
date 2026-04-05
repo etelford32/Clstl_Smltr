@@ -143,22 +143,24 @@ export class EarthHiRes {
     /**
      * @param {THREE.WebGLRenderer} renderer — for max anisotropy detection
      * @param {object} opts
-     * @param {number} [opts.compositeSize=2048] — output texture width (2:1 equirectangular)
-     * @param {number} [opts.maxZoom=6]          — max GIBS zoom level to fetch (6 = ~5.6°/tile)
-     * @param {number} [opts.activateDistance=2.0] — camera distance (Re) below which tiles load
+     * @param {number} [opts.compositeSize=4096] — output texture width (2:1 equirectangular)
+     * @param {number} [opts.maxZoom=8]          — max GIBS zoom level (8 = ~1.4°/tile ≈ 250m)
+     * @param {number} [opts.activateDistance=2.5] — camera distance (Re) below which tiles load
      */
     constructor(renderer, {
-        compositeSize    = 2048,
-        maxZoom          = 6,
-        activateDistance  = 2.0,
+        compositeSize    = 4096,
+        maxZoom          = 8,
+        activateDistance  = 2.5,
     } = {}) {
-        this._cache      = new TileCache(64);
-        this._pending     = new Set();  // keys currently being fetched
+        this._cache      = new TileCache(128);  // larger cache for deep zoom
+        this._pending     = new Set();
         this._maxZoom     = maxZoom;
         this._activateDist = activateDistance;
-        this._date        = gibsDate(1);       // yesterday (most reliable data)
-        this._layerIdx    = 0;                 // current layer (0=MODIS, 1=VIIRS)
+        this._date        = gibsDate(1);
+        this._layerIdx    = 0;
         this._lastUpdate  = 0;
+        this._lastZ       = -1;  // track zoom level changes for smooth transitions
+        this._raycaster   = new THREE.Raycaster();
         this._viewBounds  = { west: -180, east: 180, north: 90, south: -90 };
 
         // Composite canvas for output texture
@@ -232,32 +234,42 @@ export class EarthHiRes {
 
         // Only activate when zoomed close enough
         if (dist > this._activateDist) {
-            if (this.active) {
-                this.active = false;
-            }
+            if (this.active) this.active = false;
             return;
         }
 
         this.active = true;
 
-        // Throttle: update at most every 500ms
+        // Throttle: update tile loading every 300ms (faster for responsive zoom)
         const now = Date.now();
-        if (now - this._lastUpdate < 500) return;
+        if (now - this._lastUpdate < 300) return;
         this._lastUpdate = now;
 
-        // Determine the zoom level based on camera altitude
-        // dist=1.025 (surface) → z=maxZoom, dist=activateDist → z=2
-        const t = 1 - Math.min(1, (dist - 1.02) / (this._activateDist - 1.02));
-        const z = Math.max(2, Math.min(this._maxZoom, Math.round(2 + t * (this._maxZoom - 2))));
+        // ── Zoom level from camera altitude ──────────────────────────────
+        // Smooth continuous mapping: surface → maxZoom, far → zoom 2
+        const tNorm = 1 - Math.min(1, (dist - 1.015) / (this._activateDist - 1.015));
+        const z = Math.max(2, Math.min(this._maxZoom, Math.round(2 + tNorm * (this._maxZoom - 2))));
 
-        // Determine visible lat/lon from camera look direction
-        const lookDir = camera.getWorldDirection(new THREE.Vector3());
-        // Approximate subsatellite point (where camera is looking)
-        const centerLat = Math.asin(Math.max(-1, Math.min(1, -lookDir.y))) * 180 / Math.PI;
-        const centerLon = Math.atan2(lookDir.x, lookDir.z) * 180 / Math.PI;
+        // ── Find view center using raycaster (accounts for Earth rotation) ──
+        // Cast a ray from camera through screen center to the Earth mesh
+        this._raycaster.set(camera.position, camera.getWorldDirection(new THREE.Vector3()));
+        const hits = this._raycaster.intersectObject(earthMesh);
 
-        // Visible angular radius depends on altitude (~30° at 1.5 RE, ~10° at 1.05 RE)
-        const viewRadius = 10 + (dist - 1.02) * 40;
+        let centerLat, centerLon;
+        if (hits.length > 0 && hits[0].uv) {
+            // UV hit on the rotating Earth mesh → correct geographic position
+            const uv = hits[0].uv;
+            centerLon = (uv.x - 0.5) * 360;
+            centerLat = (0.5 - uv.y) * 180;
+        } else {
+            // Fallback: camera direction (ignores rotation but works when no hit)
+            const lookDir = camera.getWorldDirection(new THREE.Vector3());
+            centerLat = Math.asin(Math.max(-1, Math.min(1, -lookDir.y))) * 180 / Math.PI;
+            centerLon = Math.atan2(lookDir.x, lookDir.z) * 180 / Math.PI;
+        }
+
+        // ── Visible angular radius (tighter at close zoom for efficiency) ──
+        const viewRadius = Math.max(5, 8 + (dist - 1.015) * 35);
 
         const bounds = {
             west:  centerLon - viewRadius,
@@ -267,27 +279,35 @@ export class EarthHiRes {
         };
         this._viewBounds = bounds;
 
-        // Determine which tiles we need
+        // ── Determine required tiles ─────────────────────────────────────
         const tileMin = lonLatToTile(bounds.west, bounds.north, z);
         const tileMax = lonLatToTile(bounds.east, bounds.south, z);
 
+        // Prioritize tiles near view center (spiral outward)
+        const centerTile = lonLatToTile(centerLon, centerLat, z);
         const tilesToLoad = [];
         for (let row = tileMin.row; row <= tileMax.row; row++) {
             for (let col = tileMin.col; col <= tileMax.col; col++) {
                 if (!this._cache.has(z, row, col) && !this._pending.has(`${z}/${row}/${col}`)) {
-                    tilesToLoad.push({ z, row, col });
+                    const dr = Math.abs(row - centerTile.row);
+                    const dc = Math.abs(col - centerTile.col);
+                    tilesToLoad.push({ z, row, col, priority: dr + dc });
                 }
             }
         }
+        // Sort by distance from center (closest first)
+        tilesToLoad.sort((a, b) => a.priority - b.priority);
 
-        // Load tiles (max 4 concurrent)
-        const batch = tilesToLoad.slice(0, 4);
+        // Load up to 8 tiles concurrently (fast enough for smooth zoom)
+        const maxConcurrent = 8 - this._pending.size;
+        const batch = tilesToLoad.slice(0, Math.max(0, maxConcurrent));
         for (const t of batch) {
             this._loadTile(t.z, t.row, t.col);
         }
 
-        // Composite cached tiles into the output texture
+        // ── Composite into output texture ────────────────────────────────
         this._composite(z, tileMin, tileMax);
+        this._lastZ = z;
     }
 
     /** Get the visible bounds (for shader UV mapping). */
@@ -337,11 +357,33 @@ export class EarthHiRes {
         const ctx = this._ctx;
         const W   = this._canvas.width;
         const H   = this._canvas.height;
-        const { cols, rows } = tileGridSize(z);
 
         // Clear with transparent black
         ctx.clearRect(0, 0, W, H);
 
+        // First pass: draw any cached tiles from the PREVIOUS zoom level as a base
+        // (prevents black flashing when zooming in before new tiles arrive)
+        if (this._lastZ > 0 && this._lastZ !== z) {
+            const prevGrid = tileGridSize(this._lastZ);
+            const prevMin = lonLatToTile(this._viewBounds.west, this._viewBounds.north, this._lastZ);
+            const prevMax = lonLatToTile(this._viewBounds.east, this._viewBounds.south, this._lastZ);
+            ctx.globalAlpha = 0.6;  // faded — new tiles will draw on top
+            for (let pr = prevMin.row; pr <= prevMax.row; pr++) {
+                for (let pc = prevMin.col; pc <= prevMax.col; pc++) {
+                    const entry = this._cache.get(this._lastZ, pr, pc);
+                    if (!entry || !entry.img) continue;
+                    const b = entry.bounds;
+                    const x = (b.west + 180) / 360 * W;
+                    const y = (90 - b.north) / 180 * H;
+                    const w = (b.east - b.west) / 360 * W;
+                    const h = (b.north - b.south) / 180 * H;
+                    ctx.drawImage(entry.img, x, y, w, h);
+                }
+            }
+            ctx.globalAlpha = 1.0;
+        }
+
+        // Second pass: draw current zoom level tiles (full opacity, on top)
         let anyDrawn = false;
 
         for (let row = tileMin.row; row <= tileMax.row; row++) {
