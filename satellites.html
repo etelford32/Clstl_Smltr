@@ -120,6 +120,9 @@ nav {
     font-size:.62rem; padding:3px 8px; transition:all .15s;
 }
 .sp-export-btn:hover { background:rgba(0,170,170,.18); color:#0ee; }
+.pro-tag { display:inline-block; padding:1px 6px; border-radius:3px; font-size:.55rem; font-weight:700;
+    letter-spacing:.06em; background:rgba(0,200,200,.12); color:#0cc; border:1px solid rgba(0,200,200,.25); vertical-align:middle; margin-left:4px; }
+.pro-locked { opacity:0.4; pointer-events:none; filter:blur(1px); }
 </style>
 </head>
 <body>
@@ -171,6 +174,12 @@ nav {
             <div class="sp-toggle"><input type="checkbox" id="grp-science"><label for="grp-science">Science Missions</label><span class="count" id="cnt-science">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-resource"><label for="grp-resource">Earth Resources</label><span class="count" id="cnt-resource">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.04)">
+                <div style="font-size:.58rem;color:#556;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Debris Tracking <span style="color:#0aa;font-size:.55rem" id="debris-pro-badge">PRO</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-cosmos-2251-debris"><label for="grp-cosmos-2251-debris">Cosmos-2251 Debris</label><span class="count" id="cnt-cosmos-2251-debris">—</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-iridium-33-debris"><label for="grp-iridium-33-debris">Iridium-33 Debris</label><span class="count" id="cnt-iridium-33-debris">—</span></div>
+                <div class="sp-toggle"><input type="checkbox" id="grp-1999-025"><label for="grp-1999-025">Fengyun-1C ASAT</label><span class="count" id="cnt-1999-025">—</span></div>
+            </div>
         </div>
 
         <!-- Selected satellite info -->
@@ -187,16 +196,20 @@ nav {
             <div class="sp-row"><span class="sp-k">Speed</span><span class="sp-v" id="sp-speed">—</span></div>
         </div>
 
-        <!-- Conjunction screening -->
+        <!-- Conjunction screening (PRO) -->
         <div class="sp-section" id="sp-conj-section" style="display:none">
-            <div class="sp-label">Conjunction Screening (72 hr)</div>
+            <div class="sp-label">Collision Analysis <span class="pro-tag">PRO</span></div>
             <div id="sp-conj-status" style="color:#556;font-size:.65rem">—</div>
             <div id="sp-conj-results"></div>
+            <div id="sp-conj-gate" style="display:none;margin-top:8px;padding:10px;background:rgba(0,170,170,.06);border:1px solid rgba(0,170,170,.15);border-radius:8px;font-size:.7rem;color:#8ab;line-height:1.5">
+                <strong style="color:#0cc">Upgrade to PRO</strong> for full collision analysis: CDM generation, avoidance maneuver ΔV, probability of collision, and 72-hour screening.
+                <a href="pricing.html" style="color:#0cc;margin-left:4px">View plans →</a>
+            </div>
         </div>
 
-        <!-- PRO Analytics (shown when satellite selected) -->
+        <!-- Orbital Analytics (PRO features gated, basic info free) -->
         <div class="sp-section" id="sp-analytics" style="display:none">
-            <div class="sp-label">Orbital Analytics <span style="color:#0aa;font-weight:400;letter-spacing:0">(PRO)</span></div>
+            <div class="sp-label">Orbital Analytics</div>
             <div class="sp-row"><span class="sp-k">SMA</span><span class="sp-v" id="sp-sma">—</span></div>
             <div class="sp-row"><span class="sp-k">Velocity</span><span class="sp-v" id="sp-vel">—</span></div>
             <div class="sp-row"><span class="sp-k">Revs/day</span><span class="sp-v" id="sp-revs">—</span></div>
@@ -215,8 +228,8 @@ nav {
             </div>
             <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
                 <button class="sp-export-btn" id="sp-export-json" title="Export full analysis as JSON">Export JSON</button>
-                <button class="sp-export-btn" id="sp-export-csv" title="Export conjunctions as CSV">Export CSV</button>
-                <button class="sp-export-btn" id="sp-export-cdm" title="Export CDM for closest conjunction">Export CDM</button>
+                <button class="sp-export-btn" id="sp-export-csv" title="Export conjunctions as CSV">Export CSV <span class="pro-tag">PRO</span></button>
+                <button class="sp-export-btn" id="sp-export-cdm" title="Export CDM for closest conjunction">Export CDM <span class="pro-tag">PRO</span></button>
             </div>
         </div>
     </div>
@@ -267,6 +280,37 @@ import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV
        } from './js/orbital-analytics.js';
 import { loadUserLocation, auroraVisibility } from './js/user-location.js';
+
+// ── PRO tier detection ──────────────────────────────────────────────────────
+// Free users get: satellite tracking, visualization, basic orbital info
+// PRO users get: collision analysis, debris tracking, CDM export, avoidance ΔV
+const _AUTH_KEY = 'pp_auth';
+function _isPro() {
+    let auth = null;
+    try { auth = JSON.parse(localStorage.getItem(_AUTH_KEY) || 'null'); } catch (_) {}
+    if (!auth) { try { auth = JSON.parse(sessionStorage.getItem(_AUTH_KEY) || 'null'); } catch (_) {} }
+    if (!auth?.signedIn) return false;
+    const plan = (auth.plan || '').toLowerCase();
+    const role = (auth.role || '').toLowerCase();
+    return role === 'admin' || role === 'superadmin' || plan === 'advanced';
+}
+const IS_PRO = _isPro();
+
+// Apply PRO gating to UI elements
+if (!IS_PRO) {
+    // Debris groups: show but lock
+    for (const id of ['grp-cosmos-2251-debris', 'grp-iridium-33-debris', 'grp-1999-025']) {
+        const el = document.getElementById(id);
+        if (el) { el.disabled = true; el.closest('.sp-toggle').style.opacity = '0.4'; }
+    }
+    // Show upgrade badge on debris section
+    const debrisBadge = document.getElementById('debris-pro-badge');
+    if (debrisBadge) debrisBadge.style.display = 'inline';
+} else {
+    // PRO user: hide the badge
+    const debrisBadge = document.getElementById('debris-pro-badge');
+    if (debrisBadge) debrisBadge.style.display = 'none';
+}
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -406,11 +450,19 @@ async function doSearch() {
         // Draw orbit trail + ground track using tracker methods
         _drawVisuals(sat.norad_id);
 
-        // Run conjunction screening + PRO analytics
-        _runConjunctionScreening(sat.norad_id, sat.name);
-
-        // PRO analytics (orbital rates, lifetime, passes)
+        // Show basic orbital analytics for all users
         _updateAnalytics(sat);
+
+        // Conjunction screening: PRO only
+        if (IS_PRO) {
+            _runConjunctionScreening(sat.norad_id, sat.name);
+        } else {
+            const conjSection = document.getElementById('sp-conj-section');
+            conjSection.style.display = '';
+            document.getElementById('sp-conj-status').innerHTML =
+                '<span style="color:#0aa">Collision analysis available on PRO plan</span>';
+            document.getElementById('sp-conj-gate').style.display = '';
+        }
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
@@ -603,6 +655,7 @@ document.getElementById('sp-export-json')?.addEventListener('click', () => {
 });
 
 document.getElementById('sp-export-csv')?.addEventListener('click', () => {
+    if (!IS_PRO) { alert('CSV export is a PRO feature. Upgrade at parkersphysics.com/pricing'); return; }
     if (!_lastAnalysisTle) return;
     const csv = conjunctionsToCSV(_lastConjunctions, _lastAnalysisTle.name, _lastAnalysisTle.norad_id);
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -615,6 +668,7 @@ document.getElementById('sp-export-csv')?.addEventListener('click', () => {
 });
 
 document.getElementById('sp-export-cdm')?.addEventListener('click', () => {
+    if (!IS_PRO) { alert('CDM export is a PRO feature. Upgrade at parkersphysics.com/pricing'); return; }
     if (!_lastAnalysisTle || _lastConjunctions.length === 0) {
         alert('No conjunctions to export. Run a conjunction screening first.');
         return;
