@@ -74,6 +74,9 @@ void main() {
 }`;
 
 export const EARTH_FRAG = /* glsl */`
+#ifdef GL_OES_standard_derivatives
+#extension GL_OES_standard_derivatives : enable
+#endif
 precision highp float;
 
 uniform sampler2D u_day;
@@ -101,8 +104,13 @@ varying vec3 vWorldBitangent;
 
 // ── Terrain normal perturbation from bump/topology map ─────────────────────────
 vec3 perturbNormal(vec3 N, vec3 T, vec3 B, vec2 uv, float strength) {
-    // Sample height neighbours for central-difference gradient
-    vec2 texel = vec2(1.0 / 2048.0, 1.0 / 1024.0);  // approximate texture size
+    // Use screen-space derivatives for proper texel stepping (adapts to zoom level)
+    vec2 dUVdx = dFdx(uv);
+    vec2 dUVdy = dFdy(uv);
+    float texelScale = max(length(dUVdx), length(dUVdy));
+    // Clamp to at least 1 texel of a 2048-wide map to avoid zero-step sampling
+    vec2 texel = max(vec2(texelScale), vec2(1.0 / 2048.0));
+
     float hL = texture2D(u_bump, uv - vec2(texel.x, 0.0)).r;
     float hR = texture2D(u_bump, uv + vec2(texel.x, 0.0)).r;
     float hD = texture2D(u_bump, uv - vec2(0.0, texel.y)).r;
@@ -265,6 +273,7 @@ uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_weather_on;
 uniform float u_satellite_on;      // blend satellite into cloud appearance
+uniform float u_cam_dist;          // camera distance (Earth radii) for LOD detail
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -277,8 +286,8 @@ varying vec3 vWorldPos;
 // ── Volumetric cloud constants ────────────────────────────────────────────────
 const float R_CLOUD_BOTTOM = 1.005;   // cloud base altitude (≈ 3 km)
 const float R_CLOUD_TOP    = 1.018;   // cloud top altitude (≈ 12 km)
-const int   VOL_STEPS      = 8;       // primary ray march steps through cloud slab
-const int   LIGHT_STEPS    = 4;       // sun-direction steps for self-shadowing
+const int   VOL_STEPS      = 20;      // primary ray march steps (eliminates banding)
+const int   LIGHT_STEPS    = 6;       // sun-direction steps for self-shadowing
 
 // ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
 vec2 stormSwirl(vec2 uv) {
@@ -367,12 +376,16 @@ float noise3D(vec3 p) {
     return mix(n0, n1, f.z);
 }
 
-// Fractal Brownian Motion (3 octaves, cheap)
+// Fractal Brownian Motion — 6 octaves for detailed close-up clouds
 float fbm3(vec3 p) {
-    float v = 0.0;
-    v += noise3D(p)       * 0.50;
-    v += noise3D(p * 2.1) * 0.25;
-    v += noise3D(p * 4.3) * 0.125;
+    float v   = 0.0;
+    float amp = 0.50;
+    float frq = 1.0;
+    for (int i = 0; i < 6; i++) {
+        v   += noise3D(p * frq) * amp;
+        amp *= 0.48;
+        frq *= 2.13;
+    }
     return v;
 }
 
@@ -403,8 +416,10 @@ float cloudDensity(vec3 pos, vec2 swirl) {
     // Cloud noise from texture + 3D procedural detail
     float texNoise = texture2D(u_clouds, uv + driftLow + swirl).r;
 
-    // 3D volumetric detail noise (adds depth/thickness variation)
-    vec3 noisePos = normalize(pos) * 42.0 + vec3(u_time * 0.008, 0.0, u_time * 0.005);
+    // 3D volumetric detail noise — frequency scales with camera distance for LOD
+    // Close-up: higher frequency reveals finer cloud edges and billows
+    float lodScale = mix(120.0, 42.0, clamp((u_cam_dist - 1.02) / 2.0, 0.0, 1.0));
+    vec3 noisePos = normalize(pos) * lodScale + vec3(u_time * 0.008, 0.0, u_time * 0.005);
     float detailNoise = fbm3(noisePos);
 
     // Combine: texture gives large-scale cloud patterns, 3D noise gives volumetric edges
@@ -587,8 +602,8 @@ const float R_PLANET   = 1.0;
 const float R_ATM      = 1.045;          // atmosphere top (≈ 60 km scaled)
 const float H_RAYLEIGH = 0.012;          // Rayleigh scale height (~8 km / 6371 km)
 const float H_MIE      = 0.004;          // Mie scale height (~1.2 km)
-const int   NUM_STEPS  = 12;             // primary ray march steps
-const int   NUM_LSTEPS = 6;              // light (sun) ray march steps
+const int   NUM_STEPS  = 20;             // primary ray march steps (smooth gradient)
+const int   NUM_LSTEPS = 8;              // light (sun) ray march steps
 
 // Rayleigh scattering coefficients at sea level (λ = 680, 550, 440 nm)
 const vec3  BETA_R0 = vec3(5.8e-3, 13.5e-3, 33.1e-3);
@@ -743,6 +758,7 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_time:          { value: 0 },
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
+        u_cam_dist:      { value: 3.0 },          // camera distance for LOD detail scaling
         u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
         u_storm_count:   { value: 0 },
     };
@@ -761,13 +777,23 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
  * @param {object} cloudU - uniforms object from createCloudUniforms() (or null to skip clouds.png)
  * @returns {Promise<void>}
  */
-export function loadEarthTextures(earthU, cloudU = null) {
+export function loadEarthTextures(earthU, cloudU = null, renderer = null) {
     const loader = new THREE.TextureLoader();
+
+    // Detect max anisotropy from renderer (or use sensible default)
+    const maxAniso = renderer
+        ? renderer.capabilities.getMaxAnisotropy()
+        : 16;
 
     const loadTex = (url, onLoad, fallbackFn) => new Promise(resolve => {
         loader.load(url,
             tex => {
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                // High-quality filtering: trilinear + max anisotropy
+                tex.minFilter = THREE.LinearMipmapLinearFilter;
+                tex.magFilter = THREE.LinearFilter;
+                tex.anisotropy = maxAniso;
+                tex.generateMipmaps = true;
                 onLoad(tex);
                 resolve();
             },
@@ -861,6 +887,7 @@ export class EarthSkin {
         const earthMat = new THREE.ShaderMaterial({
             vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
             uniforms: this.earthU,
+            extensions: { derivatives: true },
         });
         this.earthMesh = new THREE.Mesh(
             new THREE.SphereGeometry(radius, segments, segments),
@@ -902,15 +929,18 @@ export class EarthSkin {
         }
     }
 
-    /** Load textures from CDN. Returns Promise<void>. */
-    loadTextures() {
-        return loadEarthTextures(this.earthU, this.cloudU);
+    /** Load textures from CDN. Pass renderer for max anisotropy detection. */
+    loadTextures(renderer = null) {
+        return loadEarthTextures(this.earthU, this.cloudU, renderer);
     }
 
-    /** Call every frame with elapsed time in seconds. */
-    update(t) {
+    /** Call every frame with elapsed time in seconds and optional camera distance. */
+    update(t, camDist = 3.0) {
         this.earthU.u_time.value = t;
-        if (this.cloudU) this.cloudU.u_time.value = t;
+        if (this.cloudU) {
+            this.cloudU.u_time.value = t;
+            this.cloudU.u_cam_dist.value = camDist;
+        }
     }
 
     /** Update sun direction (call when Earth or camera rotates). */

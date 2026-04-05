@@ -1168,7 +1168,7 @@ camera.position.set(0, 0.4, 3.0);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance   = 1.06;   // just above cloud layer
+controls.minDistance   = 1.025;  // close enough to see terrain detail
 controls.maxDistance   = 10.0;
 controls.autoRotate      = true;
 controls.autoRotateSpeed = 0.25; // slow sidereal drift
@@ -1237,16 +1237,17 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
-const earthGeo = new THREE.SphereGeometry(R_EARTH, 80, 80);
+const earthGeo = new THREE.SphereGeometry(R_EARTH, 160, 160);
 const earthMat = new THREE.ShaderMaterial({
     vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
+    extensions: { derivatives: true },
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
-const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 60, 60);
+const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 120, 120);
 const cloudMat = new THREE.ShaderMaterial({
     vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
@@ -1254,7 +1255,7 @@ const cloudMat = new THREE.ShaderMaterial({
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
 scene.add(cloudMesh);
 
-const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
+const stratGeo = new THREE.SphereGeometry(R_STRAT, 80, 80);
 const stratMat = new THREE.ShaderMaterial({
     vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,  // reuse rim shader at tighter radius
     uniforms: stratU, transparent: true, depthWrite: false,
@@ -1262,7 +1263,7 @@ const stratMat = new THREE.ShaderMaterial({
 });
 scene.add(new THREE.Mesh(stratGeo, stratMat));
 
-const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
+const atmGeo = new THREE.SphereGeometry(R_ATM, 80, 80);
 const atmMat = new THREE.ShaderMaterial({
     vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,
     uniforms: atmU, transparent: true, depthWrite: false,
@@ -1348,7 +1349,7 @@ scene.add(tropicGroup);
 // ═══════════════════════════════════════════════════════════════
 // Load textures via shared earth-skin.js loader
 // — version-pinned CDN, RepeatWrapping applied, safe 1×1 fallbacks on error
-loadEarthTextures(earthU, cloudU).then(() => {
+loadEarthTextures(earthU, cloudU, renderer).then(() => {
     document.getElementById('loading').classList.add('done');
 });
 
@@ -3213,12 +3214,13 @@ function animate() {
     // Clouds rotate slightly faster (weather systems drift)
     cloudMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE * 1.0008;
 
-    // ── Shader time
+    // ── Shader time + camera distance for LOD
     earthU.u_time.value = t;
     cloudU.u_time.value = t;
+    const dist = camera.position.length();  // in "Earth radii" units
+    cloudU.u_cam_dist.value = dist;
 
     // ── Altitude display (camera distance → km equivalent)
-    const dist = camera.position.length();  // in "Earth radii" units
     const altKm = Math.max(0, (dist - R_EARTH) * 6371);
     document.getElementById('h-alt').textContent =
         altKm > 1000
