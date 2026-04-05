@@ -261,7 +261,14 @@ export class EarthHiRes {
         // ── Zoom level from camera altitude ──────────────────────────────
         // Smooth continuous mapping: surface → maxZoom, far → zoom 2
         const tNorm = 1 - Math.min(1, (dist - 1.015) / (this._activateDist - 1.015));
-        const z = Math.max(2, Math.min(this._maxZoom, Math.round(2 + tNorm * (this._maxZoom - 2))));
+        let z = Math.max(2, Math.min(this._maxZoom, Math.round(2 + tNorm * (this._maxZoom - 2))));
+
+        // At high latitudes (>70°), reduce max zoom — polar regions are mostly
+        // ice/snow and don't benefit from high zoom, but generate many tiles
+        // due to meridian convergence. This prevents tile count explosion.
+        const absLat = Math.abs(centerLat);
+        if (absLat > 70) z = Math.min(z, 5);
+        else if (absLat > 60) z = Math.min(z, 6);
 
         // ── Find view center using raycaster (accounts for Earth rotation) ──
         // Cast a ray from camera through screen center to the Earth mesh
@@ -281,16 +288,19 @@ export class EarthHiRes {
             centerLon = Math.atan2(lookDir.x, lookDir.z) * 180 / Math.PI;
         }
 
-        // ── Visible angular radius (tighter at close zoom for efficiency) ──
-        const viewRadius = Math.max(5, 8 + (dist - 1.015) * 35);
+        // ── Visible angular radius ──────────────────────────────────────
+        const viewRadiusLat = Math.max(5, 8 + (dist - 1.015) * 35);
+        // Longitude radius expands near the poles to account for meridian convergence.
+        // At equator: 1:1, at 80°: lon radius ≈ lat radius / cos(80°) ≈ 6×.
+        // Cap at 90° to avoid fetching the entire longitude strip.
+        const cosLat = Math.max(0.1, Math.cos(Math.abs(centerLat) * Math.PI / 180));
+        const viewRadiusLon = Math.min(90, viewRadiusLat / cosLat);
 
-        // Bounds may cross antimeridian (e.g., Japan at lon=140, radius=30 → east=170)
-        // or wrap around (e.g., Fiji at lon=178, radius=10 → east=188 → wraps to -172)
         const bounds = {
-            west:  centerLon - viewRadius,
-            east:  centerLon + viewRadius,
-            north: Math.min(90,  centerLat + viewRadius),
-            south: Math.max(-90, centerLat - viewRadius),
+            west:  centerLon - viewRadiusLon,
+            east:  centerLon + viewRadiusLon,
+            north: Math.min(90,  centerLat + viewRadiusLat),
+            south: Math.max(-90, centerLat - viewRadiusLat),
         };
         this._viewBounds = bounds;
 
@@ -327,9 +337,15 @@ export class EarthHiRes {
         // Sort by distance from center (closest first)
         tilesToLoad.sort((a, b) => a.priority - b.priority);
 
-        // Load up to 10 tiles concurrently (covers Asia-scale regions fast)
+        // Cap total new tiles per update (prevents polar tile explosion)
+        // At z=8 near the pole, hundreds of tiles may be needed — only fetch the
+        // closest 40 per cycle; the rest will load on subsequent updates.
+        const maxNew = 40;
+        const capped = tilesToLoad.slice(0, maxNew);
+
+        // Load up to 10 tiles concurrently
         const maxConcurrent = 10 - this._pending.size;
-        const batch = tilesToLoad.slice(0, Math.max(0, maxConcurrent));
+        const batch = capped.slice(0, Math.max(0, maxConcurrent));
         for (const t of batch) {
             this._loadTile(t.z, t.row, t.col);
         }
