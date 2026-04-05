@@ -469,19 +469,20 @@
             }
 
             if (result.needsConfirmation) {
-                // Email confirmation required — show message
+                // Show confirmation message but still redirect — user has provisional session
                 document.getElementById('form-view').style.display = 'none';
                 document.getElementById('success-view').classList.add('show');
                 const msgEl = document.querySelector('#success-view p');
-                if (msgEl) msgEl.textContent = result.message || 'Check your email for a confirmation link.';
-                // Don't auto-redirect — user needs to confirm email first
+                if (msgEl) msgEl.textContent = result.message || 'Account created! Redirecting to your dashboard…';
+                // Redirect after short delay — provisional session lets them explore
+                setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
                 return;
             }
 
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
             setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
-        }, 1200);
+        })();
     });
 </script>
 </body>
