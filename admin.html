@@ -12,8 +12,6 @@
             background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
             color: #fff; min-height: 100vh; display: flex; flex-direction: column;
         }
-
-        /* ─── Auth gate ──────────────────────────────────────────── */
         .auth-gate {
             flex: 1; display: flex; align-items: center; justify-content: center;
             text-align: center; padding: 3rem;
@@ -25,115 +23,113 @@
             background: linear-gradient(45deg, #8040ff, #4080ff); color: #fff;
             text-decoration: none; font-weight: 600; font-size: .9rem;
         }
-
-        /* ─── Main layout ────────────────────────────────────────── */
-        main { flex: 1; max-width: 1100px; width: 100%; margin: 0 auto; padding: 28px 20px 48px; }
-        .admin-header { margin-bottom: 28px; }
+        main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px 48px; }
+        .admin-header { margin-bottom: 8px; }
         .admin-header h1 {
-            font-size: 1.6rem; font-weight: 800;
+            font-size: 1.5rem; font-weight: 800;
             background: linear-gradient(45deg, #ff6060, #ff8c00);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
         }
-        .admin-header p { color: #666; font-size: .88rem; margin-top: 4px; }
+        .admin-header p { color: #555; font-size: .85rem; margin-top: 2px; }
 
-        /* ─── Cards grid ─────────────────────────────────────────── */
-        .admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        @media (max-width: 700px) { .admin-grid { grid-template-columns: 1fr; } }
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin: 18px 0 20px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 0; }
+        .tab {
+            padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid transparent;
+            border-bottom: none; background: transparent; color: #666; font-family: inherit;
+            font-size: .85rem; cursor: pointer; font-weight: 600; transition: all .15s;
+        }
+        .tab:hover { color: #aaa; background: rgba(255,255,255,.03); }
+        .tab.active { color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
 
+        /* KPI Cards */
+        .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+        @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 550px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        .kpi {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px; padding: 18px 16px; text-align: center;
+        }
+        .kpi-val { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+        .kpi-label { font-size: .72rem; color: #666; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi-val.green { color: #4eff91; }
+        .kpi-val.blue { color: #4fc3f7; }
+        .kpi-val.purple { color: #c080ff; }
+        .kpi-val.gold { color: #ffd700; }
+        .kpi-val.red { color: #ff6060; }
+        .kpi-val.white { color: #fff; }
+        .kpi-loading { color: #333; }
+
+        /* Cards */
         .card {
-            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1);
-            border-radius: 14px; padding: 24px; position: relative; overflow: hidden;
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 22px; margin-bottom: 18px;
         }
-        .card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 14px; color: #ccc; }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
 
-        /* ─── Connection status ───────────────────────────────────── */
-        .conn-overall {
-            display: flex; align-items: center; gap: 12px;
-            padding: 14px 18px; border-radius: 10px; margin-bottom: 18px;
-            font-weight: 600; font-size: .95rem;
+        /* Connection status */
+        .conn-bar {
+            display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+            border-radius: 8px; font-size: .88rem; font-weight: 600; margin-bottom: 14px;
         }
-        .conn-overall.ok { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.2); color: #4eff91; }
-        .conn-overall.fail { background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.2); color: #ff6060; }
-        .conn-overall.loading { background: rgba(255,200,0,.06); border: 1px solid rgba(255,200,0,.15); color: #ffd700; }
-
-        .conn-dot {
-            width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
-        }
-        .conn-dot.ok { background: #4eff91; box-shadow: 0 0 8px rgba(78,255,145,.5); }
-        .conn-dot.fail { background: #ff6060; box-shadow: 0 0 8px rgba(255,80,80,.5); }
-        .conn-dot.loading { background: #ffd700; box-shadow: 0 0 8px rgba(255,200,0,.5); animation: pulse 1.2s ease-in-out infinite; }
-        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+        .conn-bar.ok { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.2); color: #4eff91; }
+        .conn-bar.fail { background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.2); color: #ff6060; }
+        .conn-bar.loading { background: rgba(255,200,0,.06); border: 1px solid rgba(255,200,0,.15); color: #ffd700; }
+        .conn-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .conn-dot.ok { background: #4eff91; box-shadow: 0 0 6px rgba(78,255,145,.5); }
+        .conn-dot.fail { background: #ff6060; box-shadow: 0 0 6px rgba(255,80,80,.5); }
+        .conn-dot.loading { background: #ffd700; animation: pulse 1.2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
         .check-list { list-style: none; }
-        .check-item {
-            display: flex; align-items: center; gap: 10px;
-            padding: 10px 14px; border-radius: 8px;
-            background: rgba(255,255,255,.03); margin-bottom: 6px;
-            font-size: .88rem;
-        }
-        .check-icon { font-size: 1rem; flex-shrink: 0; width: 20px; text-align: center; }
-        .check-name { flex: 1; color: #ccc; }
-        .check-ms { color: #666; font-size: .78rem; font-family: monospace; }
-        .check-detail { color: #ff8080; font-size: .75rem; margin-top: 2px; }
+        .check-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: .84rem; background: rgba(255,255,255,.02); border-radius: 6px; margin-bottom: 4px; }
+        .check-ms { color: #555; font-size: .75rem; font-family: monospace; margin-left: auto; }
 
-        .btn-recheck {
-            margin-top: 14px; padding: 9px 20px; border-radius: 8px; border: none;
-            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
-            color: #ccc; font-family: inherit; font-size: .82rem; cursor: pointer;
-            transition: background .2s;
-        }
-        .btn-recheck:hover { background: rgba(255,255,255,.15); color: #fff; }
+        /* Config rows */
+        .cfg { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: .84rem; }
+        .cfg:last-child { border-bottom: none; }
+        .cfg-k { color: #666; }
+        .cfg-v { color: #bbb; font-family: monospace; font-size: .78rem; text-align: right; max-width: 55%; word-break: break-all; }
 
-        /* ─── Config info ─────────────────────────────────────────── */
-        .config-row {
-            display: flex; justify-content: space-between; align-items: center;
-            padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,.06);
-            font-size: .85rem;
-        }
-        .config-row:last-child { border-bottom: none; }
-        .config-label { color: #888; }
-        .config-val { color: #ccc; font-family: monospace; font-size: .8rem; word-break: break-all; max-width: 60%; text-align: right; }
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 8px 10px; font-size: .72rem; color: #555; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid rgba(255,255,255,.07); }
+        td { padding: 9px 10px; font-size: .84rem; color: #bbb; border-bottom: 1px solid rgba(255,255,255,.03); }
+        tr:hover td { background: rgba(255,255,255,.02); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .7rem; font-weight: 600; }
+        .b-admin { background: rgba(255,60,60,.12); color: #f66; border: 1px solid rgba(255,60,60,.25); }
+        .b-super { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
+        .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
+        .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
 
-        /* ─── Users table ─────────────────────────────────────────── */
-        .card.full { grid-column: 1 / -1; }
-        .users-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
-        .users-table th {
-            text-align: left; padding: 10px 12px; font-size: .75rem; color: #666;
-            text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid rgba(255,255,255,.08);
-        }
-        .users-table td {
-            padding: 10px 12px; font-size: .85rem; color: #bbb;
-            border-bottom: 1px solid rgba(255,255,255,.04);
-        }
-        .users-table tr:hover td { background: rgba(255,255,255,.03); }
-        .role-badge {
-            display: inline-block; padding: 2px 8px; border-radius: 4px;
-            font-size: .72rem; font-weight: 600; letter-spacing: .03em;
-        }
-        .role-badge.admin { background: rgba(255,60,60,.12); color: #f66; border: 1px solid rgba(255,60,60,.25); }
-        .role-badge.superadmin { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
-        .role-badge.user { background: rgba(255,255,255,.06); color: #888; border: 1px solid rgba(255,255,255,.1); }
-        .plan-badge-sm {
-            display: inline-block; padding: 2px 7px; border-radius: 4px;
-            font-size: .7rem; font-weight: 600;
-        }
-        .plan-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
-        .plan-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
-        .plan-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
+        /* Sparkline canvas */
+        .sparkline-wrap { height: 80px; margin-bottom: 8px; }
+        .sparkline-wrap canvas { width: 100%; height: 100%; }
 
-        .empty-state { text-align: center; padding: 32px; color: #555; font-size: .9rem; }
+        /* Empty / error states */
+        .empty { text-align: center; padding: 28px; color: #444; font-size: .88rem; }
+        .empty code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: .8rem; }
 
-        /* ─── Quick actions ────────────────────────────────────────── */
-        .actions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-        @media (max-width: 500px) { .actions-grid { grid-template-columns: 1fr; } }
-        .action-btn {
-            padding: 14px 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,.1);
-            background: rgba(255,255,255,.04); color: #ccc; font-family: inherit;
-            font-size: .85rem; cursor: pointer; text-align: left; transition: background .2s;
-            display: flex; align-items: center; gap: 10px; text-decoration: none;
-        }
-        .action-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
-        .action-icon { font-size: 1.2rem; }
+        /* Buttons */
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #ccc; font-family: inherit; font-size: .82rem; cursor: pointer; transition: background .15s; }
+        .btn:hover { background: rgba(255,255,255,.12); color: #fff; }
+        .btn-sm { padding: 5px 12px; font-size: .76rem; }
+
+        /* Live event feed */
+        .event-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.03); font-size: .82rem; }
+        .event-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .event-name { color: #ccc; flex: 1; }
+        .event-time { color: #444; font-size: .75rem; font-family: monospace; }
+
+        /* GA status card */
+        .ga-status { padding: 16px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); }
+        .ga-status h4 { font-size: .88rem; margin-bottom: 8px; }
 
         footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
         footer a { color: #555; text-decoration: none; }
@@ -142,11 +138,9 @@
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("admin");</script>
 
-<!-- ═══════════════════════════════════════ AUTH GATE ═══ -->
 <div class="auth-gate" id="auth-gate">
     <div>
         <h2>Admin Access Required</h2>
@@ -155,235 +149,383 @@
     </div>
 </div>
 
-<!-- ═══════════════════════════════════════ MAIN ═══ -->
 <main style="display:none" id="admin-main">
     <div class="admin-header">
         <h1>Admin Dashboard</h1>
-        <p>System health, Supabase connection status, and user management.</p>
+        <p id="admin-sub">Loading...</p>
     </div>
 
-    <div class="admin-grid">
+    <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="users">Users</button>
+        <button class="tab" data-tab="analytics">Analytics</button>
+        <button class="tab" data-tab="system">System</button>
+    </div>
 
-        <!-- ── Supabase Connection Status ── -->
-        <div class="card">
-            <h2>Supabase Connection</h2>
-            <div class="conn-overall loading" id="conn-overall">
-                <span class="conn-dot loading" id="conn-dot"></span>
-                <span id="conn-label">Checking connection...</span>
+    <!-- ═══════════════════ OVERVIEW TAB ═══════════════════ -->
+    <div class="tab-panel active" id="panel-overview">
+        <div class="kpi-grid" id="kpi-grid">
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-intro">--</div><div class="kpi-label">Intro Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-pro">--</div><div class="kpi-label">Pro Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
+        </div>
+
+        <div class="row2">
+            <div class="card">
+                <h3>Daily Trend (14 days)</h3>
+                <div class="sparkline-wrap"><canvas id="trend-canvas"></canvas></div>
+                <div style="display:flex;justify-content:space-between;font-size:.72rem;color:#444;">
+                    <span id="trend-start"></span><span id="trend-end"></span>
+                </div>
             </div>
-            <ul class="check-list" id="check-list"></ul>
-            <button class="btn-recheck" id="btn-recheck">Re-check Connection</button>
-        </div>
-
-        <!-- ── Config Info ── -->
-        <div class="card">
-            <h2>Configuration</h2>
-            <div id="config-info"></div>
-        </div>
-
-        <!-- ── Quick Actions ── -->
-        <div class="card">
-            <h2>Quick Actions</h2>
-            <div class="actions-grid">
-                <a href="dashboard.html" class="action-btn"><span class="action-icon">📋</span> User Dashboard</a>
-                <a href="space-weather.html" class="action-btn"><span class="action-icon">🌤</span> Space Weather</a>
-                <button class="action-btn" id="btn-run-schema"><span class="action-icon">🗃</span> View Schema SQL</button>
-                <button class="action-btn" id="btn-export-health"><span class="action-icon">📊</span> Export Health Report</button>
-            </div>
-        </div>
-
-        <!-- ── System Info ── -->
-        <div class="card">
-            <h2>System Info</h2>
-            <div id="system-info"></div>
-        </div>
-
-        <!-- ── Users ── -->
-        <div class="card full">
-            <h2>Users <span id="user-count" style="font-size:.78rem;color:#666;font-weight:400"></span></h2>
-            <div id="users-container">
-                <div class="empty-state" id="users-loading">Loading users...</div>
+            <div class="card">
+                <h3>Top Pages (7 days)</h3>
+                <div id="top-pages-list"><div class="empty">Loading...</div></div>
             </div>
         </div>
 
+        <div class="card">
+            <h3>Live Event Feed <button class="btn btn-sm" id="btn-refresh-feed" style="float:right">Refresh</button></h3>
+            <div id="event-feed"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ USERS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-users">
+        <div class="card">
+            <h3>All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="users-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ ANALYTICS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-analytics">
+        <div class="row2" style="margin-bottom:18px">
+            <div class="card">
+                <h3>Google Analytics (GA4)</h3>
+                <div class="ga-status" id="ga-status"></div>
+            </div>
+            <div class="card">
+                <h3>Supabase Analytics</h3>
+                <div id="supa-analytics-status"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Active Sessions <span id="sessions-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="sessions-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ SYSTEM TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-system">
+        <div class="row2">
+            <div class="card">
+                <h3>Supabase Connection</h3>
+                <div class="conn-bar loading" id="conn-bar">
+                    <span class="conn-dot loading" id="conn-dot"></span>
+                    <span id="conn-label">Checking...</span>
+                    <button class="btn btn-sm" id="btn-recheck" style="margin-left:auto">Re-check</button>
+                </div>
+                <ul class="check-list" id="check-list"></ul>
+            </div>
+            <div class="card">
+                <h3>Configuration</h3>
+                <div id="config-info"></div>
+            </div>
+        </div>
+        <div class="row2">
+            <div class="card">
+                <h3>System Info</h3>
+                <div id="system-info"></div>
+            </div>
+            <div class="card">
+                <h3>Quick Actions</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <a href="dashboard.html" class="btn" style="text-align:center;text-decoration:none">User Dashboard</a>
+                    <a href="space-weather.html" class="btn" style="text-align:center;text-decoration:none">Space Weather</a>
+                    <button class="btn" id="btn-schema">View Schema SQL</button>
+                    <button class="btn" id="btn-export">Export Health Report</button>
+                </div>
+            </div>
+        </div>
     </div>
 </main>
 
 <footer>
-    <p>&copy; 2026 Parker Physics App &nbsp;&middot;&nbsp; <a href="index.html">Home</a> &nbsp;&middot;&nbsp; <a href="dashboard.html">Dashboard</a></p>
+    <p>&copy; 2026 Parker Physics &middot; <a href="index.html">Home</a> &middot; <a href="dashboard.html">Dashboard</a></p>
 </footer>
 
-<!-- ═══════════════════════════════════════ LOGIC ═══ -->
 <script type="module">
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
+import { GA_MEASUREMENT_ID } from './js/analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend } from './js/admin-analytics.js';
 
-// ── Auth gate ────────────────────────────────────────────────────────────
+// ── Auth gate ────────────────────────────────────────────────────────────────
 await auth.ready();
-if (!auth.isSignedIn()) {
-    document.getElementById('auth-gate').style.display = 'flex';
-    throw new Error('Not signed in');
-}
+if (!auth.isSignedIn()) { document.getElementById('auth-gate').style.display = 'flex'; throw ''; }
 await auth.fetchProfile();
 if (!auth.isAdmin()) {
-    document.getElementById('auth-gate').querySelector('h2').textContent = 'Insufficient Permissions';
-    document.getElementById('auth-gate').querySelector('p').textContent =
-        `Signed in as ${auth.getUser()?.email || 'unknown'} (role: ${auth.getRole()}). Admin or superadmin role required.`;
-    document.getElementById('auth-gate').style.display = 'flex';
-    throw new Error('Not admin');
+    const gate = document.getElementById('auth-gate');
+    gate.querySelector('h2').textContent = 'Insufficient Permissions';
+    gate.querySelector('p').textContent = `Signed in as ${auth.getUser()?.email || '?'} (role: ${auth.getRole()}). Admin required.`;
+    gate.style.display = 'flex';
+    throw '';
 }
-
-// ── Show admin content ───────────────────────────────────────────────────
 document.getElementById('auth-gate').style.display = 'none';
 document.getElementById('admin-main').style.display = 'block';
+document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
 
-// ── Config info ──────────────────────────────────────────────────────────
-const configEl = document.getElementById('config-info');
-const maskedKey = SUPABASE_ANON_KEY.length > 12
-    ? SUPABASE_ANON_KEY.slice(0, 16) + '...' + SUPABASE_ANON_KEY.slice(-4)
-    : '(not set)';
-configEl.innerHTML = `
-    <div class="config-row"><span class="config-label">Supabase URL</span><span class="config-val">${SUPABASE_URL || '(not set)'}</span></div>
-    <div class="config-row"><span class="config-label">Anon Key</span><span class="config-val">${maskedKey}</span></div>
-    <div class="config-row"><span class="config-label">Configured</span><span class="config-val" style="color:${isConfigured() ? '#4eff91' : '#ff6060'}">${isConfigured() ? 'Yes' : 'No'}</span></div>
-    <div class="config-row"><span class="config-label">Auth Provider</span><span class="config-val">${auth.getUser()?.provider || 'unknown'}</span></div>
-    <div class="config-row"><span class="config-label">Your Role</span><span class="config-val" style="color:#ffd700">${auth.getRole()}</span></div>
-    <div class="config-row"><span class="config-label">Your Plan</span><span class="config-val">${auth.getPlan()}</span></div>
-`;
-
-// ── System info ──────────────────────────────────────────────────────────
-const sysEl = document.getElementById('system-info');
-sysEl.innerHTML = `
-    <div class="config-row"><span class="config-label">User Agent</span><span class="config-val" style="max-width:70%;font-size:.7rem">${navigator.userAgent.slice(0, 80)}...</span></div>
-    <div class="config-row"><span class="config-label">Window Size</span><span class="config-val">${window.innerWidth} x ${window.innerHeight}</span></div>
-    <div class="config-row"><span class="config-label">Device Pixel Ratio</span><span class="config-val">${window.devicePixelRatio}</span></div>
-    <div class="config-row"><span class="config-label">Online</span><span class="config-val" style="color:${navigator.onLine ? '#4eff91' : '#ff6060'}">${navigator.onLine ? 'Yes' : 'No'}</span></div>
-    <div class="config-row"><span class="config-label">Page Loaded</span><span class="config-val">${new Date().toLocaleString()}</span></div>
-`;
-
-// ── Connection health check ──────────────────────────────────────────────
-async function runHealthCheck() {
-    const overall = document.getElementById('conn-overall');
-    const dot = document.getElementById('conn-dot');
-    const label = document.getElementById('conn-label');
-    const list = document.getElementById('check-list');
-
-    // Reset to loading state
-    overall.className = 'conn-overall loading';
-    dot.className = 'conn-dot loading';
-    label.textContent = 'Checking connection...';
-    list.innerHTML = '';
-
-    try {
-        const result = await testConnection();
-
-        overall.className = `conn-overall ${result.ok ? 'ok' : 'fail'}`;
-        dot.className = `conn-dot ${result.ok ? 'ok' : 'fail'}`;
-        label.textContent = result.ok ? 'All systems operational' : 'Connection issues detected';
-
-        for (const check of result.checks) {
-            const icon = check.ok ? '✓' : '✗';
-            const iconColor = check.ok ? '#4eff91' : '#ff6060';
-            let html = `
-                <li class="check-item">
-                    <span class="check-icon" style="color:${iconColor}">${icon}</span>
-                    <span class="check-name">${check.name}</span>
-                    <span class="check-ms">${check.ms}ms</span>
-                </li>`;
-            if (check.detail) {
-                html += `<li class="check-item" style="padding-top:0;margin-top:-4px">
-                    <span class="check-icon"></span>
-                    <span class="check-detail">${check.detail}</span>
-                </li>`;
-            }
-            list.innerHTML += html;
-        }
-    } catch (err) {
-        overall.className = 'conn-overall fail';
-        dot.className = 'conn-dot fail';
-        label.textContent = 'Health check failed';
-        list.innerHTML = `<li class="check-item"><span class="check-icon" style="color:#ff6060">✗</span><span class="check-name">${err.message}</span></li>`;
-    }
-}
-
-runHealthCheck();
-document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
-
-// ── Load users (admin only — requires admin RLS policy) ──────────────────
-async function loadUsers() {
-    const container = document.getElementById('users-container');
-    const countEl = document.getElementById('user-count');
-
-    if (!isConfigured()) {
-        container.innerHTML = '<div class="empty-state">Supabase not configured — cannot load users.</div>';
-        return;
-    }
-
-    try {
-        const supabase = await getSupabase();
-        const { data: users, error } = await supabase
-            .from('user_profiles')
-            .select('id, email, display_name, role, plan, created_at, last_api_call')
-            .order('created_at', { ascending: false })
-            .limit(100);
-
-        if (error) throw error;
-
-        if (!users || users.length === 0) {
-            container.innerHTML = '<div class="empty-state">No users found. The user_profiles table may be empty or the admin RLS policy hasn\'t been applied.<br><br><span style="font-size:.8rem;color:#555">Run <code>supabase-admin.sql</code> in the Supabase SQL editor to enable admin access to all profiles.</span></div>';
-            countEl.textContent = '(0)';
-            return;
-        }
-
-        countEl.textContent = `(${users.length})`;
-        let html = `<table class="users-table">
-            <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead>
-            <tbody>`;
-
-        for (const u of users) {
-            const roleCls = u.role === 'superadmin' ? 'superadmin' : u.role === 'admin' ? 'admin' : 'user';
-            const planCls = u.plan === 'advanced' ? 'plan-advanced' : u.plan === 'basic' ? 'plan-basic' : 'plan-free';
-            const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '—';
-            html += `<tr>
-                <td>${u.display_name || '—'}</td>
-                <td style="font-family:monospace;font-size:.8rem">${u.email || '—'}</td>
-                <td><span class="role-badge ${roleCls}">${(u.role || 'user').toUpperCase()}</span></td>
-                <td><span class="plan-badge-sm ${planCls}">${(u.plan || 'free')}</span></td>
-                <td style="color:#666;font-size:.8rem">${joined}</td>
-            </tr>`;
-        }
-
-        html += '</tbody></table>';
-        container.innerHTML = html;
-    } catch (err) {
-        container.innerHTML = `<div class="empty-state" style="color:#ff8080">Failed to load users: ${err.message}<br><br><span style="font-size:.8rem;color:#555">Make sure the <code>supabase-admin.sql</code> migration has been run to grant admin read access.</span></div>`;
-    }
-}
-
-loadUsers();
-
-// ── Quick action: View Schema SQL ────────────────────────────────────────
-document.getElementById('btn-run-schema').addEventListener('click', () => {
-    window.open('supabase-schema.sql', '_blank');
+// ── Tabs ─────────────────────────────────────────────────────────────────────
+document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
 });
 
-// ── Quick action: Export Health Report ────────────────────────────────────
-document.getElementById('btn-export-health').addEventListener('click', async () => {
-    const result = await testConnection();
-    const report = {
-        timestamp: new Date().toISOString(),
-        supabase_url: SUPABASE_URL,
-        configured: isConfigured(),
-        overall_ok: result.ok,
-        checks: result.checks,
-        user: { email: auth.getUser()?.email, role: auth.getRole(), plan: auth.getPlan() },
+// ── KPI Cards ────────────────────────────────────────────────────────────────
+async function loadKPIs() {
+    const res = await fetchKPIs();
+    if (!res.ok) return;
+    const d = res.data;
+    const set = (id, val, cls) => {
+        const el = document.getElementById(id);
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + cls;
     };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `health-report-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    set('kpi-dau', d.dailyUnique, 'white');
+    set('kpi-wau', d.weeklyUnique, 'white');
+    set('kpi-mau', d.monthlyUnique, 'white');
+    set('kpi-signins', d.signIns, 'blue');
+    set('kpi-minutes', d.minutesUsed, 'blue');
+    set('kpi-signups', d.signUps, 'green');
+    set('kpi-intro', d.introSubs, 'purple');
+    set('kpi-pro', d.proSubs, 'gold');
+    set('kpi-admins', d.adminUsers, 'red');
+    set('kpi-online', d.onlineNow, 'green');
+}
+loadKPIs();
+
+// ── Daily Trend sparkline ────────────────────────────────────────────────────
+async function loadTrend() {
+    const res = await fetchDailyTrend(14);
+    if (!res.ok || !res.data.length) return;
+    const data = res.data;
+    document.getElementById('trend-start').textContent = data[0]?.day?.slice(5) || '';
+    document.getElementById('trend-end').textContent = data[data.length-1]?.day?.slice(5) || '';
+
+    const canvas = document.getElementById('trend-canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+
+    const maxV = Math.max(...data.map(d => d.views), 1);
+    const pts = data.map((d, i) => ({
+        x: (i / (data.length - 1)) * W,
+        y: H - (d.views / maxV) * (H - 10) - 5,
+    }));
+
+    // Area fill
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, H);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(pts[pts.length-1].x, H);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(128,64,255,.25)');
+    grad.addColorStop(1, 'rgba(128,64,255,.02)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.strokeStyle = '#8040ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Dots
+    pts.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+        ctx.fillStyle = '#8040ff';
+        ctx.fill();
+    });
+}
+loadTrend();
+
+// ── Top Pages ────────────────────────────────────────────────────────────────
+async function loadTopPages() {
+    const res = await fetchTopPages();
+    const el = document.getElementById('top-pages-list');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No page view data yet.</div>'; return; }
+
+    const maxV = Math.max(...res.data.map(p => p.views));
+    el.innerHTML = res.data.map(p => {
+        const pct = Math.max(4, (p.views / maxV) * 100);
+        return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+                <span style="color:#ccc">${p.name}</span>
+                <span style="color:#666">${p.views} views &middot; ${p.unique} unique</span>
+            </div>
+            <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#8040ff,#4080ff);border-radius:2px"></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+loadTopPages();
+
+// ── Live Event Feed ──────────────────────────────────────────────────────────
+async function loadFeed() {
+    const res = await fetchRecentEvents(25);
+    const el = document.getElementById('event-feed');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No events recorded yet. Events appear once analytics.js is loaded on pages.</div>'; return; }
+
+    el.innerHTML = res.data.map(ev => {
+        const color = ev.event_type === 'page_view' ? '#4080ff' : ev.event_name === 'sign_in' ? '#4eff91' : '#ffd700';
+        const ago = _timeAgo(ev.created_at);
+        return `<div class="event-row">
+            <span class="event-dot" style="background:${color}"></span>
+            <span class="event-name">${ev.event_name}</span>
+            <span style="color:#444;font-size:.75rem">${ev.page_path || ''}</span>
+            <span class="event-time">${ago}</span>
+        </div>`;
+    }).join('');
+}
+loadFeed();
+document.getElementById('btn-refresh-feed').addEventListener('click', loadFeed);
+
+function _timeAgo(iso) {
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+}
+
+// ── Users Tab ────────────────────────────────────────────────────────────────
+async function loadUsers() {
+    const res = await fetchUsers();
+    const el = document.getElementById('users-container');
+    const countEl = document.getElementById('user-count');
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${res.error}<br><br>Run <code>supabase-admin.sql</code> to grant admin read access.</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No users found.</div>'; countEl.textContent = '(0)'; return; }
+
+    countEl.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
+    for (const u of res.data) {
+        const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
+        const pc = u.plan === 'advanced' ? 'b-advanced' : u.plan === 'basic' ? 'b-basic' : 'b-free';
+        const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
+        html += `<tr><td>${u.display_name||'--'}</td><td style="font-family:monospace;font-size:.78rem">${u.email||'--'}</td><td><span class="badge ${rc}">${(u.role||'user').toUpperCase()}</span></td><td><span class="badge ${pc}">${u.plan||'free'}</span></td><td style="color:#555;font-size:.78rem">${joined}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadUsers();
+
+// ── Analytics Tab ────────────────────────────────────────────────────────────
+// GA4 status
+const gaEl = document.getElementById('ga-status');
+if (GA_MEASUREMENT_ID) {
+    gaEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:#4eff91">Active</span></div>
+        <div class="cfg"><span class="cfg-k">Measurement ID</span><span class="cfg-v">${GA_MEASUREMENT_ID}</span></div>
+        <div class="cfg"><span class="cfg-k">Dashboard</span><span class="cfg-v"><a href="https://analytics.google.com" target="_blank" style="color:#4080ff">Open GA4</a></span></div>`;
+} else {
+    gaEl.innerHTML = `<div style="text-align:center;padding:12px">
+        <p style="color:#666;margin-bottom:10px">GA4 not configured yet.</p>
+        <p style="font-size:.8rem;color:#444">To enable, set <code>GA_MEASUREMENT_ID</code> in <code>js/analytics.js</code> to your G-XXXXXXXXXX ID.</p>
+        <p style="font-size:.78rem;color:#333;margin-top:8px">GA4 adds: traffic sources, geographic data, device breakdown, funnel analysis, bounce rates.</p>
+    </div>`;
+}
+
+// Supabase analytics status
+const saEl = document.getElementById('supa-analytics-status');
+saEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Active':'Not configured'}</span></div>
+    <div class="cfg"><span class="cfg-k">Tracks</span><span class="cfg-v">Page views, events, sessions, sign-ins</span></div>
+    <div class="cfg"><span class="cfg-k">Ad-blocker proof</span><span class="cfg-v" style="color:#4eff91">Yes (first-party)</span></div>
+    <div class="cfg"><span class="cfg-k">Tables</span><span class="cfg-v">analytics_events, user_sessions</span></div>`;
+
+// Active sessions
+async function loadSessions() {
+    const res = await fetchActiveSessions();
+    const el = document.getElementById('sessions-container');
+    const cnt = document.getElementById('sessions-count');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No active sessions.</div>'; cnt.textContent = '(0)'; return; }
+
+    cnt.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Session</th><th>Page</th><th>Duration</th><th>Last Seen</th></tr></thead><tbody>';
+    for (const s of res.data) {
+        const dur = s.duration_s < 60 ? s.duration_s + 's' : Math.round(s.duration_s / 60) + 'm';
+        const ago = _timeAgo(s.last_seen);
+        const sid = s.session_id?.slice(0, 16) || '--';
+        html += `<tr><td style="font-family:monospace;font-size:.75rem">${sid}</td><td>${s.page_path||'--'}</td><td>${dur}</td><td style="color:#555">${ago}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadSessions();
+
+// ── System Tab ───────────────────────────────────────────────────────────────
+// Config info
+const maskedKey = SUPABASE_ANON_KEY.length > 12 ? SUPABASE_ANON_KEY.slice(0,16) + '...' + SUPABASE_ANON_KEY.slice(-4) : '(not set)';
+document.getElementById('config-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Supabase URL</span><span class="cfg-v">${SUPABASE_URL||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Anon Key</span><span class="cfg-v">${maskedKey}</span></div>
+    <div class="cfg"><span class="cfg-k">Configured</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">GA4 ID</span><span class="cfg-v">${GA_MEASUREMENT_ID||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Role</span><span class="cfg-v" style="color:#ffd700">${auth.getRole()}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Plan</span><span class="cfg-v">${auth.getPlan()}</span></div>`;
+
+// System info
+document.getElementById('system-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Browser</span><span class="cfg-v" style="font-size:.7rem;max-width:65%">${navigator.userAgent.slice(0,80)}...</span></div>
+    <div class="cfg"><span class="cfg-k">Viewport</span><span class="cfg-v">${innerWidth}x${innerHeight}</span></div>
+    <div class="cfg"><span class="cfg-k">Pixel Ratio</span><span class="cfg-v">${devicePixelRatio}</span></div>
+    <div class="cfg"><span class="cfg-k">Online</span><span class="cfg-v" style="color:${navigator.onLine?'#4eff91':'#ff6060'}">${navigator.onLine?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">Loaded</span><span class="cfg-v">${new Date().toLocaleString()}</span></div>`;
+
+// Connection health check
+async function runHealthCheck() {
+    const bar = document.getElementById('conn-bar');
+    const dot = document.getElementById('conn-dot');
+    const lbl = document.getElementById('conn-label');
+    const list = document.getElementById('check-list');
+    bar.className = 'conn-bar loading'; dot.className = 'conn-dot loading';
+    lbl.textContent = 'Checking...'; list.innerHTML = '';
+
+    const result = await testConnection();
+    bar.className = 'conn-bar ' + (result.ok ? 'ok' : 'fail');
+    dot.className = 'conn-dot ' + (result.ok ? 'ok' : 'fail');
+    lbl.textContent = result.ok ? 'All systems operational' : 'Issues detected';
+
+    list.innerHTML = result.checks.map(c => {
+        const icon = c.ok ? '<span style="color:#4eff91">&#10003;</span>' : '<span style="color:#ff6060">&#10007;</span>';
+        return `<li class="check-item">${icon} <span style="color:#ccc;flex:1">${c.name}</span><span class="check-ms">${c.ms}ms</span></li>`
+            + (c.detail ? `<li class="check-item" style="padding-top:0"><span style="width:18px"></span><span style="color:#ff8080;font-size:.75rem">${c.detail}</span></li>` : '');
+    }).join('');
+}
+runHealthCheck();
+document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
+document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
+document.getElementById('btn-export').addEventListener('click', async () => {
+    const r = await testConnection();
+    const blob = new Blob([JSON.stringify({ timestamp: new Date().toISOString(), supabase_url: SUPABASE_URL, ok: r.ok, checks: r.checks, user: { email: auth.getUser()?.email, role: auth.getRole() } }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'health-report.json'; a.click();
 });
 </script>
 </body>

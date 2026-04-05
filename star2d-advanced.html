@@ -1276,5 +1276,11 @@ if (_navBurger && _navMenu) {
         console.log('Features: Parker Spirals, CMEs, Solar Flares, Fluid Dynamics');
     </script>
     </div>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('star2d-advanced');
+recordVisit('star2d-advanced');
+</script>
 </body>
 </html>

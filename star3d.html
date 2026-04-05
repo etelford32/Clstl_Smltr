@@ -4643,5 +4643,11 @@ nav {
     </div>
   </div>
 </section>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('star3d');
+recordVisit('star3d');
+</script>
 </body>
 </html>

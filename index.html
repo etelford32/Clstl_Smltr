@@ -1090,5 +1090,11 @@ if (canvas) {
   els.forEach(el => obs.observe(el));
 })();
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('index');
+recordVisit('index');
+</script>
 </body>
 </html>

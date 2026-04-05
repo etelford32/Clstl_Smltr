@@ -316,5 +316,11 @@
         burger.setAttribute('aria-expanded', open);
     });
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('api-policy');
+recordVisit('api-policy');
+</script>
 </body>
 </html>

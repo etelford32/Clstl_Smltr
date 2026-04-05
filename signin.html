@@ -262,8 +262,18 @@
                 </div>
                 <div class="auth-success" id="login-success" style="display:none; text-align:center; padding:28px 0;">
                     <div style="font-size:2.5rem; margin-bottom:10px;">✅</div>
-                    <h3 style="color:#4eff91; margin-bottom:8px;">Signed in!</h3>
-                    <p style="color:#888; font-size:.9rem;">Redirecting you to the app…</p>
+                    <h3 style="color:#4eff91; margin-bottom:8px;" id="success-heading">Signed in!</h3>
+                    <p style="color:#888; font-size:.9rem;" id="success-sub">Redirecting you to the app…</p>
+                    <div id="success-suggestion" style="display:none; margin-top:18px; padding:14px 18px; border-radius:10px; background:rgba(128,64,255,.08); border:1px solid rgba(128,64,255,.2); text-align:left;">
+                        <p style="font-size:.78rem;color:#a080ff;margin-bottom:6px;font-weight:600;">Try something new:</p>
+                        <a id="suggestion-link" href="#" style="display:flex;align-items:center;gap:10px;color:#ccc;text-decoration:none;">
+                            <span id="suggestion-icon" style="font-size:1.4rem;"></span>
+                            <span>
+                                <span id="suggestion-title" style="display:block;font-weight:600;font-size:.9rem;color:#fff;"></span>
+                                <span id="suggestion-desc" style="display:block;font-size:.78rem;color:#888;margin-top:2px;"></span>
+                            </span>
+                        </a>
+                    </div>
                 </div>
 
                 <form id="signin-form" novalidate>
@@ -426,13 +436,40 @@
                 return;
             }
 
-            // Show success state
+            // Show personalized success state
             document.getElementById('signin-form').style.display = 'none';
             document.getElementById('login-success').style.display = 'block';
 
-            // Redirect: check for post-login redirect, else go to dashboard
             const redirect = auth.getPostLoginRedirect() || 'dashboard.html';
-            setTimeout(() => { window.location.href = redirect; }, 1200);
+
+            // Load personalized greeting + feature suggestion
+            try {
+                const { getGreeting } = await import('./js/greeting.js');
+                const user = auth.getUser();
+                const firstName = (user?.name || user?.email || '').split(/[\s@]/)[0];
+                const g = await getGreeting(user?.id, firstName, user?.plan);
+
+                document.getElementById('success-heading').textContent = g.message;
+                document.getElementById('success-sub').textContent = 'Taking you to your dashboard…';
+
+                if (g.suggestion) {
+                    document.getElementById('suggestion-icon').textContent = g.suggestion.icon;
+                    document.getElementById('suggestion-title').textContent = g.suggestion.title;
+                    document.getElementById('suggestion-desc').textContent = g.suggestion.desc;
+                    document.getElementById('suggestion-link').href = g.suggestion.href;
+                    document.getElementById('success-suggestion').style.display = 'block';
+                }
+            } catch (_) {}
+
+            // Track sign-in event
+            try {
+                const { analytics } = await import('./js/analytics.js');
+                const user = auth.getUser();
+                if (user?.id) analytics.identify(user.id, { email: user.email, plan: user.plan });
+                analytics.event('sign_in');
+            } catch (_) {}
+
+            setTimeout(() => { window.location.href = redirect; }, 2800);
         })();
     });
 

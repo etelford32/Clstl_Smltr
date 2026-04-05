@@ -480,5 +480,11 @@
         });
     });
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('pricing');
+recordVisit('pricing');
+</script>
 </body>
 </html>

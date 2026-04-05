@@ -729,5 +729,11 @@ resize();
 
 animate();
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('satellites');
+recordVisit('satellites');
+</script>
 </body>
 </html>

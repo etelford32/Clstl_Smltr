@@ -3751,5 +3751,11 @@ if (_navBurger && _navMenu) {
     </div>
   </div>
 </section>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('earth');
+recordVisit('earth');
+</script>
 </body>
 </html>

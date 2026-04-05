@@ -334,5 +334,11 @@ if (_navBurger && _navMenu) {
     });
 }
     </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('rust');
+recordVisit('rust');
+</script>
 </body>
 </html>

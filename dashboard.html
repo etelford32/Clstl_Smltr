@@ -148,6 +148,16 @@ footer a:hover{color:var(--text)}
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
     </p>
+    <div id="feature-nudge" style="display:none; margin-top:14px; padding:12px 18px; border-radius:10px; background:rgba(128,64,255,.06); border:1px solid rgba(128,64,255,.15); max-width:480px;">
+      <a id="nudge-link" href="#" style="display:flex;align-items:center;gap:12px;text-decoration:none;color:#ccc;">
+        <span id="nudge-icon" style="font-size:1.6rem;flex-shrink:0;"></span>
+        <span>
+          <span style="font-size:.72rem;color:#a080ff;font-weight:600;display:block;margin-bottom:2px;">Haven't tried this yet:</span>
+          <span id="nudge-title" style="display:block;font-weight:700;font-size:.92rem;color:#fff;"></span>
+          <span id="nudge-desc" style="display:block;font-size:.78rem;color:#888;margin-top:2px;"></span>
+        </span>
+      </a>
+    </div>
   </div>
 
   <!-- ── TOP ROW ── -->
@@ -504,9 +514,33 @@ window._ppAuth = { auth };
   const name  = user.name || user.email || 'Explorer';
   const first = name.split(' ')[0];
 
-  const hour = new Date().getHours();
-  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
+  // Personalized greeting + feature suggestion
+  try {
+    const { getGreeting, recordVisit } = await import('./js/greeting.js');
+    recordVisit('dashboard');
+    const g = await getGreeting(user.id, first, user.plan || 'free');
+    document.getElementById('welcome-heading').textContent = g.message;
+
+    if (g.suggestion) {
+      document.getElementById('nudge-icon').textContent = g.suggestion.icon;
+      document.getElementById('nudge-title').textContent = g.suggestion.title;
+      document.getElementById('nudge-desc').textContent = g.suggestion.desc;
+      document.getElementById('nudge-link').href = g.suggestion.href;
+      document.getElementById('feature-nudge').style.display = 'block';
+    }
+  } catch (_) {
+    // Fallback to simple greeting
+    const hour = new Date().getHours();
+    const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
+  }
+
+  // Track dashboard view + identify user
+  try {
+    const { analytics } = await import('./js/analytics.js');
+    if (user.id) analytics.identify(user.id, { email: user.email, plan: user.plan, role: user.role });
+    analytics.page('dashboard');
+  } catch (_) {}
 
   const plan  = (user.plan || 'free').toLowerCase();
   const badge = document.getElementById('plan-badge');

@@ -3018,5 +3018,11 @@ window.openImg = function(thumb) {
     ov.style.display = 'flex';
 };
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('space-weather');
+recordVisit('space-weather');
+</script>
 </body>
 </html>
