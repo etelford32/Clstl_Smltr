@@ -553,6 +553,12 @@ nav {
 
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("earth");</script>
 
@@ -1008,13 +1014,6 @@ nav {
         <div class="sw-item"><span class="sw-lbl">X-Ray</span><span class="sw-val" id="sw-xray">—</span></div>
     </div>
 </div>
-
-<script type="importmap">
-{"imports":{
-    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-}}
-</script>
 
 <script type="module">
 import './js/live-status-bar.js';
