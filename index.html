@@ -179,6 +179,12 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
 <link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("home");</script>
 
@@ -446,12 +452,6 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
   </div>
 </footer>
 
-<script type="importmap">
-{"imports":{
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-}}
-</script>
 <script type="module">
 /* ════════════════════════════════════════════════════════════════════════════
    BLACK HOLE HERO — Kerr spacetime visualization
@@ -504,11 +504,33 @@ if (canvas) {
 
     // ── Event horizon (Kerr, spin a=0.9) ──────────────────────────────────
     // r+ = M + sqrt(M² - a²) ≈ 1.436M for a=0.9M
+    // Kerr horizon is oblate due to frame-dragging: r_eq > r_pole
     const BH_RADIUS = 0.5;
+    const SPIN = 0.9;  // dimensionless Kerr spin parameter a/M
+
+    const bhGeo = new THREE.SphereGeometry(BH_RADIUS, 64, 64);
+    // Vertex displacement: oblate Kerr horizon (equatorial bulge from frame-dragging)
+    {
+        const pos = bhGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+            const r = Math.sqrt(x*x + y*y + z*z);
+            const cosTheta = y / Math.max(r, 0.001);
+            const sinTheta = Math.sqrt(1 - cosTheta * cosTheta);
+            // Boyer-Lindquist: Σ = r² + a²cos²θ, r+ = M + √(M²−a²)
+            // Embedding: equatorial radius stretches by factor (r²+a²)/r²
+            const oblateness = 1.0 + SPIN * SPIN * sinTheta * sinTheta * 0.15;
+            pos.setXYZ(i, x * oblateness, y * 0.92, z * oblateness);
+        }
+        pos.needsUpdate = true;
+        bhGeo.computeVertexNormals();
+    }
+
     const bhMat = new THREE.ShaderMaterial({
         vertexShader: `
-            varying vec3 vNormal; varying vec3 vViewDir;
+            varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vLocalPos;
             void main() {
+                vLocalPos = position;
                 vNormal = normalize(normalMatrix * normal);
                 vec4 wp = modelMatrix * vec4(position, 1.0);
                 vViewDir = normalize(cameraPosition - wp.xyz);
@@ -516,19 +538,52 @@ if (canvas) {
             }`,
         fragmentShader: `
             uniform float u_time;
-            varying vec3 vNormal; varying vec3 vViewDir;
+            varying vec3 vNormal; varying vec3 vViewDir; varying vec3 vLocalPos;
             void main() {
                 float rim = 1.0 - abs(dot(vViewDir, vNormal));
                 // Hawking radiation: faint quantum glow at the horizon rim
-                float hawking = pow(rim, 8.0) * 0.3;
+                float hawking = pow(rim, 8.0) * 0.35;
                 // Frame-dragging ergosphere shimmer (Kerr a=0.9)
-                float ergo = pow(rim, 4.0) * 0.06 * (0.8 + 0.2 * sin(u_time * 4.0 + vNormal.y * 8.0));
-                vec3 col = vec3(0.15, 0.2, 0.6) * hawking + vec3(0.5, 0.3, 0.1) * ergo;
+                // Stronger at equator (sinθ) where dragging is maximal
+                float sinTheta = length(vLocalPos.xz) / max(length(vLocalPos), 0.001);
+                float ergo = pow(rim, 3.5) * 0.12 * sinTheta *
+                    (0.7 + 0.3 * sin(u_time * 5.0 + vLocalPos.y * 12.0 + atan(vLocalPos.z, vLocalPos.x) * 3.0));
+                // Shadow: center is pure black (no escape)
+                float shadow = smoothstep(0.25, 0.0, rim);
+                vec3 col = vec3(0.12, 0.18, 0.55) * hawking + vec3(0.6, 0.3, 0.08) * ergo;
+                col *= (1.0 - shadow * 0.95);
                 gl_FragColor = vec4(col, 1.0);
             }`,
         uniforms: { u_time: { value: 0 } },
     });
-    scene.add(new THREE.Mesh(new THREE.SphereGeometry(BH_RADIUS, 64, 64), bhMat));
+    scene.add(new THREE.Mesh(bhGeo, bhMat));
+
+    // ── Ergosphere (Kerr outer boundary: r_ergo = M + √(M²−a²cos²θ)) ────
+    // Larger than the horizon, especially at the equator. Region where
+    // nothing can remain stationary — everything is dragged in rotation.
+    const ergoGeo = new THREE.SphereGeometry(BH_RADIUS * 1.8, 48, 48);
+    {
+        const pos = ergoGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+            const r = Math.sqrt(x*x + y*y + z*z);
+            const cosTheta = y / Math.max(r, 0.001);
+            // Ergosphere shape: r_ergo(θ) = M + √(M²−a²cos²θ)
+            // At equator (cosθ=0): r_ergo = 2M (Schwarzschild radius)
+            // At poles (cosθ=1): r_ergo = r+ (coincides with horizon)
+            const ergoR = 1.0 + Math.sqrt(1.0 - SPIN*SPIN*cosTheta*cosTheta);
+            const scale = ergoR / 2.0;  // normalized to BH_RADIUS
+            pos.setXYZ(i, x * scale, y * scale * 0.65, z * scale);
+        }
+        pos.needsUpdate = true;
+        ergoGeo.computeVertexNormals();
+    }
+    const ergoMat = new THREE.MeshBasicMaterial({
+        color: 0x4422aa, transparent: true, opacity: 0.04,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+        wireframe: true,
+    });
+    scene.add(new THREE.Mesh(ergoGeo, ergoMat));
 
     // ── ISCO ring (Innermost Stable Circular Orbit) ───────────────────────
     // For Kerr a=0.9 prograde: r_ISCO ≈ 2.32M
@@ -657,48 +712,108 @@ if (canvas) {
     scene.add(disk2);
 
     // ── Twistor null geodesics (Penrose) ──────────────────────────────────
-    // These represent null twistors Z^α = (ω^A, π_A') where ω^A = ix^{AA'}π_A'
-    // Visually: animated light ray bundles curving through the Kerr geometry
+    // Twistors Z^α = (ω^A, π_A') encode null geodesics in complexified
+    // Minkowski space. Each twistor maps to a light ray; the helical
+    // structure represents the spinor phase (flag plane rotation).
+    // In Kerr spacetime, frame-dragging twists the null congruence,
+    // creating a visible vortex around the ergosphere.
     const twistorGroup = new THREE.Group();
     scene.add(twistorGroup);
 
-    const TWISTOR_RAYS = 24;
+    const TWISTOR_RAYS = 48;
     const twistorData = [];
 
     for (let i = 0; i < TWISTOR_RAYS; i++) {
         const pts = [];
         const baseAngle = (i / TWISTOR_RAYS) * Math.PI * 2;
-        const impact = 0.8 + (i % 5) * 0.4;  // impact parameter b
-        const elevation = (Math.random() - 0.5) * 0.6;
+        const impact = 0.6 + (i % 7) * 0.35;  // impact parameter b
+        const elevation = (Math.random() - 0.5) * 0.8;
+        // Spinor helicity: ±1 depending on twistor chirality
+        const helicity = (i % 2 === 0) ? 1 : -1;
+        const helicalFreq = 3.0 + (i % 4) * 1.5;  // spinor phase frequency
 
-        for (let j = 0; j <= 120; j++) {
-            const s = j / 120;  // affine parameter along null geodesic
-            // Schwarzschild deflection angle: Δφ = 4M/b + 15π M²/(4b²) + ...
+        for (let j = 0; j <= 160; j++) {
+            const s = j / 160;  // affine parameter λ along null geodesic
             const M = BH_RADIUS;
-            const deflect = 4.0 * M / impact * s * s + 15 * Math.PI * M * M / (4 * impact * impact) * s * s * s;
-            const frameD = 0.3 * s * s * Math.sin(baseAngle);  // Kerr frame-dragging
-            const angle = baseAngle + deflect + frameD;
-            const r = impact + s * 6.0 - deflect * impact * 0.3;
-            if (r < BH_RADIUS * 0.8) break;  // captured by horizon
-            const y = elevation * (1.0 - s * 0.3) + s * 0.1 * Math.sin(angle * 2.0);
-            pts.push(new THREE.Vector3(r * Math.cos(angle), y, r * Math.sin(angle)));
+            // Second-order Schwarzschild + Kerr deflection
+            const b = impact;
+            const deflect = 4.0*M/b * s*s + 15*Math.PI*M*M/(4*b*b) * s*s*s;
+            // Kerr frame-dragging: ΔΩ = 2Ma/(r³) integrated along path
+            const rApprox = b + s * 5.0;
+            const frameDrag = 2.0 * M * SPIN / Math.max(rApprox*rApprox*rApprox, 0.5) * s * 8.0;
+            const angle = baseAngle + deflect + frameDrag;
+            const r = b + s * 6.5 - deflect * b * 0.25;
+            if (r < BH_RADIUS * 0.7) break;  // captured by horizon
+
+            // Spinor helical structure: the twistor flag plane rotates
+            // along the ray, creating a helix whose pitch encodes the
+            // frequency (energy) of the corresponding massless field
+            const helicalY = elevation * (1.0 - s * 0.35)
+                + helicity * 0.08 * Math.sin(s * helicalFreq * Math.PI * 2 + baseAngle);
+            const helicalR = r + helicity * 0.04 * Math.cos(s * helicalFreq * Math.PI * 2 + baseAngle);
+
+            pts.push(new THREE.Vector3(
+                helicalR * Math.cos(angle),
+                helicalY,
+                helicalR * Math.sin(angle)
+            ));
         }
 
-        if (pts.length > 10) {
+        if (pts.length > 15) {
             const geo = new THREE.BufferGeometry().setFromPoints(pts);
-            const hue = 0.52 + (i % 7) * 0.04;
+            // Color encodes twistor incidence relation:
+            // positive helicity = blue-violet, negative = cyan-green
+            const hue = helicity > 0 ? (0.68 + (i % 5) * 0.02) : (0.42 + (i % 5) * 0.03);
             const mat = new THREE.LineBasicMaterial({
-                color: new THREE.Color().setHSL(hue, 0.7, 0.55),
+                color: new THREE.Color().setHSL(hue, 0.75, 0.55),
                 transparent: true, opacity: 0.0, depthWrite: false,
             });
             const line = new THREE.Line(geo, mat);
             twistorGroup.add(line);
-            twistorData.push({ line, phase: Math.random() * Math.PI * 2, speed: 0.3 + Math.random() * 0.4 });
+            twistorData.push({
+                line, phase: Math.random() * Math.PI * 2,
+                speed: 0.25 + Math.random() * 0.35,
+                helicity,
+            });
         }
     }
 
-    // ── Relativistic jets ─────────────────────────────────────────────────
-    const JET_N = 400;
+    // ── Trapped photon orbits (photon sphere) ──────────────────────────────
+    // Photons at r = 3M/2 (Schwarzschild) are on unstable circular orbits.
+    // In Kerr, prograde photon orbit is closer (r ≈ 1.08M for a=0.9).
+    // Visualise as slowly decaying luminous rings — photons that nearly escaped.
+    const photonOrbitGroup = new THREE.Group();
+    scene.add(photonOrbitGroup);
+    for (let k = 0; k < 5; k++) {
+        const orbitR = BH_RADIUS * (1.5 + k * 0.12);
+        const pts = [];
+        const nPts = 200;
+        const tilt = (k - 2) * 0.15;  // slight tilt for each orbit
+        const decay = 0.002 * (k + 1);  // slow spiral decay
+        for (let j = 0; j <= nPts; j++) {
+            const a = (j / nPts) * Math.PI * 6;  // 3 full orbits
+            const spiralR = orbitR - decay * j;
+            if (spiralR < BH_RADIUS * 0.8) break;
+            pts.push(new THREE.Vector3(
+                spiralR * Math.cos(a),
+                tilt * Math.sin(a * 0.5),
+                spiralR * Math.sin(a)
+            ));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+            color: new THREE.Color().setHSL(0.10 + k * 0.015, 0.85, 0.65),
+            transparent: true, opacity: 0.15 - k * 0.02,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        });
+        photonOrbitGroup.add(new THREE.Line(geo, mat));
+    }
+
+    // ── Relativistic jets (Blandford-Znajek mechanism) ─────────────────────
+    // Magnetic field threading the ergosphere extracts rotational energy,
+    // launching bipolar jets at ~0.99c along the spin axis.
+    // The helical B-field structure creates a characteristic corkscrew pattern.
+    const JET_N = 600;
     const jetPos = new Float32Array(JET_N * 3);
     const jetCol = new Float32Array(JET_N * 3);
     const jetVel = new Float32Array(JET_N);
@@ -707,17 +822,21 @@ if (canvas) {
     for (let i = 0; i < JET_N; i++) {
         const up = i < JET_N / 2 ? 1 : -1;
         const angle = Math.random() * Math.PI * 2;
-        const spread = Math.random() * 0.1;
-        jetPos[i*3]   = Math.cos(angle) * spread;
-        jetPos[i*3+1] = up * (Math.random() * 5.0 + 0.2);
-        jetPos[i*3+2] = Math.sin(angle) * spread;
-        jetVel[i] = 0.015 + Math.random() * 0.04;
+        const height = Math.random() * 6.0 + 0.15;
+        // Blandford-Znajek collimation: jet narrows then re-expands
+        // Opening angle ≈ 1/Γ where Γ is Lorentz factor
+        const collimation = 0.04 + 0.06 * Math.sqrt(height / 6.0);
+        jetPos[i*3]   = Math.cos(angle) * collimation;
+        jetPos[i*3+1] = up * height;
+        jetPos[i*3+2] = Math.sin(angle) * collimation;
+        jetVel[i] = 0.012 + Math.random() * 0.035;
         jetAge[i] = Math.random();
-        // Color: inner blue-white → outer cyan
-        const h = Math.abs(jetPos[i*3+1]) / 5.5;
-        jetCol[i*3]   = 0.2 + h * 0.6;
-        jetCol[i*3+1] = 0.4 + h * 0.5;
-        jetCol[i*3+2] = 1.0;
+        // Color: synchrotron emission — blue-white core → fading purple edge
+        const h = height / 6.0;
+        const core = collimation < 0.06 ? 1.0 : 0.6;
+        jetCol[i*3]   = (0.15 + h * 0.55) * core;
+        jetCol[i*3+1] = (0.3 + h * 0.5) * core;
+        jetCol[i*3+2] = (0.85 + h * 0.15) * core;
     }
 
     const jetGeo = new THREE.BufferGeometry();
@@ -801,13 +920,18 @@ if (canvas) {
         // ISCO ring pulses
         iscoMat.opacity = 0.5 + Math.sin(t * 5) * 0.2;
 
-        // Twistors: fade in/out in waves (light pulses along null geodesics)
+        // Twistors: fade in/out in waves — positive/negative helicity alternate
         for (const td of twistorData) {
-            const wave = Math.sin(t * td.speed * 2.0 + td.phase);
-            td.line.material.opacity = Math.max(0, wave * 0.22 + 0.04);
+            const wave = Math.sin(t * td.speed * 2.5 + td.phase);
+            td.line.material.opacity = Math.max(0, wave * 0.25 + 0.06);
         }
-        twistorGroup.rotation.y = t * 0.08;
-        twistorGroup.rotation.z = Math.sin(t * 0.03) * 0.05;
+        // Kerr frame-dragging rotates the twistor congruence around spin axis
+        twistorGroup.rotation.y = t * 0.12;
+        twistorGroup.rotation.z = Math.sin(t * 0.04) * 0.06;
+
+        // Trapped photon orbits: slow precession (Lense-Thirring)
+        photonOrbitGroup.rotation.y = t * 0.25;
+        photonOrbitGroup.rotation.x = Math.sin(t * 0.08) * 0.03;
 
         // Jets: stream outward with magnetic confinement spiral
         const jp = jets.geometry.attributes.position.array;
