@@ -434,62 +434,52 @@ import { predictPasses } from './js/orbital-analytics.js';
 window._ppAuth = { auth };
 
 /* ════════════════════════════════════════════════════════════
-   AUTH GATE — uses auth.js for consistent session management
+   AUTH GATE — properly awaits auth initialization before checking state
 ═════════════════════════════════════════════════════════════ */
 
-// Import auth module
-let _authMod = null;
-try {
-    // Auth module loaded via module script at top of page
-    _authMod = window._ppAuth?.auth ?? null;
-} catch (_) {}
+(async function authGate() {
+  // Wait for Supabase session check to complete before inspecting state
+  try { await auth.ready(); } catch (_) {}
 
-// Fallback: check both storage types (auth.js may use localStorage for "Remember me")
-let _auth = null;
-if (_authMod && _authMod.isSignedIn()) {
-    _auth = _authMod.getUser();
-} else {
-    // Legacy fallback — check both storages
-    try { _auth = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
-    if (!_auth) {
-        try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
-    }
-}
+  const isSignedIn = auth.isSignedIn();
+  const user       = isSignedIn ? auth.getUser() : null;
 
-if (!_auth || !_auth.signedIn) {
-  document.getElementById('dash-nav').style.visibility = 'hidden';
-  document.querySelector('main').style.visibility = 'hidden';
-  document.querySelector('footer').style.visibility = 'hidden';
-} else {
+  if (!isSignedIn || !user) {
+    // Not signed in — show auth gate, hide dashboard content
+    document.querySelector('main').style.display = 'none';
+    document.querySelector('footer').style.display = 'none';
+    return;  // exit — no dashboard initialization
+  }
+
+  // ── Signed in: hide gate, show dashboard ─────────────────────────────
   document.getElementById('auth-gate').style.display = 'none';
 
-  const name  = _auth.name || _auth.email || 'Explorer';
+  // Fetch server-side profile (role, plan from user_profiles table)
+  const profile = await auth.fetchProfile();
+
+  const name  = user.name || user.email || 'Explorer';
   const first = name.split(' ')[0];
-  const _userNameEl = document.getElementById('user-name');
-  if (_userNameEl) _userNameEl.textContent = first;
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
 
-  const plan  = (_auth.plan || 'free').toLowerCase();
+  const plan  = (user.plan || 'free').toLowerCase();
   const badge = document.getElementById('plan-badge');
   badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
   badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
 
-  function signOut() {
-    if (_authMod) {
-        _authMod.signOut('index.html');
-    } else {
-        // Fallback: clear both storages
-        try { localStorage.removeItem('pp_auth'); } catch(_){}
-        try { sessionStorage.removeItem('pp_auth'); } catch(_){}
-        window.location.href = 'index.html';
-    }
+  // Admin badge (nav.js handles the nav admin badge, this is for dashboard-specific display)
+  if (auth.isAdmin()) {
+    const adminNote = document.createElement('span');
+    adminNote.className = 'plan-badge plan-advanced';
+    adminNote.textContent = auth.isSuperAdmin() ? 'SUPER ADMIN' : 'ADMIN';
+    adminNote.style.marginLeft = '6px';
+    badge.parentNode.appendChild(adminNote);
   }
-  document.getElementById('signout-btn')?.addEventListener('click', signOut);
+
   initAll();
-}
+})();
 
 /* ════════════════════════════════════════════════════════════
    MINI WORLD MAP CANVAS
