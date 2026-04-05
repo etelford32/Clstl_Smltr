@@ -1106,5 +1106,11 @@ if (_navBurger && _navMenu) {
         console.log('Select different star types to see their characteristics');
     </script>
     </div>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('star2d');
+recordVisit('star2d');
+</script>
 </body>
 </html>

@@ -3404,5 +3404,11 @@ console.log('  NOAA SWPC: wind_1m · kp_index · xray_flux · flares_7d · regio
 console.log('  NASA DONKI: CME Analysis (cone model, ENLIL arrival times) · notifications');
 console.log('  Ephemeris: JPL Horizons (Earth vectors ECLIPJ2000) + Meeus fallback');
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('threejs');
+recordVisit('threejs');
+</script>
 </body>
 </html>

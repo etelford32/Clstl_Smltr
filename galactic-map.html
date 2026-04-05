@@ -3160,5 +3160,11 @@ console.log('GCC: Sgr A* at (0,0,0). Sun at (26673, 20, 0) ly.');
 console.log('Orion arm aligned: ORION_OFFSET ≈ −7.111 rad, passes through Sun at 26,673 ly.');
 console.log(CATALOG.length + ' objects loaded. Click any star to fly to it.');
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('galactic-map');
+recordVisit('galactic-map');
+</script>
 </body>
 </html>

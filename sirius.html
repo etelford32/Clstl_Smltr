@@ -774,5 +774,11 @@ document.getElementById('sl-oblate').addEventListener('input', function() {
 
 console.log('%c[Sirius System · A1V + DA2 Binary]', 'color:#88aaff;font-weight:bold;font-size:13px');
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('sirius');
+recordVisit('sirius');
+</script>
 </body>
 </html>

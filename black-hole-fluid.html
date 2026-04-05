@@ -558,5 +558,11 @@ pushUniforms();
 initDisk();
 requestAnimationFrame(loop);
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('black-hole-fluid');
+recordVisit('black-hole-fluid');
+</script>
 </body>
 </html>

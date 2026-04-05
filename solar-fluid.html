@@ -1265,5 +1265,11 @@ if (_navBurger && _navMenu) {
         console.log('Keyboard: 1-4=sections, SPACE=pause, R=reset, E=export');
     </script>
     </div>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('solar-fluid');
+recordVisit('solar-fluid');
+</script>
 </body>
 </html>

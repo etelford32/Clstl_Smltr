@@ -5867,5 +5867,11 @@ updateAtmospherePanel();
     </div>
   </div>
 </section>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('sun');
+recordVisit('sun');
+</script>
 </body>
 </html>

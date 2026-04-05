@@ -935,5 +935,11 @@ console.log('  Oblate spheroid vertex shader | gravity darkening (von Zeipel) | 
 console.log('  Uniforms:', Object.keys(uniforms).join(', '));
 </script>
 
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('vega');
+recordVisit('vega');
+</script>
 </body>
 </html>

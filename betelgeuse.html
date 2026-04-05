@@ -742,5 +742,11 @@ document.getElementById('sl-asym').addEventListener('input', function() {
 
 console.log('%c[Betelgeuse · M2Iab Red Supergiant]', 'color:#ff7040;font-weight:bold;font-size:13px');
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('betelgeuse');
+recordVisit('betelgeuse');
+</script>
 </body>
 </html>

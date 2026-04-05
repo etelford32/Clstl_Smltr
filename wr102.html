@@ -1214,5 +1214,11 @@ console.log('%c[WR-102 · Full Simulation]', 'color:#4080ff;font-weight:bold;fon
 console.log('  Domain-warped turbulent photosphere | β-law wind particles');
 console.log('  HeII ionization zone | OVI emission nebula | Extended corona');
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('wr102');
+recordVisit('wr102');
+</script>
 </body>
 </html>

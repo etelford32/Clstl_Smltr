@@ -463,5 +463,11 @@ function animate() {
 _updateRadPanel();
 animate();
 </script>
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('moon');
+recordVisit('moon');
+</script>
 </body>
 </html>
