@@ -15,11 +15,13 @@ const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
 const NAV_TOP = [
-    { href: 'space-weather.html', label: 'Space Weather', id: 'weather', tier: 'public' },
-    { href: 'threejs.html',       label: 'Solar System',  id: 'solar',   tier: 'public' },
-    { href: 'earth.html',         label: 'Earth',         id: 'earth',   tier: 'public' },
-    { href: 'moon.html',          label: 'Moon',          id: 'moon',    tier: 'public' },
-    { href: 'sun.html',           label: 'The Sun',       id: 'sun',     tier: 'public' },
+    { href: 'space-weather.html', label: 'Space Weather', id: 'weather',    tier: 'public' },
+    { href: 'threejs.html',       label: 'Solar System',  id: 'solar',      tier: 'public' },
+    { href: 'earth.html',         label: 'Earth',         id: 'earth',      tier: 'public' },
+    { href: 'moon.html',          label: 'Moon',          id: 'moon',       tier: 'public' },
+    { href: 'sun.html',           label: 'The Sun',       id: 'sun',        tier: 'public' },
+    { href: 'satellites.html',    label: 'Satellites',    id: 'satellites',  tier: 'public' },
+    { href: 'galactic-map.html',  label: 'Galaxy',        id: 'galactic-map', tier: 'public' },
 ];
 
 const NAV_DROPDOWNS = [
@@ -43,14 +45,12 @@ const NAV_DROPDOWNS = [
             { href: 'star2d.html',           label: '2D Stellar Modeler',  sub: 'HR diagram + classification',   tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',  label: 'Advanced 2D Solar',   sub: 'CME, Parker spirals, fluid',    tier: 'free',   icon: '🔬' },
             { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',   tier: 'free',   icon: '🕳️' },
-            { href: 'galactic-map.html',     label: 'Galactic Map',        sub: '3D Milky Way neighborhood',     tier: 'free',   icon: '🌌' },
         ],
     },
     {
         label: 'Tools',
         id: 'tools',
         items: [
-            { href: 'satellites.html', label: 'Satellite Tracker',  sub: 'LEO/MEO/GEO tracking + CDM',   tier: 'advanced', icon: '🛰️', badge: 'PRO' },
             { href: 'dashboard.html',  label: 'Dashboard',          sub: 'Your space weather report',     tier: 'free',     icon: '📋' },
             { href: 'pricing.html',    label: 'Pricing',            sub: 'Free, Intro, Advanced plans',   tier: 'public',   icon: '💰' },
             { href: 'rust.html',       label: 'Rust/WASM Engine',   sub: 'WebAssembly compute module',    tier: 'free',     icon: '⚙️' },
