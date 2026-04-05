@@ -349,89 +349,9 @@ nav {
 </style>
 </head>
 <body>
-    <nav>
-    <a href="index.html" class="nav-brand">
-        <img src="ParkerPhaysics_logo1.png" class="nav-logo-img" alt="Parker Physics">
-        Parker Physics
-    </a>
-    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
-    <div class="nav-menu" id="nav-menu">
-        <a href="index.html" class="nav-item">Home</a>
-        <a href="space-weather.html" class="nav-item">Space Weather</a>
-        <a href="galactic-map.html" class="nav-item">Galactic Map</a>
-        <a href="threejs.html" class="nav-item">Solar System</a>
-        <a href="sun.html" class="nav-item">The Sun</a>
-        <a href="earth.html" class="nav-item">Earth View</a>
-
-        <!-- ── Stars dropdown ── -->
-        <div class="nav-drop" id="nav-drop-stars">
-            <button class="nav-drop-btn active" aria-haspopup="true">Stars ▾</button>
-            <div class="nav-drop-menu">
-                <div class="nav-drop-section">3D Stellar Systems</div>
-                <a href="sirius.html" class="nav-drop-link">
-                    <span class="ndl-icon">✦</span>
-                    <span class="ndl-body"><span class="ndl-title">Sirius A System</span><span class="ndl-sub">A1V Blue Star + White Dwarf Binary</span></span>
-                </a>
-                <a href="star3d.html" class="nav-drop-link">
-                    <span class="ndl-icon">🔵</span>
-                    <span class="ndl-body"><span class="ndl-title">Sirius Planetary</span><span class="ndl-sub">Exoplanetary Orbital Mechanics</span></span>
-                </a>
-                <a href="betelgeuse.html" class="nav-drop-link">
-                    <span class="ndl-icon">🔴</span>
-                    <span class="ndl-body"><span class="ndl-title">Betelgeuse</span><span class="ndl-sub">Red Supergiant α Ori — Pulsating</span></span>
-                </a>
-                <a href="vega.html" class="nav-drop-link">
-                    <span class="ndl-icon">⚪</span>
-                    <span class="ndl-body"><span class="ndl-title">Vega</span><span class="ndl-sub">Rapid Rotator A0Vp — Oblateness &amp; Wind</span></span>
-                </a>
-                <a href="wr102.html" class="nav-drop-link">
-                    <span class="ndl-icon">💜</span>
-                    <span class="ndl-body"><span class="ndl-title">WR 102</span><span class="ndl-sub">Wolf-Rayet — Hottest Known Star</span></span>
-                </a>
-                <div class="nav-drop-section">Stellar Modeling</div>
-                <a href="star2d.html" class="nav-drop-link">
-                    <span class="ndl-icon">📐</span>
-                    <span class="ndl-body"><span class="ndl-title">2D Stellar Modeler</span><span class="ndl-sub">Interactive Cross-Section Physics</span></span>
-                </a>
-                <a href="star2d-advanced.html" class="nav-drop-link active">
-                    <span class="ndl-icon">🔬</span>
-                    <span class="ndl-body"><span class="ndl-title">Advanced 2D Solar</span><span class="ndl-sub">High-Fidelity 2D Solar Physics Engine</span></span>
-                </a>
-            </div>
-        </div>
-
-        <!-- ── Simulations dropdown ── -->
-        <div class="nav-drop" id="nav-drop-sims">
-            <button class="nav-drop-btn" aria-haspopup="true">Simulations ▾</button>
-            <div class="nav-drop-menu">
-                <div class="nav-drop-section">Fluid &amp; Particle Physics</div>
-                <a href="solar-fluid.html" class="nav-drop-link">
-                    <span class="ndl-icon">🌊</span>
-                    <span class="ndl-body"><span class="ndl-title">Solar Fluid Dynamics</span><span class="ndl-sub">Navier-Stokes MHD on the Solar Surface</span></span>
-                </a>
-                <a href="stellar-wind.html" class="nav-drop-link">
-                    <span class="ndl-icon">💨</span>
-                    <span class="ndl-body"><span class="ndl-title">Stellar Wind</span><span class="ndl-sub">Parker Spiral Particle Simulation</span></span>
-                </a>
-                <a href="black-hole-fluid.html" class="nav-drop-link">
-                    <span class="ndl-icon">🕳</span>
-                    <span class="ndl-body"><span class="ndl-title">Black Hole Accretion</span><span class="ndl-sub">WebGL2 Accretion Disk + Gravitational Lensing</span></span>
-                </a>
-                <div class="nav-drop-section">Tools</div>
-                <a href="rust.html" class="nav-drop-link">
-                    <span class="ndl-icon">⚙</span>
-                    <span class="ndl-body"><span class="ndl-title">Rust / WASM Engine</span><span class="ndl-sub">WebAssembly High-Performance Compute</span></span>
-                </a>
-            </div>
-        </div>
-
-        <!-- Auth pushed to the far right by the spacer -->
-        <div class="nav-spacer"></div>
-        <div class="nav-auth-sep"></div>
-        <a href="signin.html"  class="nav-item nav-login">Log In</a>
-        <a href="signup.html" class="nav-item nav-signup">Sign Up</a>
-    </div>
-</nav>
+    <link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("star2d-advanced");</script>
 
     <div class="page-content">
         <header>
