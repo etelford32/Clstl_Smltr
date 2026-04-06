@@ -302,9 +302,9 @@ export class SatelliteTracker {
             const latR = lla.lat * DEG2RAD;
             const lonR = lla.lon * DEG2RAD;
 
-            posArr[i * 3]     = r * Math.cos(latR) * Math.cos(lonR);
-            posArr[i * 3 + 1] = r * Math.sin(latR);
-            posArr[i * 3 + 2] = r * Math.cos(latR) * Math.sin(lonR);
+            posArr[i * 3]     =  r * Math.cos(latR) * Math.cos(lonR);
+            posArr[i * 3 + 1] =  r * Math.sin(latR);
+            posArr[i * 3 + 2] = -r * Math.cos(latR) * Math.sin(lonR);
 
             // Store for external queries
             sat.lat = lla.lat;
@@ -396,9 +396,9 @@ export class SatelliteTracker {
             const latR = pt.lat * DEG2RAD;
             const lonR = pt.lon * DEG2RAD;
             points.push(new THREE.Vector3(
-                r * Math.cos(latR) * Math.cos(lonR),
-                r * Math.sin(latR),
-                r * Math.cos(latR) * Math.sin(lonR)
+                 r * Math.cos(latR) * Math.cos(lonR),
+                 r * Math.sin(latR),
+                -r * Math.cos(latR) * Math.sin(lonR)
             ));
         }
 
@@ -424,9 +424,9 @@ export class SatelliteTracker {
             const latR = pt.lat * DEG2RAD;
             const lonR = pt.lon * DEG2RAD;
             points.push(new THREE.Vector3(
-                r * Math.cos(latR) * Math.cos(lonR),
-                r * Math.sin(latR),
-                r * Math.cos(latR) * Math.sin(lonR)
+                 r * Math.cos(latR) * Math.cos(lonR),
+                 r * Math.sin(latR),
+                -r * Math.cos(latR) * Math.sin(lonR)
             ));
         }
 

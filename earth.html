@@ -1370,14 +1370,17 @@ function uvToGeo(uv) {
 }
 
 // Geographic → 3-D Cartesian on unit sphere
-//   +Y = north pole, +Z = prime meridian at equator, +X = 90°E
+// Matches Three.js SphereGeometry UV mapping:
+//   +X = Prime Meridian (0°), -X = Intl Date Line (180°)
+//   +Z = 90°W, -Z = 90°E
+//   +Y = North Pole
 function geoToXYZ(lat, lon) {
     const phi = lat * DEG;
     const lam = lon * DEG;
     return new THREE.Vector3(
-        Math.cos(phi) * Math.sin(lam),
-        Math.sin(phi),
-        Math.cos(phi) * Math.cos(lam)
+         Math.cos(phi) * Math.cos(lam),   // PM at +X
+         Math.sin(phi),                     // North at +Y
+        -Math.cos(phi) * Math.sin(lam)     // 90°E at -Z
     );
 }
 
@@ -1567,9 +1570,9 @@ function latLonLine(lats, lons, color, opacity) {
     const pts = lats.map((lat, i) => {
         const phi = lat * DEG, lam = lons[i] * DEG;
         return new THREE.Vector3(
-            R_EARTH * 1.0015 * Math.cos(phi) * Math.sin(lam),
-            R_EARTH * 1.0015 * Math.sin(phi),
-            R_EARTH * 1.0015 * Math.cos(phi) * Math.cos(lam)
+             R_EARTH * 1.0015 * Math.cos(phi) * Math.cos(lam),
+             R_EARTH * 1.0015 * Math.sin(phi),
+            -R_EARTH * 1.0015 * Math.cos(phi) * Math.sin(lam)
         );
     });
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -2416,9 +2419,9 @@ class WindParticles {
             // Write position
             const phi = this.lat[i] * DEG, lam = this.lon[i] * DEG;
             const cp = Math.cos(phi);
-            this._pos[i*3]   = r * cp * Math.sin(lam);
-            this._pos[i*3+1] = r * Math.sin(phi);
-            this._pos[i*3+2] = r * cp * Math.cos(lam);
+            this._pos[i*3]   =  r * cp * Math.cos(lam);
+            this._pos[i*3+1] =  r * Math.sin(phi);
+            this._pos[i*3+2] = -r * cp * Math.sin(lam);
 
             // Write colour (fused with position for cache locality)
             const a = this.age[i] / this.maxAge[i];
@@ -2726,9 +2729,9 @@ class AlertMarkers {
             const r = R_EARTH * 1.004;
 
             this._dummy.position.set(
-                r * Math.cos(phi) * Math.sin(lam),
-                r * Math.sin(phi),
-                r * Math.cos(phi) * Math.cos(lam)
+                 r * Math.cos(phi) * Math.cos(lam),
+                 r * Math.sin(phi),
+                -r * Math.cos(phi) * Math.sin(lam)
             );
             this._dummy.updateMatrix();
             this._mesh.setMatrixAt(i, this._dummy.matrix);
