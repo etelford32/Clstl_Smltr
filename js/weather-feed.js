@@ -29,8 +29,12 @@
  */
 
 const OPEN_METEO   = 'https://api.open-meteo.com/v1/forecast';
-const GRID_W       = 72;                // longitude grid points (5° spacing)
-const GRID_H       = 36;                // latitude  grid points (5° spacing)
+// Grid size must stay under ~700 points for Open-Meteo URL length limit.
+// 72×36 = 2592 points → 40KB URL → rejected → "GFS unavailable".
+// 36×18 = 648 points → ~10KB URL → proven reliable.
+// Bilinear interpolation upscales to 360×180 output texture (1°/px).
+const GRID_W       = 36;                // longitude grid points (10° spacing)
+const GRID_H       = 18;                // latitude  grid points (10° spacing)
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 const MAX_WIND_MS  = 60;                // m/s — normalisation ceiling
@@ -59,8 +63,8 @@ export class WeatherFeed {
         this._gridLons = [];
         for (let j = 0; j < GRID_H; j++) {
             for (let i = 0; i < GRID_W; i++) {
-                this._gridLats.push(-87.5 + j * 5);   // -87.5 … +87.5
-                this._gridLons.push(-177.5 + i * 5);  // -177.5 … +177.5
+                this._gridLats.push(-85 + j * 10);    // -85 … +85
+                this._gridLons.push(-175 + i * 10);   // -175 … +175
             }
         }
 
@@ -78,13 +82,53 @@ export class WeatherFeed {
     get cloudBuffer()   { return this._cloudBuf; }
     get meta()          { return this._meta; }
 
+    // ── localStorage cache for instant startup ─────────────────────────────
+    _cacheKey = 'ppx_weather_cache';
+
+    _saveToCache(rows) {
+        try {
+            const data = { rows, timestamp: Date.now() };
+            localStorage.setItem(this._cacheKey, JSON.stringify(data));
+        } catch { /* storage full or unavailable — ignore */ }
+    }
+
+    _loadFromCache() {
+        try {
+            const raw = localStorage.getItem(this._cacheKey);
+            if (!raw) return null;
+            const data = JSON.parse(raw);
+            // Accept cache up to 2 hours old
+            if (Date.now() - data.timestamp > 2 * 60 * 60 * 1000) return null;
+            return data.rows;
+        } catch { return null; }
+    }
+
     // ── Fetch → process ──────────────────────────────────────────────────────
     async _fetchAndProcess() {
         this._dispatch('weather-status', { status: 'fetching' });
+
+        // Serve cached data instantly on first load (while fetch runs in background)
+        if (!this._meta.loaded) {
+            const cached = this._loadFromCache();
+            if (cached && cached.length > 0) {
+                this._processRows(cached);
+                this._meta.source    = 'Open-Meteo / GFS (cached)';
+                this._meta.fetchTime = new Date();
+                this._meta.loaded    = true;
+                this._dispatch('weather-update', {
+                    weatherBuffer: this._weatherBuf, windBuffer: this._windBuf,
+                    cloudBuffer: this._cloudBuf, meta: this._meta,
+                    texW: TEX_W, texH: TEX_H,
+                });
+                console.info('[WeatherFeed] Served cached data while fetching fresh');
+            }
+        }
+
         try {
             const rows = await this._fetchGrid();
             if (rows && rows.length > 0) {
                 this._processRows(rows);
+                this._saveToCache(rows);
                 this._meta.source    = 'Open-Meteo / GFS';
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
@@ -93,9 +137,13 @@ export class WeatherFeed {
             }
         } catch (err) {
             console.warn('[WeatherFeed] Falling back to procedural data:', err.message);
-            this._buildProcedural();
-            this._meta.loaded    = false;
-            this._meta.source    = 'procedural (GFS unavailable)';
+            if (!this._meta.loaded) {
+                // Only use procedural if we have nothing else
+                this._buildProcedural();
+            }
+            this._meta.source    = this._meta.loaded
+                ? `${this._meta.source} (refresh failed)`
+                : 'procedural (GFS unavailable)';
             this._meta.fetchTime = new Date();
         }
         this._dispatch('weather-update', {
