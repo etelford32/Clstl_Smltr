@@ -219,17 +219,17 @@ export function initNav(activeId = '') {
         });
     });
 
-    // Sign out — clear Supabase session + local storage
+    // Sign out — use auth module for clean sign-out (clears Supabase + localStorage + userState)
     document.getElementById('nav-signout-btn')?.addEventListener('click', async () => {
         try {
-            const { getSupabase, isConfigured } = await import('./supabase-config.js');
-            if (isConfigured()) {
-                const supabase = await getSupabase();
-                await supabase.auth.signOut();
-            }
-        } catch (_) {}
-        try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
-        try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
-        window.location.href = 'index.html';
+            const { auth: authManager } = await import('./auth.js');
+            await authManager.ready();
+            await authManager.signOut('index.html');
+        } catch (_) {
+            // Fallback: manual cleanup if auth module fails
+            try { localStorage.removeItem(AUTH_KEY); } catch (_e) {}
+            try { sessionStorage.removeItem(AUTH_KEY); } catch (_e) {}
+            window.location.href = 'index.html';
+        }
     });
 }

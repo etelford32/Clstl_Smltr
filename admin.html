@@ -268,22 +268,7 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnect
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
 import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend } from './js/admin-analytics.js';
 
-// ── Auth gate ────────────────────────────────────────────────────────────────
-await auth.ready();
-if (!auth.isSignedIn()) { document.getElementById('auth-gate').style.display = 'flex'; throw ''; }
-await auth.fetchProfile();
-if (!auth.isAdmin()) {
-    const gate = document.getElementById('auth-gate');
-    gate.querySelector('h2').textContent = 'Insufficient Permissions';
-    gate.querySelector('p').textContent = `Signed in as ${auth.getUser()?.email || '?'} (role: ${auth.getRole()}). Admin required.`;
-    gate.style.display = 'flex';
-    throw '';
-}
-document.getElementById('auth-gate').style.display = 'none';
-document.getElementById('admin-main').style.display = 'block';
-document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
-
-// ── Tabs ─────────────────────────────────────────────────────────────────────
+// ── Tabs (wired first so they always work) ──────────────────────────────────
 document.getElementById('tabs').addEventListener('click', e => {
     const btn = e.target.closest('.tab');
     if (!btn) return;
@@ -292,6 +277,32 @@ document.getElementById('tabs').addEventListener('click', e => {
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
 });
+
+// ── Auth gate ────────────────────────────────────────────────────────────────
+await auth.ready();
+
+function showGate(heading, message) {
+    const gate = document.getElementById('auth-gate');
+    gate.querySelector('h2').textContent = heading;
+    gate.querySelector('p').textContent = message;
+    gate.style.display = 'flex';
+}
+
+if (!auth.isSignedIn()) {
+    showGate('Admin Access Required', 'You must be signed in with an admin account to view this page.');
+    throw '';
+}
+
+await auth.fetchProfile();
+
+if (!auth.isAdmin()) {
+    showGate('Insufficient Permissions', `Signed in as ${auth.getUser()?.email || '?'} (role: ${auth.getRole()}). Admin or superadmin role required.`);
+    throw '';
+}
+
+document.getElementById('auth-gate').style.display = 'none';
+document.getElementById('admin-main').style.display = 'block';
+document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
 
 // ── KPI Cards ────────────────────────────────────────────────────────────────
 async function loadKPIs() {

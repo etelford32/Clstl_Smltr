@@ -46,6 +46,7 @@ class AuthManager {
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
+                    this._persist();
                     userState.identify(this._user);
                     console.info('[Auth] Supabase session restored:', this._user.email);
                 } else {
@@ -66,6 +67,7 @@ class AuthManager {
                     } else {
                         this._user = null;
                     }
+                    this._persist();
                     window.dispatchEvent(new CustomEvent('auth-changed', {
                         detail: { event, user: this._user }
                     }));
@@ -104,6 +106,17 @@ class AuthManager {
         };
     }
 
+    /** Persist user to localStorage so nav.js can read it synchronously on any page. */
+    _persist() {
+        try {
+            if (this._user) {
+                localStorage.setItem(AUTH_KEY, JSON.stringify(this._user));
+            } else {
+                localStorage.removeItem(AUTH_KEY);
+            }
+        } catch (_) {}
+    }
+
     /** Check if current user has admin role. */
     isAdmin() {
         return this._user?.role === 'admin' || this._user?.role === 'superadmin';
@@ -140,6 +153,7 @@ class AuthManager {
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;
+                this._persist();
             }
             return data;
         } catch (err) {
@@ -201,6 +215,7 @@ class AuthManager {
                 this._user = this._mapSupabaseUser(data.user);
                 // Fetch server-side profile (role, plan — not just user_metadata)
                 await this.fetchProfile();
+                this._persist();
                 userState.identify(this._user);
                 userState.trackEvent('sign_in', { method: 'password' });
                 return { success: true };
