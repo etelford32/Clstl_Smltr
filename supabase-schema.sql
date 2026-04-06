@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT,
     display_name TEXT,
+    role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'superadmin')),
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
