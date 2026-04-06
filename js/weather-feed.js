@@ -29,8 +29,8 @@
  */
 
 const OPEN_METEO   = 'https://api.open-meteo.com/v1/forecast';
-const GRID_W       = 36;                // longitude grid points (10° spacing)
-const GRID_H       = 18;                // latitude  grid points (10° spacing)
+const GRID_W       = 72;                // longitude grid points (5° spacing)
+const GRID_H       = 36;                // latitude  grid points (5° spacing)
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 const MAX_WIND_MS  = 60;                // m/s — normalisation ceiling
@@ -59,8 +59,8 @@ export class WeatherFeed {
         this._gridLons = [];
         for (let j = 0; j < GRID_H; j++) {
             for (let i = 0; i < GRID_W; i++) {
-                this._gridLats.push(-85 + j * 10);   // -85 … +85
-                this._gridLons.push(-175 + i * 10);  // -175 … +175
+                this._gridLats.push(-87.5 + j * 5);   // -87.5 … +87.5
+                this._gridLons.push(-177.5 + i * 5);  // -177.5 … +177.5
             }
         }
 

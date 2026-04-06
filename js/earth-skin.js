@@ -129,26 +129,62 @@ vec3 perturbNormal(vec3 N, vec3 T, vec3 B, vec2 uv, float strength) {
     return normalize(N - T * dU - B * dV);
 }
 
-// ── Aurora curtains ────────────────────────────────────────────────────────────
+// ── Aurora curtains (multi-layer, altitude-dependent colours) ──────────────────
+// Real aurora: green OI 557.7nm at ~110km, red OI 630nm at ~200-400km,
+// purple/blue N₂⁺ at ~90km. Colour depends on altitude and energy of precipitating electrons.
 vec3 auroraColor(float sinAbsLat, float lon, float kp) {
     float kpEff  = kp + u_bz_south * 2.5;
+    // Feldstein auroral oval: equatorward boundary expands with Kp
     float ovalCtr = 0.940 - clamp(kpEff, 0.0, 9.0) * 0.0197;
     float ovalW   = 0.045 + (kpEff / 9.0) * 0.055;
 
-    float zone = smoothstep(ovalCtr - ovalW * 1.5, ovalCtr, sinAbsLat)
-               * (1.0 - smoothstep(ovalCtr + ovalW * 0.4, ovalCtr + ovalW * 1.5, sinAbsLat));
+    // Double Gaussian profile: sharper poleward boundary, gradual equatorward
+    float zone = smoothstep(ovalCtr - ovalW * 1.8, ovalCtr - ovalW * 0.3, sinAbsLat)
+               * (1.0 - smoothstep(ovalCtr + ovalW * 0.3, ovalCtr + ovalW * 1.2, sinAbsLat));
     if (zone < 0.001) return vec3(0.0);
 
-    float phase  = u_time * 1.4 + lon * 9.0;
-    float anim   = (0.55 + 0.45 * sin(phase)) * (0.7 + 0.3 * sin(phase * 2.1 + 1.0));
+    // Multiple curtain folds — discrete arcs separated by ~50km
+    float arcPhase1 = u_time * 1.2 + lon * 12.0;
+    float arcPhase2 = u_time * 0.8 + lon * 8.0 + 2.1;
+    float arcPhase3 = u_time * 1.8 + lon * 15.0 + 4.3;
+    float curtain1 = 0.55 + 0.45 * sin(arcPhase1);
+    float curtain2 = 0.40 + 0.40 * sin(arcPhase2 * 0.7);
+    float curtain3 = 0.30 + 0.30 * sin(arcPhase3 * 1.3);
+    float anim = max(curtain1, max(curtain2 * 0.8, curtain3 * 0.6));
+
+    // Breakup pattern during substorms (Kp > 5): rapid flickering + broader extent
+    float breakup = 0.0;
+    if (kpEff > 5.0) {
+        float bPhase = u_time * 6.0 + lon * 20.0;
+        breakup = (0.3 + 0.7 * abs(sin(bPhase))) * smoothstep(5.0, 7.0, kpEff) * 0.4;
+    }
+    anim = max(anim, breakup);
 
     float powerScale = 0.30 + 0.70 * u_aurora_power;
     float bright = zone * anim * powerScale;
 
-    vec3 lo = vec3(0.05, 0.95, 0.15);
-    vec3 hi = vec3(0.90, 0.10, 0.80);
-    float stormMix = clamp((kpEff - 3.0) / 6.0, 0.0, 1.0);
-    return mix(lo, hi, stormMix) * bright * 0.90;
+    // Altitude-dependent colour mixing:
+    // Low energy electrons → red (high altitude OI 630nm)
+    // Medium energy → green (OI 557.7nm, ~110km)
+    // High energy → purple/blue (N₂⁺ at ~90km, during storms)
+    vec3 greenAurora  = vec3(0.08, 0.95, 0.18);  // dominant green
+    vec3 redAurora    = vec3(0.85, 0.12, 0.15);  // upper red
+    vec3 purpleAurora = vec3(0.60, 0.10, 0.90);  // lower purple (high Kp only)
+
+    // Latitudinal proxy for altitude: near centre = green, poleward = red, equatorward = purple
+    float latOff = (sinAbsLat - ovalCtr) / (ovalW * 1.5);
+    float redFrac    = smoothstep(0.0, 0.8, latOff) * 0.5;
+    float purpleFrac = smoothstep(0.0, -0.6, latOff) * clamp((kpEff - 3.0) / 5.0, 0.0, 0.6);
+
+    vec3 baseCol = greenAurora;
+    baseCol = mix(baseCol, redAurora, redFrac);
+    baseCol = mix(baseCol, purpleAurora, purpleFrac);
+
+    // Storm colour shift: higher Kp pushes more purple/red
+    float stormMix = clamp((kpEff - 4.0) / 5.0, 0.0, 1.0);
+    baseCol = mix(baseCol, mix(greenAurora, purpleAurora, 0.5), stormMix * 0.3);
+
+    return baseCol * bright * 1.05;
 }
 
 // ── Weather / temperature colour ramp ─────────────────────────────────────────
@@ -166,16 +202,25 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 // ── Ocean wave normal micro-perturbation ─────────────────────────────────────
-// Multi-scale Gerstner-inspired waves for realistic sun-glint sparkle
+// Multi-scale Gerstner-inspired waves with 6 octaves for realistic sun-glint
+// Based on Tessendorf (2001) ocean spectrum approximation
 vec2 oceanWaveNormal(vec2 uv, float t) {
-    // Large swell (wind-driven, ~200m wavelength)
-    float s1 = sin(uv.x * 320.0 + t * 0.8) * cos(uv.y * 280.0 + t * 0.6);
-    // Medium chop (~50m)
-    float s2 = sin(uv.x * 510.0 - t * 1.1) * cos(uv.y * 440.0 - t * 0.9);
-    // Capillary ripples (~5m) — visible at close zoom
-    float s3 = sin(uv.x * 1200.0 + uv.y * 900.0 + t * 2.2) * 0.3;
-    float s4 = sin(uv.x * 190.0 + uv.y * 220.0 + t * 0.5);
-    return vec2(s1 + s2 * 0.5 + s3, s4 + s2 * 0.5 + s3) * 0.0012;
+    // Ocean swell (wind-driven, ~300m wavelength, dominant wave direction)
+    float s1 = sin(uv.x * 280.0 + t * 0.65) * cos(uv.y * 240.0 + t * 0.48);
+    // Cross-swell (perpendicular wave train)
+    float s2 = sin(uv.x * 180.0 + uv.y * 350.0 + t * 0.55) * 0.7;
+    // Wind chop (~50m wavelength)
+    float s3 = sin(uv.x * 520.0 - t * 1.1) * cos(uv.y * 480.0 - t * 0.85);
+    // Short gravity waves (~15m)
+    float s4 = sin(uv.x * 850.0 + uv.y * 720.0 + t * 1.6) * 0.4;
+    // Capillary ripples (~3m) — sun-glint sparkle at close range
+    float s5 = sin(uv.x * 1400.0 + uv.y * 1100.0 + t * 2.5) * 0.2;
+    // Micro-ripples (~1m) — only visible very close
+    float s6 = sin(uv.x * 2400.0 - uv.y * 1800.0 + t * 3.2) * 0.08;
+
+    float dx = s1 + s2 * 0.5 + s3 * 0.35 + s4 * 0.2 + s5 + s6;
+    float dy = s2 + s1 * 0.5 + s3 * 0.35 + sin(uv.x * 190.0 + uv.y * 260.0 + t * 0.5) + s5 + s6;
+    return vec2(dx, dy) * 0.0014;
 }
 
 // ── Aerial perspective (atmospheric haze with distance) ──────────────────────
@@ -336,25 +381,56 @@ void main() {
     vec3 illumination = (directLight * cShadow) + skyAmbient + sssLight;
     base *= illumination;
 
-    // ── Ocean specular (Fresnel + GGX + wave perturbation) ────────────────────
+    // ── Ocean specular (dual-lobe GGX + Fresnel + sun glitter) ─────────────────
+    // Real ocean: combination of smooth specular reflection and stochastic
+    // sun glitter from wave facets. Uses two GGX lobes: one narrow (calm swell)
+    // and one broad (wind chop).
     if (oceanMsk > 0.3) {
         vec3  H2     = normalize(L + V);
         float NdotV  = max(dot(N, V), 0.001);
         float NdotH  = max(dot(N, H2), 0.0);
-        float fresnel = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
-        float rough2 = 0.06 * 0.06;
-        float denom2 = NdotH * NdotH * (rough2 - 1.0) + 1.0;
-        float D      = rough2 / (3.14159265 * denom2 * denom2);
-        float spec   = D * fresnel * oceanMsk * dayFull * 0.55;
-        base += vec3(spec * 0.80, spec * 0.90, spec);
+        float VdotH  = max(dot(V, H2), 0.001);
 
-        // Ocean Fresnel reflection: at grazing angles, ocean reflects sky colour
+        // Schlick Fresnel (seawater n=1.34 → F0 = 0.02)
+        float fresnel = 0.02 + 0.98 * pow(1.0 - VdotH, 5.0);
+
+        // Primary specular: narrow GGX lobe (calm ocean, roughness ~0.04)
+        float rough1 = 0.04;
+        float r1sq = rough1 * rough1;
+        float d1 = r1sq / (3.14159265 * pow(NdotH * NdotH * (r1sq - 1.0) + 1.0, 2.0));
+
+        // Secondary specular: broader GGX lobe (wind chop, roughness ~0.15)
+        float rough2 = 0.15;
+        float r2sq = rough2 * rough2;
+        float d2 = r2sq / (3.14159265 * pow(NdotH * NdotH * (r2sq - 1.0) + 1.0, 2.0));
+
+        // Combine: narrow peak + broad shoulder
+        float D = d1 * 0.6 + d2 * 0.4;
+        float spec = D * fresnel * oceanMsk * dayFull;
+        // Specular tint: slightly warm from sunlight, blue from sky
+        base += vec3(spec * 0.85, spec * 0.92, spec) * 0.55;
+
+        // Sun glitter: stochastic sparkles from capillary wave facets
+        // More prominent at moderate distances where individual sparkles merge
+        float glitterNoise = sin(vUv.x * 3000.0 + u_time * 1.8) * sin(vUv.y * 2500.0 + u_time * 1.3);
+        float glitterMask = smoothstep(0.92, 1.0, glitterNoise) * oceanMsk;
+        float glitterSpec = glitterMask * fresnel * dayFull * pow(max(NdotH, 0.0), 80.0);
+        base += vec3(1.0, 0.98, 0.90) * glitterSpec * 1.5;
+
+        // Ocean Fresnel reflection: at grazing angles, reflects sky colour
         float oceanFresnel = pow(1.0 - NdotV, 4.0) * oceanMsk * dayFull;
-        base += vec3(0.10, 0.18, 0.30) * oceanFresnel * 0.20;
+        base += vec3(0.12, 0.20, 0.35) * oceanFresnel * 0.22;
 
-        // Night ocean: faint moonlight-like reflection (indirect)
+        // Subsurface scattering: light penetrates water and scatters back
+        // Gives shallow tropical waters their turquoise colour
+        float sss = max(dot(N, -L), 0.0) * oceanMsk * dayFull;
+        float lat = abs((0.5 - vUv.y) * 3.14159265);
+        float tropicalMask = smoothstep(0.7, 0.2, lat);  // tropics only
+        base += vec3(0.02, 0.08, 0.06) * sss * tropicalMask * 0.4;
+
+        // Night ocean: moonlight + bioluminescence hint
         float nightOcean = nightFull * oceanMsk;
-        base += vec3(0.003, 0.005, 0.012) * nightOcean;
+        base += vec3(0.004, 0.006, 0.014) * nightOcean;
     }
 
     // ── Ice/snow specular (broad, diffuse glint) ─────────────────────────────
@@ -470,8 +546,8 @@ varying vec3 vWorldPos;
 // ── Volumetric cloud constants ────────────────────────────────────────────────
 const float R_CLOUD_BOTTOM = 1.005;   // cloud base altitude (≈ 3 km)
 const float R_CLOUD_TOP    = 1.018;   // cloud top altitude (≈ 12 km)
-const int   VOL_STEPS      = 20;      // primary ray march steps (eliminates banding)
-const int   LIGHT_STEPS    = 6;       // sun-direction steps for self-shadowing
+const int   VOL_STEPS      = 32;      // primary ray march steps (smooth volumetrics)
+const int   LIGHT_STEPS    = 8;       // sun-direction steps for self-shadowing
 
 // ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
 vec2 stormSwirl(vec2 uv) {
@@ -560,14 +636,27 @@ float noise3D(vec3 p) {
     return mix(n0, n1, f.z);
 }
 
-// Fractal Brownian Motion — 6 octaves for detailed close-up clouds
+// Fractal Brownian Motion — 8 octaves for highly detailed close-up cloud edges
 float fbm3(vec3 p) {
     float v   = 0.0;
     float amp = 0.50;
     float frq = 1.0;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 8; i++) {
         v   += noise3D(p * frq) * amp;
-        amp *= 0.48;
+        amp *= 0.46;
+        frq *= 2.17;
+    }
+    return v;
+}
+
+// Turbulence function (abs of noise for billowy cloud edges)
+float turbulence3(vec3 p) {
+    float v   = 0.0;
+    float amp = 0.50;
+    float frq = 1.0;
+    for (int i = 0; i < 6; i++) {
+        v   += abs(noise3D(p * frq) - 0.5) * 2.0 * amp;
+        amp *= 0.45;
         frq *= 2.13;
     }
     return v;
@@ -602,12 +691,15 @@ float cloudDensity(vec3 pos, vec2 swirl) {
 
     // 3D volumetric detail noise — frequency scales with camera distance for LOD
     // Close-up: higher frequency reveals finer cloud edges and billows
-    float lodScale = mix(120.0, 42.0, clamp((u_cam_dist - 1.02) / 2.0, 0.0, 1.0));
+    float lodScale = mix(160.0, 42.0, clamp((u_cam_dist - 1.02) / 2.0, 0.0, 1.0));
     vec3 noisePos = normalize(pos) * lodScale + vec3(u_time * 0.008, 0.0, u_time * 0.005);
     float detailNoise = fbm3(noisePos);
 
-    // Combine: texture gives large-scale cloud patterns, 3D noise gives volumetric edges
-    float density = texNoise * 0.7 + detailNoise * 0.3;
+    // Turbulence adds billowy, cauliflower-like edges to cumulus clouds
+    float turbDetail = turbulence3(noisePos * 0.7 + vec3(0.0, u_time * 0.003, 0.0));
+
+    // Combine: texture for large-scale, FBM for medium, turbulence for fine edges
+    float density = texNoise * 0.55 + detailNoise * 0.30 + turbDetail * 0.15;
 
     // Apply weather data or pressure-based modulation
     float baseDensity;
@@ -735,27 +827,57 @@ void main() {
         vec3 sampleCol = mix(cloudDark, cloudBright, lightTransmit * dayMix);
         sampleCol = mix(nightCol, sampleCol, dayMix);
 
-        // Silver-lining effect at cloud edges (forward scattering)
+        // Silver-lining effect — Henyey-Greenstein forward scattering
+        // Enhanced two-lobe HG for realistic cloud edge glow toward the sun
         float cosTheta = dot(rayDir, L);
-        float hg = 0.25 / (1.0 + 2.0 * (1.0 - cosTheta));  // simplified HG
-        sampleCol += cloudBright * hg * lightTransmit * dayMix * 0.4;
+        float g1 = 0.80;   // strong forward lobe
+        float g2 = -0.35;  // weak backward lobe
+        float hg1 = (1.0 - g1*g1) / pow(1.0 + g1*g1 - 2.0*g1*cosTheta, 1.5);
+        float hg2 = (1.0 - g2*g2) / pow(1.0 + g2*g2 - 2.0*g2*cosTheta, 1.5);
+        float hgPhase = 0.7 * hg1 + 0.3 * hg2;  // dual-lobe
+        sampleCol += cloudBright * hgPhase * lightTransmit * dayMix * 0.15;
 
-        // Warm golden tint at terminator
+        // Warm golden tint at terminator (sunset/sunrise through clouds)
         float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
-        sampleCol = mix(sampleCol, vec3(0.95, 0.72, 0.28), termZone * 0.30);
+        vec3 sunsetCol = mix(vec3(0.95, 0.72, 0.28), vec3(1.0, 0.42, 0.12), termZone);
+        sampleCol = mix(sampleCol, sunsetCol, termZone * 0.35);
 
-        // Accumulate using beer's law
+        // Precipitation darkening — rain-bearing clouds have darker bases
+        float precipDark = 0.0;
+        float sampleH = clamp((length(samplePos) - R_CLOUD_BOTTOM) / (R_CLOUD_TOP - R_CLOUD_BOTTOM), 0.0, 1.0);
+        if (u_weather_on > 0.5) {
+            vec2 sUV = worldToUV(samplePos);
+            float precip = texture2D(u_cloud_layers, sUV).a;
+            precipDark = precip * smoothstep(0.5, 0.0, sampleH) * 0.3;
+            // Add slight blue-grey tint to heavy rain areas
+            sampleCol = mix(sampleCol, vec3(0.35, 0.38, 0.48), precipDark);
+        }
+
+        // Beer-powder approximation: scattered light brightens thin cloud interiors
+        // (photons scatter multiple times inside cloud before exiting)
+        float beerPowder = 2.0 * exp(-dens * stepLen * sigmaA * 0.5) * (1.0 - exp(-dens * stepLen * sigmaA * 2.0));
+        sampleCol += cloudBright * beerPowder * lightTransmit * dayMix * 0.08;
+
+        // Accumulate using Beer's law
         float sampleAtten = exp(-dens * stepLen * sigmaA);
         vec3 integScatter = sampleCol * (1.0 - sampleAtten);
         scatteredLight += transmittance * integScatter;
         transmittance  *= sampleAtten;
 
         // Early exit if nearly opaque
-        if (transmittance < 0.01) break;
+        if (transmittance < 0.005) break;
     }
 
     float alpha = 1.0 - transmittance;
-    alpha = clamp(alpha, 0.0, 0.95);
+    alpha = clamp(alpha, 0.0, 0.96);
+
+    // Add a subtle warm glow under high-precipitation regions (reflected city light on rain)
+    if (u_weather_on > 0.5 && alpha > 0.1) {
+        vec4 clData = texture2D(u_cloud_layers, vUv);
+        float precip = clData.a;
+        float nightFade = 1.0 - smoothstep(-0.10, 0.15, NdotL);
+        scatteredLight += vec3(0.12, 0.08, 0.04) * precip * nightFade * alpha * 0.3;
+    }
 
     gl_FragColor = vec4(scatteredLight / max(alpha, 0.01), alpha);
 }`;
@@ -789,13 +911,20 @@ const float R_PLANET   = 1.0;
 const float R_ATM      = 1.045;          // atmosphere top (≈ 60 km scaled)
 const float H_RAYLEIGH = 0.012;          // Rayleigh scale height (~8 km / 6371 km)
 const float H_MIE      = 0.004;          // Mie scale height (~1.2 km)
-const int   NUM_STEPS  = 20;             // primary ray march steps (smooth gradient)
-const int   NUM_LSTEPS = 8;              // light (sun) ray march steps
+const float H_OZONE    = 0.0055;         // Ozone scale height (~3.5 km)
+const int   NUM_STEPS  = 32;             // primary ray march steps (higher for smoother gradient)
+const int   NUM_LSTEPS = 12;             // light (sun) ray march steps
 
 // Rayleigh scattering coefficients at sea level (λ = 680, 550, 440 nm)
 const vec3  BETA_R0 = vec3(5.8e-3, 13.5e-3, 33.1e-3);
 // Mie scattering coefficient (wavelength-independent)
 const float BETA_M0 = 3.0e-3;
+// Ozone absorption coefficients (Chappuis band: peaks ~600nm, absorbs red/green)
+// This is what gives Earth its deep blue colour from space — ozone absorbs in the visible
+const vec3  BETA_OZONE = vec3(3.426e-3, 8.298e-3, 0.356e-3);  // absorption cross-sections
+const float OZONE_PEAK = 0.004;          // ~25 km altitude (ozone layer peak)
+const float OZONE_WIDTH = 0.0047;        // ~30 km layer width
+
 // Mie preferred scattering direction (Henyey-Greenstein g)
 const float MIE_G   = 0.76;
 
@@ -804,6 +933,8 @@ const float H_GREEN_PEAK = 0.015;    // OI 557.7nm peak at ~97 km
 const float H_GREEN_W    = 0.005;    // ~30 km layer width
 const float H_RED_PEAK   = 0.038;    // OI 630.0nm peak at ~250 km
 const float H_RED_W      = 0.018;    // ~120 km layer width
+const float H_PURPLE_PEAK = 0.013;   // N₂⁺ 391.4nm (1st negative band) at ~85 km
+const float H_PURPLE_W    = 0.004;   // ~25 km width
 
 // D-layer absorption altitude
 const float H_DLAYER     = 0.012;    // ~80 km (D-layer peak)
@@ -832,50 +963,54 @@ float phaseM(float cosTheta) {
     return (3.0 / (8.0 * 3.14159265)) * num / den;
 }
 
+// ── Cornette-Shanks phase function (improved Mie for forward peak) ────────
+float phaseMCS(float cosTheta) {
+    float g2 = MIE_G * MIE_G;
+    float num = 1.5 * (1.0 - g2) * (1.0 + cosTheta * cosTheta);
+    float den = (2.0 + g2) * pow(1.0 + g2 - 2.0 * MIE_G * cosTheta, 1.5);
+    return num / (4.0 * 3.14159265 * den);
+}
+
+// ── Ozone density profile (Chapman layer) ─────────────────────────────────
+float ozoneDensity(float h) {
+    float d = (h - OZONE_PEAK) / OZONE_WIDTH;
+    return exp(-0.5 * d * d);
+}
+
 // ── Airglow emission profile ──────────────────────────────────────────────
 // OI 557.7 nm (green line): chemiluminescence from O + O + M → O₂* + M
-//   Peak at ~97 km, FWHM ~30 km, ~250 Rayleighs at night
 // OI 630.0 nm (red line): dissociative recombination of O₂⁺
-//   Peak at ~250 km, FWHM ~120 km, ~100 Rayleighs at night, enhanced by Kp
+// N₂⁺ 391.4 nm (purple): first negative band at ~85 km
 vec3 airglowEmission(float h, float NdotL, float kp, float t) {
-    // Nightside only — airglow quenched on dayside by solar UV photoionisation
     float nightMask = smoothstep(0.15, -0.10, NdotL);
 
-    // Green OI 557.7nm — altitude-dependent Gaussian
+    // Green OI 557.7nm
     float greenLayer = exp(-pow((h - H_GREEN_PEAK) / H_GREEN_W, 2.0));
-    // Subtle pulsation from gravity waves (~15 min period)
     float greenPulse = 0.85 + 0.15 * sin(t * 0.42);
-    vec3 greenCol = vec3(0.15, 0.92, 0.25) * greenLayer * 0.12 * greenPulse;
+    vec3 greenCol = vec3(0.15, 0.92, 0.25) * greenLayer * 0.14 * greenPulse;
 
-    // Red OI 630.0nm — broader layer, enhanced during geomagnetic activity
+    // Red OI 630.0nm — enhanced during geomagnetic activity
     float redLayer = exp(-pow((h - H_RED_PEAK) / H_RED_W, 2.0));
-    float kpBoost = 1.0 + clamp(kp - 2.0, 0.0, 7.0) * 0.18;  // Kp > 2 enhances red
-    vec3 redCol = vec3(0.85, 0.18, 0.08) * redLayer * 0.06 * kpBoost;
+    float kpBoost = 1.0 + clamp(kp - 2.0, 0.0, 7.0) * 0.22;
+    vec3 redCol = vec3(0.85, 0.18, 0.08) * redLayer * 0.08 * kpBoost;
 
-    return (greenCol + redCol) * nightMask;
+    // Purple N₂⁺ — faint violet glow at lower mesosphere, enhanced by particle precipitation
+    float purpleLayer = exp(-pow((h - H_PURPLE_PEAK) / H_PURPLE_W, 2.0));
+    float purpleBoost = 1.0 + clamp(kp - 4.0, 0.0, 5.0) * 0.3;
+    vec3 purpleCol = vec3(0.55, 0.15, 0.90) * purpleLayer * 0.04 * purpleBoost;
+
+    return (greenCol + redCol + purpleCol) * nightMask;
 }
 
 // ── D-layer radio blackout glow ───────────────────────────────────────────
-// Solar X-rays (1–8 Å) ionise the D-layer (60–90 km), causing HF absorption.
-// Visible as a faint orange-red glow on the sunlit hemisphere.
-// R1–R5 scale: 0.2 = C-class (R0), 0.5 = M-class (R1-R2), 1.0 = X-class (R3-R5)
 vec3 dLayerBlackout(float h, float NdotL, float xray) {
-    if (xray < 0.15) return vec3(0.0);  // below C-class threshold
-
-    // D-layer altitude profile
+    if (xray < 0.15) return vec3(0.0);
     float dProfile = exp(-pow((h - H_DLAYER) / H_DLAYER_W, 2.0));
-
-    // Dayside only — X-rays can only ionise the sunlit D-layer
     float dayMask = smoothstep(-0.05, 0.25, NdotL);
-
-    // Intensity scales with X-ray flux (log scale: C→M→X)
     float intensity = smoothstep(0.15, 1.0, xray);
-
-    // Colour: warm amber at M-class, angry red-orange at X-class
-    vec3 mColor = vec3(1.0, 0.65, 0.15);  // amber (M-class)
-    vec3 xColor = vec3(1.0, 0.25, 0.05);  // red-orange (X-class)
+    vec3 mColor = vec3(1.0, 0.65, 0.15);
+    vec3 xColor = vec3(1.0, 0.25, 0.05);
     vec3 col = mix(mColor, xColor, smoothstep(0.4, 0.85, xray));
-
     return col * dProfile * dayMask * intensity * 0.18;
 }
 
@@ -900,12 +1035,13 @@ void main() {
 
     float segLen = (tF - tN) / float(NUM_STEPS);
 
-    // Accumulate Rayleigh + Mie in-scattering + emission layers
+    // Accumulate Rayleigh + Mie + ozone in-scattering + emission layers
     vec3  sumR = vec3(0.0);
     vec3  sumM = vec3(0.0);
-    vec3  sumEmission = vec3(0.0);  // airglow + D-layer blackout
+    vec3  sumEmission = vec3(0.0);
     float optDepthR = 0.0;
     float optDepthM = 0.0;
+    float optDepthO = 0.0;   // ozone optical depth
 
     for (int i = 0; i < NUM_STEPS; i++) {
         float tMid = tN + (float(i) + 0.5) * segLen;
@@ -914,15 +1050,17 @@ void main() {
 
         float densR = exp(-h / H_RAYLEIGH) * segLen;
         float densM = exp(-h / H_MIE)      * segLen;
+        float densO = ozoneDensity(h) * segLen;
         optDepthR += densR;
         optDepthM += densM;
+        optDepthO += densO;
 
         // Light ray from sample to sun
         float ltN, ltF;
         raySphere(samplePos, L, R_ATM, ltN, ltF);
         float lSegLen = ltF / float(NUM_LSTEPS);
 
-        float lOptR = 0.0, lOptM = 0.0;
+        float lOptR = 0.0, lOptM = 0.0, lOptO = 0.0;
         bool  shadow = false;
         for (int j = 0; j < NUM_LSTEPS; j++) {
             vec3  lPos = samplePos + L * ((float(j) + 0.5) * lSegLen);
@@ -930,10 +1068,14 @@ void main() {
             if (lH < 0.0) { shadow = true; break; }
             lOptR += exp(-lH / H_RAYLEIGH) * lSegLen;
             lOptM += exp(-lH / H_MIE)      * lSegLen;
+            lOptO += ozoneDensity(lH) * lSegLen;
         }
         if (shadow) continue;
 
-        vec3 tau = BETA_R0 * (optDepthR + lOptR) + BETA_M0 * (optDepthM + lOptM);
+        // Total optical depth with ozone absorption
+        vec3 tau = BETA_R0 * (optDepthR + lOptR)
+                 + BETA_M0 * (optDepthM + lOptM)
+                 + BETA_OZONE * (optDepthO + lOptO);
         vec3 atten = exp(-tau);
 
         sumR += densR * atten;
@@ -941,32 +1083,35 @@ void main() {
 
         // ── Emission layers (self-luminous, no sun illumination needed) ────
         float sampleNdotL = dot(normalize(samplePos), L);
-
-        // Airglow — nightside OI green + red emission bands
-        sumEmission += airglowEmission(h, sampleNdotL, u_kp, u_time) * segLen * 8.0;
-
-        // D-layer blackout — dayside X-ray ionisation glow
-        sumEmission += dLayerBlackout(h, sampleNdotL, u_xray) * segLen * 8.0;
+        sumEmission += airglowEmission(h, sampleNdotL, u_kp, u_time) * segLen * 10.0;
+        sumEmission += dLayerBlackout(h, sampleNdotL, u_xray) * segLen * 10.0;
     }
 
     float cosTheta = dot(rayDir, L);
+
+    // Use Cornette-Shanks for Mie (better forward scattering peak for sun glare)
     vec3 scatter = sumR * BETA_R0 * phaseR(cosTheta)
-                 + sumM * BETA_M0 * phaseM(cosTheta);
+                 + sumM * BETA_M0 * phaseMCS(cosTheta);
 
     // Combine scattering + emission
     scatter += sumEmission;
 
-    // Exposure tone mapping
-    scatter = 1.0 - exp(-scatter * 28.0);
+    // Multi-scatter approximation: add a fraction of total Rayleigh as ambient
+    // to simulate photons that scatter 2+ times (fills in dark regions)
+    float multiScatterFactor = 0.06;
+    scatter += sumR * BETA_R0 * multiScatterFactor;
+
+    // Exposure tone mapping (tuned for sunrise/sunset dynamic range)
+    scatter = 1.0 - exp(-scatter * 32.0);
 
     // Limb-based alpha: stronger at the edges (grazing angle)
     float rim = 1.0 - max(dot(V, N), 0.0);
-    float alpha = rim * rim * 0.9;
+    float alpha = rim * rim * 0.92;
 
     // Boost alpha where scattering or emission is strong
     float lum = dot(scatter, vec3(0.299, 0.587, 0.114));
-    alpha = max(alpha, lum * 0.85);
-    alpha = clamp(alpha, 0.0, 0.92);
+    alpha = max(alpha, lum * 0.88);
+    alpha = clamp(alpha, 0.0, 0.94);
 
     gl_FragColor = vec4(scatter, alpha);
 }`;

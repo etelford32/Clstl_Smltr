@@ -71,18 +71,18 @@ export class PerfEngine {
     /** Sphere segment counts per quality tier [earth, clouds, atm] */
     get segments() {
         const tiers = [
-            [48,  36, 28],  // potato
-            [80,  48, 36],  // low
-            [120, 80, 48],  // medium
-            [160, 120, 80], // high
-            [200, 160, 96], // ultra
+            [48,  36, 28],   // potato
+            [80,  56, 36],   // low
+            [128, 96, 56],   // medium
+            [192, 144, 80],  // high
+            [256, 192, 112], // ultra
         ];
         return tiers[this._quality];
     }
 
     /** Particle count multiplier (0.3 – 1.5) */
     get particleScale() {
-        return [0.3, 0.5, 0.75, 1.0, 1.5][this._quality];
+        return [0.3, 0.5, 0.8, 1.0, 1.5][this._quality];
     }
 
     /** Whether to enable expensive effects */
