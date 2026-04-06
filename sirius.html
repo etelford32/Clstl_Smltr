@@ -776,9 +776,11 @@ console.log('%c[Sirius System · A1V + DA2 Binary]', 'color:#88aaff;font-weight:
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('sirius');
 recordVisit('sirius');
+userState.trackPage('sirius');
 </script>
 </body>
 </html>

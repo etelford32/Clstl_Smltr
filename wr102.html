@@ -1216,9 +1216,11 @@ console.log('  HeII ionization zone | OVI emission nebula | Extended corona');
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('wr102');
 recordVisit('wr102');
+userState.trackPage('wr102');
 </script>
 </body>
 </html>

@@ -336,9 +336,11 @@ if (_navBurger && _navMenu) {
     </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('rust');
 recordVisit('rust');
+userState.trackPage('rust');
 </script>
 </body>
 </html>

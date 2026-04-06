@@ -937,9 +937,11 @@ console.log('  Uniforms:', Object.keys(uniforms).join(', '));
 
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('vega');
 recordVisit('vega');
+userState.trackPage('vega');
 </script>
 </body>
 </html>

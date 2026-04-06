@@ -731,9 +731,11 @@ animate();
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('satellites');
 recordVisit('satellites');
+userState.trackPage('satellites');
 </script>
 </body>
 </html>

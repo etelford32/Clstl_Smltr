@@ -1300,9 +1300,11 @@ render();
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('stellar-wind');
 recordVisit('stellar-wind');
+userState.trackPage('stellar-wind');
 </script>
 </body>
 </html>

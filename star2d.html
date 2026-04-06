@@ -1108,9 +1108,11 @@ if (_navBurger && _navMenu) {
     </div>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('star2d');
 recordVisit('star2d');
+userState.trackPage('star2d');
 </script>
 </body>
 </html>

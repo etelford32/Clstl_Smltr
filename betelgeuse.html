@@ -744,9 +744,11 @@ console.log('%c[Betelgeuse · M2Iab Red Supergiant]', 'color:#ff7040;font-weight
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('betelgeuse');
 recordVisit('betelgeuse');
+userState.trackPage('betelgeuse');
 </script>
 </body>
 </html>

@@ -538,7 +538,10 @@ window._ppAuth = { auth };
   // Track dashboard view + identify user
   try {
     const { analytics } = await import('./js/analytics.js');
+    const { userState } = await import('./js/user-state.js');
     if (user.id) analytics.identify(user.id, { email: user.email, plan: user.plan, role: user.role });
+    userState.identify(user);
+    userState.trackPage('dashboard');
     analytics.page('dashboard');
   } catch (_) {}
 

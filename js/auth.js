@@ -27,6 +27,7 @@
  */
 
 import { getSupabase, isConfigured } from './supabase-config.js';
+import { userState } from './user-state.js';
 
 const AUTH_KEY = 'pp_auth';
 
@@ -45,6 +46,7 @@ class AuthManager {
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
+                    userState.identify(this._user);
                     console.info('[Auth] Supabase session restored:', this._user.email);
                 } else {
                     // No Supabase session — check for provisional local session
@@ -199,6 +201,8 @@ class AuthManager {
                 this._user = this._mapSupabaseUser(data.user);
                 // Fetch server-side profile (role, plan — not just user_metadata)
                 await this.fetchProfile();
+                userState.identify(this._user);
+                userState.trackEvent('sign_in', { method: 'password' });
                 return { success: true };
             } catch (err) {
                 return { success: false, error: err.message };
@@ -279,6 +283,8 @@ class AuthManager {
 
                 if (data.user) {
                     this._user = this._mapSupabaseUser(data.user);
+                    userState.identify(this._user);
+                    userState.trackEvent('sign_up', { plan });
                 }
                 return { success: true };
             } catch (err) {
@@ -297,6 +303,8 @@ class AuthManager {
         }
 
         this._user = null;
+        userState.trackEvent('sign_out');
+        userState.clearIdentity();
         try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
         try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
 

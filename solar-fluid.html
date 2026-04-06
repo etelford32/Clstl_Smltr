@@ -1267,9 +1267,11 @@ if (_navBurger && _navMenu) {
     </div>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('solar-fluid');
 recordVisit('solar-fluid');
+userState.trackPage('solar-fluid');
 </script>
 </body>
 </html>

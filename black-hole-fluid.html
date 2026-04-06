@@ -560,9 +560,11 @@ requestAnimationFrame(loop);
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('black-hole-fluid');
 recordVisit('black-hole-fluid');
+userState.trackPage('black-hole-fluid');
 </script>
 </body>
 </html>

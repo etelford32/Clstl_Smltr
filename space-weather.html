@@ -3020,9 +3020,11 @@ window.openImg = function(thumb) {
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('space-weather');
 recordVisit('space-weather');
+userState.trackPage('space-weather');
 </script>
 </body>
 </html>
