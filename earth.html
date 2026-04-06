@@ -1130,6 +1130,7 @@ nav {
         <div class="loc-row">
             <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
             <button id="loc-search" title="Search location">↵</button>
+            <button id="loc-gps" title="Use my GPS location" style="background:rgba(0,200,150,.15);border:1px solid rgba(0,200,150,.3);border-radius:4px;color:#0ca;padding:5px 9px;font-size:11px;cursor:pointer;flex-shrink:0;touch-action:manipulation;min-height:32px">📍</button>
         </div>
         <div id="loc-error"></div>
         <div id="loc-result">
@@ -3736,13 +3737,14 @@ function animate() {
         _userPinRing.material.opacity = 0.75 * (1 - pulse * 0.87);
     }
 
-    // ── Fly-to animation
+    // ── Fly-to animation (smooth cinematic zoom)
     if (_flyTarget && _flyProgress < 1) {
-        _flyProgress = Math.min(1, _flyProgress + 0.018);
+        _flyProgress = Math.min(1, _flyProgress + dt * 0.7);  // ~1.4s total flight
+        // Ease-out cubic for deceleration as we approach the target
         const ease = 1 - Math.pow(1 - _flyProgress, 3);
         camera.position.lerpVectors(_flyFrom, _flyTarget, ease);
-        controls.target.lerp(_flyAimAt, ease);
-        if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
+        controls.target.lerpVectors(controls.target, _flyAimAt, ease * 0.3 + 0.02);
+        if (_flyProgress >= 1) { _flyTarget = null; }
     }
 
     // ── Advance simulation time ─────────────────────────────────────────
@@ -3890,16 +3892,22 @@ function _setUserPin(lat, lon) {
     earthMesh.add(_userPinGroup);
 }
 
-function _flyToUserLocation() {
+/**
+ * Fly camera to user's pinned location.
+ * @param {number} [altitude=1.35] Camera distance in Earth radii (1.35 ≈ 2,200 km altitude)
+ */
+function _flyToUserLocation(altitude = 1.35) {
     if (_userLat == null) return;
     // Transform geographic coords through current Earth rotation to world space
     const localPos = geoToXYZ(_userLat, _userLon);
     const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
 
     _flyFrom.copy(camera.position);
-    _flyAimAt.copy(worldPos).multiplyScalar(0.1);      // aim near surface centre
-    _flyTarget   = worldPos.clone().multiplyScalar(4.2);
+    _flyAimAt.set(0, 0, 0);  // aim at Earth centre
+    // Camera position: along the vector from Earth centre through the location
+    _flyTarget   = worldPos.clone().normalize().multiplyScalar(altitude);
     _flyProgress = 0;
+    controls.autoRotate = false;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3963,12 +3971,65 @@ document.getElementById('loc-search').addEventListener('click', _doGeocode);
 document.getElementById('loc-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') _doGeocode();
 });
-document.getElementById('loc-fly').addEventListener('click', _flyToUserLocation);
+document.getElementById('loc-fly').addEventListener('click', () => _flyToUserLocation());
 document.getElementById('loc-clear').addEventListener('click', () => {
     clearUserLocation();
     document.getElementById('loc-input').value = '';
     document.getElementById('loc-error').style.display = 'none';
     _showLocResult(null);
+});
+
+// ── Browser GPS geolocation ──────────────────────────────────────────────
+document.getElementById('loc-gps')?.addEventListener('click', async () => {
+    const btn = document.getElementById('loc-gps');
+    const err = document.getElementById('loc-error');
+    err.style.display = 'none';
+    btn.textContent = '…'; btn.disabled = true;
+
+    try {
+        // Request browser geolocation
+        const pos = await new Promise((resolve, reject) => {
+            if (!navigator.geolocation) return reject(new Error('Geolocation not supported'));
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+                enableHighAccuracy: true, timeout: 10000, maximumAge: 60000,
+            });
+        });
+
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+
+        // Reverse geocode to get city name
+        let city = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+        try {
+            const res = await fetch(
+                `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10`,
+                { headers: { 'Accept-Language': 'en' }, signal: AbortSignal.timeout(5000) }
+            );
+            if (res.ok) {
+                const data = await res.json();
+                const adr = data.address ?? {};
+                city = adr.city || adr.town || adr.village || adr.county || adr.state || city;
+            }
+        } catch { /* reverse geocode failed — use lat/lon as name */ }
+
+        const loc = { lat, lon, city, displayName: city };
+        saveUserLocation(loc);
+        _showLocResult(loc);
+        document.getElementById('loc-input').value = city;
+
+        // Auto-fly to the location
+        _flyToUserLocation(1.25);  // closer zoom for GPS (user wants to see their area)
+
+    } catch (e) {
+        const msg = e.code === 1 ? 'Location access denied — check browser permissions'
+                  : e.code === 2 ? 'Location unavailable — try searching by city name'
+                  : e.code === 3 ? 'Location timeout — try again'
+                  : e.message;
+        err.textContent = msg;
+        err.style.display = 'block';
+    } finally {
+        btn.textContent = '📍'; btn.disabled = false;
+    }
 });
 
 window.addEventListener('user-location-changed', e => {
@@ -3981,12 +4042,14 @@ window.addEventListener('user-location-changed', e => {
     }
 });
 
-// Restore saved location on load
+// Restore saved location on load — pin + auto-fly after textures load
 (function() {
     const saved = loadUserLocation();
     if (saved) {
         document.getElementById('loc-input').value = saved.city || '';
         _showLocResult(saved);
+        // Fly to saved location after a short delay (let textures load first)
+        setTimeout(() => _flyToUserLocation(1.6), 2500);
     }
 })();
 
