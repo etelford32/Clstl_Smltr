@@ -13,32 +13,113 @@
 const LS_KEY = 'ppx_user_location';
 
 /**
- * Geocode a free-text query (city name, zip code, or street address) via Nominatim.
+ * Geocode a free-text query via Nominatim (OpenStreetMap).
+ * Handles: cities, zip/postal codes, states, countries, addresses, landmarks.
+ *
+ * Examples that work:
+ *   "New York"          → New York, NY, USA
+ *   "Paris"             → Paris, France
+ *   "90210"             → Beverly Hills, CA (US zip)
+ *   "SW1A 1AA"          → Westminster, London (UK postcode)
+ *   "Tokyo, Japan"      → Tokyo, Japan
+ *   "Texas"             → State of Texas, USA
+ *   "Mount Everest"     → Sagarmatha, Nepal
+ *   "10001"             → Manhattan, NY (US zip)
+ *   "France"            → France (country centroid)
+ *   "ISS"               → won't work (not a place) — use GPS instead
+ *
+ * Strategy: free-text search first. If that fails and input looks like
+ * a postal code, retry with structured postalcode search.
+ *
  * @param {string} query
- * @returns {Promise<{lat:number, lon:number, city:string, displayName:string}>}
+ * @returns {Promise<{lat:number, lon:number, city:string, displayName:string, country:string, type:string}>}
  * @throws {Error} on network failure or no result
  */
 export async function geocodeQuery(query) {
+    query = query.trim();
+    if (!query) throw new Error('Enter a city, zip code, or address');
+
+    // Try free-text search first (handles most queries)
+    let result = await _nominatimSearch({ q: query });
+
+    // If no result and looks like a postal code, try structured search
+    if (!result && /^\d{3,10}$/.test(query)) {
+        // Pure numeric → likely US/international zip code
+        result = await _nominatimSearch({ postalcode: query, country: 'us' });
+        if (!result) result = await _nominatimSearch({ postalcode: query });
+    }
+    // UK-style postcode (e.g. "SW1A 1AA", "EC2R 8AH")
+    if (!result && /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i.test(query)) {
+        result = await _nominatimSearch({ postalcode: query, country: 'gb' });
+    }
+    // Canadian postcode (e.g. "K1A 0B1")
+    if (!result && /^[A-Z]\d[A-Z]\s*\d[A-Z]\d$/i.test(query)) {
+        result = await _nominatimSearch({ postalcode: query, country: 'ca' });
+    }
+
+    if (!result) {
+        throw new Error(
+            'Location not found. Try:\n• City name (e.g. "London")\n• Zip code (e.g. "90210")\n• Country (e.g. "Japan")\n• Address or landmark'
+        );
+    }
+
+    return result;
+}
+
+/** Internal: Nominatim search with given params. Returns result or null. */
+async function _nominatimSearch(searchParams) {
     const params = new URLSearchParams({
-        q: query, format: 'json', limit: '1', addressdetails: '1',
+        ...searchParams,
+        format: 'json',
+        limit: '1',
+        addressdetails: '1',
     });
-    const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?${params}`,
-        { headers: { 'Accept-Language': 'en' } }
-    );
-    if (!res.ok) throw new Error(`Geocoder HTTP ${res.status}`);
-    const data = await res.json();
-    if (!data.length) throw new Error('Location not found — try a city name or zip code');
-    const r   = data[0];
-    const adr = r.address ?? {};
-    const city = adr.city || adr.town || adr.village || adr.hamlet
-               || adr.county || adr.state || adr.country || query;
-    return {
-        lat:         parseFloat(r.lat),
-        lon:         parseFloat(r.lon),
-        city,
-        displayName: r.display_name,
-    };
+    try {
+        const res = await fetch(
+            `https://nominatim.openstreetmap.org/search?${params}`,
+            {
+                headers: {
+                    'Accept-Language': 'en',
+                    'User-Agent': 'ParkerPhysics-EarthSim/1.0',
+                },
+                signal: AbortSignal.timeout(8000),
+            }
+        );
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data.length) return null;
+
+        const r   = data[0];
+        const adr = r.address ?? {};
+
+        // Build a human-friendly location name
+        const city = adr.city || adr.town || adr.village || adr.hamlet || '';
+        const state = adr.state || '';
+        const country = adr.country || '';
+        const county = adr.county || '';
+
+        // Smart label: "City, State" for US, "City, Country" for others
+        let label = city;
+        if (!label) label = county || state || country || r.display_name?.split(',')[0] || '';
+        if (state && adr.country_code === 'us' && city) label += `, ${state}`;
+        else if (country && city) label += `, ${country}`;
+        else if (!city && state) label = state + (country ? `, ${country}` : '');
+        else if (!city && !state) label = country || r.display_name || '';
+
+        // Determine what type of result this is
+        const type = r.type || r.class || 'place';
+
+        return {
+            lat:         parseFloat(r.lat),
+            lon:         parseFloat(r.lon),
+            city:        label,
+            displayName: r.display_name,
+            country:     adr.country_code?.toUpperCase() || '',
+            type,
+        };
+    } catch {
+        return null;
+    }
 }
 
 /** Persist a location object to localStorage and dispatch 'user-location-changed'. */
