@@ -258,6 +258,46 @@ nav {
     transition:all .5s; border:1px solid rgba(77,255,128,.4);
 }
 
+/* ── Time control bar */
+#time-bar {
+    position:absolute; top:auto; bottom:42px; left:50%; transform:translateX(-50%);
+    z-index:60; display:flex; align-items:center; gap:8px;
+    padding:5px 14px; background:rgba(0,0,0,.85); backdrop-filter:blur(10px);
+    border:1px solid rgba(0,200,255,.18); border-radius:8px;
+    font-size:11px; white-space:nowrap; user-select:none;
+}
+#time-bar.hidden { display:none; }
+.tb-date { color:#a0d8f0; font-weight:600; font-family:'SF Mono',monospace; font-size:10px; min-width:140px; }
+.tb-mode { font-size:9px; font-weight:700; letter-spacing:.5px; padding:2px 6px;
+    border-radius:3px; text-transform:uppercase; }
+.tb-mode.live   { color:#4dff80; background:rgba(77,255,128,.1); border:1px solid rgba(77,255,128,.3); }
+.tb-mode.play   { color:#ffcc00; background:rgba(255,200,0,.1); border:1px solid rgba(255,200,0,.3); }
+.tb-mode.paused { color:#ff6644; background:rgba(255,100,68,.1); border:1px solid rgba(255,100,68,.3); }
+.tb-btn {
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12);
+    border-radius:4px; color:#8ab; cursor:pointer; font-size:12px;
+    width:26px; height:26px; display:flex; align-items:center; justify-content:center;
+    padding:0; transition:all .15s; touch-action:manipulation;
+}
+.tb-btn:hover { background:rgba(0,200,255,.15); color:#0cf; border-color:rgba(0,200,255,.3); }
+.tb-btn.active { background:rgba(0,200,255,.2); color:#0cf; border-color:#0cf; }
+.tb-speed {
+    display:flex; gap:2px; align-items:center;
+}
+.tb-speed-btn {
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.08);
+    border-radius:3px; color:#6a8a9a; cursor:pointer; font-size:9px;
+    padding:2px 5px; font-family:inherit; transition:all .15s; white-space:nowrap;
+}
+.tb-speed-btn:hover { background:rgba(0,200,255,.12); color:#0cf; }
+.tb-speed-btn.active { background:rgba(0,200,255,.15); color:#0cf; border-color:rgba(0,200,255,.3); }
+.tb-sep { width:1px; height:18px; background:rgba(255,255,255,.1); flex-shrink:0; }
+@media (max-width:768px) {
+    #time-bar { bottom:60px; font-size:10px; gap:5px; padding:4px 10px; flex-wrap:wrap; justify-content:center; }
+    .tb-date { min-width:auto; font-size:9px; }
+    .tb-speed { flex-wrap:wrap; }
+}
+
 /* ── Solar wind speed bar */
 .spd-bar-wrap { height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; margin:3px 0 5px; }
 .spd-bar { height:100%; background:#00c6ff; border-radius:2px; transition:width .9s, background .5s; }
@@ -1141,6 +1181,27 @@ nav {
         <div class="at-exp"   id="at-exp"></div>
     </div>
 
+    <!-- Time control bar -->
+    <div id="time-bar" class="hidden">
+        <span class="tb-mode live" id="tb-mode">LIVE</span>
+        <span class="tb-date" id="tb-date">—</span>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" id="tb-rw" title="Rewind 1 hour">⏪</button>
+        <button class="tb-btn" id="tb-pause" title="Pause (Space)">⏸</button>
+        <button class="tb-btn" id="tb-play" title="Play">▶</button>
+        <button class="tb-btn" id="tb-ff" title="Forward 1 hour">⏩</button>
+        <div class="tb-sep"></div>
+        <div class="tb-speed" id="tb-speed">
+            <button class="tb-speed-btn active" data-speed="1">1×</button>
+            <button class="tb-speed-btn" data-speed="10">10×</button>
+            <button class="tb-speed-btn" data-speed="60">60×</button>
+            <button class="tb-speed-btn" data-speed="3600">1h/s</button>
+            <button class="tb-speed-btn" data-speed="86400">1d/s</button>
+        </div>
+        <div class="tb-sep"></div>
+        <button class="tb-btn" id="tb-live" title="Return to live" style="font-size:9px;width:auto;padding:0 8px;">LIVE</button>
+    </div>
+
     <!-- Space weather bar -->
     <div id="sw-bar">
         <div id="sw-dot"></div>
@@ -1190,6 +1251,7 @@ import {
 import { StormFeed } from './js/storm-feed.js';
 import { EarthHiRes } from './js/earth-hires.js';
 import { PerfEngine } from './js/perf-engine.js';
+import { SimTime } from './js/sim-time.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -1301,6 +1363,9 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 // ── Adaptive performance engine (monitors FPS, auto-adjusts quality) ────
 const perf = new PerfEngine(renderer, { targetFPS: 55 });
+
+// ── Simulation time controller (play/pause/scrub/speed) ────────────────
+const simTime = new SimTime();
 
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
@@ -3582,9 +3647,13 @@ function animate() {
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
-    // ── Earth sidereal rotation in equatorial frame
-    earthMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE;
-    cloudMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE * 1.0008;
+    // ── Earth sidereal rotation — driven by simTime for time-scrubbing support
+    // When live: uses wall-clock elapsed time (smooth rotation)
+    // When scrubbing: computes GMST from virtual date (correct for any date)
+    const simGmstDeg = gmst(julianDay(simTime.isLive ? new Date() : simTime.now));
+    const earthRot = simTime.isLive ? (EARTH_INIT_ROT + t * SIDEREAL_RATE) : (simGmstDeg * DEG);
+    earthMesh.rotation.y = earthRot;
+    cloudMesh.rotation.y = earthRot + (simTime.isLive ? t * SIDEREAL_RATE * 0.0008 : 0);
 
     // ── Shader time + camera distance for LOD
     earthU.u_time.value = t;
@@ -3682,12 +3751,14 @@ function animate() {
         if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
     }
 
-    // ── Astro HUD + sun direction (every 5 s)
-    if (t - lastAstro > 5) {
+    // ── Advance simulation time ─────────────────────────────────────────
+    const simNow = simTime.tick(dt);
+
+    // ── Astro HUD + sun direction (every 5 s, or every frame if time-scrubbing)
+    if (t - lastAstro > 5 || !simTime.isLive) {
         lastAstro = t;
-        const _now = new Date();
-        updateAstroHUD(_now);
-        const _sunDir = sunDirectionEquatorial(julianDay(_now));
+        updateAstroHUD(simNow);
+        const _sunDir = sunDirectionEquatorial(julianDay(simNow));
         earthU.u_sun_dir.value.copy(_sunDir);
         cloudU.u_sun_dir.value.copy(_sunDir);
         atmU.u_sun_dir.value.copy(_sunDir);
@@ -3716,6 +3787,67 @@ let _flyProgress = 0;
 // ── First HUD update immediately
 updateAstroHUD(new Date());
 animate();
+
+// ═══════════════════════════════════════════════════════════════
+//  TIME CONTROL BAR — play/pause/speed/scrub
+// ═══════════════════════════════════════════════════════════════
+{
+    const tbBar   = document.getElementById('time-bar');
+    const tbDate  = document.getElementById('tb-date');
+    const tbMode  = document.getElementById('tb-mode');
+    const tbPause = document.getElementById('tb-pause');
+    const tbPlay  = document.getElementById('tb-play');
+    const tbLive  = document.getElementById('tb-live');
+    const tbRw    = document.getElementById('tb-rw');
+    const tbFf    = document.getElementById('tb-ff');
+
+    // Show bar (hidden by default until first interaction)
+    tbBar.classList.remove('hidden');
+
+    function updateTimeBar() {
+        const now = simTime.now;
+        tbDate.textContent = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+
+        tbMode.textContent = simTime.mode;
+        tbMode.className = 'tb-mode ' + simTime.mode.toLowerCase();
+
+        // Highlight active speed button
+        document.querySelectorAll('#tb-speed .tb-speed-btn').forEach(btn => {
+            btn.classList.toggle('active', parseFloat(btn.dataset.speed) === simTime.speed);
+        });
+    }
+
+    // Update every 500ms
+    setInterval(updateTimeBar, 500);
+    updateTimeBar();
+
+    // Button handlers
+    tbPause.addEventListener('click', () => simTime.pause());
+    tbPlay.addEventListener('click', () => simTime.play());
+    tbLive.addEventListener('click', () => simTime.goLive());
+    tbRw.addEventListener('click', () => simTime.offsetHours(-1));
+    tbFf.addEventListener('click', () => simTime.offsetHours(1));
+
+    // Speed buttons
+    document.getElementById('tb-speed').addEventListener('click', e => {
+        const btn = e.target.closest('.tb-speed-btn');
+        if (!btn) return;
+        simTime.setSpeed(parseFloat(btn.dataset.speed));
+        simTime.play();
+    });
+
+    // Keyboard: Space = toggle pause, [ = slow down, ] = speed up
+    document.addEventListener('keydown', e => {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.key === ' ' && !e.ctrlKey) {
+            e.preventDefault();
+            simTime.isPaused ? simTime.play() : simTime.pause();
+        }
+        if (e.key === '[') simTime.setSpeed(Math.max(simTime.speed / 10, -86400));
+        if (e.key === ']') simTime.setSpeed(Math.min(simTime.speed * 10, 86400));
+        if (e.key === '\\') simTime.goLive();
+    });
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  LOCAL CLOCK  (updates every second)
@@ -4016,89 +4148,234 @@ if (_navBurger && _navMenu) {
 <section class="sim-info">
   <div class="sim-info-inner">
     <div class="sim-info-header">
-      <div class="sim-info-title">Earth Magnetosphere &amp; Space Weather</div>
+      <div class="sim-info-title">Earth Simulation — Live Data Layers &amp; Physics</div>
       <p class="sim-info-lead">
-        A real-time 3D simulation of Earth's magnetic shield — from the bow shock where solar wind
-        first strikes, through the compressed magnetosheath, magnetopause boundary, and out to the
-        elongated magnetotail. Aurora, substorm dynamics, and Kp index are driven by live NOAA data.
+        A real-time multi-layer Earth simulation combining 20+ live data feeds with physics-based
+        rendering. Every layer — from ocean wave heights to magnetosphere boundaries — is driven by
+        real observations updated every 1–60 minutes. Use the layer panel to toggle any combination,
+        and the time controls to scrub through time.
       </p>
     </div>
 
+    <!-- ═══ SURFACE & ATMOSPHERE ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 12px">Surface &amp; Atmosphere</div>
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">🌍</div>
+        <div class="sim-card-title">Earth Surface</div>
+        <div class="sim-card-body">
+          <strong>Blue Marble</strong> base texture with NASA GIBS daily MODIS/VIIRS satellite
+          overlay at 250m resolution. Terrain relief via bump mapping, ocean specular with
+          dual-lobe GGX + sun glitter, polar ice BRDF, and city lights on the nightside.
+          Aerial perspective (Rayleigh in-scattering) adds realistic atmospheric haze at the limb.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">☁️</div>
+        <div class="sim-card-title">Volumetric Clouds</div>
+        <div class="sim-card-body">
+          Full volumetric ray-marched cloud layer with Beer's law absorption, self-shadowing,
+          and Henyey-Greenstein forward scattering. Cloud fractions (low/mid/high) from
+          <strong>Open-Meteo GFS</strong> at 5° resolution. Cyclonic storm swirl with eye/eyewall
+          structure from live <strong>NHC tropical cyclone</strong> data.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌈</div>
+        <div class="sim-card-title">Atmosphere Scattering</div>
+        <div class="sim-card-body">
+          Physical Rayleigh + Mie scattering with <strong>ozone Chappuis band</strong> absorption.
+          24-step ray march with 6-step light rays. Cornette-Shanks phase function for accurate
+          forward scattering. OI 557.7nm green + OI 630nm red + N₂⁺ 391.4nm purple airglow on
+          the nightside. D-layer X-ray blackout glow during solar flares.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌡️</div>
+        <div class="sim-card-title">Weather Data</div>
+        <div class="sim-card-body">
+          Live global weather from <strong>Open-Meteo / NOAA GFS</strong> at 5° grid (72×36 points):
+          temperature, pressure, humidity, wind speed/direction, CAPE. Displayed as temperature
+          colour overlay, isobar contours (marching-squares), wind particle advection, and
+          pressure centre detection (H/L labels). Refreshes every 10 minutes.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌪️</div>
+        <div class="sim-card-title">Storm Alerts</div>
+        <div class="sim-card-body">
+          Active severe weather alerts from <strong>NOAA NWS</strong> displayed as 3D markers
+          with severity-coded colours (yellow/orange/red). Includes tornado warnings, severe
+          thunderstorm warnings, flash flood warnings, winter storms, and tropical cyclone
+          advisories across the continental US.
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ MAGNETOSPHERE & SPACE WEATHER ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 12px">Magnetosphere &amp; Space Weather</div>
     <div class="sim-cards">
       <div class="sim-card">
         <div class="sim-card-icon">🛡️</div>
-        <div class="sim-card-title">Bow Shock &amp; Magnetosheath</div>
+        <div class="sim-card-title">Bow Shock &amp; Magnetopause</div>
         <div class="sim-card-body">
-          The bow shock forms at roughly <strong>13–14 Earth radii</strong> (Re) sunward, where
-          supersonic solar wind (~400 km/s) is abruptly decelerated. The Rankine-Hugoniot jump
-          conditions heat and deflect plasma into the magnetosheath — visualized as orange-tinted
-          shocked particles.
-        </div>
-      </div>
-      <div class="sim-card">
-        <div class="sim-card-icon">🌀</div>
-        <div class="sim-card-title">Magnetopause (Shue Model)</div>
-        <div class="sim-card-body">
-          The magnetopause boundary is calculated using the <strong>Shue et al. (1998)</strong>
-          empirical model, parameterized by solar wind dynamic pressure and the IMF Bz component.
-          Southward Bz compresses the dayside boundary; strong storms push it inside geostationary
-          orbit (~6.6 Re).
-        </div>
-      </div>
-      <div class="sim-card">
-        <div class="sim-card-icon">🌌</div>
-        <div class="sim-card-title">Magnetotail &amp; Plasma Sheet</div>
-        <div class="sim-card-body">
-          On the nightside, the magnetotail stretches to <strong>80+ Re</strong> — far beyond the
-          Moon's orbit. The central plasma sheet (high-density, ~1–5 keV particles) brightens
-          during substorms as stored magnetic energy explosively reconnects and accelerates
-          particles toward the poles.
+          <strong>Shue et al. (1998)</strong> magnetopause + <strong>Farris-Russell (1994)</strong>
+          bow shock, parameterized by live solar wind pressure + IMF Bz from <strong>NOAA DSCOVR</strong>.
+          Magnetosheath fill, polar cusp funnels, dayside X-line reconnection glow (Bz-driven).
+          Updates every 60 seconds.
         </div>
       </div>
       <div class="sim-card">
         <div class="sim-card-icon">🌠</div>
-        <div class="sim-card-title">Aurora &amp; Substorms</div>
+        <div class="sim-card-title">Aurora &amp; Radiation Belts</div>
         <div class="sim-card-body">
-          3D auroral curtains expand equatorward as Kp rises (<strong>Kp ≥ 5 = G1 storm</strong>).
-          Color gradients reflect emission height: green O 557.7 nm at 100–150 km, shifting to
-          purple N₂⁺ + red O 630 nm above 200 km. Substorm onset (McPherron heuristic) triggers
-          a ripple flash across both ovals.
+          Multi-arc auroral curtains with altitude-dependent colours (green/red/purple),
+          substorm breakup flickering at Kp &gt; 5. <strong>Van Allen belts</strong> (inner 1.6 Re,
+          outer 4-6 Re), <strong>plasmasphere</strong> (Carpenter &amp; Anderson 1992), and
+          ring current Dst injection. All driven by live Kp/Bz/Dst.
         </div>
       </div>
       <div class="sim-card">
-        <div class="sim-card-icon">🗺️</div>
-        <div class="sim-card-title">3D Globe &amp; Ground Effects</div>
+        <div class="sim-card-icon">💨</div>
+        <div class="sim-card-title">Exosphere &amp; Geocorona</div>
         <div class="sim-card-body">
-          The interactive globe shows live <strong>earthquake events</strong> (USGS feed),
-          geomagnetic storm impact zones, aurora visibility oval, and atmospheric layers.
-          Overlays include field-aligned current regions and ground-level induction risk during
-          severe storms.
+          Solar-wind-driven exopause shell with Fresnel glow and Alfvénic surface waves.
+          Geocorona hydrogen torus, charge-exchange standoff halo, neutral-H escape plume.
+          Physics from <strong>Hodges (1994)</strong> and <strong>Baliukin (2019) SOHO/SWAN</strong>.
+          Nose compressed by solar wind dynamic pressure.
         </div>
       </div>
       <div class="sim-card">
-        <div class="sim-card-icon">📊</div>
-        <div class="sim-card-title">Live Geomagnetic Data</div>
+        <div class="sim-card-icon">☀️</div>
+        <div class="sim-card-title">Solar Wind &amp; Coupling</div>
         <div class="sim-card-body">
-          Kp index, Dst, IMF Bz, solar wind speed and density all update every
-          <strong>5 minutes</strong> from NOAA/SWPC. Storm levels follow the
-          <strong>NOAA G1–G5 scale</strong>, from minor (Kp 5) to extreme (Kp 9), with
-          real-time aurora visibility latitude estimates.
+          5,000 solar wind particles deflected by the magnetopause. Akasofu epsilon energy input,
+          Newell merging rate, field-aligned currents (R1+R2), substorm onset index, Alfvén speed.
+          CME transit time estimates from <strong>NASA DONKI</strong>. L1 propagation delay computed.
         </div>
       </div>
     </div>
 
+    <!-- ═══ NASA EARTH OBSERVATIONS ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 12px">NASA Earth Observations (17 layers)</div>
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">🌊</div>
+        <div class="sim-card-title">Ocean Layers</div>
+        <div class="sim-card-body">
+          <strong>Sea Surface Temperature</strong> (JPL MUR SST, daily), <strong>Ocean Chlorophyll-a</strong>
+          (MODIS ocean colour — phytoplankton blooms), <strong>Coral Bleaching Alerts</strong>
+          (NOAA CRW 7-day thermal stress), plus <strong>NDBC buoy observations</strong> — wave height,
+          period, SST, and wind from 1,300 ocean buoys worldwide (10-min refresh via proxy).
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🔥</div>
+        <div class="sim-card-title">Land &amp; Hazards</div>
+        <div class="sim-card-body">
+          <strong>Active Fires</strong> (MODIS thermal anomalies), <strong>Nighttime Lights</strong>
+          (VIIRS Day/Night Band — cities, fishing fleets, gas flares), <strong>Vegetation NDVI</strong>
+          (8-day composite crop/forest health), <strong>Land Surface Temperature</strong> (MODIS),
+          <strong>Snow Cover</strong> (MODIS 500m). All from <strong>NASA GIBS</strong>, daily updates.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌫️</div>
+        <div class="sim-card-title">Atmosphere Observations</div>
+        <div class="sim-card-body">
+          <strong>Precipitation Rate</strong> (GPM IMERG, 30-min near-real-time), <strong>Aerosol
+          Optical Depth</strong> (MODIS AOD — dust, smoke, pollution), <strong>Ozone Column</strong>
+          (OMPS — ozone hole tracking), <strong>Dust/Aerosol Index</strong> (OMPS UV),
+          <strong>Water Vapor</strong> (AIRS — atmospheric rivers), <strong>Lightning</strong>
+          (GOES GLM flash density). Cloud optical thickness for storm intensity.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">❄️</div>
+        <div class="sim-card-title">Cryosphere</div>
+        <div class="sim-card-body">
+          <strong>Sea Ice Concentration</strong> (AMSR2 12km — Arctic + Antarctic daily extent),
+          <strong>Snow Cover</strong> (MODIS binary classification at 500m). Tracks seasonal
+          ice growth and retreat across both polar regions. Climate monitoring visualization.
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ GEOPHYSICAL & TRACKING ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 12px">Geophysical Events &amp; Satellite Tracking</div>
+    <div class="sim-cards">
+      <div class="sim-card">
+        <div class="sim-card-icon">🌋</div>
+        <div class="sim-card-title">Earthquakes &amp; Geohazards</div>
+        <div class="sim-card-body">
+          Live <strong>USGS earthquake feed</strong> — M2.5+ events from the past 30 days with
+          magnitude-scaled 3D markers (InstancedMesh for one draw call). Color-coded by magnitude
+          (blue M2.5 → red M7+). Tectonic plate boundaries from <strong>USGS PB2002</strong> GeoJSON.
+          Volcanic eruption alerts from <strong>USGS VHP</strong>, tsunami warnings from <strong>NOAA NWS</strong>.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🛰️</div>
+        <div class="sim-card-title">Satellite Tracking</div>
+        <div class="sim-card-body">
+          <strong>SGP4</strong> orbit propagation (WASM + JS fallback) from <strong>CelesTrak TLEs</strong>.
+          Track ISS, Starlink (5,000+), weather satellites, GPS/GNSS, and debris.
+          Conjunction screening with 72-hour look-ahead. Metadata enrichment from
+          <strong>Space-Track.org</strong> (object type, country, RCS size) via server proxy.
+        </div>
+      </div>
+      <div class="sim-card">
+        <div class="sim-card-icon">🌬️</div>
+        <div class="sim-card-title">Air Quality &amp; Jet Stream</div>
+        <div class="sim-card-body">
+          Global PM2.5 air quality from <strong>OpenAQ</strong> (80,000+ monitoring stations with
+          EPA AQI calculation). Jet stream position from <strong>NOAA GFS 250hPa wind</strong>
+          at 2° resolution via NOMADS proxy. Wind speeds &gt;30 m/s (108 km/h) visualized as
+          the jet stream core.
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ DATA SOURCES ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:28px 0 12px">Live Data Sources</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;margin-bottom:24px">
+      <div style="background:rgba(0,198,255,.03);border:1px solid rgba(0,198,255,.08);border-radius:8px;padding:12px 14px;font-size:.78rem;line-height:1.7;color:#4a6e80">
+        <strong style="color:#5599bb">NOAA SWPC</strong> — Solar wind, Kp, X-ray, protons, electrons, aurora, alerts, Dst (1-min cadence)<br>
+        <strong style="color:#5599bb">NASA DONKI</strong> — CMEs, flares, geomagnetic storms, solar particle events (15-min)<br>
+        <strong style="color:#5599bb">NASA GIBS</strong> — 17 Earth observation imagery layers (10-min to daily)<br>
+        <strong style="color:#5599bb">Open-Meteo</strong> — Global weather from GFS at 5° grid (10-min refresh)
+      </div>
+      <div style="background:rgba(0,198,255,.03);border:1px solid rgba(0,198,255,.08);border-radius:8px;padding:12px 14px;font-size:.78rem;line-height:1.7;color:#4a6e80">
+        <strong style="color:#5599bb">CelesTrak</strong> — TLE satellite catalog for SGP4 propagation (8-hr refresh)<br>
+        <strong style="color:#5599bb">Space-Track.org</strong> — Debris metadata, object classification (6-hr via proxy)<br>
+        <strong style="color:#5599bb">USGS</strong> — Earthquakes (15-min), volcanic alerts (hourly), tectonic plates<br>
+        <strong style="color:#5599bb">NOAA NDBC</strong> — Ocean buoy observations: waves, SST, wind (10-min via proxy)
+      </div>
+      <div style="background:rgba(0,198,255,.03);border:1px solid rgba(0,198,255,.08);border-radius:8px;padding:12px 14px;font-size:.78rem;line-height:1.7;color:#4a6e80">
+        <strong style="color:#5599bb">NOAA NOMADS</strong> — GFS 0.25° upper-atmosphere wind (jet stream, hourly via proxy)<br>
+        <strong style="color:#5599bb">OpenAQ</strong> — PM2.5 air quality from 80K+ global stations (30-min)<br>
+        <strong style="color:#5599bb">NOAA NWS</strong> — Severe weather alerts, tsunami warnings (5-min)<br>
+        <strong style="color:#5599bb">NHC</strong> — Tropical cyclone positions and intensity (30-min)
+      </div>
+    </div>
+
+    <!-- ═══ CONTROLS ═══ -->
+    <div style="font-size:.72rem;color:#336a8a;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:20px 0 12px">Controls &amp; Keyboard Shortcuts</div>
     <div class="sim-controls-grid">
       <div class="sim-ctrl-row"><span class="sim-ctrl-key">Drag</span><span class="sim-ctrl-desc">Rotate camera around Earth</span></div>
-      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out</span></div>
-      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Layers</span><span class="sim-ctrl-desc">Toggle bow shock, aurora, tail, field lines</span></div>
-      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Info</span><span class="sim-ctrl-desc">Live Kp, Bz, storm level readings</span></div>
-      <div class="sim-ctrl-row"><span class="sim-ctrl-key">⚡ Weather</span><span class="sim-ctrl-desc">Full space weather data dashboard</span></div>
-      <div class="sim-ctrl-row"><span class="sim-ctrl-key">📍 Here</span><span class="sim-ctrl-desc">Show your location on the globe</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Scroll</span><span class="sim-ctrl-desc">Zoom in / out (76 km → 60,000 km)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">Space</span><span class="sim-ctrl-desc">Pause / resume time</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">[ / ]</span><span class="sim-ctrl-desc">Slow down / speed up time (1× to 86,400×)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">\</span><span class="sim-ctrl-desc">Return to live real-time</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">1–5</span><span class="sim-ctrl-desc">Layer presets (All / Off / Surface / Space Wx / Minimal)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">P</span><span class="sim-ctrl-desc">Toggle performance monitor (FPS, draw calls, triangles)</span></div>
+      <div class="sim-ctrl-row"><span class="sim-ctrl-key">?</span><span class="sim-ctrl-desc">Show all keyboard shortcuts</span></div>
     </div>
 
-    <div class="sim-links">
+    <div class="sim-links" style="margin-top:20px">
       <a href="space-weather.html" class="sim-link">⚡ Space Weather Dashboard</a>
       <a href="sun.html" class="sim-link">☀️ Solar Physics Engine</a>
+      <a href="satellites.html" class="sim-link">🛰️ Satellite Tracker</a>
       <a href="index.html" class="sim-link">🌌 Heliosphere 3D</a>
     </div>
   </div>
