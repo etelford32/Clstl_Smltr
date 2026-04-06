@@ -1,0 +1,24 @@
+[package]
+name = "earth_analytics_ecs"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance Earth simulation analytics with ECS architecture, compiled to WASM"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = 3       # Max speed (not size — these are compute-heavy analytics)
+lto = true
+codegen-units = 1
+strip = true
