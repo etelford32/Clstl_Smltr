@@ -313,9 +313,6 @@ void main() {
         dayGraded = mix(dayGraded, vec3(0.85, 0.88, 0.92), iceMask * 0.4);
     }
 
-    // ── Blend day/night ───────────────────────────────────────────────────────
-    vec3 base = mix(cityLights * cityVis, dayGraded, dayFull);
-
     // ── Lighting model ────────────────────────────────────────────────────────
     float lambert = max(NdotL, 0.0);
 
@@ -323,22 +320,30 @@ void main() {
     float skyVis = 0.5 + 0.5 * Nflat.y;
     vec3 skyAmbient = mix(vec3(0.02, 0.015, 0.01), vec3(0.04, 0.06, 0.12), skyVis);
 
-    // Subsurface forward-scattering at terminator: sunlight filters through
-    // the atmosphere and illuminates the dark side near the terminator.
-    // This creates a soft warm glow just past the shadow line.
+    // Subsurface forward-scattering at terminator
     float sssZone = smoothstep(-0.15, 0.0, NdotLf) * smoothstep(0.05, -0.08, NdotLf);
     vec3 sssLight = vec3(0.18, 0.06, 0.01) * sssZone * 0.8;
 
-    // Direct light: warm-white sunlight
+    // Direct sunlight
     vec3 sunCol = vec3(1.0, 0.98, 0.92);
     vec3 directLight = sunCol * lambert * dayFull;
 
-    // Cloud shadow on surface (darkens ground beneath thick clouds)
+    // Cloud shadow on surface
     float cShadow = cloudShadow(vUv, L);
 
-    // Total illumination
+    // Total illumination for terrain/ocean
     vec3 illumination = (directLight * cShadow) + skyAmbient + sssLight;
-    base *= illumination;
+
+    // Nightside ambient — faint blue-grey so land/ocean are visible (not black)
+    // Real Earth nightside is illuminated by starlight + airglow (~0.001 lux)
+    vec3 nightAmbient = vec3(0.010, 0.012, 0.025) * nightFull;
+
+    // ── Blend day/night ───────────────────────────────────────────────────────
+    // CRITICAL: city lights are SELF-LUMINOUS — they must NOT be multiplied
+    // by illumination (which is near-zero on the nightside). Instead, add them
+    // on top of the lit terrain. This is why the dark side was invisible before.
+    vec3 litSurface = dayGraded * illumination + nightAmbient;
+    vec3 base = litSurface + cityLights * cityVis;
 
     // ── Ocean specular (single GGX + Fresnel) ──────────────────────────────────
     // Merged dual-lobe into one medium-roughness lobe (0.08) — visually equivalent,

@@ -2343,15 +2343,6 @@ class WindParticles {
         this.spd[i]    = 0;
     }
 
-    _lookupWind(lat, lon) {
-        if (!this.windBuf) return { u: 0, v: 0, s: 0 };
-        const ix = Math.round((lon / 360 + 0.5) * (TEX_W - 1) + TEX_W) % TEX_W;
-        const iy = Math.max(0, Math.min(TEX_H - 1,
-            Math.round((0.5 - lat / 180) * (TEX_H - 1))));
-        const k4 = (iy * TEX_W + ix) * 4;
-        return { u: this.windBuf[k4], v: this.windBuf[k4+1], s: this.windBuf[k4+2] };
-    }
-
     update(dt) {
         // Single fused loop: advect + write position + colour in one pass
         // (eliminates redundant iteration, better cache locality)
@@ -2492,6 +2483,8 @@ const earthObsFeed = new EarthObsFeed();
 // The feed starts with an empty enabled set until a checkbox fires.
 
 // Observation overlay meshes — transparent sphere shells above the cloud layer
+// Shared geometry (32 segments — sufficient for overlay, saves 3x over 60-seg)
+const _obsGeo = new THREE.SphereGeometry(1.012, 32, 32);
 const _obsOverlays = {};
 
 function _createObsOverlay(layerId) {
@@ -2501,7 +2494,7 @@ function _createObsOverlay(layerId) {
         side: THREE.FrontSide, blending: THREE.NormalBlending,
     });
     const mesh = new THREE.Mesh(
-        new THREE.SphereGeometry(1.012, 60, 60),  // just above clouds (1.009)
+        _obsGeo,  // shared geometry — just above clouds
         mat
     );
     mesh.visible = false;
@@ -2653,82 +2646,76 @@ document.getElementById('wx-refresh').addEventListener('click', () => {
 class AlertMarkers {
     constructor(parent) {
         this._parent   = parent;
-        this._dotGeo   = new THREE.SphereGeometry(0.009, 7, 7);
-        this._ringGeo  = new THREE.RingGeometry(0.013, 0.022, 20);
-        this._dots     = [];   // { mesh, alert }
-        this._rings    = [];   // { mesh, freq, phase }
+        this._dummy    = new THREE.Object3D();
+        this._geo      = new THREE.SphereGeometry(0.009, 6, 6);
+        this._mat      = new THREE.MeshBasicMaterial({
+            color: 0xff8800, transparent: true, opacity: 0.85,
+        });
+        this._mesh     = null;  // InstancedMesh (single draw call)
+        this._alerts   = [];
+        this._colors   = [];    // per-instance colour cache
         this._visible  = true;
     }
 
     setVisible(v) {
         this._visible = v;
-        this._dots.forEach(d => d.mesh.visible = v);
-        this._rings.forEach(r => { r.mesh.visible = v; });
+        if (this._mesh) this._mesh.visible = v;
     }
 
-    // Replace all markers from a fresh alert array
+    // Replace all markers — single InstancedMesh for all alerts
     rebuild(alerts) {
-        // Dispose existing (share geometries, clone materials)
-        this._dots.forEach(d  => { this._parent.remove(d.mesh);  d.mesh.material.dispose(); });
-        this._rings.forEach(r => { this._parent.remove(r.mesh); r.mesh.material.dispose(); });
-        this._dots  = [];
-        this._rings = [];
+        if (this._mesh) {
+            this._parent.remove(this._mesh);
+            this._mesh.dispose();
+        }
+        this._alerts = alerts;
+        if (alerts.length === 0) { this._mesh = null; return; }
 
-        for (const alert of alerts) {
+        const n = Math.min(alerts.length, 500);  // cap for sanity
+        this._mesh = new THREE.InstancedMesh(this._geo, this._mat, n);
+        this._mesh.visible = this._visible;
+        this._mesh.renderOrder = 4;
+        this._colors = [];
+
+        const col = new THREE.Color();
+        for (let i = 0; i < n; i++) {
+            const alert = alerts[i];
             const hexColor = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
             const phi = alert.lat * DEG, lam = alert.lon * DEG;
-            const r   = R_EARTH * 1.004;
+            const r = R_EARTH * 1.004;
 
-            // Earth-local Cartesian (+Z = prime meridian, +Y = north pole)
-            const pos = new THREE.Vector3(
+            this._dummy.position.set(
                 r * Math.cos(phi) * Math.sin(lam),
                 r * Math.sin(phi),
                 r * Math.cos(phi) * Math.cos(lam)
             );
-
-            // Core dot
-            const dotMat = new THREE.MeshBasicMaterial({ color: hexColor });
-            const dot    = new THREE.Mesh(this._dotGeo, dotMat);
-            dot.position.copy(pos);
-            dot.visible = this._visible;
-            this._parent.add(dot);
-            this._dots.push({ mesh: dot, alert });
-
-            // Pulse ring — lookAt(origin) makes ring tangent to sphere surface
-            const ringMat = new THREE.MeshBasicMaterial({
-                color: hexColor, transparent: true, opacity: 0.75,
-                side: THREE.DoubleSide, depthWrite: false,
-            });
-            const ring = new THREE.Mesh(this._ringGeo, ringMat);
-            ring.position.copy(pos);
-            ring.lookAt(new THREE.Vector3(0, 0, 0));
-            ring.visible = this._visible;
-            this._parent.add(ring);
-            this._rings.push({
-                mesh:  ring,
-                freq:  ALERT_PULSE_FREQ[alert.severity] ?? 0.5,
-                phase: Math.random() * Math.PI * 2,
-            });
+            this._dummy.updateMatrix();
+            this._mesh.setMatrixAt(i, this._dummy.matrix);
+            col.set(hexColor);
+            this._mesh.setColorAt(i, col);
+            this._colors.push(hexColor);
         }
+        this._mesh.instanceMatrix.needsUpdate = true;
+        if (this._mesh.instanceColor) this._mesh.instanceColor.needsUpdate = true;
+        this._parent.add(this._mesh);
+        // Store alert refs for hover detection
+        this._dots = alerts.slice(0, n).map((alert, i) => ({ alert, idx: i }));
     }
 
-    // Animate pulse rings each frame
+    // Animate: pulse opacity on the entire InstancedMesh (one uniform, not per-instance)
     tick(t) {
-        if (!this._visible) return;
-        for (const { mesh, freq, phase } of this._rings) {
-            const pulse = Math.sin(t * freq * Math.PI * 2 + phase) * 0.5 + 0.5;
-            const s     = 1 + pulse * 2.2;
-            mesh.scale.set(s, s, 1);
-            mesh.material.opacity = 0.72 * (1 - pulse * 0.88);
-        }
+        if (!this._visible || !this._mesh) return;
+        const pulse = Math.sin(t * 1.5 * Math.PI * 2) * 0.5 + 0.5;
+        this._mesh.material.opacity = 0.55 + pulse * 0.35;
     }
 
-    // Returns the alert under cursor, or null
+    // Returns the alert nearest to cursor via InstancedMesh intersection
     getHovered(raycaster) {
-        if (!this._visible || this._dots.length === 0) return null;
-        const hits = raycaster.intersectObjects(this._dots.map(d => d.mesh));
+        if (!this._visible || !this._mesh || this._dots.length === 0) return null;
+        const hits = raycaster.intersectObject(this._mesh);
         if (hits.length === 0) return null;
-        return this._dots.find(d => d.mesh === hits[0].object)?.alert ?? null;
+        const idx = hits[0].instanceId;
+        return (idx != null && idx < this._dots.length) ? this._dots[idx].alert : null;
     }
 }
 
