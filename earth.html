@@ -1866,11 +1866,14 @@ document.getElementById('lyr-lights').addEventListener('change', e => {
 document.getElementById('lyr-terrain').addEventListener('change', e => {
     earthU.u_bump_strength.value = e.target.checked ? 1.0 : 0.0;
 });
+let _gridOn = true, _tropicOn = true;
 document.getElementById('lyr-grid').addEventListener('change', e => {
-    gridGroup.visible = e.target.checked;
+    _gridOn = e.target.checked;
+    gridGroup.visible = _gridOn;
 });
 document.getElementById('lyr-tropic').addEventListener('change', e => {
-    tropicGroup.visible = e.target.checked;
+    _tropicOn = e.target.checked;
+    tropicGroup.visible = _tropicOn;
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
     const v = e.target.checked ? 1.0 : 0.0;
@@ -3667,6 +3670,10 @@ function animate() {
     const closeView  = dist < 2.5;   // zoomed in: surface detail matters
     const midView    = dist < 6.0;   // medium: weather + markers visible
     const farView    = dist >= 6.0;  // zoomed out: magnetosphere focus
+
+    // ── Mesh LOD — hide grid/tropics when zoomed far (invisible at that scale) ──
+    gridGroup.visible   = _gridOn && dist < 8.0;
+    tropicGroup.visible = _tropicOn && dist < 8.0;
 
     // ── Hi-res satellite imagery (3-tier LOD) ──────────────────────
     if (closeView) {
