@@ -1167,7 +1167,7 @@ nav {
         <!-- My Location -->
         <div class="loc-section-hdr">📍 My Location</div>
         <div class="loc-row">
-            <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+            <input id="loc-input" type="text" placeholder="City, zip, country, address…" maxlength="120" autocomplete="off">
             <button id="loc-search" title="Search location">↵</button>
             <button id="loc-gps" title="Use my GPS location" style="background:rgba(0,200,150,.15);border:1px solid rgba(0,200,150,.3);border-radius:4px;color:#0ca;padding:5px 9px;font-size:11px;cursor:pointer;flex-shrink:0;touch-action:manipulation;min-height:32px">📍</button>
         </div>
@@ -1175,6 +1175,7 @@ nav {
         <div id="loc-result">
             <div class="loc-city"   id="loc-city"></div>
             <div class="loc-coords" id="loc-coords"></div>
+            <div id="loc-full" style="display:none;color:#557;font-size:9px;margin:2px 0 3px;line-height:1.4;word-break:break-word"></div>
             <div class="loc-aurora" id="loc-aurora"></div>
             <div class="loc-btns">
                 <button class="loc-btn" id="loc-fly">📍 Fly here</button>
@@ -3992,13 +3993,22 @@ function _showLocResult(loc) {
     }
     const latStr = `${Math.abs(loc.lat).toFixed(4)}° ${loc.lat >= 0 ? 'N' : 'S'}`;
     const lonStr = `${Math.abs(loc.lon).toFixed(4)}° ${loc.lon >= 0 ? 'E' : 'W'}`;
-    document.getElementById('loc-city').textContent   = loc.city;
+    document.getElementById('loc-city').textContent   = loc.city || loc.displayName || 'Unknown';
     document.getElementById('loc-coords').textContent = latStr + ', ' + lonStr;
     document.getElementById('loc-result').style.display = 'block';
 
+    // Show full address if different from city label
+    const fullEl = document.getElementById('loc-full');
+    if (fullEl && loc.displayName && loc.displayName !== loc.city) {
+        fullEl.textContent = loc.displayName;
+        fullEl.style.display = 'block';
+    } else if (fullEl) {
+        fullEl.style.display = 'none';
+    }
+
     // Show in HUD
     document.getElementById('h-user-loc').style.display = '';
-    document.getElementById('h-user-loc-name').textContent = loc.city;
+    document.getElementById('h-user-loc-name').textContent = loc.city || 'My Location';
 
     _setUserPin(loc.lat, loc.lon);
     updateUserAuroraVis(_currentKp);
