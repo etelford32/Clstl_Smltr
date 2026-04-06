@@ -158,16 +158,65 @@ nav {
 /* ─── Layer panel ────────────────────────────────────────────── */
 #layer-panel {
     position:absolute; top:10px; right:10px; z-index:50;
-    background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
-    border:1px solid rgba(0,200,255,.18); border-radius:9px;
-    padding:12px 14px; width:190px; font-size:12px;
+    background:rgba(0,0,0,.78); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,255,.18); border-radius:10px;
+    padding:10px 12px; width:260px; font-size:12px;
+    max-height:calc(100vh - 80px); overflow-y:auto;
 }
+#layer-panel::-webkit-scrollbar { width:3px; }
+#layer-panel::-webkit-scrollbar-thumb { background:rgba(0,200,255,.2); border-radius:2px; }
 #layer-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
-    letter-spacing:.8px; margin-bottom:10px; }
-.lyr { display:flex; align-items:center; gap:8px; margin-bottom:7px; cursor:pointer; }
+    letter-spacing:.8px; margin-bottom:8px; }
+.lyr { display:flex; align-items:center; gap:7px; margin-bottom:4px; cursor:pointer; padding:2px 4px; border-radius:4px; transition:background .15s; }
+.lyr:hover { background:rgba(0,200,255,.06); }
 .lyr input[type=checkbox] { accent-color:#00c6ff; width:13px; height:13px; flex-shrink:0; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
+
+/* Layer color dot indicators */
+.lyr-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; opacity:.85; }
+
+/* Layer group headers */
+.lyr-group-hdr {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:5px 4px 3px; margin-top:6px; cursor:pointer; user-select:none;
+    border-radius:4px; transition:background .15s;
+}
+.lyr-group-hdr:first-child { margin-top:0; }
+.lyr-group-hdr:hover { background:rgba(0,200,255,.06); }
+.lyr-group-title {
+    font-size:.62rem; color:#336a8a; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase;
+    display:flex; align-items:center; gap:6px;
+}
+.lyr-group-title .icon { font-size:.8rem; opacity:.7; }
+.lyr-group-chevron {
+    font-size:9px; color:#4a6a80; transition:transform .2s; flex-shrink:0;
+}
+.lyr-group-body { overflow:hidden; transition:max-height .3s ease; }
+.lyr-group-body.collapsed { max-height:0 !important; overflow:hidden; }
+.lyr-group-count {
+    font-size:9px; color:#3a5a6a; background:rgba(0,200,255,.08);
+    padding:1px 5px; border-radius:3px; margin-left:auto; margin-right:4px;
+}
+
+/* Preset buttons */
+.lyr-presets { display:flex; gap:4px; margin:6px 0 4px; flex-wrap:wrap; }
+.lyr-preset-btn {
+    background:rgba(0,200,255,.08); border:1px solid rgba(0,200,255,.2);
+    border-radius:4px; color:#6aa; cursor:pointer; font-size:9px;
+    padding:3px 8px; font-family:inherit; transition:all .2s;
+    white-space:nowrap;
+}
+.lyr-preset-btn:hover { background:rgba(0,200,255,.18); color:#0cf; border-color:rgba(0,200,255,.4); }
+.lyr-preset-btn.active { background:rgba(0,200,255,.15); color:#0cf; border-color:#0cf; }
+
+/* Keyboard shortcut hint */
+.lyr-key {
+    font-size:8px; color:#3a5a6a; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.08); border-radius:2px;
+    padding:0 3px; margin-left:auto; font-family:monospace; flex-shrink:0;
+}
 
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
@@ -452,11 +501,8 @@ nav {
     /* Show close button on mobile */
     .panel-close { display: block; }
 
-    /* Layer panel: two-column grid for checkboxes */
-    #layer-panel .lyr-grid {
-        display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
-        margin-bottom: 4px;
-    }
+    /* Layer panel: wider on mobile for grouped layout */
+    #layer-panel { width: 100%; max-height: 72vh; }
 
     /* Touch-friendly checkbox rows */
     .lyr { margin-bottom: 4px; }
@@ -612,50 +658,124 @@ nav {
             </div>
         </div>
         <div class="panel-body">
-        <div class="lyr-grid">
-        <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-terrain" checked><label for="lyr-terrain">Terrain Relief</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+
+        <!-- Quick presets -->
+        <div class="lyr-presets">
+            <button class="lyr-preset-btn" id="preset-all-on" title="Enable all layers">All On</button>
+            <button class="lyr-preset-btn" id="preset-all-off" title="Disable all layers">All Off</button>
+            <button class="lyr-preset-btn" id="preset-surface" title="Surface layers only">Surface</button>
+            <button class="lyr-preset-btn" id="preset-space-wx" title="Space weather focus">Space Wx</button>
+            <button class="lyr-preset-btn" id="preset-minimal" title="Minimal clean view">Minimal</button>
         </div>
-        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
-            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">NASA EARTH OBSERVATIONS</div>
-            <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><label for="lyr-obs-fires">Active Fires</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><label for="lyr-obs-snow">Snow Cover</label></label>
+
+        <!-- ═══ SURFACE & ATMOSPHERE ═══ -->
+        <div class="lyr-group" data-group="surface">
+            <div class="lyr-group-hdr" data-toggle-group="surface">
+                <span class="lyr-group-title"><span class="icon">🌍</span> Surface &amp; Atmosphere</span>
+                <span class="lyr-group-count" data-group-count="surface">8</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body" data-group-body="surface">
+                <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-dot" style="background:#ccc"></span><label for="lyr-clouds">Cloud Cover</label><span class="lyr-key">C</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><span class="lyr-dot" style="background:#4488cc"></span><label for="lyr-atm">Atmosphere</label><span class="lyr-key">A</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><span class="lyr-dot" style="background:#22ff66"></span><label for="lyr-aurora">Aurora</label><span class="lyr-key">U</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-lights" checked><span class="lyr-dot" style="background:#ffcc44"></span><label for="lyr-lights">City Lights</label><span class="lyr-key">L</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-terrain" checked><span class="lyr-dot" style="background:#886644"></span><label for="lyr-terrain">Terrain Relief</label><span class="lyr-key">T</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><span class="lyr-dot" style="background:#2a5080"></span><label for="lyr-grid">Lat/Lon Grid</label><span class="lyr-key">G</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><span class="lyr-dot" style="background:#ff8c00"></span><label for="lyr-tropic">Tropics &amp; Circles</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><span class="lyr-dot" style="background:#888"></span><label for="lyr-rotate">Auto-rotate</label><span class="lyr-key">R</span></label>
             </div>
         </div>
-        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
-            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">SATELLITE TRACKING</div>
-            <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><label for="lyr-sat-stations">Space Stations</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><label for="lyr-sat-starlink">Starlink</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><label for="lyr-sat-weather">Weather Sats</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><label for="lyr-sat-gps">GPS/GNSS</label></label>
+
+        <!-- ═══ WEATHER ═══ -->
+        <div class="lyr-group" data-group="weather">
+            <div class="lyr-group-hdr" data-toggle-group="weather">
+                <span class="lyr-group-title"><span class="icon">🌦</span> Weather Systems</span>
+                <span class="lyr-group-count" data-group-count="weather">4</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body" data-group-body="weather">
+                <label class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-dot" style="background:linear-gradient(135deg,#33f,#f33)"></span><label for="lyr-weather">Temperature Overlay</label><span class="lyr-key">W</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-dot" style="background:#88ddff"></span><label for="lyr-wind">Wind Particles</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-dot" style="background:#aaddff"></span><label for="lyr-isobars">Isobars</label><span class="lyr-key">I</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><span class="lyr-dot" style="background:#ff8800"></span><label for="lyr-alerts">Storm Alerts</label></label>
+            </div>
+        </div>
+
+        <!-- ═══ MAGNETOSPHERE ═══ -->
+        <div class="lyr-group" data-group="magneto">
+            <div class="lyr-group-hdr" data-toggle-group="magneto">
+                <span class="lyr-group-title"><span class="icon">🧲</span> Magnetosphere</span>
+                <span class="lyr-group-count" data-group-count="magneto">7</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body" data-group-body="magneto">
+                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><span class="lyr-dot" style="background:#44aaff"></span><label for="lyr-magnetopause">Magnetopause</label><span class="lyr-key">M</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><span class="lyr-dot" style="background:#ff6644"></span><label for="lyr-bowshock">Bow Shock</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><span class="lyr-dot" style="background:#996622"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><span class="lyr-dot" style="background:#ff4488"></span><label for="lyr-reconnection">X-line Reconnect</label><span class="lyr-key">X</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><span class="lyr-dot" style="background:#cc88ff"></span><label for="lyr-cusps">Polar Cusps</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><span class="lyr-dot" style="background:#ff8844"></span><label for="lyr-belts">Van Allen Belts</label><span class="lyr-key">V</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><span class="lyr-dot" style="background:#00cccc"></span><label for="lyr-plasma">Plasmasphere</label></label>
+            </div>
+        </div>
+
+        <!-- ═══ EXOSPHERE ═══ -->
+        <div class="lyr-group" data-group="exo">
+            <div class="lyr-group-hdr" data-toggle-group="exo">
+                <span class="lyr-group-title"><span class="icon">💨</span> Exosphere &amp; Geocorona</span>
+                <span class="lyr-group-count" data-group-count="exo">3</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body" data-group-body="exo">
+                <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><span class="lyr-dot" style="background:#66bbff"></span><label for="lyr-exosphere">Exosphere Shell</label><span class="lyr-key">E</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><span class="lyr-dot" style="background:#aaddff"></span><label for="lyr-geocorona">Geocorona Torus</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><span class="lyr-dot" style="background:#88aacc"></span><label for="lyr-chex">Charge Exchange</label></label>
+            </div>
+        </div>
+
+        <!-- ═══ EVENTS & TRACKERS ═══ -->
+        <div class="lyr-group" data-group="events">
+            <div class="lyr-group-hdr" data-toggle-group="events">
+                <span class="lyr-group-title"><span class="icon">📡</span> Events &amp; Tracking</span>
+                <span class="lyr-group-count" data-group-count="events">2</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body" data-group-body="events">
+                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><span class="lyr-dot" style="background:#ff4400"></span><label for="lyr-earthquakes">Earthquakes</label><span class="lyr-key">Q</span></label>
+                <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><span class="lyr-dot" style="background:#00ffcc"></span><label for="lyr-iss">ISS Tracker</label></label>
+            </div>
+        </div>
+
+        <!-- ═══ NASA OBSERVATIONS ═══ -->
+        <div class="lyr-group" data-group="obs">
+            <div class="lyr-group-hdr" data-toggle-group="obs">
+                <span class="lyr-group-title"><span class="icon">🛰</span> NASA Earth Observations</span>
+                <span class="lyr-group-count" data-group-count="obs">6</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body collapsed" data-group-body="obs">
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-dot" style="background:#33aaff"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><span class="lyr-dot" style="background:#ff4433"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-dot" style="background:#aa8855"></span><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-dot" style="background:#dddddd"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-dot" style="background:#ff6600"></span><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-dot" style="background:#eeeeff"></span><label for="lyr-obs-snow">Snow Cover</label></label>
+            </div>
+        </div>
+
+        <!-- ═══ SATELLITES ═══ -->
+        <div class="lyr-group" data-group="sats">
+            <div class="lyr-group-hdr" data-toggle-group="sats">
+                <span class="lyr-group-title"><span class="icon">🛰</span> Satellite Tracking</span>
+                <span class="lyr-group-count" data-group-count="sats">4</span>
+                <span class="lyr-group-chevron">▾</span>
+            </div>
+            <div class="lyr-group-body collapsed" data-group-body="sats">
+                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><span class="lyr-dot" style="background:#00ffcc"></span><label for="lyr-sat-stations">Space Stations</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-dot" style="background:#aabbcc"></span><label for="lyr-sat-starlink">Starlink</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-dot" style="background:#44aaff"></span><label for="lyr-sat-weather">Weather Sats</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-dot" style="background:#ffaa22"></span><label for="lyr-sat-gps">GPS/GNSS</label></label>
             </div>
             <div style="display:flex;gap:4px;margin-top:6px;align-items:center">
                 <input id="sat-norad-input" type="text" placeholder="NORAD ID (e.g. 25544)" maxlength="8"
@@ -665,6 +785,13 @@ nav {
             <div id="sat-status" style="font-size:.62rem;color:#556;margin-top:4px;line-height:1.4"></div>
             <div id="sat-conjunction-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.5;display:none"></div>
         </div>
+
+        <!-- Performance + keyboard hint -->
+        <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);display:flex;justify-content:space-between;align-items:center">
+            <button class="lyr-preset-btn" id="btn-perf-toggle" title="Toggle performance overlay (P)">Perf Monitor</button>
+            <span style="font-size:8px;color:#3a5a6a">? = shortcuts</span>
+        </div>
+
     </div>
     </div>
 
@@ -1052,6 +1179,7 @@ import {
 } from './js/earth-skin.js';
 import { StormFeed } from './js/storm-feed.js';
 import { EarthHiRes } from './js/earth-hires.js';
+import { PerfEngine } from './js/perf-engine.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -1157,9 +1285,12 @@ function fmtLT(lon, utcH) {
 //  RENDERER + CAMERA + CONTROLS
 // ═══════════════════════════════════════════════════════════════
 const canvas   = document.getElementById('c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, /Mobi|Android/i.test(navigator.userAgent) ? 1.5 : 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// ── Adaptive performance engine (monitors FPS, auto-adjusts quality) ────
+const perf = new PerfEngine(renderer, { targetFPS: 55 });
 
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(40, 1, 0.001, 200);
@@ -1247,25 +1378,30 @@ const stratU = {
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
-const earthGeo = new THREE.SphereGeometry(R_EARTH, 160, 160);
+// ── Geometry segments: adaptive to initial quality tier ───────────────────
+const _seg = perf.segments;  // [earth, clouds, atm]
+
+const earthGeo = new THREE.SphereGeometry(R_EARTH, _seg[0], _seg[0]);
 const earthMat = new THREE.ShaderMaterial({
     vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
     extensions: { derivatives: true },
 });
 const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+earthMesh.frustumCulled = false;  // always visible (center of scene)
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
-const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 120, 120);
+const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, _seg[1], _seg[1]);
 const cloudMat = new THREE.ShaderMaterial({
     vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+cloudMesh.frustumCulled = false;
 scene.add(cloudMesh);
 
-const stratGeo = new THREE.SphereGeometry(R_STRAT, 80, 80);
+const stratGeo = new THREE.SphereGeometry(R_STRAT, _seg[2], _seg[2]);
 const stratMat = new THREE.ShaderMaterial({
     vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,  // reuse rim shader at tighter radius
     uniforms: stratU, transparent: true, depthWrite: false,
@@ -1273,7 +1409,7 @@ const stratMat = new THREE.ShaderMaterial({
 });
 scene.add(new THREE.Mesh(stratGeo, stratMat));
 
-const atmGeo = new THREE.SphereGeometry(R_ATM, 80, 80);
+const atmGeo = new THREE.SphereGeometry(R_ATM, _seg[2], _seg[2]);
 const atmMat = new THREE.ShaderMaterial({
     vertexShader: ATM_VERT, fragmentShader: ATM_FRAG,
     uniforms: atmU, transparent: true, depthWrite: false,
@@ -1680,6 +1816,178 @@ document.getElementById('lyr-earthquakes').addEventListener('change', e => {
 document.getElementById('lyr-iss').addEventListener('change', e => {
     issMarker.setVisible(e.target.checked);
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  LAYER PANEL: GROUP COLLAPSE/EXPAND + PRESETS + KEYBOARD
+// ═══════════════════════════════════════════════════════════════
+{
+    // ── Group collapse/expand ────────────────────────────────────
+    document.querySelectorAll('[data-toggle-group]').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+            const name = hdr.dataset.toggleGroup;
+            const body = document.querySelector(`[data-group-body="${name}"]`);
+            const chev = hdr.querySelector('.lyr-group-chevron');
+            if (!body) return;
+            body.classList.toggle('collapsed');
+            if (chev) chev.textContent = body.classList.contains('collapsed') ? '▸' : '▾';
+        });
+        // Set initial chevron state
+        const name = hdr.dataset.toggleGroup;
+        const body = document.querySelector(`[data-group-body="${name}"]`);
+        const chev = hdr.querySelector('.lyr-group-chevron');
+        if (body && chev && body.classList.contains('collapsed')) chev.textContent = '▸';
+    });
+
+    // ── Update group active counts ──────────────────────────────
+    function updateGroupCounts() {
+        document.querySelectorAll('[data-group-count]').forEach(el => {
+            const name = el.dataset.groupCount;
+            const body = document.querySelector(`[data-group-body="${name}"]`);
+            if (!body) return;
+            const checks = body.querySelectorAll('input[type=checkbox]');
+            const active = [...checks].filter(c => c.checked).length;
+            el.textContent = `${active}/${checks.length}`;
+            el.style.color = active === 0 ? '#555' : active === checks.length ? '#0cf' : '#8ab';
+        });
+    }
+    // Update counts on any checkbox change
+    document.getElementById('layer-panel').addEventListener('change', updateGroupCounts);
+    updateGroupCounts();
+
+    // ── Helper: set checkbox + fire change event ────────────────
+    function setLayer(id, val) {
+        const cb = document.getElementById(id);
+        if (cb && cb.checked !== val) {
+            cb.checked = val;
+            cb.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }
+
+    // ── Presets ──────────────────────────────────────────────────
+    const ALL_LAYERS = [
+        'lyr-clouds','lyr-atm','lyr-aurora','lyr-lights','lyr-terrain',
+        'lyr-grid','lyr-tropic','lyr-weather','lyr-wind','lyr-isobars',
+        'lyr-alerts','lyr-magnetopause','lyr-bowshock','lyr-magnetosheath',
+        'lyr-reconnection','lyr-cusps','lyr-belts','lyr-plasma',
+        'lyr-exosphere','lyr-geocorona','lyr-chex','lyr-rotate',
+        'lyr-earthquakes','lyr-iss',
+    ];
+
+    const PRESETS = {
+        'all-on':   () => ALL_LAYERS.forEach(id => setLayer(id, true)),
+        'all-off':  () => ALL_LAYERS.filter(id => id !== 'lyr-rotate').forEach(id => setLayer(id, false)),
+        'surface':  () => {
+            ALL_LAYERS.forEach(id => setLayer(id, false));
+            ['lyr-clouds','lyr-atm','lyr-aurora','lyr-lights','lyr-terrain',
+             'lyr-grid','lyr-rotate','lyr-wind','lyr-isobars'].forEach(id => setLayer(id, true));
+        },
+        'space-wx': () => {
+            ALL_LAYERS.forEach(id => setLayer(id, false));
+            ['lyr-atm','lyr-aurora','lyr-magnetopause','lyr-bowshock',
+             'lyr-magnetosheath','lyr-reconnection','lyr-cusps','lyr-belts',
+             'lyr-plasma','lyr-exosphere','lyr-geocorona','lyr-chex',
+             'lyr-rotate'].forEach(id => setLayer(id, true));
+        },
+        'minimal':  () => {
+            ALL_LAYERS.forEach(id => setLayer(id, false));
+            ['lyr-clouds','lyr-atm','lyr-terrain','lyr-rotate'].forEach(id => setLayer(id, true));
+        },
+    };
+
+    document.querySelectorAll('.lyr-preset-btn[id^="preset-"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const key = btn.id.replace('preset-', '');
+            if (PRESETS[key]) PRESETS[key]();
+        });
+    });
+
+    // ── Performance monitor toggle ──────────────────────────────
+    document.getElementById('btn-perf-toggle')?.addEventListener('click', () => {
+        perf.toggleOverlay();
+    });
+
+    // ── Keyboard shortcuts (only when not typing in input) ──────
+    const KEY_MAP = {
+        'c': 'lyr-clouds',     'a': 'lyr-atm',       'u': 'lyr-aurora',
+        'l': 'lyr-lights',     't': 'lyr-terrain',    'g': 'lyr-grid',
+        'w': 'lyr-weather',    'i': 'lyr-isobars',    'r': 'lyr-rotate',
+        'm': 'lyr-magnetopause', 'x': 'lyr-reconnection',
+        'v': 'lyr-belts',     'e': 'lyr-exosphere',  'q': 'lyr-earthquakes',
+    };
+
+    document.addEventListener('keydown', e => {
+        // Skip if typing in an input/textarea
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        const k = e.key.toLowerCase();
+
+        // 'p' toggles perf overlay
+        if (k === 'p') { perf.toggleOverlay(); return; }
+
+        // '?' shows shortcut help
+        if (k === '?' || (e.shiftKey && k === '/')) {
+            _showShortcutHelp();
+            return;
+        }
+
+        // Number keys 1-5 for presets
+        if (k >= '1' && k <= '5') {
+            const presetNames = ['all-on', 'all-off', 'surface', 'space-wx', 'minimal'];
+            const idx = parseInt(k) - 1;
+            if (PRESETS[presetNames[idx]]) PRESETS[presetNames[idx]]();
+            return;
+        }
+
+        // Layer toggles
+        if (KEY_MAP[k]) {
+            const cb = document.getElementById(KEY_MAP[k]);
+            if (cb) {
+                cb.checked = !cb.checked;
+                cb.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    });
+
+    // ── Shortcut help overlay ───────────────────────────────────
+    let _helpEl = null;
+    function _showShortcutHelp() {
+        if (_helpEl) { _helpEl.remove(); _helpEl = null; return; }
+        _helpEl = document.createElement('div');
+        _helpEl.style.cssText = `
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            z-index:200; background:rgba(0,0,0,.92); backdrop-filter:blur(12px);
+            border:1px solid rgba(0,200,255,.25); border-radius:12px;
+            padding:20px 28px; color:#aac; font-size:12px; line-height:2;
+            max-width:400px; pointer-events:auto;
+        `;
+        _helpEl.innerHTML = `
+            <div style="color:#0cf;font-weight:700;font-size:14px;margin-bottom:8px">Keyboard Shortcuts</div>
+            <div style="display:grid;grid-template-columns:40px 1fr;gap:2px 12px;font-size:11px">
+                <kbd style="color:#ff0;font-family:monospace">C</kbd><span>Cloud Cover</span>
+                <kbd style="color:#ff0;font-family:monospace">A</kbd><span>Atmosphere</span>
+                <kbd style="color:#ff0;font-family:monospace">U</kbd><span>Aurora</span>
+                <kbd style="color:#ff0;font-family:monospace">L</kbd><span>City Lights</span>
+                <kbd style="color:#ff0;font-family:monospace">T</kbd><span>Terrain Relief</span>
+                <kbd style="color:#ff0;font-family:monospace">G</kbd><span>Lat/Lon Grid</span>
+                <kbd style="color:#ff0;font-family:monospace">W</kbd><span>Weather Overlay</span>
+                <kbd style="color:#ff0;font-family:monospace">I</kbd><span>Isobars</span>
+                <kbd style="color:#ff0;font-family:monospace">R</kbd><span>Auto-rotate</span>
+                <kbd style="color:#ff0;font-family:monospace">M</kbd><span>Magnetopause</span>
+                <kbd style="color:#ff0;font-family:monospace">X</kbd><span>X-line Reconnection</span>
+                <kbd style="color:#ff0;font-family:monospace">V</kbd><span>Van Allen Belts</span>
+                <kbd style="color:#ff0;font-family:monospace">E</kbd><span>Exosphere</span>
+                <kbd style="color:#ff0;font-family:monospace">Q</kbd><span>Earthquakes</span>
+                <kbd style="color:#ff0;font-family:monospace">P</kbd><span>Perf Monitor</span>
+                <kbd style="color:#ff0;font-family:monospace">1-5</kbd><span>Presets (All/Off/Surface/SpWx/Min)</span>
+                <kbd style="color:#ff0;font-family:monospace">?</kbd><span>This help</span>
+            </div>
+            <div style="margin-top:10px;text-align:center;font-size:10px;color:#556">Press ? again or click to close</div>
+        `;
+        _helpEl.addEventListener('click', () => { _helpEl.remove(); _helpEl = null; });
+        document.getElementById('app').appendChild(_helpEl);
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  SOLAR WIND PARTICLES
@@ -3184,16 +3492,19 @@ document.getElementById('lyr-alerts').addEventListener('change', e => {
     alertMarkers.setVisible(e.target.checked);
 });
 
-// Extend mousemove to detect alert marker hovers
+// Extend mousemove to detect alert marker hovers (reuse raycaster to avoid GC pressure)
+const _alertRay = new THREE.Raycaster();
+const _alertNDC = new THREE.Vector2();
 renderer.domElement.addEventListener('mousemove', e => {
     const r     = renderer.domElement.getBoundingClientRect();
-    const ndcX  = ((e.clientX - r.left) / r.width)  * 2 - 1;
-    const ndcY  = -((e.clientY - r.top)  / r.height) * 2 + 1;
-    const alertRay = new THREE.Raycaster();
-    alertRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+    _alertNDC.set(
+        ((e.clientX - r.left) / r.width)  * 2 - 1,
+        -((e.clientY - r.top)  / r.height) * 2 + 1
+    );
+    _alertRay.setFromCamera(_alertNDC, camera);
 
     // Intersect earthquake markers first (higher priority)
-    const eqHovered = eqMarkers.getHovered(alertRay);
+    const eqHovered = eqMarkers.getHovered(_alertRay);
     if (eqHovered) {
         _showEqPopup(eqHovered, e.clientX, e.clientY);
         hideAlertTip();
@@ -3203,7 +3514,7 @@ renderer.domElement.addEventListener('mousemove', e => {
     }
 
     // Intersect alert dots (must account for earthMesh rotation)
-    const hovered = alertMarkers.getHovered(alertRay);
+    const hovered = alertMarkers.getHovered(_alertRay);
     if (hovered) {
         showAlertTip(hovered, e.clientX, e.clientY);
     } else {
@@ -3240,14 +3551,14 @@ let lastT = 0;
 
 function animate() {
     requestAnimationFrame(animate);
+    perf.begin();
+
     const t  = clock.getElapsedTime();
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
     // ── Earth sidereal rotation in equatorial frame
-    // GMST at page load + elapsed sidereal rotation
     earthMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE;
-    // Clouds rotate slightly faster (weather systems drift)
     cloudMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE * 1.0008;
 
     // ── Shader time + camera distance for LOD
@@ -3258,16 +3569,22 @@ function animate() {
     const dist = camera.position.length();  // in "Earth radii" units
     cloudU.u_cam_dist.value = dist;
 
+    // ── Distance-based conditional rendering (skip far-away subsystems) ──
+    const closeView  = dist < 2.5;   // zoomed in: surface detail matters
+    const midView    = dist < 6.0;   // medium: weather + markers visible
+    const farView    = dist >= 6.0;  // zoomed out: magnetosphere focus
+
     // ── Hi-res satellite imagery (3-tier LOD) ──────────────────────
-    // Tier 1: base Blue Marble (static, always loaded)
-    // Tier 2: daily GIBS snapshot (4096×2048, replaces base when ready)
-    // Tier 3: GIBS WMTS tiles (250m detail, loaded on zoom)
-    if (earthHiRes.dailyReady && earthHiRes.dailyTexture) {
-        earthU.u_day.value = earthHiRes.dailyTexture;
-        earthHiRes.dailyReady = false;  // only swap once
+    if (closeView) {
+        if (earthHiRes.dailyReady && earthHiRes.dailyTexture) {
+            earthU.u_day.value = earthHiRes.dailyTexture;
+            earthHiRes.dailyReady = false;
+        }
+        earthHiRes.update(camera, earthMesh);
+        earthU.u_hires_on.value = earthHiRes.active ? 1 : 0;
+    } else {
+        earthU.u_hires_on.value = 0;
     }
-    earthHiRes.update(camera, earthMesh);
-    earthU.u_hires_on.value = earthHiRes.active ? 1 : 0;
 
     // ── Altitude display (camera distance → km equivalent)
     const altKm = Math.max(0, (dist - R_EARTH) * 6371);
@@ -3276,41 +3593,37 @@ function animate() {
             ? `${(altKm / 1000).toFixed(1)} Mm`
             : `${Math.round(altKm)} km`;
 
-    // ── Raycaster → coords
-    raycaster.setFromCamera(mouse, camera);
-    const hits = raycaster.intersectObject(earthMesh);
-    if (hits.length > 0 && hits[0].uv) {
-        // UV from intersection — correct for current mesh rotation
-        const uv = hits[0].uv.clone();
-        // The mesh rotates, so UV is in the mesh's local UV space (texture fixed to mesh).
-        // UV is already local to the sphere, so this gives the correct geographic location.
-        updateCoords(uv);
-    } else {
-        tipEl.classList.remove('show');
+    // ── Raycaster → coords (throttle to every other frame when far)
+    if (midView || (t * 30 | 0) % 2 === 0) {
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObject(earthMesh);
+        if (hits.length > 0 && hits[0].uv) {
+            updateCoords(hits[0].uv.clone());
+        } else {
+            tipEl.classList.remove('show');
+        }
     }
 
-    // ── Wind particle advection (tropospheric weather)
-    windParticles.update(dt);
+    // ── Wind particle advection (skip when zoomed far out)
+    if (midView) windParticles.update(dt);
 
-    // ── Solar wind particle stream (interplanetary → magnetopause)
+    // ── Solar wind particle stream
     solarWindParticles.tick(dt, earthU.u_sun_dir.value);
 
-    // ── Alert marker pulse
-    alertMarkers.tick(t);
+    // ── Alert + earthquake markers (skip tick when far)
+    if (midView) {
+        alertMarkers.tick(t);
+        eqMarkers.tick(t);
+    }
 
-    // ── Earthquake markers pulse
-    eqMarkers.tick(t);
-
-    // ── ISS position update (world-space, depends on earthMesh.rotation)
+    // ── ISS + satellite tracker
     issMarker.tick();
-
-    // ── Satellite tracker (all loaded catalog satellites)
     satTracker.tick();
 
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
-    // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
+    // ── Exosphere
     exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
     // ── User location pin pulse
@@ -3331,7 +3644,6 @@ function animate() {
     }
 
     // ── Astro HUD + sun direction (every 5 s)
-    // Sun moves ~1°/24 min — 5 s update keeps terminator error < 0.003°.
     if (t - lastAstro > 5) {
         lastAstro = t;
         const _now = new Date();
@@ -3345,6 +3657,7 @@ function animate() {
 
     controls.update();
     renderer.render(scene, camera);
+    perf.end();
 }
 
 // ═══════════════════════════════════════════════════════════════
