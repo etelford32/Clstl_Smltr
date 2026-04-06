@@ -1296,6 +1296,15 @@ import { PerfEngine } from './js/perf-engine.js';
 import { SimTime } from './js/sim-time.js';
 import { OceanCurrentParticles } from './js/ocean-currents.js';
 import { OceanCurrentFeed } from './js/data-feeds.js';
+import { EarthECSBridge } from './js/earth-ecs-bridge.js';
+
+// ── WASM ECS analytics engine (loads async, graceful fallback to JS) ────────
+const earthECS = new EarthECSBridge();
+earthECS.init().then(() => {
+    if (earthECS.ready) {
+        console.info('[Earth] WASM ECS analytics ready — isobars, magnetosphere, spatial queries accelerated');
+    }
+});
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -2664,8 +2673,15 @@ document.addEventListener('weather-update', e => {
     const { weatherBuffer, windBuffer, cloudBuffer, meta } = e.detail;
     updateWeatherTextures(weatherBuffer, windBuffer, cloudBuffer);
 
-    // Rebuild isobar contours from the fresh pressure field
-    isobarLayer.update(weatherBuffer);
+    // Rebuild isobar contours — WASM path (5–10× faster) with JS fallback
+    if (earthECS.ready) {
+        const ms = earthECS.updateAtmosphere(weatherBuffer);
+        // Rebuild Three.js geometry from WASM-computed vertices
+        _rebuildIsobarsFromWasm();
+        console.info(`[EarthECS] Atmosphere analytics: ${ms.toFixed(1)} ms (WASM)`);
+    } else {
+        isobarLayer.update(weatherBuffer);
+    }
     updateIsobarPanel();
 
     // Track data recency for layer tooltips
@@ -3141,6 +3157,11 @@ const earthFeeds = new EarthFeeds().start();
 
 window.addEventListener('earthquake-update', e => {
     eqMarkers.update(e.detail);
+    // Feed earthquake data into WASM spatial index for fast proximity queries
+    if (earthECS.ready) {
+        earthECS.loadEarthquakes(e.detail);
+        console.info(`[EarthECS] Loaded ${e.detail.length} earthquakes into spatial index`);
+    }
 }, { passive: true });
 
 window.addEventListener('iss-update', e => {
@@ -3185,19 +3206,128 @@ function hideAlertTip() {
 
 // ═══════════════════════════════════════════════════════════════
 //  ISOBAR LAYER — marching-squares pressure contours
+//  (WASM-accelerated when ECS bridge is available)
 // ═══════════════════════════════════════════════════════════════
 const isobarLayer = new IsobarLayer(earthMesh);
+
+// WASM fast-path: rebuild Three.js isobar geometry from WASM-computed buffers
+let _wasmIsobarLines = null;
+const _wasmIsobarGroup = new THREE.Group();
+_wasmIsobarGroup.name = 'wasmIsobarGroup';
+earthMesh.add(_wasmIsobarGroup);
+
+function _rebuildIsobarsFromWasm() {
+    // Dispose previous
+    if (_wasmIsobarLines) {
+        _wasmIsobarLines.geometry.dispose();
+        _wasmIsobarLines.material.dispose();
+        _wasmIsobarGroup.remove(_wasmIsobarLines);
+        _wasmIsobarLines = null;
+    }
+    // Remove old sprites
+    while (_wasmIsobarGroup.children.length > 0) {
+        const c = _wasmIsobarGroup.children[0];
+        if (c.material) { c.material.map?.dispose(); c.material.dispose(); }
+        _wasmIsobarGroup.remove(c);
+    }
+
+    const positions = earthECS.getIsobarPositions();
+    const colors    = earthECS.getIsobarColors();
+    if (!positions || positions.length === 0) return;
+
+    // Copy from WASM memory (view becomes invalid after next WASM call)
+    const posCopy = new Float32Array(positions);
+    const colCopy = new Float32Array(colors);
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(posCopy, 3));
+    geo.setAttribute('color',    new THREE.Float32BufferAttribute(colCopy, 3));
+
+    const mat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent:  true,
+        opacity:      1.0,
+        depthWrite:   false,
+    });
+
+    _wasmIsobarLines = new THREE.LineSegments(geo, mat);
+    _wasmIsobarLines.renderOrder = 2;
+    _wasmIsobarGroup.add(_wasmIsobarLines);
+
+    // Hide the JS isobar layer when WASM is active
+    isobarLayer.setVisible(false);
+
+    // Add pressure-centre sprites from WASM
+    const centres = earthECS.getPressureCentres();
+    if (centres) {
+        for (const c of centres) {
+            const isH = c.type === 'H';
+            const phi = c.lat * DEG, lam = c.lon * DEG;
+            const rr  = R_EARTH * 1.016;
+            const pos = new THREE.Vector3(
+                rr * Math.cos(phi) * Math.sin(lam),
+                rr * Math.sin(phi),
+                rr * Math.cos(phi) * Math.cos(lam),
+            );
+            // Minimal sprite — reuse existing makeHLSprite pattern
+            const canvas = document.createElement('canvas');
+            canvas.width = 80; canvas.height = 80;
+            const ctx = canvas.getContext('2d');
+            const css = isH ? '#ff8833' : '#33aaff';
+            ctx.beginPath();
+            ctx.arc(40, 40, 37, 0, Math.PI * 2);
+            ctx.fillStyle = isH ? 'rgba(255,120,0,0.12)' : 'rgba(0,140,255,0.12)';
+            ctx.fill();
+            ctx.strokeStyle = css; ctx.lineWidth = 2.5; ctx.stroke();
+            ctx.fillStyle = css;
+            ctx.font = 'bold 34px system-ui, sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+            ctx.fillText(c.type, 40, 48);
+            ctx.fillStyle = 'rgba(210,230,255,0.92)';
+            ctx.font = '11px system-ui, sans-serif';
+            ctx.fillText(`${Math.round(c.hPa)} hPa`, 40, 66);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+                map: tex, transparent: true, depthTest: false, sizeAttenuation: true,
+            }));
+            sprite.scale.set(0.11, 0.11, 1);
+            sprite.position.copy(pos);
+            _wasmIsobarGroup.add(sprite);
+        }
+    }
+}
 
 // IsobarLayer is populated on the first 'weather-update' event
 // (WeatherFeed fires this after async fetch + procedural fallback)
 
 document.getElementById('lyr-isobars').addEventListener('change', e => {
-    isobarLayer.setVisible(e.target.checked);
+    const v = e.target.checked;
+    if (earthECS.ready) {
+        _wasmIsobarGroup.visible = v;
+    } else {
+        isobarLayer.setVisible(v);
+    }
 });
 
 function updateIsobarPanel() {
-    const stats   = isobarLayer.stats;
-    const extrema = isobarLayer.extrema;
+    // Read from WASM or JS isobar layer
+    let stats, extrema, nSeg;
+
+    if (earthECS.ready) {
+        stats = earthECS.getGradientStats();
+        extrema = earthECS.getPressureCentres() ?? [];
+        nSeg = earthECS.getIsobarSegmentCount();
+    } else {
+        stats   = isobarLayer.stats;
+        extrema = (isobarLayer.extrema ?? []).map(e => ({
+            type: e.type, lat: (e.y / 180) * 180 - 90,
+            lon: (e.x / 360) * 360 - 180, hPa: e.hPa,
+        }));
+        const geo = isobarLayer._lines?.geometry;
+        nSeg = geo ? (geo.getAttribute('position').count / 2) : 0;
+    }
+
     if (!stats) return;
 
     // Pressure gradient
@@ -3205,8 +3335,8 @@ function updateIsobarPanel() {
         `${stats.maxGrad.toFixed(2)} hPa/100km`;
 
     // Geostrophic wind estimate (mid-latitude approximation)
-    const gw = geoWindMs(stats.maxGrad, stats.maxLat);
-    document.getElementById('wx-geo').textContent = gw != null
+    const gw = stats.geoWindMs ?? geoWindMs(stats.maxGrad, stats.maxLat);
+    document.getElementById('wx-geo').textContent = (gw != null && gw > 0)
         ? `~${gw.toFixed(0)} m/s (~${(gw * 1.944).toFixed(0)} kt)`
         : '—  (near equator)';
 
@@ -3216,13 +3346,12 @@ function updateIsobarPanel() {
     document.getElementById('wx-centers').textContent = `${nH} H  /  ${nL} L`;
 
     // Top H and top L detail
-    const topH = extrema.filter(e => e.type === 'H')[0];
-    const topL = extrema.filter(e => e.type === 'L')[0];
+    const topH = extrema.find(e => e.type === 'H');
+    const topL = extrema.find(e => e.type === 'L');
     const fmtE = e => {
         if (!e) return '—';
-        const { lat, lon } = { lat: (e.y / 180) * 180 - 90, lon: (e.x / 360) * 360 - 180 };
-        const ls = lat >= 0 ? `${lat.toFixed(0)}°N` : `${(-lat).toFixed(0)}°S`;
-        const lo = lon >= 0 ? `${lon.toFixed(0)}°E` : `${(-lon).toFixed(0)}°W`;
+        const ls = e.lat >= 0 ? `${e.lat.toFixed(0)}°N` : `${(-e.lat).toFixed(0)}°S`;
+        const lo = e.lon >= 0 ? `${e.lon.toFixed(0)}°E` : `${(-e.lon).toFixed(0)}°W`;
         return `${Math.round(e.hPa)} hPa @ ${ls} ${lo}`;
     };
     document.getElementById('wx-centers-list').innerHTML =
@@ -3230,10 +3359,9 @@ function updateIsobarPanel() {
       + `<span style="color:#33aaff">L</span> ${fmtE(topL)}`;
 
     // Isobar segment count
-    const geo = isobarLayer._lines?.geometry;
-    const nSeg = geo ? (geo.getAttribute('position').count / 2) : 0;
     document.getElementById('wx-iso-count').textContent =
-        `${ISOBAR_LEVELS.length} levels · ${nSeg.toLocaleString()} segs`;
+        `${ISOBAR_LEVELS.length} levels · ${nSeg.toLocaleString()} segs`
+        + (earthECS.ready ? ' (WASM)' : '');
 }
 
 // ═══════════════════════════════════════════════════════════════

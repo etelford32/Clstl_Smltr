@@ -1,0 +1,16 @@
+{
+  "name": "earth_analytics_ecs",
+  "type": "module",
+  "description": "High-performance Earth simulation analytics with ECS architecture, compiled to WASM",
+  "version": "0.1.0",
+  "files": [
+    "earth_analytics_ecs_bg.wasm",
+    "earth_analytics_ecs.js",
+    "earth_analytics_ecs.d.ts"
+  ],
+  "main": "earth_analytics_ecs.js",
+  "types": "earth_analytics_ecs.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
