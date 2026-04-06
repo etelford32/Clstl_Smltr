@@ -770,12 +770,13 @@ nav {
         <div class="lyr-group" data-group="weather">
             <div class="lyr-group-hdr" data-toggle-group="weather">
                 <span class="lyr-group-title"><span class="icon">🌦</span> Weather Systems</span>
-                <span class="lyr-group-count" data-group-count="weather">4</span>
+                <span class="lyr-group-count" data-group-count="weather">5</span>
                 <span class="lyr-group-chevron">▾</span>
             </div>
             <div class="lyr-group-body" data-group-body="weather">
                 <label class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-dot" style="background:linear-gradient(135deg,#33f,#f33)"></span><label for="lyr-weather">Temperature Overlay</label><span class="lyr-key">W</span></label>
                 <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-dot" style="background:#88ddff"></span><label for="lyr-wind">Wind Particles</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-currents" checked><span class="lyr-dot" style="background:#1188aa"></span><label for="lyr-currents">Ocean Currents</label><span class="lyr-key">O</span></label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-dot" style="background:#aaddff"></span><label for="lyr-isobars">Isobars</label><span class="lyr-key">I</span></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><span class="lyr-dot" style="background:#ff8800"></span><label for="lyr-alerts">Storm Alerts</label></label>
             </div>
@@ -1293,6 +1294,8 @@ import { StormFeed } from './js/storm-feed.js';
 import { EarthHiRes } from './js/earth-hires.js';
 import { PerfEngine } from './js/perf-engine.js';
 import { SimTime } from './js/sim-time.js';
+import { OceanCurrentParticles } from './js/ocean-currents.js';
+import { OceanCurrentFeed } from './js/data-feeds.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -1988,7 +1991,7 @@ document.getElementById('lyr-iss').addEventListener('change', e => {
     // ── Presets ──────────────────────────────────────────────────
     const ALL_LAYERS = [
         'lyr-clouds','lyr-atm','lyr-aurora','lyr-lights','lyr-terrain',
-        'lyr-grid','lyr-tropic','lyr-weather','lyr-wind','lyr-isobars',
+        'lyr-grid','lyr-tropic','lyr-weather','lyr-wind','lyr-currents','lyr-isobars',
         'lyr-alerts','lyr-magnetopause','lyr-bowshock','lyr-magnetosheath',
         'lyr-reconnection','lyr-cusps','lyr-belts','lyr-plasma',
         'lyr-exosphere','lyr-geocorona','lyr-chex','lyr-rotate',
@@ -2001,7 +2004,7 @@ document.getElementById('lyr-iss').addEventListener('change', e => {
         'surface':  () => {
             ALL_LAYERS.forEach(id => setLayer(id, false));
             ['lyr-clouds','lyr-atm','lyr-aurora','lyr-lights','lyr-terrain',
-             'lyr-grid','lyr-rotate','lyr-wind','lyr-isobars'].forEach(id => setLayer(id, true));
+             'lyr-grid','lyr-rotate','lyr-wind','lyr-currents','lyr-isobars'].forEach(id => setLayer(id, true));
         },
         'space-wx': () => {
             ALL_LAYERS.forEach(id => setLayer(id, false));
@@ -2032,7 +2035,7 @@ document.getElementById('lyr-iss').addEventListener('change', e => {
     const KEY_MAP = {
         'c': 'lyr-clouds',     'a': 'lyr-atm',       'u': 'lyr-aurora',
         'l': 'lyr-lights',     't': 'lyr-terrain',    'g': 'lyr-grid',
-        'w': 'lyr-weather',    'i': 'lyr-isobars',    'r': 'lyr-rotate',
+        'w': 'lyr-weather',    'o': 'lyr-currents',   'i': 'lyr-isobars',    'r': 'lyr-rotate',
         'm': 'lyr-magnetopause', 'x': 'lyr-reconnection',
         'v': 'lyr-belts',     'e': 'lyr-exosphere',  'q': 'lyr-earthquakes',
     };
@@ -2442,6 +2445,28 @@ class WindParticles {
 const _pScale = perf.particleScale;
 const windParticles    = new WindParticles(earthMesh, Math.round(3000 * _pScale));
 const solarWindParticles = new SolarWindParticles(scene, Math.round(2500 * _pScale), SUN_EQ);
+
+// ═══════════════════════════════════════════════════════════════
+//  OCEAN CURRENT PARTICLES — animated flow streamlines
+// ═══════════════════════════════════════════════════════════════
+const oceanCurrents = new OceanCurrentParticles(earthMesh, Math.round(2000 * _pScale));
+
+// Start the OSCAR current data feed
+const _oscarFeed = new OceanCurrentFeed();
+_oscarFeed.start();
+
+// Wire OSCAR data into the particle system
+document.addEventListener('ocean-currents-update', e => {
+    const { currents } = e.detail;
+    if (currents && currents.length > 0) {
+        oceanCurrents.setCurrentData(currents);
+    }
+});
+
+// Layer toggle
+document.getElementById('lyr-currents')?.addEventListener('change', e => {
+    oceanCurrents.setVisible(e.target.checked);
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  DATA RECENCY TRACKING — tooltips show how fresh each layer is
@@ -3759,7 +3784,14 @@ function animate() {
     if (closeView) {
         windParticles.update(dt);
     } else if (midView && ((t * 30 | 0) % 2 === 0)) {
-        windParticles.update(dt * 2);  // double dt to compensate for frame skip
+        windParticles.update(dt * 2);
+    }
+
+    // ── Ocean current particles (same throttle strategy as wind)
+    if (closeView) {
+        oceanCurrents.update(dt);
+    } else if (midView && ((t * 30 | 0) % 2 === 0)) {
+        oceanCurrents.update(dt * 2);
     }
 
     // ── Solar wind (throttle when zoomed in close — barely visible)
@@ -4591,6 +4623,13 @@ if (_navBurger && _navMenu) {
             event: 'iss-update',
             status: 'idle', lastUpdate: null, detail: null,
         },
+        'ocean-currents': {
+            name: 'Ocean Currents (OSCAR)',
+            source: 'NOAA OSCAR / ERDDAP',
+            cadence: '6 hours',
+            event: 'ocean-currents-update',
+            status: 'idle', lastUpdate: null, detail: null,
+        },
         'forecast': {
             name: 'Solar Forecast (AR model)',
             source: 'Kp history → AR(6) + Holt-Winters',
@@ -4659,6 +4698,9 @@ if (_navBurger && _navMenu) {
                     break;
                 case 'iss':
                     pipe.detail = `Alt: ${Math.round(d.alt ?? 0)} km`;
+                    break;
+                case 'ocean-currents':
+                    pipe.detail = `${d.count ?? d.currents?.length ?? 0} velocity vectors`;
                     break;
             }
         });
