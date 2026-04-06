@@ -2029,12 +2029,13 @@ class SolarWindParticles {
         this._pos = pos; this._col = col;
 
         this.mesh = new THREE.Points(geo, new THREE.PointsMaterial({
-            size: 0.09, vertexColors: true,
-            transparent: true, opacity: 0.55,
+            size: 0.08, vertexColors: true,
+            transparent: true, opacity: 0.60,
             blending: THREE.AdditiveBlending,
             depthWrite: false, sizeAttenuation: true,
         }));
         this.mesh.renderOrder = 7;
+        this.mesh.frustumCulled = false;  // particles span wide area
         scene.add(this.mesh);
 
         for (let i = 0; i < N; i++) this._spawn(i, true);
@@ -2234,13 +2235,18 @@ class WindParticles {
         this._pos = new Float32Array(N * 3);
         this._col = new Float32Array(N * 3);
 
+        this._sizes = new Float32Array(N);
+        for (let i = 0; i < N; i++) this._sizes[i] = 0.005 + Math.random() * 0.003;
+
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
         geo.setAttribute('color',    new THREE.BufferAttribute(this._col, 3));
+        geo.setAttribute('size',     new THREE.BufferAttribute(this._sizes, 1));
         const mat = new THREE.PointsMaterial({
             size: 0.006, vertexColors: true,
-            transparent: true, opacity: 0.80,
+            transparent: true, opacity: 0.82,
             sizeAttenuation: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
         });
         this.mesh = new THREE.Points(geo, mat);
         this.mesh.renderOrder = 2;
@@ -2312,8 +2318,10 @@ class WindParticles {
     }
 }
 
-const windParticles    = new WindParticles(earthMesh, 4000);
-const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
+// Scale particle counts based on quality tier (perf engine)
+const _pScale = perf.particleScale;
+const windParticles    = new WindParticles(earthMesh, Math.round(6000 * _pScale));
+const solarWindParticles = new SolarWindParticles(scene, Math.round(5000 * _pScale), SUN_EQ);
 
 // ═══════════════════════════════════════════════════════════════
 //  DATA RECENCY TRACKING — tooltips show how fresh each layer is
