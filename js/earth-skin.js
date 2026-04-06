@@ -666,73 +666,62 @@ vec2 worldToUV(vec3 p) {
     return vec2(u, v);
 }
 
-// ── Sample cloud density at a 3D world-space point ────────────────────────────
-// `cheap` flag: true = light sampling (2-octave FBM, no turbulence, skip weather)
-// This is THE critical optimization: light samples run 4× per primary step,
-// so making them cheap saves ~75% of the noise budget.
-float cloudDensity(vec3 pos, vec2 swirl, bool cheap) {
+// ── Cloud density: FULL quality (4-octave FBM) for primary ray sampling ───────
+float cloudDensityFull(vec3 pos, vec2 swirl) {
     float r = length(pos);
     float hFrac = clamp((r - R_CLOUD_BOTTOM) / (R_CLOUD_TOP - R_CLOUD_BOTTOM), 0.0, 1.0);
     float vProfile = smoothstep(0.0, 0.2, hFrac) * smoothstep(1.0, 0.65, hFrac);
 
     vec2 uv = worldToUV(pos);
     vec2 driftLow = vec2(u_time * 0.000050, u_time * 0.000007);
-
     float texNoise = texture2D(u_clouds, uv + driftLow + swirl).r;
 
     float lodScale = mix(160.0, 42.0, clamp((u_cam_dist - 1.02) / 2.0, 0.0, 1.0));
     vec3 noisePos = normalize(pos) * lodScale + vec3(u_time * 0.008, 0.0, u_time * 0.005);
+    float density = texNoise * 0.58 + fbm3(noisePos) * 0.42;
 
-    float density;
-    if (cheap) {
-        // Light sampling: 2-octave FBM only, no turbulence
-        density = texNoise * 0.65 + fbm3_cheap(noisePos) * 0.35;
-    } else {
-        // Primary sampling: full 4-octave FBM
-        float detailNoise = fbm3(noisePos);
-        density = texNoise * 0.58 + detailNoise * 0.42;
-    }
-
-    // Apply weather data or pressure-based modulation
     float baseDensity;
-    float precipOut = 0.0;
-
     if (u_weather_on > 0.5) {
         vec4  cl     = texture2D(u_cloud_layers, uv);
-        float clLow  = cl.r;
-        float clMid  = cl.g;
-        float clHigh = cl.b;
-        precipOut     = cl.a;
-
-        // Layer blending based on altitude within cloud slab
-        float lowW  = smoothstep(0.5, 0.0, hFrac);   // bottom half
-        float midW  = smoothstep(0.0, 0.4, hFrac) * smoothstep(0.9, 0.5, hFrac); // middle
-        float highW = smoothstep(0.5, 1.0, hFrac);    // top
-
-        float coverage = clLow * lowW + clMid * midW + clHigh * highW;
+        float lowW  = smoothstep(0.5, 0.0, hFrac);
+        float midW  = smoothstep(0.0, 0.4, hFrac) * smoothstep(0.9, 0.5, hFrac);
+        float highW = smoothstep(0.5, 1.0, hFrac);
+        float coverage = cl.r * lowW + cl.g * midW + cl.b * highW;
         baseDensity = density * coverage;
     } else {
         float pressure = texture2D(u_weather, uv).g;
         float humidity = texture2D(u_weather, uv).b;
-        float clear    = mix(1.0, 0.55, pressure);
-        float boost    = max(0.0, 0.45 - pressure) * 2.0;
-        baseDensity = pow(density, 1.3) * (clear + boost) * (0.7 + humidity * 0.5);
+        baseDensity = pow(density, 1.3) * mix(1.0, 0.55, pressure) * (0.7 + humidity * 0.5);
     }
 
-    // Satellite data blending
     if (u_satellite_on > 0.5) {
-        float satCloud = texture2D(u_satellite, uv).r;
-        baseDensity = mix(baseDensity, satCloud * 0.9, 0.45);
+        baseDensity = mix(baseDensity, texture2D(u_satellite, uv).r * 0.9, 0.45);
     }
 
-    // Apply vertical profile and storm structure
     baseDensity *= vProfile;
-
-    if (u_storm_count > 0) {
-        baseDensity *= stormStructure(uv);
-    }
-
+    if (u_storm_count > 0) baseDensity *= stormStructure(uv);
     return clamp(baseDensity, 0.0, 1.0);
+}
+
+// ── Cloud density: CHEAP (2-octave FBM, minimal texture) for light sampling ───
+// Light rays only need approximate density — fine detail doesn't affect shadows.
+// This saves ~75% of the GPU noise budget in the inner light loop.
+float cloudDensityCheap(vec3 pos, vec2 swirl) {
+    float r = length(pos);
+    float hFrac = clamp((r - R_CLOUD_BOTTOM) / (R_CLOUD_TOP - R_CLOUD_BOTTOM), 0.0, 1.0);
+    float vProfile = smoothstep(0.0, 0.2, hFrac) * smoothstep(1.0, 0.65, hFrac);
+
+    vec2 uv = worldToUV(pos);
+    float texNoise = texture2D(u_clouds, uv + vec2(u_time * 0.00005, u_time * 0.000007) + swirl).r;
+
+    float lodScale = mix(160.0, 42.0, clamp((u_cam_dist - 1.02) / 2.0, 0.0, 1.0));
+    vec3 noisePos = normalize(pos) * lodScale + vec3(u_time * 0.008, 0.0, u_time * 0.005);
+    float density = texNoise * 0.65 + fbm3_cheap(noisePos) * 0.35;
+
+    // Simplified weather: just use pressure for broad coverage modulation
+    float pressure = texture2D(u_weather, uv).g;
+    density *= mix(1.0, 0.55, pressure) * vProfile;
+    return clamp(density, 0.0, 1.0);
 }
 
 // ── Ray-sphere intersection ───────────────────────────────────────────────────
@@ -827,7 +816,7 @@ void main() {
         vec3  samplePos = rayOrigin + rayDir * t;
 
         // Primary density: full quality (4-octave FBM)
-        float dens = cloudDensity(samplePos, swirl, false);
+        float dens = cloudDensityFull(samplePos, swirl);
         if (dens < 0.01) continue;
 
         totalDensity += dens * stepLen;
@@ -845,7 +834,7 @@ void main() {
             float lr = length(lPos);
             if (lr > R_CLOUD_TOP) break;
             if (lr < R_CLOUD_BOTTOM) { lightOptDepth += 2.0; break; }
-            lightOptDepth += cloudDensity(lPos, swirl, true) * lStepLen;
+            lightOptDepth += cloudDensityCheap(lPos, swirl) * lStepLen;
         }
 
         float lightTransmit = exp(-lightOptDepth * sigmaA * 0.6);
