@@ -258,9 +258,11 @@
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('privacy');
 recordVisit('privacy');
+userState.trackPage('privacy');
 </script>
 </body>
 </html>

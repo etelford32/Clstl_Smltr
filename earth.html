@@ -3753,9 +3753,11 @@ if (_navBurger && _navMenu) {
 </section>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('earth');
 recordVisit('earth');
+userState.trackPage('earth');
 </script>
 </body>
 </html>

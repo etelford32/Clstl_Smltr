@@ -3162,9 +3162,11 @@ console.log(CATALOG.length + ' objects loaded. Click any star to fly to it.');
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('galactic-map');
 recordVisit('galactic-map');
+userState.trackPage('galactic-map');
 </script>
 </body>
 </html>

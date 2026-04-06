@@ -3406,9 +3406,11 @@ console.log('  Ephemeris: JPL Horizons (Earth vectors ECLIPJ2000) + Meeus fallba
 </script>
 <script type="module">
 import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
 analytics.page('threejs');
 recordVisit('threejs');
+userState.trackPage('threejs');
 </script>
 </body>
 </html>
