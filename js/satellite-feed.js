@@ -178,40 +178,39 @@ export class SatelliteFeed {
         }
     }
 
-    // ── MODIS Terra Cloud Fraction (daily composite) ───────────────────────────
+    // ── Global cloud imagery (VIIRS → MODIS Terra → MODIS Aqua fallback chain) ──
+    // VIIRS has wider swath than MODIS → fewer orbital gaps → less visible strips.
+    // Falls back through the chain until one succeeds.
     async _fetchMODIS() {
         const yesterday = new Date(Date.now() - 86_400_000);
         const dateStr   = yesterday.toISOString().split('T')[0];
 
         if (this._modisDate === dateStr && this._modisTex) return;
 
-        const url = gibsUrl('MODIS_Terra_Cloud_Fraction_Day', new Date(`${dateStr}T00:00:00Z`));
-        const [img, tex] = await Promise.all([loadImage(url), loadTexture(url)]);
+        // Fallback chain: VIIRS (widest swath, fewest gaps) → MODIS Terra → MODIS Aqua
+        const layers = [
+            'VIIRS_SNPP_CorrectedReflectance_TrueColor',
+            'MODIS_Terra_CorrectedReflectance_TrueColor',
+            'MODIS_Aqua_CorrectedReflectance_TrueColor',
+        ];
 
-        if (tex && img) {
-            if (this._modisTex) this._modisTex.dispose();
-            this._modisTex  = tex;
-            this._modisImg  = img;
-            this._modisDate = dateStr;
-            console.info(`[SatelliteFeed] MODIS cloud fraction loaded: ${dateStr}`);
-            this._composite();
-            this._dispatch();
-        } else {
-            // Try Aqua as backup
-            const urlAqua = gibsUrl('MODIS_Aqua_Cloud_Fraction_Day', new Date(`${dateStr}T00:00:00Z`));
-            const [imgA, texA] = await Promise.all([loadImage(urlAqua), loadTexture(urlAqua)]);
-            if (texA && imgA) {
-                if (this._modisTex) this._modisTex.dispose();
-                this._modisTex  = texA;
-                this._modisImg  = imgA;
-                this._modisDate = dateStr;
-                console.info(`[SatelliteFeed] MODIS Aqua fallback loaded: ${dateStr}`);
-                this._composite();
-                this._dispatch();
-            } else {
-                console.debug('[SatelliteFeed] MODIS fetch failed — retaining previous');
-            }
+        for (const layer of layers) {
+            try {
+                const url = gibsUrl(layer, new Date(`${dateStr}T00:00:00Z`));
+                const [img, tex] = await Promise.all([loadImage(url), loadTexture(url)]);
+                if (tex && img) {
+                    if (this._modisTex) this._modisTex.dispose();
+                    this._modisTex  = tex;
+                    this._modisImg  = img;
+                    this._modisDate = dateStr;
+                    console.info(`[SatelliteFeed] ${layer.split('_')[0]} loaded: ${dateStr}`);
+                    this._composite();
+                    this._dispatch();
+                    return;  // success — stop trying
+                }
+            } catch { /* try next layer */ }
         }
+        console.debug('[SatelliteFeed] All cloud sources failed — retaining previous');
     }
 
     // ── Composite GOES + MODIS into a single global texture ───────────────────

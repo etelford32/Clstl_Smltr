@@ -90,6 +90,33 @@ export class PerfEngine {
         return this._quality >= 2;
     }
 
+    /**
+     * Distance-based LOD level for a given camera distance.
+     * Returns 0 (closest/highest detail) to 3 (farthest/lowest detail).
+     * @param {number} dist  Camera distance in Earth radii
+     */
+    distanceLOD(dist) {
+        if (dist < 1.5) return 0;   // surface detail
+        if (dist < 3.0) return 1;   // regional view
+        if (dist < 6.0) return 2;   // continental view
+        return 3;                    // full globe
+    }
+
+    /**
+     * Recommended sphere segments for a given LOD level.
+     * Combines quality tier with distance LOD for the optimal segment count.
+     * @param {number} lod  LOD level (0-3)
+     * @param {string} type  'earth' | 'clouds' | 'atm'
+     */
+    segmentsForLOD(lod, type = 'earth') {
+        const tierBase = this.segments;
+        const idx = type === 'earth' ? 0 : type === 'clouds' ? 1 : 2;
+        const base = tierBase[idx];
+        // Reduce segments at distance — geometry detail invisible far out
+        const lodScale = [1.0, 0.75, 0.5, 0.35][lod];
+        return Math.max(16, Math.round(base * lodScale));
+    }
+
     /** Call at start of frame */
     begin() {
         this._t0 = performance.now();

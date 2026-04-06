@@ -3668,6 +3668,7 @@ function updateAstroHUD(now) {
 
 let lastAstro = 0;
 let lastT = 0;
+let _currentLOD = -1;  // runtime LOD level (0-3), -1 = not yet set
 
 function animate() {
     requestAnimationFrame(animate);
@@ -3701,6 +3702,22 @@ function animate() {
     // ── Mesh LOD — hide grid/tropics when zoomed far (invisible at that scale) ──
     gridGroup.visible   = _gridOn && dist < 8.0;
     tropicGroup.visible = _tropicOn && dist < 8.0;
+
+    // ── Runtime LOD geometry swapping (only when LOD level changes) ──────
+    const newLOD = perf.distanceLOD(dist);
+    if (newLOD !== _currentLOD) {
+        _currentLOD = newLOD;
+        const eSeg = perf.segmentsForLOD(newLOD, 'earth');
+        const cSeg = perf.segmentsForLOD(newLOD, 'clouds');
+        // Only swap if segment count changed significantly (>20% difference)
+        const curESeg = earthMesh.geometry.parameters?.widthSegments ?? 0;
+        if (Math.abs(eSeg - curESeg) > curESeg * 0.2) {
+            earthMesh.geometry.dispose();
+            earthMesh.geometry = new THREE.SphereGeometry(R_EARTH, eSeg, eSeg);
+            cloudMesh.geometry.dispose();
+            cloudMesh.geometry = new THREE.SphereGeometry(R_CLOUDS, cSeg, cSeg);
+        }
+    }
 
     // ── Hi-res satellite imagery (3-tier LOD) ──────────────────────
     if (closeView) {
