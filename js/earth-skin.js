@@ -778,12 +778,13 @@ void main() {
     if (tNear >= tFar) discard;
 
     // ── Adaptive step count based on camera distance ─────────────────────────
-    // This is the #1 performance optimization: far clouds don't need 24 steps.
+    // Use floats to compute step length (GLSL ES 1.00 can't cast dynamic int to float).
+    // The loop always runs MAX_VOL_STEPS iterations but breaks early via distLOD.
     float distLOD = clamp((u_cam_dist - 1.2) / 3.0, 0.0, 1.0);
-    int volSteps   = MAX_VOL_STEPS - int(distLOD * 14.0);  // 24 close → 10 far
-    int lightSteps = MAX_LIGHT_STEPS - int(distLOD * 2.0);  // 4 close → 2 far
+    float fVolSteps   = float(MAX_VOL_STEPS) - distLOD * 14.0;   // 24.0 close → 10.0 far
+    float fLightSteps = float(MAX_LIGHT_STEPS) - distLOD * 2.0;  // 4.0 close → 2.0 far
 
-    float stepLen = (tFar - tNear) / float(volSteps);
+    float stepLen = (tFar - tNear) / fVolSteps;
 
     // Accumulated transmittance and in-scattered light
     float transmittance = 1.0;
@@ -810,7 +811,7 @@ void main() {
     float sigmaA = 18.0;
 
     for (int i = 0; i < MAX_VOL_STEPS; i++) {
-        if (i >= volSteps) break;
+        if (float(i) >= fVolSteps) break;
 
         float t = tNear + (float(i) + 0.5) * stepLen;
         vec3  samplePos = rayOrigin + rayDir * t;
@@ -825,11 +826,11 @@ void main() {
         // This is where most of the savings come from: light rays use
         // 2-octave FBM instead of 4, and skip turbulence entirely.
         float lightOptDepth = 0.0;
-        float lStepLen = (R_CLOUD_TOP - length(samplePos)) / float(lightSteps);
+        float lStepLen = (R_CLOUD_TOP - length(samplePos)) / fLightSteps;
         lStepLen = max(lStepLen, 0.001);
 
         for (int j = 0; j < MAX_LIGHT_STEPS; j++) {
-            if (j >= lightSteps) break;
+            if (float(j) >= fLightSteps) break;
             vec3 lPos = samplePos + L * (float(j) + 0.5) * lStepLen;
             float lr = length(lPos);
             if (lr > R_CLOUD_TOP) break;
