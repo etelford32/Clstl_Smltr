@@ -45,6 +45,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d.html',           label: '2D Stellar Modeler',  sub: 'HR diagram + classification',   tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',  label: 'Advanced 2D Solar',   sub: 'CME, Parker spirals, fluid',    tier: 'free',   icon: '🔬' },
             { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',   tier: 'free',   icon: '🕳️' },
+            { href: 'sagittarius.html',     label: 'Sagittarius A*',       sub: '4M☉ SMBH · S-star orbits',   tier: 'public', icon: '🌀' },
         ],
     },
     {
