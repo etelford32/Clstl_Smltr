@@ -15,13 +15,14 @@ const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 // ── Navigation Structure ─────────────────────────────────────────────────────
 
 const NAV_TOP = [
-    { href: 'space-weather.html', label: 'Space Weather', id: 'weather',    tier: 'public' },
-    { href: 'threejs.html',       label: 'Solar System',  id: 'solar',      tier: 'public' },
-    { href: 'earth.html',         label: 'Earth',         id: 'earth',      tier: 'public' },
-    { href: 'moon.html',          label: 'Moon',          id: 'moon',       tier: 'public' },
-    { href: 'sun.html',           label: 'The Sun',       id: 'sun',        tier: 'public' },
-    { href: 'satellites.html',    label: 'Satellites',    id: 'satellites',  tier: 'public' },
+    { href: 'space-weather.html', label: 'Space Weather', id: 'weather',      tier: 'public' },
+    { href: 'threejs.html',       label: 'Solar System',  id: 'solar',        tier: 'public' },
+    { href: 'earth.html',         label: 'Earth',         id: 'earth',        tier: 'public' },
+    { href: 'moon.html',          label: 'Moon',          id: 'moon',         tier: 'public' },
+    { href: 'sun.html',           label: 'The Sun',       id: 'sun',          tier: 'public' },
+    { href: 'satellites.html',    label: 'Satellites',    id: 'satellites',    tier: 'public' },
     { href: 'galactic-map.html',  label: 'Galaxy',        id: 'galactic-map', tier: 'public' },
+    { href: 'sagittarius.html',   label: 'Sgr A*',        id: 'sagittarius',  tier: 'public' },
 ];
 
 const NAV_DROPDOWNS = [
@@ -40,12 +41,14 @@ const NAV_DROPDOWNS = [
         label: 'Simulations',
         id: 'sims',
         items: [
-            { href: 'solar-fluid.html',     label: 'Solar Fluid',         sub: 'Navier-Stokes MHD solver',      tier: 'public', icon: '🌊' },
-            { href: 'stellar-wind.html',     label: 'Stellar Wind',        sub: 'Parker spiral + wind stream',   tier: 'public', icon: '💨' },
-            { href: 'star2d.html',           label: '2D Stellar Modeler',  sub: 'HR diagram + classification',   tier: 'public', icon: '📊' },
-            { href: 'star2d-advanced.html',  label: 'Advanced 2D Solar',   sub: 'CME, Parker spirals, fluid',    tier: 'free',   icon: '🔬' },
-            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',   tier: 'free',   icon: '🕳️' },
-            { href: 'sagittarius.html',     label: 'Sagittarius A*',       sub: '4M☉ SMBH · S-star orbits',   tier: 'public', icon: '🌀' },
+            { section: 'Solar & Stellar' },
+            { href: 'solar-fluid.html',     label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: '🌊' },
+            { href: 'stellar-wind.html',     label: 'Stellar Wind',        sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
+            { href: 'star2d.html',           label: '2D Stellar Modeler',  sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
+            { href: 'star2d-advanced.html',  label: 'Advanced 2D Solar',   sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
+            { section: 'Black Holes' },
+            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: '4M☉ SMBH · galactic center',     tier: 'public', icon: '🌀', badge: 'NEW' },
+            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',     tier: 'free',   icon: '🕳️' },
         ],
     },
     {
@@ -117,6 +120,7 @@ export function initNav(activeId = '') {
     // Dropdown menus
     for (const dd of NAV_DROPDOWNS) {
         const anyActive = dd.items.some(i => {
+            if (i.section) return false;
             const hrefId = i.href.replace('.html', '');
             return hrefId === activeId || hrefId.startsWith(activeId) || activeId.startsWith(hrefId);
         });
@@ -126,6 +130,12 @@ export function initNav(activeId = '') {
         html += `<div class="nav-drop-menu">`;
 
         for (const item of dd.items) {
+            // Section header (non-link divider)
+            if (item.section) {
+                html += `<div class="nav-drop-section">${item.section}</div>`;
+                continue;
+            }
+
             const required = _tierRequired(item.tier);
             const hasAccess = userTier >= required || item.tier === 'public';
 
