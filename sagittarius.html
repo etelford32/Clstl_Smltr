@@ -133,6 +133,11 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
         <div class="hud-row"><span class="hud-label">Elapsed</span><span class="hud-val hud-flare" id="hud-flare-dur">—</span></div>
       </div>
 
+      <div class="hud-section">Accretion Flow</div>
+      <div class="hud-row"><span class="hud-label">Type</span><span class="hud-val">RIAF/MAD</span></div>
+      <div class="hud-row"><span class="hud-label">Hot-spot</span><span class="hud-val" id="hud-hotspot">dormant</span></div>
+      <div class="hud-row"><span class="hud-label">&#x1D435;-field</span><span class="hud-val">MAD (|&phi;| ~ &phi;<sub>max</sub>)</span></div>
+
       <div class="hud-section" style="margin-top:6px"></div>
       <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-val" id="hud-fps">—</span></div>
     </div>
@@ -191,6 +196,9 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
       <div class="toggle-row"><input type="checkbox" id="t-ergo" checked><label for="t-ergo">Ergosphere</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-photon" checked><label for="t-photon">Photon sphere</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-corona" checked><label for="t-corona">Corona glow</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-bfield" checked><label for="t-bfield">MAD B-field lines</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-hotspot" checked><label for="t-hotspot">Orbiting hot-spot</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-adios" checked><label for="t-adios">ADIOS wind outflow</label></div>
     </div>
 
     <!-- Camera -->
@@ -226,11 +234,12 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
 
     <div class="sep"></div>
     <div class="info-box">
-      <b>Sgr A*</b> accretes at only <b>~10&sup8; L<sub>Edd</sub></b> &mdash; a starving black hole.
-      Unlike luminous AGN, it has no powerful jets. The weak radio outflow (Li et al. 2013) extends ~0.5" from the BH.
-      Accretion is via a <b>RIAF</b> (radiatively inefficient flow): geometrically thick, optically thin, most energy advected into the horizon.
-      L<sub>bol</sub> &asymp; 300 L&odot;. Multi-band: radio (synchrotron), submm (EHT 230 GHz), NIR/X-ray (flares, Do et al. 2019).
-      X-ray flares lag NIR by ~10&ndash;20 min (Dodds-Eden et al. 2009). Use the accretion rate slider to see how a brighter AGN would look.
+      <b>RIAF/MAD accretion</b> &mdash; Sgr A*'s flow is a <b>geometrically thick torus</b> (H/R~1), NOT a thin disk.
+      The EHT (2022) resolved a bright crescent at ~5R<sub>g</sub> from Doppler beaming of the approaching side.
+      Two-temperature plasma: T<sub>i</sub>~10&sup1;&sup2; K, T<sub>e</sub>~10&sup9;&ndash;&sup1;&sup0; K. Emission is <b>synchrotron</b> (submm peak at 230 GHz), not blackbody.
+      Likely in <b>MAD state</b> (Magnetically Arrested Disk) &mdash; poloidal B-field flux eruptions may trigger the observed flares.
+      ADIOS wind: only ~1% of captured gas reaches the horizon (Blandford &amp; Begelman 1999). Most is ejected in thermal outflows.
+      Hot-spots: GRAVITY (2018) detected a NIR-bright blob orbiting near ISCO at ~45 min period.
     </div>
   </aside>
 </div>
@@ -354,6 +363,9 @@ $('t-field').addEventListener('change', e => { starfield.points.visible = e.targ
 $('t-ergo').addEventListener('change', e => { blackHole.ergosphere.visible = e.target.checked; });
 $('t-photon').addEventListener('change', e => { blackHole.rings.forEach(r => r.visible = e.target.checked); });
 $('t-corona').addEventListener('change', e => { blackHole.corona.visible = e.target.checked; });
+$('t-bfield').addEventListener('change', e => { disk.bFieldLines.forEach(l => l.visible = e.target.checked); });
+$('t-hotspot').addEventListener('change', e => { disk.hotSpot.visible = e.target.checked; });
+$('t-adios').addEventListener('change', e => { disk.adiosPoints.visible = e.target.checked; });
 
 // ── Bloom slider ─────────────────────────────────────────────────────────────
 $('s-bloom').addEventListener('input', e => {
@@ -466,6 +478,16 @@ function animate() {
         $('hud-s2-prec').textContent = tel.precession_arcmin_per_orbit.toFixed(1) + ' arcmin/orbit';
         $('hud-s2-phase').textContent = tel.phase.toFixed(3) + ' / 2\u03C0';
         $('hud-s2-next').textContent = tel.next_pericenter_yr.toFixed(1);
+
+        // Hot-spot status
+        if (disk.isHotSpotActive()) {
+            const phase = disk.getHotSpotPhase();
+            $('hud-hotspot').textContent = 'orbiting \u2014 \u03C6=' + (phase * 360).toFixed(0) + '\u00B0';
+            $('hud-hotspot').style.color = '#ffcc44';
+        } else {
+            $('hud-hotspot').textContent = 'dormant';
+            $('hud-hotspot').style.color = '#777';
+        }
 
         // Radiation output
         const lum = radiation.getLuminosity();
