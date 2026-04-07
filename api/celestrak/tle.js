@@ -156,12 +156,16 @@ export default async function handler(request) {
     const url = new URL(request.url);
     const group = url.searchParams.get('group') || 'stations';
     const norad = url.searchParams.get('norad');
-    const search = url.searchParams.get('search');
+    const rawSearch = url.searchParams.get('search');
     const fmt = url.searchParams.get('format') || 'json';
 
+    // Input validation: sanitize search and norad parameters
+    const search = rawSearch ? rawSearch.replace(/[^a-zA-Z0-9\s\-_.]/g, '').slice(0, 80) : null;
+    const safeNorad = norad ? norad.replace(/[^0-9]/g, '').slice(0, 8) : null;
+
     let celestrakUrl;
-    if (norad) {
-        celestrakUrl = `${CELESTRAK_BASE}?CATNR=${norad}&FORMAT=TLE`;
+    if (safeNorad) {
+        celestrakUrl = `${CELESTRAK_BASE}?CATNR=${safeNorad}&FORMAT=TLE`;
     } else if (search) {
         celestrakUrl = `${CELESTRAK_BASE}?NAME=${encodeURIComponent(search)}&FORMAT=TLE`;
     } else {

@@ -33,7 +33,9 @@ function isPro(request) {
     const auth   = request.headers.get('Authorization') ?? '';
     const token  = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     const secret = (typeof process !== 'undefined' && process.env?.PRO_SECRET) ?? '';
-    return secret.length > 0 && token === secret;
+    if (!secret.length || secret.length !== token.length) return false;
+    let r = 0; for (let i = 0; i < secret.length; i++) r |= secret.charCodeAt(i) ^ token.charCodeAt(i);
+    return r === 0;
 }
 
 export default async function handler(request) {

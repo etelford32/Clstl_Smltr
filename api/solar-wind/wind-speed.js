@@ -99,7 +99,9 @@ function isPro(request) {
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
     // PRO_SECRET is set as a Vercel Environment Variable; never hard-coded.
     const secret = (typeof process !== 'undefined' && process.env?.PRO_SECRET) ?? '';
-    return secret.length > 0 && token === secret;
+    if (!secret.length || secret.length !== token.length) return false;
+    let r = 0; for (let i = 0; i < secret.length; i++) r |= secret.charCodeAt(i) ^ token.charCodeAt(i);
+    return r === 0;
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────

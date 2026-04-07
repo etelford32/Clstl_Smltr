@@ -411,14 +411,17 @@ async function loadFeed() {
         const ago = _timeAgo(ev.created_at);
         return `<div class="event-row">
             <span class="event-dot" style="background:${color}"></span>
-            <span class="event-name">${ev.event_name}</span>
-            <span style="color:#444;font-size:.75rem">${ev.page_path || ''}</span>
-            <span class="event-time">${ago}</span>
+            <span class="event-name">${_esc(ev.event_name)}</span>
+            <span style="color:#444;font-size:.75rem">${_esc(ev.page_path || '')}</span>
+            <span class="event-time">${_esc(ago)}</span>
         </div>`;
     }).join('');
 }
 loadFeed();
 document.getElementById('btn-refresh-feed').addEventListener('click', loadFeed);
+
+/** Escape HTML entities to prevent stored XSS from user-controlled data */
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 function _timeAgo(iso) {
     const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
@@ -433,7 +436,7 @@ async function loadUsers() {
     const res = await fetchUsers();
     const el = document.getElementById('users-container');
     const countEl = document.getElementById('user-count');
-    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${res.error}<br><br>Run <code>supabase-admin.sql</code> to grant admin read access.</div>`; return; }
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}<br><br>Run <code>supabase-admin.sql</code> to grant admin read access.</div>`; return; }
     if (!res.data.length) { el.innerHTML = '<div class="empty">No users found.</div>'; countEl.textContent = '(0)'; return; }
 
     countEl.textContent = `(${res.data.length})`;
@@ -442,7 +445,7 @@ async function loadUsers() {
         const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
         const pc = u.plan === 'advanced' ? 'b-advanced' : u.plan === 'basic' ? 'b-basic' : 'b-free';
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
-        html += `<tr><td>${u.display_name||'--'}</td><td style="font-family:monospace;font-size:.78rem">${u.email||'--'}</td><td><span class="badge ${rc}">${(u.role||'user').toUpperCase()}</span></td><td><span class="badge ${pc}">${u.plan||'free'}</span></td><td style="color:#555;font-size:.78rem">${joined}</td></tr>`;
+        html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
     }
     html += '</tbody></table>';
     el.innerHTML = html;

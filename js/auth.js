@@ -224,7 +224,14 @@ class AuthManager {
             }
         }
 
-        // Mock mode: accept any credentials
+        // Mock mode: ONLY available in development (localhost/127.0.0.1)
+        // In production, Supabase must be configured — refuse auth without it.
+        const isDev = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+        if (!isDev) {
+            console.error('[auth] Supabase not configured — cannot authenticate in production');
+            return { success: false, error: 'Authentication service unavailable. Please try again later.' };
+        }
+        console.warn('[auth] Using mock auth — development mode only');
         const userData = {
             email,
             name: email.split('@')[0],
@@ -338,11 +345,17 @@ class AuthManager {
         return true;
     }
 
-    /** Get stored post-login redirect URL. */
+    /** Get stored post-login redirect URL (validated same-origin to prevent open redirect). */
     getPostLoginRedirect() {
         try {
             const url = sessionStorage.getItem('pp_auth_redirect');
             sessionStorage.removeItem('pp_auth_redirect');
+            if (!url) return null;
+            // Validate same-origin to prevent open redirect attacks
+            try {
+                const parsed = new URL(url, window.location.origin);
+                if (parsed.origin !== window.location.origin) return null;
+            } catch (_) { return null; }
             return url;
         } catch (_) { return null; }
     }
