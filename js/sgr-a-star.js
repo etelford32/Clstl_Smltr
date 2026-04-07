@@ -155,30 +155,49 @@ export class BlackHole {
 }
 
 // ── AccretionDisk ────────────────────────────────────────────────────────────
-// Sgr A*'s accretion flow is a RIAF (Radiatively Inefficient Accretion Flow),
-// NOT a luminous Shakura-Sunyaev thin disk. Key differences:
-//   - Geometrically thick (H/R ~ 1), optically thin
-//   - Electron temperature Te ~ 10⁹⁻¹⁰ K (virial), ion Ti >> Te
-//   - Mdot ~ 10⁻⁸ M☉/yr — only ~1% reaches the horizon
-//   - Most energy advected into the BH, not radiated
-//   - Peak emission at submm (230 GHz) from near ISCO
-// The u_eddRatio uniform dims the disk appropriately.
+// Sgr A*'s accretion is a RIAF (Radiatively Inefficient Accretion Flow) /
+// ADAF, confirmed by the EHT (2022) image showing:
+//   - Thick asymmetric ring at ~5 Rg (H/R ~ 1, NOT a thin disk)
+//   - Doppler-boosted crescent (approaching side brighter by ~3:1)
+//   - Central shadow matching Kerr metric prediction
+//   - Minute-timescale structural variability (turbulent B-field)
+//   - Likely MAD state (Magnetically Arrested Disk): flux eruptions → flares
+//   - Two-temperature: Ti ~ 10¹² K (virial), Te ~ 10⁹⁻¹⁰ K (synchrotron)
+//   - Only ~1% of Mdot_Bondi reaches horizon (ADIOS: Blandford & Begelman 1999)
+//   - Peak emission at 230 GHz (1.3mm) synchrotron from Te near ISCO
+//
+// We model the RIAF as a geometrically thick torus with:
+//   - Synchrotron emission (not blackbody) with Te profile
+//   - Doppler beaming creating the EHT crescent
+//   - MHD turbulence via multi-octave FBM
+//   - MAD magnetic field line visualization
+//   - Orbiting hot-spot (GRAVITY 2018: 45 min period at ~9 Rg)
+//   - ADIOS wind particles ejected from torus surface
 export class AccretionDisk {
-    constructor(scene, { bhRadius = 0.5, innerR = 2.5, outerR = 9.0, tilt = -0.42 } = {}) {
+    constructor(scene, { bhRadius = 0.5, tilt = -0.42 } = {}) {
         this.scene = scene;
         this.bhRadius = bhRadius;
         this.tilt = tilt;
         this.time = 0;
-        this._build(innerR, outerR);
+        this._build();
     }
 
-    _build(innerR, outerR) {
+    _build() {
+        // ── Thick RIAF torus (replaces flat RingGeometry) ────────────
+        // RIAF has H/R ~ 0.5-1.0 at most radii. We use a torus with
+        // tube radius proportional to the major radius (puffed up).
+        // Main emission ring at ~5 Rg = bhRadius * 5
+        const torusR = this.bhRadius * 4.5;   // major radius (~5 Rg)
+        const tubeR  = this.bhRadius * 2.0;   // tube radius (thick!)
+
         const fragShader = `
             uniform float u_time;
             uniform float u_tmax;
-            uniform float u_eddRatio; // 0..1 maps log(L/L_Edd) to brightness
-            varying vec2 vUv;
+            uniform float u_eddRatio;
+            uniform float u_inclination; // viewing angle to spin axis (rad)
             varying vec3 vWorldPos;
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
 
             float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
             float noise(vec2 p) {
@@ -189,99 +208,294 @@ export class AccretionDisk {
             }
             float fbm(vec2 p) {
                 float v = 0.0, a = 0.5;
-                for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.1; a *= 0.45; }
+                for (int i = 0; i < 6; i++) { v += a * noise(p); p *= 2.17; a *= 0.42; }
                 return v;
             }
 
             void main() {
                 float r = length(vWorldPos.xz);
                 float angle = atan(vWorldPos.z, vWorldPos.x);
-                float omega = pow(r + 0.5, -1.5);
-                float phase = angle + u_time * omega * 1.5;
+                float height = abs(vWorldPos.y);
 
-                float turb = fbm(vec2(phase * 4.0 + r * 2.0, r * 6.0 + u_time * 0.15)) * 0.65
-                           + fbm(vec2(phase * 12.0 - r * 3.0, r * 18.0 + u_time * 0.08)) * 0.35;
+                // Keplerian angular velocity: ω ∝ r^(-3/2)
+                float omega = pow(max(r, 0.3) + 0.5, -1.5);
+                float phase = angle + u_time * omega * 1.2;
 
-                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(r + 0.3) * 4.0);
-                turb = mix(turb, turb * spiral, 0.4);
+                // ── MHD turbulence (EHT shows highly variable structure) ──
+                // Multi-scale: large-scale spiral + fine turbulent eddies
+                float largeTurb = fbm(vec2(phase * 3.0 + r * 1.5, r * 4.0 + u_time * 0.12));
+                float fineTurb  = fbm(vec2(phase * 10.0 - r * 4.0, r * 15.0 + u_time * 0.2));
+                // Minute-timescale variability (matches EHT observations)
+                float varPhase = u_time * 0.08;
+                float minuteVar = 0.7 + 0.3 * fbm(vec2(angle * 2.0 + varPhase, r * 3.0 + varPhase * 0.5));
+                float turb = (largeTurb * 0.55 + fineTurb * 0.45) * minuteVar;
 
-                // Temperature ramp scaled by u_tmax
-                float tempScale = log(u_tmax) / log(1.0e7);  // normalize to default
-                float temp = pow(max(r, 0.3), -0.75) * tempScale;
+                // ── Synchrotron emission (NOT blackbody) ─────────────────
+                // Te ∝ r^(-1) in RIAF (virial scaling)
+                // Peak at r ~ 5 Rg where Te ~ 5×10⁹ K → 230 GHz synchrotron
+                float Te_profile = pow(max(r, 0.4), -1.0);
+                float tempScale = log(u_tmax) / log(1.0e10);
+                float Te = Te_profile * tempScale;
 
-                vec3 hottest = vec3(0.85, 0.92, 1.0);
-                vec3 hot     = vec3(1.0, 0.92, 0.7);
-                vec3 warm    = vec3(1.0, 0.55, 0.12);
-                vec3 cool    = vec3(0.7, 0.15, 0.03);
-                float t = clamp(temp, 0.0, 3.0) / 3.0;
+                // Synchrotron spectrum: submm peak → orange-red glow
+                // Much redder than blackbody at same temperature
+                vec3 synchHot  = vec3(1.0, 0.75, 0.35);  // near ISCO: bright orange
+                vec3 synchWarm = vec3(0.85, 0.4, 0.1);    // mid-disk: deep orange
+                vec3 synchCool = vec3(0.5, 0.12, 0.03);   // outer: dark red
+                float tFrac = clamp(Te, 0.0, 2.5) / 2.5;
                 vec3 col;
-                if (t > 0.66) col = mix(hot, hottest, (t - 0.66) / 0.34);
-                else if (t > 0.33) col = mix(warm, hot, (t - 0.33) / 0.33);
-                else col = mix(cool, warm, t / 0.33);
+                if (tFrac > 0.5) col = mix(synchWarm, synchHot, (tFrac - 0.5) * 2.0);
+                else col = mix(synchCool, synchWarm, tFrac * 2.0);
 
-                float brightness = (0.3 + turb * 0.7) * temp * 0.22;
-                brightness *= smoothstep(4.5, 3.0, r);
-                brightness *= smoothstep(0.9, 1.4, r);
+                // ── Doppler beaming → EHT crescent ───────────────────────
+                // Approaching side (v·n > 0) boosted by δ⁴ where δ = 1/(γ(1-β cosθ))
+                // Creates the characteristic bright crescent seen in EHT image
+                float v_orb = omega * r * 0.6;  // fraction of c
+                float beta_los = v_orb * sin(phase) * sin(u_inclination + 0.42);
+                float doppler = pow(1.0 / max(0.3, 1.0 - clamp(beta_los, -0.6, 0.6)), 3.5);
+                doppler = clamp(doppler, 0.15, 4.0);
 
-                float v_orb = omega * r * 0.8;
-                float doppler4 = pow(1.0 / (1.0 - v_orb * sin(phase) * 0.3), 4.0);
-                doppler4 = clamp(doppler4, 0.3, 3.0);
-                brightness *= doppler4;
+                // ── Brightness ───────────────────────────────────────────
+                float brightness = (0.2 + turb * 0.8) * Te * 0.18;
+                // Vertical structure: emission peaks in midplane, fades with height
+                // H/R ~ 1 for RIAF: thick but still concentrated
+                float vertFade = exp(-height * height / (0.5 * r * r + 0.1));
+                brightness *= vertFade;
+                // Inner edge: ISCO cutoff
+                brightness *= smoothstep(0.7, 1.3, r);
+                // Outer fade
+                brightness *= smoothstep(5.0, 3.5, r);
+                // Doppler crescent
+                brightness *= doppler;
 
-                // RIAF dimming: Sgr A* is at ~10⁻⁸ L_Edd
-                // u_eddRatio maps 0.0 (dim RIAF) → 1.0 (luminous thin disk)
-                float riafDim = 0.08 + 0.92 * u_eddRatio;
+                // ── RIAF dimming ─────────────────────────────────────────
+                float riafDim = 0.12 + 0.88 * u_eddRatio;
                 brightness *= riafDim;
 
-                // RIAF color shift: at low accretion rates, emission is
-                // more red/infrared (synchrotron-dominated, not blackbody)
-                col = mix(col * vec3(1.0, 0.6, 0.3), col, u_eddRatio);
+                // At low Eddington ratios, even more red (pure synchrotron)
+                col = mix(col * vec3(1.0, 0.55, 0.25), col, u_eddRatio * 0.7 + 0.3);
 
-                gl_FragColor = vec4(col * brightness, brightness * 0.9);
+                // ── Gravitational redshift ───────────────────────────────
+                // Photons climbing out of potential: z = 1/sqrt(1 - Rs/r)
+                float Rs = 0.5; // ~ bhRadius in scene units
+                float gravDim = sqrt(max(0.05, 1.0 - Rs / max(r, Rs * 1.1)));
+                brightness *= gravDim;
+
+                float alpha = clamp(brightness * 0.9, 0.0, 0.95);
+                gl_FragColor = vec4(col * brightness, alpha);
             }`;
 
         const vertShader = `
-            varying vec2 vUv;
             varying vec3 vWorldPos;
+            varying vec3 vNormal;
+            varying vec3 vViewDir;
             void main() {
-                vUv = uv;
                 vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                vNormal = normalize(normalMatrix * normal);
+                vViewDir = normalize(cameraPosition - vWorldPos);
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }`;
 
-        this.uniforms = { u_time: { value: 0 }, u_tmax: { value: 1e7 }, u_eddRatio: { value: 0.0 } };
-        // Default: Sgr A* RIAF mode (very dim). Set to 1.0 for luminous AGN disk.
-
-        const mkDisk = (iR, oR, segs, flip) => {
-            const geo = new THREE.RingGeometry(this.bhRadius * iR, this.bhRadius * oR, segs, 8);
-            const mat = new THREE.ShaderMaterial({
-                vertexShader: vertShader, fragmentShader: fragShader,
-                uniforms: this.uniforms, transparent: true, depthWrite: false,
-                side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-            });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.rotation.x = this.tilt + (flip ? Math.PI : 0);
-            if (flip) mesh.scale.set(0.9, 0.9, 0.9);
-            this.scene.add(mesh);
-            return mesh;
+        this.uniforms = {
+            u_time: { value: 0 },
+            u_tmax: { value: 1e10 },  // Te ~ 10¹⁰ K for RIAF
+            u_eddRatio: { value: 0.0 },
+            u_inclination: { value: 0.4 }, // ~23° default viewing angle
         };
 
-        this.frontDisk = mkDisk(innerR, outerR, 256, false);
-        this.backDisk  = mkDisk(innerR + 0.3, outerR - 1, 200, true);
+        // Main thick torus
+        const torusGeo = new THREE.TorusGeometry(torusR, tubeR, 48, 128);
+        const torusMat = new THREE.ShaderMaterial({
+            vertexShader, fragmentShader: fragShader,
+            uniforms: this.uniforms, transparent: true, depthWrite: false,
+            side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        });
+        this.frontDisk = new THREE.Mesh(torusGeo, torusMat);
+        this.frontDisk.rotation.x = this.tilt + Math.PI / 2;
+        this.scene.add(this.frontDisk);
+
+        // Inner hot ring (emission peaks here — 3-5 Rg, the EHT ring)
+        const innerGeo = new THREE.TorusGeometry(this.bhRadius * 3.0, this.bhRadius * 0.8, 32, 96);
+        this.backDisk = new THREE.Mesh(innerGeo, new THREE.ShaderMaterial({
+            vertexShader, fragmentShader: fragShader,
+            uniforms: this.uniforms, transparent: true, depthWrite: false,
+            side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+        }));
+        this.backDisk.rotation.x = this.tilt + Math.PI / 2;
+        this.scene.add(this.backDisk);
+
+        // ── MAD magnetic field lines (poloidal, threading horizon) ────
+        this.bFieldLines = [];
+        for (let f = 0; f < 8; f++) {
+            const pts = [];
+            const baseAngle = (f / 8) * Math.PI * 2;
+            for (let j = 0; j <= 80; j++) {
+                const s = j / 80;
+                const theta = s * Math.PI; // pole to pole
+                const rField = this.bhRadius * (1.2 + 3.5 * Math.sin(theta));
+                // Poloidal: loops from north pole through disk to south pole
+                const x = rField * Math.cos(baseAngle + s * 0.3) * Math.sin(theta);
+                const y = rField * Math.cos(theta) * 1.3;
+                const z = rField * Math.sin(baseAngle + s * 0.3) * Math.sin(theta);
+                pts.push(new THREE.Vector3(x, y, z));
+            }
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({
+                color: new THREE.Color().setHSL(0.6 + f * 0.02, 0.6, 0.4),
+                transparent: true, opacity: 0.12, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const line = new THREE.Line(geo, mat);
+            this.scene.add(line);
+            this.bFieldLines.push(line);
+        }
+
+        // ── Orbiting hot-spot (GRAVITY 2018) ─────────────────────────
+        // Detected as a NIR-bright blob orbiting at ~9 Rg with ~45 min period
+        // (consistent with ISCO for moderate spin)
+        const spotGeo = new THREE.SphereGeometry(this.bhRadius * 0.3, 16, 16);
+        this.hotSpot = new THREE.Mesh(spotGeo, new THREE.MeshBasicMaterial({
+            color: 0xffcc44, transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        }));
+        this.hotSpotOrbitR = this.bhRadius * 4.0; // ~8 Rg
+        this.hotSpotPeriod = 12; // sim seconds (~45 min real)
+        this.hotSpotActive = false;
+        this.hotSpotTimer = 0;
+        this.hotSpotDuration = 0;
+        this.hotSpotNextSpawn = 5 + Math.random() * 15;
+        this.scene.add(this.hotSpot);
+
+        // Hot-spot glow
+        const spotGlowGeo = new THREE.SphereGeometry(this.bhRadius * 0.8, 12, 12);
+        this.hotSpotGlow = new THREE.Mesh(spotGlowGeo, new THREE.MeshBasicMaterial({
+            color: 0xffaa22, transparent: true, opacity: 0.0,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+        }));
+        this.hotSpot.add(this.hotSpotGlow);
+
+        // ── ADIOS wind particles (sub-relativistic thermal outflow) ──
+        // Blandford & Begelman (1999): Mdot(r) ∝ r^p with p ~ 0.5-1
+        // Most captured gas is ejected before reaching the horizon
+        const WIND_N = 60;
+        this.adiosWind = { count: WIND_N, state: [] };
+        const windPos = new Float32Array(WIND_N * 3);
+        const windCol = new Float32Array(WIND_N * 4);
+        for (let w = 0; w < WIND_N; w++) {
+            this.adiosWind.state.push({
+                alive: false, age: 0, maxAge: 0,
+                pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+            });
+            windCol[w * 4] = 0.8; windCol[w * 4 + 1] = 0.3;
+            windCol[w * 4 + 2] = 0.08; windCol[w * 4 + 3] = 0;
+        }
+        const windGeo = new THREE.BufferGeometry();
+        windGeo.setAttribute('position', new THREE.BufferAttribute(windPos, 3));
+        windGeo.setAttribute('color', new THREE.BufferAttribute(windCol, 4));
+        this.adiosPoints = new THREE.Points(windGeo, new THREE.PointsMaterial({
+            size: 0.04, vertexColors: true, transparent: true,
+            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+        }));
+        this.scene.add(this.adiosPoints);
     }
 
     setTemperature(tmax) { this.uniforms.u_tmax.value = tmax; }
     setEddingtonRatio(ratio) { this.uniforms.u_eddRatio.value = Math.max(0, Math.min(1, ratio)); }
+    setInclination(rad) { this.uniforms.u_inclination.value = rad; }
 
     update(dt) {
         this.time += dt;
         this.uniforms.u_time.value = this.time * 1.5;
+
+        // ── Magnetic field line slow rotation (frame-dragging) ───────
+        for (let i = 0; i < this.bFieldLines.length; i++) {
+            this.bFieldLines[i].rotation.y = this.time * 0.05 + i * Math.PI / 4;
+        }
+
+        // ── Hot-spot lifecycle ───────────────────────────────────────
+        if (!this.hotSpotActive) {
+            this.hotSpotNextSpawn -= dt;
+            if (this.hotSpotNextSpawn <= 0) {
+                this.hotSpotActive = true;
+                this.hotSpotTimer = 0;
+                // Hot-spots last 1-3 orbital periods before dissipating
+                this.hotSpotDuration = this.hotSpotPeriod * (1 + Math.random() * 2);
+                this.hotSpotNextSpawn = 8 + Math.random() * 20;
+            }
+        }
+        if (this.hotSpotActive) {
+            this.hotSpotTimer += dt;
+            if (this.hotSpotTimer > this.hotSpotDuration) {
+                this.hotSpotActive = false;
+                this.hotSpot.material.opacity = 0;
+                this.hotSpotGlow.material.opacity = 0;
+            } else {
+                // Orbit at ISCO
+                const angle = (this.hotSpotTimer / this.hotSpotPeriod) * Math.PI * 2;
+                const r = this.hotSpotOrbitR;
+                this.hotSpot.position.set(
+                    r * Math.cos(angle),
+                    Math.sin(angle * 0.3) * this.bhRadius * 0.2, // slight vertical bob
+                    r * Math.sin(angle)
+                );
+                // Fade in/out at start/end
+                const fadeFrac = this.hotSpotTimer / this.hotSpotDuration;
+                const fade = fadeFrac < 0.1 ? fadeFrac / 0.1 : fadeFrac > 0.85 ? (1 - fadeFrac) / 0.15 : 1;
+                this.hotSpot.material.opacity = fade * 0.7;
+                this.hotSpotGlow.material.opacity = fade * 0.3;
+            }
+        }
+
+        // ── ADIOS wind particles ─────────────────────────────────────
+        const wp = this.adiosPoints.geometry.attributes.position.array;
+        const wc = this.adiosPoints.geometry.attributes.color.array;
+        for (let w = 0; w < this.adiosWind.count; w++) {
+            const p = this.adiosWind.state[w];
+            if (!p.alive) {
+                if (Math.random() < dt * 2.5) {
+                    p.alive = true;
+                    p.age = 0;
+                    p.maxAge = 2 + Math.random() * 4;
+                    // Spawn on torus surface
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = this.bhRadius * (2.5 + Math.random() * 3);
+                    p.pos.set(r * Math.cos(angle), (Math.random() - 0.5) * r * 0.6, r * Math.sin(angle));
+                    // Eject outward + upward (sub-relativistic thermal wind)
+                    const outDir = p.pos.clone().normalize();
+                    outDir.y += (Math.random() - 0.5) * 2; // strong vertical component
+                    outDir.normalize();
+                    p.vel.copy(outDir).multiplyScalar(0.08 + Math.random() * 0.12);
+                }
+            } else {
+                p.age += dt;
+                if (p.age > p.maxAge) {
+                    p.alive = false;
+                    wc[w * 4 + 3] = 0;
+                } else {
+                    p.pos.add(p.vel.clone().multiplyScalar(dt));
+                    p.vel.y += dt * 0.01; // slight buoyancy (pressure-driven)
+                    const fade = 1 - p.age / p.maxAge;
+                    wc[w * 4 + 3] = fade * 0.3;
+                }
+            }
+            wp[w * 3] = p.alive ? p.pos.x : 0;
+            wp[w * 3 + 1] = p.alive ? p.pos.y : 0;
+            wp[w * 3 + 2] = p.alive ? p.pos.z : 0;
+        }
+        this.adiosPoints.geometry.attributes.position.needsUpdate = true;
+        this.adiosPoints.geometry.attributes.color.needsUpdate = true;
     }
 
+    isHotSpotActive() { return this.hotSpotActive; }
+    getHotSpotPhase() { return this.hotSpotActive ? (this.hotSpotTimer / this.hotSpotPeriod) % 1 : 0; }
+
     dispose() {
-        [this.frontDisk, this.backDisk].forEach(m => {
-            m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
+        [this.frontDisk, this.backDisk, this.hotSpot, this.adiosPoints].forEach(m => {
+            if (m.geometry) m.geometry.dispose();
+            if (m.material) m.material.dispose();
+            this.scene.remove(m);
         });
+        this.bFieldLines.forEach(l => { l.geometry.dispose(); l.material.dispose(); this.scene.remove(l); });
     }
 }
 
