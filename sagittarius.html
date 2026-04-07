@@ -116,9 +116,16 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
       <div class="hud-row"><span class="hud-label">Phase</span><span class="hud-val" id="hud-s2-phase">—</span></div>
       <div class="hud-row"><span class="hud-label">Next pericenter</span><span class="hud-val" id="hud-s2-next">—</span></div>
 
+      <div class="hud-section">Radiation Output</div>
+      <div class="hud-row"><span class="hud-label">L<sub>bol</sub></span><span class="hud-val" id="hud-lbol">~300 L&odot;</span></div>
+      <div class="hud-row"><span class="hud-label">L/L<sub>Edd</sub></span><span class="hud-val" id="hud-edd">~10&sup8;</span></div>
+      <div class="hud-row"><span class="hud-label">Radio (1.3cm)</span><span class="hud-val" style="color:#cc4422" id="hud-radio">10&sup3;&sup5; erg/s</span></div>
+      <div class="hud-row"><span class="hud-label">X-ray (2-10keV)</span><span class="hud-val" style="color:#4488ff" id="hud-xray">2&times;10&sup3;&sup3; erg/s</span></div>
+
       <div id="hud-flare-section" style="display:none">
-        <div class="hud-section">NIR Flare Active</div>
-        <div class="hud-row"><span class="hud-label">Intensity</span><span class="hud-val hud-flare" id="hud-flare-int">—</span></div>
+        <div class="hud-section" style="color:#ff4400">&#x26A0; FLARE DETECTED</div>
+        <div class="hud-row"><span class="hud-label">NIR (2.2&mu;m)</span><span class="hud-val hud-flare" id="hud-flare-int">—</span></div>
+        <div class="hud-row"><span class="hud-label">X-ray</span><span class="hud-val" style="color:#4488ff" id="hud-flare-xray">—</span></div>
         <div class="hud-row"><span class="hud-label">Elapsed</span><span class="hud-val hud-flare" id="hud-flare-dur">—</span></div>
       </div>
 
@@ -156,9 +163,14 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
         <div class="val" id="v-temp">10<sup>7.0</sup> K</div>
       </div>
       <div class="ctrl">
-        <label>Jet power</label>
-        <input type="range" id="s-jet" min="0" max="100" value="80">
-        <div class="val" id="v-jet">0.80</div>
+        <label>Outflow power</label>
+        <input type="range" id="s-jet" min="0" max="100" value="15">
+        <div class="val" id="v-jet">0.15</div>
+      </div>
+      <div class="ctrl">
+        <label>Accretion rate (log L/L<sub>Edd</sub>)</label>
+        <input type="range" id="s-edd" min="0" max="100" value="0">
+        <div class="val" id="v-edd">10<sup>-8</sup> (RIAF)</div>
       </div>
     </div>
 
@@ -166,7 +178,8 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
     <div>
       <div class="sec-title">Visualization Layers</div>
       <div class="toggle-row"><input type="checkbox" id="t-disk" checked><label for="t-disk">Accretion disk</label></div>
-      <div class="toggle-row"><input type="checkbox" id="t-jets" checked><label for="t-jets">Relativistic jets</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-jets" checked><label for="t-jets">Radio outflow</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-radiation" checked><label for="t-radiation">Radiation field</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-orbits" checked><label for="t-orbits">S-star orbits</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-trails" checked><label for="t-trails">S-star trails</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-field" checked><label for="t-field">Background starfield</label></div>
@@ -208,9 +221,11 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
 
     <div class="sep"></div>
     <div class="info-box">
-      <b>Sagittarius A*</b> is the 4.154&times;10&sup6; M&odot; supermassive black hole at the Milky Way's center (2020 Nobel Prize: Genzel &amp; Ghez).
-      S-star orbits use Gillessen et al. (2009) elements with <b>GR Schwarzschild precession</b> (12 arcmin/orbit for S2, matching GRAVITY 2020).
-      NIR flares occur ~4&times;/day (Do et al. 2019). Shadow size from EHT (2022): <b>51.8 &plusmn; 2.3 &mu;as</b>.
+      <b>Sgr A*</b> accretes at only <b>~10&sup8; L<sub>Edd</sub></b> &mdash; a starving black hole.
+      Unlike luminous AGN, it has no powerful jets. The weak radio outflow (Li et al. 2013) extends ~0.5" from the BH.
+      Accretion is via a <b>RIAF</b> (radiatively inefficient flow): geometrically thick, optically thin, most energy advected into the horizon.
+      L<sub>bol</sub> &asymp; 300 L&odot;. Multi-band: radio (synchrotron), submm (EHT 230 GHz), NIR/X-ray (flares, Do et al. 2019).
+      X-ray flares lag NIR by ~10&ndash;20 min (Dodds-Eden et al. 2009). Use the accretion rate slider to see how a brighter AGN would look.
     </div>
   </aside>
 </div>
@@ -221,7 +236,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BlackHole, AccretionDisk, SStarOrbits, RelativisticJets, Starfield, FlareEngine } from './js/sgr-a-star.js';
+import { BlackHole, AccretionDisk, SStarOrbits, RadioOutflow, Starfield, FlareEngine, RadiationField } from './js/sgr-a-star.js';
 
 // ── Renderer ─────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('sim-canvas');
@@ -253,12 +268,13 @@ controls.maxDistance = 50;
 controls.target.set(0, 0, 0);
 
 // ── Simulation components ────────────────────────────────────────────────────
-const blackHole = new BlackHole(scene);
-const disk      = new AccretionDisk(scene);
-const sStars    = new SStarOrbits(scene);
-const jets      = new RelativisticJets(scene);
-const starfield = new Starfield(scene);
-const flares    = new FlareEngine(scene);
+const blackHole  = new BlackHole(scene);
+const disk       = new AccretionDisk(scene);
+const sStars     = new SStarOrbits(scene);
+const outflow    = new RadioOutflow(scene);
+const starfield  = new Starfield(scene);
+const flares     = new FlareEngine(scene);
+const radiation  = new RadiationField(scene);
 
 // ── State ────────────────────────────────────────────────────────────────────
 let paused = false;
@@ -299,12 +315,30 @@ $('s-temp').addEventListener('input', e => {
 $('s-jet').addEventListener('input', e => {
     const v = e.target.value / 100;
     $('v-jet').textContent = v.toFixed(2);
-    jets.setPower(v);
+    outflow.setPower(v);
+});
+$('s-edd').addEventListener('input', e => {
+    const v = e.target.value / 100; // 0..1
+    // Maps slider 0..1 → log(L/L_Edd) from -8 to -2
+    const logEdd = -8 + v * 6;
+    const eddRatio = Math.pow(10, logEdd);
+    if (v < 0.01) {
+        $('v-edd').innerHTML = '10<sup>-8</sup> (RIAF)';
+    } else if (v > 0.99) {
+        $('v-edd').innerHTML = '10<sup>-2</sup> (luminous)';
+    } else {
+        $('v-edd').innerHTML = '10<sup>' + logEdd.toFixed(1) + '</sup>';
+    }
+    disk.setEddingtonRatio(v);
+    radiation.setEddingtonRatio(eddRatio);
 });
 
 // ── Layer toggles ────────────────────────────────────────────────────────────
 $('t-disk').addEventListener('change', e => { disk.frontDisk.visible = disk.backDisk.visible = e.target.checked; });
-$('t-jets').addEventListener('change', e => { jets.points.visible = e.target.checked; });
+$('t-jets').addEventListener('change', e => { outflow.points.visible = e.target.checked; });
+$('t-radiation')?.addEventListener('change', e => {
+    radiation.radioShell.visible = radiation.submmShell.visible = radiation.xrayShell.visible = e.target.checked;
+});
 $('t-orbits').addEventListener('change', e => {
     sStars.orbits.forEach(o => o.visible = e.target.checked);
     sStars.markers.forEach(m => m.visible = e.target.checked);
@@ -363,8 +397,16 @@ function animate() {
     blackHole.update(dt);
     disk.update(dt);
     sStars.update(dt);
-    jets.update(dt);
+    outflow.update(dt);
     flares.update(dt);
+    radiation.update(dt);
+
+    // Couple flare → radiation X-ray boost
+    if (flares.isFlaring()) {
+        radiation.setFlareBoost(flares.getFlareIntensity());
+    } else {
+        radiation.setFlareBoost(0);
+    }
 
     // Camera: follow star mode
     if (followStar >= 0 && followStar < sStars.markers.length) {
@@ -407,10 +449,16 @@ function animate() {
         $('hud-s2-phase').textContent = tel.phase.toFixed(3) + ' / 2\u03C0';
         $('hud-s2-next').textContent = tel.next_pericenter_yr.toFixed(1);
 
+        // Radiation output
+        const lum = radiation.getLuminosity();
+        $('hud-lbol').textContent = lum.L_bol_Lsun.toFixed(0) + ' L\u2609';
+        $('hud-edd').textContent = lum.L_Edd_ratio.toExponential(1);
+
         // Flare display
         if (flares.isFlaring()) {
             $('hud-flare-section').style.display = 'block';
             $('hud-flare-int').textContent = flares.getFlareIntensity().toFixed(2);
+            $('hud-flare-xray').textContent = flares.getXrayIntensity().toFixed(2);
             $('hud-flare-dur').textContent = flares.getFlareElapsed().toFixed(1) + 's / ' + flares.getFlareDuration().toFixed(1) + 's';
         } else {
             $('hud-flare-section').style.display = 'none';

@@ -155,6 +155,14 @@ export class BlackHole {
 }
 
 // ── AccretionDisk ────────────────────────────────────────────────────────────
+// Sgr A*'s accretion flow is a RIAF (Radiatively Inefficient Accretion Flow),
+// NOT a luminous Shakura-Sunyaev thin disk. Key differences:
+//   - Geometrically thick (H/R ~ 1), optically thin
+//   - Electron temperature Te ~ 10⁹⁻¹⁰ K (virial), ion Ti >> Te
+//   - Mdot ~ 10⁻⁸ M☉/yr — only ~1% reaches the horizon
+//   - Most energy advected into the BH, not radiated
+//   - Peak emission at submm (230 GHz) from near ISCO
+// The u_eddRatio uniform dims the disk appropriately.
 export class AccretionDisk {
     constructor(scene, { bhRadius = 0.5, innerR = 2.5, outerR = 9.0, tilt = -0.42 } = {}) {
         this.scene = scene;
@@ -168,6 +176,7 @@ export class AccretionDisk {
         const fragShader = `
             uniform float u_time;
             uniform float u_tmax;
+            uniform float u_eddRatio; // 0..1 maps log(L/L_Edd) to brightness
             varying vec2 vUv;
             varying vec3 vWorldPos;
 
@@ -219,6 +228,15 @@ export class AccretionDisk {
                 doppler4 = clamp(doppler4, 0.3, 3.0);
                 brightness *= doppler4;
 
+                // RIAF dimming: Sgr A* is at ~10⁻⁸ L_Edd
+                // u_eddRatio maps 0.0 (dim RIAF) → 1.0 (luminous thin disk)
+                float riafDim = 0.08 + 0.92 * u_eddRatio;
+                brightness *= riafDim;
+
+                // RIAF color shift: at low accretion rates, emission is
+                // more red/infrared (synchrotron-dominated, not blackbody)
+                col = mix(col * vec3(1.0, 0.6, 0.3), col, u_eddRatio);
+
                 gl_FragColor = vec4(col * brightness, brightness * 0.9);
             }`;
 
@@ -231,7 +249,8 @@ export class AccretionDisk {
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }`;
 
-        this.uniforms = { u_time: { value: 0 }, u_tmax: { value: 1e7 } };
+        this.uniforms = { u_time: { value: 0 }, u_tmax: { value: 1e7 }, u_eddRatio: { value: 0.0 } };
+        // Default: Sgr A* RIAF mode (very dim). Set to 1.0 for luminous AGN disk.
 
         const mkDisk = (iR, oR, segs, flip) => {
             const geo = new THREE.RingGeometry(this.bhRadius * iR, this.bhRadius * oR, segs, 8);
@@ -252,6 +271,7 @@ export class AccretionDisk {
     }
 
     setTemperature(tmax) { this.uniforms.u_tmax.value = tmax; }
+    setEddingtonRatio(ratio) { this.uniforms.u_eddRatio.value = Math.max(0, Math.min(1, ratio)); }
 
     update(dt) {
         this.time += dt;
@@ -515,15 +535,18 @@ export class SStarOrbits {
     }
 }
 
-// ── RelativisticJets ─────────────────────────────────────────────────────────
-export class RelativisticJets {
-    constructor(scene, { count = 500, maxHeight = 7, bhRadius = 0.5 } = {}) {
+// ── RadioOutflow ─────────────────────────────────────────────────────────────
+// Sgr A* does NOT have powerful AGN-style jets. It has weak, compact radio
+// outflows detected at 1.3 cm (Li et al. 2013, Issaoun et al. 2019).
+// L_radio ≈ 10³⁵ erg/s — 10⁹× weaker than typical AGN jets.
+// The outflow extends only ~0.5" (~4000 AU) from the BH.
+export class RadioOutflow {
+    constructor(scene, { count = 80, maxHeight = 1.8, bhRadius = 0.5 } = {}) {
         this.scene = scene;
         this.count = count;
-        this.maxCount = count;
         this.maxHeight = maxHeight;
         this.bhRadius = bhRadius;
-        this.power = 1.0;
+        this.power = 0.15; // default: weak (Sgr A* realistic)
         this._build();
     }
 
@@ -536,24 +559,25 @@ export class RelativisticJets {
         for (let i = 0; i < N; i++) {
             const up = i < N / 2 ? 1 : -1;
             const angle = Math.random() * Math.PI * 2;
-            const h = Math.random() * this.maxHeight + 0.15;
-            const collimation = 0.04 + 0.06 * Math.sqrt(h / this.maxHeight);
-            pos[i * 3]     = Math.cos(angle) * collimation;
+            const h = Math.random() * this.maxHeight + 0.1;
+            // Wide opening angle — poorly collimated (not a true jet)
+            const opening = 0.12 + 0.2 * (h / this.maxHeight);
+            pos[i * 3]     = Math.cos(angle) * opening;
             pos[i * 3 + 1] = up * h;
-            pos[i * 3 + 2] = Math.sin(angle) * collimation;
-            this.vel[i] = 0.012 + Math.random() * 0.035;
-            const hNorm = h / this.maxHeight;
-            const core = collimation < 0.06 ? 1.0 : 0.6;
-            col[i * 3]     = (0.15 + hNorm * 0.55) * core;
-            col[i * 3 + 1] = (0.3 + hNorm * 0.5) * core;
-            col[i * 3 + 2] = (0.85 + hNorm * 0.15) * core;
+            pos[i * 3 + 2] = Math.sin(angle) * opening;
+            this.vel[i] = 0.003 + Math.random() * 0.008; // slow
+            // Radio-red synchrotron colors (1.3 cm emission)
+            const hN = h / this.maxHeight;
+            col[i * 3]     = 0.6 + hN * 0.3;  // red-dominant
+            col[i * 3 + 1] = 0.15 + hN * 0.15;
+            col[i * 3 + 2] = 0.08 + hN * 0.08;
         }
 
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         this.points = new THREE.Points(geo, new THREE.PointsMaterial({
-            size: 0.04, vertexColors: true, transparent: true, opacity: 0.75,
+            size: 0.06, vertexColors: true, transparent: true, opacity: 0.25,
             blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
         }));
         this.scene.add(this.points);
@@ -561,40 +585,174 @@ export class RelativisticJets {
 
     setPower(power) {
         this.power = Math.max(0, Math.min(1, power));
-        this.points.material.opacity = 0.75 * this.power;
+        this.points.material.opacity = 0.25 * this.power + 0.03;
     }
 
     update(dt) {
         const jp = this.points.geometry.attributes.position.array;
-        const jc = this.points.geometry.attributes.color.array;
         const N = this.count;
         const time = performance.now() * 0.001;
-        const pw = this.power;
+        const pw = Math.max(0.05, this.power);
 
         for (let i = 0; i < N; i++) {
             const up = jp[i * 3 + 1] > 0 ? 1 : -1;
             jp[i * 3 + 1] += up * this.vel[i] * pw;
-            const angle = time * 3 + jp[i * 3 + 1] * 2;
-            const spiralR = 0.05 * Math.abs(jp[i * 3 + 1]);
-            jp[i * 3]     += (Math.cos(angle) * spiralR - jp[i * 3]) * 0.03;
-            jp[i * 3 + 2] += (Math.sin(angle) * spiralR - jp[i * 3 + 2]) * 0.03;
-            const h = Math.min(1, Math.abs(jp[i * 3 + 1]) / (this.maxHeight - 0.5));
-            jc[i * 3]     = 0.15 + h * 0.65;
-            jc[i * 3 + 1] = 0.3 + h * 0.6;
-            jc[i * 3 + 2] = 0.9 + h * 0.1;
+            // Gentle wobble — turbulent outflow, not collimated
+            const wobble = time * 1.5 + jp[i * 3 + 1] * 3;
+            jp[i * 3]     += (Math.cos(wobble) * 0.002 - jp[i * 3] * 0.002);
+            jp[i * 3 + 2] += (Math.sin(wobble) * 0.002 - jp[i * 3 + 2] * 0.002);
             if (Math.abs(jp[i * 3 + 1]) > this.maxHeight) {
-                jp[i * 3]     = (Math.random() - 0.5) * 0.08;
-                jp[i * 3 + 1] = up * Math.random() * 0.2;
-                jp[i * 3 + 2] = (Math.random() - 0.5) * 0.08;
+                const angle = Math.random() * Math.PI * 2;
+                jp[i * 3]     = Math.cos(angle) * 0.08;
+                jp[i * 3 + 1] = up * Math.random() * 0.15;
+                jp[i * 3 + 2] = Math.sin(angle) * 0.08;
             }
         }
         this.points.geometry.attributes.position.needsUpdate = true;
-        this.points.geometry.attributes.color.needsUpdate = true;
     }
 
     dispose() {
         this.points.geometry.dispose(); this.points.material.dispose();
         this.scene.remove(this.points);
+    }
+}
+
+// ── RadiationField ───────────────────────────────────────────────────────────
+// Multi-band emission visualization. Sgr A* emits across the spectrum:
+//   Radio (1.3 cm): L ~ 10³⁵ erg/s — dominant, extends to ~1000 Rs
+//   Submm (230 GHz): L ~ 10³⁵ erg/s — EHT observing band, near ISCO
+//   NIR (2.2 μm): L ~ 10³³ erg/s quiescent, flares to 10³⁴·⁵
+//   X-ray (2-10 keV): L ~ 2×10³³ erg/s quiescent, flares to 10³⁵
+// Total L_bol ≈ 10³⁶ erg/s = 300 L☉ — only 10⁻⁸ L_Eddington!
+export class RadiationField {
+    constructor(scene, { bhRadius = 0.5 } = {}) {
+        this.scene = scene;
+        this.bhRadius = bhRadius;
+        this.time = 0;
+        this.eddingtonRatio = 1e-8; // L/L_Edd
+        this._build();
+    }
+
+    _build() {
+        // Radio emission shell — largest, faintest red glow
+        this.radioShell = new THREE.Mesh(
+            new THREE.SphereGeometry(this.bhRadius * 8, 32, 32),
+            new THREE.ShaderMaterial({
+                vertexShader: `
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vec4 wp = modelMatrix * vec4(position, 1.0);
+                        vViewDir = normalize(cameraPosition - wp.xyz);
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }`,
+                fragmentShader: `
+                    uniform float u_time;
+                    uniform float u_intensity;
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        float rim = 1.0 - abs(dot(vViewDir, vNormal));
+                        float glow = pow(rim, 2.5) * u_intensity;
+                        // Radio: deep red synchrotron
+                        vec3 col = vec3(0.7, 0.12, 0.05) * glow;
+                        gl_FragColor = vec4(col, glow * 0.3);
+                    }`,
+                uniforms: { u_time: { value: 0 }, u_intensity: { value: 0.4 } },
+                transparent: true, depthWrite: false, side: THREE.BackSide,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        this.scene.add(this.radioShell);
+
+        // Submm emission shell — EHT band, closer to BH
+        this.submmShell = new THREE.Mesh(
+            new THREE.SphereGeometry(this.bhRadius * 4, 32, 32),
+            new THREE.ShaderMaterial({
+                vertexShader: this.radioShell.material.vertexShader,
+                fragmentShader: `
+                    uniform float u_time;
+                    uniform float u_intensity;
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        float rim = 1.0 - abs(dot(vViewDir, vNormal));
+                        float glow = pow(rim, 3.0) * u_intensity;
+                        // Submm: warm orange (230 GHz thermal)
+                        vec3 col = vec3(0.9, 0.45, 0.08) * glow;
+                        gl_FragColor = vec4(col, glow * 0.25);
+                    }`,
+                uniforms: { u_time: { value: 0 }, u_intensity: { value: 0.35 } },
+                transparent: true, depthWrite: false, side: THREE.BackSide,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        this.scene.add(this.submmShell);
+
+        // X-ray emission — compact, near ISCO, blue-white
+        this.xrayShell = new THREE.Mesh(
+            new THREE.SphereGeometry(this.bhRadius * 2.0, 24, 24),
+            new THREE.ShaderMaterial({
+                vertexShader: this.radioShell.material.vertexShader,
+                fragmentShader: `
+                    uniform float u_time;
+                    uniform float u_intensity;
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        float rim = 1.0 - abs(dot(vViewDir, vNormal));
+                        float pulse = 0.8 + 0.2 * sin(u_time * 3.0);
+                        float glow = pow(rim, 4.0) * u_intensity * pulse;
+                        // X-ray: blue-white bremsstrahlung
+                        vec3 col = vec3(0.3, 0.5, 1.0) * glow;
+                        gl_FragColor = vec4(col, glow * 0.2);
+                    }`,
+                uniforms: { u_time: { value: 0 }, u_intensity: { value: 0.15 } },
+                transparent: true, depthWrite: false, side: THREE.BackSide,
+                blending: THREE.AdditiveBlending,
+            })
+        );
+        this.scene.add(this.xrayShell);
+    }
+
+    setEddingtonRatio(ratio) {
+        this.eddingtonRatio = ratio;
+        // Scale shell intensities with accretion rate
+        const logR = Math.log10(Math.max(1e-12, ratio));
+        const norm = (logR + 10) / 4; // maps 1e-10..1e-6 → 0..1
+        const s = Math.max(0.05, Math.min(1, norm));
+        this.radioShell.material.uniforms.u_intensity.value = 0.4 * s;
+        this.submmShell.material.uniforms.u_intensity.value = 0.35 * s;
+        this.xrayShell.material.uniforms.u_intensity.value = 0.15 * s;
+    }
+
+    // Boost X-ray emission during flares
+    setFlareBoost(intensity) {
+        this.xrayShell.material.uniforms.u_intensity.value = 0.15 + intensity * 0.8;
+    }
+
+    update(dt) {
+        this.time += dt;
+        this.radioShell.material.uniforms.u_time.value = this.time;
+        this.submmShell.material.uniforms.u_time.value = this.time;
+        this.xrayShell.material.uniforms.u_time.value = this.time;
+    }
+
+    getLuminosity() {
+        // L_bol ≈ η * Mdot * c² where η ~ 0.1 for thin disk, ~0.001 for RIAF
+        // For Sgr A*: L_bol ≈ 10³⁶ erg/s = ~300 L☉
+        const L_edd = 5.2e44; // erg/s for 4.154e6 Msun
+        const L_bol = this.eddingtonRatio * L_edd;
+        return {
+            L_bol_erg: L_bol,
+            L_bol_Lsun: L_bol / 3.828e33,
+            L_Edd_ratio: this.eddingtonRatio,
+            L_radio_erg: L_bol * 0.1,  // ~10% in radio
+            L_xray_erg: L_bol * 0.02,  // ~2% in X-ray (quiescent)
+        };
+    }
+
+    dispose() {
+        [this.radioShell, this.submmShell, this.xrayShell].forEach(m => {
+            m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
+        });
     }
 }
 
@@ -700,17 +858,28 @@ export class FlareEngine {
     }
 
     _build() {
-        // Flare glow sphere
-        this.glow = new THREE.Mesh(
+        // NIR flare glow sphere (2.2 μm K-band — warm gold)
+        this.nirGlow = new THREE.Mesh(
             new THREE.SphereGeometry(this.bhRadius * 2.5, 32, 32),
             new THREE.MeshBasicMaterial({
                 color: 0xffaa33, transparent: true, opacity: 0,
                 blending: THREE.AdditiveBlending, depthWrite: false,
             })
         );
-        this.scene.add(this.glow);
+        this.scene.add(this.nirGlow);
 
-        // Bright flash ring
+        // X-ray flare glow (2-10 keV — blue-white, more compact)
+        // X-ray flares lag NIR by ~10-20 min (Dodds-Eden et al. 2009)
+        this.xrayGlow = new THREE.Mesh(
+            new THREE.SphereGeometry(this.bhRadius * 1.5, 24, 24),
+            new THREE.MeshBasicMaterial({
+                color: 0x4488ff, transparent: true, opacity: 0,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            })
+        );
+        this.scene.add(this.xrayGlow);
+
+        // Bright flash ring (hotspot orbiting at ISCO — GRAVITY 2018)
         this.ring = new THREE.Mesh(
             new THREE.TorusGeometry(this.bhRadius * 1.8, 0.08, 12, 64),
             new THREE.MeshBasicMaterial({
@@ -751,10 +920,21 @@ export class FlareEngine {
         }
 
         // Update visuals
-        this.glow.material.opacity = this.intensity * 0.15;
-        this.glow.scale.setScalar(1 + this.intensity * 0.5);
-        this.ring.material.opacity = this.intensity * 0.3;
-        this.ring.scale.setScalar(1 + this.intensity * 0.3);
+        // NIR flare: immediate
+        this.nirGlow.material.opacity = this.intensity * 0.2;
+        this.nirGlow.scale.setScalar(1 + this.intensity * 0.5);
+
+        // X-ray: delayed ~20% into flare, more compact and intense
+        const xrayDelay = Math.max(0, (this.flareTimer - this.flareDuration * 0.15));
+        const xrayEnvelope = xrayDelay > 0
+            ? Math.exp(-xrayDelay / (this.flareDuration * 0.5)) * this.intensity
+            : 0;
+        this.xrayGlow.material.opacity = xrayEnvelope * 0.25;
+        this.xrayGlow.scale.setScalar(1 + xrayEnvelope * 0.3);
+
+        // Hotspot ring orbiting at ISCO (period ~27 min for Sgr A*)
+        this.ring.material.opacity = this.intensity * 0.35;
+        this.ring.rotation.z = this.time * 2.0; // fast orbital motion
     }
 
     isFlaring() { return this.flaring; }
@@ -762,8 +942,13 @@ export class FlareEngine {
     getFlareDuration() { return this.flareDuration; }
     getFlareElapsed() { return this.flareTimer; }
 
+    getXrayIntensity() {
+        const xrayDelay = Math.max(0, (this.flareTimer - this.flareDuration * 0.15));
+        return xrayDelay > 0 ? Math.exp(-xrayDelay / (this.flareDuration * 0.5)) * this.intensity : 0;
+    }
+
     dispose() {
-        [this.glow, this.ring].forEach(m => {
+        [this.nirGlow, this.xrayGlow, this.ring].forEach(m => {
             m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
         });
     }
