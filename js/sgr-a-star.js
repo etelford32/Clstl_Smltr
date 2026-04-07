@@ -287,31 +287,43 @@ export class AccretionDisk {
 
 // ── SStarOrbits ──────────────────────────────────────────────────────────────
 // Real orbital elements from Gillessen et al. (2009) / Gravity Collab. (2020)
+// The S-stars are young, massive B-type stars (B0-B2 V) with strong stellar
+// winds (v_w ~ 1000 km/s, Mdot ~ 10⁻⁷ M☉/yr). At pericenter passage, tidal
+// forces from Sgr A* strip and stretch the wind material, feeding the RIAF.
+// This is one of the main accretion channels for Sgr A* (Cuadra et al. 2006).
 export class SStarOrbits {
-    constructor(scene, { scale = 1.0 } = {}) {
+    constructor(scene, { scale = 1.0, windParticlesPerStar = 30 } = {}) {
         this.scene = scene;
         this.scale = scale;
         this.time = 0;
         this.trailsEnabled = true;
+        this.windParticlesPerStar = windParticlesPerStar;
 
-        // Real orbital elements: a_AU, e, P(yr), i(deg), Omega(deg), omega(deg)
-        // GR precession rate: δω = 6πGM/(a·c²·(1−e²)) rad/orbit
+        // Real stellar + orbital properties
+        // Spectral types from Gillessen et al. (2009), Habibi et al. (2017)
         this.stars = [
-            { name: 'S2',  a_AU: 1031, e: 0.8839, P: 16.05, i: 134.18, Om: 228.07, w: 66.25,  color: 0x66bbff },
-            { name: 'S1',  a_AU: 4193, e: 0.358,  P: 94.1,  i: 119.14, Om: 342.04, w: 122.3,  color: 0xff8866 },
-            { name: 'S62', a_AU: 747,  e: 0.976,  P: 9.9,   i: 72.76,  Om: 122.61, w: 42.62,  color: 0xffdd44 },
-            { name: 'S38', a_AU: 1169, e: 0.8201, P: 19.2,  i: 170.76, Om: 101.62, w: 17.99,  color: 0x88ff88 },
-            { name: 'S55', a_AU: 890,  e: 0.7209, P: 12.8,  i: 150.1,  Om: 325.5,  w: 332.4,  color: 0xff66ff },
+            { name: 'S2',  a_AU: 1031, e: 0.8839, P: 16.05, i: 134.18, Om: 228.07, w: 66.25,
+              color: 0x99ccff, spectral: 'B0-2 V', Teff: 27500, mass_Msun: 14, L_Lsun: 16000,
+              Mdot: 1e-7, v_wind: 1000 },
+            { name: 'S1',  a_AU: 4193, e: 0.358,  P: 94.1,  i: 119.14, Om: 342.04, w: 122.3,
+              color: 0xffa877, spectral: 'B0.5 V', Teff: 25000, mass_Msun: 12, L_Lsun: 12000,
+              Mdot: 8e-8, v_wind: 900 },
+            { name: 'S62', a_AU: 747,  e: 0.976,  P: 9.9,   i: 72.76,  Om: 122.61, w: 42.62,
+              color: 0xffdd66, spectral: 'B2 V',   Teff: 22000, mass_Msun: 10, L_Lsun: 6000,
+              Mdot: 5e-8, v_wind: 800 },
+            { name: 'S38', a_AU: 1169, e: 0.8201, P: 19.2,  i: 170.76, Om: 101.62, w: 17.99,
+              color: 0x88ff99, spectral: 'B1 V',   Teff: 24000, mass_Msun: 11, L_Lsun: 9000,
+              Mdot: 7e-8, v_wind: 950 },
+            { name: 'S55', a_AU: 890,  e: 0.7209, P: 12.8,  i: 150.1,  Om: 325.5,  w: 332.4,
+              color: 0xee88ff, spectral: 'B2 V',   Teff: 22000, mass_Msun: 10, L_Lsun: 7000,
+              Mdot: 5e-8, v_wind: 850 },
         ];
 
-        // Compute GR precession rate for each star (rad per orbit)
         for (const s of this.stars) {
             const a_m = s.a_AU * AU_M;
             s.precRate = 6 * Math.PI * GM_SGR_A / (a_m * C_KMS * 1000 * C_KMS * 1000 * (1 - s.e * s.e));
-            s.precAccum = 0;  // accumulated precession in radians
-            // Visual scale: map so S2 fills ~2.5 scene units radius
+            s.precAccum = 0;
             s.visualScale = this.scale * 2.5 / 1031;
-            // Convert angles to radians
             s.i_rad = s.i * Math.PI / 180;
             s.Om_rad = s.Om * Math.PI / 180;
             s.w_rad = s.w * Math.PI / 180;
@@ -320,14 +332,64 @@ export class SStarOrbits {
         this.orbits = [];
         this.markers = [];
         this.trails = [];
+        this.windSystems = [];
+        this._starShader = this._createStarShader();
         this._build();
+    }
+
+    // Custom star shader: smooth radial glow, no square artifacts
+    _createStarShader() {
+        return {
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vViewDir;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    vec4 wp = modelMatrix * vec4(position, 1.0);
+                    vViewDir = normalize(cameraPosition - wp.xyz);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform vec3 u_color;
+                uniform float u_temperature; // Kelvin, affects core color
+                uniform float u_time;
+                varying vec3 vNormal;
+                varying vec3 vViewDir;
+
+                void main() {
+                    float NdotV = dot(vNormal, vViewDir);
+                    float facing = max(0.0, NdotV);
+
+                    // Hot stellar core: bright white-blue center
+                    float core = pow(facing, 1.2);
+
+                    // Limb darkening (realistic for B-type stars)
+                    // I(θ) = I₀ (1 - u(1 - cosθ)) where u ≈ 0.3 for hot stars
+                    float limbDark = 1.0 - 0.3 * (1.0 - facing);
+
+                    // Chromospheric rim glow
+                    float rim = pow(1.0 - facing, 3.0) * 0.4;
+
+                    // Subtle surface convection flicker
+                    float flicker = 0.95 + 0.05 * sin(u_time * 8.0 + vNormal.x * 20.0);
+
+                    // Color: hot core is whiter, edge tints toward star color
+                    vec3 coreCol = mix(vec3(1.0, 0.98, 0.95), u_color, 0.3);
+                    vec3 rimCol = u_color * 1.3;
+                    vec3 col = coreCol * core * limbDark * flicker + rimCol * rim;
+
+                    float alpha = smoothstep(0.0, 0.15, facing) * 0.95 + rim;
+                    gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
+                }`,
+        };
     }
 
     _build() {
         for (let si = 0; si < this.stars.length; si++) {
             const star = this.stars[si];
+            const c = new THREE.Color(star.color);
 
-            // Generate elliptical orbit path in 3D (with inclination)
+            // ── Orbit line ───────────────────────────────────────────────
             const pts = [];
             const N = 256;
             for (let j = 0; j <= N; j++) {
@@ -338,43 +400,105 @@ export class SStarOrbits {
                     Math.sqrt(1 - star.e) * Math.cos(E / 2)
                 );
                 const r = star.a_AU * (1 - star.e * star.e) / (1 + star.e * Math.cos(nu));
-                const pos3d = this._orbitToXYZ(r, nu, star);
-                pts.push(pos3d);
+                pts.push(this._orbitToXYZ(r, nu, star));
             }
-
-            // Orbit line
-            const geo = new THREE.BufferGeometry().setFromPoints(pts);
-            const mat = new THREE.LineBasicMaterial({
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+            const lineMat = new THREE.LineBasicMaterial({
                 color: star.color, transparent: true, opacity: 0.3, depthWrite: false,
             });
-            const line = new THREE.Line(geo, mat);
+            const line = new THREE.Line(lineGeo, lineMat);
             this.scene.add(line);
             this.orbits.push(line);
 
-            // Star marker
-            const mGeo = new THREE.SphereGeometry(0.06, 16, 16);
-            const mMat = new THREE.MeshBasicMaterial({ color: star.color });
-            const marker = new THREE.Mesh(mGeo, mMat);
+            // ── Star mesh (custom shader — proper stellar appearance) ────
+            // Size scaled by luminosity: R ∝ L^0.5 / T^2 (Stefan-Boltzmann)
+            const starRadius = 0.04 + 0.03 * Math.sqrt(star.L_Lsun / 16000);
+            const starGeo = new THREE.SphereGeometry(starRadius, 32, 32);
+            const starMat = new THREE.ShaderMaterial({
+                vertexShader: this._starShader.vertexShader,
+                fragmentShader: this._starShader.fragmentShader,
+                uniforms: {
+                    u_color: { value: c },
+                    u_temperature: { value: star.Teff },
+                    u_time: { value: 0 },
+                },
+                transparent: true, depthWrite: true,
+            });
+            const marker = new THREE.Mesh(starGeo, starMat);
             this.scene.add(marker);
             this.markers.push(marker);
 
-            // Glow sprite
-            const spriteMat = new THREE.SpriteMaterial({
-                color: star.color, transparent: true, opacity: 0.5,
+            // ── Outer corona/atmosphere glow (additive, larger sphere) ────
+            const glowGeo = new THREE.SphereGeometry(starRadius * 3.5, 16, 16);
+            const glowMat = new THREE.ShaderMaterial({
+                vertexShader: `
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        vNormal = normalize(normalMatrix * normal);
+                        vec4 wp = modelMatrix * vec4(position, 1.0);
+                        vViewDir = normalize(cameraPosition - wp.xyz);
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }`,
+                fragmentShader: `
+                    uniform vec3 u_color;
+                    varying vec3 vNormal, vViewDir;
+                    void main() {
+                        float rim = 1.0 - max(0.0, dot(vNormal, vViewDir));
+                        float glow = pow(rim, 2.0) * 0.6;
+                        gl_FragColor = vec4(u_color * glow, glow * 0.5);
+                    }`,
+                uniforms: { u_color: { value: c.clone().multiplyScalar(1.2) } },
+                transparent: true, depthWrite: false, side: THREE.BackSide,
                 blending: THREE.AdditiveBlending,
             });
-            const sprite = new THREE.Sprite(spriteMat);
-            sprite.scale.set(0.4, 0.4, 1);
-            marker.add(sprite);
+            const glowMesh = new THREE.Mesh(glowGeo, glowMat);
+            marker.add(glowMesh);
 
-            // Trail (line with vertex colors for fading)
+            // ── Stellar wind particles → streaming toward Sgr A* ─────────
+            const WN = this.windParticlesPerStar;
+            const windPos = new Float32Array(WN * 3);
+            const windCol = new Float32Array(WN * 4);
+            const windGeo = new THREE.BufferGeometry();
+            windGeo.setAttribute('position', new THREE.BufferAttribute(windPos, 3));
+            windGeo.setAttribute('color', new THREE.BufferAttribute(windCol, 4));
+
+            // Initialize colors (star-tinted, fading with distance)
+            for (let w = 0; w < WN; w++) {
+                windCol[w * 4]     = c.r * 0.7;
+                windCol[w * 4 + 1] = c.g * 0.7;
+                windCol[w * 4 + 2] = c.b * 0.7;
+                windCol[w * 4 + 3] = 0; // start invisible
+            }
+            windGeo.attributes.color.needsUpdate = true;
+
+            const windMat = new THREE.PointsMaterial({
+                size: 0.025, vertexColors: true, transparent: true,
+                blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+            });
+            const windPoints = new THREE.Points(windGeo, windMat);
+            this.scene.add(windPoints);
+
+            // Wind state per particle
+            const windState = [];
+            for (let w = 0; w < WN; w++) {
+                windState.push({
+                    alive: false,
+                    age: 0,
+                    maxAge: 2 + Math.random() * 4,
+                    pos: new THREE.Vector3(),
+                    vel: new THREE.Vector3(),
+                });
+            }
+
+            this.windSystems.push({ points: windPoints, state: windState, starIdx: si });
+
+            // ── Trail ────────────────────────────────────────────────────
             const TRAIL_LEN = 80;
             const trailGeo = new THREE.BufferGeometry();
             const trailPos = new Float32Array(TRAIL_LEN * 3);
             const trailCol = new Float32Array(TRAIL_LEN * 4);
             trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
             trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 4));
-            const c = new THREE.Color(star.color);
             for (let t = 0; t < TRAIL_LEN; t++) {
                 const alpha = 1 - t / TRAIL_LEN;
                 trailCol[t*4] = c.r; trailCol[t*4+1] = c.g; trailCol[t*4+2] = c.b; trailCol[t*4+3] = alpha * 0.5;
@@ -437,7 +561,74 @@ export class SStarOrbits {
 
             this.markers[i].position.copy(pos3d);
 
-            // Update orbit line with current precession
+            // Update star shader time uniform
+            if (this.markers[i].material.uniforms) {
+                this.markers[i].material.uniforms.u_time.value = this.time;
+            }
+
+            // ── Stellar wind particle update ─────────────────────────
+            const wind = this.windSystems[i];
+            const wp = wind.points.geometry.attributes.position.array;
+            const wc = wind.points.geometry.attributes.color.array;
+            const starPos = pos3d;
+            // Tidal enhancement: stronger wind stripping closer to BH
+            // Tidal radius r_t ~ (M_BH / M_star)^(1/3) * R_star
+            // At pericenter for S2: ~120 AU, tidal forces dominate
+            const periDist = star.a_AU * (1 - star.e);
+            const tidalFactor = Math.min(3.0, periDist / Math.max(r_AU, periDist * 0.5));
+            const dirToBH = starPos.clone().negate().normalize();
+
+            for (let w = 0; w < wind.state.length; w++) {
+                const p = wind.state[w];
+                if (!p.alive) {
+                    // Spawn new wind particle from star surface
+                    if (Math.random() < dt * 3.0) {
+                        p.alive = true;
+                        p.age = 0;
+                        p.maxAge = 1.5 + Math.random() * 3.5;
+                        // Emit in random direction, biased toward BH (tidal stripping)
+                        const randDir = new THREE.Vector3(
+                            (Math.random() - 0.5) * 2,
+                            (Math.random() - 0.5) * 2,
+                            (Math.random() - 0.5) * 2
+                        ).normalize();
+                        // Blend: isotropic wind + tidal-directed component
+                        const tidalBias = Math.min(0.8, tidalFactor * 0.3);
+                        p.vel.copy(randDir).lerp(dirToBH, tidalBias).normalize();
+                        // Wind speed scaled by star properties (scene units/s)
+                        p.vel.multiplyScalar(0.15 + Math.random() * 0.1);
+                        p.pos.copy(starPos);
+                    }
+                } else {
+                    p.age += dt;
+                    if (p.age > p.maxAge || p.pos.length() < 0.3) {
+                        p.alive = false;
+                        wc[w * 4 + 3] = 0;
+                    } else {
+                        // Gravitational acceleration toward BH (origin)
+                        const rVec = p.pos.clone().negate();
+                        const rLen = Math.max(rVec.length(), 0.3);
+                        const grav = rVec.normalize().multiplyScalar(0.03 / (rLen * rLen));
+                        p.vel.add(grav.multiplyScalar(dt));
+                        // Tidal stretching: near pericenter, radial velocity enhanced
+                        if (tidalFactor > 1.2) {
+                            const radialBoost = dirToBH.clone().multiplyScalar(dt * 0.05 * tidalFactor);
+                            p.vel.add(radialBoost);
+                        }
+                        p.pos.add(p.vel.clone().multiplyScalar(dt));
+                        // Fade with age
+                        const fade = 1 - (p.age / p.maxAge);
+                        wc[w * 4 + 3] = fade * 0.5 * Math.min(1, tidalFactor * 0.6);
+                    }
+                }
+                wp[w * 3]     = p.alive ? p.pos.x : 0;
+                wp[w * 3 + 1] = p.alive ? p.pos.y : 0;
+                wp[w * 3 + 2] = p.alive ? p.pos.z : 0;
+            }
+            wind.points.geometry.attributes.position.needsUpdate = true;
+            wind.points.geometry.attributes.color.needsUpdate = true;
+
+            // ── Update orbit line with current precession ────────────
             const pts = [];
             const N = 256;
             for (let j = 0; j <= N; j++) {
@@ -452,7 +643,7 @@ export class SStarOrbits {
             }
             this.orbits[i].geometry.setFromPoints(pts);
 
-            // Trail update
+            // ── Trail update ─────────────────────────────────────────
             if (this.trailsEnabled) {
                 const trail = this.trails[i];
                 trail.positions.unshift(pos3d.clone());
@@ -465,12 +656,14 @@ export class SStarOrbits {
                 trail.line.geometry.attributes.position.needsUpdate = true;
             }
 
-            // Cache current physical values for S2
+            // Cache current physical values for telemetry
             if (i === 0) {
                 star._r_AU = r_AU;
                 star._nu = nu;
                 star._M = M;
             }
+            // Cache r_AU for all stars (used by getStarInfo)
+            star._r_AU = r_AU;
         }
     }
 
@@ -520,18 +713,47 @@ export class SStarOrbits {
         };
     }
 
+    getStarInfo(idx) {
+        const star = this.stars[idx] || this.stars[0];
+        const r_AU = star._r_AU || star.a_AU;
+        const r_m = r_AU * AU_M;
+        const a_m = star.a_AU * AU_M;
+        const v2 = GM_SGR_A * (2 / r_m - 1 / a_m);
+        const v_kms = Math.sqrt(Math.max(0, v2)) / 1000;
+        const periDist = star.a_AU * (1 - star.e);
+        const tidalFactor = periDist / Math.max(r_AU, periDist * 0.5);
+        return {
+            name: star.name,
+            spectral: star.spectral,
+            Teff: star.Teff,
+            mass_Msun: star.mass_Msun,
+            L_Lsun: star.L_Lsun,
+            Mdot: star.Mdot,
+            v_wind: star.v_wind,
+            distance_AU: r_AU,
+            velocity_kms: v_kms,
+            pericenter_AU: periDist,
+            tidalFactor: Math.min(3, tidalFactor),
+        };
+    }
+
     setTrails(enabled) {
         this.trailsEnabled = enabled;
         this.trails.forEach(t => t.line.visible = enabled);
     }
 
+    setWindVisible(visible) {
+        this.windSystems.forEach(ws => ws.points.visible = visible);
+    }
+
     dispose() {
         this.orbits.forEach(o => { o.geometry.dispose(); o.material.dispose(); this.scene.remove(o); });
         this.markers.forEach(m => {
-            m.children.forEach(c => { if (c.material) c.material.dispose(); });
+            m.children.forEach(c => { if (c.material) c.material.dispose(); if (c.geometry) c.geometry.dispose(); });
             m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
         });
         this.trails.forEach(t => { t.line.geometry.dispose(); t.line.material.dispose(); this.scene.remove(t.line); });
+        this.windSystems.forEach(ws => { ws.points.geometry.dispose(); ws.points.material.dispose(); this.scene.remove(ws.points); });
     }
 }
 
