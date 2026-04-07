@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sagittarius A* — Parker Physics App</title>
-<meta name="description" content="Real-time 3D simulation of Sagittarius A*, the supermassive black hole at the center of the Milky Way. S-star orbits, accretion disk, relativistic jets.">
+<meta name="description" content="Real-time 3D simulation of Sagittarius A*, the supermassive black hole at the center of the Milky Way. S-star orbits with GR precession, accretion disk, relativistic jets, NIR flare detection.">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex;flex-direction:column;min-height:100vh;overflow:hidden}
@@ -15,40 +15,70 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
 #canvas-wrap canvas{position:absolute;top:0;left:0;width:100%;height:100%;display:block}
 
 /* ─── HUD ─────────────────────────────────────────────── */
-#hud{position:absolute;top:12px;left:12px;z-index:10;pointer-events:none;font-size:11px;line-height:1.7;color:#ff9933}
-#hud .hud-title{font-size:13px;font-weight:700;color:#ffcc66;margin-bottom:4px}
-#hud .hud-row{display:flex;gap:6px}
-#hud .hud-label{color:#888}
-#hud .hud-val{color:#ffcc66;font-weight:600}
+#hud{position:absolute;top:10px;left:10px;z-index:10;pointer-events:none;
+     font-family:'Courier New',monospace;font-size:10.5px;line-height:1.55;
+     background:rgba(0,0,0,.55);backdrop-filter:blur(4px);
+     border:1px solid rgba(255,140,0,.15);border-radius:6px;padding:10px 14px;
+     min-width:260px;color:#888}
+#hud .hud-header{font-size:12px;font-weight:700;color:#ffcc66;letter-spacing:.08em;
+     border-bottom:1px solid rgba(255,140,0,.2);padding-bottom:5px;margin-bottom:6px}
+#hud .hud-section{color:#666;font-size:9px;text-transform:uppercase;letter-spacing:.12em;
+     margin-top:7px;margin-bottom:2px}
+#hud .hud-row{display:flex;justify-content:space-between;gap:12px}
+#hud .hud-label{color:#777}
+#hud .hud-val{color:#ffcc66;font-weight:600;text-align:right}
+#hud .hud-flare{color:#ff4400;font-weight:700;animation:flare-pulse 0.6s ease-in-out infinite alternate}
+@keyframes flare-pulse{from{opacity:1}to{opacity:0.4}}
+.hud-scanline{position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,100,.012) 2px,rgba(0,255,100,.012) 4px);
+    border-radius:6px}
 
 /* ─── Panel ───────────────────────────────────────────── */
-#panel{width:260px;min-width:260px;background:rgba(8,4,20,.95);border-left:1px solid rgba(255,120,0,.2);display:flex;flex-direction:column;overflow-y:auto;padding:12px;gap:10px}
-.sec-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#ff8800;border-bottom:1px solid rgba(255,136,0,.25);padding-bottom:4px;margin-bottom:6px}
-.ctrl{display:flex;flex-direction:column;gap:3px;margin-bottom:7px}
-.ctrl label{font-size:10px;color:#aaa}
-.ctrl input[type=range]{width:100%;accent-color:#ff8800}
-.ctrl .val{font-size:10.5px;color:#ff9933;text-align:right}
-.toggle-row{display:flex;align-items:center;gap:6px;margin-bottom:6px}
-.toggle-row label{font-size:10px;color:#aaa;cursor:pointer}
-.btn{background:rgba(255,100,0,.18);border:1px solid rgba(255,120,0,.4);color:#ff9933;padding:6px 10px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:11px;width:100%;transition:background .2s}
-.btn:hover{background:rgba(255,100,0,.35)}
-.info-box{font-size:10px;color:#888;line-height:1.6;border:1px solid rgba(255,255,255,.06);border-radius:4px;padding:8px;background:rgba(255,255,255,.02)}
+#panel{width:270px;min-width:270px;background:rgba(8,4,20,.95);border-left:1px solid rgba(255,120,0,.2);
+       display:flex;flex-direction:column;overflow-y:auto;padding:10px 12px;gap:8px}
+#panel::-webkit-scrollbar{width:4px}
+#panel::-webkit-scrollbar-thumb{background:rgba(255,140,0,.3);border-radius:2px}
+.sec-title{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:#ff8800;
+           border-bottom:1px solid rgba(255,136,0,.2);padding-bottom:3px;margin-bottom:5px}
+.ctrl{display:flex;flex-direction:column;gap:2px;margin-bottom:5px}
+.ctrl label{font-size:9.5px;color:#999}
+.ctrl input[type=range]{width:100%;accent-color:#ff8800;height:14px}
+.ctrl .val{font-size:10px;color:#ff9933;text-align:right}
+.toggle-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.toggle-row input{accent-color:#ff8800}
+.toggle-row label{font-size:9.5px;color:#999;cursor:pointer}
+.btn{background:rgba(255,100,0,.15);border:1px solid rgba(255,120,0,.35);color:#ff9933;
+     padding:5px 8px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:10px;
+     width:100%;transition:background .2s;margin-bottom:3px}
+.btn:hover{background:rgba(255,100,0,.3)}
+.btn-row{display:flex;gap:4px}
+.btn-row .btn{flex:1}
+.btn.active{background:rgba(255,140,0,.3);border-color:#ff8c00}
+.info-box{font-size:9.5px;color:#777;line-height:1.55;border:1px solid rgba(255,255,255,.05);
+          border-radius:4px;padding:7px;background:rgba(255,255,255,.02)}
 .info-box b{color:#ffaa44}
-.sep{border-top:1px solid rgba(255,255,255,.07);margin:4px 0}
+.sep{border-top:1px solid rgba(255,255,255,.06);margin:3px 0}
+.star-legend{display:flex;flex-direction:column;gap:2px}
+.star-legend-item{display:flex;align-items:center;gap:6px;font-size:9.5px;color:#999;cursor:pointer;
+    padding:2px 4px;border-radius:3px;transition:background .15s}
+.star-legend-item:hover{background:rgba(255,255,255,.06);color:#ddd}
+.star-legend-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 
-/* ─── Panel toggle button ─────────────────────────────── */
-#btn-panel{position:absolute;top:12px;right:12px;z-index:20;background:rgba(4,2,0,.8);backdrop-filter:blur(8px);border:1px solid #cc44ff;border-radius:7px;color:#cc44ff;cursor:pointer;font-family:inherit;font-size:12px;padding:6px 11px;transition:all .2s}
+/* ─── Panel toggle ────────────────────────────────────── */
+#btn-panel{position:absolute;top:10px;right:10px;z-index:20;background:rgba(4,2,0,.8);
+           backdrop-filter:blur(8px);border:1px solid rgba(204,68,255,.5);border-radius:6px;
+           color:#cc44ff;cursor:pointer;font-family:inherit;font-size:11px;padding:5px 10px;transition:all .2s}
 #btn-panel:hover{background:rgba(255,140,0,.15);border-color:#ff8c00;color:#ffb830}
 
-/* ─── S-Star legend ───────────────────────────────────── */
-.star-legend{display:flex;flex-direction:column;gap:3px}
-.star-legend-item{display:flex;align-items:center;gap:6px;font-size:10px;color:#aaa}
-.star-legend-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+/* ─── Time control bar ────────────────────────────────── */
+.time-bar{display:flex;align-items:center;gap:6px}
+.time-bar .btn{width:auto;padding:4px 8px;font-size:13px;line-height:1}
 
 /* ─── Mobile ──────────────────────────────────────────── */
-@media(max-width:860px){
+@media(max-width:900px){
   #panel{display:none}
   #panel.open{display:flex;position:absolute;top:0;right:0;bottom:0;z-index:50;width:280px}
+  #hud{font-size:9px;min-width:200px;padding:7px 10px}
 }
 </style>
 </head>
@@ -69,63 +99,118 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
     <button id="btn-panel" title="Toggle controls">Controls</button>
 
     <div id="hud">
-      <div class="hud-title">Sagittarius A* — Galactic Center</div>
-      <div class="hud-row"><span class="hud-label">Mass:</span><span class="hud-val">4.154 × 10⁶ M☉</span></div>
-      <div class="hud-row"><span class="hud-label">Distance:</span><span class="hud-val">26,673 ly</span></div>
-      <div class="hud-row"><span class="hud-label">Rs:</span><span class="hud-val" id="hud-rs">12.3 × 10⁶ km</span></div>
-      <div class="hud-row"><span class="hud-label">Spin (a/M):</span><span class="hud-val" id="hud-spin">0.50</span></div>
-      <div class="hud-row"><span class="hud-label">S2 period:</span><span class="hud-val">16.05 yr</span></div>
-      <div class="hud-row"><span class="hud-label">FPS:</span><span class="hud-val" id="hud-fps">—</span></div>
+      <div class="hud-scanline"></div>
+      <div class="hud-header">SAGITTARIUS A* &mdash; GALACTIC CENTER</div>
+
+      <div class="hud-section">Black Hole</div>
+      <div class="hud-row"><span class="hud-label">Mass</span><span class="hud-val">4.154 &times; 10&sup6; M&odot;</span></div>
+      <div class="hud-row"><span class="hud-label">Distance</span><span class="hud-val">26,673 ly (8.178 kpc)</span></div>
+      <div class="hud-row"><span class="hud-label">Shadow</span><span class="hud-val">51.8 &plusmn; 2.3 &mu;as (EHT 2022)</span></div>
+      <div class="hud-row"><span class="hud-label">Spin (a/M)</span><span class="hud-val" id="hud-spin">0.50</span></div>
+
+      <div class="hud-section">S2 Orbit &mdash; Live</div>
+      <div class="hud-row"><span class="hud-label">Distance</span><span class="hud-val" id="hud-s2-dist">— AU</span></div>
+      <div class="hud-row"><span class="hud-label">Velocity</span><span class="hud-val" id="hud-s2-vel">— km/s</span></div>
+      <div class="hud-row"><span class="hud-label">Redshift z</span><span class="hud-val" id="hud-s2-z">—</span></div>
+      <div class="hud-row"><span class="hud-label">Precession</span><span class="hud-val" id="hud-s2-prec">— arcmin/orbit</span></div>
+      <div class="hud-row"><span class="hud-label">Phase</span><span class="hud-val" id="hud-s2-phase">—</span></div>
+      <div class="hud-row"><span class="hud-label">Next pericenter</span><span class="hud-val" id="hud-s2-next">—</span></div>
+
+      <div id="hud-flare-section" style="display:none">
+        <div class="hud-section">NIR Flare Active</div>
+        <div class="hud-row"><span class="hud-label">Intensity</span><span class="hud-val hud-flare" id="hud-flare-int">—</span></div>
+        <div class="hud-row"><span class="hud-label">Elapsed</span><span class="hud-val hud-flare" id="hud-flare-dur">—</span></div>
+      </div>
+
+      <div class="hud-section" style="margin-top:6px"></div>
+      <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-val" id="hud-fps">—</span></div>
     </div>
   </div>
 
   <aside id="panel">
+    <!-- Time Control -->
     <div>
-      <div class="sec-title">Black Hole Parameters</div>
+      <div class="sec-title">Time Control</div>
+      <div class="time-bar">
+        <button class="btn" id="btn-pause" title="Pause/Play" style="font-size:14px;width:32px">&#9654;</button>
+        <div class="ctrl" style="flex:1;margin:0">
+          <label>Speed</label>
+          <input type="range" id="s-speed" min="1" max="200" value="50">
+          <div class="val" id="v-speed">0.50&times;</div>
+        </div>
+      </div>
+      <button class="btn" id="btn-peri" style="margin-top:4px">Jump to S2 pericenter</button>
+    </div>
+
+    <!-- Black Hole Physics -->
+    <div>
+      <div class="sec-title">Black Hole Physics</div>
       <div class="ctrl">
-        <label>Viewing elevation</label>
-        <input type="range" id="s-elev" min="0" max="80" value="25">
-        <div class="val" id="v-elev">25°</div>
+        <label>Spin parameter (a/M)</label>
+        <input type="range" id="s-spin" min="0" max="998" value="500">
+        <div class="val" id="v-spin">0.500</div>
       </div>
       <div class="ctrl">
-        <label>Camera distance</label>
-        <input type="range" id="s-dist" min="4" max="30" value="12">
-        <div class="val" id="v-dist">12</div>
+        <label>Disk temperature (log K)</label>
+        <input type="range" id="s-temp" min="40" max="80" value="70">
+        <div class="val" id="v-temp">10<sup>7.0</sup> K</div>
       </div>
       <div class="ctrl">
-        <label>Orbit speed</label>
-        <input type="range" id="s-speed" min="1" max="100" value="30">
-        <div class="val" id="v-speed">0.30×</div>
+        <label>Jet power</label>
+        <input type="range" id="s-jet" min="0" max="100" value="80">
+        <div class="val" id="v-jet">0.80</div>
       </div>
     </div>
 
+    <!-- Visualization Layers -->
     <div>
       <div class="sec-title">Visualization Layers</div>
       <div class="toggle-row"><input type="checkbox" id="t-disk" checked><label for="t-disk">Accretion disk</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-jets" checked><label for="t-jets">Relativistic jets</label></div>
-      <div class="toggle-row"><input type="checkbox" id="t-stars" checked><label for="t-stars">S-star orbits</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-orbits" checked><label for="t-orbits">S-star orbits</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-trails" checked><label for="t-trails">S-star trails</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-field" checked><label for="t-field">Background starfield</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-ergo" checked><label for="t-ergo">Ergosphere</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-photon" checked><label for="t-photon">Photon sphere</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-corona" checked><label for="t-corona">Corona glow</label></div>
     </div>
 
+    <!-- Camera -->
+    <div>
+      <div class="sec-title">Camera</div>
+      <div class="ctrl">
+        <label>Bloom strength</label>
+        <input type="range" id="s-bloom" min="0" max="200" value="80">
+        <div class="val" id="v-bloom">0.80</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="cam-overview">Overview</button>
+        <button class="btn" id="cam-edgeon">Edge-on</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="cam-polar">Polar</button>
+        <button class="btn" id="cam-s2">Follow S2</button>
+      </div>
+      <button class="btn" id="btn-reset" style="margin-top:3px">&#8634; Reset Camera</button>
+    </div>
+
+    <!-- S-Star Legend -->
     <div>
       <div class="sec-title">S-Star Orbits</div>
       <div class="star-legend">
-        <div class="star-legend-item"><span class="star-legend-dot" style="background:#66bbff"></span>S2 — P=16.05 yr, e=0.884</div>
-        <div class="star-legend-item"><span class="star-legend-dot" style="background:#ff8866"></span>S1 — P=94.1 yr, e=0.358</div>
-        <div class="star-legend-item"><span class="star-legend-dot" style="background:#ffdd44"></span>S62 — P=9.9 yr, e=0.976</div>
-        <div class="star-legend-item"><span class="star-legend-dot" style="background:#88ff88"></span>S38 — P=19.2 yr, e=0.820</div>
-        <div class="star-legend-item"><span class="star-legend-dot" style="background:#ff66ff"></span>S55 — P=12.8 yr, e=0.721</div>
+        <div class="star-legend-item" data-star="0"><span class="star-legend-dot" style="background:#66bbff"></span>S2 &mdash; P=16.05 yr, e=0.884</div>
+        <div class="star-legend-item" data-star="1"><span class="star-legend-dot" style="background:#ff8866"></span>S1 &mdash; P=94.1 yr, e=0.358</div>
+        <div class="star-legend-item" data-star="2"><span class="star-legend-dot" style="background:#ffdd44"></span>S62 &mdash; P=9.9 yr, e=0.976</div>
+        <div class="star-legend-item" data-star="3"><span class="star-legend-dot" style="background:#88ff88"></span>S38 &mdash; P=19.2 yr, e=0.820</div>
+        <div class="star-legend-item" data-star="4"><span class="star-legend-dot" style="background:#ff66ff"></span>S55 &mdash; P=12.8 yr, e=0.721</div>
       </div>
-    </div>
-
-    <div>
-      <div class="sec-title">Controls</div>
-      <button class="btn" id="btn-reset">↺ Reset Camera</button>
     </div>
 
     <div class="sep"></div>
     <div class="info-box">
-      <b>Sagittarius A*</b> is the supermassive black hole at the center of the Milky Way, confirmed by the 2020 Nobel Prize (Genzel & Ghez). S-star orbits follow Gillessen et al. (2009) orbital elements. Mass from Gravity Collaboration (2018): <b>4.154 × 10⁶ M☉</b>.
+      <b>Sagittarius A*</b> is the 4.154&times;10&sup6; M&odot; supermassive black hole at the Milky Way's center (2020 Nobel Prize: Genzel &amp; Ghez).
+      S-star orbits use Gillessen et al. (2009) elements with <b>GR Schwarzschild precession</b> (12 arcmin/orbit for S2, matching GRAVITY 2020).
+      NIR flares occur ~4&times;/day (Do et al. 2019). Shadow size from EHT (2022): <b>51.8 &plusmn; 2.3 &mu;as</b>.
     </div>
   </aside>
 </div>
@@ -136,12 +221,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import {
-    SgrAStarSimulation,
-    BlackHole, AccretionDisk, SStarOrbits, RelativisticJets, Starfield
-} from './js/sgr-a-star.js';
+import { BlackHole, AccretionDisk, SStarOrbits, RelativisticJets, Starfield, FlareEngine } from './js/sgr-a-star.js';
 
-// ── Setup renderer ───────────────────────────────────────────────────────────
+// ── Renderer ─────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('sim-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -154,91 +236,185 @@ const camera = new THREE.PerspectiveCamera(50, canvas.clientWidth / canvas.clien
 camera.position.set(0, 4, 12);
 camera.lookAt(0, 0, 0);
 
-// ── Bloom post-processing ────────────────────────────────────────────────────
+// ── Post-processing ──────────────────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(
-    new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
-    0.8, 0.4, 0.85
+    new THREE.Vector2(canvas.clientWidth, canvas.clientHeight), 0.8, 0.4, 0.85
 );
 composer.addPass(bloom);
 
-// ── Orbit controls ───────────────────────────────────────────────────────────
+// ── Controls ─────────────────────────────────────────────────────────────────
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 3;
-controls.maxDistance = 35;
+controls.minDistance = 2;
+controls.maxDistance = 50;
 controls.target.set(0, 0, 0);
 
-// ── Build simulation components (reusable modules) ───────────────────────────
+// ── Simulation components ────────────────────────────────────────────────────
 const blackHole = new BlackHole(scene);
 const disk      = new AccretionDisk(scene);
 const sStars    = new SStarOrbits(scene);
 const jets      = new RelativisticJets(scene);
 const starfield = new Starfield(scene);
+const flares    = new FlareEngine(scene);
 
-// ── UI Bindings ──────────────────────────────────────────────────────────────
+// ── State ────────────────────────────────────────────────────────────────────
+let paused = false;
+let followStar = -1;  // -1 = free camera, 0-4 = follow that S-star
+const camTarget = { pos: new THREE.Vector3(), lookAt: new THREE.Vector3(), lerping: false, t: 0 };
+
 const $ = id => document.getElementById(id);
 
-// Panel toggle
+// ── Panel toggle ─────────────────────────────────────────────────────────────
 $('btn-panel').addEventListener('click', () => $('panel').classList.toggle('open'));
 
-// Sliders
-$('s-elev').addEventListener('input', e => {
-    $('v-elev').textContent = e.target.value + '°';
-});
-$('s-dist').addEventListener('input', e => {
-    $('v-dist').textContent = e.target.value;
+// ── Time controls ────────────────────────────────────────────────────────────
+$('btn-pause').addEventListener('click', () => {
+    paused = !paused;
+    $('btn-pause').innerHTML = paused ? '&#9654;' : '&#10074;&#10074;';
 });
 $('s-speed').addEventListener('input', e => {
-    $('v-speed').textContent = (e.target.value / 100).toFixed(2) + '×';
+    $('v-speed').innerHTML = (e.target.value / 100).toFixed(2) + '&times;';
+});
+$('btn-peri').addEventListener('click', () => {
+    // Jump S-star time near pericenter (phase ~0)
+    sStars.time = 0;
+    sStars.stars.forEach(s => s.precAccum = 0);
 });
 
-// Layer toggles
-$('t-disk').addEventListener('change',  e => { disk.frontDisk.visible = disk.backDisk.visible = e.target.checked; });
-$('t-jets').addEventListener('change',  e => { jets.points.visible = e.target.checked; });
-$('t-stars').addEventListener('change', e => {
+// ── Physics sliders ──────────────────────────────────────────────────────────
+$('s-spin').addEventListener('input', e => {
+    const v = e.target.value / 1000;
+    $('v-spin').textContent = v.toFixed(3);
+    $('hud-spin').textContent = v.toFixed(2);
+    blackHole.setSpin(v);
+});
+$('s-temp').addEventListener('input', e => {
+    const logT = e.target.value / 10;
+    $('v-temp').innerHTML = '10<sup>' + logT.toFixed(1) + '</sup> K';
+    disk.setTemperature(Math.pow(10, logT));
+});
+$('s-jet').addEventListener('input', e => {
+    const v = e.target.value / 100;
+    $('v-jet').textContent = v.toFixed(2);
+    jets.setPower(v);
+});
+
+// ── Layer toggles ────────────────────────────────────────────────────────────
+$('t-disk').addEventListener('change', e => { disk.frontDisk.visible = disk.backDisk.visible = e.target.checked; });
+$('t-jets').addEventListener('change', e => { jets.points.visible = e.target.checked; });
+$('t-orbits').addEventListener('change', e => {
     sStars.orbits.forEach(o => o.visible = e.target.checked);
     sStars.markers.forEach(m => m.visible = e.target.checked);
 });
+$('t-trails').addEventListener('change', e => { sStars.setTrails(e.target.checked); });
 $('t-field').addEventListener('change', e => { starfield.points.visible = e.target.checked; });
+$('t-ergo').addEventListener('change', e => { blackHole.ergosphere.visible = e.target.checked; });
+$('t-photon').addEventListener('change', e => { blackHole.rings.forEach(r => r.visible = e.target.checked); });
+$('t-corona').addEventListener('change', e => { blackHole.corona.visible = e.target.checked; });
 
-// Reset camera
+// ── Bloom slider ─────────────────────────────────────────────────────────────
+$('s-bloom').addEventListener('input', e => {
+    const v = e.target.value / 100;
+    $('v-bloom').textContent = v.toFixed(2);
+    bloom.strength = v;
+});
+
+// ── Camera presets ───────────────────────────────────────────────────────────
+function lerpCamera(pos, lookAt) {
+    camTarget.pos.copy(pos);
+    camTarget.lookAt.copy(lookAt);
+    camTarget.lerping = true;
+    camTarget.t = 0;
+    followStar = -1;
+}
+
+$('cam-overview').addEventListener('click', () => lerpCamera(new THREE.Vector3(0, 4, 12), new THREE.Vector3(0, 0, 0)));
+$('cam-edgeon').addEventListener('click', () => lerpCamera(new THREE.Vector3(12, 0.3, 0), new THREE.Vector3(0, 0, 0)));
+$('cam-polar').addEventListener('click', () => lerpCamera(new THREE.Vector3(0, 14, 0.5), new THREE.Vector3(0, 0, 0)));
+$('cam-s2').addEventListener('click', () => { followStar = 0; });
+
 $('btn-reset').addEventListener('click', () => {
-    camera.position.set(0, 4, 12);
-    controls.target.set(0, 0, 0);
-    $('s-elev').value = 25; $('v-elev').textContent = '25°';
-    $('s-dist').value = 12; $('v-dist').textContent = '12';
+    followStar = -1;
+    lerpCamera(new THREE.Vector3(0, 4, 12), new THREE.Vector3(0, 0, 0));
+});
+
+// ── S-Star legend click → focus ──────────────────────────────────────────────
+document.querySelectorAll('.star-legend-item').forEach(el => {
+    el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.star);
+        followStar = idx;
+    });
 });
 
 // ── Animation loop ───────────────────────────────────────────────────────────
 const clock = new THREE.Clock();
-let frameCount = 0, fpsTime = 0;
+let frameCount = 0, fpsTime = 0, hudTimer = 0;
 
 function animate() {
     requestAnimationFrame(animate);
-    const dt = clock.getDelta();
+    const rawDt = clock.getDelta();
     const speed = +$('s-speed').value / 100;
+    const dt = paused ? 0 : rawDt * speed;
 
-    // Camera elevation from slider (if not user-dragging)
-    const elev = +$('s-elev').value * Math.PI / 180;
-    const dist = +$('s-dist').value;
+    // Update components
+    blackHole.update(dt);
+    disk.update(dt);
+    sStars.update(dt);
+    jets.update(dt);
+    flares.update(dt);
 
-    blackHole.update(dt * speed);
-    disk.update(dt * speed);
-    sStars.update(dt * speed);
-    jets.update(dt * speed);
+    // Camera: follow star mode
+    if (followStar >= 0 && followStar < sStars.markers.length) {
+        const starPos = sStars.markers[followStar].position;
+        const offset = starPos.clone().normalize().multiplyScalar(3).add(new THREE.Vector3(0, 1.5, 0));
+        camera.position.lerp(starPos.clone().add(offset), 0.03);
+        controls.target.lerp(starPos, 0.05);
+    }
+
+    // Camera: smooth preset transitions
+    if (camTarget.lerping) {
+        camTarget.t += rawDt * 2;
+        const t = Math.min(1, camTarget.t);
+        const ease = t * t * (3 - 2 * t); // smoothstep
+        camera.position.lerp(camTarget.pos, ease * 0.08);
+        controls.target.lerp(camTarget.lookAt, ease * 0.08);
+        if (t >= 1) camTarget.lerping = false;
+    }
 
     controls.update();
     composer.render();
 
-    // FPS counter
+    // FPS
     frameCount++;
-    fpsTime += dt;
+    fpsTime += rawDt;
     if (fpsTime >= 0.5) {
         $('hud-fps').textContent = Math.round(frameCount / fpsTime);
         frameCount = 0; fpsTime = 0;
+    }
+
+    // HUD telemetry (update every ~100ms)
+    hudTimer += rawDt;
+    if (hudTimer >= 0.1) {
+        hudTimer = 0;
+        const tel = sStars.getS2Telemetry();
+        $('hud-s2-dist').textContent = tel.distance_AU.toFixed(0) + ' AU (' + tel.distance_mas.toFixed(1) + ' mas)';
+        $('hud-s2-vel').textContent = tel.velocity_kms.toFixed(0) + ' km/s';
+        $('hud-s2-z').textContent = tel.redshift_z.toExponential(3);
+        $('hud-s2-prec').textContent = tel.precession_arcmin_per_orbit.toFixed(1) + ' arcmin/orbit';
+        $('hud-s2-phase').textContent = tel.phase.toFixed(3) + ' / 2\u03C0';
+        $('hud-s2-next').textContent = tel.next_pericenter_yr.toFixed(1);
+
+        // Flare display
+        if (flares.isFlaring()) {
+            $('hud-flare-section').style.display = 'block';
+            $('hud-flare-int').textContent = flares.getFlareIntensity().toFixed(2);
+            $('hud-flare-dur').textContent = flares.getFlareElapsed().toFixed(1) + 's / ' + flares.getFlareDuration().toFixed(1) + 's';
+        } else {
+            $('hud-flare-section').style.display = 'none';
+        }
     }
 }
 
@@ -254,10 +430,7 @@ new ResizeObserver(resize).observe(canvas.parentElement);
 resize();
 animate();
 
-// ── Visibility ───────────────────────────────────────────────────────────────
-document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) clock.getDelta(); // reset delta to avoid jump
-});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) clock.getDelta(); });
 </script>
 
 <script type="module">

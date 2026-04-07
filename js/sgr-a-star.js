@@ -1,28 +1,30 @@
 /**
  * sgr-a-star.js — Sagittarius A* Supermassive Black Hole Simulation Engine
  *
- * Reusable, object-oriented module for rendering a physically-grounded
- * Sgr A* visualization with Three.js. Designed for composability:
- * each component (BlackHole, AccretionDisk, SStarOrbits, Jets) is a
- * standalone class that can be instantiated independently.
- *
  * Physics references:
  *   Gillessen et al. (2009)  — S-star orbital elements
- *   Gravity Collab. (2018)   — Sgr A* mass = 4.15 × 10⁶ M☉
+ *   Gravity Collab. (2018)   — Sgr A* mass = 4.154 × 10⁶ M☉
+ *   Gravity Collab. (2020)   — Schwarzschild precession of S2
  *   Shakura-Sunyaev (1973)   — α-disk temperature profile
  *   Blandford-Znajek (1977)  — jet launching mechanism
+ *   EHT Collaboration (2022) — Sgr A* shadow 51.8 ± 2.3 μas
  */
 
 import * as THREE from 'three';
 
-// ── Physical constants (scaled for visualization) ────────────────────────────
-const SGR_A_MASS_MSUN = 4.154e6;       // Gravity Collab. 2018
-const SCHWARZSCHILD_R_KM = 1.23e7;     // Rs = 2GM/c² ≈ 12.3 million km
-const SPIN_PARAMETER = 0.5;            // moderate Kerr spin estimate
+// ── Physical constants ───────────────────────────────────────────────────────
+const SGR_A_MASS_MSUN = 4.154e6;
+const GM_SGR_A = 5.318e15;            // m³/s² for 4.154e6 Msun
+const SCHWARZSCHILD_R_KM = 1.23e7;    // Rs = 2GM/c² ≈ 12.3 million km
+const SCHWARZSCHILD_R_AU = 0.0823;    // Rs in AU
+const DISTANCE_LY = 26673;
+const DISTANCE_KPC = 8.178;
+const C_KMS = 299792.458;
+const AU_M = 1.496e11;
 
 // ── BlackHole ────────────────────────────────────────────────────────────────
 export class BlackHole {
-    constructor(scene, { radius = 0.5, spin = SPIN_PARAMETER } = {}) {
+    constructor(scene, { radius = 0.5, spin = 0.5 } = {}) {
         this.scene = scene;
         this.radius = radius;
         this.spin = spin;
@@ -71,9 +73,41 @@ export class BlackHole {
                 }`,
             uniforms: { u_time: { value: 0 } },
         });
-
         this.mesh = new THREE.Mesh(geo, this.material);
         this.scene.add(this.mesh);
+
+        // Ergosphere (Kerr outer boundary)
+        const ergoGeo = new THREE.SphereGeometry(this.radius * 1.8, 48, 48);
+        {
+            const ep = ergoGeo.attributes.position;
+            for (let i = 0; i < ep.count; i++) {
+                const x = ep.getX(i), y = ep.getY(i), z = ep.getZ(i);
+                const r = Math.sqrt(x*x + y*y + z*z);
+                const cosT = y / Math.max(r, 1e-4);
+                const ergoR = 1 + Math.sqrt(1 - this.spin*this.spin*cosT*cosT);
+                const scale = ergoR / 2;
+                ep.setXYZ(i, x * scale, y * scale * 0.65, z * scale);
+            }
+            ep.needsUpdate = true;
+            ergoGeo.computeVertexNormals();
+        }
+        this.ergosphere = new THREE.Mesh(ergoGeo, new THREE.MeshBasicMaterial({
+            color: 0x4422aa, transparent: true, opacity: 0.04,
+            blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, wireframe: true,
+        }));
+        this.scene.add(this.ergosphere);
+
+        // ISCO ring (r_ISCO ≈ 2.32M for a=0.9 prograde Kerr)
+        const iscoR = this.radius * 2.32;
+        this.iscoRing = new THREE.Mesh(
+            new THREE.TorusGeometry(iscoR, 0.025, 12, 120),
+            new THREE.MeshBasicMaterial({
+                color: 0xffdd66, transparent: true, opacity: 0.7,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            })
+        );
+        this.iscoRing.rotation.x = -Math.PI * 0.42 + Math.PI / 2;
+        this.scene.add(this.iscoRing);
 
         // Photon sphere rings
         this.rings = [];
@@ -90,21 +124,33 @@ export class BlackHole {
             this.scene.add(ring);
             this.rings.push(ring);
         }
+
+        // Corona glow (hot electron scattering halo)
+        this.corona = new THREE.Mesh(
+            new THREE.SphereGeometry(this.radius * 5, 32, 32),
+            new THREE.MeshBasicMaterial({
+                color: 0xff6622, transparent: true, opacity: 0.015,
+                blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+            })
+        );
+        this.scene.add(this.corona);
     }
 
     update(dt) {
         this.time += dt;
         this.material.uniforms.u_time.value = this.time;
-        this.rings.forEach((r, i) => {
-            r.rotation.z = this.time * 0.02 + i * 0.5;
-        });
+        this.iscoRing.material.opacity = 0.5 + Math.sin(this.time * 5) * 0.2;
+        this.rings.forEach((r, i) => { r.rotation.z = this.time * 0.02 + i * 0.5; });
+    }
+
+    setSpin(a) {
+        this.spin = a;
     }
 
     dispose() {
-        this.mesh.geometry.dispose();
-        this.material.dispose();
-        this.scene.remove(this.mesh);
-        this.rings.forEach(r => { r.geometry.dispose(); r.material.dispose(); this.scene.remove(r); });
+        [this.mesh, this.ergosphere, this.iscoRing, this.corona, ...this.rings].forEach(m => {
+            m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
+        });
     }
 }
 
@@ -121,6 +167,7 @@ export class AccretionDisk {
     _build(innerR, outerR) {
         const fragShader = `
             uniform float u_time;
+            uniform float u_tmax;
             varying vec2 vUv;
             varying vec3 vWorldPos;
 
@@ -149,7 +196,10 @@ export class AccretionDisk {
                 float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(r + 0.3) * 4.0);
                 turb = mix(turb, turb * spiral, 0.4);
 
-                float temp = pow(max(r, 0.3), -0.75);
+                // Temperature ramp scaled by u_tmax
+                float tempScale = log(u_tmax) / log(1.0e7);  // normalize to default
+                float temp = pow(max(r, 0.3), -0.75) * tempScale;
+
                 vec3 hottest = vec3(0.85, 0.92, 1.0);
                 vec3 hot     = vec3(1.0, 0.92, 0.7);
                 vec3 warm    = vec3(1.0, 0.55, 0.12);
@@ -181,14 +231,13 @@ export class AccretionDisk {
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }`;
 
-        const uniforms = { u_time: { value: 0 } };
-        this.uniforms = uniforms;
+        this.uniforms = { u_time: { value: 0 }, u_tmax: { value: 1e7 } };
 
         const mkDisk = (iR, oR, segs, flip) => {
             const geo = new THREE.RingGeometry(this.bhRadius * iR, this.bhRadius * oR, segs, 8);
             const mat = new THREE.ShaderMaterial({
                 vertexShader: vertShader, fragmentShader: fragShader,
-                uniforms, transparent: true, depthWrite: false,
+                uniforms: this.uniforms, transparent: true, depthWrite: false,
                 side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
             });
             const mesh = new THREE.Mesh(geo, mat);
@@ -201,6 +250,8 @@ export class AccretionDisk {
         this.frontDisk = mkDisk(innerR, outerR, 256, false);
         this.backDisk  = mkDisk(innerR + 0.3, outerR - 1, 200, true);
     }
+
+    setTemperature(tmax) { this.uniforms.u_tmax.value = tmax; }
 
     update(dt) {
         this.time += dt;
@@ -221,58 +272,68 @@ export class SStarOrbits {
         this.scene = scene;
         this.scale = scale;
         this.time = 0;
-        this.labels = [];
+        this.trailsEnabled = true;
 
-        // Orbital elements: { name, a (arcsec), e, period (yr), color }
+        // Real orbital elements: a_AU, e, P(yr), i(deg), Omega(deg), omega(deg)
+        // GR precession rate: δω = 6πGM/(a·c²·(1−e²)) rad/orbit
         this.stars = [
-            { name: 'S2',  a: 0.1251, e: 0.8839, P: 16.05,  color: 0x66bbff, phase: 0 },
-            { name: 'S1',  a: 0.508,  e: 0.358,  P: 94.1,   color: 0xff8866, phase: 1.2 },
-            { name: 'S62', a: 0.0905, e: 0.976,  P: 9.9,    color: 0xffdd44, phase: 2.5 },
-            { name: 'S38', a: 0.1416, e: 0.8201, P: 19.2,   color: 0x88ff88, phase: 3.8 },
-            { name: 'S55', a: 0.1078, e: 0.7209, P: 12.8,   color: 0xff66ff, phase: 5.0 },
+            { name: 'S2',  a_AU: 1031, e: 0.8839, P: 16.05, i: 134.18, Om: 228.07, w: 66.25,  color: 0x66bbff },
+            { name: 'S1',  a_AU: 4193, e: 0.358,  P: 94.1,  i: 119.14, Om: 342.04, w: 122.3,  color: 0xff8866 },
+            { name: 'S62', a_AU: 747,  e: 0.976,  P: 9.9,   i: 72.76,  Om: 122.61, w: 42.62,  color: 0xffdd44 },
+            { name: 'S38', a_AU: 1169, e: 0.8201, P: 19.2,  i: 170.76, Om: 101.62, w: 17.99,  color: 0x88ff88 },
+            { name: 'S55', a_AU: 890,  e: 0.7209, P: 12.8,  i: 150.1,  Om: 325.5,  w: 332.4,  color: 0xff66ff },
         ];
+
+        // Compute GR precession rate for each star (rad per orbit)
+        for (const s of this.stars) {
+            const a_m = s.a_AU * AU_M;
+            s.precRate = 6 * Math.PI * GM_SGR_A / (a_m * C_KMS * 1000 * C_KMS * 1000 * (1 - s.e * s.e));
+            s.precAccum = 0;  // accumulated precession in radians
+            // Visual scale: map so S2 fills ~2.5 scene units radius
+            s.visualScale = this.scale * 2.5 / 1031;
+            // Convert angles to radians
+            s.i_rad = s.i * Math.PI / 180;
+            s.Om_rad = s.Om * Math.PI / 180;
+            s.w_rad = s.w * Math.PI / 180;
+        }
 
         this.orbits = [];
         this.markers = [];
+        this.trails = [];
         this._build();
     }
 
     _build() {
-        for (const star of this.stars) {
-            // Generate elliptical orbit path
+        for (let si = 0; si < this.stars.length; si++) {
+            const star = this.stars[si];
+
+            // Generate elliptical orbit path in 3D (with inclination)
             const pts = [];
             const N = 256;
             for (let j = 0; j <= N; j++) {
                 const M = (j / N) * Math.PI * 2;
                 const E = this._solveKepler(M, star.e);
-                const trueAnom = 2 * Math.atan2(
+                const nu = 2 * Math.atan2(
                     Math.sqrt(1 + star.e) * Math.sin(E / 2),
                     Math.sqrt(1 - star.e) * Math.cos(E / 2)
                 );
-                const r = star.a * (1 - star.e * star.e) / (1 + star.e * Math.cos(trueAnom));
-                const s = r * this.scale * 18;
-                pts.push(new THREE.Vector3(
-                    s * Math.cos(trueAnom + star.phase),
-                    (Math.random() - 0.5) * 0.05,
-                    s * Math.sin(trueAnom + star.phase)
-                ));
+                const r = star.a_AU * (1 - star.e * star.e) / (1 + star.e * Math.cos(nu));
+                const pos3d = this._orbitToXYZ(r, nu, star);
+                pts.push(pos3d);
             }
 
             // Orbit line
             const geo = new THREE.BufferGeometry().setFromPoints(pts);
             const mat = new THREE.LineBasicMaterial({
-                color: star.color, transparent: true, opacity: 0.35,
-                depthWrite: false,
+                color: star.color, transparent: true, opacity: 0.3, depthWrite: false,
             });
             const line = new THREE.Line(geo, mat);
             this.scene.add(line);
             this.orbits.push(line);
 
-            // Star marker (sphere)
+            // Star marker
             const mGeo = new THREE.SphereGeometry(0.06, 16, 16);
-            const mMat = new THREE.MeshBasicMaterial({
-                color: star.color, transparent: true, opacity: 0.95,
-            });
+            const mMat = new THREE.MeshBasicMaterial({ color: star.color });
             const marker = new THREE.Mesh(mGeo, mMat);
             this.scene.add(marker);
             this.markers.push(marker);
@@ -285,7 +346,45 @@ export class SStarOrbits {
             const sprite = new THREE.Sprite(spriteMat);
             sprite.scale.set(0.4, 0.4, 1);
             marker.add(sprite);
+
+            // Trail (line with vertex colors for fading)
+            const TRAIL_LEN = 80;
+            const trailGeo = new THREE.BufferGeometry();
+            const trailPos = new Float32Array(TRAIL_LEN * 3);
+            const trailCol = new Float32Array(TRAIL_LEN * 4);
+            trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+            trailGeo.setAttribute('color', new THREE.BufferAttribute(trailCol, 4));
+            const c = new THREE.Color(star.color);
+            for (let t = 0; t < TRAIL_LEN; t++) {
+                const alpha = 1 - t / TRAIL_LEN;
+                trailCol[t*4] = c.r; trailCol[t*4+1] = c.g; trailCol[t*4+2] = c.b; trailCol[t*4+3] = alpha * 0.5;
+            }
+            trailGeo.attributes.color.needsUpdate = true;
+            const trailMat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            const trailLine = new THREE.Line(trailGeo, trailMat);
+            this.scene.add(trailLine);
+            this.trails.push({ line: trailLine, positions: [], maxLen: TRAIL_LEN });
         }
+    }
+
+    _orbitToXYZ(r_AU, nu, star) {
+        const w = star.w_rad + star.precAccum;
+        const cosNuW = Math.cos(nu + w);
+        const sinNuW = Math.sin(nu + w);
+        const cosOm = Math.cos(star.Om_rad);
+        const sinOm = Math.sin(star.Om_rad);
+        const cosI = Math.cos(star.i_rad);
+        const sinI = Math.sin(star.i_rad);
+
+        const x = r_AU * (cosOm * cosNuW - sinOm * sinNuW * cosI);
+        const y = r_AU * (sinNuW * sinI);
+        const z = r_AU * (sinOm * cosNuW + cosOm * sinNuW * cosI);
+
+        const s = star.visualScale;
+        return new THREE.Vector3(x * s, y * s, z * s);
     }
 
     _solveKepler(M, e, tol = 1e-8) {
@@ -302,30 +401,108 @@ export class SStarOrbits {
         this.time += dt;
         for (let i = 0; i < this.stars.length; i++) {
             const star = this.stars[i];
-            // Mean anomaly evolves with time; scale so orbits are visible
+
+            // Accumulate GR precession
+            star.precAccum += star.precRate * (dt * 0.3 / star.P);
+
+            // Mean anomaly
             const M = ((this.time * 0.3) / star.P) * Math.PI * 2;
             const E = this._solveKepler(M, star.e);
-            const trueAnom = 2 * Math.atan2(
+            const nu = 2 * Math.atan2(
                 Math.sqrt(1 + star.e) * Math.sin(E / 2),
                 Math.sqrt(1 - star.e) * Math.cos(E / 2)
             );
-            const r = star.a * (1 - star.e * star.e) / (1 + star.e * Math.cos(trueAnom));
-            const s = r * this.scale * 18;
-            this.markers[i].position.set(
-                s * Math.cos(trueAnom + star.phase),
-                0,
-                s * Math.sin(trueAnom + star.phase)
-            );
+            const r_AU = star.a_AU * (1 - star.e * star.e) / (1 + star.e * Math.cos(nu));
+            const pos3d = this._orbitToXYZ(r_AU, nu, star);
+
+            this.markers[i].position.copy(pos3d);
+
+            // Update orbit line with current precession
+            const pts = [];
+            const N = 256;
+            for (let j = 0; j <= N; j++) {
+                const Mj = (j / N) * Math.PI * 2;
+                const Ej = this._solveKepler(Mj, star.e);
+                const nuj = 2 * Math.atan2(
+                    Math.sqrt(1 + star.e) * Math.sin(Ej / 2),
+                    Math.sqrt(1 - star.e) * Math.cos(Ej / 2)
+                );
+                const rj = star.a_AU * (1 - star.e * star.e) / (1 + star.e * Math.cos(nuj));
+                pts.push(this._orbitToXYZ(rj, nuj, star));
+            }
+            this.orbits[i].geometry.setFromPoints(pts);
+
+            // Trail update
+            if (this.trailsEnabled) {
+                const trail = this.trails[i];
+                trail.positions.unshift(pos3d.clone());
+                if (trail.positions.length > trail.maxLen) trail.positions.length = trail.maxLen;
+                const tp = trail.line.geometry.attributes.position.array;
+                for (let t = 0; t < trail.maxLen; t++) {
+                    const p = trail.positions[t] || trail.positions[trail.positions.length - 1] || pos3d;
+                    tp[t*3] = p.x; tp[t*3+1] = p.y; tp[t*3+2] = p.z;
+                }
+                trail.line.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // Cache current physical values for S2
+            if (i === 0) {
+                star._r_AU = r_AU;
+                star._nu = nu;
+                star._M = M;
+            }
         }
     }
 
-    getStarPositions() {
-        return this.stars.map((star, i) => ({
-            name: star.name,
-            position: this.markers[i].position.clone(),
-            period: star.P,
-            eccentricity: star.e,
-        }));
+    getS2Telemetry() {
+        const s2 = this.stars[0];
+        const r_AU = s2._r_AU || s2.a_AU;
+        const r_m = r_AU * AU_M;
+
+        // Vis-viva: v² = GM(2/r - 1/a)
+        const a_m = s2.a_AU * AU_M;
+        const v2 = GM_SGR_A * (2 / r_m - 1 / a_m);
+        const v_kms = Math.sqrt(Math.max(0, v2)) / 1000;
+
+        // Gravitational redshift: z = 1/sqrt(1 - Rs/r) - 1
+        const Rs_m = 2 * GM_SGR_A / (C_KMS * 1000 * C_KMS * 1000);
+        const z = 1 / Math.sqrt(Math.max(0.001, 1 - Rs_m / r_m)) - 1;
+
+        // Pericenter distance
+        const rp_AU = s2.a_AU * (1 - s2.e);
+
+        // Phase (0-1 through orbit)
+        const phase = ((s2._M || 0) % (Math.PI * 2)) / (Math.PI * 2);
+
+        // Precession in arcmin per orbit
+        const precArcmin = (s2.precRate * 180 / Math.PI) * 60;
+
+        // Accumulated precession in degrees
+        const precDeg = s2.precAccum * 180 / Math.PI;
+
+        // Distance in milliarcsec (at 8.178 kpc)
+        const dist_mas = r_AU / (DISTANCE_KPC * 1000) * 206265 * 1000;
+
+        // Time to next pericenter (simplified)
+        const phaseToNext = phase < 0.5 ? (1 - phase) : (1 - phase + 1);
+        const nextPeri = 2018.38 + Math.ceil((2026.3 - 2018.38) / s2.P) * s2.P;
+
+        return {
+            distance_AU: r_AU,
+            distance_mas: dist_mas,
+            velocity_kms: v_kms,
+            redshift_z: z,
+            phase: phase,
+            precession_arcmin_per_orbit: precArcmin,
+            precession_accumulated_deg: precDeg,
+            pericenter_AU: rp_AU,
+            next_pericenter_yr: nextPeri,
+        };
+    }
+
+    setTrails(enabled) {
+        this.trailsEnabled = enabled;
+        this.trails.forEach(t => t.line.visible = enabled);
     }
 
     dispose() {
@@ -334,16 +511,19 @@ export class SStarOrbits {
             m.children.forEach(c => { if (c.material) c.material.dispose(); });
             m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
         });
+        this.trails.forEach(t => { t.line.geometry.dispose(); t.line.material.dispose(); this.scene.remove(t.line); });
     }
 }
 
 // ── RelativisticJets ─────────────────────────────────────────────────────────
 export class RelativisticJets {
-    constructor(scene, { count = 400, maxHeight = 6, bhRadius = 0.5 } = {}) {
+    constructor(scene, { count = 500, maxHeight = 7, bhRadius = 0.5 } = {}) {
         this.scene = scene;
         this.count = count;
+        this.maxCount = count;
         this.maxHeight = maxHeight;
         this.bhRadius = bhRadius;
+        this.power = 1.0;
         this._build();
     }
 
@@ -373,10 +553,15 @@ export class RelativisticJets {
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
         geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         this.points = new THREE.Points(geo, new THREE.PointsMaterial({
-            size: 0.035, vertexColors: true, transparent: true, opacity: 0.7,
+            size: 0.04, vertexColors: true, transparent: true, opacity: 0.75,
             blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
         }));
         this.scene.add(this.points);
+    }
+
+    setPower(power) {
+        this.power = Math.max(0, Math.min(1, power));
+        this.points.material.opacity = 0.75 * this.power;
     }
 
     update(dt) {
@@ -384,10 +569,11 @@ export class RelativisticJets {
         const jc = this.points.geometry.attributes.color.array;
         const N = this.count;
         const time = performance.now() * 0.001;
+        const pw = this.power;
 
         for (let i = 0; i < N; i++) {
             const up = jp[i * 3 + 1] > 0 ? 1 : -1;
-            jp[i * 3 + 1] += up * this.vel[i];
+            jp[i * 3 + 1] += up * this.vel[i] * pw;
             const angle = time * 3 + jp[i * 3 + 1] * 2;
             const spiralR = 0.05 * Math.abs(jp[i * 3 + 1]);
             jp[i * 3]     += (Math.cos(angle) * spiralR - jp[i * 3]) * 0.03;
@@ -407,8 +593,7 @@ export class RelativisticJets {
     }
 
     dispose() {
-        this.points.geometry.dispose();
-        this.points.material.dispose();
+        this.points.geometry.dispose(); this.points.material.dispose();
         this.scene.remove(this.points);
     }
 }
@@ -421,8 +606,12 @@ export class Starfield {
     }
 
     _build(count) {
-        const pos = new Float32Array(count * 3);
-        const sizes = new Float32Array(count);
+        const total = count + 500; // extra for galactic center dust band
+        const pos = new Float32Array(total * 3);
+        const col = new Float32Array(total * 3);
+        const sizes = new Float32Array(total);
+
+        // Background stars
         for (let i = 0; i < count; i++) {
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
@@ -431,15 +620,38 @@ export class Starfield {
             pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
             pos[i * 3 + 2] = r * Math.cos(phi);
             sizes[i] = 0.05 + Math.random() * 0.12;
+            col[i * 3] = 0.9 + Math.random() * 0.1;
+            col[i * 3 + 1] = 0.85 + Math.random() * 0.15;
+            col[i * 3 + 2] = 0.8 + Math.random() * 0.2;
         }
+
+        // Galactic center dust band — reddened stars concentrated near disk plane
+        for (let i = count; i < total; i++) {
+            const theta = Math.random() * Math.PI * 2;
+            const r = 15 + Math.random() * 40;
+            const y = (Math.random() - 0.5) * 4; // concentrated near plane
+            pos[i * 3]     = r * Math.cos(theta);
+            pos[i * 3 + 1] = y;
+            pos[i * 3 + 2] = r * Math.sin(theta);
+            sizes[i] = 0.03 + Math.random() * 0.08;
+            // Extinction-reddened colors
+            col[i * 3]     = 0.7 + Math.random() * 0.3;
+            col[i * 3 + 1] = 0.3 + Math.random() * 0.3;
+            col[i * 3 + 2] = 0.1 + Math.random() * 0.15;
+        }
+
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
         this.points = new THREE.Points(geo, new THREE.ShaderMaterial({
             vertexShader: `
                 attribute float size;
+                attribute vec3 color;
                 varying float vBright;
+                varying vec3 vColor;
                 void main() {
+                    vColor = color;
                     vec4 mvp = modelViewMatrix * vec4(position, 1.0);
                     float projDist = length(mvp.xy / -mvp.z);
                     float lensBoost = 1.0 + 2.0 / (projDist * projDist + 0.5);
@@ -449,11 +661,11 @@ export class Starfield {
                 }`,
             fragmentShader: `
                 varying float vBright;
+                varying vec3 vColor;
                 void main() {
                     float d = length(gl_PointCoord - 0.5) * 2.0;
                     float alpha = smoothstep(1.0, 0.0, d);
-                    vec3 col = mix(vec3(1.0), vec3(1.0, 0.9, 0.7), clamp(vBright - 1.0, 0.0, 1.0));
-                    gl_FragColor = vec4(col * vBright * 0.5, alpha * 0.8);
+                    gl_FragColor = vec4(vColor * vBright * 0.5, alpha * 0.8);
                 }`,
             transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
         }));
@@ -461,104 +673,98 @@ export class Starfield {
     }
 
     dispose() {
-        this.points.geometry.dispose();
-        this.points.material.dispose();
+        this.points.geometry.dispose(); this.points.material.dispose();
         this.scene.remove(this.points);
     }
 }
 
-// ── SgrAStarSimulation (facade) ──────────────────────────────────────────────
-export class SgrAStarSimulation {
-    constructor(canvas, { autoStart = true } = {}) {
-        this.canvas = canvas;
-        this.clock = new THREE.Clock();
-        this._setupRenderer();
-        this._setupScene();
-        this._buildComponents();
-        if (autoStart) this.start();
+// ── FlareEngine ──────────────────────────────────────────────────────────────
+// Sgr A* has NIR flares ~4×/day, averaging 40-80 min duration
+export class FlareEngine {
+    constructor(scene, { bhRadius = 0.5 } = {}) {
+        this.scene = scene;
+        this.bhRadius = bhRadius;
+        this.flaring = false;
+        this.intensity = 0;
+        this.flareDuration = 0;
+        this.flareTimer = 0;
+        this.cooldown = 0;
+        this.time = 0;
+
+        // Average 4 flares per day → mean interval ~6 hours = 360 sim-minutes
+        // In sim time at 1x speed, we compress heavily for visibility
+        this.meanInterval = 15; // seconds of sim time between flares
+        this.nextFlare = this.meanInterval * (0.5 + Math.random());
+
+        this._build();
     }
 
-    _setupRenderer() {
-        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true });
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        this.renderer.setClearColor(0x000000, 1);
-        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.2;
-    }
-
-    _setupScene() {
-        this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(50, this.canvas.clientWidth / this.canvas.clientHeight, 0.1, 200);
-        this.camera.position.set(0, 4, 10);
-        this.camera.lookAt(0, 0, 0);
-
-        // Post-processing (bloom)
-        const { EffectComposer } = THREE;
-        // We'll set up bloom in the page since addons need import maps
-        this.composer = null;
-    }
-
-    async setupBloom(EffectComposer, RenderPass, UnrealBloomPass) {
-        this.composer = new EffectComposer(this.renderer);
-        this.composer.addPass(new RenderPass(this.scene, this.camera));
-        this.bloom = new UnrealBloomPass(
-            new THREE.Vector2(this.canvas.clientWidth, this.canvas.clientHeight),
-            0.8, 0.4, 0.85
+    _build() {
+        // Flare glow sphere
+        this.glow = new THREE.Mesh(
+            new THREE.SphereGeometry(this.bhRadius * 2.5, 32, 32),
+            new THREE.MeshBasicMaterial({
+                color: 0xffaa33, transparent: true, opacity: 0,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            })
         );
-        this.composer.addPass(this.bloom);
+        this.scene.add(this.glow);
+
+        // Bright flash ring
+        this.ring = new THREE.Mesh(
+            new THREE.TorusGeometry(this.bhRadius * 1.8, 0.08, 12, 64),
+            new THREE.MeshBasicMaterial({
+                color: 0xffdd88, transparent: true, opacity: 0,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+            })
+        );
+        this.ring.rotation.x = Math.PI / 2;
+        this.scene.add(this.ring);
     }
 
-    _buildComponents() {
-        this.blackHole = new BlackHole(this.scene);
-        this.disk = new AccretionDisk(this.scene);
-        this.sStars = new SStarOrbits(this.scene);
-        this.jets = new RelativisticJets(this.scene);
-        this.starfield = new Starfield(this.scene);
-    }
+    update(dt) {
+        this.time += dt;
 
-    resize() {
-        const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
-        this.renderer.setSize(w, h, false);
-        this.camera.aspect = w / h;
-        this.camera.updateProjectionMatrix();
-        if (this.composer) this.composer.setSize(w, h);
-    }
-
-    start() {
-        this._resizeObs = new ResizeObserver(() => this.resize());
-        this._resizeObs.observe(this.canvas.parentElement);
-        this.resize();
-        this._animate();
-    }
-
-    _animate() {
-        this._raf = requestAnimationFrame(() => this._animate());
-        const dt = this.clock.getDelta();
-
-        this.blackHole.update(dt);
-        this.disk.update(dt);
-        this.sStars.update(dt);
-        this.jets.update(dt);
-
-        if (this.composer) {
-            this.composer.render();
+        if (!this.flaring) {
+            this.nextFlare -= dt;
+            if (this.nextFlare <= 0) {
+                this.flaring = true;
+                this.flareDuration = 3 + Math.random() * 5; // 3-8 seconds
+                this.flareTimer = 0;
+                this.intensity = 0.5 + Math.random() * 0.5;
+                this.nextFlare = this.meanInterval * (0.3 + Math.random() * 1.4);
+            }
         } else {
-            this.renderer.render(this.scene, this.camera);
+            this.flareTimer += dt;
+            const progress = this.flareTimer / this.flareDuration;
+
+            if (progress >= 1) {
+                this.flaring = false;
+                this.intensity = 0;
+            } else {
+                // Fast rise, slow decay envelope
+                const envelope = progress < 0.15
+                    ? progress / 0.15
+                    : Math.exp(-(progress - 0.15) * 2.5);
+                this.intensity = envelope * (0.5 + Math.random() * 0.1);
+            }
         }
+
+        // Update visuals
+        this.glow.material.opacity = this.intensity * 0.15;
+        this.glow.scale.setScalar(1 + this.intensity * 0.5);
+        this.ring.material.opacity = this.intensity * 0.3;
+        this.ring.scale.setScalar(1 + this.intensity * 0.3);
     }
 
-    stop() {
-        cancelAnimationFrame(this._raf);
-        this._resizeObs?.disconnect();
-    }
+    isFlaring() { return this.flaring; }
+    getFlareIntensity() { return this.intensity; }
+    getFlareDuration() { return this.flareDuration; }
+    getFlareElapsed() { return this.flareTimer; }
 
     dispose() {
-        this.stop();
-        this.blackHole.dispose();
-        this.disk.dispose();
-        this.sStars.dispose();
-        this.jets.dispose();
-        this.starfield.dispose();
-        this.renderer.dispose();
+        [this.glow, this.ring].forEach(m => {
+            m.geometry.dispose(); m.material.dispose(); this.scene.remove(m);
+        });
     }
 }

@@ -90,6 +90,14 @@ nav {
 .nav-drop-link:hover .ndl-title { color: #fff; }
 .nav-drop-link:hover .ndl-sub { color: #7a8090; }
 
+/* Section dividers inside dropdowns */
+.nav-drop-section {
+    padding: 7px 16px 3px; font-size: .63rem; font-weight: 700;
+    letter-spacing: .09em; color: #3d4255; text-transform: uppercase;
+    border-top: 1px solid rgba(255,255,255,.06); margin-top: 3px;
+}
+.nav-drop-section:first-child { border-top: none; margin-top: 0; padding-top: 4px; }
+
 /* ── Burger (mobile) ─────────────────────────────────────────────────────── */
 .nav-burger {
     display: none; margin-left: auto;
