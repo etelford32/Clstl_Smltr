@@ -108,13 +108,17 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
       <div class="hud-row"><span class="hud-label">Shadow</span><span class="hud-val">51.8 &plusmn; 2.3 &mu;as (EHT 2022)</span></div>
       <div class="hud-row"><span class="hud-label">Spin (a/M)</span><span class="hud-val" id="hud-spin">0.50</span></div>
 
-      <div class="hud-section">S2 Orbit &mdash; Live</div>
+      <div class="hud-section" id="hud-star-header">S2 Orbit &mdash; Live</div>
+      <div class="hud-row"><span class="hud-label">Type</span><span class="hud-val" id="hud-star-type">B0-2 V, 27500 K</span></div>
+      <div class="hud-row"><span class="hud-label">Mass / L</span><span class="hud-val" id="hud-star-ml">14 M&odot; / 1.6&times;10&sup4; L&odot;</span></div>
       <div class="hud-row"><span class="hud-label">Distance</span><span class="hud-val" id="hud-s2-dist">— AU</span></div>
       <div class="hud-row"><span class="hud-label">Velocity</span><span class="hud-val" id="hud-s2-vel">— km/s</span></div>
       <div class="hud-row"><span class="hud-label">Redshift z</span><span class="hud-val" id="hud-s2-z">—</span></div>
       <div class="hud-row"><span class="hud-label">Precession</span><span class="hud-val" id="hud-s2-prec">— arcmin/orbit</span></div>
       <div class="hud-row"><span class="hud-label">Phase</span><span class="hud-val" id="hud-s2-phase">—</span></div>
       <div class="hud-row"><span class="hud-label">Next pericenter</span><span class="hud-val" id="hud-s2-next">—</span></div>
+      <div class="hud-row"><span class="hud-label">Wind &#x1F4A8;</span><span class="hud-val" id="hud-star-wind">10&sup7; M&odot;/yr, 1000 km/s</span></div>
+      <div class="hud-row"><span class="hud-label">Tidal strip</span><span class="hud-val" id="hud-star-tidal">&times;1.0</span></div>
 
       <div class="hud-section">Radiation Output</div>
       <div class="hud-row"><span class="hud-label">L<sub>bol</sub></span><span class="hud-val" id="hud-lbol">~300 L&odot;</span></div>
@@ -182,6 +186,7 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
       <div class="toggle-row"><input type="checkbox" id="t-radiation" checked><label for="t-radiation">Radiation field</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-orbits" checked><label for="t-orbits">S-star orbits</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-trails" checked><label for="t-trails">S-star trails</label></div>
+      <div class="toggle-row"><input type="checkbox" id="t-wind" checked><label for="t-wind">Stellar wind (tidal)</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-field" checked><label for="t-field">Background starfield</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-ergo" checked><label for="t-ergo">Ergosphere</label></div>
       <div class="toggle-row"><input type="checkbox" id="t-photon" checked><label for="t-photon">Photon sphere</label></div>
@@ -211,11 +216,11 @@ body{font-family:'Courier New',monospace;background:#000;color:#ccc;display:flex
     <div>
       <div class="sec-title">S-Star Orbits</div>
       <div class="star-legend">
-        <div class="star-legend-item" data-star="0"><span class="star-legend-dot" style="background:#66bbff"></span>S2 &mdash; P=16.05 yr, e=0.884</div>
-        <div class="star-legend-item" data-star="1"><span class="star-legend-dot" style="background:#ff8866"></span>S1 &mdash; P=94.1 yr, e=0.358</div>
-        <div class="star-legend-item" data-star="2"><span class="star-legend-dot" style="background:#ffdd44"></span>S62 &mdash; P=9.9 yr, e=0.976</div>
-        <div class="star-legend-item" data-star="3"><span class="star-legend-dot" style="background:#88ff88"></span>S38 &mdash; P=19.2 yr, e=0.820</div>
-        <div class="star-legend-item" data-star="4"><span class="star-legend-dot" style="background:#ff66ff"></span>S55 &mdash; P=12.8 yr, e=0.721</div>
+        <div class="star-legend-item" data-star="0"><span class="star-legend-dot" style="background:#99ccff"></span>S2 &mdash; B0-2V 27.5kK, 14M&odot;</div>
+        <div class="star-legend-item" data-star="1"><span class="star-legend-dot" style="background:#ffa877"></span>S1 &mdash; B0.5V 25kK, 12M&odot;</div>
+        <div class="star-legend-item" data-star="2"><span class="star-legend-dot" style="background:#ffdd66"></span>S62 &mdash; B2V 22kK, 10M&odot;</div>
+        <div class="star-legend-item" data-star="3"><span class="star-legend-dot" style="background:#88ff99"></span>S38 &mdash; B1V 24kK, 11M&odot;</div>
+        <div class="star-legend-item" data-star="4"><span class="star-legend-dot" style="background:#ee88ff"></span>S55 &mdash; B2V 22kK, 10M&odot;</div>
       </div>
     </div>
 
@@ -344,6 +349,7 @@ $('t-orbits').addEventListener('change', e => {
     sStars.markers.forEach(m => m.visible = e.target.checked);
 });
 $('t-trails').addEventListener('change', e => { sStars.setTrails(e.target.checked); });
+$('t-wind').addEventListener('change', e => { sStars.setWindVisible(e.target.checked); });
 $('t-field').addEventListener('change', e => { starfield.points.visible = e.target.checked; });
 $('t-ergo').addEventListener('change', e => { blackHole.ergosphere.visible = e.target.checked; });
 $('t-photon').addEventListener('change', e => { blackHole.rings.forEach(r => r.visible = e.target.checked); });
@@ -441,9 +447,21 @@ function animate() {
     hudTimer += rawDt;
     if (hudTimer >= 0.1) {
         hudTimer = 0;
-        const tel = sStars.getS2Telemetry();
-        $('hud-s2-dist').textContent = tel.distance_AU.toFixed(0) + ' AU (' + tel.distance_mas.toFixed(1) + ' mas)';
-        $('hud-s2-vel').textContent = tel.velocity_kms.toFixed(0) + ' km/s';
+        // Show telemetry for tracked star (default S2 = index 0)
+        const trackIdx = Math.max(0, followStar >= 0 ? followStar : 0);
+        const tel = sStars.getS2Telemetry(); // always S2 for orbital telemetry
+        const sInfo = sStars.getStarInfo(trackIdx);
+
+        // Update header to show tracked star name
+        $('hud-star-header').innerHTML = sInfo.name + ' &mdash; Live';
+        $('hud-star-type').textContent = sInfo.spectral + ', ' + (sInfo.Teff / 1000).toFixed(1) + ' kK';
+        $('hud-star-ml').textContent = sInfo.mass_Msun + ' M\u2609 / ' + (sInfo.L_Lsun / 1000).toFixed(1) + '\u00D710\u00B3 L\u2609';
+        $('hud-s2-dist').textContent = sInfo.distance_AU.toFixed(0) + ' AU';
+        $('hud-s2-vel').textContent = sInfo.velocity_kms.toFixed(0) + ' km/s';
+        $('hud-star-wind').textContent = sInfo.Mdot.toExponential(0) + ' M\u2609/yr, ' + sInfo.v_wind + ' km/s';
+        $('hud-star-tidal').textContent = '\u00D7' + sInfo.tidalFactor.toFixed(2);
+
+        // S2 specific (GR) data always from S2
         $('hud-s2-z').textContent = tel.redshift_z.toExponential(3);
         $('hud-s2-prec').textContent = tel.precession_arcmin_per_orbit.toFixed(1) + ' arcmin/orbit';
         $('hud-s2-phase').textContent = tel.phase.toFixed(3) + ' / 2\u03C0';
