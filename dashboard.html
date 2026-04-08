@@ -393,16 +393,12 @@ window._ppAuth = { auth };
    AUTH GATE — uses auth.js for consistent session management
 ═════════════════════════════════════════════════════════════ */
 
-// Import auth module
-let _authMod = null;
-try {
-    // Auth module loaded via module script at top of page
-    _authMod = window._ppAuth?.auth ?? null;
-} catch (_) {}
+// Wait for auth to fully initialize (Supabase session restore is async)
+await auth.ready();
 
-// Fallback: check both storage types (auth.js may use localStorage for "Remember me")
+let _authMod = auth;
 let _auth = null;
-if (_authMod && _authMod.isSignedIn()) {
+if (_authMod.isSignedIn()) {
     _auth = _authMod.getUser();
 } else {
     // Legacy fallback — check both storages

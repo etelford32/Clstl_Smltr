@@ -6,8 +6,9 @@
  *   - Dropdown menus: Space Weather, Earth, Stars, Tools
  *   - Tier-gated items (free, intro, advanced)
  *   - Auth state (Sign In / Dashboard / Admin badge)
- *   - Mobile burger with full menu expansion
- *   - Robust hover handling with delay and gap bridging
+ *   - Mobile burger with full menu expansion + accordion dropdowns
+ *   - Robust hover with delay for desktop, touch-aware for hybrid devices
+ *   - Keyboard support (Escape, Tab focus management)
  */
 
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
@@ -106,7 +107,11 @@ export function initNav(activeId = '') {
             <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
             Parker Physics
         </a>
-        <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">&#9776;</button>
+        <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">
+            <span class="burger-line"></span>
+            <span class="burger-line"></span>
+            <span class="burger-line"></span>
+        </button>
         <div class="nav-menu" id="nav-menu">
     `;
 
@@ -172,7 +177,7 @@ export function initNav(activeId = '') {
 
     if (isSignedIn) {
         if (isAdmin) {
-            html += `<span class="nav-badge-pro" style="background:rgba(255,60,60,.12);color:#f66;border-color:rgba(255,60,60,.25);padding:3px 8px;border-radius:4px;font-size:.65rem;margin-right:4px">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</span>`;
+            html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
         }
         html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
         html += `<button class="nav-item nav-signout" id="nav-signout-btn">Sign Out</button>`;
@@ -189,28 +194,60 @@ export function initNav(activeId = '') {
     const burger = document.getElementById('nav-burger');
     const menu   = document.getElementById('nav-menu');
 
-    // Burger toggle
+    // Track whether last interaction was touch (for hybrid devices)
+    let lastWasTouch = false;
+    nav.addEventListener('touchstart', () => { lastWasTouch = true; }, { passive: true });
+    nav.addEventListener('mousemove', () => { lastWasTouch = false; }, { passive: true });
+
+    // Burger toggle with animated hamburger
     burger?.addEventListener('click', () => {
         const open = menu.classList.toggle('open');
-        burger.textContent = open ? '\u2715' : '\u2630';
+        burger.classList.toggle('open', open);
         burger.setAttribute('aria-expanded', open);
+        // Prevent body scroll when menu is open on mobile
+        document.body.style.overflow = open ? 'hidden' : '';
     });
 
-    // Close on outside click
+    // Close on outside click/touch
     document.addEventListener('click', e => {
         if (!e.target.closest('nav')) {
-            menu?.classList.remove('open');
-            if (burger) { burger.textContent = '\u2630'; burger.setAttribute('aria-expanded', 'false'); }
-            nav.querySelectorAll('.nav-drop.open').forEach(d => {
-                d.classList.remove('open');
-                d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
-            });
+            _closeAll();
         }
     });
 
-    // ── Desktop hover with delay (prevents flicker) ──────────────────────
-    const isTouchDevice = () => window.matchMedia('(hover: none)').matches;
+    // Close mobile menu when a link is clicked (navigation)
+    menu?.addEventListener('click', e => {
+        if (e.target.closest('.nav-drop-link') || e.target.closest('.nav-item')) {
+            // Only close on mobile — on desktop, dropdown link clicks navigate normally
+            if (window.innerWidth <= 1024) {
+                _closeAll();
+            }
+        }
+    });
 
+    // Keyboard: Escape closes dropdowns and mobile menu
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            _closeAll();
+            // Return focus to the last opened dropdown button or burger
+            const openBtn = nav.querySelector('.nav-drop.open .nav-drop-btn');
+            if (openBtn) openBtn.focus();
+            else burger?.focus();
+        }
+    });
+
+    function _closeAll() {
+        menu?.classList.remove('open');
+        burger?.classList.remove('open');
+        if (burger) burger.setAttribute('aria-expanded', 'false');
+        document.body.style.overflow = '';
+        nav.querySelectorAll('.nav-drop.open').forEach(d => {
+            d.classList.remove('open');
+            d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    // ── Dropdown hover (desktop) + click (touch/mobile) ──────────────────
     nav.querySelectorAll('.nav-drop').forEach(drop => {
         const btn = drop.querySelector('.nav-drop-btn');
         const dropMenu = drop.querySelector('.nav-drop-menu');
@@ -218,6 +255,7 @@ export function initNav(activeId = '') {
 
         function openDrop() {
             clearTimeout(closeTimer);
+            // Close sibling dropdowns
             nav.querySelectorAll('.nav-drop.open').forEach(d => {
                 if (d !== drop) {
                     d.classList.remove('open');
@@ -228,32 +266,36 @@ export function initNav(activeId = '') {
             btn?.setAttribute('aria-expanded', 'true');
         }
 
-        function schedulClose() {
+        function scheduleClose() {
+            clearTimeout(closeTimer);
             closeTimer = setTimeout(() => {
                 drop.classList.remove('open');
                 btn?.setAttribute('aria-expanded', 'false');
-            }, 180);
+            }, 250);
         }
 
-        // Desktop: hover with delay
+        // Desktop: hover with 250ms grace period
         drop.addEventListener('mouseenter', () => {
-            if (!isTouchDevice()) openDrop();
+            if (!lastWasTouch) openDrop();
         });
         drop.addEventListener('mouseleave', () => {
-            if (!isTouchDevice()) schedulClose();
+            if (!lastWasTouch) scheduleClose();
         });
 
-        // Keep open when hovering the dropdown menu
+        // Keep open when hovering the dropdown menu itself
         if (dropMenu) {
-            dropMenu.addEventListener('mouseenter', () => clearTimeout(closeTimer));
+            dropMenu.addEventListener('mouseenter', () => {
+                if (!lastWasTouch) clearTimeout(closeTimer);
+            });
             dropMenu.addEventListener('mouseleave', () => {
-                if (!isTouchDevice()) schedulClose();
+                if (!lastWasTouch) scheduleClose();
             });
         }
 
-        // Click toggle for mobile + keyboard fallback
+        // Click/tap toggle — works on all devices
         btn?.addEventListener('click', e => {
             e.stopPropagation();
+            e.preventDefault();
             if (drop.classList.contains('open')) {
                 drop.classList.remove('open');
                 btn.setAttribute('aria-expanded', 'false');

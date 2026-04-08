@@ -190,8 +190,11 @@ class AuthManager {
                 });
                 if (error) return { success: false, error: error.message };
                 this._user = this._mapSupabaseUser(data.user);
+                this._user.remember = remember;
                 // Fetch server-side profile (role, plan — not just user_metadata)
                 await this.fetchProfile();
+                // Always persist after sign-in so dashboard can read it
+                this._persistToStorage();
                 return { success: true };
             } catch (err) {
                 return { success: false, error: err.message };
