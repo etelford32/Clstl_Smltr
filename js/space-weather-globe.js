@@ -1,32 +1,158 @@
 /**
- * space-weather-globe.js — Three.js 3D Earth + live magnetosphere
+ * space-weather-globe.js — Three.js 3D Earth + Sun + Moon + live magnetosphere
  *
- * Scene (Earth at origin, 1 unit = 1 R⊕):
- *   • Procedural Earth sphere — day/night terminator, polar caps, aurora in shader
- *   • Lat/lon wireframe grid
- *   • Atmospheric rim glow (Fresnel, additive)
- *   • Kp-driven auroral torus ovals (N + S), colour-shifts with storm level
- *   • Solar wind particle stream (speed + density scaled)
- *   • MagnetosphereEngine — Shue-1998 magnetopause, bow shock, Van Allen belts,
+ * Scene (Earth at origin, 1 unit = 1 R_earth):
+ *   - Procedural Earth sphere — day/night terminator, polar caps, aurora in shader
+ *   - Lat/lon wireframe grid
+ *   - Atmospheric rim glow (Fresnel, additive)
+ *   - Kp-driven auroral torus ovals (N + S), colour-shifts with storm level
+ *   - Solar wind particle stream (speed + density scaled)
+ *   - MagnetosphereEngine — Shue-1998 magnetopause, bow shock, Van Allen belts,
  *     plasmasphere (all driven by live swpc-update data)
- *   • OrbitControls with gentle auto-rotate
+ *   - Full SunSkin photosphere + corona (medium quality) at sun position
+ *   - Procedural Moon with maria, craters, and terminator lighting
+ *   - OrbitControls with gentle auto-rotate
  *
  * USAGE
- * ─────
  *   import { SpaceWeatherGlobe } from './js/space-weather-globe.js';
  *   const globe = new SpaceWeatherGlobe(canvasEl).start();
  *   window.addEventListener('swpc-update', e => globe.update(e.detail));
- *   // Optional layer toggles:
  *   globe.setLayerVisible('magnetopause', false);
  */
 
 import * as THREE from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
+import { SunSkin }            from './sun-skin.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
 } from './earth-skin.js';
+
+
+// ── Moon Shaders ─────────────────────────────────────────────────────────────
+
+const MOON_VERT = /* glsl */`
+varying vec3 vNormal;
+varying vec3 vPosition;
+varying vec2 vUv;
+
+void main() {
+    vNormal   = normalize(normalMatrix * normal);
+    vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+    vUv       = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const MOON_FRAG = /* glsl */`
+precision highp float;
+
+uniform vec3  u_sun_dir;
+uniform float u_time;
+
+varying vec3 vNormal;
+varying vec3 vPosition;
+varying vec2 vUv;
+
+float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash(i);
+    float b = hash(i + vec2(1, 0));
+    float c = hash(i + vec2(0, 1));
+    float d = hash(i + vec2(1, 1));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm(vec2 p, int octaves) {
+    float v = 0.0, a = 0.5;
+    vec2 shift = vec2(100.0);
+    for (int i = 0; i < 6; i++) {
+        if (i >= octaves) break;
+        v += a * vnoise(p);
+        p = p * 2.0 + shift;
+        a *= 0.5;
+    }
+    return v;
+}
+
+float crater(vec2 p, vec2 center, float radius) {
+    float d = length(p - center) / radius;
+    if (d > 1.3) return 0.0;
+    float rim = smoothstep(0.8, 1.0, d) * smoothstep(1.3, 1.0, d) * 0.15;
+    float bowl = (1.0 - smoothstep(0.0, 0.85, d)) * -0.2;
+    float flat_floor = smoothstep(0.0, 0.3, d);
+    bowl *= flat_floor * 0.6 + 0.4;
+    return bowl + rim;
+}
+
+void main() {
+    vec3 N = normalize(vNormal);
+    vec3 L = normalize(u_sun_dir);
+
+    float NdotL = dot(N, L);
+    float diffuse = max(0.0, NdotL);
+    float earthshine = max(0.0, -NdotL) * 0.012;
+
+    vec2 uv = vUv;
+
+    // Maria (dark basaltic plains)
+    float maria = fbm(uv * 3.5 + vec2(1.7, 0.8), 3);
+    maria = smoothstep(0.42, 0.58, maria);
+
+    vec3 highland = vec3(0.62, 0.60, 0.57);
+    vec3 mare = vec3(0.22, 0.21, 0.20);
+    vec3 baseColor = mix(highland, mare, maria);
+
+    // Surface roughness
+    float roughness = fbm(uv * 40.0, 4) * 0.12;
+    baseColor += roughness - 0.06;
+
+    // Craters
+    float craterDetail = 0.0;
+    for (int i = 0; i < 8; i++) {
+        float fi = float(i);
+        vec2 cPos = vec2(hash(vec2(fi, 0.0)), hash(vec2(0.0, fi)));
+        float cRad = 0.04 + hash(vec2(fi, fi)) * 0.06;
+        craterDetail += crater(uv, cPos, cRad);
+    }
+    for (int i = 0; i < 12; i++) {
+        float fi = float(i) + 20.0;
+        vec2 cPos = vec2(hash(vec2(fi, 1.0)), hash(vec2(1.0, fi)));
+        float cRad = 0.015 + hash(vec2(fi, fi)) * 0.025;
+        craterDetail += crater(uv, cPos, cRad) * 0.7;
+    }
+    baseColor += craterDetail * 0.4;
+
+    // Normal perturbation for bump
+    float eps = 0.002;
+    float hC = fbm(uv * 25.0, 3);
+    float hR = fbm(uv * 25.0 + vec2(eps, 0.0), 3);
+    float hU = fbm(uv * 25.0 + vec2(0.0, eps), 3);
+    vec3 bumpN = normalize(N + (hR - hC) * cross(N, vec3(0, 1, 0)) * 2.0
+                              + (hU - hC) * cross(N, vec3(1, 0, 0)) * 2.0);
+    float bumpDiffuse = max(0.0, dot(bumpN, L));
+    diffuse = mix(diffuse, bumpDiffuse, 0.5);
+
+    // Limb darkening
+    vec3 V = normalize(cameraPosition - vPosition);
+    float mu = max(0.0, dot(N, V));
+    float limb = 0.85 + 0.15 * mu;
+
+    vec3 color = baseColor * diffuse * limb;
+    color += baseColor * earthshine * vec3(0.4, 0.5, 0.7);
+    color += baseColor * 0.008;
+    color = pow(color, vec3(1.0 / 2.2));
+
+    gl_FragColor = vec4(color, 1.0);
+}
+`;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,15 +163,17 @@ export class SpaceWeatherGlobe {
     constructor(canvas) {
         this._canvas        = canvas;
         this._t0            = performance.now() / 1000;
+        this._lastT         = 0;
         this._rafId         = null;
         this._auroraKp      = 2;
         this._windSpeedNorm = 0.23;
-        // Sun is always at +X in this scene (Earth at origin)
         this._sunDir = new THREE.Vector3(1, 0, 0);
 
         this._buildRenderer(canvas);
         this._buildScene();
+        this._buildSun();
         this._buildEarth();
+        this._buildMoon();
         this._buildAtmosphere();
         this._buildAurora(2);
         this._buildWindParticles();
@@ -65,6 +193,8 @@ export class SpaceWeatherGlobe {
         });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this._renderer.outputColorSpace = THREE.SRGBColorSpace;
+        this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        this._renderer.toneMappingExposure = 1.1;
         this._renderer.setClearColor(0x010812);
     }
 
@@ -93,10 +223,27 @@ export class SpaceWeatherGlobe {
         this._scene.add(this._sunLight);
     }
 
+    _buildSun() {
+        this._sunGroup = new THREE.Group();
+        this._sunGroup.position.set(40, 0, 0);
+        this._scene.add(this._sunGroup);
+
+        this._sunSkin = new SunSkin(this._sunGroup, {
+            radius:   3.0,
+            quality:  'medium',
+            corona:   true,
+            segments: 64,
+        });
+
+        // Point light from sun position for realistic illumination
+        this._sunPointLight = new THREE.PointLight(0xfff4e0, 0.6, 120, 0.5);
+        this._sunPointLight.position.copy(this._sunGroup.position);
+        this._scene.add(this._sunPointLight);
+    }
+
     _buildEarth() {
-        // Shared textured Earth skin — same Blue Marble + aurora shaders as earth.html
         this._earthU = createEarthUniforms(this._sunDir);
-        this._earthU.u_kp.value       = 2;     // show some aurora by default
+        this._earthU.u_kp.value       = 2;
         this._earthU.u_aurora_on.value = 1;
         this._earthU.u_city_lights.value = 1;
         const geo = new THREE.SphereGeometry(1, 96, 96);
@@ -105,10 +252,9 @@ export class SpaceWeatherGlobe {
             uniforms: this._earthU,
         });
         this._earthMesh = new THREE.Mesh(geo, this._earthMat);
-        this._earthMesh.rotation.z = 23.5 * Math.PI / 180;   // axial tilt
+        this._earthMesh.rotation.z = 23.5 * Math.PI / 180;
         this._scene.add(this._earthMesh);
 
-        // Load Blue Marble textures (no clouds needed at this scale)
         loadEarthTextures(this._earthU, null);
 
         // Lat / lon grid (cyan-blue, subtle)
@@ -116,7 +262,6 @@ export class SpaceWeatherGlobe {
             color: 0x0a3d78, transparent: true, opacity: 0.38, depthWrite: false,
         });
         const R = 1.003;
-        // Latitudes every 30°
         for (let ld = -60; ld <= 60; ld += 30) {
             const phi = (90 - ld) * Math.PI / 180;
             const pts = [];
@@ -130,7 +275,6 @@ export class SpaceWeatherGlobe {
             this._scene.add(new THREE.Line(
                 new THREE.BufferGeometry().setFromPoints(pts), gm));
         }
-        // Meridians every 60°
         for (let ld = 0; ld < 360; ld += 60) {
             const th = ld * Math.PI / 180;
             const pts = [];
@@ -146,10 +290,42 @@ export class SpaceWeatherGlobe {
         }
     }
 
+    _buildMoon() {
+        const moonGeo = new THREE.SphereGeometry(0.27, 48, 48);
+        this._moonUniforms = {
+            u_sun_dir: { value: this._sunDir.clone() },
+            u_time:    { value: 0 },
+        };
+        const moonMat = new THREE.ShaderMaterial({
+            vertexShader:   MOON_VERT,
+            fragmentShader: MOON_FRAG,
+            uniforms:       this._moonUniforms,
+        });
+        this._moonMesh = new THREE.Mesh(moonGeo, moonMat);
+        this._moonOrbitRadius = 5.0;
+        this._moonMesh.position.set(this._moonOrbitRadius, 0, 0);
+        this._scene.add(this._moonMesh);
+
+        // Subtle moon orbit path
+        const orbitPts = [];
+        for (let i = 0; i <= 128; i++) {
+            const a = (i / 128) * Math.PI * 2;
+            orbitPts.push(new THREE.Vector3(
+                Math.cos(a) * this._moonOrbitRadius,
+                0,
+                Math.sin(a) * this._moonOrbitRadius
+            ));
+        }
+        this._scene.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(orbitPts),
+            new THREE.LineBasicMaterial({
+                color: 0x334466, transparent: true, opacity: 0.15, depthWrite: false,
+            })
+        ));
+    }
+
     _buildAtmosphere() {
         const geo = new THREE.SphereGeometry(1.095, 48, 48);
-        // ATM_VERT/ATM_FRAG from earth-skin.js compute world-space normals so the
-        // atmosphere lighting stays fixed to the sun regardless of camera orbit.
         this._atmoMat = new THREE.ShaderMaterial({
             vertexShader:   ATM_VERT,
             fragmentShader: ATM_FRAG,
@@ -167,7 +343,6 @@ export class SpaceWeatherGlobe {
         this._auroraGroup = new THREE.Group();
         this._scene.add(this._auroraGroup);
 
-        // Equatorward boundary: 72° colatitude at Kp 0 → 55° at Kp 9
         const latDeg = 72 - kp * (17 / 9);
         const lat    = latDeg * Math.PI / 180;
         const rTorus = Math.cos(lat) * 1.02;
@@ -213,7 +388,7 @@ export class SpaceWeatherGlobe {
     _spawnWind(arr, i) {
         const spread = Math.random() * 7.5;
         const angle  = Math.random() * Math.PI * 2;
-        arr[i*3]   =  18 + Math.random() * 5;
+        arr[i*3]   =  18 + Math.random() * 18;  // spawn from near sun
         arr[i*3+1] = Math.sin(angle) * spread;
         arr[i*3+2] = Math.cos(angle) * spread;
     }
@@ -233,7 +408,7 @@ export class SpaceWeatherGlobe {
         this._controls.enableDamping   = true;
         this._controls.dampingFactor   = 0.06;
         this._controls.minDistance     = 2.5;
-        this._controls.maxDistance     = 50;
+        this._controls.maxDistance     = 80;
         this._controls.autoRotate      = true;
         this._controls.autoRotateSpeed = 0.28;
     }
@@ -260,16 +435,39 @@ export class SpaceWeatherGlobe {
         this._earthU.u_bz_south.value = Math.max(0, Math.min(1, -bz / 30));
         this._earthU.u_aurora_power.value = Math.min(1, kp / 9);
 
-        // Wind particle colour: blue → cyan → orange at high speeds
+        // Wind particle colour: blue -> cyan -> orange at high speeds
         const wMat = this._windPts.material;
         wMat.color.setHSL(0.58 - this._windSpeedNorm * 0.20, 1.0, 0.68);
         wMat.opacity = 0.30 + this._windSpeedNorm * 0.40;
 
         // Magnetosphere geometry update
         this._magEngine.update(state);
+
+        // Sun — push live SWPC data
+        const xInt = state.derived?.xray_intensity ?? 0;
+        const xrayNorm = Math.max(0, Math.min(1, xInt > 0
+            ? (-Math.log10(xInt) - 4) / 4
+            : 0));
+        this._sunSkin.setSpaceWeather({
+            xrayNorm,
+            kpNorm:   Math.min(1, kp / 9),
+            f107Norm: state.derived?.f107_norm ?? 0.5,
+            activity: state.derived?.activity  ?? 0.5,
+        });
+
+        // Flare trigger from state
+        const flare = state.flare ?? state.derived?.latest_flare;
+        if (flare && flare.class && !this._lastFlareId) {
+            this._sunSkin.triggerFlare(flare.class, {
+                lat_rad: (flare.lat ?? 0) * Math.PI / 180,
+                lon_rad: (flare.lon ?? 0) * Math.PI / 180,
+            });
+            this._lastFlareId = flare.id || flare.class;
+        }
+        if (!flare) this._lastFlareId = null;
     }
 
-    /** Toggle MagnetosphereEngine layers. name: 'magnetopause' | 'bowShock' | 'belts' | 'plasmasphere' */
+    /** Toggle MagnetosphereEngine layers. */
     setLayerVisible(name, visible) {
         this._magEngine.setLayerVisible(name, visible);
     }
@@ -305,7 +503,10 @@ export class SpaceWeatherGlobe {
     // ── Per-frame ─────────────────────────────────────────────────────────────
 
     _animate(t) {
-        // Earth slow spin (around tilted Y after rotation.z is set)
+        const dt = t - this._lastT;
+        this._lastT = t;
+
+        // Earth slow spin
         this._earthMesh.rotation.y = t * 0.048;
 
         // Push current time + sun direction to shaders
@@ -315,12 +516,11 @@ export class SpaceWeatherGlobe {
 
         // Aurora pulse
         const a0 = this._auroraAlpha;
-        const kp = this._auroraKp;
         this._auroraGroup.children.forEach((m, i) => {
             m.material.opacity = a0 * (0.60 + 0.40 * Math.sin(t * 2.6 + i * 1.4));
         });
 
-        // Solar wind particles flow −X toward Earth
+        // Solar wind particles flow -X toward Earth
         const posAttr = this._windPts.geometry.attributes.position;
         const spd     = 0.055 + this._windSpeedNorm * 0.10;
         const vel     = this._windVel;
@@ -330,7 +530,22 @@ export class SpaceWeatherGlobe {
         }
         posAttr.needsUpdate = true;
 
-        // Magnetosphere geometry tick (aligns solar group to sun direction)
+        // Sun update — shader time + flare decay
+        this._sunSkin.update(t);
+        if (dt > 0 && dt < 1) this._sunSkin.decayFlare(dt);
+
+        // Moon orbit (compressed sidereal month for visual interest)
+        const moonAngle = t * 0.052;
+        this._moonMesh.position.set(
+            Math.cos(moonAngle) * this._moonOrbitRadius,
+            Math.sin(moonAngle * 0.1) * 0.15,
+            Math.sin(moonAngle) * this._moonOrbitRadius
+        );
+        this._moonMesh.lookAt(0, 0, 0);  // tidal lock
+        this._moonUniforms.u_sun_dir.value.copy(this._sunDir);
+        this._moonUniforms.u_time.value = t;
+
+        // Magnetosphere geometry tick
         this._magEngine.tick(t, this._sunDir);
 
         this._controls.update();

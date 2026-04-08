@@ -746,7 +746,7 @@ nav {
 .earth-section-sub { font-size: .72rem; color: #778; }
 /* ── 3D Globe canvas ─────────────────────────────────────────────────────── */
 #sw-globe-canvas {
-    display: block; width: 100%; height: 520px;
+    display: block; width: 100%; height: 580px;
     border-radius: 12px; background: #010812;
     border: 1px solid rgba(0,198,255,.10);
     cursor: grab;
@@ -774,8 +774,8 @@ nav {
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
-@media (max-width: 700px) { #sw-globe-canvas { height: 420px; } }
-@media (max-width: 480px) { #sw-globe-canvas { height: 320px; } }
+@media (max-width: 700px) { #sw-globe-canvas { height: 460px; } }
+@media (max-width: 480px) { #sw-globe-canvas { height: 360px; } }
 
 /* ─── Floating control buttons ──────────────────────────────────── */
 .cv-btn {
@@ -1159,8 +1159,8 @@ nav {
     <section class="earth-section globe-section">
         <div class="earth-section-header" style="flex-wrap:wrap;gap:10px">
             <div>
-                <span class="earth-section-title">3D Earth · Magnetosphere · Aurora</span>
-                <span class="earth-section-sub">Shue-1998 magnetopause · Van Allen belts · Kp/Bz live</span>
+                <span class="earth-section-title">Sun · Earth · Moon · Magnetosphere</span>
+                <span class="earth-section-sub">Live photosphere + corona · Shue-1998 magnetopause · Van Allen belts · Kp/Bz</span>
             </div>
             <!-- Layer toggle buttons -->
             <div class="globe-layer-btns" id="globe-layers">
@@ -1174,14 +1174,16 @@ nav {
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
         <div class="globe-legend">
+            <span><span class="leg-dot" style="background:#ffd700"></span>Sun (live SWPC photosphere + corona, flare response)</span>
+            <span><span class="leg-dot" style="background:#888"></span>Moon (procedural surface, orbital motion)</span>
             <span><span class="leg-dot" style="background:#00ff88"></span>Aurora oval (Kp-driven, equatorward during storms)</span>
             <span><span class="leg-dot" style="background:#9060ff"></span>Magnetopause (Shue 1998, Bz-compressed)</span>
             <span><span class="leg-dot" style="background:#66aaff"></span>Bow shock</span>
-            <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1–3 R⊕)</span>
-            <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3–7 R⊕)</span>
+            <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1-3 R_earth)</span>
+            <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3-7 R_earth)</span>
             <span><span class="leg-dot" style="background:#00ccff"></span>Plasmasphere (Carpenter-Anderson model)</span>
             <span><span class="leg-dot" style="background:#88d8ff"></span>Solar wind particle stream (speed-coloured)</span>
-            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom</span>
+            <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system</span>
         </div>
     </section>
 

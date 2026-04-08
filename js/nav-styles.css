@@ -54,34 +54,62 @@ nav {
     padding: 5px 10px; background: rgba(255,255,255,.07);
     border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
     color: #ccc; font-size: .8rem; cursor: pointer; font-family: inherit;
-    transition: background .2s, border-color .2s; white-space: nowrap;
+    transition: background .2s, border-color .2s, color .2s; white-space: nowrap;
 }
 .nav-drop-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
 .nav-drop-btn.active { background: linear-gradient(45deg, #ff8c00, #ffd700); border-color: #ff8c00; color: #000; font-weight: 600; }
 
+/* Caret indicator */
+.nav-caret {
+    display: inline-block; font-size: .6em; margin-left: 2px;
+    transition: transform .2s ease; vertical-align: middle;
+}
+.nav-drop.open .nav-caret { transform: rotate(180deg); }
+
 /* Dropdown panel */
 .nav-drop-menu {
-    display: block; position: absolute; top: calc(100% + 5px); left: 0;
+    display: block; position: absolute; top: 100%; left: 0;
     background: rgba(5,2,18,.97); backdrop-filter: blur(18px);
     border: 1px solid rgba(255,255,255,.11); border-radius: 9px;
-    padding: 6px 0 8px; min-width: 268px; z-index: 800;
+    padding: 10px 0 8px; min-width: 268px; z-index: 800;
     box-shadow: 0 14px 44px rgba(0,0,0,.80);
     opacity: 0; visibility: hidden; pointer-events: none;
     transform: translateY(-4px);
     transition: opacity .18s ease, visibility .18s ease, transform .18s ease;
 }
-/* Show on hover OR .open class (for mobile click) */
-.nav-drop:hover .nav-drop-menu,
+
+/* Invisible bridge to prevent hover loss in the gap */
+.nav-drop-menu::before {
+    content: '';
+    position: absolute;
+    top: -8px; left: 0; right: 0;
+    height: 12px;
+    background: transparent;
+}
+
+/* Show on .open class (JS-managed for both hover and click) */
 .nav-drop.open .nav-drop-menu {
     opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+}
+
+/* Subtle highlight on the dropdown button when menu is open */
+.nav-drop.open .nav-drop-btn:not(.active) {
+    background: rgba(255,255,255,.14);
+    border-color: rgba(255,200,0,.3);
+    color: #fff;
 }
 
 /* Dropdown items */
 .nav-drop-link {
     display: flex; align-items: center; gap: 11px;
-    padding: 7px 16px; text-decoration: none; transition: background .15s;
+    padding: 7px 16px; text-decoration: none;
+    transition: background .15s, padding-left .15s;
 }
-.nav-drop-link:hover { background: rgba(255,255,255,.07); }
+.nav-drop-link:hover {
+    background: rgba(255,255,255,.07);
+    padding-left: 19px;
+}
+.nav-drop-link.active { background: rgba(255,200,0,.06); }
 .nav-drop-link.active .ndl-title { color: #ffd700 !important; font-weight: 600; }
 .ndl-icon { font-size: 1.05rem; width: 20px; text-align: center; flex-shrink: 0; opacity: .72; }
 .ndl-body { display: flex; flex-direction: column; gap: 1px; }
@@ -89,6 +117,15 @@ nav {
 .ndl-sub { color: #484e60; font-size: .70rem; line-height: 1.2; }
 .nav-drop-link:hover .ndl-title { color: #fff; }
 .nav-drop-link:hover .ndl-sub { color: #7a8090; }
+.nav-drop-link:hover .ndl-icon { opacity: 1; }
+
+/* Section dividers inside dropdowns */
+.nav-drop-section {
+    padding: 7px 16px 3px; font-size: .63rem; font-weight: 700;
+    letter-spacing: .09em; color: #3d4255; text-transform: uppercase;
+    border-top: 1px solid rgba(255,255,255,.06); margin-top: 3px;
+}
+.nav-drop-section:first-child { border-top: none; margin-top: 0; padding-top: 4px; }
 
 /* ── Burger (mobile) ─────────────────────────────────────────────────────── */
 .nav-burger {
@@ -119,10 +156,11 @@ nav {
         transform: none; display: none; box-shadow: none;
         border: none; border-radius: 0; padding: 0 0 4px 12px;
         background: transparent; backdrop-filter: none; min-width: 0;
+        margin-top: 0;
     }
+    .nav-drop-menu::before { display: none; }
     .nav-drop.open .nav-drop-menu { display: block; }
-    .nav-drop:hover .nav-drop-menu { display: none; }  /* disable hover on mobile */
-    .nav-drop.open:hover .nav-drop-menu { display: block; }
     .nav-drop-link { padding: 8px 12px; }
+    .nav-drop-link:hover { padding-left: 14px; }
     .ndl-icon { font-size: .9rem; }
 }
