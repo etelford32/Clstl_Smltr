@@ -13,7 +13,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_DST   = 'https://services.swpc.noaa.gov/products/kyoto-dst.json';
 const CACHE_TTL  = 300;

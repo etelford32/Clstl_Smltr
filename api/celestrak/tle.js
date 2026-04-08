@@ -32,7 +32,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../_lib/middleware.js';
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
 const CACHE_TTL      = 3600;   // 1 hour — TLEs update every ~8 hours

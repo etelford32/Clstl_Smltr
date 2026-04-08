@@ -10,7 +10,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_ALERTS = 'https://services.swpc.noaa.gov/products/alerts.json';
 const CACHE_TTL   = 300;

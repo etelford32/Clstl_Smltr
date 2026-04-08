@@ -13,7 +13,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../_lib/middleware.js';
 
 const NOAA_FLARES  = 'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json';
 const CACHE_TTL    = 900;   // 15 min — T3 cadence

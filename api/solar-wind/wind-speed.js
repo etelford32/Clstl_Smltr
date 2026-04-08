@@ -27,7 +27,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../_lib/middleware.js';
 
 const NOAA_WIND_1M = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
 

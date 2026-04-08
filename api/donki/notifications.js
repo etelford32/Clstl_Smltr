@@ -12,7 +12,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../_lib/middleware.js';
 
 const DONKI_NOTIFY_BASE = 'https://api.nasa.gov/DONKI/notifications';
 const CACHE_TTL         = 900;

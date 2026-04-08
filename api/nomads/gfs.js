@@ -25,7 +25,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../_lib/middleware.js';
 
 const CACHE_TTL = 3600;
 

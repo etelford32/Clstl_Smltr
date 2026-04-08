@@ -9,7 +9,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_ELECTRONS = 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json';
 const CACHE_TTL      = 300;

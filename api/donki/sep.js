@@ -17,7 +17,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const DONKI_SEP_BASE = 'https://api.nasa.gov/DONKI/SEP';
 const CACHE_TTL      = 900;   // 15 min

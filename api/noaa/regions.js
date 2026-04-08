@@ -9,7 +9,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_REGIONS = 'https://services.swpc.noaa.gov/json/solar_regions.json';
 const CACHE_TTL    = 900;
