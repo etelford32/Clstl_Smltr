@@ -1,87 +1,77 @@
 /**
  * Vercel Edge Function: /api/donki/cme
  *
- * Proxies NASA DONKI CMEAnalysis endpoint.
- * The NASA API key is injected server-side from the NASA_API_KEY environment
- * variable — it is never exposed in browser JavaScript.
- *
- * T3 endpoint (15-minute cadence).
- *
- * Query params forwarded to DONKI:
- *   ?days=N   Lookback window in days (default: 7, max: 30)
+ * Source:     NASA DONKI CMEAnalysis
+ * Cadence:    T3 (15-minute)
+ * Plan gate:  FREE — all CME data is public
+ * Params:     ?days=N — lookback window (1-30, default 7)
  *
  * Filters for complete cone-model analyses only and adds an
  * `earth_directed` boolean based on latitude/longitude cone half-angle.
  */
 export const config = { runtime: 'edge' };
 
+import {
+    jsonResp, errorResp, ErrorCodes,
+    fetchJSON, createValidator, fmt,
+} from '../_lib/middleware.js';
+
 const DONKI_CME_BASE = 'https://api.nasa.gov/DONKI/CMEAnalysis';
-const CACHE_TTL      = 900;   // 15 min
-const DEFAULT_DAYS   = 7;
-const MAX_DAYS       = 30;
+const CACHE_TTL      = 900;
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-/** Earth is at lat=0, lon=0 in HEE; an Earth-directed CME has a small
- *  half-width cone that intersects Earth's position. */
+/** Earth is at lat=0, lon=0 in HEE; CME is Earth-directed when
+ *  angular distance from (0,0) is within the cone half-angle. */
 function isEarthDirected(lat, lon, halfAngle) {
     if (lat == null || lon == null || halfAngle == null) return false;
-    // Approximate: angular distance from (0,0) must be <= halfAngle
-    const dist = Math.sqrt(lat * lat + lon * lon);
-    return dist <= halfAngle;
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
+    return Math.sqrt(lat * lat + lon * lon) <= halfAngle;
 }
 
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
+    const url = new URL(request.url);
+    const v   = createValidator();
 
-    const url    = new URL(request.url);
-    const rawDay = parseInt(url.searchParams.get('days') ?? DEFAULT_DAYS, 10);
-    const days   = Math.max(1, Math.min(isNaN(rawDay) ? DEFAULT_DAYS : rawDay, MAX_DAYS));
+    // ── 1. Input validation ──────────────────────────────────────────────
+    const days = v.clampInt(url.searchParams.get('days'), 1, 30, 7);
 
     const now   = new Date();
     const start = new Date(now.getTime() - days * 86_400_000);
-    const fmt   = d => d.toISOString().slice(0, 10);
+    const fmtD  = d => d.toISOString().slice(0, 10);
 
-    const donkiURL = `${DONKI_CME_BASE}?startDate=${fmt(start)}&endDate=${fmt(now)}&api_key=${nasaKey}`;
-
+    // ── 2. Fetch upstream ────────────────────────────────────────────────
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(
+            `${DONKI_CME_BASE}?startDate=${fmtD(start)}&endDate=${fmtD(now)}&api_key=${nasaKey}`,
+            { timeout: 15000 }
+        );
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        if (e.message === 'request_timeout') {
+            return errorResp(ErrorCodes.REQUEST_TIMEOUT, 'NASA DONKI did not respond in time');
+        }
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'NASA DONKI is unreachable');
     }
 
+    // ── 3. Parse & transform ─────────────────────────────────────────────
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI CMEAnalysis format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected DONKI CMEAnalysis format');
     }
 
     const cmes = raw
         .filter(c => c?.time21_5)
         .map(c => {
-            const lat       = c.latitude   != null ? parseFloat(c.latitude)   : null;
-            const lon       = c.longitude  != null ? parseFloat(c.longitude)  : null;
-            const halfAngle = c.halfAngle  != null ? parseFloat(c.halfAngle)  : null;
-            const speed     = c.speed      != null ? parseFloat(c.speed)      : null;
+            const lat       = fmt.safeNum(c.latitude);
+            const lon       = fmt.safeNum(c.longitude);
+            const halfAngle = fmt.safeNum(c.halfAngle);
+            const speed     = fmt.safeNum(c.speed);
             return {
-                time:           isoTag(c.time21_5),
+                time:           fmt.isoTag(c.time21_5),
                 speed_km_s:     speed,
                 latitude_deg:   lat,
                 longitude_deg:  lon,
                 half_angle_deg: halfAngle,
-                type:           c.type     ?? null,
-                note:           c.note     ?? null,
+                type:           c.type ?? null,
+                note:           c.note ? String(c.note).slice(0, 500) : null,
                 earth_directed: isEarthDirected(lat, lon, halfAngle),
             };
         })
@@ -89,14 +79,15 @@ export default async function handler(request) {
 
     const earthCme = cmes.find(c => c.earth_directed) ?? null;
 
+    // ── 4. Build response ────────────────────────────────────────────────
     return jsonResp({
-        source:    'NASA DONKI CMEAnalysis via Vercel Edge',
+        source: 'NASA DONKI CMEAnalysis via Parker Physics API',
         data: {
-            updated:         new Date().toISOString(),
-            cme_count:       cmes.length,
-            earth_directed:  !!earthCme,
+            updated:          new Date().toISOString(),
+            cme_count:        cmes.length,
+            earth_directed:   !!earthCme,
             latest_earth_cme: earthCme,
             cmes,
         },
-    });
+    }, 200, CACHE_TTL);
 }
