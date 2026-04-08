@@ -162,6 +162,39 @@ class AuthManager {
         }
     }
 
+    /**
+     * Server-side admin verification. Validates JWT with Supabase Auth,
+     * then independently queries user_profiles for role.
+     * Returns { verified: bool, role: string, error?: string }
+     * This CANNOT be bypassed by editing localStorage.
+     */
+    async verifyAdminServerSide() {
+        if (!this._supabase) {
+            return { verified: false, role: 'unknown', error: 'Auth service not configured' };
+        }
+        try {
+            // Step 1: Validate JWT with Supabase Auth server (not localStorage)
+            const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
+            if (authErr || !user) {
+                return { verified: false, role: 'unknown', error: authErr?.message || 'Not authenticated' };
+            }
+            // Step 2: Query user_profiles for server-side role
+            const { data: profile, error: profileErr } = await this._supabase
+                .from('user_profiles')
+                .select('role')
+                .eq('id', user.id)
+                .single();
+            if (profileErr || !profile) {
+                return { verified: false, role: 'user', error: profileErr?.message || 'Profile not found' };
+            }
+            const role = profile.role || 'user';
+            const isAdmin = role === 'admin' || role === 'superadmin';
+            return { verified: isAdmin, role, error: isAdmin ? null : 'Insufficient role' };
+        } catch (err) {
+            return { verified: false, role: 'unknown', error: err.message };
+        }
+    }
+
     /** Load session from localStorage/sessionStorage (mock mode). */
     _loadMock() {
         let raw = null;

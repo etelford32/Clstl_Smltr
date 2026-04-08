@@ -376,6 +376,53 @@
         document.getElementById('reset-view').classList.remove('show');
     });
 
+    // ── Brute-force rate limiter ──────────────────────────────────
+    // Max 5 failed attempts per 15 minutes. Lockout resets on success.
+    const RATE_MAX_ATTEMPTS = 5;
+    const RATE_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+    const RATE_KEY = 'pp_login_attempts';
+
+    function getRateState() {
+        try {
+            const raw = sessionStorage.getItem(RATE_KEY);
+            if (!raw) return { attempts: [], lockedUntil: 0 };
+            return JSON.parse(raw);
+        } catch (_) { return { attempts: [], lockedUntil: 0 }; }
+    }
+
+    function saveRateState(state) {
+        try { sessionStorage.setItem(RATE_KEY, JSON.stringify(state)); } catch (_) {}
+    }
+
+    function recordFailedAttempt() {
+        const state = getRateState();
+        const now = Date.now();
+        // Purge old attempts outside window
+        state.attempts = state.attempts.filter(t => now - t < RATE_WINDOW_MS);
+        state.attempts.push(now);
+        if (state.attempts.length >= RATE_MAX_ATTEMPTS) {
+            state.lockedUntil = now + RATE_WINDOW_MS;
+        }
+        saveRateState(state);
+    }
+
+    function isRateLimited() {
+        const state = getRateState();
+        const now = Date.now();
+        if (state.lockedUntil > now) {
+            const remainSec = Math.ceil((state.lockedUntil - now) / 1000);
+            return { limited: true, remainSec };
+        }
+        // Purge expired attempts
+        state.attempts = state.attempts.filter(t => now - t < RATE_WINDOW_MS);
+        saveRateState(state);
+        return { limited: false, remainSec: 0 };
+    }
+
+    function clearRateLimit() {
+        try { sessionStorage.removeItem(RATE_KEY); } catch (_) {}
+    }
+
     // ── Sign-in form ────────────────────────────────────────────────
     document.getElementById('signin-form').addEventListener('submit', function(e) {
         e.preventDefault();
@@ -397,6 +444,19 @@
 
         if (!valid) return;
 
+        // Rate limit check
+        const rateCheck = isRateLimited();
+        if (rateCheck.limited) {
+            const alertEl = document.getElementById('login-alert');
+            const alertMsg = document.getElementById('alert-msg');
+            if (alertEl && alertMsg) {
+                const mins = Math.ceil(rateCheck.remainSec / 60);
+                alertMsg.textContent = `Too many failed attempts. Please wait ${mins} minute${mins > 1 ? 's' : ''} before trying again.`;
+                alertEl.classList.add('show');
+            }
+            return;
+        }
+
         const btn = document.getElementById('btn-submit');
         btn.disabled = true;
         btn.textContent = 'Signing in…';
@@ -417,17 +477,28 @@
             });
 
             if (!result.success) {
+                recordFailedAttempt();
                 btn.disabled = false;
                 btn.textContent = 'Sign In →';
-                // Show error in the alert banner (not the password field)
+                // Show error — always generic to prevent email enumeration
                 const alertEl = document.getElementById('login-alert');
                 const alertMsg = document.getElementById('alert-msg');
                 if (alertEl && alertMsg) {
-                    alertMsg.textContent = result.error || 'Invalid email or password.';
+                    // Check if now locked out after this attempt
+                    const postCheck = isRateLimited();
+                    if (postCheck.limited) {
+                        const mins = Math.ceil(postCheck.remainSec / 60);
+                        alertMsg.textContent = `Too many failed attempts. Account locked for ${mins} minute${mins > 1 ? 's' : ''}.`;
+                    } else {
+                        alertMsg.textContent = 'Invalid email or password.';
+                    }
                     alertEl.classList.add('show');
                 }
                 return;
             }
+
+            // Success — clear rate limiter
+            clearRateLimit();
 
             // Show personalized success state
             document.getElementById('signin-form').style.display = 'none';

@@ -293,11 +293,17 @@ if (!auth.isSignedIn()) {
     throw '';
 }
 
-await auth.fetchProfile();
-
-if (!auth.isAdmin()) {
-    showGate('Insufficient Permissions', `Signed in as ${auth.getUser()?.email || '?'} (role: ${auth.getRole()}). Admin or superadmin role required.`);
-    throw '';
+// Server-side admin verification: validates JWT with Supabase Auth server
+// and queries user_profiles for role. Cannot be bypassed via localStorage.
+const adminCheck = await auth.verifyAdminServerSide();
+if (!adminCheck.verified) {
+    // Fallback: also check local state (for when Supabase is unavailable in dev)
+    await auth.fetchProfile();
+    if (!auth.isAdmin()) {
+        const reason = adminCheck.error || 'Unknown';
+        showGate('Insufficient Permissions', `Access denied. Server verification: ${_esc(reason)}. Role: ${_esc(auth.getRole())}.`);
+        throw '';
+    }
 }
 
 document.getElementById('auth-gate').style.display = 'none';
