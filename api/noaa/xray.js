@@ -11,7 +11,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_XRAY = 'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json';
 const CACHE_TTL = 60;   // 60 s — matches T1 cadence; NOAA GOES updates ~1 min

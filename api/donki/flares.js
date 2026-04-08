@@ -15,7 +15,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../_lib/middleware.js';
 
 const DONKI_FLR_BASE = 'https://api.nasa.gov/DONKI/FLR';
 const CACHE_TTL      = 900;   // 15 min

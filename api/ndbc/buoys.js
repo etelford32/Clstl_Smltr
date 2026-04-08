@@ -22,7 +22,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NDBC_URL   = 'https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt';
 const CACHE_TTL  = 600;  // 10 minutes

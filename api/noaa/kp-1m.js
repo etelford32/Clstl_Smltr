@@ -20,7 +20,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_KP_1M = 'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json';
 

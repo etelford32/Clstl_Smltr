@@ -35,7 +35,7 @@
  */
 export const config = { runtime: 'edge' };
 
-import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../_lib/middleware.js';
 
 const NOAA_F107 = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
 const CACHE_TTL = 3600;   // 1 hour — F10.7 updates once daily, no need to rush
