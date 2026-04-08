@@ -230,10 +230,11 @@ export class SpaceWeatherGlobe {
 
         this._sunSkin = new SunSkin(this._sunGroup, {
             radius:   3.0,
-            quality:  'medium',
+            quality:  'high',
             corona:   true,
-            segments: 64,
+            segments: 128,
         });
+        this._sunSkin.setBloom(1.8);
 
         // Point light from sun position for realistic illumination
         this._sunPointLight = new THREE.PointLight(0xfff4e0, 0.6, 120, 0.5);

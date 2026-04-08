@@ -503,6 +503,71 @@ function buildTorus(radius, tube, color, opacity, segments = 48) {
     return mesh;
 }
 
+/**
+ * Build 3D dipole magnetic field lines.
+ *
+ * A magnetic dipole field line satisfies  r = L sin²(θ)  where L is the
+ * equatorial crossing distance in Earth radii and θ is colatitude from
+ * the magnetic pole.  Each line is traced from pole to pole at fixed
+ * longitude φ, creating the characteristic 3D "onion" shape.
+ *
+ * Multiple L-shells at multiple longitudes give a volumetric wireframe
+ * of the inner magnetosphere — the single biggest visual cue that the
+ * field is 3D, not flat.
+ *
+ * @param {number[]} lShells   L-shell values (e.g. [2, 3, 4.5, 6])
+ * @param {number}   nLongs    longitudes per L-shell (e.g. 8)
+ * @param {number}   color     base colour
+ * @param {number}   opacity   base opacity
+ * @returns {THREE.Group}
+ */
+function buildDipoleFieldLines(lShells, nLongs, color, opacity) {
+    const group = new THREE.Group();
+    group.name  = 'fieldLines';
+    const PTS   = 80;
+
+    for (const L of lShells) {
+        // Opacity falls off for outer field lines (farther = fainter)
+        const lOp = opacity * (1.0 - (L - lShells[0]) / (lShells[lShells.length - 1] - lShells[0] + 1) * 0.5);
+
+        for (let j = 0; j < nLongs; j++) {
+            const phi = (j / nLongs) * Math.PI * 2;
+            const pts = [];
+
+            for (let i = 0; i <= PTS; i++) {
+                // Colatitude 8° to 172° (avoid poles where r → 0)
+                const theta = (8 + (i / PTS) * 164) * DEG;
+                const sinT  = Math.sin(theta);
+                const r     = L * sinT * sinT;
+
+                // Skip points inside Earth (r < 1.0 Re)
+                if (r < 1.02) continue;
+
+                pts.push(new THREE.Vector3(
+                    r * sinT * Math.cos(phi),
+                    r * Math.cos(theta),
+                    r * sinT * Math.sin(phi),
+                ));
+            }
+
+            if (pts.length < 4) continue;
+
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({
+                color,
+                transparent: true,
+                opacity:     lOp,
+                depthWrite:  false,
+                blending:    THREE.AdditiveBlending,
+            });
+            const line = new THREE.Line(geo, mat);
+            line.renderOrder = 2;
+            group.add(line);
+        }
+    }
+    return group;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  MagnetosphereEngine
 // ─────────────────────────────────────────────────────────────────────────────
@@ -715,6 +780,20 @@ export class MagnetosphereEngine {
             this._plasmasphere.material.opacity = 0.08 + 0.03 * Math.sin(t * 0.9 + 0.5);
         }
 
+        // ── Dipole field lines — colour shifts quiet blue → storm magenta ──
+        if (this._fieldLines) {
+            this._fieldLines.children.forEach(line => {
+                const m = line.material;
+                // Quiet: cool blue (0.28, 0.53, 0.80)
+                // Storm: warm magenta-purple (0.75, 0.25, 0.85)
+                const r = 0.28 + kpNorm * 0.47;
+                const g = 0.53 - kpNorm * 0.28;
+                const b = 0.80 + kpNorm * 0.05;
+                m.color.setRGB(r, g, b);
+                m.opacity = 0.12 + kpNorm * 0.18 + 0.03 * Math.sin(t * 0.5);
+            });
+        }
+
         // ── Ring current — scales with |Dst| (storm main phase injection) ──
         if (this._ringCurrent) {
             const dstNorm = Math.min(1, Math.max(0, -dst) / 200);
@@ -773,6 +852,7 @@ export class MagnetosphereEngine {
             case 'belts':
                 if (this._innerBelt) this._innerBelt.visible = v;
                 if (this._outerBelt) this._outerBelt.visible = v;
+                if (this._fieldLines) this._fieldLines.visible = v;
                 break;
             case 'plasmasphere':
                 if (this._plasmasphere) this._plasmasphere.visible = v;
@@ -928,6 +1008,14 @@ export class MagnetosphereEngine {
         this._ringCurrent = buildTorus(3.6, 0.38, 0xff4400, 0.0, 48);
         this._eqGroup.add(this._ringCurrent);
 
+        // ── 3D Dipole magnetic field lines ────────────────────────────────────
+        // Trace r = L sin²(θ) for multiple L-shells and longitudes.
+        // Closed field lines (L < ~8) form the inner magnetosphere cage.
+        // Open field lines (L > ~10) would extend into the tail (not shown).
+        const closedL = [1.5, 2.0, 3.0, 4.5, Math.min(6.5, lpp + 0.5)];
+        this._fieldLines = buildDipoleFieldLines(closedL, 8, 0x4488cc, 0.18);
+        this._eqGroup.add(this._fieldLines);
+
         // ── 3D Auroral curtains (North + South ovals) ─────────────────────────
         // Placed in _eqGroup which is Earth-local space centred at origin.
         // The curtain oval colatitude contracts equatorward with rising Kp.
@@ -935,6 +1023,11 @@ export class MagnetosphereEngine {
         this._eqGroup.add(this._auroraN);
         this._auroraS = buildAuroralCurtains(kp, false);
         this._eqGroup.add(this._auroraS);
+
+        // ── Magnetic dipole tilt ──────────────────────────────────────────────
+        // Earth's magnetic dipole axis is tilted ~11.5° from rotation axis.
+        // This makes belts/field lines visibly offset, adding realism.
+        this._eqGroup.rotation.x = 11.5 * DEG;
 
         // Apply layer visibility
         if (!this._layers.belts) {
@@ -946,6 +1039,7 @@ export class MagnetosphereEngine {
             this._auroraN.visible = false;
             this._auroraS.visible = false;
         }
+        if (!this._layers.belts && this._fieldLines) this._fieldLines.visible = false;
     }
 }
 

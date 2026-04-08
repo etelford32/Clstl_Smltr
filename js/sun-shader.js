@@ -281,20 +281,57 @@ export const CORONA_FRAG = /* glsl */`
     precision mediump float;
     uniform float u_bloom;
     uniform float u_xray_norm;
-    uniform float u_layer;   // 0-1 which corona layer (inner→outer)
+    uniform float u_euv_dimming;
+    uniform float u_layer;   // 0-1 which corona layer (inner->outer)
+    uniform float u_time;
     varying vec3 vWorldNormal;
     varying vec3 vViewDir;
+
     void main() {
         vec3 N = normalize(vWorldNormal);
         vec3 V = normalize(vViewDir);
-        float rim = pow(1.0 - abs(dot(V, N)), 2.0);
-        // Inner corona: gold-white, outer: fading orange-red
-        vec3 innerCol = vec3(1.0, 0.88, 0.55);
-        vec3 outerCol = vec3(0.85, 0.35, 0.06);
+        float NdotV = dot(V, N);
+
+        // ── Fresnel rim (strong at silhouette) ──
+        float rim = pow(1.0 - abs(NdotV), 1.6);
+
+        // ── Volumetric base glow (visible across the face, not just rim) ──
+        // Inner layers glow across the whole sphere; outer layers are rim-only
+        float faceGlow = max(0.0, NdotV) * (1.0 - u_layer) * 0.12;
+
+        // ── Streamer structure — helmet streamers at equatorial belt ──
+        // Use world normal Y component as proxy for heliographic latitude
+        float lat = abs(N.y);
+        float streamer = (1.0 - smoothstep(0.0, 0.45, lat)) * 0.15 * (1.0 - u_layer * 0.6);
+        // Polar coronal holes — dimmer at poles
+        float polarHole = smoothstep(0.7, 0.95, lat) * 0.08 * (1.0 - u_layer);
+
+        // ── Colour: K-corona gold-white inner, F-corona fading red outer ──
+        vec3 innerCol = vec3(1.0, 0.90, 0.60);
+        vec3 outerCol = vec3(0.80, 0.30, 0.05);
         vec3 col = mix(innerCol, outerCol, u_layer);
-        // X-ray brightening
-        col += vec3(0.2, 0.3, 0.5) * u_xray_norm * (1.0 - u_layer);
-        float alpha = rim * (0.25 - u_layer * 0.18) * max(0.3, u_bloom);
+
+        // Streamer colour — slightly brighter white in streamer belt
+        col += vec3(0.15, 0.12, 0.05) * streamer;
+
+        // X-ray brightening during flares — hot blue-white component
+        col += vec3(0.25, 0.35, 0.55) * u_xray_norm * (1.0 - u_layer * 0.5);
+
+        // ── Alpha: combine rim + face glow + streamers ──
+        float baseAlpha = rim * (0.30 - u_layer * 0.20)
+                        + faceGlow
+                        + streamer * rim;
+
+        // Subtract polar holes
+        baseAlpha -= polarHole;
+
+        // Bloom and time-varying pulsation (subtle coronal breathing)
+        float pulse = 1.0 + 0.04 * sin(u_time * 0.7 + u_layer * 2.0);
+        float alpha = max(0.0, baseAlpha) * max(0.3, u_bloom) * pulse;
+
+        // EUV dimming from CME — coronal mass loss reduces brightness
+        alpha *= 1.0 - u_euv_dimming * (0.4 + u_layer * 0.3);
+
         gl_FragColor = vec4(col * alpha, alpha);
     }
 `;
@@ -317,10 +354,12 @@ export function createSunUniforms(THREE) {
         u_flare_t:   { value: 0.0 },
         u_kp_norm:   { value: 0.0 },
         u_bloom:     { value: 1.0 },
-        u_flare_arc: { value: 0.0 },
-        u_flare_lon: { value: new THREE.Vector2(0, 0) },
-        u_regions:   { value: regions },
-        u_nRegions:  { value: 0 },
-        u_rot_phase: { value: 0.0 },
+        u_flare_arc:    { value: 0.0 },
+        u_flare_phase:  { value: 0.0 },   // 0-1 flare evolution stage
+        u_euv_dimming:  { value: 0.0 },   // 0-1 coronal mass loss dimming
+        u_flare_lon:    { value: new THREE.Vector2(0, 0) },
+        u_regions:      { value: regions },
+        u_nRegions:     { value: 0 },
+        u_rot_phase:    { value: 0.0 },
     };
 }
