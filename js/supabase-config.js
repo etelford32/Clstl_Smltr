@@ -54,6 +54,16 @@ export async function getSupabase() {
                 autoRefreshToken: true,
                 persistSession: true,
                 detectSessionInUrl: true,  // for OAuth redirects
+                flowType: 'pkce',          // Use PKCE flow (more secure than implicit)
+            },
+            global: {
+                headers: {
+                    'X-Client-Info': 'parker-physics-web',
+                },
+            },
+            // DB query defaults
+            db: {
+                schema: 'public',
             },
         });
         console.info('[Supabase] Client initialized');

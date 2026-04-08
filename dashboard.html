@@ -487,6 +487,9 @@ import { predictPasses } from './js/orbital-analytics.js';
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
 
+/** Escape HTML entities to prevent XSS from external API data (NOAA, etc.) */
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
 /* ════════════════════════════════════════════════════════════
    AUTH GATE — properly awaits auth initialization before checking state
 ═════════════════════════════════════════════════════════════ */
@@ -1434,8 +1437,8 @@ function _updateAlertsCard(sw) {
       html += `<div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;display:flex;align-items:flex-start;gap:8px">
         <span style="color:${sevColor};font-size:1rem;line-height:1">⚠</span>
         <div>
-          <div style="font-size:.78rem;font-weight:600;color:${sevColor}">${a.event || sev + ' Alert'}</div>
-          <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${a.area || a.headline || ''}</div>
+          <div style="font-size:.78rem;font-weight:600;color:${sevColor}">${_esc(a.event || sev + ' Alert')}</div>
+          <div style="font-size:.68rem;color:var(--muted);margin-top:2px">${_esc(a.area || a.headline || '')}</div>
         </div>
       </div>`;
     }

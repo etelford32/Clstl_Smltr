@@ -8,10 +8,37 @@
 import { getSupabase, isConfigured } from './supabase-config.js';
 
 let _sb = null;
+let _adminVerified = false;
 
 async function sb() {
     if (!_sb && isConfigured()) _sb = await getSupabase();
     return _sb;
+}
+
+/**
+ * Verify the current user is an authenticated admin before allowing queries.
+ * This prevents non-admin users from calling admin analytics functions
+ * even if they bypass the client-side admin gate.
+ * RLS enforces this at the DB level too, but this is defense-in-depth.
+ */
+async function requireAdmin() {
+    if (_adminVerified) return true;
+    const client = await sb();
+    if (!client) return false;
+    try {
+        // Validate JWT server-side (not from localStorage)
+        const { data: { user }, error } = await client.auth.getUser();
+        if (error || !user) return false;
+        // Check admin role in user_profiles (RLS allows self-read)
+        const { data: profile } = await client
+            .from('user_profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single();
+        const isAdmin = profile?.role === 'admin' || profile?.role === 'superadmin';
+        if (isAdmin) _adminVerified = true;
+        return isAdmin;
+    } catch (_) { return false; }
 }
 
 // ── Helper: date boundaries ──────────────────────────────────────────────────
@@ -32,6 +59,7 @@ function daysAgo(n) {
 export async function fetchKPIs() {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const [
@@ -143,6 +171,7 @@ export async function fetchKPIs() {
 export async function fetchUsers(limit = 100) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -163,6 +192,7 @@ export async function fetchUsers(limit = 100) {
 export async function fetchTopPages() {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -198,6 +228,7 @@ export async function fetchTopPages() {
 export async function fetchRecentEvents(limit = 30) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -218,6 +249,7 @@ export async function fetchRecentEvents(limit = 30) {
 export async function fetchActiveSessions() {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -240,6 +272,7 @@ export async function fetchActiveSessions() {
 export async function fetchDailyTrend(days = 14) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -281,6 +314,7 @@ export async function fetchDailyTrend(days = 14) {
 export async function fetchFeedback(limit = 50) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -301,6 +335,7 @@ export async function fetchFeedback(limit = 50) {
 export async function fetchInvites() {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -318,12 +353,23 @@ export async function fetchInvites() {
 export async function createInvite({ code, label, maxUses = 10, expiresInDays = null }) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    // Input validation
+    if (!code || typeof code !== 'string' || code.length < 2 || code.length > 50)
+        return { ok: false, error: 'Code must be 2-50 characters' };
+    if (label && (typeof label !== 'string' || label.length > 200))
+        return { ok: false, error: 'Label must be under 200 characters' };
+    if (!Number.isFinite(maxUses) || maxUses < 1 || maxUses > 1000)
+        return { ok: false, error: 'maxUses must be 1-1000' };
+    if (expiresInDays !== null && (!Number.isFinite(expiresInDays) || expiresInDays < 1 || expiresInDays > 365))
+        return { ok: false, error: 'expiresInDays must be 1-365' };
 
     try {
         const row = {
-            code: code.toUpperCase().replace(/\s/g, '-'),
-            label,
-            max_uses: maxUses,
+            code: code.toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 50),
+            label: (label || '').slice(0, 200),
+            max_uses: Math.min(1000, Math.max(1, Math.round(maxUses))),
             active: true,
         };
         if (expiresInDays) {
@@ -350,6 +396,7 @@ export async function createInvite({ code, label, maxUses = 10, expiresInDays = 
 export async function fetchAnnouncements() {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
     try {
         const { data, error } = await client
@@ -365,19 +412,33 @@ export async function fetchAnnouncements() {
     }
 }
 
+const VALID_SEVERITY = new Set(['info', 'success', 'warning', 'critical']);
+const VALID_TARGET_PLAN = new Set(['all', 'free', 'basic', 'advanced']);
+
 export async function createAnnouncement({ title, body, severity = 'info', targetPlan = 'all', published = false }) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    // Input validation
+    if (!title || typeof title !== 'string' || title.length > 200)
+        return { ok: false, error: 'Title required, max 200 characters' };
+    if (body && (typeof body !== 'string' || body.length > 5000))
+        return { ok: false, error: 'Body must be under 5000 characters' };
+    if (!VALID_SEVERITY.has(severity))
+        return { ok: false, error: 'Invalid severity. Must be: info, success, warning, critical' };
+    if (!VALID_TARGET_PLAN.has(targetPlan))
+        return { ok: false, error: 'Invalid target plan. Must be: all, free, basic, advanced' };
 
     try {
         const { data, error } = await client
             .from('announcements')
             .insert({
-                title,
-                body,
+                title: title.slice(0, 200),
+                body: (body || '').slice(0, 5000),
                 severity,
                 target_plan: targetPlan,
-                published,
+                published: !!published,
                 published_at: published ? new Date().toISOString() : null,
             })
             .select()

@@ -46,10 +46,9 @@ class UserState {
             events: [],          // last 50 events: [{ type, name, ts }]
             preferences: {},     // user-set preferences
             userId: null,
-            email: null,
             displayName: null,
-            plan: null,
-            role: null,
+            // NOTE: email, role, plan are intentionally NOT stored in localStorage.
+            // They are fetched from the server (auth.fetchProfile) on each session.
         };
     }
 
@@ -165,23 +164,28 @@ class UserState {
 
     // ── User Identity ──────────────────────────────────────────────────────
 
+    /**
+     * Identify user — stores ONLY non-sensitive display data in localStorage.
+     * Email, role, and plan are NOT persisted to localStorage (PII/privilege data).
+     * Those are fetched fresh from the server via auth.fetchProfile() on each session.
+     */
     identify(user) {
         if (!user) return;
         this._state.userId = user.id || this._state.userId;
-        this._state.email = user.email || this._state.email;
         this._state.displayName = user.name || user.displayName || this._state.displayName;
-        this._state.plan = user.plan || this._state.plan;
-        this._state.role = user.role || this._state.role;
-        this._addEvent('identify', user.email || user.id);
+        // Do NOT store email, role, or plan in localStorage — these are sensitive.
+        // They should be read from the Supabase session (auth.js) on each page load.
+        this._addEvent('identify', user.id || 'anon');
         this._save();
     }
 
     clearIdentity() {
         this._state.userId = null;
-        this._state.email = null;
         this._state.displayName = null;
-        this._state.plan = null;
-        this._state.role = null;
+        // Also clear any legacy fields that may have been stored previously
+        delete this._state.email;
+        delete this._state.role;
+        delete this._state.plan;
         this._save();
     }
 

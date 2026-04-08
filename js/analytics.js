@@ -110,8 +110,9 @@ async function _heartbeat() {
         await _supabase.rpc('session_heartbeat', {
             p_session_id: _sessionId,
             p_user_id: _userId || null,
-            p_page_path: window.location.pathname,
-            p_user_agent: navigator.userAgent.slice(0, 200),
+            p_page_path: window.location.pathname.slice(0, 200),
+            // Only send browser family, not full UA string (minimizes fingerprinting)
+            p_user_agent: (navigator.userAgent || '').replace(/\(.*?\)/g, '').slice(0, 100),
         });
     } catch (err) {
         console.warn('[Analytics] Heartbeat failed:', err.message);
@@ -166,12 +167,20 @@ class Analytics {
      */
     page(pageName, props = {}) {
         const path = window.location.pathname;
+        // Sanitize: truncate fields to match RLS policy limits, minimize PII
+        const safeName = (pageName || path).slice(0, 100);
+        const safePath = path.slice(0, 200);
+        const safeTitle = (document.title || '').slice(0, 300);
+        // Referrer: only keep the origin (not full URL) to avoid leaking query params
+        let safeReferrer = null;
+        try { safeReferrer = document.referrer ? new URL(document.referrer).origin : null; } catch (_) {}
+
         const event = {
             event_type: 'page_view',
-            event_name: pageName || path,
-            page_path: path,
-            page_title: document.title,
-            referrer: document.referrer || null,
+            event_name: safeName,
+            page_path: safePath,
+            page_title: safeTitle,
+            referrer: safeReferrer,
             session_id: _sessionId,
             user_id: _userId,
             properties: { ...props },
@@ -198,14 +207,28 @@ class Analytics {
      * @param {object} [props] - Event properties
      */
     event(name, props = {}) {
+        if (!name || typeof name !== 'string') return;
+        const safeName = name.slice(0, 100);
+        const safePath = window.location.pathname.slice(0, 200);
+
+        // Limit properties to 2KB to prevent storage abuse
+        let safeProps = props;
+        try {
+            const serialized = JSON.stringify(props);
+            if (serialized.length > 2000) {
+                console.warn('[Analytics] Event properties exceed 2KB, dropping');
+                safeProps = {};
+            }
+        } catch (_) { safeProps = {}; }
+
         const event = {
             event_type: 'event',
-            event_name: name,
-            page_path: window.location.pathname,
-            page_title: document.title,
+            event_name: safeName,
+            page_path: safePath,
+            page_title: (document.title || '').slice(0, 300),
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...props },
+            properties: { ...safeProps },
             created_at: new Date().toISOString(),
         };
 
@@ -234,7 +257,8 @@ class Analytics {
             window.gtag('set', { user_id: userId });
         }
 
-        this.event('identify', { ...traits });
+        // Only log non-PII traits — never send email, name, or other PII to analytics
+        this.event('identify', { plan: traits.plan, role: traits.role });
         // Update heartbeat with userId
         _heartbeat();
     }
