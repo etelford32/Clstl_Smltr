@@ -361,13 +361,6 @@
     window._ppAuth = { auth };
 </script>
 <script>
-    // ── Nav burger ──────────────────────────────────────────────────
-    document.getElementById('nav-burger').addEventListener('click', function() {
-        const menu = document.getElementById('nav-menu');
-        const open = menu.classList.toggle('open');
-        this.setAttribute('aria-expanded', open);
-    });
-
     // ── Plan pre-selection from URL param ──────────────────────────
     const urlPlan = new URLSearchParams(location.search).get('plan') || 'free';
     const planMap = { free: 'pill-free', basic: 'pill-basic', advanced: 'pill-advanced' };

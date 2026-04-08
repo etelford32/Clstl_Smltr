@@ -356,13 +356,6 @@
     window._ppAuth = { auth };
 </script>
 <script>
-    // ── Nav burger ──────────────────────────────────────────────────
-    document.getElementById('nav-burger').addEventListener('click', function() {
-        const menu = document.getElementById('nav-menu');
-        const open = menu.classList.toggle('open');
-        this.setAttribute('aria-expanded', open);
-    });
-
     // ── Forgot password toggle ──────────────────────────────────────
     document.getElementById('forgot-btn').addEventListener('click', () => {
         document.getElementById('signin-view').style.display = 'none';
