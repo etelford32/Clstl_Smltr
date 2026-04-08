@@ -10,34 +10,23 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_ALERTS = 'https://services.swpc.noaa.gov/products/alerts.json';
 const CACHE_TTL   = 300;
 const MAX_AGE_MS  = 24 * 60 * 60 * 1000;   // 24 hr
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_ALERTS, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_ALERTS, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected alerts format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const now     = Date.now();
@@ -46,7 +35,7 @@ export default async function handler() {
     const alerts = raw
         .filter(a => a?.issue_datetime)
         .map(a => {
-            const iso     = isoTag(a.issue_datetime);
+            const iso     = fmt.isoTag(a.issue_datetime);
             const issued  = iso ? new Date(iso).getTime() : 0;
             return {
                 product_id:   a.product_id ?? null,

@@ -9,31 +9,21 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_REGIONS = 'https://services.swpc.noaa.gov/json/solar_regions.json';
 const CACHE_TTL    = 900;
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_REGIONS, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_REGIONS, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected solar_regions format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const regions = raw

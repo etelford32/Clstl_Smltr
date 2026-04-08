@@ -11,6 +11,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_XRAY = 'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json';
 const CACHE_TTL = 60;   // 60 s — matches T1 cadence; NOAA GOES updates ~1 min
 
@@ -36,10 +38,6 @@ function fluxLetter(flux) {
     return 'X';
 }
 
-function isoTag(t) {
-    return t ? String(t).replace(' ', 'T') + 'Z' : null;
-}
-
 function freshnessStatus(ageMin) {
     if (ageMin == null) return 'missing';
     if (ageMin < 10)    return 'fresh';
@@ -47,29 +45,17 @@ function freshnessStatus(ageMin) {
     return 'expired';
 }
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_XRAY, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_XRAY, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     // xrays-1-day is a 2-D array: row[0] = headers, rest = string values
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected xrays-1-day format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const headers = raw[0].map(String);
@@ -87,7 +73,7 @@ export default async function handler() {
         .filter(r => r[timeCol])
         .map(r => ({
             time_tag:  r[timeCol],
-            flux:      fill(r[fluxCol]),
+            flux:      fmt.safeNum(r[fluxCol]),
             satellite: r[satCol] ?? null,
         }))
         .filter(r => r.flux != null);
@@ -97,7 +83,7 @@ export default async function handler() {
     }
 
     const latest     = rows[rows.length - 1];
-    const updatedISO = isoTag(latest.time_tag);
+    const updatedISO = fmt.isoTag(latest.time_tag);
     const updatedMs  = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageMin     = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 60_000;
 

@@ -13,6 +13,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_DST   = 'https://services.swpc.noaa.gov/products/kyoto-dst.json';
 const CACHE_TTL  = 300;
 const RECENT_N   = 24;   // last 24 readings to include
@@ -28,31 +30,18 @@ function dstStorm(dst) {
     return                   { level: 0, label: 'Quiet' };
 }
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_DST, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_DST, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     // kyoto-dst.json: 2-D array, row[0] = headers ["time_tag", "dst"]
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected kyoto-dst format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const headers = raw[0].map(String);
@@ -68,7 +57,7 @@ export default async function handler() {
 
     const rows = raw.slice(1)
         .filter(r => r[timeCol])
-        .map(r => ({ time_tag: r[timeCol], dst: fill(r[dstCol]) }))
+        .map(r => ({ time_tag: r[timeCol], dst: fmt.safeNum(r[dstCol]) }))
         .filter(r => r.dst != null);
 
     if (rows.length === 0) {
@@ -76,14 +65,14 @@ export default async function handler() {
     }
 
     const latest     = rows[rows.length - 1];
-    const updatedISO = isoTag(latest.time_tag);
+    const updatedISO = fmt.isoTag(latest.time_tag);
     const ageMin     = updatedISO
         ? (Date.now() - new Date(updatedISO).getTime()) / 60_000
         : null;
 
     const storm   = dstStorm(latest.dst);
     const recent  = rows.slice(-RECENT_N).map(r => ({
-        timestamp: isoTag(r.time_tag),
+        timestamp: fmt.isoTag(r.time_tag),
         dst_nT:    r.dst,
     }));
 

@@ -12,8 +12,10 @@
  */
 export const config = { runtime: 'edge' };
 
+import { errorResp, ErrorCodes, jsonResp, fetchUpstream } from './_lib/middleware.js';
+
 const HORIZONS_BASE = 'https://ssd.jpl.nasa.gov/api/horizons.api';
-const CACHE_TTL     = 3600;  // 1 hr — ephemeris changes slowly
+const CACHE_TTL     = 3600;
 
 // Allowed Horizons parameters (whitelist to prevent proxy abuse)
 const ALLOWED_PARAMS = new Set([
@@ -32,10 +34,7 @@ export default async function handler(request) {
 
     // Input validation: reject oversized queries and non-whitelisted params
     if (incoming.search.length > MAX_QUERY_LENGTH) {
-        return Response.json(
-            { error: 'query_too_large', max: MAX_QUERY_LENGTH },
-            { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } },
-        );
+        return errorResp(ErrorCodes.INVALID_REQUEST, 'Query string too large (max 2000 chars)');
     }
     const filtered = new URLSearchParams();
     for (const [key, value] of incoming.searchParams) {
@@ -45,22 +44,12 @@ export default async function handler(request) {
 
     let upstreamRes;
     try {
-        upstreamRes = await fetch(upstreamURL, {
-            headers: { Accept: 'application/json' },
-            cf: { cacheTtl: CACHE_TTL },   // Vercel/CF edge cache
-        });
+        upstreamRes = await fetchUpstream(upstreamURL, { timeout: 20000 });
     } catch (e) {
-        return Response.json(
-            { error: 'service_unavailable' },
-            { status: 503, headers: { 'Access-Control-Allow-Origin': '*' } },
-        );
-    }
-
-    if (!upstreamRes.ok) {
-        return Response.json(
-            { error: 'upstream_error', status: upstreamRes.status },
-            { status: upstreamRes.status, headers: { 'Access-Control-Allow-Origin': '*' } },
-        );
+        if (e.message === 'request_timeout') {
+            return errorResp(ErrorCodes.REQUEST_TIMEOUT, 'JPL Horizons did not respond in time');
+        }
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'JPL Horizons is unreachable');
     }
 
     const body = await upstreamRes.text();

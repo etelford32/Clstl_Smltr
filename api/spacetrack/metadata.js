@@ -25,19 +25,11 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+
 const ST_LOGIN = 'https://www.space-track.org/ajaxauth/login';
 const ST_QUERY = 'https://www.space-track.org/basicspacedata/query';
 const CACHE_TTL = 21600;  // 6 hours
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':              `public, s-maxage=${maxAge}, stale-while-revalidate=600`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 // Map group names to Space-Track OBJECT_NAME patterns
 const GROUP_FILTERS = {
@@ -127,10 +119,6 @@ export default async function handler(request) {
             satellites,
         });
     } catch (e) {
-        return jsonResp({
-            error: 'upstream_unavailable',
-            detail: e.message,
-            source: 'Space-Track.org',
-        }, 503, 60);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 }

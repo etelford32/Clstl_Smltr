@@ -25,17 +25,9 @@
  */
 export const config = { runtime: 'edge' };
 
-const CACHE_TTL = 3600;
+import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':              `public, s-maxage=${maxAge}, stale-while-revalidate=300`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
+const CACHE_TTL = 3600;
 
 // Find the latest GFS run (00z, 06z, 12z, 18z)
 function latestGfsRun() {
@@ -162,10 +154,6 @@ export default async function handler(request) {
             fetched: new Date().toISOString(),
         });
     } catch (e) {
-        return jsonResp({
-            error: 'upstream_unavailable',
-            detail: e.message,
-            source: 'NOAA NOMADS',
-        }, 503, 60);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 }

@@ -12,6 +12,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_PROTONS = 'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json';
 const CACHE_TTL    = 300;
 
@@ -26,31 +28,18 @@ function sepStorm(flux10mev) {
     return                        { level: 0, label: 'None' };
 }
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_PROTONS, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_PROTONS, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     // 2-D array: row[0] = headers
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected integral-protons format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const headers    = raw[0].map(String);
@@ -70,7 +59,7 @@ export default async function handler() {
         const r      = raw[i];
         const energy = r[energyCol];
         if (!energy || channels[energy]) continue;
-        const flux = fill(r[fluxCol]);
+        const flux = fmt.safeNum(r[fluxCol]);
         if (flux == null) continue;
         channels[energy] = { flux, time_tag: r[timeCol] };
         // Stop once we have the 3 primary channels
@@ -88,7 +77,7 @@ export default async function handler() {
     const ch100 = find('100');
 
     const flux10  = ch10?.flux  ?? null;
-    const updatedISO = isoTag(ch10?.time_tag ?? ch50?.time_tag ?? null);
+    const updatedISO = fmt.isoTag(ch10?.time_tag ?? ch50?.time_tag ?? null);
     const ageMin     = updatedISO
         ? (Date.now() - new Date(updatedISO).getTime()) / 60_000
         : null;

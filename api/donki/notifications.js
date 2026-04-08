@@ -12,35 +12,17 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+
 const DONKI_NOTIFY_BASE = 'https://api.nasa.gov/DONKI/notifications';
 const CACHE_TTL         = 900;
 const DEFAULT_DAYS      = 7;
 const FREE_LIMIT        = 5;
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
-function isPro(request) {
-    const auth   = request.headers.get('Authorization') ?? '';
-    const token  = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const secret = (typeof process !== 'undefined' && process.env?.PRO_SECRET) ?? '';
-    if (!secret.length || secret.length !== token.length) return false;
-    let r = 0; for (let i = 0; i < secret.length; i++) r |= secret.charCodeAt(i) ^ token.charCodeAt(i);
-    return r === 0;
-}
 
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
-    const pro     = isPro(request);
+    const pro     = validateProToken(request);
 
     const now   = new Date();
     const start = new Date(now.getTime() - DEFAULT_DAYS * 86_400_000);
@@ -50,22 +32,20 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(donkiURL, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI notifications format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const notes = raw
         .filter(n => n?.messageIssueTime)
         .map(n => ({
             type:        n.messageType   ?? null,
-            issue_time:  isoTag(n.messageIssueTime),
+            issue_time:  fmt.isoTag(n.messageIssueTime),
             id:          n.messageID     ?? null,
             url:         n.messageURL    ?? null,
             body:        (n.messageBody ?? '').slice(0, 400),   // trim verbose bodies
