@@ -22,18 +22,10 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NDBC_URL   = 'https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt';
 const CACHE_TTL  = 600;  // 10 minutes
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':              `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 // Region bounding boxes [latS, latN, lonW, lonE] (lon in -180..180)
 const REGION_BOUNDS = {
@@ -128,11 +120,7 @@ export default async function handler(request) {
         if (!res.ok) throw new Error(`NDBC HTTP ${res.status}`);
         text = await res.text();
     } catch (e) {
-        return jsonResp({
-            error: 'upstream_unavailable',
-            detail: e.message,
-            source: 'NOAA NDBC',
-        }, 503, 60);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'NOAA NDBC data temporarily unavailable');
     }
 
     let buoys = parseNdbc(text);

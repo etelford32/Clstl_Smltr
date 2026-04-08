@@ -20,6 +20,8 @@
 
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, jsonResp } from '../_lib/middleware.js';
+
 // NHC public JSON feed — no authentication, CORS-open
 const NHC_URL = 'https://www.nhc.noaa.gov/CurrentStorms.json';
 

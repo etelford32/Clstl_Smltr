@@ -9,33 +9,22 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_ELECTRONS = 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json';
 const CACHE_TTL      = 300;
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_ELECTRONS, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_ELECTRONS, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected integral-electrons format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const headers   = raw[0].map(String);
@@ -55,7 +44,7 @@ export default async function handler() {
         const r      = raw[i];
         const energy = r[energyCol];
         if (!energy || channels[energy]) continue;
-        const flux = fill(r[fluxCol]);
+        const flux = fmt.safeNum(r[fluxCol]);
         if (flux == null) continue;
         channels[energy] = { flux, time_tag: r[timeCol] };
         if (Object.keys(channels).length >= 2) break;
@@ -68,7 +57,7 @@ export default async function handler() {
 
     const ch08  = find('0.8');
     const ch2   = find('2.0') ?? find('2 ');
-    const updatedISO = isoTag(ch2?.time_tag ?? ch08?.time_tag ?? null);
+    const updatedISO = fmt.isoTag(ch2?.time_tag ?? ch08?.time_tag ?? null);
     const ageMin     = updatedISO
         ? (Date.now() - new Date(updatedISO).getTime()) / 60_000
         : null;

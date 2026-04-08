@@ -17,22 +17,13 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const DONKI_SEP_BASE = 'https://api.nasa.gov/DONKI/SEP';
 const CACHE_TTL      = 900;   // 15 min
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
@@ -49,15 +40,13 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(donkiURL, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI SEP format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const events = raw
@@ -66,7 +55,7 @@ export default async function handler(request) {
             const linked = Array.isArray(s.linkedEvents) ? s.linkedEvents : [];
             return {
                 id:            s.sepID        ?? null,
-                event_time:    isoTag(s.eventTime),
+                event_time:    fmt.isoTag(s.eventTime),
                 instruments:   (s.instruments ?? []).map(i => i.displayName ?? i).filter(Boolean),
                 linked_flare:  linked.some(e => String(e.activityID ?? '').includes('FLR')),
                 linked_cme:    linked.some(e => String(e.activityID ?? '').includes('CME')),

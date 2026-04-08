@@ -32,6 +32,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, jsonResp } from '../../_lib/middleware.js';
+
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
 const CACHE_TTL      = 3600;   // 1 hour — TLEs update every ~8 hours
 
@@ -59,16 +61,6 @@ const RE = 6378.135;  // WGS-72 Earth radius (km)
 const MU = 398600.8;  // km³/s²
 const TWOPI = 2 * Math.PI;
 const MIN_PER_DAY = 1440;
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=300`,
-            'Access-Control-Allow-Origin':  '*',
-        },
-    });
-}
 
 /** Parse mean motion (rev/day) → period, apogee, perigee */
 function orbitParams(meanMotion, ecc) {
@@ -187,11 +179,7 @@ export default async function handler(request) {
         if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
         text = await res.text();
     } catch (e) {
-        return jsonResp({
-            error: 'upstream_unavailable',
-            detail: e.message,
-            source: 'CelesTrak',
-        }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!text || text.trim().length === 0) {

@@ -15,6 +15,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+
 const DONKI_FLR_BASE = 'https://api.nasa.gov/DONKI/FLR';
 const CACHE_TTL      = 900;   // 15 min
 const DEFAULT_DAYS   = 7;
@@ -23,7 +25,6 @@ const FREE_LIMIT     = 3;
 
 const CLASS_ORDER = { X: 4, M: 3, C: 2, B: 1, A: 0 };
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
 
 function parseClass(cls) {
     if (!cls || typeof cls !== 'string') return { letter: 'A', number: 1.0 };
@@ -37,28 +38,9 @@ function classRank(cls) {
     return (CLASS_ORDER[letter] ?? 0) * 100 + number;
 }
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
-function isPro(request) {
-    const auth   = request.headers.get('Authorization') ?? '';
-    const token  = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const secret = (typeof process !== 'undefined' && process.env?.PRO_SECRET) ?? '';
-    if (!secret.length || secret.length !== token.length) return false;
-    let r = 0; for (let i = 0; i < secret.length; i++) r |= secret.charCodeAt(i) ^ token.charCodeAt(i);
-    return r === 0;
-}
-
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
-    const pro     = isPro(request);
+    const pro     = validateProToken(request);
 
     const url    = new URL(request.url);
     const rawDay = parseInt(url.searchParams.get('days') ?? DEFAULT_DAYS, 10);
@@ -72,15 +54,13 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(donkiURL, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI FLR format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const flares = raw
@@ -90,9 +70,9 @@ export default async function handler(request) {
             const { letter, number } = parseClass(f.classType);
             return {
                 id:            f.flrID           ?? null,
-                begin_time:    isoTag(f.beginTime),
-                peak_time:     isoTag(f.peakTime)  ?? null,
-                end_time:      isoTag(f.endTime)   ?? null,
+                begin_time:    fmt.isoTag(f.beginTime),
+                peak_time:     fmt.isoTag(f.peakTime)  ?? null,
+                end_time:      fmt.isoTag(f.endTime)   ?? null,
                 flare_class:   f.classType         ?? null,
                 class_letter:  letter,
                 class_number:  number,

@@ -27,6 +27,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, createValidator, errorResp, fetchJSON, fmt, jsonResp, validateProToken } from '../../_lib/middleware.js';
+
 const NOAA_WIND_1M = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
 
 // Trend / slope constants
@@ -47,7 +49,7 @@ const CACHE_SERIES  = 300;  // history changes slowly; allow slightly longer CDN
 const speedNorm = v => Math.max(0, Math.min(1, (v - 250) / 650));
 
 /** Linear OLS slope over an array of numbers. */
-function linearSlope(vals) {
+function fmt.linearSlope(vals) {
     const n = vals.length;
     if (n < 2) return 0;
     let sx = 0, sy = 0, sxy = 0, sxx = 0;
@@ -71,39 +73,8 @@ function alertLevel(speed, bz) {
     return 'QUIET';
 }
 
-function freshnessStatus(ageMin) {
-    if (ageMin == null) return 'missing';
-    if (ageMin < 5)     return 'fresh';
-    if (ageMin < 20)    return 'stale';
-    return 'expired';
-}
-
-function isoTag(timeTag) {
-    if (!timeTag) return null;
-    return String(timeTag).replace(' ', 'T') + 'Z';
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_CURRENT) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=30`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 /** True if the request carries a valid PRO auth token (Vercel env var check). */
-function isPro(request) {
-    const auth  = request.headers.get('Authorization') ?? '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    // PRO_SECRET is set as a Vercel Environment Variable; never hard-coded.
-    const secret = (typeof process !== 'undefined' && process.env?.PRO_SECRET) ?? '';
-    if (!secret.length || secret.length !== token.length) return false;
-    let r = 0; for (let i = 0; i < secret.length; i++) r |= secret.charCodeAt(i) ^ token.charCodeAt(i);
-    return r === 0;
-}
-
 // ── Main handler ─────────────────────────────────────────────────────────────
 
 export default async function handler(request) {
@@ -113,22 +84,20 @@ export default async function handler(request) {
     const wantSeries = seriesMode !== null;
 
     // PRO gate — full 24-hr series requires auth
-    if (wantFull && !isPro(request)) {
-        return jsonResp({ error: 'pro_required', detail: '?series=full requires a PRO plan token.' }, 403, 0);
+    if (wantFull && !validateProToken(request)) {
+        return errorResp(ErrorCodes.PRO_REQUIRED, 'This feature requires a PRO plan');
     }
 
     // Fetch NOAA 1-minute wind file
     let raw;
     try {
-        const res = await fetch(NOAA_WIND_1M, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_WIND_1M, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected rtsw_wind_1m format' }, 503, 30);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     // ── Parse rows ────────────────────────────────────────────────────────────
@@ -141,30 +110,30 @@ export default async function handler(request) {
         .filter(r => r?.time_tag)
         .map(r => ({
             time_tag:    r.time_tag,
-            speed:       fill(r.speed ?? r.proton_speed),
-            density:     fill(r.density ?? r.proton_density),
-            temperature: fill(r.temperature ?? r.proton_temperature),
-            bt:          fill(r.bt),
-            bz:          fill(r.bz_gsm ?? r.bz),
-            bx:          fill(r.bx_gsm ?? r.bx),
-            by:          fill(r.by_gsm ?? r.by),
+            speed:       fmt.safeNum(r.speed ?? r.proton_speed),
+            density:     fmt.safeNum(r.density ?? r.proton_density),
+            temperature: fmt.safeNum(r.temperature ?? r.proton_temperature),
+            bt:          fmt.safeNum(r.bt),
+            bz:          fmt.safeNum(r.bz_gsm ?? r.bz),
+            bx:          fmt.safeNum(r.bx_gsm ?? r.bx),
+            by:          fmt.safeNum(r.by_gsm ?? r.by),
         }));
 
     // Require only a valid, positive speed (density may gap without invalidating the reading)
     const valid = rows.filter(r => r.speed != null && r.speed > 0);
     if (valid.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All wind readings are null/fill' }, 503, 30);
+        return errorResp(ErrorCodes.NO_VALID_DATA, 'All readings are null or fill values');
     }
 
     // ── Latest record ─────────────────────────────────────────────────────────
     const latest     = valid[valid.length - 1];
-    const updatedISO = isoTag(latest.time_tag);
+    const updatedISO = fmt.isoTag(latest.time_tag);
     const updatedMs  = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageMin     = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 60_000;
 
     // ── Trend (last TREND_WINDOW valid readings) ──────────────────────────────
     const trendWindow = valid.slice(-TREND_WINDOW);
-    const slope       = linearSlope(trendWindow.map(r => r.speed));
+    const slope       = fmt.linearSlope(trendWindow.map(r => r.speed));
     const trend = {
         slope_km_s_per_min: Math.round(slope * 100) / 100,
         direction:          trendDirection(slope),
@@ -174,7 +143,7 @@ export default async function handler(request) {
     const body = {
         source:    'NOAA SWPC DSCOVR/ACE L1 (rtsw_wind_1m via Vercel Edge)',
         age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
-        freshness: freshnessStatus(ageMin),
+        freshness: fmt.freshness(ageMin),
         data: {
             updated: updatedISO,
             current: {
@@ -206,7 +175,7 @@ export default async function handler(request) {
     if (wantSeries) {
         const cap    = wantFull ? SERIES_FULL : SERIES_SHORT;
         body.data.series = valid.slice(-cap).map(r => ({
-            timestamp:     isoTag(r.time_tag),
+            timestamp:     fmt.isoTag(r.time_tag),
             speed_km_s:    r.speed,
             speed_norm:    Math.round(speedNorm(r.speed) * 1000) / 1000,
             density_cc:    r.density,

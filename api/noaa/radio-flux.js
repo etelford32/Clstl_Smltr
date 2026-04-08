@@ -35,6 +35,8 @@
  */
 export const config = { runtime: 'edge' };
 
+import { ErrorCodes, errorResp, fetchJSON, fmt, jsonResp } from '../../_lib/middleware.js';
+
 const NOAA_F107 = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
 const CACHE_TTL = 3600;   // 1 hour — F10.7 updates once daily, no need to rush
 const RECENT_N  = 7;      // days of history in `recent` array
@@ -54,7 +56,7 @@ function activityLabel(sfu) {
 const fluxNorm = v => Math.max(0, Math.min(1, (v - 65) / 235));
 
 // ── Trend / slope ─────────────────────────────────────────────────────────────
-function linearSlope(vals) {
+function fmt.linearSlope(vals) {
     const n = vals.length;
     if (n < 2) return 0;
     let sx = 0, sy = 0, sxy = 0, sxx = 0;
@@ -70,45 +72,26 @@ function trendDirection(slope) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function isoDate(t) {
-    if (!t) return null;
-    const s = String(t).trim();
-    // Dates arrive as 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
-    return s.length === 10 ? s + 'T12:00:00Z' : s.replace(' ', 'T') + 'Z';
-}
-
-function freshnessStatus(ageHours) {
+function fmt.freshness(ageHours) {
     if (ageHours == null) return 'missing';
     if (ageHours < 26)    return 'fresh';   // updated within ~1 day + buffer
     if (ageHours < 72)    return 'stale';
     return 'expired';
 }
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=1800`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_F107, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
+        raw = await fetchJSON(NOAA_F107, { timeout: 15000 });
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 60);
+        return errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Data source temporarily unavailable');
     }
 
     // f107_cm_flux.json may be an array of objects or a 2-D array depending on
     // NOAA version. Handle both shapes.
     if (!Array.isArray(raw) || raw.length === 0) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected f107_cm_flux format' }, 503, 60);
+        return errorResp(ErrorCodes.PARSE_ERROR, 'Unexpected upstream response format');
     }
 
     const fill = v => {
@@ -125,8 +108,8 @@ export default async function handler() {
             .filter(r => r?.time_tag)
             .map(r => ({
                 date:           r.time_tag,
-                flux:           fill(r.flux          ?? r.observed_flux),
-                adjusted_flux:  fill(r.adjusted_flux ?? r.adjusted),
+                flux:           fmt.safeNum(r.flux          ?? r.observed_flux),
+                adjusted_flux:  fmt.safeNum(r.adjusted_flux ?? r.adjusted),
             }))
             .filter(r => r.flux != null);
     } else {
@@ -139,23 +122,23 @@ export default async function handler() {
             .filter(r => r[timeCol])
             .map(r => ({
                 date:          r[timeCol],
-                flux:          fill(r[fluxCol]),
-                adjusted_flux: adjCol >= 0 ? fill(r[adjCol]) : null,
+                flux:          fmt.safeNum(r[fluxCol]),
+                adjusted_flux: adjCol >= 0 ? fmt.safeNum(r[adjCol]) : null,
             }))
             .filter(r => r.flux != null);
     }
 
     if (rows.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All F10.7 readings are null/fill' }, 503, 60);
+        return errorResp(ErrorCodes.NO_VALID_DATA, 'All readings are null or fill values');
     }
 
     const latest      = rows[rows.length - 1];
-    const updatedISO  = isoDate(latest.date);
+    const updatedISO  = fmt.isoDate(latest.date);
     const updatedMs   = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageHours    = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 3_600_000;
 
     const trendRows   = rows.slice(-TREND_WIN);
-    const slope       = linearSlope(trendRows.map(r => r.flux));
+    const slope       = fmt.linearSlope(trendRows.map(r => r.flux));
     const direction   = trendDirection(slope);
 
     const recent = rows.slice(-RECENT_N).map(r => ({
@@ -167,7 +150,7 @@ export default async function handler() {
     return jsonResp({
         source:     'NOAA SWPC f107_cm_flux via Vercel Edge',
         age_hours:  ageHours != null ? Math.round(ageHours * 10) / 10 : null,
-        freshness:  freshnessStatus(ageHours),
+        freshness:  fmt.freshness(ageHours),
         data: {
             updated: updatedISO,
             current: {
