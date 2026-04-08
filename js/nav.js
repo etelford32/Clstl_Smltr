@@ -55,6 +55,7 @@ const NAV_DROPDOWNS = [
         label: 'Tools',
         id: 'tools',
         items: [
+            { href: 'weather-forecast.html', label: 'Weather Forecast', sub: 'Hyper-local + confidence intervals', tier: 'public', icon: '⛅', badge: 'NEW' },
             { href: 'dashboard.html',  label: 'Dashboard',          sub: 'Your space weather report',     tier: 'free',     icon: '📋' },
             { href: 'pricing.html',    label: 'Pricing',            sub: 'Free, Intro, Advanced plans',   tier: 'public',   icon: '💰' },
             { href: 'rust.html',       label: 'Rust/WASM Engine',   sub: 'WebAssembly compute module',    tier: 'free',     icon: '⚙️' },

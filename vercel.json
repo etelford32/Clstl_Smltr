@@ -133,6 +133,14 @@
       "destination": "/api/horizons"
     },
     {
+      "source": "/weather-forecast",
+      "destination": "/weather-forecast.html"
+    },
+    {
+      "source": "/v1/forecast/:path*",
+      "destination": "/api/forecast/:path*"
+    },
+    {
       "source": "/v1/checkout/:path*",
       "destination": "/api/checkout/:path*"
     },

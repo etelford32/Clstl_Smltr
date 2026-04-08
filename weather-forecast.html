@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weather Forecast — Parker Physics App</title>
+<meta name="description" content="Hyper-local weather forecast with confidence intervals at 1h, 2h, 4h, 8h, 12h, and 24h horizons. Powered by ECMWF + GFS ensemble models.">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#03010e;color:#cdd;min-height:100vh}
+
+/* ─── Layout ──────────────────────────────────────────── */
+main{max-width:1200px;margin:0 auto;padding:24px 16px 60px}
+.page-header{margin-bottom:32px}
+.page-title{font-size:1.8rem;font-weight:800;background:linear-gradient(135deg,#fff,#ffd700);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
+.page-sub{font-size:.9rem;color:#778;line-height:1.6}
+
+/* ─── Location bar ────────────────────────────────────── */
+.loc-bar{display:flex;align-items:center;gap:10px;margin-bottom:28px;flex-wrap:wrap}
+.loc-input{flex:1;min-width:200px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:10px 14px;color:#ddd;font-size:.9rem;font-family:inherit;outline:none;transition:border-color .2s}
+.loc-input:focus{border-color:rgba(255,200,0,.4)}
+.loc-input::placeholder{color:#556}
+.loc-btn{padding:10px 18px;background:linear-gradient(135deg,#ff8c00,#ffd700);border:none;border-radius:8px;color:#000;font-weight:700;font-size:.85rem;cursor:pointer;transition:filter .2s;white-space:nowrap}
+.loc-btn:hover{filter:brightness(1.1)}
+.loc-btn:disabled{opacity:.5;cursor:not-allowed}
+.loc-gps{padding:10px 14px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#aaa;font-size:1rem;cursor:pointer;transition:all .2s}
+.loc-gps:hover{background:rgba(255,255,255,.12);color:#fff}
+.loc-status{font-size:.78rem;color:#667;width:100%}
+
+/* ─── Current conditions ──────────────────────────────── */
+.current-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:24px;margin-bottom:28px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.current-icon{font-size:3.5rem;line-height:1}
+.current-main{flex:1;min-width:180px}
+.current-temp{font-size:2.8rem;font-weight:800;color:#e8f4ff;line-height:1}
+.current-desc{font-size:.95rem;color:#99aabb;margin-top:4px}
+.current-details{display:flex;flex-wrap:wrap;gap:12px 24px;font-size:.82rem;color:#778}
+.current-details span{display:flex;align-items:center;gap:4px}
+.current-details .val{color:#cdd;font-weight:600}
+
+/* ─── Forecast grid ───────────────────────────────────── */
+.forecast-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:32px}
+.fc-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:20px;position:relative;overflow:hidden;transition:border-color .2s}
+.fc-card:hover{border-color:rgba(255,200,0,.25)}
+.fc-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--conf-color,#ffd700)}
+.fc-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.fc-horizon{font-size:1.1rem;font-weight:700;color:#e8f4ff}
+.fc-time{font-size:.75rem;color:#556;font-family:monospace}
+.fc-conf{display:flex;align-items:center;gap:6px}
+.fc-conf-label{font-size:.7rem;color:#667;text-transform:uppercase;letter-spacing:.06em}
+.fc-conf-bar{width:48px;height:6px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.fc-conf-fill{height:100%;border-radius:3px;transition:width .4s}
+.fc-conf-pct{font-size:.75rem;font-weight:700;font-family:monospace}
+
+/* ─── Forecast row ────────────────────────────────────── */
+.fc-weather{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.fc-weather-icon{font-size:2rem;line-height:1}
+.fc-weather-desc{font-size:.88rem;color:#99aabb}
+.fc-temp-main{font-size:1.8rem;font-weight:800;color:#e8f4ff;line-height:1;margin-bottom:2px}
+.fc-temp-range{font-size:.72rem;color:#556;font-family:monospace}
+
+.fc-details{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-top:12px;font-size:.78rem}
+.fc-detail{display:flex;justify-content:space-between}
+.fc-detail-label{color:#667}
+.fc-detail-val{color:#aab;font-weight:600;font-family:monospace}
+
+/* ─── Confidence interval bar (horizontal) ────────────── */
+.ci-bar{position:relative;height:18px;margin:8px 0 4px;border-radius:4px;background:rgba(255,255,255,.04)}
+.ci-95{position:absolute;top:2px;bottom:2px;border-radius:3px;background:rgba(255,200,0,.1)}
+.ci-80{position:absolute;top:0;bottom:0;border-radius:4px;background:rgba(255,200,0,.2)}
+.ci-mean{position:absolute;top:0;bottom:0;width:2px;border-radius:1px;background:#ffd700}
+.ci-label{font-size:.65rem;color:#556;font-family:monospace;text-align:center;margin-top:2px}
+
+/* ─── Model info ──────────────────────────────────────── */
+.model-info{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:16px;font-size:.78rem;color:#667;line-height:1.7}
+.model-info b{color:#99aabb}
+.model-info code{background:rgba(255,255,255,.06);padding:1px 5px;border-radius:3px;font-size:.72rem}
+
+/* ─── Loading / Error ─────────────────────────────────── */
+.loading{text-align:center;padding:60px 0;color:#556;font-size:1rem}
+.loading .spinner{display:inline-block;width:24px;height:24px;border:2px solid rgba(255,200,0,.2);border-top-color:#ffd700;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-msg{background:rgba(255,60,60,.08);border:1px solid rgba(255,60,60,.2);border-radius:8px;padding:14px;color:#ff8888;font-size:.85rem;text-align:center;margin:20px 0}
+
+@media(max-width:640px){
+  .forecast-grid{grid-template-columns:1fr}
+  .current-card{flex-direction:column;text-align:center}
+  .fc-card{padding:16px}
+}
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="importmap">
+{"imports":{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("weather-forecast");</script>
+
+<main>
+  <div class="page-header">
+    <h1 class="page-title">Weather Forecast</h1>
+    <p class="page-sub">Hyper-local predictions with ensemble-based confidence intervals. Forecast skill degrades with time — we show you exactly how much to trust each prediction.</p>
+  </div>
+
+  <!-- Location input -->
+  <div class="loc-bar">
+    <input type="text" class="loc-input" id="loc-input" placeholder="Enter city, zip code, or coordinates..." autocomplete="off">
+    <button class="loc-btn" id="loc-search">Search</button>
+    <button class="loc-gps" id="loc-gps" title="Use GPS location">&#x1F4CD;</button>
+    <div class="loc-status" id="loc-status"></div>
+  </div>
+
+  <!-- Current conditions -->
+  <div class="current-card" id="current-card" style="display:none">
+    <div class="current-icon" id="current-icon"></div>
+    <div class="current-main">
+      <div class="current-temp" id="current-temp"></div>
+      <div class="current-desc" id="current-desc"></div>
+    </div>
+    <div class="current-details" id="current-details"></div>
+  </div>
+
+  <!-- Loading state -->
+  <div class="loading" id="loading" style="display:none">
+    <div class="spinner"></div>
+    <div>Fetching forecast data...</div>
+  </div>
+
+  <!-- Error state -->
+  <div class="error-msg" id="error-msg" style="display:none"></div>
+
+  <!-- 6-panel forecast -->
+  <div class="forecast-grid" id="forecast-grid"></div>
+
+  <!-- Model info -->
+  <div class="model-info" id="model-info" style="display:none">
+    <b>Forecast model:</b> ECMWF IFS (9km) + GFS (13km) + ICON (7km) ensemble blend via Open-Meteo.<br>
+    <b>Confidence intervals:</b> NWP skill degradation <code>&sigma;(t) = &sigma;&#x2080;(1 + &alpha;t<sup>&beta;</sup>)</code> — calibrated against published ECMWF ensemble reliability (Buizza et al. 2005, Hamill &amp; Whitaker 2006).<br>
+    <b>80% interval:</b> forecast &plusmn; 1.28&sigma; &nbsp; <b>95% interval:</b> forecast &plusmn; 1.96&sigma;<br>
+    <b>Refresh:</b> Every 10 minutes. Forecast data updates hourly from ECMWF/GFS runs (00z, 06z, 12z, 18z).
+  </div>
+</main>
+
+<script type="module">
+import { WeatherForecast } from './js/weather-forecast-engine.js';
+import { geocodeQuery, loadUserLocation, saveUserLocation } from './js/user-location.js';
+
+const $ = id => document.getElementById(id);
+const _esc = s => s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+const forecast = new WeatherForecast({
+    units: 'metric',
+    onUpdate: renderForecast,
+});
+
+// ── Location handling ────────────────────────────────────────────────────────
+let currentLocation = null;
+
+async function setLocation(lat, lon, displayName) {
+    currentLocation = { lat, lon };
+    $('loc-status').textContent = `${_esc(displayName || '')} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    $('loading').style.display = 'block';
+    $('error-msg').style.display = 'none';
+    $('forecast-grid').innerHTML = '';
+    $('current-card').style.display = 'none';
+
+    await forecast.fetchForLocation(lat, lon);
+
+    $('loading').style.display = 'none';
+    if (forecast.error) {
+        $('error-msg').textContent = `Failed to load forecast: ${forecast.error}`;
+        $('error-msg').style.display = 'block';
+    }
+    forecast.startAutoRefresh(lat, lon);
+}
+
+// Search button
+$('loc-search').addEventListener('click', async () => {
+    const q = $('loc-input').value.trim();
+    if (!q) return;
+    $('loc-search').disabled = true;
+    $('loc-search').textContent = 'Searching...';
+    try {
+        const result = await geocodeQuery(q);
+        if (result) {
+            $('loc-input').value = result.city || result.displayName || q;
+            saveUserLocation(result);
+            await setLocation(result.lat, result.lon, result.city || result.displayName);
+        } else {
+            $('loc-status').textContent = 'Location not found. Try a different search.';
+        }
+    } catch (e) {
+        $('loc-status').textContent = 'Geocoding failed: ' + e.message;
+    } finally {
+        $('loc-search').disabled = false;
+        $('loc-search').textContent = 'Search';
+    }
+});
+
+$('loc-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('loc-search').click(); });
+
+// GPS button
+$('loc-gps').addEventListener('click', () => {
+    if (!navigator.geolocation) { $('loc-status').textContent = 'Geolocation not supported'; return; }
+    $('loc-gps').textContent = '...';
+    navigator.geolocation.getCurrentPosition(
+        async pos => {
+            $('loc-gps').textContent = '\uD83D\uDCCD';
+            const { latitude: lat, longitude: lon } = pos.coords;
+            // Reverse geocode
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, { headers: { 'Accept-Language': 'en' } });
+                const data = res.ok ? await res.json() : {};
+                const city = data.address?.city || data.address?.town || data.address?.village || 'Your location';
+                $('loc-input').value = city;
+                saveUserLocation({ lat, lon, city });
+                await setLocation(lat, lon, city);
+            } catch (_) {
+                await setLocation(lat, lon, 'Your location');
+            }
+        },
+        err => { $('loc-gps').textContent = '\uD83D\uDCCD'; $('loc-status').textContent = 'GPS access denied'; },
+        { enableHighAccuracy: false, timeout: 10000 }
+    );
+});
+
+// ── Render forecast data ─────────────────────────────────────────────────────
+function renderForecast(data) {
+    if (!data) return;
+
+    // Current conditions
+    const cur = data.current;
+    if (cur) {
+        $('current-card').style.display = 'flex';
+        $('current-icon').textContent = WeatherForecast.weatherIcon(cur.weather_code);
+        $('current-temp').textContent = `${Math.round(cur.temperature_2m)}°`;
+        $('current-desc').textContent = cur.weather_description;
+        $('current-details').innerHTML = `
+            <span>Feels like <span class="val">${Math.round(cur.apparent_temperature)}°</span></span>
+            <span>Humidity <span class="val">${Math.round(cur.relative_humidity_2m)}%</span></span>
+            <span>Wind <span class="val">${cur.wind_speed_10m} m/s ${WeatherForecast.degToCompass(cur.wind_direction_10m)}</span></span>
+            <span>Pressure <span class="val">${Math.round(cur.surface_pressure)} hPa</span></span>
+            <span>Cloud <span class="val">${Math.round(cur.cloud_cover)}%</span></span>
+            <span>UV <span class="val">${cur.uv_index != null ? cur.uv_index.toFixed(1) : '—'}</span></span>
+        `;
+    }
+
+    // Forecast cards
+    const horizons = ['+1h', '+2h', '+4h', '+8h', '+12h', '+24h'];
+    let html = '';
+
+    for (const key of horizons) {
+        const fc = data.forecasts[key];
+        if (!fc) continue;
+        const f = WeatherForecast.formatHorizon(fc);
+        const confColor = WeatherForecast.confidenceColor(fc.confidence_pct);
+        const confPct = fc.confidence_pct;
+        const icon = WeatherForecast.weatherIcon(fc.weather_code);
+
+        // Temperature confidence interval bar
+        const temp = fc.temperature_2m;
+        let ciHtml = '';
+        if (temp && temp.lo95 != null && temp.hi95 != null) {
+            const range = temp.hi95 - temp.lo95;
+            const center = temp.mean - temp.lo95;
+            const lo80off = ((temp.lo80 - temp.lo95) / range * 100);
+            const hi80off = ((temp.hi80 - temp.lo95) / range * 100);
+            const meanOff = (center / range * 100);
+            ciHtml = `
+                <div class="ci-bar">
+                    <div class="ci-95" style="left:0;right:0;background:rgba(255,200,0,.08)"></div>
+                    <div class="ci-80" style="left:${lo80off}%;right:${100-hi80off}%;background:rgba(255,200,0,.18)"></div>
+                    <div class="ci-mean" style="left:calc(${meanOff}% - 1px);background:${confColor}"></div>
+                </div>
+                <div class="ci-label">${temp.lo95}° &larr; 95% &rarr; ${temp.hi95}°</div>`;
+        }
+
+        // Format local time
+        const timeStr = fc.time ? new Date(fc.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+        html += `
+        <div class="fc-card" style="--conf-color:${confColor}">
+            <div class="fc-header">
+                <div>
+                    <div class="fc-horizon">${key}</div>
+                    <div class="fc-time">${_esc(timeStr)}</div>
+                </div>
+                <div class="fc-conf">
+                    <div class="fc-conf-label">Confidence</div>
+                    <div class="fc-conf-bar"><div class="fc-conf-fill" style="width:${confPct}%;background:${confColor}"></div></div>
+                    <div class="fc-conf-pct" style="color:${confColor}">${confPct.toFixed(0)}%</div>
+                </div>
+            </div>
+
+            <div class="fc-weather">
+                <div class="fc-weather-icon">${icon}</div>
+                <div>
+                    <div class="fc-temp-main">${f.temp}</div>
+                    <div class="fc-weather-desc">${_esc(f.weather)}</div>
+                </div>
+            </div>
+
+            ${ciHtml}
+
+            <div class="fc-details">
+                <div class="fc-detail"><span class="fc-detail-label">Feels like</span><span class="fc-detail-val">${f.feelsLike}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Humidity</span><span class="fc-detail-val">${f.humidity}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Wind</span><span class="fc-detail-val">${f.windSpeed} ${f.windDir}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Gusts</span><span class="fc-detail-val">${f.windGust}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Precip prob</span><span class="fc-detail-val">${f.precipProb}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Precip</span><span class="fc-detail-val">${f.precipAmount}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Cloud</span><span class="fc-detail-val">${f.cloudCover}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Visibility</span><span class="fc-detail-val">${f.visibility}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">UV index</span><span class="fc-detail-val">${f.uvIndex}</span></div>
+                <div class="fc-detail"><span class="fc-detail-label">Pressure</span><span class="fc-detail-val">${f.pressure}</span></div>
+            </div>
+        </div>`;
+    }
+
+    $('forecast-grid').innerHTML = html;
+    $('model-info').style.display = 'block';
+}
+
+// ── Init: load saved location ────────────────────────────────────────────────
+const savedLoc = loadUserLocation();
+if (savedLoc?.lat && savedLoc?.lon) {
+    $('loc-input').value = savedLoc.city || savedLoc.displayName || '';
+    setLocation(savedLoc.lat, savedLoc.lon, savedLoc.city || savedLoc.displayName);
+}
+</script>
+
+<script type="module">
+import { analytics } from './js/analytics.js';
+import { userState } from './js/user-state.js';
+import { recordVisit } from './js/greeting.js';
+analytics.page('weather-forecast');
+recordVisit('weather-forecast');
+userState.trackPage('weather-forecast');
+</script>
+</body>
+</html>
