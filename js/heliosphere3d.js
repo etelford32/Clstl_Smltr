@@ -58,7 +58,7 @@ import {
     plasmaBeta,
     cglAnisotropy,
 } from './helio-physics.js';
-import { SUN_VERT, SUN_FRAG, createSunUniforms } from './sun-shader.js';
+import { SUN_VERT, SUN_FRAG, CORONA_VERT, CORONA_FRAG, createSunUniforms } from './sun-shader.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -862,23 +862,34 @@ export class Heliosphere3D {
         //
         // The baseScale and baseOpacity are stored so setBloom() can rescale
         // them without rebuilding geometry.
+        // Corona layers now use the full CORONA_VERT/CORONA_FRAG shaders
+        // with streamer structure, polar plumes, X-ray brightening, and
+        // EUV dimming — instead of flat MeshBasicMaterial.
         this._coronaDef = [
-            { baseScale: 1.25, baseOpacity: 0.28, color: 0xff8800 },
-            { baseScale: 1.65, baseOpacity: 0.11, color: 0xff6600 },
-            { baseScale: 2.30, baseOpacity: 0.055, color: 0xff4400 },
-            { baseScale: 3.40, baseOpacity: 0.022, color: 0xff2200 },
+            { baseScale: 1.25, baseOpacity: 0.32, layer: 0.0  },  // Chromosphere/TR
+            { baseScale: 1.65, baseOpacity: 0.14, layer: 0.25 },  // Inner K-corona
+            { baseScale: 2.30, baseOpacity: 0.07, layer: 0.55 },  // K-corona
+            { baseScale: 3.40, baseOpacity: 0.028, layer: 0.85 }, // Outer F-corona
         ];
         this._coronaMeshes = [];
         for (const def of this._coronaDef) {
+            const coronaUniforms = {
+                u_bloom:       this._sunUniforms.u_bloom,
+                u_xray_norm:   this._sunUniforms.u_xray_norm,
+                u_layer:       { value: def.layer },
+                u_time:        this._sunUniforms.u_time,
+                u_euv_dimming: this._sunUniforms.u_euv_dimming,
+            };
             const glow = new THREE.Mesh(
-                new THREE.SphereGeometry(R.sun * def.baseScale, 24, 24),
-                new THREE.MeshBasicMaterial({
-                    color:       def.color,
-                    transparent: true,
-                    opacity:     def.baseOpacity,
-                    blending:    THREE.AdditiveBlending,
-                    depthWrite:  false,
-                    side:        THREE.BackSide,
+                new THREE.SphereGeometry(R.sun * def.baseScale, 32, 32),
+                new THREE.ShaderMaterial({
+                    vertexShader:   CORONA_VERT,
+                    fragmentShader: CORONA_FRAG,
+                    uniforms:       coronaUniforms,
+                    transparent:    true,
+                    depthWrite:     false,
+                    blending:       THREE.AdditiveBlending,
+                    side:           THREE.BackSide,
                 })
             );
             glow.renderOrder = 2;
@@ -909,12 +920,8 @@ export class Heliosphere3D {
         if (this._sunUniforms?.u_bloom) {
             this._sunUniforms.u_bloom.value = this._bloomLevel;
         }
-        // Outer F-corona (index 3) only becomes visible above bloom ~0.7
-        if (this._coronaMeshes) {
-            this._coronaMeshes.forEach((c, i) => {
-                c.mesh.material.opacity = c.baseOpacity * this._bloomLevel;
-            });
-        }
+        // Corona bloom is now driven by the u_bloom uniform shared with the shader.
+        // No need to set material.opacity — the CORONA_FRAG shader reads u_bloom directly.
     }
 
     _buildOrbitTrails() {
@@ -2340,13 +2347,10 @@ export class Heliosphere3D {
         }
         u.u_nRegions.value = nReg;
 
-        // ── Corona glow opacity — bloom × activity pulse ─────────────────────
-        if (this._coronaMeshes) {
-            const coronaBoost = 1.0 + xNorm * 0.55 + this._sunFlareT * 0.8;
-            for (const c of this._coronaMeshes) {
-                c.mesh.material.opacity = Math.min(1, c.baseOpacity * this._bloomLevel * coronaBoost);
-            }
-        }
+        // Corona glow is driven by u_bloom + u_xray_norm uniforms shared
+        // with the CORONA_FRAG shader. X-ray and flare activity pulse the
+        // bloom uniform which the shader reads directly per-fragment.
+        this._sunUniforms.u_bloom.value = this._bloomLevel * (1.0 + xNorm * 0.55 + this._sunFlareT * 0.8);
 
         // ── Flare SEP ray tick ────────────────────────────────────────────────
         this._tickFlareSEP(dt);

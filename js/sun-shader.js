@@ -192,6 +192,26 @@ export const SUN_FRAG = /* glsl */`
         float gran  = (u_quality > 0.5) ? granulation(uv, u_time) : sgran;
         float texture = sgran * 0.38 + gran * 0.62;
 
+        // ── Normal perturbation from granulation (3D depth) ─────────────────
+        // Compute noise gradient to fake surface bumps — makes granules look
+        // raised and intergranular lanes look indented. This is the key to
+        // making the Sun look 3D instead of a painted sphere.
+        float bumpStr = 0.0;
+        if (u_quality > 0.5) {
+            float eps = 0.002;
+            float nC = gran;
+            float nR = (u_quality > 0.5) ? granulation(uv + vec2(eps, 0.0), u_time) : vnoise((uv + vec2(eps, 0.0)) * 2.2);
+            float nU = (u_quality > 0.5) ? granulation(uv + vec2(0.0, eps), u_time) : vnoise((uv + vec2(0.0, eps)) * 2.2);
+            float dFdx = (nR - nC) / eps;
+            float dFdy = (nU - nC) / eps;
+            bumpStr = 0.15 + u_activity * 0.10;  // stronger bumps during active Sun
+            // Perturb the view-space normal to shift limb darkening
+            float bumpedMu = clamp(mu + (dFdx + dFdy) * bumpStr * 0.02, 0.001, 1.0);
+            // Blend: use bumped normal for lighting, original for limb darkening base
+            mu = mix(mu, bumpedMu, 0.6);
+            limb = limbDarkening(mu);
+        }
+
         // ── Base photosphere colour from Teff ──
         vec3 bbCol = blackbodyRGB(u_teff);
         // Limb colour: cooler (redder) at the limb due to viewing higher/cooler layers
@@ -202,8 +222,8 @@ export const SUN_FRAG = /* glsl */`
         float f107Boost = 1.0 + u_f107_norm * 0.08;
         baseCol *= f107Boost;
 
-        // Texture modulates brightness ±15%
-        vec3 photCol = baseCol * (0.85 + 0.30 * texture) * max(0.5, u_bloom);
+        // Texture modulates brightness ±18% (wider range for more visible granulation)
+        vec3 photCol = baseCol * (0.82 + 0.36 * texture) * max(0.5, u_bloom);
 
         // ── Chromospheric spicule fringe (quality >= 1) ──
         if (u_quality > 0.5) {
@@ -350,30 +370,47 @@ export const CORONA_FRAG = /* glsl */`
     // Simple hash for streamer structure
     float hash1(float n) { return fract(sin(n) * 43758.5453); }
 
+    // Simple hash for fine structure
+    float ch1(float n) { return fract(sin(n * 127.1) * 43758.5); }
+    float cnoise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p);
+        f = f*f*(3.0-2.0*f);
+        return mix(mix(ch1(dot(i,vec2(1,157))), ch1(dot(i+vec2(1,0),vec2(1,157))), f.x),
+                   mix(ch1(dot(i+vec2(0,1),vec2(1,157))), ch1(dot(i+vec2(1,1),vec2(1,157))), f.x), f.y);
+    }
+
     void main() {
         vec3 N = normalize(vWorldNormal);
         vec3 V = normalize(vViewDir);
-        float rim = pow(1.0 - abs(dot(V, N)), 2.0);
+        float NdotV = abs(dot(V, N));
+        // Rim glow: stronger falloff for more dramatic 3D depth
+        float rim = pow(1.0 - NdotV, 2.5);
 
-        // ── Streamer structure: ~8 radial streamers at equator ──
-        // Real corona has helmet streamers along the magnetic neutral line.
-        // Approximate with azimuthal modulation of brightness.
         float azimuth = atan(N.x, N.z);
         float latitude = asin(clamp(N.y, -1.0, 1.0));
-        // Streamer pattern: equatorial bias with 8 rays
-        float streamerAz = 0.5 + 0.5 * sin(azimuth * 4.0 + u_time * 0.0003);
-        float streamerLat = exp(-latitude * latitude * 3.0);  // concentrated at equator
-        float streamer = mix(0.6, 1.0, streamerAz * streamerLat);
 
-        // Polar plumes (fast solar wind): dimmer, narrower features at poles
-        float polarPlume = exp(-(1.57 - abs(latitude)) * (1.57 - abs(latitude)) * 6.0);
-        float plumeAz = 0.5 + 0.5 * sin(azimuth * 12.0 + latitude * 3.0);
-        streamer = max(streamer, polarPlume * plumeAz * 0.4);
+        // ── Streamer belt: helmet streamers along heliospheric current sheet ──
+        // Real corona has 2-4 main streamer stalks, not a uniform ring.
+        // Pattern: 4 primary streamers + 4 secondary, equatorially concentrated.
+        float s1 = pow(0.5 + 0.5 * sin(azimuth * 2.0 + u_time * 0.0002), 2.0);
+        float s2 = pow(0.5 + 0.5 * sin(azimuth * 4.0 + 1.2 + u_time * 0.00015), 1.5) * 0.5;
+        // Fine turbulent structure within streamers
+        float turb = cnoise(vec2(azimuth * 6.0 + u_time * 0.0004, latitude * 4.0)) * 0.3;
+        float streamerLat = exp(-latitude * latitude * 4.0);
+        float streamer = mix(0.3, 1.0, (s1 + s2 + turb) * streamerLat);
 
-        // Inner corona: gold-white (K-corona Thomson scattering)
-        // Outer: fading orange-red (F-corona dust scattering)
-        vec3 innerCol = vec3(1.0, 0.90, 0.60);
-        vec3 outerCol = vec3(0.80, 0.30, 0.05);
+        // ── Polar coronal holes: dark regions (open B-field, no trapped plasma) ──
+        float polarDark = 1.0 - exp(-(1.57 - abs(latitude)) * (1.57 - abs(latitude)) * 8.0) * 0.5;
+        streamer *= polarDark;
+
+        // ── Polar plumes: narrow radial rays in coronal holes ──
+        float polarPlume = exp(-(1.57 - abs(latitude)) * (1.57 - abs(latitude)) * 10.0);
+        float plumeRays = pow(0.5 + 0.5 * sin(azimuth * 16.0 + latitude * 5.0), 3.0);
+        streamer = max(streamer, polarPlume * plumeRays * 0.25);
+
+        // ── Colour: K-corona (Thomson electron scatter) → F-corona (dust) ──
+        vec3 innerCol = vec3(1.0, 0.92, 0.65);   // warm white-gold
+        vec3 outerCol = vec3(0.70, 0.25, 0.05);   // deep red
         vec3 col = mix(innerCol, outerCol, u_layer);
 
         // Apply streamer modulation
@@ -385,8 +422,16 @@ export const CORONA_FRAG = /* glsl */`
         // EUV dimming: corona thins after CME
         col *= 1.0 - u_euv_dimming * (1.0 - u_layer) * 0.5;
 
-        // Radial falloff: r^{-2.5} for K-corona (steeper than inverse square)
-        float alpha = rim * (0.25 - u_layer * 0.18) * max(0.3, u_bloom) * streamer;
+        // Radial brightness: rim glow shaped by streamer structure
+        // Inner layers: brighter, more opaque
+        // Outer layers: dimmer, wider, more transparent
+        float baseAlpha = 0.30 - u_layer * 0.20;
+        float alpha = rim * baseAlpha * max(0.3, u_bloom) * streamer;
+
+        // Edge-on boost: corona dramatically brighter at the limb (line-of-sight integration)
+        float limbBoost = 1.0 + pow(rim, 1.5) * 0.6 * (1.0 - u_layer);
+        col *= limbBoost;
+
         gl_FragColor = vec4(col * alpha, alpha);
     }
 `;
