@@ -355,11 +355,21 @@ export async function createInvite({ code, label, maxUses = 10, expiresInDays = 
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
+    // Input validation
+    if (!code || typeof code !== 'string' || code.length < 2 || code.length > 50)
+        return { ok: false, error: 'Code must be 2-50 characters' };
+    if (label && (typeof label !== 'string' || label.length > 200))
+        return { ok: false, error: 'Label must be under 200 characters' };
+    if (!Number.isFinite(maxUses) || maxUses < 1 || maxUses > 1000)
+        return { ok: false, error: 'maxUses must be 1-1000' };
+    if (expiresInDays !== null && (!Number.isFinite(expiresInDays) || expiresInDays < 1 || expiresInDays > 365))
+        return { ok: false, error: 'expiresInDays must be 1-365' };
+
     try {
         const row = {
-            code: code.toUpperCase().replace(/\s/g, '-'),
-            label,
-            max_uses: maxUses,
+            code: code.toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 50),
+            label: (label || '').slice(0, 200),
+            max_uses: Math.min(1000, Math.max(1, Math.round(maxUses))),
             active: true,
         };
         if (expiresInDays) {
@@ -402,20 +412,33 @@ export async function fetchAnnouncements() {
     }
 }
 
+const VALID_SEVERITY = new Set(['info', 'success', 'warning', 'critical']);
+const VALID_TARGET_PLAN = new Set(['all', 'free', 'basic', 'advanced']);
+
 export async function createAnnouncement({ title, body, severity = 'info', targetPlan = 'all', published = false }) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
 
+    // Input validation
+    if (!title || typeof title !== 'string' || title.length > 200)
+        return { ok: false, error: 'Title required, max 200 characters' };
+    if (body && (typeof body !== 'string' || body.length > 5000))
+        return { ok: false, error: 'Body must be under 5000 characters' };
+    if (!VALID_SEVERITY.has(severity))
+        return { ok: false, error: 'Invalid severity. Must be: info, success, warning, critical' };
+    if (!VALID_TARGET_PLAN.has(targetPlan))
+        return { ok: false, error: 'Invalid target plan. Must be: all, free, basic, advanced' };
+
     try {
         const { data, error } = await client
             .from('announcements')
             .insert({
-                title,
-                body,
+                title: title.slice(0, 200),
+                body: (body || '').slice(0, 5000),
                 severity,
                 target_plan: targetPlan,
-                published,
+                published: !!published,
                 published_at: published ? new Date().toISOString() : null,
             })
             .select()

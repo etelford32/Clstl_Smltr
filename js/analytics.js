@@ -207,14 +207,28 @@ class Analytics {
      * @param {object} [props] - Event properties
      */
     event(name, props = {}) {
+        if (!name || typeof name !== 'string') return;
+        const safeName = name.slice(0, 100);
+        const safePath = window.location.pathname.slice(0, 200);
+
+        // Limit properties to 2KB to prevent storage abuse
+        let safeProps = props;
+        try {
+            const serialized = JSON.stringify(props);
+            if (serialized.length > 2000) {
+                console.warn('[Analytics] Event properties exceed 2KB, dropping');
+                safeProps = {};
+            }
+        } catch (_) { safeProps = {}; }
+
         const event = {
             event_type: 'event',
-            event_name: name,
-            page_path: window.location.pathname,
-            page_title: document.title,
+            event_name: safeName,
+            page_path: safePath,
+            page_title: (document.title || '').slice(0, 300),
             session_id: _sessionId,
             user_id: _userId,
-            properties: { ...props },
+            properties: { ...safeProps },
             created_at: new Date().toISOString(),
         };
 
@@ -243,7 +257,8 @@ class Analytics {
             window.gtag('set', { user_id: userId });
         }
 
-        this.event('identify', { ...traits });
+        // Only log non-PII traits — never send email, name, or other PII to analytics
+        this.event('identify', { plan: traits.plan, role: traits.role });
         // Update heartbeat with userId
         _heartbeat();
     }
