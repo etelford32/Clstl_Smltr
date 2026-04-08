@@ -22,6 +22,9 @@
 
 import * as THREE from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
 import {
@@ -180,6 +183,7 @@ export class SpaceWeatherGlobe {
         this._buildMagnetosphere();
         this._buildCamera();
         this._buildControls(canvas);
+        this._buildComposer();
     }
 
     // ── Construction ──────────────────────────────────────────────────────────
@@ -194,8 +198,23 @@ export class SpaceWeatherGlobe {
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this._renderer.outputColorSpace = THREE.SRGBColorSpace;
         this._renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this._renderer.toneMappingExposure = 1.1;
+        this._renderer.toneMappingExposure = 1.2;
         this._renderer.setClearColor(0x010812);
+    }
+
+    /** Set up bloom after scene + camera exist. */
+    _buildComposer() {
+        const w = this._canvas.clientWidth  || 800;
+        const h = this._canvas.clientHeight || 480;
+        this._composer = new EffectComposer(this._renderer);
+        this._composer.addPass(new RenderPass(this._scene, this._camera));
+        this._bloom = new UnrealBloomPass(
+            new THREE.Vector2(w, h),
+            0.55,   // strength — subtle, not overwhelming
+            0.4,    // radius
+            0.78,   // threshold — only bright things bloom
+        );
+        this._composer.addPass(this._bloom);
     }
 
     _buildScene() {
@@ -225,21 +244,52 @@ export class SpaceWeatherGlobe {
 
     _buildSun() {
         this._sunGroup = new THREE.Group();
-        this._sunGroup.position.set(40, 0, 0);
+        this._sunGroup.position.set(32, 0, 0);
         this._scene.add(this._sunGroup);
 
         this._sunSkin = new SunSkin(this._sunGroup, {
-            radius:   3.0,
+            radius:   4.0,
             quality:  'high',
             corona:   true,
             segments: 128,
         });
-        this._sunSkin.setBloom(1.8);
+        this._sunSkin.setBloom(2.0);
 
         // Point light from sun position for realistic illumination
-        this._sunPointLight = new THREE.PointLight(0xfff4e0, 0.6, 120, 0.5);
+        this._sunPointLight = new THREE.PointLight(0xfff4e0, 1.2, 150, 0.3);
         this._sunPointLight.position.copy(this._sunGroup.position);
         this._scene.add(this._sunPointLight);
+
+        // Billboard glow sprite behind the sun for extra radiance
+        const glowTex = new THREE.CanvasTexture(this._createGlowCanvas());
+        const glowMat = new THREE.SpriteMaterial({
+            map: glowTex,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.4,
+            depthWrite: false,
+        });
+        this._sunGlow = new THREE.Sprite(glowMat);
+        this._sunGlow.scale.set(28, 28, 1);
+        this._sunGlow.position.copy(this._sunGroup.position);
+        this._scene.add(this._sunGlow);
+    }
+
+    /** Generate a radial glow texture for the sun sprite. */
+    _createGlowCanvas() {
+        const size = 256;
+        const c = document.createElement('canvas');
+        c.width = c.height = size;
+        const ctx = c.getContext('2d');
+        const g = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+        g.addColorStop(0,   'rgba(255,220,120,0.6)');
+        g.addColorStop(0.15,'rgba(255,180,60,0.3)');
+        g.addColorStop(0.4, 'rgba(255,120,20,0.08)');
+        g.addColorStop(0.7, 'rgba(255,80,10,0.02)');
+        g.addColorStop(1,   'rgba(255,60,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, size, size);
+        return c;
     }
 
     _buildEarth() {
@@ -479,6 +529,7 @@ export class SpaceWeatherGlobe {
             const w = this._canvas.clientWidth  || 800;
             const h = this._canvas.clientHeight || 480;
             this._renderer.setSize(w, h, false);
+            this._composer.setSize(w, h);
             this._camera.aspect = w / h;
             this._camera.updateProjectionMatrix();
         };
@@ -550,6 +601,6 @@ export class SpaceWeatherGlobe {
         this._magEngine.tick(t, this._sunDir);
 
         this._controls.update();
-        this._renderer.render(this._scene, this._camera);
+        this._composer.render();
     }
 }

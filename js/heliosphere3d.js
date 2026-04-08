@@ -1672,8 +1672,16 @@ export class Heliosphere3D {
                     const r_AU = (j / (N_LINE - 1)) * MAX_R_AU;
                     const ang  = srcLon + this._rot - (428.6 / armV) * r_AU;
                     const rp   = r_AU * AU;
+                    // Heliospheric current sheet warp: the solar magnetic dipole
+                    // is tilted ~7-15 deg from the rotation axis, creating a wavy
+                    // "ballerina skirt" pattern.  Field lines undulate above/below
+                    // the ecliptic as they spiral outward.
+                    const hcsTilt = 0.18;   // ~10 deg dipole tilt
+                    const hcsWarp = Math.sin(ang * 2.0 + arm * 0.8) * hcsTilt * rp * 0.12;
+                    // Additional latitude spread: arms fan out slightly in 3D
+                    const latSpread = Math.sin(srcLon * 3.0 + r_AU * 1.5) * rp * 0.04;
                     pts[j * 3]     = rp * Math.cos(ang);
-                    pts[j * 3 + 1] = 0;
+                    pts[j * 3 + 1] = hcsWarp + latSpread;
                     pts[j * 3 + 2] = rp * Math.sin(ang);
 
                     const tIn  = Math.min(j / 10, 1.0);
