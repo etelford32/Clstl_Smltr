@@ -561,15 +561,14 @@ if (canvas) {
     const diskGeo = new THREE.RingGeometry(BH_RADIUS * 2.5, BH_RADIUS * 9.0, 256, 8);
     const diskMat = new THREE.ShaderMaterial({
         vertexShader: `
-            varying vec2 vUv; varying vec3 vWorldPos;
+            varying vec3 vWorldPos;
             void main(){
-                vUv = uv;
                 vWorldPos = (modelMatrix * vec4(position,1.0)).xyz;
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
             }`,
         fragmentShader: `
             uniform float u_time;
-            varying vec2 vUv; varying vec3 vWorldPos;
+            varying vec3 vWorldPos;
 
             // ── Noise functions ───────────────────────────────────────────
             float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
