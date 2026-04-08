@@ -15,9 +15,33 @@ export const config = { runtime: 'edge' };
 const HORIZONS_BASE = 'https://ssd.jpl.nasa.gov/api/horizons.api';
 const CACHE_TTL     = 3600;  // 1 hr — ephemeris changes slowly
 
+// Allowed Horizons parameters (whitelist to prevent proxy abuse)
+const ALLOWED_PARAMS = new Set([
+    'format', 'COMMAND', 'OBJ_DATA', 'MAKE_EPHEM', 'EPHEM_TYPE',
+    'CENTER', 'START_TIME', 'STOP_TIME', 'STEP_SIZE', 'QUANTITIES',
+    'REF_PLANE', 'REF_SYSTEM', 'OUT_UNITS', 'VEC_TABLE', 'VEC_CORR',
+    'CAL_FORMAT', 'ANG_FORMAT', 'APPARENT', 'TIME_DIGITS', 'RANGE_UNITS',
+    'SUPPRESS_RANGE_RATE', 'ELEV_CUT', 'SKIP_DAYLT', 'SOLAR_ELONG',
+    'AIRMASS', 'LHA_CUTOFF', 'EXTRA_PREC', 'CSV_FORMAT', 'VEC_LABELS',
+    'ELM_LABELS', 'TP_TYPE', 'R_T_S_ONLY',
+]);
+const MAX_QUERY_LENGTH = 2000;
+
 export default async function handler(request) {
-    const incoming  = new URL(request.url);
-    const upstreamURL = `${HORIZONS_BASE}?${incoming.searchParams.toString()}`;
+    const incoming = new URL(request.url);
+
+    // Input validation: reject oversized queries and non-whitelisted params
+    if (incoming.search.length > MAX_QUERY_LENGTH) {
+        return Response.json(
+            { error: 'query_too_large', max: MAX_QUERY_LENGTH },
+            { status: 400, headers: { 'Access-Control-Allow-Origin': '*' } },
+        );
+    }
+    const filtered = new URLSearchParams();
+    for (const [key, value] of incoming.searchParams) {
+        if (ALLOWED_PARAMS.has(key)) filtered.set(key, value.slice(0, 200));
+    }
+    const upstreamURL = `${HORIZONS_BASE}?${filtered.toString()}`;
 
     let upstreamRes;
     try {
@@ -27,15 +51,14 @@ export default async function handler(request) {
         });
     } catch (e) {
         return Response.json(
-            { error: 'upstream_unavailable', detail: e.message, source: 'JPL Horizons' },
+            { error: 'service_unavailable' },
             { status: 503, headers: { 'Access-Control-Allow-Origin': '*' } },
         );
     }
 
     if (!upstreamRes.ok) {
-        const text = await upstreamRes.text().catch(() => '');
         return Response.json(
-            { error: 'upstream_error', status: upstreamRes.status, body: text },
+            { error: 'upstream_error', status: upstreamRes.status },
             { status: upstreamRes.status, headers: { 'Access-Control-Allow-Origin': '*' } },
         );
     }

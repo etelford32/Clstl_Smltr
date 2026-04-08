@@ -162,6 +162,39 @@ class AuthManager {
         }
     }
 
+    /**
+     * Server-side admin verification. Validates JWT with Supabase Auth,
+     * then independently queries user_profiles for role.
+     * Returns { verified: bool, role: string, error?: string }
+     * This CANNOT be bypassed by editing localStorage.
+     */
+    async verifyAdminServerSide() {
+        if (!this._supabase) {
+            return { verified: false, role: 'unknown', error: 'Auth service not configured' };
+        }
+        try {
+            // Step 1: Validate JWT with Supabase Auth server (not localStorage)
+            const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
+            if (authErr || !user) {
+                return { verified: false, role: 'unknown', error: authErr?.message || 'Not authenticated' };
+            }
+            // Step 2: Query user_profiles for server-side role
+            const { data: profile, error: profileErr } = await this._supabase
+                .from('user_profiles')
+                .select('role')
+                .eq('id', user.id)
+                .single();
+            if (profileErr || !profile) {
+                return { verified: false, role: 'user', error: profileErr?.message || 'Profile not found' };
+            }
+            const role = profile.role || 'user';
+            const isAdmin = role === 'admin' || role === 'superadmin';
+            return { verified: isAdmin, role, error: isAdmin ? null : 'Insufficient role' };
+        } catch (err) {
+            return { verified: false, role: 'unknown', error: err.message };
+        }
+    }
+
     /** Load session from localStorage/sessionStorage (mock mode). */
     _loadMock() {
         let raw = null;
@@ -224,7 +257,14 @@ class AuthManager {
             }
         }
 
-        // Mock mode: accept any credentials
+        // Mock mode: ONLY available in development (localhost/127.0.0.1)
+        // In production, Supabase must be configured — refuse auth without it.
+        const isDev = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+        if (!isDev) {
+            console.error('[auth] Supabase not configured — cannot authenticate in production');
+            return { success: false, error: 'Authentication service unavailable. Please try again later.' };
+        }
+        console.warn('[auth] Using mock auth — development mode only');
         const userData = {
             email,
             name: email.split('@')[0],
@@ -338,11 +378,17 @@ class AuthManager {
         return true;
     }
 
-    /** Get stored post-login redirect URL. */
+    /** Get stored post-login redirect URL (validated same-origin to prevent open redirect). */
     getPostLoginRedirect() {
         try {
             const url = sessionStorage.getItem('pp_auth_redirect');
             sessionStorage.removeItem('pp_auth_redirect');
+            if (!url) return null;
+            // Validate same-origin to prevent open redirect attacks
+            try {
+                const parsed = new URL(url, window.location.origin);
+                if (parsed.origin !== window.location.origin) return null;
+            } catch (_) { return null; }
             return url;
         } catch (_) { return null; }
     }

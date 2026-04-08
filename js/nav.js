@@ -66,11 +66,25 @@ const NAV_DROPDOWNS = [
 
 const AUTH_KEY = 'pp_auth';
 
+/** Escape HTML entities to prevent XSS when inserting user data into innerHTML */
+function _esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function _getAuth() {
     let auth = null;
     try { auth = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
     if (!auth) { try { auth = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {} }
-    return auth?.signedIn ? auth : null;
+    if (!auth?.signedIn) return null;
+    // Session expiry: auto-expire after 7 days (localStorage) or 24 hours (sessionStorage)
+    const maxAge = auth.remember ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    if (auth.ts && (Date.now() - auth.ts > maxAge)) {
+        try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
+        try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
+        return null;
+    }
+    return auth;
 }
 
 function _tierLevel(plan, role) {
@@ -178,17 +192,17 @@ export function initNav(activeId = '') {
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
-        // User greeting with first name
-        const displayName = auth.name || auth.email?.split('@')[0] || 'Explorer';
-        const firstName = displayName.split(' ')[0];
-        const planLabel = (auth.plan || 'free').toUpperCase();
+        // User greeting with first name — ESCAPE all user-controlled data to prevent XSS
+        const displayName = _esc(auth.name || auth.email?.split('@')[0] || 'Explorer');
+        const firstName = _esc((auth.name || auth.email?.split('@')[0] || 'Explorer').split(' ')[0]);
+        const planLabel = _esc((auth.plan || 'free').toUpperCase());
         const planColor = auth.plan === 'advanced' ? '#c080ff' : auth.plan === 'basic' ? '#00c6ff' : '#4dff80';
 
         if (isAdmin) {
             html += `<a href="admin.html" class="nav-item" style="background:rgba(255,60,60,.1);border-color:rgba(255,60,60,.25);color:#f66;font-size:.72rem;font-weight:700;padding:4px 10px" title="Admin Dashboard">${auth.role === 'superadmin' ? 'SUPER ADMIN' : 'ADMIN'}</a>`;
         }
         html += `<a href="dashboard.html" class="nav-item nav-user-btn" style="display:flex;align-items:center;gap:6px" title="${displayName} · ${planLabel} plan">`;
-        html += `<span style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,${planColor}44,${planColor}22);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;color:${planColor};border:1px solid ${planColor}44">${firstName[0].toUpperCase()}</span>`;
+        html += `<span style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,${planColor}44,${planColor}22);display:flex;align-items:center;justify-content:center;font-size:.65rem;font-weight:800;color:${planColor};border:1px solid ${planColor}44">${firstName[0] ? firstName[0].toUpperCase() : '?'}</span>`;
         html += `<span style="font-size:.78rem">${firstName}</span>`;
         html += `</a>`;
         html += `<button class="nav-item nav-signout" id="nav-signout-btn" style="font-size:.72rem;padding:4px 10px">Sign Out</button>`;
