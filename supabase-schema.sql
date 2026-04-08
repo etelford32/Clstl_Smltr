@@ -143,6 +143,45 @@ CREATE POLICY "Users can manage own locations"
     USING (auth.uid() = user_id);
 
 -- ══════════════════════════════════════════════════════════════════
+-- 5. invite_codes — admin-generated invite codes for plan upgrades
+-- ══════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.invite_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code TEXT UNIQUE NOT NULL,
+    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    max_uses INTEGER DEFAULT 1,
+    used_count INTEGER DEFAULT 0,
+    expires_at TIMESTAMPTZ,
+    created_by UUID REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    active BOOLEAN DEFAULT true
+);
+
+ALTER TABLE public.invite_codes ENABLE ROW LEVEL SECURITY;
+
+-- Admins can do everything with invite codes
+CREATE POLICY "Admins manage invites"
+    ON public.invite_codes FOR ALL
+    USING (public.is_admin());
+
+-- Anyone can read a specific active invite code (for validation during signup)
+CREATE POLICY "Public can validate invite codes"
+    ON public.invite_codes FOR SELECT
+    USING (active = true);
+
+-- Atomic redeem function: increment used_count safely
+CREATE OR REPLACE FUNCTION public.redeem_invite(invite_id UUID)
+RETURNS VOID AS $$
+    UPDATE public.invite_codes
+    SET used_count = used_count + 1
+    WHERE id = invite_id
+      AND active = true
+      AND used_count < max_uses
+      AND (expires_at IS NULL OR expires_at > now());
+$$ LANGUAGE sql SECURITY DEFINER;
+
+-- ══════════════════════════════════════════════════════════════════
 -- Done! Tables created with Row Level Security enabled.
 --
 -- Next steps:
@@ -150,4 +189,5 @@ CREATE POLICY "Users can manage own locations"
 --   2. Set SUPABASE_ANON_KEY in js/supabase-config.js
 --   3. Set SUPABASE_SERVICE_KEY in Vercel env vars
 --   4. Test: create a user via signup.html → check user_profiles table
+--   5. Grant admin: UPDATE user_profiles SET role='superadmin' WHERE email='you@example.com';
 -- ══════════════════════════════════════════════════════════════════

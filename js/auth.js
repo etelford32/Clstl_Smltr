@@ -129,6 +129,8 @@ class AuthManager {
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;
+                // Persist updated role/plan to storage so nav.js can read it
+                this._persistToStorage();
             }
             return data;
         } catch (err) {
@@ -273,6 +275,47 @@ class AuthManager {
         window.dispatchEvent(new CustomEvent('auth-changed', { detail: { event: 'SIGNED_OUT', user: null } }));
 
         if (redirectUrl) window.location.href = redirectUrl;
+    }
+
+    /**
+     * Server-side admin verification via Supabase.
+     * Validates the JWT with Supabase Auth server, then queries user_profiles
+     * for role. Cannot be bypassed via localStorage manipulation.
+     * @returns {{ verified: boolean, role?: string, error?: string }}
+     */
+    async verifyAdminServerSide() {
+        if (!this._supabase) {
+            // No Supabase — fall back to local check
+            return { verified: this.isAdmin(), role: this.getRole(), error: 'Supabase not configured' };
+        }
+        try {
+            const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
+            if (authErr || !user) return { verified: false, error: authErr?.message || 'No session' };
+
+            const { data, error: dbErr } = await this._supabase
+                .from('user_profiles')
+                .select('role')
+                .eq('id', user.id)
+                .single();
+            if (dbErr) return { verified: false, error: dbErr.message };
+
+            const role = data?.role || 'user';
+            // Update local state to match server
+            if (this._user) this._user.role = role;
+            this._persistToStorage();
+
+            const isAdmin = role === 'admin' || role === 'superadmin';
+            return { verified: isAdmin, role };
+        } catch (err) {
+            return { verified: false, error: err.message };
+        }
+    }
+
+    /** Persist current user state to localStorage for nav.js to read. */
+    _persistToStorage() {
+        if (!this._user) return;
+        const json = JSON.stringify(this._user);
+        try { localStorage.setItem(AUTH_KEY, json); } catch (_) {}
     }
 
     /** Redirect to signin if not logged in. */

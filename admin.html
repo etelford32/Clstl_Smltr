@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Parker Physics App</title>
+    <link rel="stylesheet" href="js/nav-styles.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        .auth-gate {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 3rem;
+        }
+        .auth-gate h2 { color: #ff6060; margin-bottom: .8rem; }
+        .auth-gate p { color: #888; margin-bottom: 1.5rem; }
+        .auth-gate a {
+            display: inline-block; padding: 10px 28px; border-radius: 8px;
+            background: linear-gradient(45deg, #8040ff, #4080ff); color: #fff;
+            text-decoration: none; font-weight: 600; font-size: .9rem;
+        }
+        main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px 48px; }
+        .admin-header { margin-bottom: 8px; }
+        .admin-header h1 {
+            font-size: 1.5rem; font-weight: 800;
+            background: linear-gradient(45deg, #ff6060, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .admin-header p { color: #555; font-size: .85rem; margin-top: 2px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin: 18px 0 20px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 0; }
+        .tab {
+            padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid transparent;
+            border-bottom: none; background: transparent; color: #666; font-family: inherit;
+            font-size: .85rem; cursor: pointer; font-weight: 600; transition: all .15s;
+        }
+        .tab:hover { color: #aaa; background: rgba(255,255,255,.03); }
+        .tab.active { color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* KPI Cards */
+        .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+        @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 550px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        .kpi {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px; padding: 18px 16px; text-align: center;
+        }
+        .kpi-val { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+        .kpi-label { font-size: .72rem; color: #666; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi-val.green { color: #4eff91; }
+        .kpi-val.blue { color: #4fc3f7; }
+        .kpi-val.purple { color: #c080ff; }
+        .kpi-val.gold { color: #ffd700; }
+        .kpi-val.red { color: #ff6060; }
+        .kpi-val.white { color: #fff; }
+        .kpi-loading { color: #333; }
+
+        /* Cards */
+        .card {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 22px; margin-bottom: 18px;
+        }
+        .card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 14px; color: #ccc; }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+
+        /* Connection status */
+        .conn-bar {
+            display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+            border-radius: 8px; font-size: .88rem; font-weight: 600; margin-bottom: 14px;
+        }
+        .conn-bar.ok { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.2); color: #4eff91; }
+        .conn-bar.fail { background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.2); color: #ff6060; }
+        .conn-bar.loading { background: rgba(255,200,0,.06); border: 1px solid rgba(255,200,0,.15); color: #ffd700; }
+        .conn-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .conn-dot.ok { background: #4eff91; box-shadow: 0 0 6px rgba(78,255,145,.5); }
+        .conn-dot.fail { background: #ff6060; box-shadow: 0 0 6px rgba(255,80,80,.5); }
+        .conn-dot.loading { background: #ffd700; animation: pulse 1.2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        .check-list { list-style: none; }
+        .check-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: .84rem; background: rgba(255,255,255,.02); border-radius: 6px; margin-bottom: 4px; }
+        .check-ms { color: #555; font-size: .75rem; font-family: monospace; margin-left: auto; }
+
+        /* Config rows */
+        .cfg { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: .84rem; }
+        .cfg:last-child { border-bottom: none; }
+        .cfg-k { color: #666; }
+        .cfg-v { color: #bbb; font-family: monospace; font-size: .78rem; text-align: right; max-width: 55%; word-break: break-all; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 8px 10px; font-size: .72rem; color: #555; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid rgba(255,255,255,.07); }
+        td { padding: 9px 10px; font-size: .84rem; color: #bbb; border-bottom: 1px solid rgba(255,255,255,.03); }
+        tr:hover td { background: rgba(255,255,255,.02); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .7rem; font-weight: 600; }
+        .b-admin { background: rgba(255,60,60,.12); color: #f66; border: 1px solid rgba(255,60,60,.25); }
+        .b-super { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
+        .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
+        .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
+
+        /* Sparkline canvas */
+        .sparkline-wrap { height: 80px; margin-bottom: 8px; }
+        .sparkline-wrap canvas { width: 100%; height: 100%; }
+
+        /* Empty / error states */
+        .empty { text-align: center; padding: 28px; color: #444; font-size: .88rem; }
+        .empty code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: .8rem; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #ccc; font-family: inherit; font-size: .82rem; cursor: pointer; transition: background .15s; }
+        .btn:hover { background: rgba(255,255,255,.12); color: #fff; }
+        .btn-sm { padding: 5px 12px; font-size: .76rem; }
+
+        /* Live event feed */
+        .event-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.03); font-size: .82rem; }
+        .event-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .event-name { color: #ccc; flex: 1; }
+        .event-time { color: #444; font-size: .75rem; font-family: monospace; }
+
+        /* GA status card */
+        .ga-status { padding: 16px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); }
+        .ga-status h4 { font-size: .88rem; margin-bottom: 8px; }
+
+        footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
+        footer a { color: #555; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("admin");</script>
+
+<div class="auth-gate" id="auth-gate">
+    <div>
+        <h2>Admin Access Required</h2>
+        <p>You must be signed in with an admin account to view this page.</p>
+        <a href="signin.html">Sign In</a>
+    </div>
+</div>
+
+<main style="display:none" id="admin-main">
+    <div class="admin-header">
+        <h1>Admin Dashboard</h1>
+        <p id="admin-sub">Loading...</p>
+    </div>
+
+    <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="users">Users</button>
+        <button class="tab" data-tab="analytics">Analytics</button>
+        <button class="tab" data-tab="invites">Invites</button>
+        <button class="tab" data-tab="system">System</button>
+    </div>
+
+    <!-- ═══════════════════ OVERVIEW TAB ═══════════════════ -->
+    <div class="tab-panel active" id="panel-overview">
+        <div class="kpi-grid" id="kpi-grid">
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-intro">--</div><div class="kpi-label">Intro Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-pro">--</div><div class="kpi-label">Pro Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
+        </div>
+
+        <div class="row2">
+            <div class="card">
+                <h3>Daily Trend (14 days)</h3>
+                <div class="sparkline-wrap"><canvas id="trend-canvas"></canvas></div>
+                <div style="display:flex;justify-content:space-between;font-size:.72rem;color:#444;">
+                    <span id="trend-start"></span><span id="trend-end"></span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Top Pages (7 days)</h3>
+                <div id="top-pages-list"><div class="empty">Loading...</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Live Event Feed <button class="btn btn-sm" id="btn-refresh-feed" style="float:right">Refresh</button></h3>
+            <div id="event-feed"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ USERS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-users">
+        <div class="card">
+            <h3>All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="users-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ ANALYTICS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-analytics">
+        <div class="row2" style="margin-bottom:18px">
+            <div class="card">
+                <h3>Google Analytics (GA4)</h3>
+                <div class="ga-status" id="ga-status"></div>
+            </div>
+            <div class="card">
+                <h3>Supabase Analytics</h3>
+                <div id="supa-analytics-status"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Active Sessions <span id="sessions-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="sessions-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ INVITES TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-invites">
+        <div class="row2" style="margin-bottom:18px">
+            <div class="card">
+                <h3>Generate Invite Code</h3>
+                <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+                    <select id="invite-plan" class="btn" style="padding:8px 12px">
+                        <option value="free">Free tier</option>
+                        <option value="basic">Basic tier</option>
+                        <option value="advanced">Advanced tier</option>
+                    </select>
+                    <select id="invite-uses" class="btn" style="padding:8px 12px">
+                        <option value="1">1 use</option>
+                        <option value="5">5 uses</option>
+                        <option value="10">10 uses</option>
+                        <option value="25">25 uses</option>
+                        <option value="100">100 uses</option>
+                    </select>
+                    <select id="invite-expiry" class="btn" style="padding:8px 12px">
+                        <option value="7">Expires in 7 days</option>
+                        <option value="30">Expires in 30 days</option>
+                        <option value="90">Expires in 90 days</option>
+                        <option value="0">Never expires</option>
+                    </select>
+                    <button class="btn" id="btn-gen-invite" style="background:rgba(128,64,255,.2);border-color:rgba(128,64,255,.4);color:#c080ff;font-weight:700">Generate Code</button>
+                </div>
+                <div id="invite-result" style="display:none;padding:14px;border-radius:8px;background:rgba(78,255,145,.06);border:1px solid rgba(78,255,145,.2);margin-bottom:8px">
+                    <div style="font-size:.72rem;color:#4eff91;margin-bottom:6px;font-weight:600">INVITE CODE GENERATED</div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <code id="invite-code-display" style="font-size:1.2rem;color:#fff;letter-spacing:.1em;flex:1"></code>
+                        <button class="btn btn-sm" id="btn-copy-invite">Copy</button>
+                    </div>
+                    <div id="invite-link-display" style="font-size:.75rem;color:#555;margin-top:8px;word-break:break-all"></div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Invite Stats</h3>
+                <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-total" style="color:#c080ff">--</div><div class="kpi-label">Total Codes</div></div>
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-used" style="color:#4eff91">--</div><div class="kpi-label">Times Used</div></div>
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-active" style="color:#00c6ff">--</div><div class="kpi-label">Active Codes</div></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>All Invite Codes <button class="btn btn-sm" id="btn-refresh-invites" style="float:right">Refresh</button></h3>
+            <div id="invites-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ SYSTEM TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-system">
+        <div class="row2">
+            <div class="card">
+                <h3>Supabase Connection</h3>
+                <div class="conn-bar loading" id="conn-bar">
+                    <span class="conn-dot loading" id="conn-dot"></span>
+                    <span id="conn-label">Checking...</span>
+                    <button class="btn btn-sm" id="btn-recheck" style="margin-left:auto">Re-check</button>
+                </div>
+                <ul class="check-list" id="check-list"></ul>
+            </div>
+            <div class="card">
+                <h3>Configuration</h3>
+                <div id="config-info"></div>
+            </div>
+        </div>
+        <div class="row2">
+            <div class="card">
+                <h3>System Info</h3>
+                <div id="system-info"></div>
+            </div>
+            <div class="card">
+                <h3>Quick Actions</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <a href="dashboard.html" class="btn" style="text-align:center;text-decoration:none">User Dashboard</a>
+                    <a href="space-weather.html" class="btn" style="text-align:center;text-decoration:none">Space Weather</a>
+                    <button class="btn" id="btn-schema">View Schema SQL</button>
+                    <button class="btn" id="btn-export">Export Health Report</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p>&copy; 2026 Parker Physics &middot; <a href="index.html">Home</a> &middot; <a href="dashboard.html">Dashboard</a></p>
+</footer>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
+import { GA_MEASUREMENT_ID } from './js/analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend } from './js/admin-analytics.js';
+import { createInviteCode, fetchInviteCodes, deactivateInvite } from './js/admin-invites.js';
+
+// ── Tabs (wired first so they always work) ──────────────────────────────────
+document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+});
+
+// ── Auth gate ────────────────────────────────────────────────────────────────
+await auth.ready();
+
+function showGate(heading, message) {
+    const gate = document.getElementById('auth-gate');
+    gate.querySelector('h2').textContent = heading;
+    gate.querySelector('p').textContent = message;
+    gate.style.display = 'flex';
+}
+
+if (!auth.isSignedIn()) {
+    showGate('Admin Access Required', 'You must be signed in with an admin account to view this page.');
+    throw '';
+}
+
+// Server-side admin verification: validates JWT with Supabase Auth server
+// and queries user_profiles for role. Cannot be bypassed via localStorage.
+const adminCheck = await auth.verifyAdminServerSide();
+if (!adminCheck.verified) {
+    // Fallback: also check local state (for when Supabase is unavailable in dev)
+    await auth.fetchProfile();
+    if (!auth.isAdmin()) {
+        const reason = adminCheck.error || 'Unknown';
+        showGate('Insufficient Permissions', `Access denied. Server verification: ${_esc(reason)}. Role: ${_esc(auth.getRole())}.`);
+        throw '';
+    }
+}
+
+document.getElementById('auth-gate').style.display = 'none';
+document.getElementById('admin-main').style.display = 'block';
+document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
+
+// ── KPI Cards ────────────────────────────────────────────────────────────────
+async function loadKPIs() {
+    const res = await fetchKPIs();
+    if (!res.ok) return;
+    const d = res.data;
+    const set = (id, val, cls) => {
+        const el = document.getElementById(id);
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + cls;
+    };
+    set('kpi-dau', d.dailyUnique, 'white');
+    set('kpi-wau', d.weeklyUnique, 'white');
+    set('kpi-mau', d.monthlyUnique, 'white');
+    set('kpi-signins', d.signIns, 'blue');
+    set('kpi-minutes', d.minutesUsed, 'blue');
+    set('kpi-signups', d.signUps, 'green');
+    set('kpi-intro', d.introSubs, 'purple');
+    set('kpi-pro', d.proSubs, 'gold');
+    set('kpi-admins', d.adminUsers, 'red');
+    set('kpi-online', d.onlineNow, 'green');
+}
+loadKPIs();
+
+// ── Daily Trend sparkline ────────────────────────────────────────────────────
+async function loadTrend() {
+    const res = await fetchDailyTrend(14);
+    if (!res.ok || !res.data.length) return;
+    const data = res.data;
+    document.getElementById('trend-start').textContent = data[0]?.day?.slice(5) || '';
+    document.getElementById('trend-end').textContent = data[data.length-1]?.day?.slice(5) || '';
+
+    const canvas = document.getElementById('trend-canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+
+    const maxV = Math.max(...data.map(d => d.views), 1);
+    const pts = data.map((d, i) => ({
+        x: (i / (data.length - 1)) * W,
+        y: H - (d.views / maxV) * (H - 10) - 5,
+    }));
+
+    // Area fill
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, H);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(pts[pts.length-1].x, H);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(128,64,255,.25)');
+    grad.addColorStop(1, 'rgba(128,64,255,.02)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+    ctx.strokeStyle = '#8040ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Dots
+    pts.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+        ctx.fillStyle = '#8040ff';
+        ctx.fill();
+    });
+}
+loadTrend();
+
+// ── Top Pages ────────────────────────────────────────────────────────────────
+async function loadTopPages() {
+    const res = await fetchTopPages();
+    const el = document.getElementById('top-pages-list');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No page view data yet.</div>'; return; }
+
+    const maxV = Math.max(...res.data.map(p => p.views));
+    el.innerHTML = res.data.map(p => {
+        const pct = Math.max(4, (p.views / maxV) * 100);
+        return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+                <span style="color:#ccc">${_esc(p.name)}</span>
+                <span style="color:#666">${_esc(p.views)} views &middot; ${_esc(p.unique)} unique</span>
+            </div>
+            <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#8040ff,#4080ff);border-radius:2px"></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+loadTopPages();
+
+// ── Live Event Feed ──────────────────────────────────────────────────────────
+async function loadFeed() {
+    const res = await fetchRecentEvents(25);
+    const el = document.getElementById('event-feed');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No events recorded yet. Events appear once analytics.js is loaded on pages.</div>'; return; }
+
+    el.innerHTML = res.data.map(ev => {
+        const color = ev.event_type === 'page_view' ? '#4080ff' : ev.event_name === 'sign_in' ? '#4eff91' : '#ffd700';
+        const ago = _timeAgo(ev.created_at);
+        return `<div class="event-row">
+            <span class="event-dot" style="background:${color}"></span>
+            <span class="event-name">${_esc(ev.event_name)}</span>
+            <span style="color:#444;font-size:.75rem">${_esc(ev.page_path || '')}</span>
+            <span class="event-time">${_esc(ago)}</span>
+        </div>`;
+    }).join('');
+}
+loadFeed();
+document.getElementById('btn-refresh-feed').addEventListener('click', loadFeed);
+
+/** Escape HTML entities to prevent stored XSS from user-controlled data */
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function _timeAgo(iso) {
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+}
+
+// ── Users Tab ────────────────────────────────────────────────────────────────
+async function loadUsers() {
+    const res = await fetchUsers();
+    const el = document.getElementById('users-container');
+    const countEl = document.getElementById('user-count');
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}<br><br>Run <code>supabase-admin.sql</code> to grant admin read access.</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No users found.</div>'; countEl.textContent = '(0)'; return; }
+
+    countEl.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
+    for (const u of res.data) {
+        const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
+        const pc = u.plan === 'advanced' ? 'b-advanced' : u.plan === 'basic' ? 'b-basic' : 'b-free';
+        const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
+        html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadUsers();
+
+// ── Analytics Tab ────────────────────────────────────────────────────────────
+// GA4 status
+const gaEl = document.getElementById('ga-status');
+if (GA_MEASUREMENT_ID) {
+    gaEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:#4eff91">Active</span></div>
+        <div class="cfg"><span class="cfg-k">Measurement ID</span><span class="cfg-v">${GA_MEASUREMENT_ID}</span></div>
+        <div class="cfg"><span class="cfg-k">Dashboard</span><span class="cfg-v"><a href="https://analytics.google.com" target="_blank" style="color:#4080ff">Open GA4</a></span></div>`;
+} else {
+    gaEl.innerHTML = `<div style="text-align:center;padding:12px">
+        <p style="color:#666;margin-bottom:10px">GA4 not configured yet.</p>
+        <p style="font-size:.8rem;color:#444">To enable, set <code>GA_MEASUREMENT_ID</code> in <code>js/analytics.js</code> to your G-XXXXXXXXXX ID.</p>
+        <p style="font-size:.78rem;color:#333;margin-top:8px">GA4 adds: traffic sources, geographic data, device breakdown, funnel analysis, bounce rates.</p>
+    </div>`;
+}
+
+// Supabase analytics status
+const saEl = document.getElementById('supa-analytics-status');
+saEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Active':'Not configured'}</span></div>
+    <div class="cfg"><span class="cfg-k">Tracks</span><span class="cfg-v">Page views, events, sessions, sign-ins</span></div>
+    <div class="cfg"><span class="cfg-k">Ad-blocker proof</span><span class="cfg-v" style="color:#4eff91">Yes (first-party)</span></div>
+    <div class="cfg"><span class="cfg-k">Tables</span><span class="cfg-v">analytics_events, user_sessions</span></div>`;
+
+// Active sessions
+async function loadSessions() {
+    const res = await fetchActiveSessions();
+    const el = document.getElementById('sessions-container');
+    const cnt = document.getElementById('sessions-count');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No active sessions.</div>'; cnt.textContent = '(0)'; return; }
+
+    cnt.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Session</th><th>Page</th><th>Duration</th><th>Last Seen</th></tr></thead><tbody>';
+    for (const s of res.data) {
+        const dur = s.duration_s < 60 ? s.duration_s + 's' : Math.round(s.duration_s / 60) + 'm';
+        const ago = _timeAgo(s.last_seen);
+        const sid = s.session_id?.slice(0, 16) || '--';
+        html += `<tr><td style="font-family:monospace;font-size:.75rem">${sid}</td><td>${s.page_path||'--'}</td><td>${dur}</td><td style="color:#555">${ago}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadSessions();
+
+// ── Invites Tab ─────────────────────────────────────────────────────────────
+async function loadInvites() {
+    const res = await fetchInviteCodes();
+    const el = document.getElementById('invites-container');
+
+    // Stats
+    const total  = res.data?.length || 0;
+    const used   = res.data?.reduce((s, c) => s + (c.used_count || 0), 0) || 0;
+    const active = res.data?.filter(c => c.active && (!c.expires_at || new Date(c.expires_at) > new Date()) && c.used_count < c.max_uses).length || 0;
+    document.getElementById('kpi-invites-total').textContent  = total;
+    document.getElementById('kpi-invites-used').textContent   = used;
+    document.getElementById('kpi-invites-active').textContent = active;
+
+    if (!res.ok || !res.data?.length) {
+        el.innerHTML = `<div class="empty">${res.error ? _esc(res.error) + '<br><br>' : ''}No invite codes yet. Generate one above.<br><br>If the table doesn't exist, run:<br><code>CREATE TABLE invite_codes (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code TEXT UNIQUE NOT NULL, plan TEXT DEFAULT \'free\', max_uses INTEGER DEFAULT 1, used_count INTEGER DEFAULT 0, expires_at TIMESTAMPTZ, created_by UUID, created_at TIMESTAMPTZ DEFAULT now(), active BOOLEAN DEFAULT true); ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY; CREATE POLICY "Admins manage invites" ON invite_codes FOR ALL USING (public.is_admin());</code></div>`;
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Code</th><th>Plan</th><th>Uses</th><th>Expires</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>';
+    for (const c of res.data) {
+        const expired = c.expires_at && new Date(c.expires_at) < new Date();
+        const full    = c.used_count >= c.max_uses;
+        const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
+        const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
+        const pc      = c.plan === 'advanced' ? 'b-advanced' : c.plan === 'basic' ? 'b-basic' : 'b-free';
+        const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
+        const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
+        html += `<tr>
+            <td style="font-family:monospace;font-size:.85rem;letter-spacing:.08em;color:#fff">${_esc(c.code)}</td>
+            <td><span class="badge ${pc}">${_esc(c.plan || 'free')}</span></td>
+            <td>${c.used_count} / ${c.max_uses}</td>
+            <td style="color:#555;font-size:.78rem">${_esc(exp)}</td>
+            <td style="${sClass};font-size:.78rem;font-weight:600">${status}</td>
+            <td style="color:#555;font-size:.78rem">${_esc(created)}</td>
+            <td>${c.active ? `<button class="btn btn-sm" data-deactivate="${c.id}">Disable</button>` : ''}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+    // Wire deactivate buttons
+    el.querySelectorAll('[data-deactivate]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.textContent = '...';
+            await deactivateInvite(btn.dataset.deactivate);
+            loadInvites();
+        });
+    });
+}
+loadInvites();
+
+document.getElementById('btn-gen-invite').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-gen-invite');
+    btn.textContent = 'Generating...'; btn.disabled = true;
+    const plan       = document.getElementById('invite-plan').value;
+    const maxUses    = parseInt(document.getElementById('invite-uses').value);
+    const expiryDays = parseInt(document.getElementById('invite-expiry').value);
+    const res = await createInviteCode({ plan, maxUses, expiryDays });
+    btn.textContent = 'Generate Code'; btn.disabled = false;
+
+    const resultEl = document.getElementById('invite-result');
+    if (res.ok) {
+        resultEl.style.display = 'block';
+        document.getElementById('invite-code-display').textContent = res.code;
+        document.getElementById('invite-link-display').textContent =
+            `${location.origin}/signup.html?invite=${res.code}&plan=${plan}`;
+        loadInvites();
+    } else {
+        resultEl.style.display = 'block';
+        resultEl.style.background = 'rgba(255,80,80,.06)';
+        resultEl.style.borderColor = 'rgba(255,80,80,.2)';
+        document.getElementById('invite-code-display').textContent = res.error || 'Failed';
+    }
+});
+
+document.getElementById('btn-copy-invite').addEventListener('click', () => {
+    const code = document.getElementById('invite-code-display').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        document.getElementById('btn-copy-invite').textContent = 'Copied!';
+        setTimeout(() => document.getElementById('btn-copy-invite').textContent = 'Copy', 2000);
+    });
+});
+
+document.getElementById('btn-refresh-invites').addEventListener('click', loadInvites);
+
+// ── System Tab ───────────────────────────────────────────────────────────────
+// Config info
+const maskedKey = SUPABASE_ANON_KEY.length > 12 ? SUPABASE_ANON_KEY.slice(0,6) + '...' + SUPABASE_ANON_KEY.slice(-4) : '(not set)';
+document.getElementById('config-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Supabase URL</span><span class="cfg-v">${_esc(SUPABASE_URL)||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Publishable Key</span><span class="cfg-v">${_esc(maskedKey)}</span></div>
+    <div class="cfg"><span class="cfg-k">Configured</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">GA4 ID</span><span class="cfg-v">${GA_MEASUREMENT_ID||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Role</span><span class="cfg-v" style="color:#ffd700">${auth.getRole()}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Plan</span><span class="cfg-v">${auth.getPlan()}</span></div>`;
+
+// System info
+document.getElementById('system-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Browser</span><span class="cfg-v" style="font-size:.7rem;max-width:65%">${navigator.userAgent.slice(0,80)}...</span></div>
+    <div class="cfg"><span class="cfg-k">Viewport</span><span class="cfg-v">${innerWidth}x${innerHeight}</span></div>
+    <div class="cfg"><span class="cfg-k">Pixel Ratio</span><span class="cfg-v">${devicePixelRatio}</span></div>
+    <div class="cfg"><span class="cfg-k">Online</span><span class="cfg-v" style="color:${navigator.onLine?'#4eff91':'#ff6060'}">${navigator.onLine?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">Loaded</span><span class="cfg-v">${new Date().toLocaleString()}</span></div>`;
+
+// Connection health check
+async function runHealthCheck() {
+    const bar = document.getElementById('conn-bar');
+    const dot = document.getElementById('conn-dot');
+    const lbl = document.getElementById('conn-label');
+    const list = document.getElementById('check-list');
+    bar.className = 'conn-bar loading'; dot.className = 'conn-dot loading';
+    lbl.textContent = 'Checking...'; list.innerHTML = '';
+
+    const result = await testConnection();
+    bar.className = 'conn-bar ' + (result.ok ? 'ok' : 'fail');
+    dot.className = 'conn-dot ' + (result.ok ? 'ok' : 'fail');
+    lbl.textContent = result.ok ? 'All systems operational' : 'Issues detected';
+
+    list.innerHTML = result.checks.map(c => {
+        const icon = c.ok ? '<span style="color:#4eff91">&#10003;</span>' : '<span style="color:#ff6060">&#10007;</span>';
+        return `<li class="check-item">${icon} <span style="color:#ccc;flex:1">${c.name}</span><span class="check-ms">${c.ms}ms</span></li>`
+            + (c.detail ? `<li class="check-item" style="padding-top:0"><span style="width:18px"></span><span style="color:#ff8080;font-size:.75rem">${c.detail}</span></li>` : '');
+    }).join('');
+}
+runHealthCheck();
+document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
+document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
+document.getElementById('btn-export').addEventListener('click', async () => {
+    const r = await testConnection();
+    const blob = new Blob([JSON.stringify({ timestamp: new Date().toISOString(), supabase_url: SUPABASE_URL, ok: r.ok, checks: r.checks, user: { email: auth.getUser()?.email, role: auth.getRole() } }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'health-report.json'; a.click();
+});
+</script>
+</body>
+</html>
