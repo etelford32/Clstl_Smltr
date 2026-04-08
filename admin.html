@@ -395,8 +395,8 @@ async function loadTopPages() {
         const pct = Math.max(4, (p.views / maxV) * 100);
         return `<div style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
-                <span style="color:#ccc">${p.name}</span>
-                <span style="color:#666">${p.views} views &middot; ${p.unique} unique</span>
+                <span style="color:#ccc">${_esc(p.name)}</span>
+                <span style="color:#666">${_esc(p.views)} views &middot; ${_esc(p.unique)} unique</span>
             </div>
             <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
                 <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#8040ff,#4080ff);border-radius:2px"></div>
