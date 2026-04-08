@@ -110,8 +110,9 @@ async function _heartbeat() {
         await _supabase.rpc('session_heartbeat', {
             p_session_id: _sessionId,
             p_user_id: _userId || null,
-            p_page_path: window.location.pathname,
-            p_user_agent: navigator.userAgent.slice(0, 200),
+            p_page_path: window.location.pathname.slice(0, 200),
+            // Only send browser family, not full UA string (minimizes fingerprinting)
+            p_user_agent: (navigator.userAgent || '').replace(/\(.*?\)/g, '').slice(0, 100),
         });
     } catch (err) {
         console.warn('[Analytics] Heartbeat failed:', err.message);
@@ -166,12 +167,20 @@ class Analytics {
      */
     page(pageName, props = {}) {
         const path = window.location.pathname;
+        // Sanitize: truncate fields to match RLS policy limits, minimize PII
+        const safeName = (pageName || path).slice(0, 100);
+        const safePath = path.slice(0, 200);
+        const safeTitle = (document.title || '').slice(0, 300);
+        // Referrer: only keep the origin (not full URL) to avoid leaking query params
+        let safeReferrer = null;
+        try { safeReferrer = document.referrer ? new URL(document.referrer).origin : null; } catch (_) {}
+
         const event = {
             event_type: 'page_view',
-            event_name: pageName || path,
-            page_path: path,
-            page_title: document.title,
-            referrer: document.referrer || null,
+            event_name: safeName,
+            page_path: safePath,
+            page_title: safeTitle,
+            referrer: safeReferrer,
             session_id: _sessionId,
             user_id: _userId,
             properties: { ...props },

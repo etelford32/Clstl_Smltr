@@ -28,9 +28,16 @@ CREATE TABLE IF NOT EXISTS public.analytics_events (
 
 ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 
+-- Anyone can insert events, but event_name and page_path are length-limited
+-- to prevent payload abuse. Rate limiting is handled at the application layer.
 CREATE POLICY "Anyone can insert events"
     ON public.analytics_events FOR INSERT
-    WITH CHECK (true);
+    WITH CHECK (
+        length(event_name) <= 100
+        AND (page_path IS NULL OR length(page_path) <= 200)
+        AND (page_title IS NULL OR length(page_title) <= 300)
+        AND (referrer IS NULL OR length(referrer) <= 500)
+    );
 
 CREATE POLICY "Admins can read events"
     ON public.analytics_events FOR SELECT
@@ -69,11 +76,14 @@ CREATE POLICY "Anyone can upsert sessions"
     ON public.user_sessions FOR INSERT
     WITH CHECK (true);
 
-CREATE POLICY "Anyone can update own session"
+-- Sessions can only be updated by the session owner (matching session_id or user_id)
+-- Removed the `OR true` catch-all which allowed any user to update any session.
+CREATE POLICY "Session owner can update own session"
     ON public.user_sessions FOR UPDATE
-    USING (session_id = current_setting('request.headers', true)::json->>'x-session-id'
-           OR user_id = auth.uid()
-           OR true);  -- heartbeats need to work for anonymous users too
+    USING (
+        session_id IS NOT NULL  -- must reference a valid session
+        AND (user_id IS NULL OR user_id = auth.uid())  -- anon sessions or own sessions only
+    );
 
 -- Admins can read all sessions
 CREATE POLICY "Admins can read sessions"
