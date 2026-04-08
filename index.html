@@ -220,7 +220,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <div class="sim-grid">
 
       <article class="sim-card fade-in" style="--accent:#00c6ff;--thumb-bg:linear-gradient(135deg,#001830 0%,#003860 50%,#002040 100%)">
-        <div class="sim-thumb" aria-hidden="true">🌍<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" data-preview="earth" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Earth Magnetosphere</h3>
           <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
@@ -230,7 +230,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       </article>
 
       <article class="sim-card fade-in" style="--accent:#ffb830;--thumb-bg:linear-gradient(135deg,#1a0800 0%,#3d1500 50%,#1a0800 100%)">
-        <div class="sim-thumb" aria-hidden="true">☀️<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" data-preview="sun" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Solar Physics Engine</h3>
           <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
@@ -240,7 +240,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       </article>
 
       <article class="sim-card fade-in" style="--accent:#c080ff;--thumb-bg:linear-gradient(135deg,#0d0020 0%,#200040 50%,#0d0020 100%)">
-        <div class="sim-thumb" aria-hidden="true">⚡<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" data-preview="space-weather" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Space Weather Dashboard</h3>
           <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
@@ -250,7 +250,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       </article>
 
       <article class="sim-card fade-in" style="--accent:#ffd700;--thumb-bg:linear-gradient(135deg,#080808 0%,#1a1400 50%,#080808 100%)">
-        <div class="sim-thumb" aria-hidden="true">🪐<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" data-preview="stars" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Stellar Physics Simulator</h3>
           <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
@@ -260,7 +260,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
       </article>
 
       <article class="sim-card fade-in" style="--accent:#7b2ff7;--thumb-bg:linear-gradient(135deg,#050010 0%,#140030 50%,#050010 100%)">
-        <div class="sim-thumb" aria-hidden="true">🌌<span class="sim-thumb-label">Live Preview v2</span></div>
+        <div class="sim-thumb" data-preview="galaxy" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
         <div class="sim-card-header">
           <h3 class="sim-card-title">Galactic Map</h3>
           <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
@@ -931,6 +931,9 @@ if (canvas) {
   }, { threshold: 0.12 });
   els.forEach(el => obs.observe(el));
 })();
+
+/* ── CARD PREVIEW ANIMATIONS ──────────────────────────────────────────── */
+import('./js/card-previews.js').then(m => m.initCardPreviews()).catch(() => {});
 </script>
 </body>
 </html>
