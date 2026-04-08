@@ -502,10 +502,10 @@ loadSessions();
 
 // ── System Tab ───────────────────────────────────────────────────────────────
 // Config info
-const maskedKey = SUPABASE_ANON_KEY.length > 12 ? SUPABASE_ANON_KEY.slice(0,16) + '...' + SUPABASE_ANON_KEY.slice(-4) : '(not set)';
+const maskedKey = SUPABASE_ANON_KEY.length > 12 ? SUPABASE_ANON_KEY.slice(0,6) + '...' + SUPABASE_ANON_KEY.slice(-4) : '(not set)';
 document.getElementById('config-info').innerHTML = `
-    <div class="cfg"><span class="cfg-k">Supabase URL</span><span class="cfg-v">${SUPABASE_URL||'(not set)'}</span></div>
-    <div class="cfg"><span class="cfg-k">Anon Key</span><span class="cfg-v">${maskedKey}</span></div>
+    <div class="cfg"><span class="cfg-k">Supabase URL</span><span class="cfg-v">${_esc(SUPABASE_URL)||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Publishable Key</span><span class="cfg-v">${_esc(maskedKey)}</span></div>
     <div class="cfg"><span class="cfg-k">Configured</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Yes':'No'}</span></div>
     <div class="cfg"><span class="cfg-k">GA4 ID</span><span class="cfg-v">${GA_MEASUREMENT_ID||'(not set)'}</span></div>
     <div class="cfg"><span class="cfg-k">Your Role</span><span class="cfg-v" style="color:#ffd700">${auth.getRole()}</span></div>

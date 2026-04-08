@@ -239,7 +239,7 @@ const PLAN_TIERS = { free: 0, basic: 1, advanced: 2, admin: 99 };
  *   if (!planCheck.ok) return planCheck.response;
  *   // User has basic or higher — proceed
  *
- * Requires SUPABASE_URL + SUPABASE_ANON_KEY env vars.
+ * Requires SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY (or legacy SUPABASE_ANON_KEY) env vars.
  *
  * @param {Request} request - incoming request with Authorization header
  * @param {string} requiredPlan - minimum plan needed ('basic' or 'advanced')
@@ -256,7 +256,8 @@ export async function validateUserPlan(request, requiredPlan = 'basic') {
     }
 
     const sbUrl = (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ?? '';
-    const sbKey = (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ?? '';
+    // Support both new (SUPABASE_PUBLISHABLE_KEY) and legacy (SUPABASE_ANON_KEY) env var names
+    const sbKey = (typeof process !== 'undefined' && (process.env?.SUPABASE_PUBLISHABLE_KEY || process.env?.SUPABASE_ANON_KEY)) ?? '';
     if (!sbUrl || !sbKey) {
         // If Supabase isn't configured, fall back to PRO token check
         return { ok: validateProToken(request), response: errorResp(ErrorCodes.PRO_REQUIRED, 'Upgrade required') };
