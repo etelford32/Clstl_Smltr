@@ -306,7 +306,7 @@ export class AccretionDisk {
         // Main thick torus
         const torusGeo = new THREE.TorusGeometry(torusR, tubeR, 48, 128);
         const torusMat = new THREE.ShaderMaterial({
-            vertexShader, fragmentShader: fragShader,
+            vertexShader: vertShader, fragmentShader: fragShader,
             uniforms: this.uniforms, transparent: true, depthWrite: false,
             side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
         });
@@ -317,7 +317,7 @@ export class AccretionDisk {
         // Inner hot ring (emission peaks here — 3-5 Rg, the EHT ring)
         const innerGeo = new THREE.TorusGeometry(this.bhRadius * 3.0, this.bhRadius * 0.8, 32, 96);
         this.backDisk = new THREE.Mesh(innerGeo, new THREE.ShaderMaterial({
-            vertexShader, fragmentShader: fragShader,
+            vertexShader: vertShader, fragmentShader: fragShader,
             uniforms: this.uniforms, transparent: true, depthWrite: false,
             side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
         }));
