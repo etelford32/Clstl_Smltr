@@ -131,6 +131,14 @@
     {
       "source": "/v1/horizons",
       "destination": "/api/horizons"
+    },
+    {
+      "source": "/v1/checkout/:path*",
+      "destination": "/api/checkout/:path*"
+    },
+    {
+      "source": "/v1/billing/:path*",
+      "destination": "/api/billing/:path*"
     }
   ]
 }

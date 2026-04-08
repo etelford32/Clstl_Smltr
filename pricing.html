@@ -346,7 +346,7 @@
             <li><span class="check">✓</span> Email support</li>
             <li class="dim"><span class="cross">✗</span> API / data export</li>
         </ul>
-        <a href="signup.html?plan=basic" class="btn-plan basic">Get Basic →</a>
+        <a href="signup.html?plan=basic" class="btn-plan basic" data-plan="basic">Get Basic →</a>
     </div>
 
     <!-- Advanced -->
@@ -367,7 +367,7 @@
             <li><span class="check">✓</span> Priority &amp; dedicated support</li>
             <li><span class="check">✓</span> Early access to new features</li>
         </ul>
-        <a href="signup.html?plan=advanced" class="btn-plan advanced">Get Advanced →</a>
+        <a href="signup.html?plan=advanced" class="btn-plan advanced" data-plan="advanced">Get Advanced →</a>
     </div>
 
 </div><!-- /pricing-grid -->
@@ -487,6 +487,105 @@ import { recordVisit } from './js/greeting.js';
 analytics.page('pricing');
 recordVisit('pricing');
 userState.trackPage('pricing');
+
+// ── Stripe Checkout Flow ─────────────────────────────────────────────────────
+// For signed-in users: intercept plan buttons → create Stripe checkout session.
+// For signed-out users: redirect to signup as before.
+import { auth } from './js/auth.js';
+
+(async () => {
+    try { await auth.ready(); } catch (_) {}
+    const isSignedIn = auth.isSignedIn();
+    const user = isSignedIn ? auth.getUser() : null;
+    const currentPlan = user?.plan || 'free';
+
+    // Update button text for signed-in users
+    document.querySelectorAll('.btn-plan[data-plan]').forEach(btn => {
+        const plan = btn.dataset.plan;
+        if (!isSignedIn) return; // keep default "Get X →" for signed-out users
+
+        if (plan === currentPlan) {
+            btn.textContent = 'Current Plan';
+            btn.style.opacity = '0.5';
+            btn.style.pointerEvents = 'none';
+        } else if (plan === 'basic' && currentPlan === 'advanced') {
+            btn.textContent = 'Downgrade to Basic';
+        } else {
+            btn.textContent = `Upgrade to ${plan === 'basic' ? 'Basic' : 'Advanced'} →`;
+        }
+    });
+
+    // Handle checkout for signed-in users
+    document.querySelectorAll('.btn-plan[data-plan]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const plan = btn.dataset.plan;
+            if (!plan || plan === 'free') return; // free plan goes to signup normally
+            if (!isSignedIn) return; // not signed in — let the default href work
+
+            e.preventDefault();
+            btn.textContent = 'Loading checkout...';
+            btn.style.pointerEvents = 'none';
+
+            try {
+                // Get the Supabase JWT token for authentication
+                const { getSupabase } = await import('./js/supabase-config.js');
+                const sb = await getSupabase();
+                const { data: { session } } = await sb.auth.getSession();
+                const token = session?.access_token;
+
+                if (!token) {
+                    // No valid session — redirect to signin
+                    window.location.href = `signin.html?redirect=${encodeURIComponent(window.location.href)}`;
+                    return;
+                }
+
+                // Create Stripe Checkout Session via our API
+                const res = await fetch('/api/checkout/create-session', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ plan }),
+                });
+
+                const data = await res.json();
+
+                if (!res.ok || !data.checkoutUrl) {
+                    throw new Error(data.detail || data.error || 'Checkout failed');
+                }
+
+                // Redirect to Stripe Checkout
+                window.location.href = data.checkoutUrl;
+
+            } catch (err) {
+                btn.textContent = 'Error — try again';
+                btn.style.pointerEvents = 'auto';
+                btn.style.background = 'rgba(255,60,60,.2)';
+                btn.style.borderColor = 'rgba(255,60,60,.4)';
+                console.error('[Checkout]', err.message);
+                // Reset after 3s
+                setTimeout(() => {
+                    btn.textContent = `Upgrade to ${plan === 'basic' ? 'Basic' : 'Advanced'} →`;
+                    btn.style.background = '';
+                    btn.style.borderColor = '';
+                }, 3000);
+            }
+        });
+    });
+
+    // Show checkout result if returning from Stripe
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout') === 'canceled') {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(255,140,0,.15);border:1px solid rgba(255,140,0,.3);border-radius:8px;padding:12px 24px;color:#ffb830;font-size:.9rem;z-index:999;backdrop-filter:blur(8px)';
+        banner.textContent = 'Checkout canceled. You can try again anytime.';
+        document.body.appendChild(banner);
+        setTimeout(() => banner.remove(), 5000);
+        // Clean URL
+        history.replaceState(null, '', 'pricing.html');
+    }
+})();
 </script>
 </body>
 </html>
