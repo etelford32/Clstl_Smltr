@@ -443,7 +443,6 @@ if (!_auth || !_auth.signedIn) {
     }
   }
   document.getElementById('signout-btn').addEventListener('click', signOut);
-  initAll();
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -988,6 +987,9 @@ function initAll() {
     else if (_pinLat !== null) _startMapAnimation();
   });
 }
+
+// All declarations complete — safe to call initAll now
+initAll();
 </script>
 </body>
 </html>

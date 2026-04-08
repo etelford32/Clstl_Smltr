@@ -478,6 +478,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
+try {
 const canvas = document.getElementById('hero-canvas');
 if (canvas) {
     // ── Renderer + post-processing ────────────────────────────────────────
@@ -871,7 +872,7 @@ if (canvas) {
         else animate();
     });
 }
-</script>
+} catch(heroErr) { console.warn('Hero init failed:', heroErr); }
 
 /* ── MOBILE NAV BURGER ─────────────────────────────────────────────────── */
 (function(){
