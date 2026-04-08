@@ -985,6 +985,10 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <label for="tog-wind">Solar wind particles</label>
                     </div>
                     <div class="toggle-row">
+                        <input type="checkbox" id="tog-bfield" checked>
+                        <label for="tog-bfield">3D magnetic field lines</label>
+                    </div>
+                    <div class="toggle-row">
                         <input type="checkbox" id="tog-loops" checked>
                         <label for="tog-loops">Coronal loops (AR)</label>
                     </div>
@@ -2682,6 +2686,122 @@ scene.add(new THREE.Mesh(new THREE.SphereGeometry(4.0, 24, 24),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:outerGlowFS, uniforms,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })));
 
+// ─── 3D MAGNETIC FIELD LINES ─────────────────────────────────────────────────
+// Three types of field structure:
+//   1. Dipole field: global poloidal lines (pole to pole, open at distance)
+//   2. Active-region loops: closed field arching above photosphere (low-latitude)
+//   3. Open field lines: polar coronal holes (source of fast solar wind)
+// All animated: slow rotation + breathing with activity level.
+{
+    const bFieldGroup = new THREE.Group();
+    bFieldGroup.name = 'bFieldLines';
+    scene.add(bFieldGroup);
+
+    // ── 1. Dipole field (8 poloidal lines, north→south) ─────────────
+    for (let i = 0; i < 8; i++) {
+        const pts = [];
+        const lon = (i / 8) * Math.PI * 2;
+        for (let j = 0; j <= 100; j++) {
+            const colat = (j / 100) * Math.PI;  // 0 (north pole) → π (south pole)
+            const sinC = Math.sin(colat);
+            const cosC = Math.cos(colat);
+            // Dipole: r = R_eq * sin²(θ) where R_eq is equatorial crossing radius
+            const Req = 3.5 + Math.sin(lon * 2) * 0.5;
+            const r = Math.max(1.02, Req * sinC * sinC);
+            pts.push(new THREE.Vector3(
+                r * sinC * Math.cos(lon),
+                r * cosC,
+                r * sinC * Math.sin(lon)
+            ));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const hue = 0.6 + (i % 4) * 0.05;  // blue-violet range
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            color: new THREE.Color().setHSL(hue, 0.5, 0.45),
+            transparent: true, opacity: 0.12, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        }));
+        bFieldGroup.add(line);
+    }
+
+    // ── 2. Active-region loops (12 coronal loops at low latitudes) ───
+    for (let i = 0; i < 12; i++) {
+        const pts = [];
+        const baseLon = (i / 12) * Math.PI * 2 + Math.random() * 0.3;
+        const baseLat = (Math.random() - 0.5) * 0.8;  // ±40° latitude band
+        const loopHeight = 0.3 + Math.random() * 0.5;  // 0.3-0.8 R☉ above surface
+        const loopSpan = 0.15 + Math.random() * 0.25;  // angular footpoint separation
+
+        for (let j = 0; j <= 50; j++) {
+            const t = j / 50;
+            const angle = baseLon + (t - 0.5) * loopSpan * 2;
+            const lat = baseLat + Math.sin(t * Math.PI) * 0.05;
+            // Semicircular arch: height = sin(πt) * loopHeight
+            const h = Math.sin(t * Math.PI);
+            const r = 1.02 + h * loopHeight;
+            const cosLat = Math.cos(lat);
+            pts.push(new THREE.Vector3(
+                r * cosLat * Math.cos(angle),
+                r * Math.sin(lat),
+                r * cosLat * Math.sin(angle)
+            ));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const hue = 0.08 + Math.random() * 0.06;  // orange-yellow
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            color: new THREE.Color().setHSL(hue, 0.8, 0.55),
+            transparent: true, opacity: 0.18 + Math.random() * 0.1,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        bFieldGroup.add(line);
+    }
+
+    // ── 3. Open field lines (6 per pole, radial, source of fast wind) ─
+    for (let pole = -1; pole <= 1; pole += 2) {
+        for (let i = 0; i < 6; i++) {
+            const pts = [];
+            const lon = (i / 6) * Math.PI * 2 + (pole > 0 ? 0 : Math.PI / 6);
+            const colatBase = pole > 0 ? 0.2 + i * 0.05 : Math.PI - 0.2 - i * 0.05;
+            for (let j = 0; j <= 40; j++) {
+                const t = j / 40;
+                const r = 1.02 + t * 4.5;  // extend to ~5.5 R☉
+                // Slight spiral at distance (Parker winding)
+                const spiralAngle = lon + t * t * 0.4 * (pole > 0 ? 1 : -1);
+                const colat = colatBase + t * 0.15 * (colatBase < Math.PI / 2 ? 1 : -1);
+                const sinC = Math.sin(colat);
+                const cosC = Math.cos(colat);
+                pts.push(new THREE.Vector3(
+                    r * sinC * Math.cos(spiralAngle),
+                    r * cosC,
+                    r * sinC * Math.sin(spiralAngle)
+                ));
+            }
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+                color: new THREE.Color(0.3, 0.6, 0.9),
+                transparent: true, opacity: 0.08, depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            }));
+            bFieldGroup.add(line);
+        }
+    }
+
+    // Animate: slow differential rotation + breathing with activity
+    const _bFieldUpdate = () => {
+        const t = uniforms.u_time.value;
+        const act = uniforms.u_activity.value;
+        bFieldGroup.rotation.y = t * 0.015;  // ~27-day sidereal rotation (compressed)
+        // Active region loops brighten with activity
+        bFieldGroup.children.forEach((line, idx) => {
+            if (idx >= 8 && idx < 20) {  // loops
+                line.material.opacity = (0.12 + act * 0.18) * (0.8 + 0.2 * Math.sin(t * 0.5 + idx));
+            }
+        });
+    };
+    // Store update function for the animation loop to call
+    window._bFieldUpdate = _bFieldUpdate;
+}
+
 // ─── SOLAR WIND PARTICLES ─────────────────────────────────────────────────────
 const N_SOLAR = 2500;
 const solarWindVS = /* glsl */`
@@ -2800,8 +2920,21 @@ const solarWindVS = /* glsl */`
         vec3 pos = deflected * r;
         vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
         gl_Position = projectionMatrix * mvPos;
-        float sz = (1.6 + aSeed * 0.9) * (1.0 - s * 0.55) * (160.0 / max(-mvPos.z, 0.1));
-        gl_PointSize = clamp(sz, 0.4, 7.0);
+
+        // ── Particle size: physically motivated ──────────────────────
+        // Near sun: tiny, dense points (coronal plasma, ~1px)
+        // Mid range: moderate (solar wind bulk, 2-3px)
+        // Far out: faint wide glow (tenuous heliosphere, 1-2px but dimmer)
+        // Also: fast wind = thinner stream (fewer particles per solid angle)
+        // Slow wind = denser, bigger apparent particles
+        float baseSz = 0.6 + aSeed * 0.5;                     // 0.6-1.1 (much smaller base)
+        float distScale = mix(0.5, 2.2, pow(s, 0.4));         // grows with distance
+        float speedThin = 1.0 - u_wind_speed_norm * 0.35;     // fast wind = thinner
+        float latVar = 1.0 + sinLat * sinLat * 0.3;           // polar streams slightly wider
+        float densThick = 1.0 + u_wind_density_norm * 0.4;    // dense wind = fatter particles
+        float sz = baseSz * distScale * speedThin * latVar * densThick;
+        sz *= (160.0 / max(-mvPos.z, 0.1));                   // perspective
+        gl_PointSize = clamp(sz, 0.3, 5.5);
     }
 `;
 const solarWindFS = /* glsl */`
@@ -2812,12 +2945,29 @@ const solarWindFS = /* glsl */`
         vec2  uv = gl_PointCoord - 0.5;
         float d  = length(uv);
         if (d > 0.5) discard;
-        float core  = exp(-d * d * 22.0);          // bright centre
-        float glow  = 1.0 - smoothstep(0.1, 0.5, d);
-        float fade  = 1.0 - pow(vProgress, 2.2);   // fade out with distance
-        // Live density boosts opacity: higher particle density → more visible stream
-        float densOp = 0.82 + vDensBoost * 0.38;
-        float alpha  = (core * 0.62 + glow * 0.35) * fade * 0.60 * densOp;
+
+        // ── Distance-dependent particle profile ──────────────────────
+        // Near sun (s~0): sharp pinpoint (starlike) — high core sharpness
+        // Mid range (s~0.3-0.6): soft glow — moderate core
+        // Far out (s~0.8+): very diffuse faint wash — wide soft glow
+        float sharpness = mix(48.0, 12.0, smoothstep(0.0, 0.5, vProgress));
+        float core = exp(-d * d * sharpness);
+
+        // Glow halo: wider at distance (expanding plasma)
+        float glowEdge = mix(0.35, 0.50, vProgress);
+        float glow = 1.0 - smoothstep(0.08, glowEdge, d);
+
+        // Fade: steeper near sun (crisp), gentler far (lingering)
+        float fade = 1.0 - pow(vProgress, 1.8 + vProgress * 0.8);
+
+        // Density-driven opacity
+        float densOp = 0.65 + vDensBoost * 0.45;
+
+        // Final alpha: core-dominated near sun, glow-dominated far out
+        float coreWeight = mix(0.75, 0.30, smoothstep(0.0, 0.6, vProgress));
+        float glowWeight = 1.0 - coreWeight;
+        float alpha = (core * coreWeight + glow * glowWeight) * fade * 0.55 * densOp;
+
         gl_FragColor = vec4(vColor, alpha);
     }
 `;
@@ -2846,6 +2996,10 @@ const solarWindFS = /* glsl */`
 
     document.getElementById('tog-wind').addEventListener('change', e => { windPts.visible = e.target.checked; });
 }
+document.getElementById('tog-bfield')?.addEventListener('change', e => {
+    const grp = scene.getObjectByName('bFieldLines');
+    if (grp) grp.visible = e.target.checked;
+});
 
 // ─── CME DIRECTIONAL PARTICLE BURST ─────────────────────────────────────────
 // Compact cone of fast particles triggered by Earth-directed CME (NASA DONKI).
@@ -3656,6 +3810,9 @@ function animate() {
     } else {
         uniforms.u_flare_intensity.value = 0.0;
     }
+
+    // Update 3D magnetic field lines
+    if (window._bFieldUpdate) window._bFieldUpdate();
 
     // Rotate region marker group with the photosphere texture
     const t = uniforms.u_time.value;
