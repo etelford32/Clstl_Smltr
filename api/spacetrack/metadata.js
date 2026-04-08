@@ -83,6 +83,7 @@ export default async function handler(request) {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `identity=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`,
+            signal: AbortSignal.timeout(15000),
         });
         if (!loginRes.ok) throw new Error(`Login failed: HTTP ${loginRes.status}`);
 
@@ -92,6 +93,7 @@ export default async function handler(request) {
         // Query metadata
         const dataRes = await fetch(`${ST_QUERY}${queryPath}`, {
             headers: { Cookie: cookies },
+            signal: AbortSignal.timeout(20000),
         });
         if (!dataRes.ok) throw new Error(`Query failed: HTTP ${dataRes.status}`);
 

@@ -48,15 +48,7 @@ const CACHE_SERIES  = 300;  // history changes slowly; allow slightly longer CDN
 /** Normalize solar wind speed to 0–1 (250–900 km/s range). */
 const speedNorm = v => Math.max(0, Math.min(1, (v - 250) / 650));
 
-/** Linear OLS slope over an array of numbers. */
-function fmt.linearSlope(vals) {
-    const n = vals.length;
-    if (n < 2) return 0;
-    let sx = 0, sy = 0, sxy = 0, sxx = 0;
-    vals.forEach((y, x) => { sx += x; sy += y; sxy += x * y; sxx += x * x; });
-    const denom = n * sxx - sx * sx;
-    return denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
-}
+// linearSlope imported from middleware.js (fmt.linearSlope)
 
 function trendDirection(slope) {
     if (slope >  SLOPE_STEADY) return 'RISING';

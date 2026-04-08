@@ -61,7 +61,8 @@ let _sbService = null;
 export async function getSupabaseService() {
     if (_sbService) return _sbService;
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_KEY;
+    // Support both new (SUPABASE_SECRET_KEY) and legacy (SUPABASE_SERVICE_KEY) env var names
+    const serviceKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
     if (!url || !serviceKey) throw new Error('Supabase service credentials not configured');
     // Use raw fetch instead of SDK to stay Edge-compatible
     _sbService = {
@@ -128,14 +129,15 @@ export async function authenticateUser(request) {
     if (!token) return null;
 
     const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !anonKey) return null;
+    // Support both new (SUPABASE_PUBLISHABLE_KEY) and legacy (SUPABASE_ANON_KEY) env var names
+    const pubKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !pubKey) return null;
 
     try {
         // Validate JWT via Supabase Auth API (server-side verification)
         const res = await fetch(`${url}/auth/v1/user`, {
             headers: {
-                'apikey': anonKey,
+                'apikey': pubKey,
                 'Authorization': `Bearer ${token}`,
             },
         });

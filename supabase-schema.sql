@@ -148,7 +148,7 @@ CREATE POLICY "Users can manage own locations"
 --
 -- Next steps:
 --   1. Enable Email Auth: Dashboard → Authentication → Providers → Email
---   2. Set SUPABASE_ANON_KEY in js/supabase-config.js
---   3. Set SUPABASE_SERVICE_KEY in Vercel env vars
+--   2. Set SUPABASE_PUBLISHABLE_KEY in js/supabase-config.js (from Dashboard → API Keys)
+--   3. Set SUPABASE_SECRET_KEY in Vercel env vars (secret key — NEVER expose in frontend)
 --   4. Test: create a user via signup.html → check user_profiles table
 -- ══════════════════════════════════════════════════════════════════

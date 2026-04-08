@@ -2,38 +2,46 @@
  * supabase-config.js — Supabase client configuration
  *
  * Uses the Supabase JS client (@supabase/supabase-js) loaded from CDN.
- * The anon key is safe to include in frontend code — it only grants
+ * The publishable key is safe to include in frontend code — it only grants
  * access permitted by Row Level Security (RLS) policies.
  *
  * ── Setup Required ──────────────────────────────────────────────────────────
- *   1. Set SUPABASE_URL and SUPABASE_ANON_KEY below (from Supabase dashboard)
- *   2. Add SUPABASE_SERVICE_KEY to Vercel env vars (for server-side API routes)
+ *   1. Set SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY below
+ *      (from Supabase Dashboard → Settings → API Keys)
+ *   2. Add SUPABASE_SECRET_KEY to Vercel env vars (for server-side API routes)
+ *      — NEVER expose the secret key in frontend code
  *   3. Enable Email Auth in Supabase Dashboard → Authentication → Providers
- *   4. Run the SQL migration in supabase-schema.sql to create tables
+ *   4. Run the SQL migrations in order:
+ *      supabase-schema.sql → supabase-admin.sql → supabase-analytics.sql → supabase-billing.sql
  *
- * ── Architecture ─────────────────────────────────────────────────────────────
- *   Frontend (js/auth.js):
- *     Uses supabase.auth.signInWithPassword() — handles JWT, refresh tokens
- *     Session stored in localStorage by Supabase client automatically
+ * ── Key Types (New Supabase API Keys) ───────────────────────────────────────
+ *   Publishable key (sb_publishable_...):
+ *     Safe for browser/frontend. Respects RLS policies.
+ *     Used here for: auth, user profile reads, analytics inserts.
  *
- *   Edge Functions (api/auth/*):
- *     Use SUPABASE_SERVICE_KEY for admin operations (user management)
- *     Never exposed to the browser
+ *   Secret key (sb_secret_...):
+ *     Bypasses RLS — full access to all tables.
+ *     Used ONLY in Vercel Edge Functions (api/_lib/stripe.js, webhook handler).
+ *     Set as SUPABASE_SECRET_KEY env var in Vercel — never in code.
  *
  * ── Security ─────────────────────────────────────────────────────────────────
- *   - The anon key + RLS = safe for frontend. Users can only access their own data.
- *   - The service_role key bypasses RLS — NEVER expose it to the browser.
+ *   - Publishable key + RLS = safe for frontend. Users can only access their own data.
+ *   - Secret key bypasses RLS — NEVER expose it to the browser.
  *   - Password hashing is handled by Supabase Auth (bcrypt, server-side).
  *   - JWT tokens are stored in localStorage by the Supabase client, with
  *     automatic refresh before expiry.
  */
 
 // ── Supabase Project Credentials ─────────────────────────────────────────────
-// Replace these with your project's values from:
-//   Supabase Dashboard → Settings → API
+// From Supabase Dashboard → Settings → API Keys
 
 export const SUPABASE_URL  = 'https://aijsboodkivnhzfstvdq.supabase.co';
-export const SUPABASE_ANON_KEY = 'sb_publishable_1cC1HAb6xTdX3ZafOM-_mg_DrftgLA5';
+
+/** Publishable key — safe for frontend (enforces RLS). */
+export const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_1cC1HAb6xTdX3ZafOM-_mg_DrftgLA5';
+
+// Legacy alias — some modules still reference SUPABASE_ANON_KEY
+export const SUPABASE_ANON_KEY = SUPABASE_PUBLISHABLE_KEY;
 
 // CDN URL for the Supabase JS client
 const SUPABASE_CDN = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
@@ -49,7 +57,7 @@ export async function getSupabase() {
 
     try {
         const { createClient } = await import(SUPABASE_CDN);
-        _client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        _client = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
             auth: {
                 autoRefreshToken: true,
                 persistSession: true,
@@ -78,7 +86,10 @@ export async function getSupabase() {
  * Check if Supabase is configured (anon key is not placeholder).
  */
 export function isConfigured() {
-    return SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE' && SUPABASE_ANON_KEY.length > 20;
+    const key = SUPABASE_PUBLISHABLE_KEY;
+    if (!key || key.length < 20) return false;
+    if (key === 'YOUR_ANON_KEY_HERE' || key === 'YOUR_PUBLISHABLE_KEY_HERE') return false;
+    return true;
 }
 
 /**
@@ -96,7 +107,7 @@ export async function testConnection() {
         client = await getSupabase();
         checks.push({ name: 'Client Init', ok: true, ms: Math.round(performance.now() - t0) });
     } catch (err) {
-        checks.push({ name: 'Client Init', ok: false, ms: Math.round(performance.now() - t0), detail: err.message });
+        checks.push({ name: 'Client Init', ok: false, ms: Math.round(performance.now() - t0), detail: String(err.message || 'unknown').slice(0, 200) });
         return { ok: false, checks };
     }
 
@@ -107,7 +118,7 @@ export async function testConnection() {
         if (error) throw error;
         checks.push({ name: 'Auth Service', ok: true, ms: Math.round(performance.now() - t1) });
     } catch (err) {
-        checks.push({ name: 'Auth Service', ok: false, ms: Math.round(performance.now() - t1), detail: err.message });
+        checks.push({ name: 'Auth Service', ok: false, ms: Math.round(performance.now() - t1), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     // 3. Database connectivity (query user_profiles — RLS will scope it, but the request itself tests the DB)
@@ -117,7 +128,7 @@ export async function testConnection() {
         if (error) throw error;
         checks.push({ name: 'Database', ok: true, ms: Math.round(performance.now() - t2) });
     } catch (err) {
-        checks.push({ name: 'Database', ok: false, ms: Math.round(performance.now() - t2), detail: err.message });
+        checks.push({ name: 'Database', ok: false, ms: Math.round(performance.now() - t2), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     // 4. REST endpoint reachability (lightweight ping to the PostgREST root)
@@ -125,11 +136,11 @@ export async function testConnection() {
     try {
         const resp = await fetch(`${SUPABASE_URL}/rest/v1/`, {
             method: 'HEAD',
-            headers: { 'apikey': SUPABASE_ANON_KEY },
+            headers: { 'apikey': SUPABASE_PUBLISHABLE_KEY },
         });
         checks.push({ name: 'REST API', ok: resp.ok, ms: Math.round(performance.now() - t3), detail: resp.ok ? undefined : `HTTP ${resp.status}` });
     } catch (err) {
-        checks.push({ name: 'REST API', ok: false, ms: Math.round(performance.now() - t3), detail: err.message });
+        checks.push({ name: 'REST API', ok: false, ms: Math.round(performance.now() - t3), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     const ok = checks.every(c => c.ok);
