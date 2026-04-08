@@ -175,6 +175,7 @@ export default async function handler(request) {
     try {
         const res = await fetch(celestrakUrl, {
             headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
+            signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
         text = await res.text();

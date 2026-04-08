@@ -55,28 +55,12 @@ function activityLabel(sfu) {
 /** Normalise F10.7 to [0,1] over the typical solar-cycle range 65–300 sfu. */
 const fluxNorm = v => Math.max(0, Math.min(1, (v - 65) / 235));
 
-// ── Trend / slope ─────────────────────────────────────────────────────────────
-function fmt.linearSlope(vals) {
-    const n = vals.length;
-    if (n < 2) return 0;
-    let sx = 0, sy = 0, sxy = 0, sxx = 0;
-    vals.forEach((y, x) => { sx += x; sy += y; sxy += x * y; sxx += x * x; });
-    const denom = n * sxx - sx * sx;
-    return denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
-}
+// linearSlope and freshness imported from middleware.js (fmt.linearSlope, fmt.freshness)
 
 function trendDirection(slope) {
     if (slope >  1.5) return 'RISING';
     if (slope < -1.5) return 'FALLING';
     return 'STEADY';
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function fmt.freshness(ageHours) {
-    if (ageHours == null) return 'missing';
-    if (ageHours < 26)    return 'fresh';   // updated within ~1 day + buffer
-    if (ageHours < 72)    return 'stale';
-    return 'expired';
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────

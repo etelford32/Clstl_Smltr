@@ -107,7 +107,7 @@ export async function testConnection() {
         client = await getSupabase();
         checks.push({ name: 'Client Init', ok: true, ms: Math.round(performance.now() - t0) });
     } catch (err) {
-        checks.push({ name: 'Client Init', ok: false, ms: Math.round(performance.now() - t0), detail: err.message });
+        checks.push({ name: 'Client Init', ok: false, ms: Math.round(performance.now() - t0), detail: String(err.message || 'unknown').slice(0, 200) });
         return { ok: false, checks };
     }
 
@@ -118,7 +118,7 @@ export async function testConnection() {
         if (error) throw error;
         checks.push({ name: 'Auth Service', ok: true, ms: Math.round(performance.now() - t1) });
     } catch (err) {
-        checks.push({ name: 'Auth Service', ok: false, ms: Math.round(performance.now() - t1), detail: err.message });
+        checks.push({ name: 'Auth Service', ok: false, ms: Math.round(performance.now() - t1), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     // 3. Database connectivity (query user_profiles — RLS will scope it, but the request itself tests the DB)
@@ -128,7 +128,7 @@ export async function testConnection() {
         if (error) throw error;
         checks.push({ name: 'Database', ok: true, ms: Math.round(performance.now() - t2) });
     } catch (err) {
-        checks.push({ name: 'Database', ok: false, ms: Math.round(performance.now() - t2), detail: err.message });
+        checks.push({ name: 'Database', ok: false, ms: Math.round(performance.now() - t2), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     // 4. REST endpoint reachability (lightweight ping to the PostgREST root)
@@ -140,7 +140,7 @@ export async function testConnection() {
         });
         checks.push({ name: 'REST API', ok: resp.ok, ms: Math.round(performance.now() - t3), detail: resp.ok ? undefined : `HTTP ${resp.status}` });
     } catch (err) {
-        checks.push({ name: 'REST API', ok: false, ms: Math.round(performance.now() - t3), detail: err.message });
+        checks.push({ name: 'REST API', ok: false, ms: Math.round(performance.now() - t3), detail: String(err.message || 'unknown').slice(0, 200) });
     }
 
     const ok = checks.every(c => c.ok);
