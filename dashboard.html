@@ -553,6 +553,24 @@ function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').repla
   badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
   badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
 
+  // ── Checkout success banner ─────────────────────────────────────────────
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('checkout') === 'success') {
+    const newPlan = _esc(urlParams.get('plan') || 'your new plan');
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:rgba(0,200,100,.12);border:1px solid rgba(0,200,100,.3);border-radius:8px;padding:14px 20px;margin-bottom:16px;color:#4eff91;font-weight:600;font-size:.9rem;text-align:center';
+    banner.textContent = `Welcome to ${newPlan.charAt(0).toUpperCase() + newPlan.slice(1)}! Your subscription is now active.`;
+    document.querySelector('main')?.prepend(banner);
+    // Refresh profile to get updated plan from Supabase
+    auth.fetchProfile().then(() => {
+      const updatedPlan = (auth.getUser()?.plan || plan).toLowerCase();
+      badge.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1);
+      badge.className = 'plan-badge plan-' + (updatedPlan === 'advanced' ? 'advanced' : updatedPlan === 'basic' ? 'basic' : 'free');
+    });
+    setTimeout(() => banner.remove(), 8000);
+    history.replaceState(null, '', 'dashboard.html');
+  }
+
   // Admin badge (nav.js handles the nav admin badge, this is for dashboard-specific display)
   if (auth.isAdmin()) {
     const adminNote = document.createElement('span');

@@ -224,3 +224,84 @@ export const fmt = {
         return 'expired';
     },
 };
+
+// ── Plan Enforcement ─────────────────────────────────────────────────────────
+
+/** Plan tier levels for comparison: free < basic < advanced < admin */
+const PLAN_TIERS = { free: 0, basic: 1, advanced: 2, admin: 99 };
+
+/**
+ * Server-side plan validation. Checks the user's actual plan in Supabase
+ * (not localStorage) and verifies it meets the required tier.
+ *
+ * Usage in an endpoint:
+ *   const planCheck = await validateUserPlan(request, 'basic');
+ *   if (!planCheck.ok) return planCheck.response;
+ *   // User has basic or higher — proceed
+ *
+ * Requires SUPABASE_URL + SUPABASE_ANON_KEY env vars.
+ *
+ * @param {Request} request - incoming request with Authorization header
+ * @param {string} requiredPlan - minimum plan needed ('basic' or 'advanced')
+ * @returns {{ ok: boolean, plan?: string, userId?: string, response?: Response }}
+ */
+export async function validateUserPlan(request, requiredPlan = 'basic') {
+    const requiredTier = PLAN_TIERS[requiredPlan] ?? 1;
+
+    // Extract JWT
+    const auth = request.headers.get('Authorization') ?? '';
+    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    if (!token) {
+        return { ok: false, response: errorResp(ErrorCodes.UNAUTHORIZED, 'Authentication required') };
+    }
+
+    const sbUrl = (typeof process !== 'undefined' && process.env?.SUPABASE_URL) ?? '';
+    const sbKey = (typeof process !== 'undefined' && process.env?.SUPABASE_ANON_KEY) ?? '';
+    if (!sbUrl || !sbKey) {
+        // If Supabase isn't configured, fall back to PRO token check
+        return { ok: validateProToken(request), response: errorResp(ErrorCodes.PRO_REQUIRED, 'Upgrade required') };
+    }
+
+    try {
+        // Validate JWT with Supabase Auth server
+        const userRes = await fetch(`${sbUrl}/auth/v1/user`, {
+            headers: { 'apikey': sbKey, 'Authorization': `Bearer ${token}` },
+            signal: AbortSignal.timeout(5000),
+        });
+        if (!userRes.ok) {
+            return { ok: false, response: errorResp(ErrorCodes.UNAUTHORIZED, 'Invalid session') };
+        }
+        const user = await userRes.json();
+        if (!user?.id) {
+            return { ok: false, response: errorResp(ErrorCodes.UNAUTHORIZED, 'Invalid session') };
+        }
+
+        // Fetch actual plan from user_profiles (server-side, not localStorage)
+        const profileRes = await fetch(
+            `${sbUrl}/rest/v1/user_profiles?select=plan,role&id=eq.${user.id}`,
+            {
+                headers: { 'apikey': sbKey, 'Authorization': `Bearer ${token}` },
+                signal: AbortSignal.timeout(5000),
+            }
+        );
+        if (!profileRes.ok) {
+            return { ok: false, response: errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Could not verify plan') };
+        }
+        const profiles = await profileRes.json();
+        const profile = Array.isArray(profiles) ? profiles[0] : null;
+        const userPlan = profile?.plan || 'free';
+        const userRole = profile?.role || 'user';
+
+        // Admin/superadmin always have access
+        const userTier = (userRole === 'admin' || userRole === 'superadmin')
+            ? 99
+            : (PLAN_TIERS[userPlan] ?? 0);
+
+        if (userTier >= requiredTier) {
+            return { ok: true, plan: userPlan, userId: user.id };
+        }
+        return { ok: false, plan: userPlan, response: errorResp(ErrorCodes.PRO_REQUIRED, `Requires ${requiredPlan} plan or higher`) };
+    } catch (_) {
+        return { ok: false, response: errorResp(ErrorCodes.UPSTREAM_UNAVAILABLE, 'Plan verification failed') };
+    }
+}
