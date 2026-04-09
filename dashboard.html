@@ -321,6 +321,85 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── IMPACT SCORE ── -->
+  <div class="card" id="impact-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Space Weather Impact Score</span>
+      <span class="card-link" id="impact-updated" style="font-size:.62rem;color:var(--muted)">Waiting for data...</span>
+    </div>
+    <div class="card-body">
+
+      <!-- Score ring + label -->
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px">
+        <div style="position:relative;width:90px;height:90px;flex-shrink:0">
+          <svg viewBox="0 0 36 36" style="width:90px;height:90px;transform:rotate(-90deg)">
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="3"/>
+            <circle id="impact-ring" cx="18" cy="18" r="15.5" fill="none" stroke="#44cc88"
+                    stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4"
+                    stroke-linecap="round" style="transition:stroke-dashoffset .8s,stroke .5s"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div id="impact-number" style="font-size:1.6rem;font-weight:800;color:#e8f4ff;line-height:1">0</div>
+            <div style="font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">/ 100</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <div id="impact-label" style="font-size:1rem;font-weight:700;margin-bottom:4px">Quiet</div>
+          <div id="impact-desc" style="font-size:.72rem;color:var(--muted);line-height:1.5">
+            Conditions are calm. No significant space weather expected.
+          </div>
+        </div>
+      </div>
+
+      <!-- Component breakdown bars -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-bottom:16px">
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Geomagnetic</span><span id="impact-geo-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-geo-bar" style="height:100%;width:0%;background:#4488ff;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Solar</span><span id="impact-sol-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-sol-bar" style="height:100%;width:0%;background:#ff8800;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">CME Threat</span><span id="impact-cme-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-cme-bar" style="height:100%;width:0%;background:#ff4444;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Location Risk</span><span id="impact-loc-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-loc-bar" style="height:100%;width:0%;background:#cc44ff;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+      </div>
+
+      <!-- Time-windowed forecast probabilities -->
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">
+        Storm Probability Forecast
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-variant-numeric:tabular-nums">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Window</th>
+              <th style="text-align:right;padding:4px 8px;color:#44cc88;font-weight:600">G1+ (Kp5)</th>
+              <th style="text-align:right;padding:4px 8px;color:#ffcc00;font-weight:600">G2+ (Kp6)</th>
+              <th style="text-align:right;padding:4px 8px;color:#ff4444;font-weight:600">G3+ (Kp7)</th>
+              <th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="impact-forecast-tbody">
+            <tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Recurrence + cycle context -->
+      <div id="impact-context" style="margin-top:10px;font-size:.68rem;color:var(--muted);line-height:1.6;display:none">
+        <span id="impact-recurrence"></span> &middot; <span id="impact-cycle"></span>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── ALERT PREFERENCES ── -->
   <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
     <div class="card-head">
@@ -532,6 +611,7 @@ import { geocodeQuery, saveUserLocation, loadUserLocation,
          clearUserLocation, auroraVisibility } from './js/user-location.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { AlertEngine } from './js/alert-engine.js';
+import { ImpactScoreEngine } from './js/impact-score.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1215,6 +1295,111 @@ initAll();
         // Start alert engine (only for subscribers)
         engine.start();
     }
+}
+
+// ── Impact Score Engine ──────────────────────────────────────────────────────
+{
+    const impactEngine = new ImpactScoreEngine().start();
+
+    const _el = id => document.getElementById(id);
+
+    function _pctColor(p) {
+        if (p >= 0.6) return '#ff4444';
+        if (p >= 0.3) return '#ffaa00';
+        return '#44cc88';
+    }
+
+    function _confBadge(c) {
+        const col = c === 'high' ? '#44cc88' : c === 'medium' ? '#ffcc00' : '#ff6666';
+        return `<span style="color:${col};font-weight:600">${c}</span>`;
+    }
+
+    window.addEventListener('impact-score-update', ev => {
+        const r = ev.detail;
+        if (!r) return;
+        const { now: n } = r;
+
+        // ── Score ring ──────────────────────────────────────────────────────
+        const ring   = _el('impact-ring');
+        const numEl  = _el('impact-number');
+        const lblEl  = _el('impact-label');
+        const descEl = _el('impact-desc');
+        const updEl  = _el('impact-updated');
+
+        if (ring) {
+            const circumference = 97.4;  // 2πr where r=15.5
+            ring.style.strokeDashoffset = circumference * (1 - n.score / 100);
+            ring.style.stroke = n.color;
+        }
+        if (numEl)  numEl.textContent = n.score;
+        if (lblEl)  { lblEl.textContent = n.label; lblEl.style.color = n.color; }
+        if (updEl)  updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+        // Description based on score
+        if (descEl) {
+            if (n.score >= 80)      descEl.textContent = 'Extreme space weather. Multiple hazards active — aurora, radio blackouts, GPS disruption, power grid risk.';
+            else if (n.score >= 60) descEl.textContent = 'Severe conditions. Significant geomagnetic disturbance — aurora visible at lower latitudes, HF radio degraded.';
+            else if (n.score >= 40) descEl.textContent = 'Elevated activity. Storm conditions developing — aurora possible at your latitude, minor GPS effects.';
+            else if (n.score >= 20) descEl.textContent = 'Moderate activity. Some geomagnetic disturbance — aurora hunters should monitor conditions.';
+            else                    descEl.textContent = 'Conditions are calm. No significant space weather expected.';
+        }
+
+        // ── Component bars ──────────────────────────────────────────────────
+        const c = n.components;
+        const _bar = (prefix, val) => {
+            const barEl = _el(prefix + '-bar');
+            const valEl = _el(prefix + '-val');
+            if (barEl) barEl.style.width = Math.round(val) + '%';
+            if (valEl) valEl.textContent  = Math.round(val);
+        };
+        _bar('impact-geo', c.geomagnetic);
+        _bar('impact-sol', c.solar);
+        _bar('impact-cme', c.cme);
+        _bar('impact-loc', c.location);
+
+        // ── Forecast table ──────────────────────────────────────────────────
+        const tbody = _el('impact-forecast-tbody');
+        if (tbody && r.h24) {
+            const rows = [
+                { label: 'Next 24h', d: r.h24 },
+                { label: 'Next 3 days', d: r.d3 },
+                { label: 'Next 7 days', d: r.d7 },
+            ];
+            tbody.innerHTML = rows.map(({ label, d }) => {
+                if (!d) return '';
+                const cmeTag = d.cmeArrival ? ' <span style="color:#ff8800;font-size:.6rem">CME</span>' : '';
+                return `<tr style="border-bottom:1px solid rgba(255,255,255,.03)">
+                    <td style="padding:5px 8px;color:#cdd">${label}${cmeTag}</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG1)};font-weight:600">${Math.round(d.pG1 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG2)};font-weight:600">${Math.round(d.pG2 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG3)};font-weight:600">${Math.round(d.pG3 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px">${_confBadge(d.confidence)}</td>
+                </tr>`;
+            }).join('');
+        } else if (tbody && r.insufficient_data) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating Kp history for forecast model...</td></tr>';
+        }
+
+        // ── Recurrence + cycle context ──────────────────────────────────────
+        const ctxEl = _el('impact-context');
+        if (ctxEl && r.d7) {
+            ctxEl.style.display = '';
+            const rec = r.d7.recurrence;
+            const cyc = r.d7.cycle;
+            const recEl = _el('impact-recurrence');
+            const cycEl = _el('impact-cycle');
+            if (recEl) {
+                recEl.textContent = rec?.signal === 'none'
+                    ? 'No 27-day recurrence detected'
+                    : `27-day echo: ${rec.signal} (r=${rec.corr27})`;
+            }
+            if (cycEl && cyc) {
+                cycEl.textContent = cyc.phaseName === 'maximum'
+                    ? `SC${cyc.cycleNumber} near maximum (SSN≈${cyc.smoothedSSN})`
+                    : `SC${cyc.cycleNumber} ${cyc.phaseName} — ${Math.abs(cyc.yearsToMax).toFixed(1)}yr ${cyc.yearsToMax > 0 ? 'to' : 'past'} max`;
+            }
+        }
+    });
 }
 </script>
 </body>
