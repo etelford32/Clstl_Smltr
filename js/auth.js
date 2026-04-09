@@ -136,7 +136,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, email_alerts, alert_cooldown_min')
+                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, email_alerts, email_min_severity, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -187,6 +187,7 @@ class AuthManager {
                     temp_high_f:           data.temp_high_f,
                     temp_low_f:            data.temp_low_f,
                     email_alerts:          data.email_alerts          ?? false,
+                    email_min_severity:    data.email_min_severity    ?? 'warning',
                     alert_cooldown_min:    data.alert_cooldown_min    ?? 60,
                 };
                 this._persistToStorage();
@@ -467,7 +468,7 @@ class AuthManager {
                     'notify_collision', 'notify_recurrence',
                     'aurora_kp_threshold', 'storm_g_threshold', 'flare_class_threshold',
                     'conjunction_threshold_km', 'temp_high_f', 'temp_low_f',
-                    'email_alerts', 'alert_cooldown_min',
+                    'email_alerts', 'email_min_severity', 'alert_cooldown_min',
                 ];
                 for (const k of profileFields) {
                     if (updates[k] !== undefined) row[k] = updates[k];

@@ -617,6 +617,7 @@ export class AlertEngine {
         this.recent.unshift(alert);
         if (this.recent.length > this._maxRecent) this.recent.pop();
         this._writeAlertToDB(alert);
+        this._sendEmail(alert);
         this._dispatch(alert);
         console.info(`[AlertEngine] Fired: ${alert.title} — ${c.dist_km.toFixed(1)} km`);
     }
@@ -694,6 +695,7 @@ export class AlertEngine {
             if (this.recent.length > this._maxRecent) this.recent.pop();
 
             this._writeAlertToDB(alert);
+            this._sendEmail(alert);
             this._dispatch(alert);
 
             console.info(`[AlertEngine] Fired: ${alert.title}`);
@@ -734,6 +736,56 @@ export class AlertEngine {
             });
         } catch (e) {
             console.warn('[AlertEngine] DB write failed:', e.message);
+        }
+    }
+
+    /**
+     * Send alert email via /api/alerts/email edge function.
+     * Only sends if user has email_alerts enabled and severity meets minimum.
+     */
+    async _sendEmail(alert) {
+        const prefs = auth.getAlertPrefs();
+        if (!prefs.email_alerts) return;
+
+        // Check minimum severity filter
+        const minSev = prefs.email_min_severity ?? 'warning';
+        const sevOrder = { info: 0, warning: 1, critical: 2 };
+        if ((sevOrder[alert.severity] ?? 0) < (sevOrder[minSev] ?? 1)) return;
+
+        // Get Supabase JWT for authentication
+        const sb = await this._getSb();
+        if (!sb) return;
+        let token;
+        try {
+            const { data } = await sb.auth.getSession();
+            token = data?.session?.access_token;
+        } catch { return; }
+        if (!token) return;
+
+        try {
+            const res = await fetch('/api/alerts/email', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    title:      alert.title,
+                    body:       alert.body,
+                    severity:   alert.severity,
+                    alert_type: alert.alert_type,
+                }),
+            });
+            if (res.ok) {
+                console.debug('[AlertEngine] Email sent for:', alert.title);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                if (err.error !== 'not_configured') {
+                    console.warn('[AlertEngine] Email failed:', err.error, err.detail);
+                }
+            }
+        } catch (e) {
+            console.debug('[AlertEngine] Email send error:', e.message);
         }
     }
 

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     temp_low_f DOUBLE PRECISION,
     -- Alert delivery
     email_alerts BOOLEAN DEFAULT false,
+    email_min_severity TEXT DEFAULT 'warning' CHECK (email_min_severity IN ('info', 'warning', 'critical')),
     alert_cooldown_min INTEGER DEFAULT 60,
     -- Usage tracking
     api_calls_today INTEGER DEFAULT 0,
