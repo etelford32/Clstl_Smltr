@@ -1,16 +1,18 @@
 /**
  * alert-engine.js — Client-side alert trigger engine
  *
- * Evaluates live space weather data against the user's alert preferences
- * and fires in-app notifications when thresholds are crossed.
+ * Evaluates live space weather + local weather data against user alert
+ * preferences and fires in-app notifications when thresholds are crossed.
  *
  * ── Architecture ─────────────────────────────────────────────────────────────
  *  1. Listens to 'swpc-update' events (solar wind, Kp, flares, CMEs)
- *  2. Checks each alert type against user preferences from auth.getAlertPrefs()
- *  3. Applies cooldown to prevent re-firing the same alert type repeatedly
- *  4. Plan-gates: basic tier gets Tier 1 alerts, advanced gets all
- *  5. Writes to Supabase alert_history table (if connected)
- *  6. Dispatches 'user-alert' CustomEvent for the notification bell
+ *  2. Listens to 'cme-propagation-update' events (DBM physics predictions)
+ *  3. Polls Open-Meteo every 30 min for user-location weather (temp, cloud, sun)
+ *  4. Checks each alert type against user preferences from auth.getAlertPrefs()
+ *  5. Applies cooldown to prevent re-firing the same alert type repeatedly
+ *  6. Plan-gates: basic tier gets Tier 1 alerts, advanced gets all
+ *  7. Writes to Supabase alert_history table (if connected)
+ *  8. Dispatches 'user-alert' CustomEvent for the notification bell
  *
  * ── Usage ────────────────────────────────────────────────────────────────────
  *  import { AlertEngine } from './js/alert-engine.js';
@@ -20,6 +22,55 @@
 
 import { auth } from './auth.js';
 import { getSupabase, isConfigured } from './supabase-config.js';
+import { loadUserLocation } from './user-location.js';
+
+// ── Open-Meteo point forecast ────────────────────────────────────────────────
+
+const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
+const WEATHER_POLL_MS = 30 * 60_000;  // 30 minutes
+
+/**
+ * Fetch point forecast for a lat/lon from Open-Meteo (free, no API key).
+ * Returns current conditions + today/tomorrow high/low + cloud cover + sunrise/sunset.
+ *
+ * @param {number} lat
+ * @param {number} lon
+ * @returns {Promise<object|null>}
+ */
+async function fetchPointWeather(lat, lon) {
+    const params = new URLSearchParams({
+        latitude: lat.toFixed(4),
+        longitude: lon.toFixed(4),
+        current: 'temperature_2m,cloud_cover,is_day,weather_code',
+        daily: 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
+        temperature_unit: 'fahrenheit',
+        timezone: 'auto',
+        forecast_days: '2',
+    });
+    try {
+        const res = await fetch(`${OPEN_METEO_URL}?${params}`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data.error) return null;
+        return {
+            temp_f:      data.current?.temperature_2m,
+            cloud_cover: data.current?.cloud_cover,        // 0-100%
+            is_day:      data.current?.is_day,              // 1 = day, 0 = night
+            // Today's forecast
+            today_high:  data.daily?.temperature_2m_max?.[0],
+            today_low:   data.daily?.temperature_2m_min?.[0],
+            sunrise:     data.daily?.sunrise?.[0],          // ISO string
+            sunset:      data.daily?.sunset?.[0],
+            // Tomorrow's forecast
+            tomorrow_high: data.daily?.temperature_2m_max?.[1],
+            tomorrow_low:  data.daily?.temperature_2m_min?.[1],
+            fetched_at:  Date.now(),
+        };
+    } catch (e) {
+        console.warn('[AlertEngine] Weather fetch failed:', e.message);
+        return null;
+    }
+}
 
 // ── Flare class helpers ──────────────────────────────────────────────────────
 
@@ -53,15 +104,13 @@ function kpToGScale(kp) {
 // ── R-scale from X-ray flux ──────────────────────────────────────────────────
 
 function fluxToRScale(flux) {
-    if (flux >= 2e-3) return 5;   // X20+
-    if (flux >= 1e-3) return 4;   // X10
-    if (flux >= 1e-4) return 3;   // X1
-    if (flux >= 5e-5) return 2;   // M5
-    if (flux >= 1e-5) return 1;   // M1
+    if (flux >= 2e-3) return 5;
+    if (flux >= 1e-3) return 4;
+    if (flux >= 1e-4) return 3;
+    if (flux >= 5e-5) return 2;
+    if (flux >= 1e-5) return 1;
     return 0;
 }
-
-// ── Severity mapping ─────────────────────────────────────────────────────────
 
 function gScaleSeverity(g) {
     if (g >= 4) return 'critical';
@@ -76,13 +125,144 @@ function gScaleSeverity(g) {
  *   key       — matches the notify_* preference field
  *   type      — alert_type enum in alert_history table
  *   tier      — 'basic' or 'advanced' plan requirement
- *   evaluate  — fn(state, prefs) → { fire, title, body, severity, metadata } | null
+ *   source    — 'swpc' (evaluated on swpc-update) or 'weather' (evaluated on weather poll)
+ *   evaluate  — fn(state, prefs, ctx) → { fire, title, body, severity, metadata } | null
+ *               ctx = { weather, cmeEvents } — extra data from weather/CME sources
  */
 const ALERT_DEFS = [
+    // ── Temperature (first alert users configure) ────────────────────────────
+    {
+        key: 'notify_temperature',
+        type: 'storm',  // reuse type; alert_history only has: conjunction|aurora|storm|flare|pass
+        tier: 'basic',
+        source: 'weather',
+        evaluate(_state, prefs, ctx) {
+            const w = ctx.weather;
+            if (!w) return null;
+            const hi = prefs.temp_high_f;
+            const lo = prefs.temp_low_f;
+            // Check tomorrow's forecast high/low against thresholds
+            const forecastHi = w.tomorrow_high ?? w.today_high;
+            const forecastLo = w.tomorrow_low  ?? w.today_low;
+            const city = loadUserLocation()?.city ?? 'your location';
+
+            if (hi != null && forecastHi != null && forecastHi >= hi) {
+                return {
+                    fire: true,
+                    title: 'High Temperature Alert',
+                    body: `Forecast high of ${Math.round(forecastHi)}°F at ${city} exceeds your ${Math.round(hi)}°F threshold.`,
+                    severity: forecastHi >= hi + 10 ? 'critical' : 'warning',
+                    metadata: { forecast_high: forecastHi, threshold: hi, city },
+                };
+            }
+            if (lo != null && forecastLo != null && forecastLo <= lo) {
+                return {
+                    fire: true,
+                    title: 'Low Temperature Alert',
+                    body: `Forecast low of ${Math.round(forecastLo)}°F at ${city} is below your ${Math.round(lo)}°F threshold.`,
+                    severity: forecastLo <= lo - 10 ? 'critical' : 'warning',
+                    metadata: { forecast_low: forecastLo, threshold: lo, city },
+                };
+            }
+            return null;
+        },
+    },
+
+    // ── Aurora — multi-factor (Kp + location + cloud cover + darkness) ───────
+    {
+        key: 'notify_aurora',
+        type: 'aurora',
+        tier: 'basic',
+        source: 'swpc',
+        evaluate(state, prefs, ctx) {
+            const kp = state.kp ?? 0;
+            const threshold = prefs.aurora_kp_threshold ?? 5;
+            if (kp < threshold) return null;
+
+            const loc = loadUserLocation() ?? auth.getUser()?.location;
+            if (!loc) {
+                // No location — fire generic alert
+                return {
+                    fire: true,
+                    title: 'Aurora Alert',
+                    body: `Kp ${kp.toFixed(1)} — aurora activity elevated. Set your location for personalized forecasts.`,
+                    severity: kp >= 7 ? 'critical' : 'warning',
+                    metadata: { kp },
+                };
+            }
+
+            // Check if aurora oval reaches user's latitude
+            const magLat = Math.abs(loc.lat) + 3;  // rough geomagnetic offset
+            const boundary = 72 - kp * (17 / 9);
+            if (magLat < boundary) return null;
+
+            // Multi-factor scoring
+            const factors = [];
+            let score = 60;  // base: Kp above threshold + oval reaches location
+
+            // Cloud cover factor (from weather data)
+            const w = ctx.weather;
+            if (w && w.cloud_cover != null) {
+                if (w.cloud_cover <= 25) {
+                    score += 20;
+                    factors.push('clear skies');
+                } else if (w.cloud_cover <= 50) {
+                    score += 10;
+                    factors.push('partly cloudy');
+                } else if (w.cloud_cover <= 75) {
+                    factors.push('mostly cloudy');
+                } else {
+                    score -= 15;
+                    factors.push('overcast — viewing unlikely');
+                }
+            }
+
+            // Darkness factor
+            if (w && w.is_day != null) {
+                if (w.is_day === 0) {
+                    score += 15;
+                    factors.push('dark sky');
+                } else {
+                    // Check if sunset is within 2 hours
+                    if (w.sunset) {
+                        const sunsetMs = new Date(w.sunset).getTime();
+                        const hoursToSunset = (sunsetMs - Date.now()) / 3.6e6;
+                        if (hoursToSunset > 0 && hoursToSunset <= 2) {
+                            score += 5;
+                            factors.push(`sunset in ${Math.round(hoursToSunset * 60)}min`);
+                        } else {
+                            score -= 10;
+                            factors.push('still daylight');
+                        }
+                    }
+                }
+            }
+
+            // Kp strength bonus
+            if (kp >= 7) score += 10;
+            if (kp >= 8) score += 10;
+
+            score = Math.max(0, Math.min(100, score));
+
+            const city = loc.city ?? 'your location';
+            const factorStr = factors.length ? ` (${factors.join(', ')})` : '';
+
+            return {
+                fire: true,
+                title: `Aurora Alert — ${score}% visibility`,
+                body: `Kp ${kp.toFixed(1)} — aurora likely visible from ${city}${factorStr}. Look ${loc.lat >= 0 ? 'north' : 'south'} for green/purple curtains.`,
+                severity: score >= 75 ? 'critical' : 'warning',
+                metadata: { kp, score, cloud_cover: w?.cloud_cover, is_day: w?.is_day, city },
+            };
+        },
+    },
+
+    // ── Geomagnetic Storm ────────────────────────────────────────────────────
     {
         key: 'notify_storm',
         type: 'storm',
         tier: 'basic',
+        source: 'swpc',
         evaluate(state, prefs) {
             const kp = state.kp ?? 0;
             const g = kpToGScale(kp);
@@ -97,10 +277,13 @@ const ALERT_DEFS = [
             };
         },
     },
+
+    // ── Solar Flare ──────────────────────────────────────────────────────────
     {
         key: 'notify_flare',
         type: 'flare',
         tier: 'basic',
+        source: 'swpc',
         evaluate(state, prefs) {
             const flux = state.xray_flux ?? 0;
             const threshold = prefs.flare_class_threshold ?? 'M';
@@ -115,59 +298,85 @@ const ALERT_DEFS = [
             };
         },
     },
-    {
-        key: 'notify_aurora',
-        type: 'aurora',
-        tier: 'basic',
-        evaluate(state, prefs) {
-            const kp = state.kp ?? 0;
-            const threshold = prefs.aurora_kp_threshold ?? 5;
-            if (kp < threshold) return null;
-            // Location-aware: check if aurora is visible at user's location
-            const loc = auth.getUser()?.location;
-            if (loc) {
-                const magLat = Math.abs(loc.lat) + 3;  // rough geomagnetic offset
-                const boundary = 72 - kp * (17 / 9);
-                if (magLat < boundary) return null;  // aurora oval doesn't reach user
-            }
-            const city = loc?.city ?? 'your location';
-            return {
-                fire: true,
-                title: 'Aurora Alert',
-                body: `Kp ${kp.toFixed(1)} — aurora may be visible from ${city}. Look north for green/purple curtains.`,
-                severity: kp >= 7 ? 'critical' : 'warning',
-                metadata: { kp, location: city },
-            };
-        },
-    },
+
+    // ── CME Earth-Directed (enhanced with DBM propagation) ───────────────────
     {
         key: 'notify_cme',
         type: 'storm',
         tier: 'basic',
-        evaluate(state) {
+        source: 'swpc',
+        evaluate(state, _prefs, ctx) {
             const cme = state.earth_directed_cme;
             if (!cme) return null;
-            const eta = state.cme_eta_hours;
-            const etaStr = eta != null
-                ? (eta > 24 ? `${(eta / 24).toFixed(1)} days` : `${Math.round(eta)} hours`)
-                : 'unknown';
+
+            // Try to get enhanced data from CmePropagator (DBM physics)
+            const cmeEvents = ctx.cmeEvents ?? [];
+            const dbmEvent = cmeEvents.find(e => e.earthDirected && e.hoursUntilArrival() > -6);
+
+            let etaStr, impactStr = '', severity = 'warning';
+
+            if (dbmEvent) {
+                // Use physics-based prediction
+                const etaH = dbmEvent.hoursUntilArrival();
+                etaStr = etaH > 24 ? `${(etaH / 24).toFixed(1)} days` : `${Math.round(etaH)} hours`;
+                const impact = dbmEvent.impact;
+                if (impact) {
+                    impactStr = ` Predicted impact: G${impact.g_scale} ${impact.severity}, Kp ${impact.kp_max?.toFixed(1)}, Dst ${impact.dst_min} nT.`;
+                    if (impact.g_scale >= 3) severity = 'critical';
+                }
+                if (dbmEvent.sheath?.isShock) {
+                    impactStr += ` Mach ${dbmEvent.sheath.mach.toFixed(1)} shock.`;
+                }
+            } else {
+                // Fallback to basic ballistic estimate from SWPC feed
+                const eta = state.cme_eta_hours;
+                etaStr = eta != null
+                    ? (eta > 24 ? `${(eta / 24).toFixed(1)} days` : `${Math.round(eta)} hours`)
+                    : 'unknown';
+                if ((cme.speed ?? 400) > 1000) severity = 'critical';
+            }
+
             return {
                 fire: true,
                 title: 'Earth-Directed CME',
-                body: `A coronal mass ejection is heading toward Earth. Speed: ${cme.speed ?? '?'} km/s. ETA: ${etaStr}.`,
-                severity: (cme.speed ?? 400) > 1000 ? 'critical' : 'warning',
-                metadata: { speed: cme.speed, eta_hours: eta },
+                body: `A coronal mass ejection is heading toward Earth. Speed: ${cme.speed ?? '?'} km/s. ETA: ${etaStr}.${impactStr}`,
+                severity,
+                metadata: {
+                    speed: cme.speed,
+                    eta: etaStr,
+                    dbm: !!dbmEvent,
+                    g_scale: dbmEvent?.impact?.g_scale,
+                },
             };
         },
     },
+
+    // ── Satellite Pass (ISS by default) ──────────────────────────────────────
+    {
+        key: 'notify_sat_pass',
+        type: 'pass',
+        tier: 'basic',
+        source: 'weather',  // evaluated on weather poll cycle (not every 60s swpc tick)
+        evaluate(_state, _prefs, ctx) {
+            // Satellite pass prediction requires TLE data + SGP4 propagation.
+            // For Phase 2, we provide a stub that will be wired to the Rust SGP4
+            // module in a future phase. The architecture is ready; the evaluate
+            // function will be filled in when the pass prediction service is built.
+            // For now, this returns null (no-op).
+            return null;
+        },
+    },
+
+    // ── Radio Blackout (advanced) ────────────────────────────────────────────
     {
         key: 'notify_radio_blackout',
         type: 'flare',
         tier: 'advanced',
+        source: 'swpc',
         evaluate(state) {
             const flux = state.xray_flux ?? 0;
             const r = fluxToRScale(flux);
-            if (r < 2) return null;  // R2+ only
+            if (r < 2) return null;
             return {
                 fire: true,
                 title: `R${r} Radio Blackout`,
@@ -177,15 +386,17 @@ const ALERT_DEFS = [
             };
         },
     },
+
+    // ── GPS Degradation (advanced) ───────────────────────────────────────────
     {
         key: 'notify_gps',
         type: 'storm',
         tier: 'advanced',
+        source: 'swpc',
         evaluate(state) {
             const kp = state.kp ?? 0;
             if (kp < 6) return null;
-            const loc = auth.getUser()?.location;
-            // GPS degradation is worse at equatorial and polar latitudes
+            const loc = loadUserLocation() ?? auth.getUser()?.location;
             const lat = Math.abs(loc?.lat ?? 45);
             const isVulnerable = lat > 60 || lat < 25;
             if (kp < 7 && !isVulnerable) return null;
@@ -198,17 +409,19 @@ const ALERT_DEFS = [
             };
         },
     },
+
+    // ── Power Grid Risk (advanced) ───────────────────────────────────────────
     {
         key: 'notify_power_grid',
         type: 'storm',
         tier: 'advanced',
+        source: 'swpc',
         evaluate(state) {
             const kp = state.kp ?? 0;
             const g = kpToGScale(kp);
-            if (g < 4) return null;  // G4+ only
-            const loc = auth.getUser()?.location;
+            if (g < 4) return null;
+            const loc = loadUserLocation() ?? auth.getUser()?.location;
             const lat = Math.abs(loc?.lat ?? 45);
-            // Power grid GIC risk is primarily high-latitude
             if (lat < 40 && g < 5) return null;
             return {
                 fire: true,
@@ -239,19 +452,36 @@ export class AlertEngine {
         /** Supabase client (lazy) */
         this._sb = null;
 
+        /** Cached weather data for user's location */
+        this._weather = null;
+
+        /** Cached CME propagation events */
+        this._cmeEvents = [];
+
+        /** Weather polling timer */
+        this._weatherTimer = null;
+
+        /** Last SWPC state (for weather-triggered re-evaluation) */
+        this._lastSwpcState = null;
+
         this._onSwpc = this._onSwpc.bind(this);
+        this._onCme  = this._onCme.bind(this);
     }
 
-    /** Start listening to swpc-update events. */
+    /** Start listening to events and polling weather. */
     start() {
         window.addEventListener('swpc-update', this._onSwpc);
-        // Also load recent alerts from Supabase on start
+        window.addEventListener('cme-propagation-update', this._onCme);
         this._loadRecentFromDB();
+        this._pollWeather();
+        this._weatherTimer = setInterval(() => this._pollWeather(), WEATHER_POLL_MS);
         return this;
     }
 
     stop() {
         window.removeEventListener('swpc-update', this._onSwpc);
+        window.removeEventListener('cme-propagation-update', this._onCme);
+        clearInterval(this._weatherTimer);
     }
 
     /** Get unread count. */
@@ -263,7 +493,6 @@ export class AlertEngine {
     markRead(alertId) {
         const alert = this.recent.find(a => a.id === alertId);
         if (alert) alert.read = true;
-        // Persist to DB
         this._markReadInDB(alertId);
         this._dispatch();
     }
@@ -277,16 +506,44 @@ export class AlertEngine {
 
     // ── Private ──────────────────────────────────────────────────────────────
 
+    _onCme(ev) {
+        this._cmeEvents = ev.detail?.events ?? [];
+    }
+
     _onSwpc(ev) {
         if (!auth.isSignedIn() || !auth.canUseAlerts()) return;
+        this._lastSwpcState = ev.detail;
+        this._evaluateAlerts(ev.detail, 'swpc');
+    }
 
-        const state = ev.detail;
+    /** Fetch weather for user's location and evaluate weather-triggered alerts. */
+    async _pollWeather() {
+        if (!auth.isSignedIn() || !auth.canUseAlerts()) return;
+
+        const loc = loadUserLocation() ?? auth.getUser()?.location;
+        if (!loc?.lat || !loc?.lon) return;
+
+        const w = await fetchPointWeather(loc.lat, loc.lon);
+        if (w) {
+            this._weather = w;
+            console.debug('[AlertEngine] Weather updated:', Math.round(w.temp_f) + '°F, cloud ' + w.cloud_cover + '%');
+            // Evaluate weather-triggered alerts
+            this._evaluateAlerts(this._lastSwpcState ?? {}, 'weather');
+        }
+    }
+
+    /** Run all alert definitions of the given source type. */
+    _evaluateAlerts(state, source) {
         const prefs = auth.getAlertPrefs();
         const cooldownMs = (prefs.alert_cooldown_min ?? 60) * 60_000;
         const isAdvanced = auth.canUseAdvancedAlerts();
         const now = Date.now();
+        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents };
 
         for (const def of ALERT_DEFS) {
+            // Source filter: only evaluate defs matching the current trigger source
+            if (def.source && def.source !== source) continue;
+
             // Plan gate
             if (def.tier === 'advanced' && !isAdvanced) continue;
 
@@ -300,7 +557,7 @@ export class AlertEngine {
             // Evaluate
             let result;
             try {
-                result = def.evaluate(state, prefs);
+                result = def.evaluate(state, prefs, ctx);
             } catch (e) {
                 console.warn(`[AlertEngine] Error evaluating ${def.key}:`, e.message);
                 continue;
@@ -325,10 +582,7 @@ export class AlertEngine {
             this.recent.unshift(alert);
             if (this.recent.length > this._maxRecent) this.recent.pop();
 
-            // Persist to DB
             this._writeAlertToDB(alert);
-
-            // Dispatch event for bell UI
             this._dispatch(alert);
 
             console.info(`[AlertEngine] Fired: ${alert.title}`);
@@ -397,8 +651,6 @@ export class AlertEngine {
         const sb = await this._getSb();
         if (!sb) return;
         try {
-            // alert_history.id is a UUID from DB; in-memory IDs are synthetic
-            // Only update if it looks like a UUID
             if (alertId?.length === 36 && alertId.includes('-')) {
                 await sb.from('alert_history').update({ read: true }).eq('id', alertId);
             }
