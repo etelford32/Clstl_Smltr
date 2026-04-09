@@ -195,10 +195,13 @@ export function computeIonoLayers(f107 = 150, kp = 2, xray = 1e-8, szaDeg = 50) 
 
 const _AURORA_VERT = /* glsl */`
     attribute float a_height;
+    attribute float a_phi;
     varying float   vHeight;
+    varying float   vPhi;
 
     void main() {
         vHeight     = a_height;
+        vPhi        = a_phi;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     }
 `;
@@ -212,12 +215,10 @@ const _AURORA_FRAG = /* glsl */`
     uniform float u_substorm_t;
 
     varying float vHeight;
+    varying float vPhi;
 
     void main() {
         // ── Altitude-dependent spectral colours ──────────────────────────────
-        // Low  : green   O(¹S) 557.7 nm  (100–200 km)
-        // Mid  : cyan-green transition
-        // High : purple  N₂⁺ + O(¹D) blending above 200 km
         vec3 lowCol  = vec3(0.03, 1.00, 0.28);
         vec3 midCol  = vec3(0.10, 0.82, 0.55);
         vec3 highCol = vec3(0.62, 0.14, 0.88);
@@ -229,24 +230,28 @@ const _AURORA_FRAG = /* glsl */`
             col = mix(midCol, highCol, (vHeight - 0.45) / 0.55);
         }
 
+        // ── Curtain fold structure — azimuthal brightness variation ───────────
+        float fold1 = 0.55 + 0.45 * sin(vPhi * 8.0 + u_time * 1.2);
+        float fold2 = 0.70 + 0.30 * sin(vPhi * 14.0 - u_time * 2.5 + 1.0);
+
         // ── Curtain shimmer — rapid vertical streaks ──────────────────────────
-        float s1 = 0.60 + 0.40 * sin(u_time * 5.4  + vHeight * 14.0);
+        float s1 = 0.60 + 0.40 * sin(u_time * 5.4  + vHeight * 14.0 + vPhi * 3.0);
         float s2 = 0.72 + 0.28 * sin(u_time * 9.1  + vHeight * 23.0 + 1.57);
-        float s3 = 0.80 + 0.20 * sin(u_time * 14.0 + vHeight *  8.0 + 0.88);
+        float s3 = 0.80 + 0.20 * sin(u_time * 14.0 + vHeight *  8.0 + vPhi * 5.0);
 
         // ── Vertical intensity profile: bright band in middle, fade at edges ──
-        float vFade = sin(vHeight * 3.14159) * (0.50 + 0.50 * pow(1.0 - vHeight, 0.6));
+        float vFade = sin(vHeight * 3.14159) * (0.55 + 0.45 * pow(1.0 - vHeight, 0.5));
 
         // ── Kp + storm driving ────────────────────────────────────────────────
-        float quiet  = 0.12 + u_kp_norm * 0.60;
-        float stormy = u_bz_south * 0.38;
-        float base   = clamp(quiet + stormy, 0.0, 1.2);
+        float quiet  = 0.15 + u_kp_norm * 0.65;
+        float stormy = u_bz_south * 0.42;
+        float base   = clamp(quiet + stormy, 0.0, 1.3);
 
         // ── Substorm flash: brief surge (ripple up curtain height) ────────────
         float sbRipple = u_substorm_t * (0.5 + 0.5 * sin(u_time * 10.0 + vHeight * 10.0));
-        float sbBoost  = sbRipple * 0.65;
+        float sbBoost  = sbRipple * 0.70;
 
-        float alpha  = clamp(vFade * base * s1 * s2 * s3 + sbBoost, 0.0, 0.90);
+        float alpha  = clamp(vFade * base * fold1 * fold2 * s1 * s2 * s3 + sbBoost, 0.0, 0.92);
 
         gl_FragColor = vec4(col, alpha);
     }
@@ -279,19 +284,130 @@ function shueProfile(r0, alpha, nPts = 64) {
     return pts;
 }
 
-function buildShueMesh(r0, alpha, color, opacity, wireframe = false) {
-    const profile = shueProfile(r0, alpha);
-    const geo     = new THREE.LatheGeometry(profile, wireframe ? 36 : 48);
-    const mat     = new THREE.MeshBasicMaterial({
-        color,
+// ── Fresnel surface shaders for magnetopause / bow shock ─────────────────────
+const _FRESNEL_VERT = /* glsl */`
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+        vNormal  = normalize(normalMatrix * normal);
+        vViewDir = normalize(-mvPos.xyz);
+        gl_Position = projectionMatrix * mvPos;
+    }
+`;
+
+const _FRESNEL_FRAG = /* glsl */`
+    precision highp float;
+    uniform vec3  u_color;
+    uniform vec3  u_rim_color;
+    uniform float u_base_alpha;
+    uniform float u_rim_power;
+    uniform float u_time;
+    uniform float u_pulse;
+    varying vec3 vNormal;
+    varying vec3 vViewDir;
+    void main() {
+        float NdV = abs(dot(normalize(vNormal), normalize(vViewDir)));
+        float fresnel = pow(1.0 - NdV, u_rim_power);
+        vec3 col = mix(u_color, u_rim_color, fresnel);
+        float pulse = 1.0 + u_pulse * 0.12 * sin(u_time * 0.8);
+        float alpha = (u_base_alpha + fresnel * 0.35) * pulse;
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.85));
+    }
+`;
+
+/**
+ * Build a Fresnel-rimmed Shue magnetopause or bow shock surface.
+ * Single clean mesh — no wireframe overlay.
+ */
+function buildFresnelShue(r0, alpha, color, rimColor, baseAlpha, rimPower = 3.0) {
+    const profile = shueProfile(r0, alpha, 80);
+    const geo     = new THREE.LatheGeometry(profile, 64);
+    const mat     = new THREE.ShaderMaterial({
+        uniforms: {
+            u_color:      { value: new THREE.Color(color) },
+            u_rim_color:  { value: new THREE.Color(rimColor) },
+            u_base_alpha: { value: baseAlpha },
+            u_rim_power:  { value: rimPower },
+            u_time:       { value: 0 },
+            u_pulse:      { value: 0 },
+        },
+        vertexShader:   _FRESNEL_VERT,
+        fragmentShader: _FRESNEL_FRAG,
         transparent: true,
-        opacity,
-        side:        THREE.DoubleSide,
         depthWrite:  false,
-        wireframe,
+        side:        THREE.DoubleSide,
+        blending:    THREE.AdditiveBlending,
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.renderOrder = wireframe ? 5 : 4;
+    mesh.renderOrder = 4;
+    return mesh;
+}
+
+// ── Volumetric Van Allen belt shader ─────────────────────────────────────────
+const _BELT_VERT = /* glsl */`
+    varying vec3 vLocalPos;
+    varying vec2 vUv;
+    void main() {
+        vLocalPos = position;
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+`;
+
+const _BELT_FRAG = /* glsl */`
+    precision highp float;
+    uniform vec3  u_color;
+    uniform float u_opacity;
+    uniform float u_time;
+    uniform float u_noise_scale;
+    varying vec3 vLocalPos;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+    float vnoise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = hash(i), b = hash(i + vec2(1,0)),
+              c = hash(i + vec2(0,1)), d = hash(i + vec2(1,1));
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
+
+    void main() {
+        // Radial density: bright at tube center, fades at edges
+        float tubeR = length(vec2(vUv.x - 0.5, vUv.y - 0.5)) * 2.0;
+        float density = exp(-tubeR * tubeR * 2.0);
+        // Non-uniform patches via noise
+        float n = vnoise(vLocalPos.xz * u_noise_scale + u_time * 0.1);
+        float patchiness = 0.6 + 0.4 * n;
+        float alpha = u_opacity * density * patchiness;
+        // Breathing animation
+        alpha *= 0.85 + 0.15 * sin(u_time * 1.5 + vLocalPos.x * 3.0);
+        gl_FragColor = vec4(u_color, clamp(alpha, 0.0, 0.75));
+    }
+`;
+
+function buildVolumetricTorus(radius, tube, color, opacity, noiseScale = 2.0) {
+    const geo = new THREE.TorusGeometry(radius, tube, 24, 96);
+    const mat = new THREE.ShaderMaterial({
+        uniforms: {
+            u_color:       { value: new THREE.Color(color) },
+            u_opacity:     { value: opacity },
+            u_time:        { value: 0 },
+            u_noise_scale: { value: noiseScale },
+        },
+        vertexShader:   _BELT_VERT,
+        fragmentShader: _BELT_FRAG,
+        transparent: true,
+        depthWrite:  false,
+        side:        THREE.DoubleSide,
+        blending:    THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 3;
     return mesh;
 }
 
@@ -424,68 +540,87 @@ function buildPolarCusps(r0, alpha) {
  * @returns {THREE.Mesh}
  */
 function buildAuroralCurtains(kp, isNorth) {
-    const N_SEG  = 120;     // segments around the oval
+    const N_SEG  = 180;     // segments around the oval (smoother)
     const R_BASE = 1.02;    // curtain bottom (just above surface, Re)
-    const R_TOP  = 1.82;    // curtain top  (~5 000 km altitude, exaggerated Re)
+    const R_TOP  = 2.50;    // curtain top (~9600 km altitude, visually dramatic)
+    const N_LAYERS = 3;     // concentric curtain layers for volumetric depth
 
     // Auroral oval colatitude θ from pole: expands equatorward during storms
-    const auroralLat_deg = Math.max(50, 67 - kp * 1.5);   // geographic latitude of oval centre
-    const colatDeg       = 90 - auroralLat_deg;            // colatitude from pole
-    const theta          = colatDeg * DEG;                  // radians
-    const sign           = isNorth ? 1 : -1;               // pole direction
+    const auroralLat_deg = Math.max(50, 67 - kp * 1.5);
+    const colatDeg       = 90 - auroralLat_deg;
+    const theta          = colatDeg * DEG;
+    const sign           = isNorth ? 1 : -1;
     const sinT           = Math.sin(theta);
     const cosT           = Math.cos(theta);
 
-    // Build interleaved (base, top) vertex ring + height attribute
-    const posArr = [];
-    const hArr   = [];
-    const idxArr = [];
+    // Build multi-layer curtain mesh
+    const group = new THREE.Group();
+    group.name = isNorth ? 'aurora_N' : 'aurora_S';
 
-    for (let k = 0; k <= N_SEG; k++) {
-        const phi  = (k / N_SEG) * Math.PI * 2;
-        const cosP = Math.cos(phi);
-        const sinP = Math.sin(phi);
+    for (let layer = 0; layer < N_LAYERS; layer++) {
+        // Each layer at a slightly different radial offset for depth
+        const rOffset = layer * 0.015;
+        const rBase = R_BASE + rOffset;
+        const rTop  = R_TOP  + rOffset;
 
-        // Base vertex at R_BASE along the polar unit vector
-        posArr.push(R_BASE * sinT * cosP, R_BASE * cosT * sign, R_BASE * sinT * sinP);
-        hArr.push(0.0);
+        const posArr = [];
+        const hArr   = [];
+        const phiArr = [];
+        const idxArr = [];
 
-        // Top vertex at R_TOP along the same polar unit vector
-        posArr.push(R_TOP * sinT * cosP, R_TOP * cosT * sign, R_TOP * sinT * sinP);
-        hArr.push(1.0);
+        for (let k = 0; k <= N_SEG; k++) {
+            const phi  = (k / N_SEG) * Math.PI * 2;
+            const cosP = Math.cos(phi);
+            const sinP = Math.sin(phi);
+
+            // Base vertex
+            posArr.push(rBase * sinT * cosP, rBase * cosT * sign, rBase * sinT * sinP);
+            hArr.push(0.0);
+            phiArr.push(phi);
+
+            // Top vertex
+            posArr.push(rTop * sinT * cosP, rTop * cosT * sign, rTop * sinT * sinP);
+            hArr.push(1.0);
+            phiArr.push(phi);
+        }
+
+        for (let k = 0; k < N_SEG; k++) {
+            const b0 = k * 2,       t0 = k * 2 + 1;
+            const b1 = (k + 1) * 2, t1 = (k + 1) * 2 + 1;
+            idxArr.push(b0, t0, t1,  b0, t1, b1);
+        }
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
+        geo.setAttribute('a_height', new THREE.BufferAttribute(new Float32Array(hArr),   1));
+        geo.setAttribute('a_phi',    new THREE.BufferAttribute(new Float32Array(phiArr), 1));
+        geo.setIndex(idxArr);
+
+        // Outer layers are slightly fainter for depth illusion
+        const layerFade = 1.0 - layer * 0.2;
+
+        const mat = new THREE.ShaderMaterial({
+            uniforms: {
+                u_time:       { value: 0 },
+                u_kp_norm:    { value: Math.min(1, kp / 9) * layerFade },
+                u_bz_south:   { value: 0 },
+                u_substorm_t: { value: 0 },
+            },
+            vertexShader:   _AURORA_VERT,
+            fragmentShader: _AURORA_FRAG,
+            transparent:    true,
+            depthWrite:     false,
+            side:           THREE.DoubleSide,
+            blending:       THREE.AdditiveBlending,
+        });
+
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.renderOrder = 9 + layer;
+        group.add(mesh);
     }
 
-    // Quad strip: base[k]=k*2, top[k]=k*2+1, base[k+1]=(k+1)*2, top[k+1]=(k+1)*2+1
-    for (let k = 0; k < N_SEG; k++) {
-        const b0 = k * 2,       t0 = k * 2 + 1;
-        const b1 = (k + 1) * 2, t1 = (k + 1) * 2 + 1;
-        idxArr.push(b0, t0, t1,  b0, t1, b1);
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posArr), 3));
-    geo.setAttribute('a_height', new THREE.BufferAttribute(new Float32Array(hArr),   1));
-    geo.setIndex(idxArr);
-
-    const mat = new THREE.ShaderMaterial({
-        uniforms: {
-            u_time:       { value: 0 },
-            u_kp_norm:    { value: Math.min(1, kp / 9) },
-            u_bz_south:   { value: 0 },
-            u_substorm_t: { value: 0 },
-        },
-        vertexShader:   _AURORA_VERT,
-        fragmentShader: _AURORA_FRAG,
-        transparent:    true,
-        depthWrite:     false,
-        side:           THREE.DoubleSide,
-        blending:       THREE.AdditiveBlending,
-    });
-
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name        = isNorth ? 'aurora_N' : 'aurora_S';
-    mesh.renderOrder = 9;
-    return mesh;
+    group.renderOrder = 9;
+    return group;
 }
 
 function buildTorus(radius, tube, color, opacity, segments = 48) {
@@ -527,32 +662,31 @@ function buildDipoleFieldLines(lShells, nLongs, color, opacity) {
     const PTS   = 80;
 
     for (const L of lShells) {
-        // Opacity falls off for outer field lines (farther = fainter)
         const lOp = opacity * (1.0 - (L - lShells[0]) / (lShells[lShells.length - 1] - lShells[0] + 1) * 0.5);
 
         for (let j = 0; j < nLongs; j++) {
             const phi = (j / nLongs) * Math.PI * 2;
-            const pts = [];
+            const rawPts = [];
 
             for (let i = 0; i <= PTS; i++) {
-                // Colatitude 8° to 172° (avoid poles where r → 0)
                 const theta = (8 + (i / PTS) * 164) * DEG;
                 const sinT  = Math.sin(theta);
                 const r     = L * sinT * sinT;
-
-                // Skip points inside Earth (r < 1.0 Re)
                 if (r < 1.02) continue;
-
-                pts.push(new THREE.Vector3(
+                rawPts.push(new THREE.Vector3(
                     r * sinT * Math.cos(phi),
                     r * Math.cos(theta),
                     r * sinT * Math.sin(phi),
                 ));
             }
 
-            if (pts.length < 4) continue;
+            if (rawPts.length < 4) continue;
 
-            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            // Smooth with CatmullRom spline for cleaner curves
+            const curve = new THREE.CatmullRomCurve3(rawPts, false, 'catmullrom', 0.5);
+            const smoothPts = curve.getPoints(120);
+
+            const geo = new THREE.BufferGeometry().setFromPoints(smoothPts);
             const mat = new THREE.LineBasicMaterial({
                 color,
                 transparent: true,
@@ -688,29 +822,30 @@ export class MagnetosphereEngine {
         const sep     = sw.sep_storm_level ?? (sw.particles?.sep_storm_level ?? 0);
         const pdyn    = 1.67e-6 * Math.max(0.5, density) * Math.max(200, speed) ** 2; // nPa
 
-        // ── Magnetopause wire — blue (north Bz) ↔ red-violet (south Bz) ───
+        // ── Magnetopause Fresnel — colour shifts blue→magenta with southward Bz ──
         const bzSouth = Math.max(0, Math.min(1, -bz / 30));  // 0=north, 1=−30 nT
-        if (this._mpWire) {
-            // Blue → violet → magenta as southward Bz increases
-            const r = Math.round(100 + bzSouth * 155);
-            const g = Math.round(120 - bzSouth * 70);
-            const b = Math.round(255 - bzSouth * 55);
-            this._mpWire.material.color.setRGB(r / 255, g / 255, b / 255);
-            // Opacity also scales with Bz southward (more pronounced reconnection visual)
-            this._mpWire.material.opacity = 0.30 + bzSouth * 0.35;
-        }
-        if (this._mpFill) {
-            this._mpFill.material.opacity = 0.06 + bzSouth * 0.08;
+        if (this._mpFresnel) {
+            const u = this._mpFresnel.material.uniforms;
+            u.u_time.value = t;
+            // Shift rim colour from cyan to magenta during reconnection
+            u.u_rim_color.value.setRGB(
+                0.40 + bzSouth * 0.55,
+                0.73 - bzSouth * 0.40,
+                1.0  - bzSouth * 0.15,
+            );
+            u.u_base_alpha.value = 0.04 + bzSouth * 0.08;
+            u.u_pulse.value = bzSouth;
         }
 
-        // ── Bow shock wire — intensity pulses with dynamic pressure ────────
-        const pdynNorm = Math.min(1, pdyn / 6);  // 6 nPa = strong compression — hoisted to tick() scope
-        if (this._bsWire) {
-            const pulse    = 0.5 + 0.5 * Math.sin(t * 0.8 + pdynNorm * 3);
-            this._bsWire.material.opacity = 0.12 + pdynNorm * 0.22 + pulse * 0.08;
-            // Hotter orange → yellow at high pressure
-            const g = Math.round(136 + pdynNorm * 80);
-            this._bsWire.material.color.setRGB(1.0, g / 255, 0.2 - pdynNorm * 0.1);
+        // ── Bow shock Fresnel — intensity pulses with dynamic pressure ──────
+        const pdynNorm = Math.min(1, pdyn / 6);
+        if (this._bsFresnel) {
+            const u = this._bsFresnel.material.uniforms;
+            u.u_time.value = t;
+            u.u_base_alpha.value = 0.02 + pdynNorm * 0.06;
+            u.u_pulse.value = pdynNorm;
+            // Hotter colour at high pressure
+            u.u_rim_color.value.setRGB(1.0, 0.67 + pdynNorm * 0.25, 0.27 - pdynNorm * 0.1);
         }
 
         // Hoist kpNorm / sepNorm so all new blocks below can use them
@@ -767,17 +902,21 @@ export class MagnetosphereEngine {
             });
         }
 
-        // ── Radiation belt glow pulses + storm enhancement ─────────────────
-        if (this._outerBelt) {
-            this._outerBelt.material.opacity =
-                0.16 + 0.07 * Math.sin(t * 1.7) + kpNorm * 0.12 + sepNorm * 0.08;
+        // ── Radiation belt volumetric shader updates ──────────────────────
+        if (this._outerBelt?.material?.uniforms) {
+            const u = this._outerBelt.material.uniforms;
+            u.u_time.value = t;
+            u.u_opacity.value = 0.22 + kpNorm * 0.14 + sepNorm * 0.10;
         }
-        if (this._innerBelt) {
-            this._innerBelt.material.opacity =
-                0.22 + 0.06 * Math.sin(t * 2.3 + 1.1) + sepNorm * 0.16;
+        if (this._innerBelt?.material?.uniforms) {
+            const u = this._innerBelt.material.uniforms;
+            u.u_time.value = t;
+            u.u_opacity.value = 0.28 + sepNorm * 0.18;
         }
-        if (this._plasmasphere) {
-            this._plasmasphere.material.opacity = 0.08 + 0.03 * Math.sin(t * 0.9 + 0.5);
+        if (this._plasmasphere?.material?.uniforms) {
+            const u = this._plasmasphere.material.uniforms;
+            u.u_time.value = t;
+            u.u_opacity.value = 0.12 + 0.04 * Math.sin(t * 0.9 + 0.5);
         }
 
         // ── Dipole field lines — colour shifts quiet blue → storm magenta ──
@@ -795,30 +934,32 @@ export class MagnetosphereEngine {
         }
 
         // ── Ring current — scales with |Dst| (storm main phase injection) ──
-        if (this._ringCurrent) {
+        if (this._ringCurrent?.material?.uniforms) {
             const dstNorm = Math.min(1, Math.max(0, -dst) / 200);
-            this._ringCurrent.material.opacity =
-                dstNorm * 0.28 + 0.03 * Math.sin(t * 1.1) * dstNorm;
+            const u = this._ringCurrent.material.uniforms;
+            u.u_time.value = t;
+            u.u_opacity.value = dstNorm * 0.30;
         }
 
         // ── Aurora curtains — update GLSL uniforms every frame ────────────────
         // Substorm flash decays with τ ≈ 8 s; aurora pulsation driven by Kp + Bz.
         this._substormT = Math.max(0, this._substormT - dt * 0.125);  // 8 s decay
 
-        if (this._auroraN?.material?.uniforms) {
-            const U = this._auroraN.material.uniforms;
-            U.u_time.value       = t;
-            U.u_kp_norm.value    = kpNorm;
-            U.u_bz_south.value   = bzSouth;
-            U.u_substorm_t.value = this._substormT;
-        }
-        if (this._auroraS?.material?.uniforms) {
-            const U = this._auroraS.material.uniforms;
-            U.u_time.value       = t;
-            U.u_kp_norm.value    = kpNorm;
-            U.u_bz_south.value   = bzSouth;
-            U.u_substorm_t.value = this._substormT;
-        }
+        // Aurora is now a group of multi-layer curtain meshes
+        const _updateAuroraGroup = (group) => {
+            if (!group) return;
+            group.traverse(child => {
+                if (child.isMesh && child.material?.uniforms) {
+                    const U = child.material.uniforms;
+                    U.u_time.value       = t;
+                    U.u_kp_norm.value    = kpNorm;
+                    U.u_bz_south.value   = bzSouth;
+                    U.u_substorm_t.value = this._substormT;
+                }
+            });
+        };
+        _updateAuroraGroup(this._auroraN);
+        _updateAuroraGroup(this._auroraS);
 
         // ── Plasma sheet — brightens with dynamic pressure + substorm flash ────
         if (this._plasmaSheet) {
@@ -842,12 +983,11 @@ export class MagnetosphereEngine {
         this._layers[name] = v;
         switch (name) {
             case 'magnetopause':
-                this._mpFill?.traverse(o => { if (o.isMesh || o.isLine) o.visible = v; });
-                this._mpWire?.traverse(o => { if (o.isMesh || o.isLine) o.visible = v; });
+                if (this._mpFresnel) this._mpFresnel.visible = v;
                 if (this._tail) this._tail.visible = v;
                 break;
             case 'bowShock':
-                if (this._bsWire) this._bsWire.visible = v;
+                if (this._bsFresnel) this._bsFresnel.visible = v;
                 break;
             case 'belts':
                 if (this._innerBelt) this._innerBelt.visible = v;
@@ -910,17 +1050,15 @@ export class MagnetosphereEngine {
         this._magnetosheath = buildMagnetosheath(bs.r0, bs.alpha);
         this._solarGroup.add(this._magnetosheath);
 
-        // Magnetopause fill (semi-transparent blue-purple)
-        this._mpFill = buildShueMesh(r0, alpha, 0x334477, 0.09, false);
-        this._solarGroup.add(this._mpFill);
+        // Magnetopause — clean Fresnel-rimmed surface (no wireframe)
+        this._mpFresnel = buildFresnelShue(r0, alpha, 0x334488, 0x66bbff, 0.04, 3.0);
+        this._mpFresnel.renderOrder = 4;
+        this._solarGroup.add(this._mpFresnel);
 
-        // Magnetopause wireframe overlay
-        this._mpWire = buildShueMesh(r0, alpha, 0x5577bb, 0.45, true);
-        this._solarGroup.add(this._mpWire);
-
-        // Bow shock wireframe (orange, wider and more blunt)
-        this._bsWire = buildShueMesh(bs.r0, bs.alpha, 0xee8833, 0.22, true);
-        this._solarGroup.add(this._bsWire);
+        // Bow shock — Fresnel-rimmed, orange-gold palette, higher segments
+        this._bsFresnel = buildFresnelShue(bs.r0, bs.alpha, 0x884422, 0xffaa44, 0.02, 2.5);
+        this._bsFresnel.renderOrder = 3;
+        this._solarGroup.add(this._bsFresnel);
 
         // Dayside reconnection X-line glow (active only when Bz southward)
         this._reconnXLine = buildReconnXLine(r0);
@@ -963,12 +1101,11 @@ export class MagnetosphereEngine {
 
         // Apply layer visibility
         if (!this._layers.magnetopause) {
-            this._mpFill.visible      = false;
-            this._mpWire.visible      = false;
+            this._mpFresnel.visible   = false;
             this._tail.visible        = false;
             this._plasmaSheet.visible = false;
         }
-        if (!this._layers.bowShock)      this._bsWire.visible       = false;
+        if (!this._layers.bowShock)      this._bsFresnel.visible    = false;
         if (!this._layers.magnetosheath) this._magnetosheath.visible = false;
         if (!this._layers.cusps)         this._polarCusps.visible    = false;
         if (!this._layers.reconnection)  this._reconnXLine.visible   = false;
@@ -984,28 +1121,26 @@ export class MagnetosphereEngine {
         }
 
         // Inner Van Allen belt (proton belt, 1.2–2.2 Re, fairly stable)
-        // Slightly compressed during major storms (Kp > 7)
-        const innerR    = 1.55;
-        const innerTube = 0.22;
-        this._innerBelt = buildTorus(innerR, innerTube, 0x3366ff, 0.28);
+        // Volumetric shader with non-uniform density patches
+        const innerR    = 1.55 - Math.min(0.1, kp / 90);   // slight compression at high Kp
+        const innerTube = 0.28;
+        this._innerBelt = buildVolumetricTorus(innerR, innerTube, 0x3366ff, 0.35, 3.0);
         this._eqGroup.add(this._innerBelt);
 
         // Outer Van Allen belt (electron belt, Kp-dependent boundary)
-        // Outer edge ≈ plasmapause; inner edge ≈ 2.5 Re
         const outerR    = Math.max(2.6, (2.5 + lpp) / 2);
-        const outerTube = Math.max(0.5, (lpp - 2.5) / 2 * 0.8);
-        this._outerBelt = buildTorus(outerR, outerTube, 0xff7722, 0.20);
+        const outerTube = Math.max(0.6, (lpp - 2.5) / 2 * 0.85);
+        this._outerBelt = buildVolumetricTorus(outerR, outerTube, 0xff7722, 0.28, 2.0);
         this._eqGroup.add(this._outerBelt);
 
         // Plasmasphere (cold plasma torus, extends to plasmapause L-shell)
         const psR    = lpp;
-        const psTube = lpp * 0.18;
-        this._plasmasphere = buildTorus(psR, psTube, 0x44ccee, 0.10, 64);
+        const psTube = Math.max(0.45, lpp * 0.20);    // minimum visual thickness
+        this._plasmasphere = buildVolumetricTorus(psR, psTube, 0x44ccee, 0.14, 1.5);
         this._eqGroup.add(this._plasmasphere);
 
         // Ring current torus (~3–4 Re) — O'Brien & McPherron driven by Dst
-        // Opacity starts near 0; driven up by |Dst| in tick()
-        this._ringCurrent = buildTorus(3.6, 0.38, 0xff4400, 0.0, 48);
+        this._ringCurrent = buildVolumetricTorus(3.6, 0.42, 0xff4400, 0.0, 2.5);
         this._eqGroup.add(this._ringCurrent);
 
         // ── 3D Dipole magnetic field lines ────────────────────────────────────
@@ -1013,7 +1148,7 @@ export class MagnetosphereEngine {
         // Closed field lines (L < ~8) form the inner magnetosphere cage.
         // Open field lines (L > ~10) would extend into the tail (not shown).
         const closedL = [1.5, 2.0, 3.0, 4.5, Math.min(6.5, lpp + 0.5)];
-        this._fieldLines = buildDipoleFieldLines(closedL, 8, 0x4488cc, 0.18);
+        this._fieldLines = buildDipoleFieldLines(closedL, 12, 0x4488cc, 0.22);
         this._eqGroup.add(this._fieldLines);
 
         // ── 3D Auroral curtains (North + South ovals) ─────────────────────────

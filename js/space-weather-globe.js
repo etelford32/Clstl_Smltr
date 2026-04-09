@@ -27,6 +27,7 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
+import { CmePropagator }     from './cme-propagation.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -162,8 +163,10 @@ void main() {
 export class SpaceWeatherGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
+     * @param {object} [opts]
+     * @param {CmePropagator} [opts.cmePropagator]  shared propagator (created if not provided)
      */
-    constructor(canvas) {
+    constructor(canvas, opts = {}) {
         this._canvas        = canvas;
         this._t0            = performance.now() / 1000;
         this._lastT         = 0;
@@ -171,6 +174,11 @@ export class SpaceWeatherGlobe {
         this._auroraKp      = 2;
         this._windSpeedNorm = 0.23;
         this._sunDir = new THREE.Vector3(1, 0, 0);
+
+        // CME propagation
+        this._cmePropagator = opts.cmePropagator ?? new CmePropagator();
+        this._cmeShells     = new Map();  // eventId → { group, shell, sheath }
+        this._cmeEvents     = [];
 
         this._buildRenderer(canvas);
         this._buildScene();
@@ -210,9 +218,9 @@ export class SpaceWeatherGlobe {
         this._composer.addPass(new RenderPass(this._scene, this._camera));
         this._bloom = new UnrealBloomPass(
             new THREE.Vector2(w, h),
-            0.55,   // strength — subtle, not overwhelming
-            0.4,    // radius
-            0.78,   // threshold — only bright things bloom
+            1.0,    // strength — dramatic corona bloom
+            0.5,    // radius — wider spread
+            0.55,   // threshold — corona shells + aurora trigger bloom
         );
         this._composer.addPass(this._bloom);
     }
@@ -237,26 +245,26 @@ export class SpaceWeatherGlobe {
 
         // Dim ambient + directional sun light
         this._scene.add(new THREE.AmbientLight(0x111122, 0.45));
-        this._sunLight = new THREE.DirectionalLight(0xfff6e8, 1.1);
-        this._sunLight.position.set(20, 2, 0);
+        this._sunLight = new THREE.DirectionalLight(0xfff6e8, 1.2);
+        this._sunLight.position.set(55, 2, 0);
         this._scene.add(this._sunLight);
     }
 
     _buildSun() {
         this._sunGroup = new THREE.Group();
-        this._sunGroup.position.set(32, 0, 0);
+        this._sunGroup.position.set(55, 0, 0);
         this._scene.add(this._sunGroup);
 
         this._sunSkin = new SunSkin(this._sunGroup, {
-            radius:   4.0,
+            radius:   8.0,
             quality:  'high',
             corona:   true,
             segments: 128,
         });
-        this._sunSkin.setBloom(2.0);
+        this._sunSkin.setBloom(2.5);
 
         // Point light from sun position for realistic illumination
-        this._sunPointLight = new THREE.PointLight(0xfff4e0, 1.2, 150, 0.3);
+        this._sunPointLight = new THREE.PointLight(0xfff4e0, 1.6, 200, 0.25);
         this._sunPointLight.position.copy(this._sunGroup.position);
         this._scene.add(this._sunPointLight);
 
@@ -266,11 +274,11 @@ export class SpaceWeatherGlobe {
             map: glowTex,
             blending: THREE.AdditiveBlending,
             transparent: true,
-            opacity: 0.4,
+            opacity: 0.45,
             depthWrite: false,
         });
         this._sunGlow = new THREE.Sprite(glowMat);
-        this._sunGlow.scale.set(28, 28, 1);
+        this._sunGlow.scale.set(60, 60, 1);
         this._sunGlow.position.copy(this._sunGroup.position);
         this._scene.add(this._sunGlow);
     }
@@ -437,9 +445,9 @@ export class SpaceWeatherGlobe {
     }
 
     _spawnWind(arr, i) {
-        const spread = Math.random() * 7.5;
+        const spread = Math.random() * 9;
         const angle  = Math.random() * Math.PI * 2;
-        arr[i*3]   =  18 + Math.random() * 18;  // spawn from near sun
+        arr[i*3]   =  38 + Math.random() * 22;  // spawn from near sun (at x=55)
         arr[i*3+1] = Math.sin(angle) * spread;
         arr[i*3+2] = Math.cos(angle) * spread;
     }
@@ -449,19 +457,20 @@ export class SpaceWeatherGlobe {
     }
 
     _buildCamera() {
-        this._camera = new THREE.PerspectiveCamera(40, 2, 0.1, 500);
-        this._camera.position.set(0, 5, 18);
-        this._camera.lookAt(0, 0, 0);
+        this._camera = new THREE.PerspectiveCamera(50, 2, 0.1, 600);
+        this._camera.position.set(20, 14, 38);
+        this._camera.lookAt(20, 0, 0);
     }
 
     _buildControls(canvas) {
         this._controls = new OrbitControls(this._camera, canvas);
         this._controls.enableDamping   = true;
         this._controls.dampingFactor   = 0.06;
+        this._controls.enablePan       = true;
         this._controls.minDistance     = 2.5;
-        this._controls.maxDistance     = 80;
-        this._controls.autoRotate      = true;
-        this._controls.autoRotateSpeed = 0.28;
+        this._controls.maxDistance     = 220;
+        this._controls.autoRotate      = false;
+        this._controls.target.set(20, 0, 0);  // orbit midpoint of Sun-Earth axis
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -520,8 +529,15 @@ export class SpaceWeatherGlobe {
 
     /** Toggle MagnetosphereEngine layers. */
     setLayerVisible(name, visible) {
+        if (name === 'cme') {
+            this._cmeShells.forEach(s => { s.group.visible = visible; });
+            return;
+        }
         this._magEngine.setLayerVisible(name, visible);
     }
+
+    /** Access the CME propagator (for wiring event cards from outside). */
+    get cmePropagator() { return this._cmePropagator; }
 
     /** Start the render loop. Returns this for chaining. */
     start() {
@@ -537,6 +553,10 @@ export class SpaceWeatherGlobe {
         this._ro = new ResizeObserver(onResize);
         this._ro.observe(this._canvas);
 
+        // Wire CME propagator
+        this._cmePropagator.onChange((events) => this._syncCmeShells(events));
+        this._cmePropagator.start();
+
         const loop = () => {
             this._rafId = requestAnimationFrame(loop);
             this._animate(performance.now() / 1000 - this._t0);
@@ -550,6 +570,144 @@ export class SpaceWeatherGlobe {
         this._ro?.disconnect();
         this._magEngine.dispose();
         this._renderer.dispose();
+    }
+
+    // ── CME 3D Shell Management ─────────────────────────────────────────────
+
+    /** Build a 3D shell group for a single CME event. */
+    _buildCmeShell(cmeEvent) {
+        const group = new THREE.Group();
+        group.name = 'cme_' + cmeEvent.id;
+
+        const halfAngleRad = (cmeEvent.halfAngle ?? 30) * Math.PI / 180;
+
+        // CME shell: spherical cap section
+        const shellGeo = new THREE.SphereGeometry(
+            1, 32, 24,
+            0, Math.PI * 2,                   // full azimuth
+            0, Math.min(halfAngleRad, Math.PI * 0.6), // polar cap angle
+        );
+        const sev = cmeEvent.impact?.severity ?? 'MINOR';
+        const shellColor = sev === 'EXTREME' ? 0xff2850 :
+                           sev === 'SEVERE'  ? 0xff3c28 :
+                           sev === 'STRONG'  ? 0xff8c00 :
+                           sev === 'MODERATE' ? 0xffc800 : 0xffa040;
+
+        const shellMat = new THREE.MeshBasicMaterial({
+            color: shellColor,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const shell = new THREE.Mesh(shellGeo, shellMat);
+        shell.renderOrder = 15;
+        group.add(shell);
+
+        // Sheath glow: larger shell at leading edge (only if shock)
+        let sheath = null;
+        if (cmeEvent.sheath?.isShock) {
+            const sheathGeo = new THREE.SphereGeometry(
+                1.15, 24, 16,
+                0, Math.PI * 2,
+                0, Math.min(halfAngleRad * 0.8, Math.PI * 0.5),
+            );
+            const sheathMat = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.15,
+                side: THREE.DoubleSide,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+            });
+            sheath = new THREE.Mesh(sheathGeo, sheathMat);
+            sheath.renderOrder = 16;
+            group.add(sheath);
+        }
+
+        // Core bright point
+        const coreGeo = new THREE.SphereGeometry(0.15, 8, 8);
+        const coreMat = new THREE.MeshBasicMaterial({
+            color: 0xffffff, transparent: true, opacity: 0.6,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.renderOrder = 17;
+        group.add(core);
+
+        // Orient: shell opens toward -X (toward Earth)
+        group.rotation.z = Math.PI / 2;
+
+        this._scene.add(group);
+        return { group, shell, sheath, core, event: cmeEvent, fadeOut: 0 };
+    }
+
+    /** Sync active CME events: add new shells, retire old ones. */
+    _syncCmeShells(events) {
+        this._cmeEvents = events;
+        const activeIds = new Set(events.map(e => e.id));
+
+        // Add shells for new events
+        for (const ev of events) {
+            if (!this._cmeShells.has(ev.id)) {
+                this._cmeShells.set(ev.id, this._buildCmeShell(ev));
+            }
+        }
+
+        // Mark departed events for fade-out
+        for (const [id, shell] of this._cmeShells) {
+            if (!activeIds.has(id)) {
+                shell.fadeOut = 1;  // start fade-out
+            }
+        }
+    }
+
+    /** Per-frame CME shell update: position, scale, fade. */
+    _updateCmeShells(t) {
+        const nowMs = Date.now();
+        const sunX  = 55;  // Sun position X
+
+        for (const [id, s] of this._cmeShells) {
+            // Handle fade-out and removal
+            if (s.fadeOut > 0) {
+                s.fadeOut -= 0.016;  // ~1s fade
+                if (s.fadeOut <= 0) {
+                    s.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
+                    this._scene.remove(s.group);
+                    this._cmeShells.delete(id);
+                    continue;
+                }
+                s.shell.material.opacity = 0.35 * s.fadeOut;
+                continue;
+            }
+
+            const state = s.event.stateAt(nowMs);
+            const progress = state.progress;  // 0=Sun, 1=Earth
+
+            // Position: Sun at x=55, Earth at x=0. CME travels along -X.
+            const x = sunX * (1 - progress);
+            s.group.position.set(x, 0, 0);
+
+            // Scale: CME expands as it travels (half-angle → scene units)
+            const baseScale = 1.5 + progress * 4;
+            s.group.scale.setScalar(baseScale);
+
+            // Shell opacity: brighter when fresh, fades near arrival
+            const arrivalFade = progress > 0.9 ? (1 - progress) * 10 : 1;
+            s.shell.material.opacity = 0.35 * arrivalFade;
+
+            // Sheath pulsation
+            if (s.sheath) {
+                const pulse = 0.5 + 0.5 * Math.sin(t * 3 + progress * 6);
+                s.sheath.material.opacity = (0.10 + pulse * 0.08) * arrivalFade;
+            }
+
+            // Core brightness pulsation
+            if (s.core) {
+                s.core.material.opacity = (0.4 + 0.3 * Math.sin(t * 4)) * arrivalFade;
+            }
+        }
     }
 
     // ── Per-frame ─────────────────────────────────────────────────────────────
@@ -599,6 +757,9 @@ export class SpaceWeatherGlobe {
 
         // Magnetosphere geometry tick
         this._magEngine.tick(t, this._sunDir);
+
+        // CME shells
+        this._updateCmeShells(t);
 
         this._controls.update();
         this._composer.render();
