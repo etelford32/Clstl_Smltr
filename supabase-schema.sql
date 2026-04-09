@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     email TEXT,
     display_name TEXT,
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'superadmin')),
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     -- Location for aurora/pass predictions
@@ -54,15 +55,39 @@ CREATE POLICY "Users can insert own profile"
     ON public.user_profiles FOR INSERT
     WITH CHECK (auth.uid() = id);
 
+-- Helper function: check if the current user is an admin (used by RLS policies)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.user_profiles
+        WHERE id = auth.uid() AND role IN ('admin', 'superadmin')
+    );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Admin policy: admins can read ALL user profiles (for admin dashboard)
+CREATE POLICY "Admins can view all profiles"
+    ON public.user_profiles FOR SELECT
+    USING (
+        auth.uid() = id
+        OR public.is_admin()
+    );
+
+-- Admin policy: admins can view all alert history
+CREATE POLICY "Admins can view all alerts"
+    ON public.alert_history FOR SELECT
+    USING (auth.uid() = user_id OR public.is_admin());
+
 -- Trigger: auto-create profile on signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.user_profiles (id, email, display_name)
+    INSERT INTO public.user_profiles (id, email, display_name, plan, role)
     VALUES (
         NEW.id,
         NEW.email,
-        COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1))
+        COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
+        COALESCE(NEW.raw_user_meta_data->>'plan', 'free'),
+        'user'
     );
     RETURN NEW;
 END;

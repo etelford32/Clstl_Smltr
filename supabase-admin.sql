@@ -1,13 +1,13 @@
 -- ═══════════════════════════════════════════════════════════════
 -- Parker Physics — Admin Role Migration
 -- ═══════════════════════════════════════════════════════════════
--- Run this in Supabase Dashboard → SQL Editor AFTER the main schema.
+-- NOTE: The role column and is_admin() function are now included in
+-- supabase-schema.sql for new deployments. This file is only needed
+-- if your existing database was created BEFORE the role column was
+-- added to the main schema. Safe to re-run (uses IF NOT EXISTS).
 --
--- Adds:
---   1. role column to user_profiles (admin, user)
---   2. is_admin helper function
---   3. Admin RLS policy (admins can read all profiles)
---   4. Sets YOUR account as admin
+-- Run this in Supabase Dashboard → SQL Editor if you get
+-- "Role column missing" errors in the admin dashboard.
 
 -- Add role column if it doesn't exist
 ALTER TABLE public.user_profiles
