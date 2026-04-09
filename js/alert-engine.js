@@ -23,6 +23,7 @@
 import { auth } from './auth.js';
 import { getSupabase, isConfigured } from './supabase-config.js';
 import { loadUserLocation } from './user-location.js';
+import { ConjunctionMonitor } from './conjunction-alert.js';
 
 // ── Open-Meteo point forecast ────────────────────────────────────────────────
 
@@ -432,6 +433,50 @@ const ALERT_DEFS = [
             };
         },
     },
+
+    // ── 27-Day Carrington Recurrence (advanced) ──────────────────────────────
+    {
+        key: 'notify_recurrence',
+        type: 'storm',
+        tier: 'advanced',
+        source: 'swpc',
+        _lastSignal: 'none',
+        evaluate(state, _prefs, ctx) {
+            // Uses the ImpactScoreEngine's recurrence data if available
+            // Listens for impact-score-update events cached by the alert engine
+            const recurrence = ctx.recurrence;
+            if (!recurrence || recurrence.signal === 'none') {
+                this._lastSignal = 'none';
+                return null;
+            }
+            // Only fire when signal strengthens (not on every tick)
+            if (recurrence.signal === this._lastSignal) return null;
+            const wasWeaker = this._lastSignal === 'none' ||
+                (this._lastSignal === 'weak' && recurrence.signal !== 'weak') ||
+                (this._lastSignal === 'moderate' && recurrence.signal === 'strong');
+            this._lastSignal = recurrence.signal;
+            if (!wasWeaker) return null;
+
+            return {
+                fire: true,
+                title: '27-Day Recurrence Detected',
+                body: `${recurrence.signal.charAt(0).toUpperCase() + recurrence.signal.slice(1)} 27-day Carrington recurrence signal detected (r=${recurrence.corr27}). Active region may return to Earth-facing position within 3–5 days — elevated storm risk.`,
+                severity: recurrence.signal === 'strong' ? 'warning' : 'info',
+                metadata: { corr27: recurrence.corr27, corr54: recurrence.corr54, signal: recurrence.signal },
+            };
+        },
+    },
+
+    // ── Satellite Collision (advanced) ───────────────────────────────────────
+    // This alert is triggered by 'conjunction-alert' events from ConjunctionMonitor,
+    // not by swpc-update. It's handled specially in AlertEngine._onConjunction().
+    {
+        key: 'notify_collision',
+        type: 'conjunction',
+        tier: 'advanced',
+        source: 'conjunction',  // special source — handled by separate listener
+        evaluate() { return null; },  // no-op — _onConjunction() handles it directly
+    },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -464,24 +509,43 @@ export class AlertEngine {
         /** Last SWPC state (for weather-triggered re-evaluation) */
         this._lastSwpcState = null;
 
-        this._onSwpc = this._onSwpc.bind(this);
-        this._onCme  = this._onCme.bind(this);
+        /** Cached recurrence data from impact-score-update */
+        this._recurrence = null;
+
+        /** Conjunction monitor (advanced tier only) */
+        this._conjMonitor = null;
+
+        this._onSwpc        = this._onSwpc.bind(this);
+        this._onCme         = this._onCme.bind(this);
+        this._onImpactScore = this._onImpactScore.bind(this);
+        this._onConjunction = this._onConjunction.bind(this);
     }
 
     /** Start listening to events and polling weather. */
     start() {
         window.addEventListener('swpc-update', this._onSwpc);
         window.addEventListener('cme-propagation-update', this._onCme);
+        window.addEventListener('impact-score-update', this._onImpactScore);
+        window.addEventListener('conjunction-alert', this._onConjunction);
         this._loadRecentFromDB();
         this._pollWeather();
         this._weatherTimer = setInterval(() => this._pollWeather(), WEATHER_POLL_MS);
+
+        // Start conjunction monitor for advanced users
+        if (auth.canUseAdvancedAlerts()) {
+            this._conjMonitor = new ConjunctionMonitor().start();
+        }
+
         return this;
     }
 
     stop() {
         window.removeEventListener('swpc-update', this._onSwpc);
         window.removeEventListener('cme-propagation-update', this._onCme);
+        window.removeEventListener('impact-score-update', this._onImpactScore);
+        window.removeEventListener('conjunction-alert', this._onConjunction);
         clearInterval(this._weatherTimer);
+        this._conjMonitor?.stop();
     }
 
     /** Get unread count. */
@@ -508,6 +572,53 @@ export class AlertEngine {
 
     _onCme(ev) {
         this._cmeEvents = ev.detail?.events ?? [];
+    }
+
+    _onImpactScore(ev) {
+        // Cache recurrence data for the 27-day recurrence alert
+        this._recurrence = ev.detail?.d7?.recurrence ?? null;
+    }
+
+    _onConjunction(ev) {
+        // Conjunction alert — fired by ConjunctionMonitor
+        if (!auth.isSignedIn() || !auth.canUseAdvancedAlerts()) return;
+        const prefs = auth.getAlertPrefs();
+        if (!prefs.notify_collision) return;
+
+        const c = ev.detail;
+        if (!c) return;
+
+        const riskLevel = c.dist_km < 1 ? 'critical' : c.dist_km < 5 ? 'critical' : c.dist_km < 10 ? 'warning' : 'info';
+        const etaStr = c.hours_ahead < 1
+            ? `${Math.round(c.hours_ahead * 60)} minutes`
+            : c.hours_ahead < 24
+                ? `${c.hours_ahead.toFixed(1)} hours`
+                : `${(c.hours_ahead / 24).toFixed(1)} days`;
+
+        const alert = {
+            id: `notify_collision_${Date.now()}`,
+            alert_type: 'conjunction',
+            severity: riskLevel,
+            title: 'Satellite Close Approach',
+            body: `${c.target_name} — ${c.dist_km.toFixed(1)} km miss distance with ${c.chaser_name} in ${etaStr}. Threshold: ${c.threshold_km} km.`,
+            metadata: {
+                target: c.target_name,
+                target_norad: c.target_norad,
+                chaser: c.chaser_name,
+                chaser_norad: c.chaser_norad,
+                dist_km: c.dist_km,
+                hours_ahead: c.hours_ahead,
+            },
+            read: false,
+            created_at: new Date().toISOString(),
+            _key: 'notify_collision',
+        };
+
+        this.recent.unshift(alert);
+        if (this.recent.length > this._maxRecent) this.recent.pop();
+        this._writeAlertToDB(alert);
+        this._dispatch(alert);
+        console.info(`[AlertEngine] Fired: ${alert.title} — ${c.dist_km.toFixed(1)} km`);
     }
 
     _onSwpc(ev) {
@@ -538,7 +649,7 @@ export class AlertEngine {
         const cooldownMs = (prefs.alert_cooldown_min ?? 60) * 60_000;
         const isAdvanced = auth.canUseAdvancedAlerts();
         const now = Date.now();
-        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents };
+        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents, recurrence: this._recurrence };
 
         for (const def of ALERT_DEFS) {
             // Source filter: only evaluate defs matching the current trigger source
