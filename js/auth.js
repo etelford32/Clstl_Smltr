@@ -101,6 +101,22 @@ class AuthManager {
         return this._user?.role === 'admin' || this._user?.role === 'superadmin';
     }
 
+    /** Check if user's plan allows alerts (basic or advanced). */
+    canUseAlerts() {
+        const plan = this.getPlan();
+        return plan === 'basic' || plan === 'advanced' || this.isAdmin();
+    }
+
+    /** Check if user's plan allows advanced alerts (advanced only). */
+    canUseAdvancedAlerts() {
+        return this.getPlan() === 'advanced' || this.isAdmin();
+    }
+
+    /** Get alert preferences (or defaults if not loaded). */
+    getAlertPrefs() {
+        return this._user?.alerts ?? {};
+    }
+
     /** Check if current user has superadmin role. */
     isSuperAdmin() {
         return this._user?.role === 'superadmin';
@@ -120,7 +136,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, location_lat, location_lon, location_city')
+                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, email_alerts, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -144,14 +160,35 @@ class AuthManager {
             }
             if (data) {
                 // Merge server-side role/plan into local state
-                // Only overwrite role if the DB actually returned a value
                 if (data.role) this._user.role = data.role;
                 this._user.plan = data.plan || this._user.plan;
                 if (data.display_name) this._user.name = data.display_name;
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;
-                // Persist updated role/plan to storage so nav.js can read it
+                // Merge alert preferences into local state
+                this._user.alerts = {
+                    notify_aurora:         data.notify_aurora         ?? false,
+                    notify_storm:          data.notify_storm          ?? false,
+                    notify_flare:          data.notify_flare          ?? false,
+                    notify_cme:            data.notify_cme            ?? false,
+                    notify_temperature:    data.notify_temperature    ?? false,
+                    notify_sat_pass:       data.notify_sat_pass       ?? false,
+                    notify_conjunction:    data.notify_conjunction    ?? false,
+                    notify_radio_blackout: data.notify_radio_blackout ?? false,
+                    notify_gps:            data.notify_gps            ?? false,
+                    notify_power_grid:     data.notify_power_grid     ?? false,
+                    notify_collision:      data.notify_collision      ?? false,
+                    notify_recurrence:     data.notify_recurrence     ?? false,
+                    aurora_kp_threshold:   data.aurora_kp_threshold   ?? 5,
+                    storm_g_threshold:     data.storm_g_threshold     ?? 1,
+                    flare_class_threshold: data.flare_class_threshold ?? 'M',
+                    conjunction_threshold_km: data.conjunction_threshold_km ?? 25,
+                    temp_high_f:           data.temp_high_f,
+                    temp_low_f:            data.temp_low_f,
+                    email_alerts:          data.email_alerts          ?? false,
+                    alert_cooldown_min:    data.alert_cooldown_min    ?? 60,
+                };
                 this._persistToStorage();
             }
             return data;
@@ -414,20 +451,28 @@ class AuthManager {
                         data: { name: updates.name, plan: updates.plan },
                     });
                 }
-                // Update user_profiles table (location, prefs)
-                await this._supabase.from('user_profiles').upsert({
+                // Update user_profiles table (location, prefs, alerts)
+                const row = {
                     id: this._user.id,
                     display_name: this._user.name,
                     plan: this._user.plan,
-                    location_lat: updates.location_lat,
-                    location_lon: updates.location_lon,
-                    location_city: updates.location_city,
-                    notify_aurora: updates.notify_aurora,
-                    notify_conjunction: updates.notify_conjunction,
-                    aurora_kp_threshold: updates.aurora_kp_threshold,
-                    conjunction_threshold_km: updates.conjunction_threshold_km,
                     updated_at: new Date().toISOString(),
-                });
+                };
+                // Only include fields that were actually passed in updates
+                const profileFields = [
+                    'location_lat', 'location_lon', 'location_city',
+                    'notify_aurora', 'notify_storm', 'notify_flare', 'notify_cme',
+                    'notify_temperature', 'notify_sat_pass', 'notify_conjunction',
+                    'notify_radio_blackout', 'notify_gps', 'notify_power_grid',
+                    'notify_collision', 'notify_recurrence',
+                    'aurora_kp_threshold', 'storm_g_threshold', 'flare_class_threshold',
+                    'conjunction_threshold_km', 'temp_high_f', 'temp_low_f',
+                    'email_alerts', 'alert_cooldown_min',
+                ];
+                for (const k of profileFields) {
+                    if (updates[k] !== undefined) row[k] = updates[k];
+                }
+                await this._supabase.from('user_profiles').upsert(row);
             } catch (err) {
                 console.warn('[Auth] Profile update failed:', err.message);
             }

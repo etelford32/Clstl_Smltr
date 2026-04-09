@@ -54,6 +54,17 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .card-link:hover{opacity:1}
 .card-body{padding:16px 18px 18px}
 
+/* ── ALERT PREFERENCES ── */
+.alert-pref-grid{display:flex;flex-direction:column;gap:4px}
+.alert-pref-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;transition:border-color .2s}
+.alert-pref-row:hover{border-color:rgba(255,255,255,.15)}
+.alert-pref-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.78rem;color:#cdd}
+.alert-pref-toggle input[type="checkbox"]{accent-color:#ff8c00;width:16px;height:16px;cursor:pointer}
+.alert-pref-name{user-select:none}
+.alert-pref-threshold{display:flex;align-items:center;gap:8px}
+.alert-pref-threshold input,.alert-pref-threshold select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 6px;font-family:inherit;font-size:.72rem}
+.alert-pref-row.locked{opacity:.4;pointer-events:none}
+
 /* ── LOCATION CARD ── */
 #loc-map-canvas{display:block;width:100%;height:140px;border-radius:8px;margin-bottom:14px;background:#030612}
 .loc-info{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;min-height:38px}
@@ -310,6 +321,141 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── ALERT PREFERENCES ── -->
+  <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Alert Preferences</span>
+      <span class="card-link" id="alert-prefs-plan" style="font-size:.68rem;color:var(--muted)"></span>
+    </div>
+    <div class="card-body" id="alert-prefs-body">
+
+      <!-- Gate: free users see upgrade prompt -->
+      <div id="alert-prefs-gate" style="text-align:center;padding:16px 0;display:none">
+        <div style="font-size:1.2rem;margin-bottom:6px">&#128276;</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+          Alerts are available on <strong style="color:var(--accent2)">Basic</strong> and <strong style="color:var(--accent)">Advanced</strong> plans.
+        </div>
+        <a href="pricing.html" style="display:inline-block;padding:6px 18px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;text-decoration:none;font-size:.78rem">Upgrade</a>
+      </div>
+
+      <!-- Alert toggles (basic tier) -->
+      <div id="alert-prefs-content" style="display:none">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Standard Alerts</div>
+        <div class="alert-pref-grid" id="alert-pref-grid-basic">
+          <!-- Temperature -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_temperature" data-key="notify_temperature">
+              <span class="alert-pref-name">Temperature</span>
+            </label>
+            <div class="alert-pref-threshold" id="pref-temp-thresholds">
+              <label style="font-size:.68rem;color:var(--muted)">High <input type="number" id="pref-temp_high_f" data-key="temp_high_f" style="width:48px" placeholder="95"> &deg;F</label>
+              <label style="font-size:.68rem;color:var(--muted)">Low <input type="number" id="pref-temp_low_f" data-key="temp_low_f" style="width:48px" placeholder="32"> &deg;F</label>
+            </div>
+          </div>
+          <!-- Aurora -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_aurora" data-key="notify_aurora">
+              <span class="alert-pref-name">Aurora Visibility</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Kp &ge;
+                <select id="pref-aurora_kp_threshold" data-key="aurora_kp_threshold" style="width:48px">
+                  <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                  <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Storm -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_storm" data-key="notify_storm">
+              <span class="alert-pref-name">Geomagnetic Storm</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
+                <select id="pref-storm_g_threshold" data-key="storm_g_threshold" style="width:48px">
+                  <option value="1" selected>G1</option><option value="2">G2</option><option value="3">G3</option>
+                  <option value="4">G4</option><option value="5">G5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Flare -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_flare" data-key="notify_flare">
+              <span class="alert-pref-name">Solar Flare</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Class &ge;
+                <select id="pref-flare_class_threshold" data-key="flare_class_threshold" style="width:48px">
+                  <option value="C">C</option><option value="M" selected>M</option><option value="X">X</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- CME -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_cme" data-key="notify_cme">
+              <span class="alert-pref-name">CME Earth-Directed</span>
+            </label>
+          </div>
+          <!-- Satellite Pass -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_sat_pass" data-key="notify_sat_pass">
+              <span class="alert-pref-name">Satellite Pass</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Advanced tier alerts -->
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 8px;display:flex;align-items:center;gap:6px">
+          Advanced Alerts
+          <span style="background:rgba(0,200,200,.12);color:#0cc;font-size:.6rem;padding:1px 6px;border-radius:3px;font-weight:700">PRO</span>
+        </div>
+        <div class="alert-pref-grid" id="alert-pref-grid-advanced">
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_collision" data-key="notify_collision"><span class="alert-pref-name">Satellite Collision</span></label></div>
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_power_grid" data-key="notify_power_grid"><span class="alert-pref-name">Power Grid Risk</span></label></div>
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_radio_blackout" data-key="notify_radio_blackout"><span class="alert-pref-name">Radio Blackout</span></label></div>
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_gps" data-key="notify_gps"><span class="alert-pref-name">GPS Degradation</span></label></div>
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_recurrence" data-key="notify_recurrence"><span class="alert-pref-name">27-Day Recurrence</span></label></div>
+        </div>
+
+        <!-- Delivery options -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Delivery</div>
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-email_alerts" data-key="email_alerts">
+              <span class="alert-pref-name">Email alerts</span>
+            </label>
+          </div>
+          <div class="alert-pref-row">
+            <label style="font-size:.72rem;color:var(--muted)">
+              Cooldown: <select id="pref-alert_cooldown_min" data-key="alert_cooldown_min" style="width:72px">
+                <option value="15">15 min</option><option value="30">30 min</option>
+                <option value="60" selected>1 hour</option><option value="120">2 hours</option>
+                <option value="360">6 hours</option><option value="720">12 hours</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Save -->
+        <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+          <button id="alert-prefs-save" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-family:inherit;font-size:.78rem">Save Preferences</button>
+          <span id="alert-prefs-msg" style="font-size:.68rem;color:var(--green);display:none">Saved!</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── SIMULATIONS ── -->
   <p class="section-label">Simulations</p>
   <div class="sim-grid">
@@ -385,6 +531,7 @@ import { auth } from './js/auth.js';
 import { geocodeQuery, saveUserLocation, loadUserLocation,
          clearUserLocation, auroraVisibility } from './js/user-location.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { AlertEngine } from './js/alert-engine.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -986,6 +1133,89 @@ function initAll() {
 
 // All declarations complete — safe to call initAll now
 initAll();
+
+// ── Alert Engine + Preferences Wiring ────────────────────────────────────────
+{
+    const engine = new AlertEngine();
+
+    // Wire the "mark all read" event from nav bell
+    window.addEventListener('alert-mark-all-read', () => engine.markAllRead());
+
+    // ── Preferences panel logic ──────────────────────────────────────────────
+    const canAlert    = auth.canUseAlerts();
+    const isAdvanced  = auth.canUseAdvancedAlerts();
+    const gateEl      = document.getElementById('alert-prefs-gate');
+    const contentEl   = document.getElementById('alert-prefs-content');
+    const planLabel   = document.getElementById('alert-prefs-plan');
+
+    if (planLabel) planLabel.textContent = auth.getPlan().toUpperCase() + ' plan';
+
+    if (!canAlert) {
+        if (gateEl)    gateEl.style.display = '';
+        if (contentEl) contentEl.style.display = 'none';
+    } else {
+        if (gateEl)    gateEl.style.display = 'none';
+        if (contentEl) contentEl.style.display = '';
+
+        // Lock advanced alerts for basic users
+        if (!isAdvanced) {
+            document.querySelectorAll('#alert-pref-grid-advanced .alert-pref-row').forEach(row => {
+                row.classList.add('locked');
+                row.title = 'Available on Advanced plan';
+            });
+        }
+
+        // Load current prefs into UI
+        const prefs = auth.getAlertPrefs();
+        const _setCheckbox = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+        const _setSelect   = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = String(val); };
+        const _setInput    = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+
+        _setCheckbox('pref-notify_temperature',    prefs.notify_temperature);
+        _setCheckbox('pref-notify_aurora',         prefs.notify_aurora);
+        _setCheckbox('pref-notify_storm',          prefs.notify_storm);
+        _setCheckbox('pref-notify_flare',          prefs.notify_flare);
+        _setCheckbox('pref-notify_cme',            prefs.notify_cme);
+        _setCheckbox('pref-notify_sat_pass',       prefs.notify_sat_pass);
+        _setCheckbox('pref-notify_collision',      prefs.notify_collision);
+        _setCheckbox('pref-notify_power_grid',     prefs.notify_power_grid);
+        _setCheckbox('pref-notify_radio_blackout', prefs.notify_radio_blackout);
+        _setCheckbox('pref-notify_gps',            prefs.notify_gps);
+        _setCheckbox('pref-notify_recurrence',     prefs.notify_recurrence);
+        _setCheckbox('pref-email_alerts',          prefs.email_alerts);
+        _setSelect('pref-aurora_kp_threshold',     prefs.aurora_kp_threshold);
+        _setSelect('pref-storm_g_threshold',       prefs.storm_g_threshold);
+        _setSelect('pref-flare_class_threshold',   prefs.flare_class_threshold);
+        _setSelect('pref-alert_cooldown_min',      prefs.alert_cooldown_min);
+        _setInput('pref-temp_high_f',              prefs.temp_high_f);
+        _setInput('pref-temp_low_f',               prefs.temp_low_f);
+
+        // Save button
+        document.getElementById('alert-prefs-save')?.addEventListener('click', async () => {
+            const updates = {};
+            document.querySelectorAll('#alert-prefs-body [data-key]').forEach(el => {
+                const key = el.dataset.key;
+                if (el.type === 'checkbox') updates[key] = el.checked;
+                else if (el.type === 'number') updates[key] = el.value ? parseFloat(el.value) : null;
+                else updates[key] = el.value;
+            });
+            // Convert numeric selects
+            if (updates.aurora_kp_threshold) updates.aurora_kp_threshold = parseInt(updates.aurora_kp_threshold, 10);
+            if (updates.storm_g_threshold)   updates.storm_g_threshold   = parseInt(updates.storm_g_threshold, 10);
+            if (updates.alert_cooldown_min)  updates.alert_cooldown_min  = parseInt(updates.alert_cooldown_min, 10);
+
+            await auth.updateProfile(updates);
+            // Re-fetch to confirm
+            await auth.fetchProfile();
+
+            const msg = document.getElementById('alert-prefs-msg');
+            if (msg) { msg.style.display = ''; setTimeout(() => { msg.style.display = 'none'; }, 2500); }
+        });
+
+        // Start alert engine (only for subscribers)
+        engine.start();
+    }
+}
 </script>
 </body>
 </html>

@@ -1660,6 +1660,7 @@ import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
+import { AlertEngine } from './js/alert-engine.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -2234,6 +2235,12 @@ window.addEventListener('helio-state-update', e => {
 // SpaceWeatherFeed owns all NOAA + DONKI polling via tiered edge routes.
 new SpaceWeatherFeed().start();
 new SohoFeed().start();
+
+// ── Alert engine (fires notifications for subscribers on any page with SWPC data)
+new AlertEngine().start();
+window.addEventListener('alert-mark-all-read', () => {
+    // Handled by the AlertEngine instance — re-dispatch handled internally
+});
 
 // ── Wind-speed pipeline (Vercel Edge /api/solar-wind/wind-speed) ──────────────
 // Provides enriched solar wind data: trend direction, alert level, 60-min series.

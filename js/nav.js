@@ -176,6 +176,28 @@ export function initNav(activeId = '') {
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
+        // Notification bell (subscribers only)
+        const canAlert = auth?.plan === 'basic' || auth?.plan === 'advanced' || isAdmin;
+        if (canAlert) {
+            html += `<div class="nav-bell-wrap" id="nav-bell-wrap">
+                <button class="nav-bell" id="nav-bell-btn" title="Alerts" aria-label="Notifications">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                    </svg>
+                    <span class="nav-bell-badge" id="nav-bell-badge" style="display:none">0</span>
+                </button>
+                <div class="nav-bell-dropdown" id="nav-bell-dropdown" style="display:none">
+                    <div class="nav-bell-header">
+                        <span style="font-weight:700;font-size:.82rem;color:#ccc">Alerts</span>
+                        <button id="nav-bell-read-all" style="background:none;border:none;color:var(--accent,#0cf);cursor:pointer;font-size:.68rem;font-family:inherit">Mark all read</button>
+                    </div>
+                    <div class="nav-bell-list" id="nav-bell-list">
+                        <div style="padding:20px;text-align:center;color:#556;font-size:.78rem">No alerts yet</div>
+                    </div>
+                    <a href="dashboard.html" class="nav-bell-footer">View all alerts</a>
+                </div>
+            </div>`;
+        }
         if (isAdmin) {
             html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
         }
@@ -318,4 +340,75 @@ export function initNav(activeId = '') {
             window.location.href = 'index.html';
         }
     });
+
+    // ── Notification bell ────────────────────────────────────────────────
+    const bellBtn      = document.getElementById('nav-bell-btn');
+    const bellDropdown = document.getElementById('nav-bell-dropdown');
+    const bellBadge    = document.getElementById('nav-bell-badge');
+    const bellList     = document.getElementById('nav-bell-list');
+
+    if (bellBtn && bellDropdown) {
+        // Toggle dropdown on click
+        bellBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            const open = bellDropdown.style.display === 'none';
+            bellDropdown.style.display = open ? 'block' : 'none';
+        });
+
+        // Close on outside click
+        document.addEventListener('click', e => {
+            if (!e.target.closest('#nav-bell-wrap')) {
+                bellDropdown.style.display = 'none';
+            }
+        });
+
+        // Mark all read
+        document.getElementById('nav-bell-read-all')?.addEventListener('click', () => {
+            window.dispatchEvent(new CustomEvent('alert-mark-all-read'));
+        });
+
+        // Listen for alert updates
+        window.addEventListener('user-alert', e => {
+            const { recent, unread } = e.detail;
+            // Update badge
+            if (bellBadge) {
+                bellBadge.textContent = unread > 99 ? '99+' : unread;
+                bellBadge.style.display = unread > 0 ? '' : 'none';
+            }
+            // Update list (show last 8)
+            if (bellList && recent) {
+                if (!recent.length) {
+                    bellList.innerHTML = '<div style="padding:20px;text-align:center;color:#556;font-size:.78rem">No alerts yet</div>';
+                    return;
+                }
+                bellList.innerHTML = recent.slice(0, 8).map(a => {
+                    const age = _relTime(a.created_at);
+                    const sevCol = a.severity === 'critical' ? '#ff4444' : a.severity === 'warning' ? '#ffaa00' : '#44cc88';
+                    const readCls = a.read ? ' style="opacity:.5"' : '';
+                    return `<div class="nav-bell-item"${readCls}>
+                        <span class="nav-bell-dot" style="background:${sevCol}"></span>
+                        <div class="nav-bell-content">
+                            <div class="nav-bell-title">${_escHtml(a.title)}</div>
+                            <div class="nav-bell-body">${_escHtml(a.body?.slice(0, 100) ?? '')}</div>
+                            <div class="nav-bell-time">${age}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+            }
+        });
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function _relTime(isoStr) {
+    const ms = Date.now() - new Date(isoStr).getTime();
+    if (ms < 60_000) return 'Just now';
+    if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
+    if (ms < 86400_000) return `${Math.floor(ms / 3600_000)}h ago`;
+    return `${Math.floor(ms / 86400_000)}d ago`;
+}
+
+function _escHtml(s) {
+    return s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

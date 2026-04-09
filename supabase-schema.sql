@@ -29,12 +29,30 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     location_lat DOUBLE PRECISION,
     location_lon DOUBLE PRECISION,
     location_city TEXT,
-    -- Notification preferences
-    notify_aurora BOOLEAN DEFAULT true,
-    notify_conjunction BOOLEAN DEFAULT true,
-    notify_storm BOOLEAN DEFAULT true,
+    -- Notification preferences (basic tier)
+    notify_aurora BOOLEAN DEFAULT false,
+    notify_conjunction BOOLEAN DEFAULT false,
+    notify_storm BOOLEAN DEFAULT false,
+    notify_flare BOOLEAN DEFAULT false,
+    notify_cme BOOLEAN DEFAULT false,
+    notify_temperature BOOLEAN DEFAULT false,
+    notify_sat_pass BOOLEAN DEFAULT false,
+    -- Notification preferences (advanced tier)
+    notify_radio_blackout BOOLEAN DEFAULT false,
+    notify_gps BOOLEAN DEFAULT false,
+    notify_power_grid BOOLEAN DEFAULT false,
+    notify_collision BOOLEAN DEFAULT false,
+    notify_recurrence BOOLEAN DEFAULT false,
+    -- Alert thresholds
     aurora_kp_threshold INTEGER DEFAULT 5,
+    storm_g_threshold INTEGER DEFAULT 1,
+    flare_class_threshold TEXT DEFAULT 'M',
     conjunction_threshold_km DOUBLE PRECISION DEFAULT 25.0,
+    temp_high_f DOUBLE PRECISION,
+    temp_low_f DOUBLE PRECISION,
+    -- Alert delivery
+    email_alerts BOOLEAN DEFAULT false,
+    alert_cooldown_min INTEGER DEFAULT 60,
     -- Usage tracking
     api_calls_today INTEGER DEFAULT 0,
     last_api_call TIMESTAMPTZ
