@@ -1661,6 +1661,7 @@ import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
 import { AlertEngine } from './js/alert-engine.js';
+import { ImpactScoreEngine } from './js/impact-score.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -2238,6 +2239,9 @@ new SohoFeed().start();
 
 // ── Alert engine (fires notifications for subscribers on any page with SWPC data)
 new AlertEngine().start();
+
+// ── Impact score engine (computes composite score + time-windowed forecasts)
+new ImpactScoreEngine().start();
 window.addEventListener('alert-mark-all-read', () => {
     // Handled by the AlertEngine instance — re-dispatch handled internally
 });
