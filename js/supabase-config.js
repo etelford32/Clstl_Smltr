@@ -70,3 +70,84 @@ export async function getSupabase() {
 export function isConfigured() {
     return SUPABASE_ANON_KEY !== 'YOUR_ANON_KEY_HERE' && SUPABASE_ANON_KEY.length > 20;
 }
+
+/**
+ * Test Supabase connection health — checks auth, database, and schema status.
+ * Used by admin dashboard System tab to verify configuration.
+ *
+ * @returns {{ ok: boolean, checks: Array<{ name: string, ok: boolean, ms: number, detail?: string }> }}
+ */
+export async function testConnection() {
+    const checks = [];
+
+    // 1. Client initialization
+    let client;
+    const t0 = performance.now();
+    try {
+        client = await getSupabase();
+        checks.push({ name: 'Supabase client', ok: true, ms: Math.round(performance.now() - t0) });
+    } catch (err) {
+        checks.push({ name: 'Supabase client', ok: false, ms: Math.round(performance.now() - t0), detail: err.message });
+        return { ok: false, checks };
+    }
+
+    // 2. Auth service
+    const t1 = performance.now();
+    try {
+        const { data, error } = await client.auth.getSession();
+        checks.push({
+            name: 'Auth service',
+            ok: !error,
+            ms: Math.round(performance.now() - t1),
+            detail: error?.message || (data?.session ? `Session active (${data.session.user.email})` : 'No active session'),
+        });
+    } catch (err) {
+        checks.push({ name: 'Auth service', ok: false, ms: Math.round(performance.now() - t1), detail: err.message });
+    }
+
+    // 3. Database: user_profiles table
+    const t2 = performance.now();
+    try {
+        const { data, error } = await client.from('user_profiles').select('id', { count: 'exact', head: true });
+        checks.push({
+            name: 'Database (user_profiles)',
+            ok: !error,
+            ms: Math.round(performance.now() - t2),
+            detail: error?.message,
+        });
+    } catch (err) {
+        checks.push({ name: 'Database (user_profiles)', ok: false, ms: Math.round(performance.now() - t2), detail: err.message });
+    }
+
+    // 4. Role column exists
+    const t3 = performance.now();
+    try {
+        const { error } = await client.from('user_profiles').select('role').limit(1);
+        const hasRole = !error;
+        checks.push({
+            name: 'Role column (admin schema)',
+            ok: hasRole,
+            ms: Math.round(performance.now() - t3),
+            detail: hasRole ? 'role column exists' : 'Missing — run supabase-admin.sql',
+        });
+    } catch (err) {
+        checks.push({ name: 'Role column (admin schema)', ok: false, ms: Math.round(performance.now() - t3), detail: err.message });
+    }
+
+    // 5. invite_codes table
+    const t4 = performance.now();
+    try {
+        const { error } = await client.from('invite_codes').select('id', { count: 'exact', head: true });
+        checks.push({
+            name: 'Invite codes table',
+            ok: !error,
+            ms: Math.round(performance.now() - t4),
+            detail: error?.message,
+        });
+    } catch (err) {
+        checks.push({ name: 'Invite codes table', ok: false, ms: Math.round(performance.now() - t4), detail: err.message });
+    }
+
+    const allOk = checks.every(c => c.ok);
+    return { ok: allOk, checks };
+}

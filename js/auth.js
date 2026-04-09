@@ -45,7 +45,10 @@ class AuthManager {
                 const { data: { session } } = await this._supabase.auth.getSession();
                 if (session?.user) {
                     this._user = this._mapSupabaseUser(session.user);
-                    console.info('[Auth] Supabase session restored:', this._user.email);
+                    // Fetch server-side profile (role, plan) on session restore
+                    // so admin status is available immediately, not just from stale user_metadata
+                    await this.fetchProfile();
+                    console.info('[Auth] Supabase session restored:', this._user.email, 'role:', this._user.role);
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
@@ -120,10 +123,29 @@ class AuthManager {
                 .select('role, plan, display_name, location_lat, location_lon, location_city')
                 .eq('id', this._user.id)
                 .single();
-            if (error) { console.warn('[Auth] Profile fetch failed:', error.message); return null; }
+            if (error) {
+                // If error mentions missing column, try without 'role' as fallback
+                if (error.message?.includes('role') || error.message?.includes('column')) {
+                    console.warn('[Auth] Role column missing — run supabase-admin.sql. Retrying without role...');
+                    const { data: d2, error: e2 } = await this._supabase
+                        .from('user_profiles')
+                        .select('plan, display_name, location_lat, location_lon, location_city')
+                        .eq('id', this._user.id)
+                        .single();
+                    if (!e2 && d2) {
+                        this._user.plan = d2.plan || this._user.plan;
+                        if (d2.display_name) this._user.name = d2.display_name;
+                        this._persistToStorage();
+                        return d2;
+                    }
+                }
+                console.warn('[Auth] Profile fetch failed:', error.message);
+                return null;
+            }
             if (data) {
                 // Merge server-side role/plan into local state
-                this._user.role = data.role || 'user';
+                // Only overwrite role if the DB actually returned a value
+                if (data.role) this._user.role = data.role;
                 this._user.plan = data.plan || this._user.plan;
                 if (data.display_name) this._user.name = data.display_name;
                 this._user.location = data.location_lat ? {
@@ -300,7 +322,15 @@ class AuthManager {
                 .select('role')
                 .eq('id', user.id)
                 .single();
-            if (dbErr) return { verified: false, error: dbErr.message };
+            if (dbErr) {
+                // If role column doesn't exist, the error will mention "role".
+                // Provide a helpful message so the admin knows to run the migration.
+                const msg = dbErr.message || '';
+                const hint = msg.includes('role') || msg.includes('column')
+                    ? 'Role column missing — run supabase-admin.sql in Supabase SQL Editor'
+                    : msg;
+                return { verified: false, error: hint };
+            }
 
             const role = data?.role || 'user';
             // Update local state to match server
