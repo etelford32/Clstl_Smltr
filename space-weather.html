@@ -573,16 +573,7 @@ nav {
     width:6px; height:6px; border-radius:50%; background:#ff6622;
     box-shadow:0 0 6px #ff6622; animation: pip-pulse 2s ease-in-out infinite;
 }
-/* ── The animated propagation canvas ─────────────────────────────────────── */
-#cme-transit-canvas {
-    display: block; width: 100%; height: 180px;
-    border-radius: 8px; margin-bottom: 10px;
-    cursor: default;
-}
-@media (max-width: 700px) { #cme-transit-canvas { height: 140px; } }
-@media (max-width: 480px) { #cme-transit-canvas { height: 110px; } }
-
-/* ── Event cards below the canvas ────────────────────────────────────────── */
+/* ── Event cards below the 3D view ───────────────────────────────────────── */
 .cme-events-row {
     display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px;
 }
@@ -1190,12 +1181,7 @@ nav {
             CME Propagation Forecast · Drag-Based Model (Vršnak 2013)
         </div>
 
-        <!-- Animated Sun → Earth propagation canvas -->
-        <canvas id="cme-transit-canvas"
-                role="img"
-                aria-label="CME propagation diagram showing coronal mass ejections traveling from the Sun to Earth"></canvas>
-
-        <!-- Active CME event cards (populated by JS) -->
+        <!-- Active CME event cards (populated by JS, driven by 3D globe propagator) -->
         <div class="cme-events-row" id="cme-events-row">
             <div class="cme-no-events" id="cme-no-events">
                 <span class="quiet-icon">&#9788;</span>
@@ -1306,6 +1292,7 @@ nav {
                 <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
                 <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
                 <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
+                <button class="layer-btn active" data-layer="cme">CME Shells</button>
             </div>
         </div>
         <canvas id="sw-globe-canvas"
@@ -1672,7 +1659,7 @@ import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
-import { CmePropagator, CmeEvent, dbmAnalytical, xrayToCmeSpeed } from './js/cme-propagation.js';
+import { CmePropagator } from './js/cme-propagation.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -2676,294 +2663,15 @@ let _globe = null;
     }
 }
 
-// ── CME Propagation Visualization ─────────────────────────────────────────────
-// Animated Canvas 2D showing CME blobs propagating from Sun to Earth along with
-// real-time DONKI data integration via CmePropagator.
+// ── CME Prediction Event Cards ────────────────────────────────────────────────
+// Event cards wired to the 3D globe's CmePropagator. The 3D visualization lives
+// inside SpaceWeatherGlobe; this block only manages the HTML prediction cards.
 {
-    const cmeCanvas = el('cme-transit-canvas');
-    const DPR = window.devicePixelRatio || 1;
+    // Use the globe's shared propagator (created in the globe section below)
+    // We defer wiring until _globe is constructed.
+    let _propagatorWired = false;
 
-    // ── CmePropagator instance (listens to swpc-update automatically) ─────────
-    const propagator = new CmePropagator().start();
-
-    // Expose for console debugging
-    window._cmePropagator = propagator;
-
-    // ── State for rendering ───────────────────────────────────────────────────
-    let _activeEvents = [];
-    let _v_sw = 400;
-
-    propagator.onChange((events, v_sw) => {
-        _activeEvents = events;
-        _v_sw = v_sw;
-        _renderEventCards(events);
-    });
-
-    // Also re-render cards on swpc-update in case ambient state changed
-    window.addEventListener('swpc-update', () => {
-        _activeEvents = propagator.getActive();
-    });
-
-    // ── Starfield (reuse-style, lightweight) ──────────────────────────────────
-    const CME_STARS = Array.from({ length: 60 }, () => ({
-        x: Math.random(), y: Math.random(),
-        r: 0.3 + Math.random() * 0.6,
-        a: 0.15 + Math.random() * 0.45,
-    }));
-
-    // ── Ambient wind particles ────────────────────────────────────────────────
-    const N_AMBIENT = 40;
-    const ambientPts = Array.from({ length: N_AMBIENT }, () => ({
-        x: Math.random(),
-        y: 0.1 + Math.random() * 0.8,
-        vx: 0.0006 + Math.random() * 0.0008,
-        seed: Math.random(),
-    }));
-
-    // ── Canvas resize ─────────────────────────────────────────────────────────
-    function resizeCme() {
-        if (!cmeCanvas) return;
-        const r = cmeCanvas.getBoundingClientRect();
-        cmeCanvas.width  = Math.round(r.width  * DPR);
-        cmeCanvas.height = Math.round(r.height * DPR);
-    }
-
-    // ── Main draw function ────────────────────────────────────────────────────
-    function drawCmeTransit(now) {
-        if (!cmeCanvas) return;
-        const ctx = cmeCanvas.getContext('2d');
-        const W = cmeCanvas.width, H = cmeCanvas.height;
-        ctx.save();
-        ctx.scale(DPR, DPR);
-        const w = W / DPR, h = H / DPR;
-
-        const t = now / 1000;  // seconds for animation
-
-        // Background
-        ctx.fillStyle = '#020108';
-        ctx.fillRect(0, 0, w, h);
-
-        // Stars
-        CME_STARS.forEach(s => {
-            ctx.beginPath();
-            ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(180,200,255,${s.a * (0.6 + 0.4 * Math.sin(t * 0.8 + s.seed * 12))})`;
-            ctx.fill();
-        });
-
-        // Geometry: Sun on left, Earth on right
-        const margin = 50;
-        const sunX  = margin;
-        const sunY  = h * 0.5;
-        const sunR  = Math.min(h * 0.22, 28);
-        const earthX = w - margin;
-        const earthY = h * 0.5;
-        const eR    = Math.min(h * 0.10, 14);
-
-        // Track zone: the Sun→Earth lane
-        const trackL = sunX + sunR + 6;   // left edge of track
-        const trackR = earthX - eR - 6;   // right edge of track
-        const trackW = trackR - trackL;
-
-        // ── Distance scale marks ──────────────────────────────────────────────
-        const scaleMarks = [0.25, 0.5, 0.75];
-        ctx.strokeStyle = 'rgba(255,255,255,.04)';
-        ctx.lineWidth = 1;
-        scaleMarks.forEach(f => {
-            const mx = trackL + f * trackW;
-            ctx.beginPath();
-            ctx.moveTo(mx, h * 0.15);
-            ctx.lineTo(mx, h * 0.85);
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(255,255,255,.12)';
-            ctx.font = '8px monospace';
-            ctx.textAlign = 'center';
-            ctx.fillText(`${(f).toFixed(2)} AU`, mx, h * 0.10);
-        });
-
-        // L1 marker at ~0.99 AU from Sun
-        const l1Frac = 0.99;
-        const l1X = trackL + l1Frac * trackW;
-        ctx.strokeStyle = 'rgba(0,230,120,.15)';
-        ctx.setLineDash([3, 4]);
-        ctx.beginPath();
-        ctx.moveTo(l1X, h * 0.2);
-        ctx.lineTo(l1X, h * 0.8);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(0,230,120,.4)';
-        ctx.font = 'bold 7px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('L1', l1X, h * 0.17);
-
-        // ── Ambient solar wind stream ─────────────────────────────────────────
-        const spdNorm = Math.max(0, Math.min(1, (_v_sw - 250) / 650));
-        ambientPts.forEach(p => {
-            p.x += p.vx * (0.6 + spdNorm * 0.8);
-            if (p.x > 1) { p.x = 0; p.y = 0.1 + Math.random() * 0.8; }
-            const px = trackL + p.x * trackW;
-            const py = p.y * h;
-            ctx.beginPath();
-            ctx.arc(px, py, 1, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,200,80,${0.15 + 0.15 * Math.sin(t * 1.8 + p.seed * 7)})`;
-            ctx.fill();
-        });
-
-        // ── Sun ───────────────────────────────────────────────────────────────
-        // Corona glow
-        for (let ri = 0; ri < 4; ri++) {
-            const cr = sunR * (1.3 + ri * 0.35);
-            const cg = ctx.createRadialGradient(sunX, sunY, sunR * 0.8, sunX, sunY, cr);
-            const ca = 0.06 * (1 - ri / 4);
-            cg.addColorStop(0, `rgba(255,200,80,${ca * 2})`);
-            cg.addColorStop(1, 'rgba(255,200,80,0)');
-            ctx.beginPath(); ctx.arc(sunX, sunY, cr, 0, Math.PI * 2);
-            ctx.fillStyle = cg; ctx.fill();
-        }
-        const sg = ctx.createRadialGradient(sunX - sunR * 0.15, sunY - sunR * 0.15, 0, sunX, sunY, sunR);
-        sg.addColorStop(0, '#fff8e0'); sg.addColorStop(0.4, '#ffd700');
-        sg.addColorStop(0.82, '#ff8c00'); sg.addColorStop(1, '#cc3300');
-        ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-        ctx.fillStyle = sg; ctx.fill();
-
-        // Sun label
-        ctx.fillStyle = '#886'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('Sun', sunX, sunY + sunR + 12);
-
-        // ── Earth ─────────────────────────────────────────────────────────────
-        // Atmosphere glow
-        const ag = ctx.createRadialGradient(earthX, earthY, eR, earthX, earthY, eR * 1.5);
-        ag.addColorStop(0, 'rgba(60,160,255,0.25)'); ag.addColorStop(1, 'rgba(60,160,255,0)');
-        ctx.beginPath(); ctx.arc(earthX, earthY, eR * 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = ag; ctx.fill();
-
-        // Earth disk
-        const eg = ctx.createRadialGradient(earthX - eR * 0.3, earthY, 0, earthX, earthY, eR);
-        eg.addColorStop(0, '#4499ff'); eg.addColorStop(0.5, '#1e60bf'); eg.addColorStop(1, '#0a2050');
-        ctx.beginPath(); ctx.arc(earthX, earthY, eR, 0, Math.PI * 2);
-        ctx.fillStyle = eg; ctx.fill();
-
-        // Earth label
-        ctx.fillStyle = '#668'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-        ctx.fillText('Earth', earthX, earthY + eR + 12);
-        ctx.fillText('1 AU', earthX, earthY + eR + 21);
-
-        // ── CME events: propagating blobs ─────────────────────────────────────
-        const nowMs = Date.now();
-        const events = _activeEvents;
-
-        if (events.length === 0) {
-            // Quiet state label
-            ctx.fillStyle = 'rgba(255,255,255,.12)';
-            ctx.font = '11px system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('No active CME propagation', w / 2, h * 0.5 - 4);
-            ctx.font = '9px monospace';
-            ctx.fillStyle = 'rgba(255,255,255,.07)';
-            ctx.fillText('Monitoring NASA DONKI for new events', w / 2, h * 0.5 + 10);
-        }
-
-        events.forEach((ev, idx) => {
-            const state = ev.stateAt(nowMs);
-            const progress = state.progress;  // 0 = Sun, 1 = Earth
-
-            // Position on the track
-            const blobX = trackL + progress * trackW;
-            const blobY = sunY + (idx - (events.length - 1) / 2) * 14;  // fan out vertically
-
-            // CME blob size: proportional to half-angle, shrinks with distance
-            const angScale = (ev.halfAngle ?? 30) / 30;
-            const blobR = Math.max(3, (8 + angScale * 6) * (1 - progress * 0.4));
-
-            // Color by severity
-            const sev = ev.impact?.severity ?? 'MINOR';
-            const blobCol = sev === 'EXTREME' ? [255, 40, 80] :
-                            sev === 'SEVERE'  ? [255, 60, 40] :
-                            sev === 'STRONG'  ? [255, 140, 0] :
-                            sev === 'MODERATE' ? [255, 200, 0] :
-                                                [255, 160, 60];
-
-            // Sheath compression glow (leading edge)
-            if (ev.sheath?.isShock && progress < 1) {
-                const sheathR = blobR * (1.3 + ev.sheath.compression * 0.15);
-                const sheathG = ctx.createRadialGradient(
-                    blobX + blobR * 0.3, blobY, blobR * 0.5,
-                    blobX, blobY, sheathR
-                );
-                sheathG.addColorStop(0, `rgba(${blobCol.join(',')},${0.3 + 0.15 * Math.sin(t * 3 + idx)})`);
-                sheathG.addColorStop(0.6, `rgba(${blobCol.join(',')},0.08)`);
-                sheathG.addColorStop(1, `rgba(${blobCol.join(',')},0)`);
-                ctx.beginPath(); ctx.arc(blobX, blobY, sheathR, 0, Math.PI * 2);
-                ctx.fillStyle = sheathG; ctx.fill();
-            }
-
-            // CME blob body
-            const blobG = ctx.createRadialGradient(blobX, blobY, 0, blobX, blobY, blobR);
-            blobG.addColorStop(0, `rgba(${blobCol.join(',')},0.9)`);
-            blobG.addColorStop(0.5, `rgba(${blobCol.join(',')},0.5)`);
-            blobG.addColorStop(1, `rgba(${blobCol.join(',')},0)`);
-            ctx.beginPath(); ctx.arc(blobX, blobY, blobR, 0, Math.PI * 2);
-            ctx.fillStyle = blobG; ctx.fill();
-
-            // Core bright point
-            ctx.beginPath(); ctx.arc(blobX, blobY, blobR * 0.3, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,255,220,${0.6 + 0.3 * Math.sin(t * 4 + idx)})`;
-            ctx.fill();
-
-            // Earth-directed indicator (ring)
-            if (ev.earthDirected) {
-                ctx.beginPath(); ctx.arc(blobX, blobY, blobR + 2, 0, Math.PI * 2);
-                ctx.strokeStyle = `rgba(255,80,40,${0.4 + 0.3 * Math.sin(t * 2.5)})`;
-                ctx.lineWidth = 1.2; ctx.stroke();
-            }
-
-            // Speed label near the blob
-            ctx.fillStyle = `rgba(${blobCol.join(',')},0.7)`;
-            ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
-            ctx.fillText(`${Math.round(state.v_kms)} km/s`, blobX, blobY - blobR - 4);
-
-            // Arrival ETA
-            if (!state.arrived) {
-                const etaH = ev.hoursUntilArrival(nowMs);
-                const etaStr = etaH > 24 ? `${(etaH / 24).toFixed(1)}d` : `${Math.round(etaH)}h`;
-                ctx.fillStyle = 'rgba(255,255,255,.3)';
-                ctx.font = '7px monospace';
-                ctx.fillText(`ETA ${etaStr}`, blobX, blobY + blobR + 10);
-            } else {
-                ctx.fillStyle = 'rgba(255,60,40,.6)';
-                ctx.font = 'bold 7px monospace';
-                ctx.fillText('ARRIVED', blobX, blobY + blobR + 10);
-            }
-
-            // Trail particles (motion blur)
-            if (progress > 0.01 && progress < 1) {
-                for (let ti = 1; ti <= 5; ti++) {
-                    const trailX = blobX - ti * (3 + state.v_kms / 300);
-                    if (trailX < trackL) break;
-                    const trailA = 0.15 * (1 - ti / 6);
-                    ctx.beginPath();
-                    ctx.arc(trailX, blobY + (Math.sin(t * 2 + ti) * 1.5), blobR * (0.5 - ti * 0.06), 0, Math.PI * 2);
-                    ctx.fillStyle = `rgba(${blobCol.join(',')},${trailA})`;
-                    ctx.fill();
-                }
-            }
-        });
-
-        // ── Bottom axis labels ────────────────────────────────────────────────
-        ctx.fillStyle = 'rgba(255,255,255,.08)';
-        ctx.font = '7px monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText('21.5 R☉', trackL, h - 4);
-        ctx.textAlign = 'right';
-        ctx.fillText('1 AU (149.6M km)', trackR, h - 4);
-        ctx.textAlign = 'center';
-        ctx.fillStyle = 'rgba(255,255,255,.06)';
-        ctx.fillText(`Ambient wind: ${Math.round(_v_sw)} km/s`, w / 2, h - 4);
-
-        ctx.restore();
-    }
-
-    // ── Event cards HTML ──────────────────────────────────────────────────────
+    // ── Event cards HTML (driven by globe's CmePropagator) ─────────────────
     function _renderEventCards(events) {
         const container = el('cme-events-row');
         const noEvEl    = el('cme-no-events');
@@ -3033,23 +2741,23 @@ let _globe = null;
         });
     }
 
-    // ── Animation loop ────────────────────────────────────────────────────────
-    function animateCme(now) {
-        requestAnimationFrame(animateCme);
-        drawCmeTransit(now);
-    }
-
-    if (cmeCanvas) {
-        resizeCme();
-        window.addEventListener('resize', resizeCme);
-        requestAnimationFrame(animateCme);
-
-        // Update cards every 10 seconds (positions change slowly)
+    // Wire to globe's propagator once the globe is ready (deferred)
+    function _wirePropagator() {
+        if (_propagatorWired || !_globe?.cmePropagator) return;
+        const propagator = _globe.cmePropagator;
+        propagator.onChange((events) => _renderEventCards(events));
+        // Periodic refresh for position updates
         setInterval(() => {
             const events = propagator.getActive();
             if (events.length) _renderEventCards(events);
         }, 10_000);
+        _propagatorWired = true;
     }
+
+    // Try wiring after a short delay (globe constructs below)
+    setTimeout(_wirePropagator, 500);
+    // Also retry on first swpc-update in case globe took longer
+    window.addEventListener('swpc-update', _wirePropagator, { once: true });
 }
 
 // ── LEGACY IIFE REMOVED — kept below as dead stub for safety until cleanup ──
