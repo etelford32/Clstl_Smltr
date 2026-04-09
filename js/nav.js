@@ -78,6 +78,7 @@ function _getAuth() {
 
 function _tierLevel(plan, role) {
     if (role === 'admin' || role === 'superadmin') return 99;
+    if (role === 'tester') return 98;  // testers get full feature access
     if (plan === 'advanced') return 3;
     if (plan === 'basic' || plan === 'intro') return 2;
     if (plan === 'free') return 1;
@@ -197,6 +198,9 @@ export function initNav(activeId = '') {
                     <a href="dashboard.html" class="nav-bell-footer">View all alerts</a>
                 </div>
             </div>`;
+        }
+        if (auth?.role === 'tester') {
+            html += `<span class="nav-item" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25);font-weight:700;font-size:.7rem;cursor:default">TESTER</span>`;
         }
         if (isAdmin) {
             html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;

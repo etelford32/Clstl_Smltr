@@ -12,7 +12,7 @@
 -- Add role column if it doesn't exist
 ALTER TABLE public.user_profiles
     ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'
-    CHECK (role IN ('user', 'admin', 'superadmin'));
+    CHECK (role IN ('user', 'tester', 'admin', 'superadmin'));
 
 -- Helper function: check if the current user is an admin
 CREATE OR REPLACE FUNCTION public.is_admin()

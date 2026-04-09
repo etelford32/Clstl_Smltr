@@ -186,6 +186,7 @@ footer a:hover{color:var(--text)}
     <p class="welcome-sub">
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
+      <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
     </p>
   </div>
 
@@ -204,7 +205,7 @@ footer a:hover{color:var(--text)}
         <div class="loc-info" id="loc-info">
           <span class="loc-pin">📍</span>
           <div>
-            <div class="loc-city" id="loc-city-name"><span class="loc-none">No location set</span></div>
+            <div class="loc-city" id="loc-city-name"><span class="loc-none">Set your location to unlock personalized forecasts</span></div>
             <div class="loc-coords-txt" id="loc-coords-txt"></div>
             <div class="loc-time" id="loc-time-txt"></div>
           </div>
@@ -681,6 +682,7 @@ import { geocodeQuery, saveUserLocation, loadUserLocation,
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
+import { OnboardingTour } from './js/onboarding-tour.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1282,6 +1284,15 @@ function initAll() {
 
 // All declarations complete — safe to call initAll now
 initAll();
+
+// ── Onboarding Tour ─────────────────────────────────────────────────────────
+{
+    const tour = new OnboardingTour();
+    // Auto-start for new users (first visit)
+    setTimeout(() => tour.start(), 1500);
+    // Re-trigger link
+    document.getElementById('retake-tour')?.addEventListener('click', () => tour.forceStart());
+}
 
 // ── Alert Engine + Preferences Wiring ────────────────────────────────────────
 {
