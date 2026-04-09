@@ -305,10 +305,17 @@ export function initNav(activeId = '') {
         });
     });
 
-    // Sign out
-    document.getElementById('nav-signout-btn')?.addEventListener('click', () => {
-        try { localStorage.removeItem(AUTH_KEY); } catch (_) {}
-        try { sessionStorage.removeItem(AUTH_KEY); } catch (_) {}
-        window.location.href = 'index.html';
+    // Sign out — use auth module to clear Supabase session + local storage
+    document.getElementById('nav-signout-btn')?.addEventListener('click', async () => {
+        try {
+            const { auth } = await import('./auth.js');
+            await auth.ready();
+            auth.signOut('index.html');
+        } catch (_) {
+            // Fallback if auth module fails to load
+            try { localStorage.removeItem(AUTH_KEY); } catch (_e) {}
+            try { sessionStorage.removeItem(AUTH_KEY); } catch (_e) {}
+            window.location.href = 'index.html';
+        }
     });
 }
