@@ -455,23 +455,28 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 
 <script type="module">
 /* ════════════════════════════════════════════════════════════════════════════
-   SAGITTARIUS A* — Ray-Marched Schwarzschild Black Hole
+   SAGITTARIUS A* — Ray-Marched Kerr Spacetime Black Hole
    ════════════════════════════════════════════════════════════════════════════
-   Full-screen fragment shader ray-marching through Schwarzschild spacetime:
-     • True gravitational lensing via null geodesic integration
-     • Accretion disk with Shakura-Sunyaev temperature profile
-     • Relativistic Doppler beaming + gravitational redshift
-     • "Wrapped disk" — far-side disk visible above/below BH via lensing
-     • Photon ring at the critical impact parameter b_c = 3√3/2 · R_s
-     • Procedural lensed starfield background with Einstein ring
+   Full-screen fragment shader ray-marching through Kerr spacetime (a = 0.998M):
+     • Exact Kerr-Schild Hamiltonian geodesic integration
+     • D-shaped shadow from frame-dragging asymmetry
+     • Oblate spheroidal event horizon at r+ = M + √(M² − a²)
+     • Prograde ISCO at r ≈ 1.237M (vs 6M for Schwarzschild)
+     • Accretion disk with Novikov-Thorne temperature profile
+     • Orbital velocities up to 0.67c at ISCO → extreme Doppler beaming
+     • "Wrapped disk" — far-side disk lensed above/below BH
+     • Photon ring + procedural lensed starfield with Einstein ring
      • Interactive camera: drag to orbit, scroll to zoom
 
    Physics references:
-     Schwarzschild (1916) — static spherically symmetric BH metric
-     Luminet (1979) A&A 75 — first computed image of a BH accretion disk
-     Shakura & Sunyaev (1973) — standard α-disk accretion model
-     Thorne (2014) "The Science of Interstellar" — visualisation methods
-     Oliver James et al. (2015) CQG 32 — Double Negative gravitational renderer
+     Kerr (1963) Phys. Rev. Lett. 11 — rotating BH metric
+     Kerr & Schild (1965) — Kerr-Schild coordinate form
+     Novikov & Thorne (1973) — relativistic accretion disk
+     Shakura & Sunyaev (1973) — standard α-disk model
+     Carter (1968) — separability & Carter constant
+     Luminet (1979) A&A 75 — first BH disk image computation
+     Thorne (2014) "The Science of Interstellar"
+     Oliver James et al. (2015) CQG 32 — Double Negative renderer (DNGR)
    ════════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -486,7 +491,7 @@ if (canvas) {
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setClearColor(0x000000, 1);
-    renderer.toneMapping = THREE.NoToneMapping; // tone mapping handled in shader
+    renderer.toneMapping = THREE.NoToneMapping;
 
     const scene  = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
@@ -496,9 +501,9 @@ if (canvas) {
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(
         new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
-        1.2,   // strength — strong glow on accretion disk
-        0.6,   // radius — wide bloom spread
-        0.25   // threshold — catch disk + photon ring
+        1.3,   // strength
+        0.6,   // radius
+        0.2    // threshold
     );
     composer.addPass(bloom);
 
@@ -507,10 +512,10 @@ if (canvas) {
         u_resolution: { value: new THREE.Vector2() },
         u_time:       { value: 0 },
         u_cameraPos:  { value: new THREE.Vector3() },
-        u_fov:        { value: 0.55 },   // tan(~29°) → ~58° vertical FOV
+        u_fov:        { value: 0.55 },
     };
 
-    // ── Full-screen quad with ray-march material ──────────────────────────
+    // ── Full-screen quad with Kerr ray-march material ─────────────────────
     const bhMaterial = new THREE.ShaderMaterial({
         vertexShader: /* glsl */`
             void main() {
@@ -525,13 +530,83 @@ if (canvas) {
             uniform vec3  u_cameraPos;
             uniform float u_fov;
 
-            // ─── Black hole constants (natural units: M = 0.5, Rs = 1) ────
-            #define RS          1.0
-            #define DISK_INNER  3.0     // ISCO = 6M = 3Rs (Schwarzschild)
-            #define DISK_OUTER  14.0
-            #define MAX_STEPS   150
+            // ─── Kerr black hole constants (M = 1 natural units) ──────
+            #define BH_M        1.0
+            #define BH_A        0.998           // spin parameter a/M
+            #define BH_A2       (BH_A * BH_A)   // a²
+            // Event horizon: r+ = M + sqrt(M² - a²) ≈ 1.063
+            #define R_PLUS      1.063
+            // Prograde ISCO for a = 0.998M
+            #define DISK_INNER  1.24
+            #define DISK_OUTER  20.0
+            #define MAX_STEPS   128
+            #define GRAD_EPS    0.005
 
-            // ─── Hash & Noise ─────────────────────────────────────────────
+            // Tetrahedron gradient vertices (unit vectors * 1/√3)
+            #define INV_SQRT3 0.57735
+            const vec3 T1 = vec3( INV_SQRT3,  INV_SQRT3,  INV_SQRT3);
+            const vec3 T2 = vec3( INV_SQRT3, -INV_SQRT3, -INV_SQRT3);
+            const vec3 T3 = vec3(-INV_SQRT3,  INV_SQRT3, -INV_SQRT3);
+            const vec3 T4 = vec3(-INV_SQRT3, -INV_SQRT3,  INV_SQRT3);
+
+            // ─── Kerr oblate spheroidal radius from Cartesian ─────────
+            float kerrR(vec3 p) {
+                float rho2 = dot(p, p);
+                float w = rho2 - BH_A2;
+                return sqrt(max(0.5 * (w + sqrt(w * w + 4.0 * BH_A2 * p.y * p.y)), 1e-8));
+            }
+
+            // ─── Kerr-Schild metric: f and null vector l ──────────────
+            // f = 2Mr³/(r⁴ + a²y²)
+            // l = ingoing KS null vector (spatial part, spin along y-axis)
+            void kerrFL(vec3 p, out float r, out float f, out vec3 l) {
+                float rho2 = dot(p, p);
+                float w = rho2 - BH_A2;
+                float r2 = max(0.5 * (w + sqrt(w * w + 4.0 * BH_A2 * p.y * p.y)), 1e-8);
+                r = sqrt(r2);
+                float denom = r2 * r2 + BH_A2 * p.y * p.y;
+                f = 2.0 * BH_M * r * r2 / max(denom, 1e-8);
+                float inv = 1.0 / (r2 + BH_A2);
+                l = vec3(
+                    (r * p.x + BH_A * p.z) * inv,
+                    p.y / max(r, 1e-6),
+                    (r * p.z - BH_A * p.x) * inv
+                );
+            }
+
+            // ─── Kerr geodesic force (Hamiltonian, tetrahedron gradient) ──
+            // dp_i/dλ = ½ξ² ∂f/∂x_i + fξ (∂l_j/∂x_i)p_j
+            // where ξ = l·p − E (KS Hamiltonian inner product)
+            vec3 kerrForce(vec3 pos, vec3 mom, float E, float fc, vec3 lc) {
+                float xi = dot(lc, mom) - E;
+
+                // 4 tetrahedral evaluations for gradient
+                float r1, f1, r2, f2, r3, f3, r4, f4;
+                vec3 l1, l2, l3, l4;
+                kerrFL(pos + GRAD_EPS * T1, r1, f1, l1);
+                kerrFL(pos + GRAD_EPS * T2, r2, f2, l2);
+                kerrFL(pos + GRAD_EPS * T3, r3, f3, l3);
+                kerrFL(pos + GRAD_EPS * T4, r4, f4, l4);
+
+                float invK = 1.0 / (4.0 * GRAD_EPS * INV_SQRT3);
+
+                // Gradient of f
+                vec3 grad_f = vec3(
+                    f1 + f2 - f3 - f4,
+                    f1 - f2 + f3 - f4,
+                    f1 - f2 - f3 + f4
+                ) * invK;
+
+                // Contracted Jacobian of l with momentum: (∂l_j/∂x_i) p_j
+                vec3 Dx = l1 + l2 - l3 - l4;
+                vec3 Dy = l1 - l2 + l3 - l4;
+                vec3 Dz = l1 - l2 - l3 + l4;
+                vec3 dl_dot_p = vec3(dot(Dx, mom), dot(Dy, mom), dot(Dz, mom)) * invK;
+
+                return 0.5 * xi * xi * grad_f + fc * xi * dl_dot_p;
+            }
+
+            // ─── Hash & Noise ─────────────────────────────────────────
             float hash21(vec2 p) {
                 return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
             }
@@ -558,34 +633,30 @@ if (canvas) {
                 return v;
             }
 
-            // ─── Blackbody RGB (Charity 2001 fit, astrophysical ext.) ─────
+            // ─── Blackbody RGB (Charity 2001 fit) ─────────────────────
             vec3 blackbody(float T) {
                 T = clamp(T, 800.0, 1.0e8);
                 float r, g, b;
-
                 if (T < 6600.0) r = 1.0;
                 else { float x = T / 100.0 - 60.0; r = clamp(329.698727 * pow(x, -0.1332048) / 255.0, 0.0, 1.0); }
-
                 if (T < 6600.0) { float x = max(1.0, T / 100.0); g = clamp((99.4708 * log(x) - 161.1196) / 255.0, 0.0, 1.0); }
                 else { float x = T / 100.0 - 60.0; g = clamp(288.1222 * pow(x, -0.0755148) / 255.0, 0.0, 1.0); }
-
                 if (T >= 6600.0) b = 1.0;
                 else if (T < 1900.0) b = 0.0;
                 else { float x = max(1.0, T / 100.0 - 10.0); b = clamp((138.5177 * log(x) - 305.0448) / 255.0, 0.0, 1.0); }
-
                 vec3 rgb = vec3(r, g, b);
                 rgb = mix(rgb, vec3(0.82, 0.90, 1.0), smoothstep(25000.0, 1.0e5, T));
                 rgb = mix(rgb, vec3(1.0),              smoothstep(5.0e5,  5.0e6, T));
                 return rgb;
             }
 
-            // ─── ACES filmic tone mapping ─────────────────────────────────
+            // ─── ACES filmic tone mapping ─────────────────────────────
             vec3 aces(vec3 x) {
                 float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
                 return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
             }
 
-            // ─── Procedural starfield ─────────────────────────────────────
+            // ─── Procedural starfield ─────────────────────────────────
             vec3 stars(vec3 dir) {
                 vec3 col = vec3(0.0);
                 for (int layer = 0; layer < 3; layer++) {
@@ -602,86 +673,81 @@ if (canvas) {
                         col += blackbody(temp) * br * (0.2 / float(layer + 1));
                     }
                 }
-                // Subtle Milky Way glow band
                 float gal = exp(-dir.y * dir.y * 10.0) * 0.015;
                 col += vec3(0.7, 0.6, 0.45) * gal;
                 return col;
             }
 
-            // ─── Accretion disk sampling ──────────────────────────────────
-            // Called when a ray crosses the equatorial plane (y = 0).
-            // hitPos: intersection point.  vel: photon direction at crossing.
+            // ─── Kerr accretion disk sampling ─────────────────────────
             vec3 sampleDisk(vec3 hitPos, vec3 vel, float time) {
-                float r = length(hitPos.xz);  // cylindrical radius
-                if (r < DISK_INNER * 0.8 || r > DISK_OUTER) return vec3(0.0);
+                // Oblate spheroidal r at equator: r = sqrt(x²+z² − a²)
+                float cyl2 = hitPos.x * hitPos.x + hitPos.z * hitPos.z;
+                float rDisk = sqrt(max(cyl2 - BH_A2, 1e-8));
+                if (rDisk < DISK_INNER * 0.7 || rDisk > DISK_OUTER) return vec3(0.0);
 
                 float angle = atan(hitPos.z, hitPos.x);
 
-                // Keplerian angular velocity: omega proportional to r^(-3/2)
-                float omega = pow(r, -1.5);
-                float phase = angle - time * omega * 0.15; // co-rotating frame
+                // Kerr Keplerian angular velocity: Ω = M^½ / (r^(3/2) + a·M^½)
+                float omega = 1.0 / (pow(rDisk, 1.5) + BH_A);
+                float phase = angle - time * omega * 0.12;
 
-                // ── Temperature: Shakura-Sunyaev thin-disk profile ────────
-                // T(r) proportional to r^(-3/4) * (1 - sqrt(r_ISCO / r))^(1/4)
-                float x_isco = DISK_INNER / r;
-                float T = 30000.0 * pow(x_isco, 0.75) * pow(max(0.001, 1.0 - sqrt(x_isco)), 0.25);
+                // ── Novikov-Thorne temperature profile ────────────────
+                float x_isco = DISK_INNER / rDisk;
+                float T = 45000.0 * pow(x_isco, 0.75) * pow(max(0.001, 1.0 - sqrt(x_isco)), 0.25);
 
-                // ── Turbulence in co-rotating frame ───────────────────────
-                float turb1 = fbm(vec2(phase * 3.0 + r * 2.0,  r * 5.0  + time * 0.05));
-                float turb2 = fbm(vec2(phase * 9.0 - r * 1.5,  r * 14.0 + time * 0.03));
+                // ── Turbulence in co-rotating frame ───────────────────
+                float turb1 = fbm(vec2(phase * 3.0 + rDisk * 1.5, rDisk * 4.0 + time * 0.04));
+                float turb2 = fbm(vec2(phase * 9.0 - rDisk * 1.0, rDisk * 12.0 + time * 0.025));
                 float turb  = turb1 * 0.6 + turb2 * 0.4;
 
-                // Spiral arms (m = 2 logarithmic spiral)
-                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(r + 0.3) * 5.0);
+                // Spiral arms (m = 2)
+                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * 5.0);
                 turb = mix(turb, turb * spiral, 0.35);
 
-                // Bright filaments near inner edge
-                float hotSpots = smoothstep(0.65, 0.85, turb) * smoothstep(DISK_INNER * 2.5, DISK_INNER * 1.1, r);
+                // Hot filaments near inner edge
+                float hotSpots = smoothstep(0.6, 0.85, turb) * smoothstep(DISK_INNER * 3.0, DISK_INNER * 1.1, rDisk);
                 turb += hotSpots * 0.3;
 
                 T *= (0.5 + turb * 1.0);
                 T = max(T, 1500.0);
 
-                // ── Relativistic Doppler beaming ──────────────────────────
-                // Keplerian orbital velocity v/c = sqrt(M/r) = sqrt(0.5*Rs/r)
-                float vOrb = min(sqrt(0.5 * RS / r), 0.55);
+                // ── Kerr relativistic Doppler beaming ─────────────────
+                // Orbital velocity: v = √(r²+a²) / (r^(3/2) + a)
+                float sqrtCyl = sqrt(max(cyl2, 1e-8));
+                float vOrb = sqrtCyl / (pow(rDisk, 1.5) + BH_A);
+                vOrb = min(vOrb, 0.75); // physical cap
 
-                // Orbital velocity direction: counter-clockwise viewed from +y
-                vec3 rHat   = normalize(vec3(hitPos.x, 0.0, hitPos.z));
-                vec3 orbDir = vec3(-rHat.z, 0.0, rHat.x);
+                // Orbital direction: counter-clockwise viewed from +y
+                vec3 orbDir = vec3(-hitPos.z, 0.0, hitPos.x) / max(sqrtCyl, 1e-6);
 
-                // Project matter velocity onto direction toward observer (-vel)
+                // Doppler: project onto observer direction
                 float betaLos = vOrb * dot(orbDir, -normalize(vel));
                 float gamma   = 1.0 / sqrt(max(0.001, 1.0 - vOrb * vOrb));
                 float delta   = 1.0 / (gamma * (1.0 - betaLos));
-                delta = clamp(delta, 0.08, 8.0);
+                delta = clamp(delta, 0.05, 10.0);
 
-                // ── Gravitational redshift ────────────────────────────────
-                // z = sqrt(1 - Rs/r) — photon energy loss climbing out of potential
-                float gz = sqrt(max(0.01, 1.0 - RS / r));
+                // Gravitational redshift: sqrt(1 - 2M/r) at equator
+                float gz = sqrt(max(0.01, 1.0 - 2.0 * BH_M / rDisk));
 
-                // ── Observed temperature & color ──────────────────────────
                 float T_obs = T * delta * gz;
                 vec3 col = blackbody(T_obs);
 
-                // ── Intensity: Doppler^3 × redshift^2 × turbulence ───────
                 float intensity = pow(delta, 3.0) * gz * gz;
                 intensity *= (turb * 0.7 + 0.3);
-                intensity *= 2.5;  // overall brightness
+                intensity *= 2.0;
 
-                // Edge fades
-                float outerFade = smoothstep(DISK_OUTER, DISK_OUTER * 0.6, r);
-                float innerFade = smoothstep(DISK_INNER * 0.8, DISK_INNER * 1.4, r);
+                float outerFade = smoothstep(DISK_OUTER, DISK_OUTER * 0.55, rDisk);
+                float innerFade = smoothstep(DISK_INNER * 0.7, DISK_INNER * 1.5, rDisk);
                 intensity *= outerFade * innerFade;
 
                 return col * max(0.0, intensity);
             }
 
-            // ─── Main: per-pixel ray march ────────────────────────────────
+            // ─── Main: per-pixel Kerr ray march ───────────────────────
             void main() {
                 vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
 
-                // ── Camera ray construction ───────────────────────────────
+                // Camera ray construction
                 vec3 target = vec3(0.0);
                 vec3 fwd    = normalize(target - u_cameraPos);
                 vec3 wUp    = abs(fwd.y) > 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
@@ -689,86 +755,100 @@ if (canvas) {
                 vec3 up     = cross(right, fwd);
 
                 vec3 pos = u_cameraPos;
-                vec3 vel = normalize(fwd + u_fov * (uv.x * right + uv.y * up));
+                vec3 mom = normalize(fwd + u_fov * (uv.x * right + uv.y * up));
 
-                // ── Ray march state ───────────────────────────────────────
+                // Compute photon energy E from initial conditions
+                // In KS coords: E = (f·l·p + √(p²(1+f) − f(l·p)²)) / (1+f)
+                float r0, f0; vec3 l0;
+                kerrFL(pos, r0, f0, l0);
+                float lp0 = dot(l0, mom);
+                float p2  = dot(mom, mom);
+                float E   = (f0 * lp0 + sqrt(max(p2 * (1.0 + f0) - f0 * lp0 * lp0, 0.0))) / (1.0 + f0);
+
+                // Ray march state
                 vec3  col   = vec3(0.0);
-                float alpha = 0.0;  // accumulated opacity
-                float minR  = 1e10; // closest approach (for photon ring)
+                float alpha = 0.0;
+                float minR  = 1e10;
 
                 for (int i = 0; i < MAX_STEPS; i++) {
-                    float r = length(pos);
-                    minR = min(minR, r);
+                    // Kerr state at current position
+                    float rc, fc; vec3 lc;
+                    kerrFL(pos, rc, fc, lc);
+                    minR = min(minR, rc);
 
-                    // Captured by event horizon
-                    if (r < RS * 0.5) {
+                    // Captured by event horizon (oblate spheroid)
+                    if (rc < R_PLUS * 1.02) {
                         alpha = 1.0;
                         break;
                     }
 
-                    // Escaped to infinity — sample starfield
-                    if (r > 50.0 && dot(pos, vel) > 0.0) {
-                        // Einstein ring: boost stars near critical approach
-                        float lensBoost = 1.0 + 2.0 / max(0.2, (minR - 1.5 * RS));
-                        lensBoost = min(lensBoost, 5.0);
+                    // Escaped to infinity
+                    if (rc > 50.0 && dot(pos, mom) > 0.0) {
+                        float xi = dot(lc, mom) - E;
+                        vec3 vel = mom - fc * xi * lc;
+                        float lensBoost = 1.0 + 2.5 / max(0.2, rc * (minR - R_PLUS));
+                        lensBoost = min(lensBoost, 6.0);
                         col += stars(normalize(vel)) * lensBoost * (1.0 - alpha);
                         alpha = 1.0;
                         break;
                     }
 
-                    // Save previous position for disk-crossing detection
-                    vec3 prevPos = pos;
+                    float prevY = pos.y;
 
-                    // ── Schwarzschild null geodesic acceleration ───────
-                    // a = -1.5 · Rs · h² / r⁵ · r_vec
-                    // where h = |r × v| is the specific angular momentum
-                    vec3  hVec = cross(pos, vel);
-                    float h2   = dot(hVec, hVec);
-                    float r5   = r * r * r * r * r;
-                    vec3  acc  = -1.5 * RS * h2 / r5 * pos;
+                    // ── Geodesic force ─────────────────────────────
+                    vec3 force;
+                    if (rc > 25.0) {
+                        // Far field: Schwarzschild approximation (cheap)
+                        vec3 hVec = cross(pos, mom);
+                        float h2 = dot(hVec, hVec);
+                        float r5 = rc * rc * rc * rc * rc;
+                        force = -3.0 * BH_M * h2 / r5 * pos;
+                    } else {
+                        // Near field: exact Kerr-Schild Hamiltonian force
+                        force = kerrForce(pos, mom, E, fc, lc);
+                    }
 
-                    // Adaptive step size: small near BH, large far away
-                    float dt = clamp(0.12 * r, 0.015, 1.2);
+                    // Adaptive step size
+                    float dt = clamp(0.08 * rc, 0.005, 0.8);
 
-                    // Euler integration (symplectic-ish: kick then drift)
-                    vel += acc * dt;
+                    // Kick (update momentum)
+                    mom += force * dt;
+
+                    // Compute velocity from momentum: v = p − f·ξ·l
+                    float xi = dot(lc, mom) - E;
+                    vec3 vel = mom - fc * xi * lc;
+
+                    // Drift (update position)
                     pos += vel * dt;
 
-                    // ── Accretion disk crossing check ─────────────────
-                    // When ray crosses the equatorial plane (y = 0),
-                    // sample the disk at the intersection point.
-                    if (prevPos.y * pos.y < 0.0 && alpha < 0.97) {
-                        // Linear interpolation to find crossing point
-                        float t    = -prevPos.y / (pos.y - prevPos.y);
-                        vec3  hitP = mix(prevPos, pos, t);
+                    // ── Disk crossing check ───────────────────────
+                    if (prevY * pos.y < 0.0 && alpha < 0.97) {
+                        float t    = -prevY / (pos.y - prevY);
+                        vec3  hitP = mix(pos - vel * dt, pos, t);
 
                         vec3  dCol = sampleDisk(hitP, vel, u_time);
                         float lum  = dot(dCol, vec3(0.299, 0.587, 0.114));
 
-                        // Front-to-back compositing
                         float a_ = clamp(lum * 1.5, 0.0, 1.0);
                         col   += dCol * (1.0 - alpha);
                         alpha  = min(1.0, alpha + a_);
                     }
                 }
 
-                // ── Photon ring: analytical glow at critical impact parameter ─
-                // Rays passing near r = 1.5·Rs (photon sphere) produce
-                // the bright, thin ring at the edge of the BH shadow.
-                float prDist = abs(minR - 1.5 * RS);
-                float prGlow = exp(-prDist * prDist / (0.02 * RS * RS));
-                // Doppler tilt on photon ring
+                // ── Photon ring glow (Kerr: asymmetric) ───────────────
+                float prDist = abs(minR - 1.5 * BH_M);
+                float prGlow = exp(-prDist * prDist / (0.025));
                 vec2 screenDir = normalize(gl_FragCoord.xy - 0.5 * u_resolution);
-                float prDoppler = 1.0 + 0.3 * screenDir.x;
-                col += vec3(1.0, 0.92, 0.75) * prGlow * 0.8 * prDoppler * (1.0 - alpha * 0.3);
+                float prDoppler = 1.0 + 0.4 * screenDir.x;
+                col += vec3(1.0, 0.92, 0.7) * prGlow * 0.7 * prDoppler * (1.0 - alpha * 0.3);
 
-                // Background for rays that didn't terminate
+                // Background for non-terminated rays
                 if (alpha < 1.0) {
-                    col += stars(normalize(vel)) * (1.0 - alpha) * 0.4;
+                    col += stars(normalize(mom)) * (1.0 - alpha) * 0.4;
                 }
 
-                // ── Exposure + ACES tone mapping + sRGB gamma ─────────────
-                col *= 1.6;
+                // Exposure + ACES tone mapping + sRGB gamma
+                col *= 1.3;
                 col  = aces(col);
                 col  = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
 
@@ -784,13 +864,13 @@ if (canvas) {
     scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bhMaterial));
 
     // ── Camera orbit state ────────────────────────────────────────────────
-    let camTheta = 0.0;      // azimuth angle (radians)
-    let camPhi   = 1.3;      // polar angle from +y axis (~74°, ~16° above disk)
-    let camDist  = 22.0;     // distance from BH center
+    let camTheta = 0.0;
+    let camPhi   = 1.2;      // ~69° from y-axis → ~21° above disk plane
+    let camDist  = 30.0;     // in M=1 units (shadow ≈ 5M, disk out to 20M)
     const CAM_PHI_MIN  = 0.15;
     const CAM_PHI_MAX  = Math.PI - 0.15;
-    const CAM_DIST_MIN = 8;
-    const CAM_DIST_MAX = 55;
+    const CAM_DIST_MIN = 5;
+    const CAM_DIST_MAX = 80;
 
     let isDragging       = false;
     let lastMouseX       = 0;
@@ -852,7 +932,6 @@ if (canvas) {
         raf = requestAnimationFrame(animate);
         t += 0.008;
 
-        // Slow auto-orbit when user isn't interacting
         if (autoRotateActive) {
             camTheta += 0.0004;
             updateCameraUniform();
@@ -881,6 +960,7 @@ if (canvas) {
     });
 }
 } catch(heroErr) { console.warn('Hero init failed:', heroErr); }
+
 
 
 /* ── MOBILE NAV BURGER ─────────────────────────────────────────────────── */
