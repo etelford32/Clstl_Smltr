@@ -101,15 +101,20 @@ class AuthManager {
         return this._user?.role === 'admin' || this._user?.role === 'superadmin';
     }
 
+    /** Check if current user is a tester (full feature access for testing). */
+    isTester() {
+        return this._user?.role === 'tester';
+    }
+
     /** Check if user's plan allows alerts (basic or advanced). */
     canUseAlerts() {
         const plan = this.getPlan();
-        return plan === 'basic' || plan === 'advanced' || this.isAdmin();
+        return plan === 'basic' || plan === 'advanced' || this.isAdmin() || this.isTester();
     }
 
     /** Check if user's plan allows advanced alerts (advanced only). */
     canUseAdvancedAlerts() {
-        return this.getPlan() === 'advanced' || this.isAdmin();
+        return this.getPlan() === 'advanced' || this.isAdmin() || this.isTester();
     }
 
     /** Get alert preferences (or defaults if not loaded). */

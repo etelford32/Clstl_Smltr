@@ -186,7 +186,22 @@ footer a:hover{color:var(--text)}
     <p class="welcome-sub">
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
+      <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
     </p>
+  </div>
+
+  <!-- ── SUBSCRIPTION MANAGEMENT ── -->
+  <div class="card" id="subscription-card" style="margin-bottom:16px;display:none">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
+      <div>
+        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff" id="sub-status-text">Free Plan</div>
+        <div style="font-size:.68rem;color:var(--muted)" id="sub-detail-text">Upgrade to unlock all simulations and alerts</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="pricing.html" class="btn-sm" id="sub-upgrade-btn" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Upgrade Plan</a>
+        <button id="sub-manage-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:#aab;cursor:pointer;padding:6px 16px;font-family:inherit;font-size:.75rem;display:none">Manage Billing</button>
+      </div>
+    </div>
   </div>
 
   <!-- ── TOP ROW ── -->
@@ -204,7 +219,7 @@ footer a:hover{color:var(--text)}
         <div class="loc-info" id="loc-info">
           <span class="loc-pin">📍</span>
           <div>
-            <div class="loc-city" id="loc-city-name"><span class="loc-none">No location set</span></div>
+            <div class="loc-city" id="loc-city-name"><span class="loc-none">Set your location to unlock personalized forecasts</span></div>
             <div class="loc-coords-txt" id="loc-coords-txt"></div>
             <div class="loc-time" id="loc-time-txt"></div>
           </div>
@@ -671,7 +686,7 @@ footer a:hover{color:var(--text)}
   <a href="index.html">Parker Physics</a> &nbsp;·&nbsp;
   <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
   <a href="privacy.html">Privacy</a> &nbsp;·&nbsp;
-  <a href="terms.html">Terms</a>
+  <a href="eula.html">Terms</a>
 </footer>
 
 <script type="module">
@@ -681,6 +696,7 @@ import { geocodeQuery, saveUserLocation, loadUserLocation,
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
+import { OnboardingTour } from './js/onboarding-tour.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -735,6 +751,61 @@ if (!_auth || !_auth.signedIn) {
     }
   }
   document.getElementById('signout-btn').addEventListener('click', signOut);
+
+  // ── Subscription card ─────────────────────────────────────────────────────
+  const subCard = document.getElementById('subscription-card');
+  if (subCard) {
+    subCard.style.display = '';
+    const subStatus = document.getElementById('sub-status-text');
+    const subDetail = document.getElementById('sub-detail-text');
+    const upgradeBtn = document.getElementById('sub-upgrade-btn');
+    const manageBtn  = document.getElementById('sub-manage-btn');
+
+    if (plan === 'basic' || plan === 'advanced') {
+      subStatus.textContent = plan.charAt(0).toUpperCase() + plan.slice(1) + ' Plan';
+      subStatus.style.color = plan === 'advanced' ? '#a080ff' : '#4488ff';
+      const subState = _auth.alerts?.subscription_status ?? _auth.subscription_status ?? 'active';
+      subDetail.textContent = subState === 'active' ? 'Active subscription'
+        : subState === 'trialing' ? 'Free trial active'
+        : subState === 'past_due' ? 'Payment past due — please update your card'
+        : subState === 'canceled' ? 'Canceled — access until period end'
+        : 'Active subscription';
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display = '';
+      manageBtn.addEventListener('click', async () => {
+        manageBtn.textContent = 'Opening...';
+        try {
+          const sb = await (await import('./js/supabase-config.js')).getSupabase();
+          const { data: { session } } = await sb.auth.getSession();
+          const res = await fetch('/api/stripe/portal', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+          });
+          const data = await res.json();
+          if (data.url) { window.location.href = data.url; return; }
+          alert(data.detail || 'Could not open billing portal');
+        } catch (e) { alert('Error: ' + e.message); }
+        manageBtn.textContent = 'Manage Billing';
+      });
+    } else {
+      // Free user — show upgrade prompt
+      subStatus.textContent = 'Free Plan';
+      subDetail.textContent = 'Upgrade to unlock all 17 simulations, custom alerts, and email delivery';
+    }
+  }
+
+  // Handle checkout success redirect
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.get('checkout') === 'success') {
+    const successPlan = urlParams.get('plan') || 'basic';
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,40,20,.95);border:1px solid rgba(0,200,100,.3);border-radius:10px;padding:14px 28px;color:#44cc88;font-size:.88rem;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.5);text-align:center';
+    banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 6000);
+    // Refresh profile to get updated plan from webhook
+    auth.fetchProfile().then(() => location.replace('dashboard.html'));
+  }
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -1282,6 +1353,15 @@ function initAll() {
 
 // All declarations complete — safe to call initAll now
 initAll();
+
+// ── Onboarding Tour ─────────────────────────────────────────────────────────
+{
+    const tour = new OnboardingTour();
+    // Auto-start for new users (first visit)
+    setTimeout(() => tour.start(), 1500);
+    // Re-trigger link
+    document.getElementById('retake-tour')?.addEventListener('click', () => tour.forceStart());
+}
 
 // ── Alert Engine + Preferences Wiring ────────────────────────────────────────
 {

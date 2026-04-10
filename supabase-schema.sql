@@ -22,7 +22,13 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     email TEXT,
     display_name TEXT,
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
-    role TEXT DEFAULT 'user' CHECK (role IN ('user', 'admin', 'superadmin')),
+    role TEXT DEFAULT 'user' CHECK (role IN ('user', 'tester', 'admin', 'superadmin')),
+    -- Stripe billing
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    stripe_price_id TEXT,
+    subscription_status TEXT DEFAULT 'none' CHECK (subscription_status IN ('none', 'trialing', 'active', 'past_due', 'canceled', 'unpaid')),
+    subscription_period_end TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     -- Location for aurora/pass predictions
@@ -80,6 +86,16 @@ RETURNS BOOLEAN AS $$
     SELECT EXISTS (
         SELECT 1 FROM public.user_profiles
         WHERE id = auth.uid() AND role IN ('admin', 'superadmin')
+    );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Helper function: check if the current user is a tester
+-- Testers get full feature access (advanced plan equivalent) for testing purposes
+CREATE OR REPLACE FUNCTION public.is_tester()
+RETURNS BOOLEAN AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.user_profiles
+        WHERE id = auth.uid() AND role IN ('tester', 'admin', 'superadmin')
     );
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
