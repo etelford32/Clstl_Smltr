@@ -31,7 +31,6 @@ const NAV_DROPDOWNS = [
         id: 'earth-menu',
         items: [
             { href: 'earth.html',      label: 'Earth',      sub: '3D globe with live data layers',       tier: 'public', icon: '🌍' },
-            { href: 'moon.html',       label: 'Moon',       sub: 'Lunar surface & phase tracker',        tier: 'public', icon: '🌙' },
             { href: 'satellites.html', label: 'Satellites',  sub: 'Real-time orbital tracking',          tier: 'advanced', icon: '🛰️', badge: 'PRO' },
         ],
     },
