@@ -447,14 +447,38 @@
                 document.getElementById('form-view').style.display = 'none';
                 document.getElementById('success-view').classList.add('show');
                 const msgEl = document.querySelector('#success-view p');
-                if (msgEl) msgEl.textContent = result.message || 'Check your email for a confirmation link.';
-                // Don't auto-redirect — user needs to confirm email first
+                const confirmMsg = plan !== 'free'
+                    ? `${result.message || 'Check your email for a confirmation link.'} After confirming, you'll be able to subscribe to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan.`
+                    : result.message || 'Check your email for a confirmation link.';
+                if (msgEl) msgEl.textContent = confirmMsg;
                 return;
             }
 
+            // Signup succeeded without email confirmation
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
-            setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
+
+            if (plan !== 'free') {
+                // User selected a paid plan — redirect to checkout after brief delay
+                const msgEl = document.querySelector('#success-view p');
+                if (msgEl) msgEl.innerHTML = 'Account created! Redirecting to checkout&hellip;<br><a href="dashboard.html" style="color:#a080ff;font-size:.82rem">Or go to dashboard &rarr;</a>';
+                setTimeout(async () => {
+                    try {
+                        const sb = await (await import('./js/supabase-config.js')).getSupabase();
+                        const { data: { session } } = await sb.auth.getSession();
+                        const res = await fetch('/api/stripe/checkout', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+                            body: JSON.stringify({ plan }),
+                        });
+                        const data = await res.json();
+                        if (data.url) { window.location.href = data.url; return; }
+                    } catch (e) { console.warn('Checkout redirect failed:', e); }
+                    window.location.href = 'dashboard.html';
+                }, 1500);
+            } else {
+                setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
+            }
         })();
     });
 </script>

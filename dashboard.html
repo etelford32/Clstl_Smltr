@@ -803,8 +803,17 @@ if (!_auth || !_auth.signedIn) {
     banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
     document.body.appendChild(banner);
     setTimeout(() => banner.remove(), 6000);
-    // Refresh profile to get updated plan from webhook
-    auth.fetchProfile().then(() => location.replace('dashboard.html'));
+    // Refresh profile to get updated plan from webhook, then clean URL
+    auth.fetchProfile().then(() => {
+      // Replace URL to remove ?checkout=success (prevents refresh loop)
+      history.replaceState(null, '', 'dashboard.html');
+      // Update UI with new plan
+      const updatedPlan = auth.getPlan();
+      const b = document.getElementById('plan-badge');
+      if (b) { b.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1); b.className = 'plan-badge plan-' + updatedPlan; }
+      const st = document.getElementById('sub-status-text');
+      if (st) { st.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1) + ' Plan'; }
+    });
   }
 }
 
