@@ -20,6 +20,7 @@ const STRIPE_API   = 'https://api.stripe.com/v1';
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
+const PORTAL_CONFIG = process.env.STRIPE_PORTAL_CONFIG_ID || 'bpc_1TKem2CFCdsF8GYJNqf8hKGN';
 
 function json(body, status = 200) {
     return Response.json(body, {
@@ -63,8 +64,9 @@ export default async function handler(req) {
 
     try {
         const params = new URLSearchParams({
-            customer:   customerId,
-            return_url: `${APP_URL}/dashboard.html`,
+            customer:       customerId,
+            return_url:     `${APP_URL}/dashboard.html`,
+            configuration:  PORTAL_CONFIG,
         });
         const res = await fetch(`${STRIPE_API}/billing_portal/sessions`, {
             method: 'POST',

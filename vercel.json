@@ -6,6 +6,40 @@
   "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown",
   "headers": [
     {
+      "source": "/api/stripe/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization, Stripe-Signature"
+        }
+      ]
+    },
+    {
+      "source": "/api/alerts/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
       "source": "/rust/www/(.*)",
       "headers": [
         {
@@ -94,6 +128,14 @@
     {
       "source": "/api-policy",
       "destination": "/api-policy.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/admin.html"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/reset-password.html"
     },
     {
       "source": "/v1/solar-wind/:path*",

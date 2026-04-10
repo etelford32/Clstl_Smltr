@@ -95,6 +95,7 @@ async function fetchSubscription(subscriptionId) {
 
 export default async function handler(req) {
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+    if (!STRIPE_KEY) return new Response('Webhook not configured: STRIPE_SECRET_KEY missing', { status: 501 });
 
     const rawBody  = await req.text();
     const sigValid = await verifySignature(rawBody, req.headers.get('stripe-signature'));
