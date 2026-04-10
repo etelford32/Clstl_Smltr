@@ -1,50 +1,47 @@
 /**
- * onboarding-tour.js — Lightweight modal tour for new users
+ * onboarding-tour.js — Guided modal tour for new users
  *
- * Shows a step-by-step guided tour on the dashboard highlighting key features
- * and showing value. Runs once per user (completion tracked in localStorage).
- * Can be re-triggered from a "Take the tour" link.
+ * A polished step-by-step tour that spotlights dashboard sections with a
+ * translucent cutout overlay, a cleanly-anchored tooltip card, and smooth
+ * scroll/transitions between steps.
  *
- * ── Design philosophy ────────────────────────────────────────────────────────
- *  SHOW value first, then ask for action. Each step highlights a real feature
- *  the user can see on the page, with a spotlight effect that dims everything
- *  else. Steps are skippable. The tour ends with a CTA to explore or upgrade.
- *
- * ── Usage ────────────────────────────────────────────────────────────────────
- *  import { OnboardingTour } from './js/onboarding-tour.js';
- *  const tour = new OnboardingTour();
- *  tour.start();        // show if not completed
- *  tour.forceStart();   // show even if previously completed
+ * ── Key design decisions ─────────────────────────────────────────────────────
+ *  - Overlay is a translucent scrim (not opaque) so the page is always visible
+ *  - Spotlight is a real CSS clip-path cutout, not a massive box-shadow
+ *  - The tooltip card is always anchored to a consistent position (bottom-right
+ *    of the spotlight, or centered for full-screen steps)
+ *  - Arrow/connector points from card to target
+ *  - Back button available from step 2 onward
+ *  - Keyboard: Escape to skip, Enter/Right to advance, Left to go back
  */
 
 const LS_KEY = 'ppx_tour_completed';
 
-// ── Tour step definitions ────────────────────────────────────────────────────
 const STEPS = [
     {
         title: 'Welcome to Parker Physics',
         body: 'Your personal astrophysics command center — powered by live NASA and NOAA satellite data, updated every 60 seconds.',
         icon: '&#128640;',
-        target: null,  // no spotlight — full-screen welcome
+        target: null,
         cta: 'Show me around',
     },
     {
         title: 'Set Your Location',
-        body: 'We use your location to personalize aurora forecasts, satellite pass predictions, and weather alerts. You can change it anytime.',
+        body: 'Enter your city or use GPS to unlock personalized aurora forecasts, satellite pass predictions, and local weather alerts.',
         icon: '&#128205;',
         target: '#location-card',
         cta: 'Next',
     },
     {
         title: 'Live Space Weather',
-        body: 'Real-time Kp index, solar wind speed, IMF Bz, and storm conditions — all from NOAA SWPC and NASA DONKI. Updates automatically.',
+        body: 'Real-time Kp index, solar wind speed, IMF Bz, and storm conditions from NOAA SWPC. Updates every 60 seconds automatically.',
         icon: '&#127758;',
         target: '#sw-card',
         cta: 'Next',
     },
     {
         title: 'Your Impact Score',
-        body: 'A personalized 0-100 score combining geomagnetic activity, solar radiation, CME threats, and your location risk — with 24h, 3-day, and 7-day forecasts.',
+        body: 'A personalized 0–100 score combining geomagnetic activity, solar radiation, CME threats, and your location — with 24h, 3-day, and 7-day storm probability forecasts.',
         icon: '&#127919;',
         target: '#impact-card',
         cta: 'Next',
@@ -58,14 +55,14 @@ const STEPS = [
     },
     {
         title: 'Interactive Simulations',
-        body: '17+ WebGL simulations — from the Sun\'s photosphere to Earth\'s magnetosphere, black hole accretion disks, and the Milky Way. All driven by real physics.',
+        body: '17+ WebGL simulations — from the Sun\'s photosphere to Earth\'s magnetosphere, black hole accretion disks, and the Milky Way. All driven by real physics engines.',
         icon: '&#9788;',
         target: '.sim-grid',
         cta: 'Next',
     },
     {
         title: 'You\'re All Set!',
-        body: 'Start by setting your location, then explore a simulation. Solar Maximum is happening now — the best aurora season in a decade. Don\'t miss it.',
+        body: 'Start by setting your location, then explore a simulation. Solar Maximum is happening right now — the best aurora season in over a decade.',
         icon: '&#127775;',
         target: null,
         cta: 'Start exploring',
@@ -73,61 +70,107 @@ const STEPS = [
     },
 ];
 
-// ── Styles (injected once) ───────────────────────────────────────────────────
+// ── Styles ───────────────────────────────────────────────────────────────────
+
 const TOUR_CSS = `
-.tour-overlay {
-    position: fixed; inset: 0; z-index: 9998;
-    background: rgba(0,0,0,.7); backdrop-filter: blur(3px);
-    opacity: 0; transition: opacity .3s;
+/* ── Scrim: translucent so the page is always visible ─────────────────────── */
+.tour-scrim {
+    position: fixed; inset: 0; z-index: 9990;
+    background: rgba(3,1,14,.55);
+    opacity: 0; transition: opacity .35s;
+    pointer-events: auto;
 }
-.tour-overlay.visible { opacity: 1; }
+.tour-scrim.visible { opacity: 1; }
+
+/* ── Spotlight cutout: highlights the target element ──────────────────────── */
 .tour-spotlight {
-    position: fixed; z-index: 9999;
-    box-shadow: 0 0 0 9999px rgba(0,0,0,.7);
+    position: fixed; z-index: 9991;
+    border: 2px solid rgba(255,200,0,.35);
     border-radius: 12px;
-    transition: all .4s ease;
+    box-shadow: 0 0 0 4px rgba(255,200,0,.08), 0 0 30px rgba(255,180,0,.12);
+    transition: top .4s ease, left .4s ease, width .4s ease, height .4s ease, opacity .3s;
     pointer-events: none;
+    opacity: 0;
 }
-.tour-modal {
-    position: fixed; z-index: 10000;
-    background: rgba(12,10,28,.96); backdrop-filter: blur(20px);
-    border: 1px solid rgba(255,255,255,.10); border-radius: 16px;
-    padding: 28px 26px 22px; max-width: 400px; width: 90%;
-    box-shadow: 0 20px 60px rgba(0,0,0,.6);
-    transform: translateY(10px); opacity: 0;
-    transition: transform .35s ease, opacity .3s;
+.tour-spotlight.visible { opacity: 1; }
+
+/* ── Tooltip card ─────────────────────────────────────────────────────────── */
+.tour-card {
+    position: fixed; z-index: 9992;
+    background: rgba(14,12,30,.94);
+    backdrop-filter: blur(24px) saturate(1.2);
+    border: 1px solid rgba(255,200,0,.18);
+    border-radius: 14px;
+    padding: 24px 22px 18px;
+    width: 380px; max-width: calc(100vw - 32px);
+    box-shadow: 0 16px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04) inset;
+    opacity: 0; transform: translateY(12px);
+    transition: opacity .3s, transform .35s ease;
 }
-.tour-modal.visible { transform: translateY(0); opacity: 1; }
-.tour-icon { font-size: 2rem; margin-bottom: 10px; }
-.tour-title { font-size: 1.1rem; font-weight: 700; color: #e8f4ff; margin-bottom: 8px; }
-.tour-body { font-size: .82rem; color: #99aabb; line-height: 1.6; margin-bottom: 18px; }
-.tour-footer { display: flex; justify-content: space-between; align-items: center; }
-.tour-dots { display: flex; gap: 5px; }
+.tour-card.visible { opacity: 1; transform: translateY(0); }
+.tour-card.center {
+    top: 50% !important; left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+}
+.tour-card.center.visible { transform: translate(-50%, -50%) !important; }
+
+/* ── Arrow connector (CSS triangle) ───────────────────────────────────────── */
+.tour-arrow {
+    position: absolute; width: 12px; height: 12px;
+    background: rgba(14,12,30,.94);
+    border: 1px solid rgba(255,200,0,.18);
+    transform: rotate(45deg);
+}
+.tour-arrow.arrow-up    { top: -7px; border-bottom: none; border-right: none; }
+.tour-arrow.arrow-down  { bottom: -7px; border-top: none; border-left: none; }
+
+/* ── Card content ─────────────────────────────────────────────────────────── */
+.tour-step-badge {
+    display: inline-block; font-size: .6rem; font-weight: 700;
+    color: rgba(255,200,0,.7); letter-spacing: .08em; text-transform: uppercase;
+    margin-bottom: 8px;
+}
+.tour-icon { font-size: 1.8rem; margin-bottom: 8px; line-height: 1; }
+.tour-title { font-size: 1.05rem; font-weight: 700; color: #e8f4ff; margin-bottom: 6px; line-height: 1.3; }
+.tour-body { font-size: .8rem; color: #8899aa; line-height: 1.65; margin-bottom: 16px; }
+.tour-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.tour-dots { display: flex; gap: 4px; }
 .tour-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: rgba(255,255,255,.15); transition: background .3s;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,.12); transition: background .3s, transform .3s;
 }
-.tour-dot.active { background: #ffd700; }
+.tour-dot.active { background: #ffd700; transform: scale(1.3); }
+.tour-dot.done   { background: rgba(255,200,0,.35); }
+.tour-btns { display: flex; gap: 6px; align-items: center; }
 .tour-btn {
-    padding: 8px 20px; border: none; border-radius: 8px;
-    font-size: .82rem; font-weight: 700; cursor: pointer; font-family: inherit;
-    background: linear-gradient(45deg, #ff8c00, #ffd700); color: #000;
-    transition: filter .2s;
+    padding: 7px 18px; border: none; border-radius: 7px;
+    font-size: .8rem; font-weight: 700; cursor: pointer; font-family: inherit;
+    background: linear-gradient(135deg, #ff8c00, #ffd700); color: #000;
+    transition: filter .15s, transform .15s;
 }
-.tour-btn:hover { filter: brightness(1.12); }
+.tour-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.tour-btn-back {
+    padding: 7px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px;
+    background: rgba(255,255,255,.04); color: #889; cursor: pointer;
+    font-family: inherit; font-size: .78rem; transition: border-color .15s;
+}
+.tour-btn-back:hover { border-color: rgba(255,255,255,.25); color: #bbc; }
 .tour-skip {
-    background: none; border: none; color: #667; font-size: .72rem;
-    cursor: pointer; font-family: inherit; padding: 4px 8px;
+    background: none; border: none; color: #556; font-size: .68rem;
+    cursor: pointer; font-family: inherit; padding: 2px 6px;
 }
-.tour-skip:hover { color: #aab; }
+.tour-skip:hover { color: #99a; }
 .tour-progress {
-    margin-top: 14px; height: 3px; border-radius: 2px;
-    background: rgba(255,255,255,.06); overflow: hidden;
+    margin-top: 12px; height: 2px; border-radius: 1px;
+    background: rgba(255,255,255,.05); overflow: hidden;
 }
 .tour-progress-bar {
-    height: 100%; border-radius: 2px;
+    height: 100%; border-radius: 1px;
     background: linear-gradient(90deg, #ff8c00, #ffd700);
-    transition: width .4s;
+    transition: width .4s ease;
+}
+@media (max-width: 500px) {
+    .tour-card { width: calc(100vw - 24px); padding: 20px 16px 14px; }
 }
 `;
 
@@ -136,169 +179,219 @@ const TOUR_CSS = `
 export class OnboardingTour {
     constructor() {
         this._step = 0;
-        this._overlay = null;
+        this._scrim = null;
         this._spotlight = null;
-        this._modal = null;
+        this._card = null;
         this._active = false;
+        this._onKey = this._onKey.bind(this);
     }
 
-    /** Start the tour if not previously completed. */
     start() {
-        try {
-            if (localStorage.getItem(LS_KEY) === '1') return;
-        } catch {}
+        try { if (localStorage.getItem(LS_KEY) === '1') return; } catch {}
         this.forceStart();
     }
 
-    /** Start the tour regardless of completion state. */
     forceStart() {
         if (this._active) return;
         this._active = true;
         this._step = 0;
-        this._injectCSS();
-        this._createElements();
-        this._show();
+        this._inject();
+        this._create();
+        this._render();
+        document.addEventListener('keydown', this._onKey);
     }
 
     // ── Private ──────────────────────────────────────────────────────────────
 
-    _injectCSS() {
-        if (document.getElementById('tour-styles')) return;
-        const style = document.createElement('style');
-        style.id = 'tour-styles';
-        style.textContent = TOUR_CSS;
-        document.head.appendChild(style);
+    _inject() {
+        if (document.getElementById('tour-css')) return;
+        const s = document.createElement('style');
+        s.id = 'tour-css';
+        s.textContent = TOUR_CSS;
+        document.head.appendChild(s);
     }
 
-    _createElements() {
-        // Overlay
-        this._overlay = document.createElement('div');
-        this._overlay.className = 'tour-overlay';
-        document.body.appendChild(this._overlay);
+    _create() {
+        this._scrim = document.createElement('div');
+        this._scrim.className = 'tour-scrim';
+        this._scrim.addEventListener('click', () => this._close());
+        document.body.appendChild(this._scrim);
 
-        // Spotlight
         this._spotlight = document.createElement('div');
         this._spotlight.className = 'tour-spotlight';
-        this._spotlight.style.display = 'none';
         document.body.appendChild(this._spotlight);
 
-        // Modal
-        this._modal = document.createElement('div');
-        this._modal.className = 'tour-modal';
-        document.body.appendChild(this._modal);
+        this._card = document.createElement('div');
+        this._card.className = 'tour-card';
+        document.body.appendChild(this._card);
 
-        // Click handlers
-        this._overlay.addEventListener('click', () => this._close());
-
-        requestAnimationFrame(() => {
-            this._overlay.classList.add('visible');
-        });
+        requestAnimationFrame(() => this._scrim.classList.add('visible'));
     }
 
-    _show() {
+    _render() {
         const step = STEPS[this._step];
         if (!step) { this._close(); return; }
 
-        const progress = ((this._step + 1) / STEPS.length * 100).toFixed(0);
+        const pct = (((this._step + 1) / STEPS.length) * 100).toFixed(0);
 
-        // Build modal content
-        this._modal.innerHTML = `
+        // Build card HTML
+        this._card.innerHTML = `
+            <div class="tour-step-badge">Step ${this._step + 1} of ${STEPS.length}</div>
             <div class="tour-icon">${step.icon}</div>
             <div class="tour-title">${step.title}</div>
             <div class="tour-body">${step.body}</div>
             <div class="tour-footer">
-                <div>
-                    <div class="tour-dots">
-                        ${STEPS.map((_, i) => `<span class="tour-dot${i === this._step ? ' active' : ''}"></span>`).join('')}
-                    </div>
+                <div class="tour-dots">
+                    ${STEPS.map((_, i) =>
+                        `<span class="tour-dot${i === this._step ? ' active' : i < this._step ? ' done' : ''}"></span>`
+                    ).join('')}
                 </div>
-                <div style="display:flex;gap:8px;align-items:center">
-                    ${!step.final ? '<button class="tour-skip" id="tour-skip">Skip tour</button>' : ''}
+                <div class="tour-btns">
+                    ${!step.final ? '<button class="tour-skip" id="tour-skip">Skip</button>' : ''}
+                    ${this._step > 0 ? '<button class="tour-btn-back" id="tour-back">&larr;</button>' : ''}
                     <button class="tour-btn" id="tour-next">${step.cta}</button>
                 </div>
             </div>
-            <div class="tour-progress"><div class="tour-progress-bar" style="width:${progress}%"></div></div>
+            <div class="tour-progress"><div class="tour-progress-bar" style="width:${pct}%"></div></div>
         `;
 
         // Wire buttons
-        this._modal.querySelector('#tour-next')?.addEventListener('click', () => {
+        this._card.querySelector('#tour-next')?.addEventListener('click', () => {
             if (step.final) { this._close(); return; }
             this._step++;
-            this._show();
+            this._render();
         });
-        this._modal.querySelector('#tour-skip')?.addEventListener('click', () => this._close());
-
-        // Spotlight target
-        if (step.target) {
-            const el = document.querySelector(step.target);
-            if (el) {
-                const rect = el.getBoundingClientRect();
-                const pad = 8;
-                this._spotlight.style.display = '';
-                this._spotlight.style.top    = (rect.top - pad)  + 'px';
-                this._spotlight.style.left   = (rect.left - pad) + 'px';
-                this._spotlight.style.width  = (rect.width + pad * 2)  + 'px';
-                this._spotlight.style.height = (rect.height + pad * 2) + 'px';
-
-                // Scroll target into view
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-                // Position modal below/above the target
-                const modalH = 300;
-                const spaceBelow = window.innerHeight - rect.bottom;
-                if (spaceBelow > modalH + 20) {
-                    this._modal.style.top  = (rect.bottom + 16) + 'px';
-                    this._modal.style.bottom = '';
-                } else {
-                    this._modal.style.top    = '';
-                    this._modal.style.bottom = (window.innerHeight - rect.top + 16) + 'px';
-                }
-                this._modal.style.left = Math.max(16, Math.min(
-                    window.innerWidth - 420,
-                    rect.left + rect.width / 2 - 200
-                )) + 'px';
-            } else {
-                this._spotlight.style.display = 'none';
-                this._centerModal();
-            }
-        } else {
-            this._spotlight.style.display = 'none';
-            this._centerModal();
-        }
-
-        // Animate in
-        this._modal.classList.remove('visible');
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => this._modal.classList.add('visible'));
+        this._card.querySelector('#tour-back')?.addEventListener('click', () => {
+            if (this._step > 0) { this._step--; this._render(); }
         });
+        this._card.querySelector('#tour-skip')?.addEventListener('click', () => this._close());
+
+        // Position spotlight + card
+        this._position(step);
     }
 
-    _centerModal() {
-        this._modal.style.top = '50%';
-        this._modal.style.left = '50%';
-        this._modal.style.bottom = '';
-        this._modal.style.transform = 'translate(-50%, -50%)';
-        // Re-add visible after a frame so the transition works
-        requestAnimationFrame(() => {
-            this._modal.style.transform = 'translate(-50%, -50%)';
-        });
+    _position(step) {
+        // Remove old arrow
+        this._card.querySelector('.tour-arrow')?.remove();
+
+        // Reset card classes
+        this._card.classList.remove('center', 'visible');
+        this._card.style.top = '';
+        this._card.style.left = '';
+        this._card.style.bottom = '';
+        this._card.style.right = '';
+
+        if (!step.target) {
+            // Full-screen centered card (welcome/finale)
+            this._spotlight.classList.remove('visible');
+            this._card.classList.add('center');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this._card.classList.add('visible'));
+            });
+            return;
+        }
+
+        const el = document.querySelector(step.target);
+        if (!el) {
+            // Target not found — center the card
+            this._spotlight.classList.remove('visible');
+            this._card.classList.add('center');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this._card.classList.add('visible'));
+            });
+            return;
+        }
+
+        // Scroll target into view first, then position after scroll settles
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        setTimeout(() => {
+            const rect = el.getBoundingClientRect();
+            const pad = 10;
+
+            // Position spotlight over the target
+            this._spotlight.style.top    = (rect.top - pad) + 'px';
+            this._spotlight.style.left   = (rect.left - pad) + 'px';
+            this._spotlight.style.width  = (rect.width + pad * 2) + 'px';
+            this._spotlight.style.height = (rect.height + pad * 2) + 'px';
+            this._spotlight.classList.add('visible');
+
+            // Decide card placement: prefer below, fallback above
+            const cardH = 280;
+            const gap = 14;
+            const spaceBelow = window.innerHeight - rect.bottom;
+            const spaceAbove = rect.top;
+
+            let cardTop, arrowClass, arrowLeft;
+
+            if (spaceBelow >= cardH + gap) {
+                // Place below target
+                cardTop = rect.bottom + gap;
+                arrowClass = 'arrow-up';
+            } else if (spaceAbove >= cardH + gap) {
+                // Place above target
+                cardTop = rect.top - cardH - gap;
+                arrowClass = 'arrow-down';
+            } else {
+                // Not enough space — place at bottom of viewport
+                cardTop = window.innerHeight - cardH - 20;
+                arrowClass = '';
+            }
+
+            // Horizontal: center on target, clamped to viewport
+            const cardW = Math.min(380, window.innerWidth - 32);
+            let cardLeft = rect.left + rect.width / 2 - cardW / 2;
+            cardLeft = Math.max(16, Math.min(window.innerWidth - cardW - 16, cardLeft));
+
+            this._card.style.top  = cardTop + 'px';
+            this._card.style.left = cardLeft + 'px';
+
+            // Arrow connector
+            if (arrowClass) {
+                const arrow = document.createElement('div');
+                arrow.className = 'tour-arrow ' + arrowClass;
+                // Position arrow horizontally to point at target center
+                arrowLeft = rect.left + rect.width / 2 - cardLeft - 6;
+                arrowLeft = Math.max(20, Math.min(cardW - 32, arrowLeft));
+                arrow.style.left = arrowLeft + 'px';
+                this._card.appendChild(arrow);
+            }
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this._card.classList.add('visible'));
+            });
+        }, 350);  // wait for scroll to settle
+    }
+
+    _onKey(e) {
+        if (!this._active) return;
+        if (e.key === 'Escape') { this._close(); return; }
+        if (e.key === 'ArrowRight' || e.key === 'Enter') {
+            if (STEPS[this._step]?.final) { this._close(); return; }
+            this._step++;
+            this._render();
+            return;
+        }
+        if (e.key === 'ArrowLeft' && this._step > 0) {
+            this._step--;
+            this._render();
+        }
     }
 
     _close() {
         this._active = false;
+        document.removeEventListener('keydown', this._onKey);
         try { localStorage.setItem(LS_KEY, '1'); } catch {}
 
-        // Fade out
-        this._overlay?.classList.remove('visible');
-        this._modal?.classList.remove('visible');
+        this._scrim?.classList.remove('visible');
+        this._spotlight?.classList.remove('visible');
+        this._card?.classList.remove('visible');
 
         setTimeout(() => {
-            this._overlay?.remove();
+            this._scrim?.remove();
             this._spotlight?.remove();
-            this._modal?.remove();
-            this._overlay = null;
-            this._spotlight = null;
-            this._modal = null;
-        }, 350);
+            this._card?.remove();
+            this._scrim = this._spotlight = this._card = null;
+        }, 400);
     }
 }
