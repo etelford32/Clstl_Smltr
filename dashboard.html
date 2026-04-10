@@ -284,6 +284,51 @@ footer a:hover{color:var(--text)}
 
   </div><!-- /top-row -->
 
+  <!-- ── DAILY BRIEFING ── -->
+  <div class="card" id="daily-briefing-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Daily Briefing</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="briefing-time" style="font-size:.62rem;color:var(--muted)"></span>
+        <button id="briefing-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Refresh">&#8635;</button>
+        <button id="briefing-share" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Copy to clipboard">Share</button>
+      </div>
+    </div>
+    <div class="card-body" id="briefing-body">
+
+      <!-- Solar Activity -->
+      <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:16px">
+        <div style="flex-shrink:0;width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;background:var(--surface);border:1px solid var(--border)" id="briefing-solar-icon">&#9788;</div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:.9rem;font-weight:700;color:#e8f4ff">Solar Activity</span>
+            <span id="briefing-solar-badge" style="padding:2px 8px;border-radius:4px;font-size:.65rem;font-weight:700;letter-spacing:.05em">QUIET</span>
+          </div>
+          <div id="briefing-solar-detail" style="font-size:.75rem;color:#8899aa;line-height:1.6">
+            Loading solar data...
+          </div>
+          <div id="briefing-storm-prob" style="display:none;margin-top:6px;font-size:.7rem;color:#889">
+            Storm (24h): <span id="bp-g1" style="color:#44cc88">0%</span> G1+ · <span id="bp-g2" style="color:#ffcc00">0%</span> G2+ · <span id="bp-g3" style="color:#ff4444">0%</span> G3+
+          </div>
+        </div>
+      </div>
+
+      <!-- 7-Day Temperature Forecast -->
+      <div id="briefing-forecast-section" style="display:none">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          7-Day Temperature Forecast
+          <span id="briefing-model-badge" style="font-size:.55rem;padding:1px 5px;border-radius:3px;background:rgba(0,200,200,.1);color:#0cc;font-weight:700"></span>
+        </div>
+        <div style="overflow-x:auto">
+          <div id="briefing-forecast-grid" style="display:flex;gap:6px;min-width:0;padding-bottom:4px">
+            <!-- Filled by JS -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
   <div class="card" id="alert-card" style="margin-bottom:20px">
     <div class="card-head">
@@ -697,6 +742,7 @@ import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
 import { OnboardingTour } from './js/onboarding-tour.js';
+import { DailySummaryEngine } from './js/daily-summary.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1556,6 +1602,98 @@ initAll();
                     ? `SC${cyc.cycleNumber} near maximum (SSN≈${cyc.smoothedSSN})`
                     : `SC${cyc.cycleNumber} ${cyc.phaseName} — ${Math.abs(cyc.yearsToMax).toFixed(1)}yr ${cyc.yearsToMax > 0 ? 'to' : 'past'} max`;
             }
+        }
+    });
+}
+
+// ── Daily Briefing Engine ─────────────────────────────────────────────────────
+{
+    const summaryEngine = new DailySummaryEngine().start();
+    const _el = id => document.getElementById(id);
+
+    async function refreshBriefing() {
+        const result = await summaryEngine.generate();
+        if (!result) return;
+
+        // Update time
+        const timeEl = _el('briefing-time');
+        if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
+
+        // Solar activity section
+        const s = result.solar;
+        const badge = _el('briefing-solar-badge');
+        if (badge) {
+            badge.textContent = s.level.toUpperCase();
+            badge.style.background = s.levelColor + '20';
+            badge.style.color = s.levelColor;
+            badge.style.border = `1px solid ${s.levelColor}40`;
+        }
+        const detail = _el('briefing-solar-detail');
+        if (detail) {
+            const cmeStr = s.cme_active ? ` · CME at ${s.cme_speed} km/s` : '';
+            detail.innerHTML = `Kp <strong>${s.kp.toFixed(1)}</strong> (G${s.g_scale}) · X-ray <strong>${s.xray_class}</strong>-class · Wind <strong>${s.wind_speed}</strong> km/s · Bz <strong>${s.bz}</strong> nT${cmeStr}<br>SC25 ${s.cycle_phase} phase · SSN ≈ ${s.cycle_ssn}${s.impact_score != null ? ` · Impact Score: <strong>${s.impact_score}</strong>/100` : ''}`;
+        }
+        if (s.storm_prob_24h) {
+            const probEl = _el('briefing-storm-prob');
+            if (probEl) {
+                probEl.style.display = '';
+                _el('bp-g1').textContent = s.storm_prob_24h.g1 + '%';
+                _el('bp-g2').textContent = s.storm_prob_24h.g2 + '%';
+                _el('bp-g3').textContent = s.storm_prob_24h.g3 + '%';
+            }
+        }
+
+        // 7-day forecast
+        const fc = result.forecast;
+        const fcSection = _el('briefing-forecast-section');
+        const fcGrid    = _el('briefing-forecast-grid');
+        if (fc?.length && fcSection && fcGrid) {
+            fcSection.style.display = '';
+            const modelBadge = _el('briefing-model-badge');
+            if (modelBadge && result.model) {
+                modelBadge.textContent = `ML ±${result.model.high_rmse}°F`;
+            } else if (modelBadge) {
+                modelBadge.textContent = 'GFS';
+            }
+
+            fcGrid.innerHTML = fc.map((d, i) => {
+                const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow'
+                    : new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+                const isToday = i === 0;
+                const borderCol = isToday ? 'rgba(255,200,0,.25)' : 'var(--border)';
+                const precipIcon = d.precip_mm > 5 ? '&#127783;' : d.precip_mm > 0.5 ? '&#127782;' : d.cloud > 70 ? '&#9729;' : '&#9728;';
+                return `<div style="flex:0 0 auto;min-width:72px;background:var(--surface);border:1px solid ${borderCol};border-radius:8px;padding:8px 10px;text-align:center${isToday ? ';box-shadow:0 0 8px rgba(255,200,0,.06)' : ''}">
+                    <div style="font-size:.65rem;font-weight:700;color:${isToday ? '#ffd700' : '#889'};margin-bottom:4px">${dayName}</div>
+                    <div style="font-size:1.1rem;margin-bottom:2px">${precipIcon}</div>
+                    <div style="font-size:.85rem;font-weight:700;color:#e8f4ff">${d.high}°</div>
+                    <div style="font-size:.7rem;color:#667">${d.low}°</div>
+                    <div style="font-size:.55rem;color:#445;margin-top:2px">±${d.high_ci}°</div>
+                </div>`;
+            }).join('');
+        }
+
+        // Share button
+        _el('briefing-share')?.addEventListener('click', () => {
+            if (result.text) {
+                navigator.clipboard?.writeText(result.text).then(() => {
+                    _el('briefing-share').textContent = 'Copied!';
+                    setTimeout(() => { _el('briefing-share').textContent = 'Share'; }, 2000);
+                });
+            }
+        });
+    }
+
+    // Initial load (delayed to let SWPC data arrive)
+    setTimeout(refreshBriefing, 3000);
+    // Refresh button
+    _el('briefing-refresh')?.addEventListener('click', refreshBriefing);
+    // Auto-refresh when SWPC data updates (but throttle to once per 5 min)
+    let _lastBriefingRefresh = 0;
+    window.addEventListener('swpc-update', () => {
+        const now = Date.now();
+        if (now - _lastBriefingRefresh > 300_000) {
+            _lastBriefingRefresh = now;
+            refreshBriefing();
         }
     });
 }
