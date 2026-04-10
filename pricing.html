@@ -346,7 +346,7 @@
             <li><span class="check">✓</span> Email support</li>
             <li class="dim"><span class="cross">✗</span> API / data export</li>
         </ul>
-        <a href="signup.html?plan=basic" class="btn-plan basic">Get Basic →</a>
+        <a href="signup.html?plan=basic" class="btn-plan basic" data-checkout="basic">Get Basic &rarr;</a>
     </div>
 
     <!-- Advanced -->
@@ -367,7 +367,7 @@
             <li><span class="check">✓</span> Priority &amp; dedicated support</li>
             <li><span class="check">✓</span> Early access to new features</li>
         </ul>
-        <a href="signup.html?plan=advanced" class="btn-plan advanced">Get Advanced →</a>
+        <a href="signup.html?plan=advanced" class="btn-plan advanced" data-checkout="advanced">Get Advanced &rarr;</a>
     </div>
 
 </div><!-- /pricing-grid -->
@@ -479,6 +479,60 @@
             if (!isOpen) item.classList.add('open');
         });
     });
+
+    // ── Stripe Checkout integration ──────────────────────────────────────
+    // If user is signed in, Basic/Advanced buttons open Stripe Checkout.
+    // If not signed in, they go to signup (existing href= fallback).
+    document.querySelectorAll('[data-checkout]').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            // Check if user is signed in via localStorage
+            let auth;
+            try { auth = JSON.parse(localStorage.getItem('pp_auth')); } catch {}
+            if (!auth?.signedIn) return; // let href= take them to signup
+
+            e.preventDefault();
+            const plan = btn.dataset.checkout;
+            btn.textContent = 'Redirecting...';
+            btn.style.pointerEvents = 'none';
+
+            try {
+                // Get Supabase JWT
+                const { getSupabase } = await import('./js/supabase-config.js');
+                const sb = await getSupabase();
+                const { data: { session } } = await sb.auth.getSession();
+                const token = session?.access_token;
+                if (!token) { window.location.href = `signup.html?plan=${plan}`; return; }
+
+                const res = await fetch('/api/stripe/checkout', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ plan }),
+                });
+                const data = await res.json();
+                if (data.url) {
+                    window.location.href = data.url;
+                } else {
+                    alert(data.detail || data.error || 'Checkout failed');
+                    btn.textContent = plan === 'basic' ? 'Get Basic →' : 'Get Advanced →';
+                    btn.style.pointerEvents = '';
+                }
+            } catch (err) {
+                console.error('Checkout error:', err);
+                btn.textContent = plan === 'basic' ? 'Get Basic →' : 'Get Advanced →';
+                btn.style.pointerEvents = '';
+            }
+        });
+    });
+
+    // Show checkout result if returning from Stripe
+    const params = new URLSearchParams(location.search);
+    if (params.get('checkout') === 'canceled') {
+        const banner = document.createElement('div');
+        banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:#332;border:1px solid #553;border-radius:8px;padding:12px 24px;color:#ffa;font-size:.85rem;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.5)';
+        banner.textContent = 'Checkout canceled. You can subscribe anytime.';
+        document.body.appendChild(banner);
+        setTimeout(() => banner.remove(), 5000);
+    }
 </script>
 </body>
 </html>

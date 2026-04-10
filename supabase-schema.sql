@@ -23,6 +23,12 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     display_name TEXT,
     plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
     role TEXT DEFAULT 'user' CHECK (role IN ('user', 'tester', 'admin', 'superadmin')),
+    -- Stripe billing
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    stripe_price_id TEXT,
+    subscription_status TEXT DEFAULT 'none' CHECK (subscription_status IN ('none', 'trialing', 'active', 'past_due', 'canceled', 'unpaid')),
+    subscription_period_end TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
     -- Location for aurora/pass predictions

@@ -185,6 +185,21 @@
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
         </div>
 
+        <!-- Revenue & Subscription Metrics -->
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#556;font-weight:700;margin-bottom:10px">Revenue &amp; Subscriptions</div>
+        <div class="kpi-grid" id="kpi-revenue-grid" style="margin-bottom:24px">
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mrr">--</div><div class="kpi-label">MRR (est.)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-active-subs">--</div><div class="kpi-label">Active Subs</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-trialing">--</div><div class="kpi-label">Trialing</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-past-due">--</div><div class="kpi-label">Past Due</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-canceled">--</div><div class="kpi-label">Canceled (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-free-users">--</div><div class="kpi-label">Free Users</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-conversion">--</div><div class="kpi-label">Conversion Rate</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-testers">--</div><div class="kpi-label">Testers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-arpu">--</div><div class="kpi-label">ARPU</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-alerts-fired">--</div><div class="kpi-label">Alerts Fired (24h)</div></div>
+        </div>
+
         <div class="row2">
             <div class="card">
                 <h3>Daily Trend (14 days)</h3>
@@ -391,6 +406,63 @@ async function loadKPIs() {
     set('kpi-online', d.onlineNow, 'green');
 }
 loadKPIs();
+
+// ── Revenue & Subscription KPIs ─────────────────────────────────────────────
+async function loadRevenueKPIs() {
+    const { getSupabase, isConfigured } = await import('./js/supabase-config.js');
+    if (!isConfigured()) return;
+    const sb = await getSupabase();
+
+    try {
+        const { data: profiles } = await sb.from('user_profiles')
+            .select('plan, role, subscription_status, stripe_subscription_id');
+
+        if (!profiles) return;
+
+        let basic = 0, advanced = 0, free = 0, trialing = 0, pastDue = 0, canceled = 0, testers = 0;
+        for (const p of profiles) {
+            if (p.role === 'tester') testers++;
+            if (p.subscription_status === 'trialing') trialing++;
+            else if (p.subscription_status === 'past_due') pastDue++;
+            else if (p.subscription_status === 'canceled') canceled++;
+
+            if (p.plan === 'basic') basic++;
+            else if (p.plan === 'advanced') advanced++;
+            else free++;
+        }
+
+        const activeSubs = basic + advanced;
+        const mrr = basic * 10 + advanced * 100;
+        const total = profiles.length;
+        const conversion = total > 0 ? ((activeSubs / total) * 100).toFixed(1) + '%' : '0%';
+        const arpu = activeSubs > 0 ? '$' + (mrr / activeSubs).toFixed(0) : '$0';
+
+        const set = (id, val, cls) => {
+            const el = document.getElementById(id);
+            if (el) { el.textContent = typeof val === 'number' ? val.toLocaleString() : val; el.className = 'kpi-val ' + cls; }
+        };
+
+        set('kpi-mrr', '$' + mrr.toLocaleString(), 'green');
+        set('kpi-active-subs', activeSubs, 'blue');
+        set('kpi-trialing', trialing, 'purple');
+        set('kpi-past-due', pastDue, pastDue > 0 ? 'red' : 'white');
+        set('kpi-canceled', canceled, canceled > 0 ? 'red' : 'white');
+        set('kpi-free-users', free, 'white');
+        set('kpi-conversion', conversion, 'green');
+        set('kpi-testers', testers, 'blue');
+        set('kpi-arpu', arpu, 'gold');
+
+        // Alerts fired in last 24h
+        const { count } = await sb.from('alert_history')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', new Date(Date.now() - 86400_000).toISOString());
+        set('kpi-alerts-fired', count ?? 0, 'blue');
+
+    } catch (e) {
+        console.warn('[Admin] Revenue KPIs failed:', e.message);
+    }
+}
+loadRevenueKPIs();
 
 // ── Daily Trend sparkline ────────────────────────────────────────────────────
 async function loadTrend() {
