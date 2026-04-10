@@ -299,11 +299,13 @@ class AuthManager {
     async signUp({ email, password, name, plan = 'free' }) {
         if (this._supabase) {
             try {
+                // Always sign up as 'free' — Stripe webhook upgrades the plan after payment.
+                // Store the intended plan in user_metadata for reference, but enforce free.
                 const { data, error } = await this._supabase.auth.signUp({
                     email,
                     password,
                     options: {
-                        data: { name, plan },  // stored in user_metadata
+                        data: { name, plan: 'free', intended_plan: plan },
                     },
                 });
                 if (error) return { success: false, error: error.message };
@@ -313,14 +315,17 @@ class AuthManager {
                     return {
                         success: true,
                         needsConfirmation: true,
+                        intendedPlan: plan,
                         message: 'Check your email for a confirmation link.',
                     };
                 }
 
                 if (data.user) {
                     this._user = this._mapSupabaseUser(data.user);
+                    this._user.plan = 'free';  // enforce free until payment
+                    this._persistToStorage();
                 }
-                return { success: true };
+                return { success: true, intendedPlan: plan };
             } catch (err) {
                 return { success: false, error: err.message };
             }
