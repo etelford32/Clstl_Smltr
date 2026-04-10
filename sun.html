@@ -895,6 +895,15 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
              border-top:1px solid rgba(180,120,40,0.15);letter-spacing:0.03em">
             NOAA · connecting…
         </div>
+
+        <!-- Daily Solar Activity Summary -->
+        <div id="sun-daily-summary" style="padding:8px 10px 6px;border-top:1px solid rgba(180,120,40,0.1);font-size:9px;color:#887766;line-height:1.5;display:none">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+                <span style="font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:8px;color:#998877">Daily Summary</span>
+                <span id="sun-summary-level" style="padding:1px 6px;border-radius:3px;font-size:7px;font-weight:700"></span>
+            </div>
+            <div id="sun-summary-text" style="color:#aa9977"></div>
+        </div>
     </div>
 
     <aside id="panel">
@@ -5870,5 +5879,48 @@ updateAtmospherePanel();
     </div>
   </div>
 </section>
+
+<script type="module">
+// ── Daily Solar Summary for Sun page ─────────────────────────────────────────
+import { solarCyclePhase } from './js/solar-weather-forecast.js';
+
+function flareClass(f) { return f >= 1e-4 ? 'X' : f >= 1e-5 ? 'M' : f >= 1e-6 ? 'C' : f >= 1e-7 ? 'B' : 'A'; }
+function gScale(kp) { return kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0; }
+
+window.addEventListener('swpc-update', ev => {
+    const sw = ev.detail;
+    const el = document.getElementById('sun-daily-summary');
+    if (!el) return;
+    el.style.display = '';
+
+    const kp    = sw.kp ?? 0;
+    const g     = gScale(kp);
+    const xray  = sw.xray_flux ?? 1e-8;
+    const cls   = flareClass(xray);
+    const speed = Math.round(sw.solar_wind?.speed ?? 400);
+    const bz    = (sw.solar_wind?.bz ?? 0).toFixed(1);
+    const cycle = solarCyclePhase();
+    const cme   = sw.earth_directed_cme;
+
+    let level, color;
+    if (g >= 4) { level = 'EXTREME'; color = '#ff2255'; }
+    else if (g >= 3) { level = 'SEVERE'; color = '#ff4444'; }
+    else if (g >= 2) { level = 'ACTIVE'; color = '#ff9900'; }
+    else if (kp >= 4) { level = 'UNSETTLED'; color = '#ffcc00'; }
+    else { level = 'QUIET'; color = '#44cc88'; }
+
+    const badge = document.getElementById('sun-summary-level');
+    if (badge) {
+        badge.textContent = level;
+        badge.style.background = color + '20';
+        badge.style.color = color;
+    }
+
+    let text = `Kp ${kp.toFixed(1)} (G${g}) · ${cls}-class · Wind ${speed} km/s · Bz ${bz} nT`;
+    text += ` · SC25 ${cycle.phaseName} (SSN≈${cycle.smoothedSSN})`;
+    if (cme) text += ` · CME ${cme.speed} km/s`;
+    document.getElementById('sun-summary-text').textContent = text;
+});
+</script>
 </body>
 </html>
