@@ -716,7 +716,7 @@ if (canvas) {
                 float v = 0.0, a = 0.5;
                 mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
                 int octaves = int(u_quality * 2.0 + 1.0); // 1-3 octaves
-                for (int i = 0; i < 5; i++) {
+                for (int i = 0; i < 3; i++) {
                     if (i >= octaves) break;
                     v += a * vnoise(p);
                     p = rot * p * 2.1;
@@ -778,7 +778,7 @@ if (canvas) {
 
                 float angle = atan(hitPos.z, hitPos.x);
                 float omega = 1.0 / (pow(max(rDisk, DISK_INNER), 1.5) + BH_A);
-                float phase = angle - time * omega * 0.12;
+                float phase = angle - time * omega * 2.0;
 
                 // ── Temperature (Sgr A* RIAF-like) ──────────────────
                 // Sgr A* accretes at ~10⁻⁸ M☉/yr (quiescent LLAGN).
@@ -892,7 +892,14 @@ if (canvas) {
 
                     // Kerr state at current position
                     float rc, fc; vec3 lc;
-                    kerrFL(pos, rc, fc, lc);
+                    if (u_quality < 0.5) {
+                        // Schwarzschild approx — skip full Kerr metric
+                        rc = length(pos);
+                        fc = 2.0 * BH_M / max(rc, 1e-6);
+                        lc = pos / max(rc, 1e-6);
+                    } else {
+                        kerrFL(pos, rc, fc, lc);
+                    }
                     minR = min(minR, rc);
 
                     // Captured by event horizon (oblate spheroid)
