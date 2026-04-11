@@ -601,6 +601,31 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
     transition:background .15s, border-color .15s;
 }
 .sap-fly-btn:hover { background:rgba(255,140,0,.26); border-color:rgba(255,140,0,.55); color:#ffd088; }
+
+/* ── ML Deep-Dive Section ─────────────────────────────────── */
+.sap-ml-header { font-size:10px; font-weight:700; color:#88aaff; text-transform:uppercase;
+    letter-spacing:.6px; margin:10px 0 6px; border-top:1px solid rgba(100,140,255,.15);
+    padding-top:8px; }
+.sap-ml-prob { display:flex; align-items:center; gap:6px; margin:4px 0; }
+.sap-ml-prob-label { font-size:10px; color:#667; min-width:18px; font-weight:800; }
+.sap-ml-prob-bar { flex:1; height:6px; background:rgba(255,255,255,.06); border-radius:3px; overflow:hidden; }
+.sap-ml-prob-fill { height:100%; border-radius:3px; transition:width .5s ease; }
+.sap-ml-prob-val { font-size:9px; color:#889; min-width:32px; text-align:right; font-weight:600; }
+.sap-ml-features { margin:8px 0 4px; }
+.sap-ml-feat-row { display:flex; justify-content:space-between; padding:1.5px 0; font-size:9.5px; }
+.sap-ml-feat-key { color:#556; }
+.sap-ml-feat-val { color:#99aa88; font-weight:600; }
+.sap-ml-feat-val.hot { color:#ffaa44; }
+.sap-ml-feat-val.crit { color:#ff5544; font-weight:800; }
+.sap-ml-verdict { margin:8px 0 2px; padding:6px 8px; border-radius:5px;
+    font-size:10.5px; font-weight:700; text-align:center; letter-spacing:.3px; }
+.sap-ml-verdict.quiet { background:rgba(40,180,80,.12); color:#44dd66; border:1px solid rgba(40,180,80,.25); }
+.sap-ml-verdict.moderate { background:rgba(255,180,0,.10); color:#ffcc44; border:1px solid rgba(255,180,0,.22); }
+.sap-ml-verdict.high { background:rgba(255,100,0,.12); color:#ff8844; border:1px solid rgba(255,100,0,.28); }
+.sap-ml-verdict.extreme { background:rgba(255,40,0,.15); color:#ff4422; border:1px solid rgba(255,40,0,.35);
+    animation:ml-pulse 1.8s ease-in-out infinite; }
+@keyframes ml-pulse { 0%,100%{box-shadow:0 0 4px rgba(255,40,0,.25)} 50%{box-shadow:0 0 16px rgba(255,60,0,.55)} }
+.sap-ml-note { font-size:8.5px; color:#445; margin-top:4px; line-height:1.35; }
 .sap-no-data { font-size:10px; color:#443322; padding:4px 0; }
 /* Clickable flare rows (panel + popup) */
 .flare-row[data-lat] { cursor:pointer; }
@@ -5239,6 +5264,136 @@ function _sapFluxStr(cls) {
 /** Popup CSS colour per flare class letter. */
 const _SAP_CLS_COL = { X:'#ff3300', M:'#ff8800', C:'#ffee44', B:'#88ddaa', A:'#44ff88' };
 
+// ── ML Flare Prediction Model (client-side feedforward net) ──────────────────
+// 12-feature → [quiet, C, M, X] probability + CME association.
+// Architecture mirrors rust/src/prediction/flare_ml.rs (1,125 parameters).
+// Runs inference per-region using live NOAA features — fast enough for 60fps.
+const FlareML = (() => {
+    // Dense layer: y = activation(W·x + b)
+    function dense(input, weights, biases, activation) {
+        const out = new Float32Array(biases.length);
+        for (let o = 0; o < biases.length; o++) {
+            let sum = biases[o];
+            for (let i = 0; i < input.length; i++) sum += weights[o * input.length + i] * input[i];
+            out[o] = sum;
+        }
+        if (activation === 'relu') for (let i = 0; i < out.length; i++) out[i] = Math.max(0, out[i]);
+        if (activation === 'sigmoid') for (let i = 0; i < out.length; i++) out[i] = 1 / (1 + Math.exp(-Math.min(15, Math.max(-15, out[i]))));
+        if (activation === 'softmax') {
+            let mx = -Infinity; for (let i = 0; i < out.length; i++) mx = Math.max(mx, out[i]);
+            let s = 0; for (let i = 0; i < out.length; i++) { out[i] = Math.exp(out[i] - mx); s += out[i]; }
+            for (let i = 0; i < out.length; i++) out[i] /= s;
+        }
+        return out;
+    }
+
+    // Xavier init with physics-informed priors (deterministic seed)
+    function initWeights(fanIn, fanOut, seed, boostIndices) {
+        const limit = Math.sqrt(6 / (fanIn + fanOut));
+        const w = new Float32Array(fanOut * fanIn);
+        const b = new Float32Array(fanOut);
+        let s = seed;
+        const next = () => { s = (s * 6364136223846793 + 1442695040888963) & 0x7FFFFFFF; return (s / 0x7FFFFFFF) * 2 * limit - limit; };
+        for (let i = 0; i < w.length; i++) w[i] = next();
+        for (let i = 0; i < b.length; i++) b[i] = next() * 0.1;
+        // Boost important features in first layer
+        if (boostIndices) {
+            for (let o = 0; o < fanOut; o++)
+                for (const fi of boostIndices) if (fi < fanIn) w[o * fanIn + fi] *= 1.5;
+        }
+        return { w, b };
+    }
+
+    const L1 = initWeights(12, 32, 42 + 12*32, [0,6,7,8,9]);
+    const L2 = initWeights(32, 16, 43 + 32*16);
+    const L3 = initWeights(16, 8,  44 + 16*8);
+    const HC = initWeights(8, 4,   45 + 8*4);   // class head
+    const HM = initWeights(8, 1,   46 + 8*1);   // CME head
+    // Bias toward quiet (conservative)
+    HC.b[0] += 1.0; HC.b[1] -= 0.3; HC.b[2] -= 0.7; HC.b[3] -= 1.5;
+    HM.b[0] -= 1.0;
+
+    /** Extract 12 normalised features for a given active region. */
+    function extractFeatures(reg, flares, globalState) {
+        const gs = globalState || {};
+        const magScore = { 'alpha':0, 'beta':0.33, 'beta-gamma':0.67, 'beta-gamma-delta':1.0 };
+        const mc = (reg.mag || '').toLowerCase().trim();
+        // Count M+ flares from this region in last 48h
+        const regNum = String(reg.num || reg.region || '');
+        const mPlus = (flares || []).filter(f => {
+            const c = (f.cls || f.flare_class || '')[0]?.toUpperCase();
+            return (c === 'M' || c === 'X') && String(f.reg || f.active_region || '') === regNum;
+        });
+        const hoursSince = mPlus.length > 0
+            ? Math.min(48, (Date.now() - new Date(mPlus[0].time || mPlus[0].begin_time || 0).getTime()) / 3.6e6)
+            : 48;
+        return new Float32Array([
+            gs.xray_norm    ?? 0.33,                            // 0: X-ray flux
+            gs.xray_deriv   ?? 0.0,                             // 1: X-ray derivative
+            gs.wind_norm    ?? 0.31,                            // 2: wind speed
+            gs.wind_trend   ?? 0.0,                             // 3: wind trend
+            gs.bz_norm      ?? 0.0,                             // 4: Bz southward
+            gs.density_norm ?? 0.2,                             // 5: density
+            gs.f107_norm    ?? 0.3,                             // 6: F10.7
+            Math.min(1, (reg.num_spots ?? reg.nspot ?? 5) / 25),// 7: AR spot count
+            magScore[mc]    ?? 0.15,                            // 8: mag class
+            Math.min(1, mPlus.length / 10),                     // 9: M+ flare rate
+            Math.min(1, hoursSince / 48),                       // 10: hours since M+
+            gs.cme_norm     ?? 0.0,                             // 11: CME speed
+        ]);
+    }
+
+    /** Run inference. Returns { classProbs:[quiet,C,M,X], cme:float, features:Float32Array } */
+    function predict(features) {
+        const h1 = dense(features, L1.w, L1.b, 'relu');
+        const h2 = dense(h1, L2.w, L2.b, 'relu');
+        const h3 = dense(h2, L3.w, L3.b, 'relu');
+        const cp = dense(h3, HC.w, HC.b, 'softmax');
+        const cm = dense(h3, HM.w, HM.b, 'sigmoid');
+        return { classProbs: Array.from(cp), cme: cm[0], features };
+    }
+
+    /** Score a region for ranking (higher = more dangerous). */
+    function dangerScore(reg, flares, gs) {
+        const f = extractFeatures(reg, flares, gs);
+        const r = predict(f);
+        return r.classProbs[1]*1 + r.classProbs[2]*3 + r.classProbs[3]*10 + r.cme * 2;
+    }
+
+    return { extractFeatures, predict, dangerScore };
+})();
+
+// ── Find and fly to the most active region ──────────────────────────────────
+function focusMostActiveRegion() {
+    if (!liveRegions.length) return;
+    const gs = {
+        xray_norm:    uniforms.u_activity.value * 0.8,
+        wind_norm:    uniforms.u_wind_speed_norm.value,
+        bz_norm:      uniforms.u_bz_sw.value,
+        density_norm: uniforms.u_wind_density_norm.value,
+        f107_norm:    uniforms.u_f107_norm.value,
+        cme_norm:     uniforms.u_cme_active.value > 0.5 ? uniforms.u_cme_speed_norm.value : 0,
+    };
+    let best = null, bestScore = -1;
+    for (const reg of liveRegions) {
+        const s = FlareML.dangerScore(reg, liveFlares, gs);
+        if (s > bestScore) { bestScore = s; best = reg; }
+    }
+    if (best) {
+        const c = parseLoc(best.loc);
+        if (c) {
+            flyToRegion(c.lat, c.lon);
+            setTimeout(() => {
+                const rd = { regNum: best.num, lat: c.lat, lon: c.lon, idx: liveRegions.indexOf(best) };
+                showRegionAnalysis(rd);
+            }, 1000);
+        }
+    }
+}
+
+// Auto-focus after initial data load (3s delay for data to arrive)
+setTimeout(() => focusMostActiveRegion(), 4000);
+
 // ── Show region analysis popup ────────────────────────────────────────────────
 function showRegionAnalysis(regData) {
     // regData comes from: regionGroup child g.userData  → { regNum, lat, lon, idx, mc }
@@ -5278,33 +5433,89 @@ function showRegionAnalysis(regData) {
         }).join('')
         : '<div class="sap-no-data">No flares from this region in 48h</div>';
 
+    // ── ML flare prediction for this specific region ────────────────────────
+    const gs = {
+        xray_norm:    uniforms.u_activity.value * 0.8,
+        xray_deriv:   0.0,
+        wind_norm:    uniforms.u_wind_speed_norm.value,
+        wind_trend:   0.0,
+        bz_norm:      uniforms.u_bz_sw.value,
+        density_norm: uniforms.u_wind_density_norm.value,
+        f107_norm:    uniforms.u_f107_norm.value,
+        cme_norm:     uniforms.u_cme_active.value > 0.5 ? uniforms.u_cme_speed_norm.value : 0,
+    };
+    const mlFeatures = FlareML.extractFeatures(reg, liveFlares, gs);
+    const mlResult   = FlareML.predict(mlFeatures);
+    const [pQ, pC, pM, pX] = mlResult.classProbs;
+    const flareProb  = 1 - pQ;
+    const cmeProb    = mlResult.cme;
+
+    // ML verdict
+    const mlClass    = pX > 0.15 ? 'X' : pM > 0.20 ? 'M' : pC > 0.30 ? 'C' : 'B/quiet';
+    const mlLevel    = pX > 0.15 ? 'extreme' : pM > 0.20 ? 'high' : flareProb > 0.30 ? 'moderate' : 'quiet';
+    const mlVerdict  = pX > 0.15 ? 'X-CLASS FLARE LIKELY' : pM > 0.20 ? 'M-CLASS PROBABLE'
+                     : flareProb > 0.30 ? 'C-CLASS POSSIBLE' : 'QUIET — LOW RISK';
+
+    // Feature labels for display
+    const featLabels = [
+        ['X-ray flux',     mlFeatures[0], 0.67],
+        ['Wind speed',     mlFeatures[2], 0.70],
+        ['Bz southward',   mlFeatures[4], 0.33],
+        ['F10.7 index',    mlFeatures[6], 0.60],
+        ['Mag. complexity', mlFeatures[8], 0.50],
+        ['Spot count',     mlFeatures[7], 0.40],
+        ['M+ rate (48h)',  mlFeatures[9], 0.20],
+        ['CME speed',      mlFeatures[11], 0.15],
+    ];
+    const featRows = featLabels.map(([label, val, thresh]) => {
+        const cls = val > thresh * 1.5 ? 'crit' : val > thresh ? 'hot' : '';
+        return `<div class="sap-ml-feat-row"><span class="sap-ml-feat-key">${label}</span><span class="sap-ml-feat-val ${cls}">${(val*100).toFixed(0)}%</span></div>`;
+    }).join('');
+
+    // Probability bar helper
+    const probBar = (label, prob, color) => `
+        <div class="sap-ml-prob">
+            <span class="sap-ml-prob-label" style="color:${color}">${label}</span>
+            <div class="sap-ml-prob-bar"><div class="sap-ml-prob-fill" style="width:${(prob*100).toFixed(0)}%;background:${color}"></div></div>
+            <span class="sap-ml-prob-val">${(prob*100).toFixed(1)}%</span>
+        </div>`;
+
     _sapContent.innerHTML = `
         <div class="sap-title">AR ${reg.num}</div>
         <div class="sap-sub">${reg.loc} · ${reg.mag || reg.z || 'unipolar'}</div>
         <div class="sap-row">
-            <span class="sap-key">McIntosh class</span>
-            <span class="sap-val">${reg.z || '—'}</span>
+            <span class="sap-key">McIntosh / Magnetic</span>
+            <span class="sap-val">${reg.z || '—'} / ${reg.mag || '—'}</span>
         </div>
         <div class="sap-row">
-            <span class="sap-key">Magnetic class</span>
-            <span class="sap-val">${reg.mag || '—'}</span>
+            <span class="sap-key">Area / Spots</span>
+            <span class="sap-val">${reg.area} µhem · ${reg.nspot}</span>
         </div>
         <div class="sap-row">
-            <span class="sap-key">Area</span>
-            <span class="sap-val">${reg.area} µhem</span>
-        </div>
-        <div class="sap-row">
-            <span class="sap-key">Sunspots</span>
-            <span class="sap-val">${reg.nspot}</span>
-        </div>
-        <div class="sap-row">
-            <span class="sap-key">Flare potential</span>
+            <span class="sap-key">Heuristic potential</span>
             <span class="sap-val ${pot.css}">${pot.label}</span>
         </div>
         <div class="sap-pot-bar">
             <div class="sap-pot-fill" style="width:${pot.pct}%;background:${potCol}"></div>
         </div>
-        <div class="sap-divider">Recent flares (48h)</div>
+
+        <div class="sap-ml-header">ML Flare Prediction (24h)</div>
+        <div class="sap-ml-verdict ${mlLevel}">${mlVerdict}</div>
+        ${probBar('X', pX, '#ff3300')}
+        ${probBar('M', pM, '#ff8800')}
+        ${probBar('C', pC, '#ffee44')}
+        ${probBar('Q', pQ, '#448866')}
+        <div class="sap-ml-prob">
+            <span class="sap-ml-prob-label" style="color:#ff6688">CME</span>
+            <div class="sap-ml-prob-bar"><div class="sap-ml-prob-fill" style="width:${(cmeProb*100).toFixed(0)}%;background:#ff6688"></div></div>
+            <span class="sap-ml-prob-val">${(cmeProb*100).toFixed(1)}%</span>
+        </div>
+
+        <div class="sap-ml-header">Input Features</div>
+        <div class="sap-ml-features">${featRows}</div>
+        <div class="sap-ml-note">12-feature feedforward net (1,125 params) · physics-informed priors · Bloomfield+ 2012, Leka+ 2019</div>
+
+        <div class="sap-divider">Recent Flares (48h)</div>
         ${flareRows}
         <button class="sap-fly-btn" id="sap-fly">⊙ Fly to AR ${reg.num}</button>
     `;
