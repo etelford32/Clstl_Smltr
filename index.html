@@ -527,6 +527,7 @@ if (canvas) {
         u_time:       { value: 0 },
         u_cameraPos:  { value: new THREE.Vector3() },
         u_fov:        { value: 0.55 },
+        u_quality:    { value: 1.0 },  // 0.0=low (mobile) → 1.0=high (desktop)
     };
 
     // ── Full-screen quad with Kerr ray-march material ─────────────────────
@@ -543,6 +544,7 @@ if (canvas) {
             uniform float u_time;
             uniform vec3  u_cameraPos;
             uniform float u_fov;
+            uniform float u_quality; // 0.0=low → 1.0=high
 
             // ─── Sgr A* Kerr constants (M = 1 natural units) ─────────
             // Spin: a/M ≈ 0.94 — EHT 2022 upper constraint range
@@ -556,7 +558,7 @@ if (canvas) {
             // Prograde ISCO for a = 0.94M ≈ 2.04M
             #define DISK_INNER  2.04
             #define DISK_OUTER  20.0
-            #define MAX_STEPS   128
+            #define MAX_STEPS   96      // quality system exits early for low tiers
             #define GRAD_EPS    0.005
 
             // Tetrahedron gradient vertices (unit vectors * 1/√3)
@@ -642,7 +644,9 @@ if (canvas) {
             float fbm(vec2 p) {
                 float v = 0.0, a = 0.5;
                 mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+                int octaves = int(u_quality * 3.0 + 2.0); // 2-5 octaves
                 for (int i = 0; i < 5; i++) {
+                    if (i >= octaves) break;
                     v += a * vnoise(p);
                     p = rot * p * 2.1;
                     a *= 0.45;
@@ -804,7 +808,12 @@ if (canvas) {
                 float alpha = 0.0;
                 float minR  = 1e10;
 
+                // Quality-adaptive step budget: 40 (low) → 96 (high)
+                int maxIter = int(40.0 + u_quality * 56.0);
+
                 for (int i = 0; i < MAX_STEPS; i++) {
+                    if (i >= maxIter) break;
+
                     // Kerr state at current position
                     float rc, fc; vec3 lc;
                     kerrFL(pos, rc, fc, lc);
@@ -831,8 +840,8 @@ if (canvas) {
 
                     // ── Geodesic force ─────────────────────────────
                     vec3 force;
-                    if (rc > 25.0) {
-                        // Far field: Schwarzschild approximation (cheap)
+                    if (rc > 18.0) {
+                        // Far field: Schwarzschild approx (no gradient evals)
                         vec3 hVec = cross(pos, mom);
                         float h2 = dot(hVec, hVec);
                         float r5 = rc * rc * rc * rc * rc;
@@ -842,8 +851,8 @@ if (canvas) {
                         force = kerrForce(pos, mom, E, fc, lc);
                     }
 
-                    // Adaptive step size
-                    float dt = clamp(0.08 * rc, 0.005, 0.8);
+                    // Adaptive step size (larger = fewer steps needed)
+                    float dt = clamp(0.1 * rc, 0.006, 1.0);
 
                     // Kick (update momentum)
                     mom += force * dt;
@@ -868,10 +877,8 @@ if (canvas) {
                         alpha  = min(1.0, alpha + a_);
                     }
 
-                    // ── Corona / hot electron halo ────────────────────
-                    // Inverse-Compton scattering atmosphere above the disk.
-                    // Optically thin, concentrated near the inner disk.
-                    if (alpha < 0.95 && rc < DISK_OUTER * 0.8 && rc > R_PLUS * 1.1) {
+                    // ── Corona / hot electron halo (skip on low quality) ──
+                    if (u_quality > 0.3 && alpha < 0.95 && rc < DISK_OUTER * 0.8 && rc > R_PLUS * 1.1) {
                         float H_cor  = 0.4 + 0.08 * rc;  // corona scale height
                         float corDen = exp(-pos.y * pos.y / (2.0 * H_cor * H_cor));
                         // Concentrated near inner disk (r < 8M), fades outward
@@ -884,14 +891,14 @@ if (canvas) {
                         }
                     }
 
-                    // ── Penrose twistor null geodesics ────────────────
-                    // Twistors Z^α = (ω^A, π_A') visualize the null
-                    // structure of Kerr spacetime — light ray bundles
-                    // spiraling near the photon sphere r ≈ 1.5M.
-                    if (alpha < 0.9 && rc > R_PLUS * 1.1 && rc < 6.0 && abs(pos.y) < 1.2) {
+                    // ── Penrose twistor null geodesics (med+ quality) ──
+                    // Twistors Z^α = (ω^A, π_A') — skip on low quality
+                    if (u_quality > 0.2 && alpha < 0.9 && rc > R_PLUS * 1.1 && rc < 6.0 && abs(pos.y) < 1.2) {
                         float phi = atan(pos.z, pos.x);
                         float twGlow = 0.0;
+                        int twCount = int(u_quality * 6.0 + 2.0); // 2-8 rays
                         for (int j = 0; j < 8; j++) {
+                            if (j >= twCount) break;
                             float fj = float(j);
                             // Each twistor ray at a different azimuthal phase
                             float baseA = fj * 0.7854 + u_time * 0.06;
@@ -1004,40 +1011,72 @@ if (canvas) {
         autoRotateTimer = setTimeout(() => { autoRotateActive = true; }, 3000);
     }, { passive: false });
 
-    // ── Animation loop ────────────────────────────────────────────────────
+    // ── GPU tier detection ──────────────────────────────────────────────
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
+    const isWeak = isMobile || /Intel|Mali|Adreno|PowerVR|Apple GPU/i.test(gpu);
+
+    let quality = isMobile ? 0.0 : isWeak ? 0.35 : 1.0;
+    let lastTimestamp = 0;
+    let qFrames = 0, qTimeSum = 0;
+
+    function applyQuality() {
+        const scale = 0.3 + quality * 0.4;  // 0.30–0.70 resolution
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        const pr = renderer.getPixelRatio();
+        const rw = Math.ceil(w * pr * scale);
+        const rh = Math.ceil(h * pr * scale);
+        composer.setSize(rw, rh);
+        bloom.resolution.set(rw, rh);
+        bhUniforms.u_resolution.value.set(rw, rh);
+        bhUniforms.u_quality.value = quality;
+    }
+
+    // ── Animation loop (frame-time adaptive quality) ──────────────────
     let t = 0, raf;
 
-    function animate() {
+    function animate(timestamp) {
         raf = requestAnimationFrame(animate);
-        t += 0.008;
 
+        // Frame-time quality adaptation (every 30 frames)
+        if (lastTimestamp > 0) {
+            qTimeSum += timestamp - lastTimestamp;
+            qFrames++;
+            if (qFrames >= 30) {
+                const avg = qTimeSum / qFrames;
+                if (avg > 24 && quality > 0) {          // < 42 fps → degrade
+                    quality = Math.max(0, quality - 0.15);
+                    applyQuality();
+                } else if (avg < 13 && quality < 1) {    // > 77 fps → upgrade
+                    quality = Math.min(1, quality + 0.05);
+                    applyQuality();
+                }
+                qFrames = 0; qTimeSum = 0;
+            }
+        }
+        lastTimestamp = timestamp;
+
+        t += 0.008;
         if (autoRotateActive) {
             camTheta += 0.0004;
             updateCameraUniform();
         }
 
         bhUniforms.u_time.value = t;
+        bhUniforms.u_quality.value = quality;
         composer.render();
     }
 
     function resize() {
-        const w  = canvas.clientWidth;
-        const h  = canvas.clientHeight;
-        const pr = renderer.getPixelRatio();
+        const w = canvas.clientWidth, h = canvas.clientHeight;
         renderer.setSize(w, h, false);
-        // Render ray march at reduced resolution for performance.
-        // The ray-march output is smooth (continuous gravitational field),
-        // so GPU bilinear upscale looks nearly identical to full-res.
-        const scale = 0.6;  // 60% res → 36% pixel count → ~2.8× faster
-        const rw = Math.ceil(w * pr * scale);
-        const rh = Math.ceil(h * pr * scale);
-        composer.setSize(rw, rh);
-        bloom.resolution.set(rw, rh);
-        bhUniforms.u_resolution.value.set(rw, rh);
+        applyQuality();
     }
     new ResizeObserver(resize).observe(canvas.parentElement);
     resize();
-    animate();
+    animate(0);
 
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) cancelAnimationFrame(raf);
