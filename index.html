@@ -1046,6 +1046,8 @@ if (canvas) {
     updateCameraUniform();
 
     // ── Mouse controls: drag to orbit, wheel to zoom ──────────────────────
+    let mouseX = 0, mouseY = 0;  // normalized [-1, 1] for parallax
+
     canvas.addEventListener('mousedown', (e) => {
         isDragging = true;
         lastMouseX = e.clientX;
@@ -1056,6 +1058,11 @@ if (canvas) {
     });
 
     window.addEventListener('mousemove', (e) => {
+        // Parallax tracking (always active, even when not dragging)
+        const rect = canvas.getBoundingClientRect();
+        mouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+        mouseY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+
         if (!isDragging) return;
         const dx = e.clientX - lastMouseX;
         const dy = e.clientY - lastMouseY;
@@ -1065,6 +1072,8 @@ if (canvas) {
         lastMouseY = e.clientY;
         updateCameraUniform();
     });
+
+    canvas.addEventListener('mouseleave', () => { mouseX = 0; mouseY = 0; });
 
     window.addEventListener('mouseup', () => {
         if (!isDragging) return;
@@ -1130,10 +1139,34 @@ if (canvas) {
         lastTimestamp = timestamp;
 
         t += 0.008;
+
+        // ── Cinematic camera choreography ─────────────────────────
         if (autoRotateActive) {
-            camTheta += 0.0004;
-            updateCameraUniform();
+            // Slow elliptical orbit (variable speed — faster at "close" pass)
+            const orbitSpeed = 0.0003 + 0.0001 * Math.sin(t * 0.15);
+            camTheta += orbitSpeed;
+
+            // Gentle polar bobbing: camera slowly rises and dips ±4°
+            const basePhi = 1.2;  // default: 21° above disk
+            const bobPhi  = basePhi + Math.sin(t * 0.08) * 0.07;
+            camPhi = Math.max(CAM_PHI_MIN, Math.min(CAM_PHI_MAX, bobPhi));
+
+            // Subtle distance breathing: slow zoom in/out ±5%
+            const baseDist = 30.0;
+            camDist = baseDist + Math.sin(t * 0.05) * 1.5;
         }
+
+        // Mouse parallax: subtle camera offset following cursor
+        // (works even during auto-rotation for a responsive feel)
+        const parallaxStr = 0.4;
+        const px = mouseX * parallaxStr;
+        const py = mouseY * parallaxStr * 0.5;
+        const sp = Math.sin(camPhi);
+        bhUniforms.u_cameraPos.value.set(
+            camDist * sp * Math.sin(camTheta) + px,
+            camDist * Math.cos(camPhi) - py,
+            camDist * sp * Math.cos(camTheta)
+        );
 
         bhUniforms.u_time.value = t;
         bhUniforms.u_quality.value = quality;
