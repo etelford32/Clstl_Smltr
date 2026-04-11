@@ -196,6 +196,10 @@ class AuthManager {
                     alert_cooldown_min:    data.alert_cooldown_min    ?? 60,
                 };
                 this._persistToStorage();
+                // Notify listeners (nav, dashboard) that role/plan may have changed
+                window.dispatchEvent(new CustomEvent('auth-changed', {
+                    detail: { event: 'PROFILE_FETCHED', user: this._user }
+                }));
             }
             return data;
         } catch (err) {

@@ -103,6 +103,13 @@ export function initNav(activeId = '') {
     const isSignedIn = !!auth;
     const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
 
+    // Re-render nav when profile fetches real role (fixes admin button
+    // not showing because nav rendered before fetchProfile() resolved)
+    if (!nav._authListener) {
+        nav._authListener = true;
+        window.addEventListener('auth-changed', () => initNav(activeId));
+    }
+
     let html = `
         <a href="index.html" class="nav-brand" aria-label="Parker Physics home">
             <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
