@@ -495,6 +495,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass }     from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 
 try {
@@ -510,14 +511,84 @@ if (canvas) {
     const scene  = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-    // ── Post-processing: bloom ────────────────────────────────────────────
+    // ── Post-processing pipeline ─────────────────────────────────────────
+    // Ray March → Sgr A* Atmosphere → Bloom → Screen
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
+
+    // ── Sgr A* atmosphere pass (cheap screen-space effects) ───────────
+    // Runs BEFORE bloom so flares/halo get the bloom glow treatment.
+    // Cost: 5 texture lookups + simple math. Near-zero GPU impact.
+    const sgrAPass = new ShaderPass({
+        uniforms: {
+            tDiffuse:  { value: null },
+            u_time:    bhUniforms.u_time,
+            u_quality: bhUniforms.u_quality,
+        },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            uniform sampler2D tDiffuse;
+            uniform float u_time;
+            uniform float u_quality;
+            varying vec2 vUv;
+
+            void main() {
+                vec2 center = vec2(0.5);
+                vec2 delta  = vUv - center;
+                float dist  = length(delta);
+                vec2 dir    = delta / max(dist, 1e-5);
+
+                // ── Chromatic aberration (gravitational λ-splitting) ──
+                // Different wavelengths follow slightly different geodesics
+                // in curved spacetime — produces radial RGB fringing.
+                float caStr = 0.0025 * smoothstep(0.0, 0.35, dist) * step(0.3, u_quality);
+                vec2 caOff  = dir * caStr;
+                vec3 col = vec3(
+                    texture2D(tDiffuse, vUv + caOff).r,
+                    texture2D(tDiffuse, vUv).g,
+                    texture2D(tDiffuse, vUv - caOff).b
+                );
+
+                // ── Sgr A* X-ray flare (Baganoff et al. 2001) ────────
+                // Sgr A* produces ~1 flare/day from magnetic reconnection
+                // near the ISCO. Brief bright flash in the inner region.
+                float fp = sin(u_time * 0.35) * sin(u_time * 0.73 + 1.9);
+                float flare = max(0.0, pow(fp, 12.0)) * 0.18;
+                float flareMask = smoothstep(0.18, 0.0, dist);
+                col += vec3(1.0, 0.85, 0.5) * flare * flareMask;
+
+                // ── Accretion variability (stochastic flickering) ────
+                // Sgr A* luminosity varies on minute-to-hour timescales.
+                // Subtle overall brightness modulation.
+                float flicker = 1.0 + 0.03 * sin(u_time * 1.7) * sin(u_time * 2.3 + 0.5);
+                col *= flicker;
+
+                // ── Warm scattered-light halo ────────────────────────
+                // Compton-scattered photons create a diffuse warm glow
+                // extending beyond the visible disk.
+                col += vec3(0.6, 0.42, 0.18) * exp(-dist * dist / 0.07) * 0.018;
+
+                // ── Vignette (cinematic, draws eye to center) ────────
+                col *= 1.0 - smoothstep(0.55, 1.3, dist) * 0.35;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `,
+    });
+    composer.addPass(sgrAPass);
+
+    // ── Bloom ─────────────────────────────────────────────────────────
     const bloom = new UnrealBloomPass(
         new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
-        0.5,   // strength — subtle glow, not blowout
+        0.5,   // strength
         0.4,   // radius
-        0.65   // threshold — only truly bright areas bloom
+        0.65   // threshold
     );
     composer.addPass(bloom);
 
