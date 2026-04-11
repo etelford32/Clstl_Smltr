@@ -373,17 +373,19 @@ const ALERT_DEFS = [
         key: 'notify_radio_blackout',
         type: 'flare',
         tier: 'advanced',
-        source: 'swpc',
-        evaluate(state) {
-            const flux = state.xray_flux ?? 0;
-            const r = fluxToRScale(flux);
-            if (r < 2) return null;
+        source: 'earth-forecast',
+        evaluate(_state, prefs, ctx) {
+            const ef = ctx.earthForecast;
+            if (!ef) return null;
+            const r = ef.radio?.r_scale ?? 0;
+            const threshold = prefs.radio_r_threshold ?? 2;
+            if (r < threshold) return null;
             return {
                 fire: true,
                 title: `R${r} Radio Blackout`,
-                body: `HF radio blackout in progress — X-ray flux at ${flareClassToLetter(flux)}-class. Sunlit hemisphere affected.`,
-                severity: r >= 4 ? 'critical' : 'warning',
-                metadata: { r_scale: r, flux },
+                body: `${ef.radio.desc} X-ray: ${ef.radio.xray_class}-class.`,
+                severity: r >= 4 ? 'critical' : r >= 3 ? 'critical' : 'warning',
+                metadata: { r_scale: r, xray_class: ef.radio.xray_class, threshold },
             };
         },
     },
@@ -393,20 +395,21 @@ const ALERT_DEFS = [
         key: 'notify_gps',
         type: 'storm',
         tier: 'advanced',
-        source: 'swpc',
-        evaluate(state) {
-            const kp = state.kp ?? 0;
-            if (kp < 6) return null;
+        source: 'earth-forecast',
+        evaluate(_state, prefs, ctx) {
+            const ef = ctx.earthForecast;
+            if (!ef) return null;
+            const gnss = ef.gnss;
+            const threshold = prefs.gnss_risk_threshold ?? 2;
+            if (gnss.level < threshold) return null;
             const loc = loadUserLocation() ?? auth.getUser()?.location;
-            const lat = Math.abs(loc?.lat ?? 45);
-            const isVulnerable = lat > 60 || lat < 25;
-            if (kp < 7 && !isVulnerable) return null;
+            const city = loc?.city;
             return {
                 fire: true,
-                title: 'GPS Accuracy Degraded',
-                body: `Kp ${kp.toFixed(1)} — ionospheric scintillation may degrade GPS/GNSS positioning accuracy${isVulnerable ? ' at your latitude' : ''}.`,
-                severity: kp >= 8 ? 'critical' : 'warning',
-                metadata: { kp, lat },
+                title: `GNSS Risk: ${gnss.label}`,
+                body: `${gnss.desc} L1 range delay: ${gnss.range_delay_m} m.${city ? ' (' + city + ')' : ''}`,
+                severity: gnss.level >= 3 ? 'critical' : 'warning',
+                metadata: { level: gnss.level, range_delay_m: gnss.range_delay_m, threshold },
             };
         },
     },
@@ -416,20 +419,65 @@ const ALERT_DEFS = [
         key: 'notify_power_grid',
         type: 'storm',
         tier: 'advanced',
-        source: 'swpc',
-        evaluate(state) {
-            const kp = state.kp ?? 0;
-            const g = kpToGScale(kp);
-            if (g < 4) return null;
+        source: 'earth-forecast',
+        evaluate(_state, prefs, ctx) {
+            const ef = ctx.earthForecast;
+            if (!ef) return null;
+            const grid = ef.infrastructure?.powerGrid;
+            const sat  = ef.infrastructure?.satellite;
+            const g    = ef.timing?.current_g ?? 0;
+            const threshold = prefs.power_grid_g_threshold ?? 4;
+            if (g < threshold && grid.level < 2) return null;
             const loc = loadUserLocation() ?? auth.getUser()?.location;
             const lat = Math.abs(loc?.lat ?? 45);
-            if (lat < 40 && g < 5) return null;
             return {
                 fire: true,
                 title: `G${g} Power Grid Risk`,
-                body: `Extreme geomagnetic storm (G${g}) — geomagnetically induced currents may affect power infrastructure${lat > 45 ? ' in your region' : ''}.`,
-                severity: 'critical',
-                metadata: { kp, g_scale: g, lat },
+                body: `${grid.desc}${sat.level >= 2 ? ' Satellite environment: ' + sat.desc : ''}`,
+                severity: g >= 4 ? 'critical' : 'warning',
+                metadata: { g_scale: g, grid_level: grid.level, sat_level: sat.level, lat, threshold },
+            };
+        },
+    },
+
+    // ── Ionospheric Disturbance (advanced) ──────────────────────────────────
+    {
+        key: 'notify_iono_disturbance',
+        type: 'storm',
+        tier: 'advanced',
+        source: 'earth-forecast',
+        evaluate(_state, _prefs, ctx) {
+            const ef = ctx.earthForecast;
+            if (!ef) return null;
+            const iono = ef.ionosphere;
+            if (!iono?.disturbed) return null;
+
+            // Build a detailed body from layer statuses
+            const parts = [];
+            const dl = iono.layers?.dLayer;
+            if (dl && dl.status !== 'NORMAL') parts.push(`D-layer: ${dl.desc}`);
+            const el = iono.layers?.eLayer;
+            if (el && el.status !== 'NORMAL') parts.push(`E-layer: ${el.desc}`);
+            const f2 = iono.layers?.f2Layer;
+            if (f2 && f2.status !== 'NORMAL') parts.push(`F2-layer: ${f2.desc}`);
+            const tec = iono.layers?.tec;
+            if (tec && tec.status !== 'NORMAL') parts.push(`TEC: ${tec.desc}`);
+
+            const isBlackout = dl?.status === 'BLACKOUT';
+
+            return {
+                fire: true,
+                title: isBlackout ? 'Ionospheric Blackout' : 'Ionospheric Disturbance',
+                body: parts.length
+                    ? parts.join(' ')
+                    : iono.summary,
+                severity: isBlackout ? 'critical' : 'warning',
+                metadata: {
+                    d_layer: dl?.status,
+                    e_layer: el?.status,
+                    f2_layer: f2?.status,
+                    tec: tec?.value,
+                },
             };
         },
     },
@@ -512,13 +560,17 @@ export class AlertEngine {
         /** Cached recurrence data from impact-score-update */
         this._recurrence = null;
 
+        /** Cached earth-forecast data from earth-forecast-update */
+        this._earthForecast = null;
+
         /** Conjunction monitor (advanced tier only) */
         this._conjMonitor = null;
 
-        this._onSwpc        = this._onSwpc.bind(this);
-        this._onCme         = this._onCme.bind(this);
-        this._onImpactScore = this._onImpactScore.bind(this);
-        this._onConjunction = this._onConjunction.bind(this);
+        this._onSwpc          = this._onSwpc.bind(this);
+        this._onCme           = this._onCme.bind(this);
+        this._onImpactScore   = this._onImpactScore.bind(this);
+        this._onConjunction   = this._onConjunction.bind(this);
+        this._onEarthForecast = this._onEarthForecast.bind(this);
     }
 
     /** Start listening to events and polling weather. */
@@ -527,6 +579,7 @@ export class AlertEngine {
         window.addEventListener('cme-propagation-update', this._onCme);
         window.addEventListener('impact-score-update', this._onImpactScore);
         window.addEventListener('conjunction-alert', this._onConjunction);
+        window.addEventListener('earth-forecast-update', this._onEarthForecast);
         this._loadRecentFromDB();
         this._pollWeather();
         this._weatherTimer = setInterval(() => this._pollWeather(), WEATHER_POLL_MS);
@@ -544,6 +597,7 @@ export class AlertEngine {
         window.removeEventListener('cme-propagation-update', this._onCme);
         window.removeEventListener('impact-score-update', this._onImpactScore);
         window.removeEventListener('conjunction-alert', this._onConjunction);
+        window.removeEventListener('earth-forecast-update', this._onEarthForecast);
         clearInterval(this._weatherTimer);
         this._conjMonitor?.stop();
     }
@@ -577,6 +631,14 @@ export class AlertEngine {
     _onImpactScore(ev) {
         // Cache recurrence data for the 27-day recurrence alert
         this._recurrence = ev.detail?.d7?.recurrence ?? null;
+    }
+
+    _onEarthForecast(ev) {
+        this._earthForecast = ev.detail ?? null;
+        // Evaluate earth-forecast-source alerts whenever the forecast updates
+        if (auth.isSignedIn() && auth.canUseAlerts()) {
+            this._evaluateAlerts(this._lastSwpcState ?? {}, 'earth-forecast');
+        }
     }
 
     _onConjunction(ev) {
@@ -650,7 +712,7 @@ export class AlertEngine {
         const cooldownMs = (prefs.alert_cooldown_min ?? 60) * 60_000;
         const isAdvanced = auth.canUseAdvancedAlerts();
         const now = Date.now();
-        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents, recurrence: this._recurrence };
+        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents, recurrence: this._recurrence, earthForecast: this._earthForecast };
 
         for (const def of ALERT_DEFS) {
             // Source filter: only evaluate defs matching the current trigger source

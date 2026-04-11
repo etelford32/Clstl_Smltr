@@ -141,7 +141,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, email_alerts, email_min_severity, alert_cooldown_min')
+                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -185,12 +185,16 @@ class AuthManager {
                     notify_power_grid:     data.notify_power_grid     ?? false,
                     notify_collision:      data.notify_collision      ?? false,
                     notify_recurrence:     data.notify_recurrence     ?? false,
+                    notify_iono_disturbance: data.notify_iono_disturbance ?? false,
                     aurora_kp_threshold:   data.aurora_kp_threshold   ?? 5,
                     storm_g_threshold:     data.storm_g_threshold     ?? 1,
                     flare_class_threshold: data.flare_class_threshold ?? 'M',
                     conjunction_threshold_km: data.conjunction_threshold_km ?? 25,
                     temp_high_f:           data.temp_high_f,
                     temp_low_f:            data.temp_low_f,
+                    radio_r_threshold:     data.radio_r_threshold     ?? 2,
+                    gnss_risk_threshold:   data.gnss_risk_threshold   ?? 2,
+                    power_grid_g_threshold: data.power_grid_g_threshold ?? 4,
                     email_alerts:          data.email_alerts          ?? false,
                     email_min_severity:    data.email_min_severity    ?? 'warning',
                     alert_cooldown_min:    data.alert_cooldown_min    ?? 60,
@@ -479,9 +483,10 @@ class AuthManager {
                     'notify_aurora', 'notify_storm', 'notify_flare', 'notify_cme',
                     'notify_temperature', 'notify_sat_pass', 'notify_conjunction',
                     'notify_radio_blackout', 'notify_gps', 'notify_power_grid',
-                    'notify_collision', 'notify_recurrence',
+                    'notify_collision', 'notify_recurrence', 'notify_iono_disturbance',
                     'aurora_kp_threshold', 'storm_g_threshold', 'flare_class_threshold',
                     'conjunction_threshold_km', 'temp_high_f', 'temp_low_f',
+                    'radio_r_threshold', 'gnss_risk_threshold', 'power_grid_g_threshold',
                     'email_alerts', 'email_min_severity', 'alert_cooldown_min',
                 ];
                 for (const k of profileFields) {
