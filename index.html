@@ -808,9 +808,11 @@ if (canvas) {
                     turb = turb1;
                 }
 
-                // Spiral arms (m = 2)
+                // Spiral arms (m = 2) — strong enough to show clear rotation
                 float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * 5.0);
-                turb = mix(turb, turb * spiral, 0.35);
+                turb = mix(turb, turb * spiral, 0.55);
+                // Large-scale orbiting brightness — makes rotation visible
+                turb *= 0.85 + 0.15 * sin(phase + rDisk * 0.3);
 
                 // Magnetic filaments near inner edge
                 float hotSpots = smoothstep(0.6, 0.85, turb) * smoothstep(DISK_INNER * 3.0, DISK_INNER * 1.1, rDisk);
@@ -1135,9 +1137,10 @@ if (canvas) {
         if (!heroVisible) return;
         raf = requestAnimationFrame(animate);
 
-        // Frame-time quality adaptation (every 30 frames)
+        // Frame-time quality adaptation (every 15 frames)
         if (lastTimestamp > 0) {
-            qTimeSum += timestamp - lastTimestamp;
+            const frameDt = timestamp - lastTimestamp;
+            qTimeSum += frameDt;
             qFrames++;
             if (qFrames >= 15) {
                 const avg = qTimeSum / qFrames;
@@ -1150,10 +1153,10 @@ if (canvas) {
                 }
                 qFrames = 0; qTimeSum = 0;
             }
+            // Frame-rate independent time — consistent speed at any FPS
+            t += Math.min(frameDt * 0.001, 0.1) * 0.48;
         }
         lastTimestamp = timestamp;
-
-        t += 0.008;
 
         // ── Cinematic camera choreography ─────────────────────────
         if (autoRotateActive) {

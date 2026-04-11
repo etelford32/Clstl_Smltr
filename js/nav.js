@@ -24,6 +24,7 @@ const NAV_DROPDOWNS = [
             { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',          tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',   tier: 'public', icon: '☀️' },
             { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',          tier: 'free',   icon: '🌌' },
+            { href: 'black-hole-fluid.html', label: 'Sagittarius A*', sub: 'Black hole accretion disk',      tier: 'free',   icon: '🕳️' },
         ],
     },
     {
