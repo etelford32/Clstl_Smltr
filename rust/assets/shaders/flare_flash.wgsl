@@ -122,10 +122,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     color = color * (1.0 - dimming);
 
     let total_intensity = flash + shock + pfl;
-    let alpha = clamp(total_intensity * 0.9, 0.0, 0.95);
+    let alpha = clamp(total_intensity * 0.7, 0.0, 0.8);
 
-    // HDR: push bright regions for bloom.
-    color *= 2.0;
+    // Only the flash impulse goes above bloom threshold; rest stays subtle.
+    color *= 1.2;
 
     return vec4<f32>(color, alpha);
 }

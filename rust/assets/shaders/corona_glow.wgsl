@@ -190,8 +190,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     // Alpha fades with height for smooth blending.
     let alpha = final_intensity * smoothstep(1.0, 0.0, height * height);
 
-    // HDR output (bloom picks up values > 1.0).
-    let hdr_color = corona_color * final_intensity * 1.8;
+    // Keep corona below bloom threshold (subtle glow, not overpowering).
+    let hdr_color = corona_color * final_intensity * 0.7;
 
-    return vec4<f32>(hdr_color, clamp(alpha * 0.6, 0.0, 0.85));
+    return vec4<f32>(hdr_color, clamp(alpha * 0.35, 0.0, 0.6));
 }
