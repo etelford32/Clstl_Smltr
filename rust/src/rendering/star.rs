@@ -18,7 +18,7 @@
 //! 5. **Particles + Gizmos** — solar wind, prominence, field lines drawn
 //!    on top by other systems.
 
-use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 
@@ -112,11 +112,22 @@ pub fn setup(
         affects_lightmapped_meshes: false,
     });
 
-    // ── 4. Camera with HDR bloom ────────────────────────────────────────────
+    // ── 4. Camera with subtle HDR bloom ────────────────────────────────────
     commands.spawn((
         Camera3d::default(),
         Tonemapping::AcesFitted,
-        Bloom::NATURAL,
+        Bloom {
+            intensity: 0.04,
+            low_frequency_boost: 0.3,
+            low_frequency_boost_curvature: 0.5,
+            high_pass_frequency: 0.9,
+            prefilter: BloomPrefilter {
+                threshold: 1.2,
+                threshold_softness: 0.3,
+            },
+            composite_mode: BloomCompositeMode::EnergyConserving,
+            ..Bloom::NATURAL
+        },
         Transform::from_xyz(0.0, 5.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
         CameraController {
             rotation_speed: 2.0,

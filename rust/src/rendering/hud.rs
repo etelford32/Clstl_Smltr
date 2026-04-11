@@ -19,6 +19,7 @@
 
 use bevy::prelude::*;
 
+use crate::prediction::feature_extract::SolarFeatures;
 use crate::prediction::flare_ml::FlareMLPrediction;
 use crate::prediction::solar_wind::LiveWindSpeed;
 use crate::simulation::flux_rope::{FluxRopeSet, RopePhase};
@@ -68,6 +69,7 @@ pub fn setup_hud(mut commands: Commands) {
 pub fn update_hud(
     wind: Res<LiveWindSpeed>,
     prediction: Res<FlareMLPrediction>,
+    features: Option<Res<SolarFeatures>>,
     ropes: Res<FluxRopeSet>,
     mut query: Query<&mut Text, With<WindHudText>>,
 ) {
@@ -76,18 +78,38 @@ pub fn update_hud(
         return;
     }
 
-    let trend_arrow = "→";
+    // Wind data status.
     let data_status = if wind.age_secs < 90.0 {
-        format!("LIVE  ({:.0}s ago)", wind.age_secs)
+        format!("LIVE ({:.0}s)", wind.age_secs)
     } else if wind.age_secs < 600.0 {
-        format!("STALE ({:.0}s ago)", wind.age_secs)
+        format!("STALE ({:.0}s)", wind.age_secs)
     } else {
         "OFFLINE".to_string()
     };
 
+    // Feature data status.
+    let feat_status = match &features {
+        Some(f) if f.age_secs < 180.0 => format!("LIVE ({:.0}s)", f.age_secs),
+        Some(f) => format!("STALE ({:.0}s)", f.age_secs),
+        None => "N/A".to_string(),
+    };
+
+    // X-ray flux estimate from features.
+    let xray_str = match &features {
+        Some(f) => {
+            let norm = f.xray_flux_norm;
+            if norm > 0.83 { "X" }
+            else if norm > 0.67 { "M" }
+            else if norm > 0.50 { "C" }
+            else if norm > 0.33 { "B" }
+            else { "A" }
+        }
+        None => "—",
+    };
+
     // ML prediction summary.
     let flare_line = format!(
-        "FLARE  {} {:.1}%  CME {:.1}%",
+        "ML     {} {:.1}%  CME {:.1}%",
         prediction.predicted_class,
         prediction.flare_probability * 100.0,
         prediction.cme_probability * 100.0,
@@ -102,25 +124,41 @@ pub fn update_hud(
             RopePhase::Relaxing => "RELAXING",
         };
         let detail = match rope.phase {
-            RopePhase::Emerging => format!("E={:.1}", rope.free_energy),
+            RopePhase::Emerging => {
+                format!("E={:.1} tw={:.1}", rope.free_energy, rope.twist)
+            }
             RopePhase::Erupting => rope.flare_class_full(),
             RopePhase::Relaxing => format!("{:.0}s", rope.phase_timer),
         };
-        rope_lines.push_str(&format!("\nROPE {} {}  {}", i + 1, phase_str, detail));
+        rope_lines.push_str(&format!(
+            "\nROPE {} {}  {}",
+            i + 1,
+            phase_str,
+            detail
+        ));
     }
 
     let new_text = format!(
-        "WIND   {:.0} km/s\n\
-         ALERT  {}\n\
-         TREND  {} steady\n\
-         DATA   {}\n\
+        "WIND   {:.0} km/s  {}\n\
+         ALERT  {}  Bz={}\n\
+         XRAY   {}  F10.7={}\n\
+         FEAT   {}\n\
          ──────────────\n\
          {}\
          {}",
         wind.speed_km_s,
-        wind.alert_level,
-        trend_arrow,
         data_status,
+        wind.alert_level,
+        match &features {
+            Some(f) => format!("{:.1}", f.bz_southward_norm * -30.0),
+            None => "—".to_string(),
+        },
+        xray_str,
+        match &features {
+            Some(f) => format!("{:.0}", f.radio_flux_norm * 235.0 + 65.0),
+            None => "—".to_string(),
+        },
+        feat_status,
         flare_line,
         rope_lines,
     );

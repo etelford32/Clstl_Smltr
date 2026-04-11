@@ -261,24 +261,72 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
         flare_glow += vec3<f32>(0.8, 0.9, 1.0) * ribbon * 3.0;
     }
 
-    // ── 7. Chromospheric limb emission ──────────────────────────────────────
+    // ── 7. Microflares ────────────────────────────────────────────────────────
+    // Small transient brightenings (nanoflares) scattered across the surface.
+    // These are sub-resolution reconnection events — the dominant heating
+    // mechanism of the quiet corona (Parker 1988).  Rendered as brief
+    // point-like flashes that pop in and out over ~1-3 second timescales.
+    var microflare_glow = 0.0;
+    {
+        // Sample 6 independent microflare locations using noise.
+        for (var mf = 0; mf < 6; mf++) {
+            let seed = vec3<f32>(f32(mf) * 1.7, f32(mf) * 2.3, f32(mf) * 0.9);
+            // Position drifts slowly; phase cycles at different rates per site.
+            let mf_lat = (noise3(seed + vec3<f32>(time * 0.01, 0.0, 0.0)) - 0.5) * 2.5;
+            let mf_lon = noise3(seed.zxy + vec3<f32>(0.0, time * 0.008, 0.0)) * 6.28;
+            let mf_pos = vec2<f32>(mf_lat, mf_lon);
+            let mf_dist = helio_dist(helio, mf_pos);
+            // Each microflare blinks on/off with a sine envelope.
+            let mf_phase = time * (1.5 + f32(mf) * 0.4) + f32(mf) * 7.1;
+            let mf_blink = max(0.0, sin(mf_phase));
+            let mf_bright = smoothstep(0.06, 0.0, mf_dist) * mf_blink * mf_blink;
+            microflare_glow += mf_bright * 0.35;
+        }
+    }
+    let mf_color = vec3<f32>(1.0, 0.95, 0.8) * microflare_glow;
+
+    // ── 8. Spicules / coronal hairs at the limb ────────────────────────────
+    // Spicules are thin jets of chromospheric plasma shooting radially outward
+    // at 20-100 km/s.  Visible as hair-like structures at the solar limb.
+    // We render them as angular modulation of limb brightness.
+    var spicule = 0.0;
+    if mu < 0.25 {
+        // Angular position around the limb.
+        let limb_angle = atan2(normal.y, length(vec2<f32>(normal.x, normal.z)));
+        // High-frequency radial pattern (many thin spicules).
+        let sp_freq1 = sin(limb_angle * 80.0 + time * 2.0) * 0.5 + 0.5;
+        let sp_freq2 = sin(limb_angle * 120.0 - time * 3.5 + 2.0) * 0.5 + 0.5;
+        let sp_freq3 = sin(limb_angle * 200.0 + time * 1.2 + 5.0) * 0.5 + 0.5;
+        // Combine multiple frequencies for natural look.
+        let sp_pattern = sp_freq1 * 0.5 + sp_freq2 * 0.3 + sp_freq3 * 0.2;
+        // Only visible at the extreme limb, fading toward disk centre.
+        let sp_mask = smoothstep(0.25, 0.03, mu);
+        // Spicules vary in brightness (some are type I, some type II).
+        spicule = sp_pattern * sp_mask * 0.5;
+    }
+    let spicule_color = vec3<f32>(0.95, 0.55, 0.25) * spicule;
+
+    // ── 9. Chromospheric limb emission ──────────────────────────────────────
     // At the extreme limb (μ → 0), the chromosphere emits Hα (656.3 nm, red)
     // and Ca II K (393.4 nm, violet).  This creates a thin colored ring.
-    let limb_emission = smoothstep(0.15, 0.0, mu) * 0.4;
+    let limb_emission = smoothstep(0.12, 0.0, mu) * 0.3;
     let chrom_color   = vec3<f32>(0.9, 0.2, 0.15) * limb_emission;
 
-    // ── 8. Compose final color ──────────────────────────────────────────────
+    // ── 10. Compose final color ─────────────────────────────────────────────
     var color = base_color * spot_darkening * ld;
     color    += vec3<f32>(facular_bright);
     color    += chrom_color;
+    color    += spicule_color;
+    color    += mf_color;
     color    += flare_glow;
 
     // Activity-modulated overall brightness.
     let activity_boost = 1.0 + (material.activity_scale - 1.0) * 0.1;
     color *= activity_boost;
 
-    // HDR emissive output — values > 1.0 feed into bloom.
-    let emissive_strength = 2.5 + flare_glow.x * 2.0;
+    // Moderate emissive output — keep most of the surface below the bloom
+    // threshold so only flares and microflares trigger bloom.
+    let emissive_strength = 1.1 + flare_glow.x * 1.5 + microflare_glow * 0.8;
     color *= emissive_strength;
 
     return vec4<f32>(color, 1.0);
