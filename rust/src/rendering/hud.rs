@@ -1,22 +1,27 @@
-//! Wind speed HUD overlay.
+//! HUD overlay — wind speed, flare prediction, and flux rope status.
 //!
-//! Renders a small monospace text panel in the top-left corner of the window
-//! showing live wind speed, alert level, and data freshness sourced from the
-//! NOAA pipeline via [`crate::prediction::solar_wind::LiveWindSpeed`].
+//! Renders a monospace text panel in the top-left corner of the window
+//! showing live solar data, ML flare prediction, and flux rope state.
 //!
-//! Layout (world units, top-left origin):
+//! Layout:
 //! ```text
 //! ┌──────────────────────────────┐
 //! │ WIND   450 km/s              │
 //! │ ALERT  MODERATE              │
 //! │ TREND  → STEADY              │
 //! │ DATA   LIVE                  │
+//! │ ──────────────────           │
+//! │ FLARE  M 12.3%  CME 4.1%    │
+//! │ ROPE 1 EMERGING  E=2.3      │
+//! │ ROPE 2 ERUPTING  X1.4       │
 //! └──────────────────────────────┘
 //! ```
 
 use bevy::prelude::*;
 
+use crate::prediction::flare_ml::FlareMLPrediction;
 use crate::prediction::solar_wind::LiveWindSpeed;
+use crate::simulation::flux_rope::{FluxRopeSet, RopePhase};
 
 // ── Marker component ──────────────────────────────────────────────────────────
 
@@ -43,7 +48,10 @@ pub fn setup_hud(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn((
-                Text::new("WIND   connecting…\nALERT  —\nTREND  —\nDATA   offline"),
+                Text::new(
+                    "WIND   connecting…\nALERT  —\nTREND  —\nDATA   offline\n\
+                     ──────────────\nFLARE  —\nROPE   —",
+                ),
                 TextFont {
                     font_size: 12.5,
                     ..default()
@@ -56,17 +64,19 @@ pub fn setup_hud(mut commands: Commands) {
 
 // ── Update ────────────────────────────────────────────────────────────────────
 
-/// Refreshes the HUD text every frame from the [`LiveWindSpeed`] resource.
+/// Refreshes the HUD text every frame from live resources.
 pub fn update_hud(
     wind: Res<LiveWindSpeed>,
+    prediction: Res<FlareMLPrediction>,
+    ropes: Res<FluxRopeSet>,
     mut query: Query<&mut Text, With<WindHudText>>,
 ) {
-    // Only rewrite the string when the resource actually changed.
-    if !wind.is_changed() {
+    // Refresh when any data source changes.
+    if !wind.is_changed() && !prediction.is_changed() && !ropes.is_changed() {
         return;
     }
 
-    let trend_arrow = "→"; // static for now; extended in a future phase
+    let trend_arrow = "→";
     let data_status = if wind.age_secs < 90.0 {
         format!("LIVE  ({:.0}s ago)", wind.age_secs)
     } else if wind.age_secs < 600.0 {
@@ -75,12 +85,44 @@ pub fn update_hud(
         "OFFLINE".to_string()
     };
 
+    // ML prediction summary.
+    let flare_line = format!(
+        "FLARE  {} {:.1}%  CME {:.1}%",
+        prediction.predicted_class,
+        prediction.flare_probability * 100.0,
+        prediction.cme_probability * 100.0,
+    );
+
+    // Flux rope status lines.
+    let mut rope_lines = String::new();
+    for (i, rope) in ropes.ropes.iter().enumerate() {
+        let phase_str = match rope.phase {
+            RopePhase::Emerging => "EMERGING",
+            RopePhase::Erupting => "ERUPTING",
+            RopePhase::Relaxing => "RELAXING",
+        };
+        let detail = match rope.phase {
+            RopePhase::Emerging => format!("E={:.1}", rope.free_energy),
+            RopePhase::Erupting => rope.flare_class_full(),
+            RopePhase::Relaxing => format!("{:.0}s", rope.phase_timer),
+        };
+        rope_lines.push_str(&format!("\nROPE {} {}  {}", i + 1, phase_str, detail));
+    }
+
     let new_text = format!(
-        "WIND   {:.0} km/s\nALERT  {}\nTREND  {} steady\nDATA   {}",
+        "WIND   {:.0} km/s\n\
+         ALERT  {}\n\
+         TREND  {} steady\n\
+         DATA   {}\n\
+         ──────────────\n\
+         {}\
+         {}",
         wind.speed_km_s,
         wind.alert_level,
         trend_arrow,
         data_status,
+        flare_line,
+        rope_lines,
     );
 
     for mut text in &mut query {
