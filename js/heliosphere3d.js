@@ -59,6 +59,7 @@ import {
     cglAnisotropy,
 } from './helio-physics.js';
 import { SUN_VERT, SUN_FRAG, createSunUniforms } from './sun-shader.js';
+import { SunFeatures } from './sun-features.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -409,7 +410,10 @@ export class Heliosphere3D {
         this._sunFlareT    = 0;    // 0–1 flash intensity, decays each frame
 
         // Solar prominences (animated arc loops at the limb)
-        this._prominences  = [];   // [{ line, pts, lat, lon, maxH, age, maxAge, phase }]
+        this._prominences  = [];
+
+        // Dynamic sun features (spicules, microflares, streamers, field lines)
+        this._sunFeatures  = null;   // [{ line, pts, lat, lon, maxH, age, maxAge, phase }]
 
         // Three.js objects (set by _build*)
         this._renderer    = null;
@@ -514,6 +518,8 @@ export class Heliosphere3D {
             this._flareSEP.line.material.dispose();
             this._flareSEP = null;
         }
+        this._sunFeatures?.dispose();
+        this._sunFeatures = null;
         this._renderer?.dispose();
     }
 
@@ -650,6 +656,13 @@ export class Heliosphere3D {
         this._buildScene();
         this._buildStarfield();
         this._buildSun();
+        this._sunFeatures = new SunFeatures(this._scene, {
+            sunRadius:      R.sun,
+            numSpicules:    80,
+            numMicroflares: 8,
+            numStreamers:   6,
+            fieldLines:     true,
+        });
         this._buildOrbitTrails();
         this._buildPlanets();
         this._buildHCS();          // heliospheric current sheet — below field lines
@@ -2361,6 +2374,17 @@ export class Heliosphere3D {
 
         // ── Flare ribbon tick ─────────────────────────────────────────────────
         this._tickFlareRibbons(dt);
+
+        // ── Dynamic sun features (spicules, microflares, streamers, field lines)
+        if (this._sunFeatures) {
+            this._sunFeatures.tick(dt, {
+                t:             this._t,
+                windSpeedNorm: Math.min(1, ((this._sw.speed ?? 400) - 250) / 650),
+                xrayNorm:      xNorm,
+                kp:            this._sw.kp ?? 2,
+                regions:       regions,
+            });
+        }
     }
 
     // ── Solar prominences ─────────────────────────────────────────────────────
