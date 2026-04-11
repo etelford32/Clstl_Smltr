@@ -741,8 +741,13 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
             <div>X-ray: <span class="val" id="hud-xray" style="color:#44ff88">—</span></div>
             <div>F10.7: <span class="val" id="hud-f107">—</span><span class="dim"> sfu</span></div>
             <div>Wind: <span class="val" id="hud-wind-spd">—</span><span class="dim"> km/s</span></div>
-            <div>FPS: <span id="fps-display">--</span></div>
-            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+            <div class="sep"></div>
+            <div>Flare: <span class="val" id="hud-ml-flare" style="color:#ffaa22">—</span></div>
+            <div>CME: <span class="val" id="hud-ml-cme" style="color:#ff6644">—</span></div>
+            <div>Bz: <span class="val" id="hud-bz" style="color:#66aaff">—</span><span class="dim"> nT</span></div>
+            <div>Kp: <span class="val" id="hud-kp" style="color:#aa88ff">—</span></div>
+            <div style="margin-top:3px">FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:2px">Drag · Pinch · Scroll</div>
         </div>
         <!-- Flare Alert Banner -->
         <div id="flare-alert-banner"></div>
@@ -1701,7 +1706,7 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.05;
 renderer.outputColorSpace    = THREE.SRGBColorSpace;
 
 const canvasWrap = document.getElementById('canvas-wrap');
@@ -1716,15 +1721,12 @@ let composer, bloomPass;
     composer  = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    // UnrealBloomPass — subtle HDR bloom for the very hottest surface pixels
-    // and M/X flare peaks only.  Kept deliberately low so the corona shader
-    // (not screen-space blur) carries the ambient glow.
-    // threshold 0.88 — only the sub-percent of pixels that exceed ~2.25× HDR
-    // get bloomed (granule centres, umbral contrasts, active-region UV kernels).
-    // strength 0.65 (was 0.45) — more visible solar halo
-    // radius   0.45 (was 0.32) — wider bloom kernel for softer corona edge
-    // threshold 0.82 (was 0.88) — slightly lower threshold catches more bright surface pixels
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.65, 0.45, 0.82);
+    // UnrealBloomPass — targeted bloom that only catches the brightest features:
+    // flare ribbons, microflare pops, umbral contrast, and the corona limb.
+    // threshold 0.92 — very selective; base photosphere stays clean and sharp.
+    // strength 0.35 — moderate glow that doesn't wash out granulation detail.
+    // radius 0.40 — tight kernel preserves spatial detail in streamer structure.
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.35, 0.40, 0.92);
     composer.addPass(bloomPass);
 
     // ── Vectorised limb-corona scatter ───────────────────────────────────────
@@ -2002,30 +2004,46 @@ const sunFS = /* glsl */`
         vec3  sgPos  = vPosition * 2.2 + vec3(u_time * 0.0008 * u_rot);
         vec2  sgCell = voronoi(sgPos);
         // Bright cell centres (upwelling), dark lanes (downflow at boundaries)
-        float superGran = smoothstep(0.0, 0.55, sgCell.x) * 0.05;  // very subtle (~2%)
+        float superGran = smoothstep(0.0, 0.45, sgCell.x) * 0.08;
 
         // ── Granulation (~1 000 km cells) ─────────────────────────────────────
         // Domain-warp: slow turbulent deformation gives a "boiling" look
         vec3 dwarp = vec3(
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0022), 3),
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 1.7), 3),
-            fbm(vPosition * 5.5 + vec3(u_time * 0.0022 + 3.4), 3)
-        ) * 0.12;
-        vec3 gPos   = vPosition * 9.5 + dwarp + vec3(u_time * 0.0055 * u_rot);
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0032), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0032 + 1.7), 3),
+            fbm(vPosition * 5.5 + vec3(u_time * 0.0032 + 3.4), 3)
+        ) * 0.18;
+        vec3 gPos   = vPosition * 10.5 + dwarp + vec3(u_time * 0.0065 * u_rot);
         vec2 gCell  = voronoi(gPos);
         // Use d2-d1 for cell-boundary detection: dark narrow lanes where d2≈d1,
         // bright broad interiors where d2>>d1 — matches SDO/HMI granulation morphology.
-        float laneD  = smoothstep(0.05, 0.30, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
-        float granLight = mix(0.50, 1.0, laneD);                    // lane contrast: 50% → 100%
+        float laneD  = smoothstep(0.04, 0.28, gCell.y - gCell.x);  // 0=dark lane, 1=bright interior
+        float granLight = mix(0.40, 1.0, laneD);                    // lane contrast: 40% → 100% (deeper lanes)
 
         // ── Fine sub-granulation turbulence ─────────────────────────────────
-        float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.009), 4) * 0.06;
+        float fineTurb = fbm(vPosition * 30.0 + vec3(u_time * 0.012), 4) * 0.08;
 
         // ── Magnetic bright points at intergranular lanes ─────────────────────
         // Tiny intense specks where kG flux tubes emerge between granules
-        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.025));
+        float mbpNoise = vnoise(vPosition * 52.0 + vec3(u_time * 0.030));
         float laneMask = 1.0 - laneD;  // 1=dark lane, 0=bright interior (for MBP placement)
-        float mbp = smoothstep(0.86, 0.94, mbpNoise) * laneMask * 0.40;
+        float mbp = smoothstep(0.82, 0.92, mbpNoise) * laneMask * 0.55;
+
+        // ── Nanoflare / microflare transient brightenings ─────────────────────
+        // Small-scale magnetic reconnection events (Parker 1988).
+        // 6 independent sites that blink on/off over ~1-2 second timescales.
+        float microflare = 0.0;
+        for (int mf = 0; mf < 6; mf++) {
+            float fi = float(mf);
+            vec3 mfSeed = vec3(fi * 1.7 + 0.3, fi * 2.3, fi * 0.9);
+            float mfNoise = vnoise(vPosition * 14.0 + mfSeed + vec3(u_time * 0.008));
+            // Sharp threshold → small bright point
+            float mfSpot = smoothstep(0.88, 0.96, mfNoise);
+            // Blink envelope: sin^4 gives sharp pulses
+            float mfBlink = pow(max(0.0, sin(u_time * (1.2 + fi * 0.5) + fi * 11.0)), 4.0);
+            microflare += mfSpot * mfBlink;
+        }
+        microflare = min(microflare, 1.0) * 0.65;
 
         // ── Active latitude belt ───────────────────────────────────────────────
         float spotBelt = smoothstep(0.12, 0.18, abs(lat)) * smoothstep(0.64, 0.52, abs(lat));
@@ -2066,8 +2084,11 @@ const sunFS = /* glsl */`
         // Magnetic bright points — intensely white
         col += vec3(1.4, 1.2, 0.9) * mbp * (1.0 - umbra) * u_showSpots;
 
+        // Nanoflare transient brightenings — hot white-yellow pops
+        col += vec3(1.5, 1.3, 0.8) * microflare * (1.0 - umbra) * u_showFlares;
+
         // Facular brightening near limb
-        col += baseCol * facular * 0.55;
+        col += baseCol * facular * 0.65;
 
         // ── Sunspot umbra (T_umbra ~ 0.60 × T_eff ≈ 3470 K) ──────────────────
         float umbraT = u_teff * (0.60 - umbra * 0.18);
@@ -2171,9 +2192,9 @@ const sunFS = /* glsl */`
         col *= limb;
 
         // ── HDR amplification — drives the bloom glow ─────────────────────────
-        // White-light flare: briefly boosts whole-disk brightness (very rare; only
-        // for large X-class events, but visually dramatic).
-        col *= 2.55 + u_flare_intensity * 0.90;
+        // Kept moderate so granulation contrast and sunspot detail remain visible.
+        // Only flare impulsive phase pushes significantly above bloom threshold.
+        col *= 2.20 + u_flare_intensity * 1.10;
 
         // ── F10.7 solar-cycle boost — solar maximum = hotter, brighter photosphere ──
         // Higher radio flux index → more magnetic heating → brighter surface
@@ -2187,10 +2208,20 @@ const sunFS = /* glsl */`
         float sepUV = (u_electron_norm + u_proton_norm * 0.5) * 0.12;
         col += vec3(0.90, 0.95, 1.20) * sepUV * (0.5 + u_activity * 0.5);
 
+        // ── Spicule forest at extreme limb ────────────────────────────────────
+        // Type II spicules (fast jets, 50-150 km/s, ~10 Mm tall) create a
+        // "hairy" fringe at the solar limb, visible in Hα and Ca II.
+        float spiculeNoise = vnoise(vPosition * 40.0 + vec3(u_time * 0.05));
+        float spicule2     = vnoise(vPosition * 65.0 - vec3(u_time * 0.07));
+        float spiculePattern = spiculeNoise * 0.55 + spicule2 * 0.45;
+        float spiculeMask = smoothstep(0.20, 0.03, mu);  // only at extreme limb
+        float spiculeHairs = spiculeMask * spiculePattern * 0.50;
+        col += vec3(0.85, 0.40, 0.15) * spiculeHairs;
+
         // ── Chromospheric / transition-region emission at extreme limb ─────────
         // Pink-red Hα + Ca H&K + extreme-UV pink at very low μ.
-        float fr = pow(max(1.0 - mu, 0.0), 3.5);
-        col += vec3(1.10, 0.32, 0.10) * fr * 0.65;
+        float fr = pow(max(1.0 - mu, 0.0), 3.0);
+        col += vec3(1.10, 0.32, 0.10) * fr * 0.75;
 
         gl_FragColor = vec4(col, 1.0);
     }
@@ -3818,10 +3849,11 @@ function animate() {
     // Base is deliberately low — the K-corona shader carries ambient glow.
     // Kp contributes: geomagnetic storms drive visible corona brightening.
     if (bloomPass) {
-        const flareBoost = Math.max(0, 0.55 * Math.exp(-uniforms.u_flare_t.value / 18.0));
-        const baseBloom  = 0.45 + uniforms.u_activity.value * 0.12
-                         + uniforms.u_kp_norm.value * 0.09 + flareBoost;
-        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.035);
+        // Bloom spikes only during flares; base stays low to preserve surface detail.
+        const flareBoost = Math.max(0, 0.50 * Math.exp(-uniforms.u_flare_t.value / 12.0));
+        const baseBloom  = 0.25 + uniforms.u_activity.value * 0.08
+                         + uniforms.u_kp_norm.value * 0.06 + flareBoost;
+        bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.04);
     }
     composer.render();
     fpsF++;
@@ -4548,6 +4580,40 @@ window.addEventListener('swpc-update', (ev) => {
     // S-scale drives SEP particle system
     const sepLevel = sw.sep_storm_level ?? 0;
     uniforms.u_sep_level.value = sepLevel;
+
+    // ── HUD: Bz, Kp, and ML flare prediction readout ─────────────────────────
+    const hudBz = document.getElementById('hud-bz');
+    if (hudBz) {
+        const bzVal = bz ?? 0;
+        hudBz.textContent = bzVal.toFixed(1);
+        hudBz.style.color = bzVal < -10 ? '#ff4444' : bzVal < -5 ? '#ffaa44' : '#66aaff';
+    }
+    const hudKp = document.getElementById('hud-kp');
+    if (hudKp) {
+        const kpVal = kp ?? 0;
+        hudKp.textContent = kpVal.toFixed(1);
+        hudKp.style.color = kpVal >= 7 ? '#ff3333' : kpVal >= 5 ? '#ff8800' : kpVal >= 4 ? '#ffcc00' : '#aa88ff';
+    }
+    // Simple ML-like flare probability estimate from current X-ray + activity + Bz
+    const hudFlare = document.getElementById('hud-ml-flare');
+    const hudCme   = document.getElementById('hud-ml-cme');
+    if (hudFlare) {
+        const xAct   = d.xray_intensity ?? 0.3;
+        const actVal = uniforms.u_activity.value;
+        const bzNorm = uniforms.u_bz_sw.value;
+        // Weighted combination: X-ray flux dominates, activity + Bz contribute
+        const fProb  = Math.min(99, Math.round((xAct * 55 + actVal * 25 + bzNorm * 15) * 1.1));
+        const fClass = xAct > 0.83 ? 'X' : xAct > 0.67 ? 'M' : xAct > 0.50 ? 'C' : 'B';
+        hudFlare.textContent = `${fClass} ${fProb}%`;
+        hudFlare.style.color = fClass === 'X' ? '#ff3300' : fClass === 'M' ? '#ff8800'
+                             : fClass === 'C' ? '#ffee44' : '#88ddaa';
+    }
+    if (hudCme) {
+        const cmeActive = uniforms.u_cme_active.value > 0.5;
+        const cmeSpd    = cmeActive ? Math.round(300 + uniforms.u_cme_speed_norm.value * 2200) : 0;
+        hudCme.textContent = cmeActive ? `${cmeSpd} km/s` : 'none';
+        hudCme.style.color = cmeActive ? '#ff6644' : '#556677';
+    }
 
     // Drive u_activity from live X-ray intensity (blended with manual slider)
     // xray_intensity is log-scaled [0-1]: A=0.17, C=0.50, M=0.67, X=0.83+
