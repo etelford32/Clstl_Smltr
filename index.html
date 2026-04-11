@@ -511,6 +511,15 @@ if (canvas) {
     const scene  = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
+    // ── Ray-march shader uniforms (declared early — needed by sgrAPass) ───
+    const bhUniforms = {
+        u_resolution: { value: new THREE.Vector2() },
+        u_time:       { value: 0 },
+        u_cameraPos:  { value: new THREE.Vector3() },
+        u_fov:        { value: 0.55 },
+        u_quality:    { value: 1.0 },  // 0.0=low (mobile) → 1.0=high (desktop)
+    };
+
     // ── Post-processing pipeline ─────────────────────────────────────────
     // Ray March → Sgr A* Atmosphere → Bloom → Screen
     const composer = new EffectComposer(renderer);
@@ -591,15 +600,6 @@ if (canvas) {
         0.65   // threshold
     );
     composer.addPass(bloom);
-
-    // ── Ray-march shader uniforms ─────────────────────────────────────────
-    const bhUniforms = {
-        u_resolution: { value: new THREE.Vector2() },
-        u_time:       { value: 0 },
-        u_cameraPos:  { value: new THREE.Vector3() },
-        u_fov:        { value: 0.55 },
-        u_quality:    { value: 1.0 },  // 0.0=low (mobile) → 1.0=high (desktop)
-    };
 
     // ── Full-screen quad with Kerr ray-march material ─────────────────────
     const bhMaterial = new THREE.ShaderMaterial({
