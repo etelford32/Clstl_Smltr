@@ -11,10 +11,9 @@ use prediction::feature_extract::{update_solar_features, SolarFeaturesPlugin};
 use prediction::flare_ml::{run_flare_prediction, FlareMLPrediction};
 use prediction::solar_wind::{update_live_wind, LiveWindPlugin, LiveWindSpeed};
 use rendering::hud::{setup_hud, update_hud};
-use rendering::solar_material::{CoronaGlowMat, FlareFlashMat, SolarSurfaceMat};
 use rendering::star::{
-    setup, spawn_flare_flashes, update_corona, update_flare_flashes,
-    update_solar_surface, update_star_glow, FlareFlashTracker,
+    draw_cme_shockwaves, draw_coronal_streamers, draw_microflares, draw_spicules,
+    setup, update_star_glow,
 };
 use simulation::fluid::{update_velocity_field, VelocityField};
 use simulation::flux_rope::{draw_flux_ropes, update_flux_ropes, FluxRopeSet};
@@ -26,11 +25,6 @@ use simulation::prominence::{
 
 /// Transfer the live wind speed from [`LiveWindSpeed`] into the velocity field
 /// scale so that real NOAA observations modulate the particle animation.
-///
-/// Maps normalised speed [0, 1] → wind scale [0.5, 2.5]:
-///   - 0.0 (250 km/s quiet)  → scale 0.5  (slow corona outflow)
-///   - 0.5 (450 km/s nominal) → scale 1.5  (normal animation speed)
-///   - 1.0 (900 km/s storm)  → scale 2.5  (dramatic storm particles)
 fn apply_live_wind_scale(wind: Res<LiveWindSpeed>, mut field: ResMut<VelocityField>) {
     field.wind_speed_scale = 0.5 + wind.speed_norm * 2.0;
 }
@@ -48,14 +42,10 @@ fn main() {
             }),
             ..default()
         }))
-        // Live NOAA wind speed pipeline (polls API in background thread).
+        // Live NOAA wind speed pipeline.
         .add_plugins(LiveWindPlugin)
         // Live NASA/NOAA feature extraction for ML prediction.
         .add_plugins(SolarFeaturesPlugin)
-        // Custom solar material shaders.
-        .add_plugins(MaterialPlugin::<SolarSurfaceMat>::default())
-        .add_plugins(MaterialPlugin::<CoronaGlowMat>::default())
-        .add_plugins(MaterialPlugin::<FlareFlashMat>::default())
         .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .insert_resource(ParticleSpawner::default())
         .insert_resource(VelocityField::new())
@@ -63,18 +53,17 @@ fn main() {
         .insert_resource(FluxRopeSet::default())
         .insert_resource(FlareMLPrediction::default())
         .insert_resource(ProminenceSpawner::default())
-        .insert_resource(FlareFlashTracker::default())
         .add_systems(Startup, (setup, setup_hud))
         .add_systems(
             Update,
             (
-                // 0. Receive latest live data from NASA/NOAA pipelines.
+                // 0. Live data pipelines.
                 update_live_wind,
                 update_solar_features,
-                // 1. ML flare prediction (reads features, writes activity scale).
+                // 1. ML flare prediction.
                 run_flare_prediction
                     .after(update_solar_features),
-                // 2. Apply live scale to the velocity field, then rebuild it.
+                // 2. Velocity field + wind scale.
                 apply_live_wind_scale
                     .after(update_live_wind),
                 update_velocity_field
@@ -84,14 +73,14 @@ fn main() {
                     .after(update_velocity_field),
                 update_flux_ropes
                     .after(run_flare_prediction),
-                // 4. Rendering updates (read physics state, write shader uniforms).
+                // 4. All rendering (reads physics, draws visuals).
                 (
                     camera_controller,
                     update_star_glow,
-                    update_solar_surface,
-                    update_corona,
-                    spawn_flare_flashes,
-                    update_flare_flashes,
+                    draw_spicules,
+                    draw_microflares,
+                    draw_coronal_streamers,
+                    draw_cme_shockwaves,
                     spawn_particles,
                     update_particles,
                     draw_field_lines,
