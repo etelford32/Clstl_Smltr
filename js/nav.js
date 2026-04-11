@@ -24,7 +24,7 @@ const NAV_DROPDOWNS = [
             { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',          tier: 'public', icon: '🪐', id: 'solar' },
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',   tier: 'public', icon: '☀️' },
             { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',          tier: 'free',   icon: '🌌' },
-            { href: 'black-hole-fluid.html', label: 'Sagittarius A*', sub: 'Black hole accretion disk',      tier: 'free',   icon: '🕳️' },
+            { href: 'black-hole-fluid.html', label: 'Sagittarius A*', sub: 'Black hole accretion disk',      tier: 'public', icon: '🕳️' },
         ],
     },
     {
@@ -57,7 +57,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { section: 'Black Holes' },
-            { href: 'black-hole-fluid.html',  label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',       tier: 'free',   icon: '🕳️' },
+            { href: 'black-hole-fluid.html',  label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',       tier: 'public', icon: '🕳️' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
             { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Intro, Advanced plans',     tier: 'public', icon: '💰' },
