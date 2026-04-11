@@ -463,9 +463,12 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
      • Oblate spheroidal event horizon at r+ = M + √(M² − a²)
      • Prograde ISCO at r ≈ 1.237M (vs 6M for Schwarzschild)
      • Accretion disk with Novikov-Thorne temperature profile
+     • Plunging region: free-falling matter emission inside ISCO
+     • Corona/halo: hot inverse-Compton electron atmosphere above disk
      • Orbital velocities up to 0.67c at ISCO → extreme Doppler beaming
      • "Wrapped disk" — far-side disk lensed above/below BH
      • Photon ring + procedural lensed starfield with Einstein ring
+     • Half-resolution rendering (60% scale) for 2.8× performance
      • Interactive camera: drag to orbit, scroll to zoom
 
    Physics references:
@@ -501,9 +504,9 @@ if (canvas) {
     composer.addPass(new RenderPass(scene, camera));
     const bloom = new UnrealBloomPass(
         new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
-        1.3,   // strength
-        0.6,   // radius
-        0.2    // threshold
+        0.5,   // strength — subtle glow, not blowout
+        0.4,   // radius
+        0.65   // threshold — only truly bright areas bloom
     );
     composer.addPass(bloom);
 
@@ -678,22 +681,30 @@ if (canvas) {
                 return col;
             }
 
-            // ─── Kerr accretion disk sampling ─────────────────────────
+            // ─── Kerr accretion disk + plunging region ──────────────
             vec3 sampleDisk(vec3 hitPos, vec3 vel, float time) {
-                // Oblate spheroidal r at equator: r = sqrt(x²+z² − a²)
                 float cyl2 = hitPos.x * hitPos.x + hitPos.z * hitPos.z;
                 float rDisk = sqrt(max(cyl2 - BH_A2, 1e-8));
-                if (rDisk < DISK_INNER * 0.7 || rDisk > DISK_OUTER) return vec3(0.0);
+                if (rDisk > DISK_OUTER || rDisk < R_PLUS * 1.05) return vec3(0.0);
 
                 float angle = atan(hitPos.z, hitPos.x);
-
-                // Kerr Keplerian angular velocity: Ω = M^½ / (r^(3/2) + a·M^½)
-                float omega = 1.0 / (pow(rDisk, 1.5) + BH_A);
+                float omega = 1.0 / (pow(max(rDisk, DISK_INNER), 1.5) + BH_A);
                 float phase = angle - time * omega * 0.12;
 
-                // ── Novikov-Thorne temperature profile ────────────────
-                float x_isco = DISK_INNER / rDisk;
-                float T = 45000.0 * pow(x_isco, 0.75) * pow(max(0.001, 1.0 - sqrt(x_isco)), 0.25);
+                // ── Temperature ───────────────────────────────────────
+                float T;
+                float turbScale = 1.0;
+                if (rDisk >= DISK_INNER) {
+                    // Standard Novikov-Thorne outside ISCO
+                    float x_isco = DISK_INNER / rDisk;
+                    T = 40000.0 * pow(x_isco, 0.75) * pow(max(0.001, 1.0 - sqrt(x_isco)), 0.25);
+                } else {
+                    // Plunging region: free-falling matter still radiates
+                    // T drops as matter accelerates inward; emission fades to horizon
+                    float plunge = smoothstep(R_PLUS * 1.05, DISK_INNER, rDisk);
+                    T = 30000.0 * plunge * plunge;
+                    turbScale = 0.3; // turbulence suppressed in free-fall
+                }
 
                 // ── Turbulence in co-rotating frame ───────────────────
                 float turb1 = fbm(vec2(phase * 3.0 + rDisk * 1.5, rDisk * 4.0 + time * 0.04));
@@ -704,40 +715,46 @@ if (canvas) {
                 float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * 5.0);
                 turb = mix(turb, turb * spiral, 0.35);
 
-                // Hot filaments near inner edge
+                // Magnetic filaments near inner edge
                 float hotSpots = smoothstep(0.6, 0.85, turb) * smoothstep(DISK_INNER * 3.0, DISK_INNER * 1.1, rDisk);
-                turb += hotSpots * 0.3;
+                turb += hotSpots * 0.25;
 
-                T *= (0.5 + turb * 1.0);
-                T = max(T, 1500.0);
+                // Apply turbulence scaling (reduced in plunging region)
+                turb = mix(0.5, turb, turbScale);
+                T *= (0.5 + turb * 0.8);
+                T = max(T, 1200.0);
 
                 // ── Kerr relativistic Doppler beaming ─────────────────
-                // Orbital velocity: v = √(r²+a²) / (r^(3/2) + a)
                 float sqrtCyl = sqrt(max(cyl2, 1e-8));
-                float vOrb = sqrtCyl / (pow(rDisk, 1.5) + BH_A);
-                vOrb = min(vOrb, 0.75); // physical cap
+                float vOrb = sqrtCyl / (pow(max(rDisk, DISK_INNER * 0.8), 1.5) + BH_A);
+                vOrb = min(vOrb, 0.7);
 
-                // Orbital direction: counter-clockwise viewed from +y
                 vec3 orbDir = vec3(-hitPos.z, 0.0, hitPos.x) / max(sqrtCyl, 1e-6);
-
-                // Doppler: project onto observer direction
                 float betaLos = vOrb * dot(orbDir, -normalize(vel));
                 float gamma   = 1.0 / sqrt(max(0.001, 1.0 - vOrb * vOrb));
                 float delta   = 1.0 / (gamma * (1.0 - betaLos));
-                delta = clamp(delta, 0.05, 10.0);
+                delta = clamp(delta, 0.08, 6.0);
 
-                // Gravitational redshift: sqrt(1 - 2M/r) at equator
-                float gz = sqrt(max(0.01, 1.0 - 2.0 * BH_M / rDisk));
+                // Gravitational redshift
+                float gz = sqrt(max(0.01, 1.0 - 2.0 * BH_M / max(rDisk, R_PLUS * 1.05)));
 
                 float T_obs = T * delta * gz;
                 vec3 col = blackbody(T_obs);
 
+                // Intensity: balanced for natural look
                 float intensity = pow(delta, 3.0) * gz * gz;
-                intensity *= (turb * 0.7 + 0.3);
-                intensity *= 2.0;
+                intensity *= (turb * 0.6 + 0.4);
+                intensity *= 1.0; // natural brightness (no artificial boost)
 
-                float outerFade = smoothstep(DISK_OUTER, DISK_OUTER * 0.55, rDisk);
-                float innerFade = smoothstep(DISK_INNER * 0.7, DISK_INNER * 1.5, rDisk);
+                // Smooth fades
+                float outerFade = smoothstep(DISK_OUTER, DISK_OUTER * 0.5, rDisk);
+                float innerFade;
+                if (rDisk >= DISK_INNER) {
+                    innerFade = smoothstep(DISK_INNER * 0.9, DISK_INNER * 1.5, rDisk);
+                } else {
+                    // Plunging region fades to horizon
+                    innerFade = smoothstep(R_PLUS * 1.05, R_PLUS * 1.3, rDisk);
+                }
                 intensity *= outerFade * innerFade;
 
                 return col * max(0.0, intensity);
@@ -829,18 +846,34 @@ if (canvas) {
                         vec3  dCol = sampleDisk(hitP, vel, u_time);
                         float lum  = dot(dCol, vec3(0.299, 0.587, 0.114));
 
-                        float a_ = clamp(lum * 1.5, 0.0, 1.0);
+                        float a_ = clamp(lum * 1.2, 0.0, 1.0);
                         col   += dCol * (1.0 - alpha);
                         alpha  = min(1.0, alpha + a_);
                     }
+
+                    // ── Corona / hot electron halo ────────────────────
+                    // Inverse-Compton scattering atmosphere above the disk.
+                    // Optically thin, concentrated near the inner disk.
+                    if (alpha < 0.95 && rc < DISK_OUTER * 0.8 && rc > R_PLUS * 1.1) {
+                        float H_cor  = 0.4 + 0.08 * rc;  // corona scale height
+                        float corDen = exp(-pos.y * pos.y / (2.0 * H_cor * H_cor));
+                        // Concentrated near inner disk (r < 8M), fades outward
+                        float corRad = smoothstep(12.0, 3.0, rc) * corDen;
+                        if (corRad > 0.005) {
+                            // Corona temperature ~10⁸ K → visually warm white-gold
+                            vec3 corCol = vec3(1.0, 0.85, 0.55) * corRad * 0.06 * dt;
+                            col  += corCol * (1.0 - alpha);
+                            alpha = min(1.0, alpha + corRad * 0.008 * dt);
+                        }
+                    }
                 }
 
-                // ── Photon ring glow (Kerr: asymmetric) ───────────────
+                // ── Photon ring glow (Kerr: subtle asymmetric) ───────────
                 float prDist = abs(minR - 1.5 * BH_M);
-                float prGlow = exp(-prDist * prDist / (0.025));
+                float prGlow = exp(-prDist * prDist / 0.03);
                 vec2 screenDir = normalize(gl_FragCoord.xy - 0.5 * u_resolution);
-                float prDoppler = 1.0 + 0.4 * screenDir.x;
-                col += vec3(1.0, 0.92, 0.7) * prGlow * 0.7 * prDoppler * (1.0 - alpha * 0.3);
+                float prDoppler = 1.0 + 0.3 * screenDir.x;
+                col += vec3(1.0, 0.9, 0.65) * prGlow * 0.35 * prDoppler * (1.0 - alpha * 0.5);
 
                 // Background for non-terminated rays
                 if (alpha < 1.0) {
@@ -848,7 +881,7 @@ if (canvas) {
                 }
 
                 // Exposure + ACES tone mapping + sRGB gamma
-                col *= 1.3;
+                col *= 0.9;
                 col  = aces(col);
                 col  = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
 
@@ -946,9 +979,15 @@ if (canvas) {
         const h  = canvas.clientHeight;
         const pr = renderer.getPixelRatio();
         renderer.setSize(w, h, false);
-        composer.setSize(w, h);
-        bloom.resolution.set(w, h);
-        bhUniforms.u_resolution.value.set(w * pr, h * pr);
+        // Render ray march at reduced resolution for performance.
+        // The ray-march output is smooth (continuous gravitational field),
+        // so GPU bilinear upscale looks nearly identical to full-res.
+        const scale = 0.6;  // 60% res → 36% pixel count → ~2.8× faster
+        const rw = Math.ceil(w * pr * scale);
+        const rh = Math.ceil(h * pr * scale);
+        composer.setSize(rw, rh);
+        bloom.resolution.set(rw, rh);
+        bhUniforms.u_resolution.value.set(rw, rh);
     }
     new ResizeObserver(resize).observe(canvas.parentElement);
     resize();
