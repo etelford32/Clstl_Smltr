@@ -11,7 +11,11 @@ use prediction::feature_extract::{update_solar_features, SolarFeaturesPlugin};
 use prediction::flare_ml::{run_flare_prediction, FlareMLPrediction};
 use prediction::solar_wind::{update_live_wind, LiveWindPlugin, LiveWindSpeed};
 use rendering::hud::{setup_hud, update_hud};
-use rendering::star::{setup, update_star_glow};
+use rendering::solar_material::{CoronaGlowMat, FlareFlashMat, SolarSurfaceMat};
+use rendering::star::{
+    setup, spawn_flare_flashes, update_corona, update_flare_flashes,
+    update_solar_surface, update_star_glow, FlareFlashTracker,
+};
 use simulation::fluid::{update_velocity_field, VelocityField};
 use simulation::flux_rope::{draw_flux_ropes, update_flux_ropes, FluxRopeSet};
 use simulation::magnetic::{draw_field_lines, update_field_lines, FieldLineSet};
@@ -48,6 +52,10 @@ fn main() {
         .add_plugins(LiveWindPlugin)
         // Live NASA/NOAA feature extraction for ML prediction.
         .add_plugins(SolarFeaturesPlugin)
+        // Custom solar material shaders.
+        .add_plugins(MaterialPlugin::<SolarSurfaceMat>::default())
+        .add_plugins(MaterialPlugin::<CoronaGlowMat>::default())
+        .add_plugins(MaterialPlugin::<FlareFlashMat>::default())
         .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .insert_resource(ParticleSpawner::default())
         .insert_resource(VelocityField::new())
@@ -55,6 +63,7 @@ fn main() {
         .insert_resource(FluxRopeSet::default())
         .insert_resource(FlareMLPrediction::default())
         .insert_resource(ProminenceSpawner::default())
+        .insert_resource(FlareFlashTracker::default())
         .add_systems(Startup, (setup, setup_hud))
         .add_systems(
             Update,
@@ -75,10 +84,14 @@ fn main() {
                     .after(update_velocity_field),
                 update_flux_ropes
                     .after(run_flare_prediction),
-                // 4. Everything that reads the results of the physics tick.
+                // 4. Rendering updates (read physics state, write shader uniforms).
                 (
                     camera_controller,
                     update_star_glow,
+                    update_solar_surface,
+                    update_corona,
+                    spawn_flare_flashes,
+                    update_flare_flashes,
                     spawn_particles,
                     update_particles,
                     draw_field_lines,
