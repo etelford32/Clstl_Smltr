@@ -1,3 +1,5 @@
+/* @ts-self-types="./sstar_wasm.d.ts" */
+
 /**
  * Full orbital elements and derived quantities for the given star.
  *
