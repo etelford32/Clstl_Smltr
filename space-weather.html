@@ -1906,6 +1906,7 @@ import { CmePropagator } from './js/cme-propagation.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
 import { EarthForecastEngine } from './js/earth-forecast.js';
+import { ModelValidator } from './js/model-validation.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -2493,6 +2494,13 @@ window.addEventListener('alert-mark-all-read', () => {
 // ── Earth-side forecast engine ──────────────────────────────────────────────
 // Synthesises SWPC + CME + ionospheric data into Earth-consequence forecast.
 new EarthForecastEngine().start();
+
+// ── Model validation engine ─────────────────────────────────────────────────
+// Tracks predictions vs observations, critical threshold crossings, and data
+// quality metrics.  Accumulates deterministic accuracy scorecard over time.
+// Access via window._modelValidator.getScorecard() or .exportLog() in console.
+const _modelValidator = new ModelValidator().start();
+window._modelValidator = _modelValidator;
 
 window.addEventListener('earth-forecast-update', (ev) => {
     const f = ev.detail;

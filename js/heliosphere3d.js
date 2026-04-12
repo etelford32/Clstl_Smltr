@@ -610,8 +610,12 @@ export class Heliosphere3D {
         this._sw.cmeSpeed  = d.earth_directed_cme?.speed ?? this._sw.cmeSpeed;
         if (!prevCme && this._sw.cmeActive) this._triggerCME();
 
-        // Update magnetosphere
-        if (this._magnetosphere) this._magnetosphere.update(d);
+        // Update magnetosphere — pass SZA from helio-state if available
+        if (this._magnetosphere) {
+            const szaDeg = this._helioState?.szaDeg;
+            if (szaDeg != null) d.szaDeg = szaDeg;
+            this._magnetosphere.update(d);
+        }
 
         // Trigger flare on fresh M/X class event
         const cls = this._sw.xrayClass?.[0]?.toUpperCase() ?? '';

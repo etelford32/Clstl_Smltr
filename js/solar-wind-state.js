@@ -11,29 +11,29 @@
  *   • Inverse-square density falloff n(r) = n_L1 × (1 AU / r)²
  *   • Parker spiral IMF geometry     B_r ∝ 1/r², B_φ ∝ 1/r  →  B_total at Earth
  *   • Alfvén speed, plasma beta, dynamic pressure
- *   • L1 → Earth propagation delay   Δt ≈ L1_offset_km / v_sw  (~45–65 min)
- *   • IMF sector classification (away/toward, two-sector model)
+ *   • Speed-dependent L1 → Earth propagation delay
+ *   • Validated inputs with physical range checks
+ *   • Data quality tracking (parker-corrected / l1-raw / fallback)
+ *
+ * ── Determinism ─────────────────────────────────────────────────────────────
+ *  All physics computations are pure functions.  Given the same NOAA inputs
+ *  and ephemeris position, the output is always identical.  The only non-
+ *  deterministic element is the timestamp used for buffer lookups, which is
+ *  passed explicitly to enable replay.
  *
  * EVENTS CONSUMED (window)
  * ─────────────────────────────────────────────────────────────────────────────
  *  'ephemeris-ready'   { earth: { r_AU|dist_AU, lon_rad, lat_rad, x_AU, y_AU, z_AU } }
- *  'swpc-update'       { solar_wind: { speed, density, bz, bt, by }, kp, ... }
+ *  'swpc-update'       { solar_wind: { speed, density, bz, bt, by }, kp, xray_flux, f107_flux, ... }
  *
  * EVENT FIRED (window)
  * ─────────────────────────────────────────────────────────────────────────────
- *  'helio-state-update'  { r_AU, v_sw, n, bz, bt, T, v_alfven, beta, p_dyn,
- *                          spiral_angle_rad, imf_sector, delay_s, delay_min,
- *                          B_r, B_phi, B_total, x_AU, y_AU, z_AU, lon_rad,
- *                          lat_rad, kp, l1, source }
+ *  'helio-state-update'  Validated, enriched SolarState snapshot
  *
  * USAGE
  * ─────────────────────────────────────────────────────────────────────────────
  *  import { SolarWindState } from './js/solar-wind-state.js';
  *  new SolarWindState().start();
- *
- *  window.addEventListener('helio-state-update', ev => {
- *      const { r_AU, v_sw, n, spiral_angle_rad, delay_min } = ev.detail;
- *  });
  */
 
 import {
@@ -44,6 +44,15 @@ import {
     plasmaBeta,
     plasmaTemp,
 } from './helio-physics.js';
+
+import {
+    createSolarState,
+    enrichSolarState,
+    validateReading,
+    propagationDelay,
+} from './solar-state.js';
+
+import { loadUserLocation } from './user-location.js';
 
 // ── Physical constants ─────────────────────────────────────────────────────────
 
@@ -60,7 +69,7 @@ const B_RADIAL_1AU  = 3.5;              // nT  (B_r at 1 AU)
 const T_CORONA_K    = 1.5e6;             // K
 
 /** Circular buffer depth — must cover max propagation delay + margin */
-const BUFFER_MINUTES = 90;              // 90 min covers all solar-wind speeds
+const BUFFER_MINUTES = 120;             // 120 min covers even 200 km/s wind
 
 // ── Default L1 seed values (used until first NOAA reading arrives) ────────────
 const DEFAULTS = Object.freeze({
@@ -82,6 +91,12 @@ export class SolarWindState {
 
         /** Latest L1 reading (no delay applied) */
         this._l1Now = { ...DEFAULTS };
+
+        /** Latest raw SWPC state (for supplementary fields) */
+        this._lastSwpc = null;
+
+        /** Previous frame's computed wind speed (for delay calculation) */
+        this._prevSpeed = 450;
 
         /**
          * Circular history buffer for L1 readings.
@@ -146,6 +161,7 @@ export class SolarWindState {
         };
 
         this._l1Now = reading;
+        this._lastSwpc = d;
 
         // Push to circular buffer
         this._buf.push(reading);
@@ -159,20 +175,17 @@ export class SolarWindState {
         this._compute();
     }
 
-    // ── Core computation ──────────────────────────────────────────────────────
+    // ── Core computation (deterministic given inputs) ─────────────────────────
 
     _compute() {
         const r_AU = this._earth?.r_AU ?? 1.0;
+        const now = Date.now();
 
-        // ── Propagation delay: L1 → Earth ─────────────────────────────────
-        // Fixed 60-minute nominal delay.  Previously this used Δt = L1 / v_now,
-        // which created a circular dependency: fast wind shortened the delay,
-        // pulling a different (possibly slower) historical reading from the
-        // buffer, which should have lengthened the delay.  A fixed 60-min lag
-        // matches the median transit time across typical solar wind speeds
-        // (300–700 km/s → 36–83 min, median ~55 min) and is consistent with
-        // the same fix applied in solar-wind-magnetosphere.js.
-        const delay_s = 3600;   // fixed 60-minute nominal delay
+        // ── Speed-dependent propagation delay ─────────────────────────────
+        // Uses PREVIOUS frame's wind speed to break the circular dependency:
+        // delay determines which historical L1 reading to use, and that
+        // reading's speed must not retroactively change the delay.
+        const delay_s = propagationDelay(this._prevSpeed, L1_OFFSET_KM);
 
         // Retrieve the L1 reading that departed ~delay_s ago
         const l1 = this._laggedReading(delay_s);
@@ -180,114 +193,105 @@ export class SolarWindState {
         // Raw (unlagged) L1 reading — preserve for transparent display
         const l1_raw = this._l1Now;
 
-        // ── Solar wind speed at Earth's actual distance ────────────────────
-        // Parker profile: V(r) = V_L1 × f(r) / f(1 AU)
-        // Since the LUT is normalised so f(1 AU) = 1.0:
-        //
-        // NOTE: L1 sits at ~0.99 AU, so parkerSpeedRatio(0.99) ≈ 0.998 — the
-        // correction is <1% for Earth's orbital range (0.983–1.017 AU).
-        // For the "Earth-arrival" speed we use the LAGGED reading (what has
-        // actually arrived), while for "L1 current" we pass through raw.
+        // ── Get user location for SZA computation ──────────────────────────
+        const loc = loadUserLocation();
+
+        // ── Create validated base snapshot ──────────────────────────────────
+        const base = createSolarState(l1, this._earth, now, {
+            prevSpeed: this._prevSpeed,
+            xray:      this._lastSwpc?.xray_flux,
+            f107:      this._lastSwpc?.f107_flux,
+            location:  loc,
+        });
+
+        // ── Parker-corrected physics at Earth's distance ──────────────────
+
+        // Solar wind speed scaled by Parker profile
         const v_sw = l1.v_sw * parkerSpeedRatio(r_AU, _PARKER_LUT);
 
-        // ── Plasma density (inverse-square radial expansion) ───────────────
-        // Mass flux n·v·r² = const  →  n(r) = n_L1 × (1/r)²  (for v≈const)
+        // Plasma density: inverse-square radial expansion
+        // Mass flux n·v·r² = const  →  n(r) = n_L1 × (1/r)²
         const n = l1.n * (1.0 / r_AU) ** 2;
 
-        // ── IMF components at Earth's distance ────────────────────────────
-        // Parker spiral: B_r ∝ 1/r²,  B_φ ∝ 1/r (azimuthal/tangential)
-        const B_r    = B_RADIAL_1AU / r_AU ** 2;         // nT  radial
-        const v_ms   = Math.max(100, v_sw) * 1e3;        // m/s for SI formula
-        const r_m    = r_AU * PHYS.AU_M;                 // metres
+        // IMF components: Parker spiral geometry
+        // B_r ∝ 1/r²,  B_φ = B_r × (Ω_sun × r / v)
+        const B_r    = B_RADIAL_1AU / r_AU ** 2;              // nT radial
+        const v_ms   = Math.max(100, v_sw) * 1e3;             // m/s
+        const r_m    = r_AU * PHYS.AU_M;                      // metres
         const B_phi  = B_RADIAL_1AU * (OMEGA_SUN * r_m) / v_ms; // nT azimuthal
-        const B_total = Math.sqrt(B_r ** 2 + B_phi ** 2);       // nT total
+        const B_total = Math.sqrt(B_r ** 2 + B_phi ** 2);
 
         // Scale measured Bz/Bt from L1 to Earth using field-strength ratio
-        const bt_l1    = Math.max(0.5, l1.bt);
-        const b_scale  = B_total / bt_l1;
+        const bt_l1   = Math.max(0.5, l1.bt);
+        const b_scale = B_total / bt_l1;
         const bz = l1.bz * b_scale;
         const bt = B_total;
         const by = l1.by * b_scale;
 
-        // ── Parker spiral angle at Earth ───────────────────────────────────
-        // φ = arctan(Ω_sun × r / v)  — angle between radial and field direction
+        // Parker spiral angle at Earth
         const spiral_angle_rad = Math.atan2(OMEGA_SUN * r_m, v_sw * 1e3);
 
-        // ── IMF sector (two-sector Ballerina skirt model) ─────────────────
-        // Heuristic: Earth's ecliptic longitude modulo 360° determines sector.
-        // Real sector boundaries depend on coronal hole topology (simplified here).
+        // IMF sector (two-sector model)
         const lon_deg    = (((this._earth?.lon_rad ?? 0) * 180 / Math.PI) % 360 + 360) % 360;
         const imf_sector = lon_deg < 180 ? 'away' : 'toward';
 
-        // ── Derived plasma state ───────────────────────────────────────────
-        const T        = plasmaTemp(r_AU, T_CORONA_K);       // K
-        const v_alfven = alfvenSpeed(bt, n);                  // km/s
+        // Derived MHD quantities
+        const T        = plasmaTemp(r_AU, T_CORONA_K);
+        const v_alfven = alfvenSpeed(bt, n);
         const beta     = plasmaBeta(n, T, bt);
-        // Dynamic pressure: p_dyn = ½ m_p n v²
-        // [nPa] = 1.67e-6 × n[cm⁻³] × v[km/s]²
-        const p_dyn    = 1.67e-6 * n * v_sw ** 2;            // nPa
+        const p_dyn    = 1.67e-6 * n * v_sw ** 2;  // nPa
 
-        const state = {
+        // ── Store this frame's speed for next frame's delay calculation ────
+        this._prevSpeed = v_sw;
+
+        // ── Enrich the base snapshot with Parker-corrected data ─────────────
+        const state = enrichSolarState(base, {
+            _quality: this._earth ? 'parker-corrected' : 'l1-raw',
+
+            v_sw, n, bz, bt, by,
+            T, v_alfven, beta, p_dyn,
+            B_r, B_phi, B_total,
+            spiral_angle_rad,
+
             // Orbital geometry
             r_AU,
-            lon_rad:  this._earth?.lon_rad  ?? 0,
-            lat_rad:  this._earth?.lat_rad  ?? 0,
-            x_AU:     this._earth?.x_AU     ?? r_AU,
-            y_AU:     this._earth?.y_AU     ?? 0,
-            z_AU:     this._earth?.z_AU     ?? 0,
-
-            // Solar wind at Earth's position (distance-corrected)
-            v_sw,       // km/s — Parker-scaled from L1
-            n,          // cm⁻³ — inverse-square scaled
-            bz,         // nT — IMF southward component (scaled)
-            bt,         // nT — total IMF (calculated)
-            by,         // nT — IMF dawn-dusk component (scaled)
-            T,          // K  — Parker-CGL temperature
-
-            // IMF geometry
-            B_r,              // nT — radial component
-            B_phi,            // nT — azimuthal (Parker spiral) component
-            B_total,          // nT — total field strength
-            spiral_angle_rad, // rad — Parker spiral angle at Earth (~45° for 400 km/s)
-
-            // Derived MHD quantities
-            v_alfven,  // km/s
-            beta,      // dimensionless plasma beta
-            p_dyn,     // nPa — solar wind dynamic pressure
+            lon_rad: this._earth?.lon_rad ?? 0,
+            lat_rad: this._earth?.lat_rad ?? 0,
+            x_AU:    this._earth?.x_AU    ?? r_AU,
+            y_AU:    this._earth?.y_AU    ?? 0,
+            z_AU:    this._earth?.z_AU    ?? 0,
 
             // IMF topology
-            imf_sector,  // 'away' | 'toward'
+            imf_sector,
             kp: l1.kp,
 
             // Timing
             delay_s,
             delay_min: delay_s / 60,
 
-            // Raw L1 values — current (unlagged) DSCOVR/ACE measurement
-            // This is what NOAA shows on their dashboard right now.
-            l1_raw: {
+            // Raw L1 values (unlagged) for dashboard display
+            l1_raw: Object.freeze({
                 v_sw: l1_raw.v_sw,
                 n:    l1_raw.n,
                 bz:   l1_raw.bz,
                 bt:   l1_raw.bt,
                 by:   l1_raw.by,
-            },
+            }),
 
-            // Lagged L1 values — the reading from ~60 min ago that has
-            // physically arrived at Earth by now (propagation-corrected)
-            l1_lagged: {
+            // Lagged L1 values (propagation-corrected)
+            l1_lagged: Object.freeze({
                 v_sw: l1.v_sw,
                 n:    l1.n,
                 bz:   l1.bz,
                 bt:   l1.bt,
                 by:   l1.by,
-            },
+            }),
 
             // Backward-compat alias
-            l1: { v_sw: l1.v_sw, n: l1.n, bz: l1.bz, bt: l1.bt },
+            l1: Object.freeze({ v_sw: l1.v_sw, n: l1.n, bz: l1.bz, bt: l1.bt }),
 
             source: this._earth ? 'live' : 'default',
-        };
+        });
 
         window.dispatchEvent(new CustomEvent('helio-state-update', { detail: state }));
         return state;
