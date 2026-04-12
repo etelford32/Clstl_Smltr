@@ -792,7 +792,7 @@ export class MagnetosphereEngine {
             plasmapause: computePlasmapause(kp),
             dst:         computeRingCurrentDst(kp, pdyn, bz),
             joule:       computeJouleHeating(kp),
-            iono:        computeIonoLayers(f107, kp, xr, 50),
+            iono:        computeIonoLayers(f107, kp, xr, state?.szaDeg ?? 50),
             kp,
         };
     }
