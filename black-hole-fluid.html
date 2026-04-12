@@ -452,6 +452,10 @@ const ovCanvas  = document.getElementById('overlayCanvas');
 const ovCtx     = ovCanvas.getContext('2d');
 const N = 128;
 const M = N + 2;
+const IX = (i, j) => i + j * M;
+let step = 0;
+let gl = null;
+let uLoc = {};
 
 function resize() {
     const area = document.getElementById('canvas-area');
@@ -502,6 +506,441 @@ const PRESETS = {
     smbh:    { name:'SMBH — 10⁹ M☉',          GM:0.30, EH:0.08, jetR:0.12, diskR0:0.18, diskR1:0.75, tmax:5e4 },
     ton618:  { name:'Ton 618 — 6.6×10¹⁰ M☉', GM:0.45, EH:0.10, jetR:0.16, diskR0:0.16, diskR1:0.80, tmax:3e4 },
 };
+
+// ── WebGL2 initialization ────────────────────────────────────
+gl = glCanvas.getContext('webgl2');
+if (!gl) { document.getElementById('overlay-info').innerHTML = '<b style="color:red">WebGL2 required</b>'; }
+if (gl) {
+gl.getExtension('EXT_color_buffer_float');
+
+function _compileShader(type, id) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, document.getElementById(id).textContent);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, _compileShader(gl.VERTEX_SHADER, 'vs'));
+gl.attachShader(prog, _compileShader(gl.FRAGMENT_SHADER, 'fs'));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+gl.useProgram(prog);
+
+// Uniform locations
+['uRes','uGM','uEH','uRs','uTmax','uIncl','uLensStr','uExposure'].forEach(n => {
+    uLoc[n] = gl.getUniformLocation(prog, n);
+});
+uLoc.uColorMode = gl.getUniformLocation(prog, 'uColorMode');
+['uDens','uVel','uPres'].forEach((n, i) => {
+    uLoc[n] = gl.getUniformLocation(prog, n);
+    gl.uniform1i(uLoc[n], i);
+});
+
+// Fullscreen quad
+const _vao = gl.createVertexArray();
+gl.bindVertexArray(_vao);
+const _vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, _vbo);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const _aP = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(_aP);
+gl.vertexAttribPointer(_aP, 2, gl.FLOAT, false, 0, 0);
+
+// Data textures (N×N float)
+function _mkTex(ifmt, fmt) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, N, N, 0, fmt, gl.FLOAT, null);
+    return t;
+}
+var texDens = _mkTex(gl.R32F, gl.RED);
+var texVel  = _mkTex(gl.RG32F, gl.RG);
+var texPres = _mkTex(gl.R32F, gl.RED);
+} // end if (gl)
+
+// Reusable upload buffers
+const _densUp = new Float32Array(N * N);
+const _velUp  = new Float32Array(N * N * 2);
+const _presUp = new Float32Array(N * N);
+
+function uploadTextures() {
+    if (!gl) return;
+    for (let j = 0; j < N; j++)
+        for (let i = 0; i < N; i++) {
+            const k = i + j * N;
+            _densUp[k] = dens[IX(i + 1, j + 1)];
+            _presUp[k] = pres[IX(i + 1, j + 1)];
+            _velUp[k * 2]     = u[IX(i + 1, j + 1)];
+            _velUp[k * 2 + 1] = v[IX(i + 1, j + 1)];
+        }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texDens);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RED, gl.FLOAT, _densUp);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texVel);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RG, gl.FLOAT, _velUp);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texPres);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, N, N, gl.RED, gl.FLOAT, _presUp);
+}
+
+// ── Push uniforms from state ─────────────────────────────────
+function pushUniforms() {
+    if (!gl) return;
+    gl.uniform2f(uLoc.uRes, glCanvas.width, glCanvas.height);
+    gl.uniform1f(uLoc.uGM, state.GM);
+    gl.uniform1f(uLoc.uEH, state.EH);
+    gl.uniform1f(uLoc.uRs, state.EH);
+    gl.uniform1f(uLoc.uTmax, state.tmax);
+    gl.uniform1f(uLoc.uIncl, state.inclDeg * Math.PI / 180);
+    gl.uniform1f(uLoc.uLensStr, state.lensStr);
+    gl.uniform1f(uLoc.uExposure, state.exposure);
+    gl.uniform1i(uLoc.uColorMode, state.colormap);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Fluid solver — Jos Stam stable fluids (1999)
+// ═══════════════════════════════════════════════════════════════
+
+function set_bnd(b, x) {
+    for (let i = 1; i <= N; i++) {
+        x[IX(0,   i)] = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+        x[IX(M-1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+        x[IX(i,   0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+        x[IX(i, M-1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+    }
+    x[IX(0, 0)]     = 0.5 * (x[IX(1, 0)]   + x[IX(0, 1)]);
+    x[IX(0, M-1)]   = 0.5 * (x[IX(1, M-1)] + x[IX(0, N)]);
+    x[IX(M-1, 0)]   = 0.5 * (x[IX(N, 0)]   + x[IX(M-1, 1)]);
+    x[IX(M-1, M-1)] = 0.5 * (x[IX(N, M-1)] + x[IX(M-1, N)]);
+}
+
+function diffuse(b, x, x0, diff, dt) {
+    const a = dt * diff * N * N;
+    const c = 1 + 4 * a;
+    for (let k = 0; k < state.iter; k++) {
+        for (let j = 1; j <= N; j++)
+            for (let i = 1; i <= N; i++)
+                x[IX(i,j)] = (x0[IX(i,j)] + a * (
+                    x[IX(i-1,j)] + x[IX(i+1,j)] +
+                    x[IX(i,j-1)] + x[IX(i,j+1)]
+                )) / c;
+        set_bnd(b, x);
+    }
+}
+
+function advect(b, d, d0, uu, vv, dt) {
+    const dt0 = dt * N;
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            let x = i - dt0 * uu[IX(i,j)];
+            let y = j - dt0 * vv[IX(i,j)];
+            x = Math.max(0.5, Math.min(N + 0.5, x));
+            y = Math.max(0.5, Math.min(N + 0.5, y));
+            const i0 = Math.floor(x) | 0, i1 = i0 + 1;
+            const j0 = Math.floor(y) | 0, j1 = j0 + 1;
+            const s1 = x - i0, s0 = 1 - s1;
+            const t1 = y - j0, t0 = 1 - t1;
+            d[IX(i,j)] =
+                s0 * (t0 * d0[IX(i0,j0)] + t1 * d0[IX(i0,j1)]) +
+                s1 * (t0 * d0[IX(i1,j0)] + t1 * d0[IX(i1,j1)]);
+        }
+    set_bnd(b, d);
+}
+
+function projectVel() {
+    const h = 1.0 / N;
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            div2[IX(i,j)] = -0.5 * h * (
+                u[IX(i+1,j)] - u[IX(i-1,j)] +
+                v[IX(i,j+1)] - v[IX(i,j-1)]
+            );
+            pres[IX(i,j)] = 0;
+        }
+    set_bnd(0, div2); set_bnd(0, pres);
+    for (let k = 0; k < state.iter; k++) {
+        for (let j = 1; j <= N; j++)
+            for (let i = 1; i <= N; i++)
+                pres[IX(i,j)] = (div2[IX(i,j)] +
+                    pres[IX(i-1,j)] + pres[IX(i+1,j)] +
+                    pres[IX(i,j-1)] + pres[IX(i,j+1)]) / 4;
+        set_bnd(0, pres);
+    }
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            u[IX(i,j)] -= 0.5 * (pres[IX(i+1,j)] - pres[IX(i-1,j)]) / h;
+            v[IX(i,j)] -= 0.5 * (pres[IX(i,j+1)] - pres[IX(i,j-1)]) / h;
+        }
+    set_bnd(1, u); set_bnd(2, v);
+}
+
+// ── Physics forces ───────────────────────────────────────────
+
+function applyGravity(dt) {
+    const cx = M * 0.5, cy = M * 0.5;
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r2 = (dx * dx + dy * dy) / (N * N);
+            const r = Math.sqrt(r2);
+            if (r < 0.01) continue;
+            const f = state.GM / (r2 + 0.005) * dt;
+            u[IX(i,j)] -= f * dx / (r * N);
+            v[IX(i,j)] -= f * dy / (r * N);
+        }
+}
+
+function applyEventHorizon() {
+    const cx = M * 0.5, cy = M * 0.5;
+    const ehR2 = (state.EH * N) * (state.EH * N);
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            if (dx * dx + dy * dy < ehR2) {
+                dens[IX(i,j)] *= 0.80;
+                u[IX(i,j)] *= 0.4;
+                v[IX(i,j)] *= 0.4;
+            }
+        }
+}
+
+function applyJets(dt) {
+    const cx = M * 0.5, cy = M * 0.5;
+    const jr = state.jetR * N;
+    const ehN = state.EH * N;
+    for (let i = 1; i <= N; i++) {
+        const dx = Math.abs(i - cx);
+        if (dx > jr) continue;
+        const g = state.jet * Math.exp(-dx * dx / (jr * jr * 0.5));
+        const jt = Math.round(cy - ehN * 1.5);
+        if (jt >= 1 && jt <= N) {
+            v[IX(i, jt)] -= g * dt * 10;
+            dens[IX(i, jt)] += g * dt * 3;
+        }
+        const jb = Math.round(cy + ehN * 1.5);
+        if (jb >= 1 && jb <= N) {
+            v[IX(i, jb)] += g * dt * 10;
+            dens[IX(i, jb)] += g * dt * 3;
+        }
+    }
+}
+
+function feedDisk(dt) {
+    const cx = M * 0.5, cy = M * 0.5;
+    const r0 = state.diskR0 * N, r1 = state.diskR1 * N;
+    const rMid = (r0 + r1) * 0.5, w = (r1 - r0) * 0.5;
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r = Math.sqrt(dx * dx + dy * dy);
+            if (r < r0 || r > r1) continue;
+            dens[IX(i,j)] += state.accR * dt * 0.15 * (1 - Math.abs(r - rMid) / w);
+        }
+}
+
+// ── Accretion disk initialization ────────────────────────────
+
+function initDisk() {
+    resetGrids(); step = 0;
+    const cx = M * 0.5, cy = M * 0.5;
+    for (let j = 1; j <= N; j++)
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r = Math.sqrt(dx * dx + dy * dy) / N;
+            if (r < state.diskR0 || r > state.diskR1) continue;
+            dens[IX(i,j)] = state.accR * Math.pow(state.diskR0 / r, 0.75);
+            const vK = state.spin * Math.sqrt(state.GM / (r + 0.01));
+            const th = Math.atan2(dy, dx);
+            u[IX(i,j)] = -vK * Math.sin(th);
+            v[IX(i,j)] =  vK * Math.cos(th);
+        }
+}
+
+function injectMass() {
+    const cx = M * 0.5, cy = M * 0.5;
+    const rr = state.diskR1 * N * 0.85;
+    for (let k = 0; k < 80; k++) {
+        const a = Math.random() * 2 * Math.PI;
+        const r = rr + (Math.random() - 0.5) * N * 0.12;
+        const ii = Math.round(cx + r * Math.cos(a));
+        const jj = Math.round(cy + r * Math.sin(a));
+        if (ii < 1 || ii > N || jj < 1 || jj > N) continue;
+        dens[IX(ii,jj)] += 1.0;
+        const vK = state.spin * Math.sqrt(state.GM / (r / N + 0.01));
+        u[IX(ii,jj)] -= vK * Math.sin(a) * 0.5;
+        v[IX(ii,jj)] += vK * Math.cos(a) * 0.5;
+    }
+}
+
+// ── 2D overlay ───────────────────────────────────────────────
+
+function drawOverlay() {
+    ovCtx.clearRect(0, 0, ovCanvas.width, ovCanvas.height);
+    if (!state.showGrid) return;
+    const sz = ovCanvas.width;
+    const skip = Math.max(1, Math.floor(N / 20));
+    ovCtx.strokeStyle = 'rgba(100,200,255,0.35)';
+    ovCtx.lineWidth = 1;
+    for (let j = 1; j <= N; j += skip)
+        for (let i = 1; i <= N; i += skip) {
+            const px = ((i - 1) / N) * sz;
+            const py = ((j - 1) / N) * sz;
+            const vx = u[IX(i,j)] * 500;
+            const vy = v[IX(i,j)] * 500;
+            if (vx * vx + vy * vy < 0.5) continue;
+            ovCtx.beginPath();
+            ovCtx.moveTo(px, py);
+            ovCtx.lineTo(px + vx, py + vy);
+            ovCtx.stroke();
+        }
+}
+
+// ── Animation loop ───────────────────────────────────────────
+
+let _lastT = 0, _fpsA = 0, _fpsC = 0;
+
+function loop(t) {
+    requestAnimationFrame(loop);
+    const dt = state.dt;
+
+    // Velocity step
+    applyGravity(dt);
+    applyJets(dt);
+    applyEventHorizon();
+    feedDisk(dt);
+
+    u0.set(u); v0.set(v);
+    diffuse(1, u, u0, state.visc, dt);
+    diffuse(2, v, v0, state.visc, dt);
+    projectVel();
+
+    u0.set(u); v0.set(v);
+    advect(1, u, u0, u0, v0, dt);
+    advect(2, v, v0, u0, v0, dt);
+    projectVel();
+
+    // Density step
+    dens0.set(dens);
+    diffuse(0, dens, dens0, state.visc * 0.5, dt);
+    dens0.set(dens);
+    advect(0, dens, dens0, u, v, dt);
+
+    for (let k = 0, n = dens.length; k < n; k++) dens[k] *= 0.9985;
+    step++;
+
+    // Render
+    uploadTextures();
+    if (gl) gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    drawOverlay();
+
+    // HUD
+    if (t) {
+        _fpsA += t - _lastT; _fpsC++;
+        if (_fpsC >= 20) {
+            document.getElementById('oi-fps').textContent = 'FPS: ' + Math.round(1000 * _fpsC / _fpsA);
+            _fpsA = 0; _fpsC = 0;
+        }
+        _lastT = t;
+    }
+    if (step % 10 === 0)
+        document.getElementById('oi-step').textContent = 'Step: ' + step;
+}
+
+// ── UI bindings ──────────────────────────────────────────────
+
+function syncSliders() {
+    document.getElementById('s-gm').value   = state.GM * 100;
+    document.getElementById('v-gm').textContent = state.GM.toFixed(2);
+    document.getElementById('s-acc').value   = state.accR * 100;
+    document.getElementById('v-acc').textContent = state.accR.toFixed(2);
+    document.getElementById('s-spin').value  = state.spin * 100;
+    document.getElementById('v-spin').textContent = state.spin.toFixed(2);
+    document.getElementById('s-visc').value  = state.visc * 10000;
+    document.getElementById('v-visc').textContent = state.visc.toFixed(4);
+    document.getElementById('s-jet').value   = state.jet * 100;
+    document.getElementById('v-jet').textContent = state.jet.toFixed(2);
+    document.getElementById('s-incl').value  = state.inclDeg;
+    document.getElementById('v-incl').textContent = state.inclDeg + '\u00B0';
+    document.getElementById('s-lens').value  = state.lensStr * 100;
+    document.getElementById('v-lens').textContent = state.lensStr.toFixed(2) + '\u00D7';
+    document.getElementById('s-tmax').value  = Math.log10(state.tmax);
+    const _e = Math.log10(state.tmax);
+    document.getElementById('v-tmax').textContent = '10^' + (_e === Math.round(_e) ? _e.toFixed(0) : _e.toFixed(1)) + ' K';
+    document.getElementById('s-expo').value  = state.exposure * 100;
+    document.getElementById('v-expo').textContent = state.exposure.toFixed(2);
+}
+syncSliders();
+
+document.getElementById('s-gm').addEventListener('input', e => {
+    state.GM = +e.target.value / 100;
+    state.EH = state.GM * 0.5;
+    state.jetR = state.GM * 0.75;
+    document.getElementById('v-gm').textContent = state.GM.toFixed(2);
+    document.getElementById('oi-mass').textContent = 'GM = ' + state.GM.toFixed(2);
+    pushUniforms();
+});
+document.getElementById('s-acc').addEventListener('input', e => {
+    state.accR = +e.target.value / 100;
+    document.getElementById('v-acc').textContent = state.accR.toFixed(2);
+});
+document.getElementById('s-spin').addEventListener('input', e => {
+    state.spin = +e.target.value / 100;
+    document.getElementById('v-spin').textContent = state.spin.toFixed(2);
+});
+document.getElementById('s-visc').addEventListener('input', e => {
+    state.visc = +e.target.value / 10000;
+    document.getElementById('v-visc').textContent = state.visc.toFixed(4);
+});
+document.getElementById('s-jet').addEventListener('input', e => {
+    state.jet = +e.target.value / 100;
+    document.getElementById('v-jet').textContent = state.jet.toFixed(2);
+});
+document.getElementById('s-incl').addEventListener('input', e => {
+    state.inclDeg = +e.target.value;
+    document.getElementById('v-incl').textContent = state.inclDeg + '\u00B0';
+    pushUniforms();
+});
+document.getElementById('s-lens').addEventListener('input', e => {
+    state.lensStr = +e.target.value / 100;
+    document.getElementById('v-lens').textContent = state.lensStr.toFixed(2) + '\u00D7';
+    pushUniforms();
+});
+document.getElementById('s-tmax').addEventListener('input', e => {
+    state.tmax = Math.pow(10, +e.target.value);
+    const _e = +e.target.value;
+    document.getElementById('v-tmax').textContent = '10^' + (_e === Math.round(_e) ? _e.toFixed(0) : _e.toFixed(1)) + ' K';
+    pushUniforms();
+});
+document.getElementById('s-expo').addEventListener('input', e => {
+    state.exposure = +e.target.value / 100;
+    document.getElementById('v-expo').textContent = state.exposure.toFixed(2);
+    pushUniforms();
+});
+document.getElementById('colormap').addEventListener('change', e => {
+    state.colormap = +e.target.value;
+    pushUniforms();
+});
+document.getElementById('showGrid').addEventListener('change', e => {
+    state.showGrid = e.target.checked;
+});
+document.getElementById('preset').addEventListener('change', e => {
+    const p = PRESETS[e.target.value];
+    if (!p) return;
+    Object.assign(state, p);
+    document.getElementById('oi-preset').textContent = p.name;
+    document.getElementById('oi-mass').textContent = 'GM = ' + state.GM.toFixed(2);
+    syncSliders();
+    pushUniforms();
+    initDisk();
+});
+document.getElementById('btnReset').addEventListener('click', () => { initDisk(); pushUniforms(); });
+document.getElementById('btnCME').addEventListener('click', injectMass);
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
