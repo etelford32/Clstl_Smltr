@@ -405,6 +405,50 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initScaleNav, navigateTo } from './js/scale-nav.js';
 
+// ── S-star WASM orbital propagator (Rust → WebAssembly) ─────────────────────
+// Provides real-time Keplerian + 1PN Schwarzschild orbital propagation for
+// S-stars around Sgr A*.  Falls back gracefully to static positions if the
+// WASM module is unavailable (e.g. local dev without build step).
+const AU_TO_LY = 1.0 / 63241.077;  // 1 AU in light-years
+const J2000 = 2451545.0;
+const DAYS_PER_YR = 365.25;
+
+let sstarWasm = null;  // set after async init below
+
+// Map S-star catalog ids → WASM star_id indices (S2=0, S1=1, S12=2, S14=3)
+const SSTAR_WASM_IDS = { s2: 0, s1: 1, s12: 2, s14: 3 };
+
+function dateToJD(d) {
+    let y = d.getUTCFullYear(), m = d.getUTCMonth() + 1;
+    const day = d.getUTCDate() + (d.getUTCHours() + d.getUTCMinutes() / 60) / 24;
+    if (m <= 2) { y--; m += 12; }
+    const A = Math.floor(y / 100);
+    const B = 2 - A + Math.floor(A / 4);
+    return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + day + B - 1524.5;
+}
+
+// Current simulation Julian Date (starts at "now", advanced by time controls)
+let simJD = dateToJD(new Date());
+let simTimeScale = 1.0;  // years per second of wall-clock time (1 = real-time)
+
+// Orbit path geometry (populated after WASM loads)
+const sstarOrbitLines = [];  // THREE.Line objects
+const sstarOrbitGroup = new THREE.Group();
+sstarOrbitGroup.visible = false;  // toggled by camera distance
+
+// Load WASM asynchronously — non-blocking, page works without it
+(async () => {
+    try {
+        const mod = await import('./js/sstar-wasm/sstar_wasm.js');
+        await mod.default();
+        sstarWasm = mod;
+        console.log('S-star WASM loaded — ' + sstarWasm.get_star_count() + ' stars');
+        buildSstarOrbits();   // draw orbital ellipses once WASM is ready
+    } catch (e) {
+        console.warn('S-star WASM not available — using static positions:', e.message);
+    }
+})();
+
 // ── Scale breadcrumb + page fade-in ──────────────────────────────────────────
 initScaleNav('galaxy');
 
@@ -2233,6 +2277,105 @@ CATALOG.forEach(s => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+//  S-STAR ORBITAL PATHS  (built once WASM loads, rendered at GC zoom)
+// ══════════════════════════════════════════════════════════════════════════
+
+scene.add(sstarOrbitGroup);
+
+const SSTAR_COLORS = { s2: 0xffd700, s1: 0x00ced1, s12: 0xff6347, s14: 0xda70d6, s38: 0x88ff88 };
+
+/** Convert WASM AU output [x_east, y_north, z_los] → Three.js scene coords (ly) */
+function wasmAUToScene(x_au, y_au, z_au) {
+    // WASM frame: x=East, y=North, z=away from observer
+    // Scene frame: x=toward Sun, y=galactic north, z=tangential
+    // At the GC origin both frames centre on Sgr A*, so we just scale AU→ly
+    return new THREE.Vector3(x_au * AU_TO_LY, y_au * AU_TO_LY, z_au * AU_TO_LY);
+}
+
+/** Build full orbital ellipses for each S-star using WASM propagate_orbit_path */
+function buildSstarOrbits() {
+    if (!sstarWasm) return;
+
+    // Clear previous
+    sstarOrbitLines.forEach(l => sstarOrbitGroup.remove(l));
+    sstarOrbitLines.length = 0;
+
+    const now = dateToJD(new Date());
+
+    Object.entries(SSTAR_WASM_IDS).forEach(([catId, wasmId]) => {
+        const s = CATALOG.find(c => c.id === catId);
+        if (!s) return;
+
+        // Get orbital period (from elements) to draw one full orbit
+        let periodDays;
+        try {
+            const el = sstarWasm.get_orbital_elements(wasmId);
+            periodDays = el.period_yr * DAYS_PER_YR;
+        } catch (_) {
+            periodDays = 16.05 * DAYS_PER_YR;  // fallback (S2)
+        }
+
+        // Propagate one full orbit as 360 points
+        const nPts = 360;
+        let pathData;
+        try {
+            pathData = sstarWasm.propagate_orbit_path(wasmId, now, now + periodDays, nPts);
+        } catch (_) { return; }
+
+        const pts = [];
+        for (let i = 0; i < nPts; i++) {
+            const off = i * 8;
+            pts.push(wasmAUToScene(pathData[off], pathData[off + 1], pathData[off + 2]));
+        }
+        // Close the loop
+        if (pts.length > 1) pts.push(pts[0].clone());
+
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: SSTAR_COLORS[catId] || 0xffffff,
+            transparent: true, opacity: 0.6, depthWrite: false,
+        });
+        const line = new THREE.Line(lineGeo, lineMat);
+        line.userData.sstarOrbit = catId;
+        sstarOrbitGroup.add(line);
+        sstarOrbitLines.push(line);
+    });
+
+    console.log('S-star orbits built:', sstarOrbitLines.length, 'paths');
+}
+
+/** Update S-star positions from WASM propagation (called each frame) */
+function updateSstarPositions(dt) {
+    if (!sstarWasm) return;
+
+    // Advance simulation time
+    simJD += dt * simTimeScale * DAYS_PER_YR;
+
+    // Propagate all 4 stars in one WASM call (32 f64s)
+    let allData;
+    try { allData = sstarWasm.propagate_all(simJD); } catch (_) { return; }
+
+    Object.entries(SSTAR_WASM_IDS).forEach(([catId, wasmId]) => {
+        const off = wasmId * 8;
+        const pos = wasmAUToScene(allData[off], allData[off + 1], allData[off + 2]);
+
+        const mesh  = starMeshes[catId];
+        const glow  = starGlows[catId];
+        const label = starLabels[catId];
+        if (mesh)  mesh.position.copy(pos);
+        if (glow)  glow.position.copy(pos);
+        if (label) label.position.copy(pos);
+
+        // Also update the catalog entry so flyToStar/info panel picks it up
+        const s = CATALOG.find(c => c.id === catId);
+        if (s) {
+            s.pos3.copy(pos);
+            s.gcDist = pos.length();
+        }
+    });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 //  TON 618 — SPECIAL GEOMETRY  (66 billion M☉ — most massive known BH)
 //
 //  Architecture (all units = scene units; orbit distance ≈ 45,000):
@@ -3089,10 +3232,20 @@ let t = 0;
 
 function animate() {
     requestAnimationFrame(animate);
-    t += clock.getDelta();
+    const dt = clock.getDelta();
+    t += dt;
     controls.update();
 
     const camDistFromOrigin = camera.position.length();
+
+    // ── S-star WASM orbital propagation ──────────────────────────
+    // Update positions every frame (single WASM call for all 4 stars).
+    // Show orbit paths only when zoomed close to galactic center (< 2 ly).
+    updateSstarPositions(dt);
+    const showSstarOrbits = camDistFromOrigin < 2;
+    if (sstarOrbitGroup.visible !== showSstarOrbits) {
+        sstarOrbitGroup.visible = showSstarOrbits;
+    }
 
     // ── Sgr A* glow pulse + disk differential rotation ───────────
     const sgrGlow = starGlows['sgr_a'];

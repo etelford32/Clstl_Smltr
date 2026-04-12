@@ -29,13 +29,28 @@ if ! rustup target list | grep -q "wasm32-unknown-unknown (installed)"; then
     rustup target add wasm32-unknown-unknown
 fi
 
-# Build the WASM
-echo "Building WASM binary..."
+# ── Build S-star orbital propagator (Sgr A*) ──────────────────
+echo "Building S-star WASM (Sgr A* orbital engine)..."
+cd rust-sstar
+cargo build --release --target wasm32-unknown-unknown
+
+echo "Generating S-star JS bindings..."
+if command -v wasm-bindgen &> /dev/null; then
+    wasm-bindgen --target web --out-dir ../js/sstar-wasm/ \
+        target/wasm32-unknown-unknown/release/sstar_wasm.wasm
+else
+    echo "WARN: wasm-bindgen CLI not found — using pre-built JS bindings"
+    cp target/wasm32-unknown-unknown/release/sstar_wasm.wasm ../js/sstar-wasm/sstar_wasm_bg.wasm
+fi
+cd ..
+
+# ── Build star renderer (solar flare sim) ─────────────────────
+echo "Building star renderer WASM binary..."
 cd rust
 cargo build --release --target wasm32-unknown-unknown
 
 # Copy WASM file and create minimal JS loader
-echo "Preparing deployment files..."
+echo "Preparing star renderer deployment files..."
 cp target/wasm32-unknown-unknown/release/star_renderer.wasm www/star_renderer_bg.wasm
 
 # Ensure JS loader exists
