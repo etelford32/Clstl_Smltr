@@ -545,6 +545,115 @@ nav {
 }
 @keyframes skelwave { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
+/* ── EARTH-SIDE FORECAST ───────────────────────────────────────────────────── */
+.earth-forecast-section {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(0,198,255,.14);
+    border-radius: 14px; padding: 18px 20px 16px;
+    margin-bottom: 16px; position: relative; overflow: hidden;
+}
+.earth-forecast-section::before {
+    content:''; position:absolute; inset:0;
+    background: linear-gradient(135deg, rgba(0,198,255,.04) 0%, rgba(123,47,247,.03) 50%, transparent 100%);
+    pointer-events: none;
+}
+.ef-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; flex-wrap: wrap;
+}
+.ef-title {
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#889; display:flex; align-items:center; gap:8px;
+}
+.ef-title .ef-pip {
+    width:6px; height:6px; border-radius:50%; background:#00c6ff;
+    box-shadow:0 0 6px #00c6ff; animation: pip-pulse 2s ease-in-out infinite;
+}
+.ef-severity {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 20px;
+    font-size: .74rem; font-weight: 700; letter-spacing: .05em;
+    border: 1px solid; transition: all .4s;
+}
+/* ── Forecast grid: 6 category cards ────────────────────────────────────── */
+.ef-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+}
+.ef-card {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 10px; padding: 14px 16px;
+    transition: border-color .3s;
+    position: relative;
+}
+.ef-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+}
+.ef-card-title {
+    font-size: .72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: #99b;
+}
+.ef-card-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: .68rem; font-weight: 700; letter-spacing: .04em;
+    border: 1px solid;
+}
+.ef-card-body {
+    font-size: .78rem; color: #a8c0d0; line-height: 1.55;
+}
+.ef-card-body .ef-val {
+    font-weight: 700; color: #e8f4ff;
+    font-variant-numeric: tabular-nums;
+}
+.ef-card-detail {
+    margin-top: 6px; font-size: .72rem; color: #667; line-height: 1.4;
+}
+/* ── Storm timing bar ────────────────────────────────────────────────── */
+.ef-timeline {
+    display: flex; align-items: center; gap: 0;
+    margin: 8px 0 4px; height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,.06); overflow: hidden;
+}
+.ef-timeline-seg {
+    height: 100%; transition: width .3s;
+}
+.ef-timeline-labels {
+    display: flex; justify-content: space-between;
+    font-size: .62rem; color: #556;
+}
+/* ── Ionospheric layer bars ──────────────────────────────────────────── */
+.ef-iono-row {
+    display: flex; align-items: center; gap: 8px;
+    margin: 4px 0; font-size: .72rem;
+}
+.ef-iono-name {
+    width: 52px; color: #778; font-weight: 600; flex-shrink: 0;
+}
+.ef-iono-bar {
+    flex: 1; height: 5px; border-radius: 2.5px;
+    background: rgba(255,255,255,.08); overflow: hidden;
+}
+.ef-iono-fill {
+    height: 100%; border-radius: 2.5px; transition: width .5s, background .5s;
+}
+.ef-iono-status {
+    width: 72px; text-align: right; font-weight: 600;
+    font-size: .66rem; letter-spacing: .04em;
+}
+/* ── Attribution ─────────────────────────────────────────────────────── */
+.ef-attr {
+    margin-top: 10px; font-size: .6rem; color: #443; line-height: 1.5;
+}
+.ef-attr strong { color: #665; }
+@media (max-width:600px) {
+    .ef-grid { grid-template-columns: 1fr; }
+    .earth-forecast-section { padding: 14px 12px 12px; }
+}
+
 /* ── FOOTER ─────────────────────────────────────────────────────────────────── */
 .sw-footer {
     text-align:center; margin-top:32px; padding-top:16px;
@@ -1199,6 +1308,140 @@ nav {
         </div>
     </div>
 
+    <!-- ── EARTH-SIDE SPACE WEATHER FORECAST ────────────────────────────── -->
+    <div class="earth-forecast-section" id="earth-forecast-section">
+
+        <div class="ef-header">
+            <div class="ef-title">
+                <span class="ef-pip"></span>
+                Earth-Side Forecast &middot; Consequences of Today&rsquo;s Solar Activity
+            </div>
+            <div class="ef-severity" id="ef-severity" style="background:rgba(68,204,136,.08);color:#44cc88;border-color:rgba(68,204,136,.25)">
+                QUIET
+            </div>
+        </div>
+
+        <div class="ef-grid" id="ef-grid">
+
+            <!-- 1. Radio Blackout Risk -->
+            <div class="ef-card" id="ef-radio">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">Radio Blackout Risk</span>
+                    <span class="ef-card-badge" id="ef-radio-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">R0 None</span>
+                </div>
+                <div class="ef-card-body">
+                    <span id="ef-radio-xray">X-ray: &ndash;</span>
+                    <div class="ef-card-detail" id="ef-radio-desc">No HF radio impact expected.</div>
+                </div>
+            </div>
+
+            <!-- 2. Aurora Likelihood -->
+            <div class="ef-card" id="ef-aurora">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">Aurora Likelihood</span>
+                    <span class="ef-card-badge" id="ef-aurora-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">Low</span>
+                </div>
+                <div class="ef-card-body">
+                    <span id="ef-aurora-boundary">Visible from &ge; &ndash;&deg;</span>
+                    <div class="ef-card-detail" id="ef-aurora-cities">&ndash;</div>
+                    <div class="ef-card-detail" id="ef-aurora-user" style="display:none"></div>
+                </div>
+            </div>
+
+            <!-- 3. GNSS / GPS Degradation -->
+            <div class="ef-card" id="ef-gnss">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">GNSS / GPS Risk</span>
+                    <span class="ef-card-badge" id="ef-gnss-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">Low</span>
+                </div>
+                <div class="ef-card-body">
+                    <span id="ef-gnss-delay">L1 range delay: &ndash; m</span>
+                    <div class="ef-card-detail" id="ef-gnss-desc">Normal GNSS accuracy.</div>
+                </div>
+            </div>
+
+            <!-- 4. Geomagnetic Storm Timing -->
+            <div class="ef-card" id="ef-storm">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">Geomagnetic Storm Timing</span>
+                    <span class="ef-card-badge" id="ef-storm-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">G0 None</span>
+                </div>
+                <div class="ef-card-body">
+                    <div id="ef-storm-status">No geomagnetic storm conditions.</div>
+                    <div id="ef-storm-cme" style="display:none"></div>
+                    <div id="ef-storm-probs" style="display:none;margin-top:4px"></div>
+                    <div id="ef-storm-timeline-wrap" style="display:none;margin-top:6px">
+                        <div class="ef-timeline" id="ef-storm-timeline">
+                            <div class="ef-timeline-seg" id="ef-tl-onset" style="width:33%;background:#ffcc00"></div>
+                            <div class="ef-timeline-seg" id="ef-tl-peak" style="width:34%;background:#ff5500"></div>
+                            <div class="ef-timeline-seg" id="ef-tl-recovery" style="width:33%;background:#44cc88"></div>
+                        </div>
+                        <div class="ef-timeline-labels">
+                            <span id="ef-tl-onset-lbl">Onset</span>
+                            <span id="ef-tl-peak-lbl">Peak</span>
+                            <span id="ef-tl-recovery-lbl">Recovery</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Satellite & Power Grid -->
+            <div class="ef-card" id="ef-infra">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">Satellite &amp; Power Grid</span>
+                    <span class="ef-card-badge" id="ef-infra-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">Low</span>
+                </div>
+                <div class="ef-card-body">
+                    <div id="ef-sat-row" style="margin-bottom:4px"><strong style="color:#889;font-size:.68rem">SAT:</strong> <span id="ef-sat-desc">Normal radiation environment.</span></div>
+                    <div id="ef-grid-row"><strong style="color:#889;font-size:.68rem">GRID:</strong> <span id="ef-grid-desc">No power grid impact expected.</span></div>
+                </div>
+            </div>
+
+            <!-- 6. Ionospheric Disturbance -->
+            <div class="ef-card" id="ef-iono">
+                <div class="ef-card-head">
+                    <span class="ef-card-title">Ionospheric Disturbance</span>
+                    <span class="ef-card-badge" id="ef-iono-badge" style="background:rgba(68,204,136,.1);color:#44cc88;border-color:rgba(68,204,136,.25)">Quiet</span>
+                </div>
+                <div class="ef-card-body">
+                    <div class="ef-iono-row">
+                        <span class="ef-iono-name">D-layer</span>
+                        <div class="ef-iono-bar"><div class="ef-iono-fill" id="ef-iono-d-fill" style="width:5%;background:#44cc88"></div></div>
+                        <span class="ef-iono-status" id="ef-iono-d-status" style="color:#44cc88">NORMAL</span>
+                    </div>
+                    <div class="ef-iono-row">
+                        <span class="ef-iono-name">E-layer</span>
+                        <div class="ef-iono-bar"><div class="ef-iono-fill" id="ef-iono-e-fill" style="width:10%;background:#44cc88"></div></div>
+                        <span class="ef-iono-status" id="ef-iono-e-status" style="color:#44cc88">NORMAL</span>
+                    </div>
+                    <div class="ef-iono-row">
+                        <span class="ef-iono-name">F2-layer</span>
+                        <div class="ef-iono-bar"><div class="ef-iono-fill" id="ef-iono-f2-fill" style="width:30%;background:#44cc88"></div></div>
+                        <span class="ef-iono-status" id="ef-iono-f2-status" style="color:#44cc88">NORMAL</span>
+                    </div>
+                    <div class="ef-iono-row">
+                        <span class="ef-iono-name">TEC</span>
+                        <div class="ef-iono-bar"><div class="ef-iono-fill" id="ef-iono-tec-fill" style="width:15%;background:#44cc88"></div></div>
+                        <span class="ef-iono-status" id="ef-iono-tec-status" style="color:#44cc88">NORMAL</span>
+                    </div>
+                    <div class="ef-card-detail" id="ef-iono-summary">Ionosphere quiet.</div>
+                </div>
+            </div>
+
+        </div><!-- /ef-grid -->
+
+        <div class="ef-attr">
+            <strong>Sources:</strong>
+            NOAA SWPC R/S/G scales &middot;
+            IRI-2016 ionospheric model &middot;
+            Shue (1998) magnetopause &middot;
+            DSCOVR/ACE L1 solar wind &middot;
+            GOES X-ray flux &middot;
+            NASA DONKI CME catalog
+        </div>
+
+    </div>
+
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
     <div class="hero-row">
 
@@ -1662,6 +1905,7 @@ import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js'
 import { CmePropagator } from './js/cme-propagation.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
+import { EarthForecastEngine } from './js/earth-forecast.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -2244,6 +2488,199 @@ new AlertEngine().start();
 new ImpactScoreEngine().start();
 window.addEventListener('alert-mark-all-read', () => {
     // Handled by the AlertEngine instance — re-dispatch handled internally
+});
+
+// ── Earth-side forecast engine ──────────────────────────────────────────────
+// Synthesises SWPC + CME + ionospheric data into Earth-consequence forecast.
+new EarthForecastEngine().start();
+
+window.addEventListener('earth-forecast-update', (ev) => {
+    const f = ev.detail;
+    if (!f) return;
+
+    // ── Overall severity badge ──────────────────────────────────────────────
+    const sevEl = el('ef-severity');
+    if (sevEl) {
+        sevEl.textContent = f.overall.level;
+        sevEl.style.color = f.overall.color;
+        sevEl.style.borderColor = f.overall.color + '40';
+        sevEl.style.background = f.overall.color + '14';
+    }
+
+    // ── 1. Radio Blackout ───────────────────────────────────────────────────
+    const rbBadge = el('ef-radio-badge');
+    if (rbBadge) {
+        rbBadge.textContent = `R${f.radio.r_scale} ${f.radio.label}`;
+        rbBadge.style.color = f.radio.color;
+        rbBadge.style.borderColor = f.radio.color + '40';
+        rbBadge.style.background = f.radio.color + '14';
+    }
+    const rbXray = el('ef-radio-xray');
+    if (rbXray) rbXray.innerHTML = `X-ray: <span class="ef-val">${f.radio.xray_class}</span>`;
+    const rbDesc = el('ef-radio-desc');
+    if (rbDesc) rbDesc.textContent = f.radio.desc;
+
+    // ── 2. Aurora ───────────────────────────────────────────────────────────
+    const auBadge = el('ef-aurora-badge');
+    const auKp = f.timing?.current_g ?? 0;
+    const auLabel = auKp >= 3 ? 'High' : auKp >= 1 ? 'Moderate' : 'Low';
+    const auColor = auKp >= 3 ? '#ff9900' : auKp >= 1 ? '#ffcc00' : '#44cc88';
+    if (auBadge) {
+        auBadge.textContent = auLabel;
+        auBadge.style.color = auColor;
+        auBadge.style.borderColor = auColor + '40';
+        auBadge.style.background = auColor + '14';
+    }
+    const auBoundary = el('ef-aurora-boundary');
+    if (auBoundary) auBoundary.innerHTML = `Visible from \u2265 <span class="ef-val">${f.aurora.boundary_deg}\u00B0</span> geomagnetic latitude`;
+    const auCities = el('ef-aurora-cities');
+    if (auCities) auCities.textContent = f.aurora.cities.length ? f.aurora.cities.join(' \u00B7 ') : 'Only visible near magnetic poles';
+    const auUser = el('ef-aurora-user');
+    if (auUser && f.aurora.visible_for_user != null) {
+        auUser.style.display = '';
+        auUser.innerHTML = f.aurora.visible_for_user
+            ? `<span style="color:#00ff88">\u2713 Aurora may be visible from your location${f.location ? ' (' + f.location + ')' : ''}</span>`
+            : `<span style="color:#778">Aurora not expected at your latitude${f.location ? ' (' + f.location + ')' : ''}</span>`;
+    }
+
+    // ── 3. GNSS / GPS ──────────────────────────────────────────────────────
+    const gnBadge = el('ef-gnss-badge');
+    if (gnBadge) {
+        gnBadge.textContent = f.gnss.label;
+        gnBadge.style.color = f.gnss.color;
+        gnBadge.style.borderColor = f.gnss.color + '40';
+        gnBadge.style.background = f.gnss.color + '14';
+    }
+    const gnDelay = el('ef-gnss-delay');
+    if (gnDelay) gnDelay.innerHTML = `L1 range delay: <span class="ef-val">${f.gnss.range_delay_m} m</span>`;
+    const gnDesc = el('ef-gnss-desc');
+    if (gnDesc) gnDesc.textContent = f.gnss.desc;
+
+    // ── 4. Storm Timing ────────────────────────────────────────────────────
+    const stBadge = el('ef-storm-badge');
+    if (stBadge) {
+        stBadge.textContent = `G${f.timing.current_g} ${f.timing.current_g_label}`;
+        stBadge.style.color = f.timing.current_g_color;
+        stBadge.style.borderColor = f.timing.current_g_color + '40';
+        stBadge.style.background = f.timing.current_g_color + '14';
+    }
+    const stStatus = el('ef-storm-status');
+    if (stStatus) {
+        if (f.timing.current_g >= 1) {
+            stStatus.innerHTML = `<span class="ef-val" style="color:${f.timing.current_g_color}">G${f.timing.current_g} ${f.timing.current_g_label} storm</span> in progress`;
+        } else if (f.timing.cme_eta_hours != null && f.timing.cme_eta_hours > 0) {
+            stStatus.innerHTML = `CME arrival expected — storm onset likely`;
+        } else {
+            stStatus.textContent = 'No geomagnetic storm conditions.';
+        }
+    }
+    const stCme = el('ef-storm-cme');
+    if (stCme) {
+        if (f.timing.cme_eta_hours != null && f.timing.cme_eta_hours > 0) {
+            stCme.style.display = '';
+            stCme.innerHTML = `CME ETA: <span class="ef-val">${f.timing.cme_eta_hours.toFixed(1)} hours</span>`
+                + (f.timing.cme_severity ? ` \u00B7 ${f.timing.cme_severity}` : '');
+        } else {
+            stCme.style.display = 'none';
+        }
+    }
+    const stProbs = el('ef-storm-probs');
+    if (stProbs && f.timing.probs) {
+        stProbs.style.display = '';
+        stProbs.innerHTML = `<span style="color:#667">24h storm prob:</span> `
+            + `G1+ <span class="ef-val">${Math.round((f.timing.probs.g1_24h ?? 0) * 100)}%</span> `
+            + `G2+ <span class="ef-val">${Math.round((f.timing.probs.g2_24h ?? 0) * 100)}%</span> `
+            + `G3+ <span class="ef-val">${Math.round((f.timing.probs.g3_24h ?? 0) * 100)}%</span>`;
+    }
+    const stTimeline = el('ef-storm-timeline-wrap');
+    if (stTimeline) {
+        if (f.timing.onset_window) {
+            stTimeline.style.display = '';
+            const onLbl = el('ef-tl-onset-lbl');
+            const pkLbl = el('ef-tl-peak-lbl');
+            const rcLbl = el('ef-tl-recovery-lbl');
+            const _tf = d => d ? d.toISOString().slice(11, 16) + ' UTC' : '–';
+            if (onLbl) onLbl.textContent = 'Onset ' + _tf(f.timing.onset_window);
+            if (pkLbl) pkLbl.textContent = 'Peak ' + _tf(f.timing.peak_window);
+            if (rcLbl) rcLbl.textContent = 'Recovery ' + _tf(f.timing.recovery_window);
+        } else {
+            stTimeline.style.display = 'none';
+        }
+    }
+
+    // ── 5. Infrastructure ──────────────────────────────────────────────────
+    const inBadge = el('ef-infra-badge');
+    const infraMax = Math.max(f.infrastructure.satellite.level, f.infrastructure.powerGrid.level);
+    const infraLabels = ['Low', 'Elevated', 'High', 'Severe'];
+    const infraColors = ['#44cc88', '#ffcc00', '#ff9900', '#ff2255'];
+    if (inBadge) {
+        inBadge.textContent = infraLabels[infraMax];
+        inBadge.style.color = infraColors[infraMax];
+        inBadge.style.borderColor = infraColors[infraMax] + '40';
+        inBadge.style.background = infraColors[infraMax] + '14';
+    }
+    const satDesc = el('ef-sat-desc');
+    if (satDesc) satDesc.textContent = f.infrastructure.satellite.desc;
+    const gridDesc = el('ef-grid-desc');
+    if (gridDesc) gridDesc.textContent = f.infrastructure.powerGrid.desc;
+
+    // ── 6. Ionosphere ──────────────────────────────────────────────────────
+    const ioBadge = el('ef-iono-badge');
+    if (ioBadge) {
+        const ioLabel = f.ionosphere.disturbed ? 'Disturbed' : 'Quiet';
+        const ioColor = f.ionosphere.disturbed ? '#ff9900' : '#44cc88';
+        ioBadge.textContent = ioLabel;
+        ioBadge.style.color = ioColor;
+        ioBadge.style.borderColor = ioColor + '40';
+        ioBadge.style.background = ioColor + '14';
+    }
+
+    // D-layer bar
+    const dFill = el('ef-iono-d-fill');
+    const dStat = el('ef-iono-d-status');
+    if (dFill && f.ionosphere.layers.dLayer) {
+        const dl = f.ionosphere.layers.dLayer;
+        const pct = Math.min(100, (dl.abs_dB / 20) * 100);
+        dFill.style.width = Math.max(3, pct) + '%';
+        dFill.style.background = dl.color;
+        if (dStat) { dStat.textContent = dl.status; dStat.style.color = dl.color; }
+    }
+
+    // E-layer bar
+    const eFill = el('ef-iono-e-fill');
+    const eStat = el('ef-iono-e-status');
+    if (eFill && f.ionosphere.layers.eLayer) {
+        const el2 = f.ionosphere.layers.eLayer;
+        const pct = el2.status === 'ENHANCED' ? 60 : 15;
+        eFill.style.width = pct + '%';
+        eFill.style.background = el2.color;
+        if (eStat) { eStat.textContent = el2.status; eStat.style.color = el2.color; }
+    }
+
+    // F2-layer bar
+    const f2Fill = el('ef-iono-f2-fill');
+    const f2Stat = el('ef-iono-f2-status');
+    if (f2Fill && f.ionosphere.layers.f2Layer) {
+        const f2 = f.ionosphere.layers.f2Layer;
+        const pct = Math.min(100, (f2.foF2 / 14) * 100);
+        f2Fill.style.width = Math.max(5, pct) + '%';
+        f2Fill.style.background = f2.color;
+        if (f2Stat) { f2Stat.textContent = f2.status; f2Stat.style.color = f2.color; }
+    }
+
+    // TEC bar
+    const tecFill = el('ef-iono-tec-fill');
+    const tecStat = el('ef-iono-tec-status');
+    if (tecFill && f.ionosphere.layers.tec) {
+        const tc = f.ionosphere.layers.tec;
+        const pct = Math.min(100, (tc.value / 100) * 100);
+        tecFill.style.width = Math.max(3, pct) + '%';
+        tecFill.style.background = tc.color;
+        if (tecStat) { tecStat.textContent = tc.status; tecStat.style.color = tc.color; }
+    }
+
+    const ioSummary = el('ef-iono-summary');
+    if (ioSummary) ioSummary.textContent = f.ionosphere.summary;
 });
 
 // ── Wind-speed pipeline (Vercel Edge /api/solar-wind/wind-speed) ──────────────

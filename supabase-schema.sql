@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     notify_power_grid BOOLEAN DEFAULT false,
     notify_collision BOOLEAN DEFAULT false,
     notify_recurrence BOOLEAN DEFAULT false,
+    notify_iono_disturbance BOOLEAN DEFAULT false,
     -- Alert thresholds
     aurora_kp_threshold INTEGER DEFAULT 5,
     storm_g_threshold INTEGER DEFAULT 1,
@@ -56,6 +57,9 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     conjunction_threshold_km DOUBLE PRECISION DEFAULT 25.0,
     temp_high_f DOUBLE PRECISION,
     temp_low_f DOUBLE PRECISION,
+    radio_r_threshold INTEGER DEFAULT 2,
+    gnss_risk_threshold INTEGER DEFAULT 2,
+    power_grid_g_threshold INTEGER DEFAULT 4,
     -- Alert delivery
     email_alerts BOOLEAN DEFAULT false,
     email_min_severity TEXT DEFAULT 'warning' CHECK (email_min_severity IN ('info', 'warning', 'critical')),

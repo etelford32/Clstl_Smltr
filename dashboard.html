@@ -572,9 +572,58 @@ footer a:hover{color:var(--text)}
         </div>
         <div class="alert-pref-grid" id="alert-pref-grid-advanced">
           <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_collision" data-key="notify_collision"><span class="alert-pref-name">Satellite Collision</span></label></div>
-          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_power_grid" data-key="notify_power_grid"><span class="alert-pref-name">Power Grid Risk</span></label></div>
-          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_radio_blackout" data-key="notify_radio_blackout"><span class="alert-pref-name">Radio Blackout</span></label></div>
-          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_gps" data-key="notify_gps"><span class="alert-pref-name">GPS Degradation</span></label></div>
+          <!-- Radio Blackout with R-scale threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_radio_blackout" data-key="notify_radio_blackout">
+              <span class="alert-pref-name">Radio Blackout</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">R-scale &ge;
+                <select id="pref-radio_r_threshold" data-key="radio_r_threshold" style="width:48px">
+                  <option value="1">R1</option><option value="2" selected>R2</option><option value="3">R3</option>
+                  <option value="4">R4</option><option value="5">R5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- GPS Degradation with risk level threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_gps" data-key="notify_gps">
+              <span class="alert-pref-name">GNSS / GPS Degradation</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Risk &ge;
+                <select id="pref-gnss_risk_threshold" data-key="gnss_risk_threshold" style="width:72px">
+                  <option value="1">Moderate</option><option value="2" selected>High</option><option value="3">Severe</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Power Grid Risk with G-scale threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_power_grid" data-key="notify_power_grid">
+              <span class="alert-pref-name">Power Grid Risk</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
+                <select id="pref-power_grid_g_threshold" data-key="power_grid_g_threshold" style="width:48px">
+                  <option value="2">G2</option><option value="3">G3</option><option value="4" selected>G4</option>
+                  <option value="5">G5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Ionospheric Disturbance -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_iono_disturbance" data-key="notify_iono_disturbance">
+              <span class="alert-pref-name">Ionospheric Disturbance</span>
+            </label>
+            <span style="font-size:.58rem;color:var(--muted)">D/E/F2-layer &amp; TEC anomalies</span>
+          </div>
           <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_recurrence" data-key="notify_recurrence"><span class="alert-pref-name">27-Day Recurrence</span></label></div>
         </div>
 
@@ -1475,18 +1524,22 @@ initAll();
         _setCheckbox('pref-notify_flare',          prefs.notify_flare);
         _setCheckbox('pref-notify_cme',            prefs.notify_cme);
         _setCheckbox('pref-notify_sat_pass',       prefs.notify_sat_pass);
-        _setCheckbox('pref-notify_collision',      prefs.notify_collision);
-        _setCheckbox('pref-notify_power_grid',     prefs.notify_power_grid);
-        _setCheckbox('pref-notify_radio_blackout', prefs.notify_radio_blackout);
-        _setCheckbox('pref-notify_gps',            prefs.notify_gps);
-        _setCheckbox('pref-notify_recurrence',     prefs.notify_recurrence);
-        _setCheckbox('pref-email_alerts',          prefs.email_alerts);
-        _setSelect('pref-aurora_kp_threshold',     prefs.aurora_kp_threshold);
-        _setSelect('pref-storm_g_threshold',       prefs.storm_g_threshold);
-        _setSelect('pref-flare_class_threshold',   prefs.flare_class_threshold);
-        _setSelect('pref-alert_cooldown_min',      prefs.alert_cooldown_min);
-        _setInput('pref-temp_high_f',              prefs.temp_high_f);
-        _setInput('pref-temp_low_f',               prefs.temp_low_f);
+        _setCheckbox('pref-notify_collision',         prefs.notify_collision);
+        _setCheckbox('pref-notify_power_grid',        prefs.notify_power_grid);
+        _setCheckbox('pref-notify_radio_blackout',    prefs.notify_radio_blackout);
+        _setCheckbox('pref-notify_gps',               prefs.notify_gps);
+        _setCheckbox('pref-notify_iono_disturbance',  prefs.notify_iono_disturbance);
+        _setCheckbox('pref-notify_recurrence',        prefs.notify_recurrence);
+        _setCheckbox('pref-email_alerts',             prefs.email_alerts);
+        _setSelect('pref-aurora_kp_threshold',        prefs.aurora_kp_threshold);
+        _setSelect('pref-storm_g_threshold',          prefs.storm_g_threshold);
+        _setSelect('pref-flare_class_threshold',      prefs.flare_class_threshold);
+        _setSelect('pref-radio_r_threshold',          prefs.radio_r_threshold);
+        _setSelect('pref-gnss_risk_threshold',        prefs.gnss_risk_threshold);
+        _setSelect('pref-power_grid_g_threshold',     prefs.power_grid_g_threshold);
+        _setSelect('pref-alert_cooldown_min',         prefs.alert_cooldown_min);
+        _setInput('pref-temp_high_f',                 prefs.temp_high_f);
+        _setInput('pref-temp_low_f',                  prefs.temp_low_f);
 
         // Save button
         document.getElementById('alert-prefs-save')?.addEventListener('click', async () => {
@@ -1498,9 +1551,12 @@ initAll();
                 else updates[key] = el.value;
             });
             // Convert numeric selects
-            if (updates.aurora_kp_threshold) updates.aurora_kp_threshold = parseInt(updates.aurora_kp_threshold, 10);
-            if (updates.storm_g_threshold)   updates.storm_g_threshold   = parseInt(updates.storm_g_threshold, 10);
-            if (updates.alert_cooldown_min)  updates.alert_cooldown_min  = parseInt(updates.alert_cooldown_min, 10);
+            if (updates.aurora_kp_threshold)    updates.aurora_kp_threshold    = parseInt(updates.aurora_kp_threshold, 10);
+            if (updates.storm_g_threshold)      updates.storm_g_threshold      = parseInt(updates.storm_g_threshold, 10);
+            if (updates.radio_r_threshold)      updates.radio_r_threshold      = parseInt(updates.radio_r_threshold, 10);
+            if (updates.gnss_risk_threshold)    updates.gnss_risk_threshold    = parseInt(updates.gnss_risk_threshold, 10);
+            if (updates.power_grid_g_threshold) updates.power_grid_g_threshold = parseInt(updates.power_grid_g_threshold, 10);
+            if (updates.alert_cooldown_min)     updates.alert_cooldown_min     = parseInt(updates.alert_cooldown_min, 10);
 
             await auth.updateProfile(updates);
             // Re-fetch to confirm
