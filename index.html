@@ -1139,7 +1139,9 @@ if (canvas) {
     }
 
     // ── Animation loop (frame-time adaptive quality) ──────────────────
-    let t = 0, raf, heroVisible = true;
+    // simTime: drives the shader (disk rotation, turbulence, flares)
+    // camTime: drives camera choreography on its own long cycle
+    let simTime = 0, camTime = 0, raf, heroVisible = true;
 
     function animate(timestamp) {
         if (!heroVisible) return;
@@ -1162,24 +1164,27 @@ if (canvas) {
                 qFrames = 0; qTimeSum = 0;
             }
             // Frame-rate independent time — consistent speed at any FPS
-            t += Math.min(frameDt * 0.001, 0.1) * 1.0;
+            const dt = Math.min(frameDt * 0.001, 0.1);
+            simTime += dt * 1.5;   // simulation runs 1.5× real-time
+            camTime += dt;          // camera runs at real-time
         }
         lastTimestamp = timestamp;
 
-        // ── Cinematic camera choreography ─────────────────────────
+        // ── Cinematic camera choreography (decoupled from sim) ────
+        // Long periods so the camera never feels like it loops.
+        // Full cycles: orbit-speed ~2 min, phi bob ~3.5 min, distance ~5 min
         if (autoRotateActive) {
-            // Slow elliptical orbit (variable speed — faster at "close" pass)
-            const orbitSpeed = 0.0003 + 0.0001 * Math.sin(t * 0.15);
+            const orbitSpeed = 0.0006 + 0.0002 * Math.sin(camTime * 0.05);
             camTheta += orbitSpeed;
 
-            // Gentle polar bobbing: camera slowly rises and dips ±4°
-            const basePhi = 1.2;  // default: 21° above disk
-            const bobPhi  = basePhi + Math.sin(t * 0.08) * 0.07;
+            // Polar bobbing: ±7° over ~3.5 minutes
+            const basePhi = 1.2;
+            const bobPhi  = basePhi + Math.sin(camTime * 0.03) * 0.12;
             camPhi = Math.max(CAM_PHI_MIN, Math.min(CAM_PHI_MAX, bobPhi));
 
-            // Subtle distance breathing: slow zoom in/out ±5%
+            // Distance breathing: ±10% over ~5 minutes
             const baseDist = 30.0;
-            camDist = baseDist + Math.sin(t * 0.05) * 1.5;
+            camDist = baseDist + Math.sin(camTime * 0.02) * 3.0;
         }
 
         // Mouse parallax: subtle camera offset following cursor
@@ -1194,7 +1199,7 @@ if (canvas) {
             camDist * sp * Math.cos(camTheta)
         );
 
-        bhUniforms.u_time.value = t;
+        bhUniforms.u_time.value = simTime;
         bhUniforms.u_quality.value = quality;
         bhUniforms.u_camDist.value = camDist;
         composer.render();
