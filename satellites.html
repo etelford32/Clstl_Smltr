@@ -124,6 +124,25 @@ nav {
     font-size:.62rem; padding:3px 8px; transition:all .15s;
 }
 .sp-export-btn:hover { background:rgba(0,170,170,.18); color:#0ee; }
+.sp-op-btn {
+    display:block; width:100%; margin-bottom:3px; padding:6px 10px; font-family:inherit;
+    font-size:.68rem; font-weight:600; cursor:pointer; border-radius:4px; transition:all .15s;
+    background:rgba(255,140,0,.08); border:1px solid rgba(255,140,0,.2); color:#ff8c00;
+}
+.sp-op-btn:hover { background:rgba(255,140,0,.2); color:#ffaa44; }
+.op-table { width:100%; border-collapse:collapse; font-size:.62rem; }
+.op-table th { text-align:left; padding:3px 4px; color:#556; border-bottom:1px solid rgba(255,255,255,.06); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.op-table td { padding:3px 4px; color:#99a; border-bottom:1px solid rgba(255,255,255,.02); }
+.op-table tr:hover td { background:rgba(255,255,255,.02); }
+.op-badge { display:inline-block; padding:1px 5px; border-radius:2px; font-size:.55rem; font-weight:700; }
+.op-badge.crit { background:rgba(255,30,0,.15); color:#ff3322; }
+.op-badge.high { background:rgba(255,136,0,.12); color:#ff8800; }
+.op-badge.mod  { background:rgba(255,200,0,.1); color:#ffcc44; }
+.op-badge.ok   { background:rgba(0,200,100,.1); color:#44cc66; }
+.cov-bar { height:10px; border-radius:2px; margin-top:2px; }
+.cov-stat { display:flex; justify-content:space-between; font-size:.62rem; margin:2px 0; }
+.cov-stat-k { color:#556; }
+.cov-stat-v { color:#ff8c00; font-weight:600; font-family:monospace; }
 </style>
 </head>
 <body>
@@ -188,6 +207,7 @@ nav {
             <div class="sp-toggle"><input type="checkbox" id="grp-weather"><span class="grp-dot" style="background:#ffdd44"></span><label for="grp-weather">Weather</label><span class="count" id="cnt-weather">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-science"><span class="grp-dot" style="background:#cc66ff"></span><label for="grp-science">Science</label><span class="count" id="cnt-science">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-resource"><span class="grp-dot" style="background:#44ff44"></span><label for="grp-resource">Earth Observation</label><span class="count" id="cnt-resource">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-planet"><span class="grp-dot" style="background:#88ff88"></span><label for="grp-planet">Planet Labs</label><span class="count" id="cnt-planet">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-geo"><span class="grp-dot" style="background:#ffaa00"></span><label for="grp-geo">Geostationary</label><span class="count" id="cnt-geo">—</span></div>
             <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><span class="grp-dot" style="background:#00ffaa"></span><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
         </div>
@@ -200,6 +220,16 @@ nav {
             <div class="sp-toggle"><input type="checkbox" id="tog-shells"><label for="tog-shells">Starlink orbital shells</label></div>
             <div class="sp-toggle"><input type="checkbox" id="tog-heatmap"><label for="tog-heatmap">Altitude density heatmap</label></div>
             <div id="alt-heatmap" style="display:none;margin-top:6px"></div>
+        </div>
+
+        <!-- Operator Analytics -->
+        <div class="sp-section" id="sp-operator">
+            <div class="sp-label" style="color:#ff8c00">Operator Analytics</div>
+            <button class="sp-op-btn" id="btn-decay-watchlist" title="Find objects reentering soon">Decay Watchlist</button>
+            <button class="sp-op-btn" id="btn-coverage" title="Estimate constellation coverage">Coverage Map</button>
+            <button class="sp-op-btn" id="btn-breakup" title="Detect anomalous debris clusters">Breakup Detection</button>
+            <button class="sp-op-btn" id="btn-constellation-conj" title="Screen two constellations against each other">Cross-Constellation Screening</button>
+            <div id="sp-operator-results" style="margin-top:6px;max-height:300px;overflow-y:auto"></div>
         </div>
 
         <!-- Selected satellite info -->
@@ -295,7 +325,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SatelliteTracker, isWasmLoaded } from './js/satellite-tracker.js';
 import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
-         estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV
+         estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV,
+         decayWatchlist, constellationCoverage, detectBreakupEvents
        } from './js/orbital-analytics.js';
 import { loadUserLocation, auroraVisibility } from './js/user-location.js';
 
@@ -391,7 +422,7 @@ loadGroup('stations');
 const ALL_GROUPS = [
     'stations','starlink','oneweb','iridium','globalstar',
     'gps-ops','galileo','beidou','glonass',
-    'weather','science','resource','geo','last-30-days',
+    'weather','science','resource','planet','geo','last-30-days',
     'debris',
 ];
 
@@ -714,6 +745,172 @@ document.getElementById('sp-export-cdm')?.addEventListener('click', () => {
     a.click();
     URL.revokeObjectURL(url);
 });
+
+// ═══════════════════════════════════════════════════════════════
+//  PHASE 2: OPERATOR ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+
+const _opResults = document.getElementById('sp-operator-results');
+
+// ── Decay Watchlist ─────────────────────────────────────────────────────────
+document.getElementById('btn-decay-watchlist')?.addEventListener('click', () => {
+    const sats = tracker.getSatellites();
+    if (sats.length === 0) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load satellites first</div>'; return; }
+
+    _opResults.innerHTML = '<div style="color:#ff8c00;font-size:.62rem">Computing decay estimates...</div>';
+    requestAnimationFrame(() => {
+        const watch = decayWatchlist(sats, 180);
+        if (watch.length === 0) {
+            _opResults.innerHTML = '<div style="color:#44cc66;font-size:.62rem">No objects predicted to reenter within 180 days</div>';
+            return;
+        }
+        let html = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${watch.length} objects decaying within 180 days</div>`;
+        html += '<table class="op-table"><thead><tr><th>Object</th><th>Perigee</th><th>Decay</th><th>Lifetime</th></tr></thead><tbody>';
+        for (const w of watch.slice(0, 30)) {
+            const cls = w.lifetime_days < 30 ? 'crit' : w.lifetime_days < 90 ? 'high' : 'mod';
+            html += `<tr><td title="NORAD ${w.norad_id}">${_esc(w.name?.slice(0, 20) || w.norad_id)}</td>`
+                + `<td>${w.perigee_km} km</td>`
+                + `<td>${w.decay_rate} km/d</td>`
+                + `<td><span class="op-badge ${cls}">${w.lifetime_str}</span></td></tr>`;
+        }
+        html += '</tbody></table>';
+        _opResults.innerHTML = html;
+    });
+});
+
+// ── Constellation Coverage ──────────────────────────────────────────────────
+document.getElementById('btn-coverage')?.addEventListener('click', () => {
+    const groups = tracker.getLoadedGroups();
+    if (groups.length === 0) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load constellations first</div>'; return; }
+
+    const allSats = tracker.getSatellites();
+    let html = '<div style="font-size:.58rem;color:#556;margin-bottom:6px">Coverage estimation per loaded constellation</div>';
+
+    for (const group of groups) {
+        const groupSats = allSats.filter(s => s.group === group);
+        const cov = constellationCoverage(groupSats);
+        if (!cov) continue;
+
+        const barColor = cov.est_coverage_pct > 80 ? '#44cc66' : cov.est_coverage_pct > 50 ? '#ffaa44' : '#ff4444';
+        html += `<div style="margin-bottom:8px;padding:6px;background:rgba(255,255,255,.02);border-radius:4px;border-left:3px solid ${barColor}">`;
+        html += `<div style="font-size:.65rem;font-weight:700;color:#ccc;margin-bottom:3px">${_esc(group)} (${cov.sat_count} sats)</div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Altitude</span><span class="cov-stat-v">${cov.avg_alt_km} km</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Inclination</span><span class="cov-stat-v">${cov.inclination}°</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Lat band</span><span class="cov-stat-v">${cov.lat_band}</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Footprint</span><span class="cov-stat-v">${cov.footprint_km} km radius</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Est. coverage</span><span class="cov-stat-v">${cov.est_coverage_pct}%</span></div>`;
+        html += `<div class="cov-bar" style="width:${Math.min(100, cov.est_coverage_pct)}%;background:${barColor}"></div>`;
+        html += '</div>';
+    }
+    _opResults.innerHTML = html;
+});
+
+// ── Breakup Event Detection ─────────────────────────────────────────────────
+document.getElementById('btn-breakup')?.addEventListener('click', () => {
+    const sats = tracker.getSatellites();
+    if (sats.length < 100) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load more satellites (need debris or full catalog)</div>'; return; }
+
+    const anomalies = detectBreakupEvents(sats);
+    if (anomalies.length === 0) {
+        _opResults.innerHTML = '<div style="color:#44cc66;font-size:.62rem">No anomalous debris concentrations detected</div>';
+        return;
+    }
+
+    let html = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${anomalies.length} anomalous altitude bands detected</div>`;
+    html += '<table class="op-table"><thead><tr><th>Altitude</th><th>Objects</th><th>Expected</th><th>Excess</th><th>Severity</th></tr></thead><tbody>';
+    for (const a of anomalies.slice(0, 20)) {
+        const cls = a.severity === 'CRITICAL' ? 'crit' : a.severity === 'HIGH' ? 'high' : 'mod';
+        const known = (a.alt_km >= 750 && a.alt_km <= 900) ? ' (Fengyun/Cosmos zone)' :
+                      (a.alt_km >= 1400 && a.alt_km <= 1500) ? ' (Soviet RORSAT zone)' : '';
+        html += `<tr><td>${a.alt_km} km${known}</td><td>${a.count}</td><td>${a.expected}</td>`
+            + `<td style="color:#ff8800">+${a.excess}</td>`
+            + `<td><span class="op-badge ${cls}">${a.severity} (${a.sigma}σ)</span></td></tr>`;
+    }
+    html += '</tbody></table>';
+    _opResults.innerHTML = html;
+});
+
+// ── Cross-Constellation Conjunction Screening ───────────────────────────────
+document.getElementById('btn-constellation-conj')?.addEventListener('click', () => {
+    const groups = tracker.getLoadedGroups();
+    if (groups.length < 2) {
+        _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load at least 2 constellations to screen against each other</div>';
+        return;
+    }
+
+    // Show group selector
+    let html = '<div style="font-size:.62rem;color:#ccc;margin-bottom:6px">Select two constellations to screen:</div>';
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
+    html += `<select id="conj-group-a" style="background:#111;color:#ccc;border:1px solid rgba(255,140,0,.3);border-radius:3px;padding:3px 6px;font-size:.62rem;font-family:inherit">`;
+    for (const g of groups) html += `<option value="${g}">${g}</option>`;
+    html += '</select>';
+    html += '<span style="color:#556;font-size:.62rem;align-self:center">vs</span>';
+    html += `<select id="conj-group-b" style="background:#111;color:#ccc;border:1px solid rgba(255,140,0,.3);border-radius:3px;padding:3px 6px;font-size:.62rem;font-family:inherit">`;
+    for (const g of groups) html += `<option value="${g}"${g === 'debris' ? ' selected' : ''}>${g}</option>`;
+    html += '</select>';
+    html += `<button class="sp-op-btn" id="btn-run-xconj" style="width:auto;padding:3px 10px">Screen</button>`;
+    html += '</div>';
+    html += '<div id="xconj-results"></div>';
+    _opResults.innerHTML = html;
+
+    document.getElementById('btn-run-xconj')?.addEventListener('click', async () => {
+        const groupA = document.getElementById('conj-group-a').value;
+        const groupB = document.getElementById('conj-group-b').value;
+        const xEl = document.getElementById('xconj-results');
+        if (!xEl) return;
+
+        const allSats = tracker.getSatellites();
+        const satsA = allSats.filter(s => s.group === groupA);
+        const satsB = allSats.filter(s => s.group === groupB);
+
+        if (satsA.length === 0 || satsB.length === 0) {
+            xEl.innerHTML = '<div style="color:#ff4444;font-size:.62rem">One or both groups are empty</div>';
+            return;
+        }
+
+        xEl.innerHTML = `<div style="color:#ff8c00;font-size:.62rem">Screening ${satsA.length} (${groupA}) vs ${satsB.length} (${groupB})... altitude pre-filter ±200km</div>`;
+        await new Promise(r => setTimeout(r, 50));
+
+        // Altitude-based proximity screening (fast, no propagation needed)
+        const t0 = performance.now();
+        const overlaps = [];
+        for (const a of satsA) {
+            const altA = ((a.perigee_km || 0) + (a.apogee_km || 0)) / 2;
+            for (const b of satsB) {
+                const altB = ((b.perigee_km || 0) + (b.apogee_km || 0)) / 2;
+                const altDiff = Math.abs(altA - altB);
+                if (altDiff < 50) {
+                    overlaps.push({
+                        nameA: a.name, noradA: a.norad_id,
+                        nameB: b.name, noradB: b.norad_id,
+                        altA: Math.round(altA), altB: Math.round(altB),
+                        altDiff: Math.round(altDiff),
+                    });
+                }
+            }
+        }
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+        overlaps.sort((a, b) => a.altDiff - b.altDiff);
+
+        if (overlaps.length === 0) {
+            xEl.innerHTML = `<div style="color:#44cc66;font-size:.62rem">No altitude overlaps within 50 km between ${groupA} and ${groupB} (${elapsed}s)</div>`;
+        } else {
+            let tHtml = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${overlaps.length} altitude overlaps (<50 km) — ${elapsed}s</div>`;
+            tHtml += '<table class="op-table"><thead><tr><th>' + _esc(groupA) + '</th><th>Alt</th><th>' + _esc(groupB) + '</th><th>Alt</th><th>Gap</th></tr></thead><tbody>';
+            for (const o of overlaps.slice(0, 30)) {
+                const cls = o.altDiff < 10 ? 'crit' : o.altDiff < 25 ? 'high' : 'mod';
+                tHtml += `<tr><td title="${o.noradA}">${_esc((o.nameA || '').slice(0, 16))}</td><td>${o.altA} km</td>`
+                    + `<td title="${o.noradB}">${_esc((o.nameB || '').slice(0, 16))}</td><td>${o.altB} km</td>`
+                    + `<td><span class="op-badge ${cls}">${o.altDiff} km</span></td></tr>`;
+            }
+            tHtml += '</tbody></table>';
+            if (overlaps.length > 30) tHtml += `<div style="color:#556;font-size:.55rem;margin-top:4px">Showing 30 of ${overlaps.length} overlaps</div>`;
+            xEl.innerHTML = tHtml;
+        }
+    });
+});
+
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATION LOOP

@@ -53,6 +53,9 @@ const GROUP_MAP = {
     'globalstar':   'GROUP=globalstar',
     'amateur':      'GROUP=amateur',
     'visual':       'SPECIAL=visual',
+    'beidou':       'GROUP=beidou',
+    'glonass':      'GROUP=glonass',
+    'planet':       'GROUP=planet',
 };
 
 const RE = 6378.135;  // WGS-72 Earth radius (km)
