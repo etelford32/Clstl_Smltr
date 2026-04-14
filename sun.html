@@ -1013,6 +1013,15 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <input type="checkbox" id="tog-tr" checked>
                         <label for="tog-tr">Transition region (EUV 304 Å)</label>
                     </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-fieldlines" checked>
+                        <label for="tog-fieldlines">Magnetic field lines (B-topology)</label>
+                    </div>
+                    <div class="ctrl" style="margin-top:2px;padding-left:22px">
+                        <label style="font-size:10px;color:#777">B-line density</label>
+                        <input type="range" id="sl-bline-density" min="10" max="100" step="5" value="50">
+                        <span class="vdisp" id="disp-bline-density" style="font-size:10px">50%</span>
+                    </div>
                 </div>
             </div>
 
@@ -1721,12 +1730,11 @@ let composer, bloomPass;
     composer  = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
 
-    // UnrealBloomPass — targeted bloom that only catches the brightest features:
-    // flare ribbons, microflare pops, umbral contrast, and the corona limb.
-    // threshold 0.92 — very selective; base photosphere stays clean and sharp.
-    // strength 0.35 — moderate glow that doesn't wash out granulation detail.
-    // radius 0.40 — tight kernel preserves spatial detail in streamer structure.
-    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.35, 0.40, 0.92);
+    // UnrealBloomPass — minimal bloom, preserving analytical detail.
+    // threshold 0.95 — only brightest flare peaks trigger bloom.
+    // strength 0.15 — subtle glow; surface and coronal structure stay crisp.
+    // radius 0.25 — very tight kernel to avoid washing out field geometry.
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(W, H), 0.15, 0.25, 0.95);
     composer.addPass(bloomPass);
 
     // ── Vectorised limb-corona scatter ───────────────────────────────────────
@@ -1793,7 +1801,8 @@ let composer, bloomPass;
 
                 // Add the gathered limb light to the original pixel.
                 // Scale by mask so the effect fades smoothly at both edges.
-                gl_FragColor = orig + accum * mask * 0.18;
+                // Reduced intensity for analytical clarity — structure > glow.
+                gl_FragColor = orig + accum * mask * 0.07;
             }
         `,
     };
@@ -2375,8 +2384,8 @@ const trFS = /* glsl */`
         float baseAlpha = pow(rim, 5.0) * (0.60 + u_activity * 0.30);
 
         // Texture: bright patches at coronal loop footpoints (flux tube heating)
-        float patch = smoothstep(0.62, 0.80, vn(n3d * 15.0 + vec3(u_time * 0.016)));
-        baseAlpha  += patch * pow(rim, 2.8) * 0.24 * u_activity;
+        float fpPatch = smoothstep(0.62, 0.80, vn(n3d * 15.0 + vec3(u_time * 0.016)));
+        baseAlpha  += fpPatch * pow(rim, 2.8) * 0.24 * u_activity;
 
         // ── Flare EUV flash ───────────────────────────────────────────────────
         // X-ray + EUV irradiance spikes within seconds of flare onset,
@@ -2592,9 +2601,9 @@ const coronaFS = /* glsl */`
         float auroraGlow = poleFac_n * u_aurora_north * 0.70
                          + poleFac_s * u_aurora_south * 0.70;
         // Coronal hole fast-wind streams: cool blue-green polar plumes
-        vec3 plumeCol = mix(vec3(0.55, 0.88, 1.00), vec3(0.45, 1.00, 0.75),
+        vec3 auroraPlume = mix(vec3(0.55, 0.88, 1.00), vec3(0.45, 1.00, 0.75),
                             (u_aurora_north + u_aurora_south) * 0.5);
-        col   += plumeCol * auroraGlow * pow(rim, 1.8) * 1.2;
+        col   += auroraPlume * auroraGlow * pow(rim, 1.8) * 1.2;
         alpha += auroraGlow * pow(rim, 2.2) * 0.30;
 
         // ── G-scale geomagnetic storm: corona-wide brightening + red-orange tint ─
@@ -3429,6 +3438,307 @@ function buildCoronalLoops() {
     loopGroup.visible = document.getElementById('tog-loops')?.checked !== false;
 }
 
+// ─── MAGNETIC FIELD LINES — global dipole/quadrupole topology ────────────────
+// Renders the large-scale solar magnetic field geometry for analytics:
+//   • Closed field lines (L-shell < 2.5 R☉ source surface) — nested loops
+//   • Open field lines from polar coronal holes — extending into heliosphere
+//   • Per-vertex polarity coloring: red/orange (outward B_r) ↔ blue (inward B_r)
+//   • Activity-dependent topology: more closed flux + tilt at solar max
+//   • HCS neutral line shown as equatorial current sheet marker
+// Co-rotates with photosphere via fieldLineGroup.rotation.y = solarRotAngle.
+let fieldLineGroup = null;
+
+function buildFieldLines() {
+    if (fieldLineGroup) { scene.remove(fieldLineGroup); fieldLineGroup = null; }
+    fieldLineGroup = new THREE.Group();
+
+    const activity = uniforms.u_activity.value;
+    const density  = (+document.getElementById('sl-bline-density')?.value || 50) / 100; // 0.1–1.0
+    const R_SUN = 1.0;
+    const R_SS  = 2.5;        // source surface radius
+    const R_VIS = 4.5;        // visual extent of open lines
+    const SEG   = 64;         // points per field line
+
+    // Magnetic axis tilt: ~7° at solar minimum, up to ~30° at solar max
+    const dipTilt = (7 + activity * 23) * Math.PI / 180;
+
+    // Apply tilt rotation (around X-axis, tilts magnetic poles toward/from viewer)
+    function tiltPoint(x, y, z) {
+        const yy = y * Math.cos(dipTilt) - z * Math.sin(dipTilt);
+        const zz = y * Math.sin(dipTilt) + z * Math.cos(dipTilt);
+        return [x, yy, zz];
+    }
+
+    // Polarity color: warm red/orange for outward Br, cool blue for inward
+    function polarityColor(br) {
+        const s = Math.tanh(br * 4.0); // normalise to [-1, 1]
+        if (s >= 0) {
+            return [0.95 - 0.15 * (1 - s), 0.30 + 0.15 * (1 - s), 0.08 + 0.12 * (1 - s)];
+        } else {
+            const b = -s;
+            return [0.10 + 0.12 * (1 - b), 0.35 + 0.35 * b, 0.70 + 0.30 * b];
+        }
+    }
+
+    // ── 1. Closed dipole field lines ──────────────────────────────────────────
+    // L-shell = max radial distance at equator; closed if L < R_SS
+    const nClosedShells = Math.max(3, Math.floor((6 + activity * 5) * density));
+    const nAzimuthal    = Math.max(6, Math.floor((18 + activity * 10) * density));
+
+    for (let li = 0; li < nClosedShells; li++) {
+        const L = 1.12 + (R_SS - 1.20) * Math.pow((li + 0.5) / nClosedShells, 0.8);
+        const sinThF = Math.sqrt(R_SUN / L);
+        if (sinThF > 1) continue;
+        const thFoot = Math.asin(sinThF);
+
+        for (let ai = 0; ai < nAzimuthal; ai++) {
+            const phi = (ai / nAzimuthal) * Math.PI * 2;
+
+            const positions = [];
+            const colors    = [];
+
+            for (let i = 0; i <= SEG; i++) {
+                const theta = thFoot + (Math.PI - 2 * thFoot) * (i / SEG);
+                const r     = L * Math.sin(theta) * Math.sin(theta);
+                const x0    = r * Math.sin(theta) * Math.cos(phi);
+                const y0    = r * Math.cos(theta);
+                const z0    = r * Math.sin(theta) * Math.sin(phi);
+                const [x, y, z] = tiltPoint(x0, y0, z0);
+                positions.push(x, y, z);
+
+                // Br sign: positive in north hemisphere of dipole
+                const br = 2 * Math.cos(theta) / (r * r);
+                const [cr, cg, cb] = polarityColor(br);
+                colors.push(cr, cg, cb);
+            }
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+
+            // Inner shells brighter, outer shells more transparent
+            const shellFrac = li / nClosedShells;
+            const baseOp = 0.10 + (1 - shellFrac) * 0.16;
+            const mat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: baseOp,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            mat.userData = { baseOp, phase: phi + li * 0.7 };
+            fieldLineGroup.add(new THREE.Line(geom, mat));
+        }
+    }
+
+    // ── 2. Open field lines from polar coronal holes ─────────────────────────
+    // Dipole from surface to source surface, then radial beyond
+    const nOpenPerPole = Math.max(4, Math.floor((12 + (1 - activity) * 8) * density));
+
+    [1, -1].forEach(pole => {
+        for (let oi = 0; oi < nOpenPerPole; oi++) {
+            const phi      = (oi / nOpenPerPole) * Math.PI * 2 + (pole < 0 ? Math.PI / nOpenPerPole : 0);
+            const thetaFP  = (0.08 + 0.28 * (oi / nOpenPerPole));  // 5°–20° from pole
+            const thFoot   = pole > 0 ? thetaFP : Math.PI - thetaFP;
+            const L        = R_SUN / Math.pow(Math.sin(thFoot), 2);
+            if (L <= R_SS) continue; // only open lines
+
+            // Colatitude at source surface crossing
+            const sinThSS = Math.sqrt(R_SS / L);
+            if (sinThSS > 1) continue;
+            const thSS = pole > 0 ? Math.asin(sinThSS) : Math.PI - Math.asin(sinThSS);
+
+            const positions = [];
+            const colors    = [];
+
+            // Dipole portion: surface → source surface
+            const dipSteps = Math.floor(SEG * 0.5);
+            for (let i = 0; i <= dipSteps; i++) {
+                const frac  = i / dipSteps;
+                const theta = thFoot + (thSS - thFoot) * frac;
+                const r     = L * Math.pow(Math.sin(theta), 2);
+                const x0 = r * Math.sin(theta) * Math.cos(phi);
+                const y0 = r * Math.cos(theta);
+                const z0 = r * Math.sin(theta) * Math.sin(phi);
+                const [x, y, z] = tiltPoint(x0, y0, z0);
+                positions.push(x, y, z);
+
+                const br = 2 * Math.cos(theta) / (r * r) * pole;
+                const [cr, cg, cb] = polarityColor(br * pole);
+                colors.push(cr, cg, cb);
+            }
+
+            // Radial portion: source surface → R_VIS
+            const lastIdx  = positions.length - 3;
+            const lastPos  = new THREE.Vector3(positions[lastIdx], positions[lastIdx+1], positions[lastIdx+2]);
+            const radDir   = lastPos.clone().normalize();
+            const rStart   = lastPos.length();
+            const radSteps = SEG - dipSteps;
+
+            for (let i = 1; i <= radSteps; i++) {
+                const frac = i / radSteps;
+                const r    = rStart + (R_VIS - rStart) * frac;
+                const pos  = radDir.clone().multiplyScalar(r);
+                positions.push(pos.x, pos.y, pos.z);
+
+                // Br falls as r^-2 in open field
+                const brMag = pole / (r * r) * 0.5;
+                const [cr, cg, cb] = polarityColor(brMag);
+                // Fade out toward visual edge
+                const fadeFrac = 1 - frac * frac;
+                colors.push(cr * fadeFrac, cg * fadeFrac, cb * fadeFrac);
+            }
+
+            const geom = new THREE.BufferGeometry();
+            geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+
+            const baseOp = 0.22;
+            const mat = new THREE.LineBasicMaterial({
+                vertexColors: true, transparent: true, opacity: baseOp,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            });
+            mat.userData = { baseOp, phase: phi + oi * 0.5 };
+            fieldLineGroup.add(new THREE.Line(geom, mat));
+        }
+    });
+
+    // ── 3. Heliospheric current sheet (HCS) — equatorial neutral line ────────
+    // Warped disc at the magnetic equator showing the polarity inversion line.
+    // Tilt + Parker spiral warp make the classic "ballerina skirt" shape.
+    {
+        const hcsSegs   = 72;
+        const hcsRings  = 16;
+        const hcsInner  = R_SS * 0.9;
+        const hcsOuter  = R_VIS;
+        const positions = [];
+        const colors    = [];
+        const indices   = [];
+
+        for (let ri = 0; ri <= hcsRings; ri++) {
+            const rFrac = ri / hcsRings;
+            const r     = hcsInner + (hcsOuter - hcsInner) * rFrac;
+            for (let si = 0; si <= hcsSegs; si++) {
+                const phi = (si / hcsSegs) * Math.PI * 2;
+                // Parker spiral offset: HCS is warped by solar rotation
+                const spiralPhase = phi - 0.15 * (r - hcsInner);
+                // Tilt modulation creates the warped ballerina-skirt shape
+                const warpY = Math.sin(spiralPhase) * Math.sin(dipTilt) * r * 0.12;
+                const [x, y, z] = tiltPoint(
+                    r * Math.cos(phi),
+                    warpY,
+                    r * Math.sin(phi)
+                );
+                positions.push(x, y, z);
+                // HCS is the polarity inversion — neutral yellow-white
+                const fade = (1 - rFrac) * 0.6;
+                colors.push(0.95 * fade, 0.85 * fade, 0.5 * fade);
+            }
+        }
+
+        // Build triangle indices for the sheet
+        for (let ri = 0; ri < hcsRings; ri++) {
+            for (let si = 0; si < hcsSegs; si++) {
+                const a = ri * (hcsSegs + 1) + si;
+                const b = a + 1;
+                const c = a + hcsSegs + 1;
+                const d = c + 1;
+                indices.push(a, b, c, b, d, c);
+            }
+        }
+
+        const hcsGeom = new THREE.BufferGeometry();
+        hcsGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        hcsGeom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+        hcsGeom.setIndex(indices);
+
+        const hcsMat = new THREE.MeshBasicMaterial({
+            vertexColors: true, transparent: true, opacity: 0.10,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+        });
+        hcsMat.userData = { baseOp: 0.10 };
+        fieldLineGroup.add(new THREE.Mesh(hcsGeom, hcsMat));
+    }
+
+    // ── 4. Active-region enhanced field bundles ──────────────────────────────
+    // Tight concentrated field line bundles emerging from each active region,
+    // showing where magnetic flux is concentrated on the surface.
+    if (typeof liveRegions !== 'undefined' && liveRegions.length) {
+        liveRegions.forEach(reg => {
+            const c = parseLoc(reg.loc);
+            if (!c) return;
+            const lat_r = c.lat * Math.PI / 180;
+            const lon_r = c.lon * Math.PI / 180;
+            const origin = new THREE.Vector3(
+                Math.cos(lat_r) * Math.sin(lon_r),
+                Math.sin(lat_r),
+                Math.cos(lat_r) * Math.cos(lon_r)
+            ).normalize();
+
+            const areaNorm = Math.min((reg.area || 20) / 800, 1.0);
+            const complex  = (reg.mag || '').toLowerCase().includes('delta') ||
+                             (reg.mag || '').toLowerCase().includes('gamma');
+            const nBundles = complex ? 6 : 3;
+            const bundleH  = 0.3 + areaNorm * 0.5;  // taller than coronal loops
+
+            // Build orthonormal basis
+            const up    = Math.abs(origin.y) < 0.9 ? new THREE.Vector3(0,1,0) : new THREE.Vector3(1,0,0);
+            const tang1 = new THREE.Vector3().crossVectors(origin, up).normalize();
+            const tang2 = new THREE.Vector3().crossVectors(origin, tang1).normalize();
+
+            for (let bi = 0; bi < nBundles; bi++) {
+                const angle  = (bi / nBundles) * Math.PI * 2 + 0.3;
+                const spread = 0.08 + areaNorm * 0.15;
+
+                const offsetDir = tang1.clone().multiplyScalar(Math.cos(angle))
+                                      .add(tang2.clone().multiplyScalar(Math.sin(angle)));
+                const fp1 = origin.clone().add(offsetDir.clone().multiplyScalar(-spread)).normalize();
+                const fp2 = origin.clone().add(offsetDir.clone().multiplyScalar( spread)).normalize();
+
+                const mid  = fp1.clone().add(fp2).normalize();
+                const apex = mid.clone().multiplyScalar(1.0 + bundleH);
+                const c1   = fp1.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + bundleH * 0.70);
+                const c2   = fp2.clone().lerp(apex, 0.45).normalize().multiplyScalar(1.0 + bundleH * 0.70);
+
+                const positions = [];
+                const colors    = [];
+                const N = 48;
+
+                for (let i = 0; i <= N; i++) {
+                    const t = i / N, it = 1 - t;
+                    const pt = fp1.clone().multiplyScalar(it*it*it)
+                        .add(c1.clone().multiplyScalar(3*it*it*t))
+                        .add(c2.clone().multiplyScalar(3*it*t*t))
+                        .add(fp2.clone().multiplyScalar(t*t*t));
+                    positions.push(pt.x, pt.y, pt.z);
+
+                    // Polarity gradient: leading spot → trailing spot
+                    // Use simple bipolar coloring (red footpoint → apex → blue footpoint)
+                    const polFrac = 2 * (t - 0.5); // [-1, 1]
+                    const [cr, cg, cb] = polarityColor(polFrac * 2);
+                    // Brighten the apex
+                    const apexBoost = 1 + 0.5 * (1 - Math.abs(polFrac));
+                    colors.push(cr * apexBoost, cg * apexBoost, cb * apexBoost);
+                }
+
+                const geom = new THREE.BufferGeometry();
+                geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+
+                const baseOp = 0.18 + areaNorm * 0.18 + (complex ? 0.10 : 0);
+                const mat = new THREE.LineBasicMaterial({
+                    vertexColors: true, transparent: true, opacity: baseOp,
+                    depthWrite: false, blending: THREE.AdditiveBlending,
+                    linewidth: 1,
+                });
+                mat.userData = { baseOp, phase: Math.random() * Math.PI * 2 };
+                fieldLineGroup.add(new THREE.Line(geom, mat));
+            }
+        });
+    }
+
+    scene.add(fieldLineGroup);
+    fieldLineGroup.visible = document.getElementById('tog-fieldlines')?.checked ?? true;
+}
+
 // ─── SOLAR PROMINENCES ────────────────────────────────────────────────────────
 // Cool dense plasma curtains (T ~ 8–80 kK) suspended by magnetic fields.
 // Appear as bright pink-red arches beyond the limb (Hα 656 nm / AIA 304 Å).
@@ -3661,6 +3971,11 @@ document.getElementById('tog-corona').addEventListener('change', e => { coronaMe
 document.getElementById('tog-loops').addEventListener('change',  e => { if (loopGroup)  loopGroup.visible  = e.target.checked; });
 document.getElementById('tog-prom').addEventListener('change',   e => { if (promGroup)  promGroup.visible  = e.target.checked; });
 document.getElementById('tog-tr').addEventListener('change',     e => { trMesh.visible = e.target.checked; });
+document.getElementById('tog-fieldlines').addEventListener('change', e => { if (fieldLineGroup) fieldLineGroup.visible = e.target.checked; });
+document.getElementById('sl-bline-density').addEventListener('input', function() {
+    document.getElementById('disp-bline-density').textContent = this.value + '%';
+    buildFieldLines(); // rebuild with new density
+});
 
 // RESIZE
 function resize() {
@@ -3745,6 +4060,17 @@ function animate() {
                 }
             }
             line.material.opacity = ud.baseOp * wave * (ud.eruptFade ?? 1.0);
+        });
+    }
+
+    // Magnetic field lines — co-rotate with photosphere, gentle opacity pulse
+    if (fieldLineGroup) {
+        fieldLineGroup.rotation.y = solarRotAngle;
+        fieldLineGroup.children.forEach(child => {
+            const ud = child.material?.userData;
+            if (ud?.baseOp !== undefined) {
+                child.material.opacity = ud.baseOp * (0.75 + 0.25 * Math.sin(t * 0.8 + (ud.phase || 0)));
+            }
         });
     }
 
@@ -3849,10 +4175,10 @@ function animate() {
     // Base is deliberately low — the K-corona shader carries ambient glow.
     // Kp contributes: geomagnetic storms drive visible corona brightening.
     if (bloomPass) {
-        // Bloom spikes only during flares; base stays low to preserve surface detail.
-        const flareBoost = Math.max(0, 0.50 * Math.exp(-uniforms.u_flare_t.value / 12.0));
-        const baseBloom  = 0.25 + uniforms.u_activity.value * 0.08
-                         + uniforms.u_kp_norm.value * 0.06 + flareBoost;
+        // Bloom spikes only during flares; base stays very low for analytical clarity.
+        const flareBoost = Math.max(0, 0.30 * Math.exp(-uniforms.u_flare_t.value / 12.0));
+        const baseBloom  = 0.12 + uniforms.u_activity.value * 0.04
+                         + uniforms.u_kp_norm.value * 0.03 + flareBoost;
         bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, baseBloom, 0.04);
     }
     composer.render();
@@ -4253,6 +4579,7 @@ async function fetchLiveSolarData() {
 
         buildRegionMarkers();
         buildCoronalLoops();
+        buildFieldLines();
         buildProminences();
         updateLivePanel(false);
         _updateRibbonXray();
@@ -4266,6 +4593,7 @@ async function fetchLiveSolarData() {
         // — do NOT clear liveRegions/liveFlares/liveXrayFlux
         buildRegionMarkers();
         buildCoronalLoops();
+        buildFieldLines();
         buildProminences();
         updateLivePanel(false);
         _updateRibbonXray();
@@ -4338,6 +4666,7 @@ function replayRecentFlares() {
 applyDefaultData();
 buildRegionMarkers();
 buildCoronalLoops();
+buildFieldLines();
 buildProminences();
 updateLivePanel(false);
 updateFlareActivityBar();
