@@ -4592,9 +4592,9 @@ document.getElementById('sl-rot').addEventListener('input', function() {
 //  LIVE SOLAR DATA — NOAA Space Weather Prediction Center
 //
 //  Endpoints (open CORS, no API key required):
-//    • /products/solar-regions.json — today's active sunspot regions
-//    • /json/edited_events.json     — recent solar events (flares, etc.)
-//    • /json/goes/primary/xrays-1-day.json — GOES X-ray flux (1-min cadence)
+//    • /json/solar_regions.json              — today's active sunspot regions
+//    • /json/edited_events.json              — recent solar events (flares, etc.)
+//    • /json/goes/primary/xrays-1-day.json   — GOES X-ray flux (1-min cadence)
 //
 //  Active region markers: torus rings + glow discs placed at each region's
 //  Stonyhurst heliographic position, rotating with the photosphere texture.
@@ -4869,22 +4869,39 @@ async function fetchLiveSolarData() {
         // /json/solar_regions.json returns an array of objects:
         //   { region, location, latitude, carrington_longitude, area,
         //     z_class, mag_class, num_spots, observatory, ... }
-        // Some NOAA format variants use: Region, Location, Z, Mag, Area, Spots
+        // Some format variants use: Region, Location, Z, Mag, Area, Spots
+        //
+        // The `location` field may be "N18W22" (Stonyhurst) or may be absent.
+        // Fallback: construct from numeric latitude + longitude fields.
         const parsed = (Array.isArray(rJ) ? rJ : []).map(r => {
-            // Handle both lowercase and capitalised NOAA field variants
             const num   = String(r.region ?? r.Region ?? r[1] ?? '');
-            const loc   = String(r.location ?? r.Location ?? r[4] ?? '');
+            let   loc   = String(r.location ?? r.Location ?? r[4] ?? '');
             const area  = parseInt(r.area ?? r.Area ?? r[6] ?? r[5]) || 0;
             const z     = String(r.z_class ?? r.Z ?? r[7] ?? 'A');
             const mag   = String(r.mag_class ?? r.Mag ?? r.magclass ?? r[11] ?? '');
             const nspot = parseInt(r.num_spots ?? r.Spots ?? r.numspot ?? r[10]) || 0;
+
+            // If parseLoc can't parse the location string, construct from
+            // numeric latitude + longitude (NOAA provides both)
+            if (!parseLoc(loc)) {
+                const lat = Number(r.latitude ?? r.Latitude ?? 0);
+                const lon = Number(r.longitude ?? r.Longitude ?? r.carrington_longitude ?? 0);
+                if (lat || lon) {
+                    const ns = lat >= 0 ? 'N' : 'S';
+                    const ew = lon >= 0 ? 'W' : 'E';
+                    loc = ns + String(Math.round(Math.abs(lat))).padStart(2, '0')
+                        + ew + String(Math.round(Math.abs(lon))).padStart(2, '0');
+                }
+            }
+
             return { num, loc, area, z, mag, nspot };
         }).filter(r => r.num && parseLoc(r.loc));
 
         if (parsed.length > 0) {
             liveRegions = parsed;
         }
-        console.log('[Sun] Regions parsed:', parsed.length, 'from', rJ?.length ?? 0, 'rows');
+        console.log('[Sun] Regions parsed:', parsed.length, 'from', rJ?.length ?? 0, 'rows',
+            parsed.length ? '→ ' + parsed.map(r => 'AR' + r.num + ' ' + r.loc).join(', ') : '');
 
         // ── Flares from edited_events.json ────────────────────────────────────
         // Format: array of objects with serial_number, event, begin_datetime,
@@ -4893,11 +4910,15 @@ async function fetchLiveSolarData() {
         const cutoff = Date.now() - 48 * 3600e3;
         const parsedFlares = (Array.isArray(eJ) ? eJ : [])
             .filter(e => {
+                // Filter to flare-type events: FLA, XRA, XRF, or any entry with X-ray class
                 const evType = String(e.event ?? e.type ?? '').toUpperCase();
-                if (evType && !evType.includes('FLA') && !evType.includes('XRA') && !evType.includes('XRF')) return false;
-                const tStr = e.begin_datetime ?? e.begin_time ?? e.eventTime ?? e.beginTime ?? '';
-                const t = new Date(String(tStr).replace(' ', 'T') + (tStr.includes('Z') ? '' : 'Z'));
-                const cls = e.observed_class ?? e.class ?? e.severity ?? '';
+                const cls = e.observed_class ?? e.class ?? e.severity ?? e.max_class ?? '';
+                const isFlare = !evType
+                    || evType.includes('FLA') || evType.includes('XRA') || evType.includes('XRF')
+                    || /^[ABCMX]\d/i.test(cls);  // class looks like "M2.3", "X1.0", etc.
+                if (!isFlare) return false;
+                const tStr = e.begin_datetime ?? e.begin_time ?? e.eventTime ?? e.beginTime ?? e.peak_time ?? '';
+                const t = new Date(String(tStr).replace(' ', 'T') + (String(tStr).includes('Z') ? '' : 'Z'));
                 return cls && !isNaN(t.getTime()) && t.getTime() > cutoff;
             })
             .slice(-14).reverse()
