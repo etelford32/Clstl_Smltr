@@ -940,19 +940,21 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <button class="spd-btn" id="spd-10x">10×</button>
                         <button class="spd-btn" id="spd-50x">50×</button>
                     </div>
-                    <!-- 7-day SWPC data scrubber -->
+                    <!-- 7-day SWPC data scrubber + 24h LSTM forecast -->
                     <div style="margin-top:10px">
                         <div class="scrub-hdr">
                             <span class="scrub-edge">7d ago</span>
                             <span id="scrub-time-lbl">● LIVE</span>
-                            <span class="scrub-edge">now</span>
+                            <span class="scrub-edge">+24h</span>
                         </div>
                         <input type="range" id="sl-scrub" min="0" max="10079" step="1" value="10079">
                         <div class="scrub-vals" id="scrub-vals" style="display:none">
                             <div class="scrub-val"><div class="sv" id="scrub-v-speed">—</div><div class="su">km/s</div></div>
                             <div class="scrub-val"><div class="sv" id="scrub-v-dens">—</div><div class="su">n/cc</div></div>
                             <div class="scrub-val"><div class="sv" id="scrub-v-bz">—</div><div class="su">Bz nT</div></div>
+                            <div class="scrub-val"><div class="sv" id="scrub-v-kp">—</div><div class="su">Kp</div></div>
                         </div>
+                        <div id="scrub-zone-lbl" style="text-align:center;font-size:9px;color:#555;margin-top:2px;display:none"></div>
                     </div>
                 </div>
             </div>
@@ -1049,6 +1051,7 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                         <tr><td>27-day recurrence</td><td id="fc-recurrence">—</td></tr>
                         <tr><td>Solar cycle</td><td id="fc-cycle">—</td></tr>
                         <tr><td>Model accuracy</td><td id="fc-accuracy" style="font-size:10px">—</td></tr>
+                        <tr><td>LSTM neural net</td><td id="fc-lstm" style="font-size:10px">—</td></tr>
                     </table>
                 </div>
             </div>
@@ -1483,6 +1486,7 @@ import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
+import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -1546,9 +1550,16 @@ document.getElementById('spd-5x').addEventListener('click',    () => setSimSpeed
 document.getElementById('spd-10x').addEventListener('click',   () => setSimSpeed(10));
 document.getElementById('spd-50x').addEventListener('click',   () => setSimSpeed(50));
 
-// ── 7-day SWPC scrubber ────────────────────────────────────────────────────
-let swpcTimeline = [];   // [{t, speed, density, bz}] oldest → newest
-let scrubLive    = true; // true = follow real-time swpc-update events
+// ── 7-day SWPC scrubber + 24h LSTM forecast ──────────────────────────────
+// Timeline: enriched with Bt, By, Kp (estimated from Bz/speed coupling
+// when Kp feed unavailable).  Extended by +24h LSTM forecast zone.
+let swpcTimeline   = [];    // [{t, speed, density, bz, bt, by, kp, isForecast}] oldest → newest
+let scrubLive      = true;  // true = follow real-time swpc-update events
+let scrubLiveIdx   = 0;     // index of the "LIVE" position (end of observed data)
+let scrubForecastStart = 0; // index where forecast zone begins
+
+// LSTM model — initialised below, seeded from historical data
+const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
 
 (async function loadSwpcTimeline() {
     const PLASMA = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json';
@@ -1565,31 +1576,89 @@ let scrubLive    = true; // true = follow real-time swpc-update events
             .map(r => ({ t: r[iTime], speed: parseFloat(r[iSpd]), density: parseFloat(r[iDns]) }))
             .filter(r => r.speed > 0 && r.density > 0);
 
-        // Parse mag → timestamp→bz map (key = "YYYY-MM-DD HH:MM")
-        let magMap = new Map();
+        // Parse mag → timestamp→{bz, bt, by} map (key = "YYYY-MM-DD HH:MM")
+        const magMap = new Map();
         if (mRaw) {
             const mH = mRaw[0];
-            const [iMT, iBz] = [mH.indexOf('time_tag'), mH.indexOf('bz_gsm')];
+            const iBz = mH.indexOf('bz_gsm');
+            const iBt = mH.indexOf('bt');
+            const iBy = mH.indexOf('by_gsm');
+            const iMT = mH.indexOf('time_tag');
             mRaw.slice(1).forEach(r => {
                 const bz = parseFloat(r[iBz]);
-                if (!isNaN(bz) && Math.abs(bz) < 500)
-                    magMap.set(String(r[iMT]).slice(0,16), bz);
+                const bt = iBt >= 0 ? parseFloat(r[iBt]) : NaN;
+                const by = iBy >= 0 ? parseFloat(r[iBy]) : NaN;
+                if (!isNaN(bz) && Math.abs(bz) < 500) {
+                    magMap.set(String(r[iMT]).slice(0,16), {
+                        bz,
+                        bt: isNaN(bt) ? Math.abs(bz) * 1.2 : bt,
+                        by: isNaN(by) ? 0 : by,
+                    });
+                }
             });
         }
 
-        swpcTimeline = plasma.map(r => ({
-            t:       r.t,
-            speed:   r.speed,
-            density: r.density,
-            bz:      magMap.get(String(r.t).slice(0,16)) ?? null,
+        // Build enriched timeline with estimated Kp from Bz/speed coupling
+        const observed = plasma.map(r => {
+            const mag = magMap.get(String(r.t).slice(0,16));
+            const bz  = mag?.bz ?? null;
+            const bt  = mag?.bt ?? 5;
+            const by  = mag?.by ?? 0;
+            // Newell coupling: Kp ~ f(Bz_south, v_sw)
+            // Empirical: Kp ≈ 0.3 + 2.5 * (|Bz_south|/20) + 1.5 * ((v-350)/400)
+            const bzS = bz != null ? Math.max(0, -bz) : 0;
+            const kpEst = Math.max(0, Math.min(9,
+                0.3 + 2.5 * (bzS / 20) + 1.5 * ((r.speed - 350) / 400)
+            ));
+            return {
+                t: r.t, speed: r.speed, density: r.density,
+                bz, bt, by, kp: kpEst, isForecast: false,
+            };
+        });
+
+        // Seed LSTM with hourly-sampled historical data
+        const hourlyForLSTM = [];
+        let lastHourT = 0;
+        for (const pt of observed) {
+            const tMs = new Date(pt.t.replace(' ', 'T') + 'Z').getTime();
+            if (tMs - lastHourT >= 3_600_000) {
+                hourlyForLSTM.push({
+                    t_ms: tMs, speed: pt.speed, density: pt.density,
+                    bz: pt.bz ?? 0, bt: pt.bt, kp: pt.kp,
+                });
+                lastHourT = tMs;
+            }
+        }
+        // Try to load saved weights first
+        if (!_lstm.loadFromStorage()) {
+            _lstm.seed(hourlyForLSTM, 3);
+            _lstm.saveToStorage();
+        } else {
+            // Still ingest recent data into buffer even if weights loaded
+            for (const rec of hourlyForLSTM.slice(-168)) { // last 7 days
+                _lstm.ingest(rec, rec.t_ms);
+            }
+        }
+
+        // Generate +24h LSTM forecast and append to timeline
+        const forecasts = _lstm.forecast(24);
+        const forecastPts = forecasts.map(fc => ({
+            t: new Date(fc.t_ms).toISOString().replace('T', ' ').slice(0, 16),
+            speed: fc.raw.speed, density: fc.raw.density,
+            bz: fc.raw.bz, bt: fc.raw.bt, by: 0,
+            kp: fc.raw.kp, isForecast: true,
         }));
+
+        swpcTimeline = [...observed, ...forecastPts];
+        scrubLiveIdx = observed.length - 1;
+        scrubForecastStart = observed.length;
 
         const sl = document.getElementById('sl-scrub');
         sl.max   = Math.max(0, swpcTimeline.length - 1);
-        sl.value = sl.max;   // start at live (rightmost)
-        console.log('[SWPC] 7-day timeline loaded:', swpcTimeline.length, 'readings');
+        sl.value = scrubLiveIdx;   // start at live (not forecast)
+        console.log(`[SWPC] Timeline: ${observed.length} observed + ${forecastPts.length} forecast (LSTM confidence ${(_lstm.confidence * 100).toFixed(0)}%)`);
 
-        // Mark wind + IMF feeds as live
+        // Mark feeds as live
         ['fd-wind','fd-imf'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.className = 'feed-dot live';
@@ -1605,36 +1674,76 @@ let scrubLive    = true; // true = follow real-time swpc-update events
 
 document.getElementById('sl-scrub').addEventListener('input', function() {
     const idx    = +this.value;
-    const maxIdx = swpcTimeline.length - 1;
-    scrubLive    = (idx >= maxIdx);
+    scrubLive    = (idx >= scrubLiveIdx && idx < scrubForecastStart);
+    const isForecast = idx >= scrubForecastStart;
 
-    const lbl = document.getElementById('scrub-time-lbl');
-    if (scrubLive || swpcTimeline.length === 0) {
+    const lbl     = document.getElementById('scrub-time-lbl');
+    const zoneLbl = document.getElementById('scrub-zone-lbl');
+
+    if (swpcTimeline.length === 0) {
         lbl.textContent = '● LIVE';
         lbl.style.color = '#44bb66';
         document.getElementById('scrub-vals').style.display = 'none';
+        zoneLbl.style.display = 'none';
         return;
     }
 
-    const pt = swpcTimeline[Math.min(idx, maxIdx)];
+    if (scrubLive) {
+        lbl.textContent = '● LIVE';
+        lbl.style.color = '#44bb66';
+        document.getElementById('scrub-vals').style.display = 'none';
+        zoneLbl.style.display = 'none';
+        return;
+    }
+
+    const pt = swpcTimeline[Math.min(idx, swpcTimeline.length - 1)];
     if (!pt) return;
 
-    const d   = new Date(pt.t.replace(' ', 'T') + 'Z');
+    const d   = new Date((pt.t + (pt.t.includes('T') ? '' : 'T') + (pt.t.includes('Z') ? '' : 'Z')).replace(' ', 'T'));
     const lbl_str = d.toLocaleDateString('en-US', { month:'short', day:'numeric' })
                   + ' ' + d.toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit', hour12:false });
     lbl.textContent = lbl_str;
-    lbl.style.color = '#ff9944';
+    lbl.style.color = isForecast ? '#6688ff' : '#ff9944';
 
+    // Zone label
+    if (isForecast) {
+        const hoursAhead = idx - scrubForecastStart + 1;
+        zoneLbl.textContent = `LSTM FORECAST +${hoursAhead}h (confidence ${(_lstm.confidence * 100).toFixed(0)}%)`;
+        zoneLbl.style.color = '#6688ff';
+        zoneLbl.style.display = '';
+    } else {
+        zoneLbl.textContent = 'HISTORICAL';
+        zoneLbl.style.color = '#ff9944';
+        zoneLbl.style.display = '';
+    }
+
+    // Show all scrubber values
     document.getElementById('scrub-vals').style.display = 'flex';
-    document.getElementById('scrub-v-speed').textContent = pt.speed?.toFixed(0)   ?? '—';
+    document.getElementById('scrub-v-speed').textContent = pt.speed?.toFixed(0) ?? '—';
     document.getElementById('scrub-v-dens').textContent  = pt.density?.toFixed(1) ?? '—';
     document.getElementById('scrub-v-bz').textContent    = pt.bz != null ? pt.bz.toFixed(1) : '—';
+    document.getElementById('scrub-v-kp').textContent    = pt.kp?.toFixed(1) ?? '—';
 
-    // Drive simulation with historical data
+    // ── Drive ALL uniforms from timeline data ────────────────────────────────
     uniforms.u_wind_speed_norm.value   = Math.max(0, Math.min(1, (pt.speed   - 250) / 650));
     uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, (pt.density ?? 5)  / 25));
-    if (pt.bz != null)
-        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -pt.bz / 30));
+    if (pt.bz != null) {
+        uniforms.u_bz_sw.value  = Math.max(0, Math.min(1, -pt.bz / 30));
+    }
+    uniforms.u_bt_norm.value   = Math.max(0, Math.min(1, (pt.bt ?? 5) / 30));
+    uniforms.u_by_sw.value     = Math.max(-1, Math.min(1, (pt.by ?? 0) / 20));
+    uniforms.u_kp_norm.value   = Math.max(0, Math.min(1, (pt.kp ?? 2) / 9));
+
+    // Derive storm level from Kp
+    const kp = pt.kp ?? 0;
+    uniforms.u_storm_level.value = kp >= 9 ? 5 : kp >= 8 ? 4 : kp >= 7 ? 3 : kp >= 6 ? 2 : kp >= 5 ? 1 : 0;
+
+    // Derive Dst estimate from Kp (Burton equation approximation)
+    uniforms.u_dst_norm.value = Math.max(0, Math.min(1, (kp * kp * 2.5) / 200));
+
+    // Temperature estimate from speed
+    const tempK = 50e3 + (pt.speed - 350) * 800;  // rough T-v relationship
+    uniforms.u_wind_temp_norm.value = Math.max(0, Math.min(1, (tempK - 50e3) / 450e3));
 });
 
 // SDO drawer toggle
@@ -4935,6 +5044,8 @@ window.addEventListener('swpc-update', (ev) => {
         _lastForecastAt = now;
         _lastForecast = _forecaster.update(_wxHistory, 72);
         _updateForecastPanel(_lastForecast);
+        // Persist LSTM weights every 5 minutes
+        if (typeof _lstm !== 'undefined') _lstm.saveToStorage();
     }
 }, { passive: true });
 
@@ -4986,6 +5097,13 @@ function _updateForecastPanel(fc) {
         accEl.textContent = kpAcc.n > 0
             ? `Kp hit: ${Math.round(kpAcc.hit_rate * 100)}% (n=${kpAcc.n}, MAE=${kpAcc.mae.toFixed(2)})`
             : 'Accumulating data…';
+    }
+
+    // LSTM neural network status
+    const lstmEl = el('fc-lstm');
+    if (lstmEl && typeof _lstm !== 'undefined') {
+        const s = _lstm.status();
+        lstmEl.textContent = `${s.trained} steps · err ${s.errorEMA.toFixed(3)} · conf ${(s.confidence * 100).toFixed(0)}% · lr ${s.lr.toFixed(5)}`;
     }
 }
 
@@ -5070,30 +5188,35 @@ window.addEventListener('swpc-update', (ev) => {
     }
 
     // ── Wire live values into 3D particle uniforms ─────────────────────────────
-    // Skip wind/IMF uniforms when user is scrubbing historical data
+    // Skip ALL shader uniforms when user is scrubbing historical/forecast data.
+    // The scrubber handler drives uniforms from timeline data instead.
     if (typeof scrubLive === 'undefined' || scrubLive) {
         uniforms.u_wind_speed_norm.value   = d.wind_speed_norm   ?? Math.max(0, Math.min(1, (spd - 250) / 650));
         uniforms.u_wind_density_norm.value = d.wind_density_norm ?? Math.max(0, Math.min(1, dns / 25));
-        // Temperature: 50 kK (slow) → 500 kK (fast/CME) mapped to 0-1
         uniforms.u_wind_temp_norm.value    = Math.max(0, Math.min(1, (tmp - 50e3) / 450e3));
         uniforms.u_bz_sw.value             = d.bz_southward      ?? Math.max(0, Math.min(1, -bz / 30));
+        uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
+        uniforms.u_f107_norm.value         = d.f107_norm         ?? 0.30;
+        uniforms.u_aurora_north.value      = d.aurora_north_norm ?? 0.0;
+        uniforms.u_aurora_south.value      = d.aurora_south_norm ?? 0.0;
+        uniforms.u_electron_norm.value     = d.electron_2mev_norm ?? 0.0;
+        uniforms.u_proton_norm.value       = d.proton_10mev_norm  ?? 0.0;
+        uniforms.u_storm_level.value       = d.storm_level        ?? 0.0;
+        uniforms.u_bt_norm.value           = d.bt_norm            ?? Math.max(0, Math.min(1, bt / 30));
+        uniforms.u_by_sw.value             = Math.max(-1, Math.min(1, (sw.solar_wind?.by ?? 0) / 20));
+        uniforms.u_dst_norm.value          = d.dst_norm           ?? 0.025;
     }
-    uniforms.u_kp_norm.value           = d.kp_norm           ?? Math.max(0, Math.min(1, kp / 9));
 
-    // ── Wire all remaining NOAA channels to shader uniforms ──────────────────
-    uniforms.u_f107_norm.value     = d.f107_norm         ?? 0.30;
-    uniforms.u_aurora_north.value  = d.aurora_north_norm ?? 0.0;
-    uniforms.u_aurora_south.value  = d.aurora_south_norm ?? 0.0;
-    uniforms.u_electron_norm.value = d.electron_2mev_norm ?? 0.0;
-    uniforms.u_proton_norm.value   = d.proton_10mev_norm  ?? 0.0;
-    uniforms.u_storm_level.value   = d.storm_level        ?? 0.0;
-    uniforms.u_bt_norm.value       = d.bt_norm            ?? Math.max(0, Math.min(1, bt / 30));
-    uniforms.u_by_sw.value         = Math.max(-1, Math.min(1, (sw.solar_wind?.by ?? 0) / 20));
-    uniforms.u_dst_norm.value      = d.dst_norm           ?? 0.025;
+    // ── Feed LSTM with live data (always, regardless of scrub mode) ──────────
+    if (typeof _lstm !== 'undefined') {
+        _lstm.ingest({ speed: spd, density: dns, bz, bt, kp }, Date.now());
+    }
 
     // S-scale drives SEP particle system
     const sepLevel = sw.sep_storm_level ?? 0;
-    uniforms.u_sep_level.value = sepLevel;
+    if (typeof scrubLive === 'undefined' || scrubLive) {
+        uniforms.u_sep_level.value = sepLevel;
+    }
 
     // ── HUD: Bz, Kp, and ML flare prediction readout ─────────────────────────
     const hudBz = document.getElementById('hud-bz');
