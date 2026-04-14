@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Status — Parker Physics</title>
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#03010e;color:#ccc;min-height:100vh;display:flex;flex-direction:column}
+main{flex:1;max-width:1100px;width:100%;margin:0 auto;padding:24px 20px 48px}
+h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sub{color:#555;font-size:.82rem;margin:2px 0 18px}
+
+/* KPI strip */
+.kpi-strip{display:flex;gap:12px;margin-bottom:22px;flex-wrap:wrap}
+.kpi{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 18px;text-align:center;min-width:120px;flex:1}
+.kpi-val{font-size:1.6rem;font-weight:800;line-height:1;margin-bottom:4px}
+.kpi-label{font-size:.68rem;color:#555;text-transform:uppercase;letter-spacing:.06em}
+.green{color:#4eff91} .red{color:#ff5555} .gold{color:#ffd700} .blue{color:#4fc3f7}
+
+/* Section */
+.section{margin-bottom:24px}
+.section h2{font-size:.85rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)}
+
+/* Status rows */
+.row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:3px;font-size:.84rem}
+.row:hover{background:rgba(255,255,255,.04)}
+.dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:#4eff91;box-shadow:0 0 6px rgba(78,255,145,.5)}
+.dot.fail{background:#ff5555;box-shadow:0 0 6px rgba(255,85,85,.5)}
+.dot.warn{background:#ffd700;box-shadow:0 0 6px rgba(255,215,0,.4)}
+.dot.pending{background:#444;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.row-name{flex:1;color:#bbb}
+.row-name a{color:#bbb;text-decoration:none}
+.row-name a:hover{color:#fff}
+.row-detail{color:#555;font-size:.75rem;font-family:monospace}
+.row-tag{font-size:.65rem;font-weight:600;padding:2px 7px;border-radius:3px;text-transform:uppercase;letter-spacing:.04em}
+.tag-sim{background:rgba(0,198,255,.1);color:#4fc3f7;border:1px solid rgba(0,198,255,.2)}
+.tag-tool{background:rgba(192,128,255,.1);color:#c080ff;border:1px solid rgba(192,128,255,.2)}
+.tag-page{background:rgba(255,255,255,.05);color:#777;border:1px solid rgba(255,255,255,.08)}
+.tag-api{background:rgba(255,140,0,.1);color:#ff8c00;border:1px solid rgba(255,140,0,.2)}
+.tag-js{background:rgba(78,255,145,.08);color:#4eff91;border:1px solid rgba(78,255,145,.2)}
+
+.deps{margin-top:2px;font-size:.72rem;color:#444;padding-left:20px}
+.deps .dep-miss{color:#ff5555}
+
+.actions{margin-bottom:18px;display:flex;gap:8px}
+.btn{padding:7px 16px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#ccc;font-family:inherit;font-size:.8rem;cursor:pointer;transition:background .15s}
+.btn:hover{background:rgba(255,255,255,.12);color:#fff}
+
+.timestamp{text-align:center;padding:20px;color:#333;font-size:.75rem;font-family:monospace}
+</style>
+</head>
+<body>
+<nav></nav>
+<script type="importmap">
+{"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("status");</script>
+
+<main>
+<h1>System Status</h1>
+<p class="sub" id="scan-time">Scanning...</p>
+
+<div class="kpi-strip">
+  <div class="kpi"><div class="kpi-val green" id="k-live">—</div><div class="kpi-label">Pages Live</div></div>
+  <div class="kpi"><div class="kpi-val red" id="k-404">—</div><div class="kpi-label">404 / Down</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-js">—</div><div class="kpi-label">JS Modules</div></div>
+  <div class="kpi"><div class="kpi-val gold" id="k-deps">—</div><div class="kpi-label">Broken Deps</div></div>
+</div>
+
+<div class="actions">
+  <button class="btn" id="btn-rescan">Re-scan All</button>
+  <button class="btn" id="btn-filter" data-mode="all">Show: All</button>
+</div>
+
+<div id="results"></div>
+<div class="timestamp" id="footer-ts"></div>
+</main>
+
+<script type="module">
+// ── Page & module manifest ──────────────────────────────────────────────────
+// Every page and JS module the app should have.
+// deps = local JS imports the page needs (not CDN).
+const PAGES = [
+    // Simulations
+    { file: 'index.html',            label: 'Home / Sgr A* Hero',       tag: 'sim',  deps: ['js/nav.js','js/card-previews.js'] },
+    { file: 'space-weather.html',    label: 'Space Weather',            tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/soho-feed.js','js/heliosphere3d.js','js/horizons.js','js/solar-wind-state.js','js/wind-pipeline-feed.js','js/space-weather-globe.js','js/earth-orbit.js','js/solar-wind-magnetosphere.js','js/cme-propagation.js','js/alert-engine.js','js/impact-score.js','js/earth-forecast.js','js/model-validation.js'] },
+    { file: 'sun.html',              label: 'The Sun',                  tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/wind-pipeline-feed.js','js/soho-feed.js','js/solar-atmosphere.js','js/solar-weather-forecast.js'] },
+    { file: 'earth.html',            label: 'Earth',                    tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/user-location.js','js/weather-feed.js','js/nws-alerts.js','js/isobar-engine.js','js/magnetosphere-engine.js','js/exosphere-engine.js','js/solar-wind-magnetosphere.js','js/solar-weather-history.js','js/solar-weather-forecast.js','js/satellite-feed.js','js/earth-obs-feed.js','js/scale-nav.js','js/earth-feeds.js','js/satellite-tracker.js','js/earth-skin.js','js/storm-feed.js'] },
+    { file: 'moon.html',             label: 'Moon',                     tag: 'sim',  deps: ['js/nav.js','js/moon-skin.js','js/swpc-feed.js','js/scale-nav.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
+    { file: 'threejs.html',          label: 'Solar System',             tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/horizons.js','js/jupiter-shader.js','js/planet-moons.js','js/swpc-feed.js'] },
+    { file: 'galactic-map.html',     label: 'Galaxy Map',               tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/live-status-bar.js','js/sstar-wasm/sstar_wasm.js'] },
+    { file: 'sagittarius.html',      label: 'Sagittarius A*',           tag: 'sim',  deps: ['js/nav.js','js/sgr-a-star.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
+    { file: 'sirius.html',           label: 'Sirius Binary',            tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'betelgeuse.html',       label: 'Betelgeuse',               tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'vega.html',             label: 'Vega',                     tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'wr102.html',            label: 'WR-102',                   tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'star3d.html',           label: 'Sirius Planetary',         tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'satellites.html',       label: 'Satellites',               tag: 'sim',  deps: ['js/nav.js','js/satellite-tracker.js','js/orbital-analytics.js','js/user-location.js'] },
+    // Tools
+    { file: 'solar-fluid.html',      label: 'Solar Fluid',              tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'stellar-wind.html',     label: 'Stellar Wind',             tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'star2d.html',           label: '2D Stellar Modeler',       tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'star2d-advanced.html',  label: 'Advanced 2D Solar',        tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'black-hole-fluid.html', label: 'Black Hole Accretion',     tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'rust.html',             label: 'Rust/WASM Engine',         tag: 'tool', deps: ['js/nav.js'] },
+    // App pages
+    { file: 'dashboard.html',        label: 'Dashboard',                tag: 'page', deps: ['js/auth.js','js/user-location.js','js/swpc-feed.js','js/alert-engine.js','js/impact-score.js','js/onboarding-tour.js','js/daily-summary.js'] },
+    { file: 'admin.html',            label: 'Admin',                    tag: 'page', deps: ['js/nav.js','js/supabase-config.js','js/admin-analytics.js','js/admin-invites.js'] },
+    { file: 'pricing.html',          label: 'Pricing',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'signin.html',           label: 'Sign In',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'signup.html',           label: 'Sign Up',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'reset-password.html',   label: 'Reset Password',           tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'privacy.html',          label: 'Privacy Policy',           tag: 'page', deps: ['js/nav.js'] },
+    { file: 'eula.html',             label: 'Terms of Service',         tag: 'page', deps: ['js/nav.js'] },
+    { file: 'api-policy.html',       label: 'API Policy',               tag: 'page', deps: ['js/nav.js'] },
+    { file: 'status.html',           label: 'This Page',                tag: 'page', deps: ['js/nav.js'] },
+];
+
+// JS modules that should exist (core shared modules)
+const JS_MODULES = [
+    'js/nav.js','js/analytics.js','js/auth.js','js/config.js','js/supabase-config.js',
+    'js/swpc-feed.js','js/soho-feed.js','js/user-location.js','js/user-state.js','js/greeting.js',
+    'js/magnetosphere-engine.js','js/heliosphere3d.js','js/heliosphere.js','js/helio-physics.js',
+    'js/solar-wind-state.js','js/solar-wind-magnetosphere.js','js/wind-pipeline-feed.js',
+    'js/cme-propagation.js','js/solar-atmosphere.js','js/solar-weather-forecast.js',
+    'js/solar-weather-history.js','js/solar-live-canvas.js','js/solar-state.js',
+    'js/space-weather-globe.js','js/storm-feed.js',
+    'js/earth-skin.js','js/earth-orbit.js','js/earth-feeds.js','js/earth-obs-feed.js',
+    'js/earth-forecast.js','js/exosphere-engine.js',
+    'js/moon-skin.js','js/scale-nav.js','js/live-status-bar.js',
+    'js/horizons.js','js/horizons-extended.js','js/outer-planets.js',
+    'js/orbit-trails.js','js/orbital-analytics.js',
+    'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js',
+    'js/satellite-feed.js','js/satellite-tracker.js',
+    'js/sun-shader.js','js/sun-skin.js','js/sun-features.js','js/sim-sun.js','js/sim-earth.js',
+    'js/flare-ring.js','js/neo-feed.js','js/nws-alerts.js','js/weather-feed.js',
+    'js/isobar-engine.js','js/temp-forecast.js',
+    'js/alert-engine.js','js/impact-score.js','js/conjunction-alert.js',
+    'js/model-validation.js','js/daily-summary.js',
+    'js/card-previews.js','js/hero-space-weather.js','js/onboarding-tour.js',
+    'js/admin-analytics.js','js/admin-invites.js',
+    'js/sgr-a-star.js','js/extended-feeds.js',
+    'js/sstar-wasm/sstar_wasm.js','js/sstar-wasm/sstar_wasm_bg.wasm',
+    'js/nav-styles.css',
+];
+
+// ── Scanner ─────────────────────────────────────────────────────────────────
+async function check(url) {
+    try {
+        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        return { status: r.status, ok: r.ok, ms: 0 };
+    } catch (e) {
+        // HEAD might be blocked; try GET with range
+        try {
+            const r = await fetch(url, { cache: 'no-store', headers: { Range: 'bytes=0-0' } });
+            return { status: r.status, ok: r.status < 400, ms: 0 };
+        } catch (_) {
+            return { status: 0, ok: false, ms: 0, err: e.message };
+        }
+    }
+}
+
+let filterMode = 'all';
+let lastResults = null;
+
+async function runScan() {
+    const resultsEl = document.getElementById('results');
+    resultsEl.innerHTML = '<div style="text-align:center;padding:40px;color:#555">Scanning all pages and modules...</div>';
+    document.getElementById('scan-time').textContent = 'Scanning...';
+
+    const t0 = performance.now();
+
+    // Check all pages
+    const pageResults = await Promise.all(PAGES.map(async p => {
+        const res = await check(p.file);
+        // Check deps
+        const depResults = await Promise.all(p.deps.map(async d => {
+            const dr = await check(d);
+            return { file: d, ...dr };
+        }));
+        return { ...p, ...res, depResults };
+    }));
+
+    // Check JS modules
+    const jsResults = await Promise.all(JS_MODULES.map(async m => {
+        const res = await check(m);
+        return { file: m, label: m.replace('js/',''), tag: 'js', ...res };
+    }));
+
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    lastResults = { pageResults, jsResults, elapsed };
+    render();
+}
+
+function render() {
+    if (!lastResults) return;
+    const { pageResults, jsResults, elapsed } = lastResults;
+
+    const pagesLive = pageResults.filter(p => p.ok).length;
+    const pages404  = pageResults.filter(p => !p.ok).length;
+    const jsLive    = jsResults.filter(j => j.ok).length;
+    const brokenDeps = pageResults.reduce((n, p) => n + p.depResults.filter(d => !d.ok).length, 0);
+
+    document.getElementById('k-live').textContent = pagesLive;
+    document.getElementById('k-404').textContent = pages404;
+    document.getElementById('k-404').className = 'kpi-val ' + (pages404 > 0 ? 'red' : 'green');
+    document.getElementById('k-js').textContent = jsLive + '/' + jsResults.length;
+    document.getElementById('k-deps').textContent = brokenDeps;
+    document.getElementById('k-deps').className = 'kpi-val ' + (brokenDeps > 0 ? 'red' : 'green');
+    document.getElementById('scan-time').textContent = `Scanned ${pageResults.length} pages + ${jsResults.length} modules in ${elapsed}s — ${new Date().toLocaleString()}`;
+    document.getElementById('footer-ts').textContent = `Last scan: ${new Date().toISOString()}`;
+
+    // Group pages by tag
+    const groups = [
+        { title: 'Simulations', items: pageResults.filter(p => p.tag === 'sim') },
+        { title: 'Tools', items: pageResults.filter(p => p.tag === 'tool') },
+        { title: 'App Pages', items: pageResults.filter(p => p.tag === 'page') },
+        { title: 'JS Modules', items: jsResults },
+    ];
+
+    let html = '';
+    for (const g of groups) {
+        let items = g.items;
+        if (filterMode === 'broken') items = items.filter(i => !i.ok || (i.depResults && i.depResults.some(d => !d.ok)));
+        if (items.length === 0 && filterMode === 'broken') continue;
+
+        html += `<div class="section"><h2>${g.title} (${items.filter(i=>i.ok).length}/${g.items.length} live)</h2>`;
+        for (const item of items) {
+            const dotCls = item.ok ? 'ok' : 'fail';
+            const tagCls = 'tag-' + item.tag;
+            const statusText = item.ok ? item.status : (item.status || 'ERR');
+            html += `<div class="row">
+                <span class="dot ${dotCls}"></span>
+                <span class="row-name"><a href="${item.file}" target="_blank">${item.label}</a></span>
+                <span class="row-tag ${tagCls}">${item.tag}</span>
+                <span class="row-detail">${item.file}</span>
+                <span class="row-detail">${statusText}</span>
+            </div>`;
+            // Show broken deps if any
+            if (item.depResults) {
+                const broken = item.depResults.filter(d => !d.ok);
+                if (broken.length > 0) {
+                    html += `<div class="deps">`;
+                    for (const d of broken) {
+                        html += `<span class="dep-miss">Missing: ${d.file} (${d.status || 'ERR'})</span><br>`;
+                    }
+                    html += `</div>`;
+                }
+            }
+        }
+        html += '</div>';
+    }
+    document.getElementById('results').innerHTML = html;
+}
+
+document.getElementById('btn-rescan').addEventListener('click', runScan);
+document.getElementById('btn-filter').addEventListener('click', () => {
+    const btn = document.getElementById('btn-filter');
+    if (filterMode === 'all') { filterMode = 'broken'; btn.textContent = 'Show: Broken Only'; }
+    else { filterMode = 'all'; btn.textContent = 'Show: All'; }
+    render();
+});
+
+runScan();
+</script>
+</body>
+</html>
