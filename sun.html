@@ -4848,62 +4848,71 @@ async function fetchLiveSolarData() {
     st.className   = 'live-status';
     st.textContent = 'Fetching NOAA/SWPC…';
 
-    // Helper: fetch JSON, return null on any error (network or HTTP 4xx/5xx)
-    const tryFetch = url => fetch(url, { cache: 'no-cache' })
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null);
+    // Helper: fetch JSON with 15s timeout, return null on any error
+    const tryFetch = url => fetch(url, {
+        cache: 'no-cache',
+        signal: AbortSignal.timeout(15_000),
+    }).then(r => r.ok ? r.json() : null)
+      .catch(() => null);
 
     try {
         const [rJ, eJ, xJ] = await Promise.all([
-            tryFetch(SWPC + '/products/solar-regions.json'),
-            tryFetch(SWPC + '/json/goes/primary/xray-flares-7day.json'),
-            tryFetch(SWPC + '/json/goes/primary/xray-1-day.json'),
+            tryFetch(SWPC + '/json/solar_regions.json'),
+            tryFetch(SWPC + '/json/edited_events.json'),
+            tryFetch(SWPC + '/json/goes/primary/xrays-1-day.json'),
         ]);
 
         // Fail only if every endpoint returned nothing useful
         if (!rJ && !eJ && !xJ) throw new Error('All NOAA endpoints returned null');
 
-        // Active regions — first row is header array, rest are data
-        // NOAA solar-regions.json column layout:
-        //   [0]=date [1]=region# [2]=lo [3]=latlon [4]=location [5]=area [6]=area_corrected
-        //   [7]=z [8]=p [9]=nf [10]=nb [11]=mag_class [12]=flare_index [13]=flares
-        // We want: r[0]=region#, r[3]=location, r[5]=area, r[6]=z, r[7]=p, r[9]=nspot
-        const parsed = (Array.isArray(rJ) ? rJ.slice(1) : []).map(r => {
-            // Try both known column layouts (NOAA has changed format before)
-            const num   = String(r[1] || r[0] || '');
-            const loc   = String(r[4] || r[3] || '');
-            const area  = parseInt(r[6] || r[5]) || 0;
-            const z     = String(r[7] || r[6] || 'A');
-            const mag   = String(r[11] || r[8] || '');
-            const nspot = parseInt(r[10] || r[9]) || 0;
+        // ── Active regions ────────────────────────────────────────────────────
+        // /json/solar_regions.json returns an array of objects:
+        //   { region, location, latitude, carrington_longitude, area,
+        //     z_class, mag_class, num_spots, observatory, ... }
+        // Some NOAA format variants use: Region, Location, Z, Mag, Area, Spots
+        const parsed = (Array.isArray(rJ) ? rJ : []).map(r => {
+            // Handle both lowercase and capitalised NOAA field variants
+            const num   = String(r.region ?? r.Region ?? r[1] ?? '');
+            const loc   = String(r.location ?? r.Location ?? r[4] ?? '');
+            const area  = parseInt(r.area ?? r.Area ?? r[6] ?? r[5]) || 0;
+            const z     = String(r.z_class ?? r.Z ?? r[7] ?? 'A');
+            const mag   = String(r.mag_class ?? r.Mag ?? r.magclass ?? r[11] ?? '');
+            const nspot = parseInt(r.num_spots ?? r.Spots ?? r.numspot ?? r[10]) || 0;
             return { num, loc, area, z, mag, nspot };
         }).filter(r => r.num && parseLoc(r.loc));
 
         if (parsed.length > 0) {
             liveRegions = parsed;
         }
-        // If server returned an empty list keep default — quiet day data is still useful
+        console.log('[Sun] Regions parsed:', parsed.length, 'from', rJ?.length ?? 0, 'rows');
 
-        // Flares from xray-flares-7day.json — last 48h
-        // Schema: [{begin_time, class, begin_location, active_region_num, ...}]
+        // ── Flares from edited_events.json ────────────────────────────────────
+        // Format: array of objects with serial_number, event, begin_datetime,
+        //         observed_class, location, active_region, ...
+        // Filter to flare events (FLA/XRA types) from last 48h
         const cutoff = Date.now() - 48 * 3600e3;
         const parsedFlares = (Array.isArray(eJ) ? eJ : [])
             .filter(e => {
-                const t = new Date((e.begin_time ?? e.eventTime ?? e.beginTime ?? 0)
-                    .replace ? (e.begin_time ?? '').replace(' ', 'T') + 'Z' : 0);
-                const cls = e.class ?? e.severity ?? '';
-                return cls && t.getTime() > cutoff;
+                const evType = String(e.event ?? e.type ?? '').toUpperCase();
+                if (evType && !evType.includes('FLA') && !evType.includes('XRA') && !evType.includes('XRF')) return false;
+                const tStr = e.begin_datetime ?? e.begin_time ?? e.eventTime ?? e.beginTime ?? '';
+                const t = new Date(String(tStr).replace(' ', 'T') + (tStr.includes('Z') ? '' : 'Z'));
+                const cls = e.observed_class ?? e.class ?? e.severity ?? '';
+                return cls && !isNaN(t.getTime()) && t.getTime() > cutoff;
             })
             .slice(-14).reverse()
             .map(e => ({
-                time: (e.begin_time ?? e.eventTime ?? '').replace(' ', 'T'),
-                cls:  e.class ?? e.severity ?? '?',
-                loc:  e.begin_location ?? e.location ?? '—',
-                reg:  String(e.active_region_num ?? e.activeRegion ?? '—'),
+                time: String(e.begin_datetime ?? e.begin_time ?? e.eventTime ?? '').replace(' ', 'T'),
+                cls:  e.observed_class ?? e.class ?? e.severity ?? '?',
+                loc:  e.location ?? e.begin_location ?? '—',
+                reg:  String(e.active_region ?? e.active_region_num ?? e.activeRegion ?? '—'),
             }));
         if (parsedFlares.length > 0) liveFlares = parsedFlares;
+        console.log('[Sun] Flares parsed:', parsedFlares.length, 'from', eJ?.length ?? 0, 'events');
 
-        // X-ray flux — scan from the end for a valid non-null reading; also capture sparkline
+        // ── X-ray flux — scan from end for valid non-null reading ──────────────
+        // xrays-1-day.json: [{time_tag, flux, observed_flux, energy, ...}]
+        console.log('[Sun] X-ray data:', xJ?.length ?? 0, 'readings');
         if (Array.isArray(xJ) && xJ.length > 0) {
             for (let i = xJ.length - 1; i >= Math.max(0, xJ.length - 20); i--) {
                 const v = parseFloat(xJ[i].flux ?? xJ[i].observed_flux ?? xJ[i][1]);
