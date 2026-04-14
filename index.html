@@ -780,7 +780,7 @@ if (canvas) {
 
                 float angle = atan(hitPos.z, hitPos.x);
                 float omega = 1.0 / (pow(max(rDisk, DISK_INNER), 1.5) + BH_A);
-                float phase = angle - time * omega * 5.0;
+                float phase = angle - time * omega * 8.0;
 
                 // ── Temperature (Sgr A* RIAF-like) ──────────────────
                 // Sgr A* accretes at ~10⁻⁸ M☉/yr (quiescent LLAGN).
@@ -801,17 +801,22 @@ if (canvas) {
                 }
 
                 // ── Turbulence in co-rotating frame ───────────────────
-                float turb1 = fbm(vec2(phase * 3.0 + rDisk * 1.5, rDisk * 4.0 + time * 0.04));
+                // Temporal terms drive continuous evolution so the disk
+                // never visually "resets" after a full rotation.
+                float turb1 = fbm(vec2(phase * 3.0 + rDisk * 1.5, rDisk * 4.0 + time * 0.15));
                 float turb;
                 if (u_quality > 0.4) {
-                    float turb2 = fbm(vec2(phase * 9.0 - rDisk * 1.0, rDisk * 12.0 + time * 0.025));
+                    float turb2 = fbm(vec2(phase * 9.0 - rDisk * 1.0, rDisk * 12.0 + time * 0.10));
                     turb = turb1 * 0.6 + turb2 * 0.4;
                 } else {
                     turb = turb1;
                 }
 
-                // Spiral arms (m = 2) — strong enough to show clear rotation
-                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * 5.0);
+                // Spiral arms (m = 2) with time-varying winding angle
+                // so the arm pitch continuously tightens and loosens,
+                // preventing exact periodicity on every half-rotation.
+                float spiralWind = 5.0 + 0.8 * sin(time * 0.09);
+                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * spiralWind);
                 turb = mix(turb, turb * spiral, 0.70);
                 // Large-scale orbiting brightness — makes rotation visible
                 turb *= 0.75 + 0.25 * sin(phase + rDisk * 0.3);
@@ -1156,7 +1161,7 @@ if (canvas) {
                 qFrames = 0; qTimeSum = 0;
             }
             // Frame-rate independent time — consistent speed at any FPS
-            t += Math.min(frameDt * 0.001, 0.1) * 0.8;
+            t += Math.min(frameDt * 0.001, 0.1) * 1.0;
         }
         lastTimestamp = timestamp;
 
