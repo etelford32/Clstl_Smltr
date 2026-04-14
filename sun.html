@@ -1470,7 +1470,6 @@ import './js/live-status-bar.js';
 import * as THREE             from 'three';
 import { OrbitControls }      from 'three/addons/controls/OrbitControls.js';
 import { SpaceWeatherFeed }   from './js/swpc-feed.js';
-import WindPipelineFeed        from './js/wind-pipeline-feed.js';
 import { SohoFeed }           from './js/soho-feed.js';
 import {
     solarAtmosphereTemp, solarAtmosphereDensity, solarAtmospherePressure,
@@ -4848,12 +4847,20 @@ async function fetchLiveSolarData() {
     st.className   = 'live-status';
     st.textContent = 'Fetching NOAA/SWPC…';
 
-    // Helper: fetch JSON with 15s timeout, return null on any error
-    const tryFetch = url => fetch(url, {
-        cache: 'no-cache',
-        signal: AbortSignal.timeout(15_000),
-    }).then(r => r.ok ? r.json() : null)
-      .catch(() => null);
+    // Helper: fetch JSON with 15s timeout + in-memory cache (60s TTL).
+    // Prevents redundant requests when both fetchLiveSolarData() and
+    // swpc-update fire close together, or on rapid manual refreshes.
+    const tryFetch = (() => {
+        const _cache = new Map();
+        return (url) => {
+            const cached = _cache.get(url);
+            if (cached && Date.now() - cached.t < 60_000) return Promise.resolve(cached.data);
+            return fetch(url, { signal: AbortSignal.timeout(15_000) })
+                .then(r => r.ok ? r.json() : null)
+                .then(data => { if (data) _cache.set(url, { data, t: Date.now() }); return data; })
+                .catch(() => null);
+        };
+    })();
 
     try {
         const [rJ, eJ, xJ] = await Promise.all([
@@ -5062,8 +5069,9 @@ document.getElementById('btn-live-refresh').addEventListener('click', () => {
     fetchLiveSolarData();
     _swFeed.refresh();   // also kick SpaceWeatherFeed for immediate wind data
 });
-fetchLiveSolarData();                         // attempt live update on load
-setInterval(fetchLiveSolarData, 5 * 60 * 1000);  // refresh every 5 min
+fetchLiveSolarData();                         // bootstrap: initial NOAA fetch on load
+// No setInterval — swpc-update handler now continuously syncs regions/flares/xray
+// from SpaceWeatherFeed T3 tier (15-min cadence). Manual refresh via button.
 
 // Refresh SDO/SOHO thumbnail images every 15 min (SDO updates ~every 12 min)
 setInterval(() => {
@@ -5076,36 +5084,10 @@ setInterval(() => {
 }, 15 * 60 * 1000);
 
 // ── Wind pipeline supplemental feed ────────────────────────────────────────────
-// wind-pipeline-update comes from the Vercel Edge Function (api/solar-wind/wind-speed)
-// or the local FastAPI server. Provides processed trend + alert level data.
-// Only overrides live uniforms when scrubLive is true (not scrubbing history).
-window.addEventListener('wind-pipeline-update', (ev) => {
-    const wp = ev.detail;
-    if (!wp || wp.status === 'offline' || wp.freshness === 'expired') return;
-    if (!scrubLive) return;   // don't override historical scrubbing
-
-    if (wp.speed_km_s > 0) {
-        const sn = wp.speed_norm ?? Math.max(0, Math.min(1, (wp.speed_km_s - 250) / 650));
-        uniforms.u_wind_speed_norm.value = sn;
-    }
-    if ((wp.density_cc ?? 0) > 0) {
-        uniforms.u_wind_density_norm.value = Math.max(0, Math.min(1, wp.density_cc / 25));
-    }
-    if (wp.bz_nT != null) {
-        uniforms.u_bz_sw.value = Math.max(0, Math.min(1, -wp.bz_nT / 30));
-    }
-    // Reflect trend direction in a subtle pulsing speed boost
-    if (wp.trend?.direction === 'RISING') {
-        uniforms.u_wind_speed_norm.value = Math.min(1, uniforms.u_wind_speed_norm.value + 0.02);
-    }
-    // Update pipeline feed dot
-    const fdW = document.getElementById('fd-wind');
-    if (fdW) fdW.className = wp.freshness === 'fresh' ? 'feed-dot live' : 'feed-dot stale';
-});
-
-// ── Start SpaceWeatherFeed FIRST — this is the primary NOAA data pipeline ──────
-// Must be started before the optional wind-pipeline so any startup error in the
-// wind pipeline (server not running) cannot block the primary feed.
+// ── SpaceWeatherFeed is the sole NOAA data pipeline ──────────────────────────
+// WindPipelineFeed removed — it fetched the same rtsw_wind_1m.json endpoint
+// every 60s, duplicating ~10 MB/hr of bandwidth. SpaceWeatherFeed T1 already
+// provides wind speed, density, Bz, temperature, and IMF at the same cadence.
 
 // ══════════════════════════════════════════════════════════════════════════
 //  SPACE WEATHER RIBBON — wired to SpaceWeatherFeed (solar wind, Kp, Bz)
@@ -5180,14 +5162,6 @@ function _updateRibbonXray() {
 // 60-second poll: NOAA rtsw_wind_1m.json updates every 60 s at source.
 const _swFeed = new SpaceWeatherFeed({ pollInterval: 60_000 });
 _swFeed.start();
-
-// Optional processed wind pipeline (local FastAPI / Vercel edge) — fails silently
-// when the server isn't running so it never blocks the primary NOAA feed.
-try {
-    new WindPipelineFeed().start();
-} catch (e) {
-    console.debug('[WindPipeline] server not available, using NOAA data only:', e.message);
-}
 
 // ── Solar weather history + forecasting + validation pipeline ──────────────────
 // Connects the ML forecasting engine to the real-time data feed.
@@ -5773,6 +5747,66 @@ window.addEventListener('swpc-update', (ev) => {
                 sn
             );
         }
+    }
+
+    // ── T3 data sync: active regions + flares + X-ray → 3D visuals ────────────
+    // SpaceWeatherFeed T3 provides active_regions and recent_flares every 15 min.
+    // We use this to keep liveRegions/liveFlares/liveXrayFlux in sync and rebuild
+    // 3D markers, eliminating the need for fetchLiveSolarData() to poll separately.
+    let _regionsChanged = false;
+
+    // Active regions → liveRegions → rebuild markers/loops/prominences/field lines
+    if (sw.active_regions?.length) {
+        const newRegs = sw.active_regions.map(r => {
+            // Convert swpc-feed region format to sun.html format
+            const lat = r.lat_deg ?? 0;
+            const lon = r.lon_deg ?? 0;
+            const ns  = lat >= 0 ? 'N' : 'S';
+            const ew  = lon >= 0 ? 'W' : 'E';
+            const loc = ns + String(Math.round(Math.abs(lat))).padStart(2, '0')
+                      + ew + String(Math.round(Math.abs(lon))).padStart(2, '0');
+            return {
+                num:   String(r.region ?? ''),
+                loc,
+                area:  Math.round((r.area_norm ?? 0.05) * 400),
+                z:     'D',  // T3 doesn't provide z-class; default moderate
+                mag:   r.mag_class ?? '',
+                nspot: r.num_spots ?? 5,
+            };
+        }).filter(r => r.num && parseLoc(r.loc));
+
+        // Only rebuild if the region set actually changed
+        const newKey = newRegs.map(r => r.num).sort().join(',');
+        const oldKey = liveRegions.map(r => r.num).sort().join(',');
+        if (newKey !== oldKey) {
+            liveRegions = newRegs;
+            _regionsChanged = true;
+        }
+    }
+
+    // Flares → liveFlares (always take the freshest set)
+    if (sw.recent_flares?.length) {
+        const mapped = sw.recent_flares.slice(0, 14).map(f => ({
+            time: f.time instanceof Date ? f.time.toISOString() : String(f.time ?? ''),
+            cls:  f.cls ?? '?',
+            loc:  f.location ?? '—',
+            reg:  String(f.region ?? '—'),
+        }));
+        if (mapped.length > 0) liveFlares = mapped;
+    }
+
+    // X-ray flux
+    if (sw.xray_flux > 0) liveXrayFlux = sw.xray_flux;
+
+    // Rebuild 3D markers if regions changed (expensive — only when needed)
+    if (_regionsChanged) {
+        buildRegionMarkers();
+        buildCoronalLoops();
+        buildFieldLines();
+        buildProminences();
+        updateLivePanel(false);
+        console.log('[SWPC→3D] Regions updated:', liveRegions.length, 'ARs →',
+            liveRegions.map(r => 'AR' + r.num).join(', '));
     }
 });
 
