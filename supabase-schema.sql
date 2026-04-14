@@ -245,6 +245,91 @@ RETURNS VOID AS $$
       AND (expires_at IS NULL OR expires_at > now());
 $$ LANGUAGE sql SECURITY DEFINER;
 
+-- ── 6. Analytics Events ──────────────────────────────────────────────────────
+-- First-party analytics: page views, custom events. Immune to ad blockers.
+-- Written by js/analytics.js, queried by js/admin-analytics.js.
+
+CREATE TABLE IF NOT EXISTS public.analytics_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type TEXT NOT NULL DEFAULT 'page_view',
+    event_name TEXT,
+    page_path TEXT,
+    page_title TEXT,
+    referrer TEXT,
+    session_id TEXT,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    properties JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+
+-- Admins can read all events; regular inserts are allowed for any authenticated user
+CREATE POLICY "Anyone can insert analytics events"
+    ON public.analytics_events FOR INSERT
+    WITH CHECK (true);
+
+CREATE POLICY "Admins can view all analytics"
+    ON public.analytics_events FOR SELECT
+    USING (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_created
+    ON public.analytics_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_user
+    ON public.analytics_events(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_analytics_events_session
+    ON public.analytics_events(session_id);
+
+-- ── 7. User Sessions ────────────────────────────────────────────────────────
+-- Heartbeat-based session tracking. Updated every 60s by js/analytics.js.
+
+CREATE TABLE IF NOT EXISTS public.user_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id TEXT UNIQUE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    page_path TEXT,
+    user_agent TEXT,
+    started_at TIMESTAMPTZ DEFAULT now(),
+    last_seen TIMESTAMPTZ DEFAULT now(),
+    duration_s INTEGER DEFAULT 0,
+    ended BOOLEAN DEFAULT false
+);
+
+ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Anyone can upsert sessions"
+    ON public.user_sessions FOR ALL
+    USING (true)
+    WITH CHECK (true);
+
+CREATE POLICY "Admins can view all sessions"
+    ON public.user_sessions FOR SELECT
+    USING (public.is_admin());
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_active
+    ON public.user_sessions(last_seen DESC) WHERE ended = false;
+
+-- Session heartbeat RPC: upserts session row (insert or update last_seen).
+-- Called every 60s by the client — single round-trip.
+CREATE OR REPLACE FUNCTION public.session_heartbeat(
+    p_session_id TEXT,
+    p_user_id UUID DEFAULT NULL,
+    p_page_path TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+) RETURNS VOID AS $$
+BEGIN
+    INSERT INTO public.user_sessions (session_id, user_id, page_path, user_agent, started_at, last_seen, ended)
+    VALUES (p_session_id, p_user_id, p_page_path, p_user_agent, now(), now(), false)
+    ON CONFLICT (session_id) DO UPDATE
+    SET last_seen = now(),
+        user_id = COALESCE(EXCLUDED.user_id, user_sessions.user_id),
+        page_path = COALESCE(EXCLUDED.page_path, user_sessions.page_path),
+        duration_s = EXTRACT(EPOCH FROM (now() - user_sessions.started_at))::INTEGER;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- ══════════════════════════════════════════════════════════════════
 -- Done! Tables created with Row Level Security enabled.
 --
