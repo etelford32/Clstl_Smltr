@@ -2444,17 +2444,27 @@ const glowVS = /* glsl */`
         gl_Position = projectionMatrix * mv;
     }
 `;
+// Chromosphere physics:
+//   T = 4 400 K (temp minimum) → 6 000 K (mid) → 25 000 K (top)
+//   Dominant emission: Hα 656 nm (red), Ca H 396.8 nm & Ca K 393.3 nm (violet)
+//   Appearance: brilliant RED/PINK ring at limb ("flash spectrum"), faint on disk.
+//   Hα vastly dominates the visible chromospheric emission — the chromosphere
+//   appears RED in total eclipse, NOT purple.  Ca K shows as subtle rose tint.
+//
+//   Spicules: radial plasma jets (5–10 Mm tall, 20–100 km/s), concentrated at
+//   supergranule boundaries.  Appear as fine radial hair-like structures at limb.
+//   Type II spicules are faster (50–300 km/s) and may heat to TR temperatures.
 const chromoFS = /* glsl */`
     precision highp float;
     uniform float u_time;
     uniform float u_activity;
-    uniform float u_f107_norm;       // F10.7 solar cycle [0-1]
-    uniform float u_electron_norm;   // GOES >2MeV electron flux [0-1]
-    uniform float u_kp_norm;         // Kp/9 [0-1] — storm-time heating
-    uniform float u_flare_t;         // sim-time since flare (0 = just fired, 999 = none)
-    uniform float u_flare_lat;       // heliographic latitude of last flare (radians)
-    uniform float u_flare_lon;       // heliographic longitude (radians)
-    uniform float u_flare_intensity; // 0-1 white-light flash intensity
+    uniform float u_f107_norm;
+    uniform float u_electron_norm;
+    uniform float u_kp_norm;
+    uniform float u_flare_t;
+    uniform float u_flare_lat;
+    uniform float u_flare_lon;
+    uniform float u_flare_intensity;
     varying vec3 vNormal;
     varying vec3 vViewDir;
 
@@ -2471,73 +2481,223 @@ const chromoFS = /* glsl */`
         float mu  = max(dot(n3d, vd), 0.0);
         float rim = 1.0 - mu;
 
-        // ── Spicule forest — narrow jets 5–10 Mm tall above photosphere ──────
-        // Fine-scale: ~1000 km spacing. Coarse-scale: supergranule outlines.
-        float sp1 = vn(n3d * 18.0 + vec3(u_time * 0.028));
-        float sp2 = vn(n3d * 38.0 + vec3(u_time * 0.042));
-        float sp3 = vn(n3d *  8.0 + vec3(u_time * 0.012));  // supergranule boundary
-        float spicule = sp1 * 0.45 + sp2 * 0.35 + sp3 * 0.20;
+        // ── Spicule forest — radial jets with directional structure ──────────
+        // Type I spicules: ~1000 km spacing, 5–10 Mm tall, 20–40 km/s.
+        // Type II (fast): 50–300 km/s, hotter, contribute to coronal heating.
+        //
+        // DIRECTIONALITY: spicules point radially outward from the solar surface.
+        // At the limb (high rim) we see them edge-on as fine radial streaks.
+        // Face-on (low rim) they're foreshortened and nearly invisible.
+        //
+        // We achieve this by stretching noise along the radial (normal) direction
+        // and modulating visibility by rim angle.
 
-        // Spicules are sharpest at the limb (we see them in emission at the edge)
-        float limbAmp = pow(rim, 1.6) * (0.60 + spicule * 0.80 * u_activity);
+        // Radial-stretched coordinate: elongate noise along the surface normal
+        // to create streak-like patterns that look like radial jets at the limb
+        vec3 radialCoord = n3d * 22.0 + n3d * vn(n3d * 6.0) * 4.0;
+        float sp_fine  = vn(radialCoord + vec3(u_time * 0.035, 0.0, 0.0));
+        float sp_ultra = vn(n3d * 50.0 + vec3(0.0, u_time * 0.055, 0.0));
+        float sp_sgb   = vn(n3d *  7.0 + vec3(u_time * 0.010));  // supergranule boundaries
 
-        // ── Chromospheric network (Ca K bright network at supergranule boundaries) ──
-        float network = smoothstep(0.55, 0.75, sp3) * 0.25 * u_activity;
+        // Spicule intensity: combination of fine jets + ultrafine + supergranule modulation
+        float spicule = sp_fine * 0.40 + sp_ultra * 0.30 + sp_sgb * 0.30;
 
-        float alpha = clamp(limbAmp + network * (1.0 - rim * rim), 0.0, 0.80);
+        // Sharpened jet peaks: make spicules more discrete (threshold → sharp jets)
+        float jets = smoothstep(0.45, 0.72, spicule);
 
-        // ── Colour: H-alpha red at limb, Ca H&K blue-violet deeper, UV extreme limb ──
-        vec3 hAlpha  = vec3(0.98, 0.22, 0.10);   // Hα 656 nm — bright red
-        vec3 caHK    = vec3(0.55, 0.14, 0.60);   // Ca H&K 393–396 nm — violet
-        vec3 euv     = vec3(0.30, 0.45, 1.00);   // EUV — blue-white
-        // Blend: inner limb = H-alpha red, mid = Ca violet, extreme limb = EUV
-        vec3 col = mix(hAlpha, caHK, pow(rim, 2.0));
-        col = mix(col, euv, pow(rim, 5.0) * u_activity * 0.6);
-        // Network brightening is more Ca-dominated
-        col = mix(col, caHK * 1.4 + 0.1, network * 0.5);
+        // Spicules are brightest at the limb (seen in emission against space)
+        // and nearly invisible on disk (face-on: foreshortened, optically thin)
+        float limbSpicule = pow(rim, 2.2) * (0.45 + jets * 0.75 * u_activity);
 
-        // ── Chromospheric flare brightening (Hα emission near flare site) ────
-        // During a flare, chromospheric evaporation heats the local plasma to
-        // multi-MK, producing bright Hα + Ca H&K emission near the ribbons.
+        // ── Chromospheric network (Ca K bright network at supergranule edges) ──
+        // On-disk pattern visible in Ca K filtergrams: bright cell boundaries
+        // surrounding dark supergranule interiors.  Very faint in broadband.
+        float network = smoothstep(0.55, 0.78, sp_sgb) * 0.15 * u_activity;
+
+        // Alpha: limb-dominated with subtle on-disk network
+        // Steep rim power keeps disk nearly transparent (realistic: chromosphere
+        // is invisible in white light except at the limb during eclipse)
+        float alpha = clamp(limbSpicule + network * pow(1.0 - rim, 2.0), 0.0, 0.75);
+
+        // ── Colour: Hα-dominated emission spectrum ──────────────────────────
+        // The real chromosphere is overwhelmingly RED in visible light.
+        // Hα 656 nm dominates at all heights. Ca H&K adds a subtle rose/pink
+        // tint but does NOT produce visible purple in broadband imaging.
+        //
+        // Temperature gradient: base (4400 K, deep red) → top (25000 K, pink-white)
+        vec3 hAlpha    = vec3(0.95, 0.18, 0.06);   // Hα 656 nm — deep emission red
+        vec3 hAlphaHot = vec3(1.00, 0.40, 0.22);   // heated Hα — brighter, warmer red
+        vec3 caKrose   = vec3(0.92, 0.38, 0.42);   // Ca K contribution — rose-pink (NOT purple)
+        vec3 topGlow   = vec3(1.00, 0.55, 0.35);   // upper chromosphere → TR approach
+
+        // Base: deep Hα red.  With height (rim): warms toward pink-white
+        // as temperature increases toward the transition region.
+        vec3 col = mix(hAlpha, hAlphaHot, rim * 0.6 + u_activity * 0.2);
+
+        // Subtle Ca K rose tint: only at extreme limb, never dominant
+        col = mix(col, caKrose, pow(rim, 4.5) * 0.25);
+
+        // Upper chromosphere approaches TR temperatures: warm pink-white
+        col = mix(col, topGlow, pow(rim, 6.0) * u_activity * 0.35);
+
+        // Network: slightly more orange (Ca K plage emission)
+        col = mix(col, vec3(1.00, 0.50, 0.25), network * 0.4);
+
+        // Spicule jets: individual jets are brighter, slightly bluer (hotter tips)
+        col = mix(col, vec3(1.00, 0.45, 0.30), jets * pow(rim, 2.5) * 0.3);
+
+        // ── Chromospheric flare brightening (Hα ribbons) ─────────────────────
         float lat_c   = asin(clamp(n3d.y, -1.0, 1.0));
         float lon_c   = atan(n3d.z, n3d.x);
         float cos_df  = sin(lat_c)*sin(u_flare_lat) + cos(lat_c)*cos(u_flare_lat)*cos(lon_c - u_flare_lon);
         float df_c    = acos(clamp(cos_df, -1.0, 1.0));
-        // Brightening: rapid onset, fades over ~90 sim-time units
         float chromoFl = exp(-df_c*df_c / 0.075) * exp(-u_flare_t / 90.0) * u_flare_intensity;
-        // Also a global flash from u_flare_intensity (backscattered EUV lighting the whole disk)
-        float globalFl = u_flare_intensity * 0.18 * pow(rim, 1.2);
-        alpha = clamp(alpha + chromoFl * 0.72 + globalFl, 0.0, 0.92);
-        // Shift colour toward bright Hα red near site, then teal-UV at global flash
-        col = mix(col, hAlpha * 1.5, chromoFl * 0.85);
-        col = mix(col, euv * 1.2, globalFl * 0.5);
+        float globalFl = u_flare_intensity * 0.15 * pow(rim, 1.5);
+        alpha = clamp(alpha + chromoFl * 0.70 + globalFl, 0.0, 0.88);
+        // Flare ribbons are brilliant Hα red, global flash is pale pink
+        col = mix(col, hAlpha * 1.6, chromoFl * 0.80);
+        col = mix(col, vec3(1.00, 0.65, 0.45), globalFl * 0.5);
 
-        // ── F10.7 solar-cycle: hotter chromosphere at solar maximum ─────────────
-        // At high F10.7 the chromospheric network is more visible and the Ca H&K
-        // emission is stronger — boost the orange-pink limb brightening.
-        float cycleBoost = 1.0 + u_f107_norm * 0.55;
-        alpha = clamp(alpha * cycleBoost, 0.0, 0.92);
-        col   = mix(col, col * vec3(1.08, 0.90, 0.78), u_f107_norm * 0.25);
+        // ── F10.7 solar cycle: hotter, more emissive chromosphere at max ─────
+        float cycleBoost = 1.0 + u_f107_norm * 0.45;
+        alpha = clamp(alpha * cycleBoost, 0.0, 0.88);
+        col   = mix(col, col * vec3(1.05, 0.92, 0.82), u_f107_norm * 0.20);
 
-        // ── Electron flux: energetic electrons excite EUV emission ──────────────
-        // Energetic electrons from solar wind precipitation create additional
-        // blue-UV chromospheric glow, especially near pole and limb regions.
-        vec3 euvBlue = vec3(0.55, 0.75, 1.20);
-        col   += euvBlue * u_electron_norm * rim * 0.20;
-        alpha  = clamp(alpha + u_electron_norm * rim * 0.08, 0.0, 0.92);
+        // ── Electron flux: EUV excitation adds warm white glow ───────────────
+        col  += vec3(0.80, 0.65, 0.50) * u_electron_norm * rim * 0.15;
+        alpha = clamp(alpha + u_electron_norm * rim * 0.06, 0.0, 0.88);
 
-        // ── Kp storm heating: chromospheric network brightens during storms ──────
-        col *= 1.0 + u_kp_norm * u_kp_norm * 0.15;
+        // ── Kp storm: enhanced network and limb emission ─────────────────────
+        col *= 1.0 + u_kp_norm * u_kp_norm * 0.12;
 
         gl_FragColor = vec4(col, alpha);
     }
 `;
 const chromoMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1.15, 48, 48),
+    new THREE.SphereGeometry(1.06, 48, 48),
     new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:chromoFS, uniforms,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide })
 );
 scene.add(chromoMesh);
+
+// ─── SPICULE PARTICLE SYSTEM — radial jets through chromosphere–corona boundary ──
+// Type I spicules: 20–40 km/s, 5–10 Mm tall, lifetime 5–15 min
+// Type II spicules: 50–300 km/s, 3–7 Mm, lifetime 10–150 s, may reach TR temps
+// Appear as fine hair-like radial jets at the limb.  ~300,000 on the Sun at
+// any time, concentrated at supergranule boundaries.
+//
+// Particles launch from r=1.0 (photosphere), travel radially outward to
+// r ≈ 1.01–1.02 (chromosphere top), then decelerate and fade.
+// Color: Hα red at base → warm pink at tip (heating).
+const N_SPICULES = 600;
+const spiculeVS = /* glsl */`
+    attribute vec3  aDir;    // radial launch direction (unit vector on sphere)
+    attribute float aPhase;  // staggered birth phase [0-1]
+    attribute float aSeed;   // per-particle random seed
+    attribute float aSpeed;  // normalised speed: 0 = Type I slow, 1 = Type II fast
+
+    uniform float u_time;
+    uniform float u_activity;
+
+    varying float vHeight;   // 0 = base, 1 = tip
+    varying float vSpeed;    // passed to fragment for colour
+    varying float vAlpha;
+
+    void main() {
+        float lifetime = mix(8.0, 2.5, aSpeed);   // Type I: ~8 s, Type II: ~2.5 s
+        float maxH     = mix(0.015, 0.025, aSpeed); // Type I: 0.015 R, Type II: 0.025 R
+
+        float t = mod(u_time * 0.6 + aPhase * lifetime, lifetime);
+        float frac = t / lifetime;
+
+        // Parabolic trajectory: rise fast, decelerate, stall at apex
+        float height = maxH * (1.0 - (2.0 * frac - 1.0) * (2.0 * frac - 1.0));
+        float r = 1.0 + height;
+
+        // Slight lateral wobble (MHD wave oscillation along the jet)
+        float wobble = sin(frac * 12.56 + aSeed * 6.28) * 0.001 * (1.0 - frac);
+
+        vec3 pos = aDir * r;
+        // Add tiny perpendicular wobble
+        vec3 perp = normalize(cross(aDir, vec3(0.0, 1.0, 0.001)));
+        pos += perp * wobble;
+
+        vHeight = height / maxH;
+        vSpeed  = aSpeed;
+        // Fade in at launch, peak at mid-height, fade at apex
+        vAlpha  = smoothstep(0.0, 0.15, frac) * smoothstep(1.0, 0.7, frac);
+        // Activity modulates overall density (more spicules at solar max)
+        vAlpha *= 0.5 + u_activity * 0.5;
+
+        vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+        gl_Position = projectionMatrix * mv;
+        gl_PointSize = mix(1.2, 2.0, aSpeed) * (200.0 / -mv.z);
+    }
+`;
+const spiculeFS = /* glsl */`
+    precision highp float;
+    varying float vHeight;
+    varying float vSpeed;
+    varying float vAlpha;
+
+    void main() {
+        // Circular point sprite
+        vec2 c = gl_PointCoord - 0.5;
+        if (dot(c, c) > 0.25) discard;
+
+        // Colour: Hα deep red at base → warm pink at tip (heating as it rises)
+        // Type II (fast) spicules are hotter → more orange-white at tips
+        vec3 baseCol = vec3(0.92, 0.18, 0.06);   // deep Hα red
+        vec3 tipCol  = mix(
+            vec3(1.00, 0.45, 0.25),               // Type I tip: warm orange-red
+            vec3(1.00, 0.65, 0.45),                // Type II tip: hot pink-white
+            vSpeed
+        );
+        vec3 col = mix(baseCol, tipCol, vHeight);
+
+        gl_FragColor = vec4(col, vAlpha * 0.7);
+    }
+`;
+{
+    const dirs   = new Float32Array(N_SPICULES * 3);
+    const phases = new Float32Array(N_SPICULES);
+    const seeds  = new Float32Array(N_SPICULES);
+    const speeds = new Float32Array(N_SPICULES);
+
+    for (let i = 0; i < N_SPICULES; i++) {
+        // Distribute launch points over the sphere (uniform random)
+        const theta = Math.acos(2 * Math.random() - 1);
+        const phi   = Math.random() * Math.PI * 2;
+        dirs[i*3]   = Math.sin(theta) * Math.cos(phi);
+        dirs[i*3+1] = Math.sin(theta) * Math.sin(phi);
+        dirs[i*3+2] = Math.cos(theta);
+        phases[i]   = Math.random();
+        seeds[i]    = Math.random();
+        // ~80% Type I (slow), ~20% Type II (fast)
+        speeds[i]   = Math.random() < 0.2 ? 0.6 + Math.random() * 0.4 : Math.random() * 0.3;
+    }
+
+    const spGeo = new THREE.BufferGeometry();
+    spGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N_SPICULES * 3), 3));
+    spGeo.setAttribute('aDir',    new THREE.Float32BufferAttribute(dirs, 3));
+    spGeo.setAttribute('aPhase',  new THREE.Float32BufferAttribute(phases, 1));
+    spGeo.setAttribute('aSeed',   new THREE.Float32BufferAttribute(seeds, 1));
+    spGeo.setAttribute('aSpeed',  new THREE.Float32BufferAttribute(speeds, 1));
+
+    const spMat = new THREE.ShaderMaterial({
+        vertexShader: spiculeVS, fragmentShader: spiculeFS, uniforms,
+        transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const spiculePts = new THREE.Points(spGeo, spMat);
+    scene.add(spiculePts);
+
+    // Toggle with chromosphere
+    const origChromToggle = document.getElementById('tog-chrom');
+    if (origChromToggle) {
+        origChromToggle.addEventListener('change', e => { spiculePts.visible = e.target.checked; });
+    }
+}
 
 // ─── TRANSITION REGION (r=1.04) — thin EUV emission shell ────────────────────
 // The transition region is a <2 000 km layer where coronal temperature jumps from
