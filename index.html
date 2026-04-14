@@ -812,14 +812,15 @@ if (canvas) {
                     turb = turb1;
                 }
 
-                // Spiral arms (m = 2) with time-varying winding angle
-                // so the arm pitch continuously tightens and loosens,
-                // preventing exact periodicity on every half-rotation.
+                // Spiral arms (m = 2) with drifting azimuthal phase.
+                // time * 0.4 is incommensurate with Keplerian ω at every
+                // radius, so the pattern never exactly repeats — arms
+                // drift, merge, and reform like real MHD instabilities.
                 float spiralWind = 5.0 + 0.8 * sin(time * 0.09);
-                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * spiralWind);
+                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * spiralWind + time * 0.4);
                 turb = mix(turb, turb * spiral, 0.70);
-                // Large-scale orbiting brightness — makes rotation visible
-                turb *= 0.75 + 0.25 * sin(phase + rDisk * 0.3);
+                // Large-scale orbiting brightness — also drifts to avoid looping
+                turb *= 0.75 + 0.25 * sin(phase + rDisk * 0.3 + time * 0.17);
 
                 // Magnetic filaments near inner edge
                 float hotSpots = smoothstep(0.6, 0.85, turb) * smoothstep(DISK_INNER * 3.0, DISK_INNER * 1.1, rDisk);
