@@ -51,6 +51,7 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 .btn:hover{background:rgba(255,255,255,.12);color:#fff}
 
 .timestamp{text-align:center;padding:20px;color:#333;font-size:.75rem;font-family:monospace}
+.auth-gate{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:3rem}
 </style>
 </head>
 <body>
@@ -63,7 +64,15 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 </script>
 <script type="module">import { initNav } from "./js/nav.js"; initNav("status");</script>
 
-<main>
+<div class="auth-gate" id="auth-gate">
+  <div>
+    <h2 style="color:#ff6060;margin-bottom:.8rem">Superadmin Access Required</h2>
+    <p style="color:#888;margin-bottom:1.5rem">You must be signed in with a superadmin account to view this page.</p>
+    <a href="signin.html" style="display:inline-block;padding:10px 28px;border-radius:8px;background:linear-gradient(45deg,#8040ff,#4080ff);color:#fff;text-decoration:none;font-weight:600;font-size:.9rem">Sign In</a>
+  </div>
+</div>
+
+<main style="display:none" id="status-main">
 <h1>System Status</h1>
 <p class="sub" id="scan-time">Scanning...</p>
 
@@ -84,6 +93,34 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 </main>
 
 <script type="module">
+// ── Auth gate: superadmin only ──────────────────────────────────────────────
+import { auth } from './js/auth.js';
+await auth.ready();
+
+if (!auth.isSignedIn()) {
+    document.getElementById('auth-gate').style.display = 'flex';
+    throw '';
+}
+const adminCheck = await auth.verifyAdminServerSide();
+if (!adminCheck.verified) {
+    await auth.fetchProfile();
+    if (auth.getRole() !== 'superadmin') {
+        const gate = document.getElementById('auth-gate');
+        gate.querySelector('h2').textContent = 'Insufficient Permissions';
+        gate.querySelector('p').textContent = `Access denied. Role: ${auth.getRole() || 'none'}. Superadmin required.`;
+        gate.style.display = 'flex';
+        throw '';
+    }
+} else if (adminCheck.role !== 'superadmin') {
+    const gate = document.getElementById('auth-gate');
+    gate.querySelector('h2').textContent = 'Insufficient Permissions';
+    gate.querySelector('p').textContent = `Access denied. Role: ${adminCheck.role}. Superadmin required.`;
+    gate.style.display = 'flex';
+    throw '';
+}
+document.getElementById('auth-gate').style.display = 'none';
+document.getElementById('status-main').style.display = 'block';
+
 // ── Page & module manifest ──────────────────────────────────────────────────
 // Every page and JS module the app should have.
 // deps = local JS imports the page needs (not CDN).

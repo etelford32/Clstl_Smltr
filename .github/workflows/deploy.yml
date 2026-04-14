@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - master
-      - claude/star-simulation-pygame-01HAh5XryNs9JAtTWF5jYcSU
   workflow_dispatch:
 
 permissions:
