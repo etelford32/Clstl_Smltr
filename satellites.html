@@ -92,6 +92,10 @@ nav {
 .sp-toggle input { accent-color:#0cc; width:14px; height:14px; cursor:pointer; }
 .sp-toggle label { cursor:pointer; color:#99a; font-size:.72rem; }
 .sp-toggle .count { margin-left:auto; color:#445; font-size:.62rem; font-family:monospace; }
+.grp-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.alt-bar { display:flex; align-items:flex-end; gap:1px; height:40px; margin-top:4px; }
+.alt-bar-col { flex:1; min-width:2px; border-radius:1px 1px 0 0; transition:height .3s; }
+.alt-bar-label { display:flex; justify-content:space-between; font-size:.55rem; color:#445; font-family:monospace; margin-top:2px; }
 
 /* Conjunction results */
 .cj-result {
@@ -145,6 +149,7 @@ nav {
         <div>Tracked: <span class="val" id="hud-count">0</span> objects</div>
         <div>Groups: <span class="val" id="hud-groups">—</span></div>
         <div>Source: <span class="dim">CelesTrak / 18th SDS</span></div>
+        <div>Engine: <span class="val" id="hud-engine">loading...</span></div>
         <div>Updated: <span class="val" id="hud-updated">—</span></div>
     </div>
 
@@ -164,14 +169,37 @@ nav {
 
         <!-- Satellite groups -->
         <div class="sp-section">
-            <div class="sp-label">Satellite Groups</div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-stations" checked><label for="grp-stations">Space Stations</label><span class="count" id="cnt-stations">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-starlink"><label for="grp-starlink">Starlink</label><span class="count" id="cnt-starlink">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-weather"><label for="grp-weather">Weather Sats</label><span class="count" id="cnt-weather">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-gps-ops"><label for="grp-gps-ops">GPS / GNSS</label><span class="count" id="cnt-gps-ops">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-science"><label for="grp-science">Science Missions</label><span class="count" id="cnt-science">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-resource"><label for="grp-resource">Earth Resources</label><span class="count" id="cnt-resource">—</span></div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
+            <div class="sp-label">Mega-Constellations</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-starlink"><span class="grp-dot" style="background:#ccddff"></span><label for="grp-starlink">Starlink (SpaceX)</label><span class="count" id="cnt-starlink">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-oneweb"><span class="grp-dot" style="background:#4488ff"></span><label for="grp-oneweb">OneWeb</label><span class="count" id="cnt-oneweb">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-iridium"><span class="grp-dot" style="background:#ff66aa"></span><label for="grp-iridium">Iridium</label><span class="count" id="cnt-iridium">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-globalstar"><span class="grp-dot" style="background:#ffaa66"></span><label for="grp-globalstar">Globalstar</label><span class="count" id="cnt-globalstar">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Navigation (GNSS)</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-gps-ops"><span class="grp-dot" style="background:#00ff88"></span><label for="grp-gps-ops">GPS (USA)</label><span class="count" id="cnt-gps-ops">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-galileo"><span class="grp-dot" style="background:#00ccff"></span><label for="grp-galileo">Galileo (EU)</label><span class="count" id="cnt-galileo">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-beidou"><span class="grp-dot" style="background:#ff8844"></span><label for="grp-beidou">BeiDou (China)</label><span class="count" id="cnt-beidou">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-glonass"><span class="grp-dot" style="background:#ff4444"></span><label for="grp-glonass">GLONASS (Russia)</label><span class="count" id="cnt-glonass">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Missions &amp; Infrastructure</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-stations" checked><span class="grp-dot" style="background:#ffffff"></span><label for="grp-stations">Space Stations</label><span class="count" id="cnt-stations">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-weather"><span class="grp-dot" style="background:#ffdd44"></span><label for="grp-weather">Weather</label><span class="count" id="cnt-weather">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-science"><span class="grp-dot" style="background:#cc66ff"></span><label for="grp-science">Science</label><span class="count" id="cnt-science">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-resource"><span class="grp-dot" style="background:#44ff44"></span><label for="grp-resource">Earth Observation</label><span class="count" id="cnt-resource">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-geo"><span class="grp-dot" style="background:#ffaa00"></span><label for="grp-geo">Geostationary</label><span class="count" id="cnt-geo">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><span class="grp-dot" style="background:#00ffaa"></span><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label" style="color:#ff4444">Debris &amp; Hazards</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-debris"><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Visualization</div>
+            <div class="sp-toggle"><input type="checkbox" id="tog-shells"><label for="tog-shells">Starlink orbital shells</label></div>
+            <div class="sp-toggle"><input type="checkbox" id="tog-heatmap"><label for="tog-heatmap">Altitude density heatmap</label></div>
+            <div id="alt-heatmap" style="display:none;margin-top:6px"></div>
         </div>
 
         <!-- Selected satellite info -->
@@ -330,45 +358,95 @@ scene.add(atmMesh);
 // ═══════════════════════════════════════════════════════════════
 
 const tracker = new SatelliteTracker(scene, 1.0, {
-    maxSatellites: 2000,
+    maxSatellites: 50000,
     showOrbits: true,
-    dotSize: 0.006,
 });
 
-const _loadedGroups = new Map();
-
 async function loadGroup(name) {
-    if (_loadedGroups.has(name)) return;
+    if (tracker.hasGroup(name)) return;
     const countEl = document.getElementById(`cnt-${name}`);
     if (countEl) countEl.textContent = '…';
     const count = await tracker.loadGroup(name);
-    _loadedGroups.set(name, count);
-    if (countEl) countEl.textContent = count;
+    if (countEl) countEl.textContent = count.toLocaleString();
     _updateHud();
+    _updateHeatmap();
 }
 
 function _updateHud() {
     const total = tracker.getSatellites().length;
-    document.getElementById('hud-count').textContent = total;
-    document.getElementById('hud-groups').textContent = [..._loadedGroups.keys()].join(', ') || '—';
+    const groups = tracker.getLoadedGroups();
+    document.getElementById('hud-count').textContent = total.toLocaleString();
+    document.getElementById('hud-groups').textContent = groups.join(', ') || '—';
     document.getElementById('hud-updated').textContent = new Date().toLocaleTimeString([], {
         hour: '2-digit', minute: '2-digit',
     });
-    document.getElementById('sd-total').textContent = `${total} loaded`;
+    document.getElementById('sd-total').textContent = `${total.toLocaleString()} loaded`;
+    document.getElementById('hud-engine').textContent = isWasmLoaded() ? 'Rust WASM SGP4' : 'JS Fallback';
 }
 
 // Auto-load stations
 loadGroup('stations');
 
-// Group toggle handlers
-for (const name of ['stations', 'starlink', 'weather', 'gps-ops', 'science', 'resource', 'last-30-days']) {
-    document.getElementById(`grp-${name}`)?.addEventListener('change', async e => {
+// All constellation group toggles
+const ALL_GROUPS = [
+    'stations','starlink','oneweb','iridium','globalstar',
+    'gps-ops','galileo','beidou','glonass',
+    'weather','science','resource','geo','last-30-days',
+    'debris',
+];
+
+for (const name of ALL_GROUPS) {
+    const el = document.getElementById(`grp-${name}`);
+    if (!el) continue;
+    el.addEventListener('change', async e => {
         if (e.target.checked) {
             await loadGroup(name);
         }
-        // TODO: toggle visibility per group
+        tracker.setGroupVisible(name, e.target.checked);
     });
 }
+
+// ── Starlink shell visualization ──────────────────────────────────────────
+document.getElementById('tog-shells')?.addEventListener('change', e => {
+    if (e.target.checked && tracker.getShellGroup().children.length === 0) {
+        tracker.buildStarlinkShells(true);
+    }
+    tracker.setShellsVisible(e.target.checked);
+});
+
+// ── Altitude density heatmap ──────────────────────────────────────────────
+function _updateHeatmap() {
+    const container = document.getElementById('alt-heatmap');
+    if (!container || !document.getElementById('tog-heatmap')?.checked) return;
+
+    const dist = tracker.getAltitudeDistribution(50);
+    if (dist.length === 0) { container.innerHTML = '<div style="color:#445;font-size:.6rem">No data</div>'; return; }
+
+    const maxCount = Math.max(...dist.map(d => d.count));
+    const dangerZones = [[750, 900], [1400, 1500]]; // Fengyun/Cosmos debris bands
+
+    let barsHtml = '<div class="alt-bar">';
+    for (const d of dist) {
+        if (d.alt > 2000) continue; // only show LEO
+        const h = Math.max(2, (d.count / maxCount) * 40);
+        const isDanger = dangerZones.some(([lo, hi]) => d.alt >= lo && d.alt <= hi);
+        const color = isDanger ? '#ff3322' : d.count > maxCount * 0.5 ? '#ff8844' : '#0cc';
+        barsHtml += `<div class="alt-bar-col" style="height:${h}px;background:${color}" title="${d.alt}km: ${d.count} objects"></div>`;
+    }
+    barsHtml += '</div>';
+    barsHtml += '<div class="alt-bar-label"><span>200 km</span><span style="color:#ff3322">750-900 km DANGER</span><span>2000 km</span></div>';
+    container.innerHTML = barsHtml;
+    container.style.display = 'block';
+}
+
+document.getElementById('tog-heatmap')?.addEventListener('change', e => {
+    const container = document.getElementById('alt-heatmap');
+    if (e.target.checked) {
+        _updateHeatmap();
+    } else if (container) {
+        container.style.display = 'none';
+    }
+});
 
 // Search handler
 async function doSearch() {
