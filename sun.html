@@ -1036,6 +1036,23 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
+            <div class="sec">
+                <div class="sec-hd"><span>Forecast Analytics</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl" style="font-size:11px">
+                        <tr><td>Kp forecast (24h)</td><td id="fc-kp-24h">—</td></tr>
+                        <tr><td>Kp forecast (72h)</td><td id="fc-kp-72h">—</td></tr>
+                        <tr><td>Trend</td><td id="fc-trend">—</td></tr>
+                        <tr><td>Storm G1+ (24h)</td><td id="fc-g1-prob">—</td></tr>
+                        <tr><td>Storm G2+ (24h)</td><td id="fc-g2-prob">—</td></tr>
+                        <tr><td>Storm G3+ (24h)</td><td id="fc-g3-prob">—</td></tr>
+                        <tr><td>27-day recurrence</td><td id="fc-recurrence">—</td></tr>
+                        <tr><td>Solar cycle</td><td id="fc-cycle">—</td></tr>
+                        <tr><td>Model accuracy</td><td id="fc-accuracy" style="font-size:10px">—</td></tr>
+                    </table>
+                </div>
+            </div>
+
             <div class="sec closed">
                 <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
                 <div class="sec-bd">
@@ -1463,6 +1480,9 @@ import { EffectComposer }     from 'three/addons/postprocessing/EffectComposer.j
 import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
+import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
+import { ModelValidator }     from './js/model-validation.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
 const _navBurger = document.getElementById('nav-burger');
@@ -1807,6 +1827,71 @@ let composer, bloomPass;
         `,
     };
     composer.addPass(new ShaderPass(diffuseShader));
+
+    // ── Space occlusion — corona-to-space shadow boundary ────────────────────
+    // Final pass: smoothly darkens pixels beyond the bright corona annulus,
+    // eliminating the purple additive-glow haze while preserving coronal
+    // structure.  Acts like a coronagraph occulter + limb vignette.
+    //
+    // Three zones:
+    //   1. Inner bright zone (r < inner): untouched — photosphere & inner corona
+    //   2. Transition zone (inner < r < outer): gradual darkening
+    //   3. Deep space (r > outer): near-black, only bright features survive
+    //
+    // The key insight: rather than hard-clipping, we use a luminance-aware
+    // curve that dims low-brightness pixels MORE aggressively than bright ones.
+    // This kills the purple haze (low-lum additive residue) while letting
+    // bright streamers, CME arcs, and field lines remain visible at distance.
+    const spaceOcclusionShader = {
+        uniforms: {
+            tDiffuse:   { value: null },
+            resolution: { value: new THREE.Vector2(W, H) },
+            center:     { value: new THREE.Vector2(0.5, 0.5) },
+        },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+            precision highp float;
+            uniform sampler2D tDiffuse;
+            uniform vec2      resolution;
+            uniform vec2      center;
+            varying vec2      vUv;
+
+            void main() {
+                vec4 col = texture2D(tDiffuse, vUv);
+                vec2 ar  = vec2(resolution.x / resolution.y, 1.0);
+                float dist = length((vUv - center) * ar);
+
+                // Luminance of this pixel (perceived brightness)
+                float lum = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+
+                // ── Zone boundaries (in aspect-corrected UV space) ──
+                // Inner: solar disk + tight corona (fully preserved)
+                float inner = 0.14;
+                // Outer: beyond this, only the brightest features survive
+                float outer = 0.50;
+
+                // Base distance falloff: smooth ramp from 1.0 to ~0.0
+                float distFade = 1.0 - smoothstep(inner, outer, dist);
+
+                // Luminance-aware boost: bright features (streamers, CME, field lines)
+                // get to survive further into space than dim additive residue.
+                // At lum=0.5+, the pixel keeps ~70% brightness even at distance.
+                float lumBoost = smoothstep(0.03, 0.25, lum) * 0.70;
+
+                // Combined factor: distance fade + luminance rescue
+                float keep = clamp(distFade + lumBoost * (1.0 - distFade), 0.0, 1.0);
+
+                // Deep space floor: allow a whisper so background stars survive
+                keep = max(keep, 0.005);
+
+                gl_FragColor = vec4(col.rgb * keep, col.a);
+            }
+        `,
+    };
+    composer.addPass(new ShaderPass(spaceOcclusionShader));
 }
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -2630,12 +2715,12 @@ const coronaFS = /* glsl */`
         col  = mix(col, vec3(0.55, 0.80, 1.20) * (col * 0.6 + 0.4), u_electron_norm * 0.30);
         alpha += u_electron_norm * pow(rim, 2.5) * 0.10;
 
-        // ── Dst ring-current: sub-storm magnetospheric injection glow ─────────
-        // Negative Dst (ring-current injection) comes from the solar wind
-        // energizing Earth's magnetosphere — reflects extreme solar wind pressure.
+        // ── Dst ring-current: compressed solar wind pressure glow ──────────────
+        // Enhanced Dst reflects stronger solar wind compression on the dayside;
+        // warm amber-white tint in K-corona from increased electron density.
         float dstBoost = u_dst_norm * helmetBelt;
-        col  = mix(col, vec3(0.80, 0.55, 1.10), dstBoost * 0.22);
-        alpha += dstBoost * pow(rim, 2.8) * 0.12;
+        col  = mix(col, vec3(1.05, 0.88, 0.60), dstBoost * 0.18);
+        alpha += dstBoost * pow(rim, 3.2) * 0.08;
 
         gl_FragColor = vec4(col * pulse, alpha);
     }
@@ -2671,9 +2756,9 @@ const outerGlowFS = /* glsl */`
         vec3 V = normalize(vViewDir);
         float rim = 1.0 - max(dot(N, V), 0.0);
 
-        // Base limb glow — wider and brighter during high activity
-        float basePow  = mix(6.0, 3.5, u_activity);
-        float baseAlph = pow(rim, basePow) * (0.14 + u_activity * 0.12 + u_wind_density_norm * 0.08);
+        // Base limb glow — tighter falloff to prevent background haze
+        float basePow  = mix(8.0, 4.5, u_activity);
+        float baseAlph = pow(rim, basePow) * (0.10 + u_activity * 0.08 + u_wind_density_norm * 0.05);
 
         // Streamer belt: equatorial brightening driven by Kp
         float lat    = asin(clamp(N.y, -1.0, 1.0));
@@ -2688,7 +2773,7 @@ const outerGlowFS = /* glsl */`
         tendril = smoothstep(0.3, 0.9, tendril) * beltW * pow(rim, 3.5)
                   * (0.03 + u_activity * 0.04);
 
-        float alpha = clamp(baseAlph + beltAlph + tendril, 0.0, 0.55);
+        float alpha = clamp(baseAlph + beltAlph + tendril, 0.0, 0.40);
 
         // Colour: warm white → blue-white fast wind → golden Kp storm → flare white
         vec3 col   = vec3(0.90, 0.86, 0.74);
@@ -2697,9 +2782,10 @@ const outerGlowFS = /* glsl */`
         col = mix(col, vec3(1.20, 1.00, 0.80), u_flare_intensity  * 0.50);
 
         // Southward Bz → reconnection glow on equatorial belt
+        // Warm white-gold tint (compressed HCS electron density)
         float bzBoost = clamp(u_bz_sw, 0.0, 1.0);
-        col   = mix(col, vec3(0.80, 0.55, 1.10), bzBoost * beltW * 0.25);
-        alpha += bzBoost * beltAlph * 0.40;
+        col   = mix(col, vec3(1.00, 0.85, 0.55), bzBoost * beltW * 0.20);
+        alpha += bzBoost * beltAlph * 0.30;
 
         // Flare EUV blast — brief global brightening
         alpha = clamp(alpha + pow(rim, 4.0) * u_flare_intensity * 0.30, 0.0, 0.65);
@@ -2713,19 +2799,19 @@ const outerGlowFS = /* glsl */`
 
         // ── G-scale storm: broad equatorial brightening + warm tint ───────────
         float stNorm = u_storm_level / 5.0;
-        col   = mix(col, vec3(1.08, 0.78, 0.55), stNorm * beltW * 0.35);
-        alpha = clamp(alpha * (1.0 + stNorm * 0.38), 0.0, 0.75);
+        col   = mix(col, vec3(1.08, 0.78, 0.55), stNorm * beltW * 0.30);
+        alpha = clamp(alpha * (1.0 + stNorm * 0.25), 0.0, 0.55);
 
         // ── Total IMF: stronger field = tighter, brighter streamer belt ────────
         alpha += beltAlph * u_bt_norm * 0.55;
         col    = mix(col, vec3(1.05, 0.95, 0.80), u_bt_norm * beltW * 0.18);
 
         // ── F10.7 solar cycle: global heliospheric glow intensity ──────────────
-        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.30), 0.0, 0.75);
+        alpha = clamp(alpha * (1.0 + u_f107_norm * 0.18), 0.0, 0.50);
 
-        // ── Energetic electron flux: faint blue-violet outer heliosphere haze ──
-        col   = mix(col, vec3(0.62, 0.76, 1.12), u_electron_norm * 0.22);
-        alpha += u_electron_norm * pow(rim, 3.5) * 0.08;
+        // ── Energetic electron flux: faint blue-white outer heliosphere haze ──
+        col   = mix(col, vec3(0.80, 0.88, 1.00), u_electron_norm * 0.15);
+        alpha += u_electron_norm * pow(rim, 4.0) * 0.05;
 
         gl_FragColor = vec4(col, alpha);
     }
@@ -4802,6 +4888,105 @@ try {
     new WindPipelineFeed().start();
 } catch (e) {
     console.debug('[WindPipeline] server not available, using NOAA data only:', e.message);
+}
+
+// ── Solar weather history + forecasting + validation pipeline ──────────────────
+// Connects the ML forecasting engine to the real-time data feed.
+// History: 3-tier ring buffers (1-min/1-hr/1-day) with IndexedDB persistence.
+// Forecaster: AR(6) Kp model + Holt-Winters trend + 27-day recurrence + storm prob.
+// Validator: tracks prediction accuracy against observed outcomes.
+const _wxHistory   = new SolarWeatherHistory();
+const _forecaster  = new SolarWeatherForecaster();
+const _validator   = new ModelValidator().start();
+let   _lastForecast = null;
+
+(async function initForecastPipeline() {
+    await _wxHistory.open();
+    // If no historical data, seed with synthetic data so forecasts work immediately
+    if (_wxHistory.sizes().every(s => s === 0)) {
+        seedSyntheticHistory(_wxHistory, 90);
+    }
+    // Run initial forecast
+    _lastForecast = _forecaster.update(_wxHistory, 72);
+    _updateForecastPanel(_lastForecast);
+    console.info('[Sun] Forecast pipeline initialised —',
+        `Kp24h: ${_lastForecast.summary.kpFC24h}`,
+        `G1: ${Math.round(_lastForecast.storm.g1_24h * 100)}%`,
+        `cycle: ${_lastForecast.cycle.phaseName}`);
+})();
+
+// Ingest every swpc-update event into history + re-forecast every 5 min
+let _lastForecastAt = 0;
+window.addEventListener('swpc-update', (ev) => {
+    const sw = ev.detail?.solar_wind ?? {};
+    const kp = ev.detail?.kp ?? 0;
+    const coupling = {
+        dst:             ev.detail?.dst_index ?? 0,
+        epsilon_GW:      0,
+        substorm_index:  Math.min(1, kp / 9),
+    };
+    _wxHistory.ingest(
+        { speed: sw.speed, density: sw.density, bz: sw.bz, by: sw.by, kp },
+        coupling
+    );
+    // Re-forecast every 5 minutes (not every 60s event)
+    const now = Date.now();
+    if (now - _lastForecastAt >= 300_000) {
+        _lastForecastAt = now;
+        _lastForecast = _forecaster.update(_wxHistory, 72);
+        _updateForecastPanel(_lastForecast);
+    }
+}, { passive: true });
+
+// Update forecast display panel
+function _updateForecastPanel(fc) {
+    if (!fc) return;
+    const el = (id) => document.getElementById(id);
+
+    // Kp forecast values
+    const kp24El = el('fc-kp-24h');
+    if (kp24El) kp24El.textContent = fc.summary.kpFC24h?.toFixed(1) ?? '—';
+    const kp72El = el('fc-kp-72h');
+    if (kp72El) kp72El.textContent = fc.summary.kpFC72h?.toFixed(1) ?? '—';
+
+    // Storm probabilities
+    const g1El = el('fc-g1-prob');
+    if (g1El) g1El.textContent = Math.round(fc.storm.g1_24h * 100) + '%';
+    const g2El = el('fc-g2-prob');
+    if (g2El) g2El.textContent = Math.round(fc.storm.g2_24h * 100) + '%';
+    const g3El = el('fc-g3-prob');
+    if (g3El) g3El.textContent = Math.round(fc.storm.g3_24h * 100) + '%';
+
+    // Holt-Winters trend arrow
+    const trendEl = el('fc-trend');
+    if (trendEl) {
+        const t = fc.hw.trend;
+        trendEl.textContent = t > 0.05 ? '↑ Rising' : t < -0.05 ? '↓ Falling' : '→ Steady';
+        trendEl.style.color = t > 0.05 ? '#ff6644' : t < -0.05 ? '#44cc88' : '#888';
+    }
+
+    // 27-day recurrence
+    const recurEl = el('fc-recurrence');
+    if (recurEl) {
+        const r = fc.recurrence;
+        recurEl.textContent = r.signal !== 'none'
+            ? `${r.signal} (r=${r.corr27})`
+            : 'Not detected';
+    }
+
+    // Solar cycle
+    const cycleEl = el('fc-cycle');
+    if (cycleEl) cycleEl.textContent = `SC${fc.cycle.cycleNumber} ${fc.cycle.phaseName} · SSN≈${fc.cycle.smoothedSSN}`;
+
+    // Model accuracy (from validator)
+    const accEl = el('fc-accuracy');
+    if (accEl) {
+        const card = _validator.getScorecard();
+        const kpAcc = card.kp_persistence;
+        accEl.textContent = kpAcc.n > 0
+            ? `Kp hit: ${Math.round(kpAcc.hit_rate * 100)}% (n=${kpAcc.n}, MAE=${kpAcc.mae.toFixed(2)})`
+            : 'Accumulating data…';
+    }
 }
 
 // ── Live countdown ticker — shows "Next NOAA refresh in Xs" ──────────────────
