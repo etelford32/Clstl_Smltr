@@ -71,6 +71,10 @@ ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS conjunction_threshold_
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS temp_high_f DOUBLE PRECISION;
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS temp_low_f DOUBLE PRECISION;
 
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS notify_iono_disturbance BOOLEAN DEFAULT false;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS radio_r_threshold INTEGER DEFAULT 2;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS gnss_risk_threshold INTEGER DEFAULT 2;
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS power_grid_g_threshold INTEGER DEFAULT 4;
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS email_alerts BOOLEAN DEFAULT false;
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS email_min_severity TEXT DEFAULT 'warning';
 ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS alert_cooldown_min INTEGER DEFAULT 60;
