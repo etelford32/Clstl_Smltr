@@ -169,6 +169,42 @@ function ecefToLatLonAlt(x, y, z) {
     return { lat, lon, alt };
 }
 
+// ── Constellation color map ─────────────────────────────────────────────────
+// Each group gets a distinct color for per-vertex coloring.
+const GROUP_COLORS = {
+    'stations':      new THREE.Color(0xffffff),  // white — ISS, Tiangong
+    'starlink':      new THREE.Color(0xccddff),  // cool white — SpaceX
+    'oneweb':        new THREE.Color(0x4488ff),  // blue — OneWeb
+    'gps-ops':       new THREE.Color(0x00ff88),  // green — GPS
+    'galileo':       new THREE.Color(0x00ccff),  // cyan — Galileo
+    'beidou':        new THREE.Color(0xff8844),  // orange — BeiDou
+    'glonass':       new THREE.Color(0xff4444),  // red — GLONASS
+    'weather':       new THREE.Color(0xffdd44),  // yellow — GOES/JPSS/Meteosat
+    'resource':      new THREE.Color(0x44ff44),  // lime — Landsat/Sentinel
+    'science':       new THREE.Color(0xcc66ff),  // purple — Hubble/JWST/Chandra
+    'iridium':       new THREE.Color(0xff66aa),  // pink — Iridium
+    'globalstar':    new THREE.Color(0xffaa66),  // peach — Globalstar
+    'amateur':       new THREE.Color(0x66ffcc),  // teal — Ham radio
+    'visual':        new THREE.Color(0xffffaa),  // pale yellow — Bright objects
+    'active':        new THREE.Color(0x88aacc),  // muted blue — All active
+    'debris':        new THREE.Color(0xff2200),  // danger red — Debris
+    'last-30-days':  new THREE.Color(0x00ffaa),  // mint — Recent launches
+    'geo':           new THREE.Color(0xffaa00),  // amber — Geostationary
+    'planet':        new THREE.Color(0x88ff88),  // light green — Planet Labs
+    'search':        new THREE.Color(0x00ffcc),  // original cyan — Manual search
+    '_default':      new THREE.Color(0x00ffcc),  // fallback
+};
+
+/** Get the color for a constellation group. */
+export function getGroupColor(group) {
+    return GROUP_COLORS[group] ?? GROUP_COLORS._default;
+}
+
+/** Get the hex string for a group (for CSS). */
+export function getGroupColorHex(group) {
+    return '#' + (GROUP_COLORS[group] ?? GROUP_COLORS._default).getHexString();
+}
+
 // ── SatelliteTracker class ───────────────────────────────────────────────────
 
 export class SatelliteTracker {
@@ -176,49 +212,66 @@ export class SatelliteTracker {
      * @param {THREE.Object3D} parent      Earth group to attach satellites to
      * @param {number}         earthRadius  Earth sphere radius in scene units
      * @param {object}         [opts]
-     * @param {number}         [opts.maxSatellites=500] Max satellites to render
-     * @param {boolean}        [opts.showOrbits=true]   Draw orbit trails
+     * @param {number}         [opts.maxSatellites=50000] Max satellites to render
+     * @param {boolean}        [opts.showOrbits=true]     Draw orbit trails
      */
-    constructor(parent, earthRadius, { maxSatellites = 500, showOrbits = true } = {}) {
+    constructor(parent, earthRadius, { maxSatellites = 50000, showOrbits = true } = {}) {
         this._parent = parent;
         this._earthR = earthRadius;
         this._maxSats = maxSatellites;
         this._showOrbits = showOrbits;
-        this._satellites = [];   // array of { tle, mesh, orbitLine, ... }
+        this._satellites = [];   // array of { tle, epochJd, group, lat, lon, alt }
+        this._groups = new Map(); // group name → { visible, count, color }
         this._group = new THREE.Group();
         this._group.name = 'satellites';
         parent.add(this._group);
 
-        // Dot material (shared)
+        // Per-vertex color material (replaces uniform cyan)
         this._dotMat = new THREE.PointsMaterial({
-            color: 0x00ffcc, size: 0.008, sizeAttenuation: true,
+            size: 0.008, sizeAttenuation: true,
             transparent: true, opacity: 0.9, depthWrite: false,
+            vertexColors: true,
         });
 
-        // Points geometry (instanced for all satellites)
         this._positions = null;
+        this._colors = null;
         this._pointsMesh = null;
+
+        // Shell visualization group
+        this._shellGroup = new THREE.Group();
+        this._shellGroup.name = 'orbital-shells';
+        this._shellGroup.visible = false;
+        parent.add(this._shellGroup);
     }
 
     /**
-     * Fetch a CelesTrak satellite group and set up visualization.
+     * Fetch a CelesTrak satellite group and ADD to existing catalog.
+     * Supports loading multiple groups without replacing previous data.
      * @param {string} group  CelesTrak group name (e.g. 'stations', 'starlink')
      */
     async loadGroup(group = 'stations') {
+        if (this._groups.has(group)) return this._groups.get(group).count;
         try {
             const res = await fetch(`/api/celestrak/tle?group=${group}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             if (data.error) throw new Error(data.error);
 
-            this._setupSatellites(data.satellites ?? []);
-            console.info(`[SatTracker] Loaded ${this._satellites.length} satellites (${group})`);
+            const tles = data.satellites ?? [];
+            const added = this._addSatellites(tles, group);
+            this._groups.set(group, {
+                visible: true,
+                count: added,
+                color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+            });
+
+            console.info(`[SatTracker] +${added} satellites (${group}) — total: ${this._satellites.length}`);
 
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
-                detail: { group, count: this._satellites.length, satellites: this._satellites.map(s => s.tle) },
+                detail: { group, count: added, total: this._satellites.length },
             }));
 
-            return this._satellites.length;
+            return added;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
             return 0;
@@ -237,8 +290,7 @@ export class SatelliteTracker {
             if (data.error) throw new Error(data.error);
 
             const sats = data.satellites ?? [];
-            // Add to existing catalog rather than replacing
-            this._addSatellites(sats);
+            this._addSatellites(sats, 'search');
             return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);
@@ -246,24 +298,60 @@ export class SatelliteTracker {
         }
     }
 
-    /** Add satellites to the existing catalog (for searched individual sats). */
-    _addSatellites(tles) {
-        for (const tle of tles) {
-            // Skip if already tracked
-            if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
-
-            const epochYr = tle.epoch_yr ?? 2026;
-            const yr = Math.floor(epochYr);
-            const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
-            const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
-            const epochJd = jdJan1 + dayFrac;
-
-            this._satellites.push({ tle, epochJd, lat: 0, lon: 0, alt: 400 });
-        }
-        this._rebuildPoints();
+    /** Toggle visibility of a constellation group. */
+    setGroupVisible(group, visible) {
+        const g = this._groups.get(group);
+        if (!g) return;
+        g.visible = visible;
+        this._updateColors();
     }
 
-    /** Rebuild the Points mesh after adding satellites. */
+    /** Check if a group is loaded. */
+    hasGroup(group) { return this._groups.has(group); }
+
+    /** Get loaded group info. */
+    getGroupInfo(group) { return this._groups.get(group) ?? null; }
+
+    /** Get all loaded group names. */
+    getLoadedGroups() { return [...this._groups.keys()]; }
+
+    /** Get count per group. */
+    getGroupCounts() {
+        const out = {};
+        for (const [name, g] of this._groups) out[name] = g.count;
+        return out;
+    }
+
+    /** Get altitude distribution for loaded satellites (for heatmap). */
+    getAltitudeDistribution(binSizeKm = 25) {
+        const bins = {};
+        for (const sat of this._satellites) {
+            const alt = (sat.tle.perigee_km + sat.tle.apogee_km) / 2;
+            const bin = Math.round(alt / binSizeKm) * binSizeKm;
+            bins[bin] = (bins[bin] || 0) + 1;
+        }
+        return Object.entries(bins)
+            .map(([alt, count]) => ({ alt: +alt, count }))
+            .sort((a, b) => a.alt - b.alt);
+    }
+
+    /** Add satellites to catalog, tagged with their group. Returns count added. */
+    _addSatellites(tles, group = '_default') {
+        let added = 0;
+        const color = GROUP_COLORS[group] ?? GROUP_COLORS._default;
+        for (const tle of tles) {
+            if (this._satellites.length >= this._maxSats) break;
+            if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
+
+            const epochJd = _tleEpochToJd(tle);
+            this._satellites.push({ tle, epochJd, group, color, lat: 0, lon: 0, alt: 400 });
+            added++;
+        }
+        if (added > 0) this._rebuildPoints();
+        return added;
+    }
+
+    /** Rebuild the Points mesh with per-vertex colors. */
     _rebuildPoints() {
         if (this._pointsMesh) {
             this._group.remove(this._pointsMesh);
@@ -271,12 +359,45 @@ export class SatelliteTracker {
         }
         const n = this._satellites.length;
         const posArr = new Float32Array(n * 3);
+        const colArr = new Float32Array(n * 3);
+
+        for (let i = 0; i < n; i++) {
+            const sat = this._satellites[i];
+            const gInfo = this._groups.get(sat.group);
+            const visible = gInfo ? gInfo.visible : true;
+            const c = visible ? sat.color : _hiddenColor;
+            colArr[i * 3]     = c.r;
+            colArr[i * 3 + 1] = c.g;
+            colArr[i * 3 + 2] = c.b;
+        }
+
         this._positions = new THREE.BufferAttribute(posArr, 3);
+        this._colors = new THREE.BufferAttribute(colArr, 3);
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', this._positions);
+        geo.setAttribute('color', this._colors);
         this._pointsMesh = new THREE.Points(geo, this._dotMat);
         this._pointsMesh.renderOrder = 10;
         this._group.add(this._pointsMesh);
+    }
+
+    /** Update only the color buffer (for show/hide toggles). */
+    _updateColors() {
+        if (!this._colors) return;
+        const colArr = this._colors.array;
+        for (let i = 0; i < this._satellites.length; i++) {
+            const sat = this._satellites[i];
+            const gInfo = this._groups.get(sat.group);
+            const visible = gInfo ? gInfo.visible : true;
+            if (visible) {
+                colArr[i * 3]     = sat.color.r;
+                colArr[i * 3 + 1] = sat.color.g;
+                colArr[i * 3 + 2] = sat.color.b;
+            } else {
+                colArr[i * 3] = colArr[i * 3 + 1] = colArr[i * 3 + 2] = 0;
+            }
+        }
+        this._colors.needsUpdate = true;
     }
 
     /** Update satellite positions to current time. Call every frame. */
@@ -288,16 +409,12 @@ export class SatelliteTracker {
 
         for (let i = 0; i < this._satellites.length; i++) {
             const sat = this._satellites[i];
-            const tsince = (jd - sat.epochJd) * MIN_PER_DAY;  // minutes since TLE epoch
+            const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
 
-            // Propagate via WASM SGP4 (if loaded) or JS fallback
             const teme = propagate(sat.tle, tsince);
-
-            // TEME → ECEF → lat/lon/alt
             const ecef = temeToEcef(teme.x, teme.y, teme.z, jd);
             const lla = ecefToLatLonAlt(ecef.x, ecef.y, ecef.z);
 
-            // Convert to 3D scene position on globe
             const r = this._earthR * (1 + lla.alt / RE_KM);
             const latR = lla.lat * DEG2RAD;
             const lonR = lla.lon * DEG2RAD;
@@ -306,7 +423,6 @@ export class SatelliteTracker {
             posArr[i * 3 + 1] = r * Math.sin(latR);
             posArr[i * 3 + 2] = r * Math.cos(latR) * Math.sin(lonR);
 
-            // Store for external queries
             sat.lat = lla.lat;
             sat.lon = lla.lon;
             sat.alt = lla.alt;
@@ -320,6 +436,7 @@ export class SatelliteTracker {
         return this._satellites.map(s => ({
             name: s.tle.name,
             norad_id: s.tle.norad_id,
+            group: s.group,
             lat: s.lat,
             lon: s.lon,
             alt: s.alt,
@@ -336,6 +453,7 @@ export class SatelliteTracker {
         if (!s) return null;
         return {
             name: s.tle.name, norad_id: s.tle.norad_id,
+            group: s.group,
             lat: s.lat, lon: s.lon, alt: s.alt,
             period_min: s.tle.period_min, inclination: s.tle.inclination,
             tle: s.tle,
@@ -344,6 +462,55 @@ export class SatelliteTracker {
 
     /** Set visibility. */
     setVisible(v) { this._group.visible = v; }
+
+    // ── Starlink shell visualization ────────────────────────────────────────
+
+    /**
+     * Build translucent orbital shell rings for Starlink's operating altitudes.
+     * Each shell is a tilted ring at the constellation's inclination.
+     */
+    buildStarlinkShells(visible = true) {
+        // Clear previous shells
+        while (this._shellGroup.children.length) {
+            const c = this._shellGroup.children[0];
+            c.geometry?.dispose();
+            c.material?.dispose();
+            this._shellGroup.remove(c);
+        }
+
+        // Starlink orbital shells (altitude km, inclination deg, label)
+        const shells = [
+            { alt: 550, inc: 53.0,  label: 'Gen1 Shell 1',  color: 0x4466ff, count: '~1584' },
+            { alt: 540, inc: 53.2,  label: 'Gen1 Shell 2',  color: 0x5577ff, count: '~1584' },
+            { alt: 570, inc: 70.0,  label: 'Gen1 Polar',    color: 0x6688ff, count: '~720' },
+            { alt: 560, inc: 97.6,  label: 'Gen1 SSO',      color: 0x88aaff, count: '~348' },
+            { alt: 525, inc: 53.0,  label: 'Gen2 V-band',   color: 0x3355dd, count: '~7178' },
+            { alt: 530, inc: 43.0,  label: 'Gen2 Mid-Inc',  color: 0x4466dd, count: '~2000' },
+        ];
+
+        for (const sh of shells) {
+            const r = this._earthR * (1 + sh.alt / RE_KM);
+            const ring = new THREE.Mesh(
+                new THREE.RingGeometry(r - 0.003, r + 0.003, 128),
+                new THREE.MeshBasicMaterial({
+                    color: sh.color, side: THREE.DoubleSide,
+                    transparent: true, opacity: 0.25, depthWrite: false,
+                    blending: THREE.AdditiveBlending,
+                })
+            );
+            ring.rotation.x = (90 - sh.inc) * DEG2RAD;
+            ring.userData = { ...sh };
+            this._shellGroup.add(ring);
+        }
+
+        this._shellGroup.visible = visible;
+    }
+
+    /** Toggle shell visibility. */
+    setShellsVisible(v) { this._shellGroup.visible = v; }
+
+    /** Get shell group for external access. */
+    getShellGroup() { return this._shellGroup; }
 
     /**
      * Compute ground track for a satellite (one full orbit).
@@ -530,41 +697,16 @@ export class SatelliteTracker {
         return conjunctions;
     }
 
-    // ── Internal ─────────────────────────────────────────────────────────────
+}
 
-    _setupSatellites(tles) {
-        // Clear previous
-        if (this._pointsMesh) {
-            this._group.remove(this._pointsMesh);
-            this._pointsMesh.geometry.dispose();
-        }
+// ── Helpers (module-level) ──────────────────────────────────────────────────
 
-        const n = Math.min(tles.length, this._maxSats);
-        this._satellites = [];
+const _hiddenColor = new THREE.Color(0x000000);
 
-        for (let i = 0; i < n; i++) {
-            const tle = tles[i];
-            // Compute epoch JD for tsince calculation
-            const epochYr = tle.epoch_yr ?? 2026;
-            const yr = Math.floor(epochYr);
-            const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
-            const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
-            const epochJd = jdJan1 + dayFrac;
-
-            this._satellites.push({
-                tle,
-                epochJd,
-                lat: 0, lon: 0, alt: 400,
-            });
-        }
-
-        // Create points geometry
-        const posArr = new Float32Array(n * 3);
-        this._positions = new THREE.BufferAttribute(posArr, 3);
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', this._positions);
-        this._pointsMesh = new THREE.Points(geo, this._dotMat);
-        this._pointsMesh.renderOrder = 10;
-        this._group.add(this._pointsMesh);
-    }
+function _tleEpochToJd(tle) {
+    const epochYr = tle.epoch_yr ?? 2026;
+    const yr = Math.floor(epochYr);
+    const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
+    const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
+    return jdJan1 + dayFrac;
 }
