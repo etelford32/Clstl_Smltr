@@ -428,3 +428,145 @@ export function conjunctionsToCSV(conjunctions, targetName, targetNorad) {
     }
     return csv;
 }
+
+// ── 7. Decay Watchlist ──────────────────────────────────────────────────────
+
+/**
+ * Identify satellites likely to reenter within a given number of days.
+ * Scans the loaded catalog and returns objects sorted by shortest lifetime.
+ *
+ * @param {Array} satellites  Array of { tle, group } from tracker.getSatellites()
+ * @param {number} withinDays  Threshold (default 90 days)
+ * @param {number} f107        Solar flux proxy (default 150)
+ * @returns {Array<{name, norad_id, group, perigee_km, lifetime_days, lifetime_str, decay_rate}>}
+ */
+export function decayWatchlist(satellites, withinDays = 90, f107 = 150) {
+    const watchlist = [];
+    for (const sat of satellites) {
+        const tle = sat.tle ?? sat;
+        if (!tle.mean_motion) continue;
+        const perigee = tle.perigee_km ?? 0;
+        if (perigee > 800 || perigee < 100) continue; // skip high orbits and already-reentered
+
+        const life = estimateOrbitLifetime(tle, f107);
+        if (life.lifetime_days <= withinDays) {
+            watchlist.push({
+                name: tle.name,
+                norad_id: tle.norad_id,
+                group: sat.group || 'unknown',
+                perigee_km: perigee,
+                lifetime_days: life.lifetime_days,
+                lifetime_str: life.lifetime_str,
+                decay_rate: life.decay_rate_km_day,
+            });
+        }
+    }
+    watchlist.sort((a, b) => a.lifetime_days - b.lifetime_days);
+    return watchlist;
+}
+
+// ── 8. Constellation Coverage Estimation ────────────────────────────────────
+
+/**
+ * Estimate ground coverage for a constellation using inclination + altitude.
+ * For a Walker constellation, coverage latitude band ≈ [-incl, +incl].
+ * Instantaneous coverage per satellite ≈ circular footprint with radius
+ * determined by the Earth central angle to the horizon.
+ *
+ * @param {Array} satellites  Array of { tle } for one constellation
+ * @returns {{ lat_band, footprint_km, est_coverage_pct, sat_count, avg_alt_km, inclination }}
+ */
+export function constellationCoverage(satellites) {
+    if (satellites.length === 0) return null;
+
+    let sumAlt = 0, sumIncl = 0, count = 0;
+    for (const sat of satellites) {
+        const tle = sat.tle ?? sat;
+        if (!tle.mean_motion) continue;
+        const alt = ((tle.perigee_km || 0) + (tle.apogee_km || 0)) / 2;
+        sumAlt += alt;
+        sumIncl += (tle.inclination || 0);
+        count++;
+    }
+    if (count === 0) return null;
+
+    const avgAlt = sumAlt / count;
+    const avgIncl = sumIncl / count;
+
+    // Earth central angle to horizon from altitude h:
+    // θ = arccos(Re / (Re + h))
+    const theta = Math.acos(RE_KM / (RE_KM + avgAlt));
+    const footprint_km = theta * RE_KM; // ground distance to sub-satellite horizon
+
+    // Single satellite instantaneous coverage area
+    const capArea = TWOPI * RE_KM * RE_KM * (1 - Math.cos(theta));
+    const earthSurface = 4 * Math.PI * RE_KM * RE_KM;
+
+    // Coverage band by latitude: ±inclination degrees
+    const bandFraction = Math.sin(avgIncl * DEG2RAD); // fraction of Earth surface in the band
+    const bandArea = earthSurface * bandFraction;
+
+    // Very rough N-satellite coverage: each covers capArea, N satellites overlap ~30%
+    const overlapFactor = 0.7;
+    const totalCoverage = Math.min(1.0, count * capArea * overlapFactor / bandArea);
+
+    return {
+        sat_count: count,
+        avg_alt_km: Math.round(avgAlt),
+        inclination: Math.round(avgIncl * 10) / 10,
+        lat_band: `±${Math.round(avgIncl)}°`,
+        footprint_km: Math.round(footprint_km),
+        single_sat_area_km2: Math.round(capArea),
+        est_coverage_pct: Math.round(totalCoverage * 100),
+    };
+}
+
+// ── 9. Breakup / Fragmentation Event Detection ─────────────────────────────
+
+/**
+ * Detect potential breakup events by finding altitude bands with anomalously
+ * high object density. Compares current distribution against a baseline
+ * (uniform distribution) and flags bins with >3σ excess.
+ *
+ * @param {Array} satellites  Full catalog from tracker.getSatellites()
+ * @param {number} binSizeKm  Altitude bin width (default 25 km)
+ * @returns {Array<{alt_km, count, expected, excess, sigma, severity}>}
+ */
+export function detectBreakupEvents(satellites, binSizeKm = 25) {
+    const bins = {};
+    let totalLEO = 0;
+
+    for (const sat of satellites) {
+        const tle = sat.tle ?? sat;
+        const alt = ((tle.perigee_km || 0) + (tle.apogee_km || 0)) / 2;
+        if (alt < 200 || alt > 2000) continue; // LEO only
+        const bin = Math.round(alt / binSizeKm) * binSizeKm;
+        bins[bin] = (bins[bin] || 0) + 1;
+        totalLEO++;
+    }
+
+    if (totalLEO === 0) return [];
+
+    const nBins = Object.keys(bins).length;
+    const expected = totalLEO / Math.max(nBins, 1);
+    const variance = Object.values(bins).reduce((s, c) => s + (c - expected) ** 2, 0) / Math.max(nBins, 1);
+    const stddev = Math.sqrt(variance);
+
+    const anomalies = [];
+    for (const [alt, count] of Object.entries(bins)) {
+        const sigma = stddev > 0 ? (count - expected) / stddev : 0;
+        if (sigma > 2.0) {
+            anomalies.push({
+                alt_km: +alt,
+                count,
+                expected: Math.round(expected),
+                excess: count - Math.round(expected),
+                sigma: Math.round(sigma * 10) / 10,
+                severity: sigma > 5 ? 'CRITICAL' : sigma > 3 ? 'HIGH' : 'MODERATE',
+            });
+        }
+    }
+
+    anomalies.sort((a, b) => b.sigma - a.sigma);
+    return anomalies;
+}
