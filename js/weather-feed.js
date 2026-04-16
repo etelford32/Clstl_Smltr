@@ -284,12 +284,13 @@ export class WeatherFeed {
         const precip = this._bilinear(rawPrecip, GRID_W, GRID_H, TEX_W, TEX_H, true);
 
         // Smooth cloud fractions to soften grid-cell boundaries.
-        // Two passes of 5×5 box blur is equivalent to ~10×10 Gaussian and
-        // eliminates the visible 10°-spaced block edges.
-        const sLow    = this._boxBlur(this._boxBlur(low,    TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
-        const sMid    = this._boxBlur(this._boxBlur(mid,    TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
-        const sHigh   = this._boxBlur(this._boxBlur(high,   TEX_W, TEX_H, 2), TEX_W, TEX_H, 2);
-        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, 2);  // single pass for precip
+        // Two passes of radius-5 (11×11) box blur ≈ Gaussian σ≈8 px,
+        // which spans roughly two 10°-grid cells and fully eliminates
+        // the visible block edges from the coarse input grid.
+        const sLow    = this._boxBlur(this._boxBlur(low,    TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
+        const sMid    = this._boxBlur(this._boxBlur(mid,    TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
+        const sHigh   = this._boxBlur(this._boxBlur(high,   TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
+        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, 4);
 
         for (let k = 0; k < TEX_W * TEX_H; k++) {
             const t4 = k * 4;
@@ -381,17 +382,22 @@ export class WeatherFeed {
                 this._windBuf[t4+2] = spd;
                 this._windBuf[t4+3] = 1.0;
 
-                // Procedural cloud layers: low cloud in ITCZ + mid-lat storms,
-                // high cirrus in subtropics and polar front
-                const itcz    = Math.max(0, 1.0 - Math.abs(lat) * 3.8); // near equator
-                const midLat  = Math.max(0, Math.abs(lat) - 0.5) * 1.2; // >30°
-                const cLow    = Math.max(0, Math.min(1, itcz * 0.9 + midLat * 0.55 * (1 - pNorm)));
-                const cMid    = Math.max(0, Math.min(1, midLat * 0.5 + (1 - pNorm) * 0.3));
-                const cHigh   = Math.max(0, Math.min(1, 0.25 + 0.35 * Math.abs(Math.sin(lat * 2))));
+                // Procedural cloud layers: Rossby-wave perturbations break
+                // purely zonal banding so clouds vary with longitude too.
+                const w1 = 0.28 * Math.sin(lon * 3.0 + lat * 1.8);
+                const w2 = 0.18 * Math.sin(lon * 5.0 - lat * 2.5);
+                const w3 = 0.12 * Math.sin(lon * 7.0 + lat * 0.7);
+                const lonVar = w1 + w2 + w3;
+
+                const itcz    = Math.max(0, 1.0 - Math.abs(lat + lonVar * 0.15) * 3.8);
+                const midLat  = Math.max(0, Math.abs(lat) - 0.5 + lonVar * 0.12) * 1.2;
+                const cLow    = Math.max(0, Math.min(1, itcz * 0.9 + midLat * 0.55 * (1 - pNorm) + lonVar * 0.12));
+                const cMid    = Math.max(0, Math.min(1, midLat * 0.5 + (1 - pNorm) * 0.3 + lonVar * 0.08));
+                const cHigh   = Math.max(0, Math.min(1, 0.25 + 0.35 * Math.abs(Math.sin(lat * 2.0 + lon * 0.8))));
                 this._cloudBuf[t4+0] = cLow;
                 this._cloudBuf[t4+1] = cMid;
                 this._cloudBuf[t4+2] = cHigh;
-                this._cloudBuf[t4+3] = cLow * 0.4;  // precip proportional to low cloud
+                this._cloudBuf[t4+3] = cLow * 0.4;
             }
         }
     }

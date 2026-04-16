@@ -213,6 +213,40 @@ uniform int  u_storm_count;
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 
+// ── Procedural noise for natural cloud shapes ────────────────────────────────
+// Hash-based value noise + FBM give multi-scale cloud structure directly in
+// the shader, independent of texture resolution.
+
+float hash21(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+float fbm(vec2 p, int octaves) {
+    float val = 0.0;
+    float amp = 0.5;
+    float freq = 1.0;
+    for (int i = 0; i < 6; i++) {
+        if (i >= octaves) break;
+        val += amp * vnoise(p * freq);
+        freq *= 2.0;
+        amp *= 0.5;
+    }
+    return val;
+}
+
 // ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
 // For each active storm, rotate the cloud lookup UV around the storm eye.
 // Northern Hemisphere: CCW (spin=+1). Southern Hemisphere: CW (spin=-1).
@@ -289,10 +323,28 @@ void main() {
     vec2 driftMid  = vec2(u_time * 0.000072, u_time * 0.000010);
     vec2 driftHigh = vec2(u_time * 0.000100, u_time * 0.000014);
 
-    // Noise texture samples per layer
-    float noiseLow  = texture2D(u_clouds, vUv + driftLow  + swirl).r;
-    float noiseMid  = texture2D(u_clouds, vUv + driftMid  + swirl * 0.7).r;
-    float noiseHigh = texture2D(u_clouds, vUv + driftHigh + swirl * 0.4).r;
+    vec2 uvLow  = vUv + driftLow  + swirl;
+    vec2 uvMid  = vUv + driftMid  + swirl * 0.7;
+    vec2 uvHigh = vUv + driftHigh + swirl * 0.4;
+
+    // ── Multi-octave procedural noise per cloud layer ────────────────────────
+    // Each layer uses different frequency / octave counts to create distinct
+    // cloud character instead of uniform white haze.
+
+    // Low cumulus: large puffy shapes with defined edges
+    float nLow  = fbm(uvLow * 12.0, 5);
+    // Mid altostratus: smoother, broader sheets
+    float nMid  = fbm(uvMid *  8.0 + 3.7, 4);
+    // High cirrus: horizontally stretched for wispy streaks
+    float nHigh = fbm(vec2(uvHigh.x * 18.0, uvHigh.y * 6.0) + 7.3, 5);
+
+    // Blend texture noise as fine-detail layer (FBM dominates)
+    float texLow  = texture2D(u_clouds, uvLow).r;
+    float texMid  = texture2D(u_clouds, uvMid).r;
+    float texHigh = texture2D(u_clouds, uvHigh).r;
+    nLow  = mix(nLow,  texLow,  0.25);
+    nMid  = mix(nMid,  texMid,  0.20);
+    nHigh = mix(nHigh, texHigh, 0.15);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -305,29 +357,34 @@ void main() {
         float clHigh  = cl.b;   // 0-1 high-cloud fraction (cirrus/cirrostratus)
         precip        = cl.a;   // 0-1 precipitation rate
 
-        // Low clouds: dense white cumulus, driven by actual cloud fraction
-        alphaLow  = clLow  * pow(noiseLow,  1.2) * 0.94;
-        // Mid clouds: semi-transparent altostratus
-        alphaMid  = clMid  * pow(noiseMid,  1.5) * 0.72;
-        // High cirrus: thin, wispy, translucent
-        alphaHigh = clHigh * pow(noiseHigh, 2.0) * 0.50;
+        // Threshold-based formation: cloud fraction controls coverage area.
+        // Higher fraction → lower threshold → more cloud formations appear.
+        // This produces defined cloud edges with clear sky between them,
+        // rather than uniform white haze.
+        float tLow = mix(0.65, 0.15, clLow);
+        alphaLow   = smoothstep(tLow, tLow + 0.18, nLow) * 0.92;
+
+        float tMid = mix(0.60, 0.20, clMid);
+        alphaMid   = smoothstep(tMid, tMid + 0.25, nMid) * 0.68;
+
+        float tHigh = mix(0.58, 0.22, clHigh);
+        alphaHigh   = smoothstep(tHigh, tHigh + 0.32, nHigh) * 0.45;
     } else {
-        // Fallback to legacy pressure/humidity modulation when weather off
+        // Fallback: pressure/humidity drive coverage via threshold
         float pressure = texture2D(u_weather, vUv).g;
         float humidity = texture2D(u_weather, vUv).b;
-        float base     = pow(max(noiseLow, noiseHigh * 0.55), 1.4) * 0.90;
-        float clear    = mix(1.0, 0.55, pressure);
-        float boost    = max(0.0, 0.45 - pressure) * 2.2;
-        base = clamp(base * clear + base * boost, 0.0, 1.0);
-        base = clamp(base * (0.7 + humidity * 0.5), 0.0, 1.0);
-        alphaLow  = base;
-        alphaHigh = noiseHigh * 0.3;
+
+        float cover = (0.55 + humidity * 0.45) * mix(1.0, 0.40, pressure);
+        float tLow  = mix(0.62, 0.18, cover);
+        alphaLow    = smoothstep(tLow, tLow + 0.20, nLow) * 0.88;
+
+        alphaHigh = smoothstep(0.48, 0.78, nHigh) * 0.28;
     }
 
-    // Satellite data blending: replaces noise-driven alpha with observed cloud density
+    // Satellite data blending: replaces noise-driven alpha with observed density
     if (u_satellite_on > 0.5) {
         float satCloud = texture2D(u_satellite, vUv).r;
-        // Blend: satellite gives large-scale structure; noise adds fine detail
+        // Blend: satellite gives large-scale structure; procedural adds detail
         alphaLow  = mix(alphaLow,  satCloud * 0.95, 0.55);
         alphaMid  = mix(alphaMid,  satCloud * 0.60, 0.30);
     }
@@ -343,17 +400,17 @@ void main() {
     }
 
     // ── Cloud colour ──────────────────────────────────────────────────────────
-    // Day colour: bright white for thick clouds, ice-blue tint for cirrus
     vec3 cloudWhite = mix(vec3(0.82, 0.85, 0.92), vec3(0.97, 0.98, 1.00), lit);
-    // Precipitation: grey-blue underbelly on raining clouds
     vec3 rainGrey   = vec3(0.50, 0.53, 0.62);
-    // Cirrus tint: slight blue-white at high altitude
     vec3 cirrusTint = vec3(0.88, 0.92, 1.00);
-    // Night: dark grey-blue
     vec3 nightCol   = vec3(0.22, 0.26, 0.38);
 
     float dayMix  = smoothstep(-0.12, 0.20, NdotL);
     vec3  col     = mix(nightCol, cloudWhite, dayMix);
+
+    // Thin cloud edges: slightly blue-tinted for translucency
+    float edgeSoft = smoothstep(0.0, 0.35, alpha);
+    col = mix(col * vec3(0.92, 0.94, 1.0), col, edgeSoft);
 
     // Blend in precipitation darkening (only visible side)
     float precipVis = precip * dayMix;
