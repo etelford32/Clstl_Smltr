@@ -27,7 +27,6 @@ export const EARTH_TEXTURES = {
     day:    _CDN + 'earth-blue-marble.jpg',
     night:  _CDN + 'earth-night.jpg',
     ocean:  _CDN + 'earth-water.png',
-    clouds: _CDN + 'clouds.png',
 };
 
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────
@@ -38,6 +37,47 @@ function _blackTex() {
 }
 function _grayTex() {
     const t = new THREE.DataTexture(new Uint8Array([180, 185, 200, 255]), 1, 1, THREE.RGBAFormat);
+    t.needsUpdate = true;
+    return t;
+}
+
+// ── Procedural noise texture (replaces CDN clouds.png dependency) ────────────
+// Generates a tileable multi-octave value noise texture on the CPU.
+// Used as the fine-detail layer in the cloud shader (25% blend weight).
+function _proceduralCloudNoise(W = 512, H = 256) {
+    function hash(ix, iy) {
+        let n = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
+        return n - Math.floor(n);
+    }
+    function vnoise(x, y) {
+        const ix = Math.floor(x), iy = Math.floor(y);
+        const fx = x - ix, fy = y - iy;
+        const sx = fx * fx * (3 - 2 * fx);
+        const sy = fy * fy * (3 - 2 * fy);
+        const a = hash(ix, iy), b = hash(ix + 1, iy);
+        const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+    }
+    function fbm(x, y) {
+        let val = 0, amp = 0.5, freq = 1;
+        for (let o = 0; o < 5; o++) {
+            val += amp * vnoise(x * freq, y * freq);
+            freq *= 2.0; amp *= 0.5;
+        }
+        return val;
+    }
+    const data = new Uint8Array(W * H * 4);
+    for (let j = 0; j < H; j++) {
+        for (let i = 0; i < W; i++) {
+            const n = fbm(i / W * 10, j / H * 5);
+            const v = Math.max(0, Math.min(255, (n * 255) | 0));
+            const k = (j * W + i) * 4;
+            data[k] = data[k + 1] = data[k + 2] = v;
+            data[k + 3] = 255;
+        }
+    }
+    const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.needsUpdate = true;
     return t;
 }
@@ -486,7 +526,7 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
 /** Default cloud layer uniforms. */
 export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
-        u_clouds:        { value: _grayTex() },
+        u_clouds:        { value: _proceduralCloudNoise() },
         u_weather:       { value: _blackTex() },
         u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
@@ -509,7 +549,7 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
  * Resolves when all four have either loaded or failed (safe fallback used on error).
  *
  * @param {object} earthU - uniforms object from createEarthUniforms()
- * @param {object} cloudU - uniforms object from createCloudUniforms() (or null to skip clouds.png)
+ * @param {object} cloudU - uniforms object from createCloudUniforms() (unused, kept for API compat)
  * @returns {Promise<void>}
  */
 export function loadEarthTextures(earthU, cloudU = null) {
@@ -547,13 +587,8 @@ export function loadEarthTextures(earthU, cloudU = null) {
         }, _blackTex),
     ];
 
-    if (cloudU) {
-        promises.push(
-            loadTex(EARTH_TEXTURES.clouds, tex => {
-                cloudU.u_clouds.value = tex;
-            }, _grayTex)
-        );
-    }
+    // Cloud noise texture is now procedurally generated at init time
+    // (no CDN dependency).  Skip loading the old clouds.png.
 
     return Promise.all(promises);
 }
