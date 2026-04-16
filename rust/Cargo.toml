@@ -3,6 +3,14 @@ name = "star_renderer"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "star_renderer"
+path = "src/main.rs"
+
+[[bin]]
+name = "t_tauri"
+path = "src/t_tauri_main.rs"
+
 [dependencies]
 bevy = { version = "0.17", default-features = false, features = [
     "bevy_winit",
