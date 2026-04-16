@@ -161,13 +161,37 @@ nav {
     background:rgba(0,0,0,.72); backdrop-filter:blur(8px);
     border:1px solid rgba(0,200,255,.18); border-radius:9px;
     padding:12px 14px; width:190px; font-size:12px;
+    max-height:calc(100vh - 80px); overflow-y:auto;
 }
+#layer-panel::-webkit-scrollbar { width:3px; }
+#layer-panel::-webkit-scrollbar-thumb { background:rgba(0,200,255,.2); border-radius:2px; }
 #layer-panel h3 { color:#00c6ff; font-size:10px; text-transform:uppercase;
     letter-spacing:.8px; margin-bottom:10px; }
 .lyr { display:flex; align-items:center; gap:8px; margin-bottom:7px; cursor:pointer; }
 .lyr input[type=checkbox] { accent-color:#00c6ff; width:13px; height:13px; flex-shrink:0; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
+
+/* ─── Collapsible section groups inside layer panel ─────────── */
+.lyr-section { border-top:1px solid rgba(255,255,255,.06); margin-top:6px; padding-top:6px; }
+.lyr-section-hdr {
+    display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; user-select:none; padding:2px 2px 4px;
+}
+.lyr-section-hdr span {
+    font-size:.62rem; color:#556; font-weight:600; letter-spacing:.08em;
+}
+.lyr-section-hdr .lyr-chevron {
+    font-size:9px; color:#556; transition:transform .2s;
+}
+.lyr-section.collapsed .lyr-chevron { transform:rotate(-90deg); }
+.lyr-section-body {
+    overflow:hidden; transition:max-height .25s ease, opacity .2s;
+    max-height:500px; opacity:1;
+}
+.lyr-section.collapsed .lyr-section-body {
+    max-height:0; opacity:0;
+}
 
 /* ─── Info panel ─────────────────────────────────────────────── */
 #info-panel {
@@ -613,44 +637,66 @@ nav {
             </div>
         </div>
         <div class="panel-body">
-        <div class="lyr-grid">
-        <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
-        <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+
+        <!-- ── Surface & Atmosphere ── -->
+        <div class="lyr-section" data-lyr-section="surface">
+            <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
+            </div></div>
         </div>
-        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
-            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">NASA EARTH OBSERVATIONS</div>
-            <div class="lyr-grid">
+
+        <!-- ── Weather ── -->
+        <div class="lyr-section" data-lyr-section="weather">
+            <div class="lyr-section-hdr"><span>WEATHER</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
+            </div></div>
+        </div>
+
+        <!-- ── Magnetosphere ── -->
+        <div class="lyr-section" data-lyr-section="magneto">
+            <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
+            </div></div>
+        </div>
+
+        <!-- ── NASA Earth Observations ── -->
+        <div class="lyr-section" data-lyr-section="nasa-obs">
+            <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><label for="lyr-obs-sst">Sea Surface Temp</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><label for="lyr-obs-fires">Active Fires</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><label for="lyr-obs-snow">Snow Cover</label></label>
-            </div>
+            </div></div>
         </div>
-        <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06)">
-            <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px;padding:0 2px">SATELLITE TRACKING</div>
+
+        <!-- ── Satellite Tracking ── -->
+        <div class="lyr-section" data-lyr-section="satellites">
+            <div class="lyr-section-hdr"><span>SATELLITE TRACKING</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body">
             <div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><label for="lyr-sat-stations">Space Stations</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><label for="lyr-sat-starlink">Starlink</label></label>
@@ -664,6 +710,16 @@ nav {
             </div>
             <div id="sat-status" style="font-size:.62rem;color:#556;margin-top:4px;line-height:1.4"></div>
             <div id="sat-conjunction-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.5;display:none"></div>
+            </div>
+        </div>
+
+        <!-- ── Misc ── -->
+        <div class="lyr-section" data-lyr-section="misc">
+            <div class="lyr-section-hdr"><span>DISPLAY</span><span class="lyr-chevron">▾</span></div>
+            <div class="lyr-section-body"><div class="lyr-grid">
+                <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+            </div></div>
         </div>
     </div>
     </div>
@@ -3545,6 +3601,26 @@ document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
             panel.classList.add('panel-minimized');
             const btn = panel.querySelector('[data-minimize-btn]');
             if (btn) btn.textContent = '▸';
+        }
+    } catch {}
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  LAYER SECTION COLLAPSE / EXPAND
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll('.lyr-section-hdr').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+        const section = hdr.parentElement;
+        const key = section.dataset.lyrSection;
+        const collapsed = section.classList.toggle('collapsed');
+        try { localStorage.setItem('earth-lyr-sec-' + key, collapsed ? '1' : '0'); } catch {}
+    });
+});
+// Restore collapsed states on load
+document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
+    try {
+        if (localStorage.getItem('earth-lyr-sec-' + sec.dataset.lyrSection) === '1') {
+            sec.classList.add('collapsed');
         }
     } catch {}
 });

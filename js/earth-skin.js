@@ -389,36 +389,29 @@ void main() {
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
 
+    // ── Cloud formation: noise gives shape, weather data gives density ────
+    // Noise defines WHERE individual cloud formations appear (puffy edges,
+    // clear sky gaps).  Weather fraction only scales their opacity so the
+    // overall pattern is driven by the noise, not by zonal data bands.
+    float shapeLow  = smoothstep(0.38, 0.56, nLow);
+    float shapeMid  = smoothstep(0.35, 0.60, nMid);
+    float shapeHigh = smoothstep(0.33, 0.65, nHigh);
+
     if (u_weather_on > 0.5) {
-        // Real cloud fraction data from weather feed
         vec4  cl      = texture2D(u_cloud_layers, vUv);
-        float clLow   = cl.r;   // 0-1 low-cloud fraction  (cumulus/stratus)
-        float clMid   = cl.g;   // 0-1 mid-cloud fraction  (altostratus)
-        float clHigh  = cl.b;   // 0-1 high-cloud fraction (cirrus/cirrostratus)
-        precip        = cl.a;   // 0-1 precipitation rate
+        float clLow   = cl.r;
+        float clMid   = cl.g;
+        float clHigh  = cl.b;
+        precip        = cl.a;
 
-        // Threshold-based formation: cloud fraction controls coverage area.
-        // Higher fraction → lower threshold → more cloud formations appear.
-        // This produces defined cloud edges with clear sky between them,
-        // rather than uniform white haze.
-        float tLow = mix(0.65, 0.15, clLow);
-        alphaLow   = smoothstep(tLow, tLow + 0.18, nLow) * 0.92;
-
-        float tMid = mix(0.60, 0.20, clMid);
-        alphaMid   = smoothstep(tMid, tMid + 0.25, nMid) * 0.68;
-
-        float tHigh = mix(0.58, 0.22, clHigh);
-        alphaHigh   = smoothstep(tHigh, tHigh + 0.32, nHigh) * 0.45;
+        // Soft density ramp: fraction < 0.05 → clear, > 0.45 → full density
+        alphaLow  = shapeLow  * smoothstep(0.03, 0.45, clLow)  * 0.92;
+        alphaMid  = shapeMid  * smoothstep(0.03, 0.40, clMid)  * 0.68;
+        alphaHigh = shapeHigh * smoothstep(0.03, 0.35, clHigh) * 0.45;
     } else {
-        // Fallback: pressure/humidity drive coverage via threshold
-        float pressure = texture2D(u_weather, vUv).g;
-        float humidity = texture2D(u_weather, vUv).b;
-
-        float cover = (0.55 + humidity * 0.45) * mix(1.0, 0.40, pressure);
-        float tLow  = mix(0.62, 0.18, cover);
-        alphaLow    = smoothstep(tLow, tLow + 0.20, nLow) * 0.88;
-
-        alphaHigh = smoothstep(0.48, 0.78, nHigh) * 0.28;
+        // No weather data: pure noise-driven clouds, uniform coverage
+        alphaLow  = shapeLow  * 0.65;
+        alphaHigh = shapeHigh * 0.25;
     }
 
     // Satellite data blending: replaces noise-driven alpha with observed density
