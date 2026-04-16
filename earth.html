@@ -1252,6 +1252,7 @@ const cloudMat = new THREE.ShaderMaterial({
     uniforms: cloudU, transparent: true, depthWrite: false,
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on top
 scene.add(cloudMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
@@ -1260,7 +1261,9 @@ const stratMat = new THREE.ShaderMaterial({
     uniforms: stratU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
-scene.add(new THREE.Mesh(stratGeo, stratMat));
+const stratMesh = new THREE.Mesh(stratGeo, stratMat);
+stratMesh.renderOrder = 1;   // atmosphere glow renders first (additive, order-independent)
+scene.add(stratMesh);
 
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
@@ -1268,7 +1271,9 @@ const atmMat = new THREE.ShaderMaterial({
     uniforms: atmU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
-scene.add(new THREE.Mesh(atmGeo, atmMat));
+const atmMesh = new THREE.Mesh(atmGeo, atmMat);
+atmMesh.renderOrder = 1;     // same as strat — additive blending is order-independent
+scene.add(atmMesh);
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER DATA TEXTURE
@@ -2266,6 +2271,7 @@ class AlertMarkers {
             const ring = new THREE.Mesh(this._ringGeo, ringMat);
             ring.position.copy(pos);
             ring.lookAt(new THREE.Vector3(0, 0, 0));
+            ring.renderOrder = 4;   // after clouds (3), before obs overlays (5)
             ring.visible = this._visible;
             this._parent.add(ring);
             this._rings.push({
