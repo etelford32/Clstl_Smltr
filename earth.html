@@ -1084,10 +1084,11 @@ function sunDirectionEquatorial(jd) {
     const Mr = M * DEG;
     const lam = (L + 1.915 * Math.sin(Mr) + 0.020 * Math.sin(2 * Mr)) * DEG;
     const eps = 23.439 * DEG;  // obliquity J2000
+    // Three.js convention: +X = vernal equinox, +Y = north pole, -Z = RA 6h
     return new THREE.Vector3(
-        Math.cos(lam),
-        Math.sin(lam) * Math.cos(eps),
-        Math.sin(lam) * Math.sin(eps)
+         Math.cos(lam),
+         Math.sin(lam) * Math.sin(eps),
+        -Math.sin(lam) * Math.cos(eps)
     ).normalize();
 }
 
@@ -1100,8 +1101,8 @@ function gmst(jd) {
 function subsolarPoint(jd) {
     const sunEq = sunDirectionEquatorial(jd);
     const lat = Math.asin(Math.max(-1, Math.min(1, sunEq.y))) / DEG;
-    // RA of sun in degrees
-    const ra = Math.atan2(sunEq.z, sunEq.x) / DEG;
+    // RA from Three.js convention: -Z = RA 6h, so RA = atan2(-z, x)
+    const ra = Math.atan2(-sunEq.z, sunEq.x) / DEG;
     const lon = ((ra - gmst(jd)) % 360 + 540) % 360 - 180;
     return { lat, lon };
 }
@@ -1120,23 +1121,24 @@ function solarDeclination(jd) {
 // ═══════════════════════════════════════════════════════════════
 // UV → geographic  (Three.js SphereGeometry UV convention)
 //   u ∈ [0,1] → lon ∈ [-180, 180]°   (u=0 = 180°W, u=0.5 = 0° prime meridian)
-//   v ∈ [0,1] → lat ∈ [+90, -90]°   (v=0 = north pole, v=1 = south pole)
+//   v ∈ [0,1] → lat ∈ [-90, +90]°   (v=0 = south pole, v=1 = north pole)
 function uvToGeo(uv) {
     return {
-        lat: (0.5 - uv.y) * 180,
+        lat: (uv.y - 0.5) * 180,
         lon: (uv.x - 0.5) * 360
     };
 }
 
 // Geographic → 3-D Cartesian on unit sphere
-//   +Y = north pole, +Z = prime meridian at equator, +X = 90°E
+// Matches Three.js SphereGeometry convention (equirectangular texture):
+//   +X = prime meridian at equator, +Y = north pole, -Z = 90°E
 function geoToXYZ(lat, lon) {
     const phi = lat * DEG;
     const lam = lon * DEG;
     return new THREE.Vector3(
-        Math.cos(phi) * Math.sin(lam),
-        Math.sin(phi),
-        Math.cos(phi) * Math.cos(lam)
+         Math.cos(phi) * Math.cos(lam),
+         Math.sin(phi),
+        -Math.cos(phi) * Math.sin(lam)
     );
 }
 
@@ -1252,6 +1254,7 @@ const cloudMat = new THREE.ShaderMaterial({
     uniforms: cloudU, transparent: true, depthWrite: false,
 });
 const cloudMesh = new THREE.Mesh(cloudGeo, cloudMat);
+cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on top
 scene.add(cloudMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
@@ -1260,7 +1263,9 @@ const stratMat = new THREE.ShaderMaterial({
     uniforms: stratU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
-scene.add(new THREE.Mesh(stratGeo, stratMat));
+const stratMesh = new THREE.Mesh(stratGeo, stratMat);
+stratMesh.renderOrder = 1;   // atmosphere glow renders first (additive, order-independent)
+scene.add(stratMesh);
 
 const atmGeo = new THREE.SphereGeometry(R_ATM, 40, 40);
 const atmMat = new THREE.ShaderMaterial({
@@ -1268,7 +1273,9 @@ const atmMat = new THREE.ShaderMaterial({
     uniforms: atmU, transparent: true, depthWrite: false,
     side: THREE.BackSide, blending: THREE.AdditiveBlending,
 });
-scene.add(new THREE.Mesh(atmGeo, atmMat));
+const atmMesh = new THREE.Mesh(atmGeo, atmMat);
+atmMesh.renderOrder = 1;     // same as strat — additive blending is order-independent
+scene.add(atmMesh);
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER DATA TEXTURE
@@ -1304,9 +1311,9 @@ function latLonLine(lats, lons, color, opacity) {
     const pts = lats.map((lat, i) => {
         const phi = lat * DEG, lam = lons[i] * DEG;
         return new THREE.Vector3(
-            R_EARTH * 1.0015 * Math.cos(phi) * Math.sin(lam),
-            R_EARTH * 1.0015 * Math.sin(phi),
-            R_EARTH * 1.0015 * Math.cos(phi) * Math.cos(lam)
+             R_EARTH * 1.0015 * Math.cos(phi) * Math.cos(lam),
+             R_EARTH * 1.0015 * Math.sin(phi),
+            -R_EARTH * 1.0015 * Math.cos(phi) * Math.sin(lam)
         );
     });
     const geo = new THREE.BufferGeometry().setFromPoints(pts);
@@ -1333,7 +1340,7 @@ for (let lat = -80; lat <= 80; lat += 10) {
     const opc   = lat === 0 ? 0.8 : (major ? 0.55 : 0.25);
     gridGroup.add(latLonLine(lats, lons, col, opc));
 }
-scene.add(gridGroup);
+earthMesh.add(gridGroup);   // child of earthMesh → rotates with globe
 
 // Special parallels: tropics (±23.44°) and polar circles (±66.56°)
 for (const [lat, col] of [[23.44, 0xff8c00], [-23.44, 0xff8c00], [66.56, 0x5580ff], [-66.56, 0x5580ff]]) {
@@ -1341,7 +1348,7 @@ for (const [lat, col] of [[23.44, 0xff8c00], [-23.44, 0xff8c00], [66.56, 0x5580f
     for (let lon = 0; lon <= 360; lon += 2) { lats.push(lat); lons.push(lon); }
     tropicGroup.add(latLonLine(lats, lons, col, 0.55));
 }
-scene.add(tropicGroup);
+earthMesh.add(tropicGroup); // child of earthMesh → rotates with globe
 
 // ═══════════════════════════════════════════════════════════════
 //  TEXTURE LOADING
@@ -1950,9 +1957,9 @@ class WindParticles {
         for (let i = 0; i < this.N; i++) {
             const phi = this.lat[i] * DEG, lam = this.lon[i] * DEG;
             const r   = R_EARTH * 1.003;
-            this._pos[i*3]   = r * Math.cos(phi) * Math.sin(lam);
-            this._pos[i*3+1] = r * Math.sin(phi);
-            this._pos[i*3+2] = r * Math.cos(phi) * Math.cos(lam);
+            this._pos[i*3]   =  r * Math.cos(phi) * Math.cos(lam);
+            this._pos[i*3+1] =  r * Math.sin(phi);
+            this._pos[i*3+2] = -r * Math.cos(phi) * Math.sin(lam);
 
             // Age envelope: fade-in (first 10%), full, fade-out (last 20%)
             const a = this.age[i] / this.maxAge[i];
@@ -2243,11 +2250,11 @@ class AlertMarkers {
             const phi = alert.lat * DEG, lam = alert.lon * DEG;
             const r   = R_EARTH * 1.004;
 
-            // Earth-local Cartesian (+Z = prime meridian, +Y = north pole)
+            // Earth-local Cartesian (+X = prime meridian, +Y = north pole)
             const pos = new THREE.Vector3(
-                r * Math.cos(phi) * Math.sin(lam),
-                r * Math.sin(phi),
-                r * Math.cos(phi) * Math.cos(lam)
+                 r * Math.cos(phi) * Math.cos(lam),
+                 r * Math.sin(phi),
+                -r * Math.cos(phi) * Math.sin(lam)
             );
 
             // Core dot
@@ -2266,6 +2273,7 @@ class AlertMarkers {
             const ring = new THREE.Mesh(this._ringGeo, ringMat);
             ring.position.copy(pos);
             ring.lookAt(new THREE.Vector3(0, 0, 0));
+            ring.renderOrder = 4;   // after clouds (3), before obs overlays (5)
             ring.visible = this._visible;
             this._parent.add(ring);
             this._rings.push({

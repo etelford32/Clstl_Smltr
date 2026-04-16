@@ -630,6 +630,7 @@ export class EarthSkin {
                 new THREE.SphereGeometry(radius * 1.009, Math.round(segments * 0.75), Math.round(segments * 0.75)),
                 cloudMat
             );
+            this.cloudMesh.renderOrder = 3;  // after atmosphere glow (1)
             parent.add(this.cloudMesh);
         }
 
@@ -645,6 +646,7 @@ export class EarthSkin {
                 new THREE.SphereGeometry(radius * 1.026, Math.round(segments * 0.5), Math.round(segments * 0.5)),
                 atmMat
             );
+            this._atmMesh.renderOrder = 1;   // atmosphere glow renders first
             parent.add(this._atmMesh);
         }
     }
