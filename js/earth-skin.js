@@ -24,9 +24,10 @@ import * as THREE from 'three';
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
 export const EARTH_TEXTURES = {
-    day:    _CDN + 'earth-blue-marble.jpg',
-    night:  _CDN + 'earth-night.jpg',
-    ocean:  _CDN + 'earth-water.png',
+    day:      _CDN + 'earth-blue-marble.jpg',
+    night:    _CDN + 'earth-night.jpg',
+    ocean:    _CDN + 'earth-water.png',
+    topology: _CDN + 'earth-topology.png',
 };
 
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────
@@ -103,6 +104,7 @@ precision highp float;
 uniform sampler2D u_day;
 uniform sampler2D u_night;
 uniform sampler2D u_specular;   // ocean mask (r = ocean)
+uniform sampler2D u_topology;   // grayscale height / elevation (r = normalised height)
 uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity, A=wind
 uniform vec3  u_sun_dir;
 uniform float u_time;
@@ -114,6 +116,7 @@ uniform float u_weather_on;
 uniform float u_aurora_power;
 uniform float u_bz_south;
 uniform float u_dst_norm;
+uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
@@ -156,21 +159,43 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 void main() {
-    vec3 N = normalize(vWorldNormal);
-
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = smoothstep(-0.10, 0.20, NdotL);
+    vec3 N_base = normalize(vWorldNormal);
 
     vec3 dayCol    = texture2D(u_day,      vUv).rgb;
     vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
+    // ── Topographic normal perturbation ────────────────────────────────
+    // Sample the height map at three offset UVs and build a tangent-space
+    // gradient. Project that gradient into the surface tangent basis so
+    // mountains cast the right shadow regardless of camera angle. Ocean
+    // is kept flat — bump only affects land via (1 - oceanMsk).
+    float hC   = texture2D(u_topology, vUv).r;
+    float hDx  = texture2D(u_topology, vUv + vec2(1.0 / 2048.0, 0.0)).r - hC;
+    float hDy  = texture2D(u_topology, vUv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    // East / north tangents at the current surface point
+    vec3  up      = vec3(0.0, 1.0, 0.0);
+    vec3  tEast   = normalize(cross(up, N_base));
+    vec3  tNorth  = normalize(cross(N_base, tEast));
+    float landMsk = (1.0 - oceanMsk) * u_bump_strength;
+    vec3  N = normalize(N_base - (tEast * hDx + tNorth * hDy) * 85.0 * landMsk);
+
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = smoothstep(-0.10, 0.20, NdotL);
+
+    // Self-shadow: terrain shading is strongest when sun is low and hitting
+    // the slope obliquely. Boosts mountain-range relief at the terminator.
+    float shading = mix(1.0, clamp(NdotL * 0.5 + 0.5, 0.55, 1.25),
+                        landMsk * smoothstep(-0.20, 0.10, NdotL));
+    dayCol *= shading;
+
     vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
 
-    // Ocean specular glint
+    // Ocean specular glint (use the un-perturbed normal; water doesn't
+    // inherit the height map's bumps).
     vec3  V    = normalize(cameraPosition - vWorldPos);
     vec3  H    = normalize(u_sun_dir + V);
-    float spec = pow(max(dot(N, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
+    float spec = pow(max(dot(N_base, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
     base += vec3(spec * 0.7, spec * 0.85, spec);
 
     // Weather temperature overlay
@@ -806,6 +831,8 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_day:          { value: blackFallback },
         u_night:        { value: blackFallback },
         u_specular:     { value: blackFallback },
+        u_topology:     { value: _blackTex() },   // flat until texture loads
+        u_bump_strength:{ value: 0.85 },           // 0 disables bump, 1 is strong
         u_weather:      { value: _blackTex() },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
@@ -897,6 +924,13 @@ export function loadEarthTextures(earthU, cloudU = null) {
 
         loadTex(EARTH_TEXTURES.ocean, tex => {
             earthU.u_specular.value = tex;
+        }, _blackTex),
+
+        // Grayscale topology map — drives the bump / shading pass in the
+        // surface fragment shader. If the CDN fetch fails the fallback
+        // black texture leaves the surface flat, matching the old look.
+        loadTex(EARTH_TEXTURES.topology, tex => {
+            earthU.u_topology.value = tex;
         }, _blackTex),
     ];
 
