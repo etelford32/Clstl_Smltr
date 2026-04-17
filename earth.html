@@ -1182,7 +1182,8 @@ import {
     clearUserLocation, auroraVisibility,
 } from './js/user-location.js';
 import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
-import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER } from './js/nws-alerts.js';
+import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
+import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
 import {
     MagnetosphereEngine,
@@ -2380,86 +2381,294 @@ document.getElementById('wx-refresh').addEventListener('click', () => {
 //  of earthMesh so they rotate automatically with the globe.
 //  Hover detection extends the existing raycaster pipeline.
 // ═══════════════════════════════════════════════════════════════
+/**
+ * AlertMarkers — NWS weather alerts rendered as per-event-type emergency
+ * icons (tornado, hurricane, thunder, flood, wind, winter, heat, fire,
+ * fog, marine, generic) instead of generic dots.
+ *
+ * Each alert becomes a Three.js Sprite anchored to the globe surface. The
+ * sprite texture is a procedural canvas glyph (see js/alert-icons.js) tinted
+ * to the severity color via sprite.material.color. A smaller "halo sprite"
+ * underneath provides the pulsing aura; we keep the glyph legible by only
+ * pulsing the halo's opacity/scale, not the icon itself.
+ *
+ * Zoom handling:
+ *   Sprites use sizeAttenuation=true (world-unit scale), so world-scale
+ *   naturally shrinks apparent size as the camera approaches. That gives
+ *   a clean "zoom in on one icon" feel without the icons growing so large
+ *   they cover the globe. A mild distance-compensation keeps icons visible
+ *   when zoomed out to full-earth as well.
+ */
+const ALERT_KIND_BASE_SIZE = {
+    tornado:   0.055,
+    hurricane: 0.070,
+    thunder:   0.045,
+    flood:     0.040,
+    wind:      0.042,
+    winter:    0.042,
+    heat:      0.042,
+    fire:      0.045,
+    fog:       0.040,
+    marine:    0.040,
+    generic:   0.038,
+};
+
+const ALERT_KIND_SEVERITY_BOOST = {
+    Extreme:  1.25,
+    Severe:   1.10,
+    Moderate: 1.00,
+    Minor:    0.85,
+    Unknown:  0.80,
+};
+
+/**
+ * Per-kind animation hook. Returns an object read every frame by tick() with:
+ *   rotation: radians to rotate the glyph (screen-space, via material.rotation)
+ *   scalePulse: multiplier around 1.0 (breathing)
+ *   haloPulse:  multiplier for halo scale (0.5–1.8)
+ *   haloAlpha:  0–1
+ *   flicker:    multiplier to icon opacity (0–1) — for thunder
+ */
+function _animateKind(kind, t, phase, sevFreq) {
+    const twoPi = Math.PI * 2;
+    switch (kind) {
+        case 'tornado': {
+            // Fast clockwise spin + vertical wobble
+            return {
+                rotation:   t * 5.2 + phase,
+                scalePulse: 1 + 0.06 * Math.sin(t * 6 + phase),
+                haloPulse:  1 + 0.40 * Math.sin(t * sevFreq * twoPi + phase) * 0.5 + 0.5,
+                haloAlpha:  0.55,
+                flicker:    1,
+            };
+        }
+        case 'hurricane': {
+            // Slow massive rotation; calm breathing halo
+            return {
+                rotation:   -t * 0.65 + phase,
+                scalePulse: 1 + 0.04 * Math.sin(t * 1.2 + phase),
+                haloPulse:  1 + 0.35 * Math.sin(t * 0.8 + phase),
+                haloAlpha:  0.60,
+                flicker:    1,
+            };
+        }
+        case 'thunder': {
+            // Static icon but flashes — three quick flashes then rest
+            const cycle = ((t * 0.9 + phase / twoPi) % 1);
+            const flash = cycle < 0.07 ? 1.0
+                        : cycle < 0.11 ? 0.55
+                        : cycle < 0.17 ? 0.95
+                        : 0.60;
+            return {
+                rotation:   0,
+                scalePulse: 1,
+                haloPulse:  flash > 0.9 ? 1.8 : 1.0,
+                haloAlpha:  flash > 0.9 ? 0.85 : 0.30,
+                flicker:    flash,
+            };
+        }
+        case 'wind': {
+            // Horizontal gust oscillation — X-axis scale only
+            return {
+                rotation:   0,
+                scalePulse: 1,
+                haloPulse:  1 + 0.25 * Math.sin(t * 2.2 + phase),
+                haloAlpha:  0.45,
+                flicker:    1,
+                scaleXBias: 1 + 0.10 * Math.sin(t * 3.3 + phase),
+            };
+        }
+        case 'flood': {
+            // Gentle vertical wave motion via scaleY breathe
+            return {
+                rotation:   0,
+                scalePulse: 1,
+                haloPulse:  1 + 0.25 * Math.sin(t * 1.4 + phase),
+                haloAlpha:  0.50,
+                flicker:    1,
+                scaleYBias: 1 + 0.08 * Math.sin(t * 2.5 + phase),
+            };
+        }
+        case 'winter': {
+            return {
+                rotation:   Math.sin(t * 0.6 + phase) * 0.25,   // tiny wobble
+                scalePulse: 1 + 0.05 * Math.sin(t * 0.9 + phase),
+                haloPulse:  1 + 0.20 * Math.sin(t * 0.7 + phase),
+                haloAlpha:  0.55,
+                flicker:    1,
+            };
+        }
+        case 'heat': {
+            // Outward ripple — halo expands and fades repeatedly
+            const cycle = (t * 0.7 + phase / twoPi) % 1;
+            return {
+                rotation:   0,
+                scalePulse: 1 + 0.03 * Math.sin(t * 3 + phase),
+                haloPulse:  0.8 + cycle * 1.6,
+                haloAlpha:  0.65 * (1 - cycle),
+                flicker:    1,
+            };
+        }
+        case 'fire': {
+            // Flicker — rapid, irregular
+            const jitter = 0.85 + 0.15 * Math.sin(t * 14 + phase) + 0.08 * Math.sin(t * 23 + phase * 1.7);
+            return {
+                rotation:   0,
+                scalePulse: 1 + 0.04 * Math.sin(t * 8 + phase),
+                haloPulse:  1 + 0.35 * Math.sin(t * 6.5 + phase),
+                haloAlpha:  0.55 + 0.25 * Math.sin(t * 9 + phase),
+                flicker:    Math.max(0.75, Math.min(1, jitter)),
+            };
+        }
+        case 'fog':
+        case 'marine':
+        case 'generic':
+        default: {
+            return {
+                rotation:   0,
+                scalePulse: 1,
+                haloPulse:  1 + 0.30 * Math.sin(t * sevFreq * twoPi + phase),
+                haloAlpha:  0.45,
+                flicker:    1,
+            };
+        }
+    }
+}
+
 class AlertMarkers {
     constructor(parent) {
-        this._parent   = parent;
-        this._dotGeo   = new THREE.SphereGeometry(0.009, 7, 7);
-        this._ringGeo  = new THREE.RingGeometry(0.013, 0.022, 20);
-        this._dots     = [];   // { mesh, alert }
-        this._rings    = [];   // { mesh, freq, phase }
-        this._visible  = true;
+        this._parent  = parent;
+        this._items   = [];   // { alert, icon, halo, kind, baseSize, phase, sevFreq }
+        this._visible = true;
+        this._haloTex = null;
+
+        // Warm up icon textures so the first pulse doesn't hitch.
+        precomputeAlertIcons(THREE);
+        this._haloTex = this._buildHaloTexture();
+    }
+
+    /** A soft radial glow sprite used as the aura behind each icon. */
+    _buildHaloTexture() {
+        const size = 128, c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        const ctx = c.getContext('2d');
+        const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+        g.addColorStop(0,   'rgba(255,255,255,1)');
+        g.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+        g.addColorStop(1,   'rgba(255,255,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, size, size);
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return tex;
     }
 
     setVisible(v) {
         this._visible = v;
-        this._dots.forEach(d => d.mesh.visible = v);
-        this._rings.forEach(r => { r.mesh.visible = v; });
+        for (const it of this._items) {
+            it.icon.visible = v;
+            it.halo.visible = v;
+        }
     }
 
-    // Replace all markers from a fresh alert array
+    /** Replace all markers from a fresh alert array. */
     rebuild(alerts) {
-        // Dispose existing (share geometries, clone materials)
-        this._dots.forEach(d  => { this._parent.remove(d.mesh);  d.mesh.material.dispose(); });
-        this._rings.forEach(r => { this._parent.remove(r.mesh); r.mesh.material.dispose(); });
-        this._dots  = [];
-        this._rings = [];
+        // Dispose existing sprite materials
+        for (const it of this._items) {
+            this._parent.remove(it.icon);
+            this._parent.remove(it.halo);
+            it.icon.material.dispose();
+            it.halo.material.dispose();
+        }
+        this._items = [];
 
         for (const alert of alerts) {
-            const hexColor = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
+            const kind    = alert.kind ?? classifyAlertEvent(alert.event);
+            const hexCol  = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
             const phi = alert.lat * DEG, lam = alert.lon * DEG;
-            const r   = R_EARTH * 1.004;
-
-            // Earth-local Cartesian (+X = prime meridian, +Y = north pole)
+            const r   = R_EARTH * 1.006;
             const pos = new THREE.Vector3(
                  r * Math.cos(phi) * Math.cos(lam),
                  r * Math.sin(phi),
                 -r * Math.cos(phi) * Math.sin(lam)
             );
 
-            // Core dot
-            const dotMat = new THREE.MeshBasicMaterial({ color: hexColor });
-            const dot    = new THREE.Mesh(this._dotGeo, dotMat);
-            dot.position.copy(pos);
-            dot.visible = this._visible;
-            this._parent.add(dot);
-            this._dots.push({ mesh: dot, alert });
+            const base = (ALERT_KIND_BASE_SIZE[kind] ?? 0.04) *
+                         (ALERT_KIND_SEVERITY_BOOST[alert.severity] ?? 1);
 
-            // Pulse ring — lookAt(origin) makes ring tangent to sphere surface
-            const ringMat = new THREE.MeshBasicMaterial({
-                color: hexColor, transparent: true, opacity: 0.75,
-                side: THREE.DoubleSide, depthWrite: false,
+            // Halo
+            const haloMat = new THREE.SpriteMaterial({
+                map: this._haloTex, color: hexCol,
+                transparent: true, opacity: 0.55,
+                blending: THREE.AdditiveBlending,
+                depthTest: true, depthWrite: false,
             });
-            const ring = new THREE.Mesh(this._ringGeo, ringMat);
-            ring.position.copy(pos);
-            ring.lookAt(new THREE.Vector3(0, 0, 0));
-            ring.renderOrder = 4;   // after clouds (3), before obs overlays (5)
-            ring.visible = this._visible;
-            this._parent.add(ring);
-            this._rings.push({
-                mesh:  ring,
-                freq:  ALERT_PULSE_FREQ[alert.severity] ?? 0.5,
-                phase: Math.random() * Math.PI * 2,
+            const halo = new THREE.Sprite(haloMat);
+            halo.position.copy(pos);
+            halo.scale.set(base * 2.0, base * 2.0, 1);
+            halo.renderOrder = 4;
+            halo.visible = this._visible;
+            this._parent.add(halo);
+
+            // Icon glyph
+            const iconMat = new THREE.SpriteMaterial({
+                map: getAlertIconTexture(THREE, kind), color: hexCol,
+                transparent: true, opacity: 1,
+                blending: THREE.AdditiveBlending,
+                depthTest: true, depthWrite: false,
+            });
+            const icon = new THREE.Sprite(iconMat);
+            icon.position.copy(pos);
+            icon.scale.set(base, base, 1);
+            icon.renderOrder = 5;
+            icon.visible = this._visible;
+            icon.userData.alert = alert;     // for raycast lookup
+            this._parent.add(icon);
+
+            this._items.push({
+                alert, icon, halo, kind,
+                baseSize: base,
+                phase:    Math.random() * Math.PI * 2,
+                sevFreq:  ALERT_PULSE_FREQ[alert.severity] ?? 0.5,
             });
         }
     }
 
-    // Animate pulse rings each frame
-    tick(t) {
-        if (!this._visible) return;
-        for (const { mesh, freq, phase } of this._rings) {
-            const pulse = Math.sin(t * freq * Math.PI * 2 + phase) * 0.5 + 0.5;
-            const s     = 1 + pulse * 2.2;
-            mesh.scale.set(s, s, 1);
-            mesh.material.opacity = 0.72 * (1 - pulse * 0.88);
+    /**
+     * Per-frame animation + zoom adaptation.
+     *   camDist: camera distance from Earth centre (in R_EARTH units is ideal,
+     *            but we accept raw scene units and derive the ratio ourselves).
+     */
+    tick(t, camDist) {
+        if (!this._visible || !this._items.length) return;
+
+        // Zoom factor: keep icons readable at all zooms. Slightly shrink when
+        // close-up (so icons don't dominate a single-region view) and enlarge
+        // when far away (so they remain visible against the whole globe).
+        const ratio = (camDist ?? R_EARTH * 2.5) / R_EARTH;
+        const zoom  = Math.max(0.55, Math.min(1.8, 0.55 + (ratio - 1) * 0.4));
+
+        for (const it of this._items) {
+            const a = _animateKind(it.kind, t, it.phase, it.sevFreq);
+            const s = it.baseSize * zoom * (a.scalePulse ?? 1);
+            const sx = s * (a.scaleXBias ?? 1);
+            const sy = s * (a.scaleYBias ?? 1);
+            it.icon.scale.set(sx, sy, 1);
+            it.icon.material.rotation = a.rotation ?? 0;
+            it.icon.material.opacity  = a.flicker ?? 1;
+
+            const hs = it.baseSize * 2.0 * zoom * (a.haloPulse ?? 1);
+            it.halo.scale.set(hs, hs, 1);
+            it.halo.material.opacity = a.haloAlpha ?? 0.4;
         }
     }
 
-    // Returns the alert under cursor, or null
+    /** Returns the alert under cursor, or null. */
     getHovered(raycaster) {
-        if (!this._visible || this._dots.length === 0) return null;
-        const hits = raycaster.intersectObjects(this._dots.map(d => d.mesh));
+        if (!this._visible || this._items.length === 0) return null;
+        const hits = raycaster.intersectObjects(this._items.map(i => i.icon));
         if (hits.length === 0) return null;
-        return this._dots.find(d => d.mesh === hits[0].object)?.alert ?? null;
+        return hits[0].object.userData.alert ?? null;
     }
 }
 
@@ -3746,8 +3955,8 @@ function animate() {
     // ── Solar wind particle stream (interplanetary → magnetopause)
     solarWindParticles.tick(dt, earthU.u_sun_dir.value);
 
-    // ── Alert marker pulse
-    alertMarkers.tick(t);
+    // ── Alert marker pulse (per-type emergency icons with zoom adaptation)
+    alertMarkers.tick(t, camera.position.length());
 
     // ── Earthquake markers pulse
     eqMarkers.tick(t);
