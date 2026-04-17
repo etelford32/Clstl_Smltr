@@ -137,8 +137,7 @@ struct RawFeatures {
     xray_deriv: f64,          // W/m²/min
     wind_speed_km_s: f64,
     wind_trend_slope: f64,    // km/s/min
-    #[allow(non_snake_case)]
-    bz_nT: f64,              // nT (negative = southward)
+    bz_nt: f64,              // nT (negative = southward)
     density_cc: f64,          // #/cc
     radio_flux_sfu: f64,      // solar flux units
     ar_count: u32,
@@ -162,7 +161,7 @@ impl RawFeatures {
             xray_deriv: (self.xray_deriv / 1e-6).clamp(-1.0, 1.0) as f32,
             wind_speed_norm: ((self.wind_speed_km_s - 250.0) / 650.0).clamp(0.0, 1.0) as f32,
             wind_trend: (self.wind_trend_slope / 10.0).clamp(-1.0, 1.0) as f32,
-            bz_southward_norm: ((-self.bz_nT).max(0.0) / 30.0).clamp(0.0, 1.0) as f32,
+            bz_southward_norm: ((-self.bz_nt).max(0.0) / 30.0).clamp(0.0, 1.0) as f32,
             density_norm: (self.density_cc / 25.0).clamp(0.0, 1.0) as f32,
             radio_flux_norm: ((self.radio_flux_sfu - 65.0) / 235.0).clamp(0.0, 1.0) as f32,
             ar_count_norm: (self.ar_count as f32 / 15.0).clamp(0.0, 1.0),

@@ -108,6 +108,7 @@ pub enum RopePhase {
 #[derive(Debug, Clone)]
 pub struct FluxRope {
     /// Active-region index (matches bipole ordering in [`super::magnetic`]).
+    #[allow(dead_code)]  // written at construction; readers live outside this crate
     pub ar_index: usize,
 
     /// Major radius — height of the rope axis above the photosphere (world units).
@@ -188,6 +189,7 @@ impl FluxRope {
     }
 
     /// World-space position of the rope apex (top of the torus loop).
+    #[allow(dead_code)]  // public API; consumers call this when rendering rope overlays
     pub fn apex_position(&self) -> Vec3 {
         let star_r = crate::STAR_RADIUS;
         let (sin_lat, cos_lat) = self.latitude.sin_cos();
@@ -231,12 +233,12 @@ impl FluxRope {
     ///   B_poloidal = B₀αr / (1 + α²r²)
     /// where r is the perpendicular distance from the rope axis and
     /// α = twist / (π R).
+    #[allow(dead_code)]  // public API; sampled when compositing live rope B-field onto the dipole
     pub fn field_at(&self, world_pos: Vec3) -> Vec3 {
         if self.phase == RopePhase::Relaxing {
             return Vec3::ZERO;
         }
 
-        let apex = self.apex_position();
         let star_r = crate::STAR_RADIUS;
         let (sin_lat, cos_lat) = self.latitude.sin_cos();
         let (sin_lon, cos_lon) = self.longitude.sin_cos();
@@ -345,7 +347,7 @@ impl FluxRope {
     }
 
     /// Post-eruption relaxation: reform the rope from scratch.
-    fn step_relaxing(&mut self, dt: f32) {
+    fn step_relaxing(&mut self, _dt: f32) {
         // After a cooldown, reset and begin re-emergence.
         let cooldown = 15.0 / self.ml_activity_scale.max(0.1);
         if self.phase_timer > cooldown {
@@ -367,6 +369,7 @@ impl FluxRope {
     ///
     /// Our simulation energy is in arbitrary units, so we map:
     ///   energy < 0.5 → B,  < 2.0 → C,  < 8.0 → M,  ≥ 8.0 → X
+    #[allow(dead_code)]  // public API; HUD reads this after each eruption
     pub fn flare_class(&self) -> &'static str {
         let e = self.last_eruption_energy;
         if e >= 8.0 {

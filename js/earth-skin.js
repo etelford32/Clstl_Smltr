@@ -24,9 +24,10 @@ import * as THREE from 'three';
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
 export const EARTH_TEXTURES = {
-    day:    _CDN + 'earth-blue-marble.jpg',
-    night:  _CDN + 'earth-night.jpg',
-    ocean:  _CDN + 'earth-water.png',
+    day:      _CDN + 'earth-blue-marble.jpg',
+    night:    _CDN + 'earth-night.jpg',
+    ocean:    _CDN + 'earth-water.png',
+    topology: _CDN + 'earth-topology.png',
 };
 
 // ── Safe 1×1 placeholder textures (prevent null-sampler GPU crashes) ─────────
@@ -103,6 +104,7 @@ precision highp float;
 uniform sampler2D u_day;
 uniform sampler2D u_night;
 uniform sampler2D u_specular;   // ocean mask (r = ocean)
+uniform sampler2D u_topology;   // grayscale height / elevation (r = normalised height)
 uniform sampler2D u_weather;    // R=temp, G=pressure [0=low,1=high], B=humidity, A=wind
 uniform vec3  u_sun_dir;
 uniform float u_time;
@@ -114,6 +116,7 @@ uniform float u_weather_on;
 uniform float u_aurora_power;
 uniform float u_bz_south;
 uniform float u_dst_norm;
+uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
@@ -156,21 +159,47 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 void main() {
-    vec3 N = normalize(vWorldNormal);
-
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = smoothstep(-0.10, 0.20, NdotL);
+    vec3 N_base = normalize(vWorldNormal);
 
     vec3 dayCol    = texture2D(u_day,      vUv).rgb;
     vec3 nightCol  = texture2D(u_night,    vUv).rgb * 2.5;
     float oceanMsk = texture2D(u_specular, vUv).r;
 
-    vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
+    // ── Topographic normal perturbation ────────────────────────────────
+    // Sample the height map at three offset UVs and build a tangent-space
+    // gradient. Project that gradient into the surface tangent basis so
+    // mountains cast the right shadow regardless of camera angle. Ocean
+    // is kept flat — bump only affects land via (1 - oceanMsk).
+    float hC   = texture2D(u_topology, vUv).r;
+    float hDx  = texture2D(u_topology, vUv + vec2(1.0 / 2048.0, 0.0)).r - hC;
+    float hDy  = texture2D(u_topology, vUv + vec2(0.0, 1.0 / 1024.0)).r - hC;
+    // East / north tangents at the current surface point
+    vec3  up      = vec3(0.0, 1.0, 0.0);
+    vec3  tEast   = normalize(cross(up, N_base));
+    vec3  tNorth  = normalize(cross(N_base, tEast));
+    float landMsk = (1.0 - oceanMsk) * u_bump_strength;
+    vec3  N = normalize(N_base - (tEast * hDx + tNorth * hDy) * 85.0 * landMsk);
 
-    // Ocean specular glint
+    float NdotL  = dot(N, u_sun_dir);
+    float dayMix = smoothstep(-0.10, 0.20, NdotL);
+
+    // Self-shadow: terrain shading is strongest when sun is low and hitting
+    // the slope obliquely. Boosts mountain-range relief at the terminator.
+    float shading = mix(1.0, clamp(NdotL * 0.5 + 0.5, 0.55, 1.25),
+                        landMsk * smoothstep(-0.20, 0.10, NdotL));
+    dayCol *= shading;
+
+    // Keep the Blue Marble readable on the night side at ~55% instead of
+    // fading it to black. City lights layer additively on top so both cues
+    // co-exist near the terminator (photograph + lamps), not cross-fade.
+    vec3 base = dayCol * (0.55 + 0.45 * dayMix)
+              + nightCol * u_city_lights * (1.0 - dayMix);
+
+    // Ocean specular glint (use the un-perturbed normal; water doesn't
+    // inherit the height map's bumps).
     vec3  V    = normalize(cameraPosition - vWorldPos);
     vec3  H    = normalize(u_sun_dir + V);
-    float spec = pow(max(dot(N, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
+    float spec = pow(max(dot(N_base, H), 0.0), 90.0) * oceanMsk * dayMix * 0.60;
     base += vec3(spec * 0.7, spec * 0.85, spec);
 
     // Weather temperature overlay
@@ -180,7 +209,7 @@ void main() {
 
     // Aurora
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
+        float lat    = (vUv.y - 0.5) * 3.14159265;
         float lon    = (vUv.x - 0.5) * 6.28318530;
         float sinAbs = abs(sin(lat));
         float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
@@ -195,7 +224,7 @@ void main() {
 
     // Ring current heating: equatorial nightside reddish glow
     if (u_dst_norm > 0.08) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
+        float lat    = (vUv.y - 0.5) * 3.14159265;
         float absLat = abs(lat);
         float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
         base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
@@ -211,7 +240,7 @@ void main() {
     // Lighting: half-Lambert without squaring — Blue Marble is already a daylit photo;
     // squaring creates a harsh spotlight effect.  Keep a gentle falloff + raised ambient.
     float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float lit      = mix(0.10, halfLamb, dayMix);
+    float lit      = mix(0.35, halfLamb, dayMix);
     base *= lit;
 
     // Terminator warm glow
@@ -496,17 +525,24 @@ void main() {
     // Satellite observation: when a real cloud-imagery texture is supplied
     // (NASA GIBS, GOES, etc.), use its brightness as the dominant coverage
     // signal and fold the procedural noise in as fine-scale detail + motion.
+    //
+    // The texture's alpha channel is a NO-DATA mask set by GIBS. Regions
+    // the satellite didn't see (polar winter darkness, MODIS orbit gaps,
+    // coastline masks) arrive with alpha = 0 and we route them back to
+    // procedural clouds, so the globe never shows a permanent fake cap.
     if (u_satellite_on > 0.5) {
-        float satCloud = texture2D(u_satellite, vUv).r;
+        vec4  sat      = texture2D(u_satellite, vUv);
+        float satCloud = sat.r;
+        float satData  = sat.a;                             // 1 where MODIS has coverage
         float satShape = smoothstep(0.18, 0.85, satCloud);
-        // Mixing coverage, not replacing: noise still animates where sat is
-        // uniform so the globe doesn't look like a static photo.
         float satLow   = satShape * mix(0.85, 1.0, shapeLow);
         float satMid   = satShape * mix(0.55, 0.85, shapeMid);
-        alphaLow  = mix(alphaLow,  satLow,   0.82);
-        alphaMid  = mix(alphaMid,  satMid,   0.60);
-        // Keep high cirrus dominated by noise so wisps keep moving
-        alphaHigh = mix(alphaHigh, satShape * 0.35, 0.35);
+        // Coverage-weighted blend: full satellite influence only where the
+        // alpha mask confirms the pixel is real data.
+        float influence = satData * 0.82;
+        alphaLow  = mix(alphaLow,  satLow,           influence);
+        alphaMid  = mix(alphaMid,  satMid,           0.60 * satData);
+        alphaHigh = mix(alphaHigh, satShape * 0.35,  0.35 * satData);
     }
 
     // Composite layers: opaque low clouds dominate, cirrus adds on top
@@ -556,7 +592,7 @@ void main() {
     // slower streaks (frontal rain). High-latitude precip shifts toward a
     // lighter blue-white tint so it reads as sleet/snow rather than rain.
     if (u_weather_on > 0.5 && precip > 0.02) {
-        float latDeg = (0.5 - vUv.y) * 180.0;
+        float latDeg = (vUv.y - 0.5) * 180.0;
         float absLat = abs(latDeg);
 
         // 0 = tropical (convective), 1 = frontal (stratiform)
@@ -622,20 +658,86 @@ void main() {
 }`;
 
 export const ATM_FRAG = /* glsl */`
-precision mediump float;
+precision highp float;
 uniform vec3 u_sun_dir;
 varying vec3 vWorldNormal;
 varying vec3 vViewDir;
+
+// Simplified atmospheric scattering — physically-motivated approximation
+// without precomputed LUTs, so the cost stays at one fragment pass.
+//
+//   Rayleigh  — strong forward + back scatter, blue-weighted by λ⁻⁴.
+//   Mie       — forward-biased via Henyey–Greenstein, provides the warm
+//               tint around the sun and the orange/pink terminator band.
+//   Altitude  — approximated by the view angle through the shell, so the
+//               rim brightens naturally toward the limb.
+//
+// This replaces the flat rim-glow with a sky that reads blue on the day
+// limb, navy on the night side, pink/orange at the terminator, and gets
+// that sun-facing flare you see from orbit when the Sun is near the edge.
+
+// Rayleigh phase: 3/(16π) · (1 + cos²θ)
+float rayleighPhase(float cosT) {
+    return 0.75 * (1.0 + cosT * cosT);
+}
+
+// Mie phase (Henyey–Greenstein), forward-scattering asymmetry g
+float miePhase(float cosT, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / pow(max(1e-4, 1.0 + g2 - 2.0 * g * cosT), 1.5) * 0.375;
+}
+
 void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
-    vec3 rayleigh = mix(vec3(0.03, 0.01, 0.08), vec3(0.14, 0.42, 1.00), dayMix);
-    float mie = pow(max(dot(-V, normalize(u_sun_dir)), 0.0), 8.0) * dayMix;
-    vec3 col = rayleigh + mie * vec3(0.30, 0.18, 0.06);
-    gl_FragColor = vec4(col * rim, rim * 0.82);
+    vec3  N = normalize(vWorldNormal);
+    vec3  V = normalize(vViewDir);
+    vec3  L = normalize(u_sun_dir);
+
+    // Geometry
+    float VdotN = dot(V, N);
+    float NdotL = dot(N, L);
+    float VdotL = dot(V, L);
+
+    // Atmosphere is visible at the rim (grazing view) and fades as the
+    // surface turns face-on. rim² gives a soft limb gradient.
+    float rim = pow(1.0 - abs(VdotN), 2.2);
+
+    // Day / night blending — scattering only happens where the atmosphere
+    // is actually illuminated. Terminator is the smooth band in between.
+    float dayMix     = smoothstep(-0.10, 0.30, NdotL);
+    float termBand   = smoothstep(-0.25, 0.00, NdotL)
+                     * (1.0 - smoothstep(0.10, 0.30, NdotL));  // peak at terminator
+
+    // Wavelength-dependent Rayleigh scatter coefficients, based on the
+    // standard 680 / 550 / 440 nm approximation.
+    vec3 betaR = vec3(5.8e-3, 13.5e-3, 33.1e-3) * 20.0;
+    vec3 betaM = vec3(21.0e-3)                  * 1.0;
+
+    // Phase contributions
+    float pR = rayleighPhase(VdotL);
+    float pM = miePhase(VdotL, 0.76);
+
+    // Rayleigh colour — dominant blue on the day limb, turns violet near
+    // the terminator as the longer path scatters out the red first.
+    vec3 rayleigh = betaR * pR * dayMix;
+
+    // Mie — adds the warm halo around the sun when it's on-screen, plus
+    // the orange terminator band you see from orbit.
+    vec3 mieSun    = betaM * pM * dayMix;
+    vec3 mieTermCol = vec3(1.00, 0.52, 0.26);
+    vec3 mieTerm    = mieTermCol * termBand * 0.22;
+
+    // Night side: very faint navy glow so the sphere's rim isn't black.
+    vec3 nightGlow  = vec3(0.015, 0.022, 0.050) * (1.0 - dayMix);
+
+    vec3 col = rayleigh + mieSun + mieTerm + nightGlow;
+
+    // Scale by rim so the atmosphere is concentrated near the limb, not
+    // spread across the face of the sphere. Alpha mirrors the colour so
+    // additive-blend compositing reads cleanly over the surface shader.
+    float alpha = rim * (0.60 + 0.40 * dayMix) + termBand * 0.18;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(col * rim * 1.6, alpha);
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -696,7 +798,7 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
-    float latDeg = (0.5 - vUv.y) * 180.0;
+    float latDeg = (vUv.y - 0.5) * 180.0;
     float absLat = abs(latDeg);
     float lonDeg = (vUv.x - 0.5) * 360.0;
 
@@ -799,6 +901,8 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_day:          { value: blackFallback },
         u_night:        { value: blackFallback },
         u_specular:     { value: blackFallback },
+        u_topology:     { value: _blackTex() },   // flat until texture loads
+        u_bump_strength:{ value: 0.85 },           // 0 disables bump, 1 is strong
         u_weather:      { value: _blackTex() },
         u_sun_dir:      { value: sunDir.clone() },
         u_time:         { value: 0 },
@@ -890,6 +994,13 @@ export function loadEarthTextures(earthU, cloudU = null) {
 
         loadTex(EARTH_TEXTURES.ocean, tex => {
             earthU.u_specular.value = tex;
+        }, _blackTex),
+
+        // Grayscale topology map — drives the bump / shading pass in the
+        // surface fragment shader. If the CDN fetch fails the fallback
+        // black texture leaves the surface flat, matching the old look.
+        loadTex(EARTH_TEXTURES.topology, tex => {
+            earthU.u_topology.value = tex;
         }, _blackTex),
     ];
 
