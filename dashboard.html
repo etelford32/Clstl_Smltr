@@ -65,6 +65,60 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .alert-pref-threshold input,.alert-pref-threshold select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 6px;font-family:inherit;font-size:.72rem}
 .alert-pref-row.locked{opacity:.4;pointer-events:none}
 
+/* ── TRIP PLANNING ── */
+.tp-row{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:10px}
+.tp-col{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tp-lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.tp-select{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:#cdd;padding:6px 9px;font-family:inherit;font-size:.8rem;width:100%;appearance:none;cursor:pointer}
+.tp-select:focus{border-color:var(--accent2);outline:none}
+.tp-swap{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;padding:6px 10px;font-size:.9rem;align-self:end;transition:border-color .15s,color .15s}
+.tp-swap:hover{border-color:var(--accent2);color:var(--text)}
+.tp-actions{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.tp-go-btn{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-family:inherit;font-size:.78rem;transition:filter .15s,transform .1s}
+.tp-go-btn:hover{filter:brightness(1.08)}
+.tp-go-btn:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(.4)}
+.tp-earth-btn{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;padding:7px 14px;font-family:inherit;font-size:.72rem;text-decoration:none;transition:border-color .15s}
+.tp-earth-btn:hover{border-color:var(--accent2)}
+.tp-earth-btn.disabled{opacity:.4;pointer-events:none}
+.tp-summary{font-size:.7rem;color:var(--muted);margin-left:auto;text-align:right;font-variant-numeric:tabular-nums}
+.tp-summary strong{color:#cdd}
+.tp-err{color:#ff6666;font-size:.72rem;margin-top:6px;display:none}
+.tp-results{display:none;margin-top:12px}
+.tp-results.show{display:block}
+.tp-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:620px){.tp-compare-grid{grid-template-columns:1fr}.tp-row{grid-template-columns:1fr}}
+.tp-card{background:#080518;border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0}
+.tp-card.from{border-color:rgba(79,195,247,.25)}
+.tp-card.to{border-color:rgba(255,184,48,.25)}
+.tp-card-hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.tp-card-side{font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700}
+.tp-card.from .tp-card-side{color:var(--accent2)}
+.tp-card.to .tp-card-side{color:var(--accent)}
+.tp-card-title{font-size:.9rem;font-weight:700;color:#e8f4ff;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
+.tp-card-sub{font-size:.65rem;color:var(--muted);font-family:monospace;margin-top:1px}
+.tp-current{display:flex;align-items:baseline;gap:8px;margin:6px 0 2px}
+.tp-temp{font-size:1.7rem;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.tp-feels{font-size:.68rem;color:var(--muted)}
+.tp-cond{font-size:.8rem;color:#cdd;margin-bottom:6px}
+.tp-metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:.7rem;color:#99a;margin-top:6px}
+.tp-metric-grid .m-lbl{color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:.58rem}
+.tp-metric-grid .m-val{color:#cdd;font-weight:600;font-variant-numeric:tabular-nums}
+.tp-daily{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:4px}
+.tp-day{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 6px;text-align:center;min-width:0}
+.tp-day-name{font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;font-weight:700}
+.tp-day-hi{font-size:.82rem;font-weight:700;color:#e8f4ff}
+.tp-day-lo{font-size:.65rem;color:var(--muted)}
+.tp-day-precip{font-size:.55rem;color:var(--accent2);margin-top:1px}
+.tp-winner{color:#4fc97f !important}
+.tp-loser{color:#ff8888 !important}
+.tp-route{margin-top:12px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+.tp-route-hdr{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;font-weight:700}
+.tp-route-strip{display:flex;gap:4px;overflow-x:auto}
+.tp-stop{flex:0 0 auto;min-width:64px;background:#08051a;border:1px solid var(--border);border-radius:6px;padding:6px 7px;text-align:center}
+.tp-stop-t{font-size:.52rem;color:var(--muted);letter-spacing:.04em;margin-bottom:2px}
+.tp-stop-temp{font-size:.82rem;font-weight:700;color:#e8f4ff;font-variant-numeric:tabular-nums}
+.tp-stop-cond{font-size:.55rem;color:#99a;line-height:1.2;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:64px}
+
 /* ── SAVED LOCATIONS ── */
 .sl-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .sl-counter{font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
@@ -566,6 +620,54 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── TRIP PLANNING ── -->
+  <div class="card" id="trip-planning-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Trip Planning</span>
+      <span class="card-link" id="tp-hint" style="font-size:.68rem;color:var(--muted)">Compare weather at two saved locations</span>
+    </div>
+    <div class="card-body">
+
+      <div id="tp-empty" class="sl-empty" style="display:none">
+        Save at least two locations above to plan a trip.
+      </div>
+
+      <div id="tp-wrap" style="display:none">
+        <div class="tp-row">
+          <div class="tp-col">
+            <span class="tp-lbl">From</span>
+            <select class="tp-select" id="tp-from"></select>
+          </div>
+          <button class="tp-swap" id="tp-swap" title="Swap From / To" aria-label="Swap from and to">⇄</button>
+          <div class="tp-col">
+            <span class="tp-lbl">To</span>
+            <select class="tp-select" id="tp-to"></select>
+          </div>
+        </div>
+
+        <div class="tp-actions">
+          <button class="tp-go-btn" id="tp-go">Compare weather</button>
+          <a class="tp-earth-btn disabled" id="tp-earth" href="#" target="_self">View route on Earth →</a>
+          <span class="tp-summary" id="tp-summary"></span>
+        </div>
+        <div class="tp-err" id="tp-err" role="alert"></div>
+
+        <div class="tp-results" id="tp-results">
+          <div class="tp-compare-grid">
+            <div class="tp-card from" id="tp-card-from"></div>
+            <div class="tp-card to"   id="tp-card-to"></div>
+          </div>
+
+          <div class="tp-route" id="tp-route-wrap" style="display:none">
+            <div class="tp-route-hdr">Along the route <span id="tp-route-note" style="color:#778;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+            <div class="tp-route-strip" id="tp-route-strip"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- ── ALERT PREFERENCES ── -->
   <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
     <div class="card-head">
@@ -903,6 +1005,10 @@ import {
     listLocations, addLocation, updateLocation, removeLocation,
     setPrimaryLocation, locationLimit, onLocationsChanged, PLAN_LIMITS,
 } from './js/saved-locations.js';
+import {
+    fetchTripWeather, encodeTripParam, weatherCodeLabel, compassLabel,
+    greatCircleDistanceKm,
+} from './js/trip-planner.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -2050,6 +2156,213 @@ initAll();
 
     // Initial render
     render();
+})();
+
+// ── Trip Planning (two-location weather comparison) ─────────────────────────
+(() => {
+    const $ = id => document.getElementById(id);
+    const empty     = $('tp-empty');
+    const wrap      = $('tp-wrap');
+    const fromSel   = $('tp-from');
+    const toSel     = $('tp-to');
+    const swapBtn   = $('tp-swap');
+    const goBtn     = $('tp-go');
+    const earthLink = $('tp-earth');
+    const summary   = $('tp-summary');
+    const errEl     = $('tp-err');
+    const results   = $('tp-results');
+    const cardFrom  = $('tp-card-from');
+    const cardTo    = $('tp-card-to');
+    const routeWrap = $('tp-route-wrap');
+    const routeStrip= $('tp-route-strip');
+    const routeNote = $('tp-route-note');
+
+    let _locs = [];
+
+    function showErr(msg) {
+        if (!errEl) return;
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+        clearTimeout(showErr._t);
+        showErr._t = setTimeout(() => { errEl.style.display = 'none'; }, 4500);
+    }
+    function clearErr() { if (errEl) errEl.style.display = 'none'; }
+
+    function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function populateSelects() {
+        const opts = _locs.map(l => `<option value="${l.id}">${escHtml(l.label)}${l.city && l.city !== l.label ? ' — ' + escHtml(l.city) : ''}</option>`).join('');
+        fromSel.innerHTML = opts;
+        toSel.innerHTML   = opts;
+
+        // Default: primary → the next non-primary location (or index 1)
+        const primaryIdx = _locs.findIndex(l => l.is_primary);
+        const fromIdx = Math.max(0, primaryIdx);
+        const toIdx   = _locs.length > 1 ? (fromIdx === 0 ? 1 : 0) : 0;
+        fromSel.value = _locs[fromIdx].id;
+        toSel.value   = _locs[toIdx].id;
+        updateSummary();
+    }
+
+    function pickFromById(id) { return _locs.find(l => l.id === id) ?? null; }
+
+    function updateSummary() {
+        const a = pickFromById(fromSel.value);
+        const b = pickFromById(toSel.value);
+        if (!a || !b) { summary.textContent = ''; earthLink.classList.add('disabled'); return; }
+        if (a.id === b.id) {
+            summary.textContent = 'Pick two different locations';
+            earthLink.classList.add('disabled');
+            return;
+        }
+        const km = greatCircleDistanceKm(a, b);
+        const mi = km * 0.621371;
+        summary.innerHTML = `<strong>${km < 100 ? km.toFixed(1) : Math.round(km)}</strong> km · <strong>${mi < 100 ? mi.toFixed(1) : Math.round(mi)}</strong> mi`;
+        earthLink.href = `earth.html?trip=${encodeURIComponent(encodeTripParam(a, b))}`;
+        earthLink.classList.remove('disabled');
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────
+    function renderCard(side, location, weather) {
+        if (!weather) {
+            return `<div class="tp-card-hdr"><span class="tp-card-side">${side}</span></div>
+                    <div class="tp-card-title">${escHtml(location.label)}</div>
+                    <div class="tp-card-sub">${location.lat.toFixed(2)}°, ${location.lon.toFixed(2)}°</div>
+                    <div class="tp-cond" style="color:#ff6666">Could not fetch weather</div>`;
+        }
+        const cond = weatherCodeLabel(weather.weather_code);
+        const dailyRows = (weather.daily.dates || []).slice(0, 3).map((iso, i) => {
+            const d = new Date(iso + 'T12:00:00');
+            const name = i === 0 ? 'Today' : i === 1 ? 'Tmrw'
+                : d.toLocaleDateString('en-US', { weekday: 'short' });
+            const hi = weather.daily.high_f[i];
+            const lo = weather.daily.low_f[i];
+            const pp = weather.daily.precip_prob_pct[i];
+            return `<div class="tp-day">
+                <div class="tp-day-name">${name}</div>
+                <div class="tp-day-hi">${hi != null ? Math.round(hi) + '°' : '—'}</div>
+                <div class="tp-day-lo">${lo != null ? Math.round(lo) + '°' : '—'}</div>
+                ${pp != null && pp > 5 ? `<div class="tp-day-precip">${Math.round(pp)}%</div>` : ''}
+            </div>`;
+        }).join('');
+
+        return `
+            <div class="tp-card-hdr">
+                <span class="tp-card-side">${side}</span>
+                <span class="tp-card-sub" title="Timezone">${escHtml(weather.timezone ?? '')}</span>
+            </div>
+            <div class="tp-card-title">${escHtml(location.label)}</div>
+            <div class="tp-card-sub">${location.lat.toFixed(2)}°, ${location.lon.toFixed(2)}°</div>
+
+            <div class="tp-current">
+                <span class="tp-temp">${Math.round(weather.temp_f)}°F</span>
+                <span class="tp-feels">feels ${Math.round(weather.feels_f)}°</span>
+            </div>
+            <div class="tp-cond">${escHtml(cond)} · ${weather.cloud_cover ?? 0}% cloud</div>
+
+            <div class="tp-metric-grid">
+                <span class="m-lbl">Wind</span>
+                <span class="m-val">${Math.round(weather.wind_mph ?? 0)} mph ${compassLabel(weather.wind_dir_deg)}</span>
+                <span class="m-lbl">Gust</span>
+                <span class="m-val">${Math.round(weather.wind_gust_mph ?? 0)} mph</span>
+                <span class="m-lbl">Humidity</span>
+                <span class="m-val">${weather.humidity ?? '—'}%</span>
+                <span class="m-lbl">Pressure</span>
+                <span class="m-val">${weather.pressure_hpa != null ? Math.round(weather.pressure_hpa) : '—'} hPa</span>
+            </div>
+
+            <div class="tp-daily">${dailyRows}</div>
+        `;
+    }
+
+    /** Highlight the warmer / wetter / windier side so the user can tell at a glance. */
+    function decorateDiffs(wa, wb) {
+        if (!wa || !wb) return;
+        const fromEls = cardFrom.querySelectorAll('.m-val, .tp-temp');
+        const toEls   = cardTo.querySelectorAll('.m-val, .tp-temp');
+
+        // Temp: warmer wins
+        if (wa.temp_f != null && wb.temp_f != null && Math.abs(wa.temp_f - wb.temp_f) > 1.5) {
+            const [warm, cold] = wa.temp_f > wb.temp_f ? [fromEls[0], toEls[0]] : [toEls[0], fromEls[0]];
+            warm?.classList.add('tp-winner');
+            cold?.classList.add('tp-loser');
+        }
+    }
+
+    function renderRoute(route, from, to) {
+        if (!route || !route.length) { routeWrap.style.display = 'none'; return; }
+        const anyOk = route.some(w => w);
+        if (!anyOk) { routeWrap.style.display = 'none'; return; }
+        routeWrap.style.display = '';
+        routeNote.textContent = ` · ${route.length} sample${route.length === 1 ? '' : 's'} along great-circle path`;
+        routeStrip.innerHTML = route.map((w, i) => {
+            const pct = Math.round(((i + 1) / (route.length + 1)) * 100);
+            if (!w) return `<div class="tp-stop"><div class="tp-stop-t">${pct}%</div><div class="tp-stop-temp">—</div></div>`;
+            return `<div class="tp-stop" title="${w.lat.toFixed(2)}°, ${w.lon.toFixed(2)}° · ${escHtml(weatherCodeLabel(w.weather_code))}">
+                <div class="tp-stop-t">${pct}%</div>
+                <div class="tp-stop-temp">${Math.round(w.temp_f)}°</div>
+                <div class="tp-stop-cond">${escHtml(weatherCodeLabel(w.weather_code))}</div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── Compare handler ──────────────────────────────────────────────────
+    async function doCompare() {
+        clearErr();
+        const a = pickFromById(fromSel.value);
+        const b = pickFromById(toSel.value);
+        if (!a || !b) return;
+        if (a.id === b.id) { showErr('Pick two different locations'); return; }
+
+        goBtn.disabled    = true;
+        goBtn.textContent = 'Loading…';
+
+        // Scale route sample count with trip distance — pointless to query
+        // 5 waypoints for a 200 km trip. Free, unauthenticated Open-Meteo,
+        // but still a courtesy to cap at 4.
+        const km      = greatCircleDistanceKm(a, b);
+        const samples = km < 500 ? 0 : km < 2000 ? 2 : km < 6000 ? 3 : 4;
+
+        try {
+            const trip = await fetchTripWeather(a, b, { routeSamples: samples });
+            cardFrom.innerHTML = renderCard('From', a, trip.from.weather);
+            cardTo.innerHTML   = renderCard('To',   b, trip.to.weather);
+            decorateDiffs(trip.from.weather, trip.to.weather);
+            renderRoute(trip.route, a, b);
+            results.classList.add('show');
+        } catch (e) {
+            showErr('Weather fetch failed: ' + e.message);
+        } finally {
+            goBtn.disabled    = false;
+            goBtn.textContent = 'Compare weather';
+        }
+    }
+
+    // ── Wiring ────────────────────────────────────────────────────────────
+    async function refreshLocations() {
+        _locs = (await listLocations({ force: false })).filter(l => l.lat != null && l.lon != null);
+        const hasTwo = _locs.length >= 2;
+        empty.style.display = hasTwo ? 'none' : '';
+        wrap.style.display  = hasTwo ? '' : 'none';
+        if (!hasTwo) {
+            results.classList.remove('show');
+            return;
+        }
+        populateSelects();
+    }
+
+    fromSel?.addEventListener('change', updateSummary);
+    toSel?.addEventListener('change',   updateSummary);
+    swapBtn?.addEventListener('click', () => {
+        const a = fromSel.value;
+        fromSel.value = toSel.value;
+        toSel.value = a;
+        updateSummary();
+    });
+    goBtn?.addEventListener('click', doCompare);
+
+    onLocationsChanged(() => refreshLocations());
+    refreshLocations();
 })();
 
 // ── Impact Score Engine ──────────────────────────────────────────────────────
