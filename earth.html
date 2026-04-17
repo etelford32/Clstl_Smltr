@@ -720,7 +720,7 @@ nav {
         <div><span class="hk">Local&nbsp;</span><span class="hv" id="h-local">—</span></div>
         <div><span class="hk">Lat&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lat">—</span></div>
         <div><span class="hk">Lon&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lon">—</span></div>
-        <div><span class="hk">LT&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lt">—</span></div>
+        <div title="Solar mean local time at the hovered longitude. LT = UTC + lon/15 h. The subsolar meridian is by definition where LT = 12:00."><span class="hk">LT&nbsp;&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-lt">—</span></div>
         <div><span class="hk">Alt&nbsp;&nbsp;&nbsp;</span><span class="hv" id="h-alt">—</span></div>
         <div id="h-user-loc" style="display:none;grid-column:1/-1;margin-top:2px;padding-top:4px;border-top:1px solid rgba(0,200,255,.1)">
             <span class="hk">📍&nbsp;</span><span class="hv" id="h-user-loc-name" style="color:#00ffcc;font-size:9px;">—</span>
@@ -757,6 +757,7 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
+                <label class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></label>
             </div></div>
         </div>
 
@@ -1468,7 +1469,10 @@ const auroraMat = new THREE.ShaderMaterial({
 });
 const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat);
 auroraMesh.renderOrder = 4;  // after clouds so it's not occluded by cloud alpha
-scene.add(auroraMesh);
+// Parent to earthMesh so the oval's vUv-derived lat/lon track GMST — otherwise
+// the "oval at geographic lat X, lon Y" would drift relative to the ground as
+// the Earth rotates beneath a scene-anchored aurora sphere.
+earthMesh.add(auroraMesh);
 
 const stratGeo = new THREE.SphereGeometry(R_STRAT, 40, 40);
 const stratMat = new THREE.ShaderMaterial({
@@ -1489,6 +1493,28 @@ const atmMat = new THREE.ShaderMaterial({
 const atmMesh = new THREE.Mesh(atmGeo, atmMat);
 atmMesh.renderOrder = 1;     // same as strat — additive blending is order-independent
 scene.add(atmMesh);
+
+// ── Subsolar debug marker ──────────────────────────────────────────────
+// A small yellow pip that sits on the sphere surface at the sub-solar point.
+// Parented to earthMesh so we only have to supply (lat, lon) — the mesh's
+// GMST rotation carries it into world space. Hidden by default; toggled by
+// the `lyr-subsolar` checkbox. If this ever drifts off the day-side peak,
+// coord/rotation sync has broken somewhere.
+const subsolarMarker = (() => {
+    const g = new THREE.Group();
+    g.visible = false;
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffee33 });
+    const core    = new THREE.Mesh(new THREE.SphereGeometry(0.014, 14, 14), coreMat);
+    const haloMat = new THREE.MeshBasicMaterial({
+        color: 0xffcc22, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const halo    = new THREE.Mesh(new THREE.RingGeometry(0.022, 0.042, 40), haloMat);
+    g.add(core); g.add(halo);
+    g.renderOrder = 10;
+    earthMesh.add(g);
+    return { group: g, halo };
+})();
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER DATA TEXTURE
@@ -1888,6 +1914,9 @@ document.getElementById('lyr-grid').addEventListener('change', e => {
 });
 document.getElementById('lyr-tropic').addEventListener('change', e => {
     tropicGroup.visible = e.target.checked;
+});
+document.getElementById('lyr-subsolar').addEventListener('change', e => {
+    subsolarMarker.group.visible = e.target.checked;
 });
 document.getElementById('lyr-weather').addEventListener('change', e => {
     const v = e.target.checked ? 1.0 : 0.0;
@@ -4608,8 +4637,24 @@ function updateAstroHUD(now) {
 
     document.getElementById('ip-decl').textContent =
         `${dc >= 0 ? '+' : ''}${dc.toFixed(1)}°`;
+    // Subsolar readout: lat/lon + the UTC offset of that longitude. Solar mean
+    // local time at lon L is UTC + L/15, so the subsolar meridian is by
+    // definition the longitude where solar LT == 12. Displaying its UTC offset
+    // is a quick cross-check that our GMST rotation + sun-direction math stay
+    // consistent with wall-clock UTC.
+    const spOffH = sp.lon / 15;
+    const offSign = spOffH >= 0 ? '+' : '−';
+    const offAbs  = Math.abs(spOffH);
+    const offHH   = String(Math.floor(offAbs)).padStart(2, '0');
+    const offMM   = String(Math.round((offAbs % 1) * 60)).padStart(2, '0');
     document.getElementById('ip-subsolar').textContent =
-        `${fmtLat(sp.lat)}, ${fmtLon(sp.lon)}`;
+        `${fmtLat(sp.lat)}, ${fmtLon(sp.lon)} · UTC${offSign}${offHH}:${offMM}`;
+
+    // Move the debug marker to the sub-solar surface point (parented to
+    // earthMesh, so we pass the raw geographic coords — GMST carries it).
+    const sPos = geoToXYZ(sp.lat, sp.lon).multiplyScalar(R_EARTH * 1.004);
+    subsolarMarker.group.position.copy(sPos);
+    subsolarMarker.halo.lookAt(new THREE.Vector3(0, 0, 0));
 }
 
 let lastAstro = 0;
