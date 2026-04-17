@@ -28,13 +28,16 @@
  *   - Custom WebSocket stream for ultra-low-latency updates
  */
 
-const OPEN_METEO   = 'https://api.open-meteo.com/v1/forecast';
+// Reads from /api/weather/grid, a Vercel Edge Function fronted by the CDN
+// with s-maxage=3600. Upstream Open-Meteo is only hit once per hour by the
+// /api/weather/refresh cron, so visitor count no longer drives upstream load.
+const WEATHER_ENDPOINT = '/api/weather/grid';
 const GRID_W       = 36;                // longitude grid points (10° spacing)
 const GRID_H       = 18;                // latitude  grid points (10° spacing)
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 const MAX_WIND_MS  = 60;                // m/s — normalisation ceiling
-const REFRESH_MS   = 10 * 60 * 1000;   // re-fetch every 10 minutes
+const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
 
 // ─────────────────────────────────────────────────────────────────────────────
 export class WeatherFeed {
@@ -85,7 +88,7 @@ export class WeatherFeed {
             const rows = await this._fetchGrid();
             if (rows && rows.length > 0) {
                 this._processRows(rows);
-                this._meta.source    = 'Open-Meteo / GFS';
+                this._meta.source    = 'Open-Meteo / GFS (hourly shared cache)';
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
             } else {
@@ -108,40 +111,24 @@ export class WeatherFeed {
         });
     }
 
-    // ── Open-Meteo grid fetch ─────────────────────────────────────────────────
-    // Sends ONE HTTP request with all 648 lat/lon pairs as comma-separated lists.
-    // Returns array of per-location objects (same order as _gridLats/_gridLons).
+    // ── Cached grid fetch ─────────────────────────────────────────────────────
+    // Hits /api/weather/grid — one hourly Open-Meteo pull shared across all
+    // visitors via the Vercel edge CDN + Supabase persistence. Response:
+    //   { source, fetched_at, age_seconds, data: [ { current: {…} }, … ] }
+    // where `data` is the same 648-item array Open-Meteo would have returned.
     async _fetchGrid() {
-        const params = new URLSearchParams();
-        params.set('latitude',        this._gridLats.join(','));
-        params.set('longitude',       this._gridLons.join(','));
-        params.set('current',         [
-            'temperature_2m',
-            'relative_humidity_2m',
-            'surface_pressure',
-            'wind_speed_10m',
-            'wind_direction_10m',
-            'cloud_cover_low',
-            'cloud_cover_mid',
-            'cloud_cover_high',
-            'precipitation',
-            'cape',
-        ].join(','));
-        params.set('wind_speed_unit', 'ms');
-        params.set('timezone',        'UTC');
-
-        const res = await fetch(`${OPEN_METEO}?${params}`, {
-            signal: AbortSignal.timeout(20000),   // 20 s timeout
+        const res = await fetch(WEATHER_ENDPOINT, {
+            signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const body = await res.json();
-        // Open-Meteo returns { error: true, reason: "…" } on bad requests
-        if (body && !Array.isArray(body) && body.error) {
-            throw new Error(`Open-Meteo: ${body.reason ?? body.error}`);
-        }
-        // Multi-location → array; single location → wrap in array
-        return Array.isArray(body) ? body : [body];
+        if (body?.error) throw new Error(body.detail || body.error);
+        if (!Array.isArray(body?.data)) throw new Error('Malformed cache response');
+
+        this._meta.cacheAgeSeconds = body.age_seconds ?? null;
+        this._meta.cacheFetchedAt  = body.fetched_at  ?? null;
+        return body.data;
     }
 
     // ── Parse location array → coarse grid → interpolated textures ───────────

@@ -40,6 +40,23 @@
       ]
     },
     {
+      "source": "/api/weather/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    },
+    {
       "source": "/rust/www/(.*)",
       "headers": [
         {
@@ -152,6 +169,12 @@
     {
       "source": "/v1/horizons",
       "destination": "/api/horizons"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/weather/refresh",
+      "schedule": "0 * * * *"
     }
   ]
 }
