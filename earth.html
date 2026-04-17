@@ -1495,6 +1495,27 @@ cloudU.u_cloud_layers.value = new THREE.DataTexture(
 );
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
+// ── Live cloud imagery (NASA GIBS MODIS) ─────────────────────────────────
+// Loaded asynchronously; the procedural cloud shader renders immediately
+// and is blended with the satellite composite when (and if) it arrives.
+// The imagery is a daily MODIS true-colour snapshot — clouds are bright,
+// ocean/land dark, which the shader reads as a coverage brightness proxy.
+(async () => {
+    try {
+        const { fetchLatestCloudImagery } = await import('./js/cloud-imagery.js');
+        const hit = await fetchLatestCloudImagery(THREE, { width: 2048 });
+        if (hit) {
+            cloudU.u_satellite.value   = hit.texture;
+            cloudU.u_satellite_on.value = 1.0;
+            console.info(`[CloudImagery] Loaded MODIS ${hit.date}`);
+        } else {
+            console.info('[CloudImagery] Imagery unavailable — procedural clouds only');
+        }
+    } catch (e) {
+        console.warn('[CloudImagery] Failed:', e.message);
+    }
+})();
+
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
 // ═══════════════════════════════════════════════════════════════

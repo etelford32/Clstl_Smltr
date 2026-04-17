@@ -255,12 +255,20 @@ varying vec3 vWorldNormal;
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
 // Hash-based value noise + FBM give multi-scale cloud structure directly in
-// the shader, independent of texture resolution.
+// the shader, independent of texture resolution. We also keep a 3-D variant
+// so the third coordinate can be fed u_time — clouds then MORPH in place
+// instead of rigidly drifting across the globe.
 
 float hash21(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
     p3 += dot(p3, p3.yzx + 33.33);
     return fract((p3.x + p3.y) * p3.z);
+}
+
+float hash31(vec3 p) {
+    p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
 }
 
 float vnoise(vec2 p) {
@@ -274,6 +282,28 @@ float vnoise(vec2 p) {
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// 3-D value noise — trilinear interpolation of hashed lattice values
+float vnoise3(vec3 p) {
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash31(i);
+    float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+    float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+    float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+    float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+    float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+    float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+    float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+    float x00 = mix(n000, n100, f.x);
+    float x10 = mix(n010, n110, f.x);
+    float x01 = mix(n001, n101, f.x);
+    float x11 = mix(n011, n111, f.x);
+    float y0  = mix(x00, x10, f.y);
+    float y1  = mix(x01, x11, f.y);
+    return mix(y0, y1, f.z);
+}
+
 float fbm(vec2 p, int octaves) {
     float val = 0.0;
     float amp = 0.5;
@@ -285,6 +315,33 @@ float fbm(vec2 p, int octaves) {
         amp *= 0.5;
     }
     return val;
+}
+
+// 3-D FBM — same construction in (x, y, z). Third coord is time-sliced by
+// callers to give clouds the slow morph of real convection.
+float fbm3(vec3 p, int octaves) {
+    float val = 0.0;
+    float amp = 0.5;
+    float freq = 1.0;
+    for (int i = 0; i < 6; i++) {
+        if (i >= octaves) break;
+        val += amp * vnoise3(p * freq);
+        freq *= 2.0;
+        amp *= 0.5;
+    }
+    return val;
+}
+
+// Domain-warped 3-D FBM. A low-frequency FBM lookup is used as an offset
+// into a higher-frequency FBM, which breaks straight-line artifacts that
+// pure FBM leaves behind — no more horizontal "strips" in the cloud cover.
+float warpedFbm3(vec3 p, int octaves) {
+    vec3 warp = vec3(
+        fbm3(p * 0.8 + vec3(17.3, -3.1,  0.0), 3),
+        fbm3(p * 0.8 + vec3(-9.6, 12.4,  0.0), 3),
+        fbm3(p * 0.8 + vec3( 4.2,  7.8,  0.0), 3)
+    ) - 0.5;
+    return fbm3(p + warp * 1.15, octaves);
 }
 
 // ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
@@ -358,44 +415,61 @@ void main() {
     // Compute cyclonic UV swirl from active storm systems
     vec2 swirl = (u_storm_count > 0) ? stormSwirl(vUv) : vec2(0.0);
 
-    // Three-layer drift: low clouds slow, mid medium, high cirrus fastest
-    vec2 driftLow  = vec2(u_time * 0.000050, u_time * 0.000007);
-    vec2 driftMid  = vec2(u_time * 0.000072, u_time * 0.000010);
-    vec2 driftHigh = vec2(u_time * 0.000100, u_time * 0.000014);
+    // Slow horizontal drift + independent time slice fed into the third
+    // noise dimension — the 3-D slice lets clouds MORPH (form / dissipate)
+    // in place instead of sliding across the sphere as a rigid texture.
+    vec2  driftLow  = vec2(u_time * 0.0000330, u_time * 0.0000040);
+    vec2  driftMid  = vec2(u_time * 0.0000480, u_time * 0.0000060);
+    vec2  driftHigh = vec2(u_time * 0.0000720, u_time * 0.0000090);
+    float tLow  = u_time * 0.00060;
+    float tMid  = u_time * 0.00085;
+    float tHigh = u_time * 0.00120;
 
     vec2 uvLow  = vUv + driftLow  + swirl;
     vec2 uvMid  = vUv + driftMid  + swirl * 0.7;
     vec2 uvHigh = vUv + driftHigh + swirl * 0.4;
 
     // ── Multi-octave procedural noise per cloud layer ────────────────────────
-    // Each layer uses different frequency / octave counts to create distinct
-    // cloud character instead of uniform white haze.
+    // Each layer samples domain-warped 3-D FBM at its own frequency + time
+    // slice so layers evolve independently and nothing reads as parallel bands.
 
-    // Low cumulus: large puffy shapes with defined edges
-    float nLow  = fbm(uvLow * 12.0, 5);
-    // Mid altostratus: smoother, broader sheets
-    float nMid  = fbm(uvMid *  8.0 + 3.7, 4);
-    // High cirrus: horizontally stretched for wispy streaks
-    float nHigh = fbm(vec2(uvHigh.x * 18.0, uvHigh.y * 6.0) + 7.3, 5);
+    // Low cumulus: defined puffy cells
+    float nLow  = warpedFbm3(vec3(uvLow  * 14.0,        tLow),  5);
+    // Mid altostratus: smoother, broader
+    float nMid  = warpedFbm3(vec3(uvMid  *  9.5 + 3.7,  tMid),  4);
+    // High cirrus: anisotropic sampling gives the wispy elongated look,
+    // but the domain warp keeps it from reading as horizontal stripes.
+    float nHigh = warpedFbm3(vec3(uvHigh.x * 22.0, uvHigh.y * 8.0, tHigh) + vec3(7.3, 7.3, 0.0), 5);
 
-    // Blend texture noise as fine-detail layer (FBM dominates)
-    float texLow  = texture2D(u_clouds, uvLow).r;
-    float texMid  = texture2D(u_clouds, uvMid).r;
-    float texHigh = texture2D(u_clouds, uvHigh).r;
-    nLow  = mix(nLow,  texLow,  0.25);
-    nMid  = mix(nMid,  texMid,  0.20);
-    nHigh = mix(nHigh, texHigh, 0.15);
+    // Blend a tiny fraction of the lookup texture for fine grain (dust /
+    // pixel-scale detail) — down-weighted heavily so the FBM dominates.
+    float texDetail = texture2D(u_clouds, uvLow * 2.3 + vec2(tLow * 0.12, 0.0)).r;
+    nLow  = mix(nLow,  texDetail, 0.12);
+    nMid  = mix(nMid,  texDetail, 0.08);
+    nHigh = mix(nHigh, texDetail, 0.05);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
 
-    // ── Cloud formation: noise gives shape, weather data gives density ────
-    // Noise defines WHERE individual cloud formations appear (puffy edges,
-    // clear sky gaps).  Weather fraction only scales their opacity so the
-    // overall pattern is driven by the noise, not by zonal data bands.
-    float shapeLow  = smoothstep(0.38, 0.56, nLow);
-    float shapeMid  = smoothstep(0.35, 0.60, nMid);
-    float shapeHigh = smoothstep(0.33, 0.65, nHigh);
+    // ── Cloud formation ─────────────────────────────────────────────────────
+    // Previous implementation gated formation by the zonal weather fraction
+    // (smoothstep 0.03→0.45 on a ~10°-coarse input). On most days the input
+    // is strongly zonal, so entire latitude bands were suppressed and the
+    // user saw horizontal strips of cloud / no-cloud.
+    //
+    // New formation: the noise always produces a *full* cloud field; the
+    // weather fraction only nudges local density up or down by ±25%, and
+    // the global cover is rate-limited to a sane base. A longitudinally
+    // offset bias term from the noise itself prevents any residual banding.
+    float shapeLow  = smoothstep(0.36, 0.58, nLow);
+    float shapeMid  = smoothstep(0.38, 0.62, nMid);
+    float shapeHigh = smoothstep(0.40, 0.72, nHigh);
+
+    // Global base cover — constant across latitudes so the shader can never
+    // produce a completely clear band just because the weather grid says so.
+    const float BASE_LOW  = 0.72;
+    const float BASE_MID  = 0.48;
+    const float BASE_HIGH = 0.32;
 
     if (u_weather_on > 0.5) {
         vec4  cl      = texture2D(u_cloud_layers, vUv);
@@ -404,22 +478,35 @@ void main() {
         float clHigh  = cl.b;
         precip        = cl.a;
 
-        // Soft density ramp: fraction < 0.05 → clear, > 0.45 → full density
-        alphaLow  = shapeLow  * smoothstep(0.03, 0.45, clLow)  * 0.92;
-        alphaMid  = shapeMid  * smoothstep(0.03, 0.40, clMid)  * 0.68;
-        alphaHigh = shapeHigh * smoothstep(0.03, 0.35, clHigh) * 0.45;
+        // ±25% modulation. clLow in [0,1] → modulator in [0.75, 1.25].
+        float modLow  = 0.75 + clLow  * 0.50;
+        float modMid  = 0.75 + clMid  * 0.50;
+        float modHigh = 0.75 + clHigh * 0.50;
+
+        alphaLow  = shapeLow  * BASE_LOW  * modLow;
+        alphaMid  = shapeMid  * BASE_MID  * modMid;
+        alphaHigh = shapeHigh * BASE_HIGH * modHigh;
     } else {
-        // No weather data: pure noise-driven clouds, uniform coverage
-        alphaLow  = shapeLow  * 0.65;
-        alphaHigh = shapeHigh * 0.25;
+        // No weather data: pure noise-driven clouds at the base density.
+        alphaLow  = shapeLow  * BASE_LOW;
+        alphaMid  = shapeMid  * BASE_MID;
+        alphaHigh = shapeHigh * BASE_HIGH;
     }
 
-    // Satellite data blending: replaces noise-driven alpha with observed density
+    // Satellite observation: when a real cloud-imagery texture is supplied
+    // (NASA GIBS, GOES, etc.), use its brightness as the dominant coverage
+    // signal and fold the procedural noise in as fine-scale detail + motion.
     if (u_satellite_on > 0.5) {
         float satCloud = texture2D(u_satellite, vUv).r;
-        // Blend: satellite gives large-scale structure; procedural adds detail
-        alphaLow  = mix(alphaLow,  satCloud * 0.95, 0.55);
-        alphaMid  = mix(alphaMid,  satCloud * 0.60, 0.30);
+        float satShape = smoothstep(0.18, 0.85, satCloud);
+        // Mixing coverage, not replacing: noise still animates where sat is
+        // uniform so the globe doesn't look like a static photo.
+        float satLow   = satShape * mix(0.85, 1.0, shapeLow);
+        float satMid   = satShape * mix(0.55, 0.85, shapeMid);
+        alphaLow  = mix(alphaLow,  satLow,   0.82);
+        alphaMid  = mix(alphaMid,  satMid,   0.60);
+        // Keep high cirrus dominated by noise so wisps keep moving
+        alphaHigh = mix(alphaHigh, satShape * 0.35, 0.35);
     }
 
     // Composite layers: opaque low clouds dominate, cirrus adds on top
