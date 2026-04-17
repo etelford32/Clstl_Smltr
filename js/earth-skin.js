@@ -441,12 +441,12 @@ void main() {
     // but the domain warp keeps it from reading as horizontal stripes.
     float nHigh = warpedFbm3(vec3(uvHigh.x * 22.0, uvHigh.y * 8.0, tHigh) + vec3(7.3, 7.3, 0.0), 5);
 
-    // Blend a tiny fraction of the lookup texture for fine grain (dust /
-    // pixel-scale detail) — down-weighted heavily so the FBM dominates.
-    float texDetail = texture2D(u_clouds, uvLow * 2.3 + vec2(tLow * 0.12, 0.0)).r;
-    nLow  = mix(nLow,  texDetail, 0.12);
-    nMid  = mix(nMid,  texDetail, 0.08);
-    nHigh = mix(nHigh, texDetail, 0.05);
+    // Previously we blended a separate procedural noise texture in at
+    // ~10-12% for pixel-scale grain. That texture was generated flat on a
+    // 2:1 equirect canvas, which stretched features into horizontal stripes
+    // when wrapped onto a sphere. The shader's own warpedFbm3 already gives
+    // multi-octave detail on a spherical domain (no seams, no elongation),
+    // so the lookup is intentionally skipped.
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;

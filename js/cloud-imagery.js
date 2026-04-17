@@ -34,10 +34,20 @@
  *   } | null>
  */
 
-const GIBS_BASE        = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
-const DEFAULT_LAYER    = 'MODIS_Terra_CorrectedReflectance_TrueColor';
-const DEFAULT_WIDTH    = 2048;
-const DEFAULT_HEIGHT   = 1024;
+const GIBS_BASE         = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
+
+// Preference order. Cloud-specific optical-thickness layer is the primary
+// choice — it doesn't mis-identify bright deserts, polar snow, or sea ice
+// as clouds the way CorrectedReflectance does. Aqua is included as a same-
+// day secondary because Terra data can lag or be patchy. TrueColor is the
+// last-ditch fallback so we always have SOMETHING to show.
+const LAYER_PREFERENCE = [
+    'MODIS_Terra_Cloud_Optical_Thickness',
+    'MODIS_Aqua_Cloud_Optical_Thickness',
+    'MODIS_Terra_CorrectedReflectance_TrueColor',
+];
+const DEFAULT_WIDTH     = 2048;
+const DEFAULT_HEIGHT    = 1024;
 const MAX_FALLBACK_DAYS = 3;   // walk back this many days if TIME is missing
 
 /** Format a Date as YYYY-MM-DD in UTC. */
@@ -101,31 +111,42 @@ async function loadImageWithDateFallback(baseDate, layer, width, height) {
  * Fetch the most recent GIBS cloud snapshot and wrap it in a Three.js
  * texture ready to be assigned to a shader uniform.
  *
+ * Tries each layer in LAYER_PREFERENCE in order until one succeeds. Layers
+ * after the first are fallbacks for when the preferred cloud-specific
+ * product isn't available for recent dates yet.
+ *
  * @param {*}       THREE  — Three.js namespace (caller passes it in so the
  *                           module stays decoupled from the THREE bundler).
  * @param {object}  [opts]
- * @param {Date}    [opts.date]  — defaults to "today" (UTC)
- * @param {string}  [opts.layer] — GIBS layer id
- * @param {number}  [opts.width] — snapshot pixel width (max 4096)
+ * @param {Date}    [opts.date]   — defaults to "today" (UTC)
+ * @param {string}  [opts.layer]  — override; single layer string
+ * @param {string[]}[opts.layers] — override; ordered preference list
+ * @param {number}  [opts.width]  — snapshot pixel width (max 4096)
  * @returns {Promise<{ texture: THREE.Texture, date: string, layer: string, url: string } | null>}
  */
 export async function fetchLatestCloudImagery(THREE, opts = {}) {
-    const layer  = opts.layer ?? DEFAULT_LAYER;
     const width  = Math.min(4096, Math.max(512, opts.width ?? DEFAULT_WIDTH));
     const height = width / 2 | 0;  // equirectangular 2:1 aspect
     const base   = opts.date ?? new Date();
 
-    const hit = await loadImageWithDateFallback(base, layer, width, height);
-    if (!hit) return null;
+    const layers = opts.layer   ? [opts.layer]
+                 : opts.layers  ? opts.layers
+                 :                LAYER_PREFERENCE;
 
-    const tex = new THREE.Texture(hit.image);
-    tex.wrapS      = THREE.RepeatWrapping;
-    tex.wrapT      = THREE.ClampToEdgeWrapping;
-    tex.minFilter  = THREE.LinearMipMapLinearFilter;
-    tex.magFilter  = THREE.LinearFilter;
-    tex.anisotropy = 8;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.needsUpdate = true;
+    for (const layer of layers) {
+        const hit = await loadImageWithDateFallback(base, layer, width, height);
+        if (!hit) continue;
 
-    return { texture: tex, date: hit.date, layer, url: hit.url };
+        const tex = new THREE.Texture(hit.image);
+        tex.wrapS      = THREE.RepeatWrapping;
+        tex.wrapT      = THREE.ClampToEdgeWrapping;
+        tex.minFilter  = THREE.LinearMipMapLinearFilter;
+        tex.magFilter  = THREE.LinearFilter;
+        tex.anisotropy = 8;
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.needsUpdate = true;
+
+        return { texture: tex, date: hit.date, layer, url: hit.url };
+    }
+    return null;
 }

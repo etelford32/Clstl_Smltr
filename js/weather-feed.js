@@ -382,22 +382,21 @@ export class WeatherFeed {
                 this._windBuf[t4+2] = spd;
                 this._windBuf[t4+3] = 1.0;
 
-                // Procedural cloud layers: Rossby-wave perturbations break
-                // purely zonal banding so clouds vary with longitude too.
-                const w1 = 0.28 * Math.sin(lon * 3.0 + lat * 1.8);
-                const w2 = 0.18 * Math.sin(lon * 5.0 - lat * 2.5);
-                const w3 = 0.12 * Math.sin(lon * 7.0 + lat * 0.7);
-                const lonVar = w1 + w2 + w3;
-
-                const itcz    = Math.max(0, 1.0 - Math.abs(lat + lonVar * 0.15) * 3.8);
-                const midLat  = Math.max(0, Math.abs(lat) - 0.5 + lonVar * 0.12) * 1.2;
-                const cLow    = Math.max(0, Math.min(1, itcz * 0.9 + midLat * 0.55 * (1 - pNorm) + lonVar * 0.12));
-                const cMid    = Math.max(0, Math.min(1, midLat * 0.5 + (1 - pNorm) * 0.3 + lonVar * 0.08));
-                const cHigh   = Math.max(0, Math.min(1, 0.25 + 0.35 * Math.abs(Math.sin(lat * 2.0 + lon * 0.8))));
-                this._cloudBuf[t4+0] = cLow;
-                this._cloudBuf[t4+1] = cMid;
-                this._cloudBuf[t4+2] = cHigh;
-                this._cloudBuf[t4+3] = cLow * 0.4;
+                // Procedural cloud layers — neutral low-coverage field.
+                // Previously this used abs(lat)-based ITCZ/mid-lat/polar
+                // bands, which produced strong horizontal strips during
+                // the ~5-10 s window before Open-Meteo resolved (and any
+                // time the fetch fails outright). Now we emit a constant
+                // half-strength cover plus a quiet longitudinal ripple so
+                // the shader has SOMETHING to modulate without teaching
+                // the user's eye to expect zonal bands as the default.
+                const ripple = 0.06 * Math.sin(lon * 4.0 + lat * 1.3);
+                const jitter = 0.04 * Math.sin(lon * 9.0 - lat * 5.1);
+                const base   = 0.50 + ripple + jitter;
+                this._cloudBuf[t4+0] = Math.max(0.25, Math.min(0.75, base));
+                this._cloudBuf[t4+1] = Math.max(0.20, Math.min(0.70, base - 0.05));
+                this._cloudBuf[t4+2] = Math.max(0.15, Math.min(0.60, base - 0.12));
+                this._cloudBuf[t4+3] = 0.0;  // no procedural precipitation
             }
         }
     }
