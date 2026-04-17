@@ -62,6 +62,33 @@ export const ALERT_PULSE_FREQ = {
     Unknown:  0.3,
 };
 
+// Event taxonomy — maps NWS event names onto a small set of visual "kinds"
+// so each alert can render a distinct emergency icon (tornado, hurricane,
+// lightning, flood, etc.) on the globe instead of a generic dot.
+export const ALERT_KINDS = [
+    'tornado', 'hurricane', 'thunder', 'flood', 'wind',
+    'winter', 'heat', 'fire', 'fog', 'marine', 'generic',
+];
+
+/** Classify an NWS event string into one of ALERT_KINDS. */
+export function classifyAlertEvent(event) {
+    const e = String(event ?? '').toLowerCase();
+
+    // Order matters — check most specific first
+    if (/\btornado\b|\bfunnel\b/.test(e))                                       return 'tornado';
+    if (/\bhurricane\b|\btropical\s*(storm|depression|cyclone)\b|\btyphoon\b/.test(e)) return 'hurricane';
+    if (/\bblizzard\b|\bice\s*storm\b|\bwinter\s*(storm|weather)\b|\bfreezing\b|\bsnow\b|\bsleet\b|\bfrost\b|\bfreeze\b/.test(e)) return 'winter';
+    if (/\bthunderstorm\b|\bthunder\b|\blightning\b|\bhail\b/.test(e))          return 'thunder';
+    if (/\bfire\b|\bred\s*flag\b|\bsmoke\b/.test(e))                            return 'fire';
+    if (/\bheat\b|\bhigh\s*temperature\b|\bexcessive\s*heat\b/.test(e))         return 'heat';
+    if (/\bflood\b|\brain\b|\btsunami\b|\bstorm\s*surge\b/.test(e))             return 'flood';
+    if (/\bwind\b|\bdust\s*storm\b/.test(e))                                    return 'wind';
+    if (/\bfog\b|\bdense\s*smoke\b/.test(e))                                    return 'fog';
+    if (/\bmarine\b|\bsmall\s*craft\b|\brip\s*current\b|\bsurf\b/.test(e))      return 'marine';
+
+    return 'generic';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export class NWSAlerts {
     constructor() {
@@ -126,6 +153,7 @@ export class NWSAlerts {
             alerts.push({
                 id:        p.id,
                 event:     p.event,
+                kind:      classifyAlertEvent(p.event),
                 headline:  p.headline ?? p.description?.slice(0, 120) ?? p.event,
                 severity,
                 urgency:   p.urgency ?? 'Unknown',
