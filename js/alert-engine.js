@@ -23,6 +23,7 @@
 import { auth } from './auth.js';
 import { getSupabase, isConfigured } from './supabase-config.js';
 import { loadUserLocation } from './user-location.js';
+import { listLocations, effectivePrefs, onLocationsChanged } from './saved-locations.js';
 import { ConjunctionMonitor } from './conjunction-alert.js';
 
 // ── Open-Meteo point forecast ────────────────────────────────────────────────
@@ -145,24 +146,25 @@ const ALERT_DEFS = [
             // Check tomorrow's forecast high/low against thresholds
             const forecastHi = w.tomorrow_high ?? w.today_high;
             const forecastLo = w.tomorrow_low  ?? w.today_low;
-            const city = loadUserLocation()?.city ?? 'your location';
+            const city  = ctx.location?.city  ?? loadUserLocation()?.city ?? 'your location';
+            const label = ctx.location?.label ?? city;
 
             if (hi != null && forecastHi != null && forecastHi >= hi) {
                 return {
                     fire: true,
-                    title: 'High Temperature Alert',
+                    title: `High Temperature Alert — ${label}`,
                     body: `Forecast high of ${Math.round(forecastHi)}°F at ${city} exceeds your ${Math.round(hi)}°F threshold.`,
                     severity: forecastHi >= hi + 10 ? 'critical' : 'warning',
-                    metadata: { forecast_high: forecastHi, threshold: hi, city },
+                    metadata: { forecast_high: forecastHi, threshold: hi, city, location_id: ctx.location?.id },
                 };
             }
             if (lo != null && forecastLo != null && forecastLo <= lo) {
                 return {
                     fire: true,
-                    title: 'Low Temperature Alert',
+                    title: `Low Temperature Alert — ${label}`,
                     body: `Forecast low of ${Math.round(forecastLo)}°F at ${city} is below your ${Math.round(lo)}°F threshold.`,
                     severity: forecastLo <= lo - 10 ? 'critical' : 'warning',
-                    metadata: { forecast_low: forecastLo, threshold: lo, city },
+                    metadata: { forecast_low: forecastLo, threshold: lo, city, location_id: ctx.location?.id },
                 };
             }
             return null;
@@ -180,7 +182,7 @@ const ALERT_DEFS = [
             const threshold = prefs.aurora_kp_threshold ?? 5;
             if (kp < threshold) return null;
 
-            const loc = loadUserLocation() ?? auth.getUser()?.location;
+            const loc = ctx.location ?? loadUserLocation() ?? auth.getUser()?.location;
             if (!loc) {
                 // No location — fire generic alert
                 return {
@@ -246,14 +248,15 @@ const ALERT_DEFS = [
             score = Math.max(0, Math.min(100, score));
 
             const city = loc.city ?? 'your location';
+            const label = loc.label ?? city;
             const factorStr = factors.length ? ` (${factors.join(', ')})` : '';
 
             return {
                 fire: true,
-                title: `Aurora Alert — ${score}% visibility`,
+                title: `Aurora Alert — ${label} (${score}% visibility)`,
                 body: `Kp ${kp.toFixed(1)} — aurora likely visible from ${city}${factorStr}. Look ${loc.lat >= 0 ? 'north' : 'south'} for green/purple curtains.`,
                 severity: score >= 75 ? 'critical' : 'warning',
-                metadata: { kp, score, cloud_cover: w?.cloud_cover, is_day: w?.is_day, city },
+                metadata: { kp, score, cloud_cover: w?.cloud_cover, is_day: w?.is_day, city, location_id: loc.id },
             };
         },
     },
@@ -402,14 +405,15 @@ const ALERT_DEFS = [
             const gnss = ef.gnss;
             const threshold = prefs.gnss_risk_threshold ?? 2;
             if (gnss.level < threshold) return null;
-            const loc = loadUserLocation() ?? auth.getUser()?.location;
-            const city = loc?.city;
+            const loc = ctx.location ?? loadUserLocation() ?? auth.getUser()?.location;
+            const city  = loc?.city;
+            const label = loc?.label ?? city;
             return {
                 fire: true,
-                title: `GNSS Risk: ${gnss.label}`,
+                title: `GNSS Risk${label ? ' — ' + label : ''}: ${gnss.label}`,
                 body: `${gnss.desc} L1 range delay: ${gnss.range_delay_m} m.${city ? ' (' + city + ')' : ''}`,
                 severity: gnss.level >= 3 ? 'critical' : 'warning',
-                metadata: { level: gnss.level, range_delay_m: gnss.range_delay_m, threshold },
+                metadata: { level: gnss.level, range_delay_m: gnss.range_delay_m, threshold, location_id: loc?.id },
             };
         },
     },
@@ -428,14 +432,15 @@ const ALERT_DEFS = [
             const g    = ef.timing?.current_g ?? 0;
             const threshold = prefs.power_grid_g_threshold ?? 4;
             if (g < threshold && grid.level < 2) return null;
-            const loc = loadUserLocation() ?? auth.getUser()?.location;
+            const loc = ctx.location ?? loadUserLocation() ?? auth.getUser()?.location;
             const lat = Math.abs(loc?.lat ?? 45);
+            const label = loc?.label ?? loc?.city;
             return {
                 fire: true,
-                title: `G${g} Power Grid Risk`,
+                title: `G${g} Power Grid Risk${label ? ' — ' + label : ''}`,
                 body: `${grid.desc}${sat.level >= 2 ? ' Satellite environment: ' + sat.desc : ''}`,
                 severity: g >= 4 ? 'critical' : 'warning',
-                metadata: { g_scale: g, grid_level: grid.level, sat_level: sat.level, lat, threshold },
+                metadata: { g_scale: g, grid_level: grid.level, sat_level: sat.level, lat, threshold, location_id: loc?.id },
             };
         },
     },
@@ -533,7 +538,11 @@ const ALERT_DEFS = [
 
 export class AlertEngine {
     constructor() {
-        /** @type {Map<string, number>} alert type key → last fire timestamp (ms) */
+        /**
+         * Cooldown tracker. Key is `${alertKey}@${locationId}` so the same
+         * alert type can fire independently for different saved locations.
+         * @type {Map<string, number>}
+         */
         this._cooldowns = new Map();
 
         /** @type {Array<object>} recent alerts (in-memory for bell UI, newest first) */
@@ -545,8 +554,8 @@ export class AlertEngine {
         /** Supabase client (lazy) */
         this._sb = null;
 
-        /** Cached weather data for user's location */
-        this._weather = null;
+        /** @type {Map<string, object>} weather cache keyed by "lat,lon" */
+        this._weatherByKey = new Map();
 
         /** Cached CME propagation events */
         this._cmeEvents = [];
@@ -566,11 +575,19 @@ export class AlertEngine {
         /** Conjunction monitor (advanced tier only) */
         this._conjMonitor = null;
 
+        /** @type {Array<object>} resolved alert locations (saved + fallback) */
+        this._locations = [];
+
+        /** Unsubscribe handle for saved-locations change events */
+        this._unsubLocations = null;
+
         this._onSwpc          = this._onSwpc.bind(this);
         this._onCme           = this._onCme.bind(this);
         this._onImpactScore   = this._onImpactScore.bind(this);
         this._onConjunction   = this._onConjunction.bind(this);
         this._onEarthForecast = this._onEarthForecast.bind(this);
+        this._onUserLoc       = this._onUserLoc.bind(this);
+        this._onLocationsChg  = this._onLocationsChg.bind(this);
     }
 
     /** Start listening to events and polling weather. */
@@ -580,8 +597,10 @@ export class AlertEngine {
         window.addEventListener('impact-score-update', this._onImpactScore);
         window.addEventListener('conjunction-alert', this._onConjunction);
         window.addEventListener('earth-forecast-update', this._onEarthForecast);
+        window.addEventListener('user-location-changed', this._onUserLoc);
+        this._unsubLocations = onLocationsChanged(this._onLocationsChg);
         this._loadRecentFromDB();
-        this._pollWeather();
+        this._refreshLocations().then(() => this._pollWeather());
         this._weatherTimer = setInterval(() => this._pollWeather(), WEATHER_POLL_MS);
 
         // Start conjunction monitor for advanced users
@@ -598,9 +617,57 @@ export class AlertEngine {
         window.removeEventListener('impact-score-update', this._onImpactScore);
         window.removeEventListener('conjunction-alert', this._onConjunction);
         window.removeEventListener('earth-forecast-update', this._onEarthForecast);
+        window.removeEventListener('user-location-changed', this._onUserLoc);
+        this._unsubLocations?.();
         clearInterval(this._weatherTimer);
         this._conjMonitor?.stop();
     }
+
+    // ── Location resolution ─────────────────────────────────────────────────
+    /**
+     * Build the list of locations alerts should evaluate against.
+     *  - If the user has saved locations: use all with notify_enabled = true.
+     *  - Otherwise: fall back to the single localStorage / profile location
+     *    so the engine behaves unchanged for users who never used the
+     *    Saved Locations card.
+     *  - If still nothing: return [null] so alerts without location context
+     *    (CME, flare, storm, recurrence) still fire generically.
+     */
+    async _refreshLocations() {
+        const saved = await listLocations({ force: true });
+        const active = (saved ?? []).filter(s => s.notify_enabled !== false);
+        if (active.length) {
+            this._locations = active.map(r => ({
+                id:                 r.id,
+                label:              r.label,
+                lat:                r.lat,
+                lon:                r.lon,
+                city:               r.city,
+                is_primary:         !!r.is_primary,
+                alert_config:       r.alert_config ?? {},
+                email_enabled:      r.email_alerts_enabled !== false,
+            }));
+            return;
+        }
+        const fallback = loadUserLocation() ?? auth.getUser()?.location;
+        if (fallback?.lat != null && fallback?.lon != null) {
+            this._locations = [{
+                id:            null,
+                label:         fallback.city ?? 'Your location',
+                lat:           fallback.lat,
+                lon:           fallback.lon,
+                city:          fallback.city,
+                is_primary:    true,
+                alert_config:  {},
+                email_enabled: true,
+            }];
+        } else {
+            this._locations = [null];
+        }
+    }
+
+    _onUserLoc()       { this._refreshLocations().then(() => this._pollWeather()); }
+    _onLocationsChg()  { this._refreshLocations().then(() => this._pollWeather()); }
 
     /** Get unread count. */
     getUnreadCount() {
@@ -637,7 +704,7 @@ export class AlertEngine {
         this._earthForecast = ev.detail ?? null;
         // Evaluate earth-forecast-source alerts whenever the forecast updates
         if (auth.isSignedIn() && auth.canUseAlerts()) {
-            this._evaluateAlerts(this._lastSwpcState ?? {}, 'earth-forecast');
+            this._evaluateAllLocations(this._lastSwpcState ?? {}, 'earth-forecast');
         }
     }
 
@@ -687,80 +754,102 @@ export class AlertEngine {
     _onSwpc(ev) {
         if (!auth.isSignedIn() || !auth.canUseAlerts()) return;
         this._lastSwpcState = ev.detail;
-        this._evaluateAlerts(ev.detail, 'swpc');
+        this._evaluateAllLocations(ev.detail, 'swpc');
     }
 
-    /** Fetch weather for user's location and evaluate weather-triggered alerts. */
+    /**
+     * Fetch weather for each active location (unique by lat,lon) and
+     * evaluate weather-triggered alerts per location.
+     */
     async _pollWeather() {
         if (!auth.isSignedIn() || !auth.canUseAlerts()) return;
+        if (!this._locations.length) return;
 
-        const loc = loadUserLocation() ?? auth.getUser()?.location;
-        if (!loc?.lat || !loc?.lon) return;
-
-        const w = await fetchPointWeather(loc.lat, loc.lon);
-        if (w) {
-            this._weather = w;
-            console.debug('[AlertEngine] Weather updated:', Math.round(w.temp_f) + '°F, cloud ' + w.cloud_cover + '%');
-            // Evaluate weather-triggered alerts
-            this._evaluateAlerts(this._lastSwpcState ?? {}, 'weather');
+        const seen = new Set();
+        for (const loc of this._locations) {
+            if (!loc?.lat || !loc?.lon) continue;
+            const key = `${loc.lat.toFixed(3)},${loc.lon.toFixed(3)}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const w = await fetchPointWeather(loc.lat, loc.lon);
+            if (w) this._weatherByKey.set(key, w);
         }
+        // Evaluate weather-triggered alerts across all locations
+        this._evaluateAllLocations(this._lastSwpcState ?? {}, 'weather');
     }
 
-    /** Run all alert definitions of the given source type. */
-    _evaluateAlerts(state, source) {
-        const prefs = auth.getAlertPrefs();
-        const cooldownMs = (prefs.alert_cooldown_min ?? 60) * 60_000;
+    /** Iterate over every active location and evaluate matching alert defs. */
+    _evaluateAllLocations(state, source) {
+        const basePrefs  = auth.getAlertPrefs();
         const isAdvanced = auth.canUseAdvancedAlerts();
         const now = Date.now();
-        const ctx = { weather: this._weather, cmeEvents: this._cmeEvents, recurrence: this._recurrence, earthForecast: this._earthForecast };
 
-        for (const def of ALERT_DEFS) {
-            // Source filter: only evaluate defs matching the current trigger source
-            if (def.source && def.source !== source) continue;
+        // Always evaluate at least once, even without a concrete location,
+        // so sources like 'swpc' / 'earth-forecast' that don't strictly need
+        // a location (generic storm/flare/CME) still fire.
+        const locs = this._locations.length ? this._locations : [null];
 
-            // Plan gate
-            if (def.tier === 'advanced' && !isAdvanced) continue;
+        for (const loc of locs) {
+            const prefs = loc ? effectivePrefs(loc, basePrefs) : basePrefs;
+            const cooldownMs = (prefs.alert_cooldown_min ?? 60) * 60_000;
 
-            // Preference check
-            if (!prefs[def.key]) continue;
+            // Per-location weather lookup
+            const wKey = loc?.lat != null ? `${loc.lat.toFixed(3)},${loc.lon.toFixed(3)}` : null;
+            const weather = wKey ? this._weatherByKey.get(wKey) : null;
 
-            // Cooldown check
-            const lastFire = this._cooldowns.get(def.key) ?? 0;
-            if (now - lastFire < cooldownMs) continue;
-
-            // Evaluate
-            let result;
-            try {
-                result = def.evaluate(state, prefs, ctx);
-            } catch (e) {
-                console.warn(`[AlertEngine] Error evaluating ${def.key}:`, e.message);
-                continue;
-            }
-
-            if (!result?.fire) continue;
-
-            // Fire!
-            const alert = {
-                id: `${def.key}_${now}`,
-                alert_type: def.type,
-                severity: result.severity ?? 'info',
-                title: result.title,
-                body: result.body,
-                metadata: result.metadata ?? {},
-                read: false,
-                created_at: new Date().toISOString(),
-                _key: def.key,
+            const ctx = {
+                weather,
+                cmeEvents:      this._cmeEvents,
+                recurrence:     this._recurrence,
+                earthForecast:  this._earthForecast,
+                location:       loc,
             };
 
-            this._cooldowns.set(def.key, now);
-            this.recent.unshift(alert);
-            if (this.recent.length > this._maxRecent) this.recent.pop();
+            for (const def of ALERT_DEFS) {
+                if (def.source && def.source !== source) continue;
+                if (def.tier === 'advanced' && !isAdvanced) continue;
+                if (!prefs[def.key]) continue;
 
-            this._writeAlertToDB(alert);
-            this._sendEmail(alert);
-            this._dispatch(alert);
+                const cooldownKey = `${def.key}@${loc?.id ?? 'global'}`;
+                const lastFire = this._cooldowns.get(cooldownKey) ?? 0;
+                if (now - lastFire < cooldownMs) continue;
 
-            console.info(`[AlertEngine] Fired: ${alert.title}`);
+                let result;
+                try {
+                    result = def.evaluate(state, prefs, ctx);
+                } catch (e) {
+                    console.warn(`[AlertEngine] Error evaluating ${def.key} @ ${loc?.label ?? 'global'}:`, e.message);
+                    continue;
+                }
+                if (!result?.fire) continue;
+
+                const alert = {
+                    id: `${def.key}_${loc?.id ?? 'global'}_${now}`,
+                    alert_type: def.type,
+                    severity: result.severity ?? 'info',
+                    title: result.title,
+                    body: result.body,
+                    metadata: {
+                        ...(result.metadata ?? {}),
+                        location_id:    loc?.id ?? null,
+                        location_label: loc?.label ?? null,
+                    },
+                    read: false,
+                    created_at: new Date().toISOString(),
+                    _key: def.key,
+                    _loc: loc,
+                };
+
+                this._cooldowns.set(cooldownKey, now);
+                this.recent.unshift(alert);
+                if (this.recent.length > this._maxRecent) this.recent.pop();
+
+                this._writeAlertToDB(alert);
+                this._sendEmail(alert);
+                this._dispatch(alert);
+
+                console.info(`[AlertEngine] Fired: ${alert.title}`);
+            }
         }
     }
 
@@ -803,11 +892,17 @@ export class AlertEngine {
 
     /**
      * Send alert email via /api/alerts/email edge function.
-     * Only sends if user has email_alerts enabled and severity meets minimum.
+     * Only sends if:
+     *   - user has email_alerts enabled globally, AND
+     *   - the firing location has email_alerts_enabled !== false, AND
+     *   - severity meets the user's minimum severity floor.
      */
     async _sendEmail(alert) {
         const prefs = auth.getAlertPrefs();
         if (!prefs.email_alerts) return;
+
+        // Per-location email opt-out
+        if (alert._loc && alert._loc.email_enabled === false) return;
 
         // Check minimum severity filter
         const minSev = prefs.email_min_severity ?? 'warning';
@@ -832,10 +927,12 @@ export class AlertEngine {
                     'Authorization': `Bearer ${token}`,
                 },
                 body: JSON.stringify({
-                    title:      alert.title,
-                    body:       alert.body,
-                    severity:   alert.severity,
-                    alert_type: alert.alert_type,
+                    title:          alert.title,
+                    body:           alert.body,
+                    severity:       alert.severity,
+                    alert_type:     alert.alert_type,
+                    location_label: alert._loc?.label ?? null,
+                    location_city:  alert._loc?.city  ?? null,
                 }),
             });
             if (res.ok) {

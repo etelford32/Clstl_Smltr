@@ -13,7 +13,12 @@
  * ── Request ──────────────────────────────────────────────────────────────────
  *  POST /api/alerts/email
  *  Headers:  Authorization: Bearer <supabase-jwt>
- *  Body:     { title, body, severity, alert_type, metadata }
+ *  Body:     { title, body, severity, alert_type, metadata,
+ *              location_label?, location_city? }
+ *
+ *  When location_label is present the email subject includes it and the HTML
+ *  shows it as a small chip next to the severity label, so multi-location
+ *  subscribers can tell at a glance which spot fired the alert.
  *
  * ── Response ─────────────────────────────────────────────────────────────────
  *  200: { sent: true, id: "<resend-message-id>" }
@@ -86,9 +91,12 @@ function checkRate(userId) {
 }
 
 /** Build a clean HTML email body. */
-function buildEmailHtml(title, body, severity, alertType) {
+function buildEmailHtml(title, body, severity, alertType, locationLabel) {
     const sevColor = severity === 'critical' ? '#ff3344' : severity === 'warning' ? '#ffaa00' : '#44cc88';
     const sevLabel = severity.charAt(0).toUpperCase() + severity.slice(1);
+    const locChip  = locationLabel
+        ? `<span style="display:inline-block;background:rgba(79,195,247,.14);color:#4fc3f7;font-size:.64rem;padding:2px 8px;border-radius:10px;font-weight:700;letter-spacing:.03em">📍 ${escHtml(locationLabel)}</span>`
+        : '';
 
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>
@@ -98,9 +106,10 @@ function buildEmailHtml(title, body, severity, alertType) {
     <span style="font-size:1.1rem;font-weight:800;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent">Parker Physics</span>
   </div>
   <div style="background:#12111a;border:1px solid #222;border-radius:12px;padding:20px;margin-bottom:16px">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${sevColor}"></span>
       <span style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:${sevColor};font-weight:700">${sevLabel} &middot; ${alertType}</span>
+      ${locChip}
     </div>
     <h2 style="margin:0 0 8px;font-size:1.15rem;color:#e8f4ff;font-weight:700">${escHtml(title)}</h2>
     <p style="margin:0;font-size:.88rem;color:#99aabb;line-height:1.6">${escHtml(body)}</p>
@@ -110,7 +119,7 @@ function buildEmailHtml(title, body, severity, alertType) {
   </div>
   <p style="margin-top:20px;font-size:.65rem;color:#445;text-align:center;line-height:1.5">
     You're receiving this because you enabled email alerts in your Parker Physics dashboard.<br>
-    <a href="https://parkerphysics.com/dashboard.html" style="color:#667">Manage alert preferences</a>
+    <a href="https://parkerphysics.com/dashboard.html#saved-locations-card" style="color:#667">Manage alert preferences &amp; locations</a>
   </p>
 </div>
 </body></html>`;
@@ -161,10 +170,18 @@ export default async function handler(req) {
         return jsonResp({ error: 'invalid_body' }, 400);
     }
 
-    const { title, body, severity = 'info', alert_type = 'storm' } = payload;
+    const {
+        title, body, severity = 'info', alert_type = 'storm',
+        location_label = null,
+    } = payload;
     if (!title || !body) {
         return jsonResp({ error: 'missing_fields', detail: 'title and body required' }, 400);
     }
+
+    // Prefix subject with location label so multi-location subscribers
+    // can triage the alert at a glance from their inbox.
+    const locPrefix = location_label ? `[${location_label}] ` : '';
+    const subject   = `[${severity.toUpperCase()}] ${locPrefix}${title}`;
 
     // Send via Resend
     try {
@@ -177,8 +194,8 @@ export default async function handler(req) {
             body: JSON.stringify({
                 from:    FROM_EMAIL,
                 to:      user.email,
-                subject: `[${severity.toUpperCase()}] ${title}`,
-                html:    buildEmailHtml(title, body, severity, alert_type),
+                subject,
+                html:    buildEmailHtml(title, body, severity, alert_type, location_label),
             }),
         });
 

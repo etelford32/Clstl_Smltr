@@ -125,8 +125,56 @@ export function eqMagColorTHREE(THREE, mag) {
     return new THREE.Color(eqMagColor(mag));
 }
 
-/** Returns radius scale for an earthquake marker (scene units). */
+/**
+ * Marker radius (scene units) with strong per-magnitude differentiation.
+ * M2.5 stays a pinprick; M8+ reads as a dominant event without eating the globe.
+ * A floor of 0.003 keeps small events clickable by the raycaster.
+ *
+ * Approximate curve:
+ *   M2.5 → 0.0030   M4 → 0.013   M5 → 0.025
+ *   M6   → 0.040    M7 → 0.060   M8 → 0.085   M9 → 0.115
+ */
 export function eqMarkerRadius(mag) {
-    // M2.5 → 0.008,  M5 → 0.018,  M7 → 0.038,  M9 → 0.075
-    return 0.004 * Math.pow(1.65, Math.max(0, mag - 2.5));
+    const m = Math.max(2.5, mag);
+    const r = 0.0012 * Math.pow(m - 1.0, 2.2);
+    return Math.min(0.12, Math.max(0.003, r));
+}
+
+/**
+ * Pulse frequency in Hz keyed to magnitude.
+ * Small quakes flicker; big quakes throb slowly.
+ *   M2.5 → 1.4 Hz   M5 → 0.98 Hz   M7 → 0.63 Hz   M9 → 0.30 Hz
+ */
+export function eqPulseFreq(mag) {
+    const f = 1.4 - 0.17 * Math.max(0, mag - 2.5);
+    return Math.max(0.18, f);
+}
+
+/**
+ * Pulse amplitude (fraction of baseRadius). Bigger quakes "breathe" deeper.
+ *   M2.5 → 0.22   M5 → 0.44   M7 → 0.62   M9 → 0.80
+ */
+export function eqPulseAmp(mag) {
+    const a = 0.22 + 0.09 * Math.max(0, mag - 2.5);
+    return Math.min(0.90, a);
+}
+
+/**
+ * Brightness multiplier as a function of age. Fresh events flash bright,
+ * older ones fade toward a dim floor so the globe stops looking uniformly
+ * noisy after an active day.
+ *   <1min   → 1.3  (arrival flash)
+ *   <1h     → 1.0
+ *   1–6h    → 1.0 → 0.55  (linear)
+ *   6–24h   → 0.55 → 0.25
+ *   24–72h  → 0.25 → 0.08
+ *   >72h    → 0.08  (ghost floor)
+ */
+export function eqAgeFactor(ageHours) {
+    if (ageHours < 1 / 60) return 1.3;
+    if (ageHours < 1)      return 1.0;
+    if (ageHours < 6)      return 1.0  - (ageHours - 1)  * 0.09;
+    if (ageHours < 24)     return 0.55 - (ageHours - 6)  * 0.01875;
+    if (ageHours < 72)     return 0.25 - (ageHours - 24) * 0.00354;
+    return 0.08;
 }
