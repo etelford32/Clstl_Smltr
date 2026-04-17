@@ -496,17 +496,24 @@ void main() {
     // Satellite observation: when a real cloud-imagery texture is supplied
     // (NASA GIBS, GOES, etc.), use its brightness as the dominant coverage
     // signal and fold the procedural noise in as fine-scale detail + motion.
+    //
+    // The texture's alpha channel is a NO-DATA mask set by GIBS. Regions
+    // the satellite didn't see (polar winter darkness, MODIS orbit gaps,
+    // coastline masks) arrive with alpha = 0 and we route them back to
+    // procedural clouds, so the globe never shows a permanent fake cap.
     if (u_satellite_on > 0.5) {
-        float satCloud = texture2D(u_satellite, vUv).r;
+        vec4  sat      = texture2D(u_satellite, vUv);
+        float satCloud = sat.r;
+        float satData  = sat.a;                             // 1 where MODIS has coverage
         float satShape = smoothstep(0.18, 0.85, satCloud);
-        // Mixing coverage, not replacing: noise still animates where sat is
-        // uniform so the globe doesn't look like a static photo.
         float satLow   = satShape * mix(0.85, 1.0, shapeLow);
         float satMid   = satShape * mix(0.55, 0.85, shapeMid);
-        alphaLow  = mix(alphaLow,  satLow,   0.82);
-        alphaMid  = mix(alphaMid,  satMid,   0.60);
-        // Keep high cirrus dominated by noise so wisps keep moving
-        alphaHigh = mix(alphaHigh, satShape * 0.35, 0.35);
+        // Coverage-weighted blend: full satellite influence only where the
+        // alpha mask confirms the pixel is real data.
+        float influence = satData * 0.82;
+        alphaLow  = mix(alphaLow,  satLow,           influence);
+        alphaMid  = mix(alphaMid,  satMid,           0.60 * satData);
+        alphaHigh = mix(alphaHigh, satShape * 0.35,  0.35 * satData);
     }
 
     // Composite layers: opaque low clouds dominate, cirrus adds on top

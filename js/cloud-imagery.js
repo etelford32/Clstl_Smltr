@@ -59,6 +59,11 @@ function toUtcDate(d) {
 }
 
 function buildSnapshotUrl(time, layer, width, height) {
+    // PNG preserves the alpha channel GIBS uses to flag no-data pixels
+    // (polar winter darkness, MODIS swath gaps, coastal masking, etc.).
+    // The shader then treats alpha as a coverage-confidence mask so those
+    // regions fall back to procedural clouds instead of rendering as a
+    // solid grey cap.
     const p = new URLSearchParams({
         REQUEST: 'GetSnapshot',
         TIME:    time,
@@ -66,7 +71,7 @@ function buildSnapshotUrl(time, layer, width, height) {
         CRS:     'EPSG:4326',
         LAYERS:  layer,
         WRAP:    'day',
-        FORMAT:  'image/jpeg',
+        FORMAT:  'image/png',
         WIDTH:   String(width),
         HEIGHT:  String(height),
     });
