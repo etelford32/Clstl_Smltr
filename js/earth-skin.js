@@ -544,6 +544,66 @@ void main() {
     float termZone = smoothstep(-0.10, 0.0, NdotL) * smoothstep(0.22, 0.06, NdotL);
     col = mix(col, vec3(0.95, 0.72, 0.28), termZone * 0.32 * (1.0 - precipVis * 0.5));
 
+    // ── Falling precipitation streaks ────────────────────────────────────────
+    // Where the weather feed's precipitation channel is non-zero, paint short
+    // downward-scrolling streaks on top of the cloud. The pattern is purely
+    // procedural: narrow stripes in longitude, short dashes in latitude, the
+    // dashes slide toward the equator-facing side over time to read as rain
+    // falling out of the cloud base.
+    //
+    // Regime separation: tropical latitudes render tighter, denser, faster
+    // streaks (convective cells); mid-latitudes render longer, sparser,
+    // slower streaks (frontal rain). High-latitude precip shifts toward a
+    // lighter blue-white tint so it reads as sleet/snow rather than rain.
+    if (u_weather_on > 0.5 && precip > 0.02) {
+        float latDeg = (0.5 - vUv.y) * 180.0;
+        float absLat = abs(latDeg);
+
+        // 0 = tropical (convective), 1 = frontal (stratiform)
+        float regime = smoothstep(15.0, 45.0, absLat);
+
+        float freqX     = mix(260.0, 210.0, regime);   // streak density across lon
+        float freqY     = mix(160.0, 105.0, regime);   // dash length along lat
+        float fallSpd   = mix(0.055, 0.032, regime);   // v-axis scroll rate
+
+        // Per-column random phase so dashes don't march in lockstep across
+        // whole latitude bands. hash21 is defined in the noise block above.
+        float colId    = floor(vUv.x * freqX);
+        float colPhase = hash21(vec2(colId, 17.3)) * 3.0;
+
+        float sx = vUv.x * freqX;
+        float sy = vUv.y * freqY - u_time * fallSpd * freqY - colPhase;
+
+        // Horizontal mask — thin vertical stripe centred in each unit cell.
+        float streakH = 1.0 - smoothstep(0.06, 0.16, abs(fract(sx) - 0.5));
+
+        // Vertical mask — short dash that fades in and out within each cell.
+        float fy = fract(sy);
+        float streakV = smoothstep(0.0, 0.28, fy) * (1.0 - smoothstep(0.52, 0.92, fy));
+
+        float streak = streakH * streakV;
+
+        // Gate by precip intensity (0.02 → fade in, 0.30 → full) and modulate
+        // by daylight so the streaks don't overwhelm the night side where the
+        // cloud base is already dark. They stay faintly visible at night so
+        // storms remain identifiable over populated regions.
+        float precipMask = smoothstep(0.02, 0.30, precip);
+        streak *= precipMask * (0.35 + 0.65 * dayMix);
+
+        // Rain colour: mid grey-blue on warm regions, pale icy blue toward
+        // the poles to hint at frozen precipitation.
+        vec3 rainShade = mix(
+            vec3(0.30, 0.38, 0.52),    // rain
+            vec3(0.78, 0.86, 1.00),    // sleet/snow
+            smoothstep(55.0, 72.0, absLat)
+        );
+
+        // Apply: darken the cloud under the streaks and bump alpha so the
+        // rain shows even over already-opaque overcast.
+        col    = mix(col, rainShade, streak * 0.70);
+        alpha  = clamp(alpha + streak * 0.30, 0.0, 0.98);
+    }
+
     gl_FragColor = vec4(col, alpha);
 }`;
 
