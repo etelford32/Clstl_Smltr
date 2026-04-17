@@ -447,6 +447,30 @@ nav {
 .eq-place{ color: #aac; font-size: 10px; }
 .eq-meta { color: #556; font-size: 9px; margin-top: 3px; }
 
+/* Trip-mode HUD (shown when ?trip=… is in the URL) */
+#trip-hud {
+    position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+    display: none; z-index: 70;
+    background: rgba(8,10,18,.88); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,200,80,.4); border-radius: 10px;
+    padding: 8px 14px; font-size: 11px; color: #e8f4ff;
+    box-shadow: 0 4px 18px rgba(0,0,0,.5);
+    max-width: calc(100% - 20px);
+}
+#trip-hud.show { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+#trip-hud .th-from { color: #4fc3f7; font-weight: 700; }
+#trip-hud .th-to   { color: #ffb830; font-weight: 700; }
+#trip-hud .th-arrow { color: #889; }
+#trip-hud .th-meta { color: #99a; font-variant-numeric: tabular-nums; font-size: 10px; }
+#trip-hud .th-close {
+    background: none; border: 1px solid rgba(255,255,255,.18); border-radius: 5px;
+    color: #aac; cursor: pointer; padding: 3px 9px; font-size: 10px;
+}
+#trip-hud .th-close:hover { border-color: #ff8888; color: #ff8888; }
+@media (max-width: 520px) {
+    #trip-hud { font-size: 10px; padding: 6px 10px; }
+}
+
 /* ISS info overlay (fixed top-center on mobile) */
 #iss-hud {
     display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
@@ -1137,6 +1161,15 @@ nav {
     <!-- ISS info overlay -->
     <div id="iss-hud"></div>
 
+    <!-- Trip-mode HUD (populated when ?trip= is in the URL) -->
+    <div id="trip-hud" role="status">
+        <span class="th-from" id="th-from">—</span>
+        <span class="th-arrow">→</span>
+        <span class="th-to"   id="th-to">—</span>
+        <span class="th-meta" id="th-meta"></span>
+        <button class="th-close" id="th-close" type="button" aria-label="Exit trip mode">Exit</button>
+    </div>
+
     <!-- Alert hover tooltip -->
     <div id="alert-tip">
         <div class="at-sev"  id="at-sev"></div>
@@ -1206,6 +1239,7 @@ import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
+import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
@@ -2675,6 +2709,179 @@ class AlertMarkers {
 const alertMarkers = new AlertMarkers(earthMesh);
 
 // ═══════════════════════════════════════════════════════════════
+//  TRIP ROUTE OVERLAY — activated by ?trip=lat,lon,label;lat,lon,label
+//    Draws a glowing great-circle arc between two saved locations plus
+//    labelled endpoint markers, and frames both points with the camera.
+// ═══════════════════════════════════════════════════════════════
+class TripRouteOverlay {
+    constructor(parent) {
+        this._parent  = parent;
+        this._group   = new THREE.Group();
+        this._group.renderOrder = 6;
+        parent.add(this._group);
+        this._active  = false;
+    }
+
+    show({ from, to }) {
+        this.clear();
+        const path = greatCirclePath(from, to, 96);
+        const R = R_EARTH * 1.012;
+
+        // Arc as a fat-ish additive line (two strokes for bloom)
+        const pts = path.map(p => geoToXYZ(p.lat, p.lon).multiplyScalar(R));
+        for (const cfg of [
+            { color: 0xffcc66, opacity: 0.85, width: 1 },
+            { color: 0xffffff, opacity: 0.35, width: 1 },
+        ]) {
+            const geo = new THREE.BufferGeometry().setFromPoints(pts);
+            const mat = new THREE.LineBasicMaterial({
+                color: cfg.color, transparent: true, opacity: cfg.opacity,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+                linewidth: cfg.width,  // note: WebGL caps line width to 1 on most GPUs
+            });
+            const line = new THREE.Line(geo, mat);
+            line.renderOrder = 6;
+            this._group.add(line);
+        }
+
+        // Endpoint pins (From = blue, To = gold)
+        this._pin(from, 0x4fc3f7, 'FROM');
+        this._pin(to,   0xffb830, 'TO');
+
+        // Travelling arrow — a small sprite that slides along the arc
+        this._travellerPath = path;
+        this._traveller = this._makeTraveller();
+        this._group.add(this._traveller);
+        this._t0 = performance.now() / 1000;
+
+        this._active = true;
+
+        return { pts, pathLonLat: path };
+    }
+
+    _pin(loc, hexColor, tag) {
+        const base = geoToXYZ(loc.lat, loc.lon).multiplyScalar(R_EARTH * 1.002);
+        const top  = geoToXYZ(loc.lat, loc.lon).multiplyScalar(R_EARTH * 1.06);
+
+        // Vertical "pin stalk"
+        const stalkGeo = new THREE.BufferGeometry().setFromPoints([base, top]);
+        const stalkMat = new THREE.LineBasicMaterial({
+            color: hexColor, transparent: true, opacity: 0.9,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this._group.add(new THREE.Line(stalkGeo, stalkMat));
+
+        // Glowing head sphere
+        const headMat = new THREE.MeshBasicMaterial({
+            color: hexColor, transparent: true, opacity: 0.95,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.012, 10, 10), headMat);
+        head.position.copy(top);
+        this._group.add(head);
+
+        // Ground ring
+        const ringGeo = new THREE.RingGeometry(0.012, 0.022, 28);
+        const ringMat = new THREE.MeshBasicMaterial({
+            color: hexColor, transparent: true, opacity: 0.55,
+            blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false,
+        });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.copy(base);
+        ring.lookAt(0, 0, 0);
+        this._group.add(ring);
+
+        head.userData = { tag, loc };
+    }
+
+    _makeTraveller() {
+        const geo = new THREE.SphereGeometry(0.009, 10, 10);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0xffffff, transparent: true, opacity: 0.9,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        return new THREE.Mesh(geo, mat);
+    }
+
+    tick(/* t */) {
+        if (!this._active || !this._traveller || !this._travellerPath?.length) return;
+        // Loop every 6s along the arc
+        const now = performance.now() / 1000;
+        const u = ((now - this._t0) / 6) % 1;
+        const idx = Math.min(this._travellerPath.length - 1, Math.floor(u * this._travellerPath.length));
+        const p = this._travellerPath[idx];
+        const pos = geoToXYZ(p.lat, p.lon).multiplyScalar(R_EARTH * 1.018);
+        this._traveller.position.copy(pos);
+        // Breathe
+        const s = 1 + 0.25 * Math.sin(now * 3);
+        this._traveller.scale.setScalar(s);
+    }
+
+    clear() {
+        while (this._group.children.length) {
+            const c = this._group.children.pop();
+            c.geometry?.dispose?.();
+            c.material?.dispose?.();
+        }
+        this._active = false;
+        this._traveller = null;
+        this._travellerPath = null;
+    }
+}
+const tripRoute = new TripRouteOverlay(earthMesh);
+
+// ── Trip mode — activate from ?trip=lat,lon,label;lat,lon,label ────────
+(() => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('trip');
+    const spec = parseTripParam(raw);
+    if (!spec) return;
+
+    tripRoute.show(spec);
+
+    // HUD
+    const hud = document.getElementById('trip-hud');
+    document.getElementById('th-from').textContent = spec.from.label || `${spec.from.lat.toFixed(2)}°, ${spec.from.lon.toFixed(2)}°`;
+    document.getElementById('th-to').textContent   = spec.to.label   || `${spec.to.lat.toFixed(2)}°, ${spec.to.lon.toFixed(2)}°`;
+    const km  = greatCircleDistanceKm(spec.from, spec.to);
+    const mi  = km * 0.621371;
+    const brg = initialBearingDeg(spec.from, spec.to);
+    document.getElementById('th-meta').textContent =
+        `${km < 100 ? km.toFixed(1) : Math.round(km)} km · ${mi < 100 ? mi.toFixed(1) : Math.round(mi)} mi · bearing ${Math.round(brg)}°`;
+    hud.classList.add('show');
+
+    document.getElementById('th-close').addEventListener('click', () => {
+        tripRoute.clear();
+        hud.classList.remove('show');
+        const u = new URL(window.location.href);
+        u.searchParams.delete('trip');
+        window.history.replaceState(null, '', u);
+    });
+
+    // Frame the two endpoints: point the camera at the arc midpoint and
+    // back off enough to comfortably see both endpoints given the angular
+    // separation.
+    try {
+        const mid = greatCirclePath(spec.from, spec.to, 3)[1];
+        const midVec = geoToXYZ(mid.lat, mid.lon);
+        // Angular separation (half-arc) in radians
+        const sepHalf = greatCircleDistanceKm(spec.from, spec.to) / 6371.0 / 2;
+        // Distance so that half-arc subtends ~45% of vertical FOV
+        const fovRad  = (camera.fov * Math.PI) / 180;
+        const desired = Math.max(1.6, Math.min(4.5, sepHalf / Math.tan(fovRad * 0.45 / 2)));
+        const camPos  = midVec.clone().multiplyScalar(desired);
+        // Tween camera position (OrbitControls-friendly: set + update target)
+        camera.position.copy(camPos);
+        if (typeof controls !== 'undefined' && controls?.target) {
+            controls.target.set(0, 0, 0);
+            controls.update?.();
+        }
+    } catch (e) {
+        console.warn('[TripMode] Camera framing failed:', e.message);
+    }
+})();
+
+// ═══════════════════════════════════════════════════════════════
 //  EARTHQUAKE MARKERS  (InstancedMesh — single draw call)
 // ═══════════════════════════════════════════════════════════════
 class EarthquakeMarkers {
@@ -3957,6 +4164,9 @@ function animate() {
 
     // ── Alert marker pulse (per-type emergency icons with zoom adaptation)
     alertMarkers.tick(t, camera.position.length());
+
+    // ── Trip route overlay (only if ?trip= was parsed)
+    tripRoute.tick(t);
 
     // ── Earthquake markers pulse
     eqMarkers.tick(t);
