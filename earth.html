@@ -348,6 +348,68 @@ nav {
 .ds-badge.fetching{ background: rgba(255,200,0,.08);  color: #ffcc00; border: 1px solid rgba(255,200,0,.2); }
 .ds-badge.error   { background: rgba(255,50,50,.08);  color: #ff5555; border: 1px solid rgba(255,50,50,.2); }
 
+/* Pinned event detail card (click-to-pin, with Save button) */
+#event-detail {
+    position: absolute; z-index: 95; pointer-events: auto;
+    background: rgba(8,10,18,.94); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.14); border-radius: 10px;
+    padding: 12px 14px 10px; font-size: 11px; max-width: 260px; min-width: 200px;
+    line-height: 1.55; opacity: 0; transform: translateY(4px);
+    transition: opacity .15s ease, transform .15s ease;
+    box-shadow: 0 6px 24px rgba(0,0,0,.6);
+    display: none;
+}
+#event-detail.show { opacity: 1; transform: translateY(0); display: block; }
+#event-detail.sev-extreme  { border-color: rgba(255,34,0,.55); box-shadow: 0 6px 24px rgba(255,34,0,.25); }
+#event-detail.sev-severe   { border-color: rgba(255,136,0,.5); }
+#event-detail.sev-moderate { border-color: rgba(255,221,0,.45); }
+#event-detail.sev-minor    { border-color: rgba(34,170,255,.4); }
+#event-detail.sev-quake    { border-color: rgba(255,100,0,.45); }
+#event-detail .ed-close {
+    position: absolute; top: 6px; right: 7px;
+    background: none; border: none; color: #667; cursor: pointer;
+    font-size: 14px; line-height: 1; padding: 3px 6px;
+}
+#event-detail .ed-close:hover { color: #ff6666; }
+#event-detail .ed-sev {
+    font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+    font-weight: 700; display: inline-flex; align-items: center; gap: 5px;
+}
+#event-detail .ed-sev::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; box-shadow: 0 0 6px currentColor;
+}
+#event-detail .ed-title { font-size: 13px; font-weight: 700; color: #e8f4ff; margin: 4px 0 3px; }
+#event-detail .ed-sub   { font-size: 10px; color: #8a9cb0; }
+#event-detail .ed-meta  { font-size: 9.5px; color: #556; margin-top: 6px; font-variant-numeric: tabular-nums; }
+#event-detail .ed-actions {
+    display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+}
+#event-detail .ed-btn {
+    flex: 1; min-width: 96px; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid rgba(255,200,80,.35); background: linear-gradient(45deg,#ff8c00,#ffd700);
+    color: #0a0510; font-size: 10.5px; font-weight: 700; cursor: pointer;
+    font-family: inherit; letter-spacing: .02em; transition: transform .1s, filter .15s;
+}
+#event-detail .ed-btn:hover { filter: brightness(1.1); }
+#event-detail .ed-btn:active { transform: translateY(1px); }
+#event-detail .ed-btn:disabled { opacity: .55; cursor: default; filter: grayscale(.4); }
+#event-detail .ed-btn.secondary {
+    background: transparent; color: #aac; border-color: rgba(255,255,255,.15);
+}
+#event-detail .ed-btn.secondary:hover { border-color: #4fc3f7; color: #4fc3f7; }
+#event-detail .ed-msg {
+    margin-top: 6px; font-size: 10px; color: #4fc97f; display: none;
+}
+#event-detail .ed-msg.err { color: #ff6666; }
+#event-detail .ed-msg.warn { color: #ffcc44; }
+#event-detail .ed-msg.show { display: block; }
+#event-detail .ed-upsell {
+    display: block; margin-top: 6px; font-size: 10px;
+    color: #4fc3f7; text-decoration: none;
+}
+#event-detail .ed-upsell:hover { text-decoration: underline; }
+
 /* Earthquake info popup */
 #eq-popup {
     position: absolute; z-index: 90; pointer-events: none;
@@ -1060,6 +1122,21 @@ nav {
         <div class="at-exp"   id="at-exp"></div>
     </div>
 
+    <!-- Pinned event detail (appears on click, lets the user save the event
+         as a tracked location for multi-location alerts) -->
+    <div id="event-detail" role="dialog" aria-label="Event details">
+        <button class="ed-close" id="ed-close" aria-label="Close">×</button>
+        <div class="ed-sev"   id="ed-sev"></div>
+        <div class="ed-title" id="ed-title"></div>
+        <div class="ed-sub"   id="ed-sub"></div>
+        <div class="ed-meta"  id="ed-meta"></div>
+        <div class="ed-actions">
+            <button class="ed-btn" id="ed-save-btn" type="button">Save as location</button>
+            <button class="ed-btn secondary" id="ed-open-dash" type="button" title="Open dashboard">Dashboard</button>
+        </div>
+        <div class="ed-msg" id="ed-msg"></div>
+    </div>
+
     <!-- Space weather bar -->
     <div id="sw-bar">
         <div id="sw-dot"></div>
@@ -1103,6 +1180,8 @@ import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
+import { auth } from './js/auth.js';
+import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
@@ -2804,6 +2883,203 @@ function hideAlertTip() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  PINNED EVENT DETAIL CARD — click an earthquake or weather alert
+//  to pin its details and save it as a tracked location.
+// ═══════════════════════════════════════════════════════════════
+const _ed = {
+    card:     document.getElementById('event-detail'),
+    sev:      document.getElementById('ed-sev'),
+    title:    document.getElementById('ed-title'),
+    sub:      document.getElementById('ed-sub'),
+    meta:     document.getElementById('ed-meta'),
+    saveBtn:  document.getElementById('ed-save-btn'),
+    openBtn:  document.getElementById('ed-open-dash'),
+    closeBtn: document.getElementById('ed-close'),
+    msg:      document.getElementById('ed-msg'),
+};
+let _edPinned = null;   // { kind: 'quake' | 'alert', data, lat, lon, label }
+
+const SEV_CLASS = {
+    Extreme:  'sev-extreme', Severe: 'sev-severe',
+    Moderate: 'sev-moderate', Minor:  'sev-minor',
+};
+
+function _clampToViewport(cx, cy) {
+    const r = renderer.domElement.getBoundingClientRect();
+    const w = _ed.card.offsetWidth  || 240;
+    const h = _ed.card.offsetHeight || 150;
+    const x = Math.min(Math.max(cx - r.left + 14, 8), r.width  - w - 8);
+    const y = Math.min(Math.max(cy - r.top  - 20, 8), r.height - h - 8);
+    return { x, y };
+}
+
+function _setEdMsg(text, variant) {
+    _ed.msg.textContent = text || '';
+    _ed.msg.className   = 'ed-msg' + (text ? ' show' : '') + (variant ? ' ' + variant : '');
+}
+
+/** Build a compact saved-location label from an event. */
+function _labelFromEvent(kind, data) {
+    if (kind === 'quake') {
+        // USGS "place" is like "13 km W of Example, Region" — already compact.
+        const place = (data.place ?? '—').replace(/\s+/g, ' ').trim();
+        return `M${data.mag.toFixed(1)} · ${place}`.slice(0, 40);
+    }
+    // NWS alert: area is ; / , separated — take the first chunk.
+    const firstArea = (data.area ?? '').split(/[;,]/)[0].trim();
+    return `${data.event}${firstArea ? ' · ' + firstArea : ''}`.slice(0, 40);
+}
+
+/** Seed alert_config for a saved event so it fires meaningful alerts. */
+function _alertConfigForEvent(kind, data) {
+    if (kind === 'quake') {
+        // Not a space/weather threshold — enable aurora + storm watching
+        // by default for the coords; users can customise in the dashboard.
+        return { notify_aurora: true, notify_storm: true };
+    }
+    // NWS weather alert — enable temperature + storm monitoring by default.
+    // User can enable flare/aurora/etc. in the dashboard later.
+    return { notify_temperature: true, notify_storm: true };
+}
+
+function _pinEvent(kind, data, cx, cy) {
+    // Normalise coordinates + label
+    let lat, lon;
+    if (kind === 'quake') { lat = data.lat;  lon = data.lon; }
+    else                  { lat = data.lat;  lon = data.lon; }
+    if (lat == null || lon == null) return;
+
+    const label = _labelFromEvent(kind, data);
+
+    _edPinned = { kind, data, lat, lon, label };
+
+    // Classes
+    _ed.card.classList.remove('sev-extreme','sev-severe','sev-moderate','sev-minor','sev-quake');
+    if (kind === 'quake') {
+        _ed.card.classList.add('sev-quake');
+        const col = eqMagColorTHREE(THREE, data.mag).getHexString();
+        _ed.sev.textContent = `Earthquake · M${data.mag.toFixed(1)}`;
+        _ed.sev.style.color = '#' + col;
+        _ed.title.textContent = data.place ?? '—';
+        const ageH = Math.max(0, (Date.now() - data.time.getTime()) / 3_600_000);
+        const ageStr = ageH < 1 ? `${Math.round(ageH * 60)} min ago`
+                      : ageH < 24 ? `${ageH.toFixed(1)} h ago`
+                      : `${(ageH / 24).toFixed(1)} d ago`;
+        _ed.sub.textContent = `Depth ${Math.round(data.depth)} km · ${ageStr}`;
+    } else {
+        const sevCls = SEV_CLASS[data.severity] ?? 'sev-minor';
+        _ed.card.classList.add(sevCls);
+        _ed.sev.textContent = `${(data.severity || 'Unknown').toUpperCase()} · ${data.urgency || ''}`.trim();
+        _ed.sev.style.color = ALERT_CSS_COLORS[data.severity] ?? '#888';
+        _ed.title.textContent = data.event || 'Weather alert';
+        _ed.sub.textContent   = data.area   || '';
+    }
+
+    const latStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? 'E' : 'W'}`;
+    _ed.meta.textContent = `${latStr} ${lonStr}`;
+
+    _setEdMsg('', '');
+    _ed.saveBtn.disabled    = false;
+    _ed.saveBtn.textContent = 'Save as location';
+
+    // Position & show
+    const { x, y } = _clampToViewport(cx, cy);
+    _ed.card.style.left = x + 'px';
+    _ed.card.style.top  = y + 'px';
+    _ed.card.classList.add('show');
+
+    // Proactively hide hover tips so they don't compete
+    hideAlertTip();
+    _hideEqPopup();
+}
+
+function _hideEventDetail() {
+    _ed.card.classList.remove('show');
+    _edPinned = null;
+    _setEdMsg('', '');
+}
+
+_ed.closeBtn?.addEventListener('click', _hideEventDetail);
+_ed.openBtn?.addEventListener('click', () => { window.location.href = 'dashboard.html#saved-locations-card'; });
+
+// Save → addLocation() with auth + plan guards
+_ed.saveBtn?.addEventListener('click', async () => {
+    if (!_edPinned) return;
+    const { kind, data, lat, lon, label } = _edPinned;
+
+    // Guard 1: must be signed in
+    await auth.ready?.();
+    if (!auth.isSignedIn()) {
+        _setEdMsg('Sign in to save this location for ongoing alerts.', 'warn');
+        _ed.msg.innerHTML += ` <a class="ed-upsell" href="signin.html">Sign in →</a>`;
+        return;
+    }
+
+    // Guard 2: plan limit
+    const plan   = (auth.getPlan?.() || 'free').toLowerCase();
+    const cap    = locationLimit();
+    const planLbl= plan.charAt(0).toUpperCase() + plan.slice(1);
+    if (cap <= 0) {
+        _setEdMsg(`Saving locations is a Basic feature (5) / Advanced (25).`, 'warn');
+        _ed.msg.innerHTML += ` <a class="ed-upsell" href="pricing.html">Upgrade →</a>`;
+        return;
+    }
+
+    _ed.saveBtn.disabled = true;
+    _ed.saveBtn.textContent = 'Saving…';
+    _setEdMsg('', '');
+
+    // Pre-check the live count so we can give a clean "at limit" message
+    try {
+        const rows = await listLocations({ force: true });
+        if (rows.length >= cap) {
+            _ed.saveBtn.disabled    = false;
+            _ed.saveBtn.textContent = 'Save as location';
+            _setEdMsg(`${planLbl} plan holds ${cap} locations — you're at the cap.`, 'warn');
+            _ed.msg.innerHTML += ` <a class="ed-upsell" href="pricing.html">Upgrade →</a>`;
+            return;
+        }
+    } catch (_) { /* non-fatal; server trigger is source of truth */ }
+
+    const city = kind === 'quake'
+        ? (data.place ?? label)
+        : ((data.area ?? '').split(/[;,]/)[0].trim() || label);
+
+    const res = await addLocation({
+        label,
+        lat,
+        lon,
+        city,
+        is_primary:   false,
+        alert_config: _alertConfigForEvent(kind, data),
+    });
+
+    if (res.ok) {
+        _ed.saveBtn.textContent = 'Saved ✓';
+        _setEdMsg('Saved to your dashboard. Configure alert thresholds from there.', '');
+        _ed.msg.innerHTML += ` <a class="ed-upsell" href="dashboard.html#saved-locations-card">Open dashboard →</a>`;
+    } else if (res.limitReached) {
+        _ed.saveBtn.disabled    = false;
+        _ed.saveBtn.textContent = 'Save as location';
+        _setEdMsg(`${planLbl} plan holds ${cap} locations — you're at the cap.`, 'warn');
+        _ed.msg.innerHTML += ` <a class="ed-upsell" href="pricing.html">Upgrade →</a>`;
+    } else {
+        _ed.saveBtn.disabled    = false;
+        _ed.saveBtn.textContent = 'Save as location';
+        _setEdMsg('Could not save: ' + (res.error || 'unknown error'), 'err');
+    }
+});
+
+// Close the pinned card when user clicks empty globe area
+document.addEventListener('click', (e) => {
+    if (!_ed.card.classList.contains('show')) return;
+    if (_ed.card.contains(e.target))      return;  // clicks inside card ignore
+    if (e.target === renderer.domElement) return;  // globe click handler (below) decides
+    _hideEventDetail();
+}, true);
+
+// ═══════════════════════════════════════════════════════════════
 //  ISOBAR LAYER — marching-squares pressure contours
 // ═══════════════════════════════════════════════════════════════
 const isobarLayer = new IsobarLayer(earthMesh);
@@ -3283,6 +3559,43 @@ renderer.domElement.addEventListener('mousemove', e => {
     }
 });
 renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); });
+
+// ── Click-to-pin: earthquake or NWS alert under the cursor ──────────────────
+//   A click is a pointerdown+pointerup inside a ~5px radius (so OrbitControls
+//   drags don't trigger a pin). Earthquake markers take priority over weather
+//   alerts, matching the hover handler above.
+{
+    let _downX = 0, _downY = 0, _isClick = false;
+    const CLICK_PX = 5;
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        _downX = e.clientX; _downY = e.clientY; _isClick = true;
+    });
+    renderer.domElement.addEventListener('pointermove', (e) => {
+        if (!_isClick) return;
+        if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > CLICK_PX) _isClick = false;
+    });
+    renderer.domElement.addEventListener('pointerup', (e) => {
+        if (!_isClick) return;
+        _isClick = false;
+
+        const r    = renderer.domElement.getBoundingClientRect();
+        const ndcX = ((e.clientX - r.left) / r.width)  * 2 - 1;
+        const ndcY = -((e.clientY - r.top)  / r.height) * 2 + 1;
+        const ray  = new THREE.Raycaster();
+        ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+
+        // Earthquake first (higher priority to match hover)
+        const q = eqMarkers.getHovered(ray);
+        if (q) { _pinEvent('quake', q, e.clientX, e.clientY); return; }
+
+        const a = alertMarkers.getHovered(ray);
+        if (a) { _pinEvent('alert', a, e.clientX, e.clientY); return; }
+
+        // Empty globe click — dismiss any pinned card
+        if (_ed.card.classList.contains('show')) _hideEventDetail();
+    });
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATE
