@@ -786,6 +786,7 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cme"           checked><label for="lyr-cme">CME Shockfront</label></label>
             </div></div>
         </div>
 
@@ -1237,6 +1238,7 @@ import { EarthObsFeed, EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
+import { CmePropagator } from './js/cme-propagation.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
@@ -3039,6 +3041,279 @@ class TripRouteOverlay {
 }
 const tripRoute = new TripRouteOverlay(earthMesh);
 
+// ═══════════════════════════════════════════════════════════════
+//  CME SHOCKFRONT LAYER
+//
+//  For every Earth-directed CmeEvent whose arrival is < 12 h away, paint
+//  a glowing torus on the sunward side of Earth at a standoff that
+//  shrinks from ~5 R⊕ toward 1.1 R⊕ as the ETA counts down. The torus
+//  is severity-coloured (green → amber → red → magenta by predicted
+//  g-scale) and its arc "paints in" around the ring as progress
+//  approaches 1, so a user watching the Earth view reads the ETA not
+//  as a number but as a ring closing around the planet.
+//
+//  At impact (ETA crosses 0) the torus quickly expands + fades while a
+//  separate flash sphere enveloping Earth pulses bright for ~2.5 s, so
+//  the hit lands with a visible beat instead of quietly vanishing.
+// ═══════════════════════════════════════════════════════════════
+const CME_SHOCK_VERT = /* glsl */`
+varying vec2 vUv;
+void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const CME_SHOCK_FRAG = /* glsl */`
+precision highp float;
+uniform vec3  u_color;
+uniform float u_progress;   // 0 at 12 h out, 1 at arrival
+uniform float u_time;
+uniform float u_intensity;  // severity multiplier
+uniform float u_dissipate;  // 0 normally, grows past impact to fade the ring
+varying vec2 vUv;
+
+void main() {
+    // vUv.x sweeps around the torus major radius; vUv.y crosses the tube.
+    // Paint-in: alpha rises where vUv.x is within the progress arc.
+    float arcEnd   = u_progress;
+    float distToArc = arcEnd - vUv.x;
+    // Soft leading edge (bright bloom just behind the advancing front)
+    float head  = exp(-distToArc * distToArc * 900.0);          // tight head glow
+    float body  = smoothstep(-0.02, 0.12, distToArc);           // fill behind head
+    float tail  = 1.0 - smoothstep(0.12, 0.85, distToArc);      // fade toward start
+    float arc   = clamp(body * tail + head * 0.9, 0.0, 1.2);
+
+    // Bright at tube centre, faded at edges (gives a 3-D cord look)
+    float tube  = 1.0 - 2.0 * abs(vUv.y - 0.5);
+    tube = smoothstep(0.05, 0.95, tube);
+
+    // Temporal pulse — quicker as impact nears
+    float pulseHz = 1.2 + u_progress * 4.5;
+    float pulse   = 0.65 + 0.35 * sin(u_time * pulseHz + vUv.x * 18.0);
+
+    // Dissipation (post-impact fade)
+    float alpha = arc * tube * pulse * u_intensity * (1.0 - u_dissipate);
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    // Head glow tints toward white for a hot leading edge
+    vec3 col = mix(u_color, vec3(1.0), head * 0.55);
+    gl_FragColor = vec4(col * alpha * 1.6, alpha * 0.9);
+}`;
+
+const CME_FLASH_FRAG = /* glsl */`
+precision highp float;
+uniform vec3  u_color;
+uniform float u_age;        // seconds since impact
+uniform float u_duration;   // total flash duration (s)
+uniform vec3  u_sun_dir;
+varying vec2  vUv;
+varying vec3  vWorldNormal;
+
+void main() {
+    float t = clamp(u_age / u_duration, 0.0, 1.0);
+    // Ramp up fast, fade out slow: flash envelope
+    float env = t < 0.12 ? (t / 0.12) : (1.0 - (t - 0.12) / 0.88);
+    env = max(0.0, env);
+
+    // Stronger on the dayside (where the CME actually impacts) but still
+    // wraps the night side faintly so the impact reads at any camera angle.
+    vec3 N = normalize(vWorldNormal);
+    float NdotL  = dot(N, u_sun_dir);
+    float dayBias = smoothstep(-0.30, 0.50, NdotL);
+    float mask    = mix(0.35, 1.0, dayBias);
+
+    float alpha = env * mask * 0.75;
+    gl_FragColor = vec4(u_color * alpha * 1.4, alpha);
+}`;
+
+/** Map a predicted G-scale onto a severity colour. */
+function _cmeSeverityColor(gScale) {
+    if (gScale >= 4) return new THREE.Color(1.00, 0.28, 0.92);  // magenta — extreme
+    if (gScale >= 3) return new THREE.Color(1.00, 0.22, 0.18);  // red — strong
+    if (gScale >= 2) return new THREE.Color(1.00, 0.68, 0.16);  // amber — moderate
+    return new THREE.Color(0.24, 0.92, 0.44);                   // green — minor / unknown
+}
+
+class CmeShockfrontLayer {
+    constructor(parent) {
+        this._parent = parent;
+        this._group  = new THREE.Group();
+        this._group.renderOrder = 5;
+        parent.add(this._group);
+
+        /** @type {Map<string, { event, shockMesh, shockMat, flashMesh, flashMat, impactMs, dissipate }>} */
+        this._entries = new Map();
+        this._visible = true;
+        // Shared torus geometry (tube pointing along the ring's minor axis).
+        // Major radius / minor radius use a 1:0.04 ratio that reads as a thin
+        // glowing cord. 96 radial segments so the paint-in arc stays smooth.
+        this._torusGeo = new THREE.TorusGeometry(1, 0.04, 10, 96);
+        this._flashGeo = new THREE.SphereGeometry(R_EARTH * 1.08, 48, 32);
+    }
+
+    setVisible(v) {
+        this._visible = v;
+        this._group.visible = v;
+    }
+
+    /** Consume the latest propagator event list. */
+    syncEvents(events) {
+        const now  = Date.now();
+        const seen = new Set();
+
+        for (const ev of events ?? []) {
+            if (!ev.earthDirected) continue;
+            // Show from 12 h lead time through 30 min post-impact.
+            const h = ev.hoursUntilArrival(now);
+            if (h > 12 || h < -0.5) continue;
+
+            seen.add(ev.id);
+            if (!this._entries.has(ev.id)) this._spawnEntry(ev);
+        }
+
+        // Remove entries whose events are gone or fully past impact flash life
+        for (const [id, e] of this._entries) {
+            const gone       = !seen.has(id);
+            const flashDone  = e.impactMs && (now - e.impactMs) > 3500;
+            if (gone && (!e.impactMs || flashDone)) this._removeEntry(id);
+        }
+    }
+
+    _spawnEntry(ev) {
+        const gScale = ev.impact?.g_scale ?? 1;
+        const color  = _cmeSeverityColor(gScale);
+        const intensity = 0.7 + 0.15 * Math.min(5, gScale);
+
+        const shockMat = new THREE.ShaderMaterial({
+            vertexShader:   CME_SHOCK_VERT,
+            fragmentShader: CME_SHOCK_FRAG,
+            uniforms: {
+                u_color:     { value: color.clone() },
+                u_progress:  { value: 0 },
+                u_time:      { value: 0 },
+                u_intensity: { value: intensity },
+                u_dissipate: { value: 0 },
+            },
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const shockMesh = new THREE.Mesh(this._torusGeo, shockMat);
+        shockMesh.renderOrder = 5;
+        this._group.add(shockMesh);
+
+        const flashMat = new THREE.ShaderMaterial({
+            vertexShader: /* glsl */`
+                varying vec2  vUv;
+                varying vec3  vWorldNormal;
+                void main() {
+                    vUv = uv;
+                    vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+                    gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: CME_FLASH_FRAG,
+            uniforms: {
+                u_color:    { value: color.clone() },
+                u_age:      { value: 0 },
+                u_duration: { value: 2.5 },
+                u_sun_dir:  { value: new THREE.Vector3(1, 0, 0) },
+            },
+            transparent: true, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const flashMesh = new THREE.Mesh(this._flashGeo, flashMat);
+        flashMesh.visible = false;
+        flashMesh.renderOrder = 6;
+        this._group.add(flashMesh);
+
+        this._entries.set(ev.id, {
+            event: ev,
+            shockMesh, shockMat,
+            flashMesh, flashMat,
+            impactMs: null,
+            dissipate: 0,
+        });
+    }
+
+    _removeEntry(id) {
+        const e = this._entries.get(id);
+        if (!e) return;
+        this._group.remove(e.shockMesh);
+        this._group.remove(e.flashMesh);
+        e.shockMat.dispose();
+        e.flashMat.dispose();
+        this._entries.delete(id);
+    }
+
+    /**
+     * @param {number} t          scene time in seconds (for pulse animations)
+     * @param {THREE.Vector3} sunDir  unit vector from Earth toward Sun, in world frame
+     */
+    tick(t, sunDir) {
+        if (!this._visible || this._entries.size === 0) return;
+
+        const now = Date.now();
+        for (const e of this._entries.values()) {
+            const ev   = e.event;
+            const eta  = ev.hoursUntilArrival(now);              // hours until impact
+            const lead = Math.min(12, Math.max(0, eta));         // within 12 h lead window
+
+            // Progress 0 at 12 h out → 1 at impact. Ease-in so the arc
+            // feels like it accelerates into Earth.
+            const raw = 1 - lead / 12;
+            const progress = Math.pow(raw, 1.4);
+
+            // Standoff distance along sunward vector. Far when the CME is
+            // hours out, just outside the atmosphere when it hits.
+            const standoff = 1.05 + (1 - progress) * 4.0;
+            // Torus major radius expands to wrap Earth as it closes in.
+            const scale    = 0.30 + progress * 1.15;
+
+            // Position on sunward side
+            e.shockMesh.position.copy(sunDir).multiplyScalar(standoff * R_EARTH);
+            e.shockMesh.scale.setScalar(scale);
+            // Orient the torus so its tube plane is perpendicular to the
+            // Earth-sun line (i.e. the ring faces Earth).
+            e.shockMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), sunDir);
+
+            // Shader uniforms
+            e.shockMat.uniforms.u_progress.value = progress;
+            e.shockMat.uniforms.u_time.value     = t;
+
+            // Impact detection — once we cross ETA 0, trigger flash and
+            // start expanding + fading the torus.
+            if (eta <= 0) {
+                if (e.impactMs === null) {
+                    e.impactMs = now;
+                    e.flashMesh.visible = true;
+                }
+                const flashAge = (now - e.impactMs) / 1000;      // seconds since hit
+                e.flashMat.uniforms.u_age.value     = flashAge;
+                e.flashMat.uniforms.u_sun_dir.value.copy(sunDir);
+                if (flashAge > e.flashMat.uniforms.u_duration.value) {
+                    e.flashMesh.visible = false;
+                }
+
+                // Torus dissipates over 2 s after impact
+                e.dissipate = Math.min(1, flashAge / 2);
+                e.shockMat.uniforms.u_dissipate.value = e.dissipate;
+                // Torus also drifts on toward Earth and grows slightly
+                e.shockMesh.scale.setScalar(scale + flashAge * 0.25);
+            }
+        }
+    }
+}
+
+const cmeShockfronts = new CmeShockfrontLayer(scene);
+const cmePropagator  = new CmePropagator().start();
+
+window.addEventListener('cme-propagation-update', (e) => {
+    cmeShockfronts.syncEvents(e.detail?.events ?? []);
+});
+
+document.getElementById('lyr-cme')?.addEventListener('change', (e) => {
+    cmeShockfronts.setVisible(e.target.checked);
+});
+
 // ── Trip mode — activate from ?trip=lat,lon,label;lat,lon,label ────────
 (() => {
     const params = new URLSearchParams(window.location.search);
@@ -4386,6 +4661,9 @@ function animate() {
 
     // ── Trip route overlay (only if ?trip= was parsed)
     tripRoute.tick(t);
+
+    // ── CME shockfront: in-bound arcs + impact flash
+    cmeShockfronts.tick(t, earthU.u_sun_dir.value);
 
     // ── Earthquake markers pulse
     eqMarkers.tick(t);
