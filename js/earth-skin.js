@@ -654,20 +654,86 @@ void main() {
 }`;
 
 export const ATM_FRAG = /* glsl */`
-precision mediump float;
+precision highp float;
 uniform vec3 u_sun_dir;
 varying vec3 vWorldNormal;
 varying vec3 vViewDir;
+
+// Simplified atmospheric scattering — physically-motivated approximation
+// without precomputed LUTs, so the cost stays at one fragment pass.
+//
+//   Rayleigh  — strong forward + back scatter, blue-weighted by λ⁻⁴.
+//   Mie       — forward-biased via Henyey–Greenstein, provides the warm
+//               tint around the sun and the orange/pink terminator band.
+//   Altitude  — approximated by the view angle through the shell, so the
+//               rim brightens naturally toward the limb.
+//
+// This replaces the flat rim-glow with a sky that reads blue on the day
+// limb, navy on the night side, pink/orange at the terminator, and gets
+// that sun-facing flare you see from orbit when the Sun is near the edge.
+
+// Rayleigh phase: 3/(16π) · (1 + cos²θ)
+float rayleighPhase(float cosT) {
+    return 0.75 * (1.0 + cosT * cosT);
+}
+
+// Mie phase (Henyey–Greenstein), forward-scattering asymmetry g
+float miePhase(float cosT, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / pow(max(1e-4, 1.0 + g2 - 2.0 * g * cosT), 1.5) * 0.375;
+}
+
 void main() {
-    vec3  N   = normalize(vWorldNormal);
-    vec3  V   = normalize(vViewDir);
-    float rim = pow(1.0 - abs(dot(V, N)), 2.4);
-    float NdotL  = dot(N, u_sun_dir);
-    float dayMix = clamp(NdotL * 2.0 + 0.5, 0.0, 1.0);
-    vec3 rayleigh = mix(vec3(0.03, 0.01, 0.08), vec3(0.14, 0.42, 1.00), dayMix);
-    float mie = pow(max(dot(-V, normalize(u_sun_dir)), 0.0), 8.0) * dayMix;
-    vec3 col = rayleigh + mie * vec3(0.30, 0.18, 0.06);
-    gl_FragColor = vec4(col * rim, rim * 0.82);
+    vec3  N = normalize(vWorldNormal);
+    vec3  V = normalize(vViewDir);
+    vec3  L = normalize(u_sun_dir);
+
+    // Geometry
+    float VdotN = dot(V, N);
+    float NdotL = dot(N, L);
+    float VdotL = dot(V, L);
+
+    // Atmosphere is visible at the rim (grazing view) and fades as the
+    // surface turns face-on. rim² gives a soft limb gradient.
+    float rim = pow(1.0 - abs(VdotN), 2.2);
+
+    // Day / night blending — scattering only happens where the atmosphere
+    // is actually illuminated. Terminator is the smooth band in between.
+    float dayMix     = smoothstep(-0.10, 0.30, NdotL);
+    float termBand   = smoothstep(-0.25, 0.00, NdotL)
+                     * (1.0 - smoothstep(0.10, 0.30, NdotL));  // peak at terminator
+
+    // Wavelength-dependent Rayleigh scatter coefficients, based on the
+    // standard 680 / 550 / 440 nm approximation.
+    vec3 betaR = vec3(5.8e-3, 13.5e-3, 33.1e-3) * 20.0;
+    vec3 betaM = vec3(21.0e-3)                  * 1.0;
+
+    // Phase contributions
+    float pR = rayleighPhase(VdotL);
+    float pM = miePhase(VdotL, 0.76);
+
+    // Rayleigh colour — dominant blue on the day limb, turns violet near
+    // the terminator as the longer path scatters out the red first.
+    vec3 rayleigh = betaR * pR * dayMix;
+
+    // Mie — adds the warm halo around the sun when it's on-screen, plus
+    // the orange terminator band you see from orbit.
+    vec3 mieSun    = betaM * pM * dayMix;
+    vec3 mieTermCol = vec3(1.00, 0.52, 0.26);
+    vec3 mieTerm    = mieTermCol * termBand * 0.22;
+
+    // Night side: very faint navy glow so the sphere's rim isn't black.
+    vec3 nightGlow  = vec3(0.015, 0.022, 0.050) * (1.0 - dayMix);
+
+    vec3 col = rayleigh + mieSun + mieTerm + nightGlow;
+
+    // Scale by rim so the atmosphere is concentrated near the limb, not
+    // spread across the face of the sphere. Alpha mirrors the colour so
+    // additive-blend compositing reads cleanly over the surface shader.
+    float alpha = rim * (0.60 + 0.40 * dayMix) + termBand * 0.18;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(col * rim * 1.6, alpha);
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
