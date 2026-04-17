@@ -205,7 +205,7 @@ void main() {
 
     // Aurora
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
+        float lat    = (vUv.y - 0.5) * 3.14159265;
         float lon    = (vUv.x - 0.5) * 6.28318530;
         float sinAbs = abs(sin(lat));
         float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
@@ -220,7 +220,7 @@ void main() {
 
     // Ring current heating: equatorial nightside reddish glow
     if (u_dst_norm > 0.08) {
-        float lat    = (0.5 - vUv.y) * 3.14159265;
+        float lat    = (vUv.y - 0.5) * 3.14159265;
         float absLat = abs(lat);
         float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
         base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
@@ -588,7 +588,7 @@ void main() {
     // slower streaks (frontal rain). High-latitude precip shifts toward a
     // lighter blue-white tint so it reads as sleet/snow rather than rain.
     if (u_weather_on > 0.5 && precip > 0.02) {
-        float latDeg = (0.5 - vUv.y) * 180.0;
+        float latDeg = (vUv.y - 0.5) * 180.0;
         float absLat = abs(latDeg);
 
         // 0 = tropical (convective), 1 = frontal (stratiform)
@@ -794,7 +794,7 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
-    float latDeg = (0.5 - vUv.y) * 180.0;
+    float latDeg = (vUv.y - 0.5) * 180.0;
     float absLat = abs(latDeg);
     float lonDeg = (vUv.x - 0.5) * 360.0;
 
