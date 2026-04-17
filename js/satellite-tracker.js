@@ -419,9 +419,14 @@ export class SatelliteTracker {
             const latR = lla.lat * DEG2RAD;
             const lonR = lla.lon * DEG2RAD;
 
-            posArr[i * 3]     = r * Math.cos(latR) * Math.cos(lonR);
-            posArr[i * 3 + 1] = r * Math.sin(latR);
-            posArr[i * 3 + 2] = r * Math.cos(latR) * Math.sin(lonR);
+            // Z is negated to match earth.html's geoToXYZ convention
+            // (Three.js SphereGeometry + Blue Marble texture: +X = Greenwich,
+            // -Z = 90°E). Using +cos(lat)*sin(lon) mirrored every satellite
+            // across the prime meridian, so e.g. ISS over Beijing appeared
+            // over the eastern Pacific.
+            posArr[i * 3]     =  r * Math.cos(latR) * Math.cos(lonR);
+            posArr[i * 3 + 1] =  r * Math.sin(latR);
+            posArr[i * 3 + 2] = -r * Math.cos(latR) * Math.sin(lonR);
 
             sat.lat = lla.lat;
             sat.lon = lla.lon;
@@ -563,9 +568,9 @@ export class SatelliteTracker {
             const latR = pt.lat * DEG2RAD;
             const lonR = pt.lon * DEG2RAD;
             points.push(new THREE.Vector3(
-                r * Math.cos(latR) * Math.cos(lonR),
-                r * Math.sin(latR),
-                r * Math.cos(latR) * Math.sin(lonR)
+                 r * Math.cos(latR) * Math.cos(lonR),
+                 r * Math.sin(latR),
+                -r * Math.cos(latR) * Math.sin(lonR)
             ));
         }
 
@@ -591,9 +596,9 @@ export class SatelliteTracker {
             const latR = pt.lat * DEG2RAD;
             const lonR = pt.lon * DEG2RAD;
             points.push(new THREE.Vector3(
-                r * Math.cos(latR) * Math.cos(lonR),
-                r * Math.sin(latR),
-                r * Math.cos(latR) * Math.sin(lonR)
+                 r * Math.cos(latR) * Math.cos(lonR),
+                 r * Math.sin(latR),
+                -r * Math.cos(latR) * Math.sin(lonR)
             ));
         }
 

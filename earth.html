@@ -3093,7 +3093,12 @@ const issMarker = new ISSMarker(scene);
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE TRACKER — CelesTrak TLE catalog + SGP4 propagation
 // ═══════════════════════════════════════════════════════════════
-const satTracker = new SatelliteTracker(scene, 1.0, { maxSatellites: 500, showOrbits: false });
+// Parent to earthMesh so satellite positions (derived from ECEF lat/lon,
+// which are Earth-fixed) rotate with the globe — otherwise every marker
+// is offset from its real ground track by the current GMST angle, and
+// the offset grows with time. Matches the pattern used by AlertMarkers,
+// EarthquakeMarkers, and the ISS marker.
+const satTracker = new SatelliteTracker(earthMesh, 1.0, { maxSatellites: 500, showOrbits: false });
 
 // Auto-load space stations on startup
 satTracker.loadGroup('stations').then(() => {
