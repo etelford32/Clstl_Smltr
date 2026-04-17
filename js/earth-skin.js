@@ -189,7 +189,11 @@ void main() {
                         landMsk * smoothstep(-0.20, 0.10, NdotL));
     dayCol *= shading;
 
-    vec3 base = mix(nightCol * u_city_lights, dayCol, dayMix);
+    // Keep the Blue Marble readable on the night side at ~55% instead of
+    // fading it to black. City lights layer additively on top so both cues
+    // co-exist near the terminator (photograph + lamps), not cross-fade.
+    vec3 base = dayCol * (0.55 + 0.45 * dayMix)
+              + nightCol * u_city_lights * (1.0 - dayMix);
 
     // Ocean specular glint (use the un-perturbed normal; water doesn't
     // inherit the height map's bumps).
@@ -236,7 +240,7 @@ void main() {
     // Lighting: half-Lambert without squaring — Blue Marble is already a daylit photo;
     // squaring creates a harsh spotlight effect.  Keep a gentle falloff + raised ambient.
     float halfLamb = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
-    float lit      = mix(0.10, halfLamb, dayMix);
+    float lit      = mix(0.35, halfLamb, dayMix);
     base *= lit;
 
     // Terminator warm glow
