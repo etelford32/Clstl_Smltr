@@ -1483,6 +1483,13 @@ earthU.u_weather.value = new THREE.DataTexture(
     new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
     THREE.RGBAFormat, THREE.FloatType
 );
+// Linear filter (not Nearest) so 1°-cell values interpolate smoothly across
+// the sphere instead of rendering as sharp pixel rectangles. Repeat on X
+// so the antimeridian seam wraps, clamp on Y so the poles don't bleed.
+earthU.u_weather.value.magFilter = THREE.LinearFilter;
+earthU.u_weather.value.minFilter = THREE.LinearFilter;
+earthU.u_weather.value.wrapS     = THREE.RepeatWrapping;
+earthU.u_weather.value.wrapT     = THREE.ClampToEdgeWrapping;
 earthU.u_weather.value.needsUpdate = true;
 // Share the same DataTexture with cloud shader for pressure-modulated clouds
 cloudU.u_weather.value = earthU.u_weather.value;
@@ -1493,6 +1500,10 @@ cloudU.u_cloud_layers.value = new THREE.DataTexture(
     new Float32Array(TEX_W * TEX_H * 4), TEX_W, TEX_H,
     THREE.RGBAFormat, THREE.FloatType
 );
+cloudU.u_cloud_layers.value.magFilter = THREE.LinearFilter;
+cloudU.u_cloud_layers.value.minFilter = THREE.LinearFilter;
+cloudU.u_cloud_layers.value.wrapS     = THREE.RepeatWrapping;
+cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
 // ── Live cloud imagery (NASA GIBS MODIS) ─────────────────────────────────
@@ -4155,7 +4166,11 @@ function animate() {
     // GMST at page load + elapsed sidereal rotation
     earthMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE;
     // Clouds rotate slightly faster (weather systems drift)
-    cloudMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE * 1.0008;
+    // Lock cloud sphere rotation to Earth's. The old 1.0008× factor made
+    // clouds drift off their ECEF-sourced grid cells over time. Any visible
+    // wind-like motion the user sees is now supplied by the shader's
+    // driftLow/Mid/High + 3-D time-sliced noise, which evolve in place.
+    cloudMesh.rotation.y = earthMesh.rotation.y;
 
     // ── Shader time
     earthU.u_time.value = t;
