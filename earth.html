@@ -1785,8 +1785,15 @@ window.addEventListener('swpc-update', e => {
     earthU.u_bz_south.value    = Math.max(0, Math.min(1, -(sw.solar_wind?.bz ?? 0) / 30));
     earthU.u_dst_norm.value    = Math.min(1, Math.max(0, -(sw.dst_index ?? -5) / 200));
 
-    // ── Aurora oval uniforms (shares Kp feed with the polar-glow overlay)
-    auroraU.u_kp.value = kp;
+    // ── Aurora oval uniforms. Shares the Kp feed with the polar-glow
+    // overlay AND reads the same live IMF Bz + hemispheric-power values
+    // that already drive the earth surface shader, so the oval responds
+    // to reconnection-driven substorms on the same cadence as the storm
+    // card: southward Bz turnings will widen + energize it instantly,
+    // without waiting for Kp to catch up.
+    auroraU.u_kp.value           = kp;
+    auroraU.u_bz_south.value     = earthU.u_bz_south.value;
+    auroraU.u_aurora_power.value = earthU.u_aurora_power.value;
 
     // ── Space Weather Impacts on Earth Systems (new panel)
     const kpI = Math.floor(kp);

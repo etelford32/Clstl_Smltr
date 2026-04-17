@@ -673,6 +673,8 @@ uniform float u_kp;
 uniform float u_time;
 uniform vec3  u_sun_dir;
 uniform float u_enabled;
+uniform float u_bz_south;      // 0..1 normalised southward IMF Bz (1 = very -Bz)
+uniform float u_aurora_power;  // 0..1 hemispheric auroral power proxy
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 
@@ -698,38 +700,71 @@ void main() {
     float absLat = abs(latDeg);
     float lonDeg = (vUv.x - 0.5) * 360.0;
 
-    // Equatorward boundary (deg) as a function of Kp.
-    //   Kp 0 → 72°,  Kp 3 → 66.3°,  Kp 5 → 62.6°,  Kp 7 → 58.8°,  Kp 9 → 55°
-    float boundary = max(55.0, 72.0 - u_kp * (17.0 / 9.0));
+    // Effective storm strength — Kp plus a Bz-south kicker so a fresh
+    // southward turning shoves the oval equatorward immediately, without
+    // having to wait for the Kp index to catch up.
+    float bz      = clamp(u_bz_south, 0.0, 1.0);
+    float kpEff   = u_kp + bz * 1.8;
 
-    // Undulation: slow sinusoidal ripple in longitude + value-noise jitter
-    // so the oval wobbles like a real auroral curtain, not a perfect circle.
-    float ripple = sin(lonDeg * 0.105 + u_time * 0.35) * 0.85
-                 + sin(lonDeg * 0.047 - u_time * 0.22) * 1.1
-                 + (vnoise(vec2(lonDeg * 0.028 + u_time * 0.06, 0.0)) - 0.5) * 2.4;
+    // Equatorward boundary (deg). Matches js/user-location.js#auroraVisibility
+    // with a -Bz shift added so reconnection-driven expansion shows visibly.
+    float boundary = max(52.0, 72.0 - kpEff * (17.0 / 9.0));
+
+    // Undulation. Two travelling sine waves + value-noise jitter so the oval
+    // wobbles like a real curtain. Ripple amplitude scales with Bz: quiet
+    // northward IMF holds the oval steady, strong southward IMF makes it
+    // churn visibly.
+    float turbulence = 0.6 + bz * 2.0;
+    float ripple = sin(lonDeg * 0.105 + u_time * 0.35) * 0.85 * turbulence
+                 + sin(lonDeg * 0.047 - u_time * 0.22) * 1.1  * turbulence
+                 + (vnoise(vec2(lonDeg * 0.028 + u_time * 0.06, 0.0)) - 0.5) * 2.4 * turbulence;
     float dynBoundary = boundary + ripple;
 
-    // Band width grows with Kp — stronger storms spread the oval toward the
-    // equator. Inner edge = equatorward, outer edge fades poleward.
-    float widthEq = 3.0 + u_kp * 0.55;      // equatorward half-width
-    float widthPol = 6.0 + u_kp * 1.10;     // poleward half-width
+    // Band width grows with Kp + Bz. Bz south widens the oval so substorms
+    // look like explosively brightening curtains, not a thin ribbon.
+    float widthEq  = 3.0 + kpEff * 0.55;
+    float widthPol = 6.0 + kpEff * 1.10 + bz * 2.5;
 
-    float offset = absLat - dynBoundary;    // 0 at equatorward edge, + poleward
+    float offset = absLat - dynBoundary;
     float eq = smoothstep(-widthEq, 0.0, offset);
     float po = 1.0 - smoothstep(0.0, widthPol, offset);
     float band = eq * po;
 
-    // Pulse with Kp + time (stronger storms pulse harder)
-    float pulse = 0.70 + 0.30 * sin(u_time * 0.85 + absLat * 0.18);
-    pulse *= 0.85 + 0.25 * smoothstep(3.0, 7.0, u_kp);
+    // Radial "rays" — thin vertical-ish streaks within the band that flicker
+    // on/off at active periods. Longitudinally high-frequency stripes shift
+    // with time so the curtain reads as turbulent plasma motion, not a solid
+    // neon band. Rays are gated on Bz + Kp; quiet periods see smooth bands,
+    // active periods see visible structure.
+    float rayFreq  = 90.0;
+    float rayShift = u_time * (0.6 + bz * 1.2);
+    float raySeed  = lonDeg * rayFreq / 360.0 + rayShift;
+    float rayA     = fract(raySeed);
+    float rayMask  = smoothstep(0.35, 0.50, rayA) * (1.0 - smoothstep(0.55, 0.70, rayA));
+    // Per-column flicker — each ray has an independent on/off cycle so the
+    // curtain shimmers instead of scrolling uniformly.
+    float rayFlick = step(0.45, hash21(vec2(floor(raySeed), floor(u_time * 1.3))));
+    float rayContribution = rayMask * rayFlick * smoothstep(0.1, 0.6, bz + u_aurora_power * 0.5);
+    float rayGlow = 1.0 + 0.9 * rayContribution;
 
-    // Mask out the dayside — aurora is invisible against sunlit atmosphere.
+    // Temporal pulse — scales with Kp AND Bz so a Bz-south event visibly
+    // quickens the heartbeat.
+    float pulseHz = 0.85 + bz * 1.4;
+    float pulse   = 0.70 + 0.30 * sin(u_time * pulseHz + absLat * 0.18);
+    pulse *= 0.85 + 0.25 * smoothstep(3.0, 7.0, kpEff);
+
+    // Substorm kicker — occasional brief bright surges when Bz is very south,
+    // emulating the expansion phase of a magnetospheric substorm.
+    float subStrength = max(0.0, bz - 0.55);  // only fires on strong -Bz
+    float subPulse    = pow(0.5 + 0.5 * sin(u_time * 0.25), 32.0);  // sharp peak
+    float substorm    = subStrength * subPulse * 1.6;
+
+    // Mask out the dayside.
     vec3  N      = normalize(vWorldNormal);
     float NdotL  = dot(N, u_sun_dir);
     float nightM = 1.0 - smoothstep(-0.18, 0.22, NdotL);
 
-    // Colour ramp: green → cyan → magenta as storm strength increases.
-    float kpNorm = clamp((u_kp - 2.0) / 7.0, 0.0, 1.0);
+    // Colour ramp: green → cyan → magenta as effective Kp rises.
+    float kpNorm = clamp((kpEff - 2.0) / 7.0, 0.0, 1.0);
     vec3 cLow  = vec3(0.15, 0.95, 0.40);
     vec3 cMid  = vec3(0.35, 0.85, 1.00);
     vec3 cHigh = vec3(1.00, 0.30, 0.90);
@@ -737,16 +772,20 @@ void main() {
         ? mix(cLow, cMid, kpNorm / 0.5)
         : mix(cMid, cHigh, (kpNorm - 0.5) / 0.5);
 
-    // Fade in over Kp 1.5 → 3 so weak storms don't paint a bright oval
-    // the user can barely justify from the numbers.
-    float kpGate = smoothstep(1.5, 3.0, u_kp);
+    // Hot tips at the equatorward edge when rays are firing — reddish pink
+    // tint that you only see in real photos at substorm peak.
+    col = mix(col, vec3(1.0, 0.55, 0.75), rayContribution * 0.4);
 
-    float intensity = band * pulse * nightM * kpGate;
-    // Gentle vertical smear for curtain look — brighter at equatorward edge,
-    // thin streamers pointing poleward.
-    float curtain = 0.55 + 0.45 * eq;
+    // Hemispheric-power brightening: proxy for live PED output.
+    float powerBoost = 1.0 + u_aurora_power * 1.0;
 
-    gl_FragColor = vec4(col * intensity * curtain * 1.8, intensity * 0.85);
+    // Fade in over Kp_eff 1.5 → 3.
+    float kpGate = smoothstep(1.5, 3.0, kpEff);
+
+    float intensity = band * pulse * nightM * kpGate * rayGlow * powerBoost + substorm * band * nightM;
+    float curtain   = 0.55 + 0.45 * eq;
+
+    gl_FragColor = vec4(col * intensity * curtain * 1.8, clamp(intensity * 0.85, 0.0, 1.0));
 }`;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -777,10 +816,16 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
 /** Default aurora oval uniforms. */
 export function createAuroraUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
-        u_kp:      { value: 0 },
-        u_time:    { value: 0 },
-        u_sun_dir: { value: sunDir.clone() },
-        u_enabled: { value: 1 },
+        u_kp:           { value: 0 },
+        u_time:         { value: 0 },
+        u_sun_dir:      { value: sunDir.clone() },
+        u_enabled:      { value: 1 },
+        // Southward IMF Bz, normalised to [0, 1] (1 = very southward Bz).
+        // Drives ripple turbulence, brightness, and equatorward boundary shift.
+        u_bz_south:     { value: 0 },
+        // Hemispheric auroral power proxy [0, 1]. Scales overall brightness
+        // so real substorm surges show up as a globe-visible beat.
+        u_aurora_power: { value: 0 },
     };
 }
 
