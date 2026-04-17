@@ -410,6 +410,29 @@ nav {
 }
 #event-detail .ed-upsell:hover { text-decoration: underline; }
 
+/* ── Touch optimisations for the pinned event card ─────────────────── */
+/* Devices without hover (phones, tablets) don't show the hover tooltips —
+   the click-to-pin card is the only surface, which avoids flashing on tap. */
+@media (hover: none) {
+    #alert-tip, #eq-popup { display: none !important; }
+}
+/* Coarse pointer (touch) → larger tap targets, bigger close button. */
+@media (pointer: coarse) {
+    #event-detail .ed-btn    { min-height: 42px; font-size: 12px; padding: 10px 12px; }
+    #event-detail .ed-close  { width: 34px; height: 34px; font-size: 18px; top: 4px; right: 4px; }
+    #event-detail .ed-actions{ gap: 8px; }
+    #event-detail            { padding: 14px 14px 12px; }
+}
+/* Narrow viewport → pin as a bottom sheet instead of floating by the tap,
+   so the card can't land off-screen or be hidden under the thumb. */
+@media (max-width: 520px) {
+    #event-detail.show {
+        left: 10px !important; right: 10px !important; bottom: 14px !important;
+        top: auto !important; max-width: none; width: auto;
+        transform: translateY(0);
+    }
+}
+
 /* Earthquake info popup */
 #eq-popup {
     position: absolute; z-index: 90; pointer-events: none;
@@ -3561,40 +3584,97 @@ renderer.domElement.addEventListener('mousemove', e => {
 renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hideEqPopup(); });
 
 // ── Click-to-pin: earthquake or NWS alert under the cursor ──────────────────
-//   A click is a pointerdown+pointerup inside a ~5px radius (so OrbitControls
-//   drags don't trigger a pin). Earthquake markers take priority over weather
-//   alerts, matching the hover handler above.
+//   Works across mouse, touch, and pen. Listens on both pointerup (modern
+//   browsers, fires before the synthetic click) and click (legacy + a11y
+//   fallback), with a dedup flag so we only pin once per tap.
+//
+//   Drag threshold is widened for touch, because fingers drift more than
+//   a mouse during a "tap". OrbitControls' own drag/rotate is undisturbed
+//   — we only observe the events, never preventDefault.
 {
-    let _downX = 0, _downY = 0, _isClick = false;
-    const CLICK_PX = 5;
+    let _downX = 0, _downY = 0, _isTap = false, _touchMode = false;
+    let _lastTapHandled = 0;
+    const CLICK_PX_MOUSE = 10;
+    const CLICK_PX_TOUCH = 14;
 
-    renderer.domElement.addEventListener('pointerdown', (e) => {
-        _downX = e.clientX; _downY = e.clientY; _isClick = true;
-    });
-    renderer.domElement.addEventListener('pointermove', (e) => {
-        if (!_isClick) return;
-        if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > CLICK_PX) _isClick = false;
-    });
-    renderer.domElement.addEventListener('pointerup', (e) => {
-        if (!_isClick) return;
-        _isClick = false;
-
+    function _resolveTap(clientX, clientY) {
         const r    = renderer.domElement.getBoundingClientRect();
-        const ndcX = ((e.clientX - r.left) / r.width)  * 2 - 1;
-        const ndcY = -((e.clientY - r.top)  / r.height) * 2 + 1;
+        const ndcX = ((clientX - r.left) / r.width)  * 2 - 1;
+        const ndcY = -((clientY - r.top)  / r.height) * 2 + 1;
         const ray  = new THREE.Raycaster();
         ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
 
         // Earthquake first (higher priority to match hover)
         const q = eqMarkers.getHovered(ray);
-        if (q) { _pinEvent('quake', q, e.clientX, e.clientY); return; }
+        if (q) { _pinEvent('quake', q, clientX, clientY); return true; }
 
         const a = alertMarkers.getHovered(ray);
-        if (a) { _pinEvent('alert', a, e.clientX, e.clientY); return; }
+        if (a) { _pinEvent('alert', a, clientX, clientY); return true; }
 
-        // Empty globe click — dismiss any pinned card
+        // Empty globe — dismiss any pinned card
         if (_ed.card.classList.contains('show')) _hideEventDetail();
-    });
+        return false;
+    }
+
+    function _onPrimaryTap(e) {
+        // Dedup: if pointerup already handled this tap, skip the click echo.
+        if (Date.now() - _lastTapHandled < 400) return;
+        _lastTapHandled = Date.now();
+        _resolveTap(e.clientX, e.clientY);
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+        _downX = e.clientX; _downY = e.clientY; _isTap = true;
+        _touchMode = e.pointerType === 'touch';
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('pointermove', (e) => {
+        if (!_isTap) return;
+        const threshold = _touchMode ? CLICK_PX_TOUCH : CLICK_PX_MOUSE;
+        if (Math.hypot(e.clientX - _downX, e.clientY - _downY) > threshold) _isTap = false;
+    }, { passive: true });
+
+    renderer.domElement.addEventListener('pointerup', (e) => {
+        if (!_isTap) return;
+        _isTap = false;
+        _onPrimaryTap(e);
+    }, { passive: true });
+
+    // Fallback for browsers without pointer events (old iOS Safari), assistive
+    // tech that synthesises click directly, and any case where pointerup
+    // didn't run — e.g. focus ring triggering click via keyboard.
+    renderer.domElement.addEventListener('click', _onPrimaryTap);
+
+    // Belt-and-suspenders: raw touchend in case pointer events are disabled.
+    // Skips if we already handled this tap, preventing double-fires.
+    renderer.domElement.addEventListener('touchend', (e) => {
+        if (Date.now() - _lastTapHandled < 400) return;
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        _touchMode = true;
+        _lastTapHandled = Date.now();
+        _resolveTap(t.clientX, t.clientY);
+    }, { passive: true });
+
+    // Touch interactions should suppress the mouse-style hover popups,
+    // which iOS otherwise fires as synthetic mousemove after a tap and
+    // flashes a tooltip under the finger.
+    let _lastTouchMs = 0;
+    window.addEventListener('touchstart', () => { _lastTouchMs = Date.now(); }, { passive: true, capture: true });
+    // Patch hover handlers by swallowing them when a touch was the most
+    // recent input within the last second.
+    const _origShowAlertTip = showAlertTip;
+    const _origShowEqPopup  = _showEqPopup;
+    // eslint-disable-next-line no-global-assign
+    showAlertTip = function (alert, cx, cy) {
+        if (Date.now() - _lastTouchMs < 1000) return;
+        return _origShowAlertTip(alert, cx, cy);
+    };
+    // eslint-disable-next-line no-global-assign
+    _showEqPopup = function (q, cx, cy) {
+        if (Date.now() - _lastTouchMs < 1000) return;
+        return _origShowEqPopup(q, cx, cy);
+    };
 }
 
 // ═══════════════════════════════════════════════════════════════
