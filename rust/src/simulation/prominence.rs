@@ -72,6 +72,7 @@ pub struct ProminenceParticle {
     /// Remaining lifetime (seconds).
     pub lifetime: f32,
     /// Maximum lifetime at birth.
+    #[allow(dead_code)]  // diagnostic/sampling field; preserved for HUD overlays
     pub max_lifetime: f32,
     /// Phase offset for thermal oscillation.
     pub osc_phase: f32,
