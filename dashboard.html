@@ -65,6 +65,62 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .alert-pref-threshold input,.alert-pref-threshold select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 6px;font-family:inherit;font-size:.72rem}
 .alert-pref-row.locked{opacity:.4;pointer-events:none}
 
+/* ── SAVED LOCATIONS ── */
+.sl-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.sl-counter{font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.sl-counter strong{color:#cdd}
+.sl-add-row{display:flex;gap:6px;margin-bottom:12px}
+.sl-add-row input{flex:1;background:#08051a;border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:.82rem;outline:none;transition:border-color .2s}
+.sl-add-row input:focus{border-color:rgba(0,200,255,.45)}
+.sl-add-row input::placeholder{color:var(--muted)}
+.sl-add-row input:disabled{opacity:.45;cursor:not-allowed}
+.sl-add-row .loc-btn{padding:7px 11px}
+.sl-add-row .loc-btn:disabled{opacity:.45;cursor:not-allowed}
+.sl-list{display:flex;flex-direction:column;gap:8px}
+.sl-empty{text-align:center;padding:20px 8px;color:var(--muted);font-size:.78rem;background:var(--surface);border:1px dashed var(--border);border-radius:10px}
+.sl-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:border-color .2s}
+.sl-item:hover{border-color:rgba(255,255,255,.15)}
+.sl-item.is-primary{border-color:rgba(255,184,48,.3)}
+.sl-item.disabled{opacity:.55}
+.sl-row{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.sl-star{font-size:.95rem;cursor:pointer;user-select:none;color:#556;transition:color .2s}
+.sl-star.on{color:#ffb830}
+.sl-star:hover{color:#ffd770}
+.sl-label-wrap{flex:1;min-width:120px;display:flex;flex-direction:column;gap:1px}
+.sl-label{font-size:.85rem;font-weight:700;color:#e8f4ff;background:transparent;border:1px solid transparent;border-radius:4px;padding:1px 4px;outline:none;transition:all .15s;min-width:60px;max-width:220px}
+.sl-label:focus,.sl-label:hover{border-color:var(--border);background:#08051a}
+.sl-city{font-size:.68rem;color:var(--muted);font-family:monospace;padding:0 4px}
+.sl-status{display:flex;align-items:center;gap:5px;font-size:.68rem}
+.sl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sl-dot.on{background:#44cc88;box-shadow:0 0 6px rgba(68,204,136,.5)}
+.sl-dot.off{background:#556}
+.sl-actions{display:flex;gap:4px;flex-wrap:wrap}
+.sl-btn{background:transparent;border:1px solid var(--border);border-radius:5px;color:#99a;cursor:pointer;font-family:inherit;font-size:.65rem;padding:3px 9px;transition:all .15s;white-space:nowrap}
+.sl-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+.sl-btn.danger:hover{border-color:#ff5555;color:#ff5555}
+.sl-btn.primary{border-color:var(--accent);color:var(--accent)}
+.sl-config{padding:0 12px 12px;border-top:1px solid var(--border);display:none}
+.sl-item.expanded .sl-config{display:block}
+.sl-cfg-section{margin-top:10px}
+.sl-cfg-title{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;font-weight:700}
+.sl-cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px}
+.sl-cfg-row{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 8px;background:#08051a;border:1px solid var(--border);border-radius:5px;font-size:.72rem;color:#cdd}
+.sl-cfg-row label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1}
+.sl-cfg-row input[type=checkbox]{accent-color:#ff8c00;width:14px;height:14px;cursor:pointer}
+.sl-cfg-row input[type=number],.sl-cfg-row select{background:var(--bg);border:1px solid var(--border);border-radius:3px;color:#cdd;padding:2px 5px;font-family:inherit;font-size:.68rem}
+.sl-cfg-row input[type=number]{width:54px}
+.sl-cfg-row select{max-width:68px}
+.sl-cfg-row.muted{opacity:.45}
+.sl-cfg-actions{display:flex;align-items:center;gap:8px;margin-top:10px}
+.sl-save-btn{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:5px;padding:5px 14px;cursor:pointer;font-family:inherit;font-size:.7rem}
+.sl-save-msg{font-size:.62rem;color:var(--green);display:none}
+.sl-reset-btn{background:transparent;border:1px solid var(--border);border-radius:5px;color:#889;cursor:pointer;font-family:inherit;font-size:.65rem;padding:4px 10px}
+.sl-reset-btn:hover{border-color:#aaa;color:#cdd}
+.sl-gate{text-align:center;padding:16px 8px;font-size:.78rem;color:var(--muted)}
+.sl-gate strong{color:var(--accent2)}
+.sl-gate a.btn{display:inline-block;margin-top:8px;padding:5px 16px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:5px;text-decoration:none;font-size:.72rem}
+.sl-err{color:#ff6666;font-size:.7rem;margin-top:6px;display:none}
+
 /* ── ALERT HISTORY ── */
 .ah-item{display:flex;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);transition:border-color .2s;margin-bottom:6px}
 .ah-item:hover{border-color:rgba(255,255,255,.15)}
@@ -474,6 +530,42 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── SAVED LOCATIONS ── -->
+  <div class="card" id="saved-locations-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Saved Locations</span>
+      <span class="card-link" id="sl-plan-badge" style="font-size:.68rem;color:var(--muted)"></span>
+    </div>
+    <div class="card-body">
+
+      <!-- Gate for free users -->
+      <div id="sl-gate" class="sl-gate" style="display:none">
+        <div style="font-size:1.3rem;margin-bottom:6px">&#128205;</div>
+        <div>Save up to <strong>5 locations</strong> with Basic, or <strong>25 locations</strong> with Advanced, and get dedicated alerts for each one.</div>
+        <a href="pricing.html" class="btn">Upgrade</a>
+      </div>
+
+      <div id="sl-content" style="display:none">
+        <div class="sl-header">
+          <div class="sl-counter"><strong id="sl-count">0</strong> of <strong id="sl-limit">5</strong> locations used</div>
+          <button class="sl-btn" id="sl-copy-defaults-btn" title="Create a location from your current primary location setting">Add current location</button>
+        </div>
+
+        <div class="sl-add-row">
+          <input id="sl-label-input" type="text" placeholder="Label (e.g. Home, Cabin)" maxlength="40" autocomplete="off">
+          <input id="sl-city-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+          <button class="loc-btn" id="sl-add-btn" title="Add this location">&#43;</button>
+          <button class="loc-btn" id="sl-add-gps-btn" title="Use my GPS location">&#8853;</button>
+        </div>
+        <div class="sl-err" id="sl-err" role="alert"></div>
+
+        <div class="sl-list" id="sl-list">
+          <div class="sl-empty">No saved locations yet. Add one above to start getting per-location alerts.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── ALERT PREFERENCES ── -->
   <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
     <div class="card-head">
@@ -630,34 +722,47 @@ footer a:hover{color:var(--text)}
 
         <!-- Delivery options -->
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Delivery &amp; Notifications</div>
+          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px">
+            Email Delivery
+            <span style="background:rgba(79,195,247,.1);color:var(--accent2);font-size:.55rem;padding:1px 6px;border-radius:3px;font-weight:700">SENT TO <span id="email-delivery-addr">your inbox</span></span>
+          </div>
+
+          <!-- Master email toggle -->
           <div class="alert-pref-row">
             <label class="alert-pref-toggle">
               <input type="checkbox" id="pref-email_alerts" data-key="email_alerts">
-              <span class="alert-pref-name">Email alerts</span>
+              <span class="alert-pref-name">Email me when alerts fire</span>
             </label>
-            <span style="font-size:.62rem;color:var(--muted)">Instant email for each alert</span>
+            <span style="font-size:.62rem;color:var(--muted)">Max 10 emails / hour</span>
           </div>
-          <div class="alert-pref-row" id="pref-email-severity-row" style="padding-left:28px">
-            <label style="font-size:.72rem;color:var(--muted)">
-              Email only for:
-              <select id="pref-email_min_severity" data-key="email_min_severity" style="width:80px">
-                <option value="info">All alerts</option>
-                <option value="warning" selected>Warning+</option>
+
+          <!-- Dependent email settings — hidden when email alerts off -->
+          <div id="email-delivery-dependents" style="display:none">
+
+            <div class="alert-pref-row" style="padding-left:28px">
+              <label style="font-size:.72rem;color:var(--muted);flex:1">Minimum severity</label>
+              <select id="pref-email_min_severity" data-key="email_min_severity" style="width:110px">
+                <option value="info">Info &amp; up</option>
+                <option value="warning" selected>Warning &amp; up</option>
                 <option value="critical">Critical only</option>
               </select>
-            </label>
-          </div>
-          <div class="alert-pref-row">
-            <label style="font-size:.72rem;color:var(--muted)">
-              Cooldown:
-              <select id="pref-alert_cooldown_min" data-key="alert_cooldown_min" style="width:72px">
+            </div>
+
+            <div class="alert-pref-row" style="padding-left:28px">
+              <label style="font-size:.72rem;color:var(--muted);flex:1">Cooldown per alert type</label>
+              <select id="pref-alert_cooldown_min" data-key="alert_cooldown_min" style="width:96px">
                 <option value="15">15 min</option><option value="30">30 min</option>
                 <option value="60" selected>1 hour</option><option value="120">2 hours</option>
                 <option value="360">6 hours</option><option value="720">12 hours</option>
               </select>
-              <span style="font-size:.58rem;color:#556;margin-left:4px">between same alert type</span>
-            </label>
+            </div>
+
+            <div style="padding:8px 10px;margin-top:4px;background:rgba(79,195,247,.05);border:1px solid rgba(79,195,247,.15);border-radius:6px;font-size:.66rem;color:#99b;line-height:1.5">
+              <strong style="color:var(--accent2)">Tip:</strong>
+              Each <a href="#saved-locations-card" style="color:var(--accent2)">saved location</a>
+              can turn email delivery on/off independently, and override any of the thresholds above.
+            </div>
+
           </div>
         </div>
 
@@ -794,6 +899,10 @@ import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
 import { OnboardingTour } from './js/onboarding-tour.js';
 import { DailySummaryEngine } from './js/daily-summary.js';
+import {
+    listLocations, addLocation, updateLocation, removeLocation,
+    setPrimaryLocation, locationLimit, onLocationsChanged, PLAN_LIMITS,
+} from './js/saved-locations.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1573,8 +1682,375 @@ initAll();
 
         // Start alert engine (only for subscribers)
         engine.start();
+
+        // Show master email-delivery dependents only when toggled on
+        const _emailMasterCk = document.getElementById('pref-email_alerts');
+        const _emailDeps     = document.getElementById('email-delivery-dependents');
+        const _emailAddr     = document.getElementById('email-delivery-addr');
+        const _syncEmailDeps = () => {
+            if (_emailDeps) _emailDeps.style.display = _emailMasterCk?.checked ? '' : 'none';
+        };
+        _emailMasterCk?.addEventListener('change', _syncEmailDeps);
+        _syncEmailDeps();
+        if (_emailAddr) _emailAddr.textContent = (auth.getUser()?.email || 'your inbox');
     }
 }
+
+// ── Saved Locations (multi-location alerts) ─────────────────────────────────
+(() => {
+    const $ = id => document.getElementById(id);
+    const gate        = $('sl-gate');
+    const content     = $('sl-content');
+    const cardTitle   = $('sl-plan-badge');
+    const countEl     = $('sl-count');
+    const limitEl     = $('sl-limit');
+    const listEl      = $('sl-list');
+    const errEl       = $('sl-err');
+    const labelInput  = $('sl-label-input');
+    const cityInput   = $('sl-city-input');
+    const addBtn      = $('sl-add-btn');
+    const gpsBtn      = $('sl-add-gps-btn');
+    const copyBtn     = $('sl-copy-defaults-btn');
+
+    const plan     = (auth.getPlan() || 'free').toLowerCase();
+    const isAdmin  = auth.isAdmin?.() || auth.isTester?.();
+    const cap      = locationLimit();
+    const planCap  = isAdmin ? '∞' : (PLAN_LIMITS[plan] ?? 0);
+
+    if (cardTitle) {
+        cardTitle.textContent = isAdmin
+            ? `${plan.toUpperCase()} (admin override)`
+            : `${plan.toUpperCase()} · up to ${planCap}`;
+    }
+
+    // Plan-gate: free users see upgrade pitch
+    if (!isAdmin && cap <= 0) {
+        if (gate)    gate.style.display = '';
+        if (content) content.style.display = 'none';
+        return;
+    }
+    if (gate)    gate.style.display = 'none';
+    if (content) content.style.display = '';
+    if (limitEl) limitEl.textContent = String(planCap);
+
+    // ── Error helpers ────────────────────────────────────────────────────────
+    function showErr(msg) {
+        if (!errEl) return;
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+        clearTimeout(showErr._t);
+        showErr._t = setTimeout(() => { errEl.style.display = 'none'; }, 5000);
+    }
+    function clearErr() { if (errEl) errEl.style.display = 'none'; }
+
+    // ── Render list ──────────────────────────────────────────────────────────
+    async function render() {
+        const rows = await listLocations({ force: true });
+        if (countEl) countEl.textContent = String(rows.length);
+
+        const canAdd = isAdmin || rows.length < cap;
+        if (addBtn)  addBtn.disabled  = !canAdd;
+        if (gpsBtn)  gpsBtn.disabled  = !canAdd;
+        if (copyBtn) copyBtn.disabled = !canAdd;
+        if (labelInput) labelInput.disabled = !canAdd;
+        if (cityInput)  cityInput.disabled  = !canAdd;
+
+        if (!rows.length) {
+            listEl.innerHTML = '<div class="sl-empty">No saved locations yet. Add one above to get dedicated alerts for that spot.</div>';
+            return;
+        }
+
+        listEl.innerHTML = rows.map(row => renderItem(row)).join('');
+
+        // Wire per-row controls
+        for (const row of rows) wireItem(row);
+    }
+
+    function renderItem(row) {
+        const cfg      = row.alert_config || {};
+        const primary  = row.is_primary   ? ' is-primary' : '';
+        const muted    = !row.notify_enabled ? ' disabled'  : '';
+        const dotClass = row.notify_enabled  ? 'on' : 'off';
+        const summary  = buildSummary(row, cfg);
+        return `
+<div class="sl-item${primary}${muted}" data-id="${row.id}">
+  <div class="sl-row">
+    <span class="sl-star ${row.is_primary ? 'on' : ''}" data-action="primary" title="${row.is_primary ? 'Primary location' : 'Set as primary'}">★</span>
+    <div class="sl-label-wrap">
+      <input class="sl-label" data-action="label" value="${escAttr(row.label)}" maxlength="40" aria-label="Location label">
+      <span class="sl-city">${escHtml(row.city ?? '')} &middot; ${row.lat.toFixed(2)}°${row.lat >= 0 ? 'N' : 'S'}, ${row.lon.toFixed(2)}°${row.lon >= 0 ? 'E' : 'W'}</span>
+    </div>
+    <div class="sl-status">
+      <span class="sl-dot ${dotClass}"></span>
+      <span style="color:var(--muted)">${summary}</span>
+    </div>
+    <div class="sl-actions">
+      <button class="sl-btn" data-action="toggle">${row.notify_enabled ? 'Mute' : 'Enable'}</button>
+      <button class="sl-btn" data-action="expand">Configure</button>
+      <button class="sl-btn danger" data-action="delete" title="Delete this location">&times;</button>
+    </div>
+  </div>
+  <div class="sl-config">
+    ${renderConfigPanel(row, cfg)}
+  </div>
+</div>`;
+    }
+
+    function buildSummary(row, cfg) {
+        if (!row.notify_enabled) return 'Muted';
+        const prefs = auth.getAlertPrefs() || {};
+        const types = ['notify_aurora','notify_storm','notify_flare','notify_cme','notify_temperature','notify_radio_blackout','notify_gps','notify_power_grid','notify_iono_disturbance'];
+        let n = 0;
+        for (const k of types) {
+            const v = cfg[k] !== undefined ? cfg[k] : prefs[k];
+            if (v) n++;
+        }
+        const emailWord = row.email_alerts_enabled && prefs.email_alerts ? 'email on' : 'email off';
+        return n ? `${n} alert${n === 1 ? '' : 's'} · ${emailWord}` : 'No alerts enabled';
+    }
+
+    function renderConfigPanel(row, cfg) {
+        const prefs = auth.getAlertPrefs() || {};
+        const isAdv = auth.canUseAdvancedAlerts();
+
+        const kpVal    = cfg.aurora_kp_threshold    ?? prefs.aurora_kp_threshold    ?? 5;
+        const gVal     = cfg.storm_g_threshold      ?? prefs.storm_g_threshold      ?? 1;
+        const fVal     = cfg.flare_class_threshold  ?? prefs.flare_class_threshold  ?? 'M';
+        const hiVal    = cfg.temp_high_f            ?? prefs.temp_high_f            ?? '';
+        const loVal    = cfg.temp_low_f             ?? prefs.temp_low_f             ?? '';
+        const rVal     = cfg.radio_r_threshold      ?? prefs.radio_r_threshold      ?? 2;
+        const gnssVal  = cfg.gnss_risk_threshold    ?? prefs.gnss_risk_threshold    ?? 2;
+        const pgVal    = cfg.power_grid_g_threshold ?? prefs.power_grid_g_threshold ?? 4;
+
+        const ck = (key) => (cfg[key] !== undefined ? !!cfg[key] : !!prefs[key]) ? 'checked' : '';
+
+        const advBlock = isAdv ? `
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Advanced alerts</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_radio_blackout" ${ck('notify_radio_blackout')}> Radio blackout</label>
+        <label>R&ge; <select data-cfg="radio_r_threshold">${[1,2,3,4,5].map(v => `<option value="${v}" ${rVal==v?'selected':''}>R${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_gps" ${ck('notify_gps')}> GPS/GNSS</label>
+        <label>Risk&ge; <select data-cfg="gnss_risk_threshold">${[[1,'Mod'],[2,'High'],[3,'Sev']].map(([v,l]) => `<option value="${v}" ${gnssVal==v?'selected':''}>${l}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_power_grid" ${ck('notify_power_grid')}> Power grid</label>
+        <label>G&ge; <select data-cfg="power_grid_g_threshold">${[2,3,4,5].map(v => `<option value="${v}" ${pgVal==v?'selected':''}>G${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_iono_disturbance" ${ck('notify_iono_disturbance')}> Ionospheric disturbance</label>
+      </div>
+    </div>
+  </div>` : '';
+
+        return `
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Delivery at this location</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_enabled" ${row.notify_enabled?'checked':''}> Alerts on</label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="email_alerts_enabled" ${row.email_alerts_enabled?'checked':''}> Email on</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Alert types &amp; thresholds</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_temperature" ${ck('notify_temperature')}> Temperature</label>
+        <span style="display:flex;gap:4px">
+          <input type="number" data-cfg="temp_high_f" value="${hiVal}" placeholder="hi" title="High °F">
+          <input type="number" data-cfg="temp_low_f"  value="${loVal}" placeholder="lo" title="Low °F">
+        </span>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_aurora" ${ck('notify_aurora')}> Aurora</label>
+        <label>Kp&ge; <select data-cfg="aurora_kp_threshold">${[3,4,5,6,7,8].map(v => `<option value="${v}" ${kpVal==v?'selected':''}>${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_storm" ${ck('notify_storm')}> Geomag storm</label>
+        <label>G&ge; <select data-cfg="storm_g_threshold">${[1,2,3,4,5].map(v => `<option value="${v}" ${gVal==v?'selected':''}>G${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_flare" ${ck('notify_flare')}> Solar flare</label>
+        <label>Class&ge; <select data-cfg="flare_class_threshold">${['C','M','X'].map(v => `<option value="${v}" ${fVal===v?'selected':''}>${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_cme" ${ck('notify_cme')}> CME Earth-directed</label>
+      </div>
+    </div>
+  </div>
+
+  ${advBlock}
+
+  <div class="sl-cfg-actions">
+    <button class="sl-save-btn" data-action="save">Save</button>
+    <button class="sl-reset-btn" data-action="reset" title="Clear overrides at this location — use account defaults">Reset to defaults</button>
+    <span class="sl-save-msg" data-role="save-msg">Saved!</span>
+  </div>`;
+    }
+
+    function wireItem(row) {
+        const el = listEl.querySelector(`[data-id="${row.id}"]`);
+        if (!el) return;
+
+        el.querySelector('[data-action="primary"]')?.addEventListener('click', async () => {
+            if (row.is_primary) return;
+            await setPrimaryLocation(row.id);
+            render();
+        });
+
+        el.querySelector('[data-action="expand"]')?.addEventListener('click', () => {
+            el.classList.toggle('expanded');
+        });
+
+        el.querySelector('[data-action="toggle"]')?.addEventListener('click', async () => {
+            await updateLocation(row.id, { notify_enabled: !row.notify_enabled });
+            render();
+        });
+
+        el.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+            if (!confirm(`Delete "${row.label}"? This cannot be undone.`)) return;
+            await removeLocation(row.id);
+            render();
+        });
+
+        const labelInp = el.querySelector('.sl-label');
+        labelInp?.addEventListener('change', async () => {
+            const v = labelInp.value.trim();
+            if (!v || v === row.label) return;
+            await updateLocation(row.id, { label: v });
+            render();
+        });
+
+        el.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
+            const patch = { alert_config: {} };
+            const cfg = patch.alert_config;
+            el.querySelectorAll('[data-cfg]').forEach(inp => {
+                const k = inp.dataset.cfg;
+                if (k === 'notify_enabled') {
+                    patch.notify_enabled = inp.checked;
+                } else if (k === 'email_alerts_enabled') {
+                    patch.email_alerts_enabled = inp.checked;
+                } else if (inp.type === 'checkbox') {
+                    cfg[k] = inp.checked;
+                } else if (inp.type === 'number') {
+                    cfg[k] = inp.value === '' ? null : parseFloat(inp.value);
+                } else if (inp.tagName === 'SELECT') {
+                    const v = inp.value;
+                    cfg[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
+                }
+            });
+            const res = await updateLocation(row.id, patch);
+            if (res.ok) {
+                const msg = el.querySelector('[data-role="save-msg"]');
+                if (msg) { msg.style.display = 'inline'; setTimeout(() => { msg.style.display = 'none'; }, 2200); }
+                render();
+            } else {
+                showErr('Failed to save: ' + (res.error || 'unknown'));
+            }
+        });
+
+        el.querySelector('[data-action="reset"]')?.addEventListener('click', async () => {
+            await updateLocation(row.id, { alert_config: {} });
+            render();
+        });
+    }
+
+    // ── Add flow ─────────────────────────────────────────────────────────────
+    async function submitAdd({ lat, lon, city, label }) {
+        clearErr();
+        const res = await addLocation({
+            label: label || city || 'New Location',
+            lat, lon, city,
+            is_primary: false,
+        });
+        if (!res.ok) {
+            if (res.limitReached) showErr(`You've hit the ${planCap}-location cap. Upgrade or remove one.`);
+            else showErr(res.error || 'Could not save location');
+            return;
+        }
+        if (labelInput) labelInput.value = '';
+        if (cityInput)  cityInput.value  = '';
+        render();
+    }
+
+    addBtn?.addEventListener('click', async () => {
+        const q = (cityInput?.value || '').trim();
+        if (!q) { showErr('Enter a city, zip, or address'); return; }
+        addBtn.disabled = true;
+        try {
+            const loc = await geocodeQuery(q);
+            await submitAdd({
+                lat: loc.lat, lon: loc.lon, city: loc.city,
+                label: (labelInput?.value || '').trim() || loc.city,
+            });
+        } catch (e) {
+            showErr(e.message || 'Geocoding failed');
+        } finally {
+            addBtn.disabled = false;
+        }
+    });
+
+    cityInput?.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn?.click(); });
+
+    gpsBtn?.addEventListener('click', () => {
+        if (!navigator.geolocation) { showErr('Geolocation not supported'); return; }
+        gpsBtn.disabled = true;
+        navigator.geolocation.getCurrentPosition(async pos => {
+            try {
+                const { latitude: lat, longitude: lon } = pos.coords;
+                let city = `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+                try {
+                    const res = await fetch(
+                        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+                        { headers: { 'Accept-Language': 'en' } },
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        const adr = data.address ?? {};
+                        city = adr.city || adr.town || adr.village || adr.county || adr.state || city;
+                    }
+                } catch (_) {}
+                await submitAdd({
+                    lat, lon, city,
+                    label: (labelInput?.value || '').trim() || city,
+                });
+            } finally {
+                gpsBtn.disabled = false;
+            }
+        }, err => {
+            gpsBtn.disabled = false;
+            showErr({ 1: 'Location access denied', 2: 'Location unavailable', 3: 'Location timed out' }[err.code] || 'GPS error');
+        }, { timeout: 10000 });
+    });
+
+    // "Add current location" — pulls the single-location selector above
+    copyBtn?.addEventListener('click', async () => {
+        const loc = loadUserLocation();
+        if (!loc) { showErr('Set your primary location above first'); return; }
+        await submitAdd({
+            lat: loc.lat, lon: loc.lon, city: loc.city,
+            label: (labelInput?.value || '').trim() || loc.city,
+        });
+    });
+
+    // Helpers
+    function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
+
+    // Re-render when anything external mutates (e.g. alert engine ack)
+    onLocationsChanged(() => render());
+
+    // Initial render
+    render();
+})();
 
 // ── Impact Score Engine ──────────────────────────────────────────────────────
 {
