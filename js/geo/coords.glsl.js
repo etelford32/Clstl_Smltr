@@ -25,8 +25,10 @@ export const GEO_GLSL = /* glsl */ `
     #ifndef GEO_COORDS_INCLUDED
     #define GEO_COORDS_INCLUDED
 
-    const float GEO_PI  = 3.14159265358979323846;
-    const float GEO_TAU = 6.28318530717958647692;
+    const float GEO_PI      = 3.14159265358979323846;
+    const float GEO_TAU     = 6.28318530717958647692;
+    const float GEO_DEG2RAD = 0.017453292519943295;
+    const float GEO_RAD2DEG = 57.29577951308232;
 
     // Geographic (lat, lon radians) → unit normal on sphere.
     vec3 latLonToNormal(float lat, float lon) {
@@ -73,6 +75,23 @@ export const GEO_GLSL = /* glsl */ `
         return vec2(
             (0.5 - uv.y) * GEO_PI,
             uv.x * GEO_TAU - GEO_PI
+        );
+    }
+
+    // UV → (lat, lon) in DEGREES. Callers that think in degrees (aurora oval,
+    // precip regimes, magnetic latitude labels) get a one-line swap.
+    vec2 uvToLatLonDeg(vec2 uv) {
+        return vec2(
+            (0.5 - uv.y) * 180.0,
+            uv.x * 360.0 - 180.0
+        );
+    }
+
+    // (lat, lon) DEGREES → UV.
+    vec2 latLonDegToUV(float latDeg, float lonDeg) {
+        return vec2(
+            (lonDeg + 180.0) / 360.0,
+            (90.0 - latDeg)  / 180.0
         );
     }
 

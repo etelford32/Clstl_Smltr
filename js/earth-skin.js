@@ -21,6 +21,7 @@
 
 import * as THREE from 'three';
 import { geo } from './geo/coords.js';
+import { GEO_GLSL } from './geo/coords.glsl.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
@@ -101,6 +102,8 @@ void main() {
 
 export const EARTH_FRAG = /* glsl */`
 precision highp float;
+
+${GEO_GLSL}
 
 uniform sampler2D u_day;
 uniform sampler2D u_night;
@@ -210,11 +213,10 @@ void main() {
 
     // Aurora
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        float lat    = (vUv.y - 0.5) * 3.14159265;
-        float lon    = (vUv.x - 0.5) * 6.28318530;
-        float sinAbs = abs(sin(lat));
+        vec2  ll     = uvToLatLon(vUv);            // radians, canonical convention
+        float sinAbs = abs(sin(ll.x));
         float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
-        base += auroraColor(sinAbs, lon, u_kp) * nightM;
+        base += auroraColor(sinAbs, ll.y, u_kp) * nightM;
     }
 
     // X-ray ionospheric flash (dayside HF blackout)
@@ -225,8 +227,7 @@ void main() {
 
     // Ring current heating: equatorial nightside reddish glow
     if (u_dst_norm > 0.08) {
-        float lat    = (vUv.y - 0.5) * 3.14159265;
-        float absLat = abs(lat);
+        float absLat = abs(uvToLatLon(vUv).x);
         float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
         base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
     }
@@ -266,6 +267,8 @@ void main() {
 
 export const CLOUD_FRAG = /* glsl */`
 precision mediump float;
+
+${GEO_GLSL}
 
 uniform sampler2D u_clouds;
 uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
@@ -593,7 +596,7 @@ void main() {
     // slower streaks (frontal rain). High-latitude precip shifts toward a
     // lighter blue-white tint so it reads as sleet/snow rather than rain.
     if (u_weather_on > 0.5 && precip > 0.02) {
-        float latDeg = (vUv.y - 0.5) * 180.0;
+        float latDeg = uvToLatLonDeg(vUv).x;
         float absLat = abs(latDeg);
 
         // 0 = tropical (convective), 1 = frontal (stratiform)
@@ -772,6 +775,9 @@ void main() {
 
 export const AURORA_FRAG = /* glsl */`
 precision highp float;
+
+${GEO_GLSL}
+
 uniform float u_kp;
 uniform float u_time;
 uniform vec3  u_sun_dir;
@@ -799,9 +805,10 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
-    float latDeg = (vUv.y - 0.5) * 180.0;
+    vec2  llDeg  = uvToLatLonDeg(vUv);          // (lat, lon) in degrees
+    float latDeg = llDeg.x;
     float absLat = abs(latDeg);
-    float lonDeg = (vUv.x - 0.5) * 360.0;
+    float lonDeg = llDeg.y;
 
     // Effective storm strength — Kp plus a Bz-south kicker so a fresh
     // southward turning shoves the oval equatorward immediately, without
