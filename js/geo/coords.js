@@ -357,6 +357,61 @@ export class GeoCoords {
         return out.copy(this._magPoleN);
     }
 
+    // ── Spherical polygons (GeoJSON rings) ────────────────────────────────────
+    // Accept an array of [lon, lat] DEGREE pairs (GeoJSON convention).
+    // Return geometric quantities on the sphere — antimeridian-safe because
+    // the computation is done in 3D unit vectors, not in the (lon, lat) plane.
+
+    /**
+     * Spherical centroid of a closed polygon ring. Returns `{ lat, lon }` in
+     * degrees, or `null` for degenerate rings (all-coincident vertices).
+     * Unit-normal mean — simpler than area-weighted but identical for most
+     * NWS county polygons and unaffected by dateline crossings.
+     */
+    sphericalRingCentroid(ring) {
+        const sum = new THREE.Vector3();
+        const tmp = new THREE.Vector3();
+        for (const pt of ring) {
+            this.latLonToNormal(pt[1] * DEG, pt[0] * DEG, tmp);
+            sum.add(tmp);
+        }
+        if (sum.lengthSq() < 1e-12) return null;
+        sum.normalize();
+        const ll = this.normalToLatLon(sum);
+        return { lat: ll.lat * RAD, lon: ll.lon * RAD };
+    }
+
+    /**
+     * Signed spherical area of a polygon ring in steradians. Fans from the
+     * first vertex and sums Van-Oosterom-Strackee solid angles. Positive
+     * for CCW winding (viewed from outside the sphere), negative for CW.
+     * Multiply by radiusKm² for km². Callers who only need the magnitude
+     * use Math.abs.
+     */
+    sphericalRingArea(ring) {
+        if (!ring || ring.length < 3) return 0;
+        const r0 = new THREE.Vector3();
+        const a  = new THREE.Vector3();
+        const b  = new THREE.Vector3();
+        const cr = new THREE.Vector3();
+        this.latLonToNormal(ring[0][1] * DEG, ring[0][0] * DEG, r0);
+        let area = 0;
+        for (let i = 1; i < ring.length - 1; i++) {
+            this.latLonToNormal(ring[i  ][1] * DEG, ring[i  ][0] * DEG, a);
+            this.latLonToNormal(ring[i+1][1] * DEG, ring[i+1][0] * DEG, b);
+            cr.crossVectors(a, b);
+            const num = r0.dot(cr);
+            const den = 1 + r0.dot(a) + a.dot(b) + b.dot(r0);
+            area += 2 * Math.atan2(num, den);
+        }
+        return area;
+    }
+
+    /** Spherical polygon area in km² (always non-negative). */
+    sphericalRingAreaKm2(ring) {
+        return Math.abs(this.sphericalRingArea(ring)) * this.radiusKm * this.radiusKm;
+    }
+
     // ── Self-test (dev use) ───────────────────────────────────────────────────
     /**
      * Verifies round-trips agree to ~1e-9. Returns an array of failures;

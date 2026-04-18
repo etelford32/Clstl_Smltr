@@ -2862,13 +2862,10 @@ class AlertMarkers {
         for (const alert of alerts) {
             const kind    = alert.kind ?? classifyAlertEvent(alert.event);
             const hexCol  = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
-            const phi = alert.lat * DEG, lam = alert.lon * DEG;
-            const r   = R_EARTH * 1.006;
-            const pos = new THREE.Vector3(
-                 r * Math.cos(phi) * Math.cos(lam),
-                 r * Math.sin(phi),
-                -r * Math.cos(phi) * Math.sin(lam)
-            );
+            // Same geoToXYZ that trip pins, user location, and satellite
+            // ground tracks use — guarantees the marker sits exactly on the
+            // storm-swirl centre instead of drifting by a couple of degrees.
+            const pos = geoToXYZ(alert.lat, alert.lon).multiplyScalar(R_EARTH * 1.006);
 
             const base = (ALERT_KIND_BASE_SIZE[kind] ?? 0.04) *
                          (ALERT_KIND_SEVERITY_BOOST[alert.severity] ?? 1);
