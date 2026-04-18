@@ -20,6 +20,7 @@
  */
 
 import * as THREE from 'three';
+import { geo } from './geo/coords.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
@@ -1147,9 +1148,13 @@ export class EarthSkin {
 
         for (let i = 0; i < n; i++) {
             const s = storms[i];
-            // UV coordinate from lat/lon (Three.js SphereGeometry convention)
-            const u = (s.lon + 180) / 360;
-            const v = (90 - s.lat) / 180;
+            // UV coordinate from lat/lon via the unified coordinate module.
+            // geo.deg.latLonToUV applies the canonical convention:
+            //   u = (lon + 180) / 360,  v = (90 - lat) / 180
+            // — byte-for-byte the same as the old inline formula, but sourced
+            // from the same primitive the GLSL side uses after 3b.
+            const uv = geo.deg.latLonToUV(s.lat, s.lon);
+            const u = uv.x, v = uv.y;
             // Intensity: 0 at 35kt (tropical storm threshold), 1.0 at 157kt (Cat 5)
             const inten = Math.min(Math.max((s.intensityKt - 35) / 122, 0), 1);
             // Cyclone spin: CCW in NH (+1), CW in SH (-1)
