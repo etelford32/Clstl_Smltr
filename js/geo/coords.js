@@ -346,10 +346,15 @@ export class GeoCoords {
         };
     }
 
-    /** Magnetic colatitude in radians (0 at magnetic pole, π at magnetic equator). */
+    /** Magnetic colatitude in radians (0 at magnetic pole, π at antipodal pole). */
     magneticColatitude(latLon) {
         const n = this.latLonToNormal(latLon.lat, latLon.lon, this._tmpA);
         return Math.acos(THREE.MathUtils.clamp(n.dot(this._magPoleN), -1, 1));
+    }
+
+    /** Geomagnetic dipole north pole as a unit normal (ECEF-scene frame). */
+    magneticPoleNormal(out = new THREE.Vector3()) {
+        return out.copy(this._magPoleN);
     }
 
     // ── Self-test (dev use) ───────────────────────────────────────────────────

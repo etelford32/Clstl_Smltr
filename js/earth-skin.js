@@ -121,6 +121,7 @@ uniform float u_aurora_power;
 uniform float u_bz_south;
 uniform float u_dst_norm;
 uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
+uniform vec3  u_mag_pole;       // geomagnetic dipole pole (unit normal)
 
 varying vec2 vUv;
 varying vec3 vWorldNormal;
@@ -211,12 +212,15 @@ void main() {
         base = mix(base, weatherOverlay(vUv), 0.28);
     }
 
-    // Aurora
+    // Aurora — driven by MAGNETIC latitude, not geographic. The dipole pole
+    // is tilted ~11° from the spin axis (IGRF 2025 epoch), so the oval sits
+    // over northern Canada / Siberia instead of ringing the geographic pole.
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        vec2  ll     = uvToLatLon(vUv);            // radians, canonical convention
-        float sinAbs = abs(sin(ll.x));
+        vec3  nGeo   = uvToNormal(vUv);
+        float sinAbs = absSinMagLat(nGeo, u_mag_pole);   // |cos(magCoLat)|
+        float lonRad = uvToLatLon(vUv).y;                // ripple phase stays geographic
         float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
-        base += auroraColor(sinAbs, ll.y, u_kp) * nightM;
+        base += auroraColor(sinAbs, lonRad, u_kp) * nightM;
     }
 
     // X-ray ionospheric flash (dayside HF blackout)
@@ -784,6 +788,7 @@ uniform vec3  u_sun_dir;
 uniform float u_enabled;
 uniform float u_bz_south;      // 0..1 normalised southward IMF Bz (1 = very -Bz)
 uniform float u_aurora_power;  // 0..1 hemispheric auroral power proxy
+uniform vec3  u_mag_pole;      // geomagnetic dipole pole (unit normal)
 varying vec2 vUv;
 varying vec3 vWorldNormal;
 
@@ -805,10 +810,13 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
-    vec2  llDeg  = uvToLatLonDeg(vUv);          // (lat, lon) in degrees
-    float latDeg = llDeg.x;
-    float absLat = abs(latDeg);
-    float lonDeg = llDeg.y;
+    // Oval position uses MAGNETIC latitude — dipole tilt puts the ring over
+    // Hudson Bay / Taymyr, not the geographic pole. Ripple phase keeps using
+    // geographic longitude because the wave pattern is visual, not physical.
+    vec3  nGeo        = uvToNormal(vUv);
+    float magCoLatDeg = GEO_RAD2DEG * magneticColatitude(nGeo, u_mag_pole);
+    float absLat      = 90.0 - min(magCoLatDeg, 180.0 - magCoLatDeg);
+    float lonDeg      = uvToLatLonDeg(vUv).y;
 
     // Effective storm strength — Kp plus a Bz-south kicker so a fresh
     // southward turning shoves the oval equatorward immediately, without
@@ -922,6 +930,10 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_aurora_power: { value: 0 },
         u_bz_south:     { value: 0 },
         u_dst_norm:     { value: 0 },
+        // Geomagnetic dipole north pole as a unit normal — drives the aurora
+        // oval off the geographic pole (11° tilt at 2025 epoch). Shared with
+        // the aurora mesh uniforms so oval + surface brightness agree.
+        u_mag_pole:     { value: geo.magneticPoleNormal() },
     };
 }
 
@@ -938,6 +950,8 @@ export function createAuroraUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         // Hemispheric auroral power proxy [0, 1]. Scales overall brightness
         // so real substorm surges show up as a globe-visible beat.
         u_aurora_power: { value: 0 },
+        // See note in createEarthUniforms — same IGRF-2025 dipole pole.
+        u_mag_pole:     { value: geo.magneticPoleNormal() },
     };
 }
 

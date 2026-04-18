@@ -100,6 +100,21 @@ export const GEO_GLSL = /* glsl */ `
         return acos(clamp(dot(a, b), -1.0, 1.0));
     }
 
+    // Magnetic colatitude of a geographic surface normal given the dipole
+    // pole (unit normal, usually passed in as uniform u_mag_pole). Returns
+    // radians: 0 at the magnetic pole, π/2 at the magnetic equator, π at
+    // the antipodal magnetic pole.
+    float magneticColatitude(vec3 nGeo, vec3 magPole) {
+        return acos(clamp(dot(nGeo, magPole), -1.0, 1.0));
+    }
+
+    // |sin(magnetic latitude)| — cheap form for aurora oval shaders that
+    // want the hemisphere-symmetric "how close to either magnetic pole
+    // am I" signal without an acos. Equivalent to abs(cos(magCoLat)).
+    float absSinMagLat(vec3 nGeo, vec3 magPole) {
+        return abs(dot(nGeo, magPole));
+    }
+
     #endif
 `;
 
