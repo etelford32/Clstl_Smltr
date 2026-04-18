@@ -1243,6 +1243,7 @@ import { CmePropagator } from './js/cme-propagation.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
+import { geo } from './js/geo/coords.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
@@ -1329,17 +1330,12 @@ function uvToGeo(uv) {
     };
 }
 
-// Geographic → 3-D Cartesian on unit sphere
-// Matches Three.js SphereGeometry convention (equirectangular texture):
-//   +X = prime meridian at equator, +Y = north pole, -Z = 90°E
+// Geographic → 3-D Cartesian on unit sphere.
+// Thin wrapper over the unified coordinate module so the trip overlay,
+// satellite tracker, alert markers, and this page all use the same
+// canonical frame (+X = prime meridian, +Y = north pole, -Z = 90°E).
 function geoToXYZ(lat, lon) {
-    const phi = lat * DEG;
-    const lam = lon * DEG;
-    return new THREE.Vector3(
-         Math.cos(phi) * Math.cos(lam),
-         Math.sin(phi),
-        -Math.cos(phi) * Math.sin(lam)
-    );
+    return geo.deg.latLonToPosition(lat, lon);
 }
 
 function fmtLat(d) { return `${Math.abs(d).toFixed(2)}° ${d >= 0 ? 'N' : 'S'}`; }
