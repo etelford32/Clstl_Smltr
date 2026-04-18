@@ -281,9 +281,8 @@ export class GeoCoords {
 
     // ── Sidereal time & ECI↔ECEF (for satellites) ─────────────────────────────
 
-    /** Greenwich mean sidereal time in radians (IAU 1982, good to ~1 arcsec). */
-    greenwichSiderealTime(date = this.epoch) {
-        const jd  = date.getTime() / 86400000 + 2440587.5;
+    /** Greenwich mean sidereal time in radians from a Julian Date. Hot-loop friendly. */
+    greenwichSiderealTimeFromJD(jd) {
         const T   = (jd - 2451545.0) / 36525.0;
         const gmstSec = 67310.54841
                       + (876600 * 3600 + 8640184.812866) * T
@@ -291,6 +290,12 @@ export class GeoCoords {
                       - 6.2e-6 * T * T * T;
         const gmstRad = ((gmstSec % 86400) / 86400) * TAU;
         return (gmstRad + TAU) % TAU;
+    }
+
+    /** Greenwich mean sidereal time in radians (IAU 1982, good to ~1 arcsec). */
+    greenwichSiderealTime(date = this.epoch) {
+        const jd = date.getTime() / 86400000 + 2440587.5;
+        return this.greenwichSiderealTimeFromJD(jd);
     }
 
     /** ECI vector → ECEF (rotate −GMST about Z, then flip Z for Three.js frame). */
