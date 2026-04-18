@@ -90,11 +90,15 @@ function _proceduralCloudNoise(W = 512, H = 256) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const EARTH_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 void main() {
-    vUv          = uv;
+    // The object-space direction of this vertex IS its UV address on an
+    // equirectangular sphere. The fragment shader reconstructs UV from the
+    // interpolated value via normalToUV(), which bypasses the stock sphere
+    // mesh's antimeridian seam and pole-fan wedge artifacts entirely.
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -123,7 +127,7 @@ uniform float u_dst_norm;
 uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
 uniform vec3  u_mag_pole;       // geomagnetic dipole pole (unit normal)
 
-varying vec2 vUv;
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
@@ -164,6 +168,15 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 void main() {
+    // Reconstruct equirectangular UV from the INTERPOLATED surface normal
+    // instead of trusting the mesh uv attribute. On stock SphereGeometry
+    // this eliminates the pole-fan wedge artifact (where the u coordinate
+    // staircases across triangles sharing the pole point); on IcosahedronGeometry
+    // it also eliminates the antimeridian seam that PolyhedronGeometry
+    // auto-UVs produce. Either way: no more horizontal white stripes.
+    vec3 N_sphere = normalize(vNormalLocal);
+    vec2 vUv      = normalToUV(N_sphere);
+
     vec3 N_base = normalize(vWorldNormal);
 
     vec3 dayCol    = texture2D(u_day,      vUv).rgb;
@@ -261,10 +274,10 @@ void main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const CLOUD_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 void main() {
-    vUv          = uv;
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
@@ -287,7 +300,7 @@ uniform float u_satellite_on;      // blend satellite into cloud appearance
 uniform vec4 u_storms[8];
 uniform int  u_storm_count;
 
-varying vec2 vUv;
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
@@ -444,6 +457,12 @@ float stormStructure(vec2 uv) {
 }
 
 void main() {
+    // UV reconstructed from the interpolated surface normal — kills the
+    // pole-fan wedge artifact that stock SphereGeometry produces and the
+    // antimeridian seam that IcosahedronGeometry's auto-UVs would produce.
+    vec3 N_sphere = normalize(vNormalLocal);
+    vec2 vUv      = normalToUV(N_sphere);
+
     vec3  N     = normalize(vWorldNormal);
     float NdotL = dot(N, u_sun_dir);
     float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
@@ -769,10 +788,10 @@ void main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const AURORA_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 void main() {
-    vUv          = uv;
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
@@ -789,7 +808,7 @@ uniform float u_enabled;
 uniform float u_bz_south;      // 0..1 normalised southward IMF Bz (1 = very -Bz)
 uniform float u_aurora_power;  // 0..1 hemispheric auroral power proxy
 uniform vec3  u_mag_pole;      // geomagnetic dipole pole (unit normal)
-varying vec2 vUv;
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 
 float hash21(vec2 p) {
@@ -810,10 +829,16 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
+    // UV reconstructed from interpolated object-space normal (see EARTH_VERT
+    // for the rationale). Feed it straight into the same helpers used by the
+    // Earth surface shader so oval coordinates and surface lighting agree to
+    // the pixel.
+    vec3  nGeo        = normalize(vNormalLocal);
+    vec2  vUv         = normalToUV(nGeo);
+
     // Oval position uses MAGNETIC latitude — dipole tilt puts the ring over
     // Hudson Bay / Taymyr, not the geographic pole. Ripple phase keeps using
     // geographic longitude because the wave pattern is visual, not physical.
-    vec3  nGeo        = uvToNormal(vUv);
     float magCoLatDeg = GEO_RAD2DEG * magneticColatitude(nGeo, u_mag_pole);
     float absLat      = 90.0 - min(magCoLatDeg, 180.0 - magCoLatDeg);
     float lonDeg      = uvToLatLonDeg(vUv).y;
@@ -1064,7 +1089,8 @@ export class EarthSkin {
      * @param {THREE.Vector3}               sunDir   — initial sun direction (world space)
      * @param {object}                      opts
      * @param {number}  [opts.radius=1.0]            — Earth sphere radius
-     * @param {number}  [opts.segments=64]           — sphere tessellation
+     * @param {number}  [opts.segments=64]           — legacy; mapped to icoLevel (28→4, 48→5, 80+→6)
+     * @param {number}  [opts.icoLevel]              — icosphere subdivision level (overrides segments)
      * @param {boolean} [opts.clouds=true]           — include cloud shell
      * @param {boolean} [opts.atmosphere=true]       — include atmosphere rim
      * @param {boolean} [opts.aurora=true]           — aurora uniforms active
@@ -1072,10 +1098,17 @@ export class EarthSkin {
     constructor(parent, sunDir = new THREE.Vector3(1, 0, 0), {
         radius     = 1.0,
         segments   = 64,
+        icoLevel,
         clouds     = true,
         atmosphere = true,
     } = {}) {
         this._parent = parent;
+
+        // Map the legacy `segments` count to an icosphere subdivision level.
+        // Earth AND clouds share the level so their topology aligns exactly —
+        // no more cloud stripes floating relative to continents from mismatched
+        // SphereGeometry segment counts.
+        const lvl = icoLevel ?? (segments >= 80 ? 6 : segments >= 48 ? 5 : 4);
 
         // Earth surface
         this.earthU = createEarthUniforms(sunDir);
@@ -1084,12 +1117,14 @@ export class EarthSkin {
             uniforms: this.earthU,
         });
         this.earthMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(radius, segments, segments),
+            new THREE.IcosahedronGeometry(radius, lvl),
             earthMat
         );
         parent.add(this.earthMesh);
 
-        // Cloud shell (1.009 R⊕ above surface)
+        // Cloud shell (1.009 R⊕ above surface) — IDENTICAL tessellation level
+        // to Earth so cloud features sit exactly over their underlying surface
+        // pixels at every latitude.
         this.cloudU   = null;
         this.cloudMesh = null;
         if (clouds) {
@@ -1101,14 +1136,15 @@ export class EarthSkin {
                 uniforms: this.cloudU, transparent: true, depthWrite: false,
             });
             this.cloudMesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius * 1.009, Math.round(segments * 0.75), Math.round(segments * 0.75)),
+                new THREE.IcosahedronGeometry(radius * 1.009, lvl),
                 cloudMat
             );
             this.cloudMesh.renderOrder = 3;  // after atmosphere glow (1)
             parent.add(this.cloudMesh);
         }
 
-        // Atmosphere rim glow
+        // Atmosphere rim glow — one level lower is plenty for a fresnel shell
+        // (silhouette only, no texture sampling).
         if (atmosphere) {
             const atmU = { u_sun_dir: this.earthU.u_sun_dir };
             const atmMat = new THREE.ShaderMaterial({
@@ -1117,7 +1153,7 @@ export class EarthSkin {
                 side: THREE.BackSide, blending: THREE.AdditiveBlending,
             });
             this._atmMesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius * 1.026, Math.round(segments * 0.5), Math.round(segments * 0.5)),
+                new THREE.IcosahedronGeometry(radius * 1.026, Math.max(3, lvl - 1)),
                 atmMat
             );
             this._atmMesh.renderOrder = 1;   // atmosphere glow renders first

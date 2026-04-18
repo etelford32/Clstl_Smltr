@@ -1433,7 +1433,23 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
-const earthGeo = new THREE.SphereGeometry(R_EARTH, 80, 80);
+// Earth, cloud, and aurora shells are IcosahedronGeometry at matching level 6
+// (≈40 k verts / ≈82 k triangles each, ~40 km equator-edge length). Three
+// properties this guarantees that SphereGeometry couldn't:
+//   1. No pole fans — every triangle has the same shape, so the fragment
+//      shader can reconstruct equirectangular UV from the interpolated
+//      surface normal without a wedge-of-longitude artifact at the poles.
+//   2. Earth and cloud topology align exactly, so cloud features sit on top
+//      of their underlying surface pixels at every latitude (no more
+//      "floating" cloud bands at polar latitudes from mismatched segment
+//      counts between the two shells).
+//   3. Uniform triangle size across the globe means procedural noise sampled
+//      against the surface has the same spatial frequency everywhere — no
+//      bias toward east-west stretching from equirectangular UV.
+// Stratosphere + atmosphere rim shells below stay on SphereGeometry: they're
+// fresnel-only, don't sample textures, and never produced stripes.
+const ICO_LEVEL = 6;
+const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL);
 const earthMat = new THREE.ShaderMaterial({
     vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
@@ -1442,7 +1458,7 @@ const earthMesh = new THREE.Mesh(earthGeo, earthMat);
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
-const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 60, 60);
+const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
 const cloudMat = new THREE.ShaderMaterial({
     vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
@@ -1452,11 +1468,11 @@ cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on 
 scene.add(cloudMesh);
 
 // ── Aurora oval overlay ────────────────────────────────────────────────
-// A thin sphere sitting above the cloud shell with a shader that paints
+// A thin icosphere sitting above the cloud shell with a shader that paints
 // an undulating band near the auroral oval boundary. Shares SUN_EQ so
 // its nightside mask stays in sync with the earth/cloud terminators.
 const auroraU   = createAuroraUniforms(SUN_EQ.clone());
-const auroraGeo = new THREE.SphereGeometry(R_AURORA, 96, 64);
+const auroraGeo = new THREE.IcosahedronGeometry(R_AURORA, ICO_LEVEL);
 const auroraMat = new THREE.ShaderMaterial({
     vertexShader: AURORA_VERT, fragmentShader: AURORA_FRAG,
     uniforms: auroraU,
