@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>geo/coords.js self-test</title>
+    <style>
+        body { font-family: ui-monospace, monospace; background: #0a0e1a; color: #cde; padding: 24px; }
+        h1 { color: #9cf; }
+        .pass { color: #7f7; }
+        .fail { color: #f77; }
+        pre { background: #111a2b; padding: 12px; border-radius: 6px; }
+    </style>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.164.0/build/three.module.js" } }
+    </script>
+</head>
+<body>
+    <h1>geo/coords.js self-test</h1>
+    <div id="out">running…</div>
+    <script type="module">
+        import { geo, GeoCoords, DEG, RAD, EARTH_RADIUS_KM } from './coords.js';
+
+        const out = document.getElementById('out');
+        const log = (s, cls='') => {
+            const div = document.createElement('div');
+            div.className = cls;
+            div.textContent = s;
+            out.appendChild(div);
+        };
+        out.textContent = '';
+
+        // 1. Built-in round-trip suite
+        const fails = geo.selfTest();
+        if (fails.length === 0) {
+            log('✓ all round-trips pass (latLon↔normal, latLon↔uv, normal↔uv)', 'pass');
+        } else {
+            log(`✗ ${fails.length} round-trip failures:`, 'fail');
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(fails, null, 2);
+            out.appendChild(pre);
+        }
+
+        // 2. Anchor checks — exact frame convention
+        const checks = [
+            ['prime meridian (0°,0°)',   geo.deg.latLonToNormal(0, 0),     [ 1, 0,  0]],
+            ['north pole  (90°,*)',      geo.deg.latLonToNormal(90, 0),    [ 0, 1,  0]],
+            ['south pole  (-90°,*)',     geo.deg.latLonToNormal(-90, 0),   [ 0,-1,  0]],
+            ['lon +90°E   (0°,90°)',     geo.deg.latLonToNormal(0, 90),    [ 0, 0, -1]],
+            ['lon -90°W   (0°,-90°)',    geo.deg.latLonToNormal(0, -90),   [ 0, 0,  1]],
+            ['antimeridian (0°,180°)',   geo.deg.latLonToNormal(0, 180),   [-1, 0,  0]],
+        ];
+        for (const [label, v, expected] of checks) {
+            const ok = Math.abs(v.x - expected[0]) < 1e-10
+                    && Math.abs(v.y - expected[1]) < 1e-10
+                    && Math.abs(v.z - expected[2]) < 1e-10;
+            log(`${ok ? '✓' : '✗'} ${label} → (${v.x.toFixed(6)}, ${v.y.toFixed(6)}, ${v.z.toFixed(6)})  expected (${expected.join(', ')})`,
+                ok ? 'pass' : 'fail');
+        }
+
+        // 3. UV anchors
+        const uvChecks = [
+            ['lon -180° → u=0',   geo.deg.latLonToUV(0, -180).x, 0   ],
+            ['lon    0° → u=0.5', geo.deg.latLonToUV(0,    0).x, 0.5 ],
+            ['lon +180° → u=1',   geo.deg.latLonToUV(0,  180).x, 1   ],
+            ['lat +90°  → v=0',   geo.deg.latLonToUV(90,  0).y, 0   ],
+            ['lat   0°  → v=0.5', geo.deg.latLonToUV(0,   0).y, 0.5 ],
+            ['lat -90°  → v=1',   geo.deg.latLonToUV(-90, 0).y, 1   ],
+        ];
+        for (const [label, got, expected] of uvChecks) {
+            const ok = Math.abs(got - expected) < 1e-10;
+            log(`${ok ? '✓' : '✗'} ${label}  got ${got.toFixed(6)}`, ok ? 'pass' : 'fail');
+        }
+
+        // 4. Great-circle distance — NYC ↔ London should be ~5570 km
+        const nyc = { lat:  40.7128, lon:  -74.0060 };
+        const lon = { lat:  51.5074, lon:   -0.1278 };
+        const d = geo.deg.distanceKm(nyc, lon);
+        const ok = Math.abs(d - 5570) < 20;
+        log(`${ok ? '✓' : '✗'} NYC↔London distance = ${d.toFixed(1)} km (expected ~5570)`,
+            ok ? 'pass' : 'fail');
+
+        // 5. Sub-solar point sanity — should be within ±23.5° latitude year-round
+        const sub = geo.deg.subSolarPoint(new Date());
+        const latOk = Math.abs(sub.lat) < 23.5;
+        log(`${latOk ? '✓' : '✗'} sub-solar point today: lat=${sub.lat.toFixed(2)}°, lon=${sub.lon.toFixed(2)}° (|lat| must be ≤ 23.5°)`,
+            latOk ? 'pass' : 'fail');
+
+        // 6. Earth radius conversion
+        const kmOk = Math.abs(geo.unitsToKm(1.0) - EARTH_RADIUS_KM) < 1e-6;
+        log(`${kmOk ? '✓' : '✗'} 1.0 scene unit → ${geo.unitsToKm(1.0)} km`, kmOk ? 'pass' : 'fail');
+    </script>
+</body>
+</html>
