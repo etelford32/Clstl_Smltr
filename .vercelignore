@@ -9,8 +9,11 @@ venv/
 *.egg-info/
 
 # Rust
+# Only the build byproducts are excluded. rust/www/ (including the
+# committed star_renderer_bg.wasm) must ship to Vercel because rust.html
+# loads it as a static asset. Vercel no longer rebuilds rust/ at deploy
+# time (see build-wasm.sh); the committed wasm is the source of truth.
 rust/target/
-rust/Cargo.lock
 
 # Git
 .git/

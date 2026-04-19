@@ -45,90 +45,19 @@ fi
 cd ..
 
 # ── Build star renderer (solar flare sim) ─────────────────────
-echo "Building star renderer WASM binary..."
-cd rust
-cargo build --release --target wasm32-unknown-unknown
-
-# Copy WASM file and create minimal JS loader
-echo "Preparing star renderer deployment files..."
-cp target/wasm32-unknown-unknown/release/star_renderer.wasm www/star_renderer_bg.wasm
-
-# Ensure JS loader exists
-if [ ! -f "www/star_renderer.js" ]; then
-    echo "Creating JS loader..."
-    cat > www/star_renderer.js << 'EOF'
-let wasm;
-
-async function init(input) {
-    if (typeof input === 'undefined') {
-        input = new URL('star_renderer_bg.wasm', import.meta.url);
-    }
-    const imports = {};
-    imports.wbg = {};
-    imports.wbg.__wbindgen_throw = function(arg0, arg1) {
-        throw new Error(getStringFromWasm0(arg0, arg1));
-    };
-
-    if (typeof input === 'string' || (typeof Request === 'function' && input instanceof Request) || (typeof URL === 'function' && input instanceof URL)) {
-        input = fetch(input);
-    }
-
-    const { instance, module } = await load(await input, imports);
-
-    wasm = instance.exports;
-    init.__wbindgen_wasm_module = module;
-
-    return wasm;
-}
-
-async function load(module, imports) {
-    if (typeof Response === 'function' && module instanceof Response) {
-        if (typeof WebAssembly.instantiateStreaming === 'function') {
-            try {
-                return await WebAssembly.instantiateStreaming(module, imports);
-            } catch (e) {
-                if (module.headers.get('Content-Type') != 'application/wasm') {
-                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
-                } else {
-                    throw e;
-                }
-            }
-        }
-
-        const bytes = await module.arrayBuffer();
-        return await WebAssembly.instantiate(bytes, imports);
-    } else {
-        const instance = await WebAssembly.instantiate(module, imports);
-
-        if (instance instanceof WebAssembly.Instance) {
-            return { instance, module };
-        } else {
-            return instance;
-        }
-    }
-}
-
-function getStringFromWasm0(ptr, len) {
-    return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
-}
-
-const cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-
-cachedTextDecoder.decode();
-
-let cachegetUint8Memory0 = null;
-function getUint8Memory0() {
-    if (cachegetUint8Memory0 === null || cachegetUint8Memory0.buffer !== wasm.memory.buffer) {
-        cachegetUint8Memory0 = new Uint8Array(wasm.memory.buffer);
-    }
-    return cachegetUint8Memory0;
-}
-
-export default init;
-EOF
-fi
-
-cd ..
+# NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
+# Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
+# every deploy by demanding rustc 1.95+. The pre-built wasm at
+#   rust/www/star_renderer_bg.wasm
+# is committed to git and served as a static asset. Rebuild locally when
+# you edit rust/src/**:
+#   (cd rust && cargo build --release --target wasm32-unknown-unknown \
+#        && cp target/wasm32-unknown-unknown/release/star_renderer.wasm \
+#             www/star_renderer_bg.wasm)
+# then commit the updated rust/www/star_renderer_bg.wasm alongside your
+# source change.
 
 echo "✅ WASM build complete!"
-ls -lh rust/www/*.wasm rust/www/*.js
+echo "   Built:   js/sstar-wasm/ (S-star orbital propagator)"
+echo "   Skipped: rust/www/ star renderer — served from committed binary"
+ls -lh js/sstar-wasm/*.wasm 2>/dev/null || true

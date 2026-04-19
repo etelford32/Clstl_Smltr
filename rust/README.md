@@ -2,6 +2,8 @@
 
 A high-performance 3D star renderer written in Rust using the Bevy game engine. This is a proof-of-concept implementation showcasing Rust's capabilities for real-time graphics and physics simulation.
 
+> **Vercel does not rebuild this crate.** The ~479-crate Bevy dep graph kept breaking Vercel deploys whenever an upstream transitive (like `constant_time_eq`) bumped its minimum rustc past the version on the build image. The pre-built artifact at `www/star_renderer_bg.wasm` is committed to git and served as a static asset; `rust.html` iframes `www/index.html` which loads it. When you edit anything under `src/`, rebuild locally with `build_wasm.sh` and commit the updated `www/star_renderer_bg.wasm` in the same PR.
+
 ## Features
 
 - **3D Star Rendering**: Photorealistic star sphere with emissive glow and pulsing effect
