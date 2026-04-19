@@ -14,12 +14,11 @@
  * stale-while-revalidate=600 lets the CDN keep serving a ~1 hr old copy for
  * up to 10 extra minutes while it refreshes in the background.
  *
- * Refreshers (ranked by cadence):
- *   - Supabase pg_cron — hourly, primary. Defined in
- *     supabase-weather-pgcron-migration.sql. Runs entirely inside Postgres;
- *     no Vercel dependency.
- *   - Vercel Cron      — daily, safety net. Calls /api/weather/refresh. Kept
- *     on because Vercel Hobby allows exactly one cron run per day.
+ * Refresher: Supabase pg_cron — hourly, sole writer. Defined in
+ * supabase-weather-pgcron-migration.sql. Runs entirely inside Postgres; no
+ * Vercel cron, no GitHub Actions. Staleness is surfaced to the UI via the
+ * `age_seconds` field on responses so a silent pg_cron failure is visible
+ * to visitors within one reload.
  *
  * Response shape (consumed by js/weather-feed.js):
  *   {

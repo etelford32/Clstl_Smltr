@@ -170,11 +170,5 @@
       "source": "/v1/horizons",
       "destination": "/api/horizons"
     }
-  ],
-  "crons": [
-    {
-      "path": "/api/weather/refresh",
-      "schedule": "0 6 * * *"
-    }
   ]
 }

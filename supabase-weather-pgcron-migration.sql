@@ -1,15 +1,16 @@
 -- ═══════════════════════════════════════════════════════════════
 -- Parker Physics — Weather Grid Refresh via pg_cron (run in Supabase SQL Editor)
 -- ═══════════════════════════════════════════════════════════════
--- Schedules an hourly Open-Meteo fetch entirely inside Postgres so the
--- refresh cron isn't subject to Vercel Hobby's once-per-day cap. Vercel
--- Cron at /api/weather/refresh stays wired up as a daily safety net.
+-- Schedules an hourly Open-Meteo fetch entirely inside Postgres. Sole writer
+-- for weather_grid_cache — no Vercel cron, no GitHub Actions, no external
+-- scheduler. Staleness is surfaced to the UI via the `age_seconds` field on
+-- /api/weather/grid responses; if pg_cron stops running the site will show
+-- "X hr ago" in red instead of pretending the data is fresh.
 --
 -- Architecture:
 --   Supabase pg_cron (hourly)  ───▶  refresh_weather_grid()
 --                                          ├─▶ http_get(open-meteo)
 --                                          └─▶ INSERT weather_grid_cache
---   Vercel Cron     (daily)    ───▶  /api/weather/refresh  (same target row)
 --   Browsers       (15 min)    ───▶  /api/weather/grid     (cached read)
 --
 -- Run order (one-time, in the Supabase SQL Editor):
@@ -34,9 +35,8 @@ CREATE EXTENSION IF NOT EXISTS http;      -- synchronous HTTP calls from plpgsql
 -- Fetches the 648-location Open-Meteo grid in a single HTTP GET and
 -- inserts the response array into weather_grid_cache.
 --
--- Mirrors api/weather/refresh.js (the Vercel handler used by the
--- daily safety-net cron). If you change the variable list, the grid
--- geometry, or the units in either file, update both.
+-- Keep the grid geometry / variable list / units in sync with
+-- js/weather-feed.js (the consumer that parses the cached rows).
 --
 -- Returns: the inserted row id, or raises on upstream failure.
 -- pg_cron records exceptions in cron.job_run_details so failed runs
@@ -57,7 +57,7 @@ DECLARE
     inserted_id  bigint;
 BEGIN
     -- Build comma-separated lat / lon arrays in row-major order (lat
-    -- varies slowest), matching js/weather-feed.js + api/weather/refresh.js
+    -- varies slowest), matching js/weather-feed.js's consumer-side grid
     -- byte-for-byte. PostgreSQL doesn't guarantee array_agg ordering
     -- without ORDER BY, so it's specified explicitly.
     SELECT array_to_string(array_agg((-85  + j * 10)::text ORDER BY j, i), ','),

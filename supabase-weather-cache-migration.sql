@@ -12,8 +12,9 @@
 --     payload      JSONB array of 648 per-location current-weather objects
 --                  (same shape as Open-Meteo's multi-location response)
 --
--- The refresh cron (/api/weather/refresh) inserts one row/hour.
--- The reader edge fn (/api/weather/grid) returns the newest row.
+-- Supabase pg_cron inserts one row/hour (see
+-- supabase-weather-pgcron-migration.sql). /api/weather/grid returns
+-- the newest row to browsers via the CDN.
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE TABLE IF NOT EXISTS public.weather_grid_cache (

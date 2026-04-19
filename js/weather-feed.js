@@ -29,8 +29,9 @@
  */
 
 // Reads from /api/weather/grid, a Vercel Edge Function fronted by the CDN
-// with s-maxage=3600. Upstream Open-Meteo is only hit once per hour by the
-// /api/weather/refresh cron, so visitor count no longer drives upstream load.
+// with s-maxage=3600. Upstream Open-Meteo is only hit once per hour by
+// Supabase pg_cron (see supabase-weather-pgcron-migration.sql), so visitor
+// count never drives upstream load.
 const WEATHER_ENDPOINT = '/api/weather/grid';
 const GRID_W       = 36;                // longitude grid points (10° spacing)
 const GRID_H       = 18;                // latitude  grid points (10° spacing)
@@ -88,7 +89,7 @@ export class WeatherFeed {
             const rows = await this._fetchGrid();
             if (rows && rows.length > 0) {
                 this._processRows(rows);
-                this._meta.source    = 'Open-Meteo / GFS (hourly shared cache)';
+                this._meta.source    = 'Open-Meteo / GFS';
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
             } else {
