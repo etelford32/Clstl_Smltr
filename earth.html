@@ -281,6 +281,11 @@ nav {
 #wx-status-dot.live    { background:#4dff80; box-shadow:0 0 5px #4dff80; }
 #wx-status-dot.fetch   { background:#ffaa44; box-shadow:0 0 4px #ffaa44; }
 #wx-status-dot.offline { background:#555; }
+/* Data staleness — set on #wx-age via data-staleness attribute.
+   fresh (age < 90 min) inherits default colour; warn/stale stand out
+   so a silently failing pg_cron is visible to visitors on reload. */
+#wx-age[data-staleness="warn"]  { color:#ffaa44; }
+#wx-age[data-staleness="stale"] { color:#ff6b6b; font-weight:600; }
 .wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
@@ -1068,6 +1073,7 @@ nav {
         <div class="panel-body">
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
+        <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
         <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
@@ -1243,6 +1249,7 @@ import { CmePropagator } from './js/cme-propagation.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
+import { geo } from './js/geo/coords.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
@@ -1329,17 +1336,12 @@ function uvToGeo(uv) {
     };
 }
 
-// Geographic → 3-D Cartesian on unit sphere
-// Matches Three.js SphereGeometry convention (equirectangular texture):
-//   +X = prime meridian at equator, +Y = north pole, -Z = 90°E
+// Geographic → 3-D Cartesian on unit sphere.
+// Thin wrapper over the unified coordinate module so the trip overlay,
+// satellite tracker, alert markers, and this page all use the same
+// canonical frame (+X = prime meridian, +Y = north pole, -Z = 90°E).
 function geoToXYZ(lat, lon) {
-    const phi = lat * DEG;
-    const lam = lon * DEG;
-    return new THREE.Vector3(
-         Math.cos(phi) * Math.cos(lam),
-         Math.sin(phi),
-        -Math.cos(phi) * Math.sin(lam)
-    );
+    return geo.deg.latLonToPosition(lat, lon);
 }
 
 function fmtLat(d) { return `${Math.abs(d).toFixed(2)}° ${d >= 0 ? 'N' : 'S'}`; }
@@ -1437,7 +1439,23 @@ const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
-const earthGeo = new THREE.SphereGeometry(R_EARTH, 80, 80);
+// Earth, cloud, and aurora shells are IcosahedronGeometry at matching level 6
+// (≈40 k verts / ≈82 k triangles each, ~40 km equator-edge length). Three
+// properties this guarantees that SphereGeometry couldn't:
+//   1. No pole fans — every triangle has the same shape, so the fragment
+//      shader can reconstruct equirectangular UV from the interpolated
+//      surface normal without a wedge-of-longitude artifact at the poles.
+//   2. Earth and cloud topology align exactly, so cloud features sit on top
+//      of their underlying surface pixels at every latitude (no more
+//      "floating" cloud bands at polar latitudes from mismatched segment
+//      counts between the two shells).
+//   3. Uniform triangle size across the globe means procedural noise sampled
+//      against the surface has the same spatial frequency everywhere — no
+//      bias toward east-west stretching from equirectangular UV.
+// Stratosphere + atmosphere rim shells below stay on SphereGeometry: they're
+// fresnel-only, don't sample textures, and never produced stripes.
+const ICO_LEVEL = 6;
+const earthGeo = new THREE.IcosahedronGeometry(R_EARTH, ICO_LEVEL);
 const earthMat = new THREE.ShaderMaterial({
     vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG,
     uniforms: earthU,
@@ -1446,7 +1464,7 @@ const earthMesh = new THREE.Mesh(earthGeo, earthMat);
 // Earth spin axis = world Y. Sun direction baked into uniforms (equatorial frame).
 scene.add(earthMesh);
 
-const cloudGeo = new THREE.SphereGeometry(R_CLOUDS, 60, 60);
+const cloudGeo = new THREE.IcosahedronGeometry(R_CLOUDS, ICO_LEVEL);
 const cloudMat = new THREE.ShaderMaterial({
     vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG,
     uniforms: cloudU, transparent: true, depthWrite: false,
@@ -1456,11 +1474,11 @@ cloudMesh.renderOrder = 3;   // after atmosphere glow, so clouds alpha-blend on 
 scene.add(cloudMesh);
 
 // ── Aurora oval overlay ────────────────────────────────────────────────
-// A thin sphere sitting above the cloud shell with a shader that paints
+// A thin icosphere sitting above the cloud shell with a shader that paints
 // an undulating band near the auroral oval boundary. Shares SUN_EQ so
 // its nightside mask stays in sync with the earth/cloud terminators.
 const auroraU   = createAuroraUniforms(SUN_EQ.clone());
-const auroraGeo = new THREE.SphereGeometry(R_AURORA, 96, 64);
+const auroraGeo = new THREE.IcosahedronGeometry(R_AURORA, ICO_LEVEL);
 const auroraMat = new THREE.ShaderMaterial({
     vertexShader: AURORA_VERT, fragmentShader: AURORA_FRAG,
     uniforms: auroraU,
@@ -2630,6 +2648,31 @@ document.addEventListener('weather-update', e => {
     document.getElementById('wx-upd').textContent  = meta.fetchTime
         ? meta.fetchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
 
+    // Data age — how old the cached row from Supabase is, NOT how long ago
+    // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
+    // min (default colour), warn 90–180 min (amber), stale > 180 min (red
+    // + bold). If you see the age climb past ~90 min, pg_cron is lagging;
+    // past ~180 min it has likely stopped and needs attention.
+    const ageEl = document.getElementById('wx-age');
+    const ageS  = meta.cacheAgeSeconds;
+    if (ageS == null) {
+        ageEl.textContent = '—';
+        ageEl.removeAttribute('data-staleness');
+    } else {
+        const mins = Math.floor(ageS / 60);
+        const hrs  = Math.floor(mins / 60);
+        const rem  = mins % 60;
+        ageEl.textContent =
+            mins <  1   ? 'just now' :
+            hrs  <  1   ? `${mins} min ago` :
+            hrs  <  24  ? `${hrs} hr ${rem} min ago` :
+                          `${Math.floor(hrs / 24)} d ago`;
+        ageEl.dataset.staleness =
+            mins < 90   ? 'fresh' :
+            mins < 180  ? 'warn'  :
+                          'stale';
+    }
+
     if (meta.tempMin != null) {
         document.getElementById('wx-tmin').textContent  = `${meta.tempMin.toFixed(1)} °C`;
         document.getElementById('wx-tmax').textContent  = `${meta.tempMax.toFixed(1)} °C`;
@@ -2866,13 +2909,10 @@ class AlertMarkers {
         for (const alert of alerts) {
             const kind    = alert.kind ?? classifyAlertEvent(alert.event);
             const hexCol  = ALERT_COLORS[alert.severity] ?? ALERT_COLORS.Unknown;
-            const phi = alert.lat * DEG, lam = alert.lon * DEG;
-            const r   = R_EARTH * 1.006;
-            const pos = new THREE.Vector3(
-                 r * Math.cos(phi) * Math.cos(lam),
-                 r * Math.sin(phi),
-                -r * Math.cos(phi) * Math.sin(lam)
-            );
+            // Same geoToXYZ that trip pins, user location, and satellite
+            // ground tracks use — guarantees the marker sits exactly on the
+            // storm-swirl centre instead of drifting by a couple of degrees.
+            const pos = geoToXYZ(alert.lat, alert.lon).multiplyScalar(R_EARTH * 1.006);
 
             const base = (ALERT_KIND_BASE_SIZE[kind] ?? 0.04) *
                          (ALERT_KIND_SEVERITY_BOOST[alert.severity] ?? 1);

@@ -34,10 +34,11 @@
  */
 
 import * as THREE from 'three';
+import { geo, DEG, RAD } from './geo/coords.js';
 
 const TWOPI    = 2 * Math.PI;
-const DEG2RAD  = Math.PI / 180;
-const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard)
+const DEG2RAD  = DEG;         // kept as alias for SGP4 orbital-element conversions
+const RE_KM    = 6378.135;    // WGS-72 (SGP4 standard — distinct from geo.radiusKm)
 const MIN_PER_DAY = 1440;
 
 // ── Rust WASM SGP4 (high-performance, loaded async) ────────────────────────
@@ -140,34 +141,16 @@ function jsFallbackPropagate(tle, tsince_min) {
     return { x, y, z };
 }
 
-// ── TEME → ECEF via GMST ────────────────────────────────────────────────────
-
-function gmst(jd) {
-    const T = (jd - 2451545.0) / 36525.0;
-    // IAU-1982 GMST formula (degrees)
-    let theta = 67310.54841 + (876600 * 3600 + 8640184.812866) * T
-              + 0.093104 * T * T - 6.2e-6 * T * T * T;
-    theta = (theta % 86400) / 240;  // seconds → degrees
-    return theta * DEG2RAD;
-}
-
-function temeToEcef(x, y, z, jd) {
-    const g = gmst(jd);
-    const cosG = Math.cos(g), sinG = Math.sin(g);
-    return {
-        x: cosG * x + sinG * y,
-        y: -sinG * x + cosG * y,
-        z: z,
-    };
-}
-
-function ecefToLatLonAlt(x, y, z) {
-    const r = Math.sqrt(x * x + y * y + z * z);
-    const lat = Math.asin(z / r) / DEG2RAD;
-    const lon = Math.atan2(y, x) / DEG2RAD;
-    const alt = r - RE_KM;
-    return { lat, lon, alt };
-}
+// ── TEME → scene-frame position via unified coordinate module ───────────────
+// GMST rotation, ECI→ECEF mapping, and the scene-frame flip (astronomical
+// Z = north → Three.js Y = north, plus the −Z = +90°E convention) all live
+// in js/geo/coords.js. This file stays focused on orbital mechanics (SGP4,
+// Kepler) and delegates every Earth-geography conversion to the module.
+//
+// `_temeScratch` / `_sceneScratch` are module-level scratch vectors used by
+// the per-frame `tick()` loop to avoid per-sat Vector3 allocations.
+const _temeScratch  = new THREE.Vector3();
+const _sceneScratch = new THREE.Vector3();
 
 // ── Constellation color map ─────────────────────────────────────────────────
 // Each group gets a distinct color for per-vertex coloring.
@@ -373,10 +356,10 @@ export class SatelliteTracker {
 
         this._positions = new THREE.BufferAttribute(posArr, 3);
         this._colors = new THREE.BufferAttribute(colArr, 3);
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', this._positions);
-        geo.setAttribute('color', this._colors);
-        this._pointsMesh = new THREE.Points(geo, this._dotMat);
+        const bufGeo = new THREE.BufferGeometry();
+        bufGeo.setAttribute('position', this._positions);
+        bufGeo.setAttribute('color', this._colors);
+        this._pointsMesh = new THREE.Points(bufGeo, this._dotMat);
         this._pointsMesh.renderOrder = 10;
         this._group.add(this._pointsMesh);
     }
@@ -404,33 +387,32 @@ export class SatelliteTracker {
     tick(nowMs = Date.now()) {
         if (!this._positions || this._satellites.length === 0) return;
 
-        const jd = nowMs / 86400000 + 2440587.5;
-        const posArr = this._positions.array;
+        const jd      = nowMs / 86400000 + 2440587.5;
+        const gmstRad = geo.greenwichSiderealTimeFromJD(jd);
+        const kmToScene = this._earthR / RE_KM;
+        const posArr  = this._positions.array;
 
         for (let i = 0; i < this._satellites.length; i++) {
-            const sat = this._satellites[i];
+            const sat    = this._satellites[i];
             const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
 
             const teme = propagate(sat.tle, tsince);
-            const ecef = temeToEcef(teme.x, teme.y, teme.z, jd);
-            const lla = ecefToLatLonAlt(ecef.x, ecef.y, ecef.z);
+            _temeScratch.set(teme.x, teme.y, teme.z);
 
-            const r = this._earthR * (1 + lla.alt / RE_KM);
-            const latR = lla.lat * DEG2RAD;
-            const lonR = lla.lon * DEG2RAD;
+            // TEME → ECEF (GMST rotation) → scene frame, in one call.
+            geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
 
-            // Z is negated to match earth.html's geoToXYZ convention
-            // (Three.js SphereGeometry + Blue Marble texture: +X = Greenwich,
-            // -Z = 90°E). Using +cos(lat)*sin(lon) mirrored every satellite
-            // across the prime meridian, so e.g. ISS over Beijing appeared
-            // over the eastern Pacific.
-            posArr[i * 3]     =  r * Math.cos(latR) * Math.cos(lonR);
-            posArr[i * 3 + 1] =  r * Math.sin(latR);
-            posArr[i * 3 + 2] = -r * Math.cos(latR) * Math.sin(lonR);
+            posArr[i * 3]     = _sceneScratch.x * kmToScene;
+            posArr[i * 3 + 1] = _sceneScratch.y * kmToScene;
+            posArr[i * 3 + 2] = _sceneScratch.z * kmToScene;
 
-            sat.lat = lla.lat;
-            sat.lon = lla.lon;
-            sat.alt = lla.alt;
+            // Recover geographic coords for tooltip / API use. `positionToLatLon`
+            // returns radians and the scene-frame magnitude (here in km since
+            // we haven't scaled yet); convert to degrees + altitude.
+            const ll = geo.positionToLatLon(_sceneScratch);
+            sat.lat = ll.lat * RAD;
+            sat.lon = ll.lon * RAD;
+            sat.alt = ll.radiusUnits - RE_KM;
         }
 
         this._positions.needsUpdate = true;
@@ -534,12 +516,20 @@ export class SatelliteTracker {
         const track = [];
 
         for (let i = 0; i <= steps; i++) {
-            const tsince = tsinceBase + (i / steps) * periodMin;
-            const teme = propagate(sat.tle, tsince);
-            const jdStep = jd + (i / steps) * periodMin / MIN_PER_DAY;
-            const ecef = temeToEcef(teme.x, teme.y, teme.z, jdStep);
-            const lla = ecefToLatLonAlt(ecef.x, ecef.y, ecef.z);
-            track.push(lla);
+            const tsince  = tsinceBase + (i / steps) * periodMin;
+            const teme    = propagate(sat.tle, tsince);
+            const jdStep  = jd + (i / steps) * periodMin / MIN_PER_DAY;
+            const gmstRad = geo.greenwichSiderealTimeFromJD(jdStep);
+
+            _temeScratch.set(teme.x, teme.y, teme.z);
+            geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+
+            const ll = geo.positionToLatLon(_sceneScratch);
+            track.push({
+                lat: ll.lat * RAD,
+                lon: ll.lon * RAD,
+                alt: ll.radiusUnits - RE_KM,
+            });
         }
         return track;
     }
@@ -565,20 +555,14 @@ export class SatelliteTracker {
             prevLon = pt.lon;
 
             const r = this._earthR + heightOffset;  // on the surface
-            const latR = pt.lat * DEG2RAD;
-            const lonR = pt.lon * DEG2RAD;
-            points.push(new THREE.Vector3(
-                 r * Math.cos(latR) * Math.cos(lonR),
-                 r * Math.sin(latR),
-                -r * Math.cos(latR) * Math.sin(lonR)
-            ));
+            points.push(geo.latLonToPosition(pt.lat * DEG, pt.lon * DEG, r));
         }
 
-        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const bufGeo = new THREE.BufferGeometry().setFromPoints(points);
         const mat = new THREE.LineBasicMaterial({
             color: 0xffcc00, transparent: true, opacity: 0.5, depthWrite: false,
         });
-        return new THREE.Line(geo, mat);
+        return new THREE.Line(bufGeo, mat);
     }
 
     /**
@@ -593,20 +577,14 @@ export class SatelliteTracker {
         const points = [];
         for (const pt of track) {
             const r = this._earthR * (1 + pt.alt / RE_KM);
-            const latR = pt.lat * DEG2RAD;
-            const lonR = pt.lon * DEG2RAD;
-            points.push(new THREE.Vector3(
-                 r * Math.cos(latR) * Math.cos(lonR),
-                 r * Math.sin(latR),
-                -r * Math.cos(latR) * Math.sin(lonR)
-            ));
+            points.push(geo.latLonToPosition(pt.lat * DEG, pt.lon * DEG, r));
         }
 
-        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const bufGeo = new THREE.BufferGeometry().setFromPoints(points);
         const mat = new THREE.LineBasicMaterial({
             color: 0x00ffcc, transparent: true, opacity: 0.35, depthWrite: false,
         });
-        return new THREE.Line(geo, mat);
+        return new THREE.Line(bufGeo, mat);
     }
 
     /**

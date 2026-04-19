@@ -14,70 +14,54 @@
  *                             sharing / deep-linking between pages.
  */
 
-const EARTH_R_KM     = 6371.0;
+import * as THREE from 'three';
+import { geo, RAD } from './geo/coords.js';
+
 const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
 
 // ── Great-circle math ───────────────────────────────────────────────────────
+// These three exports used to carry their own haversine / bearing / SLERP
+// implementations. They now delegate to js/geo/coords.js so the trip module,
+// the satellite tracker, the aurora oval, and the (future) alert intersection
+// tests all share one definition of "distance between two points on Earth."
 
-const DEG = Math.PI / 180;
-
-function _toRad(p) {
-    return { lat: p.lat * DEG, lon: p.lon * DEG };
-}
-
-/** Great-circle distance in km between two {lat, lon} points (haversine). */
+/** Great-circle distance in km between two {lat, lon} (degrees) points. */
 export function greatCircleDistanceKm(a, b) {
-    const ra = _toRad(a), rb = _toRad(b);
-    const dLat = rb.lat - ra.lat;
-    const dLon = rb.lon - ra.lon;
-    const h = Math.sin(dLat / 2) ** 2
-            + Math.cos(ra.lat) * Math.cos(rb.lat) * Math.sin(dLon / 2) ** 2;
-    return 2 * EARTH_R_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+    return geo.deg.distanceKm(a, b);
 }
 
-/** Initial bearing (degrees, clockwise from true north) from a → b. */
+/** Initial bearing in degrees, clockwise from true north, range [0, 360). */
 export function initialBearingDeg(a, b) {
-    const ra = _toRad(a), rb = _toRad(b);
-    const dLon = rb.lon - ra.lon;
-    const y = Math.sin(dLon) * Math.cos(rb.lat);
-    const x = Math.cos(ra.lat) * Math.sin(rb.lat)
-            - Math.sin(ra.lat) * Math.cos(rb.lat) * Math.cos(dLon);
-    const brg = Math.atan2(y, x) / DEG;
-    return (brg + 360) % 360;
+    return (geo.deg.bearing(a, b) + 360) % 360;
 }
 
 /**
  * Sample `n` equally spaced points along the great-circle arc from a to b.
- * Returns [{ lat, lon, t }] with t ∈ [0, 1] (inclusive). n ≥ 2.
- *
- * Degenerates to a linear interpolation for near-coincident points.
+ * Returns [{ lat, lon, t }] with t ∈ [0, 1] (inclusive) and lat/lon in
+ * degrees. n is floored to at least 2. Coincident endpoints degenerate to
+ * n copies of a.
  */
+const _slerpA = new THREE.Vector3();
+const _slerpB = new THREE.Vector3();
+const _slerpOut = new THREE.Vector3();
 export function greatCirclePath(a, b, n = 64) {
     if (n < 2) n = 2;
-    const ra = _toRad(a), rb = _toRad(b);
-    const d = Math.acos(
-        Math.min(1, Math.max(-1,
-            Math.sin(ra.lat) * Math.sin(rb.lat) +
-            Math.cos(ra.lat) * Math.cos(rb.lat) * Math.cos(rb.lon - ra.lon)
-        ))
-    );
+    geo.deg.latLonToNormal(a.lat, a.lon, _slerpA);
+    geo.deg.latLonToNormal(b.lat, b.lon, _slerpB);
+    const d = Math.acos(Math.min(1, Math.max(-1, _slerpA.dot(_slerpB))));
     const out = [];
     if (d < 1e-6) {
-        // Coincident endpoints — return n copies of a
         for (let i = 0; i < n; i++) out.push({ lat: a.lat, lon: a.lon, t: i / (n - 1) });
         return out;
     }
     const sinD = Math.sin(d);
     for (let i = 0; i < n; i++) {
-        const t = i / (n - 1);
-        const A = Math.sin((1 - t) * d) / sinD;
-        const B = Math.sin(t * d) / sinD;
-        const x = A * Math.cos(ra.lat) * Math.cos(ra.lon) + B * Math.cos(rb.lat) * Math.cos(rb.lon);
-        const y = A * Math.cos(ra.lat) * Math.sin(ra.lon) + B * Math.cos(rb.lat) * Math.sin(rb.lon);
-        const z = A * Math.sin(ra.lat) + B * Math.sin(rb.lat);
-        const lat = Math.atan2(z, Math.sqrt(x * x + y * y)) / DEG;
-        const lon = Math.atan2(y, x) / DEG;
-        out.push({ lat, lon, t });
+        const t  = i / (n - 1);
+        const s0 = Math.sin((1 - t) * d) / sinD;
+        const s1 = Math.sin(t * d) / sinD;
+        _slerpOut.copy(_slerpA).multiplyScalar(s0).addScaledVector(_slerpB, s1);
+        const ll = geo.normalToLatLon(_slerpOut);
+        out.push({ lat: ll.lat * RAD, lon: ll.lon * RAD, t });
     }
     return out;
 }

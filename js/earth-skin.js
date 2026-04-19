@@ -20,6 +20,8 @@
  */
 
 import * as THREE from 'three';
+import { geo } from './geo/coords.js';
+import { GEO_GLSL } from './geo/coords.glsl.js';
 
 // ── Version-pinned CDN — avoids broken URLs from three-globe package updates ──
 const _CDN = 'https://unpkg.com/three-globe@2.31.0/example/img/';
@@ -42,57 +44,21 @@ function _grayTex() {
     return t;
 }
 
-// ── Procedural noise texture (replaces CDN clouds.png dependency) ────────────
-// Generates a tileable multi-octave value noise texture on the CPU.
-// Used as the fine-detail layer in the cloud shader (25% blend weight).
-function _proceduralCloudNoise(W = 512, H = 256) {
-    function hash(ix, iy) {
-        let n = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
-        return n - Math.floor(n);
-    }
-    function vnoise(x, y) {
-        const ix = Math.floor(x), iy = Math.floor(y);
-        const fx = x - ix, fy = y - iy;
-        const sx = fx * fx * (3 - 2 * fx);
-        const sy = fy * fy * (3 - 2 * fy);
-        const a = hash(ix, iy), b = hash(ix + 1, iy);
-        const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
-        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
-    }
-    function fbm(x, y) {
-        let val = 0, amp = 0.5, freq = 1;
-        for (let o = 0; o < 5; o++) {
-            val += amp * vnoise(x * freq, y * freq);
-            freq *= 2.0; amp *= 0.5;
-        }
-        return val;
-    }
-    const data = new Uint8Array(W * H * 4);
-    for (let j = 0; j < H; j++) {
-        for (let i = 0; i < W; i++) {
-            const n = fbm(i / W * 10, j / H * 5);
-            const v = Math.max(0, Math.min(255, (n * 255) | 0));
-            const k = (j * W + i) * 4;
-            data[k] = data[k + 1] = data[k + 2] = v;
-            data[k + 3] = 255;
-        }
-    }
-    const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  EARTH SURFACE SHADERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const EARTH_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 void main() {
-    vUv          = uv;
+    // The object-space direction of this vertex IS its UV address on an
+    // equirectangular sphere. The fragment shader reconstructs UV from the
+    // interpolated value via normalToUV(), which bypasses the stock sphere
+    // mesh's antimeridian seam and pole-fan wedge artifacts entirely.
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     vWorldPos    = (modelMatrix * vec4(position, 1.0)).xyz;
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
@@ -100,6 +66,8 @@ void main() {
 
 export const EARTH_FRAG = /* glsl */`
 precision highp float;
+
+${GEO_GLSL}
 
 uniform sampler2D u_day;
 uniform sampler2D u_night;
@@ -117,8 +85,9 @@ uniform float u_aurora_power;
 uniform float u_bz_south;
 uniform float u_dst_norm;
 uniform float u_bump_strength;  // 0 = flat, ~1 = pronounced relief
+uniform vec3  u_mag_pole;       // geomagnetic dipole pole (unit normal)
 
-varying vec2 vUv;
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 varying vec3 vWorldPos;
 
@@ -159,6 +128,15 @@ vec3 weatherOverlay(vec2 uv) {
 }
 
 void main() {
+    // Reconstruct equirectangular UV from the INTERPOLATED surface normal
+    // instead of trusting the mesh uv attribute. On stock SphereGeometry
+    // this eliminates the pole-fan wedge artifact (where the u coordinate
+    // staircases across triangles sharing the pole point); on IcosahedronGeometry
+    // it also eliminates the antimeridian seam that PolyhedronGeometry
+    // auto-UVs produce. Either way: no more horizontal white stripes.
+    vec3 N_sphere = normalize(vNormalLocal);
+    vec2 vUv      = normalToUV(N_sphere);
+
     vec3 N_base = normalize(vWorldNormal);
 
     vec3 dayCol    = texture2D(u_day,      vUv).rgb;
@@ -207,13 +185,15 @@ void main() {
         base = mix(base, weatherOverlay(vUv), 0.28);
     }
 
-    // Aurora
+    // Aurora — driven by MAGNETIC latitude, not geographic. The dipole pole
+    // is tilted ~11° from the spin axis (IGRF 2025 epoch), so the oval sits
+    // over northern Canada / Siberia instead of ringing the geographic pole.
     if (u_aurora_on > 0.5 && u_kp > 1.5) {
-        float lat    = (vUv.y - 0.5) * 3.14159265;
-        float lon    = (vUv.x - 0.5) * 6.28318530;
-        float sinAbs = abs(sin(lat));
+        vec3  nGeo   = uvToNormal(vUv);
+        float sinAbs = absSinMagLat(nGeo, u_mag_pole);   // |cos(magCoLat)|
+        float lonRad = uvToLatLon(vUv).y;                // ripple phase stays geographic
         float nightM = 1.0 - smoothstep(-0.20, 0.30, NdotL);
-        base += auroraColor(sinAbs, lon, u_kp) * nightM;
+        base += auroraColor(sinAbs, lonRad, u_kp) * nightM;
     }
 
     // X-ray ionospheric flash (dayside HF blackout)
@@ -224,8 +204,7 @@ void main() {
 
     // Ring current heating: equatorial nightside reddish glow
     if (u_dst_norm > 0.08) {
-        float lat    = (vUv.y - 0.5) * 3.14159265;
-        float absLat = abs(lat);
+        float absLat = abs(uvToLatLon(vUv).x);
         float rcZone = smoothstep(0.0, 0.20, 0.55 - absLat) * (1.0 - dayMix);
         base += vec3(0.85, 0.25, 0.05) * rcZone * u_dst_norm * 0.28;
     }
@@ -255,10 +234,10 @@ void main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const CLOUD_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 void main() {
-    vUv          = uv;
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
@@ -266,7 +245,8 @@ void main() {
 export const CLOUD_FRAG = /* glsl */`
 precision mediump float;
 
-uniform sampler2D u_clouds;
+${GEO_GLSL}
+
 uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
 uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip [0-1]
 uniform sampler2D u_satellite;     // GOES/MODIS cloud image (grayscale brightness)
@@ -279,7 +259,7 @@ uniform float u_satellite_on;      // blend satellite into cloud appearance
 uniform vec4 u_storms[8];
 uniform int  u_storm_count;
 
-varying vec2 vUv;
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 
 // ── Procedural noise for natural cloud shapes ────────────────────────────────
@@ -373,34 +353,51 @@ float warpedFbm3(vec3 p, int octaves) {
     return fbm3(p + warp * 1.15, octaves);
 }
 
-// ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
-// For each active storm, rotate the cloud lookup UV around the storm eye.
-// Northern Hemisphere: CCW (spin=+1). Southern Hemisphere: CW (spin=-1).
-vec2 stormSwirl(vec2 uv) {
-    vec2 swirl = vec2(0.0);
+// ── Rotations on the unit sphere ──────────────────────────────────────────────
+// The cloud noise and storm swirl used to operate on equirectangular UV
+// offsets, which produced stripes (UV-space stretch + hard-coded cirrus
+// anisotropy). Now everything happens in 3-D on the sphere: drift = slow
+// rotation about the spin axis, swirl = Rodrigues rotation around each
+// storm's 3-D centre.
+
+// Rodrigues rotation of p around unit vector axis by angle radians.
+vec3 rotateAroundAxis(vec3 p, vec3 axis, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return p * c + cross(axis, p) * s + axis * dot(axis, p) * (1.0 - c);
+}
+
+// Rotation about the world Y axis (planet spin axis). Cheap specialisation
+// of rotateAroundAxis for the "eastward drift" case. Positive angle rotates
+// toward +east (prime meridian → lon +90°E).
+vec3 rotateY(vec3 p, float angle) {
+    float c = cos(angle), s = sin(angle);
+    return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
+}
+
+// ── Cyclonic swirl on the 3-D normal ──────────────────────────────────────────
+// For each active storm, rotate the sampling normal around the storm's
+// 3-D centre by an angle that falls off with great-circle distance.
+// NH (spin = +1): CCW viewed from outside the sphere.
+// SH (spin = -1): CW  viewed from outside the sphere.
+vec3 stormSwirl3D(vec3 N) {
+    vec3 result = N;
     for (int i = 0; i < 8; i++) {
         if (i >= u_storm_count) break;
-        vec2  center = u_storms[i].xy;
-        float inten  = u_storms[i].z;
-        float spin   = u_storms[i].w;
+        vec3  centerN = uvToNormal(u_storms[i].xy);
+        float inten   = u_storms[i].z;
+        float spin    = u_storms[i].w;
 
-        vec2 d = uv - center;
-        // Wrap longitude seam (UV u is periodic)
-        if (d.x >  0.5) d.x -= 1.0;
-        if (d.x < -0.5) d.x += 1.0;
+        float ang       = acos(clamp(dot(result, centerN), -1.0, 1.0));
+        float radiusAng = 0.12 + inten * 0.10;           // ≈7°–14° = ~800–1550 km
 
-        float dist   = length(d);
-        float radius = 0.07 + inten * 0.05;   // storm radius in UV space (≈ 700–1200 km)
-
-        if (dist < radius * 2.2) {
-            float falloff = smoothstep(radius * 2.2, 0.0, dist);
-            float angle   = spin * inten * falloff * 2.2;   // max ~126° spiral
-            float c = cos(angle), s = sin(angle);
-            vec2 rotated = vec2(d.x * c - d.y * s, d.x * s + d.y * c);
-            swirl += (rotated - d) * falloff;
+        if (ang < radiusAng * 2.2) {
+            float falloff  = smoothstep(radiusAng * 2.2, 0.0, ang);
+            float rotAngle = spin * inten * falloff * 2.2;   // peak ~126° at eye
+            result = rotateAroundAxis(result, centerN, rotAngle);
         }
     }
-    return swirl;
+    return result;
 }
 
 // ── Eye / eyewall structure for intense storms ────────────────────────────────
@@ -436,46 +433,54 @@ float stormStructure(vec2 uv) {
 }
 
 void main() {
+    // UV reconstructed from the interpolated surface normal — kills the
+    // pole-fan wedge artifact that stock SphereGeometry produces and the
+    // antimeridian seam that IcosahedronGeometry's auto-UVs would produce.
+    vec3 N_sphere = normalize(vNormalLocal);
+    vec2 vUv      = normalToUV(N_sphere);
+
     vec3  N     = normalize(vWorldNormal);
     float NdotL = dot(N, u_sun_dir);
     float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
     lit = lit * lit;
 
-    // Compute cyclonic UV swirl from active storm systems
-    vec2 swirl = (u_storm_count > 0) ? stormSwirl(vUv) : vec2(0.0);
+    // ── Sample-normal advection ──────────────────────────────────────────────
+    // Apply cyclonic swirl + slow eastward drift directly to the 3-D sampling
+    // normal. All noise below reads from the SPHERE, not from equirectangular
+    // UV — this is what kills the cirrus stripes and the polar UV-stretch.
+    vec3 N_swirled = (u_storm_count > 0) ? stormSwirl3D(N_sphere) : N_sphere;
 
-    // Slow horizontal drift + independent time slice fed into the third
-    // noise dimension — the 3-D slice lets clouds MORPH (form / dissipate)
-    // in place instead of sliding across the sphere as a rigid texture.
-    vec2  driftLow  = vec2(u_time * 0.0000330, u_time * 0.0000040);
-    vec2  driftMid  = vec2(u_time * 0.0000480, u_time * 0.0000060);
-    vec2  driftHigh = vec2(u_time * 0.0000720, u_time * 0.0000090);
+    // Drift rates match the old UV speeds: original was U units per second,
+    // so we multiply by 2π to convert to radians around the Y axis. Preserves
+    // the pre-existing cloud-drift cadence.
+    const float TAU     = 6.2831853;
+    const float yawLow  = 0.0000330 * TAU;
+    const float yawMid  = 0.0000480 * TAU;
+    const float yawHigh = 0.0000720 * TAU;
+
+    vec3 N_low  = rotateY(N_swirled, u_time * yawLow);
+    vec3 N_mid  = rotateY(N_swirled, u_time * yawMid);
+    vec3 N_high = rotateY(N_swirled, u_time * yawHigh);
+
     float tLow  = u_time * 0.00060;
     float tMid  = u_time * 0.00085;
     float tHigh = u_time * 0.00120;
 
-    vec2 uvLow  = vUv + driftLow  + swirl;
-    vec2 uvMid  = vUv + driftMid  + swirl * 0.7;
-    vec2 uvHigh = vUv + driftHigh + swirl * 0.4;
-
     // ── Multi-octave procedural noise per cloud layer ────────────────────────
-    // Each layer samples domain-warped 3-D FBM at its own frequency + time
-    // slice so layers evolve independently and nothing reads as parallel bands.
+    // warpedFbm3 samples 3-D noise directly on the sphere normal. Each layer's
+    // frequency is isotropic (same scalar on x/y/z) — no more cirrus 22:8
+    // east-west stretch. Time is carried as a z-plane offset so clouds morph
+    // in place. Per-layer phase offsets (3.7, 7.3) decouple the layers so they
+    // don't lock into identical shapes at the same frequency.
 
     // Low cumulus: defined puffy cells
-    float nLow  = warpedFbm3(vec3(uvLow  * 14.0,        tLow),  5);
+    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  5);
     // Mid altostratus: smoother, broader
-    float nMid  = warpedFbm3(vec3(uvMid  *  9.5 + 3.7,  tMid),  4);
-    // High cirrus: anisotropic sampling gives the wispy elongated look,
-    // but the domain warp keeps it from reading as horizontal stripes.
-    float nHigh = warpedFbm3(vec3(uvHigh.x * 22.0, uvHigh.y * 8.0, tHigh) + vec3(7.3, 7.3, 0.0), 5);
-
-    // Previously we blended a separate procedural noise texture in at
-    // ~10-12% for pixel-scale grain. That texture was generated flat on a
-    // 2:1 equirect canvas, which stretched features into horizontal stripes
-    // when wrapped onto a sphere. The shader's own warpedFbm3 already gives
-    // multi-octave detail on a spherical domain (no seams, no elongation),
-    // so the lookup is intentionally skipped.
+    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  4);
+    // High cirrus: higher frequency for thinner strands. ISOTROPIC — the
+    // wispy elongation will come back later from wind-driven flow advection
+    // (step 6 in the plan), not from a hard-coded frequency ratio.
+    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), 5);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -592,7 +597,7 @@ void main() {
     // slower streaks (frontal rain). High-latitude precip shifts toward a
     // lighter blue-white tint so it reads as sleet/snow rather than rain.
     if (u_weather_on > 0.5 && precip > 0.02) {
-        float latDeg = (vUv.y - 0.5) * 180.0;
+        float latDeg = uvToLatLonDeg(vUv).x;
         float absLat = abs(latDeg);
 
         // 0 = tropical (convective), 1 = frontal (stratiform)
@@ -761,23 +766,27 @@ void main() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const AURORA_VERT = /* glsl */`
-varying vec2 vUv;
+varying vec3 vNormalLocal;     // object-space unit direction (sphere normal)
 varying vec3 vWorldNormal;
 void main() {
-    vUv          = uv;
+    vNormalLocal = normalize(position);
     vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
     gl_Position  = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
 export const AURORA_FRAG = /* glsl */`
 precision highp float;
+
+${GEO_GLSL}
+
 uniform float u_kp;
 uniform float u_time;
 uniform vec3  u_sun_dir;
 uniform float u_enabled;
 uniform float u_bz_south;      // 0..1 normalised southward IMF Bz (1 = very -Bz)
 uniform float u_aurora_power;  // 0..1 hemispheric auroral power proxy
-varying vec2 vUv;
+uniform vec3  u_mag_pole;      // geomagnetic dipole pole (unit normal)
+varying vec3 vNormalLocal;
 varying vec3 vWorldNormal;
 
 float hash21(vec2 p) {
@@ -798,9 +807,19 @@ float vnoise(vec2 p) {
 void main() {
     if (u_enabled < 0.5 || u_kp < 1.5) discard;
 
-    float latDeg = (vUv.y - 0.5) * 180.0;
-    float absLat = abs(latDeg);
-    float lonDeg = (vUv.x - 0.5) * 360.0;
+    // UV reconstructed from interpolated object-space normal (see EARTH_VERT
+    // for the rationale). Feed it straight into the same helpers used by the
+    // Earth surface shader so oval coordinates and surface lighting agree to
+    // the pixel.
+    vec3  nGeo        = normalize(vNormalLocal);
+    vec2  vUv         = normalToUV(nGeo);
+
+    // Oval position uses MAGNETIC latitude — dipole tilt puts the ring over
+    // Hudson Bay / Taymyr, not the geographic pole. Ripple phase keeps using
+    // geographic longitude because the wave pattern is visual, not physical.
+    float magCoLatDeg = GEO_RAD2DEG * magneticColatitude(nGeo, u_mag_pole);
+    float absLat      = 90.0 - min(magCoLatDeg, 180.0 - magCoLatDeg);
+    float lonDeg      = uvToLatLonDeg(vUv).y;
 
     // Effective storm strength — Kp plus a Bz-south kicker so a fresh
     // southward turning shoves the oval equatorward immediately, without
@@ -914,6 +933,10 @@ export function createEarthUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_aurora_power: { value: 0 },
         u_bz_south:     { value: 0 },
         u_dst_norm:     { value: 0 },
+        // Geomagnetic dipole north pole as a unit normal — drives the aurora
+        // oval off the geographic pole (11° tilt at 2025 epoch). Shared with
+        // the aurora mesh uniforms so oval + surface brightness agree.
+        u_mag_pole:     { value: geo.magneticPoleNormal() },
     };
 }
 
@@ -930,13 +953,14 @@ export function createAuroraUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         // Hemispheric auroral power proxy [0, 1]. Scales overall brightness
         // so real substorm surges show up as a globe-visible beat.
         u_aurora_power: { value: 0 },
+        // See note in createEarthUniforms — same IGRF-2025 dipole pole.
+        u_mag_pole:     { value: geo.magneticPoleNormal() },
     };
 }
 
 /** Default cloud layer uniforms. */
 export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
-        u_clouds:        { value: _proceduralCloudNoise() },
         u_weather:       { value: _blackTex() },
         u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
@@ -1042,7 +1066,8 @@ export class EarthSkin {
      * @param {THREE.Vector3}               sunDir   — initial sun direction (world space)
      * @param {object}                      opts
      * @param {number}  [opts.radius=1.0]            — Earth sphere radius
-     * @param {number}  [opts.segments=64]           — sphere tessellation
+     * @param {number}  [opts.segments=64]           — legacy; mapped to icoLevel (28→4, 48→5, 80+→6)
+     * @param {number}  [opts.icoLevel]              — icosphere subdivision level (overrides segments)
      * @param {boolean} [opts.clouds=true]           — include cloud shell
      * @param {boolean} [opts.atmosphere=true]       — include atmosphere rim
      * @param {boolean} [opts.aurora=true]           — aurora uniforms active
@@ -1050,10 +1075,17 @@ export class EarthSkin {
     constructor(parent, sunDir = new THREE.Vector3(1, 0, 0), {
         radius     = 1.0,
         segments   = 64,
+        icoLevel,
         clouds     = true,
         atmosphere = true,
     } = {}) {
         this._parent = parent;
+
+        // Map the legacy `segments` count to an icosphere subdivision level.
+        // Earth AND clouds share the level so their topology aligns exactly —
+        // no more cloud stripes floating relative to continents from mismatched
+        // SphereGeometry segment counts.
+        const lvl = icoLevel ?? (segments >= 80 ? 6 : segments >= 48 ? 5 : 4);
 
         // Earth surface
         this.earthU = createEarthUniforms(sunDir);
@@ -1062,12 +1094,14 @@ export class EarthSkin {
             uniforms: this.earthU,
         });
         this.earthMesh = new THREE.Mesh(
-            new THREE.SphereGeometry(radius, segments, segments),
+            new THREE.IcosahedronGeometry(radius, lvl),
             earthMat
         );
         parent.add(this.earthMesh);
 
-        // Cloud shell (1.009 R⊕ above surface)
+        // Cloud shell (1.009 R⊕ above surface) — IDENTICAL tessellation level
+        // to Earth so cloud features sit exactly over their underlying surface
+        // pixels at every latitude.
         this.cloudU   = null;
         this.cloudMesh = null;
         if (clouds) {
@@ -1079,14 +1113,15 @@ export class EarthSkin {
                 uniforms: this.cloudU, transparent: true, depthWrite: false,
             });
             this.cloudMesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius * 1.009, Math.round(segments * 0.75), Math.round(segments * 0.75)),
+                new THREE.IcosahedronGeometry(radius * 1.009, lvl),
                 cloudMat
             );
             this.cloudMesh.renderOrder = 3;  // after atmosphere glow (1)
             parent.add(this.cloudMesh);
         }
 
-        // Atmosphere rim glow
+        // Atmosphere rim glow — one level lower is plenty for a fresnel shell
+        // (silhouette only, no texture sampling).
         if (atmosphere) {
             const atmU = { u_sun_dir: this.earthU.u_sun_dir };
             const atmMat = new THREE.ShaderMaterial({
@@ -1095,7 +1130,7 @@ export class EarthSkin {
                 side: THREE.BackSide, blending: THREE.AdditiveBlending,
             });
             this._atmMesh = new THREE.Mesh(
-                new THREE.SphereGeometry(radius * 1.026, Math.round(segments * 0.5), Math.round(segments * 0.5)),
+                new THREE.IcosahedronGeometry(radius * 1.026, Math.max(3, lvl - 1)),
                 atmMat
             );
             this._atmMesh.renderOrder = 1;   // atmosphere glow renders first
@@ -1147,9 +1182,13 @@ export class EarthSkin {
 
         for (let i = 0; i < n; i++) {
             const s = storms[i];
-            // UV coordinate from lat/lon (Three.js SphereGeometry convention)
-            const u = (s.lon + 180) / 360;
-            const v = (90 - s.lat) / 180;
+            // UV coordinate from lat/lon via the unified coordinate module.
+            // geo.deg.latLonToUV applies the canonical convention:
+            //   u = (lon + 180) / 360,  v = (90 - lat) / 180
+            // — byte-for-byte the same as the old inline formula, but sourced
+            // from the same primitive the GLSL side uses after 3b.
+            const uv = geo.deg.latLonToUV(s.lat, s.lon);
+            const u = uv.x, v = uv.y;
             // Intensity: 0 at 35kt (tropical storm threshold), 1.0 at 157kt (Cat 5)
             const inten = Math.min(Math.max((s.intensityKt - 35) / 122, 0), 1);
             // Cyclone spin: CCW in NH (+1), CW in SH (-1)

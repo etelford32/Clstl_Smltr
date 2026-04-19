@@ -1,26 +1,31 @@
 /**
  * Vercel Edge Function: /api/weather/grid
  *
- * Public reader. Returns the newest row from Supabase's weather_grid_cache
- * — a 648-location Open-Meteo snapshot refreshed hourly by the cron at
- * /api/weather/refresh.
+ * Public reader. Returns the newest row from Supabase's weather_grid_cache —
+ * a 648-location Open-Meteo snapshot.
  *
  * Cache strategy (two layers):
- *   1. Vercel Edge CDN fronts this route with s-maxage=3600. Once a POP
- *      has served one response, every subsequent visitor in that region
- *      gets the cached bytes — zero DB hits, zero upstream calls.
+ *   1. Vercel Edge CDN fronts this route with s-maxage=3600. Once a POP has
+ *      served one response, every subsequent visitor in that region gets
+ *      the cached bytes — zero DB hits, zero upstream calls.
  *   2. Supabase persists the row so a cold POP (or redeploy) still serves
- *      fresh data without waiting for the next cron tick.
+ *      fresh data without waiting for the next refresh tick.
  *
- * stale-while-revalidate=600 lets the CDN keep serving a ~1 hr old copy
- * for up to 10 extra minutes while it refreshes in the background.
+ * stale-while-revalidate=600 lets the CDN keep serving a ~1 hr old copy for
+ * up to 10 extra minutes while it refreshes in the background.
+ *
+ * Refresher: Supabase pg_cron — hourly, sole writer. Defined in
+ * supabase-weather-pgcron-migration.sql. Runs entirely inside Postgres; no
+ * Vercel cron, no GitHub Actions. Staleness is surfaced to the UI via the
+ * `age_seconds` field on responses so a silent pg_cron failure is visible
+ * to visitors within one reload.
  *
  * Response shape (consumed by js/weather-feed.js):
  *   {
  *     source:      "open-meteo",
  *     fetched_at:  "2025-…Z",
  *     age_seconds: 1234,
- *     data:        [ { current: { temperature_2m, … } }, … ]  // 648 items
+ *     data:        [ { current: { temperature_2m, … } }, … ]   // 648 items
  *   }
  *
  * ── Env vars ────────────────────────────────────────────────────────
@@ -33,7 +38,7 @@ export const config = { runtime: 'edge' };
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
-const CACHE_TTL        = 3600;   // 1 hour — matches cron cadence
+const CACHE_TTL        = 3600;   // 1 hour — matches pg_cron cadence
 const CACHE_SWR        = 600;    // serve stale up to 10 min while refreshing
 const ERROR_CACHE_TTL  = 30;     // brief cache on upstream failure
 
@@ -77,7 +82,7 @@ export default async function handler() {
     }
     if (!row) {
         // Cache never populated yet — shorten TTL so clients retry quickly
-        // once the first cron run completes.
+        // once the first refresh (pg_cron or Vercel daily) completes.
         return json({ error: 'cache_empty' }, 503);
     }
 

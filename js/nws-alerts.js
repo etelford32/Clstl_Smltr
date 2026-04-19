@@ -28,6 +28,8 @@
  * Refreshes every REFRESH_MS (default 5 minutes).
  */
 
+import { geo } from './geo/coords.js';
+
 const NWS_API    = 'https://api.weather.gov/alerts/active';
 const REFRESH_MS = 5 * 60 * 1000;   // 5 minutes (NWS updates ~1-2 min)
 const USER_AGENT = '(CelestialSimulator/1.0, celestial@parker-physics.edu)';
@@ -162,6 +164,7 @@ export class NWSAlerts {
                 expires:   p.expires,
                 lat:       centroid.lat,
                 lon:       centroid.lon,
+                areaKm2:   centroid.areaKm2 ?? 0,    // spherical polygon area (0 for Point / state-fallback anchors)
             });
             bySeverity[severity] = (bySeverity[severity] ?? 0) + 1;
         }
@@ -183,38 +186,43 @@ export class NWSAlerts {
 
     // ── Centroid resolution ───────────────────────────────────────────────────
     // Priority: GeoJSON geometry → SAME geocode state lookup → null (skip)
+    // Centroid + area are computed spherically via js/geo/coords.js, so large
+    // polygons (winter-storm watches that cover several states) and polygons
+    // straddling the antimeridian both get a correct anchor point.
+    //
+    // Returns: { lat, lon, areaKm2 } or null if no geography resolvable.
     _centroid(feat) {
-        const geo = feat.geometry;
-        if (geo) {
-            switch (geo.type) {
+        const g = feat.geometry;
+        if (g) {
+            switch (g.type) {
                 case 'Point':
-                    return { lon: geo.coordinates[0], lat: geo.coordinates[1] };
-                case 'Polygon':
-                    return this._ringCentroid(geo.coordinates[0]);
+                    return {
+                        lon: g.coordinates[0],
+                        lat: g.coordinates[1],
+                        areaKm2: 0,
+                    };
+                case 'Polygon': {
+                    const ring = g.coordinates[0];
+                    const c = geo.sphericalRingCentroid(ring);
+                    if (!c) return null;
+                    c.areaKm2 = geo.sphericalRingAreaKm2(ring);
+                    return c;
+                }
                 case 'MultiPolygon': {
                     let best = null, bestArea = 0;
-                    for (const poly of geo.coordinates) {
-                        const a = this._ringArea(poly[0]);
+                    for (const poly of g.coordinates) {
+                        const a = geo.sphericalRingAreaKm2(poly[0]);
                         if (a > bestArea) { bestArea = a; best = poly[0]; }
                     }
-                    return best ? this._ringCentroid(best) : null;
+                    if (!best) return null;
+                    const c = geo.sphericalRingCentroid(best);
+                    if (!c) return null;
+                    c.areaKm2 = bestArea;
+                    return c;
                 }
             }
         }
         return this._geocodeFallback(feat.properties);
-    }
-
-    _ringCentroid(ring) {
-        let lon = 0, lat = 0;
-        for (const [x, y] of ring) { lon += x; lat += y; }
-        return { lon: lon / ring.length, lat: lat / ring.length };
-    }
-
-    _ringArea(ring) {
-        let a = 0;
-        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++)
-            a += (ring[j][0] + ring[i][0]) * (ring[j][1] - ring[i][1]);
-        return Math.abs(a / 2);
     }
 
     // Map SAME geocode prefix (state FIPS 01–78) → approximate centroid

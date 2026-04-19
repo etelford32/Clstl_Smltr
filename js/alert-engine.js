@@ -25,6 +25,7 @@ import { getSupabase, isConfigured } from './supabase-config.js';
 import { loadUserLocation } from './user-location.js';
 import { listLocations, effectivePrefs, onLocationsChanged } from './saved-locations.js';
 import { ConjunctionMonitor } from './conjunction-alert.js';
+import { geo, RAD } from './geo/coords.js';
 
 // ── Open-Meteo point forecast ────────────────────────────────────────────────
 
@@ -194,10 +195,19 @@ const ALERT_DEFS = [
                 };
             }
 
-            // Check if aurora oval reaches user's latitude
-            const magLat = Math.abs(loc.lat) + 3;  // rough geomagnetic offset
-            const boundary = 72 - kp * (17 / 9);
-            if (magLat < boundary) return null;
+            // Check if aurora oval reaches user's MAGNETIC latitude. Using
+            // geo.magneticColatitude (IGRF-2025 dipole) instead of the old
+            // `abs(lat) + 3` hack: matters for Reykjavik (high mag lat, lower
+            // geo lat) and for southern-hemisphere users whose dipole tilt
+            // runs the opposite direction. The boundary constant (72 - Kp·17/9
+            // deg) matches js/earth-skin.js:AURORA_FRAG and user-location.js.
+            const magCoLatDeg = geo.magneticColatitude({
+                lat: loc.lat * (Math.PI / 180),
+                lon: loc.lon * (Math.PI / 180),
+            }) * RAD;
+            const absMagLat = 90 - Math.min(magCoLatDeg, 180 - magCoLatDeg);
+            const boundary  = 72 - kp * (17 / 9);
+            if (absMagLat < boundary) return null;
 
             // Multi-factor scoring
             const factors = [];
