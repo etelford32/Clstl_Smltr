@@ -44,46 +44,6 @@ function _grayTex() {
     return t;
 }
 
-// ── Procedural noise texture (replaces CDN clouds.png dependency) ────────────
-// Generates a tileable multi-octave value noise texture on the CPU.
-// Used as the fine-detail layer in the cloud shader (25% blend weight).
-function _proceduralCloudNoise(W = 512, H = 256) {
-    function hash(ix, iy) {
-        let n = Math.sin(ix * 127.1 + iy * 311.7) * 43758.5453;
-        return n - Math.floor(n);
-    }
-    function vnoise(x, y) {
-        const ix = Math.floor(x), iy = Math.floor(y);
-        const fx = x - ix, fy = y - iy;
-        const sx = fx * fx * (3 - 2 * fx);
-        const sy = fy * fy * (3 - 2 * fy);
-        const a = hash(ix, iy), b = hash(ix + 1, iy);
-        const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
-        return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
-    }
-    function fbm(x, y) {
-        let val = 0, amp = 0.5, freq = 1;
-        for (let o = 0; o < 5; o++) {
-            val += amp * vnoise(x * freq, y * freq);
-            freq *= 2.0; amp *= 0.5;
-        }
-        return val;
-    }
-    const data = new Uint8Array(W * H * 4);
-    for (let j = 0; j < H; j++) {
-        for (let i = 0; i < W; i++) {
-            const n = fbm(i / W * 10, j / H * 5);
-            const v = Math.max(0, Math.min(255, (n * 255) | 0));
-            const k = (j * W + i) * 4;
-            data[k] = data[k + 1] = data[k + 2] = v;
-            data[k + 3] = 255;
-        }
-    }
-    const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping;
-    t.needsUpdate = true;
-    return t;
-}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  EARTH SURFACE SHADERS
@@ -287,7 +247,6 @@ precision mediump float;
 
 ${GEO_GLSL}
 
-uniform sampler2D u_clouds;
 uniform sampler2D u_weather;       // R=temp, G=pressure, B=humidity, A=wind
 uniform sampler2D u_cloud_layers;  // R=cl_low, G=cl_mid, B=cl_high, A=precip [0-1]
 uniform sampler2D u_satellite;     // GOES/MODIS cloud image (grayscale brightness)
@@ -394,34 +353,51 @@ float warpedFbm3(vec3 p, int octaves) {
     return fbm3(p + warp * 1.15, octaves);
 }
 
-// ── Cyclonic swirl UV offset ──────────────────────────────────────────────────
-// For each active storm, rotate the cloud lookup UV around the storm eye.
-// Northern Hemisphere: CCW (spin=+1). Southern Hemisphere: CW (spin=-1).
-vec2 stormSwirl(vec2 uv) {
-    vec2 swirl = vec2(0.0);
+// ── Rotations on the unit sphere ──────────────────────────────────────────────
+// The cloud noise and storm swirl used to operate on equirectangular UV
+// offsets, which produced stripes (UV-space stretch + hard-coded cirrus
+// anisotropy). Now everything happens in 3-D on the sphere: drift = slow
+// rotation about the spin axis, swirl = Rodrigues rotation around each
+// storm's 3-D centre.
+
+// Rodrigues rotation of p around unit vector axis by angle radians.
+vec3 rotateAroundAxis(vec3 p, vec3 axis, float angle) {
+    float c = cos(angle);
+    float s = sin(angle);
+    return p * c + cross(axis, p) * s + axis * dot(axis, p) * (1.0 - c);
+}
+
+// Rotation about the world Y axis (planet spin axis). Cheap specialisation
+// of rotateAroundAxis for the "eastward drift" case. Positive angle rotates
+// toward +east (prime meridian → lon +90°E).
+vec3 rotateY(vec3 p, float angle) {
+    float c = cos(angle), s = sin(angle);
+    return vec3(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
+}
+
+// ── Cyclonic swirl on the 3-D normal ──────────────────────────────────────────
+// For each active storm, rotate the sampling normal around the storm's
+// 3-D centre by an angle that falls off with great-circle distance.
+// NH (spin = +1): CCW viewed from outside the sphere.
+// SH (spin = -1): CW  viewed from outside the sphere.
+vec3 stormSwirl3D(vec3 N) {
+    vec3 result = N;
     for (int i = 0; i < 8; i++) {
         if (i >= u_storm_count) break;
-        vec2  center = u_storms[i].xy;
-        float inten  = u_storms[i].z;
-        float spin   = u_storms[i].w;
+        vec3  centerN = uvToNormal(u_storms[i].xy);
+        float inten   = u_storms[i].z;
+        float spin    = u_storms[i].w;
 
-        vec2 d = uv - center;
-        // Wrap longitude seam (UV u is periodic)
-        if (d.x >  0.5) d.x -= 1.0;
-        if (d.x < -0.5) d.x += 1.0;
+        float ang       = acos(clamp(dot(result, centerN), -1.0, 1.0));
+        float radiusAng = 0.12 + inten * 0.10;           // ≈7°–14° = ~800–1550 km
 
-        float dist   = length(d);
-        float radius = 0.07 + inten * 0.05;   // storm radius in UV space (≈ 700–1200 km)
-
-        if (dist < radius * 2.2) {
-            float falloff = smoothstep(radius * 2.2, 0.0, dist);
-            float angle   = spin * inten * falloff * 2.2;   // max ~126° spiral
-            float c = cos(angle), s = sin(angle);
-            vec2 rotated = vec2(d.x * c - d.y * s, d.x * s + d.y * c);
-            swirl += (rotated - d) * falloff;
+        if (ang < radiusAng * 2.2) {
+            float falloff  = smoothstep(radiusAng * 2.2, 0.0, ang);
+            float rotAngle = spin * inten * falloff * 2.2;   // peak ~126° at eye
+            result = rotateAroundAxis(result, centerN, rotAngle);
         }
     }
-    return swirl;
+    return result;
 }
 
 // ── Eye / eyewall structure for intense storms ────────────────────────────────
@@ -468,41 +444,43 @@ void main() {
     float lit   = clamp(NdotL * 0.5 + 0.5, 0.0, 1.0);
     lit = lit * lit;
 
-    // Compute cyclonic UV swirl from active storm systems
-    vec2 swirl = (u_storm_count > 0) ? stormSwirl(vUv) : vec2(0.0);
+    // ── Sample-normal advection ──────────────────────────────────────────────
+    // Apply cyclonic swirl + slow eastward drift directly to the 3-D sampling
+    // normal. All noise below reads from the SPHERE, not from equirectangular
+    // UV — this is what kills the cirrus stripes and the polar UV-stretch.
+    vec3 N_swirled = (u_storm_count > 0) ? stormSwirl3D(N_sphere) : N_sphere;
 
-    // Slow horizontal drift + independent time slice fed into the third
-    // noise dimension — the 3-D slice lets clouds MORPH (form / dissipate)
-    // in place instead of sliding across the sphere as a rigid texture.
-    vec2  driftLow  = vec2(u_time * 0.0000330, u_time * 0.0000040);
-    vec2  driftMid  = vec2(u_time * 0.0000480, u_time * 0.0000060);
-    vec2  driftHigh = vec2(u_time * 0.0000720, u_time * 0.0000090);
+    // Drift rates match the old UV speeds: original was U units per second,
+    // so we multiply by 2π to convert to radians around the Y axis. Preserves
+    // the pre-existing cloud-drift cadence.
+    const float TAU     = 6.2831853;
+    const float yawLow  = 0.0000330 * TAU;
+    const float yawMid  = 0.0000480 * TAU;
+    const float yawHigh = 0.0000720 * TAU;
+
+    vec3 N_low  = rotateY(N_swirled, u_time * yawLow);
+    vec3 N_mid  = rotateY(N_swirled, u_time * yawMid);
+    vec3 N_high = rotateY(N_swirled, u_time * yawHigh);
+
     float tLow  = u_time * 0.00060;
     float tMid  = u_time * 0.00085;
     float tHigh = u_time * 0.00120;
 
-    vec2 uvLow  = vUv + driftLow  + swirl;
-    vec2 uvMid  = vUv + driftMid  + swirl * 0.7;
-    vec2 uvHigh = vUv + driftHigh + swirl * 0.4;
-
     // ── Multi-octave procedural noise per cloud layer ────────────────────────
-    // Each layer samples domain-warped 3-D FBM at its own frequency + time
-    // slice so layers evolve independently and nothing reads as parallel bands.
+    // warpedFbm3 samples 3-D noise directly on the sphere normal. Each layer's
+    // frequency is isotropic (same scalar on x/y/z) — no more cirrus 22:8
+    // east-west stretch. Time is carried as a z-plane offset so clouds morph
+    // in place. Per-layer phase offsets (3.7, 7.3) decouple the layers so they
+    // don't lock into identical shapes at the same frequency.
 
     // Low cumulus: defined puffy cells
-    float nLow  = warpedFbm3(vec3(uvLow  * 14.0,        tLow),  5);
+    float nLow  = warpedFbm3(N_low  * 14.0 + vec3(0.0, 0.0, tLow),  5);
     // Mid altostratus: smoother, broader
-    float nMid  = warpedFbm3(vec3(uvMid  *  9.5 + 3.7,  tMid),  4);
-    // High cirrus: anisotropic sampling gives the wispy elongated look,
-    // but the domain warp keeps it from reading as horizontal stripes.
-    float nHigh = warpedFbm3(vec3(uvHigh.x * 22.0, uvHigh.y * 8.0, tHigh) + vec3(7.3, 7.3, 0.0), 5);
-
-    // Previously we blended a separate procedural noise texture in at
-    // ~10-12% for pixel-scale grain. That texture was generated flat on a
-    // 2:1 equirect canvas, which stretched features into horizontal stripes
-    // when wrapped onto a sphere. The shader's own warpedFbm3 already gives
-    // multi-octave detail on a spherical domain (no seams, no elongation),
-    // so the lookup is intentionally skipped.
+    float nMid  = warpedFbm3(N_mid  *  9.5 + vec3(3.7, 0.0, tMid),  4);
+    // High cirrus: higher frequency for thinner strands. ISOTROPIC — the
+    // wispy elongation will come back later from wind-driven flow advection
+    // (step 6 in the plan), not from a hard-coded frequency ratio.
+    float nHigh = warpedFbm3(N_high * 22.0 + vec3(7.3, 7.3, tHigh), 5);
 
     float alphaLow = 0.0, alphaMid = 0.0, alphaHigh = 0.0;
     float precip   = 0.0;
@@ -983,7 +961,6 @@ export function createAuroraUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
 /** Default cloud layer uniforms. */
 export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
     return {
-        u_clouds:        { value: _proceduralCloudNoise() },
         u_weather:       { value: _blackTex() },
         u_cloud_layers:  { value: _blackTex() },  // real cloud fraction + precip
         u_satellite:     { value: _grayTex()  },  // GOES/MODIS satellite imagery
