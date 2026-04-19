@@ -1,20 +1,28 @@
 /**
  * Vercel Edge Function: /api/weather/refresh
  *
- * Cron-triggered writer. Fetches the 648-point Open-Meteo grid ONCE
- * per hour and persists the raw per-location array into Supabase's
- * weather_grid_cache table. Every user-facing request reads from that
- * row instead of hitting Open-Meteo directly, so upstream traffic is
- * decoupled from visitor traffic.
+ * Writer endpoint. Fetches the 648-point Open-Meteo grid and persists the
+ * raw per-location array into Supabase's weather_grid_cache table. Every
+ * user-facing request reads from that row via /api/weather/grid, so upstream
+ * Open-Meteo traffic is decoupled from visitor traffic.
  *
- * Triggered by Vercel Cron (see vercel.json "crons" entry). Vercel Cron
- * adds an Authorization: Bearer <CRON_SECRET> header; we verify it so
- * random callers can't force a refresh.
+ * Invocation sources:
+ *   1. Vercel Cron — daily (Hobby plan limit). vercel.json schedule is kept
+ *      as a safety net that guarantees at least one refresh per day even if
+ *      every other trigger fails.
+ *   2. GitHub Actions Cron — hourly (.github/workflows/weather-refresh.yml).
+ *      This is the primary freshness driver on Hobby deployments.
+ *   3. /api/weather/grid — on a read that sees stale data, it invokes
+ *      performRefresh() via ctx.waitUntil() so the first visitor of each
+ *      hour eats no latency while still trickling fresh data into the cache.
+ *
+ * Authenticated callers (1 and 2) send `Authorization: Bearer ${CRON_SECRET}`.
+ * Case 3 imports performRefresh() directly and bypasses the HTTP layer.
  *
  * ── Env vars ────────────────────────────────────────────────────────
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_KEY   — service_role (bypasses RLS)
- *   CRON_SECRET            — shared secret Vercel Cron sends
+ *   CRON_SECRET            — shared secret Vercel Cron / GH Actions send
  */
 
 export const config = { runtime: 'edge' };
@@ -111,6 +119,31 @@ async function trimHistory() {
     } catch { /* noop */ }
 }
 
+/**
+ * Fetch + persist one Open-Meteo snapshot. Named export so /api/weather/grid
+ * can call it directly via ctx.waitUntil() without going through HTTP +
+ * auth. Throws on upstream / DB failure; callers decide what to do.
+ *
+ * @returns {Promise<{ ok: true, locations: number, refreshed_at: string }>}
+ */
+export async function performRefresh() {
+    if (!SUPABASE_URL || !SUPABASE_KEY) {
+        throw new Error('supabase_not_configured');
+    }
+    const rows = await fetchOpenMeteo();
+    if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error('Empty Open-Meteo response');
+    }
+    await insertRow(rows);
+    await trimHistory();
+    return {
+        ok: true,
+        source: 'open-meteo',
+        locations: rows.length,
+        refreshed_at: new Date().toISOString(),
+    };
+}
+
 export default async function handler(req) {
     if (CRON_SECRET) {
         const auth = req.headers.get('authorization') || '';
@@ -118,24 +151,11 @@ export default async function handler(req) {
             return json({ error: 'unauthorized' }, 401);
         }
     }
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
-        return json({ error: 'supabase_not_configured' }, 500);
-    }
-
     try {
-        const rows = await fetchOpenMeteo();
-        if (!Array.isArray(rows) || rows.length === 0) {
-            throw new Error('Empty Open-Meteo response');
-        }
-        await insertRow(rows);
-        await trimHistory();
-        return json({
-            ok: true,
-            source: 'open-meteo',
-            locations: rows.length,
-            refreshed_at: new Date().toISOString(),
-        });
+        const result = await performRefresh();
+        return json(result);
     } catch (e) {
-        return json({ error: 'refresh_failed', detail: e.message }, 502);
+        const status = e.message === 'supabase_not_configured' ? 500 : 502;
+        return json({ error: 'refresh_failed', detail: e.message }, status);
     }
 }
