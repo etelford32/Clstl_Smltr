@@ -518,3 +518,28 @@ export async function fetchEmailActivity(limit = 30) {
         return { ok: false, error: err.message };
     }
 }
+
+// ── Scheduled job (pg_cron) status ───────────────────────────────────────────
+// Reads the admin_get_cron_status SECURITY DEFINER RPC. Surfaces every
+// pg_cron job's last-run status + 24h failure count so silent cron failures
+// (which currently only land in cron.job_run_details) are visible on the
+// admin dashboard.
+
+/**
+ * Returns one entry per scheduled job. See the migration file for full
+ * column docs. Empty result if pg_cron isn't installed or the caller
+ * isn't admin (RPC degrades gracefully rather than erroring).
+ */
+export async function fetchCronStatus() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client.rpc('admin_get_cron_status');
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}

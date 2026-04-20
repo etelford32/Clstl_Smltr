@@ -58,6 +58,7 @@ supabase-security-tighten-migration.sql   # analytics + session RLS hardening
 supabase-invites-email-migration.sql      # email-targeted invites + RPCs
 supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
 supabase-schema-hardening-migration.sql   # role/endpoint CHECKs + delete_user_data RPC
+supabase-retention-cron-migration.sql     # analytics/alert retention + cron-status RPC
 ```
 
 If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable

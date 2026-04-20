@@ -365,6 +365,18 @@
                 <div id="config-info"></div>
             </div>
         </div>
+        <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
+        <!-- Surfaces the most-recent run + 24h failure counts for every
+             pg_cron job so silent cron failures are visible BEFORE
+             users notice stale data downstream. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Scheduled Jobs
+                <button class="btn btn-sm" id="btn-refresh-cron" style="float:right">Refresh</button>
+            </h3>
+            <div id="cron-status-container"><div class="empty">Loading...</div></div>
+        </div>
+
         <div class="row2">
             <div class="card">
                 <h3>System Info</h3>
@@ -391,7 +403,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -801,6 +813,72 @@ async function loadEmailActivity() {
 document.getElementById('btn-refresh-email').addEventListener('click', loadEmailActivity);
 document.getElementById('email-window').addEventListener('change', loadEmailActivity);
 loadEmailActivity();
+
+// ── Scheduled jobs (pg_cron) health card ────────────────────────────────────
+// Reads admin_get_cron_status — returns every pg_cron job's most recent run
+// plus 24h fail/total counts. Anything other than "succeeded" in the last run
+// renders red so operators see silent failures before user-facing data goes
+// stale downstream.
+async function loadCronStatus() {
+    const el = document.getElementById('cron-status-container');
+    const res = await fetchCronStatus();
+
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty">Failed to load: ${_esc(res.error)}</div>`;
+        return;
+    }
+    if (!res.data.length) {
+        el.innerHTML = `<div class="empty">No scheduled jobs found.<br><br>pg_cron may not be enabled, or you may not have admin access. Apply <code>supabase-weather-pgcron-migration.sql</code> + <code>supabase-retention-cron-migration.sql</code> in the Supabase SQL Editor.</div>`;
+        return;
+    }
+
+    const fmtRel = (iso) => {
+        if (!iso) return 'never';
+        const ms = Date.now() - new Date(iso).getTime();
+        if (ms < 60_000)     return `${Math.round(ms / 1000)}s ago`;
+        if (ms < 3_600_000)  return `${Math.round(ms / 60_000)}m ago`;
+        if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+        return `${Math.round(ms / 86_400_000)}d ago`;
+    };
+
+    let html = '<table><thead><tr>'
+             + '<th>Job</th><th>Schedule</th><th>Last run</th>'
+             + '<th>Status</th><th>24h runs</th><th>24h failures</th>'
+             + '</tr></thead><tbody>';
+
+    for (const j of res.data) {
+        const statusColor = j.last_run_status === 'succeeded' ? '#4eff91'
+                         : j.last_run_status === 'failed'    ? '#ff6b6b'
+                         : j.last_run_status === 'running'   ? '#ffaa44'
+                         :                                      '#778';
+        const statusLabel = j.last_run_status || '— never run';
+        const durStr = j.last_run_duration_s != null
+            ? ` · ${Number(j.last_run_duration_s).toFixed(1)}s`
+            : '';
+        const failColor = Number(j.recent_failures_24h) > 0 ? '#ff6b6b' : '#556';
+        const failWeight = Number(j.recent_failures_24h) > 0 ? '700' : '400';
+        const inactiveChip = j.active
+            ? ''
+            : ` <span style="color:#ff6b6b;font-size:.68rem;background:rgba(255,107,107,.1);padding:1px 6px;border-radius:4px;margin-left:4px">inactive</span>`;
+        const msgTooltip = j.last_run_message
+            ? ` title="${_esc(j.last_run_message)}"`
+            : '';
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(j.jobname)}</strong>${inactiveChip}<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(j.command_preview)}${j.command_preview.length >= 80 ? '…' : ''}</div></td>`
+             +  `<td style="font-family:ui-monospace,monospace;font-size:.78rem;color:#9ad">${_esc(j.schedule)}</td>`
+             +  `<td style="color:#aab;font-size:.78rem"${msgTooltip}>${fmtRel(j.last_run_at)}${durStr}</td>`
+             +  `<td style="color:${statusColor};font-weight:600;font-size:.78rem">${_esc(statusLabel)}</td>`
+             +  `<td style="color:#aab">${j.recent_runs_24h}</td>`
+             +  `<td style="color:${failColor};font-weight:${failWeight}">${j.recent_failures_24h}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-cron').addEventListener('click', loadCronStatus);
+loadCronStatus();
 
 document.getElementById('btn-gen-invite').addEventListener('click', async () => {
     const btn = document.getElementById('btn-gen-invite');
