@@ -277,6 +277,14 @@
                 </div>
 
                 <form id="signup-form" novalidate>
+                    <!-- Invite code (optional). Pre-filled from ?code= URL param when
+                         the user arrives via an admin-issued email invite. -->
+                    <div class="form-group">
+                        <label for="invite-code">Invite Code <span style="font-weight:400;color:#778;font-size:.85em">(optional)</span></label>
+                        <input type="text" id="invite-code" name="invite_code" placeholder="ABCDEFGH" autocomplete="off" style="text-transform:uppercase;letter-spacing:.08em">
+                        <div id="invite-status" style="font-size:.78rem;margin-top:6px;min-height:1.1em"></div>
+                    </div>
+
                     <div class="form-row">
                         <div class="form-group">
                             <label for="first-name">First Name</label>
@@ -337,9 +345,64 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
+    import { validateInviteCode, redeemInviteCode } from './js/admin-invites.js';
+
     await auth.ready();
     if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
-    window._ppAuth = { auth };
+    window._ppAuth = { auth, validateInviteCode, redeemInviteCode };
+
+    // ── Invite code: URL pre-fill + live validation ──────────────────────
+    // The ?code= and ?email= params are populated by the magic link sent
+    // from /api/invites/send. Email-targeted invites only validate when
+    // both the code AND the right email are supplied.
+    const params       = new URLSearchParams(location.search);
+    const urlCode      = (params.get('code') || params.get('invite') || '').toUpperCase().trim();
+    const urlEmail     = (params.get('email') || '').trim();
+    const codeInput    = document.getElementById('invite-code');
+    const emailInput   = document.getElementById('email');
+    const statusEl     = document.getElementById('invite-status');
+
+    if (urlCode)  codeInput.value  = urlCode;
+    if (urlEmail) emailInput.value = urlEmail;
+
+    let _validatedInvite = null;   // { plan, inviteId, isTargeted } when valid
+
+    async function validateNow() {
+        const code  = codeInput.value.trim().toUpperCase();
+        const email = emailInput.value.trim();
+        if (!code) {
+            statusEl.textContent = '';
+            statusEl.style.color = '';
+            _validatedInvite = null;
+            return;
+        }
+        statusEl.textContent = 'Checking…';
+        statusEl.style.color = '#778';
+        const res = await validateInviteCode(code, email || null);
+        if (res.ok) {
+            const planLabel = res.plan === 'advanced' ? 'Advanced'
+                            : res.plan === 'basic'    ? 'Basic'
+                            :                           'Free';
+            statusEl.textContent = `✓ Valid invite — ${planLabel} tier${res.isTargeted ? ' (email-locked)' : ''}`;
+            statusEl.style.color = '#4eff91';
+            _validatedInvite = res;
+            // Auto-select the plan to match the invite
+            if (typeof window.selectPlan === 'function') window.selectPlan(res.plan);
+        } else {
+            statusEl.textContent = `✗ ${res.error || 'Invalid code'}`;
+            statusEl.style.color = '#ffaaaa';
+            _validatedInvite = null;
+        }
+    }
+
+    codeInput.addEventListener('blur',  validateNow);
+    emailInput.addEventListener('blur', () => { if (codeInput.value) validateNow(); });
+
+    // Validate immediately if URL pre-filled the code
+    if (urlCode) validateNow();
+
+    // Expose for the form-submit handler in the classic <script> block
+    window._ppGetInvite = () => _validatedInvite;
 </script>
 <script>
     // ── Plan pre-selection from URL param ──────────────────────────
@@ -355,6 +418,9 @@
         const btn = document.getElementById('btn-submit');
         btn.className = 'btn-submit' + (val === 'basic' ? ' basic-plan' : val === 'advanced' ? ' advanced-plan' : '');
     }
+    // Expose for the invite-validation module above to auto-pick the
+    // tier the invite was issued for.
+    window.selectPlan = selectPlan;
     selectPlan(urlPlan);
 
     document.querySelectorAll('.plan-pill').forEach(pill => {
@@ -417,7 +483,9 @@
             const emailVal = document.getElementById('email').value;
             const passwordVal = document.getElementById('password').value;
 
-            const { auth } = window._ppAuth || {};
+            const { auth, redeemInviteCode } = window._ppAuth || {};
+            const invite = (typeof window._ppGetInvite === 'function')
+                ? window._ppGetInvite() : null;
             if (!auth) {
                 btn.textContent = 'Error — reload page';
                 btn.disabled = false;
@@ -428,7 +496,9 @@
                 email: emailVal,
                 password: passwordVal,
                 name: `${firstName} ${lastName}`.trim(),
-                plan,
+                // Trust the invite's plan over the radio if both are present —
+                // the invite was issued by an admin for a specific tier.
+                plan: invite?.plan || plan,
             });
 
             if (!result.success) {
@@ -440,6 +510,14 @@
                     errEl.classList.add('visible');
                 }
                 return;
+            }
+
+            // Redeem the invite (idempotent on the server: ON CONFLICT no-op,
+            // accepted_at set only on first redeem). Failure here does NOT
+            // block signup — the account exists, the user can be upgraded
+            // manually if redemption breaks.
+            if (invite?.inviteId && redeemInviteCode) {
+                redeemInviteCode(invite.inviteId, emailVal).catch(() => {});
             }
 
             if (result.needsConfirmation) {
