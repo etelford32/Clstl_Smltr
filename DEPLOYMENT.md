@@ -41,6 +41,70 @@ The easiest way to share your simulation online using Pygbag (Pygame compiled to
    - [Vercel](https://vercel.com/)
    - [GitHub Pages](https://pages.github.com/)
 
+## 🔐 Supabase Setup & Admin Bootstrap
+
+Required once per Supabase project, before the first sign-up. The
+migrations are idempotent — safe to re-run if you ever rebuild.
+
+**1. Apply the schema migrations in order** (Supabase Dashboard → SQL
+Editor → paste each file → Run):
+
+```
+supabase-schema.sql                       # core tables, RLS, helpers
+supabase-multi-location-migration.sql     # per-plan saved-location caps
+supabase-weather-cache-migration.sql      # weather_grid_cache table
+supabase-weather-pgcron-migration.sql     # hourly Open-Meteo refresh
+supabase-security-tighten-migration.sql   # analytics + session RLS hardening
+supabase-invites-email-migration.sql      # email-targeted invites + RPCs
+supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
+```
+
+If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable
+the extension via Database → Extensions in the Supabase dashboard,
+then re-run the migration.
+
+**2. Set Vercel environment variables** (Project → Settings →
+Environment Variables, scope = Production):
+
+| Var | Required for |
+|---|---|
+| `SUPABASE_URL` | every `/api/*` endpoint |
+| `SUPABASE_SERVICE_KEY` | every `/api/*` endpoint (service_role, server-only) |
+| `RESEND_API_KEY` | `/api/alerts/email`, `/api/invites/send` |
+| `INVITE_FROM_EMAIL` | optional; defaults to `Parker Physics <invites@parkerphysics.com>` |
+| `ALERT_FROM_EMAIL` | optional; defaults to `Parker Physics Alerts <alerts@parkerphysics.com>` |
+| `APP_URL` | optional; defaults to `https://parkerphysics.com` (used in invite magic links) |
+| `STRIPE_SECRET_KEY` + `STRIPE_*_PRICE_ID` + `STRIPE_WEBHOOK_SECRET` | paid tiers |
+
+**3. Promote the first admin** — after you've signed up your own
+account through `/signup`, run this in the Supabase SQL Editor (one
+time per project, replace the email with yours):
+
+```sql
+UPDATE public.user_profiles
+   SET role = 'superadmin'
+ WHERE id = (
+     SELECT id FROM auth.users WHERE email = 'you@example.com'
+ );
+```
+
+There is no UI path for this on purpose — `is_admin()` gates
+admin-only routes in the database, so the very first admin must be
+promoted out-of-band. Subsequent admins can be promoted by an
+existing `superadmin` from the admin dashboard.
+
+**4. Sanity check** — sign in, visit `/admin`, confirm the dashboard
+loads (KPIs, Email Activity, Invites tabs all populate). If "Not
+authorized" appears, the role update didn't apply or the JWT hasn't
+refreshed; sign out, sign back in.
+
+**5. Recommended Supabase Auth hardening** (Dashboard → Authentication
+→ Providers / Policies, no code change):
+- Password minimum length: 10+
+- Enable "Protect against breached passwords" (HaveIBeenPwned check)
+- Session timeout: 7 days for normal users, shorter for staff
+- Confirm email enabled (default)
+
 ## 🐳 Option 2: Docker with VNC (Full 3D Version)
 
 Run the full OpenGL version in a container with remote access via VNC.
