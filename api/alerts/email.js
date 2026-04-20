@@ -7,7 +7,12 @@
  * ── Security ─────────────────────────────────────────────────────────────────
  *  - Validates the Supabase JWT from the Authorization header
  *  - Only sends to the authenticated user's own email (no arbitrary recipients)
- *  - Rate-limited: max 10 emails per user per hour (tracked in-memory)
+ *  - Rate-limited: max 10 emails per user per hour, tracked in
+ *    public.email_send_log via the try_send_email_quota RPC. The DB-
+ *    backed limit is global across Vercel POPs (the previous in-memory
+ *    counter could be bypassed by hitting different edge regions).
+ *  - Every send attempt — allowed or throttled — gets a row in the
+ *    log, which the admin dashboard reads as audit + analytics.
  *  - Requires RESEND_API_KEY env var (set in Vercel Dashboard → Settings → Env)
  *
  * ── Request ──────────────────────────────────────────────────────────────────
@@ -44,9 +49,6 @@ const RESEND_KEY    = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkerphysics.com>';
 const MAX_PER_HOUR  = 10;
 
-// In-memory rate limiter (resets on cold start — acceptable for edge function)
-const _rateBucket = new Map();
-
 function jsonResp(body, status = 200) {
     return Response.json(body, {
         status,
@@ -78,16 +80,48 @@ async function verifyJwt(authHeader) {
     }
 }
 
-/** Check rate limit: max MAX_PER_HOUR emails per user per hour. */
-function checkRate(userId) {
-    const now = Date.now();
-    const bucket = _rateBucket.get(userId) ?? [];
-    // Prune entries older than 1 hour
-    const recent = bucket.filter(t => now - t < 3600_000);
-    _rateBucket.set(userId, recent);
-    if (recent.length >= MAX_PER_HOUR) return false;
-    recent.push(now);
-    return true;
+/**
+ * DB-backed rate limit + audit log via try_send_email_quota RPC.
+ * Atomically checks whether the user is under their hourly cap and
+ * inserts a row in email_send_log (with throttled set accordingly).
+ *
+ * Returns true if the caller may proceed to send the email.
+ *
+ * On Supabase / network failure we FAIL OPEN — log a warning and let
+ * the send proceed. The alternative (fail closed) would mean a
+ * single Supabase blip blocks every user's alerts. The endpoint is
+ * still gated by JWT validation and by Resend's own per-key limits.
+ */
+async function checkRate({ userId, recipient, subject, severity, alertType }) {
+    if (!SUPABASE_KEY) return true;     // not configured — skip
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/try_send_email_quota`, {
+            method:  'POST',
+            headers: {
+                apikey:        SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`,
+                'Content-Type':'application/json',
+            },
+            body: JSON.stringify({
+                p_user_id:        userId,
+                p_endpoint:       'alerts',
+                p_recipient:      recipient,
+                p_subject:        subject,
+                p_metadata:       { severity, alert_type: alertType },
+                p_limit:          MAX_PER_HOUR,
+                p_window_seconds: 3600,
+            }),
+        });
+        if (!res.ok) {
+            console.warn('[alerts/email] quota RPC HTTP', res.status, '— failing open');
+            return true;
+        }
+        const allowed = await res.json();
+        return allowed === true;
+    } catch (e) {
+        console.warn('[alerts/email] quota RPC error:', e.message, '— failing open');
+        return true;
+    }
 }
 
 /** Build a clean HTML email body. */
@@ -157,12 +191,8 @@ export default async function handler(req) {
         return jsonResp({ error: 'unauthorized' }, 401);
     }
 
-    // Rate limit
-    if (!checkRate(user.id)) {
-        return jsonResp({ error: 'rate_limited', detail: `Max ${MAX_PER_HOUR} emails per hour` }, 429);
-    }
-
-    // Parse body
+    // Parse body BEFORE rate-check so the log row carries the actual
+    // alert metadata (subject, severity) for admin analytics.
     let payload;
     try {
         payload = await req.json();
@@ -178,10 +208,25 @@ export default async function handler(req) {
         return jsonResp({ error: 'missing_fields', detail: 'title and body required' }, 400);
     }
 
-    // Prefix subject with location label so multi-location subscribers
-    // can triage the alert at a glance from their inbox.
-    const locPrefix = location_label ? `[${location_label}] ` : '';
-    const subject   = `[${severity.toUpperCase()}] ${locPrefix}${title}`;
+    // Pre-build subject so the rate-limit log row matches what gets sent.
+    const locPrefixForLog = location_label ? `[${location_label}] ` : '';
+    const logSubject      = `[${severity.toUpperCase()}] ${locPrefixForLog}${title}`;
+
+    // DB-backed rate limit + audit insert (atomic, global across POPs).
+    const allowed = await checkRate({
+        userId:    user.id,
+        recipient: user.email,
+        subject:   logSubject,
+        severity,
+        alertType: alert_type,
+    });
+    if (!allowed) {
+        return jsonResp({ error: 'rate_limited', detail: `Max ${MAX_PER_HOUR} emails per hour` }, 429);
+    }
+
+    // Subject already computed above (logSubject) so the audit log
+    // and the actual Resend message carry the same string.
+    const subject = logSubject;
 
     // Send via Resend
     try {
