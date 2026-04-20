@@ -317,6 +317,28 @@
             <h3>All Invite Codes <button class="btn btn-sm" id="btn-refresh-invites" style="float:right">Refresh</button></h3>
             <div id="invites-container"><div class="empty">Loading...</div></div>
         </div>
+
+        <!-- ── Email send activity (rate-limit + audit log) ───────── -->
+        <div class="card" style="margin-top:18px">
+            <h3>
+                Email Activity
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last
+                    <select id="email-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="24">24 hours</option>
+                        <option value="168" selected>7 days</option>
+                        <option value="720">30 days</option>
+                    </select>
+                </span>
+                <button class="btn btn-sm" id="btn-refresh-email" style="float:right">Refresh</button>
+            </h3>
+            <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+                <div class="kpi"><div class="kpi-val" id="kpi-email-sent"      style="color:#4eff91">--</div><div class="kpi-label">Sent</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-throttled" style="color:#ffaa44">--</div><div class="kpi-label">Throttled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-alerts"    style="color:#00c6ff">--</div><div class="kpi-label">Alerts</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-invites"   style="color:#c080ff">--</div><div class="kpi-label">Invites</div></div>
+            </div>
+            <div id="email-activity-container"><div class="empty">Loading...</div></div>
+        </div>
     </div>
 
     <!-- ═══════════════════ SYSTEM TAB ═══════════════════ -->
@@ -369,7 +391,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -712,6 +734,74 @@ async function loadInvites() {
 }
 loadInvites();
 
+// ── Email send activity (rate-limit + audit log) ────────────────────────────
+// Reads public.email_send_log via the admin-analytics helpers. Reflects every
+// send attempt across both endpoints (alerts + invites), including throttled
+// requests, so admins can see at a glance whether someone is hitting the cap.
+// Uses the page-level _esc() defined above for HTML escaping.
+
+function _fmtRelative(iso) {
+    if (!iso) return '—';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000)        return `${Math.round(ms / 1000)}s ago`;
+    if (ms < 3_600_000)     return `${Math.round(ms / 60_000)}m ago`;
+    if (ms < 86_400_000)    return `${Math.round(ms / 3_600_000)}h ago`;
+    return `${Math.round(ms / 86_400_000)}d ago`;
+}
+
+async function loadEmailActivity() {
+    const windowHours = parseInt(document.getElementById('email-window').value, 10) || 168;
+
+    const [statsRes, activityRes] = await Promise.all([
+        fetchEmailStats(windowHours),
+        fetchEmailActivity(40),
+    ]);
+
+    // KPIs
+    if (statsRes.ok) {
+        const s = statsRes.data;
+        document.getElementById('kpi-email-sent').textContent      = s.sent;
+        document.getElementById('kpi-email-throttled').textContent = s.throttled;
+        document.getElementById('kpi-email-alerts').textContent    = (s.byEndpoint.alerts?.sent  || 0);
+        document.getElementById('kpi-email-invites').textContent   = (s.byEndpoint.invites?.sent || 0);
+    } else {
+        ['kpi-email-sent','kpi-email-throttled','kpi-email-alerts','kpi-email-invites']
+            .forEach(id => document.getElementById(id).textContent = '—');
+    }
+
+    // Activity table
+    const el = document.getElementById('email-activity-container');
+    if (!activityRes.ok) {
+        el.innerHTML = `<div class="empty">${_esc(activityRes.error || 'Failed to load email activity')}<br><br>If the table doesn't exist, apply <code>supabase-email-rate-limit-migration.sql</code> in the Supabase SQL Editor.</div>`;
+        return;
+    }
+    if (!activityRes.data.length) {
+        el.innerHTML = `<div class="empty">No email activity in this window.</div>`;
+        return;
+    }
+
+    let html = '<table><thead><tr><th>When</th><th>Endpoint</th><th>Recipient</th><th>Subject</th><th>Status</th></tr></thead><tbody>';
+    for (const r of activityRes.data) {
+        const epColor   = r.endpoint === 'invites' ? '#c080ff' : '#00c6ff';
+        const status    = r.throttled
+            ? `<span style="color:#ffaa44;font-weight:700">throttled</span>`
+            : `<span style="color:#4eff91">sent</span>`;
+        html += `<tr>`
+             +  `<td title="${_esc(r.sent_at)}" style="color:#778;font-size:.78rem">${_fmtRelative(r.sent_at)}</td>`
+             +  `<td><span style="color:${epColor};font-weight:700;font-size:.74rem;text-transform:uppercase">${_esc(r.endpoint)}</span></td>`
+             +  `<td style="font-family:ui-monospace,monospace;font-size:.78rem">${_esc(r.recipient_email || '—')}</td>`
+             +  `<td style="font-size:.78rem;color:#aab">${_esc((r.subject || '').slice(0, 60))}</td>`
+             +  `<td>${status}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-email').addEventListener('click', loadEmailActivity);
+document.getElementById('email-window').addEventListener('change', loadEmailActivity);
+loadEmailActivity();
+
 document.getElementById('btn-gen-invite').addEventListener('click', async () => {
     const btn = document.getElementById('btn-gen-invite');
     btn.textContent = 'Generating...'; btn.disabled = true;
@@ -791,6 +881,7 @@ document.getElementById('btn-send-invite-email').addEventListener('click', async
         emailEl.value = '';
         nameEl.value  = '';
         loadInvites();
+        loadEmailActivity();
     } else {
         result.style.background = 'rgba(255,80,80,.06)';
         result.style.border     = '1px solid rgba(255,80,80,.2)';

@@ -450,3 +450,71 @@ export async function createAnnouncement({ title, body, severity = 'info', targe
         return { ok: false, error: err.message };
     }
 }
+
+// ── Email send activity ──────────────────────────────────────────────────────
+// Reads public.email_send_log (admin-only via RLS). Returns aggregate
+// counters AND a recent-activity list, in one round trip per query.
+
+/**
+ * Aggregate email send stats over a window (default last 24h).
+ *
+ * @param {number} windowHours - Hours to look back (24 or 168 typical)
+ * @returns {{ ok: boolean, data?: {
+ *     total: number, sent: number, throttled: number,
+ *     byEndpoint: Record<string, { sent: number, throttled: number }>,
+ *     window_hours: number,
+ *   }, error?: string }}
+ */
+export async function fetchEmailStats(windowHours = 24) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const since = new Date(Date.now() - windowHours * 3_600_000).toISOString();
+        const { data, error } = await client
+            .from('email_send_log')
+            .select('endpoint, throttled')
+            .gte('sent_at', since);
+        if (error) throw error;
+
+        const stats = { total: 0, sent: 0, throttled: 0, byEndpoint: {}, window_hours: windowHours };
+        for (const row of data || []) {
+            stats.total++;
+            const ep = row.endpoint || 'unknown';
+            stats.byEndpoint[ep] = stats.byEndpoint[ep] || { sent: 0, throttled: 0 };
+            if (row.throttled) {
+                stats.throttled++;
+                stats.byEndpoint[ep].throttled++;
+            } else {
+                stats.sent++;
+                stats.byEndpoint[ep].sent++;
+            }
+        }
+        return { ok: true, data: stats };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Recent send activity (most recent first). Used for the admin
+ * dashboard's audit table.
+ */
+export async function fetchEmailActivity(limit = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client
+            .from('email_send_log')
+            .select('id, sent_at, endpoint, recipient_email, subject, throttled, metadata')
+            .order('sent_at', { ascending: false })
+            .limit(Math.min(Math.max(limit, 1), 200));
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}

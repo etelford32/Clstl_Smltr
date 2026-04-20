@@ -45,6 +45,13 @@ const VALID_PLANS  = new Set(['free', 'basic', 'advanced']);
 const CODE_ALPHA   = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no I/O/0/1
 const CODE_LEN     = 8;
 
+// Per-admin rate limit. Higher than the alerts endpoint's 10/hr
+// because admins burst-invite at launch (e.g. 100 founding users in
+// one sitting). 200/hr ≈ 33,600/wk per admin — well above realistic
+// hand-issued volume but tight enough to bound damage from a
+// compromised admin account.
+const MAX_PER_HOUR = 200;
+
 function jsonResp(body, status = 200) {
     return Response.json(body, {
         status,
@@ -101,6 +108,50 @@ async function verifyAdmin(authHeader) {
     if (role !== 'admin' && role !== 'superadmin') return { error: 'forbidden' };
 
     return { user_id: user.id, email: user.email, role };
+}
+
+/**
+ * DB-backed per-admin rate limit + audit log via the shared
+ * try_send_email_quota RPC. Atomically checks whether this admin is
+ * under MAX_PER_HOUR sends and inserts a row in email_send_log
+ * (throttled flag set accordingly). Returns true if the send may
+ * proceed.
+ *
+ * Fails open on Supabase / network error — admin issuing invites
+ * shouldn't be blocked by a transient infra problem when the
+ * /auth/v1/user check already succeeded. Admin role gate above is
+ * the primary defence.
+ */
+async function checkAdminRate({ userId, recipient, subject, plan }) {
+    if (!SUPABASE_KEY) return true;
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/try_send_email_quota`, {
+            method:  'POST',
+            headers: {
+                apikey:        SUPABASE_KEY,
+                Authorization: `Bearer ${SUPABASE_KEY}`,
+                'Content-Type':'application/json',
+            },
+            body: JSON.stringify({
+                p_user_id:        userId,
+                p_endpoint:       'invites',
+                p_recipient:      recipient,
+                p_subject:        subject,
+                p_metadata:       { plan },
+                p_limit:          MAX_PER_HOUR,
+                p_window_seconds: 3600,
+            }),
+        });
+        if (!res.ok) {
+            console.warn('[invites/send] quota RPC HTTP', res.status, '— failing open');
+            return true;
+        }
+        const allowed = await res.json();
+        return allowed === true;
+    } catch (e) {
+        console.warn('[invites/send] quota RPC error:', e.message, '— failing open');
+        return true;
+    }
 }
 
 async function insertInvite({ code, plan, invitedEmail, expiryDays, createdBy }) {
@@ -215,6 +266,18 @@ export default async function handler(req) {
         return jsonResp({ error: 'invalid_plan', detail: `plan must be one of ${[...VALID_PLANS].join(', ')}` }, 400);
     }
 
+    // Rate limit + audit log (atomic, global across POPs).
+    const subject = `You're invited to Parker Physics`;
+    const allowed = await checkAdminRate({
+        userId:    auth.user_id,
+        recipient: recipientEmail,
+        subject,
+        plan,
+    });
+    if (!allowed) {
+        return jsonResp({ error: 'rate_limited', detail: `Max ${MAX_PER_HOUR} invites per hour per admin` }, 429);
+    }
+
     // Generate + persist
     const code = generateCode();
     let inviteId;
@@ -235,8 +298,7 @@ export default async function handler(req) {
     const link = `${APP_URL}/signup?code=${encodeURIComponent(code)}`
               +  `&email=${encodeURIComponent(recipientEmail)}`;
 
-    // Send via Resend
-    const subject = `You're invited to Parker Physics`;
+    // Send via Resend (subject defined above for the rate-limit log).
     const html    = buildInviteHtml({
         recipientName,
         recipientEmail,
