@@ -1436,6 +1436,37 @@ const cloudU = createCloudUniforms(SUN_EQ.clone());
 const atmU   = { u_sun_dir: { value: SUN_EQ.clone() } };
 const stratU = { u_sun_dir: { value: SUN_EQ.clone() } };
 
+// ── Debug: cloud data imprint strength ──────────────────────────────────────
+// Controls how strongly u_cloud_layers (Open-Meteo 36×18 grid upsampled to
+// 360×180) modulates the shader's procedural cloud alpha. Useful for
+// isolating whether visible stripes come from the DATA texture pipeline or
+// from the NOISE field in CLOUD_FRAG.
+//
+//   0.0   pure noise, data texture completely ignored
+//   0.2   soft ±10% imprint
+//   0.5   default, matches original ±25% imprint
+//   1.0   ±50%, data-dominated
+//
+// Set via URL param on load, e.g.  earth.html?cloud_strength=0
+// Or at runtime from the dev console:  window.setCloudDataStrength(0)
+{
+    const param = new URLSearchParams(location.search).get('cloud_strength');
+    if (param != null) {
+        const n = parseFloat(param);
+        if (Number.isFinite(n)) {
+            cloudU.u_cloud_data_strength.value = Math.max(0, Math.min(1, n));
+            console.info(`[CloudDebug] u_cloud_data_strength = ${cloudU.u_cloud_data_strength.value} (from URL)`);
+        }
+    }
+    window.setCloudDataStrength = (v) => {
+        const clamped = Math.max(0, Math.min(1, Number(v)));
+        cloudU.u_cloud_data_strength.value = clamped;
+        console.info(`[CloudDebug] u_cloud_data_strength = ${clamped}`);
+        return clamped;
+    };
+    window.getCloudDataStrength = () => cloudU.u_cloud_data_strength.value;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  MESHES
 // ═══════════════════════════════════════════════════════════════
