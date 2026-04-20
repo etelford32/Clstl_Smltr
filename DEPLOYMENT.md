@@ -57,6 +57,7 @@ supabase-weather-pgcron-migration.sql     # hourly Open-Meteo refresh
 supabase-security-tighten-migration.sql   # analytics + session RLS hardening
 supabase-invites-email-migration.sql      # email-targeted invites + RPCs
 supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
+supabase-schema-hardening-migration.sql   # role/endpoint CHECKs + delete_user_data RPC
 ```
 
 If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable
@@ -104,6 +105,27 @@ refreshed; sign out, sign back in.
 - Enable "Protect against breached passwords" (HaveIBeenPwned check)
 - Session timeout: 7 days for normal users, shorter for staff
 - Confirm email enabled (default)
+
+**6. Account-deletion runbook** (handle a user's deletion request):
+
+```sql
+-- Step 1: find the UUID
+SELECT id, email FROM auth.users WHERE email = 'user@example.com';
+
+-- Step 2: wipe public-schema PII + anonymize logs
+SELECT * FROM public.delete_user_data('<uuid>'::uuid);
+-- Returns row counts; verify they look sensible.
+```
+
+Then **Step 3**: delete the `auth.users` row from the Supabase
+Dashboard (Authentication → Users → row menu → Delete user) or from
+a server-side context with the service-role key
+(`supabase.auth.admin.deleteUser('<uuid>')`). The public-schema RPC
+deliberately can't reach `auth.users` from plpgsql.
+
+**Step 4** if the user had a paid plan: void/refund the Stripe
+subscription via the Stripe Dashboard. Future work is wrapping all
+four steps behind a single `/api/admin/delete-user` endpoint.
 
 ## 🐳 Option 2: Docker with VNC (Full 3D Version)
 
