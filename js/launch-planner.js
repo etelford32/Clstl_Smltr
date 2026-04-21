@@ -166,12 +166,22 @@ function verdictLabel(v) {
     return v === 'red' ? 'NO-GO' : v === 'yellow' ? 'HOLD' : 'GO';
 }
 
+// Render a two-letter ISO country code to its flag emoji (skipped if not exactly 2 letters).
+function countryFlag(cc) {
+    if (!cc || typeof cc !== 'string' || cc.length !== 2) return '';
+    const base = 0x1F1E6;
+    const a = cc.toUpperCase().charCodeAt(0) - 65;
+    const b = cc.toUpperCase().charCodeAt(1) - 65;
+    if (a < 0 || a > 25 || b < 0 || b > 25) return '';
+    return String.fromCodePoint(base + a) + String.fromCodePoint(base + b);
+}
+
 function renderCard(l) {
     const verdict = l._score?.verdict || 'unknown';
     const color   = verdictColor(verdict);
     const label   = l._score ? verdictLabel(verdict) : '—';
     const net     = formatLocalTime(l.net_iso);
-    const flagCls = l.pad?.country_code ? `flag-${l.pad.country_code.toLowerCase()}` : '';
+    const flag    = countryFlag(l.pad?.country_code);
     return `
         <button type="button" class="lp-card${verdict === 'red' ? ' lp-card--red' : verdict === 'yellow' ? ' lp-card--yellow' : verdict === 'green' ? ' lp-card--green' : ''}" data-launch-id="${escHtml(l.id)}">
             <div class="lp-card-hd">
@@ -182,7 +192,7 @@ function renderCard(l) {
             <div class="lp-card-meta">
                 <span class="lp-card-vehicle">${escHtml(l.vehicle)}</span>
                 <span class="lp-card-dot">·</span>
-                <span class="lp-card-pad ${flagCls}">${escHtml(l.pad?.location || '—')}</span>
+                <span class="lp-card-pad">${flag ? flag + ' ' : ''}${escHtml(l.pad?.location || '—')}</span>
             </div>
             <div class="lp-card-footer">
                 <span class="lp-card-net">${escHtml(net)}</span>
@@ -216,16 +226,18 @@ function renderDetail(l, fc, score) {
     const lon = l.pad?.lon;
     const hasPad = Number.isFinite(lat) && Number.isFinite(lon);
 
-    const weatherBlock = fc ? `
-        <div class="lp-wx-grid">
-            <div class="lp-wx-cell"><div class="lp-wx-k">Conditions</div><div class="lp-wx-v">${escHtml(weatherCodeLabel(fc.weather_code))}</div></div>
-            <div class="lp-wx-cell"><div class="lp-wx-k">Temp</div><div class="lp-wx-v">${fc.temp_f != null ? `${fc.temp_f.toFixed(0)}°F` : '—'}</div></div>
-            <div class="lp-wx-cell"><div class="lp-wx-k">Wind</div><div class="lp-wx-v">${fc.wind_mph != null ? `${fc.wind_mph.toFixed(0)} mph ${compassLabel(fc.wind_dir_deg)}` : '—'}</div></div>
-            <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${fc.wind_gust_mph != null ? `${fc.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
-            <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${fc.cloud_cover != null ? `${fc.cloud_cover}%` : '—'}</div></div>
-            <div class="lp-wx-cell"><div class="lp-wx-k">Humidity</div><div class="lp-wx-v">${fc.humidity != null ? `${fc.humidity}%` : '—'}</div></div>
-        </div>
-    ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
+    const weatherBlock = !hasPad
+        ? `<div class="lp-wx-loading">Pad coordinates are not published yet — weather analysis unavailable.</div>`
+        : fc ? `
+            <div class="lp-wx-grid">
+                <div class="lp-wx-cell"><div class="lp-wx-k">Conditions</div><div class="lp-wx-v">${escHtml(weatherCodeLabel(fc.weather_code))}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Temp</div><div class="lp-wx-v">${fc.temp_f != null ? `${fc.temp_f.toFixed(0)}°F` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Wind</div><div class="lp-wx-v">${fc.wind_mph != null ? `${fc.wind_mph.toFixed(0)} mph ${compassLabel(fc.wind_dir_deg)}` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${fc.wind_gust_mph != null ? `${fc.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${fc.cloud_cover != null ? `${fc.cloud_cover}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Humidity</div><div class="lp-wx-v">${fc.humidity != null ? `${fc.humidity}%` : '—'}</div></div>
+            </div>
+        ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
 
     const forecastBlock = fc?.daily?.dates?.length ? `
         <div class="lp-label">3-Day Forecast</div>
@@ -444,8 +456,9 @@ async function init() {
     const verdictParam = urlParams.get('verdict');
     if (verdictParam && ['green', 'yellow', 'red'].includes(verdictParam)) {
         state.verdictFilter = verdictParam;
-        const btn = document.querySelector(`[data-verdict-filter="${verdictParam}"]`);
-        btn?.classList.add('lp-chip--on');
+        document.querySelectorAll('[data-verdict-filter]').forEach(b => b.classList.remove('lp-chip--on'));
+        document.querySelector(`[data-verdict-filter="${verdictParam}"]`)?.classList.add('lp-chip--on');
+        applyFilters();
     }
     if (preselect && state.launches.some(l => String(l.id) === String(preselect))) {
         await selectLaunch(preselect);
@@ -455,8 +468,17 @@ async function init() {
         renderDetailPane();
     }
 
-    // Countdown tick
-    setInterval(renderCountdowns, 1000);
+    // Countdown tick (single interval; pause when tab hidden to save CPU)
+    let tick = setInterval(renderCountdowns, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            clearInterval(tick);
+            tick = null;
+        } else if (!tick) {
+            renderCountdowns();
+            tick = setInterval(renderCountdowns, 1000);
+        }
+    });
 
     // Lazy-load weather for the rest so all cards show verdicts eventually
     const remaining = state.launches.slice(8);

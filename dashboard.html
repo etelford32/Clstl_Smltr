@@ -316,6 +316,17 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── PIPELINE ANALYTICS (superadmin only) ── -->
+  <div class="card" id="pipeline-card" style="margin-bottom:16px;display:none">
+    <div class="card-head">
+      <span class="card-title">Pipeline Analytics · Superadmin</span>
+      <a href="admin.html" class="card-link">Open admin console →</a>
+    </div>
+    <div class="card-body">
+      <div id="pipeline-health"><div style="color:var(--muted);font-size:.78rem;padding:10px 0">Loading pipeline probes…</div></div>
+    </div>
+  </div>
+
   <!-- ── TOP ROW ── -->
   <div class="top-row">
 
@@ -1017,27 +1028,48 @@ window._ppAuth = { auth };
    AUTH GATE — uses auth.js for consistent session management
 ═════════════════════════════════════════════════════════════ */
 
-// Wait for auth to fully initialize (Supabase session restore is async)
-await auth.ready();
+// Wait for auth to fully initialize (Supabase session restore is async).
+// Bound the wait so a dead Supabase call can never leave superusers stuck
+// on the full-screen auth gate with no way to sign in.
+await Promise.race([
+    auth.ready(),
+    new Promise(resolve => setTimeout(resolve, 8000)),
+]);
 
 let _authMod = auth;
 let _auth = null;
 if (_authMod.isSignedIn()) {
     _auth = _authMod.getUser();
 } else {
-    // Legacy fallback — check both storages
+    // Legacy fallback — check both storages. Superusers who already have a
+    // persisted session should never be punted back to the sign-in gate just
+    // because Supabase's in-memory session state is cold on this page load.
     try { _auth = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
     if (!_auth) {
         try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
     }
 }
 
+// Diagnostic log — visible in DevTools so a stuck superuser can tell whether
+// they landed here without a session vs. got past the gate but hit a later bug.
+console.info('[Dashboard] auth gate:', {
+    supabaseSignedIn: _authMod.isSignedIn?.(),
+    authLoaded:       !!_auth,
+    role:             _auth?.role,
+    plan:             _auth?.plan,
+});
+
 if (!_auth || !_auth.signedIn) {
   document.getElementById('dash-nav').style.visibility = 'hidden';
   document.querySelector('main').style.visibility = 'hidden';
   document.querySelector('footer').style.visibility = 'hidden';
 } else {
+  // Hide the full-screen sign-in overlay FIRST, before any downstream init can
+  // throw. A crash below used to leave the gate visible, which looked to
+  // superusers like "the sign-in is broken for me" when the real failure was
+  // something cosmetic further down the script.
   document.getElementById('auth-gate').style.display = 'none';
+  try {
 
   const name  = _auth.name || _auth.email || 'Explorer';
   const first = name.split(' ')[0];
@@ -1047,10 +1079,18 @@ if (!_auth || !_auth.signedIn) {
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
 
+  const role  = (_auth.role || 'user').toLowerCase();
   const plan  = (_auth.plan || 'free').toLowerCase();
   const badge = document.getElementById('plan-badge');
-  badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
-  badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
+  // Superadmins typically have no paid plan — show their role so they don't
+  // see a misleading "Free" badge after signing in.
+  if (role === 'superadmin' || role === 'admin') {
+      badge.textContent = role === 'superadmin' ? 'Superadmin' : 'Admin';
+      badge.className   = 'plan-badge plan-advanced';
+  } else {
+      badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
+      badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
+  }
 
   // Show superadmin buttons if user has admin/superadmin role
   function _showAdminBtn() {
@@ -1068,6 +1108,28 @@ if (!_auth || !_auth.signedIn) {
   _showAdminBtn();
   // Also re-check when profile fetch completes (role may update async)
   window.addEventListener('auth-changed', _showAdminBtn);
+
+  // Pipeline Analytics — superadmin only. Defer the module import until we
+  // know the user qualifies so regular users never pay the download cost.
+  async function _mountPipelineCard() {
+      const a = JSON.parse(localStorage.getItem('pp_auth') || '{}');
+      const card = document.getElementById('pipeline-card');
+      if (!card) return;
+      if (a.role !== 'superadmin') { card.style.display = 'none'; return; }
+      if (card.dataset.mounted === '1') return;
+      card.dataset.mounted = '1';
+      card.style.display = '';
+      try {
+          const mod = await import('./js/pipeline-analytics.js');
+          mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
+      } catch (err) {
+          console.error('[Dashboard] pipeline-analytics failed:', err);
+          document.getElementById('pipeline-health').innerHTML =
+              `<div style="color:#f88;font-size:.78rem">Pipeline analytics failed to load: ${err.message}</div>`;
+      }
+  }
+  _mountPipelineCard();
+  window.addEventListener('auth-changed', _mountPipelineCard);
 
   function signOut() {
     if (_authMod) {
@@ -1143,6 +1205,9 @@ if (!_auth || !_auth.signedIn) {
       const st = document.getElementById('sub-status-text');
       if (st) { st.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1) + ' Plan'; }
     });
+  }
+  } catch (err) {
+    console.error('[Dashboard] Post-auth init failed:', err);
   }
 }
 
