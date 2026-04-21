@@ -805,6 +805,9 @@ nav {
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
+                <label class="lyr" title="Highlight wind &gt; 30 m/s (108 km/h) — the operational jet-stream threshold">
+                    <input type="checkbox" id="lyr-jet"><label for="lyr-jet">Jet Stream</label>
+                </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
@@ -1141,6 +1144,10 @@ nav {
             <span class="wx-k">Geo wind</span>
             <span class="wx-v" id="wx-geo">—</span>
         </div>
+        <div class="wx-row" title="Peak sampled wind &gt; 30 m/s (operational jet-stream threshold). Dash when no jet found in the current field.">
+            <span class="wx-k">Jet peak</span>
+            <span class="wx-v" id="wx-jet">—</span>
+        </div>
         <div class="wx-row">
             <span class="wx-k">Centers</span>
             <span class="wx-v" id="wx-centers">—</span>
@@ -1327,6 +1334,7 @@ import { initScaleNav } from './js/scale-nav.js';
 import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
 import { CmePropagator } from './js/cme-propagation.js';
+import { JetstreamOverlay } from './js/jetstream-overlay.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
@@ -2666,6 +2674,36 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
     }
 })();
 
+// ── Jet-stream overlay — highlights wind > 30 m/s on the globe ─────────
+// Parented to earthMesh (rides with the globe), driven by windParticles'
+// public sampler so lookups stay consistent with the streamlines. The
+// overlay starts hidden; toggled on via the lyr-jet checkbox. Updated
+// only when new weather data lands — the field doesn't change between
+// refreshes, so per-frame rebuilds would be wasted work.
+const jetstreamOverlay = new JetstreamOverlay(
+    earthMesh,
+    (lat, lon) => windParticles.lookupWind(lat, lon),
+);
+jetstreamOverlay.setVisible(false);
+
+document.getElementById('lyr-jet')?.addEventListener('change', e => {
+    jetstreamOverlay.setVisible(e.target.checked);
+});
+
+// Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when a jet
+// is present; em-dash when the field is calm / no data. Called from the
+// weather-update handler where jetstreamOverlay.update() runs.
+function _updateJetReadout() {
+    const el = document.getElementById('wx-jet');
+    if (!el) return;
+    const p = jetstreamOverlay.peak;
+    if (!p) { el.textContent = '—'; return; }
+    const kmh = (p.speedMs * 3.6).toFixed(0);
+    const lat = `${Math.abs(p.lat).toFixed(1)}°${p.lat >= 0 ? 'N' : 'S'}`;
+    const lon = `${Math.abs(p.lon).toFixed(1)}°${p.lon >= 0 ? 'E' : 'W'}`;
+    el.textContent = `${kmh} km/h · ${lat} ${lon}`;
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  DATA RECENCY TRACKING — tooltips show how fresh each layer is
 // ═══════════════════════════════════════════════════════════════
@@ -2861,6 +2899,12 @@ document.addEventListener('weather-update', e => {
 
     // Rebuild isobar contours from the fresh pressure field
     isobarLayer.update(weatherBuffer);
+
+    // Rebuild the jet-stream ribbons from the fresh wind field and refresh
+    // the wx-panel peak readout. Runs once per feed refresh (~15 min); the
+    // overlay itself sits hidden by default until the user toggles lyr-jet.
+    jetstreamOverlay.update();
+    _updateJetReadout();
     updateIsobarPanel();
 
     // Track data recency for layer tooltips
