@@ -769,6 +769,7 @@ nav {
         <div class="ct-title">Position</div>
         <div class="ct-val" id="ct-lat">—</div>
         <div class="ct-val" id="ct-lon">—</div>
+        <div class="ct-wind" id="ct-wind" style="display:none;margin-top:4px;padding-top:3px;border-top:1px solid rgba(255,255,255,.08);color:#ffb366;font-size:10px;font-weight:500">—</div>
     </div>
 
     <!-- Layer controls -->
@@ -1115,6 +1116,17 @@ nav {
         <div class="wx-row"><span class="wx-k">P high</span>   <span class="wx-v" id="wx-pmax">—</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">Max wind</span> <span class="wx-v" id="wx-wmax">—</span></div>
+        <!-- Wind-particle colour legend. Canvas is painted once on page
+             load using the same blue→white→magenta ramp WindParticles
+             uses per-vertex, so it's an exact match not an approximation.
+             Anchors at 0 / 30 / 60 m/s (= 0 / ~108 / ~216 km/h); MAX_WIND_MS
+             is the normalisation ceiling from weather-feed.js. -->
+        <div style="margin:0 0 6px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Wind scale</div>
+        <canvas id="wx-wind-legend" width="180" height="8"
+                style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+            <span>0</span><span>30</span><span>60 m/s</span>
+        </div>
         <hr class="ir-sep">
         <!-- Isobar / pressure analysis -->
         <div class="wx-row" style="align-items:flex-start;margin-bottom:2px;">
@@ -1291,7 +1303,7 @@ import {
     geocodeQuery, saveUserLocation, loadUserLocation,
     clearUserLocation, auroraVisibility,
 } from './js/user-location.js';
-import { WeatherFeed, TEX_W, TEX_H } from './js/weather-feed.js';
+import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -1837,6 +1849,23 @@ function updateCoords(uv) {
     document.getElementById('h-lat').textContent  = fmtLat(lat);
     document.getElementById('h-lon').textContent  = fmtLon(lon);
     document.getElementById('h-lt').textContent   = lt;
+
+    // Wind probe at the cursor's geographic point. Uses the same bilinear
+    // sample the particle advection uses, so the readout and the streaks
+    // can't disagree. Hidden when wind data isn't loaded or the sample
+    // is below the 0.05 m/s resolution floor (procedural fallback / calm).
+    const tipWind = document.getElementById('ct-wind');
+    if (tipWind) {
+        const w = windParticles.lookupWind(lat, lon);
+        if (w && w.speedMs > 0) {
+            const kmh = w.speedMs * 3.6;
+            const dir = Math.round(w.dirFromDeg);
+            tipWind.textContent = `🌬 ${w.speedMs.toFixed(1)} m/s (${kmh.toFixed(0)} km/h) from ${dir}° ${compass16(w.dirFromDeg)}`;
+            tipWind.style.display = 'block';
+        } else {
+            tipWind.style.display = 'none';
+        }
+    }
     tipEl.classList.add('show');
 }
 
@@ -2407,6 +2436,31 @@ class WindParticles {
         }
     }
 
+    /**
+     * Public wind probe for a lat/lon pair. Returns the wind vector in
+     * m/s + meteorological FROM-direction, or null when no wind data is
+     * available (procedural fallback zeroes the buffer → speed==0 reads
+     * as "no data" rather than "perfectly calm", which matches reality
+     * for the datasets we serve).
+     *
+     * Kept separate from _lookupWind() so the particle hot-loop doesn't
+     * pay for allocations + angle math 6 000 times a frame.
+     */
+    lookupWind(lat, lon) {
+        if (!this.windBuf) return null;
+        const out = { u: 0, v: 0, s: 0 };
+        this._lookupWind(lat, lon, out);
+        const uMs = out.u * MAX_WIND_MS;
+        const vMs = out.v * MAX_WIND_MS;
+        const speedMs = Math.hypot(uMs, vMs);
+        if (speedMs < 0.05) return { uMs, vMs, speedMs: 0, dirFromDeg: null };
+        // Velocity (u, v) points WHERE the wind is going. Meteorological
+        // direction is where it's COMING FROM — rotate 180°. Compass
+        // convention: 0 = north, 90 = east, measured clockwise.
+        const dirFromDeg = (Math.atan2(-uMs, -vMs) * 180 / Math.PI + 360) % 360;
+        return { uMs, vMs, speedMs, dirFromDeg };
+    }
+
     /** Bilinear lookup of (U, V, speed) from the 360×180 wind buffer. */
     _lookupWind(lat, lon, out) {
         if (!this.windBuf) { out.u = 0; out.v = 0; out.s = 0; return; }
@@ -2580,6 +2634,37 @@ class WindParticles {
 
 const windParticles    = new WindParticles(earthMesh, 6000);
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
+
+// ── Wind-scale legend ──────────────────────────────────────────────────
+// Paint the blue → white → magenta particle ramp into the wx-panel
+// canvas at init so the colours the user sees streaming across the globe
+// are decodable. Painted once; the ramp doesn't change, and MAX_WIND_MS
+// (60 m/s) anchors the top end.
+(function _paintWindLegend() {
+    const cv = document.getElementById('wx-wind-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    // Mirror WindParticles._speedColor() exactly — no cross-module import
+    // needed because the function is small and has lived here forever.
+    for (let x = 0; x < W; x++) {
+        const sc = x / (W - 1);
+        let r, g, b;
+        if (sc < 0.5) {
+            const t = sc / 0.5;
+            r = 0.35 + 0.65 * t;
+            g = 0.55 + 0.45 * t;
+            b = 1.0;
+        } else {
+            const t = (sc - 0.5) / 0.5;
+            r = 1.0;
+            g = 1.0 - 0.72 * t;
+            b = 1.0 - 0.05 * t;
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
 
 // ═══════════════════════════════════════════════════════════════
 //  DATA RECENCY TRACKING — tooltips show how fresh each layer is

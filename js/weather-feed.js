@@ -37,7 +37,7 @@ const GRID_W       = 36;                // longitude grid points (10° spacing)
 const GRID_H       = 18;                // latitude  grid points (10° spacing)
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
-const MAX_WIND_MS  = 60;                // m/s — normalisation ceiling
+export const MAX_WIND_MS = 60;          // m/s — wind-speed normalisation ceiling
 const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
 
 // ─────────────────────────────────────────────────────────────────────────────
