@@ -353,23 +353,37 @@ export class WeatherFeed {
                 const hNorm = Math.max(0, Math.cos(lat * 1.8) * 0.8
                             + 0.20 * Math.abs(Math.sin(lat * 3.0 + lon * 2.0)));
 
-                // Wind: deliberately ZEROED in the procedural fallback.
-                // The old −sin(3φ)·0.65 formula was meant to sketch "trade
-                // winds + Ferrel westerlies + polar easterlies" but the sign
-                // came out inverted through mid-latitudes (45°N/S rendered
-                // as easterlies when they should have been westerlies). A
-                // silent wrong wind field is more misleading than no wind
-                // at all — particles stand still until Open-Meteo resolves,
-                // and callers can read meta.loaded to know they're on the
-                // fallback path.
+                // Wind — idealised 3-cell zonal circulation. `−sin(6φ)·cos(φ)`
+                // goes cleanly through zeros at lat = 0, ±30°, ±60°, ±90°:
+                //   peaks easterly at ±15° (Hadley / trade winds)
+                //   peaks westerly at ±45° (Ferrel mid-lat westerlies)
+                //   peaks easterly at ±75° (polar easterlies)
+                //   cos(φ) attenuates the polar amplitude so the ±75° band
+                //     ends up visibly weaker than the mid-lat jet.
+                // The earlier `-sin(3φ)` formula had the sign inverted in
+                // mid-latitudes — westerlies came out as easterlies, which
+                // on a correctly-oriented globe (post flipY fix) was obviously
+                // wrong. `sin(6φ)` matches the real 3-cell structure.
+                //
+                // This is the LAST-RESORT fallback when Open-Meteo fails;
+                // the wx-panel source label still reads "procedural (GFS
+                // unavailable)" so users can tell they're on synthetic data.
+                // A small longitudinal ripple sin(2λ)·0.08 breaks the
+                // monotonous ring so particles don't stream in a perfect
+                // latitude band (which reads as fake immediately).
+                const windU = (-0.55 * Math.sin(lat * 6.0) * Math.cos(lat))
+                            + 0.08 * Math.sin(lon * 2.0) * Math.cos(lat * 3.0);
+                const windV = 0.05 * Math.sin(lon * 2.0 + lat * 1.5) * Math.cos(lat);
+                const wMag  = Math.sqrt(windU * windU + windV * windV);
+
                 this._weatherBuf[t4+0] = tNorm;
                 this._weatherBuf[t4+1] = Math.max(0, Math.min(1, pNorm));
                 this._weatherBuf[t4+2] = Math.max(0, Math.min(1, hNorm));
-                this._weatherBuf[t4+3] = 0;      // wind-speed channel
+                this._weatherBuf[t4+3] = Math.min(1, wMag * 1.3);
 
-                this._windBuf[t4+0] = 0;
-                this._windBuf[t4+1] = 0;
-                this._windBuf[t4+2] = 0;
+                this._windBuf[t4+0] = windU;
+                this._windBuf[t4+1] = windV;
+                this._windBuf[t4+2] = Math.min(1, wMag * 1.3);
                 this._windBuf[t4+3] = 1.0;
 
                 // Procedural cloud layers — neutral low-coverage field.
