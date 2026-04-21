@@ -1428,6 +1428,7 @@ import {
     loadEarthTextures,
 } from './js/earth-skin.js';
 import { StormFeed } from './js/storm-feed.js';
+import { initDebugOverlay } from './js/debug-overlay.js';
 
 // ── Scale breadcrumb + page fade-in (runs immediately on module load) ─────────
 initScaleNav('earth');
@@ -5807,6 +5808,39 @@ if (_navBurger && _navMenu) {
         hint.style.opacity = window.scrollY > 40 ? '0' : '1';
     }, { passive: true });
 })();
+
+// ── ?debug=1 telemetry overlay ──────────────────────────────────────────
+// No-op unless the URL carries the flag. Registry maps each layer
+// checkbox to a zero-arg predicate returning the paired mesh / material
+// visibility, so the overlay can flag checkbox↔mesh drift the second
+// it appears.  New layers should be added here as the scene grows.
+const _layerRegistry = {
+    'lyr-clouds':         () => cloudMesh.visible,
+    'lyr-atm':            () => atmMat.visible,
+    'lyr-aurora':         () => (earthU.u_aurora_on?.value ?? 0) > 0.5,
+    'lyr-lights':         () => (earthU.u_city_lights?.value ?? 0) > 0.5,
+    'lyr-grid':           () => gridGroup.visible,
+    'lyr-tropic':         () => tropicGroup.visible,
+    'lyr-subsolar':       () => subsolarMarker.group.visible,
+    'lyr-weather':        () => (earthU.u_weather_on?.value ?? 0) > 0.5,
+    // NASA Earth Observations — each id maps to the dynamically-created
+    // overlay mesh. _obsOverlays is populated lazily by _createObsOverlay,
+    // so fall through to the checkbox's own state when the mesh hasn't
+    // been built yet (which would cause a spurious "mismatch" warning).
+    'lyr-obs-precip-rate':     () => _obsOverlays['precip-rate']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-precip-rate')?.checked ?? false,
+    'lyr-obs-sst':             () => _obsOverlays['sst']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-sst')?.checked ?? false,
+    'lyr-obs-aod':             () => _obsOverlays['aod']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-aod')?.checked ?? false,
+    'lyr-obs-cloud-thickness': () => _obsOverlays['cloud-thickness']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-cloud-thickness')?.checked ?? false,
+    'lyr-obs-fires':           () => _obsOverlays['fires']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-fires')?.checked ?? false,
+    'lyr-obs-snow':            () => _obsOverlays['snow']?.mesh?.visible
+                                   ?? document.getElementById('lyr-obs-snow')?.checked ?? false,
+};
+initDebugOverlay({ renderer, layerRegistry: _layerRegistry });
 </script>
 
 <!-- ── Simulation description ──────────────────────────────────────────── -->
