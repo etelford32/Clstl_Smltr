@@ -254,6 +254,11 @@ uniform vec3  u_sun_dir;
 uniform float u_time;
 uniform float u_weather_on;
 uniform float u_satellite_on;      // blend satellite into cloud appearance
+uniform float u_cloud_data_strength; // Open-Meteo imprint intensity.
+                                     //   0.0  = pure noise, no data modulation (debug)
+                                     //   0.2  = ±10% soft modulation
+                                     //   0.5  = ±25% (default, original behaviour)
+                                     //   1.0  = ±50% (data-dominated)
 
 // Storm systems: .xy = UV position, .z = intensity [0-1], .w = spin (+1 CCW/-1 CW)
 uniform vec4 u_storms[8];
@@ -512,10 +517,17 @@ void main() {
         float clHigh  = cl.b;
         precip        = cl.a;
 
-        // ±25% modulation. clLow in [0,1] → modulator in [0.75, 1.25].
-        float modLow  = 0.75 + clLow  * 0.50;
-        float modMid  = 0.75 + clMid  * 0.50;
-        float modHigh = 0.75 + clHigh * 0.50;
+        // Parameterised data-imprint strength. Equivalent to the original
+        // ±25% formula when u_cloud_data_strength == 0.5. At 0.0 the data
+        // is completely ignored (pure noise-driven clouds) — that's the
+        // diagnostic mode for isolating whether banding comes from the
+        // data texture or the shader's own noise field. Precipitation
+        // channel (cl.a) is still read regardless of strength because it
+        // gates the streak overlay, which is meaningful independent of
+        // the modulation weight.
+        float modLow  = 1.0 + (clLow  - 0.5) * u_cloud_data_strength;
+        float modMid  = 1.0 + (clMid  - 0.5) * u_cloud_data_strength;
+        float modHigh = 1.0 + (clHigh - 0.5) * u_cloud_data_strength;
 
         alphaLow  = shapeLow  * BASE_LOW  * modLow;
         alphaMid  = shapeMid  * BASE_MID  * modMid;
@@ -968,6 +980,7 @@ export function createCloudUniforms(sunDir = new THREE.Vector3(1, 0, 0)) {
         u_time:          { value: 0 },
         u_weather_on:    { value: 0 },
         u_satellite_on:  { value: 0 },            // off until satellite texture arrives
+        u_cloud_data_strength: { value: 0.5 },    // 0.5 matches original ±25% imprint
         u_storms:        { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 1)) },
         u_storm_count:   { value: 0 },
     };
