@@ -1183,11 +1183,15 @@ nav {
             <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
                  next 24 h. Computed once when the user's location is set (or
                  restored on load); cached in a module var and refreshed when
-                 the location or tracker TLE changes. -->
+                 the location or tracker TLE changes.  Visibility badge uses
+                 pass-predictor's sunlit + observer-darkness flags: 🌟 naked-
+                 eye, ☀️ daylight (both lit), ⚫ eclipsed (sat in Earth shadow). -->
             <div class="loc-card empty" id="loc-iss-card">
                 <div class="loc-card-hdr">
                     <span>🛰️ ISS next pass</span>
-                    <span class="loc-card-meta" id="loc-iss-when">—</span>
+                    <span class="loc-card-meta">
+                        <span id="loc-iss-vis" style="margin-right:4px"></span><span id="loc-iss-when">—</span>
+                    </span>
                 </div>
                 <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
                 <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
@@ -5123,6 +5127,17 @@ function _updateLocSunCard(now, lat, lon) {
       : `${Math.floor(dlen)}h ${String(Math.round((dlen % 1) * 60)).padStart(2,'0')}m`;
 }
 
+// Compact visibility badge for the ISS card header. Three cases, matching
+// pass-predictor's sunlit/observerDark classification:
+//   visible = sunlit && observerDark  → naked-eye (🌟 bright yellow)
+//   sunlit  && !observerDark          → daylight pass (☀️ grey)
+//   !sunlit                           → eclipsed by Earth's shadow (⚫ dim)
+function _passVisBadge(p) {
+    if (p.visible)      return { icon: '🌟', label: 'visible',   color: '#ffd766' };
+    if (p.sunlit)       return { icon: '☀️', label: 'daylight',  color: '#88aabb' };
+    return                     { icon: '⚫', label: 'eclipsed',  color: '#667788' };
+}
+
 function _updateLocPassCard() {
     const card = document.getElementById('loc-iss-card');
     if (!card) return;
@@ -5131,18 +5146,29 @@ function _updateLocPassCard() {
     const peakEl = document.getElementById('loc-iss-peak');
     const dirEl  = document.getElementById('loc-iss-dir');
     const durEl  = document.getElementById('loc-iss-dur');
+    const visEl  = document.getElementById('loc-iss-vis');
 
     // Pass has already passed? Recompute lazily instead of showing stale data.
-    if (_issNextPass && _issNextPass.set.time < new Date()) _issNextPass = null;
+    if (_issNextPass && _issNextPass.set.time < new Date()) {
+        _issNextPass = null;
+        _refreshIssPassForUser();     // queue up the next one
+    }
 
     if (!_issNextPass) {
         card.classList.add('empty');
+        if (visEl) { visEl.textContent = ''; visEl.removeAttribute('title'); }
         whenEl.textContent = _issPassTle ? 'none in 24h' : 'waiting TLE…';
         riseEl.textContent = peakEl.textContent = dirEl.textContent = durEl.textContent = '—';
         return;
     }
     card.classList.remove('empty');
     const p = _issNextPass;
+    const badge = _passVisBadge(p);
+    if (visEl) {
+        visEl.textContent = badge.icon;
+        visEl.style.color = badge.color;
+        visEl.title       = `${badge.label} pass (sat ${p.sunlit ? 'sunlit' : 'in shadow'}; observer ${p.observerDark ? 'in darkness' : 'in daylight'})`;
+    }
     whenEl.textContent = _fmtPassWhen(p.rise.time);
     riseEl.textContent = `${_fmtHM(p.rise.time)} · ${compass16(p.rise.azDeg)}`;
     peakEl.textContent = `${p.peak.elDeg.toFixed(0)}° · ${compass16(p.peak.azDeg)}`;

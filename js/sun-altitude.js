@@ -185,6 +185,22 @@ export function subSolarPoint(date) {
     return { lat: dec, lon: mod180(ra - gmstDeg(jd)) };
 }
 
+/**
+ * Sun direction unit vector in the astronomical inertial frame
+ * (+x = vernal equinox, +z = geographic north pole). Safe to use with
+ * SGP4 TEME positions — the mean-equinox drift is <0.02°/decade, well
+ * below the precision we care about for shadow tests and look angles.
+ * Returns a plain {x, y, z} literal so callers don't need to adopt any
+ * particular vector class.
+ */
+export function sunDirectionEci(date) {
+    const jd  = julianDay(date);
+    const dec = solarDeclinationDeg(jd) * DEG;
+    const ra  = solarRightAscensionDeg(jd) * DEG;
+    const cd  = Math.cos(dec);
+    return { x: cd * Math.cos(ra), y: cd * Math.sin(ra), z: Math.sin(dec) };
+}
+
 // Compass cardinal from an azimuth (N/NNE/NE/ENE/E/…) — handy for HUD.
 const COMPASS_16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE',
                     'S','SSW','SW','WSW','W','WNW','NW','NNW'];

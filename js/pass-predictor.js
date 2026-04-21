@@ -41,6 +41,7 @@
 
 import { geo, DEG, RAD } from './geo/coords.js';
 import { propagate, tleEpochToJd } from './satellite-tracker.js';
+import { solarPosition, sunDirectionEci } from './sun-altitude.js';
 
 const MIN_PER_DAY = 1440;
 const R_EARTH_KM  = 6378.135;                      // WGS-72, matches SGP4
@@ -147,7 +148,8 @@ export function nextPasses(tle, obs, opts = {}) {
             const setJd = _bisectElevationZero(tle, epochJd, obs, prevJd, jd);
             pass.set = _sampleEl(tle, epochJd, setJd, obs);
             if (pass.peak.elevationDeg >= minPeakDeg) {
-                passes.push(_finalizePass(pass));
+                const vis = _classifyVisibility(pass.peak.time, tle, epochJd, obs);
+                passes.push(_finalizePass(pass, vis));
                 if (passes.length >= maxPasses) return passes;
             }
             pass = null;
@@ -189,11 +191,54 @@ function _bisectElevationZero(tle, epochJd, obs, jdLo, jdHi) {
     return 0.5 * (lo + hi);
 }
 
-function _finalizePass(p) {
+function _finalizePass(p, vis) {
     return {
         rise: { time: p.rise.time, azDeg: p.rise.azimuthDeg, elDeg: p.rise.elevationDeg, rangeKm: p.rise.rangeKm },
         peak: { time: p.peak.time, azDeg: p.peak.azimuthDeg, elDeg: p.peak.elevationDeg, rangeKm: p.peak.rangeKm },
         set:  { time: p.set.time,  azDeg: p.set.azimuthDeg,  elDeg: p.set.elevationDeg,  rangeKm: p.set.rangeKm  },
-        durationMin: (p.set.time - p.rise.time) / 60000,
+        durationMin:  (p.set.time - p.rise.time) / 60000,
+        sunlit:       vis.sunlit,
+        observerDark: vis.observerDark,
+        visible:      vis.visible,
     };
+}
+
+/**
+ * Classify a pass at its peak moment:
+ *   sunlit       — satellite is in direct sunlight (outside Earth's umbra).
+ *                  Uses a cylindrical-shadow approximation which over-estimates
+ *                  the umbra by a few percent near the terminator; good enough
+ *                  for naked-eye visibility flags.
+ *   observerDark — sun is more than 6° below the observer's horizon
+ *                  (civil twilight). Covers the entire "sky reads dark enough
+ *                  to spot a -2 magnitude ISS" window reliably.
+ *   visible      — sunlit && observerDark.
+ *
+ * Both tests are run at the peak timestamp only — that's the brightest
+ * and easiest-to-spot moment of the pass, and it's where naked-eye
+ * spotters get the best read on visibility.
+ */
+function _classifyVisibility(peakTime, tle, epochJd, obs) {
+    const jd     = msToJd(peakTime.getTime());
+    const tsince = (jd - epochJd) * MIN_PER_DAY;
+    const t      = propagate(tle, tsince);
+
+    const sun = sunDirectionEci(peakTime);                  // unit vector
+    const dot = t.x * sun.x + t.y * sun.y + t.z * sun.z;   // sat · sun_hat
+
+    let sunlit;
+    if (dot >= 0) {
+        sunlit = true;                                      // sun-facing side
+    } else {
+        // Perpendicular distance from Earth–sun axis:
+        //   |P_perp|² = |P|² − (P·sun_hat)²
+        const magSq  = t.x * t.x + t.y * t.y + t.z * t.z;
+        const perpSq = magSq - dot * dot;
+        sunlit = perpSq > R_EARTH_KM * R_EARTH_KM;          // outside umbra cyl
+    }
+
+    const obsSun = solarPosition(peakTime, obs.lat, obs.lon);
+    const observerDark = obsSun.altitudeDeg < -6;           // civil twilight
+
+    return { sunlit, observerDark, visible: sunlit && observerDark };
 }
