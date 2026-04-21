@@ -416,9 +416,21 @@ controls.dampingFactor = 0.08;
 controls.minDistance = 1.2;
 controls.maxDistance = 20;
 
-// Lights
-scene.add(new THREE.AmbientLight(0x334466, 0.4));
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+// Lights — tuned for the sim-time scrubber. At 3600× speed the
+// terminator sweeps a full rotation every 24 s, and with the old
+// 0.4/1.2 ambient-to-directional balance the night hemisphere dropped
+// to ~25% of day-side brightness, making the sweep read as a jarring
+// flicker. Bumping ambient to 0.58 with a slightly warmer tint puts
+// the night side at ~35% — still clearly unlit, but the transition
+// reads as a gradient rather than a flash. Directional trimmed to 1.05
+// to keep the sunlit hemisphere from clipping to pure white.
+//
+// If we later swap the MeshStandardMaterial for the shader-based
+// earth-skin used on earth.html (physically-accurate rim + city lights
+// + atmosphere glow), this balance can go back toward 0.4/1.2 because
+// the shader carries its own night-side ambient floor.
+scene.add(new THREE.AmbientLight(0x445878, 0.58));
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.05);
 sunLight.position.set(10, 2, 3);   // placeholder — animate() drives this from sim time
 scene.add(sunLight);
 
