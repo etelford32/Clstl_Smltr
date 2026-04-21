@@ -849,9 +849,9 @@ nav {
         <div class="lyr-section" data-lyr-section="surface">
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><label for="lyr-clouds">Cloud Cover</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><label for="lyr-aurora">Aurora</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
@@ -863,14 +863,14 @@ nav {
         <div class="lyr-section" data-lyr-section="weather">
             <div class="lyr-section-hdr"><span>WEATHER</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-weather"><label for="lyr-weather">Weather (temp)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><label for="lyr-wind">Wind Particles</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-weather"><span class="lyr-status" data-layer="weather-temp" title="waiting"></span><label for="lyr-weather">Weather (temp)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-wind"    checked><span class="lyr-status" data-layer="wind" title="waiting"></span><label for="lyr-wind">Wind Particles</label></label>
                 <label class="lyr" title="Highlight wind &gt; 30 m/s (108 km/h) — the operational jet-stream threshold">
-                    <input type="checkbox" id="lyr-jet"><label for="lyr-jet">Jet Stream</label>
+                    <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </label>
-                <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><label for="lyr-isobars">Isobars</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><label for="lyr-alerts">Storm Alerts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><label for="lyr-earthquakes">Earthquakes</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div></div>
         </div>
 
@@ -878,13 +878,13 @@ nav {
         <div class="lyr-section" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><label for="lyr-magnetopause">Magnetopause</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><label for="lyr-bowshock">Bow Shock</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><label for="lyr-magnetosheath">Magnetosheath</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><label for="lyr-reconnection">X-line Reconnect</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><label for="lyr-cusps">Polar Cusps</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><label for="lyr-belts">Rad. Belts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><label for="lyr-plasma">Plasmasphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
@@ -910,10 +910,10 @@ nav {
             <div class="lyr-section-hdr"><span>SATELLITE TRACKING</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body">
             <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><label for="lyr-sat-stations">Space Stations</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><label for="lyr-sat-starlink">Starlink</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><label for="lyr-sat-weather">Weather Sats</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><label for="lyr-sat-gps">GPS/GNSS</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-status" data-layer="sat-starlink" title="waiting"></span><label for="lyr-sat-starlink">Starlink</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-status" data-layer="sat-weather" title="waiting"></span><label for="lyr-sat-weather">Weather Sats</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-status" data-layer="sat-gps" title="waiting"></span><label for="lyr-sat-gps">GPS/GNSS</label></label>
             </div>
             <div style="display:flex;gap:4px;margin-top:6px;align-items:center">
                 <input id="sat-norad-input" type="text" placeholder="NORAD ID (e.g. 25544)" maxlength="8"
@@ -2928,19 +2928,139 @@ window.addEventListener('earth-obs-update', e => {
 // checkbox row it belongs to.  Pip colour + title stay in lockstep with
 // the feed; hover reveals the failure reason when something's red.
 window.addEventListener('earth-obs-status', (e) => {
-    const d    = e.detail ?? {};
-    const pill = document.querySelector(`.lyr-status[data-layer="${d.layerId}"]`);
-    if (!pill) return;
-    pill.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
-    pill.classList.add(`st-${d.state}`);
-    const ago = d.updated
-        ? `${Math.round((Date.now() - new Date(d.updated).getTime()) / 60000)} m ago`
-        : 'never';
-    pill.title = d.state === 'loaded'   ? `loaded · ${ago} · ${d.source ?? '—'}`
-              :  d.state === 'fetching' ? 'fetching from NASA GIBS…'
-              :  d.state === 'error'    ? `error: ${d.error ?? 'unknown'}`
-              :                            'waiting for first fetch';
+    const d = e.detail ?? {};
+    _setLayerPipById(d.layerId, d.state, d.state === 'loaded'   ? `loaded · ${_agoStr(d.updated)} · ${d.source ?? '—'}`
+                                         : d.state === 'fetching' ? 'fetching from NASA GIBS…'
+                                         : d.state === 'error'    ? `error: ${d.error ?? 'unknown'}`
+                                         :                          'waiting for first fetch');
 });
+
+// ── Unified layer-status pip driver ──────────────────────────────────────
+// Per-layer data-layer="…" tags on .lyr-status spans get their colour
+// from whichever feed event carries the relevant update. Everything here
+// is additive — each feed still dispatches its existing domain event,
+// this block just listens and routes state into the UI. Keeps feeds
+// decoupled from panel IDs.
+
+function _agoStr(ts) {
+    if (!ts) return 'never';
+    const s = Math.round((Date.now() - new Date(ts).getTime()) / 1000);
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+}
+
+function _setLayerPipById(dataLayer, state, title) {
+    // data-layer may match multiple rows (e.g. "swpc" drives every
+    // magnetosphere row) so loop instead of querySelector single.
+    document.querySelectorAll(`.lyr-status[data-layer="${dataLayer}"]`).forEach(pill => {
+        pill.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+        pill.classList.add(`st-${state}`);
+        if (title) pill.title = title;
+    });
+}
+
+// Shorthand: set many rows at once (weather feed drives four panels,
+// alerts + storms share one, SWPC drives the whole magnetosphere set).
+function _setLayerPipGroup(ids, state, title) {
+    for (const id of ids) _setLayerPipById(id, state, title);
+}
+
+const _WEATHER_PIPS = ['clouds', 'weather-temp', 'wind', 'jet', 'isobars'];
+
+// Weather feed: fetching → pulsing amber; update → green or red based on
+// whether the real GFS payload actually landed (meta.loaded=false means
+// we're on the procedural fallback, and the user should see amber/red
+// rather than green).
+document.addEventListener('weather-status', (e) => {
+    if (e.detail?.status === 'fetching') {
+        _setLayerPipGroup(_WEATHER_PIPS, 'fetching', 'fetching weather grid…');
+    }
+});
+document.addEventListener('weather-update', (e) => {
+    const meta = e.detail?.meta ?? {};
+    if (meta.loaded) {
+        _setLayerPipGroup(_WEATHER_PIPS, 'loaded',
+            `${meta.source ?? 'GFS'} · ${_agoStr(meta.fetchTime)}`);
+    } else {
+        _setLayerPipGroup(_WEATHER_PIPS, 'error',
+            `upstream down — falling back to synthetic data (source: ${meta.source ?? 'procedural'})`);
+    }
+});
+
+// NWS + Storm feed both paint the single "alerts" pip. Whichever event
+// arrives first populates it; the other updates in place.
+document.addEventListener('nws-status', (e) => {
+    if (e.detail?.status === 'fetching') {
+        _setLayerPipById('alerts', 'fetching', 'fetching NWS alerts…');
+    }
+});
+document.addEventListener('nws-alerts-update', (e) => {
+    const d = e.detail ?? {};
+    if (d.error) {
+        _setLayerPipById('alerts', 'error', `NWS error: ${d.error}`);
+    } else {
+        _setLayerPipById('alerts', 'loaded',
+            `${d.meta?.count ?? 0} alerts · ${_agoStr(d.meta?.fetchTime)}`);
+    }
+});
+window.addEventListener('storm-update', (e) => {
+    // Storm updates augment the alerts pip only when NWS hasn't already
+    // marked an error — otherwise we'd overwrite a useful red.
+    const pill = document.querySelector('.lyr-status[data-layer="alerts"]');
+    if (pill && pill.classList.contains('st-error')) return;
+    _setLayerPipById('alerts', 'loaded',
+        `${(e.detail?.storms ?? []).length} active cyclones · ${e.detail?.status ?? 'updated'}`);
+});
+
+// USGS earthquakes — earth-feeds dispatches a generic 'feeds-status'
+// event that carries source + status strings.
+window.addEventListener('feeds-status', (e) => {
+    const d = e.detail ?? {};
+    if (d.source !== 'USGS') return;
+    if (d.status === 'fetching') {
+        _setLayerPipById('earthquakes', 'fetching', 'fetching USGS feed…');
+    } else if (d.status === 'ok') {
+        _setLayerPipById('earthquakes', 'loaded', `${d.count ?? 0} quakes · just now`);
+    } else if (d.status === 'error') {
+        _setLayerPipById('earthquakes', 'error', `USGS error: ${d.error ?? 'unknown'}`);
+    }
+});
+
+// Satellite tracker: 'satellites-loaded' fires after each group's fetch.
+// The tracker already logs failures to console.warn with returned
+// count = 0, so we can infer error when added === 0.
+window.addEventListener('satellites-loaded', (e) => {
+    const d = e.detail ?? {};
+    const id = `sat-${d.group}`;
+    if (d.count === 0) {
+        _setLayerPipById(id, 'error', `CelesTrak fetch failed for ${d.group}`);
+    } else {
+        _setLayerPipById(id, 'loaded', `${d.count} loaded · just now`);
+    }
+});
+
+// SWPC space-weather feed drives the aurora, magnetopause, bow shock,
+// and all downstream magnetosphere-engine derived layers. One pip
+// update covers the whole group via data-layer="swpc".
+window.addEventListener('swpc-update', (e) => {
+    const sw    = e.detail ?? {};
+    const fresh = sw.updated ? _agoStr(sw.updated) : 'just now';
+    _setLayerPipById('swpc',   'loaded', `NOAA SWPC · ${fresh}`);
+    _setLayerPipById('aurora', 'loaded', `Kp ${sw.kp?.toFixed?.(1) ?? '—'} · ${fresh}`);
+});
+
+// Default non-loaded rows (atm, grid, tropics, lights) get no pip; the
+// magnetosphere rows show grey "waiting" until SWPC lands.  First SWPC
+// poll usually resolves in ~1 s; if 10 s pass with no update, paint
+// them yellow/red through this one-shot watchdog so users know the
+// space-weather feed is silently hung rather than just slow.
+setTimeout(() => {
+    document.querySelectorAll('.lyr-status[data-layer="swpc"], .lyr-status[data-layer="aurora"]').forEach(p => {
+        if (p.classList.contains('st-idle')) _setLayerPipById(p.dataset.layer, 'error', 'no SWPC response after 10 s — check /api/solar-wind');
+    });
+}, 10000);
 
 function _updateObsStatusPanel(meta) {
     const el = document.getElementById('obs-status-list');
