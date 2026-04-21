@@ -1,0 +1,3 @@
+[submodule "data/heliochronicles"]
+	path = data/heliochronicles
+	url = https://github.com/etelford32/heliochronicles

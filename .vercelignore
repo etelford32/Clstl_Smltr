@@ -18,6 +18,10 @@ rust/target/
 # Git
 .git/
 .gitignore
+# Submodules have a `.git` *file* (not directory) pointing to the parent
+# repo's .git/modules/... — exclude those without excluding submodule content.
+**/.git
+.gitmodules
 
 # IDE
 .vscode/
