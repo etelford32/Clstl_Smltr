@@ -3780,176 +3780,87 @@ for (const [checkboxId, group] of Object.entries(_satGroups)) {
 }
 
 // NORAD ID search
+// NORAD lookup + conjunction screening — delegates to the satellite
+// tracker. The tracker's screenConjunctions() propagates both the target
+// AND every catalog object via SGP4 (Rust WASM when available) in the
+// same TEME frame, so we don't mix ECI target coords with cached ECEF
+// catalog coords like the old in-HTML screener did.
 document.getElementById('sat-norad-btn')?.addEventListener('click', async () => {
-    const input = document.getElementById('sat-norad-input');
-    const statusEl = document.getElementById('sat-status');
+    const input     = document.getElementById('sat-norad-input');
+    const statusEl  = document.getElementById('sat-status');
+    const resultsEl = document.getElementById('sat-conjunction-results');
     if (!input?.value.trim()) return;
-    const norad = input.value.trim();
-    if (statusEl) statusEl.textContent = `Looking up NORAD ${norad}…`;
 
+    const noradNum = Number(input.value.trim());
+    if (!Number.isFinite(noradNum)) {
+        if (statusEl) statusEl.textContent = 'Invalid NORAD ID';
+        return;
+    }
+
+    if (statusEl) statusEl.textContent = `Looking up NORAD ${noradNum}…`;
+
+    // Fetch + add the target to the tracker catalog. De-dupes internally,
+    // so re-clicking Track on an already-loaded satellite is harmless.
+    let sat;
     try {
-        const res = await fetch(`/api/celestrak/tle?norad=${norad}`);
-        const data = await res.json();
-        if (data.error || !data.satellites?.length) {
-            if (statusEl) statusEl.textContent = `NORAD ${norad} not found`;
-            return;
-        }
-        const sat = data.satellites[0];
-        if (statusEl) {
-            statusEl.innerHTML = `<strong style="color:#0cc">${sat.name}</strong> (NORAD ${sat.norad_id})<br>`
-                + `Incl: ${sat.inclination.toFixed(1)}° | Period: ${sat.period_min.toFixed(1)} min<br>`
-                + `Perigee: ${sat.perigee_km} km | Apogee: ${sat.apogee_km} km`;
-        }
-
-        // Run conjunction screening against loaded catalog
-        _runConjunction(sat, norad);
+        sat = await satTracker.loadNorad(noradNum);
     } catch (err) {
         if (statusEl) statusEl.textContent = `Error: ${err.message}`;
+        return;
     }
+    if (!sat) {
+        if (statusEl) statusEl.textContent = `NORAD ${noradNum} not found`;
+        return;
+    }
+
+    if (statusEl) {
+        statusEl.innerHTML =
+            `<strong style="color:#0cc">${sat.name}</strong> (NORAD ${sat.norad_id})<br>`
+          + `Incl: ${sat.inclination.toFixed(1)}° | Period: ${sat.period_min.toFixed(1)} min<br>`
+          + `Perigee: ${sat.perigee_km} km | Apogee: ${sat.apogee_km} km`;
+    }
+
+    if (!resultsEl) return;
+    resultsEl.style.display = '';
+    resultsEl.innerHTML = '<span style="color:#0cc">Screening conjunctions (72 hr, SGP4)…</span>';
+    // Let the DOM paint the "screening…" message before we spin the WASM.
+    await new Promise(r => setTimeout(r, 30));
+
+    const screened = satTracker.getSatellites().length;
+    let conjunctions;
+    try {
+        conjunctions = await satTracker.screenConjunctions(noradNum, 72, 10, 25);
+    } catch (err) {
+        resultsEl.innerHTML =
+            `<span style="color:#ff8800">Screening failed: ${err.message}</span>`;
+        return;
+    }
+
+    if (conjunctions.length === 0) {
+        resultsEl.innerHTML =
+            `<span style="color:#4fc97f">No conjunctions &lt;25 km found in next 72 hours.</span><br>`
+          + `<span style="color:#556">Screened ${screened} objects × 432 steps (SGP4)</span>`;
+        return;
+    }
+
+    conjunctions.sort((a, b) => a.dist_km - b.dist_km);
+    let html = `<span style="color:#ff8800;font-weight:600">${conjunctions.length} conjunction(s) found!</span><br>`;
+    for (const c of conjunctions.slice(0, 10)) {
+        const risk = c.dist_km < 5  ? '#ff2200'
+                   : c.dist_km < 10 ? '#ff8800' : '#ffcc44';
+        html += `<div style="margin-top:3px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)">`
+              + `<span style="color:${risk};font-weight:600">${c.dist_km.toFixed(1)} km</span> `
+              + `— ${c.name} (${c.norad_id}) `
+              + `in <strong>${c.hours_ahead.toFixed(1)}h</strong></div>`;
+    }
+    html += `<div style="margin-top:4px;color:#556">Screened ${screened} objects × 432 steps (SGP4)</div>`;
+    resultsEl.innerHTML = html;
 });
 
 // Enter key in NORAD input
 document.getElementById('sat-norad-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('sat-norad-btn')?.click();
 });
-
-// ── Simple Conjunction Screener ──────────────────────────────────────────────
-// Propagates the target satellite and all loaded catalog satellites forward
-// 72 hours at 10-minute steps, flags any approach within 25 km.
-async function _runConjunction(targetTle, noradId) {
-    const resultsEl = document.getElementById('sat-conjunction-results');
-    if (!resultsEl) return;
-    resultsEl.style.display = '';
-    resultsEl.innerHTML = '<span style="color:#0cc">Screening conjunctions (72 hr)…</span>';
-
-    // Give UI time to render
-    await new Promise(r => setTimeout(r, 50));
-
-    const catalog = satTracker.getSatellites();
-    if (catalog.length === 0) {
-        resultsEl.textContent = 'No catalog loaded — enable a satellite group first.';
-        return;
-    }
-
-    const THRESHOLD_KM = 25;       // flag approaches closer than this
-    const STEPS = 432;             // 72 hours × 6 steps/hr (10-min intervals)
-    const STEP_MIN = 10;           // minutes per step
-    const RE = 6378.135;
-    const DEG2RAD = Math.PI / 180;
-    const TWOPI = 2 * Math.PI;
-    const MIN_PER_DAY = 1440;
-
-    // Simplified propagator for conjunction screening
-    function quickPropagate(tle, tsince) {
-        const n0 = tle.mean_motion * TWOPI / MIN_PER_DAY;
-        const e0 = tle.eccentricity;
-        const i0 = tle.inclination * DEG2RAD;
-        const raan0 = tle.raan * DEG2RAD;
-        const argp0 = tle.arg_perigee * DEG2RAD;
-        const M0 = tle.mean_anomaly * DEG2RAD;
-
-        const cosI = Math.cos(i0);
-        const J2 = 0.001082616;
-        const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1 / 3);
-        const p = a * (1 - e0 * e0);
-        const n_corr = n0 * (1 + 1.5 * J2 * (RE / p) ** 2 * (1 - 1.5 * (1 - cosI * cosI)));
-        const raanDot = -1.5 * J2 * (RE / p) ** 2 * n0 * cosI;
-        const argpDot = 0.75 * J2 * (RE / p) ** 2 * n0 * (5 * cosI * cosI - 1);
-
-        const M = M0 + n_corr * tsince;
-        const raan = raan0 + raanDot * tsince;
-        const argp = argp0 + argpDot * tsince;
-
-        let E = M;
-        for (let k = 0; k < 8; k++) {
-            E -= (E - e0 * Math.sin(E) - M) / (1 - e0 * Math.cos(E));
-        }
-
-        const nu = Math.atan2(Math.sqrt(1 - e0 * e0) * Math.sin(E), Math.cos(E) - e0);
-        const r = a * (1 - e0 * Math.cos(E));
-        const u = argp + nu;
-
-        const cosU = Math.cos(u), sinU = Math.sin(u);
-        const cosR = Math.cos(raan), sinR = Math.sin(raan);
-        const cosI2 = Math.cos(i0), sinI2 = Math.sin(i0);
-
-        return {
-            x: r * (cosR * cosU - sinR * sinU * cosI2),
-            y: r * (sinR * cosU + cosR * sinU * cosI2),
-            z: r * sinU * sinI2,
-        };
-    }
-
-    // Compute target epoch JD
-    const targetEpochYr = targetTle.epoch_yr;
-    const yr = Math.floor(targetEpochYr);
-    const dayFrac = (targetEpochYr - yr) * (yr % 4 === 0 ? 366 : 365);
-    const jdJan1 = 367 * yr - Math.floor(7 * (yr + Math.floor(10 / 12)) / 4) + Math.floor(275 / 9) + 1721013.5;
-    const targetEpochJd = jdJan1 + dayFrac;
-    const nowJd = Date.now() / 86400000 + 2440587.5;
-    const tsinceBase = (nowJd - targetEpochJd) * MIN_PER_DAY;
-
-    const conjunctions = [];
-
-    for (let step = 0; step < STEPS; step++) {
-        const tsince = tsinceBase + step * STEP_MIN;
-        const tgt = quickPropagate(targetTle, tsince);
-
-        for (const cat of catalog) {
-            if (cat.norad_id === targetTle.norad_id) continue;
-
-            // Pre-filter: skip if altitude difference > 100 km
-            const altDiff = Math.abs(cat.alt - (targetTle.perigee_km + targetTle.apogee_km) / 2);
-            if (altDiff > 200) continue;
-
-            // Compute catalog satellite epoch JD
-            const catEpochYr = cat.period_min ? targetEpochYr : 2026;  // approximate
-            const catTsince = tsince;  // simplified: assume similar epoch
-
-            // For a real screener we'd propagate the catalog TLE too.
-            // Here we use the last-known lat/lon/alt from the tracker
-            // and project it forward (very rough approximation).
-            const catR = RE + cat.alt;
-            const catLatR = cat.lat * DEG2RAD;
-            const catLonR = cat.lon * DEG2RAD;
-            // Rough ECEF (ignoring Earth rotation for this step)
-            const cx = catR * Math.cos(catLatR) * Math.cos(catLonR);
-            const cy = catR * Math.cos(catLatR) * Math.sin(catLonR);
-            const cz = catR * Math.sin(catLatR);
-
-            const dx = tgt.x - cx, dy = tgt.y - cy, dz = tgt.z - cz;
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-            if (dist < THRESHOLD_KM) {
-                const hoursAhead = step * STEP_MIN / 60;
-                conjunctions.push({
-                    name: cat.name,
-                    norad_id: cat.norad_id,
-                    dist_km: dist,
-                    hours_ahead: hoursAhead,
-                });
-            }
-        }
-    }
-
-    // Display results
-    if (conjunctions.length === 0) {
-        resultsEl.innerHTML = `<span style="color:#4fc97f">No conjunctions &lt;${THRESHOLD_KM} km found in next 72 hours.</span><br>`
-            + `<span style="color:#556">Screened ${catalog.length} objects × ${STEPS} time steps</span>`;
-    } else {
-        conjunctions.sort((a, b) => a.dist_km - b.dist_km);
-        let html = `<span style="color:#ff8800;font-weight:600">${conjunctions.length} conjunction(s) found!</span><br>`;
-        for (const c of conjunctions.slice(0, 10)) {
-            const risk = c.dist_km < 5 ? '#ff2200' : c.dist_km < 10 ? '#ff8800' : '#ffcc44';
-            html += `<div style="margin-top:3px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)">`
-                + `<span style="color:${risk};font-weight:600">${c.dist_km.toFixed(1)} km</span> `
-                + `— ${c.name} (${c.norad_id}) `
-                + `in <strong>${c.hours_ahead.toFixed(1)}h</strong></div>`;
-        }
-        html += `<div style="margin-top:4px;color:#556">Screened ${catalog.length} objects × ${STEPS} steps</div>`;
-        resultsEl.innerHTML = html;
-    }
-}
 
 // ── EarthFeeds: USGS earthquakes + ISS position ───────────────────────────────
 // Earthquakes still come from USGS; ISS is handled by the SGP4-driven
