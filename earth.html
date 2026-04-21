@@ -2086,8 +2086,11 @@ document.getElementById('lyr-earthquakes').addEventListener('change', e => {
     eqMarkers.setVisible(e.target.checked);
 });
 document.getElementById('lyr-iss').addEventListener('change', e => {
-    issMarker.setVisible(e.target.checked);
     satTracker.setHighlightVisible(e.target.checked);
+    if (!e.target.checked) {
+        document.getElementById('iss-hud')?.classList.remove('visible');
+    }
+    // If re-checked, the HUD will reappear on the next _updateIssHud() tick.
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -3702,71 +3705,31 @@ function _showEqPopup(q, cx, cy) {
 function _hideEqPopup() { _eqPopup?.classList.remove('show'); _eqHovered = null; }
 
 // ═══════════════════════════════════════════════════════════════
-//  ISS MARKER
+//  ISS HUD  — driven by the satellite tracker (SGP4), not by the
+//  Open-Notify feed. The visual marker is handled by
+//  satTracker.setHighlight(25544, …) below, so this function only
+//  maintains the #iss-hud DOM readout. Hidden when lyr-iss is off or
+//  when the tracker hasn't loaded the stations group yet.
 // ═══════════════════════════════════════════════════════════════
-class ISSMarker {
-    constructor(scene) {
-        this._lat = null; this._lon = null; this._alt = 408;
-        this._vel = 27600; this._visible = true;
-        const mat = new THREE.MeshBasicMaterial({
-            color: 0x00ffcc, transparent: true, opacity: 0.92,
-            blending: THREE.AdditiveBlending, depthWrite: false,
-        });
-        this._sphere = new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 8), mat);
-        this._sphere.visible = false;
-        this._sphere.renderOrder = 11;
-        scene.add(this._sphere);
-
-        // Simple equatorial orbit ring as orientation reference
-        const pts = [];
-        const rOrb = 1.0 + 408 / 6371;
-        for (let i = 0; i <= 64; i++) {
-            const a = (i / 64) * Math.PI * 2;
-            pts.push(new THREE.Vector3(Math.cos(a) * rOrb, 0, Math.sin(a) * rOrb));
-        }
-        const trailGeo = new THREE.BufferGeometry().setFromPoints(pts);
-        this._trail = new THREE.Line(trailGeo, new THREE.LineBasicMaterial({
-            color: 0x005544, transparent: true, opacity: 0.22,
-        }));
-        this._trail.rotation.x = 51.6 * Math.PI / 180;  // ISS inclination
-        this._trail.visible = false;
-        scene.add(this._trail);
+const _ISS_HUD_MU_KM3_S2 = 398600.44;
+function _updateIssHud() {
+    const hud = document.getElementById('iss-hud');
+    if (!hud) return;
+    if (!document.getElementById('lyr-iss')?.checked) {
+        hud.classList.remove('visible');
+        return;
     }
-
-    update(data) {
-        this._lat = data.lat; this._lon = data.lon;
-        this._alt = data.alt ?? 408; this._vel = data.vel ?? 27600;
-        const hud = document.getElementById('iss-hud');
-        if (hud) {
-            hud.classList.add('visible');
-            hud.innerHTML = `<strong>ISS</strong> · Alt: ${Math.round(this._alt)} km · ` +
-                `${(this._vel / 1).toFixed(0)} km/h · ` +
-                `${fmtLat(this._lat)}, ${fmtLon(this._lon)}`;
-        }
-    }
-
-    tick() {
-        if (this._lat == null || !this._visible) return;
-        const r        = 1.0 + this._alt / 6371;
-        const localPos = geoToXYZ(this._lat, this._lon).multiplyScalar(r);
-        const worldPos = localPos.clone().applyEuler(earthMesh.rotation);
-        this._sphere.position.copy(worldPos);
-        this._sphere.visible = true;
-        this._trail.visible  = true;
-    }
-
-    setVisible(v) {
-        this._visible = v;
-        if (!v) {
-            this._sphere.visible = false;
-            this._trail.visible  = false;
-            const hud = document.getElementById('iss-hud');
-            if (hud) hud.classList.remove('visible');
-        }
-    }
+    const iss = satTracker.getSatellite?.(25544);
+    if (!iss) { hud.classList.remove('visible'); return; }
+    // Circular-orbit speed — good to ~0.2% for ISS's near-circular orbit.
+    // Rendered as km/h to match the units the old Open-Notify feed used.
+    const rKm    = 6378.135 + iss.alt;
+    const velKmh = Math.sqrt(_ISS_HUD_MU_KM3_S2 / rKm) * 3600;
+    hud.classList.add('visible');
+    hud.innerHTML = `<strong>ISS</strong> · Alt: ${Math.round(iss.alt)} km · ` +
+        `${Math.round(velKmh).toLocaleString()} km/h · ` +
+        `${fmtLat(iss.lat)}, ${fmtLon(iss.lon)}`;
 }
-
-const issMarker = new ISSMarker(scene);
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE TRACKER — CelesTrak TLE catalog + SGP4 propagation
@@ -3786,8 +3749,10 @@ satTracker.loadGroup('stations').then(() => {
     // panel wants it for next-pass prediction.
     _tryAttachIssTle?.();
     // Pin the ISS so it stands out from the other space-station dots.
-    // Visibility is gated by the existing lyr-iss checkbox alongside the
-    // separate ISSMarker.
+    // This is the *only* ISS visual on the page — the old dedicated
+    // ISSMarker was removed; _updateIssHud() below maintains the HUD
+    // readout from the same tracker state, making SGP4 the single
+    // source of truth for ISS position/HUD/label.
     satTracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
     if (!document.getElementById('lyr-iss')?.checked) satTracker.setHighlightVisible(false);
 });
@@ -3987,14 +3952,12 @@ async function _runConjunction(targetTle, noradId) {
 }
 
 // ── EarthFeeds: USGS earthquakes + ISS position ───────────────────────────────
-const earthFeeds = new EarthFeeds().start();
+// Earthquakes still come from USGS; ISS is handled by the SGP4-driven
+// satellite tracker above, so we skip the wheretheiss.at polling loop.
+const earthFeeds = new EarthFeeds().start({ iss: false });
 
 window.addEventListener('earthquake-update', e => {
     eqMarkers.update(e.detail);
-}, { passive: true });
-
-window.addEventListener('iss-update', e => {
-    issMarker.update(e.detail);
 }, { passive: true });
 
 // ── EarthFeeds status badges ──────────────────────────────────────────────────
@@ -4927,8 +4890,9 @@ function animate() {
     // ── Earthquake markers pulse
     eqMarkers.tick(t);
 
-    // ── ISS position update (world-space, depends on earthMesh.rotation)
-    issMarker.tick();
+    // ── ISS HUD readout — reads from the satellite tracker each frame so
+    // the tracker (SGP4) is the single source of truth for ISS state.
+    _updateIssHud();
 
     // ── Satellite tracker (all loaded catalog satellites)
     satTracker.tick();
