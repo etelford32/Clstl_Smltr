@@ -560,6 +560,33 @@ export class SatelliteTracker {
     }
 
     /**
+     * Pick the nearest currently-visible satellite under an NDC point.
+     * Uses Three.js Raycaster against the internal Points mesh, then
+     * filters hits whose group is toggled off so only visible dots can
+     * be selected. Returns { noradId, distance } or null.
+     *
+     * @param {{x:number,y:number}} ndc         NDC cursor coords (−1..+1).
+     * @param {THREE.Camera} camera             The rendering camera.
+     * @param {object} [opts]
+     * @param {number} [opts.threshold=0.02]   World-space pick radius.
+     */
+    pickAtNDC(ndc, camera, { threshold = 0.02 } = {}) {
+        if (!this._pointsMesh) return null;
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, camera);
+        ray.params.Points = { threshold };
+        const hits = ray.intersectObject(this._pointsMesh);
+        for (const hit of hits) {
+            const sat = this._satellites[hit.index];
+            if (!sat) continue;
+            const g = this._groups.get(sat.group);
+            if (g && !g.visible) continue;   // skip hidden groups
+            return { noradId: sat.tle.norad_id, distance: hit.distance };
+        }
+        return null;
+    }
+
+    /**
      * Read the current scene-space Vec3 of a tracked satellite. Returns
      * `out` on success (for chaining) and null when the sat isn't in the
      * catalog or positions haven't been built yet.  Used by the TCA
