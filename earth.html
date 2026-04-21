@@ -518,9 +518,18 @@ nav {
 }
 #loc-search:hover { background: rgba(0,180,255,.28); }
 #loc-result { display: none; margin-top: 5px; }
-.loc-city   { color: #eef; font-weight: 600; font-size: 10px; margin-bottom: 1px; }
+.loc-header {
+    display: flex; justify-content: space-between; align-items: baseline;
+    gap: 6px; margin-bottom: 1px;
+}
+.loc-city   { color: #eef; font-weight: 600; font-size: 10px; flex: 1; min-width: 0;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loc-localtime {
+    color: #78b0c8; font-size: 9px; font-weight: 500; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
 .loc-coords { color: #557788; font-size: 9px; margin-bottom: 4px; }
-.loc-aurora { font-size: 10px; font-weight: 600; }
+.loc-aurora { font-size: 10px; font-weight: 600; margin-top: 6px; }
 .loc-btns   { display: flex; gap: 5px; margin-top: 6px; }
 .loc-btn {
     flex: 1; background: rgba(0,150,180,.12);
@@ -532,6 +541,29 @@ nav {
 .loc-btn.danger { color: #ff8888; border-color: rgba(255,80,80,.25); }
 .loc-btn.danger:hover { background: rgba(255,80,80,.12); }
 #loc-error  { color: #ff8888; font-size: 9px; margin-top: 3px; display: none; }
+
+/* ── Data cards inside the location panel (sun, ISS, etc.) ── */
+.loc-card {
+    margin-top: 6px; padding: 5px 7px 4px;
+    background: rgba(0,150,200,.05);
+    border: 1px solid rgba(0,200,255,.11);
+    border-radius: 5px;
+    font-size: 9.5px; line-height: 1.45;
+}
+.loc-card-hdr {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 9px; color: #99ccdd; font-weight: 600;
+    margin-bottom: 3px; padding-bottom: 2px;
+    border-bottom: 1px solid rgba(0,200,255,.09);
+    letter-spacing: .02em;
+}
+.loc-card-hdr .loc-card-meta { color: #78a0b8; font-weight: 500; font-size: 9px; }
+.loc-card-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+}
+.loc-k { color: #557788; }
+.loc-v { color: #cde0ea; font-weight: 500; font-variant-numeric: tabular-nums; }
+.loc-card.empty .loc-v { color: #446; }
 
 /* ─── Mobile bottom toolbar ──────────────────────────────────────── */
 #mobile-toolbar {
@@ -1129,9 +1161,42 @@ nav {
         </div>
         <div id="loc-error"></div>
         <div id="loc-result">
-            <div class="loc-city"   id="loc-city"></div>
+            <div class="loc-header">
+                <div class="loc-city"      id="loc-city"></div>
+                <div class="loc-localtime" id="loc-localtime">—</div>
+            </div>
             <div class="loc-coords" id="loc-coords"></div>
+
+            <!-- Sun card: sunrise, solar noon (= max solar altitude), sunset,
+                 current altitude + azimuth, day length. Refreshes at 1 Hz. -->
+            <div class="loc-card" id="loc-sun-card">
+                <div class="loc-card-hdr">
+                    <span>☀️ Sun</span>
+                    <span class="loc-card-meta" id="loc-sun-altaz">—</span>
+                </div>
+                <div class="loc-card-row"><span class="loc-k">Rises</span>      <span class="loc-v" id="loc-sunrise">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Solar max</span>  <span class="loc-v" id="loc-solar-noon">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Sets</span>       <span class="loc-v" id="loc-sunset">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Day length</span> <span class="loc-v" id="loc-daylength">—</span></div>
+            </div>
+
+            <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
+                 next 24 h. Computed once when the user's location is set (or
+                 restored on load); cached in a module var and refreshed when
+                 the location or tracker TLE changes. -->
+            <div class="loc-card empty" id="loc-iss-card">
+                <div class="loc-card-hdr">
+                    <span>🛰️ ISS next pass</span>
+                    <span class="loc-card-meta" id="loc-iss-when">—</span>
+                </div>
+                <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Direction</span> <span class="loc-v" id="loc-iss-dir">—</span></div>
+                <div class="loc-card-row"><span class="loc-k">Duration</span>  <span class="loc-v" id="loc-iss-dur">—</span></div>
+            </div>
+
             <div class="loc-aurora" id="loc-aurora"></div>
+
             <div class="loc-btns">
                 <button class="loc-btn" id="loc-fly">📍 Fly here</button>
                 <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
@@ -1251,6 +1316,8 @@ import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/sav
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
 import { geo } from './js/geo/coords.js';
 import { SatelliteTracker } from './js/satellite-tracker.js';
+import { solarPosition, sunTimes, compass16 } from './js/sun-altitude.js';
+import { nextPasses } from './js/pass-predictor.js';
 import {
     EARTH_VERT, EARTH_FRAG, CLOUD_VERT, CLOUD_FRAG, ATM_VERT, ATM_FRAG,
     AURORA_VERT, AURORA_FRAG,
@@ -1532,6 +1599,59 @@ const subsolarMarker = (() => {
     earthMesh.add(g);
     return { group: g, halo };
 })();
+
+// ── User-location solar markers ────────────────────────────────────────
+// Two children of earthMesh, both tied to (and lifecycle-managed by) the
+// location panel. Hidden when the user hasn't saved a location.
+//
+//   userSolarNoonPin — sits at (today's solar declination, user's
+//   longitude). That's the point where the sub-solar point will cross
+//   the user's meridian, i.e. the Earth-side projection of "the sun at
+//   your solar max today". The pip shares the subsolar's geometry so the
+//   two visually read as a pair when both are enabled.
+//
+//   userSkyArrow — an arrow anchored on the globe at the user's surface
+//   position pointing toward where the sun currently is in THEIR sky.
+//   Direction is decomposed from alt/az into the local ENU basis, then
+//   expressed in the earthMesh local frame. Hidden when the sun is below
+//   the observer's horizon (alt < −1°).
+const userSolarNoonPin = (() => {
+    const g = new THREE.Group();
+    g.visible = false;
+    const coreMat = new THREE.MeshBasicMaterial({ color: 0xffaa22 });
+    const core    = new THREE.Mesh(new THREE.SphereGeometry(0.013, 14, 14), coreMat);
+    const haloMat = new THREE.MeshBasicMaterial({
+        color: 0xffcc44, transparent: true, opacity: 0.48,
+        side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const halo    = new THREE.Mesh(new THREE.RingGeometry(0.020, 0.040, 40), haloMat);
+    g.add(core); g.add(halo);
+    g.renderOrder = 10;
+    earthMesh.add(g);
+    return { group: g, halo };
+})();
+
+const userSkyArrow = (() => {
+    const a = new THREE.ArrowHelper(
+        new THREE.Vector3(0, 1, 0),     // direction placeholder
+        new THREE.Vector3(0, 0, 0),     // origin placeholder
+        0.15,                            // shaft length in Earth radii (~955 km)
+        0xffd766,                        // warm sun yellow
+        0.035,                           // head length
+        0.025,                           // head width
+    );
+    a.visible = false;
+    a.renderOrder = 10;
+    earthMesh.add(a);
+    return a;
+})();
+
+// Scratch vectors for the per-frame ENU basis — module-level reuse keeps
+// the sun-marker update GC-free.
+const _enuUp    = new THREE.Vector3();
+const _enuEast  = new THREE.Vector3();
+const _enuNorth = new THREE.Vector3();
+const _sunBody  = new THREE.Vector3();
 
 // ═══════════════════════════════════════════════════════════════
 //  WEATHER DATA TEXTURE
@@ -3657,6 +3777,9 @@ const satTracker = new SatelliteTracker(earthMesh, 1.0, { maxSatellites: 500, sh
 satTracker.loadGroup('stations').then(() => {
     const statusEl = document.getElementById('sat-status');
     if (statusEl) statusEl.textContent = `Tracking ${satTracker.getSatellites().length} space stations`;
+    // Once stations are loaded, the ISS TLE is available; the location
+    // panel wants it for next-pass prediction.
+    _tryAttachIssTle?.();
 });
 
 // Layer toggle handlers for satellite groups
@@ -4858,10 +4981,35 @@ animate();
 //  LOCAL CLOCK  (updates every second)
 // ═══════════════════════════════════════════════════════════════
 function _tickLocalClock() {
+    const now = new Date();
     const el = document.getElementById('h-local');
-    if (el) el.textContent = new Date().toLocaleTimeString([], {
+    if (el) el.textContent = now.toLocaleTimeString([], {
         hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
     });
+
+    // Location panel mirrors the same clock at 1 Hz so the sun card and the
+    // "in N min" ISS countdown stay current without their own timer loop.
+    const loc = (typeof loadUserLocation === 'function') ? loadUserLocation() : null;
+    if (loc) {
+        // Local mean solar-ish time at the user's longitude. Matches the
+        // coord-hover tooltip convention (no IANA DST; 15°/h offset).
+        const utcH = now.getUTCHours()
+                   + now.getUTCMinutes() / 60
+                   + now.getUTCSeconds() / 3600;
+        const ltH  = ((utcH + loc.lon / 15) % 24 + 24) % 24;
+        const hh = String(Math.floor(ltH)).padStart(2, '0');
+        const mm = String(Math.floor((ltH * 60) % 60)).padStart(2, '0');
+        const ss = String(Math.floor((ltH * 3600) % 60)).padStart(2, '0');
+        const ltEl = document.getElementById('loc-localtime');
+        if (ltEl) ltEl.textContent = `${hh}:${mm}:${ss} LT`;
+
+        _updateLocSunCard(now, loc.lat, loc.lon);
+        _updateLocPassCard();
+        _updateUserSunMarkers(now, loc.lat, loc.lon);
+    } else {
+        // Location cleared — make sure the on-globe markers disappear with it.
+        _updateUserSunMarkers(now, null, null);
+    }
 }
 _tickLocalClock();
 setInterval(_tickLocalClock, 1000);
@@ -4930,6 +5078,150 @@ function updateUserAuroraVis(kp) {
 // ═══════════════════════════════════════════════════════════════
 //  LOCATION PANEL LOGIC
 // ═══════════════════════════════════════════════════════════════
+// Cached ISS TLE + last-computed next pass. `_issPassTle` is populated
+// the first time the satellite tracker reports ISS (NORAD 25544). Passes
+// are recomputed when (a) a new user location is saved, (b) we attach the
+// ISS TLE for the first time, or (c) the cached pass has already elapsed.
+let _issPassTle   = null;
+let _issNextPass  = null;
+
+const _fmtHM = d => d
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '—';
+
+function _fmtDurationMin(m) {
+    if (m == null || !isFinite(m)) return '—';
+    if (m < 1) return '<1 min';
+    return `${m.toFixed(1)} min`;
+}
+
+// Build a compact "in 45 min" / "in 3 h" / "Sat" countdown for the pass card.
+function _fmtPassWhen(date) {
+    const mins = Math.max(0, (date - Date.now()) / 60000);
+    if (mins < 60)  return `in ${Math.round(mins)} min`;
+    if (mins < 720) return `in ${Math.round(mins / 60)} h`;
+    return date.toLocaleDateString([], { weekday: 'short' });
+}
+
+function _updateLocSunCard(now, lat, lon) {
+    if (lat == null) return;
+    const pos  = solarPosition(now, lat, lon);
+    const suns = sunTimes(now, lat, lon);
+
+    const altAz = `${pos.altitudeDeg >= 0 ? '+' : ''}${pos.altitudeDeg.toFixed(1)}° · `
+                + `${compass16(pos.azimuthDeg)} ${Math.round(pos.azimuthDeg)}°`;
+    document.getElementById('loc-sun-altaz').textContent = altAz;
+    document.getElementById('loc-sunrise').textContent   =
+        suns.polar === 'night' ? 'polar night' : _fmtHM(suns.sunrise);
+    document.getElementById('loc-solar-noon').textContent = _fmtHM(suns.solarNoon);
+    document.getElementById('loc-sunset').textContent    =
+        suns.polar === 'day' ? 'polar day' : _fmtHM(suns.sunset);
+    const dlen = suns.dayLengthH;
+    document.getElementById('loc-daylength').textContent =
+        suns.polar === 'day'   ? '24h 00m'
+      : suns.polar === 'night' ? '0h 00m'
+      : `${Math.floor(dlen)}h ${String(Math.round((dlen % 1) * 60)).padStart(2,'0')}m`;
+}
+
+function _updateLocPassCard() {
+    const card = document.getElementById('loc-iss-card');
+    if (!card) return;
+    const whenEl = document.getElementById('loc-iss-when');
+    const riseEl = document.getElementById('loc-iss-rise');
+    const peakEl = document.getElementById('loc-iss-peak');
+    const dirEl  = document.getElementById('loc-iss-dir');
+    const durEl  = document.getElementById('loc-iss-dur');
+
+    // Pass has already passed? Recompute lazily instead of showing stale data.
+    if (_issNextPass && _issNextPass.set.time < new Date()) _issNextPass = null;
+
+    if (!_issNextPass) {
+        card.classList.add('empty');
+        whenEl.textContent = _issPassTle ? 'none in 24h' : 'waiting TLE…';
+        riseEl.textContent = peakEl.textContent = dirEl.textContent = durEl.textContent = '—';
+        return;
+    }
+    card.classList.remove('empty');
+    const p = _issNextPass;
+    whenEl.textContent = _fmtPassWhen(p.rise.time);
+    riseEl.textContent = `${_fmtHM(p.rise.time)} · ${compass16(p.rise.azDeg)}`;
+    peakEl.textContent = `${p.peak.elDeg.toFixed(0)}° · ${compass16(p.peak.azDeg)}`;
+    dirEl.textContent  = `${compass16(p.rise.azDeg)} → ${compass16(p.set.azDeg)}`;
+    durEl.textContent  = _fmtDurationMin(p.durationMin);
+}
+
+function _refreshIssPassForUser() {
+    const loc = loadUserLocation();
+    if (!loc || !_issPassTle) { _issNextPass = null; _updateLocPassCard(); return; }
+    try {
+        const passes = nextPasses(_issPassTle, { lat: loc.lat, lon: loc.lon },
+                                  { horizonH: 24, maxPasses: 1 });
+        _issNextPass = passes[0] ?? null;
+    } catch (err) {
+        console.debug('[Loc] ISS pass lookup failed:', err.message);
+        _issNextPass = null;
+    }
+    _updateLocPassCard();
+}
+
+// Update user-location solar markers (noon pin + sky-angle arrow) from
+// the current time. Both markers are children of earthMesh, so positions
+// live in geographic space and automatically track the globe rotation.
+function _updateUserSunMarkers(now, lat, lon) {
+    if (lat == null) {
+        userSolarNoonPin.group.visible = false;
+        userSkyArrow.visible = false;
+        return;
+    }
+    const pos = solarPosition(now, lat, lon);
+
+    // Solar-noon pin: projected onto the globe at (today's solar declination,
+    // user's longitude). Read as "the sun will be directly overhead here at
+    // your solar max". Stays on the surface; small halo rings around the dot.
+    const noonPos = geoToXYZ(pos.declinationDeg, lon).multiplyScalar(R_EARTH * 1.005);
+    userSolarNoonPin.group.position.copy(noonPos);
+    userSolarNoonPin.halo.lookAt(0, 0, 0);
+    userSolarNoonPin.group.visible = true;
+
+    // Sky-angle arrow: origin = user's surface, direction = current sun
+    // direction in the observer's ENU frame, projected into earthMesh-local.
+    //   Up    = radial outward     (= latLonToNormal(lat, lon))
+    //   East  = ∂normal / ∂lon       (tangent, points 090°)
+    //   North = Up × East           (tangent, points 000°)
+    const latUserR = lat * DEG, lonUserR = lon * DEG;
+    const cLat = Math.cos(latUserR), sLat = Math.sin(latUserR);
+    const cLon = Math.cos(lonUserR), sLon = Math.sin(lonUserR);
+    _enuUp.set(cLat * cLon, sLat, -cLat * sLon);
+    _enuEast.set(-cLat * sLon, 0, -cLat * cLon).normalize();
+    _enuNorth.crossVectors(_enuUp, _enuEast).normalize();
+
+    // Sun altitude/azimuth (astronomical: az from N clockwise) → ENU
+    const altR = pos.altitudeDeg * DEG;
+    const azR  = pos.azimuthDeg  * DEG;
+    const horiz = Math.cos(altR);
+    _sunBody.copy(_enuEast).multiplyScalar(horiz * Math.sin(azR))
+            .addScaledVector(_enuNorth, horiz * Math.cos(azR))
+            .addScaledVector(_enuUp,    Math.sin(altR))
+            .normalize();
+
+    userSkyArrow.position.copy(_enuUp).multiplyScalar(R_EARTH * 1.003);
+    userSkyArrow.setDirection(_sunBody);
+    // Hide arrow when sun is below horizon — an arrow pointing into the
+    // ground is more confusing than informative.
+    userSkyArrow.visible = pos.altitudeDeg > -1;
+}
+
+// Latch onto the ISS TLE once satTracker has it. Safe to call repeatedly —
+// becomes a no-op after the TLE is attached.
+function _tryAttachIssTle() {
+    if (_issPassTle) return;
+    const iss = satTracker.getSatellite?.(25544);
+    if (iss?.tle) {
+        _issPassTle = iss.tle;
+        _refreshIssPassForUser();
+    }
+}
+
 function _showLocResult(loc) {
     if (!loc) {
         document.getElementById('loc-result').style.display = 'none';
@@ -4949,6 +5241,15 @@ function _showLocResult(loc) {
 
     _setUserPin(loc.lat, loc.lon);
     updateUserAuroraVis(_currentKp);
+
+    // Prime the sun card, ISS next-pass lookup, and on-globe solar markers
+    // for the newly set location. _tickLocalClock will keep all three fresh
+    // at 1 Hz from here; ISS pass is only recomputed when location changes
+    // or the cached pass has elapsed.
+    const _now = new Date();
+    _updateLocSunCard(_now, loc.lat, loc.lon);
+    _updateUserSunMarkers(_now, loc.lat, loc.lon);
+    _refreshIssPassForUser();
 }
 
 async function _doGeocode() {

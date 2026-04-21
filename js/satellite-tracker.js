@@ -70,8 +70,10 @@ export function isWasmLoaded() { return _wasmSgp4 !== null; }
 /** Get the WASM module (or null). */
 export function getWasmSgp4() { return _wasmSgp4; }
 
-/** Propagate using WASM if available, else JS fallback. */
-function propagate(tle, tsince_min) {
+/** Propagate a TLE via Rust WASM if available, else JS fallback.
+ *  Exported so pass-predictor.js and conjunction tools can reuse the same
+ *  propagator the live tracker draws with. */
+export function propagate(tle, tsince_min) {
     if (_wasmSgp4 && tle.line1 && tle.line2) {
         try {
             const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
@@ -326,7 +328,7 @@ export class SatelliteTracker {
             if (this._satellites.length >= this._maxSats) break;
             if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
 
-            const epochJd = _tleEpochToJd(tle);
+            const epochJd = tleEpochToJd(tle);
             this._satellites.push({ tle, epochJd, group, color, lat: 0, lon: 0, alt: 400 });
             added++;
         }
@@ -686,7 +688,10 @@ export class SatelliteTracker {
 
 const _hiddenColor = new THREE.Color(0x000000);
 
-function _tleEpochToJd(tle) {
+/** Convert a TLE's (epoch_yr, epoch_day) fractional-year field into a JD.
+ *  Exported for modules that want to propagate independently of the
+ *  tracker but using the same epoch arithmetic. */
+export function tleEpochToJd(tle) {
     const epochYr = tle.epoch_yr ?? 2026;
     const yr = Math.floor(epochYr);
     const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);
