@@ -567,8 +567,14 @@ function _renderDebrisStatus(evt) {
         return;
     }
     if (evt.state === 'done') {
+        // Tag the source so a user can tell whether they're looking at
+        // a fresh run or a restored row from IndexedDB.
+        const source = _debrisCache.source;
+        const srcTag = source === 'idb'
+            ? `<span style="color:#88ccdd" title="Restored from IndexedDB (last run ${evt.ageMs ? (evt.ageMs / 3600000).toFixed(1) + ' h ago' : 'recent'})">cached</span>`
+            : `<span style="color:#4fc97f">✓ Done</span>`;
         label.innerHTML =
-            `<span style="color:#4fc97f">✓ Done</span> — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
+            `${srcTag} — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
         bar.style.width = '100%';
         // Force the selected-sat card to refresh its readout with the
         // newly-available count.
@@ -585,7 +591,7 @@ function _renderDebrisStatus(evt) {
     }
 }
 
-function _maybeRunDebrisScreen() {
+async function _maybeRunDebrisScreen() {
     if (_debrisScreenRan) return;
     if (!tracker.hasGroup('debris')) return;
 
@@ -598,8 +604,22 @@ function _maybeRunDebrisScreen() {
     if (targets.length === 0 || debris.length === 0) return;
 
     _debrisScreenRan = true;
+
+    // Try the IDB fast path first — a compatible run from the last 6 h
+    // (same params, catalog counts within 5 %) lets us skip the worker
+    // entirely. If it misses, fall through to a live run.
+    const params = { hoursAhead: 24, stepMin: 10, thresholdKm: 50 };
+    const restored = await _debrisCache.restore({
+        params,
+        targetCount: targets.length,
+        debrisCount: debris.length,
+    });
+    if (restored) {
+        console.info('[DebrisThreat] Restored from IndexedDB (skipping worker run)');
+        return;
+    }
     console.info(`[DebrisThreat] Starting screen: ${targets.length} targets × ${debris.length} debris`);
-    _debrisCache.run(targets, debris, { hoursAhead: 24, stepMin: 10, thresholdKm: 50 });
+    _debrisCache.run(targets, debris, params);
 }
 
 // Fires after every tracker.loadGroup() resolves — use it as the hook for
@@ -1384,6 +1404,93 @@ window.addEventListener('keydown', (e) => {
 // Scratch vectors for the per-frame sun direction — hot path, no GC.
 const _sunSceneV = new THREE.Vector3();
 
+// ── TCA collision arcs (Level 3) ─────────────────────────────────────────
+// When a satellite is selected AND the debris-threat cache has populated
+// its threat list, draw a fading line between the sat and each threat
+// debris whose TCA is within _TCA_WINDOW_MIN of the current sim instant.
+// The line brightens as |t − tca| → 0 and fades to invisible outside the
+// window. Entirely sim-time driven: at 3600× scrub the arcs flicker
+// through the catalog in seconds, same way you'd watch a traffic radar.
+//
+// Geometry rebuilt each frame (cheap: one LineSegments, ≤ tens of
+// segments even on the busiest LEO sat). Material + scene group live
+// here and aren't disposed; only the BufferGeometry is churned.
+const _TCA_WINDOW_MIN = 30;                        // ± minutes around TCA
+const _tcaGroup = new THREE.Group();
+_tcaGroup.name  = 'tcaArcs';
+scene.add(_tcaGroup);
+const _tcaMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent:  true,
+    opacity:      1.0,
+    blending:     THREE.AdditiveBlending,
+    depthWrite:   false,
+});
+let _tcaMesh = null;
+
+// Scratch vectors for the per-frame position pulls.
+const _tcaVecA = { x: 0, y: 0, z: 0 };
+const _tcaVecB = { x: 0, y: 0, z: 0 };
+
+function _updateTcaArcs() {
+    if (_selectedNorad == null || _debrisCache.state !== 'done') {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+    const threats = _debrisCache.getThreatsFor(_selectedNorad);
+    if (!threats || threats.length === 0) {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+
+    // Sim-time Julian Date.  Matches what the tracker uses internally so
+    // cache.tca_jd and "now" are in the same frame.
+    const nowJd = simTimeMs / 86400000 + 2440587.5;
+
+    const positions = [];
+    const colors    = [];
+
+    for (const t of threats) {
+        if (!Number.isFinite(t.tca_jd)) continue;
+        const dtMin = (t.tca_jd - nowJd) * 24 * 60;       // − = already past TCA
+        if (Math.abs(dtMin) > _TCA_WINDOW_MIN) continue;
+
+        const a = tracker.getPositionXYZ(_selectedNorad, _tcaVecA);
+        const b = tracker.getPositionXYZ(t.norad_id,   _tcaVecB);
+        if (!a || !b) continue;
+
+        // Ease: 1 at TCA, 0 at ±window, quadratic so the pop reads sharp.
+        const norm = 1 - Math.min(1, Math.abs(dtMin) / _TCA_WINDOW_MIN);
+        const fade = norm * norm;
+
+        // Severity colour — red for <10 km, orange for <25, amber else.
+        const base = t.dist_km < 10 ? [1.00, 0.15, 0.10]
+                  :  t.dist_km < 25 ? [1.00, 0.55, 0.15]
+                  :                   [1.00, 0.85, 0.35];
+        const r = base[0] * fade;
+        const g = base[1] * fade;
+        const bC = base[2] * fade;
+
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        colors.push(r, g, bC, r, g, bC);
+    }
+
+    // Rebuild LineSegments (cheap; max ~20 edges per selected sat).
+    if (_tcaMesh) {
+        _tcaGroup.remove(_tcaMesh);
+        _tcaMesh.geometry.dispose();
+        _tcaMesh = null;
+    }
+    if (positions.length === 0) return;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+    _tcaMesh = new THREE.LineSegments(geom, _tcaMat);
+    _tcaMesh.renderOrder = 11;       // above sat points, below highlight sprite
+    _tcaGroup.add(_tcaMesh);
+}
+
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
@@ -1411,6 +1518,11 @@ function animate() {
     // ── Satellites — tracker takes an explicit timestamp, so sat
     // positions are propagated to the sim instant too.
     tracker.tick(simTimeMs);
+
+    // ── TCA collision arcs — bright ribbons for imminent debris close
+    // approaches to the currently-selected target. Only active when the
+    // background threat cache has populated.
+    _updateTcaArcs();
 
     // ── Weather-aware alert overlay — recompute per frame when enabled.
     // Matching is <1 ms for typical catalogs because the matcher has a
