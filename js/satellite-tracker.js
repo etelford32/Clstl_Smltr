@@ -368,6 +368,26 @@ export class SatelliteTracker {
             }));
     }
 
+    /**
+     * Return the raw TLE objects for a given CelesTrak group, or an
+     * array aggregated across groups when `group === null`.  Used by
+     * the Web Worker pre-compute path to ship catalogs across the
+     * postMessage boundary without including the scratch render state.
+     *
+     * @param {string|string[]|null} group  group name, list of names,
+     *        or null to mean "every loaded group".
+     */
+    getTlesByGroup(group) {
+        const matches = (g) => {
+            if (group == null) return true;
+            if (Array.isArray(group)) return group.includes(g);
+            return g === group;
+        };
+        return this._satellites
+            .filter(s => matches(s.group))
+            .map(s => s.tle);
+    }
+
     _buildHighlightSprite() {
         const cv  = document.createElement('canvas');
         cv.width  = 128;

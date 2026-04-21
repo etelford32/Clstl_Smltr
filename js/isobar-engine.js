@@ -32,6 +32,7 @@
  */
 
 import * as THREE from 'three';
+import { geo } from './geo/coords.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants
@@ -164,16 +165,15 @@ function toLatLon(lx, ly) {
     };
 }
 
-// Grid-space coords → THREE.Vector3 on the sphere surface
+// Grid-space coords → THREE.Vector3 on the sphere surface.  Delegates to
+// the canonical coords module so isobar geometry lands on the same
+// +X=lon0 / +Y=north / −Z=+90°E frame used by the Earth shader and every
+// other overlay.  The previous hand-rolled (cos·sin, sin, cos·cos) formula
+// put lines 90° west of their real longitude — only visible once the
+// Blue Marble was un-flipped on the earthMesh.
 function toVec3(lx, ly) {
     const { lat, lon } = toLatLon(lx, ly);
-    const phi = lat * DEG, lam = lon * DEG;
-    const r   = R * 1.0025;   // 0.25% above surface — above globe, below clouds
-    return new THREE.Vector3(
-        r * Math.cos(phi) * Math.sin(lam),
-        r * Math.sin(phi),
-        r * Math.cos(phi) * Math.cos(lam),
-    );
+    return geo.deg.latLonToPosition(lat, lon, R * 1.0025);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -601,13 +601,9 @@ export class IsobarLayer {
 
         for (const e of this._extrema) {
             const { lat, lon } = toLatLon(e.x, e.y);
-            const phi = lat * DEG, lam = lon * DEG;
-            const rr  = R * 1.016;   // float above the isobar lines
-            const pos = new THREE.Vector3(
-                rr * Math.cos(phi) * Math.sin(lam),
-                rr * Math.sin(phi),
-                rr * Math.cos(phi) * Math.cos(lam),
-            );
+            // Canonical coord conversion — matches the isobar lines above
+            // and keeps H/L markers aligned with the continents they sit on.
+            const pos = geo.deg.latLonToPosition(lat, lon, R * 1.016);
             const sprite = makeHLSprite(e.type, e.hPa);
             sprite.position.copy(pos);
             this._group.add(sprite);
