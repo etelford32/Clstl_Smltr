@@ -2087,6 +2087,7 @@ document.getElementById('lyr-earthquakes').addEventListener('change', e => {
 });
 document.getElementById('lyr-iss').addEventListener('change', e => {
     issMarker.setVisible(e.target.checked);
+    satTracker.setHighlightVisible(e.target.checked);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -3784,6 +3785,11 @@ satTracker.loadGroup('stations').then(() => {
     // Once stations are loaded, the ISS TLE is available; the location
     // panel wants it for next-pass prediction.
     _tryAttachIssTle?.();
+    // Pin the ISS so it stands out from the other space-station dots.
+    // Visibility is gated by the existing lyr-iss checkbox alongside the
+    // separate ISSMarker.
+    satTracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
+    if (!document.getElementById('lyr-iss')?.checked) satTracker.setHighlightVisible(false);
 });
 
 // Layer toggle handlers for satellite groups

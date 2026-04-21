@@ -227,6 +227,98 @@ export class SatelliteTracker {
         this._shellGroup.name = 'orbital-shells';
         this._shellGroup.visible = false;
         parent.add(this._shellGroup);
+
+        // Optional single-satellite highlight (e.g. pin "ISS" out of the
+        // stations group). Lazily built on the first setHighlight() call.
+        this._highlightNoradId = null;
+        this._highlightOpts    = null;
+        this._highlightSprite  = null;
+        this._highlightCanvas  = null;
+        this._highlightTexture = null;
+    }
+
+    // ── Highlight a single satellite with a sprite (dot + text label) ────
+    // So a specific NORAD ID stays findable in a field of ~30 k dots. The
+    // sprite is a child of the tracker's internal group, so it inherits
+    // whatever coordinate frame the parent container is in.
+    //
+    // opts: { label: string, color: hex }
+    setHighlight(noradId, opts = {}) {
+        this._highlightNoradId = noradId;
+        this._highlightOpts    = {
+            label: opts.label ?? '',
+            color: opts.color ?? 0x00ffcc,
+        };
+        if (!this._highlightSprite) this._buildHighlightSprite();
+        else                        this._rebuildHighlightTexture();
+        this._highlightSprite.visible = true;
+    }
+
+    clearHighlight() {
+        this._highlightNoradId = null;
+        if (this._highlightSprite) this._highlightSprite.visible = false;
+    }
+
+    setHighlightVisible(v) {
+        if (this._highlightSprite) {
+            this._highlightSprite.visible = !!v && this._highlightNoradId != null;
+        }
+    }
+
+    _buildHighlightSprite() {
+        const cv  = document.createElement('canvas');
+        cv.width  = 128;
+        cv.height = 40;
+        const tex = new THREE.CanvasTexture(cv);
+        tex.minFilter = THREE.LinearFilter;
+        const mat = new THREE.SpriteMaterial({
+            map: tex, transparent: true,
+            depthWrite: false, depthTest: false,
+        });
+        const sprite = new THREE.Sprite(mat);
+        // World-unit size: ≈1/5 of Earth radius. Keep 128×40 canvas aspect.
+        sprite.scale.set(0.20, 0.0625, 1);
+        // Anchor the sprite on the *dot* (drawn at canvas x=20 / 128 = 0.156),
+        // not the canvas centre — so sprite.position = sat.position puts the
+        // dot right on the satellite and the label trails to the right.
+        sprite.center.set(20 / 128, 0.5);
+        sprite.renderOrder = 12;
+        this._highlightSprite  = sprite;
+        this._highlightCanvas  = cv;
+        this._highlightTexture = tex;
+        this._group.add(sprite);
+        this._rebuildHighlightTexture();
+    }
+
+    _rebuildHighlightTexture() {
+        const cv    = this._highlightCanvas;
+        const ctx   = cv.getContext('2d');
+        const color = this._highlightOpts.color;
+        const label = this._highlightOpts.label;
+        const hex   = '#' + color.toString(16).padStart(6, '0');
+
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        // Soft halo + solid core so the dot stands out on bright and dark
+        // continents alike. Three concentric fills at decreasing radius.
+        ctx.fillStyle = hex;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath(); ctx.arc(20, 20, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath(); ctx.arc(20, 20, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1.0;
+        ctx.beginPath(); ctx.arc(20, 20,  5, 0, Math.PI * 2); ctx.fill();
+
+        // Label — outlined for legibility over any globe colour.
+        ctx.font         = 'bold 18px system-ui, sans-serif';
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth    = 4;
+        ctx.strokeStyle  = 'rgba(0, 0, 0, 0.85)';
+        ctx.strokeText(label, 38, 22);
+        ctx.fillStyle    = hex;
+        ctx.fillText(label, 38, 22);
+
+        this._highlightTexture.needsUpdate = true;
     }
 
     /**
@@ -404,9 +496,12 @@ export class SatelliteTracker {
             // TEME → ECEF (GMST rotation) → scene frame, in one call.
             geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
 
-            posArr[i * 3]     = _sceneScratch.x * kmToScene;
-            posArr[i * 3 + 1] = _sceneScratch.y * kmToScene;
-            posArr[i * 3 + 2] = _sceneScratch.z * kmToScene;
+            const x = _sceneScratch.x * kmToScene;
+            const y = _sceneScratch.y * kmToScene;
+            const z = _sceneScratch.z * kmToScene;
+            posArr[i * 3]     = x;
+            posArr[i * 3 + 1] = y;
+            posArr[i * 3 + 2] = z;
 
             // Recover geographic coords for tooltip / API use. `positionToLatLon`
             // returns radians and the scene-frame magnitude (here in km since
@@ -415,6 +510,15 @@ export class SatelliteTracker {
             sat.lat = ll.lat * RAD;
             sat.lon = ll.lon * RAD;
             sat.alt = ll.radiusUnits - RE_KM;
+
+            // Park the highlight sprite on the matching sat. O(1) hit test
+            // folded into the main loop so we don't have to re-find the
+            // satellite after the fact.
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
         }
 
         this._positions.needsUpdate = true;
