@@ -353,21 +353,23 @@ export class WeatherFeed {
                 const hNorm = Math.max(0, Math.cos(lat * 1.8) * 0.8
                             + 0.20 * Math.abs(Math.sin(lat * 3.0 + lon * 2.0)));
 
-                // Zonal wind: trade winds (E) in tropics, westerlies in mid-lat,
-                //             polar easterlies. Meridional: gentle Hadley circulation.
-                // sin(3φ) has zeros at ±0, ±60, ±90° and max at ±30° — matches Ferrel
-                const windU = -Math.sin(lat * 3.0) * 0.65;  // eastward normalised [-1,1]
-                const windV =  Math.sin(lon * 2.0 + lat * 0.8) * 0.12 * Math.cos(lat);
-                const spd   = Math.min(1, Math.sqrt(windU * windU + windV * windV) * 1.4);
-
+                // Wind: deliberately ZEROED in the procedural fallback.
+                // The old −sin(3φ)·0.65 formula was meant to sketch "trade
+                // winds + Ferrel westerlies + polar easterlies" but the sign
+                // came out inverted through mid-latitudes (45°N/S rendered
+                // as easterlies when they should have been westerlies). A
+                // silent wrong wind field is more misleading than no wind
+                // at all — particles stand still until Open-Meteo resolves,
+                // and callers can read meta.loaded to know they're on the
+                // fallback path.
                 this._weatherBuf[t4+0] = tNorm;
                 this._weatherBuf[t4+1] = Math.max(0, Math.min(1, pNorm));
                 this._weatherBuf[t4+2] = Math.max(0, Math.min(1, hNorm));
-                this._weatherBuf[t4+3] = spd;
+                this._weatherBuf[t4+3] = 0;      // wind-speed channel
 
-                this._windBuf[t4+0] = windU;
-                this._windBuf[t4+1] = windV;
-                this._windBuf[t4+2] = spd;
+                this._windBuf[t4+0] = 0;
+                this._windBuf[t4+1] = 0;
+                this._windBuf[t4+2] = 0;
                 this._windBuf[t4+3] = 1.0;
 
                 // Procedural cloud layers — neutral low-coverage field.
