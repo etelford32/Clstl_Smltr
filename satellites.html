@@ -251,6 +251,16 @@ nav {
         <div class="sp-section">
             <div class="sp-label" style="color:#ff4444">Debris &amp; Hazards</div>
             <div class="sp-toggle"><input type="checkbox" id="grp-debris"><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
+            <!-- Status strip for the background debris-threat screen.
+                 Collapsed until the user enables debris; the Web Worker
+                 then runs once against every loaded operational group and
+                 populates sp-near-miss counts on each selected satellite. -->
+            <div id="debris-screen-status" style="display:none;margin-top:6px;font-size:.62rem;color:#887;line-height:1.5">
+                <div id="dss-label">—</div>
+                <div style="height:3px;background:rgba(255,80,80,.10);border-radius:2px;margin-top:3px;overflow:hidden">
+                    <div id="dss-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#ff4422,#ffaa44);transition:width .15s"></div>
+                </div>
+            </div>
         </div>
         <div class="sp-section">
             <div class="sp-label">Visualization</div>
@@ -409,6 +419,7 @@ import { sunDirectionEci } from './js/sun-altitude.js';
 import { NWSAlerts, ALERT_CSS_COLORS } from './js/nws-alerts.js';
 import { StormFeed } from './js/storm-feed.js';
 import { findSatsOverAlerts } from './js/sat-alert-matcher.js';
+import { DebrisThreatCache } from './js/debris-threat-cache.js';
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -516,6 +527,85 @@ function _updateHud() {
 // other space-station dots.
 loadGroup('stations').then(() => {
     tracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
+});
+
+// ── Debris-threat pre-compute (Level 2) ──────────────────────────────────
+// Spins up a Module Worker that propagates every loaded operational sat
+// against the debris catalog once, then caches the per-sat near-miss
+// lists. The altitude-cohort card reads this cache so "Near-miss 24 h"
+// is already filled in when the user selects a sat — no click required.
+//
+// Triggered once, the first time the 'debris' group finishes loading.
+// `_debrisScreenRan` ensures we don't re-run on subsequent group loads;
+// a future commit can add a manual "Rescan" button if we want that.
+const _debrisCache  = new DebrisThreatCache();
+let   _debrisScreenRan = false;
+
+_debrisCache.subscribe(_renderDebrisStatus);
+
+function _renderDebrisStatus(evt) {
+    const box   = document.getElementById('debris-screen-status');
+    const label = document.getElementById('dss-label');
+    const bar   = document.getElementById('dss-bar');
+    if (!box || !label || !bar) return;
+
+    if (evt.state === 'idle' || !evt.state) {
+        box.style.display = 'none';
+        return;
+    }
+    box.style.display = '';
+
+    if (evt.state === 'running') {
+        if (evt.phase === 'start') {
+            label.textContent = `Pre-compute launching…`;
+            bar.style.width = '2%';
+            return;
+        }
+        const pct = evt.total > 0 ? (100 * evt.done / evt.total) : 0;
+        label.innerHTML = `Screening debris: <strong>${evt.done.toLocaleString()}</strong> / ${evt.total.toLocaleString()} sats`;
+        bar.style.width = pct.toFixed(1) + '%';
+        return;
+    }
+    if (evt.state === 'done') {
+        label.innerHTML =
+            `<span style="color:#4fc97f">✓ Done</span> — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
+        bar.style.width = '100%';
+        // Force the selected-sat card to refresh its readout with the
+        // newly-available count.
+        if (_selectedNorad != null) {
+            const sel = tracker.getSatellites().find(s => s.norad_id === _selectedNorad);
+            if (sel) _updateAltitudeCohort(sel);
+        }
+        return;
+    }
+    if (evt.state === 'error') {
+        label.innerHTML = `<span style="color:#ff4422">⚠ Pre-compute failed</span> — ${_esc(evt.error || 'unknown')}`;
+        bar.style.width = '0%';
+        return;
+    }
+}
+
+function _maybeRunDebrisScreen() {
+    if (_debrisScreenRan) return;
+    if (!tracker.hasGroup('debris')) return;
+
+    // Target = every loaded group *except* debris. GEO sats won't actually
+    // conjunct with LEO debris, but the altitude pre-filter in the worker
+    // prunes them cheaply and including them keeps the API simple.
+    const loaded  = tracker.getLoadedGroups();
+    const targets = tracker.getTlesByGroup(loaded.filter(g => g !== 'debris'));
+    const debris  = tracker.getTlesByGroup('debris');
+    if (targets.length === 0 || debris.length === 0) return;
+
+    _debrisScreenRan = true;
+    console.info(`[DebrisThreat] Starting screen: ${targets.length} targets × ${debris.length} debris`);
+    _debrisCache.run(targets, debris, { hoursAhead: 24, stepMin: 10, thresholdKm: 50 });
+}
+
+// Fires after every tracker.loadGroup() resolves — use it as the hook for
+// "both catalogs ready, kick off the worker".
+window.addEventListener('satellites-loaded', (e) => {
+    if (e.detail?.group === 'debris') _maybeRunDebrisScreen();
 });
 
 // All constellation group toggles
@@ -841,6 +931,26 @@ function _updateAltitudeCohort(sel) {
     if (!hasDebris) {
         document.getElementById('sp-cohort-debris').textContent = '— (load debris)';
     }
+    // Near-miss — prefer the pre-computed cache if the worker has run;
+    // fall back to a hint that prompts the user to click Screen when
+    // cache isn't available.
+    const nearEl = document.getElementById('sp-near-miss');
+    if (!nearEl) return;
+    if (_debrisCache.state === 'done') {
+        const n = _debrisCache.getCountFor(sel.norad_id);
+        nearEl.textContent = n === 0
+            ? '0 (safe)'
+            : `${n.toLocaleString()} (cached)`;
+    } else if (_debrisCache.state === 'running') {
+        const pct = _debrisCache.total > 0
+            ? Math.round(100 * _debrisCache.progress / _debrisCache.total)
+            : 0;
+        nearEl.textContent = `computing… ${pct}%`;
+    } else if (!hasDebris) {
+        nearEl.textContent = 'enable debris';
+    } else {
+        nearEl.textContent = 'click Screen';
+    }
 }
 
 // "Screen debris" button — runs the tracker's SGP4 conjunction screen
@@ -863,16 +973,24 @@ document.getElementById('sp-screen-debris')?.addEventListener('click', async () 
     resEl.innerHTML = '';
     resEl.style.display = '';
 
+    // If the background worker has already produced a complete screen,
+    // render from the cache instantly — no new propagate() work. Saves
+    // the ~0.5–2 s wait per selection when the user is browsing many
+    // sats in the same session.
     let hits = [];
-    try {
-        hits = await tracker.countDebrisApproaches(_selectedNorad, {
-            withinKm: 50, horizonH: 24, stepMin: 10,
-        });
-    } catch (err) {
-        resEl.innerHTML = `<span style="color:#ff4422">Screen failed: ${_esc(err.message)}</span>`;
-        btn.disabled   = false;
-        btn.textContent = 'Screen debris (24h · 50 km)';
-        return;
+    if (_debrisCache.state === 'done') {
+        hits = _debrisCache.getThreatsFor(_selectedNorad) ?? [];
+    } else {
+        try {
+            hits = await tracker.countDebrisApproaches(_selectedNorad, {
+                withinKm: 50, horizonH: 24, stepMin: 10,
+            });
+        } catch (err) {
+            resEl.innerHTML = `<span style="color:#ff4422">Screen failed: ${_esc(err.message)}</span>`;
+            btn.disabled   = false;
+            btn.textContent = 'Screen debris (24h · 50 km)';
+            return;
+        }
     }
 
     nearEl.textContent = hits.length.toLocaleString();
