@@ -1403,17 +1403,20 @@ onResize();
 // ═══════════════════════════════════════════════════════════════
 //  SUN DIRECTION (updated once per frame from real date/GMST)
 // ═══════════════════════════════════════════════════════════════
-const now = new Date();
-const JD0 = julianDay(now);   // JD at page load
+//  SUN DIRECTION (recomputed every frame from real date/GMST)
+// ═══════════════════════════════════════════════════════════════
+// Initial sun direction — only used as the seed value for the shader
+// uniforms and the solar-wind particle stream. animate() recomputes the
+// sun direction from new Date() each frame and overwrites every
+// u_sun_dir uniform, so one source of truth drives both the Earth's
+// rotation and the terminator, with no per-frame drift between them.
+const SUN_EQ = sunDirectionEquatorial(julianDay(new Date()));
 
-// Sun direction in EQUATORIAL frame (fixed; Earth rotates beneath it)
-const SUN_EQ = sunDirectionEquatorial(JD0);
-
-// The Earth mesh's Y-axis is the geographic north pole.
-// We orient the globe so GMST=0 → Z-axis = prime meridian.
-// Then Earth rotates around Y at sidereal rate.
-// Sun direction in world space == SUN_EQ (since scene is in equatorial frame).
-const EARTH_INIT_ROT = gmst(JD0) * DEG;  // rotation at page load
+// The Earth mesh's Y-axis is the geographic north pole. animate() sets
+// earthMesh.rotation.y = gmst(jd) * DEG every frame, which carries the
+// prime meridian around the scene's equatorial +X axis (vernal equinox)
+// at the exact sidereal rate baked into the GMST formula — no separate
+// rate constant needed, and no accumulator to drift over long sessions.
 
 // ═══════════════════════════════════════════════════════════════
 //  SHARED UNIFORMS
@@ -4672,8 +4675,7 @@ renderer.domElement.addEventListener('mouseleave', () => { hideAlertTip(); _hide
 // ═══════════════════════════════════════════════════════════════
 //  ANIMATE
 // ═══════════════════════════════════════════════════════════════
-const clock   = new THREE.Clock();
-const SIDEREAL_RATE = TWO_PI / 86164.1;  // rad/s (sidereal day)
+const clock = new THREE.Clock();   // t = animation seconds; NOT astronomy.
 
 // Update HUD clock & astronomical quantities
 function updateAstroHUD(now) {
@@ -4708,8 +4710,12 @@ function updateAstroHUD(now) {
     subsolarMarker.halo.lookAt(new THREE.Vector3(0, 0, 0));
 }
 
-let lastAstro = 0;
+let lastHudUpdate = 0;
 let lastT = 0;
+
+// Scratch vector for per-frame sun-direction recompute — avoids allocating
+// a fresh THREE.Vector3 every frame on the hot path.
+const _sunDirScratch = new THREE.Vector3();
 
 function animate() {
     requestAnimationFrame(animate);
@@ -4717,17 +4723,34 @@ function animate() {
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
-    // ── Earth sidereal rotation in equatorial frame
-    // GMST at page load + elapsed sidereal rotation
-    earthMesh.rotation.y = EARTH_INIT_ROT + t * SIDEREAL_RATE;
-    // Clouds rotate slightly faster (weather systems drift)
-    // Lock cloud sphere rotation to Earth's. The old 1.0008× factor made
-    // clouds drift off their ECEF-sourced grid cells over time. Any visible
-    // wind-like motion the user sees is now supplied by the shader's
-    // driftLow/Mid/High + 3-D time-sliced noise, which evolve in place.
-    cloudMesh.rotation.y = earthMesh.rotation.y;
+    // ── Real-time astronomical state ────────────────────────────────────
+    // Single source of truth per frame: one new Date() drives both Earth's
+    // rotation (via GMST) and the sun direction (via mean ecliptic longitude
+    // → equatorial frame). Because both derive from the same jd, the
+    // sub-solar point can never drift relative to the globe — not across
+    // tab backgrounding, not across multi-hour sessions, not across the
+    // sub-second quantisation that an accumulator-based approach leaves in.
+    //
+    // Side effect: when a user time-shifts the clock (daylight saving,
+    // timezone change, manual date set) the terminator follows instantly
+    // on the next frame. No warm-up period, no re-init.
+    const wallTime = new Date();
+    const jd       = julianDay(wallTime);
+    earthMesh.rotation.y = gmst(jd) * DEG;
+    cloudMesh.rotation.y = earthMesh.rotation.y;   // clouds locked to ground
 
-    // ── Shader time
+    // Sun direction recomputed from the same jd so the shaders' NdotL test
+    // agrees with the Earth's current rotation angle down to float precision.
+    _sunDirScratch.copy(sunDirectionEquatorial(jd));
+    earthU.u_sun_dir.value.copy(_sunDirScratch);
+    cloudU.u_sun_dir.value.copy(_sunDirScratch);
+    auroraU.u_sun_dir.value.copy(_sunDirScratch);
+    atmU.u_sun_dir.value.copy(_sunDirScratch);
+    stratU.u_sun_dir.value.copy(_sunDirScratch);
+
+    // ── Shader time — animation seconds, NOT astronomical time. Used by
+    // noise phase, pulse envelopes, particle trails. Safe to keep on
+    // clock.getElapsedTime() because it's purely visual.
     earthU.u_time.value  = t;
     cloudU.u_time.value  = t;
     auroraU.u_time.value = t;
@@ -4800,18 +4823,13 @@ function animate() {
         if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
     }
 
-    // ── Astro HUD + sun direction (every 5 s)
-    // Sun moves ~1°/24 min — 5 s update keeps terminator error < 0.003°.
-    if (t - lastAstro > 5) {
-        lastAstro = t;
-        const _now = new Date();
-        updateAstroHUD(_now);
-        const _sunDir = sunDirectionEquatorial(julianDay(_now));
-        earthU.u_sun_dir.value.copy(_sunDir);
-        cloudU.u_sun_dir.value.copy(_sunDir);
-        auroraU.u_sun_dir.value.copy(_sunDir);
-        atmU.u_sun_dir.value.copy(_sunDir);
-        stratU.u_sun_dir.value.copy(_sunDir);
+    // ── Astro HUD DOM writes — throttled to 1 Hz. The rotation + sun
+    // uniforms above already update every frame for determinism; this gate
+    // exists only so we're not thrashing textContent on subsolar/UTC strings
+    // 60 times a second when a one-second refresh is plenty for humans.
+    if (t - lastHudUpdate > 1) {
+        lastHudUpdate = t;
+        updateAstroHUD(wallTime);
     }
 
     controls.update();
