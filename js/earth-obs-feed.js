@@ -184,17 +184,23 @@ export const EARTH_OBS_LAYERS = [
     },
     {
         id:          'snow',
-        gibs:        'MODIS_Terra_Snow_Cover',
+        // `MODIS_Terra_Snow_Cover` was retired from NASA GIBS — the live
+        // layer name is `MODIS_Terra_NDSI_Snow_Cover` (Normalised
+        // Difference Snow Index). Fetches with the old id return 404,
+        // which is why this pip was red on production. timeOffset of 2
+        // gives MODIS a day to finalise its daily composite before we
+        // request it — 1-day offsets sometimes still return "no data".
+        gibs:        'MODIS_Terra_NDSI_Snow_Cover',
         name:        'Snow Cover',
         category:    'cryosphere',
-        description: 'MODIS snow/no-snow classification at 500m',
-        unit:        'binary (snow/no-snow)',
+        description: 'MODIS NDSI snow cover fraction',
+        unit:        'NDSI (0-100)',
         resolution:  { w: 2048, h: 1024 },
         cadence:     6 * 60 * 60_000,
         latency:     '~1 day',
-        colorRamp:   'White (snow) on transparent background',
+        colorRamp:   'Pale blue → white (more snow) on transparent background',
         format:      'image/png',
-        timeOffset:  1,
+        timeOffset:  2,
     },
 ];
 
