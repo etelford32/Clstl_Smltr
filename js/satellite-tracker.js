@@ -299,6 +299,54 @@ export class SatelliteTracker {
     }
 
     /**
+     * Screen a target satellite against the loaded debris catalog only.
+     *
+     * Thin wrapper over screenConjunctions with groupFilter='debris' and
+     * LEO-friendly defaults (50 km threshold, 24 h look-ahead, 10-min
+     * step). Returns the same shape as screenConjunctions — caller can
+     * derive a count, closest approach, or render a list.
+     *
+     * Callers should only invoke this on user demand (click Screen) —
+     * it still propagates every debris entry via SGP4 and is NOT cheap
+     * enough to run per frame.
+     */
+    async countDebrisApproaches(noradId, opts = {}) {
+        const {
+            withinKm  = 50,
+            horizonH  = 24,
+            stepMin   = 10,
+        } = opts;
+        return this.screenConjunctions(noradId, horizonH, stepMin, withinKm, 'debris');
+    }
+
+    /**
+     * Instant per-altitude-band census of the catalog: given a reference
+     * altitude and a band half-width (km), count how many debris / active
+     * satellites currently sit within that band. Purely a filter over the
+     * `alt` field the tracker updates each tick, so this is O(N_sats)
+     * and safe to call every animation frame.
+     *
+     * @param {number}  altKm        Reference altitude (km above RE).
+     * @param {number}  [bandKm=25]  Band half-width (km). Total band = 2·bandKm.
+     * @param {number|null} [excludeId=null]  NORAD ID to exclude (usually the
+     *                                        selected sat itself).
+     * @returns {{ debris:number, active:number, total:number, bandKm:number }}
+     */
+    getAltitudeCohort(altKm, bandKm = 25, excludeId = null) {
+        const lo = altKm - bandKm;
+        const hi = altKm + bandKm;
+        let debris = 0, active = 0;
+        for (const s of this._satellites) {
+            if (s.tle.norad_id === excludeId) continue;
+            if (!Number.isFinite(s.alt))      continue;
+            if (s.alt < lo || s.alt > hi)     continue;
+            if (s.group === 'debris') debris++;
+            else                      active++;
+        }
+        return { debris, active, total: debris + active, bandKm };
+    }
+
+    /**
      * Return the satellites in a given CelesTrak group, shaped like
      * getSatellites() entries.  Handy for group-scoped analytics /
      * overlays that shouldn't re-filter the full catalog each time.
@@ -767,13 +815,17 @@ export class SatelliteTracker {
      *
      * Uses WASM batch propagation when available for ~100× speed.
      *
-     * @param {number} targetNoradId   NORAD ID of the target satellite
-     * @param {number} [hoursAhead=72] Look-ahead window
-     * @param {number} [stepMin=10]    Time step in minutes
+     * @param {number} targetNoradId    NORAD ID of the target satellite
+     * @param {number} [hoursAhead=72]  Look-ahead window
+     * @param {number} [stepMin=10]     Time step in minutes
      * @param {number} [thresholdKm=25] Distance threshold
+     * @param {string|null} [groupFilter=null]
+     *        If set (e.g. 'debris'), skip catalog objects whose group
+     *        isn't a match. Saves thousands of propagate() calls per run
+     *        when the caller only cares about one constellation kind.
      * @returns {Array<{name, norad_id, dist_km, hours_ahead, tca_jd}>}
      */
-    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25) {
+    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null) {
         const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
         if (!target) return [];
 
@@ -816,6 +868,7 @@ export class SatelliteTracker {
 
         for (const cat of this._satellites) {
             if (cat.tle.norad_id === targetNoradId) continue;
+            if (groupFilter && cat.group !== groupFilter) continue;
 
             // Pre-filter: skip if altitude difference > 200 km
             const catAltAvg = (cat.tle.perigee_km + cat.tle.apogee_km) / 2;

@@ -285,6 +285,21 @@ nav {
             <div class="sp-row"><span class="sp-k">Altitude</span><span class="sp-v" id="sp-alt">—</span></div>
             <div class="sp-row"><span class="sp-k">Lat / Lon</span><span class="sp-v" id="sp-latlon">—</span></div>
             <div class="sp-row"><span class="sp-k">Speed</span><span class="sp-v" id="sp-speed">—</span></div>
+
+            <!-- Altitude Cohort — sat + debris sharing the selected object's
+                 altitude shell (±25 km). Live instantaneous count (cheap,
+                 no SGP4). The "Screen debris" button below fires the
+                 tracker's SGP4-based conjunction screen filtered to debris
+                 over 24 h at 50 km — clicks only, because per-run it still
+                 propagates every debris entry against the target. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,170,0,.1);font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
+                Altitude Cohort (±25 km)
+            </div>
+            <div class="sp-row"><span class="sp-k">Debris in band</span>    <span class="sp-v" id="sp-cohort-debris">—</span></div>
+            <div class="sp-row"><span class="sp-k">Active in band</span>    <span class="sp-v" id="sp-cohort-active">—</span></div>
+            <div class="sp-row"><span class="sp-k">Near-miss 24 h</span>    <span class="sp-v" id="sp-near-miss">—</span></div>
+            <button class="sp-op-btn" id="sp-screen-debris" title="Propagate target + debris catalog and list approaches &lt;50 km over next 24 h">Screen debris (24h · 50 km)</button>
+            <div id="sp-debris-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.6;display:none"></div>
         </div>
 
         <!-- Conjunction screening -->
@@ -807,6 +822,79 @@ let _lastAnalysisTle = null;
 let _lastConjunctions = [];
 let _lastPasses = [];
 
+// ── Altitude-cohort card — live census of what shares the selected
+// satellite's orbital shell. `bandKm` is the half-width, so 25 covers a
+// 50-km-thick band centred on the target. The count is instantaneous
+// and recomputed every animation frame; the near-miss total lives on
+// the same card but is only refreshed when the user clicks "Screen
+// debris" (expensive SGP4 run).
+const _COHORT_BAND_KM = 25;
+function _updateAltitudeCohort(sel) {
+    if (!sel || !Number.isFinite(sel.alt)) return;
+    const c = tracker.getAltitudeCohort(sel.alt, _COHORT_BAND_KM, sel.norad_id);
+    document.getElementById('sp-cohort-debris').textContent = c.debris.toLocaleString();
+    document.getElementById('sp-cohort-active').textContent = c.active.toLocaleString();
+    // If debris group isn't loaded yet, show a hint so the zero isn't
+    // misread as "no debris nearby" when the real answer is "no debris
+    // data". Active count likewise reads 0 for empty catalogs.
+    const hasDebris = tracker.getLoadedGroups?.().includes('debris');
+    if (!hasDebris) {
+        document.getElementById('sp-cohort-debris').textContent = '— (load debris)';
+    }
+}
+
+// "Screen debris" button — runs the tracker's SGP4 conjunction screen
+// filtered to the debris group only (passes groupFilter='debris' to
+// screenConjunctions, which skips propagation entirely for non-debris
+// objects). Still button-gated because it propagates the entire debris
+// catalog against the target.
+document.getElementById('sp-screen-debris')?.addEventListener('click', async () => {
+    if (_selectedNorad == null) return;
+    const btn     = document.getElementById('sp-screen-debris');
+    const resEl   = document.getElementById('sp-debris-results');
+    const nearEl  = document.getElementById('sp-near-miss');
+    if (!tracker.getLoadedGroups?.().includes('debris')) {
+        resEl.innerHTML = '<span style="color:#ff8800">Load the "Tracked Debris" group first</span>';
+        resEl.style.display = '';
+        return;
+    }
+    btn.disabled   = true;
+    btn.textContent = 'Screening…';
+    resEl.innerHTML = '';
+    resEl.style.display = '';
+
+    let hits = [];
+    try {
+        hits = await tracker.countDebrisApproaches(_selectedNorad, {
+            withinKm: 50, horizonH: 24, stepMin: 10,
+        });
+    } catch (err) {
+        resEl.innerHTML = `<span style="color:#ff4422">Screen failed: ${_esc(err.message)}</span>`;
+        btn.disabled   = false;
+        btn.textContent = 'Screen debris (24h · 50 km)';
+        return;
+    }
+
+    nearEl.textContent = hits.length.toLocaleString();
+    if (hits.length === 0) {
+        resEl.innerHTML = '<span style="color:#4fc97f">No debris within 50 km in next 24 h</span>';
+    } else {
+        hits.sort((a, b) => a.dist_km - b.dist_km);
+        let html = `<span style="color:#ff8800;font-weight:600">${hits.length} debris near-miss${hits.length === 1 ? '' : 'es'}:</span>`;
+        for (const h of hits.slice(0, 10)) {
+            const risk = h.dist_km < 10 ? '#ff2200'
+                      :  h.dist_km < 25 ? '#ff8800' : '#ffcc44';
+            html += `<div style="margin-top:2px"><span style="color:${risk};font-weight:600">${h.dist_km.toFixed(1)} km</span> — ${_esc(h.name)} in <strong>${h.hours_ahead.toFixed(1)}h</strong></div>`;
+        }
+        if (hits.length > 10) {
+            html += `<div style="margin-top:3px;color:#556">+${hits.length - 10} more not shown</div>`;
+        }
+        resEl.innerHTML = html;
+    }
+    btn.disabled   = false;
+    btn.textContent = 'Rescan debris';
+});
+
 function _updateAnalytics(tle) {
     _lastAnalysisTle = tle;
     const analyticsEl = document.getElementById('sp-analytics');
@@ -1226,6 +1314,10 @@ function animate() {
             document.getElementById('sp-latlon').textContent = `${sel.lat.toFixed(2)}°, ${sel.lon.toFixed(2)}°`;
             const speedKms = sel.alt > 0 ? Math.sqrt(398600.8 / (6378.135 + sel.alt)).toFixed(1) : '—';
             document.getElementById('sp-speed').textContent = `${speedKms} km/s`;
+            // Live altitude-band cohort. Cheap: O(N_sats) filter on the
+            // alt field the tracker already updates each tick. Runs at
+            // whatever animate framerate is — no throttling needed.
+            _updateAltitudeCohort(sel);
         }
     }
 
