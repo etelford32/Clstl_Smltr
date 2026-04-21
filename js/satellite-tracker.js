@@ -70,8 +70,10 @@ export function isWasmLoaded() { return _wasmSgp4 !== null; }
 /** Get the WASM module (or null). */
 export function getWasmSgp4() { return _wasmSgp4; }
 
-/** Propagate using WASM if available, else JS fallback. */
-function propagate(tle, tsince_min) {
+/** Propagate a TLE via Rust WASM if available, else JS fallback.
+ *  Exported so pass-predictor.js and conjunction tools can reuse the same
+ *  propagator the live tracker draws with. */
+export function propagate(tle, tsince_min) {
     if (_wasmSgp4 && tle.line1 && tle.line2) {
         try {
             const result = _wasmSgp4.propagate_tle(tle.line1, tle.line2, tsince_min);
@@ -225,6 +227,201 @@ export class SatelliteTracker {
         this._shellGroup.name = 'orbital-shells';
         this._shellGroup.visible = false;
         parent.add(this._shellGroup);
+
+        // Optional single-satellite highlight (e.g. pin "ISS" out of the
+        // stations group). Lazily built on the first setHighlight() call.
+        this._highlightNoradId = null;
+        this._highlightOpts    = null;
+        this._highlightSprite  = null;
+        this._highlightCanvas  = null;
+        this._highlightTexture = null;
+
+        // Colour-override layer. Map<noradId, THREE.Color>. Applied in
+        // _updateColors() and _rebuildPoints(), so overrides survive
+        // group-visibility toggles and catalog loads. Used by the
+        // weather-alert overlay to tint flagged sats without disturbing
+        // group colours.
+        this._colorOverrides = null;
+    }
+
+    // ── Highlight a single satellite with a sprite (dot + text label) ────
+    // So a specific NORAD ID stays findable in a field of ~30 k dots. The
+    // sprite is a child of the tracker's internal group, so it inherits
+    // whatever coordinate frame the parent container is in.
+    //
+    // opts: { label: string, color: hex }
+    setHighlight(noradId, opts = {}) {
+        this._highlightNoradId = noradId;
+        this._highlightOpts    = {
+            label: opts.label ?? '',
+            color: opts.color ?? 0x00ffcc,
+        };
+        if (!this._highlightSprite) this._buildHighlightSprite();
+        else                        this._rebuildHighlightTexture();
+        this._highlightSprite.visible = true;
+    }
+
+    clearHighlight() {
+        this._highlightNoradId = null;
+        if (this._highlightSprite) this._highlightSprite.visible = false;
+    }
+
+    setHighlightVisible(v) {
+        if (this._highlightSprite) {
+            this._highlightSprite.visible = !!v && this._highlightNoradId != null;
+        }
+    }
+
+    // ── Bulk per-satellite colour tinting ────────────────────────────────
+    // For overlays that want to recolour many specific satellites at once
+    // (e.g. "these sats are currently passing over an active NWS alert")
+    // without fighting the group-colour system or allocating new geometry.
+    // Writes into the existing colour buffer in-place.
+    //
+    // `overrideMap` is a Map<noradId, THREE.Color>, or null/undefined to
+    // clear. Null clears; an empty Map also clears (cheap no-op).
+    //
+    // Safe to call every animation frame — but the matcher shouldn't
+    // need more than ~1 Hz because satellites don't move far enough per
+    // frame to cross alert-footprint boundaries.
+    setColorOverrides(overrideMap) {
+        this._colorOverrides = overrideMap && overrideMap.size > 0
+            ? overrideMap
+            : null;
+        this._updateColors();
+    }
+
+    /** Remove any active colour overrides and restore group colours. */
+    clearColorOverrides() {
+        if (this._colorOverrides === null) return;
+        this._colorOverrides = null;
+        this._updateColors();
+    }
+
+    /**
+     * Screen a target satellite against the loaded debris catalog only.
+     *
+     * Thin wrapper over screenConjunctions with groupFilter='debris' and
+     * LEO-friendly defaults (50 km threshold, 24 h look-ahead, 10-min
+     * step). Returns the same shape as screenConjunctions — caller can
+     * derive a count, closest approach, or render a list.
+     *
+     * Callers should only invoke this on user demand (click Screen) —
+     * it still propagates every debris entry via SGP4 and is NOT cheap
+     * enough to run per frame.
+     */
+    async countDebrisApproaches(noradId, opts = {}) {
+        const {
+            withinKm  = 50,
+            horizonH  = 24,
+            stepMin   = 10,
+        } = opts;
+        return this.screenConjunctions(noradId, horizonH, stepMin, withinKm, 'debris');
+    }
+
+    /**
+     * Instant per-altitude-band census of the catalog: given a reference
+     * altitude and a band half-width (km), count how many debris / active
+     * satellites currently sit within that band. Purely a filter over the
+     * `alt` field the tracker updates each tick, so this is O(N_sats)
+     * and safe to call every animation frame.
+     *
+     * @param {number}  altKm        Reference altitude (km above RE).
+     * @param {number}  [bandKm=25]  Band half-width (km). Total band = 2·bandKm.
+     * @param {number|null} [excludeId=null]  NORAD ID to exclude (usually the
+     *                                        selected sat itself).
+     * @returns {{ debris:number, active:number, total:number, bandKm:number }}
+     */
+    getAltitudeCohort(altKm, bandKm = 25, excludeId = null) {
+        const lo = altKm - bandKm;
+        const hi = altKm + bandKm;
+        let debris = 0, active = 0;
+        for (const s of this._satellites) {
+            if (s.tle.norad_id === excludeId) continue;
+            if (!Number.isFinite(s.alt))      continue;
+            if (s.alt < lo || s.alt > hi)     continue;
+            if (s.group === 'debris') debris++;
+            else                      active++;
+        }
+        return { debris, active, total: debris + active, bandKm };
+    }
+
+    /**
+     * Return the satellites in a given CelesTrak group, shaped like
+     * getSatellites() entries.  Handy for group-scoped analytics /
+     * overlays that shouldn't re-filter the full catalog each time.
+     */
+    getSatellitesByGroup(group) {
+        return this._satellites
+            .filter(s => s.group === group)
+            .map(s => ({
+                name:        s.tle.name,
+                norad_id:    s.tle.norad_id,
+                group:       s.group,
+                lat:         s.lat,
+                lon:         s.lon,
+                alt:         s.alt,
+                period_min:  s.tle.period_min,
+                inclination: s.tle.inclination,
+                apogee_km:   s.tle.apogee_km,
+                perigee_km:  s.tle.perigee_km,
+            }));
+    }
+
+    _buildHighlightSprite() {
+        const cv  = document.createElement('canvas');
+        cv.width  = 128;
+        cv.height = 40;
+        const tex = new THREE.CanvasTexture(cv);
+        tex.minFilter = THREE.LinearFilter;
+        const mat = new THREE.SpriteMaterial({
+            map: tex, transparent: true,
+            depthWrite: false, depthTest: false,
+        });
+        const sprite = new THREE.Sprite(mat);
+        // World-unit size: ≈1/5 of Earth radius. Keep 128×40 canvas aspect.
+        sprite.scale.set(0.20, 0.0625, 1);
+        // Anchor the sprite on the *dot* (drawn at canvas x=20 / 128 = 0.156),
+        // not the canvas centre — so sprite.position = sat.position puts the
+        // dot right on the satellite and the label trails to the right.
+        sprite.center.set(20 / 128, 0.5);
+        sprite.renderOrder = 12;
+        this._highlightSprite  = sprite;
+        this._highlightCanvas  = cv;
+        this._highlightTexture = tex;
+        this._group.add(sprite);
+        this._rebuildHighlightTexture();
+    }
+
+    _rebuildHighlightTexture() {
+        const cv    = this._highlightCanvas;
+        const ctx   = cv.getContext('2d');
+        const color = this._highlightOpts.color;
+        const label = this._highlightOpts.label;
+        const hex   = '#' + color.toString(16).padStart(6, '0');
+
+        ctx.clearRect(0, 0, cv.width, cv.height);
+        // Soft halo + solid core so the dot stands out on bright and dark
+        // continents alike. Three concentric fills at decreasing radius.
+        ctx.fillStyle = hex;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath(); ctx.arc(20, 20, 16, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath(); ctx.arc(20, 20, 10, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1.0;
+        ctx.beginPath(); ctx.arc(20, 20,  5, 0, Math.PI * 2); ctx.fill();
+
+        // Label — outlined for legibility over any globe colour.
+        ctx.font         = 'bold 18px system-ui, sans-serif';
+        ctx.textAlign    = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth    = 4;
+        ctx.strokeStyle  = 'rgba(0, 0, 0, 0.85)';
+        ctx.strokeText(label, 38, 22);
+        ctx.fillStyle    = hex;
+        ctx.fillText(label, 38, 22);
+
+        this._highlightTexture.needsUpdate = true;
     }
 
     /**
@@ -326,7 +523,7 @@ export class SatelliteTracker {
             if (this._satellites.length >= this._maxSats) break;
             if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
 
-            const epochJd = _tleEpochToJd(tle);
+            const epochJd = tleEpochToJd(tle);
             this._satellites.push({ tle, epochJd, group, color, lat: 0, lon: 0, alt: 400 });
             added++;
         }
@@ -344,11 +541,18 @@ export class SatelliteTracker {
         const posArr = new Float32Array(n * 3);
         const colArr = new Float32Array(n * 3);
 
+        const overrides = this._colorOverrides;
         for (let i = 0; i < n; i++) {
-            const sat = this._satellites[i];
+            const sat   = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
-            const c = visible ? sat.color : _hiddenColor;
+            // Explicit override (e.g. weather-alert tint) wins over group
+            // colour, but still respects group visibility — a hidden group
+            // stays hidden even if its sat is flagged.
+            const override = overrides?.get(sat.tle.norad_id);
+            const c = !visible          ? _hiddenColor
+                    : override          ? override
+                    :                     sat.color;
             colArr[i * 3]     = c.r;
             colArr[i * 3 + 1] = c.g;
             colArr[i * 3 + 2] = c.b;
@@ -364,15 +568,21 @@ export class SatelliteTracker {
         this._group.add(this._pointsMesh);
     }
 
-    /** Update only the color buffer (for show/hide toggles). */
+    /** Update only the color buffer (for show/hide toggles + alert tints). */
     _updateColors() {
         if (!this._colors) return;
         const colArr = this._colors.array;
+        const overrides = this._colorOverrides;
         for (let i = 0; i < this._satellites.length; i++) {
             const sat = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
-            if (visible) {
+            const override = overrides?.get(sat.tle.norad_id);
+            if (visible && override) {
+                colArr[i * 3]     = override.r;
+                colArr[i * 3 + 1] = override.g;
+                colArr[i * 3 + 2] = override.b;
+            } else if (visible) {
                 colArr[i * 3]     = sat.color.r;
                 colArr[i * 3 + 1] = sat.color.g;
                 colArr[i * 3 + 2] = sat.color.b;
@@ -402,9 +612,12 @@ export class SatelliteTracker {
             // TEME → ECEF (GMST rotation) → scene frame, in one call.
             geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
 
-            posArr[i * 3]     = _sceneScratch.x * kmToScene;
-            posArr[i * 3 + 1] = _sceneScratch.y * kmToScene;
-            posArr[i * 3 + 2] = _sceneScratch.z * kmToScene;
+            const x = _sceneScratch.x * kmToScene;
+            const y = _sceneScratch.y * kmToScene;
+            const z = _sceneScratch.z * kmToScene;
+            posArr[i * 3]     = x;
+            posArr[i * 3 + 1] = y;
+            posArr[i * 3 + 2] = z;
 
             // Recover geographic coords for tooltip / API use. `positionToLatLon`
             // returns radians and the scene-frame magnitude (here in km since
@@ -413,6 +626,15 @@ export class SatelliteTracker {
             sat.lat = ll.lat * RAD;
             sat.lon = ll.lon * RAD;
             sat.alt = ll.radiusUnits - RE_KM;
+
+            // Park the highlight sprite on the matching sat. O(1) hit test
+            // folded into the main loop so we don't have to re-find the
+            // satellite after the fact.
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
         }
 
         this._positions.needsUpdate = true;
@@ -593,13 +815,17 @@ export class SatelliteTracker {
      *
      * Uses WASM batch propagation when available for ~100× speed.
      *
-     * @param {number} targetNoradId   NORAD ID of the target satellite
-     * @param {number} [hoursAhead=72] Look-ahead window
-     * @param {number} [stepMin=10]    Time step in minutes
+     * @param {number} targetNoradId    NORAD ID of the target satellite
+     * @param {number} [hoursAhead=72]  Look-ahead window
+     * @param {number} [stepMin=10]     Time step in minutes
      * @param {number} [thresholdKm=25] Distance threshold
+     * @param {string|null} [groupFilter=null]
+     *        If set (e.g. 'debris'), skip catalog objects whose group
+     *        isn't a match. Saves thousands of propagate() calls per run
+     *        when the caller only cares about one constellation kind.
      * @returns {Array<{name, norad_id, dist_km, hours_ahead, tca_jd}>}
      */
-    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25) {
+    async screenConjunctions(targetNoradId, hoursAhead = 72, stepMin = 10, thresholdKm = 25, groupFilter = null) {
         const target = this._satellites.find(s => s.tle.norad_id === targetNoradId);
         if (!target) return [];
 
@@ -642,6 +868,7 @@ export class SatelliteTracker {
 
         for (const cat of this._satellites) {
             if (cat.tle.norad_id === targetNoradId) continue;
+            if (groupFilter && cat.group !== groupFilter) continue;
 
             // Pre-filter: skip if altitude difference > 200 km
             const catAltAvg = (cat.tle.perigee_km + cat.tle.apogee_km) / 2;
@@ -686,7 +913,10 @@ export class SatelliteTracker {
 
 const _hiddenColor = new THREE.Color(0x000000);
 
-function _tleEpochToJd(tle) {
+/** Convert a TLE's (epoch_yr, epoch_day) fractional-year field into a JD.
+ *  Exported for modules that want to propagate independently of the
+ *  tracker but using the same epoch arithmetic. */
+export function tleEpochToJd(tle) {
     const epochYr = tle.epoch_yr ?? 2026;
     const yr = Math.floor(epochYr);
     const dayFrac = (epochYr - yr) * (yr % 4 === 0 ? 366 : 365);

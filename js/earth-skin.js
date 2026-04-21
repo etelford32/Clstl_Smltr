@@ -993,6 +993,12 @@ export function loadEarthTextures(earthU, cloudU = null) {
         loader.load(url,
             tex => {
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+                // Canonical UV convention (js/geo/coords.js): v=0 at +90°N.
+                // TextureLoader defaults flipY=true, which would map image
+                // row 0 (north) to GL t=1 and put the south pole at v=0 —
+                // rendering the globe upside-down. Keep image rows aligned
+                // with the shader's normalToUV() by disabling the flip.
+                tex.flipY = false;
                 onLoad(tex);
                 resolve();
             },

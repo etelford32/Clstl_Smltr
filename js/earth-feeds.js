@@ -82,15 +82,23 @@ export class EarthFeeds {
         this._timers = {};
     }
 
-    start() {
-        // Earthquakes: immediate + polling
-        fetchEarthquakes();
-        this._timers.eq = setInterval(fetchEarthquakes, EQ_POLL_MS);
-
-        // ISS: immediate + polling
-        fetchISS();
-        this._timers.iss = setInterval(fetchISS, ISS_POLL_MS);
-
+    /**
+     * @param {object} [opts]
+     * @param {boolean} [opts.earthquakes=true]  Poll USGS earthquake feed.
+     * @param {boolean} [opts.iss=true]          Poll wheretheiss.at for ISS
+     *                                            position. Set false if the
+     *                                            page gets ISS coords from
+     *                                            SGP4-propagated TLEs instead.
+     */
+    start({ earthquakes = true, iss = true } = {}) {
+        if (earthquakes) {
+            fetchEarthquakes();
+            this._timers.eq = setInterval(fetchEarthquakes, EQ_POLL_MS);
+        }
+        if (iss) {
+            fetchISS();
+            this._timers.iss = setInterval(fetchISS, ISS_POLL_MS);
+        }
         return this;
     }
 

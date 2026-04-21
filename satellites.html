@@ -55,6 +55,43 @@ nav {
 #sat-hud .val { color:#0ee; font-weight:600; font-family:monospace; }
 #sat-hud .dim { color:#556; }
 
+/* ─── Time controls (bottom-centre) ──────────────────── */
+#time-controls {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    z-index:10;
+    background:rgba(0,0,0,.82); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,200,.2); border-radius:9px;
+    padding:6px 8px; display:flex; align-items:center; gap:3px;
+    font-size:.72rem;
+}
+.tc-btn {
+    background:rgba(0,200,200,.08); border:1px solid rgba(0,200,200,.18);
+    border-radius:4px; color:#9cc; cursor:pointer;
+    font-family:inherit; font-size:.68rem; font-weight:600;
+    padding:4px 8px; min-width:30px; line-height:1;
+    transition:background .12s, color .12s, border-color .12s;
+}
+.tc-btn:hover  { background:rgba(0,200,200,.18); color:#cdd; }
+.tc-btn.active { background:rgba(0,200,200,.30); color:#fff; border-color:#0cc; }
+.tc-sep {
+    width:1px; height:18px; background:rgba(255,255,255,.1); margin:0 4px;
+}
+.tc-display {
+    display:flex; flex-direction:column; align-items:flex-end;
+    margin-left:6px; padding-left:8px;
+    border-left:1px solid rgba(255,255,255,.1);
+    min-width:172px; font-family:monospace;
+}
+.tc-time   { color:#0ee; font-size:.72rem; line-height:1;   letter-spacing:.02em; }
+.tc-offset { color:#667; font-size:.58rem; line-height:1.2; margin-top:2px; }
+@media (max-width:640px) {
+    #time-controls { bottom:6px; padding:4px 6px; font-size:.64rem; }
+    .tc-btn        { min-width:26px; padding:3px 6px; font-size:.60rem; }
+    .tc-display    { min-width:120px; }
+    .tc-time       { font-size:.62rem; }
+    .tc-offset     { font-size:.52rem; }
+}
+
 /* ─── Control panel (right side) ─────────────────────── */
 #sat-panel {
     position:absolute; top:12px; right:12px; z-index:10;
@@ -220,6 +257,10 @@ nav {
             <div class="sp-toggle"><input type="checkbox" id="tog-shells"><label for="tog-shells">Starlink orbital shells</label></div>
             <div class="sp-toggle"><input type="checkbox" id="tog-heatmap"><label for="tog-heatmap">Altitude density heatmap</label></div>
             <div id="alt-heatmap" style="display:none;margin-top:6px"></div>
+            <div class="sp-toggle" title="Tint sats whose sub-point is inside an active NWS alert polygon or tropical-cyclone wind radius">
+                <input type="checkbox" id="tog-alerts"><label for="tog-alerts">Alert overpass (sats over active weather)</label>
+                <span class="count" id="cnt-alerts">0</span>
+            </div>
         </div>
 
         <!-- Operator Analytics -->
@@ -244,6 +285,21 @@ nav {
             <div class="sp-row"><span class="sp-k">Altitude</span><span class="sp-v" id="sp-alt">—</span></div>
             <div class="sp-row"><span class="sp-k">Lat / Lon</span><span class="sp-v" id="sp-latlon">—</span></div>
             <div class="sp-row"><span class="sp-k">Speed</span><span class="sp-v" id="sp-speed">—</span></div>
+
+            <!-- Altitude Cohort — sat + debris sharing the selected object's
+                 altitude shell (±25 km). Live instantaneous count (cheap,
+                 no SGP4). The "Screen debris" button below fires the
+                 tracker's SGP4-based conjunction screen filtered to debris
+                 over 24 h at 50 km — clicks only, because per-run it still
+                 propagates every debris entry against the target. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,170,0,.1);font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
+                Altitude Cohort (±25 km)
+            </div>
+            <div class="sp-row"><span class="sp-k">Debris in band</span>    <span class="sp-v" id="sp-cohort-debris">—</span></div>
+            <div class="sp-row"><span class="sp-k">Active in band</span>    <span class="sp-v" id="sp-cohort-active">—</span></div>
+            <div class="sp-row"><span class="sp-k">Near-miss 24 h</span>    <span class="sp-v" id="sp-near-miss">—</span></div>
+            <button class="sp-op-btn" id="sp-screen-debris" title="Propagate target + debris catalog and list approaches &lt;50 km over next 24 h">Screen debris (24h · 50 km)</button>
+            <div id="sp-debris-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.6;display:none"></div>
         </div>
 
         <!-- Conjunction screening -->
@@ -278,6 +334,25 @@ nav {
                 <button class="sp-export-btn" id="sp-export-cdm" title="Export CDM for closest conjunction">Export CDM</button>
             </div>
         </div>
+    </div>
+
+    <!-- Time controls (bottom-centre): single source of truth for the whole
+         page. All per-frame state (Earth rotation, sun direction, satellite
+         propagation) is derived from simTimeMs in animate(). Keyboard:
+         Space = play/pause, N = jump to now. -->
+    <div id="time-controls">
+        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" id="tc-now" title="Jump to real time">Now</button>
+        <span class="tc-display">
+            <span class="tc-time"   id="tc-time-utc">—</span>
+            <span class="tc-offset" id="tc-time-offset">now</span>
+        </span>
     </div>
 </div>
 
@@ -329,6 +404,11 @@ import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          decayWatchlist, constellationCoverage, detectBreakupEvents
        } from './js/orbital-analytics.js';
 import { loadUserLocation, auroraVisibility } from './js/user-location.js';
+import { geo } from './js/geo/coords.js';
+import { sunDirectionEci } from './js/sun-altitude.js';
+import { NWSAlerts, ALERT_CSS_COLORS } from './js/nws-alerts.js';
+import { StormFeed } from './js/storm-feed.js';
+import { findSatsOverAlerts } from './js/sat-alert-matcher.js';
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -358,13 +438,30 @@ controls.dampingFactor = 0.08;
 controls.minDistance = 1.2;
 controls.maxDistance = 20;
 
-// Lights
-scene.add(new THREE.AmbientLight(0x334466, 0.4));
-const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-sunLight.position.set(5, 2, 3);
+// Lights — tuned for the sim-time scrubber. At 3600× speed the
+// terminator sweeps a full rotation every 24 s, and with the old
+// 0.4/1.2 ambient-to-directional balance the night hemisphere dropped
+// to ~25% of day-side brightness, making the sweep read as a jarring
+// flicker. Bumping ambient to 0.58 with a slightly warmer tint puts
+// the night side at ~35% — still clearly unlit, but the transition
+// reads as a gradient rather than a flash. Directional trimmed to 1.05
+// to keep the sunlit hemisphere from clipping to pure white.
+//
+// If we later swap the MeshStandardMaterial for the shader-based
+// earth-skin used on earth.html (physically-accurate rim + city lights
+// + atmosphere glow), this balance can go back toward 0.4/1.2 because
+// the shader carries its own night-side ambient floor.
+scene.add(new THREE.AmbientLight(0x445878, 0.58));
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.05);
+sunLight.position.set(10, 2, 3);   // placeholder — animate() drives this from sim time
 scene.add(sunLight);
 
-// Earth sphere — Blue Marble texture from CDN
+// Earth sphere — Blue Marble texture from CDN.
+// (This page uses Three.js's native SphereGeometry whose UVs store v=(1-v),
+// i.e. v=1 at the north pole — opposite of the shader-based earth.html
+// convention. Combined with TextureLoader's default flipY=true that
+// correctly lands image row 0 at mesh-north. Do NOT set flipY=false here
+// or the globe renders upside-down.)
 const earthGeo = new THREE.SphereGeometry(1, 64, 64);
 const earthTex = new THREE.TextureLoader().load(
     'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
@@ -415,8 +512,11 @@ function _updateHud() {
     document.getElementById('hud-engine').textContent = isWasmLoaded() ? 'Rust WASM SGP4' : 'JS Fallback';
 }
 
-// Auto-load stations
-loadGroup('stations');
+// Auto-load stations, then pin the ISS so it's findable among all the
+// other space-station dots.
+loadGroup('stations').then(() => {
+    tracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
+});
 
 // All constellation group toggles
 const ALL_GROUPS = [
@@ -444,6 +544,114 @@ document.getElementById('tog-shells')?.addEventListener('change', e => {
     }
     tracker.setShellsVisible(e.target.checked);
 });
+
+// ── Alert overpass (weather-aware satellite overlay) ─────────────────────
+// Maintains local mirrors of the NWS + StormFeed streams, recomputes the
+// sat/alert match each animation frame, and hands a colour-override map
+// to the tracker. The matcher is cheap (<1 ms for ~5 k sats × ~100
+// events with the lat prefilter) so there's no meaningful cost to
+// running it every frame — which is useful because at high sim speeds
+// sats cross alert zones in a fraction of a second of real time.
+let _nwsAlertsLive = [];
+let _stormsLive    = [];
+let _alertEnabled  = false;
+let _lastMatchMap  = null;    // Map<noradId, { alerts, storms }>
+const _alertFeed   = new NWSAlerts();
+const _stormFeed   = new StormFeed();
+
+// THREE.Color instances reused across frames; severity-weighted so a
+// tornado warning stands out more than a small-craft advisory, and a
+// cyclone-over pass (magenta) is always distinct from either.
+const _ALERT_TINT = {
+    Extreme:  new THREE.Color(0xff2200),
+    Severe:   new THREE.Color(0xff8800),
+    Moderate: new THREE.Color(0xffdd44),
+    Minor:    new THREE.Color(0x00ccff),
+    Unknown:  new THREE.Color(0xcccccc),
+};
+const _STORM_TINT = new THREE.Color(0xff00aa);
+
+// Pick the strongest match colour for a sat that's over multiple events.
+// Storm always wins over a regular alert; among alerts, the most severe.
+function _pickTint(hit) {
+    if (hit.storms && hit.storms.length > 0) return _STORM_TINT;
+    let best = _ALERT_TINT.Unknown;
+    let bestRank = 99;
+    const order = ['Extreme', 'Severe', 'Moderate', 'Minor', 'Unknown'];
+    for (const a of hit.alerts ?? []) {
+        const r = order.indexOf(a.severity);
+        if (r >= 0 && r < bestRank) { bestRank = r; best = _ALERT_TINT[a.severity] ?? best; }
+    }
+    return best;
+}
+
+document.addEventListener('nws-alerts-update', (e) => {
+    _nwsAlertsLive = e.detail?.alerts ?? [];
+    _runMatchNow();   // refresh immediately; don't wait for next frame
+});
+window.addEventListener('storm-update', (e) => {
+    _stormsLive = e.detail?.storms ?? [];
+    _runMatchNow();
+});
+
+function _runMatchNow() {
+    if (!_alertEnabled) return;
+    const sats = tracker.getSatellites();
+    _lastMatchMap = findSatsOverAlerts(sats, _nwsAlertsLive, _stormsLive);
+    const overrides = new Map();
+    for (const [noradId, hit] of _lastMatchMap) {
+        overrides.set(noradId, _pickTint(hit));
+    }
+    tracker.setColorOverrides(overrides);
+    const cnt = document.getElementById('cnt-alerts');
+    if (cnt) cnt.textContent = overrides.size.toLocaleString();
+    // Refresh the selected-sat info panel if it's showing a flagged sat.
+    if (_selectedNorad != null) _renderSelectedAlerts(_selectedNorad);
+}
+
+document.getElementById('tog-alerts')?.addEventListener('change', (e) => {
+    _alertEnabled = e.target.checked;
+    if (_alertEnabled) {
+        // First-time activation — spin up the feeds.  Both are idempotent
+        // (start() on an already-running feed is a no-op via timer reuse).
+        _alertFeed.start();
+        _stormFeed.start();
+        _runMatchNow();
+    } else {
+        tracker.clearColorOverrides();
+        const cnt = document.getElementById('cnt-alerts');
+        if (cnt) cnt.textContent = '0';
+        const row = document.getElementById('sp-alert-row');
+        if (row) row.style.display = 'none';
+    }
+});
+
+// Render the "currently over" list for a selected satellite inside the
+// existing #sp-sat-info panel. Inserts once and updates in place so we
+// don't thrash the DOM.
+function _renderSelectedAlerts(noradId) {
+    const info = document.getElementById('sp-sat-info');
+    if (!info || info.style.display === 'none') return;
+    let row = document.getElementById('sp-alert-row');
+    if (!row) {
+        row = document.createElement('div');
+        row.id = 'sp-alert-row';
+        row.style.cssText = 'margin-top:6px;padding:6px 7px;border-top:1px solid rgba(255,170,0,.18);background:rgba(255,170,0,.04);border-radius:4px;font-size:.65rem;line-height:1.5;color:#cda;display:none';
+        info.appendChild(row);
+    }
+    const hit = _lastMatchMap?.get(noradId);
+    if (!hit || !_alertEnabled) { row.style.display = 'none'; return; }
+    const bits = [];
+    for (const s of hit.storms ?? []) {
+        bits.push(`<div><span style="color:${_STORM_TINT.getStyle()};font-weight:600">🌀 ${_esc(s.name)}</span> · ${s.classification} · ${Math.round(s.distanceKm)} km from eye</div>`);
+    }
+    for (const a of hit.alerts ?? []) {
+        const col = ALERT_CSS_COLORS?.[a.severity] ?? '#ffdd44';
+        bits.push(`<div><span style="color:${col};font-weight:600">⚠ ${_esc(a.event)}</span> — ${_esc(a.area.split(';')[0].trim())} · ${Math.round(a.distanceKm)} km from centroid</div>`);
+    }
+    row.innerHTML = `<div style="font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Currently Over</div>${bits.join('')}`;
+    row.style.display = '';
+}
 
 // ── Altitude density heatmap ──────────────────────────────────────────────
 function _updateHeatmap() {
@@ -523,6 +731,10 @@ async function doSearch() {
 
         // PRO analytics (orbital rates, lifetime, passes)
         _updateAnalytics(sat);
+
+        // Populate the "currently over" alert row if the overpass overlay
+        // is on. No-op otherwise; the row stays hidden.
+        _renderSelectedAlerts(sat.norad_id);
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
@@ -609,6 +821,79 @@ document.getElementById('sp-search-input')?.addEventListener('keydown', e => {
 let _lastAnalysisTle = null;
 let _lastConjunctions = [];
 let _lastPasses = [];
+
+// ── Altitude-cohort card — live census of what shares the selected
+// satellite's orbital shell. `bandKm` is the half-width, so 25 covers a
+// 50-km-thick band centred on the target. The count is instantaneous
+// and recomputed every animation frame; the near-miss total lives on
+// the same card but is only refreshed when the user clicks "Screen
+// debris" (expensive SGP4 run).
+const _COHORT_BAND_KM = 25;
+function _updateAltitudeCohort(sel) {
+    if (!sel || !Number.isFinite(sel.alt)) return;
+    const c = tracker.getAltitudeCohort(sel.alt, _COHORT_BAND_KM, sel.norad_id);
+    document.getElementById('sp-cohort-debris').textContent = c.debris.toLocaleString();
+    document.getElementById('sp-cohort-active').textContent = c.active.toLocaleString();
+    // If debris group isn't loaded yet, show a hint so the zero isn't
+    // misread as "no debris nearby" when the real answer is "no debris
+    // data". Active count likewise reads 0 for empty catalogs.
+    const hasDebris = tracker.getLoadedGroups?.().includes('debris');
+    if (!hasDebris) {
+        document.getElementById('sp-cohort-debris').textContent = '— (load debris)';
+    }
+}
+
+// "Screen debris" button — runs the tracker's SGP4 conjunction screen
+// filtered to the debris group only (passes groupFilter='debris' to
+// screenConjunctions, which skips propagation entirely for non-debris
+// objects). Still button-gated because it propagates the entire debris
+// catalog against the target.
+document.getElementById('sp-screen-debris')?.addEventListener('click', async () => {
+    if (_selectedNorad == null) return;
+    const btn     = document.getElementById('sp-screen-debris');
+    const resEl   = document.getElementById('sp-debris-results');
+    const nearEl  = document.getElementById('sp-near-miss');
+    if (!tracker.getLoadedGroups?.().includes('debris')) {
+        resEl.innerHTML = '<span style="color:#ff8800">Load the "Tracked Debris" group first</span>';
+        resEl.style.display = '';
+        return;
+    }
+    btn.disabled   = true;
+    btn.textContent = 'Screening…';
+    resEl.innerHTML = '';
+    resEl.style.display = '';
+
+    let hits = [];
+    try {
+        hits = await tracker.countDebrisApproaches(_selectedNorad, {
+            withinKm: 50, horizonH: 24, stepMin: 10,
+        });
+    } catch (err) {
+        resEl.innerHTML = `<span style="color:#ff4422">Screen failed: ${_esc(err.message)}</span>`;
+        btn.disabled   = false;
+        btn.textContent = 'Screen debris (24h · 50 km)';
+        return;
+    }
+
+    nearEl.textContent = hits.length.toLocaleString();
+    if (hits.length === 0) {
+        resEl.innerHTML = '<span style="color:#4fc97f">No debris within 50 km in next 24 h</span>';
+    } else {
+        hits.sort((a, b) => a.dist_km - b.dist_km);
+        let html = `<span style="color:#ff8800;font-weight:600">${hits.length} debris near-miss${hits.length === 1 ? '' : 'es'}:</span>`;
+        for (const h of hits.slice(0, 10)) {
+            const risk = h.dist_km < 10 ? '#ff2200'
+                      :  h.dist_km < 25 ? '#ff8800' : '#ffcc44';
+            html += `<div style="margin-top:2px"><span style="color:${risk};font-weight:600">${h.dist_km.toFixed(1)} km</span> — ${_esc(h.name)} in <strong>${h.hours_ahead.toFixed(1)}h</strong></div>`;
+        }
+        if (hits.length > 10) {
+            html += `<div style="margin-top:3px;color:#556">+${hits.length - 10} more not shown</div>`;
+        }
+        resEl.innerHTML = html;
+    }
+    btn.disabled   = false;
+    btn.textContent = 'Rescan debris';
+});
 
 function _updateAnalytics(tle) {
     _lastAnalysisTle = tle;
@@ -913,18 +1198,112 @@ document.getElementById('btn-constellation-conj')?.addEventListener('click', () 
 function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ═══════════════════════════════════════════════════════════════
+//  SIMULATION TIME  (single source of truth for all per-frame state)
+// ═══════════════════════════════════════════════════════════════
+// Everything the scene cares about — Earth rotation (GMST), sun direction,
+// and satellite propagation (tracker.tick(nowMs)) — is derived from one
+// `simTimeMs` value. This makes the whole page deterministic: the same
+// simTimeMs produces the exact same render, regardless of how long the
+// user has been watching, whether the tab was backgrounded, or what speed
+// we're stepping through.
+
+let simTimeMs  = Date.now();
+let simSpeed   = 1;                 // sim-seconds per real-second (1 = realtime)
+let simPaused  = false;
+let _realLast  = performance.now();
+
+function _fmtSimUTC(d) {
+    // Compact ISO without milliseconds — easy to read, easy to cross-check.
+    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+function _fmtSimOffset(d) {
+    const deltaS = (d.getTime() - Date.now()) / 1000;
+    const abs    = Math.abs(deltaS);
+    const sign   = deltaS >= 0 ? '+' : '−';
+    if (abs < 1)     return 'now';
+    if (abs < 60)    return `${sign}${abs.toFixed(0)}s`;
+    if (abs < 3600)  return `${sign}${(abs / 60).toFixed(1)}m`;
+    if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
+    return `${sign}${(abs / 86400).toFixed(1)}d`;
+}
+
+function _setSimSpeed(speed) {
+    simSpeed = speed;
+    document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+    });
+}
+function _setSimPaused(paused) {
+    simPaused = paused;
+    const b = document.getElementById('tc-play');
+    if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
+}
+function _jumpToNow() {
+    simTimeMs = Date.now();
+}
+
+// Wire up buttons once on load.
+document.getElementById('tc-play').addEventListener('click', () => _setSimPaused(!simPaused));
+document.getElementById('tc-now').addEventListener('click', _jumpToNow);
+document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+    btn.addEventListener('click', () => _setSimSpeed(Number(btn.dataset.speed)));
+});
+_setSimSpeed(1);
+_setSimPaused(false);
+
+// Keyboard shortcuts: Space = play/pause, N = jump to now. Matches the
+// convention most video scrubbers / simulators use.
+window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { _setSimPaused(!simPaused); e.preventDefault(); }
+    else if (e.key === 'n' || e.key === 'N') _jumpToNow();
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  ANIMATION LOOP
 // ═══════════════════════════════════════════════════════════════
+
+// Scratch vectors for the per-frame sun direction — hot path, no GC.
+const _sunSceneV = new THREE.Vector3();
 
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
 
-    // Slow Earth rotation
-    earthMesh.rotation.y += 0.0001;
+    // ── Advance simulation time by real-world dt × speed multiplier.
+    const realNow = performance.now();
+    const dtMs    = realNow - _realLast;
+    _realLast     = realNow;
+    if (!simPaused) simTimeMs += dtMs * simSpeed;
 
-    // Propagate satellites
-    tracker.tick();
+    const simDate = new Date(simTimeMs);
+
+    // ── Earth rotation: real GMST at the sim instant. Replaces the old
+    // cosmetic drift — terminator and ground tracks now match the clock.
+    earthMesh.rotation.y = geo.greenwichSiderealTime(simDate);
+
+    // ── Sun direction: astronomical inertial frame (+z = north pole)
+    // remapped to Three.js scene frame (+y = north, scene -Z = 90°E).
+    // Light is placed 10 Earth-radii out along the sun direction so
+    // MeshStandardMaterial treats it as a parallel source.
+    const sun = sunDirectionEci(simDate);
+    _sunSceneV.set(sun.x, sun.z, -sun.y).multiplyScalar(10);
+    sunLight.position.copy(_sunSceneV);
+
+    // ── Satellites — tracker takes an explicit timestamp, so sat
+    // positions are propagated to the sim instant too.
+    tracker.tick(simTimeMs);
+
+    // ── Weather-aware alert overlay — recompute per frame when enabled.
+    // Matching is <1 ms for typical catalogs because the matcher has a
+    // latitude-band prefilter; keeping it per-frame lets the overlay
+    // stay honest at high sim-speed scrubs where sats cross alert zones
+    // in a fraction of a real second.
+    if (_alertEnabled) _runMatchNow();
+
+    // ── HUD readouts (cheap; one frame is fine)
+    document.getElementById('tc-time-utc').textContent    = _fmtSimUTC(simDate);
+    document.getElementById('tc-time-offset').textContent = _fmtSimOffset(simDate);
 
     // Update selected satellite info panel
     if (_selectedNorad) {
@@ -935,6 +1314,10 @@ function animate() {
             document.getElementById('sp-latlon').textContent = `${sel.lat.toFixed(2)}°, ${sel.lon.toFixed(2)}°`;
             const speedKms = sel.alt > 0 ? Math.sqrt(398600.8 / (6378.135 + sel.alt)).toFixed(1) : '—';
             document.getElementById('sp-speed').textContent = `${speedKms} km/s`;
+            // Live altitude-band cohort. Cheap: O(N_sats) filter on the
+            // alt field the tracker already updates each tick. Runs at
+            // whatever animate framerate is — no throttling needed.
+            _updateAltitudeCohort(sel);
         }
     }
 
