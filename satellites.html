@@ -55,6 +55,43 @@ nav {
 #sat-hud .val { color:#0ee; font-weight:600; font-family:monospace; }
 #sat-hud .dim { color:#556; }
 
+/* ─── Time controls (bottom-centre) ──────────────────── */
+#time-controls {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    z-index:10;
+    background:rgba(0,0,0,.82); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,200,.2); border-radius:9px;
+    padding:6px 8px; display:flex; align-items:center; gap:3px;
+    font-size:.72rem;
+}
+.tc-btn {
+    background:rgba(0,200,200,.08); border:1px solid rgba(0,200,200,.18);
+    border-radius:4px; color:#9cc; cursor:pointer;
+    font-family:inherit; font-size:.68rem; font-weight:600;
+    padding:4px 8px; min-width:30px; line-height:1;
+    transition:background .12s, color .12s, border-color .12s;
+}
+.tc-btn:hover  { background:rgba(0,200,200,.18); color:#cdd; }
+.tc-btn.active { background:rgba(0,200,200,.30); color:#fff; border-color:#0cc; }
+.tc-sep {
+    width:1px; height:18px; background:rgba(255,255,255,.1); margin:0 4px;
+}
+.tc-display {
+    display:flex; flex-direction:column; align-items:flex-end;
+    margin-left:6px; padding-left:8px;
+    border-left:1px solid rgba(255,255,255,.1);
+    min-width:172px; font-family:monospace;
+}
+.tc-time   { color:#0ee; font-size:.72rem; line-height:1;   letter-spacing:.02em; }
+.tc-offset { color:#667; font-size:.58rem; line-height:1.2; margin-top:2px; }
+@media (max-width:640px) {
+    #time-controls { bottom:6px; padding:4px 6px; font-size:.64rem; }
+    .tc-btn        { min-width:26px; padding:3px 6px; font-size:.60rem; }
+    .tc-display    { min-width:120px; }
+    .tc-time       { font-size:.62rem; }
+    .tc-offset     { font-size:.52rem; }
+}
+
 /* ─── Control panel (right side) ─────────────────────── */
 #sat-panel {
     position:absolute; top:12px; right:12px; z-index:10;
@@ -279,6 +316,25 @@ nav {
             </div>
         </div>
     </div>
+
+    <!-- Time controls (bottom-centre): single source of truth for the whole
+         page. All per-frame state (Earth rotation, sun direction, satellite
+         propagation) is derived from simTimeMs in animate(). Keyboard:
+         Space = play/pause, N = jump to now. -->
+    <div id="time-controls">
+        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" id="tc-now" title="Jump to real time">Now</button>
+        <span class="tc-display">
+            <span class="tc-time"   id="tc-time-utc">—</span>
+            <span class="tc-offset" id="tc-time-offset">now</span>
+        </span>
+    </div>
 </div>
 
 <!-- Data section below canvas -->
@@ -329,6 +385,8 @@ import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          decayWatchlist, constellationCoverage, detectBreakupEvents
        } from './js/orbital-analytics.js';
 import { loadUserLocation, auroraVisibility } from './js/user-location.js';
+import { geo } from './js/geo/coords.js';
+import { sunDirectionEci } from './js/sun-altitude.js';
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -361,10 +419,15 @@ controls.maxDistance = 20;
 // Lights
 scene.add(new THREE.AmbientLight(0x334466, 0.4));
 const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
-sunLight.position.set(5, 2, 3);
+sunLight.position.set(10, 2, 3);   // placeholder — animate() drives this from sim time
 scene.add(sunLight);
 
-// Earth sphere — Blue Marble texture from CDN
+// Earth sphere — Blue Marble texture from CDN.
+// (This page uses Three.js's native SphereGeometry whose UVs store v=(1-v),
+// i.e. v=1 at the north pole — opposite of the shader-based earth.html
+// convention. Combined with TextureLoader's default flipY=true that
+// correctly lands image row 0 at mesh-north. Do NOT set flipY=false here
+// or the globe renders upside-down.)
 const earthGeo = new THREE.SphereGeometry(1, 64, 64);
 const earthTex = new THREE.TextureLoader().load(
     'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
@@ -913,18 +976,105 @@ document.getElementById('btn-constellation-conj')?.addEventListener('click', () 
 function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 // ═══════════════════════════════════════════════════════════════
+//  SIMULATION TIME  (single source of truth for all per-frame state)
+// ═══════════════════════════════════════════════════════════════
+// Everything the scene cares about — Earth rotation (GMST), sun direction,
+// and satellite propagation (tracker.tick(nowMs)) — is derived from one
+// `simTimeMs` value. This makes the whole page deterministic: the same
+// simTimeMs produces the exact same render, regardless of how long the
+// user has been watching, whether the tab was backgrounded, or what speed
+// we're stepping through.
+
+let simTimeMs  = Date.now();
+let simSpeed   = 1;                 // sim-seconds per real-second (1 = realtime)
+let simPaused  = false;
+let _realLast  = performance.now();
+
+function _fmtSimUTC(d) {
+    // Compact ISO without milliseconds — easy to read, easy to cross-check.
+    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+function _fmtSimOffset(d) {
+    const deltaS = (d.getTime() - Date.now()) / 1000;
+    const abs    = Math.abs(deltaS);
+    const sign   = deltaS >= 0 ? '+' : '−';
+    if (abs < 1)     return 'now';
+    if (abs < 60)    return `${sign}${abs.toFixed(0)}s`;
+    if (abs < 3600)  return `${sign}${(abs / 60).toFixed(1)}m`;
+    if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
+    return `${sign}${(abs / 86400).toFixed(1)}d`;
+}
+
+function _setSimSpeed(speed) {
+    simSpeed = speed;
+    document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+    });
+}
+function _setSimPaused(paused) {
+    simPaused = paused;
+    const b = document.getElementById('tc-play');
+    if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
+}
+function _jumpToNow() {
+    simTimeMs = Date.now();
+}
+
+// Wire up buttons once on load.
+document.getElementById('tc-play').addEventListener('click', () => _setSimPaused(!simPaused));
+document.getElementById('tc-now').addEventListener('click', _jumpToNow);
+document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+    btn.addEventListener('click', () => _setSimSpeed(Number(btn.dataset.speed)));
+});
+_setSimSpeed(1);
+_setSimPaused(false);
+
+// Keyboard shortcuts: Space = play/pause, N = jump to now. Matches the
+// convention most video scrubbers / simulators use.
+window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { _setSimPaused(!simPaused); e.preventDefault(); }
+    else if (e.key === 'n' || e.key === 'N') _jumpToNow();
+});
+
+// ═══════════════════════════════════════════════════════════════
 //  ANIMATION LOOP
 // ═══════════════════════════════════════════════════════════════
+
+// Scratch vectors for the per-frame sun direction — hot path, no GC.
+const _sunSceneV = new THREE.Vector3();
 
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
 
-    // Slow Earth rotation
-    earthMesh.rotation.y += 0.0001;
+    // ── Advance simulation time by real-world dt × speed multiplier.
+    const realNow = performance.now();
+    const dtMs    = realNow - _realLast;
+    _realLast     = realNow;
+    if (!simPaused) simTimeMs += dtMs * simSpeed;
 
-    // Propagate satellites
-    tracker.tick();
+    const simDate = new Date(simTimeMs);
+
+    // ── Earth rotation: real GMST at the sim instant. Replaces the old
+    // cosmetic drift — terminator and ground tracks now match the clock.
+    earthMesh.rotation.y = geo.greenwichSiderealTime(simDate);
+
+    // ── Sun direction: astronomical inertial frame (+z = north pole)
+    // remapped to Three.js scene frame (+y = north, scene -Z = 90°E).
+    // Light is placed 10 Earth-radii out along the sun direction so
+    // MeshStandardMaterial treats it as a parallel source.
+    const sun = sunDirectionEci(simDate);
+    _sunSceneV.set(sun.x, sun.z, -sun.y).multiplyScalar(10);
+    sunLight.position.copy(_sunSceneV);
+
+    // ── Satellites — tracker takes an explicit timestamp, so sat
+    // positions are propagated to the sim instant too.
+    tracker.tick(simTimeMs);
+
+    // ── HUD readouts (cheap; one frame is fine)
+    document.getElementById('tc-time-utc').textContent    = _fmtSimUTC(simDate);
+    document.getElementById('tc-time-offset').textContent = _fmtSimOffset(simDate);
 
     // Update selected satellite info panel
     if (_selectedNorad) {
