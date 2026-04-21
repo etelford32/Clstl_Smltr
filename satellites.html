@@ -256,7 +256,11 @@ nav {
                  then runs once against every loaded operational group and
                  populates sp-near-miss counts on each selected satellite. -->
             <div id="debris-screen-status" style="display:none;margin-top:6px;font-size:.62rem;color:#887;line-height:1.5">
-                <div id="dss-label">—</div>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <div id="dss-label" style="flex:1;min-width:0">—</div>
+                    <button id="dss-rescan" type="button" title="Discard cached threats and re-run the SGP4 screen against the current catalog"
+                        style="background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:3px;color:#ffaa44;cursor:pointer;font-size:.58rem;padding:2px 6px;font-family:inherit;flex-shrink:0">↻ Rescan</button>
+                </div>
                 <div style="height:3px;background:rgba(255,80,80,.10);border-radius:2px;margin-top:3px;overflow:hidden">
                     <div id="dss-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#ff4422,#ffaa44);transition:width .15s"></div>
                 </div>
@@ -626,6 +630,16 @@ async function _maybeRunDebrisScreen() {
 // "both catalogs ready, kick off the worker".
 window.addEventListener('satellites-loaded', (e) => {
     if (e.detail?.group === 'debris') _maybeRunDebrisScreen();
+});
+
+// Manual rescan — drop the IDB row + reset the one-shot flag so the next
+// _maybeRunDebrisScreen() call actually spins the worker instead of
+// hitting the fast-restore path. No-op while a run is already in flight.
+document.getElementById('dss-rescan')?.addEventListener('click', () => {
+    if (_debrisCache.state === 'running') return;
+    _debrisCache.clearCache({ persist: true });
+    _debrisScreenRan = false;
+    _maybeRunDebrisScreen();
 });
 
 // All constellation group toggles
