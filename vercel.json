@@ -135,6 +135,10 @@
       "destination": "/dashboard.html"
     },
     {
+      "source": "/launch-planner",
+      "destination": "/launch-planner.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },
