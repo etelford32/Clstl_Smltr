@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-04-21T16:46:19.961Z",
+  "generator": "scripts/heliochronicles/build-snapshots.mjs",
+  "upstream": {
+    "submodule": "data/heliochronicles",
+    "manifest": "../heliochronicles/data/MANIFEST.json"
+  },
+  "populated": "catalog_only",
+  "artifacts": {
+    "catalog": [
+      {
+        "id": "solar_cycles",
+        "path": "../heliochronicles/data/cycles/solar_cycles.json",
+        "bytes": 4170,
+        "sha256": "1521f0fa312ab0d297894792d23852a74158a9f91cf5624c456a2333013e8b7c",
+        "count": 25
+      },
+      {
+        "id": "grand_minima",
+        "path": "../heliochronicles/data/cycles/grand_minima.json",
+        "bytes": 5046,
+        "sha256": "906e346e500ea18acaaabef087ddcdbe521618d07b31be8b36654888d64a3f4c",
+        "count": 6
+      },
+      {
+        "id": "historical_storms",
+        "path": "../heliochronicles/data/events/historical_storms.json",
+        "bytes": 27130,
+        "sha256": "91e6a81e67e94af1945993a5aeee10992507f59e5f2184a99335d0371620ad79",
+        "count": 23
+      },
+      {
+        "id": "aurora_observations",
+        "path": "../heliochronicles/data/events/aurora_observations.json",
+        "bytes": 20725,
+        "sha256": "1b39b6fab74e85e752d8d83cfb009bbff63b9097c6106cc008383c02ec83fa73",
+        "count": 15
+      },
+      {
+        "id": "notable_regions",
+        "path": "../heliochronicles/data/regions/notable_regions.json",
+        "bytes": 12931,
+        "sha256": "15f351bde0e2d6a6daa04b33eeccd0e0fbdd13513da910ebe18c35652f34a4a2",
+        "count": 11
+      }
+    ]
+  }
+}

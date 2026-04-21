@@ -694,6 +694,26 @@ export class SolarLSTM {
         return false;
     }
 
+    /**
+     * Load pretrained weights shipped with the app (e.g., produced offline
+     * from a multi-decade OMNI corpus). Non-fatal on 404 or parse errors —
+     * the model just starts cold as before.
+     *
+     * @param {string} url — path to a JSON file produced by exportWeights()
+     * @returns {Promise<boolean>} true if weights were applied
+     */
+    async loadPretrainedWeights(url) {
+        try {
+            const res = await fetch(url, { cache: 'no-cache' });
+            if (!res.ok) return false;
+            const ok = this.importWeights(await res.json());
+            if (ok) console.info(`[SolarLSTM] Loaded pretrained weights from ${url} (${this._nTrained} steps, confidence ${(this._confidence * 100).toFixed(0)}%)`);
+            return ok;
+        } catch {
+            return false;
+        }
+    }
+
     /** Save weights to localStorage */
     saveToStorage() {
         try {
