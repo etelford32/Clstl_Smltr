@@ -1483,6 +1483,7 @@ import { RenderPass }         from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass }         from 'three/addons/postprocessing/ShaderPass.js';
 import { SolarWeatherHistory, seedSyntheticHistory } from './js/solar-weather-history.js';
+import { loadRealHistory } from './js/history-loader.js';
 import { SolarWeatherForecaster } from './js/solar-weather-forecast.js';
 import { ModelValidator }     from './js/model-validation.js';
 import { SolarLSTM, normalise as lstmNormalise, denormalise as lstmDenorm, FEATURES } from './js/solar-lstm.js';
@@ -1561,6 +1562,12 @@ let scrubForecastStart = 0; // index where forecast zone begins
 const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
 
 (async function loadSwpcTimeline() {
+    // Pretrained weights ship with the app (produced offline from a
+    // multi-decade OMNI corpus). 404 is fine — we just start cold as before.
+    // Runs before the seed path so `trainedSteps > 0` reflects any shipped
+    // weights by the time we decide whether to re-train.
+    await _lstm.loadPretrainedWeights('/js/solar-lstm-weights.json').catch(() => false);
+
     const PLASMA = 'https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json';
     const MAG    = 'https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json';
     try {
@@ -1628,8 +1635,12 @@ const _lstm = new SolarLSTM({ hiddenSize: 32, seqLen: 24, lr: 0.001 });
                 lastHourT = tMs;
             }
         }
-        // Try to load saved weights first
-        if (!_lstm.loadFromStorage()) {
+        // Precedence: user's localStorage (warm from prior sessions) beats
+        // shipped pretrained weights beats cold-start seed on NOAA 7-day data.
+        // `trainedSteps > 0` catches the pretrained case set up at the top
+        // of this function.
+        const warm = _lstm.loadFromStorage() || _lstm.trainedSteps > 0;
+        if (!warm) {
             _lstm.seed(hourlyForLSTM, 3);
             _lstm.saveToStorage();
         } else {
@@ -5175,10 +5186,25 @@ let   _lastForecast = null;
 
 (async function initForecastPipeline() {
     await _wxHistory.open();
-    // If no historical data, seed with synthetic data so forecasts work immediately
+
+    // Prefer real history (heliochronicles snapshots) over synthetic. Falls
+    // back gracefully when /data/history/index.json is absent, missing CSV
+    // artifacts (populated: "catalog_only"), or offline.
     if (_wxHistory.sizes().every(s => s === 0)) {
-        seedSyntheticHistory(_wxHistory, 90);
+        const res = await loadRealHistory(_wxHistory);
+        if (res.ok) {
+            console.info('[Sun] History seeded from heliochronicles —',
+                `tier0:${res.tier0} tier1:${res.tier1} tier2:${res.tier2}`,
+                `latest ${new Date(res.latest_ms).toISOString()}`);
+        } else {
+            seedSyntheticHistory(_wxHistory, 90);
+            console.info('[Sun] History seeded synthetic —', res.reason ?? 'no heliochronicles snapshot');
+        }
     }
+
+    // (Pretrained LSTM weights are loaded inside loadSwpcTimeline — kept
+    //  next to the LSTM seed logic so precedence is obvious.)
+
     // Run initial forecast
     _lastForecast = _forecaster.update(_wxHistory, 72);
     _updateForecastPanel(_lastForecast);
