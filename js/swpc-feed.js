@@ -276,48 +276,6 @@ async function fetchWind(state) {
     // Rows are 1-minute samples; last non-fill entry is current.
     if (!Array.isArray(raw) || raw.length === 0) return;
 
-    // ── DIAGNOSTIC: dump raw NOAA structure on first fetch ─────────────────
-    // Remove after debugging — logs the actual field names NOAA is sending
-    // so we can verify our field mapping is correct.
-    if (!fetchWind._diagnosed) {
-        fetchWind._diagnosed = true;
-        const last = raw[raw.length - 1];
-        const last5 = raw.slice(-5);
-        console.group('%c[SWPC WIND DIAGNOSTIC] Raw NOAA rtsw_wind_1m.json', 'color:#ff8c00;font-weight:bold');
-        console.log('Total rows:', raw.length);
-        console.log('Last row keys:', Object.keys(last));
-        console.log('Last row full:', JSON.parse(JSON.stringify(last)));
-        // Dump ALL 31 field names and values from the last row
-        console.log('ALL FIELDS in last row:');
-        for (const [k, v] of Object.entries(last)) {
-            console.log(`  ${k}: ${JSON.stringify(v)} (${typeof v})`);
-        }
-        console.table(last5.map(r => ({
-            time_tag:          r.time_tag,
-            active:            r.active,
-            source:            r.source,
-            proton_speed:      r.proton_speed,
-            proton_density:    r.proton_density,
-            proton_temperature:r.proton_temperature,
-            // Check ALL possible IMF field names
-            bt:                r.bt,
-            bz_gsm:            r.bz_gsm,
-            bz:                r.bz,
-            bt_gsm:            r.bt_gsm,
-            bx_gse:            r.bx_gse,
-            by_gse:            r.by_gse,
-            bz_gse:            r.bz_gse,
-            bx_gsm:            r.bx_gsm,
-            by_gsm:            r.by_gsm,
-        })));
-        // Summarize which fields exist vs are undefined
-        const allKeys = Object.keys(last);
-        const magKeys = allKeys.filter(k => k.startsWith('b') || k.includes('mag') || k.includes('imf'));
-        console.log('Magnetic/IMF field names found:', magKeys);
-        console.log('Active flag:', last.active, '| Source:', last.source);
-        console.groupEnd();
-    }
-
     // Walk backwards to find the most recent ACTIVE row with a valid speed.
     // Rows with active=false may be from an inactive instrument or data gap.
     // Prefer DSCOVR proton_* fields; apply noaaFill to each independently.
@@ -360,17 +318,6 @@ async function fetchMag(state) {
         return;  // mag data unavailable — retain previous values
     }
     if (!Array.isArray(raw) || raw.length === 0) return;
-
-    // ── DIAGNOSTIC: dump mag structure on first fetch ──────────────────────
-    if (!fetchMag._diagnosed) {
-        fetchMag._diagnosed = true;
-        const last = raw[raw.length - 1];
-        console.group('%c[SWPC MAG DIAGNOSTIC] Raw NOAA rtsw_mag_1m.json', 'color:#cc44ff;font-weight:bold');
-        console.log('Total rows:', raw.length);
-        console.log('Last row keys:', Object.keys(last));
-        console.log('Last row:', JSON.parse(JSON.stringify(last)));
-        console.groupEnd();
-    }
 
     for (let i = raw.length - 1; i >= 0; i--) {
         const r = raw[i];

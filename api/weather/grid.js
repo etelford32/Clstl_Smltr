@@ -71,8 +71,19 @@ async function readLatest() {
 }
 
 export default async function handler() {
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
-        return json({ error: 'supabase_not_configured' }, 500);
+    // Explicit per-var reporting so an operator hitting the endpoint in a
+    // browser (or the frontend's devtools Network tab) sees exactly which
+    // env var Vercel is missing in the current environment — no more "why
+    // is it 500?" detective work.
+    const missing = [];
+    if (!SUPABASE_URL) missing.push('SUPABASE_URL');
+    if (!SUPABASE_KEY) missing.push('SUPABASE_SERVICE_KEY');
+    if (missing.length) {
+        return json({
+            error:   'supabase_not_configured',
+            missing,
+            hint:    'Vercel → Project Settings → Environment Variables → Production. Add missing vars, redeploy.',
+        }, 500);
     }
     let row;
     try {
