@@ -260,22 +260,30 @@ function loadTexture(url) {
 
 export class EarthObsFeed {
     constructor() {
-        this._timers  = {};
-        this._textures = {};   // id → THREE.Texture
-        this._meta     = {};   // id → { source, time, updated, status }
-        this._enabled  = new Set(['precip-rate', 'sst', 'aod']);  // default active layers
+        this._timers    = {};
+        this._textures  = {};   // id → THREE.Texture
+        this._meta      = {};   // id → { source, time, updated, status, error? }
+        // Default: every layer enabled. Autoload makes the globe rich on
+        // arrival; per-layer checkboxes gate visibility (not the fetch)
+        // so turning a layer off just hides the mesh while keeping the
+        // texture primed for re-enable.
+        this._enabled = new Set(EARTH_OBS_LAYERS.map(l => l.id));
+        // Seed idle status so every layer has a row the UI can paint.
+        for (const layer of EARTH_OBS_LAYERS) {
+            this._meta[layer.id] = { status: 'idle', layer };
+        }
     }
 
-    /** Start polling enabled layers. */
+    /** Start polling enabled layers. Safe to call multiple times. */
     start() {
         for (const layer of EARTH_OBS_LAYERS) {
-            if (this._enabled.has(layer.id)) {
-                this._fetchLayer(layer);
-                this._timers[layer.id] = setInterval(
-                    () => this._fetchLayer(layer),
-                    layer.cadence
-                );
-            }
+            if (!this._enabled.has(layer.id)) continue;
+            if (this._timers[layer.id]) continue;    // already polling
+            this._fetchLayer(layer);
+            this._timers[layer.id] = setInterval(
+                () => this._fetchLayer(layer),
+                layer.cadence
+            );
         }
         return this;
     }
@@ -321,44 +329,71 @@ export class EarthObsFeed {
 
     // ── Internal ─────────────────────────────────────────────────────────────
 
+    /** Current per-layer status row. Used by the layer-panel status pips
+     *  and the debug overlay. Shape:
+     *    { state: 'idle'|'fetching'|'loaded'|'error',
+     *      source?, time?, updated?, error? } */
+    getStatus(layerId) {
+        const m = this._meta[layerId];
+        if (!m) return { state: 'idle' };
+        return {
+            state:   m.status === 'live' ? 'loaded' : (m.status ?? 'idle'),
+            source:  m.source,
+            time:    m.time,
+            updated: m.updated,
+            error:   m.error,
+        };
+    }
+
     async _fetchLayer(layer) {
-        const now = new Date();
+        // Flip to 'fetching' immediately so the layer pip pulses amber
+        // before the network round-trip resolves. Preserve the previous
+        // updated/source so the row keeps useful context while pulling.
+        this._meta[layer.id] = {
+            ...this._meta[layer.id],
+            status: 'fetching',
+            layer,
+        };
+        this._dispatchStatus(layer.id);
+
+        const now        = new Date();
         const targetDate = new Date(now.getTime() - layer.timeOffset * 86_400_000);
 
-        // Try GIBS snapshot first (same endpoint as satellite-feed.js),
-        // fall back to WMS if snapshot fails
-        let tex = await loadTexture(gibsSnapshotUrl(layer, targetDate));
+        // GIBS snapshot first, fall back to WMS if the snapshot 404s.
+        let tex    = await loadTexture(gibsSnapshotUrl(layer, targetDate));
         let source = 'GIBS Snapshot';
-
         if (!tex) {
-            tex = await loadTexture(gibsWmsUrl(layer, targetDate));
+            tex    = await loadTexture(gibsWmsUrl(layer, targetDate));
             source = 'GIBS WMS';
         }
 
         if (tex) {
-            if (this._textures[layer.id]) {
-                this._textures[layer.id].dispose();
-            }
+            if (this._textures[layer.id]) this._textures[layer.id].dispose();
             this._textures[layer.id] = tex;
             this._meta[layer.id] = {
-                source:   `${layer.name} (${source})`,
-                time:     targetDate,
-                updated:  new Date(),
-                status:   'live',
-                layer:    layer,
+                source:  `${layer.name} (${source})`,
+                time:    targetDate,
+                updated: new Date(),
+                status:  'live',
+                layer,
             };
-
             console.info(`[EarthObs] ${layer.name} loaded via ${source}`);
         } else {
             this._meta[layer.id] = {
                 ...this._meta[layer.id],
-                status: 'error',
+                status:  'error',
                 updated: new Date(),
+                // Snapshot + WMS both returned null — surface the most useful
+                // single-line reason so the inline status dot's title= can
+                // tell the user why it went red.
+                error:   `GIBS snapshot + WMS both failed for ${targetDate.toISOString().slice(0,10)}`,
+                layer,
             };
             console.debug(`[EarthObs] ${layer.name} fetch failed — retaining previous`);
         }
 
         this._dispatch();
+        this._dispatchStatus(layer.id);
     }
 
     _dispatch() {
@@ -368,6 +403,12 @@ export class EarthObsFeed {
                 meta:     { ...this._meta },
                 enabled:  [...this._enabled],
             },
+        }));
+    }
+
+    _dispatchStatus(layerId) {
+        window.dispatchEvent(new CustomEvent('earth-obs-status', {
+            detail: { layerId, ...this.getStatus(layerId) },
         }));
     }
 }

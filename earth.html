@@ -171,6 +171,22 @@ nav {
 .lyr input[type=checkbox] { accent-color:#00c6ff; width:13px; height:13px; flex-shrink:0; }
 .lyr label { color:#b0c8d8; font-size:11px; cursor:pointer; user-select:none; line-height:1.3; }
 .lyr-sep { border:none; border-top:1px solid rgba(255,255,255,.07); margin:8px 0; }
+/* Per-layer data-status pip. Grey = idle (feed hasn't fired yet),
+   amber pulsing = fetching, green = loaded, red = error. hover on
+   the pip shows the feed's last-known reason via title=.  Rendered
+   between the checkbox and the label so a quick eye-scan picks up
+   any red before the user reaches for a layer. */
+.lyr-status {
+    display:inline-block; width:7px; height:7px; border-radius:50%;
+    background:#556; flex-shrink:0; box-shadow:none; transition:background .2s, box-shadow .2s;
+}
+.lyr-status.st-fetching {
+    background:#ffaa22; box-shadow:0 0 3px rgba(255,170,34,.6);
+    animation: lyrStatusPulse 1.2s ease-in-out infinite;
+}
+.lyr-status.st-loaded { background:#4fc97f; box-shadow:0 0 4px rgba(79,201,127,.55); }
+.lyr-status.st-error  { background:#ff4422; box-shadow:0 0 4px rgba(255,68,34,.65); }
+@keyframes lyrStatusPulse { 0%,100% { opacity:.55; } 50% { opacity:1; } }
 
 /* ─── Collapsible section groups inside layer panel ─────────── */
 .lyr-section { border-top:1px solid rgba(255,255,255,.06); margin-top:6px; padding-top:6px; }
@@ -880,12 +896,12 @@ nav {
         <div class="lyr-section" data-lyr-section="nasa-obs">
             <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><label for="lyr-obs-fires">Active Fires</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><label for="lyr-obs-snow">Snow Cover</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"         checked><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness" checked><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"        checked><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
             </div></div>
         </div>
 
@@ -2851,8 +2867,11 @@ satFeed.start();
 //  Precipitation, SST, aerosol, cloud thickness, fires, snow
 // ═══════════════════════════════════════════════════════════════
 const earthObsFeed = new EarthObsFeed();
-// Don't auto-start any layers — user toggles them on via the layer panel.
-// The feed starts with an empty enabled set until a checkbox fires.
+// Autoload: every layer is enabled by default inside EarthObsFeed, and
+// start() kicks off polling immediately so the globe is rich on arrival.
+// User toggles only gate visibility — the textures stay cached so flipping
+// a layer back on is instant and doesn't re-hit NASA.
+earthObsFeed.start();
 
 // Observation overlay meshes — transparent sphere shells above the cloud layer
 const _obsOverlays = {};
@@ -2867,44 +2886,60 @@ function _createObsOverlay(layerId) {
         new THREE.SphereGeometry(1.012, 60, 60),  // just above clouds (1.009)
         mat
     );
-    mesh.visible = false;
+    // Visibility now follows the checkbox strictly — default-checked
+    // checkboxes ↔ default-visible overlays. No more "on every feed tick,
+    // force visible" override that used to run in the update handler.
+    const checkbox   = document.getElementById(`lyr-obs-${layerId}`);
+    mesh.visible     = checkbox ? checkbox.checked : true;
     mesh.renderOrder = 5;
     scene.add(mesh);
     _obsOverlays[layerId] = { mesh, mat };
     return _obsOverlays[layerId];
 }
 
-// Layer toggle handlers
+// Layer toggle handlers — visibility only, feed keeps running.
 for (const layer of EARTH_OBS_LAYERS) {
     const checkbox = document.getElementById(`lyr-obs-${layer.id}`);
     if (!checkbox) continue;
     checkbox.addEventListener('change', e => {
-        const on = e.target.checked;
-        earthObsFeed.setEnabled(layer.id, on);
-        if (on) {
-            earthObsFeed.start();  // safe to call multiple times
-        }
-        const overlay = _obsOverlays[layer.id];
-        if (overlay) overlay.mesh.visible = on;
+        const overlay = _obsOverlays[layer.id] ?? _createObsOverlay(layer.id);
+        overlay.mesh.visible = e.target.checked;
     });
 }
 
-// Handle texture updates from the feed
+// Handle texture updates from the feed.  Visibility is NOT touched here —
+// the bug that sent "NASA overlay visible when checkbox off" lived in this
+// handler forcing mesh.visible = true on every update. The mesh's visible
+// state is strictly the checkbox's state now.
 window.addEventListener('earth-obs-update', e => {
     const { textures, meta, enabled } = e.detail;
-
     for (const layerId of enabled) {
         const tex = textures[layerId];
         if (!tex) continue;
-
-        const overlay = _createObsOverlay(layerId);
-        overlay.mat.map = tex;
+        const overlay = _obsOverlays[layerId] ?? _createObsOverlay(layerId);
+        overlay.mat.map        = tex;
         overlay.mat.needsUpdate = true;
-        overlay.mesh.visible = true;
     }
-
-    // Update the observation status panel
     _updateObsStatusPanel(meta);
+});
+
+// Per-layer status pip in the Layers panel. One subscription powers every
+// .lyr-status pill — the data-layer attribute on the span tells us which
+// checkbox row it belongs to.  Pip colour + title stay in lockstep with
+// the feed; hover reveals the failure reason when something's red.
+window.addEventListener('earth-obs-status', (e) => {
+    const d    = e.detail ?? {};
+    const pill = document.querySelector(`.lyr-status[data-layer="${d.layerId}"]`);
+    if (!pill) return;
+    pill.classList.remove('st-idle', 'st-fetching', 'st-loaded', 'st-error');
+    pill.classList.add(`st-${d.state}`);
+    const ago = d.updated
+        ? `${Math.round((Date.now() - new Date(d.updated).getTime()) / 60000)} m ago`
+        : 'never';
+    pill.title = d.state === 'loaded'   ? `loaded · ${ago} · ${d.source ?? '—'}`
+              :  d.state === 'fetching' ? 'fetching from NASA GIBS…'
+              :  d.state === 'error'    ? `error: ${d.error ?? 'unknown'}`
+              :                            'waiting for first fetch';
 });
 
 function _updateObsStatusPanel(meta) {
