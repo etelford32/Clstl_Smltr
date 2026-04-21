@@ -257,6 +257,10 @@ nav {
             <div class="sp-toggle"><input type="checkbox" id="tog-shells"><label for="tog-shells">Starlink orbital shells</label></div>
             <div class="sp-toggle"><input type="checkbox" id="tog-heatmap"><label for="tog-heatmap">Altitude density heatmap</label></div>
             <div id="alt-heatmap" style="display:none;margin-top:6px"></div>
+            <div class="sp-toggle" title="Tint sats whose sub-point is inside an active NWS alert polygon or tropical-cyclone wind radius">
+                <input type="checkbox" id="tog-alerts"><label for="tog-alerts">Alert overpass (sats over active weather)</label>
+                <span class="count" id="cnt-alerts">0</span>
+            </div>
         </div>
 
         <!-- Operator Analytics -->
@@ -387,6 +391,9 @@ import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
 import { loadUserLocation, auroraVisibility } from './js/user-location.js';
 import { geo } from './js/geo/coords.js';
 import { sunDirectionEci } from './js/sun-altitude.js';
+import { NWSAlerts, ALERT_CSS_COLORS } from './js/nws-alerts.js';
+import { StormFeed } from './js/storm-feed.js';
+import { findSatsOverAlerts } from './js/sat-alert-matcher.js';
 
 // ── Nav burger ──────────────────────────────────────────────────────────────
 const _burger = document.getElementById('nav-burger');
@@ -523,6 +530,114 @@ document.getElementById('tog-shells')?.addEventListener('change', e => {
     tracker.setShellsVisible(e.target.checked);
 });
 
+// ── Alert overpass (weather-aware satellite overlay) ─────────────────────
+// Maintains local mirrors of the NWS + StormFeed streams, recomputes the
+// sat/alert match each animation frame, and hands a colour-override map
+// to the tracker. The matcher is cheap (<1 ms for ~5 k sats × ~100
+// events with the lat prefilter) so there's no meaningful cost to
+// running it every frame — which is useful because at high sim speeds
+// sats cross alert zones in a fraction of a second of real time.
+let _nwsAlertsLive = [];
+let _stormsLive    = [];
+let _alertEnabled  = false;
+let _lastMatchMap  = null;    // Map<noradId, { alerts, storms }>
+const _alertFeed   = new NWSAlerts();
+const _stormFeed   = new StormFeed();
+
+// THREE.Color instances reused across frames; severity-weighted so a
+// tornado warning stands out more than a small-craft advisory, and a
+// cyclone-over pass (magenta) is always distinct from either.
+const _ALERT_TINT = {
+    Extreme:  new THREE.Color(0xff2200),
+    Severe:   new THREE.Color(0xff8800),
+    Moderate: new THREE.Color(0xffdd44),
+    Minor:    new THREE.Color(0x00ccff),
+    Unknown:  new THREE.Color(0xcccccc),
+};
+const _STORM_TINT = new THREE.Color(0xff00aa);
+
+// Pick the strongest match colour for a sat that's over multiple events.
+// Storm always wins over a regular alert; among alerts, the most severe.
+function _pickTint(hit) {
+    if (hit.storms && hit.storms.length > 0) return _STORM_TINT;
+    let best = _ALERT_TINT.Unknown;
+    let bestRank = 99;
+    const order = ['Extreme', 'Severe', 'Moderate', 'Minor', 'Unknown'];
+    for (const a of hit.alerts ?? []) {
+        const r = order.indexOf(a.severity);
+        if (r >= 0 && r < bestRank) { bestRank = r; best = _ALERT_TINT[a.severity] ?? best; }
+    }
+    return best;
+}
+
+document.addEventListener('nws-alerts-update', (e) => {
+    _nwsAlertsLive = e.detail?.alerts ?? [];
+    _runMatchNow();   // refresh immediately; don't wait for next frame
+});
+window.addEventListener('storm-update', (e) => {
+    _stormsLive = e.detail?.storms ?? [];
+    _runMatchNow();
+});
+
+function _runMatchNow() {
+    if (!_alertEnabled) return;
+    const sats = tracker.getSatellites();
+    _lastMatchMap = findSatsOverAlerts(sats, _nwsAlertsLive, _stormsLive);
+    const overrides = new Map();
+    for (const [noradId, hit] of _lastMatchMap) {
+        overrides.set(noradId, _pickTint(hit));
+    }
+    tracker.setColorOverrides(overrides);
+    const cnt = document.getElementById('cnt-alerts');
+    if (cnt) cnt.textContent = overrides.size.toLocaleString();
+    // Refresh the selected-sat info panel if it's showing a flagged sat.
+    if (_selectedNorad != null) _renderSelectedAlerts(_selectedNorad);
+}
+
+document.getElementById('tog-alerts')?.addEventListener('change', (e) => {
+    _alertEnabled = e.target.checked;
+    if (_alertEnabled) {
+        // First-time activation — spin up the feeds.  Both are idempotent
+        // (start() on an already-running feed is a no-op via timer reuse).
+        _alertFeed.start();
+        _stormFeed.start();
+        _runMatchNow();
+    } else {
+        tracker.clearColorOverrides();
+        const cnt = document.getElementById('cnt-alerts');
+        if (cnt) cnt.textContent = '0';
+        const row = document.getElementById('sp-alert-row');
+        if (row) row.style.display = 'none';
+    }
+});
+
+// Render the "currently over" list for a selected satellite inside the
+// existing #sp-sat-info panel. Inserts once and updates in place so we
+// don't thrash the DOM.
+function _renderSelectedAlerts(noradId) {
+    const info = document.getElementById('sp-sat-info');
+    if (!info || info.style.display === 'none') return;
+    let row = document.getElementById('sp-alert-row');
+    if (!row) {
+        row = document.createElement('div');
+        row.id = 'sp-alert-row';
+        row.style.cssText = 'margin-top:6px;padding:6px 7px;border-top:1px solid rgba(255,170,0,.18);background:rgba(255,170,0,.04);border-radius:4px;font-size:.65rem;line-height:1.5;color:#cda;display:none';
+        info.appendChild(row);
+    }
+    const hit = _lastMatchMap?.get(noradId);
+    if (!hit || !_alertEnabled) { row.style.display = 'none'; return; }
+    const bits = [];
+    for (const s of hit.storms ?? []) {
+        bits.push(`<div><span style="color:${_STORM_TINT.getStyle()};font-weight:600">🌀 ${_esc(s.name)}</span> · ${s.classification} · ${Math.round(s.distanceKm)} km from eye</div>`);
+    }
+    for (const a of hit.alerts ?? []) {
+        const col = ALERT_CSS_COLORS?.[a.severity] ?? '#ffdd44';
+        bits.push(`<div><span style="color:${col};font-weight:600">⚠ ${_esc(a.event)}</span> — ${_esc(a.area.split(';')[0].trim())} · ${Math.round(a.distanceKm)} km from centroid</div>`);
+    }
+    row.innerHTML = `<div style="font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Currently Over</div>${bits.join('')}`;
+    row.style.display = '';
+}
+
 // ── Altitude density heatmap ──────────────────────────────────────────────
 function _updateHeatmap() {
     const container = document.getElementById('alt-heatmap');
@@ -601,6 +716,10 @@ async function doSearch() {
 
         // PRO analytics (orbital rates, lifetime, passes)
         _updateAnalytics(sat);
+
+        // Populate the "currently over" alert row if the overpass overlay
+        // is on. No-op otherwise; the row stays hidden.
+        _renderSelectedAlerts(sat.norad_id);
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
@@ -1086,6 +1205,13 @@ function animate() {
     // ── Satellites — tracker takes an explicit timestamp, so sat
     // positions are propagated to the sim instant too.
     tracker.tick(simTimeMs);
+
+    // ── Weather-aware alert overlay — recompute per frame when enabled.
+    // Matching is <1 ms for typical catalogs because the matcher has a
+    // latitude-band prefilter; keeping it per-frame lets the overlay
+    // stay honest at high sim-speed scrubs where sats cross alert zones
+    // in a fraction of a real second.
+    if (_alertEnabled) _runMatchNow();
 
     // ── HUD readouts (cheap; one frame is fine)
     document.getElementById('tc-time-utc').textContent    = _fmtSimUTC(simDate);

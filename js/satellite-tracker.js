@@ -235,6 +235,13 @@ export class SatelliteTracker {
         this._highlightSprite  = null;
         this._highlightCanvas  = null;
         this._highlightTexture = null;
+
+        // Colour-override layer. Map<noradId, THREE.Color>. Applied in
+        // _updateColors() and _rebuildPoints(), so overrides survive
+        // group-visibility toggles and catalog loads. Used by the
+        // weather-alert overlay to tint flagged sats without disturbing
+        // group colours.
+        this._colorOverrides = null;
     }
 
     // ── Highlight a single satellite with a sprite (dot + text label) ────
@@ -263,6 +270,54 @@ export class SatelliteTracker {
         if (this._highlightSprite) {
             this._highlightSprite.visible = !!v && this._highlightNoradId != null;
         }
+    }
+
+    // ── Bulk per-satellite colour tinting ────────────────────────────────
+    // For overlays that want to recolour many specific satellites at once
+    // (e.g. "these sats are currently passing over an active NWS alert")
+    // without fighting the group-colour system or allocating new geometry.
+    // Writes into the existing colour buffer in-place.
+    //
+    // `overrideMap` is a Map<noradId, THREE.Color>, or null/undefined to
+    // clear. Null clears; an empty Map also clears (cheap no-op).
+    //
+    // Safe to call every animation frame — but the matcher shouldn't
+    // need more than ~1 Hz because satellites don't move far enough per
+    // frame to cross alert-footprint boundaries.
+    setColorOverrides(overrideMap) {
+        this._colorOverrides = overrideMap && overrideMap.size > 0
+            ? overrideMap
+            : null;
+        this._updateColors();
+    }
+
+    /** Remove any active colour overrides and restore group colours. */
+    clearColorOverrides() {
+        if (this._colorOverrides === null) return;
+        this._colorOverrides = null;
+        this._updateColors();
+    }
+
+    /**
+     * Return the satellites in a given CelesTrak group, shaped like
+     * getSatellites() entries.  Handy for group-scoped analytics /
+     * overlays that shouldn't re-filter the full catalog each time.
+     */
+    getSatellitesByGroup(group) {
+        return this._satellites
+            .filter(s => s.group === group)
+            .map(s => ({
+                name:        s.tle.name,
+                norad_id:    s.tle.norad_id,
+                group:       s.group,
+                lat:         s.lat,
+                lon:         s.lon,
+                alt:         s.alt,
+                period_min:  s.tle.period_min,
+                inclination: s.tle.inclination,
+                apogee_km:   s.tle.apogee_km,
+                perigee_km:  s.tle.perigee_km,
+            }));
     }
 
     _buildHighlightSprite() {
@@ -438,11 +493,18 @@ export class SatelliteTracker {
         const posArr = new Float32Array(n * 3);
         const colArr = new Float32Array(n * 3);
 
+        const overrides = this._colorOverrides;
         for (let i = 0; i < n; i++) {
-            const sat = this._satellites[i];
+            const sat   = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
-            const c = visible ? sat.color : _hiddenColor;
+            // Explicit override (e.g. weather-alert tint) wins over group
+            // colour, but still respects group visibility — a hidden group
+            // stays hidden even if its sat is flagged.
+            const override = overrides?.get(sat.tle.norad_id);
+            const c = !visible          ? _hiddenColor
+                    : override          ? override
+                    :                     sat.color;
             colArr[i * 3]     = c.r;
             colArr[i * 3 + 1] = c.g;
             colArr[i * 3 + 2] = c.b;
@@ -458,15 +520,21 @@ export class SatelliteTracker {
         this._group.add(this._pointsMesh);
     }
 
-    /** Update only the color buffer (for show/hide toggles). */
+    /** Update only the color buffer (for show/hide toggles + alert tints). */
     _updateColors() {
         if (!this._colors) return;
         const colArr = this._colors.array;
+        const overrides = this._colorOverrides;
         for (let i = 0; i < this._satellites.length; i++) {
             const sat = this._satellites[i];
             const gInfo = this._groups.get(sat.group);
             const visible = gInfo ? gInfo.visible : true;
-            if (visible) {
+            const override = overrides?.get(sat.tle.norad_id);
+            if (visible && override) {
+                colArr[i * 3]     = override.r;
+                colArr[i * 3 + 1] = override.g;
+                colArr[i * 3 + 2] = override.b;
+            } else if (visible) {
                 colArr[i * 3]     = sat.color.r;
                 colArr[i * 3 + 1] = sat.color.g;
                 colArr[i * 3 + 2] = sat.color.b;
