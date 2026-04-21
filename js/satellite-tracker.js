@@ -206,6 +206,10 @@ export class SatelliteTracker {
         this._maxSats = maxSatellites;
         this._showOrbits = showOrbits;
         this._satellites = [];   // array of { tle, epochJd, group, lat, lon, alt }
+        // O(1) NORAD ID → index lookup. Kept in lockstep with _satellites
+        // by _addSatellites; every consumer that needs a per-sat slot
+        // (highlight sprite, TCA arcs, color overrides) uses this.
+        this._indexByNorad = new Map();
         this._groups = new Map(); // group name → { visible, count, color }
         this._group = new THREE.Group();
         this._group.name = 'satellites';
@@ -541,14 +545,62 @@ export class SatelliteTracker {
         const color = GROUP_COLORS[group] ?? GROUP_COLORS._default;
         for (const tle of tles) {
             if (this._satellites.length >= this._maxSats) break;
-            if (this._satellites.find(s => s.tle.norad_id === tle.norad_id)) continue;
+            // O(1) dedupe via the NORAD→index map; previously an O(N)
+            // `find` per TLE, which turned loading a 30 k-row group into
+            // an O(N²) start-up.
+            if (this._indexByNorad.has(tle.norad_id)) continue;
 
             const epochJd = tleEpochToJd(tle);
+            this._indexByNorad.set(tle.norad_id, this._satellites.length);
             this._satellites.push({ tle, epochJd, group, color, lat: 0, lon: 0, alt: 400 });
             added++;
         }
         if (added > 0) this._rebuildPoints();
         return added;
+    }
+
+    /**
+     * Pick the nearest currently-visible satellite under an NDC point.
+     * Uses Three.js Raycaster against the internal Points mesh, then
+     * filters hits whose group is toggled off so only visible dots can
+     * be selected. Returns { noradId, distance } or null.
+     *
+     * @param {{x:number,y:number}} ndc         NDC cursor coords (−1..+1).
+     * @param {THREE.Camera} camera             The rendering camera.
+     * @param {object} [opts]
+     * @param {number} [opts.threshold=0.02]   World-space pick radius.
+     */
+    pickAtNDC(ndc, camera, { threshold = 0.02 } = {}) {
+        if (!this._pointsMesh) return null;
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera(ndc, camera);
+        ray.params.Points = { threshold };
+        const hits = ray.intersectObject(this._pointsMesh);
+        for (const hit of hits) {
+            const sat = this._satellites[hit.index];
+            if (!sat) continue;
+            const g = this._groups.get(sat.group);
+            if (g && !g.visible) continue;   // skip hidden groups
+            return { noradId: sat.tle.norad_id, distance: hit.distance };
+        }
+        return null;
+    }
+
+    /**
+     * Read the current scene-space Vec3 of a tracked satellite. Returns
+     * `out` on success (for chaining) and null when the sat isn't in the
+     * catalog or positions haven't been built yet.  Used by the TCA
+     * collision-arc renderer; O(1) via `_indexByNorad`.
+     */
+    getPositionXYZ(noradId, out) {
+        const idx = this._indexByNorad.get(noradId);
+        if (idx == null || !this._positions) return null;
+        const a = this._positions.array;
+        const o = out ?? { x: 0, y: 0, z: 0 };
+        o.x = a[idx * 3];
+        o.y = a[idx * 3 + 1];
+        o.z = a[idx * 3 + 2];
+        return o;
     }
 
     /** Rebuild the Points mesh with per-vertex colors. */

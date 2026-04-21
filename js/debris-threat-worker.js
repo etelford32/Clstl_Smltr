@@ -168,6 +168,10 @@ function screenOne(target, debris, params) {
                     norad_id:    cat.tle.norad_id,
                     dist_km:     Math.round(dist * 10) / 10,
                     hours_ahead: Math.round(i * stepMin / 60 * 10) / 10,
+                    // Absolute TCA as Julian Date — lets the main thread
+                    // compute "minutes until/since TCA" against sim time
+                    // (which can scrub, so relative offsets aren't enough).
+                    tca_jd:      jd + (i * stepMin) / MIN_PER_DAY,
                 };
             }
         }

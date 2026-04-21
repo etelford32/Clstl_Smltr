@@ -256,7 +256,11 @@ nav {
                  then runs once against every loaded operational group and
                  populates sp-near-miss counts on each selected satellite. -->
             <div id="debris-screen-status" style="display:none;margin-top:6px;font-size:.62rem;color:#887;line-height:1.5">
-                <div id="dss-label">—</div>
+                <div style="display:flex;align-items:center;gap:6px">
+                    <div id="dss-label" style="flex:1;min-width:0">—</div>
+                    <button id="dss-rescan" type="button" title="Discard cached threats and re-run the SGP4 screen against the current catalog"
+                        style="background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:3px;color:#ffaa44;cursor:pointer;font-size:.58rem;padding:2px 6px;font-family:inherit;flex-shrink:0">↻ Rescan</button>
+                </div>
                 <div style="height:3px;background:rgba(255,80,80,.10);border-radius:2px;margin-top:3px;overflow:hidden">
                     <div id="dss-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#ff4422,#ffaa44);transition:width .15s"></div>
                 </div>
@@ -310,6 +314,18 @@ nav {
             <div class="sp-row"><span class="sp-k">Near-miss 24 h</span>    <span class="sp-v" id="sp-near-miss">—</span></div>
             <button class="sp-op-btn" id="sp-screen-debris" title="Propagate target + debris catalog and list approaches &lt;50 km over next 24 h">Screen debris (24h · 50 km)</button>
             <div id="sp-debris-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.6;display:none"></div>
+
+            <!-- Trajectory analysis — rebuilt each selection from one
+                 orbital period of SGP4 samples. Shows when the object
+                 next reaches apogee / perigee, whether it's sunlit now,
+                 and when it enters / exits Earth's umbra. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,200,255,.12);font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
+                Trajectory (next orbit)
+            </div>
+            <div class="sp-row"><span class="sp-k">Next apogee</span>   <span class="sp-v" id="sp-next-apo">—</span></div>
+            <div class="sp-row"><span class="sp-k">Next perigee</span>  <span class="sp-v" id="sp-next-peri">—</span></div>
+            <div class="sp-row"><span class="sp-k">Sun state</span>     <span class="sp-v" id="sp-sunlit">—</span></div>
+            <div class="sp-row"><span class="sp-k">Next eclipse</span>  <span class="sp-v" id="sp-next-eclipse">—</span></div>
         </div>
 
         <!-- Conjunction screening -->
@@ -408,7 +424,7 @@ nav {
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SatelliteTracker, isWasmLoaded } from './js/satellite-tracker.js';
+import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd } from './js/satellite-tracker.js';
 import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
          estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV,
          decayWatchlist, constellationCoverage, detectBreakupEvents
@@ -567,8 +583,14 @@ function _renderDebrisStatus(evt) {
         return;
     }
     if (evt.state === 'done') {
+        // Tag the source so a user can tell whether they're looking at
+        // a fresh run or a restored row from IndexedDB.
+        const source = _debrisCache.source;
+        const srcTag = source === 'idb'
+            ? `<span style="color:#88ccdd" title="Restored from IndexedDB (last run ${evt.ageMs ? (evt.ageMs / 3600000).toFixed(1) + ' h ago' : 'recent'})">cached</span>`
+            : `<span style="color:#4fc97f">✓ Done</span>`;
         label.innerHTML =
-            `<span style="color:#4fc97f">✓ Done</span> — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
+            `${srcTag} — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
         bar.style.width = '100%';
         // Force the selected-sat card to refresh its readout with the
         // newly-available count.
@@ -585,7 +607,7 @@ function _renderDebrisStatus(evt) {
     }
 }
 
-function _maybeRunDebrisScreen() {
+async function _maybeRunDebrisScreen() {
     if (_debrisScreenRan) return;
     if (!tracker.hasGroup('debris')) return;
 
@@ -598,14 +620,38 @@ function _maybeRunDebrisScreen() {
     if (targets.length === 0 || debris.length === 0) return;
 
     _debrisScreenRan = true;
+
+    // Try the IDB fast path first — a compatible run from the last 6 h
+    // (same params, catalog counts within 5 %) lets us skip the worker
+    // entirely. If it misses, fall through to a live run.
+    const params = { hoursAhead: 24, stepMin: 10, thresholdKm: 50 };
+    const restored = await _debrisCache.restore({
+        params,
+        targetCount: targets.length,
+        debrisCount: debris.length,
+    });
+    if (restored) {
+        console.info('[DebrisThreat] Restored from IndexedDB (skipping worker run)');
+        return;
+    }
     console.info(`[DebrisThreat] Starting screen: ${targets.length} targets × ${debris.length} debris`);
-    _debrisCache.run(targets, debris, { hoursAhead: 24, stepMin: 10, thresholdKm: 50 });
+    _debrisCache.run(targets, debris, params);
 }
 
 // Fires after every tracker.loadGroup() resolves — use it as the hook for
 // "both catalogs ready, kick off the worker".
 window.addEventListener('satellites-loaded', (e) => {
     if (e.detail?.group === 'debris') _maybeRunDebrisScreen();
+});
+
+// Manual rescan — drop the IDB row + reset the one-shot flag so the next
+// _maybeRunDebrisScreen() call actually spins the worker instead of
+// hitting the fast-restore path. No-op while a run is already in flight.
+document.getElementById('dss-rescan')?.addEventListener('click', () => {
+    if (_debrisCache.state === 'running') return;
+    _debrisCache.clearCache({ persist: true });
+    _debrisScreenRan = false;
+    _maybeRunDebrisScreen();
 });
 
 // All constellation group toggles
@@ -800,40 +846,141 @@ async function doSearch() {
         const sat = data.satellites[0];
         resultEl.innerHTML = `Found: <strong style="color:#0cc">${sat.name}</strong>`;
 
-        // Show info panel
-        infoEl.style.display = '';
-        document.getElementById('sp-name').textContent = sat.name;
-        document.getElementById('sp-norad').textContent = sat.norad_id;
-        document.getElementById('sp-incl').textContent = sat.inclination.toFixed(2) + '°';
-        document.getElementById('sp-period').textContent = sat.period_min.toFixed(1) + ' min';
-        document.getElementById('sp-peri').textContent = sat.perigee_km + ' km';
-        document.getElementById('sp-apo').textContent = sat.apogee_km + ' km';
-
-        // Add to tracker for live propagation
+        // Add to tracker for live propagation, then drive the full
+        // selection pipeline. The CelesTrak response IS a TLE object.
         await tracker.loadNorad(sat.norad_id);
-        _selectedNorad = sat.norad_id;
-
-        // Draw orbit trail + ground track using tracker methods
-        _drawVisuals(sat.norad_id);
-
-        // Run conjunction screening + PRO analytics
-        _runConjunctionScreening(sat.norad_id, sat.name);
-
-        // PRO analytics (orbital rates, lifetime, passes)
-        _updateAnalytics(sat);
-
-        // Populate the "currently over" alert row if the overpass overlay
-        // is on. No-op otherwise; the row stays hidden.
-        _renderSelectedAlerts(sat.norad_id);
+        _selectByTle(sat);
 
     } catch (err) {
         resultEl.textContent = `Error: ${err.message}`;
     }
 }
 
+/**
+ * Point all the "selected sat" UI at a specific TLE.
+ * Used by both the search box (passes CelesTrak's response directly) and
+ * the right-click picker (passes tracker.getSatellite(id).tle).  The TLE
+ * is the authoritative input — _updateAnalytics needs mean_motion etc.,
+ * and using the same object for panel fields keeps everything in sync.
+ */
+function _selectByTle(tle) {
+    const infoEl = document.getElementById('sp-sat-info');
+    infoEl.style.display = '';
+    document.getElementById('sp-name').textContent   = tle.name ?? `NORAD ${tle.norad_id}`;
+    document.getElementById('sp-norad').textContent  = tle.norad_id;
+    document.getElementById('sp-incl').textContent   = tle.inclination.toFixed(2) + '°';
+    document.getElementById('sp-period').textContent = tle.period_min.toFixed(1) + ' min';
+    document.getElementById('sp-peri').textContent   = tle.perigee_km + ' km';
+    document.getElementById('sp-apo').textContent    = tle.apogee_km + ' km';
+
+    _selectedNorad = tle.norad_id;
+    _drawVisuals(tle.norad_id);
+    _runConjunctionScreening(tle.norad_id, tle.name ?? String(tle.norad_id));
+    _updateAnalytics(tle);                       // reads mean_motion, eccentricity, …
+    _renderSelectedAlerts(tle.norad_id);
+    _renderTrajectoryAnalysis(tle.norad_id);
+}
+
 let _selectedNorad = null;
 let _orbitLine = null;
 let _groundTrackLine = null;
+
+// ── Trajectory analysis ──────────────────────────────────────────────────
+// Samples one orbital period at ~1-minute resolution and pulls out the
+// four things an operator wants to see at a glance:
+//   * next apogee time + altitude
+//   * next perigee time + altitude
+//   * current sunlit / eclipsed state
+//   * next umbra entry (if sunlit) or exit (if eclipsed), with duration
+//
+// Uses the same cylindrical-umbra test as pass-predictor's visibility
+// flag — sat is lit unless it's on the anti-sun side AND its
+// perpendicular distance from the Earth-sun axis is below Earth's radius.
+const _TRAJ_RE_KM = 6378.135;
+function _renderTrajectoryAnalysis(noradId) {
+    const sat = tracker.getSatellite(noradId);
+    const ids = ['sp-next-apo', 'sp-next-peri', 'sp-sunlit', 'sp-next-eclipse'];
+    if (!sat || !sat.tle || !Number.isFinite(sat.period_min)) {
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '—';
+        }
+        return;
+    }
+
+    const periodMin = sat.period_min || 90;
+    const nSteps    = Math.max(30, Math.min(180, Math.round(periodMin)));
+    const stepMin   = periodMin / nSteps;
+
+    // Start from sim time (not wall clock) so the card tracks the time
+    // scrubber — the trajectory card *should* update when the user
+    // scrubs forward, just like the TCA arcs do.
+    const jd0        = simTimeMs / 86400000 + 2440587.5;
+    const epochJd    = tleEpochToJd(sat.tle);
+    const tsinceBase = (jd0 - epochJd) * 1440;
+
+    // Sun direction in ECI at jd0 — constant over one orbit is fine
+    // (sun moves ~0.04° in 90 min, negligible for umbra boundary).
+    const sun = sunDirectionEci(new Date(simTimeMs));
+
+    let minAlt =  Infinity, minAltMin = 0;
+    let maxAlt = -Infinity, maxAltMin = 0;
+    let litNow = null;
+    let nextEclipseEntryMin = null;
+    let nextEclipseExitMin  = null;
+    let prevLit = null;
+
+    for (let i = 0; i <= nSteps; i++) {
+        const dt     = i * stepMin;
+        const p      = propagate(sat.tle, tsinceBase + dt);
+        if (!isFinite(p.x)) continue;
+
+        const magSq  = p.x * p.x + p.y * p.y + p.z * p.z;
+        const alt    = Math.sqrt(magSq) - _TRAJ_RE_KM;
+        if (alt < minAlt) { minAlt = alt; minAltMin = dt; }
+        if (alt > maxAlt) { maxAlt = alt; maxAltMin = dt; }
+
+        const dot = p.x * sun.x + p.y * sun.y + p.z * sun.z;
+        let lit;
+        if (dot >= 0) lit = true;
+        else          lit = (magSq - dot * dot) > _TRAJ_RE_KM * _TRAJ_RE_KM;
+
+        if (i === 0) litNow = lit;
+        if (prevLit !== null && prevLit !== lit) {
+            if (!lit && nextEclipseEntryMin === null) nextEclipseEntryMin = dt;
+            if ( lit && nextEclipseExitMin  === null) nextEclipseExitMin  = dt;
+        }
+        prevLit = lit;
+    }
+
+    const fmtT = (min) => min < 60 ? `+${Math.round(min)}m` : `+${(min / 60).toFixed(1)}h`;
+
+    document.getElementById('sp-next-apo').textContent =
+        isFinite(maxAlt) ? `${fmtT(maxAltMin)} · ${Math.round(maxAlt)} km` : '—';
+    document.getElementById('sp-next-peri').textContent =
+        isFinite(minAlt) ? `${fmtT(minAltMin)} · ${Math.round(minAlt)} km` : '—';
+
+    const sunEl = document.getElementById('sp-sunlit');
+    if (litNow === null) sunEl.textContent = '—';
+    else sunEl.innerHTML = litNow
+        ? '<span style="color:#ffdd44">☀ sunlit</span>'
+        : '<span style="color:#8899bb">⚫ eclipsed</span>';
+
+    const eclEl = document.getElementById('sp-next-eclipse');
+    if (litNow === null) {
+        eclEl.textContent = '—';
+    } else if (litNow && nextEclipseEntryMin !== null) {
+        // If we'll also exit before the orbit wraps, append the duration.
+        const dur = (nextEclipseExitMin !== null && nextEclipseExitMin > nextEclipseEntryMin)
+            ? ` · ${Math.round(nextEclipseExitMin - nextEclipseEntryMin)}m`
+            : '';
+        eclEl.textContent = `enters in ${Math.round(nextEclipseEntryMin)}m${dur}`;
+    } else if (!litNow && nextEclipseExitMin !== null) {
+        eclEl.textContent = `exits in ${Math.round(nextEclipseExitMin)}m`;
+    } else {
+        eclEl.textContent = litNow ? 'none in orbit' : 'stays eclipsed';
+    }
+}
 
 function _drawVisuals(noradId) {
     // Remove old visuals
@@ -1383,6 +1530,94 @@ window.addEventListener('keydown', (e) => {
 
 // Scratch vectors for the per-frame sun direction — hot path, no GC.
 const _sunSceneV = new THREE.Vector3();
+let _lastTrajectoryRefresh = 0;   // real-time ms of last trajectory-card scan
+
+// ── TCA collision arcs (Level 3) ─────────────────────────────────────────
+// When a satellite is selected AND the debris-threat cache has populated
+// its threat list, draw a fading line between the sat and each threat
+// debris whose TCA is within _TCA_WINDOW_MIN of the current sim instant.
+// The line brightens as |t − tca| → 0 and fades to invisible outside the
+// window. Entirely sim-time driven: at 3600× scrub the arcs flicker
+// through the catalog in seconds, same way you'd watch a traffic radar.
+//
+// Geometry rebuilt each frame (cheap: one LineSegments, ≤ tens of
+// segments even on the busiest LEO sat). Material + scene group live
+// here and aren't disposed; only the BufferGeometry is churned.
+const _TCA_WINDOW_MIN = 30;                        // ± minutes around TCA
+const _tcaGroup = new THREE.Group();
+_tcaGroup.name  = 'tcaArcs';
+scene.add(_tcaGroup);
+const _tcaMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent:  true,
+    opacity:      1.0,
+    blending:     THREE.AdditiveBlending,
+    depthWrite:   false,
+});
+let _tcaMesh = null;
+
+// Scratch vectors for the per-frame position pulls.
+const _tcaVecA = { x: 0, y: 0, z: 0 };
+const _tcaVecB = { x: 0, y: 0, z: 0 };
+
+function _updateTcaArcs() {
+    if (_selectedNorad == null || _debrisCache.state !== 'done') {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+    const threats = _debrisCache.getThreatsFor(_selectedNorad);
+    if (!threats || threats.length === 0) {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+
+    // Sim-time Julian Date.  Matches what the tracker uses internally so
+    // cache.tca_jd and "now" are in the same frame.
+    const nowJd = simTimeMs / 86400000 + 2440587.5;
+
+    const positions = [];
+    const colors    = [];
+
+    for (const t of threats) {
+        if (!Number.isFinite(t.tca_jd)) continue;
+        const dtMin = (t.tca_jd - nowJd) * 24 * 60;       // − = already past TCA
+        if (Math.abs(dtMin) > _TCA_WINDOW_MIN) continue;
+
+        const a = tracker.getPositionXYZ(_selectedNorad, _tcaVecA);
+        const b = tracker.getPositionXYZ(t.norad_id,   _tcaVecB);
+        if (!a || !b) continue;
+
+        // Ease: 1 at TCA, 0 at ±window, quadratic so the pop reads sharp.
+        const norm = 1 - Math.min(1, Math.abs(dtMin) / _TCA_WINDOW_MIN);
+        const fade = norm * norm;
+
+        // Severity colour — red for <10 km, orange for <25, amber else.
+        const base = t.dist_km < 10 ? [1.00, 0.15, 0.10]
+                  :  t.dist_km < 25 ? [1.00, 0.55, 0.15]
+                  :                   [1.00, 0.85, 0.35];
+        const r = base[0] * fade;
+        const g = base[1] * fade;
+        const bC = base[2] * fade;
+
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        colors.push(r, g, bC, r, g, bC);
+    }
+
+    // Rebuild LineSegments (cheap; max ~20 edges per selected sat).
+    if (_tcaMesh) {
+        _tcaGroup.remove(_tcaMesh);
+        _tcaMesh.geometry.dispose();
+        _tcaMesh = null;
+    }
+    if (positions.length === 0) return;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+    _tcaMesh = new THREE.LineSegments(geom, _tcaMat);
+    _tcaMesh.renderOrder = 11;       // above sat points, below highlight sprite
+    _tcaGroup.add(_tcaMesh);
+}
 
 function animate() {
     requestAnimationFrame(animate);
@@ -1411,6 +1646,21 @@ function animate() {
     // ── Satellites — tracker takes an explicit timestamp, so sat
     // positions are propagated to the sim instant too.
     tracker.tick(simTimeMs);
+
+    // ── TCA collision arcs — bright ribbons for imminent debris close
+    // approaches to the currently-selected target. Only active when the
+    // background threat cache has populated.
+    _updateTcaArcs();
+
+    // ── Trajectory card refresh — one orbital-period scan is cheap
+    // (~90 propagate() calls ≈ 0.5 ms), but refreshing every frame on
+    // top of everything else adds up. 500 ms real-time throttle is
+    // plenty for a human-readable readout and still feels live during
+    // 3600× scrubs where the sim clock hops hours every real second.
+    if (_selectedNorad != null && realNow - _lastTrajectoryRefresh > 500) {
+        _lastTrajectoryRefresh = realNow;
+        _renderTrajectoryAnalysis(_selectedNorad);
+    }
 
     // ── Weather-aware alert overlay — recompute per frame when enabled.
     // Matching is <1 ms for typical catalogs because the matcher has a
@@ -1449,6 +1699,32 @@ function resize() {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
 }
+// Right-click any visible satellite dot on the globe to pivot the
+// selected-sat analytics panel onto it — same flow as the search box,
+// but no CelesTrak fetch since the TLE is already in the tracker catalog.
+// Preventing the browser context menu is intentional; there's no
+// default action worth preserving over a 3D pick.
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const ndc  = {
+        x:  ((e.clientX - rect.left) / rect.width)  * 2 - 1,
+        y: -((e.clientY - rect.top)  / rect.height) * 2 + 1,
+    };
+    const hit = tracker.pickAtNDC(ndc, camera, { threshold: 0.025 });
+    const resultEl = document.getElementById('sp-search-result');
+    if (!hit) {
+        if (resultEl) resultEl.innerHTML = `<span style="color:#887">No satellite under cursor — try zooming in or moving closer to a dot</span>`;
+        return;
+    }
+    const sat = tracker.getSatellite(hit.noradId);
+    if (!sat || !sat.tle) return;
+    const input = document.getElementById('sp-search-input');
+    if (input)    input.value    = sat.tle.name ?? String(sat.norad_id);
+    if (resultEl) resultEl.innerHTML = `Picked: <strong style="color:#0cc">${_esc(sat.tle.name ?? String(sat.norad_id))}</strong> <span style="color:#887">(right-click)</span>`;
+    _selectByTle(sat.tle);
+});
+
 new ResizeObserver(resize).observe(canvas.parentElement);
 resize();
 
