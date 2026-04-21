@@ -565,6 +565,50 @@ nav {
 .loc-v { color: #cde0ea; font-weight: 500; font-variant-numeric: tabular-nums; }
 .loc-card.empty .loc-v { color: #446; }
 
+/* ─── Time controls (bottom-centre) ────────────────────────────── */
+/* Same pattern as satellites.html so both pages share muscle memory.
+   One simTimeMs drives the Earth rotation, sun direction, sub-solar
+   point, sun card, ISS pass card, and on-globe solar markers.  UI
+   speed presets: 1× (real), 60× (1 min/s), 600×, 3600× (1 hr/s). */
+#time-controls {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    z-index: 60;
+    background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
+    border: 1px solid rgba(0,200,255,.2); border-radius: 9px;
+    padding: 6px 8px; display: flex; align-items: center; gap: 3px;
+    font-size: 11px;
+}
+.tc-btn {
+    background: rgba(0,200,200,.08); border: 1px solid rgba(0,200,200,.18);
+    border-radius: 4px; color: #9cc; cursor: pointer;
+    font-family: inherit; font-size: 10px; font-weight: 600;
+    padding: 4px 8px; min-width: 30px; line-height: 1;
+    transition: background .12s, color .12s, border-color .12s;
+}
+.tc-btn:hover  { background: rgba(0,200,200,.18); color: #cdd; }
+.tc-btn.active { background: rgba(0,200,200,.30); color: #fff; border-color: #0cc; }
+.tc-sep {
+    width: 1px; height: 18px; background: rgba(255,255,255,.1); margin: 0 4px;
+}
+.tc-display {
+    display: flex; flex-direction: column; align-items: flex-end;
+    margin-left: 6px; padding-left: 8px;
+    border-left: 1px solid rgba(255,255,255,.1);
+    min-width: 172px; font-family: monospace;
+}
+.tc-time   { color: #0ee; font-size: 11px; line-height: 1;   letter-spacing: .02em; }
+.tc-offset { color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px; }
+/* On mobile the #mobile-toolbar lives at bottom:0 / height:56px, so the
+   scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
+   bottom:12px is fine. */
+@media (max-width:1024px) {
+    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; }
+    .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
+    .tc-display    { min-width: 128px; }
+    .tc-time       { font-size: 10px; }
+    .tc-offset     { font-size: 8px; }
+}
+
 /* ─── Mobile bottom toolbar ──────────────────────────────────────── */
 #mobile-toolbar {
     display: none;
@@ -1231,6 +1275,25 @@ nav {
     <!-- Panel backdrop (mobile tap-to-close) -->
     <div id="panel-backdrop"></div>
 
+    <!-- Time-scrub controls (bottom-centre). One simTimeMs variable
+         drives GMST, sun direction, sub-solar point, sun card, ISS pass
+         card, and on-globe solar markers.  Press Space to toggle
+         play/pause; N snaps back to real time. -->
+    <div id="time-controls">
+        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
+        <span class="tc-display">
+            <span class="tc-time"   id="tc-time-utc">—</span>
+            <span class="tc-offset" id="tc-time-offset">now</span>
+        </span>
+    </div>
+
     <!-- Mobile bottom toolbar -->
     <div id="mobile-toolbar">
         <button class="mtb-btn" data-panel="info-panel">
@@ -1850,7 +1913,11 @@ canvas.addEventListener('mouseleave', () => {
 function updateCoords(uv) {
     const { lat, lon } = geo.deg.uvToLatLon(uv.x, uv.y);
     lastGeo = { lat, lon };
-    const utcH = new Date().getUTCHours() + new Date().getUTCMinutes() / 60;
+    // Local time at the hovered longitude, measured in sim-time so it
+    // tracks the scrubber (hovering a spot 6 h into the future reads the
+    // local time that spot will have at that sim instant).
+    const simNow = new Date(simTimeMs);
+    const utcH = simNow.getUTCHours() + simNow.getUTCMinutes() / 60;
     const lt   = fmtLT(lon, utcH);
     document.getElementById('ct-lat').textContent = fmtLat(lat);
     document.getElementById('ct-lon').textContent = fmtLon(lon);
@@ -4853,25 +4920,82 @@ let lastT = 0;
 // a fresh THREE.Vector3 every frame on the hot path.
 const _sunDirScratch = new THREE.Vector3();
 
+// ── Simulation-time state ──────────────────────────────────────────────
+// One simTimeMs variable is the single source of truth for every
+// time-sensitive part of the scene — GMST-driven rotation, sun direction,
+// sub-solar point, sun card, ISS pass card, on-globe solar markers. It
+// advances by real-dt × simSpeed unless paused.  Same pattern as
+// satellites.html; both pages now share the scrubber muscle memory.
+let simTimeMs = Date.now();
+let simSpeed  = 1;                  // sim seconds per real second
+let simPaused = false;
+let _realLast = performance.now();
+
+function _fmtSimUTC(d) {
+    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+function _fmtSimOffset(d) {
+    const deltaS = (d.getTime() - Date.now()) / 1000;
+    const abs    = Math.abs(deltaS);
+    const sign   = deltaS >= 0 ? '+' : '−';
+    if (abs < 1)     return 'now';
+    if (abs < 60)    return `${sign}${abs.toFixed(0)}s`;
+    if (abs < 3600)  return `${sign}${(abs / 60).toFixed(1)}m`;
+    if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
+    return `${sign}${(abs / 86400).toFixed(1)}d`;
+}
+function _setSimSpeed(speed) {
+    simSpeed = speed;
+    document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+    });
+}
+function _setSimPaused(paused) {
+    simPaused = paused;
+    const b = document.getElementById('tc-play');
+    if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
+}
+function _jumpToNow() { simTimeMs = Date.now(); }
+
+document.getElementById('tc-play')?.addEventListener('click', () => _setSimPaused(!simPaused));
+document.getElementById('tc-now')?.addEventListener('click', _jumpToNow);
+document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+    btn.addEventListener('click', () => _setSimSpeed(Number(btn.dataset.speed)));
+});
+_setSimSpeed(1);
+_setSimPaused(false);
+
+// Keyboard shortcuts — ignored when a text input / textarea is focused
+// so typing in the location search doesn't accidentally pause the sim.
+window.addEventListener('keydown', (e) => {
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.code === 'Space')              { _setSimPaused(!simPaused); e.preventDefault(); }
+    else if (e.key === 'n' || e.key === 'N') _jumpToNow();
+});
+
 function animate() {
     requestAnimationFrame(animate);
     const t  = clock.getElapsedTime();
     const dt = Math.min(t - lastT, 0.1);  // cap dt at 100 ms (tab unfocus recovery)
     lastT = t;
 
+    // ── Advance simulation time by real-world dt × speed multiplier.
+    // performance.now() is monotonic and unaffected by wall-clock changes,
+    // so tab backgrounding and NTP adjustments don't jolt the sim.
+    const realNow = performance.now();
+    if (!simPaused) simTimeMs += (realNow - _realLast) * simSpeed;
+    _realLast = realNow;
+
     // ── Real-time astronomical state ────────────────────────────────────
-    // Single source of truth per frame: one new Date() drives both Earth's
+    // Single source of truth per frame: one simTimeMs drives both Earth's
     // rotation (via GMST) and the sun direction (via mean ecliptic longitude
     // → equatorial frame). Because both derive from the same jd, the
-    // sub-solar point can never drift relative to the globe — not across
-    // tab backgrounding, not across multi-hour sessions, not across the
-    // sub-second quantisation that an accumulator-based approach leaves in.
-    //
-    // Side effect: when a user time-shifts the clock (daylight saving,
-    // timezone change, manual date set) the terminator follows instantly
-    // on the next frame. No warm-up period, no re-init.
-    const wallTime = new Date();
-    const jd       = julianDay(wallTime);
+    // sub-solar point can never drift relative to the globe — and a time
+    // scrub (any simSpeed ≠ 1) moves both together, so the terminator
+    // tracks wherever the user pulls time to.
+    const simDate = new Date(simTimeMs);
+    const jd      = julianDay(simDate);
     earthMesh.rotation.y = gmst(jd) * DEG;
     cloudMesh.rotation.y = earthMesh.rotation.y;   // clouds locked to ground
 
@@ -4934,8 +5058,9 @@ function animate() {
     // the tracker (SGP4) is the single source of truth for ISS state.
     _updateIssHud();
 
-    // ── Satellite tracker (all loaded catalog satellites)
-    satTracker.tick();
+    // ── Satellite tracker (all loaded catalog satellites). Pass sim
+    // time so ISS position, sub-points, and the ISS HUD follow scrub.
+    satTracker.tick(simTimeMs);
 
     // ── Magnetosphere: orient to sun + per-frame Bz/pdyn animation
     magnetosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
@@ -4960,13 +5085,18 @@ function animate() {
         if (_flyProgress >= 1) { _flyTarget = null; controls.autoRotate = false; }
     }
 
-    // ── Astro HUD DOM writes — throttled to 1 Hz. The rotation + sun
-    // uniforms above already update every frame for determinism; this gate
-    // exists only so we're not thrashing textContent on subsolar/UTC strings
-    // 60 times a second when a one-second refresh is plenty for humans.
+    // ── Astro HUD DOM writes — throttled to 1 Hz of real time. Rotation
+    // + sun uniforms above already update every frame for determinism;
+    // this gate avoids thrashing textContent 60 times a second.
     if (t - lastHudUpdate > 1) {
         lastHudUpdate = t;
-        updateAstroHUD(wallTime);
+        updateAstroHUD(simDate);
+        // Sim-time readout in the scrub bar.  Cheap; runs at the same
+        // cadence as the other HUD strings.
+        const tEl = document.getElementById('tc-time-utc');
+        const oEl = document.getElementById('tc-time-offset');
+        if (tEl) tEl.textContent = _fmtSimUTC(simDate);
+        if (oEl) oEl.textContent = _fmtSimOffset(simDate);
     }
 
     controls.update();
@@ -4987,15 +5117,18 @@ let _flyFrom     = new THREE.Vector3();
 let _flyAimAt    = new THREE.Vector3();
 let _flyProgress = 0;
 
-// ── First HUD update immediately
-updateAstroHUD(new Date());
+// ── First HUD update immediately (simTimeMs is initialised to Date.now()
+// at module load, so this matches the scrubber's starting position).
+updateAstroHUD(new Date(simTimeMs));
 animate();
 
 // ═══════════════════════════════════════════════════════════════
 //  LOCAL CLOCK  (updates every second)
 // ═══════════════════════════════════════════════════════════════
 function _tickLocalClock() {
-    const now = new Date();
+    // Follow the scrubber — every time-sensitive DOM readout on the page
+    // should move together when the user pulls sim time forward or back.
+    const now = new Date(simTimeMs);
     const el = document.getElementById('h-local');
     if (el) el.textContent = now.toLocaleTimeString([], {
         hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
@@ -5109,9 +5242,10 @@ function _fmtDurationMin(m) {
     return `${m.toFixed(1)} min`;
 }
 
-// Build a compact "in 45 min" / "in 3 h" / "Sat" countdown for the pass card.
+// Build a compact "in 45 min" / "in 3 h" / "Sat" countdown for the pass
+// card. Measured from sim time so the countdown tracks scrub.
 function _fmtPassWhen(date) {
-    const mins = Math.max(0, (date - Date.now()) / 60000);
+    const mins = Math.max(0, (date - simTimeMs) / 60000);
     if (mins < 60)  return `in ${Math.round(mins)} min`;
     if (mins < 720) return `in ${Math.round(mins / 60)} h`;
     return date.toLocaleDateString([], { weekday: 'short' });
@@ -5158,8 +5292,11 @@ function _updateLocPassCard() {
     const durEl  = document.getElementById('loc-iss-dur');
     const visEl  = document.getElementById('loc-iss-vis');
 
-    // Pass has already passed? Recompute lazily instead of showing stale data.
-    if (_issNextPass && _issNextPass.set.time < new Date()) {
+    // Pass has already passed (per sim time)? Recompute lazily instead
+    // of showing stale data. At 3600× scrub the cached pass elapses in
+    // seconds so this kicks often — _refreshIssPassForUser uses simTime
+    // as its from= argument, so the next pass is the correct next one.
+    if (_issNextPass && _issNextPass.set.time < new Date(simTimeMs)) {
         _issNextPass = null;
         _refreshIssPassForUser();     // queue up the next one
     }
@@ -5191,7 +5328,7 @@ function _refreshIssPassForUser() {
     if (!loc || !_issPassTle) { _issNextPass = null; _updateLocPassCard(); return; }
     try {
         const passes = nextPasses(_issPassTle, { lat: loc.lat, lon: loc.lon },
-                                  { horizonH: 24, maxPasses: 1 });
+                                  { from: new Date(simTimeMs), horizonH: 24, maxPasses: 1 });
         _issNextPass = passes[0] ?? null;
     } catch (err) {
         console.debug('[Loc] ISS pass lookup failed:', err.message);
@@ -5281,8 +5418,9 @@ function _showLocResult(loc) {
     // Prime the sun card, ISS next-pass lookup, and on-globe solar markers
     // for the newly set location. _tickLocalClock will keep all three fresh
     // at 1 Hz from here; ISS pass is only recomputed when location changes
-    // or the cached pass has elapsed.
-    const _now = new Date();
+    // or the cached pass has elapsed.  Uses simTime so the cards line up
+    // with the scrubber if the user is exploring a future moment.
+    const _now = new Date(simTimeMs);
     _updateLocSunCard(_now, loc.lat, loc.lon);
     _updateUserSunMarkers(_now, loc.lat, loc.lon);
     _refreshIssPassForUser();
