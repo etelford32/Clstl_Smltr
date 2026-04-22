@@ -29,21 +29,13 @@
  *   }
  */
 
+import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
-const LL2_BASE = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/';
+const LL2_BASE  = 'https://ll.thespacedevs.com/2.3.0/launches/upcoming/';
 const CACHE_TTL = 3600;  // 1 hour — launch schedules shift slowly
-const ERROR_TTL = 60;
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=300`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
+const CACHE_SWR = 300;   // launch feed tolerates a wider SWR than NOAA nowcasts
 
 function project(l) {
     const pad      = l.pad || {};
@@ -93,17 +85,18 @@ export default async function handler(request) {
 
     let payload;
     try {
-        const res = await fetch(upstream, {
+        const res = await fetchWithTimeout(upstream, {
+            // LL2 User-Agent is intentionally more specific than the shared
+            // default — TheSpaceDevs recommend per-consumer UA strings so
+            // abusive clients can be identified and throttled by fingerprint
+            // rather than by blanket IP block.
             headers: { 'User-Agent': 'ParkerPhysics/1.0 (launch-planner)' },
+            timeoutMs: 15000,   // LL2 p99 is slower than NOAA on first miss
         });
         if (!res.ok) throw new Error(`LL2 HTTP ${res.status}`);
         payload = await res.json();
     } catch (e) {
-        return jsonResp({
-            error:  'upstream_unavailable',
-            detail: e.message,
-            source: 'thespacedevs/ll2',
-        }, 503, ERROR_TTL);
+        return jsonError('upstream_unavailable', e.message, { source: 'thespacedevs/ll2' });
     }
 
     const now = Date.now();
@@ -117,11 +110,11 @@ export default async function handler(request) {
             return Number.isFinite(t) && t <= maxMs;
         });
 
-    return jsonResp({
+    return jsonOk({
         source:     'thespacedevs/ll2',
         fetched_at: new Date().toISOString(),
         window_days: windowDays,
         count:      launches.length,
         launches,
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

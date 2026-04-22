@@ -11,6 +11,8 @@
  * Dst (Disturbance Storm Time) measures ring-current strength (nT).
  * More negative = stronger geomagnetic storm.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_DST   = 'https://services.swpc.noaa.gov/products/kyoto-dst.json';
@@ -28,31 +30,19 @@ function dstStorm(dst) {
     return                   { level: 0, label: 'Quiet' };
 }
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_DST, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_DST, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     // kyoto-dst.json: 2-D array, row[0] = headers ["time_tag", "dst"]
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected kyoto-dst format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected kyoto-dst format', { source: 'NOAA SWPC' });
     }
 
     const headers = raw[0].map(String);
@@ -72,7 +62,7 @@ export default async function handler() {
         .filter(r => r.dst != null);
 
     if (rows.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All Dst readings are null/fill' }, 503, 30);
+        return jsonError('no_valid_data', 'All Dst readings are null/fill', { source: 'NOAA SWPC' });
     }
 
     const latest     = rows[rows.length - 1];
@@ -87,7 +77,7 @@ export default async function handler() {
         dst_nT:    r.dst,
     }));
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC Kyoto Dst kyoto-dst via Vercel Edge',
         age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
         data: {
@@ -100,5 +90,5 @@ export default async function handler() {
             recent,
         },
         units: { dst_nT: 'nT (negative = stronger storm)' },
-    });
+    }, { maxAge: CACHE_TTL });
 }

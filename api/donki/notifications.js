@@ -10,24 +10,15 @@
  * FREE plan: last 5 notifications.
  * PRO plan:  full list.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const DONKI_NOTIFY_BASE = 'https://api.nasa.gov/DONKI/notifications';
 const CACHE_TTL         = 900;
+const CACHE_SWR         = 120;
 const DEFAULT_DAYS      = 7;
 const FREE_LIMIT        = 5;
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 function isPro(request) {
     const auth   = request.headers.get('Authorization') ?? '';
@@ -48,15 +39,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI notifications format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected DONKI notifications format', { source: 'NASA DONKI' });
     }
 
     const notes = raw
@@ -72,7 +63,7 @@ export default async function handler(request) {
 
     const limited = pro ? notes : notes.slice(0, FREE_LIMIT);
 
-    return jsonResp({
+    return jsonOk({
         source:    'NASA DONKI notifications via Vercel Edge',
         plan:      pro ? 'pro' : 'free',
         data: {
@@ -81,5 +72,5 @@ export default async function handler(request) {
             shown_count:   limited.length,
             notifications: limited,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

@@ -18,11 +18,14 @@
  *     }
  *   }
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_KP_1M = 'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json';
 
 const CACHE_TTL  = 60;    // s — matches T1 cadence
+const CACHE_SWR  = 30;    // T1 endpoints use a shorter SWR than the default
 const RECENT_N   = 15;    // readings to include in `recent` array
 
 // ── Kp storm scale (NOAA G-scale) ────────────────────────────────────────────
@@ -38,11 +41,6 @@ function stormLevel(kp) {
 /** Normalize Kp 0–9 → 0–1. */
 const kpNorm = v => Math.max(0, Math.min(1, v / 9));
 
-function isoTag(t) {
-    if (!t) return null;
-    return String(t).replace(' ', 'T') + 'Z';
-}
-
 function freshnessStatus(ageMin) {
     if (ageMin == null) return 'missing';
     if (ageMin < 5)     return 'fresh';
@@ -50,28 +48,18 @@ function freshnessStatus(ageMin) {
     return 'expired';
 }
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=30`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_KP_1M, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_KP_1M, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     if (!Array.isArray(raw) || raw.length === 0) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected planetary_k_index_1m format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected planetary_k_index_1m format', { source: 'NOAA SWPC' });
     }
 
     // Parse — rows are objects: { time_tag, estimated_kp, kp_index }
@@ -85,7 +73,7 @@ export default async function handler() {
         .filter(r => r.kp != null);
 
     if (rows.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All Kp readings are null/fill' }, 503, 30);
+        return jsonError('no_valid_data', 'All Kp readings are null/fill', { source: 'NOAA SWPC' });
     }
 
     const latest     = rows[rows.length - 1];
@@ -99,7 +87,7 @@ export default async function handler() {
         kp:        Math.round(r.kp * 100) / 100,
     }));
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC planetary_k_index_1m via Vercel Edge',
         age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
         freshness: freshnessStatus(ageMin),
@@ -114,5 +102,5 @@ export default async function handler() {
             recent,
         },
         units: { kp: '0–9 (NOAA G-scale)' },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }
