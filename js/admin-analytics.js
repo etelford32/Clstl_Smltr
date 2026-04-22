@@ -543,3 +543,34 @@ export async function fetchCronStatus() {
         return { ok: false, error: err.message };
     }
 }
+
+// ── Pipeline heartbeat (per-pipeline health summary) ────────────────────────
+// Reads the pipeline_heartbeat table populated by record_pipeline_success /
+// record_pipeline_failure inside each pg_cron refresh function. This is the
+// higher-level "is the feed alive?" view — complements the raw cron job
+// table, which only reports whether the job ran, not whether the upstream
+// fetch actually produced usable data. RLS on the table already allows
+// anon/authenticated reads (see supabase-pipeline-heartbeat-migration.sql);
+// we keep the admin gate here for consistency with the rest of this module.
+
+/**
+ * Returns one row per pipeline with freshness + failure streak info.
+ * Empty result if the migration hasn't been applied or no cron job has
+ * written yet. Rows sorted by pipeline_name for stable UI ordering.
+ */
+export async function fetchPipelineHeartbeat() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client
+            .from('pipeline_heartbeat')
+            .select('pipeline_name, last_success_at, last_failure_at, last_failure_reason, last_source, consecutive_fail, updated_at')
+            .order('pipeline_name', { ascending: true });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
