@@ -40,6 +40,36 @@ export const TEX_H = 180;               // output texture height (1°/pixel)
 export const MAX_WIND_MS = 60;          // m/s — wind-speed normalisation ceiling
 const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
 
+// ── Session-snapshot helpers ───────────────────────────────────────────────
+// Cache last-known-good buffer trio into sessionStorage so a short
+// /api/weather/grid outage doesn't snap the globe back to synthetic data
+// on every reload.  Scoped to the browser tab — localStorage would share
+// across tabs and widen the blast radius of a stale cache.
+//
+// Size budget:
+//   TEX_W × TEX_H × 4 floats × 4 bytes × 3 buffers ≈ 3.1 MB binary
+//   → base64 ≈ 4.2 MB string
+// Fits inside Chrome/Firefox's ~10 MB per-origin sessionStorage cap; Safari
+// is tighter (~5 MB). QuotaExceededError is swallowed — best-effort cache.
+const SNAPSHOT_KEY         = 'weatherFeed-snapshot-v1';
+const SNAPSHOT_MAX_AGE_MS  = 90 * 60 * 1000;   // 90 min — two feed refreshes
+
+function _f32ToBase64(arr) {
+    const u8 = new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+    let bin = '';
+    const chunk = 0x8000;   // stay under the JS call-stack arg limit
+    for (let i = 0; i < u8.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+    }
+    return btoa(bin);
+}
+function _base64ToF32(s) {
+    const bin = atob(s);
+    const u8  = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new Float32Array(u8.buffer);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 export class WeatherFeed {
     constructor() {
@@ -68,8 +98,14 @@ export class WeatherFeed {
             }
         }
 
-        // Start with procedural data so the shader has something immediately
+        // Start with procedural data so the shader has something immediately.
         this._buildProcedural();
+
+        // Then attempt to overlay a session-cached last-known-good snapshot
+        // from a previous tab lifetime. If restored, _hasGoodData flips to
+        // true — the fetch-failure path then *keeps* those buffers instead
+        // of flattening them back to procedural every refresh.
+        this._hasGoodData = this._restoreSnapshot();
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
@@ -92,15 +128,29 @@ export class WeatherFeed {
                 this._meta.source    = 'Open-Meteo / GFS';
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
+                this._hasGoodData    = true;
+                // Persist for subsequent reloads within this tab session.
+                this._saveSnapshot();
             } else {
                 throw new Error('Empty response');
             }
         } catch (err) {
-            console.warn('[WeatherFeed] Falling back to procedural data:', err.message);
-            this._buildProcedural();
-            this._meta.loaded    = false;
-            this._meta.source    = 'procedural (GFS unavailable)';
-            this._meta.fetchTime = new Date();
+            // Three-tier fallback. If we've ever had live or cached data
+            // in this session (_hasGoodData), keep those buffers — serving
+            // stale real data beats reverting to synthetic. Only rebuild
+            // procedural when we have nothing better to show.
+            if (this._hasGoodData) {
+                console.warn('[WeatherFeed] upstream failed — keeping last-known-good buffers:', err.message);
+                this._meta.loaded    = false;
+                this._meta.source    = `stale · last known (${err.message ?? 'upstream error'})`;
+                this._meta.fetchTime = new Date();
+            } else {
+                console.warn('[WeatherFeed] Falling back to procedural data:', err.message);
+                this._buildProcedural();
+                this._meta.loaded    = false;
+                this._meta.source    = 'procedural (GFS unavailable)';
+                this._meta.fetchTime = new Date();
+            }
         }
         this._dispatch('weather-update', {
             weatherBuffer: this._weatherBuf,
@@ -402,6 +452,84 @@ export class WeatherFeed {
                 this._cloudBuf[t4+2] = Math.max(0.15, Math.min(0.60, base - 0.12));
                 this._cloudBuf[t4+3] = 0.0;  // no procedural precipitation
             }
+        }
+    }
+
+    // ── Session snapshot (last-known-good) ───────────────────────────────────
+
+    /**
+     * Serialize the current buffer trio to sessionStorage so the next page
+     * load in this tab can restore real data instead of booting to
+     * procedural while the fetch is in flight (or while the upstream is
+     * down).  Fires after every successful _fetchAndProcess.
+     * Swallows QuotaExceededError — best-effort cache.
+     */
+    _saveSnapshot() {
+        try {
+            if (typeof sessionStorage === 'undefined') return;
+            const snap = {
+                version:     1,
+                savedAt:     Date.now(),
+                source:      this._meta.source,
+                fetchTime:   this._meta.fetchTime?.getTime?.() ?? null,
+                weather_b64: _f32ToBase64(this._weatherBuf),
+                wind_b64:    _f32ToBase64(this._windBuf),
+                cloud_b64:   _f32ToBase64(this._cloudBuf),
+            };
+            sessionStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snap));
+        } catch (err) {
+            // Quota full or encoding error — cache is optional, keep going.
+            console.debug('[WeatherFeed] snapshot save skipped:', err?.message);
+        }
+    }
+
+    /**
+     * Attempt to restore a snapshot from sessionStorage. Returns true if
+     * buffers were populated from cache (caller should treat this as
+     * "_hasGoodData = true"), false otherwise.
+     *
+     * A stale-but-restored cache gets a visible `source: "cached · ..."`
+     * tag in meta so the UI can flag the user that this isn't live data.
+     */
+    _restoreSnapshot() {
+        try {
+            if (typeof sessionStorage === 'undefined') return false;
+            const raw = sessionStorage.getItem(SNAPSHOT_KEY);
+            if (!raw) return false;
+            const snap = JSON.parse(raw);
+            if (snap.version !== 1) return false;
+
+            const age = Date.now() - (snap.savedAt ?? 0);
+            if (age < 0 || age > SNAPSHOT_MAX_AGE_MS) {
+                sessionStorage.removeItem(SNAPSHOT_KEY);
+                return false;
+            }
+
+            const w  = _base64ToF32(snap.weather_b64);
+            const wi = _base64ToF32(snap.wind_b64);
+            const c  = _base64ToF32(snap.cloud_b64);
+            // Size sanity — mismatched TEX_W/TEX_H between versions would
+            // blow up set() below; bail loudly and rebuild procedural.
+            if (w.length  !== this._weatherBuf.length ||
+                wi.length !== this._windBuf.length    ||
+                c.length  !== this._cloudBuf.length) {
+                sessionStorage.removeItem(SNAPSHOT_KEY);
+                return false;
+            }
+
+            this._weatherBuf.set(w);
+            this._windBuf.set(wi);
+            this._cloudBuf.set(c);
+
+            const ageMin = Math.round(age / 60_000);
+            this._meta.loaded    = false;   // cached ≠ live
+            this._meta.source    = `cached (${snap.source ?? 'previous session'} · ${ageMin}m ago)`;
+            this._meta.fetchTime = snap.fetchTime ? new Date(snap.fetchTime) : null;
+            console.info(`[WeatherFeed] restored session snapshot (${ageMin}m old) — bridging until live fetch lands`);
+            return true;
+        } catch (err) {
+            console.debug('[WeatherFeed] snapshot restore skipped:', err?.message);
+            return false;
         }
     }
 
