@@ -131,6 +131,99 @@ export async function fetchPointForecast(lat, lon) {
 }
 
 /**
+ * Fetch a launch-planner forecast: current + 7-day hourly + 7-day daily in
+ * one Open-Meteo call, so callers can score weather at any hour within the
+ * forecast horizon (T-0, T-6h, window open/close, etc.) rather than only
+ * "right now." Additive; does not replace fetchPointForecast.
+ *
+ * The hourly arrays are parallel — all the same length, indexed by `time`.
+ * Returns null on network / parse failure.
+ */
+export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
+    const params = new URLSearchParams({
+        latitude:  (+lat).toFixed(4),
+        longitude: (+lon).toFixed(4),
+        current: [
+            'temperature_2m', 'apparent_temperature',
+            'relative_humidity_2m', 'cloud_cover', 'is_day', 'weather_code',
+            'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
+            'precipitation', 'pressure_msl',
+        ].join(','),
+        hourly: [
+            'temperature_2m',
+            'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
+            'precipitation', 'precipitation_probability',
+            'cloud_cover', 'weather_code',
+            'relative_humidity_2m', 'visibility', 'cape',
+        ].join(','),
+        daily: [
+            'temperature_2m_max', 'temperature_2m_min',
+            'precipitation_sum', 'precipitation_probability_max',
+            'sunrise', 'sunset', 'uv_index_max',
+        ].join(','),
+        temperature_unit: 'fahrenheit',
+        wind_speed_unit:  'mph',
+        timezone:         'auto',
+        forecast_days:    String(forecastDays),
+    });
+    try {
+        const res = await fetch(`${OPEN_METEO_URL}?${params}`, { signal: AbortSignal.timeout(12000) });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data.error) return null;
+        return {
+            lat, lon,
+            timezone:     data.timezone,
+            utc_offset_s: data.utc_offset_seconds,
+            current: {
+                time:          data.current?.time,
+                temp_f:        data.current?.temperature_2m,
+                feels_f:       data.current?.apparent_temperature,
+                humidity:      data.current?.relative_humidity_2m,
+                cloud_cover:   data.current?.cloud_cover,
+                is_day:        data.current?.is_day,
+                weather_code:  data.current?.weather_code,
+                wind_mph:      data.current?.wind_speed_10m,
+                wind_gust_mph: data.current?.wind_gusts_10m,
+                wind_dir_deg:  data.current?.wind_direction_10m,
+                precip_in:     data.current?.precipitation,
+                pressure_hpa:  data.current?.pressure_msl,
+            },
+            hourly: {
+                time:              data.hourly?.time ?? [],
+                temp_f:            data.hourly?.temperature_2m ?? [],
+                wind_mph:          data.hourly?.wind_speed_10m ?? [],
+                wind_gust_mph:     data.hourly?.wind_gusts_10m ?? [],
+                wind_dir_deg:      data.hourly?.wind_direction_10m ?? [],
+                precip_in:         data.hourly?.precipitation ?? [],
+                precip_prob_pct:   data.hourly?.precipitation_probability ?? [],
+                cloud_cover:       data.hourly?.cloud_cover ?? [],
+                weather_code:      data.hourly?.weather_code ?? [],
+                humidity:          data.hourly?.relative_humidity_2m ?? [],
+                visibility_m:      data.hourly?.visibility ?? [],
+                cape_j_per_kg:     data.hourly?.cape ?? [],
+            },
+            daily: {
+                dates:            data.daily?.time ?? [],
+                high_f:           data.daily?.temperature_2m_max ?? [],
+                low_f:            data.daily?.temperature_2m_min ?? [],
+                precip_sum_in:    data.daily?.precipitation_sum ?? [],
+                precip_prob_pct:  data.daily?.precipitation_probability_max ?? [],
+                sunrise:          data.daily?.sunrise ?? [],
+                sunset:           data.daily?.sunset ?? [],
+                uv_index_max:     data.daily?.uv_index_max ?? [],
+            },
+            fetched_at:   Date.now(),
+            forecast_days: forecastDays,
+            horizon_end_ms: Date.now() + forecastDays * 86_400_000,
+        };
+    } catch (e) {
+        console.warn('[TripPlanner] launch forecast failed:', e.message);
+        return null;
+    }
+}
+
+/**
  * Pull weather for both endpoints plus N interior route waypoints.
  * @param {{lat:number,lon:number,label?:string,city?:string}} a
  * @param {{lat:number,lon:number,label?:string,city?:string}} b
