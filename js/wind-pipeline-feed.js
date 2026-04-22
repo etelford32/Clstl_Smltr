@@ -1,14 +1,24 @@
 /**
- * wind-pipeline-feed.js — Solar wind pipeline client (direct NOAA browser fetch)
+ * wind-pipeline-feed.js — Solar wind pipeline client (Supabase-backed)
  * ========================================================================
- * Fetches NOAA DSCOVR/ACE real-time 1-minute wind data DIRECTLY from the
- * browser.  The previous design polled a Vercel edge function
- * (/api/solar-wind/wind-speed) which NOAA's WAF permanently blocks with 403
- * host_not_allowed for any server-side fetch.  This version skips the edge
- * function and hits NOAA directly — CORS is enabled on all services.swpc.noaa.gov
- * endpoints so browser-side fetches are fine.
+ * Primary source  :  /api/solar-wind/latest        (Vercel Edge → Supabase
+ *                                                  ring buffer, 1-min pg_cron
+ *                                                  writer hitting NOAA)
+ * Belt & suspenders:  https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json
+ *                    (browser-direct NOAA fetch, invoked ONLY when the
+ *                     Supabase reader says the ring buffer is stale). On
+ *                     success, the newest sample is POSTed back to
+ *                     /api/solar-wind/ingest to repopulate the ring buffer
+ *                     for every other visitor — any online user keeps the
+ *                     buffer warm if the cron writer is paused.
  *
  * Dispatches 'wind-pipeline-update' on window each time fresh data arrives.
+ *
+ * Previous version (removed): every browser polled NOAA directly every 60 s,
+ * which meant N visitors = N req/min to NOAA's WAF. That's what tripped the
+ * earlier 403 host_not_allowed on the server side, and risks browser-IP
+ * bans at scale. Now NOAA sees at most one request per cron tick (plus a
+ * trickle of belt-and-suspenders fetches only when the cron is down).
  *
  * USAGE
  * ─────
@@ -19,6 +29,7 @@
  * EVENT DETAIL  (wind-pipeline-update)
  * ─────────────────────────────────────
  *   status        'live' | 'stale' | 'offline'
+ *   source        'supabase' | 'noaa-direct' | null  (provenance for the UI)
  *   speed_km_s    float   e.g. 487.3
  *   speed_norm    float   0–1
  *   density_cc    float   protons/cm³
@@ -32,21 +43,24 @@
  *   updated       string  ISO timestamp of last reading
  */
 
-// NOAA SWPC DSCOVR/ACE real-time 1-minute wind (CORS-enabled; browser-only)
-const NOAA_WIND_URL    = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
-const DEFAULT_INTERVAL = 60_000;   // 60 s — matches NOAA 1-min product cadence
-const SERIES_CAP       = 60;       // last 60 rows ≈ 1 hour for sparkline
-const TREND_WINDOW     = 5;        // readings for slope calculation
+const SUPABASE_ENDPOINT = '/api/solar-wind/latest?series=1';
+const INGEST_ENDPOINT   = '/api/solar-wind/ingest';
+const NOAA_WIND_URL     = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
+
+const DEFAULT_INTERVAL  = 60_000;   // 60 s — matches NOAA 1-min product cadence
+const SERIES_CAP        = 60;       // last 60 rows ≈ 1 hour for sparkline
+const TREND_WINDOW      = 5;        // readings for slope calculation
+
+// If the Supabase reader returns data older than this, trigger the
+// browser-direct NOAA belt-and-suspenders path. 3 min gives pg_cron
+// three chances to land a row (it runs every 60 s) before we bypass.
+const STALE_BYPASS_MS   = 3 * 60_000;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** NOAA fill sentinel: values ≤ −9990 or > 1e20 are missing. */
 const _fill = v => (v == null || Number(v) <= -9990 || Number(v) > 1e20) ? null : Number(v);
-
-/** Normalize speed to 0–1 over 250–900 km/s. */
 const _norm = v => Math.max(0, Math.min(1, (v - 250) / 650));
 
-/** OLS slope over an array of numbers (returns km/s per sample). */
 function _slope(vals) {
     const n = vals.length;
     if (n < 2) return 0;
@@ -54,6 +68,15 @@ function _slope(vals) {
     vals.forEach((y, x) => { sx += x; sy += y; sxy += x * y; sxx += x * x; });
     const denom = n * sxx - sx * sx;
     return denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
+}
+
+function _alertLevel(speed, bz) {
+    const s = speed ?? 400;
+    const b = bz    ?? 0;
+    if (s >= 800 || (s >= 600 && b < -15)) return 'EXTREME';
+    if (s >= 600 || (s >= 400 && b < -10)) return 'HIGH';
+    if (s >= 400 || b < -10)               return 'MODERATE';
+    return 'QUIET';
 }
 
 // ── Class ─────────────────────────────────────────────────────────────────────
@@ -69,25 +92,53 @@ export class WindPipelineFeed {
         this._failStreak  = 0;
     }
 
-    /** Start polling immediately and on the configured interval. */
     start() {
         this._poll();
         this._timer = setInterval(() => this._poll(), this.pollInterval);
         return this;
     }
 
-    /** Stop polling. */
     stop() {
         clearInterval(this._timer);
         this._timer = null;
     }
 
-    /** Trigger an out-of-band refresh. */
     refresh() { return this._poll(); }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
     async _poll() {
+        // 1. Primary read: Supabase-backed edge endpoint.
+        let supabasePayload = null;
+        try {
+            const res = await fetch(SUPABASE_ENDPOINT, {
+                cache:  'no-store',
+                signal: AbortSignal.timeout(10_000),
+            });
+            if (res.ok) {
+                supabasePayload = await res.json();
+            } else if (res.status !== 503) {
+                // 503 just means the ring buffer is still cold-starting.
+                // Any other code is a real error worth logging.
+                console.debug('[wind-pipeline] supabase reader HTTP', res.status);
+            }
+        } catch (err) {
+            console.debug('[wind-pipeline] supabase reader failed:', err.message);
+        }
+
+        const supaAgeMs = _payloadAgeMs(supabasePayload);
+        const supaFresh = supaAgeMs != null && supaAgeMs < STALE_BYPASS_MS;
+
+        if (supaFresh) {
+            this._failStreak = 0;
+            this._dispatchFromSupabase(supabasePayload);
+            return;
+        }
+
+        // 2. Fallback: browser-direct NOAA fetch. Only reached when pg_cron
+        //    hasn't landed a row in the last ~3 min — this is the belt-and-
+        //    suspenders path. On success we dispatch + POST to ingest so the
+        //    Supabase ring buffer recovers even if pg_cron itself is broken.
         try {
             const res = await fetch(NOAA_WIND_URL, {
                 cache:  'no-store',
@@ -95,61 +146,112 @@ export class WindPipelineFeed {
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const raw = await res.json();
-            if (!Array.isArray(raw) || raw.length === 0) throw new Error('empty response');
+            if (!Array.isArray(raw) || raw.length === 0) throw new Error('empty NOAA response');
             this._failStreak = 0;
-            this._dispatch(raw);
+            const dispatched = this._dispatchFromNoaa(raw);
+            if (dispatched) this._postIngest(dispatched);   // best-effort
         } catch (err) {
             this._failStreak++;
-            console.debug('[wind-pipeline] poll failed:', err.message);
-            this._dispatchOffline(err.message);
+            console.debug('[wind-pipeline] NOAA fallback failed:', err.message);
+            // If Supabase gave us *something* (just stale), serve that over
+            // a hard 'offline' — stale real data beats no data.
+            if (supabasePayload?.data?.current) {
+                this._dispatchFromSupabase(supabasePayload, { forcedStale: true });
+            } else {
+                this._dispatchOffline(err.message);
+            }
         }
     }
 
-    _dispatch(raw) {
-        // ── DIAGNOSTIC: dump raw NOAA structure on first dispatch ──────────
-        if (!this._diagnosed) {
-            this._diagnosed = true;
-            const last = raw[raw.length - 1];
-            console.group('%c[WIND PIPELINE DIAGNOSTIC] Raw NOAA rtsw_wind_1m.json', 'color:#00ccff;font-weight:bold');
-            console.log('Total rows:', raw.length);
-            console.log('Last row keys:', Object.keys(last ?? {}));
-            console.log('Last row:', JSON.parse(JSON.stringify(last)));
-            console.groupEnd();
+    /**
+     * Parse the Supabase-backed /api/solar-wind/latest response and emit
+     * a wind-pipeline-update event. Response shape is documented in
+     * api/solar-wind/latest.js.
+     */
+    _dispatchFromSupabase(payload, { forcedStale = false } = {}) {
+        const d = payload?.data;
+        if (!d?.current || !d?.updated) {
+            this._dispatchOffline('malformed supabase payload');
+            return;
         }
 
+        const c       = d.current;
+        const updated = d.updated;
+        const ageMin  = (Date.now() - Date.parse(updated)) / 60_000;
+
+        const freshness = ageMin < 5 ? 'fresh' : ageMin < 20 ? 'stale' : 'expired';
+
+        // Series ships already-normalised from the edge endpoint.
+        const series = Array.isArray(d.series)
+            ? d.series.slice(-SERIES_CAP).map(r => ({
+                  timestamp:  r.timestamp,
+                  speed_km_s: r.speed_km_s,
+                  speed_norm: r.speed_norm ?? _norm(r.speed_km_s),
+                  density_cc: r.density_cc,
+                  bz_nT:      r.bz_nT,
+              }))
+            : [];
+
+        const trend = d.trend ?? {
+            slope_km_s_per_min: 0,
+            direction:          'STEADY',
+        };
+
+        window.dispatchEvent(new CustomEvent('wind-pipeline-update', {
+            detail: {
+                status:       forcedStale || freshness === 'expired' ? 'stale' : 'live',
+                source:       'supabase',
+                speed_km_s:   c.speed_km_s,
+                speed_norm:   c.speed_norm ?? _norm(c.speed_km_s),
+                density_cc:   c.density_cc,
+                bz_nT:        c.bz_nT,
+                alert_level:  c.alert_level ?? _alertLevel(c.speed_km_s, c.bz_nT),
+                trend,
+                series_count: series.length,
+                series,
+                age_min:      Math.round(ageMin * 10) / 10,
+                freshness,
+                updated,
+            },
+        }));
+    }
+
+    /**
+     * Parse raw NOAA rtsw_wind_1m.json and emit wind-pipeline-update.
+     * Returns the newest reading so the caller can forward it to the
+     * Supabase ingest endpoint (write-through).
+     */
+    _dispatchFromNoaa(raw) {
         // Parse every row; prefer DSCOVR proton_* fields over ACE legacy fields.
-        // Apply noaaFill to each field independently before coalescing, so fill
-        // values (-99999) don't shadow valid proton_* readings via the ?? operator.
+        // Apply _fill independently before coalescing so fill sentinels don't
+        // shadow valid readings via the ?? operator.
         const rows = raw
-            .filter(r => r?.time_tag && r.active !== false)  // skip inactive instruments
+            .filter(r => r?.time_tag && r.active !== false)
             .map(r => {
                 const spd = _fill(r.proton_speed) ?? _fill(r.speed);
                 const den = _fill(r.proton_density) ?? _fill(r.density);
+                // NOTE: rtsw_wind_1m.json is plasma-only — Bz lives in
+                // rtsw_mag_1m.json (fetched separately by swpc-feed.js).
+                // Keep the try here for NOAA versions that merge both.
                 return {
                     timestamp:  new Date(String(r.time_tag).replace(' ', 'T') + 'Z'),
                     speed_km_s: spd,
                     density_cc: den,
-                    // NOTE: IMF bt/bz may not be in rtsw_wind_1m.json (plasma only);
-                    // they come from rtsw_mag_1m.json via swpc-feed.js fetchMag().
-                    // Include here for rows that have them (some NOAA versions merge both).
                     bz_nT:      _fill(r.bz_gsm) ?? _fill(r.bz),
                     bt_nT:      _fill(r.bt),
                 };
             })
-            // Only keep rows that have a valid, positive wind speed
             .filter(r => r.speed_km_s != null && r.speed_km_s > 0);
 
         if (rows.length === 0) {
             this._dispatchOffline('no valid readings in NOAA response');
-            return;
+            return null;
         }
 
-        // Most-recent valid reading
-        const latest  = rows[rows.length - 1];
-        const ageMin  = (Date.now() - latest.timestamp.getTime()) / 60_000;
-        const fresh   = ageMin < 5 ? 'fresh' : ageMin < 20 ? 'stale' : 'expired';
+        const latest = rows[rows.length - 1];
+        const ageMin = (Date.now() - latest.timestamp.getTime()) / 60_000;
+        const fresh  = ageMin < 5 ? 'fresh' : ageMin < 20 ? 'stale' : 'expired';
 
-        // Trend slope over last TREND_WINDOW valid readings (km/s per sample minute)
         const tw    = rows.slice(-TREND_WINDOW).map(r => r.speed_km_s);
         const slope = _slope(tw);
         const trend = {
@@ -157,7 +259,6 @@ export class WindPipelineFeed {
             direction: slope >  2 ? 'RISING' : slope < -2 ? 'FALLING' : 'STEADY',
         };
 
-        // Series for sparkline (last SERIES_CAP readings ≈ 1 hour)
         const series = rows.slice(-SERIES_CAP).map(r => ({
             timestamp:  r.timestamp.toISOString(),
             speed_km_s: r.speed_km_s,
@@ -166,22 +267,15 @@ export class WindPipelineFeed {
             bz_nT:      r.bz_nT,
         }));
 
-        // Alert classification
-        const spd   = latest.speed_km_s;
-        const bz    = latest.bz_nT ?? 0;
-        const alert =
-            spd >= 800 || (spd >= 600 && bz < -15) ? 'EXTREME' :
-            spd >= 600 || (spd >= 400 && bz < -10) ? 'HIGH'    :
-            spd >= 400 || bz < -10                  ? 'MODERATE': 'QUIET';
-
         window.dispatchEvent(new CustomEvent('wind-pipeline-update', {
             detail: {
                 status:       fresh === 'expired' ? 'stale' : 'live',
-                speed_km_s:   spd,
-                speed_norm:   _norm(spd),
+                source:       'noaa-direct',
+                speed_km_s:   latest.speed_km_s,
+                speed_norm:   _norm(latest.speed_km_s),
                 density_cc:   latest.density_cc,
                 bz_nT:        latest.bz_nT,
-                alert_level:  alert,
+                alert_level:  _alertLevel(latest.speed_km_s, latest.bz_nT),
                 trend,
                 series_count: rows.length,
                 series,
@@ -190,18 +284,57 @@ export class WindPipelineFeed {
                 updated:      latest.timestamp.toISOString(),
             },
         }));
+
+        return latest;
+    }
+
+    /**
+     * Best-effort POST to /api/solar-wind/ingest with the newest NOAA row
+     * we just successfully read. Silently swallows failures — this is a
+     * cache-warming side-effect, not part of the user-visible flow.
+     */
+    async _postIngest(latest) {
+        try {
+            await fetch(INGEST_ENDPOINT, {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    observed_at:   latest.timestamp.toISOString(),
+                    speed_km_s:    latest.speed_km_s,
+                    density_cc:    latest.density_cc,
+                    bt_nt:         latest.bt_nT,
+                    bz_nt:         latest.bz_nT,
+                    source:        'noaa-swpc-browser',
+                }),
+                cache:  'no-store',
+                signal: AbortSignal.timeout(5_000),
+            });
+        } catch {
+            // write-through is best-effort; a single failed POST doesn't
+            // affect the user flow (they already saw the NOAA data).
+        }
     }
 
     _dispatchOffline(reason) {
         window.dispatchEvent(new CustomEvent('wind-pipeline-update', {
             detail: {
                 status:      this._failStreak > 2 ? 'offline' : 'stale',
+                source:      null,
                 alert_level: null,
                 trend:       null,
                 error:       reason,
             },
         }));
     }
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function _payloadAgeMs(payload) {
+    const updated = payload?.data?.updated;
+    if (!updated) return null;
+    const ms = Date.parse(updated);
+    return Number.isFinite(ms) ? Date.now() - ms : null;
 }
 
 export default WindPipelineFeed;

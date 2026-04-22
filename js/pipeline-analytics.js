@@ -44,7 +44,7 @@ const PIPELINES = [
     { key: 'donki-notif',  label: 'DONKI Notifications',  group: 'NASA DONKI',    url: '/api/donki/notifications',         freshKey: null,          target: 60 },
 
     { key: 'celestrak',    label: 'CelesTrak TLE',        group: 'Orbital',       url: '/api/celestrak/tle?group=stations', freshKey: null,         target: 240 },
-    { key: 'solar-wind',   label: 'ACE Solar Wind',       group: 'Space Weather', url: '/api/solar-wind/wind-speed',       freshKey: null,          target: 10 },
+    { key: 'solar-wind',   label: 'DSCOVR Solar Wind',    group: 'Space Weather', url: '/api/solar-wind/latest',           freshKey: 'age_min',     freshUnit: 'min', target: 2 },
     { key: 'launches',     label: 'Launch Library 2',     group: 'Launches',      url: '/api/launches/upcoming?limit=10',  freshKey: null,          target: 120 },
     { key: 'weather-grid', label: 'Open-Meteo Grid',      group: 'Weather',       url: '/api/weather/grid',                freshKey: 'age_seconds', freshUnit: 's', target: 3600 },
 ];
