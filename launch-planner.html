@@ -263,6 +263,28 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 /* Recovery rules visually nested under their own header */
 .lp-rules--recovery { background:rgba(0,200,255,.04); border-color:rgba(0,200,255,.1); }
 
+/* NWS active-alert stack — rendered when a convective warning/watch polygon
+   is within 50 km of the pad. Color-coded per alert at render-time based on
+   event severity (Warning = red, Watch = amber). */
+.lp-alerts {
+    display:flex; flex-direction:column; gap:6px;
+    margin-bottom:16px;
+}
+.lp-alert {
+    border:1px solid;
+    border-radius:8px;
+    padding:8px 12px;
+}
+.lp-alert-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    gap:8px; margin-bottom:3px;
+}
+.lp-alert-ev   { font-size:.82rem; font-weight:800; letter-spacing:.02em; }
+.lp-alert-dist { font-size:.68rem; color:#ccd; font-family:monospace; }
+.lp-alert-area { font-size:.7rem; color:#aab; line-height:1.4; }
+.lp-alert-exp  { font-size:.64rem; color:#889; font-family:monospace; margin-top:3px; }
+.lp-alert-note { font-size:.64rem; color:#889; margin-top:4px; font-style:italic; }
+
 /* ─── Starship Focus panel ────────────────────────────── */
 .lp-starship {
     margin-top:18px; padding:14px 16px;
