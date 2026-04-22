@@ -63,6 +63,8 @@ const API_ROUTES = {
     '/api/weather/grid':           'api/weather/grid.js',
     '/api/weather/forecast':       'api/weather/forecast.js',
     '/api/lightning/strikes':      'api/lightning/strikes.js',
+    '/api/nws/convective':         'api/nws/convective.js',
+    '/api/cron/warm-forecasts':    'api/cron/warm-forecasts.js',
     '/api/storms':                 'api/storms.js',
 };
 
