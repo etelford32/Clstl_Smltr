@@ -20,11 +20,12 @@ const NAV_DROPDOWNS = [
         label: 'Space Weather',
         id: 'space-weather',
         items: [
-            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',  tier: 'public', icon: '🌤️', id: 'weather' },
-            { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',          tier: 'public', icon: '🪐', id: 'solar' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',   tier: 'public', icon: '☀️' },
-            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',          tier: 'free',   icon: '🌌' },
-            { href: 'sagittarius.html',       label: 'Sagittarius A*', sub: 'Live galactic center simulation', tier: 'public', icon: '🕳️', id: 'sagittarius' },
+            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
+            { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',           tier: 'public', icon: '🪐', id: 'solar' },
+            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
+            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
+            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
+            { href: 'sagittarius.html',   label: 'Sagittarius A*', sub: 'Live galactic center simulation', tier: 'public', icon: '🕳️', id: 'sagittarius' },
         ],
     },
     {

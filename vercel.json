@@ -139,6 +139,10 @@
       "destination": "/launch-planner.html"
     },
     {
+      "source": "/missions",
+      "destination": "/missions.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },

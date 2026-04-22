@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Missions — Inner Solar System Fleet · Parker Physics</title>
+<meta name="description" content="Live roster of 24+ inner-solar-system space missions — Parker Solar Probe, Solar Orbiter, SOHO, SDO, BepiColombo, DART, Psyche, and every spacecraft measuring the Sun, inner planets, and near-Earth asteroids.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif; }
+
+/* ─── Hero ──────────────────────────────────────────────── */
+#msn-hero {
+    padding:22px 24px 14px;
+    background:linear-gradient(180deg, rgba(255,140,0,.08), rgba(4,2,16,.0));
+    border-bottom:1px solid rgba(255,140,0,.12);
+}
+#msn-hero h1 {
+    font-size:1.5rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#ffb830);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:6px;
+}
+#msn-hero p { font-size:.88rem; color:#aa9; line-height:1.55; max-width:760px; }
+#msn-hero-stats {
+    margin-top:12px; display:flex; gap:12px; flex-wrap:wrap;
+}
+.msn-stat {
+    font-size:.72rem; color:#aa9; font-family:monospace;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:6px;
+    padding:6px 12px;
+}
+.msn-stat strong { color:#ffb830; font-weight:800; margin-right:6px; }
+
+/* ─── Layout ────────────────────────────────────────────── */
+#msn-app {
+    display:grid;
+    grid-template-columns:240px 1fr;
+    gap:16px;
+    padding:16px 24px 48px;
+    max-width:1400px; margin:0 auto;
+}
+@media (max-width:900px) { #msn-app { grid-template-columns:1fr; padding:12px; gap:12px; } }
+
+.msn-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:14px 16px;
+}
+
+/* ─── Filters ───────────────────────────────────────────── */
+.msn-label {
+    font-size:.66rem; color:#668; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700; margin-bottom:8px; margin-top:14px;
+}
+.msn-label:first-child { margin-top:0; }
+
+.msn-chip-row { display:flex; flex-wrap:wrap; gap:6px; }
+.msn-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 11px;
+    font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+}
+.msn-chip:hover { border-color:rgba(255,184,48,.4); color:#fff; }
+.msn-chip--on {
+    background:rgba(255,184,48,.2);
+    border-color:#fb0;
+    color:#fc7;
+}
+.msn-counter {
+    font-size:.64rem; color:#556; margin-top:10px; font-family:monospace;
+}
+
+/* ─── Grid ──────────────────────────────────────────────── */
+#msn-grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(360px, 1fr));
+    gap:14px;
+}
+.msn-card {
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid rgba(255,255,255,.15);
+    border-radius:10px;
+    padding:14px 16px;
+    transition:border-color .2s, transform .12s;
+    display:flex; flex-direction:column; gap:6px;
+}
+.msn-card:hover { border-color:rgba(255,184,48,.35); transform:translateY(-1px); }
+.msn-card--psp {
+    border-left-color:#ffb830;
+    background:linear-gradient(150deg, rgba(255,184,48,.06), rgba(15,10,35,.78) 60%);
+}
+.msn-card--operational { border-left-color:#4fc97f; }
+.msn-card--extended    { border-left-color:#4fc3f7; }
+.msn-card--cruising    { border-left-color:#ffb830; }
+.msn-card--completed   { border-left-color:#888;   }
+.msn-card--retired     { border-left-color:#555;   }
+.msn-card--planned     { border-left-color:#c78;   }
+
+.msn-card-hd { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+.msn-card-name { font-size:1rem; font-weight:800; color:#eef; line-height:1.2; }
+.msn-card-badge {
+    font-size:.62rem; font-weight:800; font-family:monospace;
+    padding:2px 8px; border-radius:4px; letter-spacing:.06em;
+    text-transform:uppercase; white-space:nowrap; flex-shrink:0;
+}
+.msn-badge--operational { background:rgba(79,201,127,.15); color:#5e9; border:1px solid #4c8; }
+.msn-badge--extended    { background:rgba(79,195,247,.15); color:#8df; border:1px solid #4bd; }
+.msn-badge--cruising    { background:rgba(255,184,48,.15); color:#fc7; border:1px solid #fb0; }
+.msn-badge--completed   { background:rgba(200,200,200,.08); color:#aaa; border:1px solid #666; }
+.msn-badge--retired     { background:rgba(120,120,120,.08); color:#888; border:1px solid #555; }
+.msn-badge--planned     { background:rgba(200,120,140,.14); color:#d89; border:1px solid #c78; }
+
+.msn-card-meta {
+    font-size:.72rem; color:#998; font-family:monospace; line-height:1.5;
+}
+.msn-card-meta span + span::before { content: " · "; color:#555; }
+.msn-card-summary {
+    font-size:.82rem; color:#ccd; line-height:1.55; margin-top:4px;
+}
+.msn-card-highlights {
+    margin:4px 0 0 18px; padding:0; font-size:.76rem; line-height:1.5; color:#aa9;
+}
+.msn-card-highlights li { margin-bottom:2px; }
+.msn-card-highlights li::marker { color:#ffb830; }
+.msn-card-instr {
+    font-size:.68rem; color:#778; font-family:monospace; margin-top:4px;
+}
+.msn-card-instr strong { color:#89a; font-weight:700; }
+.msn-card-source {
+    font-size:.62rem; color:#556; margin-top:6px; padding-top:6px;
+    border-top:1px solid rgba(255,255,255,.05);
+    font-style:italic;
+}
+.msn-pin-psp {
+    font-size:.6rem; color:#fc7; letter-spacing:.08em; text-transform:uppercase;
+    margin-bottom:4px; font-weight:700;
+}
+.msn-empty {
+    padding:40px; text-align:center; color:#778;
+    background:rgba(255,255,255,.02); border-radius:10px; border:1px dashed rgba(255,255,255,.08);
+    grid-column:1 / -1;
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("missions");</script>
+
+<div id="msn-hero">
+    <h1>Space Missions — Inner Solar System Fleet</h1>
+    <p>Every operational, cruising, and historically-important spacecraft measuring the Sun, the inner planets, and near-Earth small bodies. Parker Solar Probe is the namesake of this app and the first vehicle ever to cross the Alfvén surface.</p>
+    <div id="msn-hero-stats"></div>
+</div>
+
+<div id="msn-app">
+
+    <aside class="msn-panel" id="msn-filters">
+        <div class="msn-label">Domain</div>
+        <div class="msn-chip-row" id="msn-family-filters"></div>
+
+        <div class="msn-label">Status</div>
+        <div class="msn-chip-row" id="msn-status-filters"></div>
+
+        <div class="msn-counter" id="msn-counter">—</div>
+    </aside>
+
+    <main>
+        <div id="msn-grid">
+            <div class="msn-empty">Loading mission roster…</div>
+        </div>
+    </main>
+
+</div>
+
+<script type="module">
+import {
+    HELIOPHYSICS_MISSIONS,
+    INNER_PLANET_MISSIONS,
+    MARS_MISSIONS,
+    SMALL_BODY_MISSIONS,
+    LEGACY_MISSIONS,
+} from './js/space-missions.js';
+
+// ── Tag each mission with its family for filtering ──────────────
+const FAMILIES = [
+    { id: 'helio',     label: 'Heliophysics',  missions: HELIOPHYSICS_MISSIONS },
+    { id: 'inner',     label: 'Inner Planets', missions: INNER_PLANET_MISSIONS },
+    { id: 'mars',      label: 'Mars',          missions: MARS_MISSIONS },
+    { id: 'smallbody', label: 'Small Bodies',  missions: SMALL_BODY_MISSIONS },
+    { id: 'legacy',    label: 'Legacy',        missions: LEGACY_MISSIONS },
+];
+const ALL = FAMILIES.flatMap(f => f.missions.map(m => ({ ...m, _family: f.id, _familyLabel: f.label })));
+
+const STATUSES = ['operational', 'extended', 'cruising', 'completed', 'retired', 'planned'];
+const STATUS_RANK = { operational: 0, extended: 1, cruising: 2, planned: 3, completed: 4, retired: 5 };
+
+// ── State ────────────────────────────────────────────────────────
+const state = {
+    activeFamilies: new Set(),   // empty = all
+    activeStatuses: new Set(),   // empty = all
+};
+
+// ── Renderers ────────────────────────────────────────────────────
+const esc = s => s == null ? '' : String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function renderStats() {
+    const host = document.getElementById('msn-hero-stats');
+    const ops  = ALL.filter(m => m.status === 'operational').length;
+    const ext  = ALL.filter(m => m.status === 'extended').length;
+    const cru  = ALL.filter(m => m.status === 'cruising').length;
+    const psp  = ALL.find(m => m.id === 'parker-solar-probe');
+    const pspClosest = psp?.closest_approach_km ? (psp.closest_approach_km / 1e6).toFixed(2) : '—';
+    host.innerHTML = `
+        <span class="msn-stat"><strong>${ALL.length}</strong>total missions</span>
+        <span class="msn-stat"><strong>${ops}</strong>operational</span>
+        <span class="msn-stat"><strong>${ext}</strong>extended</span>
+        <span class="msn-stat"><strong>${cru}</strong>cruising</span>
+        <span class="msn-stat"><strong>${pspClosest} Mkm</strong>PSP closest approach</span>
+    `;
+}
+
+function renderFamilyFilters() {
+    document.getElementById('msn-family-filters').innerHTML = FAMILIES.map(f => {
+        const n = f.missions.length;
+        const on = state.activeFamilies.has(f.id);
+        return `<button type="button" class="msn-chip ${on ? 'msn-chip--on' : ''}" data-family="${f.id}">${esc(f.label)} · ${n}</button>`;
+    }).join('');
+    document.querySelectorAll('[data-family]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.family;
+            if (state.activeFamilies.has(id)) state.activeFamilies.delete(id);
+            else state.activeFamilies.add(id);
+            renderFamilyFilters();
+            renderGrid();
+        });
+    });
+}
+
+function renderStatusFilters() {
+    document.getElementById('msn-status-filters').innerHTML = STATUSES.map(s => {
+        const n = ALL.filter(m => m.status === s).length;
+        const on = state.activeStatuses.has(s);
+        return `<button type="button" class="msn-chip ${on ? 'msn-chip--on' : ''}" data-status="${s}">${s} · ${n}</button>`;
+    }).join('');
+    document.querySelectorAll('[data-status]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.status;
+            if (state.activeStatuses.has(id)) state.activeStatuses.delete(id);
+            else state.activeStatuses.add(id);
+            renderStatusFilters();
+            renderGrid();
+        });
+    });
+}
+
+function renderCard(m) {
+    const isPSP = m.id === 'parker-solar-probe';
+    const pspPin = isPSP ? `<div class="msn-pin-psp">◆ App namesake · first inside the Alfvén surface</div>` : '';
+    const closestApproach = m.closest_approach_km
+        ? `${(m.closest_approach_km / 1e6).toFixed(2)} Mkm closest`
+        : '';
+    const hl = (m.highlights || m.note ? [m.note] : [])
+        ? (m.highlights || []).slice(0, 3).map(h => `<li>${esc(h)}</li>`).join('')
+        : '';
+    const meta = [
+        m.agency,
+        m.launched ? `launched ${m.launched}` : null,
+        m.launch_vehicle ? `${esc(m.launch_vehicle)}` : null,
+        closestApproach,
+    ].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('');
+    const orbit = m.orbit ? `<div class="msn-card-meta"><span>${esc(m.orbit)}</span></div>` : '';
+    const instr = m.instruments?.length
+        ? `<div class="msn-card-instr"><strong>Instruments:</strong> ${m.instruments.map(esc).join(' · ')}</div>`
+        : '';
+    const note = m.note ? `<div class="msn-card-summary">${esc(m.note)}</div>` : '';
+    const source = m.source ? `<div class="msn-card-source">${esc(m.source)}</div>` : '';
+
+    return `
+        <article class="msn-card msn-card--${esc(m.status)} ${isPSP ? 'msn-card--psp' : ''}">
+            ${pspPin}
+            <div class="msn-card-hd">
+                <div class="msn-card-name">${esc(m.name)}</div>
+                <span class="msn-card-badge msn-badge--${esc(m.status)}">${esc(m.status)}</span>
+            </div>
+            <div class="msn-card-meta">${meta}</div>
+            ${orbit}
+            ${m.summary ? `<div class="msn-card-summary">${esc(m.summary)}</div>` : ''}
+            ${note}
+            ${hl ? `<ul class="msn-card-highlights">${hl}</ul>` : ''}
+            ${instr}
+            ${source}
+        </article>
+    `;
+}
+
+function renderGrid() {
+    const host = document.getElementById('msn-grid');
+    let filtered = ALL;
+    if (state.activeFamilies.size) filtered = filtered.filter(m => state.activeFamilies.has(m._family));
+    if (state.activeStatuses.size) filtered = filtered.filter(m => state.activeStatuses.has(m.status));
+
+    // Sort: PSP first, then by status rank, then by launch date desc.
+    filtered = [...filtered].sort((a, b) => {
+        if (a.id === 'parker-solar-probe') return -1;
+        if (b.id === 'parker-solar-probe') return  1;
+        const sd = (STATUS_RANK[a.status] ?? 99) - (STATUS_RANK[b.status] ?? 99);
+        if (sd !== 0) return sd;
+        const ya = parseInt((a.launched || '').slice(0, 4), 10) || 0;
+        const yb = parseInt((b.launched || '').slice(0, 4), 10) || 0;
+        return yb - ya;
+    });
+
+    if (!filtered.length) {
+        host.innerHTML = `<div class="msn-empty">No missions match these filters.</div>`;
+    } else {
+        host.innerHTML = filtered.map(renderCard).join('');
+    }
+
+    document.getElementById('msn-counter').textContent =
+        `Showing ${filtered.length} of ${ALL.length} missions`;
+}
+
+// ── Bootstrap ────────────────────────────────────────────────────
+renderStats();
+renderFamilyFilters();
+renderStatusFilters();
+renderGrid();
+</script>
+
+</body>
+</html>
