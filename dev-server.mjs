@@ -59,6 +59,11 @@ const API_ROUTES = {
     '/api/noaa/radio-flux':        'api/noaa/radio-flux.js',
     '/api/donki/cme':              'api/donki/cme.js',
     '/api/donki/notifications':    'api/donki/notifications.js',
+    '/api/launches/upcoming':      'api/launches/upcoming.js',
+    '/api/weather/grid':           'api/weather/grid.js',
+    '/api/weather/forecast':       'api/weather/forecast.js',
+    '/api/lightning/strikes':      'api/lightning/strikes.js',
+    '/api/storms':                 'api/storms.js',
 };
 
 // Cache imported edge-function modules (stateless, so caching is safe)
