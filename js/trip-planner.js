@@ -17,7 +17,8 @@
 import * as THREE from 'three';
 import { geo, RAD } from './geo/coords.js';
 
-const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_URL        = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO_MARINE_URL = 'https://marine-api.open-meteo.com/v1/marine';
 
 // ── Great-circle math ───────────────────────────────────────────────────────
 // These three exports used to carry their own haversine / bearing / SLERP
@@ -155,6 +156,15 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
             'precipitation', 'precipitation_probability',
             'cloud_cover', 'weather_code',
             'relative_humidity_2m', 'visibility', 'cape',
+            // Pressure-level winds for upper-level shear analysis near max-Q.
+            // 200 hPa ≈ 12 km (the max-Q altitude for most orbital launch
+            // vehicles); 300 hPa ≈ 9 km (below max-Q, needed to compute
+            // vector shear across the high-stress band); 500 hPa ≈ 5.5 km
+            // kept as a mid-layer reference for tall small launchers like
+            // Electron that max-Q higher.
+            'wind_speed_500hPa', 'wind_direction_500hPa',
+            'wind_speed_300hPa', 'wind_direction_300hPa',
+            'wind_speed_200hPa', 'wind_direction_200hPa',
         ].join(','),
         daily: [
             'temperature_2m_max', 'temperature_2m_min',
@@ -202,6 +212,14 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
                 humidity:          data.hourly?.relative_humidity_2m ?? [],
                 visibility_m:      data.hourly?.visibility ?? [],
                 cape_j_per_kg:     data.hourly?.cape ?? [],
+                // Pressure-level wind arrays, aligned to the same `time` index.
+                // Units follow wind_speed_unit (mph), direction in degrees.
+                wind_500_mph:      data.hourly?.wind_speed_500hPa ?? [],
+                wind_500_dir_deg:  data.hourly?.wind_direction_500hPa ?? [],
+                wind_300_mph:      data.hourly?.wind_speed_300hPa ?? [],
+                wind_300_dir_deg:  data.hourly?.wind_direction_300hPa ?? [],
+                wind_200_mph:      data.hourly?.wind_speed_200hPa ?? [],
+                wind_200_dir_deg:  data.hourly?.wind_direction_200hPa ?? [],
             },
             daily: {
                 dates:            data.daily?.time ?? [],
@@ -219,6 +237,87 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
         };
     } catch (e) {
         console.warn('[TripPlanner] launch forecast failed:', e.message);
+        return null;
+    }
+}
+
+/**
+ * Marine forecast for a recovery zone (ASDS droneship position, splashdown
+ * zone, tower-catch area). Uses Open-Meteo's Marine API.
+ *
+ * Returns null on failure OR if the point is inland / outside the marine
+ * model's ocean mask — Open-Meteo silently returns empty arrays for land
+ * coordinates, which we detect and surface so the scorer can skip the
+ * recovery-wave rules gracefully instead of flagging them as unavailable.
+ *
+ * Units: meters for heights, seconds for periods, degrees for directions.
+ */
+export async function fetchMarineForecast(lat, lon, { forecastDays = 5 } = {}) {
+    if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return null;
+    const params = new URLSearchParams({
+        latitude:  (+lat).toFixed(4),
+        longitude: (+lon).toFixed(4),
+        current: [
+            'wave_height', 'wave_direction', 'wave_period',
+            'wind_wave_height', 'wind_wave_period',
+            'swell_wave_height', 'swell_wave_period', 'swell_wave_direction',
+            'ocean_current_velocity',
+        ].join(','),
+        hourly: [
+            'wave_height', 'wave_direction', 'wave_period',
+            'wind_wave_height', 'wind_wave_direction', 'wind_wave_period',
+            'swell_wave_height', 'swell_wave_direction', 'swell_wave_period',
+        ].join(','),
+        timezone:      'auto',
+        forecast_days: String(forecastDays),
+    });
+    try {
+        const res = await fetch(`${OPEN_METEO_MARINE_URL}?${params}`, { signal: AbortSignal.timeout(12000) });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (data.error) return null;
+
+        // Land coords come back as an array of nulls. Detect that so the
+        // scorer can degrade the recovery rules to yellow ("no marine data")
+        // rather than silently pass.
+        const waveArr = data.hourly?.wave_height ?? [];
+        const hasAny  = waveArr.some(v => Number.isFinite(v));
+        if (!hasAny) return { inland: true, lat, lon };
+
+        return {
+            lat, lon,
+            inland:   false,
+            timezone: data.timezone,
+            current: {
+                time:              data.current?.time,
+                wave_height_m:     data.current?.wave_height,
+                wave_period_s:     data.current?.wave_period,
+                wave_dir_deg:      data.current?.wave_direction,
+                wind_wave_h_m:     data.current?.wind_wave_height,
+                wind_wave_period_s:data.current?.wind_wave_period,
+                swell_h_m:         data.current?.swell_wave_height,
+                swell_period_s:    data.current?.swell_wave_period,
+                swell_dir_deg:     data.current?.swell_wave_direction,
+                current_vel_ms:    data.current?.ocean_current_velocity,
+            },
+            hourly: {
+                time:                 data.hourly?.time ?? [],
+                wave_height_m:        data.hourly?.wave_height ?? [],
+                wave_period_s:        data.hourly?.wave_period ?? [],
+                wave_dir_deg:         data.hourly?.wave_direction ?? [],
+                wind_wave_h_m:        data.hourly?.wind_wave_height ?? [],
+                wind_wave_dir_deg:    data.hourly?.wind_wave_direction ?? [],
+                wind_wave_period_s:   data.hourly?.wind_wave_period ?? [],
+                swell_h_m:            data.hourly?.swell_wave_height ?? [],
+                swell_dir_deg:        data.hourly?.swell_wave_direction ?? [],
+                swell_period_s:       data.hourly?.swell_wave_period ?? [],
+            },
+            fetched_at:     Date.now(),
+            forecast_days:  forecastDays,
+            horizon_end_ms: Date.now() + forecastDays * 86_400_000,
+        };
+    } catch (e) {
+        console.warn('[TripPlanner] marine forecast failed:', e.message);
         return null;
     }
 }
