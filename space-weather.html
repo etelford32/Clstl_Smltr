@@ -654,6 +654,141 @@ nav {
     .earth-forecast-section { padding: 14px 12px 12px; }
 }
 
+/* ── FORECAST TIMELINE (72h ensemble + uncertainty + validation) ─────────── */
+.forecast-timeline-section {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(123,47,247,.18);
+    border-radius: 14px; padding: 18px 20px 14px;
+    margin-bottom: 16px; position: relative; overflow: hidden;
+}
+.forecast-timeline-section::before {
+    content:''; position:absolute; inset:0;
+    background: linear-gradient(135deg, rgba(123,47,247,.05) 0%, rgba(0,198,255,.03) 60%, transparent 100%);
+    pointer-events: none;
+}
+.ft-header {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 12px; flex-wrap: wrap;
+}
+.ft-title {
+    font-size:.72rem; text-transform:uppercase; letter-spacing:.1em;
+    color:#889; display:flex; align-items:center; gap:8px;
+}
+.ft-title .ft-pip {
+    width:6px; height:6px; border-radius:50%; background:#7b2ff7;
+    box-shadow:0 0 6px #7b2ff7; animation: pip-pulse 2s ease-in-out infinite;
+}
+.ft-swpc-status {
+    margin-left: auto; font-size: .68rem; color: #99b;
+    letter-spacing: .02em;
+}
+.ft-chart-wrap {
+    position: relative;
+    width: 100%; height: 220px;
+    background: rgba(0,0,0,.18);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 8px;
+    padding: 2px;
+}
+#forecast-timeline-canvas {
+    display: block; width: 100%; height: 100%;
+}
+.ft-legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    margin: 8px 0 12px;
+    font-size: .7rem; color: #99b; letter-spacing: .02em;
+}
+.ft-legend-item {
+    display: inline-flex; align-items: center; gap: 6px;
+}
+.ft-swatch {
+    display: inline-block; width: 14px; height: 4px;
+    border-radius: 2px; vertical-align: middle;
+}
+.ft-swatch.ft-dashed {
+    border-top: 1px dashed rgba(170,180,200,.8); background: transparent !important;
+    height: 0;
+}
+.ft-swatch.ft-diamond {
+    width: 8px; height: 8px; transform: rotate(45deg); border-radius: 1px;
+}
+/* Per-horizon impact grid */
+.ft-grid-table {
+    width: 100%; border-collapse: collapse;
+    font-size: .74rem; color: #a8c0d0;
+    margin-top: 6px;
+}
+.ft-grid-table th,
+.ft-grid-table td {
+    padding: 6px 8px; text-align: center;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    vertical-align: middle;
+}
+.ft-grid-table thead th {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+    color: #778; font-weight: 600;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+}
+.ft-grid-table tbody th {
+    text-align: left; color: #889; font-weight: 500;
+    font-size: .7rem; width: 160px;
+    border-right: 1px solid rgba(255,255,255,.05);
+}
+.ft-grid-table .ft-val {
+    font-weight: 700; color: #e8f4ff;
+    font-variant-numeric: tabular-nums;
+}
+.ft-grid-table .ft-band {
+    display: block; font-size: .62rem; color: #667;
+    font-variant-numeric: tabular-nums;
+    margin-top: 1px;
+}
+.ft-grid-table .ft-muted {
+    color: #667; font-variant-numeric: tabular-nums;
+}
+.ft-grid-table .ft-chip {
+    display: inline-block; padding: 2px 7px; border-radius: 4px;
+    font-size: .66rem; font-weight: 700; letter-spacing: .04em;
+    border: 1px solid;
+}
+/* Validation mini-card */
+.ft-validation {
+    margin-top: 14px; padding: 10px 14px;
+    background: rgba(0,0,0,.22);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 8px;
+    display: flex; flex-wrap: wrap; gap: 18px;
+    align-items: baseline; font-size: .74rem;
+}
+.ft-validation-title {
+    font-size: .66rem; text-transform: uppercase;
+    letter-spacing: .08em; color: #778; font-weight: 600;
+}
+.ft-validation-metric {
+    display: inline-flex; gap: 4px; align-items: baseline;
+    color: #99b;
+}
+.ft-validation-metric strong {
+    font-variant-numeric: tabular-nums; color: #e8f4ff;
+    font-weight: 700;
+}
+.ft-validation-note {
+    width: 100%; margin-top: 2px;
+    font-size: .64rem; color: #556; line-height: 1.5;
+}
+/* Honesty blurb below chart */
+.ft-blurb {
+    margin-top: 10px; font-size: .68rem; color: #667; line-height: 1.55;
+}
+.ft-blurb strong { color: #99b; }
+@media (max-width: 600px) {
+    .forecast-timeline-section { padding: 14px 12px 12px; }
+    .ft-chart-wrap { height: 180px; }
+    .ft-grid-table th,
+    .ft-grid-table td { padding: 4px 4px; font-size: .68rem; }
+    .ft-grid-table tbody th { width: auto; font-size: .64rem; }
+}
+
 /* ── FOOTER ─────────────────────────────────────────────────────────────────── */
 .sw-footer {
     text-align:center; margin-top:32px; padding-top:16px;
@@ -1442,6 +1577,66 @@ nav {
 
     </div>
 
+    <!-- ── FORECAST TIMELINE (72h ensemble + uncertainty + validation) ──── -->
+    <div class="forecast-timeline-section" id="forecast-timeline-section">
+
+        <div class="ft-header">
+            <div class="ft-title">
+                <span class="ft-pip"></span>
+                72-Hour Forecast Timeline &middot; Probabilistic Kp &amp; Impacts
+            </div>
+            <span class="ft-swpc-status" id="ft-swpc-status">SWPC 3-day: loading&hellip;</span>
+        </div>
+
+        <div class="ft-chart-wrap">
+            <canvas id="forecast-timeline-canvas"></canvas>
+        </div>
+
+        <div class="ft-legend" id="ft-legend"></div>
+
+        <div id="ft-horizons-grid"></div>
+
+        <div class="ft-validation">
+            <span class="ft-validation-title">Skill check (rolling, local)</span>
+            <span class="ft-validation-metric">
+                <span>AR(p) MAE @ <span id="ft-validation-horizon">t+24h</span>:</span>
+                <strong id="ft-validation-arp-mae">&ndash;</strong>
+            </span>
+            <span class="ft-validation-metric">
+                <span>Persistence MAE:</span>
+                <strong id="ft-validation-persist-mae">&ndash;</strong>
+            </span>
+            <span class="ft-validation-metric">
+                <span>Skill vs. persistence:</span>
+                <strong id="ft-validation-skill">n/a</strong>
+            </span>
+            <span class="ft-validation-metric">
+                <span>n:</span>
+                <strong id="ft-validation-n">0</strong>
+            </span>
+            <div class="ft-validation-note">
+                MAE = mean absolute error in Kp. Skill &gt; 0 means AR(p) beats the persistence null model
+                on this device's rolling sample. Requires &ge; 5 matched predictions; accumulates over time.
+            </div>
+        </div>
+
+        <div class="ft-blurb">
+            <strong>Read this panel honestly.</strong>
+            Bands show 10th&ndash;90th percentile forecasts. Persistence is the null model any useful
+            forecast must beat. NOAA SWPC is shown as an independent reference &mdash; divergence
+            is flagged &#x26A0;. Flare-driven quantities (radio blackout, SEP) have no skillful
+            12h+ forecast; the impact table carries their current state forward, not a prediction.
+        </div>
+
+        <div class="ef-attr" style="margin-top:8px">
+            <strong>Models:</strong>
+            AR(p=6) Levinson&ndash;Durbin on last 168 h of Kp &middot;
+            Persistence baseline with &sigma;(t)=&sigma;<sub>climo</sub>&radic;(t/&tau;), &tau;=24 h &middot;
+            NOAA SWPC 3-day Kp forecast (JSON, text fallback)
+        </div>
+
+    </div>
+
     <!-- ── HERO ROW ───────────────────────────────────────────────────────── -->
     <div class="hero-row">
 
@@ -1907,6 +2102,8 @@ import { CmePropagator } from './js/cme-propagation.js';
 import { AlertEngine } from './js/alert-engine.js';
 import { ImpactScoreEngine } from './js/impact-score.js';
 import { EarthForecastEngine } from './js/earth-forecast.js';
+import { ForecastValidator } from './js/forecast-validation.js';
+import { ForecastTimeline } from './js/forecast-timeline.js';
 import { ModelValidator } from './js/model-validation.js';
 
 // ─── Nav ─────────────────────────────────────────────────────────────────────
@@ -2493,8 +2690,15 @@ window.addEventListener('alert-mark-all-read', () => {
 });
 
 // ── Earth-side forecast engine ──────────────────────────────────────────────
-// Synthesises SWPC + CME + ionospheric data into Earth-consequence forecast.
+// Synthesises SWPC + CME + ionospheric data into Earth-consequence forecast
+// plus the 72h probabilistic timeline (AR(p) + persistence + SWPC 3-day).
 new EarthForecastEngine().start();
+
+// ── Forecast timeline UI + rolling validation ──────────────────────────────
+// ForecastValidator must start before ForecastTimeline so its first summary
+// event is dispatched early; the UI renderer listens for it.
+new ForecastValidator().start();
+new ForecastTimeline().start();
 
 // ── Model validation engine ─────────────────────────────────────────────────
 // Tracks predictions vs observations, critical threshold crossings, and data
