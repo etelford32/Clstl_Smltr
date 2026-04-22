@@ -10,6 +10,8 @@
  *
  * SEP storm scale follows NOAA S-scale: S1 ≥ 10 pfu (>10 MeV).
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_PROTONS = 'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json';
@@ -26,31 +28,19 @@ function sepStorm(flux10mev) {
     return                        { level: 0, label: 'None' };
 }
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_PROTONS, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_PROTONS, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     // 2-D array: row[0] = headers
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected integral-protons format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected integral-protons format', { source: 'NOAA SWPC' });
     }
 
     const headers    = raw[0].map(String);
@@ -95,7 +85,7 @@ export default async function handler() {
 
     const sep = sepStorm(flux10);
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC GOES primary integral-protons-1-day via Vercel Edge',
         age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
         data: {
@@ -109,5 +99,5 @@ export default async function handler() {
             },
         },
         units: { flux_pfu: 'pfu = particles/cm²/s/sr' },
-    });
+    }, { maxAge: CACHE_TTL });
 }

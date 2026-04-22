@@ -1,10 +1,12 @@
 /**
  * launch-rulesets.js — Per-vehicle launch-commit overrides.
  *
- * V3 scope: WIND ONLY. Each vehicle entry overrides the ground-wind and
- * gust bands in DEFAULT_RULESET (js/launch-planner.js). Future dimensions
- * (upper-level shear, recovery sea-state, precip, thermal, lightning)
- * extend the same model — the dispatcher below doesn't need to change.
+ * Each vehicle entry overrides a subset of the bands in DEFAULT_RULESET
+ * (js/launch-planner.js). Dimensions live on the same object and plug in
+ * without a dispatcher rewrite: wind · gust · upper_wind · upper_shear ·
+ * recovery · and now convective (CAPE + lifted index + CIN + PoP) for
+ * lightning-risk scoring. Per-vehicle convective overrides will land in a
+ * follow-up PR; current vehicles inherit DEFAULT_RULESET convective bands.
  *
  * Threshold semantics (mph at pad-height anemometer, 10 m above ground):
  *   sustained.green  — < X mph is clearly safe

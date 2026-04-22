@@ -7,33 +7,26 @@
  * T3 endpoint (15-minute cadence).
  * Returns the full active region list — the file is small so no slicing needed.
  */
+import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_REGIONS = 'https://services.swpc.noaa.gov/json/solar_regions.json';
 const CACHE_TTL    = 900;
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
+const CACHE_SWR    = 120;
 
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_REGIONS, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_REGIONS, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected solar_regions format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected solar_regions format', { source: 'NOAA SWPC' });
     }
 
     const regions = raw
@@ -49,12 +42,12 @@ export default async function handler() {
             num_spots:        r.num_spots          ?? r.Spots     ?? null,
         }));
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC solar_regions via Vercel Edge',
         data: {
             updated:       new Date().toISOString(),
             region_count:  regions.length,
             regions,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

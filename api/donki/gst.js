@@ -19,14 +19,15 @@
  *   Kp 8    → G4
  *   Kp ≥ 9  → G5
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const DONKI_GST_BASE = 'https://api.nasa.gov/DONKI/GST';
 const CACHE_TTL      = 900;   // 15 min
+const CACHE_SWR      = 120;
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
 
 function kpToGScale(kp) {
     if (kp == null) return 0;
@@ -36,16 +37,6 @@ function kpToGScale(kp) {
     if (kp >= 6)   return 2;
     if (kp >= 5)   return 1;
     return 0;
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
 }
 
 export default async function handler(request) {
@@ -63,15 +54,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI GST format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected DONKI GST format', { source: 'NASA DONKI' });
     }
 
     const events = raw
@@ -113,7 +104,7 @@ export default async function handler(request) {
         return (now_ms - t) < recentWindow && e.g_scale >= 1;
     }) ?? null;
 
-    return jsonResp({
+    return jsonOk({
         source: 'NASA DONKI GST via Vercel Edge',
         data: {
             updated:       new Date().toISOString(),
@@ -121,5 +112,5 @@ export default async function handler(request) {
             current_storm: currentStorm,
             events,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

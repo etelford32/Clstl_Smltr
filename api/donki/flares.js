@@ -13,17 +13,18 @@
  * FREE plan: 3 most-recent flares.
  * PRO plan:  full list.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const DONKI_FLR_BASE = 'https://api.nasa.gov/DONKI/FLR';
 const CACHE_TTL      = 900;   // 15 min
+const CACHE_SWR      = 120;
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
 const FREE_LIMIT     = 3;
 
 const CLASS_ORDER = { X: 4, M: 3, C: 2, B: 1, A: 0 };
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
 
 function parseClass(cls) {
     if (!cls || typeof cls !== 'string') return { letter: 'A', number: 1.0 };
@@ -35,16 +36,6 @@ function parseClass(cls) {
 function classRank(cls) {
     const { letter, number } = parseClass(cls);
     return (CLASS_ORDER[letter] ?? 0) * 100 + number;
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
 }
 
 function isPro(request) {
@@ -70,15 +61,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI FLR format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected DONKI FLR format', { source: 'NASA DONKI' });
     }
 
     const flares = raw
@@ -106,7 +97,7 @@ export default async function handler(request) {
 
     const limited = pro ? flares : flares.slice(0, FREE_LIMIT);
 
-    return jsonResp({
+    return jsonOk({
         source:    'NASA DONKI FLR via Vercel Edge',
         plan:      pro ? 'pro' : 'free',
         data: {
@@ -115,5 +106,5 @@ export default async function handler(request) {
             shown_count: limited.length,
             flares:      limited,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

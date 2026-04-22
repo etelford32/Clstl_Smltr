@@ -71,6 +71,7 @@ async function verifyJwt(authHeader) {
                 Authorization: `Bearer ${token}`,
                 apikey: SUPABASE_KEY || token,  // service key preferred, fall back to user token
             },
+            signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) return null;
         const user = await res.json();
@@ -111,6 +112,7 @@ async function checkRate({ userId, recipient, subject, severity, alertType }) {
                 p_limit:          MAX_PER_HOUR,
                 p_window_seconds: 3600,
             }),
+            signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) {
             console.warn('[alerts/email] quota RPC HTTP', res.status, '— failing open');
@@ -242,6 +244,7 @@ export default async function handler(req) {
                 subject,
                 html:    buildEmailHtml(title, body, severity, alert_type, location_label),
             }),
+            signal: AbortSignal.timeout(10000),
         });
 
         if (!res.ok) {

@@ -25,6 +25,8 @@
  *     }
  *   }
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_WIND_1M = 'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json';
@@ -40,6 +42,7 @@ const SERIES_FULL   = 1440; // ?series=full — 24 hr (PRO)
 // Cache TTL (seconds)
 const CACHE_CURRENT = 60;
 const CACHE_SERIES  = 300;  // history changes slowly; allow slightly longer CDN cache
+const CACHE_SWR     = 30;   // T1 endpoint — tighter SWR than default
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,21 +81,6 @@ function freshnessStatus(ageMin) {
     return 'expired';
 }
 
-function isoTag(timeTag) {
-    if (!timeTag) return null;
-    return String(timeTag).replace(' ', 'T') + 'Z';
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_CURRENT) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=30`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 /** True if the request carries a valid PRO auth token (Vercel env var check). */
 function isPro(request) {
     const auth  = request.headers.get('Authorization') ?? '';
@@ -110,23 +98,26 @@ export default async function handler(request) {
     const wantFull   = seriesMode === 'full';
     const wantSeries = seriesMode !== null;
 
-    // PRO gate — full 24-hr series requires auth
+    // PRO gate — full 24-hr series requires auth. No caching — a plan
+    // upgrade needs to take effect immediately.
     if (wantFull && !isPro(request)) {
-        return jsonResp({ error: 'pro_required', detail: '?series=full requires a PRO plan token.' }, 403, 0);
+        return jsonError('pro_required', '?series=full requires a PRO plan token.', {
+            status: 403, maxAge: 0,
+        });
     }
 
     // Fetch NOAA 1-minute wind file
     let raw;
     try {
-        const res = await fetch(NOAA_WIND_1M, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_WIND_1M, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     if (!Array.isArray(raw) || raw.length < 2) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected rtsw_wind_1m format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected rtsw_wind_1m format', { source: 'NOAA SWPC' });
     }
 
     // ── Parse rows ────────────────────────────────────────────────────────────
@@ -151,7 +142,7 @@ export default async function handler(request) {
     // Require only a valid, positive speed (density may gap without invalidating the reading)
     const valid = rows.filter(r => r.speed != null && r.speed > 0);
     if (valid.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All wind readings are null/fill' }, 503, 30);
+        return jsonError('no_valid_data', 'All wind readings are null/fill', { source: 'NOAA SWPC' });
     }
 
     // ── Latest record ─────────────────────────────────────────────────────────
@@ -214,5 +205,5 @@ export default async function handler(request) {
     }
 
     const maxAge = wantSeries ? CACHE_SERIES : CACHE_CURRENT;
-    return jsonResp(body, 200, maxAge);
+    return jsonOk(body, { maxAge, swr: CACHE_SWR });
 }

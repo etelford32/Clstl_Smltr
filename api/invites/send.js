@@ -87,6 +87,7 @@ async function verifyAdmin(authHeader) {
     // Validate the JWT against Supabase Auth
     const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY || token },
+        signal: AbortSignal.timeout(8000),
     });
     if (!userRes.ok) return { error: 'unauthorized' };
     const user = await userRes.json();
@@ -100,6 +101,7 @@ async function verifyAdmin(authHeader) {
                 apikey:        SUPABASE_KEY,
                 Authorization: `Bearer ${SUPABASE_KEY}`,
             },
+            signal: AbortSignal.timeout(8000),
         }
     );
     if (!profileRes.ok) return { error: 'unauthorized' };
@@ -141,6 +143,7 @@ async function checkAdminRate({ userId, recipient, subject, plan }) {
                 p_limit:          MAX_PER_HOUR,
                 p_window_seconds: 3600,
             }),
+            signal: AbortSignal.timeout(8000),
         });
         if (!res.ok) {
             console.warn('[invites/send] quota RPC HTTP', res.status, '— failing open');
@@ -178,6 +181,7 @@ async function insertInvite({ code, plan, invitedEmail, expiryDays, createdBy })
             created_by:    createdBy,
             active:        true,
         }),
+        signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
         const txt = await res.text().catch(() => '');
@@ -321,6 +325,7 @@ export default async function handler(req) {
                 subject,
                 html,
             }),
+            signal: AbortSignal.timeout(10000),
         });
         if (!sendRes.ok) {
             const detail = await sendRes.text().catch(() => '');

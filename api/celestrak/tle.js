@@ -30,10 +30,13 @@
  * CelesTrak is free, CORS-enabled, and does not require authentication
  * for basic GP element queries.
  */
+import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const CELESTRAK_BASE = 'https://celestrak.org/NORAD/elements/gp.php';
 const CACHE_TTL      = 3600;   // 1 hour — TLEs update every ~8 hours
+const CACHE_SWR      = 300;
 
 // ── CelesTrak group → query parameter mapping ────────────────────────────────
 const GROUP_MAP = {
@@ -62,16 +65,6 @@ const RE = 6378.135;  // WGS-72 Earth radius (km)
 const MU = 398600.8;  // km³/s²
 const TWOPI = 2 * Math.PI;
 const MIN_PER_DAY = 1440;
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=300`,
-            'Access-Control-Allow-Origin':  '*',
-        },
-    });
-}
 
 /** Parse mean motion (rev/day) → period, apogee, perigee */
 function orbitParams(meanMotion, ecc) {
@@ -170,41 +163,40 @@ export default async function handler(request) {
     } else {
         const groupParam = GROUP_MAP[group];
         if (!groupParam) {
-            return jsonResp({
-                error: 'unknown_group',
-                available: Object.keys(GROUP_MAP),
-            }, 400, 60);
+            // 400 with a brief cache — bad group is a client bug, not an
+            // upstream problem, so no point hammering our own edge.
+            return jsonError('unknown_group', `Available: ${Object.keys(GROUP_MAP).join(', ')}`, {
+                status: 400, maxAge: 300,
+            });
         }
         celestrakUrl = `${CELESTRAK_BASE}?${groupParam}&FORMAT=TLE`;
     }
 
     let text;
     try {
-        const res = await fetch(celestrakUrl, {
+        const res = await fetchWithTimeout(celestrakUrl, {
             headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
         });
         if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
         text = await res.text();
     } catch (e) {
-        return jsonResp({
-            error: 'upstream_unavailable',
-            detail: e.message,
-            source: 'CelesTrak',
-        }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
     }
 
     if (!text || text.trim().length === 0) {
-        return jsonResp({ error: 'empty_response', source: 'CelesTrak' }, 503, 30);
+        return jsonError('empty_response', 'CelesTrak returned no TLEs', { source: 'CelesTrak' });
     }
 
-    // Raw TLE format requested
+    // Raw TLE format requested — return text/plain with the same cache
+    // policy. Can't use jsonOk because the caller wants the original TLE
+    // text, not a JSON wrapper.
     if (fmt === 'tle') {
         return new Response(text, {
             status: 200,
             headers: {
-                'Content-Type': 'text/plain',
-                'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=300`,
-                'Access-Control-Allow-Origin': '*',
+                'Content-Type':  'text/plain',
+                'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=${CACHE_SWR}`,
+                ...CORS_HEADERS,
             },
         });
     }
@@ -212,11 +204,11 @@ export default async function handler(request) {
     // Parse to JSON
     const satellites = parseTleText(text);
 
-    return jsonResp({
+    return jsonOk({
         source: 'CelesTrak',
         group: norad ? `NORAD ${norad}` : group,
         count: satellites.length,
         fetched: new Date().toISOString(),
         satellites,
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

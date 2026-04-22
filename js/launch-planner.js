@@ -27,6 +27,7 @@ import {
     compassLabel,
 } from './trip-planner.js';
 import { resolveRuleset, recoveryZoneForLaunch } from './launch-rulesets.js';
+import { convectiveAlertsNearPad } from './nws-proximity.js';
 
 // ── Rulesets ────────────────────────────────────────────────────────────────
 // Default ruleset is a conservative blend of publicly-documented launch
@@ -48,6 +49,46 @@ export const DEFAULT_RULESET = Object.freeze({
     cloud:       { green: 50, yellow: 75 },   // %, total cover
     tempLo:      { red: 35, yellow: 40 },     // °F
     tempHi:      { yellow: 95, red: 100 },    // °F
+    // Convective-instability bands — feed the bandConvective() scorer that
+    // replaced the old binary weather_code lightning check. These numbers
+    // are the SPC-style forecaster consensus for "marginal" vs "strong"
+    // thunderstorm environments:
+    //   CAPE    — 0–500 weak · 500–1500 moderate · >1500 strong
+    //   LI      — >−2 stable · −2 to −4 moderate · <−4 strongly unstable
+    //   CIN     — more negative = stronger cap. At or below cin_floor we
+    //             treat the airmass as capped even with high CAPE/LI.
+    //   pop_bump_pct — if PoP is this high AND instability is yellow, bump
+    //             to red (storms already lit in the model).
+    // Per-vehicle tightening happens in js/launch-rulesets.js.
+    convective: {
+        cape:        { green: 500, yellow: 1500 }, // J/kg (below green = clean)
+        lifted:      { green: -2,  yellow: -4   }, // °C  (above green = clean)
+        cin_floor:   -100,                         // J/kg (below = capped)
+        pop_bump_pct: 60,                          // %
+    },
+    // Cloud-layer bands — forecast proxies for 45 WS LLCC rules 3/4 (anvil
+    // clouds) and rule 6 (thick cloud layer through the 0° → -20°C band).
+    // Open-Meteo's 3-band decomposition isn't a direct stand-in for the
+    // polygon-based LLCC tests (which care about specific distances to
+    // specific clouds), but the "% cover in each altitude band" signal
+    // catches the obvious cases — scattered cirrus vs. overcast anvil deck,
+    // thin mid layer vs. a thick one straddling the freezing line.
+    //
+    //   anvil.high_pct     — % high cloud ( > 8 km ) triggering anvil caution
+    //   thick.mid_pct      — % mid cloud ( 3–8 km ) triggering thick-layer
+    //                        caution, ONLY when the freezing level sits in
+    //                        or below the mid-cloud band
+    //   thick.fl_max_m     — freezing level max altitude for the thick-layer
+    //                        rule to fire. If 0°C is above ~5 km the 0→-20°C
+    //                        band sits in the high-cloud zone, not mid.
+    // Two-threshold convention (matches wind/cape/lifted bands above):
+    //   < green  → clean   (green)
+    //   < yellow → watch   (yellow)
+    //   ≥ yellow → over    (red)
+    clouds: {
+        anvil: { green: 50, yellow: 85 },  // % high-cloud cover (>8 km)
+        thick: { green: 65, yellow: 90, fl_max_m: 5000 }, // % mid-cloud + freezing-level gate
+    },
 });
 
 const THUNDERSTORM_CODES = new Set([95, 96, 99]);
@@ -86,6 +127,77 @@ function bandCloud(pct, T) {
     return { v: 'red', note: `${pct}% — overcast` };
 }
 
+// LLCC cloud-layer proxies — anvil (Rules 3/4) + thick layer (Rule 6).
+//
+// Total cloud cover (bandCloud above) answers "can we see the rocket?" —
+// useful but it doesn't distinguish the LLCC concern. A clear ceiling with
+// 70% cirrus at 10 km is visible but could be anvil debris; an 80% mid-
+// level deck crossing the freezing line is a classic triggered-lightning
+// environment. This scorer reads both.
+//
+// This is explicitly a proxy, NOT the LLCC itself. The formal LLCC rules
+// test specific polygon distances to clouds of specific types / thicknesses,
+// which need field-mill + radar-inferred cloud-top temperatures we don't
+// have from public forecast APIs. The % cover + freezing-level check
+// catches the obvious red-flag cases and is transparent about its limits.
+function bandCloudLayers(snap, T) {
+    const low  = snap?.cloud_cover_low;
+    const mid  = snap?.cloud_cover_mid;
+    const high = snap?.cloud_cover_high;
+    const fl_m = snap?.freezing_level_m;
+
+    const haveAny = Number.isFinite(low) || Number.isFinite(mid) || Number.isFinite(high);
+    if (!haveAny) return { v: 'green', note: 'no layer data' };
+
+    const A = T.clouds.anvil;
+    const K = T.clouds.thick;
+    let band = 'green';
+    const bits = [];
+
+    // Anvil proxy — high cloud (>8 km) is the altitude band where
+    // thunderstorm anvils detach and drift. We don't know WHETHER it's an
+    // anvil here (vs. frontal cirrus), so the thresholds are generous:
+    // above green = "possibly anvil, watch"; above yellow = "probably
+    // anvil-class cover, LLCC scrub likely."
+    if (Number.isFinite(high)) {
+        const sub =
+            high >= A.yellow ? 'red'    :
+            high >= A.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`anvil risk: ${high}% high cloud`);
+        }
+    }
+
+    // Thick-layer proxy — mid cloud (3–8 km) only matters when the freezing
+    // level sits in or below the mid band (fl_m ≤ fl_max_m, typically 5 km).
+    // Above that, 0°→-20°C lives in the high-cloud zone and the thick-
+    // layer rule would apply to cirrus, not mid-deck altocumulus.
+    if (Number.isFinite(mid) && Number.isFinite(fl_m) && fl_m <= K.fl_max_m) {
+        const sub =
+            mid >= K.yellow ? 'red'    :
+            mid >= K.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`thick layer at 0°C (${mid}% mid · 0°C at ${(fl_m / 1000).toFixed(1)} km)`);
+        }
+    }
+
+    // Low-cloud info only — LLCC Rule 1 (cumulus) really needs cloud-top
+    // temperature, which isn't in the forecast. We list the low-cover
+    // number as context so operators can eyeball it; we don't score it.
+    if (Number.isFinite(low) && low >= 75 && band === 'green') {
+        bits.push(`${low}% low cloud (ceiling check)`);
+    }
+
+    const detail = bits.length ? bits.join(' · ') : 'layers within proxies';
+    const headline =
+        band === 'red'    ? 'cloud layers over LLCC proxies'  :
+        band === 'yellow' ? 'cloud layers marginal for LLCC'  :
+                            'cloud layers clear';
+    return { v: band, note: `${headline} (${detail})` };
+}
+
 function bandTemp(f, T) {
     if (f == null || !Number.isFinite(f)) return { v: 'yellow', note: 'unknown' };
     if (f < T.tempLo.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — below ${T.tempLo.red}°F cutoff` };
@@ -95,9 +207,131 @@ function bandTemp(f, T) {
     return { v: 'green', note: `${f.toFixed(0)}°F` };
 }
 
-function bandLightning(code) {
-    if (code != null && THUNDERSTORM_CODES.has(code)) return { v: 'red', note: weatherCodeLabel(code) };
-    return { v: 'green', note: 'no thunderstorms' };
+// Rank of NWS convective events by severity. Higher index = worse.
+// Used to pick the "driving" alert when multiple polygons are near the pad.
+const ALERT_EVENT_RANK = {
+    'Severe Thunderstorm Watch':   1,
+    'Tornado Watch':               2,
+    'Severe Thunderstorm Warning': 3,
+    'Tornado Warning':             4,
+};
+
+/** Return the worst (highest-rank) alert from a list, or null if empty. */
+function _worstAlert(alerts) {
+    if (!alerts || !alerts.length) return null;
+    let worst = alerts[0];
+    let worstRank = ALERT_EVENT_RANK[worst.event] ?? 0;
+    for (let i = 1; i < alerts.length; i++) {
+        const r = ALERT_EVENT_RANK[alerts[i].event] ?? 0;
+        if (r > worstRank) { worstRank = r; worst = alerts[i]; }
+    }
+    return worst;
+}
+
+// Convective/lightning band. Fuses four forecast signals plus live NWS
+// alerts so a developing or already-firing storm shows up in the verdict
+// hours before the WMO weather_code trips.
+//   weather_code  — ground truth: is a thunderstorm already firing?
+//   CAPE          — fuel: how much energy is available for updrafts?
+//   lifted index  — ignition: will a surface parcel actually rise? (< 0 unstable)
+//   CIN           — cap: is there a warm layer holding convection back?
+//   PoP           — model confidence that something will precipitate
+//   NWS alerts    — ground-truth: is a human forecaster calling lightning
+//                   RIGHT NOW near the pad? (proxies LLCC Rule 9.)
+//
+// A convention note on signs:
+//   lifted index is a temperature difference in °C. Negative = unstable.
+//   CIN is an energy deficit in J/kg. Open-Meteo publishes it as a NEGATIVE
+//   number (more negative = stronger cap). Our threshold `cin_floor` is also
+//   negative; we check `cin <= cin_floor` to mean "cap at least this strong."
+function bandConvective(snap, T, alerts) {
+    const code = snap?.weather_code;
+    const cape = snap?.cape_j_per_kg;
+    const li   = snap?.lifted_index;
+    const cin  = snap?.cin_j_per_kg;
+    const pop  = snap?.precip_prob_pct;
+    const leadH = Number.isFinite(snap?.lead_hours) ? snap.lead_hours : 0;
+
+    // Pre-compute the worst nearby NWS alert (if any). Used in two places:
+    // to force the band upward, and to add a rationale string. Pulled once
+    // so we don't do the ranking scan twice.
+    const wa = _worstAlert(alerts);
+
+    // 1. Compute the base forecast band from CAPE/LI/CIN/PoP/code as before.
+    let band, bits = [];
+
+    if (code != null && THUNDERSTORM_CODES.has(code)) {
+        band = 'red';
+        bits.push(`active TS code (${weatherCodeLabel(code)})`);
+    } else {
+        const capeBand =
+            !Number.isFinite(cape) ? null :
+            cape >= T.convective.cape.yellow ? 'red'    :
+            cape >= T.convective.cape.green  ? 'yellow' : 'green';
+        const liBand =
+            !Number.isFinite(li) ? null :
+            li <= T.convective.lifted.yellow ? 'red'    :
+            li <= T.convective.lifted.green  ? 'yellow' : 'green';
+
+        if (capeBand == null && liBand == null && !wa) {
+            // No forecast data AND no alert — we can't say anything. Don't
+            // flip every launch to yellow just because the feed was quiet.
+            return { v: 'green', note: 'no convective data' };
+        }
+
+        band = worst(capeBand ?? 'green', liBand ?? 'green');
+
+        // CIN cap downgrade — yellow→green when a strong warm layer pins
+        // convection down ("loaded gun with no trigger"). Never applied to
+        // red-level instability; never applied when an NWS alert is active
+        // near the pad (human forecaster beats our cap heuristic).
+        if (band === 'yellow' && !wa && Number.isFinite(cin) && cin <= T.convective.cin_floor) {
+            band = 'green';
+            bits.push('strong cap');
+        }
+
+        // PoP bump — if precip is likely and we're already marginal, call
+        // it red; precip in an unstable airmass is convective by default.
+        if (Number.isFinite(pop) && pop >= T.convective.pop_bump_pct && band === 'yellow') {
+            band = 'red';
+        }
+
+        if (Number.isFinite(cape)) bits.push(`CAPE ${Math.round(cape)} J/kg`);
+        if (Number.isFinite(li))   bits.push(`LI ${li.toFixed(1)}`);
+    }
+
+    // 2. Fold in any nearby NWS convective alert. Behavior depends on how
+    //    far away T-0 is:
+    //
+    //    • lead ≤ 12 h  — active NWS warning is directly relevant. Force
+    //                     red. Even a Watch bumps the verdict to red here
+    //                     because the human forecaster has already issued
+    //                     it for the current timeframe.
+    //    • lead > 12 h  — current alerts will almost certainly have
+    //                     expired before launch (NWS warnings run ~30–60
+    //                     minutes). Show as yellow — informational — but
+    //                     don't override a red base band downward.
+    if (wa) {
+        const dist = Number.isFinite(wa.distanceKm) ? Math.round(wa.distanceKm) : null;
+        const inside = wa.inside;
+        const alertLabel = inside
+            ? `${wa.event} covers the pad`
+            : `${wa.event} ${dist != null ? `${dist} km` : 'nearby'}`;
+
+        if (leadH <= 12) {
+            band = 'red';
+        } else if (band === 'green') {
+            band = 'yellow';
+        }
+        bits.unshift(alertLabel);
+    }
+
+    const detail = bits.length ? bits.join(' · ') : 'convective signals clear';
+    const headline =
+        band === 'red'    ? 'thunderstorm potential'                  :
+        band === 'yellow' ? 'instability — watch for development'     :
+                            'no thunderstorms';
+    return { v: band, note: `${headline} (${detail})`, alert: wa || null };
 }
 
 function bandUpperWind(mph, T) {
@@ -245,6 +479,12 @@ export function snapshotAt(fc, targetIso) {
         humidity:         h.humidity?.[i]         ?? null,
         visibility_m:     h.visibility_m?.[i]     ?? null,
         cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
+        lifted_index:     h.lifted_index?.[i]     ?? null,
+        cin_j_per_kg:     h.cin_j_per_kg?.[i]     ?? null,
+        cloud_cover_low:  h.cloud_cover_low?.[i]  ?? null,
+        cloud_cover_mid:  h.cloud_cover_mid?.[i]  ?? null,
+        cloud_cover_high: h.cloud_cover_high?.[i] ?? null,
+        freezing_level_m: h.freezing_level_m?.[i] ?? null,
         upper_wind_mph:       Number.isFinite(w200) ? w200 : null,
         upper_wind_dir_deg:   Number.isFinite(d200) ? d200 : null,
         upper_wind_500_mph:   Number.isFinite(h.wind_500_mph?.[i]) ? h.wind_500_mph[i] : null,
@@ -371,6 +611,12 @@ function snapshotFromCurrent(fc) {
         humidity:         c.humidity ?? null,
         visibility_m:     null,
         cape_j_per_kg:    null,
+        lifted_index:     null,
+        cin_j_per_kg:     null,
+        cloud_cover_low:  null,
+        cloud_cover_mid:  null,
+        cloud_cover_high: null,
+        freezing_level_m: null,
     };
 }
 
@@ -378,7 +624,10 @@ function snapshotFromCurrent(fc) {
  * Score a snapshot against launch commit criteria.
  * @param {object} snap     — shape returned by snapshotAt() or snapshotFromCurrent()
  * @param {object} [opts]
- * @param {object} [opts.ruleset] — override any subset of DEFAULT_RULESET
+ * @param {object}  [opts.ruleset]       — override any subset of DEFAULT_RULESET
+ * @param {Array}   [opts.nearbyAlerts]  — NWS convective alerts within the pad
+ *                                         proximity buffer (see nws-proximity.js).
+ *                                         Used by the convection/lightning band.
  * @returns {{ verdict: 'green'|'yellow'|'red', rules: Array, ruleset_id: string }}
  */
 export function scoreWeather(snap, opts = {}) {
@@ -390,15 +639,17 @@ export function scoreWeather(snap, opts = {}) {
             ruleset_id: T.id,
         };
     }
+    const alerts = opts.nearbyAlerts || null;
     const rules = [
         { key: 'wind',        label: 'Ground wind',      ...bandSustainedWind(snap.wind_mph, T) },
         { key: 'gust',        label: 'Wind gusts',       ...bandGust(snap.wind_gust_mph, T) },
         { key: 'upper_wind',  label: 'Upper winds (max-Q)', ...bandUpperWind(snap.upper_wind_mph, T) },
         { key: 'upper_shear', label: 'Wind shear',       ...bandUpperShear(snap.upper_shear_mph, T) },
         { key: 'precip',      label: 'Precipitation',    ...bandPrecip(snap.precip_prob_pct, T) },
-        { key: 'cloud',       label: 'Cloud cover',      ...bandCloud(snap.cloud_cover, T) },
-        { key: 'lightning',   label: 'Thunderstorms',    ...bandLightning(snap.weather_code) },
-        { key: 'temp',        label: 'Temperature',      ...bandTemp(snap.temp_f, T) },
+        { key: 'cloud',        label: 'Cloud cover',             ...bandCloud(snap.cloud_cover, T) },
+        { key: 'cloud_layers', label: 'Cloud layers (LLCC)',     ...bandCloudLayers(snap, T) },
+        { key: 'lightning',    label: 'Convection / lightning',  ...bandConvective(snap, T, alerts) },
+        { key: 'temp',         label: 'Temperature',             ...bandTemp(snap.temp_f, T) },
     ];
     const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
     return { verdict, rules, ruleset_id: T.id, snapshot: snap };
@@ -694,6 +945,13 @@ function renderDetail(l, fc, score) {
                 <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${snap.wind_gust_mph != null ? `${snap.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${snap.cloud_cover != null ? `${snap.cloud_cover}%` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">Precip prob</div><div class="lp-wx-v">${snap.precip_prob_pct != null ? `${snap.precip_prob_pct}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">CAPE</div><div class="lp-wx-v">${snap.cape_j_per_kg != null ? `${Math.round(snap.cape_j_per_kg)} J/kg` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Lifted idx</div><div class="lp-wx-v">${Number.isFinite(snap.lifted_index) ? snap.lifted_index.toFixed(1) : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud L / M / H</div><div class="lp-wx-v">${
+                    [snap.cloud_cover_low, snap.cloud_cover_mid, snap.cloud_cover_high]
+                        .map(x => Number.isFinite(x) ? `${x}` : '—').join(' / ')
+                }</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Freezing lvl</div><div class="lp-wx-v">${Number.isFinite(snap.freezing_level_m) ? `${(snap.freezing_level_m / 1000).toFixed(1)} km` : '—'}</div></div>
             </div>
         ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
 
@@ -758,6 +1016,40 @@ function renderDetail(l, fc, score) {
         ${sourceTxt}${notes}
     ` : '';
 
+    // Active NWS convective alerts (Severe Thunderstorm / Tornado
+    // Warning+Watch) whose polygon is within 50 km of the pad. Rendered only
+    // for US pads, only when the fetch produced matches — silent otherwise.
+    // NET-relative behavior lives in bandConvective(); here we just surface
+    // the triggering alert(s) as context.
+    const nearbyAlerts = l._nearby_alerts || [];
+    const alertBlock = nearbyAlerts.length ? `
+        <div class="lp-label" style="color:#fb0">Active NWS Alerts · within 50 km of pad</div>
+        <div class="lp-alerts">
+            ${nearbyAlerts.map(a => {
+                const isWarning = /Warning/i.test(a.event);
+                const c = isWarning ? '#ff4444' : '#ffaa00';
+                const dist = a.inside
+                    ? 'covers the pad'
+                    : `${Math.round(a.distanceKm)} km away`;
+                const exp = a.expires ? new Date(a.expires) : null;
+                const expTxt = exp && !isNaN(exp)
+                    ? exp.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : '';
+                return `
+                    <div class="lp-alert" style="border-color:${c}55;background:${c}10">
+                        <div class="lp-alert-hd">
+                            <span class="lp-alert-ev" style="color:${c}">${escHtml(a.event)}</span>
+                            <span class="lp-alert-dist">${escHtml(dist)}</span>
+                        </div>
+                        ${a.area ? `<div class="lp-alert-area">${escHtml(a.area)}</div>` : ''}
+                        ${expTxt ? `<div class="lp-alert-exp">expires ${escHtml(expTxt)}</div>` : ''}
+                    </div>
+                `;
+            }).join('')}
+            <div class="lp-alert-note">Source: api.weather.gov (CONUS + US territories). LLCC Rule 9 uses a 10 nmi lightning halo; this check extends to 50 km to allow for forecast uncertainty and polygon-edge granularity.</div>
+        </div>
+    ` : '';
+
     const zone = l._recovery_zone;
     const recoveryBlock = recoveryRules.length ? `
         <div class="lp-label">Recovery Criteria${zone ? ` <span class="lp-rule-src">· ${escHtml(zone.label)}${zone.offset_km ? ` (${zone.offset_km} km downrange)` : ''}</span>` : ''}</div>
@@ -801,6 +1093,8 @@ function renderDetail(l, fc, score) {
 
             ${forecastBlock}
 
+            ${alertBlock}
+
             ${ruleBlock}
 
             ${recoveryBlock}
@@ -808,11 +1102,16 @@ function renderDetail(l, fc, score) {
             ${starshipBlock}
 
             <div class="lp-footnote">
-                Weather source: Open-Meteo (hourly forecast, time-aligned to NET).
-                Launch data: Launch Library 2 (TheSpaceDevs).
-                Go/No-Go uses a generic orbital-launch ruleset based on publicly-documented
-                commit criteria; vehicle-specific rules ship next. Advisory only — not an
-                official flight-readiness determination.
+                Weather source: Open-Meteo (hourly forecast, time-aligned to NET) — surface
+                wind, upper-level winds at 200/300/500 hPa, CAPE, lifted index, CIN,
+                cloud cover decomposed by altitude (low/mid/high), and freezing-level
+                height. Alert source: api.weather.gov (CONUS + US territories).
+                Launch data: Launch Library 2 (TheSpaceDevs). Go/No-Go proxies 45 WS
+                LLCC rules 3/4 (anvil), 6 (thick layer across 0°→-20°C), and 9
+                (triggered lightning) — the LLCC itself tests specific polygon
+                distances, cloud-top temperatures, and surface-electric-field data
+                that public forecast APIs don't expose, so treat this as a triage
+                tool, not a flight-readiness determination.
             </div>
         </div>
     `;
@@ -926,13 +1225,23 @@ async function ensureWeather(l) {
     const needsMarine       = recoveryZone && recoveryZone.type === 'ASDS';
     const needsRecoveryWind = needsMarine;   // ASDS-zone wind differs from pad
 
-    const [fc, recoveryFc, marineFc] = await Promise.all([
+    // US pads get an NWS active-alert proximity check at the same time as
+    // the Open-Meteo fetches. Non-US pads (Kourou, Wenchang, Baikonur…) get
+    // an empty result because api.weather.gov's coverage is CONUS + US
+    // territories only; the helper returns [] silently in that case.
+    // The 50 km buffer mirrors the launch-commit lightning halo at CCAFS
+    // (LLCC Rule 9 uses 10 nmi ≈ 18.5 km; we double-and-round for forecast
+    // uncertainty + polygon-edge coarseness).
+    const [fc, recoveryFc, marineFc, nearbyAlerts] = await Promise.all([
         fetchLaunchForecast(l.pad.lat, l.pad.lon),
         needsRecoveryWind ? fetchLaunchForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
         needsMarine       ? fetchMarineForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
+        convectiveAlertsNearPad(l.pad.lat, l.pad.lon, { radiusKm: 50 })
+            .catch(() => []),
     ]);
     state.weatherCache.set(l.id, fc);
     l._marine_fc = marineFc;     // retained for the Starship focus panel
+    l._nearby_alerts = nearbyAlerts;
 
     const score = scoreLaunch(fc, l.net_iso, {
         ruleset:           rr.ruleset,
@@ -940,6 +1249,7 @@ async function ensureWeather(l) {
         recovery_fc:       recoveryFc,
         marine_fc:         marineFc,
         vehicle_label:     rr.label,
+        nearbyAlerts,
     });
     state.scoreCache.set(l.id, score);
     l._score = score;

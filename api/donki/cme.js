@@ -13,14 +13,15 @@
  * Filters for complete cone-model analyses only and adds an
  * `earth_directed` boolean based on latitude/longitude cone half-angle.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const DONKI_CME_BASE = 'https://api.nasa.gov/DONKI/CMEAnalysis';
 const CACHE_TTL      = 900;   // 15 min
+const CACHE_SWR      = 120;
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
 
 /** Earth is at lat=0, lon=0 in HEE; an Earth-directed CME has a small
  *  half-width cone that intersects Earth's position. */
@@ -29,16 +30,6 @@ function isEarthDirected(lat, lon, halfAngle) {
     // Approximate: angular distance from (0,0) must be <= halfAngle
     const dist = Math.sqrt(lat * lat + lon * lon);
     return dist <= halfAngle;
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
 }
 
 export default async function handler(request) {
@@ -56,15 +47,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI CMEAnalysis format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected DONKI CMEAnalysis format', { source: 'NASA DONKI' });
     }
 
     const cmes = raw
@@ -89,7 +80,7 @@ export default async function handler(request) {
 
     const earthCme = cmes.find(c => c.earth_directed) ?? null;
 
-    return jsonResp({
+    return jsonOk({
         source:    'NASA DONKI CMEAnalysis via Vercel Edge',
         data: {
             updated:         new Date().toISOString(),
@@ -98,5 +89,5 @@ export default async function handler(request) {
             latest_earth_cme: earthCme,
             cmes,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

@@ -33,10 +33,13 @@
  *   Solar minimum: F10.7 ≈ 65–70 sfu
  *   Solar maximum: F10.7 ≈ 200–300+ sfu
  */
+import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_F107 = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
 const CACHE_TTL = 3600;   // 1 hour — F10.7 updates once daily, no need to rush
+const CACHE_SWR = 1800;   // daily-cadence endpoint gets a longer SWR window
 const RECENT_N  = 7;      // days of history in `recent` array
 const TREND_WIN = 7;      // days for slope calculation
 
@@ -84,31 +87,21 @@ function freshnessStatus(ageHours) {
     return 'expired';
 }
 
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=1800`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 // ── Main handler ─────────────────────────────────────────────────────────────
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_F107, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_F107, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 60);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     // f107_cm_flux.json may be an array of objects or a 2-D array depending on
     // NOAA version. Handle both shapes.
     if (!Array.isArray(raw) || raw.length === 0) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected f107_cm_flux format' }, 503, 60);
+        return jsonError('parse_error', 'Unexpected f107_cm_flux format', { source: 'NOAA SWPC' });
     }
 
     const fill = v => {
@@ -146,7 +139,7 @@ export default async function handler() {
     }
 
     if (rows.length === 0) {
-        return jsonResp({ error: 'no_valid_data', detail: 'All F10.7 readings are null/fill' }, 503, 60);
+        return jsonError('no_valid_data', 'All F10.7 readings are null/fill', { source: 'NOAA SWPC' });
     }
 
     const latest      = rows[rows.length - 1];
@@ -164,7 +157,7 @@ export default async function handler() {
         flux_adjusted_sfu: r.adjusted_flux ?? null,
     }));
 
-    return jsonResp({
+    return jsonOk({
         source:     'NOAA SWPC f107_cm_flux via Vercel Edge',
         age_hours:  ageHours != null ? Math.round(ageHours * 10) / 10 : null,
         freshness:  freshnessStatus(ageHours),
@@ -185,5 +178,5 @@ export default async function handler() {
         units: {
             flux_sfu: 'sfu (10⁻²² W m⁻² Hz⁻¹) at 10.7 cm / 2.8 GHz',
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

@@ -15,24 +15,15 @@
  * useful for event-based detection vs. the continuous flux measurement.
  * A `recent_event` within 24 hr signals an active radiation storm.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const DONKI_SEP_BASE = 'https://api.nasa.gov/DONKI/SEP';
 const CACHE_TTL      = 900;   // 15 min
+const CACHE_SWR      = 120;
 const DEFAULT_DAYS   = 7;
 const MAX_DAYS       = 30;
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
 
 export default async function handler(request) {
     const nasaKey = (typeof process !== 'undefined' && process.env?.NASA_API_KEY) || 'DEMO_KEY';
@@ -49,15 +40,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(donkiURL, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(donkiURL, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NASA DONKI' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NASA DONKI' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected DONKI SEP format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected DONKI SEP format', { source: 'NASA DONKI' });
     }
 
     const events = raw
@@ -84,7 +75,7 @@ export default async function handler(request) {
     }) ?? null;
     const radiationStormActive = !!recentEvent;
 
-    return jsonResp({
+    return jsonOk({
         source: 'NASA DONKI SEP via Vercel Edge',
         data: {
             updated:                new Date().toISOString(),
@@ -93,5 +84,5 @@ export default async function handler(request) {
             recent_event:           recentEvent,
             events,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

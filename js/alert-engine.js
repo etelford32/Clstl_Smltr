@@ -27,14 +27,25 @@ import { listLocations, effectivePrefs, onLocationsChanged } from './saved-locat
 import { ConjunctionMonitor } from './conjunction-alert.js';
 import { geo, RAD } from './geo/coords.js';
 
-// ── Open-Meteo point forecast ────────────────────────────────────────────────
+// ── Open-Meteo point forecast (via backend proxy) ───────────────────────────
 
-const OPEN_METEO_URL = 'https://api.open-meteo.com/v1/forecast';
+// Routes through /api/weather/forecast with type=point. Cache dedup means
+// a whole-site rollout of alert-engine polling only costs the backend a
+// handful of Open-Meteo calls per 15 min, not one per user. See
+// api/weather/forecast.js for the full rationale.
+const WEATHER_API = '/api/weather/forecast';
 const WEATHER_POLL_MS = 30 * 60_000;  // 30 minutes
 
+// Match the proxy's lat/lon quantization so alert-engine's cache keys align
+// with trip-planner's — a dashboard open on the same location pre-warms the
+// alert-engine's next poll and vice-versa.
+const quantize = v => Number((+v).toFixed(3));
+
 /**
- * Fetch point forecast for a lat/lon from Open-Meteo (free, no API key).
+ * Fetch point forecast for a lat/lon from the backend proxy.
  * Returns current conditions + today/tomorrow high/low + cloud cover + sunrise/sunset.
+ * The proxy's `point` type returns a superset of the fields we need; we
+ * just pluck what this module uses.
  *
  * @param {number} lat
  * @param {number} lon
@@ -42,16 +53,15 @@ const WEATHER_POLL_MS = 30 * 60_000;  // 30 minutes
  */
 async function fetchPointWeather(lat, lon) {
     const params = new URLSearchParams({
-        latitude: lat.toFixed(4),
-        longitude: lon.toFixed(4),
-        current: 'temperature_2m,cloud_cover,is_day,weather_code',
-        daily: 'temperature_2m_max,temperature_2m_min,sunrise,sunset',
-        temperature_unit: 'fahrenheit',
-        timezone: 'auto',
-        forecast_days: '2',
+        type: 'point',
+        lat:  String(quantize(lat)),
+        lon:  String(quantize(lon)),
+        days: '2',
     });
     try {
-        const res = await fetch(`${OPEN_METEO_URL}?${params}`);
+        const res = await fetch(`${WEATHER_API}?${params}`, {
+            signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return null;
         const data = await res.json();
         if (data.error) return null;

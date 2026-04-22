@@ -8,6 +8,8 @@
  * Returns hemispheric auroral power (GW) for north and south, plus an
  * activity label derived from north hemisphere power.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_AURORA = 'https://services.swpc.noaa.gov/json/ovation_aurora_latest.json';
@@ -23,32 +25,20 @@ function auroraActivity(powerGW) {
     return                      'quiet';
 }
 
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=60`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
-}
-
 export default async function handler() {
     let raw;
     try {
-        const res = await fetch(NOAA_AURORA, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_AURORA, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     // ovation_aurora_latest.json: { Forecast Time, Data Type, coordinates[], ... }
     // Hemispheric power is in the top-level object
     if (!raw || typeof raw !== 'object') {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected ovation_aurora format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected ovation_aurora format', { source: 'NOAA SWPC' });
     }
 
     const fill = v => {
@@ -70,7 +60,7 @@ export default async function handler() {
     );
     const forecastTime = raw['Forecast Time'] ?? raw.forecast_time ?? null;
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC OVATION Prime ovation_aurora_latest via Vercel Edge',
         data: {
             updated: isoTag(forecastTime),
@@ -81,5 +71,5 @@ export default async function handler() {
             },
         },
         units: { power_GW: 'Gigawatts (hemispheric integrated power)' },
-    });
+    }, { maxAge: CACHE_TTL });
 }

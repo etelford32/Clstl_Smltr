@@ -11,27 +11,18 @@
  *   PRO  — full 7-day list
  *          Pass Authorization: Bearer <token> to unlock.
  */
+import { jsonOk, jsonError, fetchWithTimeout, isoTag } from '../_lib/responses.js';
+
 export const config = { runtime: 'edge' };
 
 const NOAA_FLARES  = 'https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json';
 const CACHE_TTL    = 900;   // 15 min — T3 cadence
+const CACHE_SWR    = 120;   // T3 endpoints use a longer SWR than the default
 const FREE_LIMIT   = 3;
-
-function isoTag(t) { return t ? String(t).replace(' ', 'T') + 'Z' : null; }
 
 function fluxLetter(cls) {
     if (!cls) return 'A';
     return cls[0].toUpperCase();
-}
-
-function jsonResp(body, status = 200, maxAge = CACHE_TTL) {
-    return Response.json(body, {
-        status,
-        headers: {
-            'Cache-Control':               `public, s-maxage=${maxAge}, stale-while-revalidate=120`,
-            'Access-Control-Allow-Origin': '*',
-        },
-    });
 }
 
 function isPro(request) {
@@ -46,15 +37,15 @@ export default async function handler(request) {
 
     let raw;
     try {
-        const res = await fetch(NOAA_FLARES, { headers: { Accept: 'application/json' } });
+        const res = await fetchWithTimeout(NOAA_FLARES, { headers: { Accept: 'application/json' } });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         raw = await res.json();
     } catch (e) {
-        return jsonResp({ error: 'upstream_unavailable', detail: e.message, source: 'NOAA SWPC' }, 503, 30);
+        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
     if (!Array.isArray(raw)) {
-        return jsonResp({ error: 'parse_error', detail: 'Unexpected xray-flares format' }, 503, 30);
+        return jsonError('parse_error', 'Unexpected xray-flares format', { source: 'NOAA SWPC' });
     }
 
     // Parse flare objects — NOAA returns JSON objects (not a 2-D array)
@@ -73,7 +64,7 @@ export default async function handler(request) {
 
     const limited = pro ? flares : flares.slice(0, FREE_LIMIT);
 
-    return jsonResp({
+    return jsonOk({
         source:    'NOAA SWPC GOES xray-flares-7-day via Vercel Edge',
         plan:      pro ? 'pro' : 'free',
         data: {
@@ -82,5 +73,5 @@ export default async function handler(request) {
             shown_count:  limited.length,
             flares:       limited,
         },
-    });
+    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }

@@ -17,8 +17,34 @@
 import * as THREE from 'three';
 import { geo, RAD } from './geo/coords.js';
 
-const OPEN_METEO_URL        = 'https://api.open-meteo.com/v1/forecast';
-const OPEN_METEO_MARINE_URL = 'https://marine-api.open-meteo.com/v1/marine';
+// All Open-Meteo traffic now routes through our backend proxy. Benefits
+// spelled out in api/weather/forecast.js; in short: ~1000× fewer upstream
+// calls via edge-cache dedup, no CORS preflight tax, and SWR-served stale
+// data during upstream blips. The proxy encodes the parameter sets
+// server-side so the client URL stays short + cache-key-stable.
+const WEATHER_API = '/api/weather/forecast';
+
+// Match the proxy's quantization — lat/lon rounded to 3dp (~110 m) so
+// near-duplicate pad/location coords hit the same edge cache entry.
+// Anything finer just fragments the cache without any forecast difference
+// (Open-Meteo's coarsest grid is ~11 km).
+const COORD_DECIMALS = 3;
+const quantize = v => Number((+v).toFixed(COORD_DECIMALS));
+
+/**
+ * Build the proxy URL. Keeping this as one helper rather than three
+ * per-type builders because the URL shape is identical — only the
+ * `type` literal and (optional) `days` differ.
+ */
+function weatherProxyUrl(type, lat, lon, { days } = {}) {
+    const params = new URLSearchParams({
+        type,
+        lat: String(quantize(lat)),
+        lon: String(quantize(lon)),
+    });
+    if (days != null) params.set('days', String(days));
+    return `${WEATHER_API}?${params}`;
+}
 
 // ── Great-circle math ───────────────────────────────────────────────────────
 // These three exports used to carry their own haversine / bearing / SLERP
@@ -74,27 +100,15 @@ export function greatCirclePath(a, b, n = 64) {
  * Returns null on network / parse failure.
  */
 export async function fetchPointForecast(lat, lon) {
-    const params = new URLSearchParams({
-        latitude:  (+lat).toFixed(4),
-        longitude: (+lon).toFixed(4),
-        current:   [
-            'temperature_2m', 'apparent_temperature',
-            'relative_humidity_2m', 'cloud_cover', 'is_day', 'weather_code',
-            'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
-            'precipitation', 'pressure_msl',
-        ].join(','),
-        daily: [
-            'temperature_2m_max', 'temperature_2m_min',
-            'precipitation_sum', 'precipitation_probability_max',
-            'sunrise', 'sunset', 'uv_index_max',
-        ].join(','),
-        temperature_unit: 'fahrenheit',
-        wind_speed_unit:  'mph',
-        timezone:         'auto',
-        forecast_days:    '3',
-    });
+    // Route through /api/weather/forecast proxy. Parameter set lives
+    // server-side (see api/weather/forecast.js buildPointParams). Shorter
+    // timeout than the old direct-to-Open-Meteo path — the proxy itself
+    // enforces 8 s upstream, so a 10 s client budget leaves slack for
+    // the one-hop edge round-trip.
     try {
-        const res = await fetch(`${OPEN_METEO_URL}?${params}`, { signal: AbortSignal.timeout(12000) });
+        const res = await fetch(weatherProxyUrl('point', lat, lon), {
+            signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return null;
         const data = await res.json();
         if (data.error) return null;
@@ -141,43 +155,16 @@ export async function fetchPointForecast(lat, lon) {
  * Returns null on network / parse failure.
  */
 export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
-    const params = new URLSearchParams({
-        latitude:  (+lat).toFixed(4),
-        longitude: (+lon).toFixed(4),
-        current: [
-            'temperature_2m', 'apparent_temperature',
-            'relative_humidity_2m', 'cloud_cover', 'is_day', 'weather_code',
-            'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
-            'precipitation', 'pressure_msl',
-        ].join(','),
-        hourly: [
-            'temperature_2m',
-            'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
-            'precipitation', 'precipitation_probability',
-            'cloud_cover', 'weather_code',
-            'relative_humidity_2m', 'visibility', 'cape',
-            // Pressure-level winds for upper-level shear analysis near max-Q.
-            // 200 hPa ≈ 12 km (the max-Q altitude for most orbital launch
-            // vehicles); 300 hPa ≈ 9 km (below max-Q, needed to compute
-            // vector shear across the high-stress band); 500 hPa ≈ 5.5 km
-            // kept as a mid-layer reference for tall small launchers like
-            // Electron that max-Q higher.
-            'wind_speed_500hPa', 'wind_direction_500hPa',
-            'wind_speed_300hPa', 'wind_direction_300hPa',
-            'wind_speed_200hPa', 'wind_direction_200hPa',
-        ].join(','),
-        daily: [
-            'temperature_2m_max', 'temperature_2m_min',
-            'precipitation_sum', 'precipitation_probability_max',
-            'sunrise', 'sunset', 'uv_index_max',
-        ].join(','),
-        temperature_unit: 'fahrenheit',
-        wind_speed_unit:  'mph',
-        timezone:         'auto',
-        forecast_days:    String(forecastDays),
-    });
+    // Parameter set (hourly pressure-level winds, CAPE/LI/CIN, cloud-layer
+    // decomposition, freezing level) is encoded server-side in
+    // api/weather/forecast.js buildLaunchParams. Adding new forecast fields
+    // means updating that file AND the response shape below — the proxy
+    // passes through raw Open-Meteo JSON untouched.
     try {
-        const res = await fetch(`${OPEN_METEO_URL}?${params}`, { signal: AbortSignal.timeout(12000) });
+        const res = await fetch(
+            weatherProxyUrl('launch', lat, lon, { days: forecastDays }),
+            { signal: AbortSignal.timeout(10000) },
+        );
         if (!res.ok) return null;
         const data = await res.json();
         if (data.error) return null;
@@ -208,10 +195,16 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
                 precip_in:         data.hourly?.precipitation ?? [],
                 precip_prob_pct:   data.hourly?.precipitation_probability ?? [],
                 cloud_cover:       data.hourly?.cloud_cover ?? [],
+                cloud_cover_low:   data.hourly?.cloud_cover_low ?? [],
+                cloud_cover_mid:   data.hourly?.cloud_cover_mid ?? [],
+                cloud_cover_high:  data.hourly?.cloud_cover_high ?? [],
+                freezing_level_m:  data.hourly?.freezing_level_height ?? [],
                 weather_code:      data.hourly?.weather_code ?? [],
                 humidity:          data.hourly?.relative_humidity_2m ?? [],
                 visibility_m:      data.hourly?.visibility ?? [],
                 cape_j_per_kg:     data.hourly?.cape ?? [],
+                lifted_index:      data.hourly?.lifted_index ?? [],
+                cin_j_per_kg:      data.hourly?.convective_inhibition ?? [],
                 // Pressure-level wind arrays, aligned to the same `time` index.
                 // Units follow wind_speed_unit (mph), direction in degrees.
                 wind_500_mph:      data.hourly?.wind_speed_500hPa ?? [],
@@ -254,25 +247,14 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
  */
 export async function fetchMarineForecast(lat, lon, { forecastDays = 5 } = {}) {
     if (!Number.isFinite(+lat) || !Number.isFinite(+lon)) return null;
-    const params = new URLSearchParams({
-        latitude:  (+lat).toFixed(4),
-        longitude: (+lon).toFixed(4),
-        current: [
-            'wave_height', 'wave_direction', 'wave_period',
-            'wind_wave_height', 'wind_wave_period',
-            'swell_wave_height', 'swell_wave_period', 'swell_wave_direction',
-            'ocean_current_velocity',
-        ].join(','),
-        hourly: [
-            'wave_height', 'wave_direction', 'wave_period',
-            'wind_wave_height', 'wind_wave_direction', 'wind_wave_period',
-            'swell_wave_height', 'swell_wave_direction', 'swell_wave_period',
-        ].join(','),
-        timezone:      'auto',
-        forecast_days: String(forecastDays),
-    });
+    // Marine parameter set (wave / wind-wave / swell / ocean-current) is
+    // in buildMarineParams on the proxy. The proxy routes this to
+    // marine-api.open-meteo.com (separate subdomain from the forecast API).
     try {
-        const res = await fetch(`${OPEN_METEO_MARINE_URL}?${params}`, { signal: AbortSignal.timeout(12000) });
+        const res = await fetch(
+            weatherProxyUrl('marine', lat, lon, { days: forecastDays }),
+            { signal: AbortSignal.timeout(10000) },
+        );
         if (!res.ok) return null;
         const data = await res.json();
         if (data.error) return null;
