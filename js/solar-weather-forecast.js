@@ -293,6 +293,54 @@ function solarCyclePhase(now_ms = Date.now()) {
     };
 }
 
+// ── Persistence baseline ─────────────────────────────────────────────────────
+
+/**
+ * Dumbest-model-that-works Kp forecast: "Kp(t) = Kp_now", with prediction
+ * intervals that grow with horizon. This is the null model any skilled
+ * forecast must beat; shipping it on the dashboard keeps us honest about
+ * whether the AR(p) bands are doing real work or just decoration.
+ *
+ * Uncertainty grows as σ(t) = σ_climo · √(t / τ), approaching climatological
+ * spread by ~τ hours. τ=24h is an empirical match to Owens et al. (2013)
+ * persistence-skill-decay analyses for Kp at mid-latitudes.
+ *
+ * @param {number}   kpNow       — current Kp value
+ * @param {number[]} history     — recent hourly Kp (for σ_climo fallback)
+ * @param {number}   horizon_h   — forecast horizon (hours)
+ * @param {object}   opts
+ * @param {number}   [opts.tau]         — e-folding time for uncertainty (default 24h)
+ * @param {number}   [opts.sigmaClimo]  — long-run Kp std dev (default 1.6, ~7-day σ of estimated Kp)
+ * @returns {{ mean, lo80, hi80, lo95, hi95, sigma: number[] }}
+ */
+function persistenceForecast(kpNow, history, horizon_h, opts = {}) {
+    const tau = opts.tau ?? 24;
+    // Prefer observed σ of the recent window, floor at climatological value,
+    // cap at a physically implausible ceiling to avoid blow-up on tiny samples.
+    const sigmaSample = Math.sqrt(variance(history ?? []));
+    const sigmaClimo = opts.sigmaClimo ?? Math.max(1.2, Math.min(2.2, sigmaSample || 1.6));
+
+    const mean  = new Array(horizon_h);
+    const sigma = new Array(horizon_h);
+    const lo80  = new Array(horizon_h);
+    const hi80  = new Array(horizon_h);
+    const lo95  = new Array(horizon_h);
+    const hi95  = new Array(horizon_h);
+
+    const kpClamped = Math.max(0, Math.min(9, kpNow ?? 0));
+    for (let h = 0; h < horizon_h; h++) {
+        const tHours = h + 1;   // forecast for end of hour (1..horizon_h)
+        const s = sigmaClimo * Math.sqrt(tHours / tau);
+        mean[h]  = kpClamped;
+        sigma[h] = s;
+        lo80[h]  = Math.max(0, kpClamped - 1.28 * s);
+        hi80[h]  = Math.min(9, kpClamped + 1.28 * s);
+        lo95[h]  = Math.max(0, kpClamped - 1.96 * s);
+        hi95[h]  = Math.min(9, kpClamped + 1.96 * s);
+    }
+    return { mean, lo80, hi80, lo95, hi95, sigma };
+}
+
 // ── Storm probability ────────────────────────────────────────────────────────
 
 /**
@@ -476,4 +524,4 @@ export class SolarWeatherForecaster {
 }
 
 // Re-export helpers for direct use in tests or other modules
-export { fitAR, forecastAR, holtSmooth, recurrence27Day, solarCyclePhase, stormProbability, acf };
+export { fitAR, forecastAR, persistenceForecast, holtSmooth, recurrence27Day, solarCyclePhase, stormProbability, acf };
