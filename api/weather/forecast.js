@@ -49,13 +49,22 @@ export const config = { runtime: 'edge' };
 // else lives on the main forecast API.
 const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_MARINE   = 'https://marine-api.open-meteo.com/v1/marine';
+// Historical archive is served from a separate subdomain — not the live
+// forecast API. Data horizon reaches back ~80 years; we only ask for the
+// last 90 days because that's what temp-forecast.js's regression needs.
+const OPEN_METEO_ARCHIVE  = 'https://archive-api.open-meteo.com/v1/archive';
 
-// Cache tuning. Open-Meteo's deterministic models refresh hourly; we pick
-// 15 min so we guarantee at least one refresh per model cycle without
-// hammering the upstream. stale-while-revalidate=600 covers upstream
-// blips: edge serves up-to-25-min-old data while it silently refreshes.
-const CACHE_TTL  = 900;   // 15 min
-const CACHE_SWR  = 600;   // 10 min stale tolerance
+// Cache tuning — two tiers, chosen per type:
+//   FORECAST tier (point / launch / marine): Open-Meteo's deterministic
+//     models refresh hourly. 15 min s-maxage guarantees at least one
+//     refresh per model cycle without hammering the upstream.
+//   ARCHIVE tier (archive): historical daily temps are effectively
+//     immutable for the last ~30 days — they don't change until the next
+//     reanalysis run, days later. Cache 24 hr + long SWR window.
+const CACHE_TTL_FORECAST = 900;    // 15 min
+const CACHE_SWR_FORECAST = 600;    // 10 min stale tolerance
+const CACHE_TTL_ARCHIVE  = 86400;  // 24 hr
+const CACHE_SWR_ARCHIVE  = 43200;  // 12 hr — long SWR is free for historical
 
 // Tight upstream timeout. Open-Meteo's p99 is ~2 s under healthy conditions;
 // 8 s gives comfortable headroom for cold-region fetches without pinning
@@ -68,26 +77,43 @@ const UPSTREAM_TIMEOUT_MS = 8000;
 // trip-planner.js applies on the client side.
 const COORD_DECIMALS = 3;
 
-// Per-type forecast-horizon defaults + caps. Each type's upstream call
-// pulls a parameter set tuned to its use case; here we just gate `days`.
+// Per-type spec: default forecast horizon, max allowed, upstream endpoint,
+// parameter builder, and which cache tier to apply. `archive` is the only
+// non-forecast tier; everything else shares the 15-min forecast cache.
 const TYPE_SPECS = Object.freeze({
     point: {
         defaultDays: 3,
         maxDays:     7,
         upstream:    OPEN_METEO_FORECAST,
         build:       buildPointParams,
+        cacheTier:   'forecast',
     },
     launch: {
         defaultDays: 7,
         maxDays:     7,          // Open-Meteo free plan forecast horizon
         upstream:    OPEN_METEO_FORECAST,
         build:       buildLaunchParams,
+        cacheTier:   'forecast',
     },
     marine: {
         defaultDays: 5,
         maxDays:     7,
         upstream:    OPEN_METEO_MARINE,
         build:       buildMarineParams,
+        cacheTier:   'forecast',
+    },
+    // Historical daily temperatures — feeds temp-forecast.js's local
+    // ridge-regression model. The client requests N days of lookback via
+    // `days`; we clamp to [14, 365] because <14 days can't fit a
+    // meaningful regression, and >365 exceeds what Open-Meteo's archive
+    // returns in a single call without pagination.
+    archive: {
+        defaultDays: 90,
+        maxDays:     365,
+        minDays:     14,
+        upstream:    OPEN_METEO_ARCHIVE,
+        build:       buildArchiveParams,
+        cacheTier:   'archive',
     },
 });
 
@@ -106,9 +132,15 @@ function buildPointParams(lat, lon, days) {
             'wind_speed_10m', 'wind_direction_10m', 'wind_gusts_10m',
             'precipitation', 'pressure_msl',
         ].join(','),
+        // cloud_cover_mean + wind_speed_10m_max are extra daily aggregates
+        // temp-forecast.js's GFS ensemble reads; including them in the
+        // default `point` response (a few kB of extra JSON) lets temp-
+        // forecast share the same cache key as the dashboard card instead
+        // of fragmenting cache with a near-duplicate request.
         daily: [
             'temperature_2m_max', 'temperature_2m_min',
             'precipitation_sum', 'precipitation_probability_max',
+            'cloud_cover_mean',  'wind_speed_10m_max',
             'sunrise', 'sunset', 'uv_index_max',
         ].join(','),
         temperature_unit: 'fahrenheit',
@@ -155,6 +187,30 @@ function buildLaunchParams(lat, lon, days) {
         wind_speed_unit:  'mph',
         timezone:         'auto',
         forecast_days:    String(days),
+    });
+}
+
+/**
+ * Historical daily temperatures for the last `days` days.
+ * Endpoint differs from the forecast API — requires start_date + end_date
+ * rather than forecast_days. Values are reanalysis-grade and don't change
+ * for dates >30 days old, so this tier caches aggressively (24 hr).
+ */
+function buildArchiveParams(lat, lon, days) {
+    // Query window ends yesterday (archive data lags 1–2 days behind real
+    // time) and extends `days` back. ISO-date-only format is what the
+    // archive API accepts.
+    const end   = new Date(Date.now() - 86_400_000);   // yesterday
+    const start = new Date(end.getTime() - days * 86_400_000);
+    const fmt   = d => d.toISOString().slice(0, 10);
+    return new URLSearchParams({
+        latitude:   lat.toFixed(COORD_DECIMALS),
+        longitude:  lon.toFixed(COORD_DECIMALS),
+        start_date: fmt(start),
+        end_date:   fmt(end),
+        daily:      'temperature_2m_max,temperature_2m_min',
+        temperature_unit: 'fahrenheit',
+        timezone:   'auto',
     });
 }
 
@@ -214,7 +270,8 @@ export default async function handler(request) {
     }
 
     const rawDays = parseInt(url.searchParams.get('days') ?? String(spec.defaultDays), 10);
-    const days    = Math.max(1,
+    const minDays = spec.minDays ?? 1;
+    const days    = Math.max(minDays,
                              Math.min(spec.maxDays,
                                       Number.isFinite(rawDays) ? rawDays : spec.defaultDays));
 
@@ -254,11 +311,13 @@ export default async function handler(request) {
     // Passthrough the upstream body verbatim. No re-serialization cost,
     // and trip-planner.js keeps its existing parse logic.
     const body = await upstream.text();
+    const ttl  = spec.cacheTier === 'archive' ? CACHE_TTL_ARCHIVE : CACHE_TTL_FORECAST;
+    const swr  = spec.cacheTier === 'archive' ? CACHE_SWR_ARCHIVE : CACHE_SWR_FORECAST;
     return new Response(body, {
         status:  200,
         headers: {
             'Content-Type':  'application/json',
-            'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=${CACHE_SWR}`,
+            'Cache-Control': `public, s-maxage=${ttl}, stale-while-revalidate=${swr}`,
             ...CORS_HEADERS,
         },
     });

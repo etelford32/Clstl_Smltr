@@ -32,16 +32,25 @@
 
 import { geo } from './geo/coords.js';
 
-const NWS_API    = 'https://api.weather.gov/alerts/active';
-const USER_AGENT = '(CelestialSimulator/1.0, celestial@parker-physics.edu)';
+// Backend proxy that fetches + filters NWS active alerts. The proxy
+// adds an edge-cache layer shared across ALL visitors (api/nws/convective.js
+// s-maxage=180) so a launch-planner pageview with 30 pads is ONE upstream
+// hit — even across different user sessions — not one per cold client
+// cache. See the proxy source for the full "why" rationale.
+const NWS_PROXY = '/api/nws/convective';
+
+// Client-side TTL is shorter than the edge cache because the edge is
+// already dedup'd; the in-module cache exists to dedup within a single
+// page load (multiple pads checked simultaneously), not across hours.
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const FETCH_TIMEOUT_MS = 12000;
+const FETCH_TIMEOUT_MS = 10000;
 
 // The four NWS event names that mean "active lightning risk near this point."
 // Deliberately narrow — a Flood Warning or Winter Storm Watch doesn't gate
 // LLCC Rule 9. Severe Thunderstorm Watch is included because a launch scrubs
 // for *forecast* thunder as well as ongoing thunder; tower ops don't care
 // about the warning-vs-watch legal distinction.
+// Exported for callers who want to assert expected behavior in tests.
 export const CONVECTIVE_EVENTS = Object.freeze([
     'Severe Thunderstorm Warning',
     'Severe Thunderstorm Watch',
@@ -53,10 +62,10 @@ let _cache    = null;    // { fetchedAt: number, alerts: Alert[] }
 let _inflight = null;    // dedupe concurrent callers
 
 /**
- * Fetch the active convective-alert set. Single-flight, 5-minute cached.
- * Returns [] on network / parse failure rather than throwing — a convection
- * scorer shouldn't turn into an error path just because api.weather.gov is
- * briefly slow.
+ * Fetch the active convective-alert set via the backend proxy. Single-
+ * flight, 5-minute client cache. Returns [] on failure rather than
+ * throwing — a convection scorer shouldn't become an error path just
+ * because the proxy or upstream is briefly slow.
  */
 export async function fetchConvectiveAlerts() {
     const now = Date.now();
@@ -65,19 +74,11 @@ export async function fetchConvectiveAlerts() {
 
     _inflight = (async () => {
         try {
-            // NWS supports a CSV event= filter; keeps the response small by
-            // fetching only the 4 event types we care about rather than the
-            // full firehose the globe uses.
-            const params = new URLSearchParams({
-                status:       'actual',
-                message_type: 'alert',
-                event:        CONVECTIVE_EVENTS.join(','),
-            });
-            const res = await fetch(`${NWS_API}?${params}`, {
-                headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/geo+json' },
+            const res = await fetch(NWS_PROXY, {
+                headers: { Accept: 'application/geo+json' },
                 signal:  AbortSignal.timeout(FETCH_TIMEOUT_MS),
             });
-            if (!res.ok) throw new Error(`NWS HTTP ${res.status}`);
+            if (!res.ok) throw new Error(`proxy HTTP ${res.status}`);
             const gj = await res.json();
             const alerts = (gj.features ?? [])
                 .map(_projectFeature)

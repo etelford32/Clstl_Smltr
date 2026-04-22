@@ -27,32 +27,35 @@
  *  fetchExtendedForecast fn — get 7-day GFS forecast
  */
 
-const OPEN_METEO_FORECAST  = 'https://api.open-meteo.com/v1/forecast';
-const OPEN_METEO_ARCHIVE   = 'https://archive-api.open-meteo.com/v1/archive';
+// All Open-Meteo traffic routes through /api/weather/forecast. The proxy
+// encodes the archive + forecast parameter sets server-side, so cache
+// dedup catches near-duplicate locations (many users per same region)
+// AND cross-type dedup: this module's `point` call shares a cache key
+// with the dashboard card's fetchPointForecast, so loading one warms the
+// other. See api/weather/forecast.js for cache tiering (archive tier
+// caches 24 hr; forecast tier caches 15 min).
+const WEATHER_API = '/api/weather/forecast';
+
+// Match the proxy's 3-decimal quantization so cache keys align exactly.
+const quantize = v => Number((+v).toFixed(3));
 
 // ── Data fetching ────────────────────────────────────────────────────────────
 
 /**
- * Fetch 90 days of historical daily temperatures for a location.
+ * Fetch N days of historical daily temperatures (via proxy's archive type).
  * @returns {Promise<Array<{date:string, high:number, low:number}>>}
  */
 export async function fetchHistorical(lat, lon, days = 90) {
-    const end   = new Date();
-    const start = new Date(end);
-    start.setDate(start.getDate() - days);
-
     const params = new URLSearchParams({
-        latitude:  lat.toFixed(4),
-        longitude: lon.toFixed(4),
-        start_date: start.toISOString().slice(0, 10),
-        end_date:   end.toISOString().slice(0, 10),
-        daily: 'temperature_2m_max,temperature_2m_min',
-        temperature_unit: 'fahrenheit',
-        timezone: 'auto',
+        type: 'archive',
+        lat:  String(quantize(lat)),
+        lon:  String(quantize(lon)),
+        days: String(days),
     });
-
     try {
-        const res = await fetch(`${OPEN_METEO_ARCHIVE}?${params}`);
+        const res = await fetch(`${WEATHER_API}?${params}`, {
+            signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return [];
         const data = await res.json();
         if (data.error || !data.daily?.time) return [];
@@ -69,21 +72,21 @@ export async function fetchHistorical(lat, lon, days = 90) {
 }
 
 /**
- * Fetch 7-day GFS/ECMWF forecast from Open-Meteo.
+ * Fetch 7-day GFS/ECMWF forecast (via proxy's point type — same cache key
+ * as the dashboard's point forecast, free cache-hit dedup).
  * @returns {Promise<Array<{date:string, high:number, low:number, precip_mm:number, cloud:number, wind_max:number}>>}
  */
 export async function fetchExtendedForecast(lat, lon) {
     const params = new URLSearchParams({
-        latitude:  lat.toFixed(4),
-        longitude: lon.toFixed(4),
-        daily: 'temperature_2m_max,temperature_2m_min,precipitation_sum,cloud_cover_mean,wind_speed_10m_max',
-        temperature_unit: 'fahrenheit',
-        timezone: 'auto',
-        forecast_days: '7',
+        type: 'point',
+        lat:  String(quantize(lat)),
+        lon:  String(quantize(lon)),
+        days: '7',
     });
-
     try {
-        const res = await fetch(`${OPEN_METEO_FORECAST}?${params}`);
+        const res = await fetch(`${WEATHER_API}?${params}`, {
+            signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return [];
         const data = await res.json();
         if (data.error || !data.daily?.time) return [];
