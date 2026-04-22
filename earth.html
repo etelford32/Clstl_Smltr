@@ -253,6 +253,41 @@ nav {
 .spd-bar-wrap { height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; margin:3px 0 5px; }
 .spd-bar { height:100%; background:#00c6ff; border-radius:2px; transition:width .9s, background .5s; }
 
+/* ─── Feed-error banner ─────────────────────────────────────────
+   Shown when a primary feed goes to its procedural fallback (most
+   commonly WeatherFeed when /api/weather/grid 500s). Sits between
+   the nav and the globe so the user can't miss the mismatch between
+   their expectations (live data) and what the scene is painting
+   (synthetic fallback). Click × to dismiss for the session. */
+#feed-error-banner {
+    position: absolute; top: 10px; left: 50%;
+    transform: translateX(-50%);
+    z-index: 58;
+    background: linear-gradient(90deg, rgba(255,68,34,.95), rgba(255,136,0,.9));
+    color: #fff;
+    border: 1px solid rgba(255,68,34,.6);
+    border-radius: 6px;
+    padding: 6px 30px 6px 14px;
+    font-size: 11px; font-weight: 600;
+    letter-spacing: .02em;
+    display: none;
+    box-shadow: 0 3px 12px rgba(255,68,34,.3);
+    max-width: calc(100% - 40px);
+    pointer-events: auto;
+}
+#feed-error-banner.show { display: block; }
+#feed-error-banner a {
+    color: #fff; text-decoration: underline; opacity: .85;
+}
+#feed-error-banner a:hover { opacity: 1; }
+#feed-error-banner .feb-close {
+    position: absolute; top: 3px; right: 6px;
+    cursor: pointer; color: rgba(255,255,255,.65);
+    font-size: 14px; line-height: 1;
+    padding: 2px 4px;
+}
+#feed-error-banner .feb-close:hover { color: #fff; }
+
 /* ─── Space weather bar ──────────────────────────────────────── */
 #sw-bar {
     position:absolute; bottom:0; left:50%; transform:translateX(-50%);
@@ -807,6 +842,15 @@ nav {
     <div id="loading">
         <div id="loading-globe"></div>
         <p>Loading Earth textures…</p>
+    </div>
+
+    <!-- Feed-error banner — surfaces upstream failures front-of-mind so the
+         user knows synthetic data is running. Populated by the weather-
+         update / swpc-update / earth-obs-status listeners in the script
+         block below.  Click × to dismiss for the session. -->
+    <div id="feed-error-banner" role="alert">
+        <span id="feb-body">—</span>
+        <span class="feb-close" title="Dismiss">×</span>
     </div>
 
     <!-- HUD -->
@@ -3025,11 +3069,43 @@ document.addEventListener('weather-update', (e) => {
     if (meta.loaded) {
         _setLayerPipGroup(_WEATHER_PIPS, 'loaded',
             `${meta.source ?? 'GFS'} · ${_agoStr(meta.fetchTime)}`);
+        _setFeedBanner(null);
     } else {
         _setLayerPipGroup(_WEATHER_PIPS, 'error',
             `upstream down — falling back to synthetic data (source: ${meta.source ?? 'procedural'})`);
+        _setFeedBanner(
+            `Weather grid feed down — cloud, wind, isobar, and jet layers are showing synthetic data. Real values will return when /api/weather/grid stops 500ing.`
+        );
     }
 });
+
+// Dismissible top-banner driver.  Any feed that wants to surface a
+// degraded-state message calls _setFeedBanner(msg); passing null hides
+// it.  Dismissal is session-scoped (sessionStorage) so the same banner
+// doesn't keep popping back up if the user already acknowledged it.
+const _FEED_BANNER_DISMISS_KEY = 'earth-feed-banner-dismissed';
+function _setFeedBanner(msg) {
+    const el   = document.getElementById('feed-error-banner');
+    const body = document.getElementById('feb-body');
+    if (!el || !body) return;
+    if (!msg) { el.classList.remove('show'); return; }
+    // Don't re-show a banner the user already dismissed this session for
+    // the same text; they've seen it.
+    try {
+        if (sessionStorage.getItem(_FEED_BANNER_DISMISS_KEY) === msg) return;
+    } catch {}
+    body.textContent = '⚠ ' + msg;
+    el.classList.add('show');
+}
+document.getElementById('feed-error-banner')?.querySelector('.feb-close')
+    ?.addEventListener('click', () => {
+        const el   = document.getElementById('feed-error-banner');
+        const body = document.getElementById('feb-body');
+        try {
+            if (body) sessionStorage.setItem(_FEED_BANNER_DISMISS_KEY, body.textContent.replace(/^⚠ /, ''));
+        } catch {}
+        if (el) el.classList.remove('show');
+    });
 
 // NWS + Storm feed both paint the single "alerts" pip. Whichever event
 // arrives first populates it; the other updates in place.
