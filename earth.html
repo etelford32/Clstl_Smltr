@@ -3077,10 +3077,17 @@ document.addEventListener('weather-update', (e) => {
             `${meta.source ?? 'GFS'} · ${_agoStr(meta.fetchTime)}`);
         _setFeedBanner(null);
     } else {
+        // meta.source is already decorated by WeatherFeed on failure:
+        //   "stale · last known (<code> — <detail> (missing env: …))"  or
+        //   "DEMO DATA — synthetic circulation (upstream unavailable)"
+        // Thread the same string into the banner so operators eyeballing
+        // production see the upstream error code without having to open
+        // DevTools.
+        const srcStr = meta.source ?? 'procedural';
         _setLayerPipGroup(_WEATHER_PIPS, 'error',
-            `upstream down — falling back to synthetic data (source: ${meta.source ?? 'procedural'})`);
+            `upstream down — falling back to synthetic data (source: ${srcStr})`);
         _setFeedBanner(
-            `Weather grid feed down — cloud, wind, isobar, and jet layers are showing synthetic data. Real values will return when /api/weather/grid stops 500ing.`
+            `Weather grid feed down — cloud, wind, isobar, and jet layers are showing ${meta.demo ? 'synthetic' : 'stale'} data. Reason: ${srcStr}.`
         );
     }
 });
