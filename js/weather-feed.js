@@ -205,14 +205,32 @@ export class WeatherFeed {
     // visitors via the Vercel edge CDN + Supabase persistence. Response:
     //   { source, fetched_at, age_seconds, data: [ { current: {…} }, … ] }
     // where `data` is the same 648-item array Open-Meteo would have returned.
+    //
+    // The proxy returns structured JSON even on failure (status 500/503 with
+    // { error, detail, missing?, hint? }). Parse the body on both paths so
+    // the real reason surfaces in console + the stale-state banner on
+    // earth.html — losing it to a generic "HTTP 503" made production
+    // debugging much harder than it needed to be.
     async _fetchGrid() {
         const res = await fetch(WEATHER_ENDPOINT, {
             signal: AbortSignal.timeout(20000),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-        const body = await res.json();
-        if (body?.error) throw new Error(body.detail || body.error);
+        // Try to parse JSON regardless of status; the proxy is JSON-always.
+        let body = null;
+        try { body = await res.json(); } catch { /* non-JSON — handled below */ }
+
+        if (!res.ok) {
+            const code   = body?.error  ?? `http_${res.status}`;
+            const detail = body?.detail ?? body?.hint ?? '';
+            const missing = Array.isArray(body?.missing) && body.missing.length
+                ? ` (missing env: ${body.missing.join(', ')})`
+                : '';
+            throw new Error(detail ? `${code} — ${detail}${missing}` : `${code}${missing}`);
+        }
+        if (body?.error) {
+            throw new Error(body.detail || body.hint || body.error);
+        }
         if (!Array.isArray(body?.data)) throw new Error('Malformed cache response');
 
         this._meta.cacheAgeSeconds = body.age_seconds ?? null;

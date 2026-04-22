@@ -45,8 +45,14 @@ const MIME = {
 };
 
 // ── API route → edge function file (relative to project root) ─────────────────
+// Vercel auto-routes /api/**.js via file-based convention in production; this
+// table mirrors that for local dev. Keep it in sync when adding endpoints —
+// a missing entry here is the main reason a route 404s locally but works in
+// prod, which makes smoke-testing harder than it needs to be.
 const API_ROUTES = {
     '/api/solar-wind/wind-speed':  'api/solar-wind/wind-speed.js',
+    '/api/solar-wind/latest':      'api/solar-wind/latest.js',
+    '/api/solar-wind/ingest':      'api/solar-wind/ingest.js',
     '/api/noaa/kp-1m':             'api/noaa/kp-1m.js',
     '/api/noaa/xray':              'api/noaa/xray.js',
     '/api/noaa/protons':           'api/noaa/protons.js',
@@ -57,7 +63,11 @@ const API_ROUTES = {
     '/api/noaa/flares':            'api/noaa/flares.js',
     '/api/noaa/regions':           'api/noaa/regions.js',
     '/api/noaa/radio-flux':        'api/noaa/radio-flux.js',
+    '/api/noaa/forecast-3day':     'api/noaa/forecast-3day.js',
     '/api/donki/cme':              'api/donki/cme.js',
+    '/api/donki/flares':           'api/donki/flares.js',
+    '/api/donki/gst':              'api/donki/gst.js',
+    '/api/donki/sep':              'api/donki/sep.js',
     '/api/donki/notifications':    'api/donki/notifications.js',
     '/api/launches/upcoming':      'api/launches/upcoming.js',
     '/api/weather/grid':           'api/weather/grid.js',

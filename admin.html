@@ -380,6 +380,20 @@
             </h3>
             <div id="heartbeat-container"><div class="empty">Loading...</div></div>
         </div>
+        <!-- ── Proxy Freshness (what the browser actually sees) ────── -->
+        <!-- Hits the public proxy endpoints the Earth + Sun sims
+             consume. Complements Pipeline Health by reporting what the
+             CDN is ACTUALLY serving — catches cases where the DB row is
+             fresh but the edge function is 500ing, or the Vercel env
+             vars (SUPABASE_URL / SUPABASE_SERVICE_KEY) are missing in a
+             given environment. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Proxy Freshness
+                <button class="btn btn-sm" id="btn-refresh-proxies" style="float:right">Refresh</button>
+            </h3>
+            <div id="proxy-freshness-container"><div class="empty">Loading...</div></div>
+        </div>
         <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
         <!-- Surfaces the most-recent run + 24h failure counts for every
              pg_cron job so silent cron failures are visible BEFORE
@@ -936,6 +950,143 @@ async function loadPipelineHeartbeat() {
 
 document.getElementById('btn-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeat);
 loadPipelineHeartbeat();
+
+// ── Proxy Freshness card (what the CDN actually serves) ────────────────────
+// Pings the same public proxies the sims consume. If /api/weather/grid is
+// 500ing while Pipeline Health says the pg_cron succeeded, that's an edge
+// function / env-var problem — the Supabase row is fresh but browsers can't
+// read it. Similarly for /api/solar-wind/latest. Both endpoints return JSON
+// on every status so we can surface structured error codes (cache_empty,
+// supabase_not_configured, …) in addition to HTTP status.
+//
+// Probed endpoints are intentionally public; no Supabase admin key needed.
+const PROXY_PROBES = [
+    {
+        key:      'weather_grid',
+        label:    'Weather Grid',
+        endpoint: '/api/weather/grid',
+        // Expected refresh cadence: hourly pg_cron. Age > 90 min = stale,
+        // > 180 min = critical (matches the earth.html wx-age thresholds).
+        warnAgeS: 90 * 60,
+        critAgeS: 180 * 60,
+        sizeHint: (body) => Array.isArray(body?.data) ? `${body.data.length} locs` : null,
+    },
+    {
+        key:      'solar_wind',
+        label:    'Solar Wind',
+        endpoint: '/api/solar-wind/latest',
+        // pg_cron writes every minute; the proxy exposes a `freshness`
+        // enum (fresh/stale/expired/missing) we can trust directly.
+        warnAgeS: 5 * 60,
+        critAgeS: 20 * 60,
+        sizeHint: (body) => body?.data?.current?.speed_km_s != null
+            ? `${Math.round(body.data.current.speed_km_s)} km/s`
+            : null,
+    },
+];
+
+async function _probeOne(spec) {
+    const startedAt = performance.now();
+    let status = null;
+    let body   = null;
+    let netErr = null;
+    try {
+        const res = await fetch(spec.endpoint, {
+            signal: AbortSignal.timeout(8000),
+            cache:  'no-store',   // bypass the service-worker / browser cache
+                                  // so the card reflects the CDN's current state
+        });
+        status = res.status;
+        try { body = await res.json(); } catch { /* non-JSON — report as such */ }
+    } catch (e) {
+        netErr = e?.message || String(e);
+    }
+    const latencyMs = Math.round(performance.now() - startedAt);
+
+    // Pull freshness: prefer explicit age_seconds on the response, fall
+    // back to computing from fetched_at, else null for "unknown".
+    let ageSec = null;
+    if (Number.isFinite(body?.age_seconds)) {
+        ageSec = body.age_seconds;
+    } else if (body?.fetched_at) {
+        const t = Date.parse(body.fetched_at);
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    } else if (body?.data?.updated) {
+        const t = Date.parse(body.data.updated);
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    }
+
+    return { spec, status, body, netErr, latencyMs, ageSec };
+}
+
+function _proxyHealth(probe) {
+    const { spec, status, body, netErr, ageSec } = probe;
+    if (netErr)                              return { color:'#ff6b6b', label:`network error: ${netErr}`, emoji:'●' };
+    if (status == null)                      return { color:'#ff6b6b', label:'no response',                emoji:'●' };
+    if (status >= 500)                       return { color:'#ff6b6b', label:`HTTP ${status} · ${body?.error ?? 'error'}`, emoji:'●' };
+    if (status >= 400)                       return { color:'#ff6b6b', label:`HTTP ${status}`,             emoji:'●' };
+    if (body?.error)                         return { color:'#ff6b6b', label:`${body.error}`,              emoji:'●' };
+    if (ageSec == null)                      return { color:'#ffaa44', label:'no freshness info',          emoji:'●' };
+    if (ageSec > spec.critAgeS)              return { color:'#ff6b6b', label:'critical (stale)',           emoji:'●' };
+    if (ageSec > spec.warnAgeS)              return { color:'#ffaa44', label:'warning (stale)',            emoji:'●' };
+    // /api/solar-wind/latest has a self-reported freshness field — trust it
+    // when present so the card agrees with what earth.html / sun.html show.
+    if (body?.freshness === 'expired')       return { color:'#ff6b6b', label:`freshness=${body.freshness}`,  emoji:'●' };
+    if (body?.freshness === 'stale')         return { color:'#ffaa44', label:`freshness=${body.freshness}`,  emoji:'●' };
+    return { color:'#4eff91', label:'healthy', emoji:'●' };
+}
+
+function _fmtAgeSec(s) {
+    if (s == null) return '—';
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+}
+
+async function loadProxyFreshness() {
+    const el = document.getElementById('proxy-freshness-container');
+    el.innerHTML = `<div class="empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
+
+    const probes = await Promise.all(PROXY_PROBES.map(_probeOne));
+
+    let html = '<table><thead><tr>'
+             + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+             + '<th>Source</th><th>Payload</th><th>Latency</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const p of probes) {
+        const h = _proxyHealth(p);
+        const body = p.body || {};
+        const missingEnv = Array.isArray(body.missing) && body.missing.length
+            ? ` <span style="color:#ff6b6b;font-size:.66rem">missing env: ${_esc(body.missing.join(', '))}</span>`
+            : '';
+        const source = body.source
+            || body.heartbeat?.last_source
+            || '—';
+        const sizeHint = (p.spec.sizeHint?.(body) ?? '—');
+        const statusCell = p.status != null
+            ? `<span style="color:${p.status < 400 ? '#aab' : '#ff6b6b'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
+            : `<span style="color:#ff6b6b;font-weight:700">—</span>`;
+        const latency = p.netErr ? '—' : `${p.latencyMs}ms`;
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(p.spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(p.spec.endpoint)}</div></td>`
+             +  `<td>${statusCell}</td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_fmtAgeSec(p.ageSec)}</td>`
+             +  `<td><span style="font-family:ui-monospace,monospace;font-size:.72rem;color:#9ad">${_esc(String(source))}</span>${missingEnv}</td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_esc(String(sizeHint))}</td>`
+             +  `<td style="color:#9ad;font-size:.72rem;font-family:ui-monospace,monospace">${_esc(latency)}</td>`
+             +  `<td style="color:${h.color};font-weight:600;font-size:.78rem">${h.emoji} ${_esc(h.label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-proxies').addEventListener('click', loadProxyFreshness);
+loadProxyFreshness();
 
 // ── Scheduled jobs (pg_cron) health card ────────────────────────────────────
 // Reads admin_get_cron_status — returns every pg_cron job's most recent run
