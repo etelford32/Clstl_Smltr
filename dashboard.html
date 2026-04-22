@@ -1079,44 +1079,56 @@ if (!_auth || !_auth.signedIn) {
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
 
-  const role  = (_auth.role || 'user').toLowerCase();
-  const plan  = (_auth.plan || 'free').toLowerCase();
-  const badge = document.getElementById('plan-badge');
-  // Superadmins typically have no paid plan — show their role so they don't
-  // see a misleading "Free" badge after signing in.
-  if (role === 'superadmin' || role === 'admin') {
-      badge.textContent = role === 'superadmin' ? 'Superadmin' : 'Admin';
-      badge.className   = 'plan-badge plan-advanced';
-  } else {
-      badge.textContent = plan.charAt(0).toUpperCase() + plan.slice(1);
-      badge.className   = 'plan-badge plan-' + (plan === 'advanced' ? 'advanced' : plan === 'basic' ? 'basic' : 'free');
+  // Role/plan-aware UI renders — always sourced from the live auth module,
+  // never from a one-shot localStorage snapshot. fetchProfile() resolves the
+  // server-side role from user_profiles and fires auth-changed, so every
+  // renderer below re-runs on that event and converges to the real role
+  // even if user_metadata.role is stale (common when a superadmin was
+  // promoted via SQL against user_profiles only).
+  function _renderPlanBadge() {
+      const r = (_authMod.getRole?.() || 'user').toLowerCase();
+      const p = (_authMod.getPlan?.() || 'free').toLowerCase();
+      const badge = document.getElementById('plan-badge');
+      if (!badge) return;
+      if (r === 'superadmin' || r === 'admin') {
+          badge.textContent = r === 'superadmin' ? 'Superadmin' : 'Admin';
+          badge.className   = 'plan-badge plan-advanced';
+      } else {
+          badge.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+          badge.className   = 'plan-badge plan-' + (p === 'advanced' ? 'advanced' : p === 'basic' ? 'basic' : 'free');
+      }
   }
 
-  // Show superadmin buttons if user has admin/superadmin role
-  function _showAdminBtn() {
-      const a = JSON.parse(localStorage.getItem('pp_auth') || '{}');
-      const btn = document.getElementById('dash-admin-btn');
+  function _renderAdminButtons() {
+      const btn       = document.getElementById('dash-admin-btn');
       const statusBtn = document.getElementById('dash-status-btn');
-      if (btn && (a.role === 'admin' || a.role === 'superadmin')) {
-          btn.style.display = 'inline-block';
-          btn.textContent = a.role === 'superadmin' ? 'SUPER ADMIN' : 'ADMIN';
+      const isAdmin   = _authMod.isAdmin?.()      ?? false;
+      const isSuper   = _authMod.isSuperAdmin?.() ?? false;
+      if (btn) {
+          btn.style.display = isAdmin ? 'inline-block' : 'none';
+          if (isAdmin) btn.textContent = isSuper ? 'SUPER ADMIN' : 'ADMIN';
       }
-      if (statusBtn && a.role === 'superadmin') {
-          statusBtn.style.display = 'inline-block';
+      if (statusBtn) {
+          statusBtn.style.display = isSuper ? 'inline-block' : 'none';
       }
   }
-  _showAdminBtn();
-  // Also re-check when profile fetch completes (role may update async)
-  window.addEventListener('auth-changed', _showAdminBtn);
 
   // Pipeline Analytics — superadmin only. Defer the module import until we
   // know the user qualifies so regular users never pay the download cost.
   async function _mountPipelineCard() {
-      const a = JSON.parse(localStorage.getItem('pp_auth') || '{}');
       const card = document.getElementById('pipeline-card');
       if (!card) return;
-      if (a.role !== 'superadmin') { card.style.display = 'none'; return; }
-      if (card.dataset.mounted === '1') return;
+      const isSuper = _authMod.isSuperAdmin?.() ?? false;
+      if (!isSuper) {
+          card.style.display = 'none';
+          // Reset mount flag so a late-arriving superadmin role flip re-mounts.
+          card.dataset.mounted = '';
+          return;
+      }
+      if (card.dataset.mounted === '1') {
+          card.style.display = '';
+          return;
+      }
       card.dataset.mounted = '1';
       card.style.display = '';
       try {
@@ -1128,8 +1140,26 @@ if (!_auth || !_auth.signedIn) {
               `<div style="color:#f88;font-size:.78rem">Pipeline analytics failed to load: ${err.message}</div>`;
       }
   }
+
+  _renderPlanBadge();
+  _renderAdminButtons();
   _mountPipelineCard();
-  window.addEventListener('auth-changed', _mountPipelineCard);
+  window.addEventListener('auth-changed', () => {
+      _renderPlanBadge();
+      _renderAdminButtons();
+      _mountPipelineCard();
+      _renderSubscriptionCard();
+  });
+
+  // Kick a profile re-fetch in the background so that if the cached user_metadata
+  // role is stale (superadmin promoted only in user_profiles), the UI converges.
+  // fetchProfile() dispatches auth-changed on success, which re-runs the
+  // renderers registered above.
+  if (_authMod.fetchProfile) {
+      _authMod.fetchProfile().catch(err => {
+          console.warn('[Dashboard] Background profile refresh failed:', err?.message || err);
+      });
+  }
 
   function signOut() {
     if (_authMod) {
@@ -1144,18 +1174,37 @@ if (!_auth || !_auth.signedIn) {
   document.getElementById('signout-btn').addEventListener('click', signOut);
 
   // ── Subscription card ─────────────────────────────────────────────────────
-  const subCard = document.getElementById('subscription-card');
-  if (subCard) {
+  // Rendered as a function so auth-changed (e.g. PROFILE_FETCHED, post-checkout
+  // refresh) can re-run it without reloading the page. Admin/superadmin
+  // accounts are surfaced explicitly so they don't get a misleading
+  // "Free Plan · Upgrade to Basic" pitch.
+  let _subManageBound = false;
+  function _renderSubscriptionCard() {
+    const subCard = document.getElementById('subscription-card');
+    if (!subCard) return;
     subCard.style.display = '';
     const subStatus = document.getElementById('sub-status-text');
     const subDetail = document.getElementById('sub-detail-text');
     const upgradeBtn = document.getElementById('sub-upgrade-btn');
     const manageBtn  = document.getElementById('sub-manage-btn');
 
-    if (plan === 'basic' || plan === 'advanced') {
-      subStatus.textContent = plan.charAt(0).toUpperCase() + plan.slice(1) + ' Plan';
-      subStatus.style.color = plan === 'advanced' ? '#a080ff' : '#4488ff';
-      const subState = _auth.alerts?.subscription_status ?? _auth.subscription_status ?? 'active';
+    const liveUser = _authMod.getUser?.() || _auth || {};
+    const r = (_authMod.getRole?.() || 'user').toLowerCase();
+    const p = (_authMod.getPlan?.() || 'free').toLowerCase();
+
+    if (r === 'superadmin' || r === 'admin') {
+      subStatus.textContent = r === 'superadmin' ? 'Superadmin Access' : 'Admin Access';
+      subStatus.style.color = r === 'superadmin' ? '#ff6b6b' : '#ff8c00';
+      subDetail.textContent = 'Full access — no plan restrictions';
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display  = 'none';
+      return;
+    }
+
+    if (p === 'basic' || p === 'advanced') {
+      subStatus.textContent = p.charAt(0).toUpperCase() + p.slice(1) + ' Plan';
+      subStatus.style.color = p === 'advanced' ? '#a080ff' : '#4488ff';
+      const subState = liveUser.alerts?.subscription_status ?? liveUser.subscription_status ?? 'active';
       subDetail.textContent = subState === 'active' ? 'Active subscription'
         : subState === 'trialing' ? 'Free trial active'
         : subState === 'past_due' ? 'Payment past due — please update your card'
@@ -1163,27 +1212,33 @@ if (!_auth || !_auth.signedIn) {
         : 'Active subscription';
       upgradeBtn.style.display = 'none';
       manageBtn.style.display = '';
-      manageBtn.addEventListener('click', async () => {
-        manageBtn.textContent = 'Opening...';
-        try {
-          const sb = await (await import('./js/supabase-config.js')).getSupabase();
-          const { data: { session } } = await sb.auth.getSession();
-          const res = await fetch('/api/stripe/portal', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-          });
-          const data = await res.json();
-          if (data.url) { window.location.href = data.url; return; }
-          alert(data.detail || 'Could not open billing portal');
-        } catch (e) { alert('Error: ' + e.message); }
-        manageBtn.textContent = 'Manage Billing';
-      });
+      if (!_subManageBound) {
+        _subManageBound = true;
+        manageBtn.addEventListener('click', async () => {
+          manageBtn.textContent = 'Opening...';
+          try {
+            const sb = await (await import('./js/supabase-config.js')).getSupabase();
+            const { data: { session } } = await sb.auth.getSession();
+            const res = await fetch('/api/stripe/portal', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            });
+            const data = await res.json();
+            if (data.url) { window.location.href = data.url; return; }
+            alert(data.detail || 'Could not open billing portal');
+          } catch (e) { alert('Error: ' + e.message); }
+          manageBtn.textContent = 'Manage Billing';
+        });
+      }
     } else {
-      // Free user — show upgrade prompt
       subStatus.textContent = 'Free Plan';
+      subStatus.style.color = '';
       subDetail.textContent = 'Upgrade to unlock all 17 simulations, custom alerts, and email delivery';
+      upgradeBtn.style.display = '';
+      manageBtn.style.display  = 'none';
     }
   }
+  _renderSubscriptionCard();
 
   // Handle checkout success redirect
   const urlParams = new URLSearchParams(location.search);
@@ -1194,16 +1249,11 @@ if (!_auth || !_auth.signedIn) {
     banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
     document.body.appendChild(banner);
     setTimeout(() => banner.remove(), 6000);
-    // Refresh profile to get updated plan from webhook, then clean URL
+    // Refresh profile to get updated plan from webhook, then clean URL.
+    // fetchProfile dispatches auth-changed which re-runs every role/plan
+    // renderer, so we don't need to poke DOM fields manually here.
     auth.fetchProfile().then(() => {
-      // Replace URL to remove ?checkout=success (prevents refresh loop)
       history.replaceState(null, '', 'dashboard.html');
-      // Update UI with new plan
-      const updatedPlan = auth.getPlan();
-      const b = document.getElementById('plan-badge');
-      if (b) { b.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1); b.className = 'plan-badge plan-' + updatedPlan; }
-      const st = document.getElementById('sub-status-text');
-      if (st) { st.textContent = updatedPlan.charAt(0).toUpperCase() + updatedPlan.slice(1) + ' Plan'; }
     });
   }
   } catch (err) {
