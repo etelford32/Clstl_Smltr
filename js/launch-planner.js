@@ -66,6 +66,29 @@ export const DEFAULT_RULESET = Object.freeze({
         cin_floor:   -100,                         // J/kg (below = capped)
         pop_bump_pct: 60,                          // %
     },
+    // Cloud-layer bands — forecast proxies for 45 WS LLCC rules 3/4 (anvil
+    // clouds) and rule 6 (thick cloud layer through the 0° → -20°C band).
+    // Open-Meteo's 3-band decomposition isn't a direct stand-in for the
+    // polygon-based LLCC tests (which care about specific distances to
+    // specific clouds), but the "% cover in each altitude band" signal
+    // catches the obvious cases — scattered cirrus vs. overcast anvil deck,
+    // thin mid layer vs. a thick one straddling the freezing line.
+    //
+    //   anvil.high_pct     — % high cloud ( > 8 km ) triggering anvil caution
+    //   thick.mid_pct      — % mid cloud ( 3–8 km ) triggering thick-layer
+    //                        caution, ONLY when the freezing level sits in
+    //                        or below the mid-cloud band
+    //   thick.fl_max_m     — freezing level max altitude for the thick-layer
+    //                        rule to fire. If 0°C is above ~5 km the 0→-20°C
+    //                        band sits in the high-cloud zone, not mid.
+    // Two-threshold convention (matches wind/cape/lifted bands above):
+    //   < green  → clean   (green)
+    //   < yellow → watch   (yellow)
+    //   ≥ yellow → over    (red)
+    clouds: {
+        anvil: { green: 50, yellow: 85 },  // % high-cloud cover (>8 km)
+        thick: { green: 65, yellow: 90, fl_max_m: 5000 }, // % mid-cloud + freezing-level gate
+    },
 });
 
 const THUNDERSTORM_CODES = new Set([95, 96, 99]);
@@ -102,6 +125,77 @@ function bandCloud(pct, T) {
     if (pct < T.cloud.green)  return { v: 'green',  note: `${pct}% cover` };
     if (pct < T.cloud.yellow) return { v: 'yellow', note: `${pct}% — watch ceiling` };
     return { v: 'red', note: `${pct}% — overcast` };
+}
+
+// LLCC cloud-layer proxies — anvil (Rules 3/4) + thick layer (Rule 6).
+//
+// Total cloud cover (bandCloud above) answers "can we see the rocket?" —
+// useful but it doesn't distinguish the LLCC concern. A clear ceiling with
+// 70% cirrus at 10 km is visible but could be anvil debris; an 80% mid-
+// level deck crossing the freezing line is a classic triggered-lightning
+// environment. This scorer reads both.
+//
+// This is explicitly a proxy, NOT the LLCC itself. The formal LLCC rules
+// test specific polygon distances to clouds of specific types / thicknesses,
+// which need field-mill + radar-inferred cloud-top temperatures we don't
+// have from public forecast APIs. The % cover + freezing-level check
+// catches the obvious red-flag cases and is transparent about its limits.
+function bandCloudLayers(snap, T) {
+    const low  = snap?.cloud_cover_low;
+    const mid  = snap?.cloud_cover_mid;
+    const high = snap?.cloud_cover_high;
+    const fl_m = snap?.freezing_level_m;
+
+    const haveAny = Number.isFinite(low) || Number.isFinite(mid) || Number.isFinite(high);
+    if (!haveAny) return { v: 'green', note: 'no layer data' };
+
+    const A = T.clouds.anvil;
+    const K = T.clouds.thick;
+    let band = 'green';
+    const bits = [];
+
+    // Anvil proxy — high cloud (>8 km) is the altitude band where
+    // thunderstorm anvils detach and drift. We don't know WHETHER it's an
+    // anvil here (vs. frontal cirrus), so the thresholds are generous:
+    // above green = "possibly anvil, watch"; above yellow = "probably
+    // anvil-class cover, LLCC scrub likely."
+    if (Number.isFinite(high)) {
+        const sub =
+            high >= A.yellow ? 'red'    :
+            high >= A.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`anvil risk: ${high}% high cloud`);
+        }
+    }
+
+    // Thick-layer proxy — mid cloud (3–8 km) only matters when the freezing
+    // level sits in or below the mid band (fl_m ≤ fl_max_m, typically 5 km).
+    // Above that, 0°→-20°C lives in the high-cloud zone and the thick-
+    // layer rule would apply to cirrus, not mid-deck altocumulus.
+    if (Number.isFinite(mid) && Number.isFinite(fl_m) && fl_m <= K.fl_max_m) {
+        const sub =
+            mid >= K.yellow ? 'red'    :
+            mid >= K.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`thick layer at 0°C (${mid}% mid · 0°C at ${(fl_m / 1000).toFixed(1)} km)`);
+        }
+    }
+
+    // Low-cloud info only — LLCC Rule 1 (cumulus) really needs cloud-top
+    // temperature, which isn't in the forecast. We list the low-cover
+    // number as context so operators can eyeball it; we don't score it.
+    if (Number.isFinite(low) && low >= 75 && band === 'green') {
+        bits.push(`${low}% low cloud (ceiling check)`);
+    }
+
+    const detail = bits.length ? bits.join(' · ') : 'layers within proxies';
+    const headline =
+        band === 'red'    ? 'cloud layers over LLCC proxies'  :
+        band === 'yellow' ? 'cloud layers marginal for LLCC'  :
+                            'cloud layers clear';
+    return { v: band, note: `${headline} (${detail})` };
 }
 
 function bandTemp(f, T) {
@@ -387,6 +481,10 @@ export function snapshotAt(fc, targetIso) {
         cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
         lifted_index:     h.lifted_index?.[i]     ?? null,
         cin_j_per_kg:     h.cin_j_per_kg?.[i]     ?? null,
+        cloud_cover_low:  h.cloud_cover_low?.[i]  ?? null,
+        cloud_cover_mid:  h.cloud_cover_mid?.[i]  ?? null,
+        cloud_cover_high: h.cloud_cover_high?.[i] ?? null,
+        freezing_level_m: h.freezing_level_m?.[i] ?? null,
         upper_wind_mph:       Number.isFinite(w200) ? w200 : null,
         upper_wind_dir_deg:   Number.isFinite(d200) ? d200 : null,
         upper_wind_500_mph:   Number.isFinite(h.wind_500_mph?.[i]) ? h.wind_500_mph[i] : null,
@@ -515,6 +613,10 @@ function snapshotFromCurrent(fc) {
         cape_j_per_kg:    null,
         lifted_index:     null,
         cin_j_per_kg:     null,
+        cloud_cover_low:  null,
+        cloud_cover_mid:  null,
+        cloud_cover_high: null,
+        freezing_level_m: null,
     };
 }
 
@@ -544,9 +646,10 @@ export function scoreWeather(snap, opts = {}) {
         { key: 'upper_wind',  label: 'Upper winds (max-Q)', ...bandUpperWind(snap.upper_wind_mph, T) },
         { key: 'upper_shear', label: 'Wind shear',       ...bandUpperShear(snap.upper_shear_mph, T) },
         { key: 'precip',      label: 'Precipitation',    ...bandPrecip(snap.precip_prob_pct, T) },
-        { key: 'cloud',       label: 'Cloud cover',      ...bandCloud(snap.cloud_cover, T) },
-        { key: 'lightning',   label: 'Convection / lightning', ...bandConvective(snap, T, alerts) },
-        { key: 'temp',        label: 'Temperature',      ...bandTemp(snap.temp_f, T) },
+        { key: 'cloud',        label: 'Cloud cover',             ...bandCloud(snap.cloud_cover, T) },
+        { key: 'cloud_layers', label: 'Cloud layers (LLCC)',     ...bandCloudLayers(snap, T) },
+        { key: 'lightning',    label: 'Convection / lightning',  ...bandConvective(snap, T, alerts) },
+        { key: 'temp',         label: 'Temperature',             ...bandTemp(snap.temp_f, T) },
     ];
     const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
     return { verdict, rules, ruleset_id: T.id, snapshot: snap };
@@ -844,6 +947,11 @@ function renderDetail(l, fc, score) {
                 <div class="lp-wx-cell"><div class="lp-wx-k">Precip prob</div><div class="lp-wx-v">${snap.precip_prob_pct != null ? `${snap.precip_prob_pct}%` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">CAPE</div><div class="lp-wx-v">${snap.cape_j_per_kg != null ? `${Math.round(snap.cape_j_per_kg)} J/kg` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">Lifted idx</div><div class="lp-wx-v">${Number.isFinite(snap.lifted_index) ? snap.lifted_index.toFixed(1) : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud L / M / H</div><div class="lp-wx-v">${
+                    [snap.cloud_cover_low, snap.cloud_cover_mid, snap.cloud_cover_high]
+                        .map(x => Number.isFinite(x) ? `${x}` : '—').join(' / ')
+                }</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Freezing lvl</div><div class="lp-wx-v">${Number.isFinite(snap.freezing_level_m) ? `${(snap.freezing_level_m / 1000).toFixed(1)} km` : '—'}</div></div>
             </div>
         ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
 
@@ -995,12 +1103,15 @@ function renderDetail(l, fc, score) {
 
             <div class="lp-footnote">
                 Weather source: Open-Meteo (hourly forecast, time-aligned to NET) — surface
-                wind, upper-level winds at 200/300/500 hPa, CAPE, lifted index, and CIN.
-                Launch data: Launch Library 2 (TheSpaceDevs). Convection / lightning
-                scoring fuses instability (CAPE + LI), cap strength (CIN), precipitation
-                probability, and active thunderstorm codes — a proxy for 45 WS LLCC
-                Rule 9, not a replacement for field-mill surface-electric-field data.
-                Advisory only; not an official flight-readiness determination.
+                wind, upper-level winds at 200/300/500 hPa, CAPE, lifted index, CIN,
+                cloud cover decomposed by altitude (low/mid/high), and freezing-level
+                height. Alert source: api.weather.gov (CONUS + US territories).
+                Launch data: Launch Library 2 (TheSpaceDevs). Go/No-Go proxies 45 WS
+                LLCC rules 3/4 (anvil), 6 (thick layer across 0°→-20°C), and 9
+                (triggered lightning) — the LLCC itself tests specific polygon
+                distances, cloud-top temperatures, and surface-electric-field data
+                that public forecast APIs don't expose, so treat this as a triage
+                tool, not a flight-readiness determination.
             </div>
         </div>
     `;

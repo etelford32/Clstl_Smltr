@@ -155,6 +155,18 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
             'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
             'precipitation', 'precipitation_probability',
             'cloud_cover', 'weather_code',
+            // Cloud-layer decomposition for LLCC anvil-cloud and thick-layer
+            // rule proxies. Open-Meteo bands by altitude:
+            //   low  — surface → 3 km   (boundary-layer cumulus, stratus)
+            //   mid  — 3 km → 8 km     (altocumulus/altostratus — the layer
+            //                             that can straddle the 0° → -20°C
+            //                             band that LLCC Rule 6 cares about)
+            //   high — > 8 km          (cirrus; anvil-debris candidates)
+            // freezing_level_height is m AGL where the 0°C isotherm sits —
+            // combined with mid cloud it tells us whether the thick layer
+            // actually crosses the critical temperature band.
+            'cloud_cover_low', 'cloud_cover_mid', 'cloud_cover_high',
+            'freezing_level_height',
             'relative_humidity_2m', 'visibility',
             // Convective-instability triplet — CAPE + lifted index + CIN
             // together are what a forecaster actually reads to decide
@@ -217,6 +229,10 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
                 precip_in:         data.hourly?.precipitation ?? [],
                 precip_prob_pct:   data.hourly?.precipitation_probability ?? [],
                 cloud_cover:       data.hourly?.cloud_cover ?? [],
+                cloud_cover_low:   data.hourly?.cloud_cover_low ?? [],
+                cloud_cover_mid:   data.hourly?.cloud_cover_mid ?? [],
+                cloud_cover_high:  data.hourly?.cloud_cover_high ?? [],
+                freezing_level_m:  data.hourly?.freezing_level_height ?? [],
                 weather_code:      data.hourly?.weather_code ?? [],
                 humidity:          data.hourly?.relative_humidity_2m ?? [],
                 visibility_m:      data.hourly?.visibility ?? [],
