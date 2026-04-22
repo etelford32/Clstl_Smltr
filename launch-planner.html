@@ -260,6 +260,38 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 .lp-conf--public-estimate  { color:#f86;   background:rgba(255,120,80,.12); }
 .lp-conf--generic          { color:#99a;   background:rgba(200,200,220,.08); }
 
+/* Recovery rules visually nested under their own header */
+.lp-rules--recovery { background:rgba(0,200,255,.04); border-color:rgba(0,200,255,.1); }
+
+/* ─── Starship Focus panel ────────────────────────────── */
+.lp-starship {
+    margin-top:18px; padding:14px 16px;
+    background:linear-gradient(180deg, rgba(255,140,0,.06), rgba(255,140,0,.02));
+    border:1px solid rgba(255,140,0,.22);
+    border-radius:10px;
+}
+.lp-ss-label { color:#fb0 !important; margin-top:0 !important; }
+.lp-ss-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;
+    margin:6px 0 12px;
+}
+@media (max-width:720px) { .lp-ss-grid { grid-template-columns:repeat(2, 1fr); } }
+.lp-ss-tile {
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.lp-ss-tile--info { border-color:rgba(0,200,200,.15); background:rgba(0,200,200,.04); }
+.lp-ss-tile-k   { font-size:.62rem; color:#8ab; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+.lp-ss-tile-v   { font-size:.95rem; font-weight:800; font-family:monospace; letter-spacing:.02em; }
+.lp-ss-tile-sub { font-size:.64rem; color:#99a; margin-top:4px; line-height:1.4; }
+.lp-ss-note {
+    font-size:.66rem; color:#aab; line-height:1.55;
+    padding-top:10px; border-top:1px solid rgba(255,140,0,.15);
+    font-style:italic;
+}
+
 .lp-footnote {
     font-size:.66rem; color:#556; line-height:1.5;
     border-top:1px solid rgba(255,255,255,.06);

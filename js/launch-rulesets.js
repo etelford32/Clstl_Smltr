@@ -51,11 +51,24 @@ export const VEHICLES = Object.freeze([
             upper_wind:  { green: 100, yellow: 145 },
             upper_shear: { green: 60,  yellow: 95  },
         },
+        recovery: {
+            booster_modes:  ['RTLS', 'ASDS', 'expendable'],  // two side cores RTLS, center core ASDS or expendable
+            asds_ships:     ['JRTI', 'ASOG', 'OCISLY'],
+            landing_zones:  ['LZ-1', 'LZ-2', 'LZ-4'],        // LZ-1/2 Cape (dual RTLS), LZ-4 Vandenberg
+        },
+        recovery_ruleset: {
+            id:              'falcon-heavy-recovery',
+            zone_wind:       { green: 20, yellow: 30 },      // mph at ASDS position
+            wave_height_m:   { green: 1.5, yellow: 2.5 },    // significant wave height
+            swell_period_s:  { green: 8,   yellow: 6   },    // MIN period — shorter = worse
+            rtls_wind:       { green: 20, yellow: 35 },
+        },
         sources: [
             'SpaceX Falcon Payload User\'s Guide (Rev. 3)',
             '45 WS Flight Commit Criteria (public)',
+            'SpaceX public statements on ASDS sea-state limits',
         ],
-        notes: 'Triple-core vehicle; ASDS/RTLS recovery constraints handled separately in v5.',
+        notes: 'Center core recovery optional per mission; some FH flights fly expendable center.',
     },
     {
         id:            'falcon-9',
@@ -90,9 +103,26 @@ export const VEHICLES = Object.freeze([
                 upper_shear: { green: 45, yellow: 70  },
             },
         },
+        recovery: {
+            booster_modes: ['RTLS', 'ASDS', 'expendable'],
+            asds_ships:    ['JRTI', 'ASOG', 'OCISLY'],
+            landing_zones: ['LZ-1', 'LZ-4'],
+        },
+        recovery_ruleset: {
+            id:              'falcon-9-recovery',
+            // F9 booster recovery constraints (public SpaceX statements +
+            // observed scrub behavior). Wave-height threshold reflects the
+            // fact that JRTI/ASOG have actively ridden out 2–3 m seas
+            // during catch; anything much higher risks tipping the booster.
+            zone_wind:       { green: 20, yellow: 30 },
+            wave_height_m:   { green: 1.5, yellow: 2.5 },
+            swell_period_s:  { green: 8,   yellow: 6   },
+            rtls_wind:       { green: 20, yellow: 35 },
+        },
         sources: [
             'SpaceX Falcon Payload User\'s Guide (Rev. 3)',
             'NASA Commercial Crew Program abort-corridor analysis (public)',
+            'Historical Falcon 9 ASDS scrub behavior (CRS-16, CRS-21 weather holds)',
         ],
     },
     {
@@ -119,11 +149,38 @@ export const VEHICLES = Object.freeze([
             upper_wind:  { green: 90, yellow: 130 },
             upper_shear: { green: 55, yellow: 85  },
         },
+        // Starship recovery is *not* droneship-based. The booster returns to
+        // the launch tower (Mechazilla chopsticks) and the ship currently
+        // splashes down in the ocean during the test campaign (destined for
+        // tower catch on future missions).
+        recovery: {
+            booster_modes:  ['tower-catch'],
+            ship_modes:     ['ocean-splashdown', 'tower-catch'],
+            catch_tower:    'Mechazilla',
+            splashdown:     'Indian Ocean / Gulf (mission-dependent)',
+        },
+        recovery_ruleset: {
+            id:              'starship-recovery',
+            // Chopstick catch is a new ops envelope. Public statements from
+            // SpaceX suggest ~35 mph ground wind + gust tolerance at catch;
+            // this is in addition to the launch wind already scored.
+            tower_catch_wind: { green: 18, yellow: 35 },
+            tower_catch_gust: { green: 25, yellow: 45 },
+            // Methalox cryogenic loading has a tighter wind limit than
+            // launch because the tall full-stack + venting methane plume
+            // has to be kept clear of personnel.
+            tanking_wind:     { green: 12, yellow: 22 },
+            // Ship splashdown zone gets a light wave-height check; the ship
+            // is expended in current test campaign so this is informational
+            // until operational ocean-catch missions begin.
+            ship_wave_height_m:  { green: 2.0, yellow: 3.5 },
+        },
         sources: [
             'FAA Final EIS for Starship Orbital Test Flight (2022)',
             'Public statements, SpaceX operational scrub history',
+            'IFT-1 through IFT-6 flight campaign observations',
         ],
-        notes: 'Thresholds will tighten/relax as SpaceX publishes formal LCC.',
+        notes: 'Starship is still in test phase. Methalox tanking + chopstick catch rules are unique to this vehicle and evolve mission-to-mission.',
     },
     {
         id:            'vulcan',
@@ -192,6 +249,19 @@ export const VEHICLES = Object.freeze([
             // operational data.
             upper_wind:  { green: 95, yellow: 140 },
             upper_shear: { green: 55, yellow: 85  },
+        },
+        recovery: {
+            booster_modes:  ['ASDS'],                     // Jacklyn droneship
+            asds_ships:     ['Jacklyn'],
+        },
+        recovery_ruleset: {
+            id:              'new-glenn-recovery',
+            // Conservative analog to F9 pending BO operational data. Jacklyn
+            // is substantially larger than JRTI/ASOG, so tolerance may end
+            // up more generous once flight history accrues.
+            zone_wind:       { green: 20, yellow: 32 },
+            wave_height_m:   { green: 2.0, yellow: 3.0 },
+            swell_period_s:  { green: 8,   yellow: 6   },
         },
         sources: [
             'Blue Origin New Glenn Payload User\'s Guide (v1, public)',
@@ -419,5 +489,66 @@ export function resolveRuleset(launch) {
         confidence: v.confidence,
         sources:    v.sources || [],
         notes:      v.notes || '',
+    };
+}
+
+// ── Recovery geolocation ────────────────────────────────────────────────────
+// For v4 we derive the recovery zone from the launch pad:
+//   • Starship  → tower catch at pad (0 km offset)
+//   • Pacific-coast launch (pad lon < -100°) → ASDS ~350 km west
+//   • Atlantic-coast or Equatorial → ASDS ~500 km east
+// This is coarse on purpose — actual droneship positions vary mission-to-
+// mission by mission profile (ISS 51.6° incl vs GTO 28° vs polar ~98°).
+// V5 can replace this with mission-specific downrange solutions once we
+// decode trajectory hints from LL2 mission fields.
+
+const DEG_PER_KM_LAT = 1 / 111.0;
+function _offsetKm(lat, lon, eastKm, northKm) {
+    const newLat = lat + northKm * DEG_PER_KM_LAT;
+    const newLon = lon + eastKm / (111.0 * Math.cos(lat * Math.PI / 180) || 1);
+    return { lat: newLat, lon: newLon };
+}
+
+/**
+ * Recovery zone {lat, lon, label, type, offset_km} for a launch, or null if
+ * the vehicle is expendable or has no recovery component needing marine data.
+ * type ∈ 'tower-catch' | 'ASDS' | 'splashdown'.
+ */
+export function recoveryZoneForLaunch(launch) {
+    if (!launch) return null;
+    const v = vehicleForLaunch(launch);
+    if (!v.recovery) return null;
+
+    const lat = +launch.pad?.lat;
+    const lon = +launch.pad?.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    // Starship: booster catch at the tower itself. Ship splashdown zone
+    // is mission-specific; we don't geolocate it in v4 (need mission profile
+    // parsing). Return just the tower location for now — UI can render
+    // "tower catch" without marine data.
+    if (v.id === 'starship') {
+        return {
+            lat, lon,
+            label:     'Mechazilla tower',
+            type:      'tower-catch',
+            offset_km: 0,
+            vehicle_id: v.id,
+        };
+    }
+
+    // For F9 / FH / New Glenn, offset 500 km downrange by pad longitude.
+    // Western pads (Vandenberg, ~-120°) recover in the Pacific; others in
+    // the Atlantic or equatorial downrange corridor.
+    const isPacific = lon < -100;
+    const zone = isPacific
+        ? _offsetKm(lat, lon, -350,  20)
+        : _offsetKm(lat, lon,  500, -40);
+    return {
+        ...zone,
+        label:     isPacific ? 'Pacific ASDS zone (est.)' : 'Atlantic ASDS zone (est.)',
+        type:      'ASDS',
+        offset_km: isPacific ? 350 : 500,
+        vehicle_id: v.id,
     };
 }

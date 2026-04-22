@@ -22,10 +22,11 @@
 
 import {
     fetchLaunchForecast,
+    fetchMarineForecast,
     weatherCodeLabel,
     compassLabel,
 } from './trip-planner.js';
-import { resolveRuleset } from './launch-rulesets.js';
+import { resolveRuleset, recoveryZoneForLaunch } from './launch-rulesets.js';
 
 // ── Rulesets ────────────────────────────────────────────────────────────────
 // Default ruleset is a conservative blend of publicly-documented launch
@@ -117,6 +118,69 @@ function bandUpperShear(mph, T) {
     return { v: 'red', note: `${Math.round(mph)} mph — severe wind shear` };
 }
 
+// ── Recovery-zone band scorers ──────────────────────────────────────────────
+// Used only when a launch has a recovery operation (ASDS, RTLS, or tower
+// catch). Each reads its threshold from the vehicle's recovery_ruleset —
+// absent ruleset means the rule isn't evaluated.
+
+function bandRecoveryWind(mph, R) {
+    if (!R?.zone_wind) return null;
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'recovery wind unavailable' };
+    if (mph < R.zone_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph at recovery zone` };
+    if (mph < R.zone_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — recovery wind marginal` };
+    return { v: 'red', note: `${Math.round(mph)} mph — over recovery wind limit` };
+}
+
+function bandWaveHeight(m, R) {
+    if (!R?.wave_height_m) return null;
+    if (m == null || !Number.isFinite(m)) return { v: 'yellow', note: 'no marine data (inland proxy?)' };
+    if (m < R.wave_height_m.green)  return { v: 'green',  note: `${m.toFixed(1)} m sig wave height` };
+    if (m < R.wave_height_m.yellow) return { v: 'yellow', note: `${m.toFixed(1)} m — rough seas` };
+    return { v: 'red', note: `${m.toFixed(1)} m — over ASDS limit` };
+}
+
+function bandSwellPeriod(s, R) {
+    // Shorter swell period = steeper, choppier seas — BAD for ASDS stability.
+    // Thresholds are MINIMUMS: period must be at least .green to be green.
+    if (!R?.swell_period_s) return null;
+    if (s == null || !Number.isFinite(s)) return { v: 'yellow', note: 'swell period unavailable' };
+    if (s >= R.swell_period_s.green)  return { v: 'green',  note: `${s.toFixed(1)} s swell period` };
+    if (s >= R.swell_period_s.yellow) return { v: 'yellow', note: `${s.toFixed(1)} s — short-period chop` };
+    return { v: 'red', note: `${s.toFixed(1)} s — severe short-period chop` };
+}
+
+// Starship-specific: tower catch and tanking both read the LAUNCH pad's
+// ground wind, but apply different thresholds than the launch-wind rule.
+
+function bandTowerCatchWind(mph, gustMph, R) {
+    if (!R?.tower_catch_wind) return null;
+    // Catch feasibility considers both sustained and gust — take the worst.
+    const sustained = mph != null && Number.isFinite(mph) ? mph : null;
+    const gust      = gustMph != null && Number.isFinite(gustMph) ? gustMph : null;
+    if (sustained == null && gust == null) return { v: 'yellow', note: 'catch wind unavailable' };
+
+    const verdictFor = (val, band) => {
+        if (val == null) return 'yellow';
+        if (val < band.green)  return 'green';
+        if (val < band.yellow) return 'yellow';
+        return 'red';
+    };
+    const sV = sustained != null ? verdictFor(sustained, R.tower_catch_wind) : 'green';
+    const gV = (gust != null && R.tower_catch_gust) ? verdictFor(gust, R.tower_catch_gust) : 'green';
+    const worstV = VERDICT_RANK[gV] > VERDICT_RANK[sV] ? gV : sV;
+    const s = sustained != null ? `${Math.round(sustained)} mph` : '—';
+    const g = gust      != null ? `${Math.round(gust)} mph gust` : '';
+    return { v: worstV, note: `${s}${g ? ' / ' + g : ''} at tower` };
+}
+
+function bandTankingWind(mph, R) {
+    if (!R?.tanking_wind) return null;
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'tanking wind unavailable' };
+    if (mph < R.tanking_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph during load` };
+    if (mph < R.tanking_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — watch plume` };
+    return { v: 'red', note: `${Math.round(mph)} mph — over cryo tanking limit` };
+}
+
 // ── Snapshot helpers ────────────────────────────────────────────────────────
 // Forecast data is laid out as parallel hourly arrays. A snapshot is the
 // projection of those arrays at one hour index — the shape scoreWeather()
@@ -187,6 +251,85 @@ export function snapshotAt(fc, targetIso) {
         upper_wind_300_mph:   Number.isFinite(w300) ? w300 : null,
         upper_shear_mph:      Number.isFinite(shearMag) ? shearMag : null,
     };
+}
+
+/**
+ * Snapshot the marine forecast at the hour nearest targetIso. Parallel to
+ * snapshotAt but over the marine hourly arrays.
+ */
+function _marineSnapshotAt(marine, targetIso) {
+    if (!marine || marine.inland) return null;
+    const times = marine.hourly?.time || [];
+    if (!times.length) return null;
+    const target = Date.parse(targetIso);
+    if (!Number.isFinite(target)) return null;
+
+    let best = 0, bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+        const diff = Math.abs(Date.parse(times[i]) - target);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    const h = marine.hourly;
+    const i = best;
+    return {
+        time:                times[i],
+        wave_height_m:       h.wave_height_m?.[i]     ?? null,
+        wave_period_s:       h.wave_period_s?.[i]     ?? null,
+        wave_dir_deg:        h.wave_dir_deg?.[i]      ?? null,
+        wind_wave_h_m:       h.wind_wave_h_m?.[i]     ?? null,
+        wind_wave_period_s:  h.wind_wave_period_s?.[i]?? null,
+        swell_h_m:           h.swell_h_m?.[i]         ?? null,
+        swell_period_s:      h.swell_period_s?.[i]    ?? null,
+        swell_dir_deg:       h.swell_dir_deg?.[i]     ?? null,
+    };
+}
+
+/**
+ * Compose recovery-specific rule rows. Returns null when neither the
+ * vehicle\'s recovery_ruleset nor Starship-only rulesets are configured.
+ *
+ * Inputs (all optional):
+ *   padSnap       — launch-pad atmospheric snapshot at T-0 (for tower catch
+ *                   and tanking winds, which are evaluated at the pad)
+ *   recoverySnap  — atmospheric snapshot at the ASDS / recovery zone
+ *                   (for zone wind — a different place from the pad)
+ *   marineSnap    — marine snapshot at the recovery zone (waves, swell)
+ */
+function _scoreRecovery(padSnap, recoverySnap, marineSnap, opts = {}) {
+    const R = opts.recovery_ruleset;
+    const vehicleLabel = opts.vehicle_label || 'recovery';
+    if (!R) return null;
+
+    const rules = [];
+
+    // Starship-specific rules — evaluated at the launch pad because catch
+    // and tanking both happen there.
+    if (R.tower_catch_wind) {
+        const row = bandTowerCatchWind(padSnap?.wind_mph, padSnap?.wind_gust_mph, R);
+        if (row) rules.push({ key: 'tower_catch', label: 'Tower catch wind', ...row });
+    }
+    if (R.tanking_wind) {
+        const row = bandTankingWind(padSnap?.wind_mph, R);
+        if (row) rules.push({ key: 'tanking', label: 'Methalox tanking wind', ...row });
+    }
+
+    // ASDS / droneship rules — evaluated at the downrange recovery zone.
+    if (R.zone_wind) {
+        const row = bandRecoveryWind(recoverySnap?.wind_mph, R);
+        if (row) rules.push({ key: 'recovery_wind', label: 'Recovery-zone wind', ...row });
+    }
+    if (R.wave_height_m) {
+        const row = bandWaveHeight(marineSnap?.wave_height_m, R);
+        if (row) rules.push({ key: 'wave_height', label: 'Wave height (ASDS)', ...row });
+    }
+    if (R.swell_period_s) {
+        const row = bandSwellPeriod(marineSnap?.swell_period_s, R);
+        if (row) rules.push({ key: 'swell_period', label: 'Swell period',      ...row });
+    }
+
+    if (!rules.length) return null;
+    const verdict = rules.reduce((a, r) => worst(a, r.v), 'green');
+    return { verdict, rules, ruleset_id: R.id || 'recovery', vehicle_label: vehicleLabel };
 }
 
 /**
@@ -272,6 +415,7 @@ export function scoreLaunch(fc, netIso, opts = {}) {
             verdict:   'yellow',
             primary:   scoreWeather(null, opts),
             arc:       [],
+            recovery:  null,
             source:    'none',
             target_iso: netIso,
         };
@@ -286,10 +430,15 @@ export function scoreLaunch(fc, netIso, opts = {}) {
 
     if (!horizonOk) {
         const snap = snapshotFromCurrent(fc);
+        const primary = scoreWeather(snap, opts);
+        const rec = _scoreRecovery(snap, null, null, opts);
+        if (rec) primary.rules.push(...rec.rules);
+        const verdictWithRec = primary.rules.reduce((a, r) => worst(a, r.v), 'green');
         return {
-            verdict:    scoreWeather(snap, opts).verdict,
-            primary:    scoreWeather(snap, opts),
+            verdict:    verdictWithRec,
+            primary,
             arc:        [],
+            recovery:   rec,
             source:     hasHourly && Number.isFinite(targetMs) ? 'beyond-horizon' : (netIso ? 'current' : 'no-net'),
             target_iso: netIso,
         };
@@ -298,8 +447,25 @@ export function scoreLaunch(fc, netIso, opts = {}) {
     const primarySnap = snapshotAt(fc, netIso);
     const primary     = scoreWeather(primarySnap, opts);
 
+    // Recovery scoring — uses the pad snapshot for Starship (tower catch /
+    // tanking wind) plus optional recovery-zone atmospheric + marine
+    // snapshots for ASDS-class vehicles.
+    const recoveryFc  = opts.recovery_fc  || null;
+    const marineFc    = opts.marine_fc    || null;
+    const recoverySnap = (recoveryFc && Number.isFinite(targetMs))
+        ? snapshotAt(recoveryFc, netIso) : null;
+    const marineSnap   = (marineFc && Number.isFinite(targetMs))
+        ? _marineSnapshotAt(marineFc, netIso) : null;
+    const rec = _scoreRecovery(primarySnap, recoverySnap, marineSnap, opts);
+    if (rec) primary.rules.push(...rec.rules);
+
+    // Re-compute top-level verdict including appended recovery rows.
+    const verdictWithRec = primary.rules.reduce((a, r) => worst(a, r.v), 'green');
+    primary.verdict = verdictWithRec;
+
     // Arc offsets in hours from NET — picked to bracket the most common
-    // scrub windows and recovery ops.
+    // scrub windows and recovery ops. Arc uses launch-only snapshots; the
+    // recovery overlay is evaluated at T-0 and surfaced in the UI separately.
     const ARC_OFFSETS_H = [-6, -1, 0, 1, 3];
     const arc = ARC_OFFSETS_H.map(dh => {
         const iso = new Date(targetMs + dh * 3600_000).toISOString();
@@ -314,9 +480,10 @@ export function scoreLaunch(fc, netIso, opts = {}) {
     });
 
     return {
-        verdict:    primary.verdict,
+        verdict:    verdictWithRec,
         primary,
         arc,
+        recovery:   rec,
         source:     'hourly',
         target_iso: netIso,
     };
@@ -435,6 +602,60 @@ function renderRuleRow(r) {
     `;
 }
 
+// Starship-specific focus panel. Surfaces mission context (IFT number,
+// booster/ship serials if we can parse them), the catch + tanking verdicts
+// as prominent headline tiles, and the evolving-LCC caveat. Called only
+// when the resolved vehicle id === 'starship'.
+function renderStarshipFocus(l, score) {
+    const allRules = score?.primary?.rules || [];
+    const catchRow   = allRules.find(r => r.key === 'tower_catch');
+    const tankingRow = allRules.find(r => r.key === 'tanking');
+    const name = l.name || '';
+    // Heuristic IFT number parse — LL2 mission names often read
+    // "Starship | IFT-5" or "Integrated Flight Test 7". Surface if found.
+    const iftMatch = name.match(/IFT[- ]?(\d+)|Flight Test\s*(\d+)|Starship Flight\s*(\d+)/i);
+    const iftNum   = iftMatch ? (iftMatch[1] || iftMatch[2] || iftMatch[3]) : null;
+
+    const tile = (row, headline) => {
+        if (!row) return '';
+        const color = verdictColor(row.v);
+        return `
+            <div class="lp-ss-tile" style="border-color:${color}40;background:${color}10">
+                <div class="lp-ss-tile-k">${escHtml(headline)}</div>
+                <div class="lp-ss-tile-v" style="color:${color}">${escHtml(verdictLabel(row.v))}</div>
+                <div class="lp-ss-tile-sub">${escHtml(row.note)}</div>
+            </div>
+        `;
+    };
+
+    return `
+        <div class="lp-starship">
+            <div class="lp-label lp-ss-label">Starship Focus ${iftNum ? `<span class="lp-rule-src">· IFT-${escHtml(iftNum)}</span>` : ''}</div>
+            <div class="lp-ss-grid">
+                ${tile(catchRow, 'Tower catch (Mechazilla)')}
+                ${tile(tankingRow, 'Methalox tanking')}
+                <div class="lp-ss-tile lp-ss-tile--info">
+                    <div class="lp-ss-tile-k">Aspect ratio</div>
+                    <div class="lp-ss-tile-v" style="color:#0cc">120 m</div>
+                    <div class="lp-ss-tile-sub">Tallest stack in the catalog — ground wind bites early</div>
+                </div>
+                <div class="lp-ss-tile lp-ss-tile--info">
+                    <div class="lp-ss-tile-k">Max-Q</div>
+                    <div class="lp-ss-tile-v" style="color:#0cc">8 km · T+55 s</div>
+                    <div class="lp-ss-tile-sub">Lower than F9 despite greater vehicle — mass-limited acceleration</div>
+                </div>
+            </div>
+            <div class="lp-ss-note">
+                Starship is still in test phase. Thresholds here are drawn from FAA EIS
+                filings, SpaceX public statements, and IFT-1–6 observed scrubs. Formal
+                launch commit criteria will tighten or relax as the vehicle matures.
+                Ship splashdown-zone marine data is mission-dependent and not yet
+                geolocated — v5 will parse trajectory hints from mission metadata.
+            </div>
+        </div>
+    `;
+}
+
 function renderDetail(l, fc, score) {
     if (!l) {
         return `<div class="lp-empty">Select a launch on the left to see weather Go/No-Go analysis.</div>`;
@@ -517,16 +738,36 @@ function renderDetail(l, fc, score) {
         </div>
     ` : '';
 
-    const primaryRules = score?.primary?.rules || score?.rules;
-    const veh = l._vehicle;  // resolved vehicle + ruleset + metadata
+    const allRules   = score?.primary?.rules || score?.rules || [];
+    // Split launch-commit rows from recovery rows so they can render under
+    // separate headers — an ops team looking at "is the booster going to
+    // make it back to JRTI?" wants recovery constraints grouped, not mixed
+    // with ascent LCC.
+    const RECOVERY_KEYS = new Set(['tower_catch', 'tanking', 'recovery_wind', 'wave_height', 'swell_period']);
+    const launchRules    = allRules.filter(r => !RECOVERY_KEYS.has(r.key));
+    const recoveryRules  = allRules.filter(r =>  RECOVERY_KEYS.has(r.key));
+
+    const veh = l._vehicle;
     const confBadge = veh ? `<span class="lp-conf lp-conf--${escHtml(veh.confidence)}" title="${escHtml(confidenceTooltip(veh.confidence))}">${escHtml(veh.confidence)}</span>` : '';
     const sourceTxt = veh?.sources?.length ? `<div class="lp-rule-sources">Sources: ${veh.sources.map(escHtml).join(' · ')}</div>` : '';
     const notes     = veh?.notes ? `<div class="lp-rule-note">${escHtml(veh.notes)}</div>` : '';
-    const ruleBlock = primaryRules ? `
+
+    const ruleBlock = launchRules.length ? `
         <div class="lp-label">Launch Commit Criteria${veh ? ` <span class="lp-rule-src">· ${escHtml(veh.label)} ruleset ${confBadge}</span>` : ''}</div>
-        <div class="lp-rules">${primaryRules.map(renderRuleRow).join('')}</div>
+        <div class="lp-rules">${launchRules.map(renderRuleRow).join('')}</div>
         ${sourceTxt}${notes}
     ` : '';
+
+    const zone = l._recovery_zone;
+    const recoveryBlock = recoveryRules.length ? `
+        <div class="lp-label">Recovery Criteria${zone ? ` <span class="lp-rule-src">· ${escHtml(zone.label)}${zone.offset_km ? ` (${zone.offset_km} km downrange)` : ''}</span>` : ''}</div>
+        <div class="lp-rules lp-rules--recovery">${recoveryRules.map(renderRuleRow).join('')}</div>
+    ` : '';
+
+    // Starship gets its own mission-context panel layered on top of the
+    // generic detail view. Rendered inline here (not a separate file) to
+    // keep the selected-launch view in one place.
+    const starshipBlock = (veh?.vehicle?.id === 'starship') ? renderStarshipFocus(l, score) : '';
 
     return `
         <div class="lp-detail">
@@ -561,6 +802,10 @@ function renderDetail(l, fc, score) {
             ${forecastBlock}
 
             ${ruleBlock}
+
+            ${recoveryBlock}
+
+            ${starshipBlock}
 
             <div class="lp-footnote">
                 Weather source: Open-Meteo (hourly forecast, time-aligned to NET).
@@ -665,14 +910,37 @@ async function ensureWeather(l) {
         l._score = state.scoreCache.get(l.id);
         return null;
     }
-    const fc = await fetchLaunchForecast(l.pad.lat, l.pad.lon);
-    state.weatherCache.set(l.id, fc);
-    // Vehicle-specific wind ruleset. resolveRuleset() returns both the merged
-    // thresholds and UI-facing metadata (confidence, sources); we stash the
-    // metadata on the launch so renderDetail can cite it without re-matching.
+
     const rr = resolveRuleset(l);
     l._vehicle = rr;
-    const score = scoreLaunch(fc, l.net_iso, { ruleset: rr.ruleset });
+
+    // Recovery zone (ASDS offset / tower catch / null for expendable) and
+    // the vehicle's recovery_ruleset — both optional. We fetch marine +
+    // recovery-zone atmospheric forecasts in parallel with the pad forecast
+    // so a reusable vehicle's full picture loads in one round-trip worth
+    // of waiting rather than three serial hops.
+    const recoveryZone    = recoveryZoneForLaunch(l);
+    const recoveryRuleset = rr.vehicle?.recovery_ruleset;
+    l._recovery_zone      = recoveryZone;
+
+    const needsMarine       = recoveryZone && recoveryZone.type === 'ASDS';
+    const needsRecoveryWind = needsMarine;   // ASDS-zone wind differs from pad
+
+    const [fc, recoveryFc, marineFc] = await Promise.all([
+        fetchLaunchForecast(l.pad.lat, l.pad.lon),
+        needsRecoveryWind ? fetchLaunchForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
+        needsMarine       ? fetchMarineForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
+    ]);
+    state.weatherCache.set(l.id, fc);
+    l._marine_fc = marineFc;     // retained for the Starship focus panel
+
+    const score = scoreLaunch(fc, l.net_iso, {
+        ruleset:           rr.ruleset,
+        recovery_ruleset:  recoveryRuleset,
+        recovery_fc:       recoveryFc,
+        marine_fc:         marineFc,
+        vehicle_label:     rr.label,
+    });
     state.scoreCache.set(l.id, score);
     l._score = score;
     return fc;
