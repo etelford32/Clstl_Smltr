@@ -1461,71 +1461,9 @@ input#sl-scrub { width:100%; margin:0; height:20px; }
                 </div>
             </div>
 
-            <!-- ── Heliophysics Fleet ──────────────────────────────── -->
-            <div class="sec" id="sec-fleet">
-                <div class="sec-hd"><span>Heliophysics Fleet</span><span class="arrow">▼</span></div>
-                <div class="sec-bd">
-                    <div style="font-size:10px;color:#ccb;line-height:1.55;margin-bottom:8px">
-                        Missions currently observing the Sun or its environment — the data
-                        sources behind everything else on this page.
-                    </div>
-                    <div id="helio-fleet-list"></div>
-                    <div style="font-size:9px;color:#443322;margin-top:8px;line-height:1.5">
-                        Parker Solar Probe is the namesake of this app — operating inside
-                        the solar corona since 2021. Roster data:
-                        <code>js/space-missions.js</code>.
-                    </div>
-                </div>
-            </div>
-
         </div>
     </aside>
 </div>
-
-<!-- Heliophysics Fleet panel — populates the roster list from the canonical
-     data module so it stays in sync with other pages (moon/threejs/etc.) -->
-<script type="module">
-    import { HELIOPHYSICS_MISSIONS } from './js/space-missions.js';
-    const host = document.getElementById('helio-fleet-list');
-    if (host) {
-        const STATUS_COLOR = {
-            operational: '#4fc97f',
-            extended:    '#4fc3f7',
-            cruising:    '#ffb830',
-            completed:   '#888',
-            retired:     '#555',
-            planned:     '#c78',
-        };
-        // Sort: PSP first (app namesake), then operational > extended > rest
-        const RANK = { operational: 0, extended: 1, cruising: 2, completed: 3, retired: 4 };
-        const rows = [...HELIOPHYSICS_MISSIONS].sort((a, b) => {
-            if (a.id === 'parker-solar-probe') return -1;
-            if (b.id === 'parker-solar-probe') return  1;
-            return (RANK[a.status] ?? 99) - (RANK[b.status] ?? 99);
-        });
-        host.innerHTML = rows.map(m => {
-            const dot = STATUS_COLOR[m.status] || '#888';
-            const hl  = (m.highlights || []).slice(0, 2)
-                .map(h => `<li style="color:#aa9">${h}</li>`).join('');
-            const closestApproach = m.closest_approach_km
-                ? ` · closest ${(m.closest_approach_km / 1e6).toFixed(2)} Mkm`
-                : '';
-            return `
-                <div style="margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.04)">
-                    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">
-                        <span style="font-weight:700;color:#ffd7a4">${m.name}</span>
-                        <span style="font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:${dot}">● ${m.status}</span>
-                    </div>
-                    <div style="font-size:9px;color:#998;margin-top:2px">
-                        ${m.agency} · launched ${m.launched}${closestApproach}
-                    </div>
-                    <div style="font-size:9px;color:#cbb;margin-top:4px;line-height:1.5">${m.summary}</div>
-                    ${hl ? `<ul style="margin:4px 0 0 14px;padding:0;font-size:8.5px;line-height:1.5">${hl}</ul>` : ''}
-                </div>
-            `;
-        }).join('');
-    }
-</script>
 
 <script type="module">
 import './js/live-status-bar.js';
