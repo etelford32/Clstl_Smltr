@@ -471,14 +471,23 @@ function computeGradientStats(grid) {
  * V_g = |∇P| / (f × ρ)  where f = 2Ω sin|φ| (Coriolis parameter).
  * Returns null within ±5° of the equator where f → 0.
  *
+ * Capped at V_G_MAX_MS to stop procedural / noisy pressure fields from
+ * producing wildly non-physical readouts. The real-atmosphere extreme
+ * (Mount Washington, top 1 % of jet-stream cores) tops out near 125 m/s;
+ * 150 leaves headroom for a genuinely exceptional synoptic event but
+ * clamps away e.g. 1800 m/s artefacts that appear when a 75 hPa/100 km
+ * gradient shows up in noisy synthetic data.
+ *
  * @param {number} gradHPa100km  Max pressure gradient in hPa / 100 km
  * @param {number} latDeg        Geographic latitude in degrees
  */
+const V_G_MAX_MS = 150;
 export function geoWindMs(gradHPa100km, latDeg) {
     const f = 2 * OMEGA * Math.abs(Math.sin(latDeg * DEG));
     if (f < 1.4e-5) return null;                    // |lat| < ~5.8° — geostrophy breaks down
     const gradPaM = gradHPa100km * 1e-3;           // Pa / m  (1 hPa/100km = 1e-3 Pa/m)
-    return gradPaM / (f * RHO);                    // m / s
+    const raw     = gradPaM / (f * RHO);           // m / s
+    return Math.min(raw, V_G_MAX_MS);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
