@@ -39,6 +39,12 @@ export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 export const MAX_WIND_MS = 60;          // m/s — wind-speed normalisation ceiling
 const REFRESH_MS   = 15 * 60 * 1000;   // re-fetch every 15 min (cache is 1 hr w/ SWR)
+// Retry staircase after a failed fetch. On each successive failure we step
+// to the next entry; on success we reset to the steady-state REFRESH_MS.
+// Design goal: recover quickly when the upstream comes back (30 s is
+// short enough that a reload-in-tab blip barely shows) without hammering
+// the edge cache when something is actually down.
+const RETRY_BACKOFF_MS = [30_000, 120_000, 15 * 60 * 1000];
 
 // ── Session-snapshot helpers ───────────────────────────────────────────────
 // Cache last-known-good buffer trio into sessionStorage so a short
@@ -74,6 +80,7 @@ function _base64ToF32(s) {
 export class WeatherFeed {
     constructor() {
         this._timer      = null;
+        this._failureCount = 0;    // consecutive-failure counter → RETRY_BACKOFF_MS index
         this._weatherBuf = new Float32Array(TEX_W * TEX_H * 4);
         this._windBuf    = new Float32Array(TEX_W * TEX_H * 4);
         // cloudBuf: R=cloud_low, G=cloud_mid, B=cloud_high, A=precipitation_rate
@@ -98,20 +105,34 @@ export class WeatherFeed {
             }
         }
 
-        // Start with procedural data so the shader has something immediately.
-        this._buildProcedural();
-
-        // Then attempt to overlay a session-cached last-known-good snapshot
-        // from a previous tab lifetime. If restored, _hasGoodData flips to
-        // true — the fetch-failure path then *keeps* those buffers instead
-        // of flattening them back to procedural every refresh.
+        // Prefer the session-cached snapshot on first paint — avoids the
+        // flash-of-procedural that used to show for ~1 frame before the
+        // snapshot overlay landed. If no snapshot exists (first-ever load,
+        // expired cache, TEX size bump), fall back to procedural so the
+        // shader still has something to sample.
         this._hasGoodData = this._restoreSnapshot();
+        if (!this._hasGoodData) this._buildProcedural();
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
-    start()  { this._fetchAndProcess(); this._timer = setInterval(() => this._fetchAndProcess(), REFRESH_MS); }
-    stop()   { clearInterval(this._timer); }
+    // Self-rescheduling timer (setTimeout, not setInterval) so each success
+    // or failure can dial its own delay. Success → REFRESH_MS; failure →
+    // RETRY_BACKOFF_MS[min(failureCount-1, end)].
+    start()  { this._fetchAndProcess(); }
+    stop()   { clearTimeout(this._timer); this._timer = null; }
     refresh(){ this._fetchAndProcess(); }
+
+    _scheduleNext() {
+        clearTimeout(this._timer);
+        let delay;
+        if (this._failureCount === 0) {
+            delay = REFRESH_MS;
+        } else {
+            const idx = Math.min(this._failureCount - 1, RETRY_BACKOFF_MS.length - 1);
+            delay = RETRY_BACKOFF_MS[idx];
+        }
+        this._timer = setTimeout(() => this._fetchAndProcess(), delay);
+    }
 
     get weatherBuffer() { return this._weatherBuf; }
     get windBuffer()    { return this._windBuf; }
@@ -129,28 +150,32 @@ export class WeatherFeed {
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
                 this._hasGoodData    = true;
+                this._failureCount   = 0;   // reset backoff on success
                 // Persist for subsequent reloads within this tab session.
                 this._saveSnapshot();
             } else {
                 throw new Error('Empty response');
             }
         } catch (err) {
+            this._failureCount++;
             // Three-tier fallback. If we've ever had live or cached data
             // in this session (_hasGoodData), keep those buffers — serving
             // stale real data beats reverting to synthetic. Only rebuild
             // procedural when we have nothing better to show.
             if (this._hasGoodData) {
-                console.warn('[WeatherFeed] upstream failed — keeping last-known-good buffers:', err.message);
+                console.warn(`[WeatherFeed] upstream failed (attempt ${this._failureCount}) — keeping last-known-good buffers:`, err.message);
                 this._meta.loaded    = false;
                 this._meta.source    = `stale · last known (${err.message ?? 'upstream error'})`;
                 this._meta.fetchTime = new Date();
             } else {
-                console.warn('[WeatherFeed] Falling back to procedural data:', err.message);
+                console.warn(`[WeatherFeed] Falling back to procedural data (attempt ${this._failureCount}):`, err.message);
                 this._buildProcedural();
                 this._meta.loaded    = false;
                 this._meta.source    = 'procedural (GFS unavailable)';
                 this._meta.fetchTime = new Date();
             }
+        } finally {
+            this._scheduleNext();
         }
         this._dispatch('weather-update', {
             weatherBuffer: this._weatherBuf,

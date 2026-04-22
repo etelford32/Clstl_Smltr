@@ -65,6 +65,10 @@ export const FREE_LIMITS = Object.freeze({
 export const NOAA = Object.freeze({
     wind:      'https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json',
     kp1m:      'https://services.swpc.noaa.gov/json/planetary_k_index_1m.json',
+    // 3-day Kp forecast in 3-hour bins. 2D-array payload:
+    //   [[headers], [time_tag, kp, observed/estimated/predicted, noaa_scale], …]
+    // Refreshed hourly by NOAA; we pull it at T3 cadence.
+    kpForecast:'https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json',
     xray:      'https://services.swpc.noaa.gov/json/goes/primary/xrays-1-day.json',
     protons:   'https://services.swpc.noaa.gov/json/goes/primary/integral-protons-1-day.json',
     electrons: 'https://services.swpc.noaa.gov/json/goes/primary/integral-electrons-1-day.json',

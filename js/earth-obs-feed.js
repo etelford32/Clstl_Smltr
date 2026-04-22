@@ -96,6 +96,11 @@ const CRS           = 'EPSG:4326';
  *   colorRamp   — description of the GIBS colour mapping
  *   format      — image format for GIBS request
  *   timeOffset  — days to subtract from today (most products need yesterday)
+ *   opacity     — per-layer mesh opacity (see _createObsOverlay). Tuned so
+ *                 dense overlays (fires, snow) read clearly while subtle
+ *                 ones (AOD haze, cloud thickness) don't drown out the
+ *                 wind/isobar/cloud shaders beneath.
+ *   defaultOn   — whether the layer autoloads + its checkbox ships checked
  */
 export const EARTH_OBS_LAYERS = [
     {
@@ -111,6 +116,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Blue (light) → green → yellow → red → magenta (extreme)',
         format:      'image/png',
         timeOffset:  0,    // IMERG has near-real-time products
+        opacity:     0.65, // storm cells — stand out without burying land
+        defaultOn:   true,
     },
     {
         id:          'precip-amsr2',
@@ -125,6 +132,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Blue → green → yellow → red',
         format:      'image/png',
         timeOffset:  1,
+        opacity:     0.6,
+        defaultOn:   false,   // redundant with IMERG on first paint
     },
     {
         id:          'sst',
@@ -139,6 +148,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Purple (cold) → blue → cyan → green → yellow → red (warm)',
         format:      'image/png',
         timeOffset:  1,
+        opacity:     0.55, // middle-of-road — paints over oceans only
+        defaultOn:   true,
     },
     {
         id:          'aod',
@@ -153,6 +164,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Clear (transparent) → yellow → orange → red → brown',
         format:      'image/png',
         timeOffset:  1,
+        opacity:     0.4,  // haze should read as *haze*, not a wall of colour
+        defaultOn:   true,
     },
     {
         id:          'cloud-thickness',
@@ -167,6 +180,13 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Thin (light blue) → medium (white) → thick (yellow/red)',
         format:      'image/png',
         timeOffset:  1,
+        // NASA MODIS cloud optical thickness and our weather-feed cloud
+        // shader both paint the same concept (cloudiness) at different
+        // altitudes — enabling both at once double-paints clouds and
+        // washes out the shader's wind/precip motion. Default off,
+        // opacity muted for the opt-in analytic view.
+        opacity:     0.45,
+        defaultOn:   false,
     },
     {
         id:          'fires',
@@ -181,6 +201,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Red/orange dots on transparent background',
         format:      'image/png',
         timeOffset:  1,
+        opacity:     0.85, // sparse hot spots — needs to punch through
+        defaultOn:   true,
     },
     {
         id:          'snow',
@@ -201,6 +223,8 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Pale blue → white (more snow) on transparent background',
         format:      'image/png',
         timeOffset:  2,
+        opacity:     0.7,  // snow fields — should read clearly on polar ice
+        defaultOn:   true,
     },
 ];
 
@@ -269,11 +293,12 @@ export class EarthObsFeed {
         this._timers    = {};
         this._textures  = {};   // id → THREE.Texture
         this._meta      = {};   // id → { source, time, updated, status, error? }
-        // Default: every layer enabled. Autoload makes the globe rich on
-        // arrival; per-layer checkboxes gate visibility (not the fetch)
-        // so turning a layer off just hides the mesh while keeping the
-        // texture primed for re-enable.
-        this._enabled = new Set(EARTH_OBS_LAYERS.map(l => l.id));
+        // Default: only layers marked `defaultOn:true` autoload. The
+        // others (cloud-thickness duplicates the shader, AMSR2 duplicates
+        // IMERG) stay dormant until the user flips them on.
+        this._enabled = new Set(
+            EARTH_OBS_LAYERS.filter(l => l.defaultOn !== false).map(l => l.id)
+        );
         // Seed idle status so every layer has a row the UI can paint.
         for (const layer of EARTH_OBS_LAYERS) {
             this._meta[layer.id] = { status: 'idle', layer };

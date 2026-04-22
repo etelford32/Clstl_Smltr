@@ -45,6 +45,7 @@ export const FALLBACK = {
     by:            5.0,
     kp:            2.0,  // quiet geomagnetic conditions
     kp_1min:       2.0,
+    kp_forecast:   [],    // array of {time, kp, kind: 'observed'|'estimated'|'predicted'}
     xray_flux:   1e-8,   // W/m²  A-class background
     xray_class:  'A1.0',
     flare_class:  null,
@@ -232,26 +233,55 @@ function parseLocation(loc) {
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
+/**
+ * Retry-with-exponential-backoff wrapper. Up to `maxAttempts` tries (default 3);
+ * waits 500 ms, 1500 ms between retries.  5xx and network errors (including
+ * AbortError on timeout) retry; 4xx responses throw immediately since they
+ * almost always indicate a URL/config bug that no number of retries will fix.
+ *
+ * Matches WeatherFeed's recovery strategy so intermittent NOAA 502/504s
+ * during storm traffic spikes don't instantly poison the feed's failStreak.
+ */
+const SWPC_RETRY_DELAYS_MS = [500, 1500];   // 3 total attempts
+
+async function _fetchWithRetry(url, label) {
+    const attempts = SWPC_RETRY_DELAYS_MS.length + 1;
+    let lastErr;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+            if (!res.ok) {
+                // 4xx = likely non-transient; bubble up immediately.
+                if (res.status >= 400 && res.status < 500) {
+                    throw new Error(`${label} HTTP ${res.status} — ${url}`);
+                }
+                throw new Error(`${label} HTTP ${res.status} — ${url}`);
+            }
+            try {
+                return await res.json();
+            } catch (e) {
+                throw new Error(`${label} bad JSON from ${url}: ${e.message}`);
+            }
+        } catch (err) {
+            lastErr = err;
+            // Don't retry definitive client errors (4xx).
+            if (/HTTP 4\d\d/.test(err.message)) throw err;
+            if (attempt < SWPC_RETRY_DELAYS_MS.length) {
+                await new Promise(r => setTimeout(r, SWPC_RETRY_DELAYS_MS[attempt]));
+            }
+        }
+    }
+    throw lastErr;
+}
+
 /** Direct browser→NOAA fetch (CORS enabled; WAF only blocks server-side). */
 async function fetchNoaa(url) {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error(`NOAA HTTP ${res.status} — ${url}`);
-    try {
-        return await res.json();
-    } catch (e) {
-        throw new Error(`NOAA bad JSON from ${url}: ${e.message}`);
-    }
+    return _fetchWithRetry(url, 'NOAA');
 }
 
 /** Edge function fetch (DONKI only — NASA key stays server-side). */
 async function fetchEdge(url) {
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error(`Edge HTTP ${res.status} — ${url}`);
-    try {
-        return await res.json();
-    } catch (e) {
-        throw new Error(`Edge bad JSON from ${url}: ${e.message}`);
-    }
+    return _fetchWithRetry(url, 'Edge');
 }
 
 // ── 2D-array helpers (NOAA "CSV-in-JSON" format used by several endpoints) ───
@@ -484,6 +514,28 @@ async function fetchAlerts(state) {
                   : 'info',
         };
     }).slice(0, 20);
+}
+
+/**
+ * NOAA 3-day Kp forecast — 3-hour bins mixing observed, estimated, and
+ * predicted values. Format is a 2D array:
+ *   [ ['time_tag','kp','observed','noaa_scale'],
+ *     ['2025-11-01 00:00:00', '3.00', 'observed',  'G0'],
+ *     ['2025-11-01 03:00:00', '2.67', 'estimated', 'G0'],
+ *     ['2025-11-01 06:00:00', '3.33', 'predicted', 'G0'], … ]
+ * `observed` column is literally the string label — not a boolean.
+ */
+async function fetchKpForecast(state) {
+    const raw = await fetchNoaa(NOAA.kpForecast);
+    if (!Array.isArray(raw) || raw.length < 2) { state.kp_forecast = []; return; }
+    const rows = parse2D(raw);
+    state.kp_forecast = rows.map(r => {
+        const t  = r.time_tag ? new Date(r.time_tag.replace(' ', 'T') + 'Z') : null;
+        const kp = Number(r.kp);
+        const kind = String(r.observed ?? '').toLowerCase();   // 'observed' | 'estimated' | 'predicted'
+        if (!t || isNaN(t.getTime()) || !isFinite(kp)) return null;
+        return { time: t, kp, kind: kind || 'predicted' };
+    }).filter(Boolean);
 }
 
 async function fetchDst(state) {
@@ -840,6 +892,7 @@ export class SpaceWeatherFeed {
             fetchFlares(this._raw),
             fetchRegions(this._raw),
             fetchDst(this._raw),
+            fetchKpForecast(this._raw),
             fetchDONKICME(this._raw),
             fetchDONKINotifications(this._raw),
             fetchDONKIFlares(this._raw),
@@ -979,6 +1032,7 @@ export class SpaceWeatherFeed {
             proton_diff_10mev:   raw.proton_diff_10mev ?? 0,
 
             // ── Nested groups — clean API for new consumers ───────────────
+            kp_forecast:   raw.kp_forecast ?? [],
             geomagnetic: {
                 kp:           raw.kp,
                 kp_1min:      raw.kp_1min      ?? raw.kp,
@@ -987,6 +1041,7 @@ export class SpaceWeatherFeed {
                 kp_norm:      d.kp_norm,
                 kp_1min_norm: d.kp_1min_norm,
                 dst_norm:     d.dst_norm,
+                kp_forecast:  raw.kp_forecast ?? [],
             },
             particles: {
                 proton_10mev_pfu:   raw.proton_flux_10mev,

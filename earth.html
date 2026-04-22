@@ -943,7 +943,7 @@ nav {
                 <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-aod"         checked><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness" checked><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-snow"        checked><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
             </div></div>
@@ -1165,7 +1165,7 @@ nav {
         <canvas id="kp-forecast-chart" width="252" height="88"
             style="display:block;width:100%;border-radius:3px;margin-bottom:6px;
                    background:rgba(0,10,20,.55);border:1px solid rgba(0,198,255,.08);"
-            title="Cyan = observed Kp (last 72 h) | Orange = AR(6) forecast | Band = 80% prediction interval"></canvas>
+            title="Cyan = observed Kp (last 72 h) | Orange = AR(6) forecast | Green = NOAA SWPC official forecast | Band = 80% prediction interval"></canvas>
 
         <div class="ir">
             <span class="ik">Kp (24h forecast)</span>
@@ -2962,8 +2962,14 @@ function _createObsOverlay(layerId) {
     // winds and clouds float above. Previously these shells sat at 1.012
     // *above* the cloud layer, so with all 6 enabled they formed a near-
     // opaque stack that occluded every other weather visualisation.
+    //
+    // Per-layer opacity (EARTH_OBS_LAYERS[].opacity) replaces the old
+    // one-size-fits-all 0.55 so sparse hotspots (fires) pop while haze
+    // datasets (AOD) stay subtle.
+    const layerDef = EARTH_OBS_LAYERS.find(l => l.id === layerId);
+    const opacity  = layerDef?.opacity ?? 0.55;
     const mat = new THREE.MeshBasicMaterial({
-        transparent: true, opacity: 0.55, depthWrite: false,
+        transparent: true, opacity, depthWrite: false,
         side: THREE.FrontSide, blending: THREE.NormalBlending,
     });
     const mesh = new THREE.Mesh(
@@ -4797,6 +4803,12 @@ function drawKpChart(result) {
     const fc   = result.kpForecast ?? [];
     const lo   = result.kpFcLo80  ?? [];
     const hi   = result.kpFcHi80  ?? [];
+    // NOAA's official 3-day Kp forecast (3-hour bins). Pulled in T3
+    // via swpc-feed.js fetchKpForecast(). Rendered as a green trace so
+    // operators can compare our AR(6) forecast (orange) against NOAA's
+    // planetary-k-index-forecast product.
+    const noaaFc = (_lastSwState?.kp_forecast ?? [])
+        .filter(p => p.time instanceof Date && isFinite(p.kp));
     const total = hist.length + fc.length;
     if (!total) return;
 
@@ -4845,6 +4857,28 @@ function drawKpChart(result) {
         ctx.beginPath();
         if (hist.length) ctx.moveTo(iX(hist.length - 1), kpY(hist[hist.length - 1]));
         fc.forEach((kp, i) => ctx.lineTo(iX(hist.length + i), kpY(kp)));
+        ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // NOAA official 3-day forecast (dashed green). Mapped onto the same
+    // x-axis as our in-house forecast by clipping to the +72 h window.
+    // The index is hist-length-relative assuming each forecast bin in our
+    // AR(6) is hourly; NOAA's bins are 3-hourly so we space them by 3x.
+    if (noaaFc.length && fc.length) {
+        ctx.strokeStyle = '#60d090';
+        ctx.lineWidth   = 1.2;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        const baseIdx = hist.length;   // "now" on the chart
+        let first = true;
+        for (const pt of noaaFc) {
+            const hoursAhead = (pt.time.getTime() - Date.now()) / 3_600_000;
+            if (hoursAhead < -1 || hoursAhead > fc.length + 1) continue;
+            const x = iX(baseIdx + hoursAhead);
+            const y = kpY(pt.kp);
+            if (first) { ctx.moveTo(x, y); first = false; }
+            else        ctx.lineTo(x, y);
+        }
         ctx.stroke(); ctx.setLineDash([]);
     }
 
