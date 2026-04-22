@@ -68,27 +68,18 @@ Every success response sets `stale-while-revalidate` alongside
   firing a background refresh against upstream.
 - Next user (or same user's next request) gets the fresh copy.
 
-Net effect: no user ever waits for Open-Meteo's round-trip under normal
-load. The ONLY cold-cache path is an endpoint that has never been hit
-within the current edge POP, which the cron pre-warm eliminates for the
-launch-planner flow.
+Net effect under steady traffic: only the first visitor of any given
+cache-period pays the upstream round-trip; everyone else gets an edge
+hit or a SWR-revalidated stale hit. Once any entry is warm, it stays
+warm as long as at least one request per (s-maxage + SWR) window
+touches that cache key.
 
-## Pre-warming
+Cold-cache scenarios that still incur upstream latency:
+  • First visitor after a Vercel deploy (edge caches are flushed)
+  • First visitor after an extended idle period (>s-maxage + SWR)
+  • First visitor at a regional edge POP that hasn't seen the endpoint
 
-`/api/cron/warm-forecasts` runs every 10 min (vercel.json `crons`).
-It fetches the upcoming-launches list, derives unique pad coords, and
-fires batched GETs against `/api/weather/forecast?type=launch&...` for
-each pad, plus one GET against `/api/nws/convective`.
-
-The 10-min cadence is 5 min shorter than the 15-min forecast cache TTL,
-which means the cache is refreshed BEFORE it expires — so real users
-never hit a cold cache for the hot-path pads.
-
-Gotcha: the cron does a **self-fetch** against the site's public URL
-(VERCEL_URL for preview, parkersphysics.com for prod). This is
-deliberate — it routes through the CDN and populates the edge cache.
-A direct handler invocation would warm Open-Meteo but leave our own
-edge cold.
+These are the edge cases; the common path is always cached.
 
 ## Adding a new endpoint
 
