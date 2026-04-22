@@ -3259,7 +3259,7 @@ document.addEventListener('weather-update', e => {
 
     // Weather analysis panel
     const dot  = document.getElementById('wx-status-dot');
-    const live = meta.source.includes('GFS') || meta.source.includes('Open-Meteo');
+    const live = meta.loaded && !meta.demo;
     dot.className = live ? 'live' : 'offline';
     document.getElementById('wx-src').textContent  = meta.source;
     document.getElementById('wx-upd').textContent  = meta.fetchTime
