@@ -183,6 +183,28 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
             </div>
         </div>
 
+        <!-- Artemis Program -->
+        <div class="ip-section">
+            <div class="ip-title">Artemis Program</div>
+            <div id="ip-artemis-missions" style="font-size:10px;line-height:1.55"></div>
+        </div>
+
+        <!-- Artemis I findings -->
+        <div class="ip-section">
+            <div class="ip-title">What Artemis I Taught Us</div>
+            <div id="ip-artemis-findings" style="font-size:9px;color:#99a;line-height:1.55"></div>
+        </div>
+
+        <!-- Landing sites (Apollo + Artemis III candidates) -->
+        <div class="ip-section">
+            <div class="ip-title">Landing Sites</div>
+            <div class="lyr-grid" style="margin-bottom:8px">
+                <label class="lyr"><input type="checkbox" id="lyr-apollo" checked> <span style="color:#ffae44">●</span> Apollo (6 sites)</label>
+                <label class="lyr"><input type="checkbox" id="lyr-artemis" checked> <span style="color:#44ccff">●</span> Artemis III candidates (13 regions)</label>
+            </div>
+            <div id="ip-landing-sites" style="font-size:9px;color:#99a;line-height:1.5;max-height:140px;overflow-y:auto;padding-right:4px"></div>
+        </div>
+
         <!-- Data Sources -->
         <div class="ip-section">
             <div class="ip-title">Data Sources</div>
@@ -192,6 +214,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#
                 <div>PREDICCS — Predictions of radiation from REleASE/EMMREM</div>
                 <div>NOAA SWPC — Solar wind, X-ray flux, SEP events (live)</div>
                 <div>Schwadron et al. (2018) — GCR dose rate model</div>
+                <div>MARE — Matroshka AstroRad Radiation Experiment (DLR/NASA, Artemis I 2022)</div>
+                <div>NASA Artemis III candidate regions (August 2022 announcement)</div>
             </div>
         </div>
     </div>
@@ -203,6 +227,13 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { MoonSkin } from './js/moon-skin.js';
 import { SpaceWeatherFeed } from './js/swpc-feed.js';
 import { initScaleNav } from './js/scale-nav.js';
+import {
+    MISSIONS as ARTEMIS_MISSIONS,
+    ARTEMIS_I_FINDINGS,
+    APOLLO_SITES,
+    ARTEMIS_III_CANDIDATES,
+} from './js/artemis-data.js';
+import { LandingSites } from './js/moon-landing-sites.js';
 
 initScaleNav('moon');
 
@@ -271,6 +302,75 @@ const moon = new MoonSkin(scene, sunDir, {
 
 moon.loadTextures(renderer).then(() => {
     document.getElementById('loading').classList.add('done');
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  LANDING SITES — Apollo (6) + Artemis III candidates (13)
+//  Mounted on moon.moonMesh so markers rotate with the lunar body.
+// ═══════════════════════════════════════════════════════════════
+const landingSites = new LandingSites(moon.moonMesh);
+
+// ── Info-panel population ────────────────────────────────────────
+(function renderArtemisPanel() {
+    const host = document.getElementById('ip-artemis-missions');
+    if (!host) return;
+    host.innerHTML = ARTEMIS_MISSIONS.map(m => {
+        const statusColor =
+            m.status === 'completed' ? '#44cc88' :
+            m.status === 'planned'   ? '#ffaa00' :
+            '#99a';
+        const dateStr = m.status === 'completed'
+            ? (m.returned || m.launched || '—')
+            : (m.launched || 'TBD');
+        return `
+            <div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.04)">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
+                    <span style="font-weight:700;color:#dde">${m.name}</span>
+                    <span style="font-size:8px;text-transform:uppercase;letter-spacing:.06em;color:${statusColor}">${m.status}</span>
+                </div>
+                <div style="font-size:9px;color:#778">${dateStr}${m.crewed ? ` · crew ${m.crew_size}` : ' · uncrewed'}</div>
+                <div style="font-size:9px;color:#8ab;margin-top:2px">${m.summary}</div>
+                ${m.notes ? `<div style="font-size:8px;color:#667;margin-top:2px;font-style:italic">${m.notes}</div>` : ''}
+            </div>
+        `;
+    }).join('');
+})();
+
+(function renderArtemisFindings() {
+    const host = document.getElementById('ip-artemis-findings');
+    if (!host) return;
+    host.innerHTML = ARTEMIS_I_FINDINGS.map(f => `
+        <div style="margin-bottom:6px">
+            <div style="color:#bcd;font-weight:600">${f.topic}</div>
+            <div style="color:#899">${f.observation || f.measured || ''}</div>
+            ${f.vest_effect ? `<div style="color:#0cc;font-size:8px">AstroRad effect: ${f.vest_effect}</div>` : ''}
+            ${f.significance ? `<div style="color:#778;font-size:8px;margin-top:1px">${f.significance}</div>` : ''}
+        </div>
+    `).join('');
+})();
+
+(function renderLandingSiteList() {
+    const host = document.getElementById('ip-landing-sites');
+    if (!host) return;
+    const apolloRows = APOLLO_SITES.map(s =>
+        `<div><span style="color:#ffae44">●</span> <strong style="color:#bcd">${s.mission}</strong> · ${s.region} · ${s.lat.toFixed(2)}°, ${s.lon.toFixed(2)}°</div>`
+    ).join('');
+    const artemisRows = ARTEMIS_III_CANDIDATES.map(s =>
+        `<div><span style="color:#44ccff">●</span> <strong style="color:#bcd">${s.name}</strong> · ${s.lat.toFixed(1)}°, ${s.lon.toFixed(1)}° · <span style="color:#778">${s.note}</span></div>`
+    ).join('');
+    host.innerHTML = `
+        <div style="margin-bottom:6px;color:#ffae44;font-weight:700;font-size:8px;text-transform:uppercase;letter-spacing:.08em">Apollo (1969–1972)</div>
+        ${apolloRows}
+        <div style="margin:8px 0 6px;color:#44ccff;font-weight:700;font-size:8px;text-transform:uppercase;letter-spacing:.08em">Artemis III candidates (south pole)</div>
+        ${artemisRows}
+    `;
+})();
+
+document.getElementById('lyr-apollo')?.addEventListener('change', e => {
+    landingSites.setApolloVisible(e.target.checked);
+});
+document.getElementById('lyr-artemis')?.addEventListener('change', e => {
+    landingSites.setArtemisVisible(e.target.checked);
 });
 
 // ═══════════════════════════════════════════════════════════════
