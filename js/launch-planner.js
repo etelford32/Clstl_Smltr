@@ -25,6 +25,7 @@ import {
     weatherCodeLabel,
     compassLabel,
 } from './trip-planner.js';
+import { resolveRuleset } from './launch-rulesets.js';
 
 // ── Rulesets ────────────────────────────────────────────────────────────────
 // Default ruleset is a conservative blend of publicly-documented launch
@@ -319,6 +320,14 @@ function verdictLabel(v) {
     return v === 'red' ? 'NO-GO' : v === 'yellow' ? 'HOLD' : 'GO';
 }
 
+function confidenceTooltip(c) {
+    if (c === 'high')            return 'Thresholds from the vehicle\'s primary public user\'s guide or 45 WS Flight Commit Criteria.';
+    if (c === 'medium')          return 'Thresholds derived from FAA EIS, press statements, or historical scrub behavior.';
+    if (c === 'public-estimate') return 'No primary public source; conservative analog from a similar-class vehicle.';
+    if (c === 'generic')         return 'Vehicle not in catalog; using generic default thresholds.';
+    return '';
+}
+
 // Render a two-letter ISO country code to its flag emoji (skipped if not exactly 2 letters).
 function countryFlag(cc) {
     if (!cc || typeof cc !== 'string' || cc.length !== 2) return '';
@@ -449,9 +458,14 @@ function renderDetail(l, fc, score) {
     ` : '';
 
     const primaryRules = score?.primary?.rules || score?.rules;
+    const veh = l._vehicle;  // resolved vehicle + ruleset + metadata
+    const confBadge = veh ? `<span class="lp-conf lp-conf--${escHtml(veh.confidence)}" title="${escHtml(confidenceTooltip(veh.confidence))}">${escHtml(veh.confidence)}</span>` : '';
+    const sourceTxt = veh?.sources?.length ? `<div class="lp-rule-sources">Sources: ${veh.sources.map(escHtml).join(' · ')}</div>` : '';
+    const notes     = veh?.notes ? `<div class="lp-rule-note">${escHtml(veh.notes)}</div>` : '';
     const ruleBlock = primaryRules ? `
-        <div class="lp-label">Launch Commit Criteria${score?.primary?.ruleset_id ? ` <span class="lp-rule-src">· ${escHtml(score.primary.ruleset_id)} ruleset</span>` : ''}</div>
+        <div class="lp-label">Launch Commit Criteria${veh ? ` <span class="lp-rule-src">· ${escHtml(veh.label)} ruleset ${confBadge}</span>` : ''}</div>
         <div class="lp-rules">${primaryRules.map(renderRuleRow).join('')}</div>
+        ${sourceTxt}${notes}
     ` : '';
 
     return `
@@ -593,7 +607,12 @@ async function ensureWeather(l) {
     }
     const fc = await fetchLaunchForecast(l.pad.lat, l.pad.lon);
     state.weatherCache.set(l.id, fc);
-    const score = scoreLaunch(fc, l.net_iso /* , { ruleset: rulesetForLaunch(l) } in v3 */);
+    // Vehicle-specific wind ruleset. resolveRuleset() returns both the merged
+    // thresholds and UI-facing metadata (confidence, sources); we stash the
+    // metadata on the launch so renderDetail can cite it without re-matching.
+    const rr = resolveRuleset(l);
+    l._vehicle = rr;
+    const score = scoreLaunch(fc, l.net_iso, { ruleset: rr.ruleset });
     state.scoreCache.set(l.id, score);
     l._score = score;
     return fc;
