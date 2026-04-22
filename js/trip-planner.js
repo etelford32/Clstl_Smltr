@@ -155,7 +155,16 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
             'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
             'precipitation', 'precipitation_probability',
             'cloud_cover', 'weather_code',
-            'relative_humidity_2m', 'visibility', 'cape',
+            'relative_humidity_2m', 'visibility',
+            // Convective-instability triplet — CAPE + lifted index + CIN
+            // together are what a forecaster actually reads to decide
+            // "thunderstorms likely today?" CAPE alone flags "fuel present";
+            // lifted index < 0 confirms the parcel will actually rise;
+            // CIN is the lid that keeps it from firing. All three catch
+            // developing convection hours before the WMO weather_code
+            // flips to 95/96/99 — the scrub pattern Cape Canaveral sees
+            // regularly.
+            'cape', 'lifted_index', 'convective_inhibition',
             // Pressure-level winds for upper-level shear analysis near max-Q.
             // 200 hPa ≈ 12 km (the max-Q altitude for most orbital launch
             // vehicles); 300 hPa ≈ 9 km (below max-Q, needed to compute
@@ -212,6 +221,8 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
                 humidity:          data.hourly?.relative_humidity_2m ?? [],
                 visibility_m:      data.hourly?.visibility ?? [],
                 cape_j_per_kg:     data.hourly?.cape ?? [],
+                lifted_index:      data.hourly?.lifted_index ?? [],
+                cin_j_per_kg:      data.hourly?.convective_inhibition ?? [],
                 // Pressure-level wind arrays, aligned to the same `time` index.
                 // Units follow wind_speed_unit (mph), direction in degrees.
                 wind_500_mph:      data.hourly?.wind_speed_500hPa ?? [],

@@ -48,6 +48,23 @@ export const DEFAULT_RULESET = Object.freeze({
     cloud:       { green: 50, yellow: 75 },   // %, total cover
     tempLo:      { red: 35, yellow: 40 },     // °F
     tempHi:      { yellow: 95, red: 100 },    // °F
+    // Convective-instability bands — feed the bandConvective() scorer that
+    // replaced the old binary weather_code lightning check. These numbers
+    // are the SPC-style forecaster consensus for "marginal" vs "strong"
+    // thunderstorm environments:
+    //   CAPE    — 0–500 weak · 500–1500 moderate · >1500 strong
+    //   LI      — >−2 stable · −2 to −4 moderate · <−4 strongly unstable
+    //   CIN     — more negative = stronger cap. At or below cin_floor we
+    //             treat the airmass as capped even with high CAPE/LI.
+    //   pop_bump_pct — if PoP is this high AND instability is yellow, bump
+    //             to red (storms already lit in the model).
+    // Per-vehicle tightening happens in js/launch-rulesets.js.
+    convective: {
+        cape:        { green: 500, yellow: 1500 }, // J/kg (below green = clean)
+        lifted:      { green: -2,  yellow: -4   }, // °C  (above green = clean)
+        cin_floor:   -100,                         // J/kg (below = capped)
+        pop_bump_pct: 60,                          // %
+    },
 });
 
 const THUNDERSTORM_CODES = new Set([95, 96, 99]);
@@ -95,9 +112,80 @@ function bandTemp(f, T) {
     return { v: 'green', note: `${f.toFixed(0)}°F` };
 }
 
-function bandLightning(code) {
-    if (code != null && THUNDERSTORM_CODES.has(code)) return { v: 'red', note: weatherCodeLabel(code) };
-    return { v: 'green', note: 'no thunderstorms' };
+// Convective/lightning band. Fuses four independent signals so a developing
+// storm shows up in the verdict hours before the WMO weather_code trips.
+//   weather_code  — ground truth: is a thunderstorm already firing?
+//   CAPE          — fuel: how much energy is available for updrafts?
+//   lifted index  — ignition: will a surface parcel actually rise? (< 0 unstable)
+//   CIN           — cap: is there a warm layer holding convection back?
+//   PoP           — model confidence that something will precipitate
+//
+// A convention note on signs:
+//   lifted index is a temperature difference in °C. Negative = unstable.
+//   CIN is an energy deficit in J/kg. Open-Meteo publishes it as a NEGATIVE
+//   number (more negative = stronger cap). Our threshold `cin_floor` is also
+//   negative; we check `cin <= cin_floor` to mean "cap at least this strong."
+function bandConvective(snap, T) {
+    const code = snap?.weather_code;
+    const cape = snap?.cape_j_per_kg;
+    const li   = snap?.lifted_index;
+    const cin  = snap?.cin_j_per_kg;
+    const pop  = snap?.precip_prob_pct;
+
+    // 1. Active thunderstorm beats everything — LLCC Rule 9 already tripped.
+    if (code != null && THUNDERSTORM_CODES.has(code)) {
+        return { v: 'red', note: `active thunderstorm (${weatherCodeLabel(code)})` };
+    }
+
+    // 2. Fuse CAPE and lifted index. Take the worse of the two.
+    const capeBand =
+        !Number.isFinite(cape) ? null :
+        cape >= T.convective.cape.yellow ? 'red'    :
+        cape >= T.convective.cape.green  ? 'yellow' : 'green';
+
+    // lifted_index: more negative = worse; thresholds are stored as the
+    // "least negative value that's still in the band" for readability
+    // (e.g. green: -2 means LI >= -2 is clean).
+    const liBand =
+        !Number.isFinite(li) ? null :
+        li <= T.convective.lifted.yellow ? 'red'    :
+        li <= T.convective.lifted.green  ? 'yellow' : 'green';
+
+    // If neither signal is available, fall back gracefully — a missing
+    // convective feed shouldn't flip every launch to yellow.
+    if (capeBand == null && liBand == null) {
+        return { v: 'green', note: 'no convective data' };
+    }
+
+    let band = worst(capeBand ?? 'green', liBand ?? 'green');
+
+    // 3. CIN cap downgrade. If there's a strong warm-layer cap in place,
+    //    storms are unlikely to fire even with high CAPE/LI — the classic
+    //    "loaded gun with no trigger" pattern. Only downgrade yellow→green;
+    //    we don't trust a cap to hold against red-level instability.
+    if (band === 'yellow' && Number.isFinite(cin) && cin <= T.convective.cin_floor) {
+        band = 'green';
+    }
+
+    // 4. PoP nudge. If model thinks precipitation is likely AND instability is
+    //    already in the marginal band, bump one step — precip in an unstable
+    //    airmass is convective by construction.
+    if (Number.isFinite(pop) && pop >= T.convective.pop_bump_pct && band === 'yellow') {
+        band = 'red';
+    }
+
+    // Build the rationale string. List the specific signals that drove the
+    // verdict so an operator can see *why* it's yellow, not just that it is.
+    const bits = [];
+    if (Number.isFinite(cape)) bits.push(`CAPE ${Math.round(cape)} J/kg`);
+    if (Number.isFinite(li))   bits.push(`LI ${li.toFixed(1)}`);
+    if (Number.isFinite(cin) && cin <= T.convective.cin_floor) bits.push('strong cap');
+    const detail = bits.length ? bits.join(' · ') : 'convective signals clear';
+    const headline =
+        band === 'red'    ? 'thunderstorm potential'                  :
+        band === 'yellow' ? 'instability — watch for development'     :
+                            'no thunderstorms';
+    return { v: band, note: `${headline} (${detail})` };
 }
 
 function bandUpperWind(mph, T) {
@@ -245,6 +333,8 @@ export function snapshotAt(fc, targetIso) {
         humidity:         h.humidity?.[i]         ?? null,
         visibility_m:     h.visibility_m?.[i]     ?? null,
         cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
+        lifted_index:     h.lifted_index?.[i]     ?? null,
+        cin_j_per_kg:     h.cin_j_per_kg?.[i]     ?? null,
         upper_wind_mph:       Number.isFinite(w200) ? w200 : null,
         upper_wind_dir_deg:   Number.isFinite(d200) ? d200 : null,
         upper_wind_500_mph:   Number.isFinite(h.wind_500_mph?.[i]) ? h.wind_500_mph[i] : null,
@@ -371,6 +461,8 @@ function snapshotFromCurrent(fc) {
         humidity:         c.humidity ?? null,
         visibility_m:     null,
         cape_j_per_kg:    null,
+        lifted_index:     null,
+        cin_j_per_kg:     null,
     };
 }
 
@@ -397,7 +489,7 @@ export function scoreWeather(snap, opts = {}) {
         { key: 'upper_shear', label: 'Wind shear',       ...bandUpperShear(snap.upper_shear_mph, T) },
         { key: 'precip',      label: 'Precipitation',    ...bandPrecip(snap.precip_prob_pct, T) },
         { key: 'cloud',       label: 'Cloud cover',      ...bandCloud(snap.cloud_cover, T) },
-        { key: 'lightning',   label: 'Thunderstorms',    ...bandLightning(snap.weather_code) },
+        { key: 'lightning',   label: 'Convection / lightning', ...bandConvective(snap, T) },
         { key: 'temp',        label: 'Temperature',      ...bandTemp(snap.temp_f, T) },
     ];
     const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
@@ -694,6 +786,8 @@ function renderDetail(l, fc, score) {
                 <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${snap.wind_gust_mph != null ? `${snap.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${snap.cloud_cover != null ? `${snap.cloud_cover}%` : '—'}</div></div>
                 <div class="lp-wx-cell"><div class="lp-wx-k">Precip prob</div><div class="lp-wx-v">${snap.precip_prob_pct != null ? `${snap.precip_prob_pct}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">CAPE</div><div class="lp-wx-v">${snap.cape_j_per_kg != null ? `${Math.round(snap.cape_j_per_kg)} J/kg` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Lifted idx</div><div class="lp-wx-v">${Number.isFinite(snap.lifted_index) ? snap.lifted_index.toFixed(1) : '—'}</div></div>
             </div>
         ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
 
@@ -808,11 +902,13 @@ function renderDetail(l, fc, score) {
             ${starshipBlock}
 
             <div class="lp-footnote">
-                Weather source: Open-Meteo (hourly forecast, time-aligned to NET).
-                Launch data: Launch Library 2 (TheSpaceDevs).
-                Go/No-Go uses a generic orbital-launch ruleset based on publicly-documented
-                commit criteria; vehicle-specific rules ship next. Advisory only — not an
-                official flight-readiness determination.
+                Weather source: Open-Meteo (hourly forecast, time-aligned to NET) — surface
+                wind, upper-level winds at 200/300/500 hPa, CAPE, lifted index, and CIN.
+                Launch data: Launch Library 2 (TheSpaceDevs). Convection / lightning
+                scoring fuses instability (CAPE + LI), cap strength (CIN), precipitation
+                probability, and active thunderstorm codes — a proxy for 45 WS LLCC
+                Rule 9, not a replacement for field-mill surface-electric-field data.
+                Advisory only; not an official flight-readiness determination.
             </div>
         </div>
     `;
