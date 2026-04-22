@@ -8,26 +8,36 @@
  * Pipeline:
  *   1. GET /api/launches/upcoming  (Launch Library 2, cached 1 hr).
  *   2. Render left-panel filters + center roster of launch cards sorted by T-.
- *   3. On card select, fetchPointForecast(pad.lat, pad.lon) from Open-Meteo.
- *   4. Score weather against public launch commit criteria (wind, precip,
- *      cloud, thunderstorm, temperature). Worst rule wins.
+ *   3. On card select, fetchLaunchForecast(pad.lat, pad.lon) — pulls current
+ *      + 7-day hourly + daily in one Open-Meteo call so we can score weather
+ *      at the actual NET, not "right now."
+ *   4. Score a time-aligned snapshot against public launch commit criteria
+ *      (wind, precip, cloud, thunderstorm, temperature). Worst rule wins.
+ *      scoreWeather() takes an optional ruleset so per-vehicle thresholds
+ *      (Falcon 9 vs. Electron vs. crewed Dragon) plug in without refactors.
  *   5. Per-second countdown updates T-minus on every visible card.
  *
  * No Supabase writes. No auth required beyond nav tier gating.
  */
 
 import {
-    fetchPointForecast,
+    fetchLaunchForecast,
     weatherCodeLabel,
     compassLabel,
 } from './trip-planner.js';
 
-// ── Go/No-Go scoring ────────────────────────────────────────────────────────
+// ── Rulesets ────────────────────────────────────────────────────────────────
+// Default ruleset is a conservative blend of publicly-documented launch
+// commit criteria (SpaceX Falcon 9 user's guide + 45 WS Flight Commit
+// Criteria for Cape Canaveral / KSC). Vehicle-specific rulesets will override
+// any subset of these in v3.
 
-const THRESHOLDS = Object.freeze({
+export const DEFAULT_RULESET = Object.freeze({
+    id: 'default',
+    label: 'Generic orbital launch',
     wind:   { green: 20, yellow: 30 },        // mph, sustained
     gust:   { green: 25, yellow: 35 },        // mph, peak
-    precip: { green: 25, yellow: 50 },        // %, daily precip probability
+    precip: { green: 25, yellow: 50 },        // %, hourly probability at T-0
     cloud:  { green: 50, yellow: 75 },        // %, total cover
     tempLo: { red: 35, yellow: 40 },          // °F
     tempHi: { yellow: 95, red: 100 },         // °F
@@ -41,71 +51,214 @@ function worst(a, b) {
     return VERDICT_RANK[b] > VERDICT_RANK[a] ? b : a;
 }
 
-function bandSustainedWind(mph) {
+function bandSustainedWind(mph, T) {
     if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'unknown' };
-    if (mph < THRESHOLDS.wind.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
-    if (mph < THRESHOLDS.wind.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — marginal` };
-    return { v: 'red', note: `${mph.toFixed(0)} mph — over 30 mph ground wind` };
+    if (mph < T.wind.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
+    if (mph < T.wind.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — marginal` };
+    return { v: 'red', note: `${mph.toFixed(0)} mph — over ${T.wind.yellow} mph ground wind` };
 }
 
-function bandGust(mph) {
+function bandGust(mph, T) {
     if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'unknown' };
-    if (mph < THRESHOLDS.gust.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
-    if (mph < THRESHOLDS.gust.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — watch gusts` };
-    return { v: 'red', note: `${mph.toFixed(0)} mph — gusts over 35 mph` };
+    if (mph < T.gust.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
+    if (mph < T.gust.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — watch gusts` };
+    return { v: 'red', note: `${mph.toFixed(0)} mph — gusts over ${T.gust.yellow} mph` };
 }
 
-function bandPrecip(pct) {
+function bandPrecip(pct, T) {
     if (pct == null || !Number.isFinite(pct)) return { v: 'green', note: 'no precip forecast' };
-    if (pct < THRESHOLDS.precip.green)  return { v: 'green',  note: `${pct}% chance` };
-    if (pct < THRESHOLDS.precip.yellow) return { v: 'yellow', note: `${pct}% — possible scrub` };
+    if (pct < T.precip.green)  return { v: 'green',  note: `${pct}% chance` };
+    if (pct < T.precip.yellow) return { v: 'yellow', note: `${pct}% — possible scrub` };
     return { v: 'red', note: `${pct}% — wet weather expected` };
 }
 
-function bandCloud(pct) {
+function bandCloud(pct, T) {
     if (pct == null || !Number.isFinite(pct)) return { v: 'yellow', note: 'unknown' };
-    if (pct < THRESHOLDS.cloud.green)  return { v: 'green',  note: `${pct}% cover` };
-    if (pct < THRESHOLDS.cloud.yellow) return { v: 'yellow', note: `${pct}% — watch ceiling` };
+    if (pct < T.cloud.green)  return { v: 'green',  note: `${pct}% cover` };
+    if (pct < T.cloud.yellow) return { v: 'yellow', note: `${pct}% — watch ceiling` };
     return { v: 'red', note: `${pct}% — overcast` };
 }
 
-function bandTemp(f) {
+function bandTemp(f, T) {
     if (f == null || !Number.isFinite(f)) return { v: 'yellow', note: 'unknown' };
-    if (f < THRESHOLDS.tempLo.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — below 35°F cutoff` };
-    if (f < THRESHOLDS.tempLo.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — cold` };
-    if (f > THRESHOLDS.tempHi.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — heat extreme` };
-    if (f > THRESHOLDS.tempHi.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — hot` };
+    if (f < T.tempLo.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — below ${T.tempLo.red}°F cutoff` };
+    if (f < T.tempLo.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — cold` };
+    if (f > T.tempHi.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — heat extreme` };
+    if (f > T.tempHi.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — hot` };
     return { v: 'green', note: `${f.toFixed(0)}°F` };
 }
 
 function bandLightning(code) {
-    if (THUNDERSTORM_CODES.has(code)) return { v: 'red', note: weatherCodeLabel(code) };
+    if (code != null && THUNDERSTORM_CODES.has(code)) return { v: 'red', note: weatherCodeLabel(code) };
     return { v: 'green', note: 'no thunderstorms' };
 }
 
+// ── Snapshot helpers ────────────────────────────────────────────────────────
+// Forecast data is laid out as parallel hourly arrays. A snapshot is the
+// projection of those arrays at one hour index — the shape scoreWeather()
+// operates on. Lets us score any point in the forecast horizon, not just
+// "right now."
+
 /**
- * Score an Open-Meteo forecast against launch commit criteria.
- * Returns { verdict, rules: [{ key, label, v, note }] }.
- * Worst rule wins; UNKNOWN weather yields a yellow overall verdict.
+ * Build a snapshot (the shape scoreWeather consumes) from an hourly index.
+ * Returns null if the forecast doesn't extend to this hour.
  */
-export function scoreWeather(fc) {
-    if (!fc) {
+export function snapshotAt(fc, targetIso) {
+    if (!fc?.hourly?.time?.length || !targetIso) return null;
+    const target = Date.parse(targetIso);
+    if (!Number.isFinite(target)) return null;
+
+    const times = fc.hourly.time;
+    const lastIdx = times.length - 1;
+    const lastMs = Date.parse(times[lastIdx]);
+    if (Number.isFinite(lastMs) && target > lastMs + 3600_000) {
+        // Target is beyond the forecast horizon — let the caller fall back.
+        return null;
+    }
+
+    // Nearest-hour lookup. Open-Meteo timestamps are on the hour in local
+    // tz; binary search would be overkill for 168 slots.
+    let best = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+        const t = Date.parse(times[i]);
+        const diff = Math.abs(t - target);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    const i = best;
+    const h = fc.hourly;
+    return {
+        time:             times[i],
+        target_iso:       targetIso,
+        lead_hours:       (target - Date.now()) / 3600_000,
+        slot_offset_min:  Math.round((Date.parse(times[i]) - target) / 60_000),
+        temp_f:           h.temp_f?.[i]           ?? null,
+        wind_mph:         h.wind_mph?.[i]         ?? null,
+        wind_gust_mph:    h.wind_gust_mph?.[i]    ?? null,
+        wind_dir_deg:     h.wind_dir_deg?.[i]     ?? null,
+        precip_prob_pct:  h.precip_prob_pct?.[i]  ?? null,
+        precip_in:        h.precip_in?.[i]        ?? null,
+        cloud_cover:      h.cloud_cover?.[i]      ?? null,
+        weather_code:     h.weather_code?.[i]     ?? null,
+        humidity:         h.humidity?.[i]         ?? null,
+        visibility_m:     h.visibility_m?.[i]     ?? null,
+        cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
+    };
+}
+
+/**
+ * Project the `current` block into the same snapshot shape as snapshotAt()
+ * so the scorer can consume either interchangeably.
+ */
+function snapshotFromCurrent(fc) {
+    const c = fc?.current;
+    if (!c) return null;
+    return {
+        time:             c.time,
+        target_iso:       c.time,
+        lead_hours:       0,
+        slot_offset_min:  0,
+        temp_f:           c.temp_f ?? null,
+        wind_mph:         c.wind_mph ?? null,
+        wind_gust_mph:    c.wind_gust_mph ?? null,
+        wind_dir_deg:     c.wind_dir_deg ?? null,
+        precip_prob_pct:  null,                 // current block has no prob
+        precip_in:        c.precip_in ?? null,
+        cloud_cover:      c.cloud_cover ?? null,
+        weather_code:     c.weather_code ?? null,
+        humidity:         c.humidity ?? null,
+        visibility_m:     null,
+        cape_j_per_kg:    null,
+    };
+}
+
+/**
+ * Score a snapshot against launch commit criteria.
+ * @param {object} snap     — shape returned by snapshotAt() or snapshotFromCurrent()
+ * @param {object} [opts]
+ * @param {object} [opts.ruleset] — override any subset of DEFAULT_RULESET
+ * @returns {{ verdict: 'green'|'yellow'|'red', rules: Array, ruleset_id: string }}
+ */
+export function scoreWeather(snap, opts = {}) {
+    const T = { ...DEFAULT_RULESET, ...(opts.ruleset || {}) };
+    if (!snap) {
         return {
-            verdict: 'yellow',
-            rules: [{ key: 'data', label: 'Forecast', v: 'yellow', note: 'No forecast available' }],
+            verdict:    'yellow',
+            rules:      [{ key: 'data', label: 'Forecast', v: 'yellow', note: 'No forecast available' }],
+            ruleset_id: T.id,
         };
     }
-    const precipPct = Array.isArray(fc.daily?.precip_prob_pct) ? fc.daily.precip_prob_pct[0] : null;
     const rules = [
-        { key: 'wind',      label: 'Ground wind',     ...bandSustainedWind(fc.wind_mph) },
-        { key: 'gust',      label: 'Wind gusts',      ...bandGust(fc.wind_gust_mph) },
-        { key: 'precip',    label: 'Precipitation',   ...bandPrecip(precipPct) },
-        { key: 'cloud',     label: 'Cloud cover',     ...bandCloud(fc.cloud_cover) },
-        { key: 'lightning', label: 'Thunderstorms',   ...bandLightning(fc.weather_code) },
-        { key: 'temp',      label: 'Temperature',     ...bandTemp(fc.temp_f) },
+        { key: 'wind',      label: 'Ground wind',     ...bandSustainedWind(snap.wind_mph, T) },
+        { key: 'gust',      label: 'Wind gusts',      ...bandGust(snap.wind_gust_mph, T) },
+        { key: 'precip',    label: 'Precipitation',   ...bandPrecip(snap.precip_prob_pct, T) },
+        { key: 'cloud',     label: 'Cloud cover',     ...bandCloud(snap.cloud_cover, T) },
+        { key: 'lightning', label: 'Thunderstorms',   ...bandLightning(snap.weather_code) },
+        { key: 'temp',      label: 'Temperature',     ...bandTemp(snap.temp_f, T) },
     ];
     const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
-    return { verdict, rules };
+    return { verdict, rules, ruleset_id: T.id, snapshot: snap };
+}
+
+/**
+ * Compute the full scoring bundle for a launch: primary T-0 score plus a
+ * lead-time arc (T-6h, T-1h, T-0, T+1h, T+3h) so the UI can show whether
+ * the verdict is improving, holding, or deteriorating across the window.
+ */
+export function scoreLaunch(fc, netIso, opts = {}) {
+    if (!fc) {
+        return {
+            verdict:   'yellow',
+            primary:   scoreWeather(null, opts),
+            arc:       [],
+            source:    'none',
+            target_iso: netIso,
+        };
+    }
+    // If NET is missing or beyond the forecast horizon, fall back to `current`
+    // so new launches still show *something* — just flag the source.
+    const hasHourly = !!fc.hourly?.time?.length;
+    const targetMs  = netIso ? Date.parse(netIso) : NaN;
+    const horizonOk = Number.isFinite(targetMs)
+        && hasHourly
+        && targetMs <= (fc.horizon_end_ms || (Date.parse(fc.hourly.time[fc.hourly.time.length - 1]) + 3600_000));
+
+    if (!horizonOk) {
+        const snap = snapshotFromCurrent(fc);
+        return {
+            verdict:    scoreWeather(snap, opts).verdict,
+            primary:    scoreWeather(snap, opts),
+            arc:        [],
+            source:     hasHourly && Number.isFinite(targetMs) ? 'beyond-horizon' : (netIso ? 'current' : 'no-net'),
+            target_iso: netIso,
+        };
+    }
+
+    const primarySnap = snapshotAt(fc, netIso);
+    const primary     = scoreWeather(primarySnap, opts);
+
+    // Arc offsets in hours from NET — picked to bracket the most common
+    // scrub windows and recovery ops.
+    const ARC_OFFSETS_H = [-6, -1, 0, 1, 3];
+    const arc = ARC_OFFSETS_H.map(dh => {
+        const iso = new Date(targetMs + dh * 3600_000).toISOString();
+        const s   = snapshotAt(fc, iso);
+        const sc  = scoreWeather(s, opts);
+        return {
+            offset_h: dh,
+            label:    dh === 0 ? 'T-0' : dh < 0 ? `T${dh}h` : `T+${dh}h`,
+            verdict:  sc.verdict,
+            snapshot: s,
+        };
+    });
+
+    return {
+        verdict:    primary.verdict,
+        primary,
+        arc,
+        source:     'hourly',
+        target_iso: netIso,
+    };
 }
 
 // ── Countdown formatting ────────────────────────────────────────────────────
@@ -226,21 +379,57 @@ function renderDetail(l, fc, score) {
     const lon = l.pad?.lon;
     const hasPad = Number.isFinite(lat) && Number.isFinite(lon);
 
+    // The T-0 snapshot is what the verdict is actually computed from. If we
+    // fell back to `current` (no NET, or NET beyond forecast horizon) the
+    // snapshot still exists — we just label it differently.
+    const snap = score?.primary?.snapshot;
+    const src  = score?.source || 'none';
+    const srcLabel =
+        src === 'hourly'         ? `Forecast at T-0 (${formatLocalTime(snap?.target_iso)})` :
+        src === 'current'        ? 'Current conditions at pad (no NET set)' :
+        src === 'beyond-horizon' ? 'Current conditions (NET beyond 7-day forecast)' :
+        'Current conditions';
+    const srcNote =
+        src === 'beyond-horizon' ? 'Hourly forecast re-evaluates as T-0 moves inside the 7-day window.' :
+        src === 'current'        ? 'Set a NET to time-align the forecast.' : '';
+
     const weatherBlock = !hasPad
         ? `<div class="lp-wx-loading">Pad coordinates are not published yet — weather analysis unavailable.</div>`
-        : fc ? `
+        : snap ? `
+            <div class="lp-wx-sub">${escHtml(srcLabel)}${srcNote ? ` — <span style="color:#667">${escHtml(srcNote)}</span>` : ''}</div>
             <div class="lp-wx-grid">
-                <div class="lp-wx-cell"><div class="lp-wx-k">Conditions</div><div class="lp-wx-v">${escHtml(weatherCodeLabel(fc.weather_code))}</div></div>
-                <div class="lp-wx-cell"><div class="lp-wx-k">Temp</div><div class="lp-wx-v">${fc.temp_f != null ? `${fc.temp_f.toFixed(0)}°F` : '—'}</div></div>
-                <div class="lp-wx-cell"><div class="lp-wx-k">Wind</div><div class="lp-wx-v">${fc.wind_mph != null ? `${fc.wind_mph.toFixed(0)} mph ${compassLabel(fc.wind_dir_deg)}` : '—'}</div></div>
-                <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${fc.wind_gust_mph != null ? `${fc.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
-                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${fc.cloud_cover != null ? `${fc.cloud_cover}%` : '—'}</div></div>
-                <div class="lp-wx-cell"><div class="lp-wx-k">Humidity</div><div class="lp-wx-v">${fc.humidity != null ? `${fc.humidity}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Conditions</div><div class="lp-wx-v">${escHtml(weatherCodeLabel(snap.weather_code))}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Temp</div><div class="lp-wx-v">${snap.temp_f != null ? `${snap.temp_f.toFixed(0)}°F` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Wind</div><div class="lp-wx-v">${snap.wind_mph != null ? `${snap.wind_mph.toFixed(0)} mph ${compassLabel(snap.wind_dir_deg)}` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${snap.wind_gust_mph != null ? `${snap.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${snap.cloud_cover != null ? `${snap.cloud_cover}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Precip prob</div><div class="lp-wx-v">${snap.precip_prob_pct != null ? `${snap.precip_prob_pct}%` : '—'}</div></div>
             </div>
         ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
 
+    const arcBlock = (score?.arc?.length) ? `
+        <div class="lp-label">Launch-window arc</div>
+        <div class="lp-arc">
+            ${score.arc.map(stop => {
+                const s  = stop.snapshot;
+                const c  = verdictColor(stop.verdict);
+                const wind = s?.wind_mph != null ? `${Math.round(s.wind_mph)} mph` : '—';
+                const prec = s?.precip_prob_pct != null ? `${s.precip_prob_pct}%` : '—';
+                return `
+                    <div class="lp-arc-stop" title="${escHtml(weatherCodeLabel(s?.weather_code))}">
+                        <div class="lp-arc-name">${escHtml(stop.label)}</div>
+                        <div class="lp-arc-dot" style="background:${c}"></div>
+                        <div class="lp-arc-v">${verdictLabel(stop.verdict)}</div>
+                        <div class="lp-arc-metric">${wind}</div>
+                        <div class="lp-arc-metric lp-arc-precip">${prec}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    ` : '';
+
     const forecastBlock = fc?.daily?.dates?.length ? `
-        <div class="lp-label">3-Day Forecast</div>
+        <div class="lp-label">7-Day Daily Outlook</div>
         <div class="lp-forecast">
             ${fc.daily.dates.map((d, i) => {
                 const dt = new Date(d);
@@ -259,9 +448,10 @@ function renderDetail(l, fc, score) {
         </div>
     ` : '';
 
-    const ruleBlock = score ? `
-        <div class="lp-label">Launch Commit Criteria</div>
-        <div class="lp-rules">${score.rules.map(renderRuleRow).join('')}</div>
+    const primaryRules = score?.primary?.rules || score?.rules;
+    const ruleBlock = primaryRules ? `
+        <div class="lp-label">Launch Commit Criteria${score?.primary?.ruleset_id ? ` <span class="lp-rule-src">· ${escHtml(score.primary.ruleset_id)} ruleset</span>` : ''}</div>
+        <div class="lp-rules">${primaryRules.map(renderRuleRow).join('')}</div>
     ` : '';
 
     return `
@@ -299,8 +489,10 @@ function renderDetail(l, fc, score) {
             ${ruleBlock}
 
             <div class="lp-footnote">
-                Weather source: Open-Meteo. Launch data: Launch Library 2 (TheSpaceDevs).
-                Go/No-Go uses public launch commit criteria and is advisory only — not an
+                Weather source: Open-Meteo (hourly forecast, time-aligned to NET).
+                Launch data: Launch Library 2 (TheSpaceDevs).
+                Go/No-Go uses a generic orbital-launch ruleset based on publicly-documented
+                commit criteria; vehicle-specific rules ship next. Advisory only — not an
                 official flight-readiness determination.
             </div>
         </div>
@@ -395,11 +587,13 @@ async function ensureWeather(l) {
     if (state.weatherCache.has(l.id)) return state.weatherCache.get(l.id);
     if (!Number.isFinite(l.pad?.lat) || !Number.isFinite(l.pad?.lon)) {
         state.weatherCache.set(l.id, null);
+        state.scoreCache.set(l.id, scoreLaunch(null, l.net_iso));
+        l._score = state.scoreCache.get(l.id);
         return null;
     }
-    const fc = await fetchPointForecast(l.pad.lat, l.pad.lon);
+    const fc = await fetchLaunchForecast(l.pad.lat, l.pad.lon);
     state.weatherCache.set(l.id, fc);
-    const score = scoreWeather(fc);
+    const score = scoreLaunch(fc, l.net_iso /* , { ruleset: rulesetForLaunch(l) } in v3 */);
     state.scoreCache.set(l.id, score);
     l._score = score;
     return fc;

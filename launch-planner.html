@@ -191,12 +191,34 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 .lp-wx-k { font-size:.62rem; color:#556; text-transform:uppercase; letter-spacing:.06em; font-weight:700; margin-bottom:3px; }
 .lp-wx-v { font-size:.85rem; font-weight:700; color:#eef; font-family:monospace; }
 .lp-wx-loading { color:#667; font-size:.78rem; padding:16px 0; font-style:italic; }
+.lp-wx-sub { font-size:.7rem; color:#8ab; margin-bottom:8px; font-family:monospace; }
+
+/* Launch-window arc — visualizes how the verdict evolves around T-0 */
+.lp-arc {
+    display:grid; grid-template-columns:repeat(5, 1fr);
+    gap:6px; margin-bottom:16px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    padding:10px 8px;
+}
+.lp-arc-stop {
+    display:flex; flex-direction:column; align-items:center;
+    padding:4px; border-right:1px solid rgba(255,255,255,.04);
+}
+.lp-arc-stop:last-child { border-right:none; }
+.lp-arc-name { font-size:.64rem; color:#8ab; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+.lp-arc-dot { width:10px; height:10px; border-radius:50%; margin-bottom:4px; box-shadow:0 0 6px currentColor; }
+.lp-arc-v { font-size:.62rem; font-family:monospace; font-weight:800; color:#ccd; margin-bottom:4px; letter-spacing:.04em; }
+.lp-arc-metric { font-size:.64rem; font-family:monospace; color:#9ab; line-height:1.3; }
+.lp-arc-precip { color:#6af; }
 
 /* Forecast */
 .lp-forecast {
-    display:grid; grid-template-columns:repeat(3, 1fr);
-    gap:8px; margin-bottom:16px;
+    display:grid; grid-template-columns:repeat(7, 1fr);
+    gap:6px; margin-bottom:16px;
 }
+@media (max-width:600px) { .lp-forecast { grid-template-columns:repeat(4, 1fr); } }
 .lp-fc-day {
     background:rgba(255,255,255,.03);
     border:1px solid rgba(255,255,255,.06);
@@ -221,6 +243,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 .lp-rule-dot { width:10px; height:10px; border-radius:50%; display:block; }
 .lp-rule-k { color:#889; font-weight:600; }
 .lp-rule-v { color:#ccd; font-family:monospace; font-size:.72rem; }
+.lp-rule-src { font-size:.6rem; color:#667; font-family:monospace; text-transform:none; letter-spacing:0; font-weight:500; }
 
 .lp-footnote {
     font-size:.66rem; color:#556; line-height:1.5;
