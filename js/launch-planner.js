@@ -36,12 +36,17 @@ import { resolveRuleset } from './launch-rulesets.js';
 export const DEFAULT_RULESET = Object.freeze({
     id: 'default',
     label: 'Generic orbital launch',
-    wind:   { green: 20, yellow: 30 },        // mph, sustained
-    gust:   { green: 25, yellow: 35 },        // mph, peak
-    precip: { green: 25, yellow: 50 },        // %, hourly probability at T-0
-    cloud:  { green: 50, yellow: 75 },        // %, total cover
-    tempLo: { red: 35, yellow: 40 },          // °F
-    tempHi: { yellow: 95, red: 100 },         // °F
+    wind:        { green: 20, yellow: 30 },   // mph, sustained at pad
+    gust:        { green: 25, yellow: 35 },   // mph, peak at pad
+    // Upper-level winds and vector shear across the max-Q band (≈9–12 km).
+    // Conservative generic thresholds; per-vehicle overrides in
+    // js/launch-rulesets.js tune these to each rocket's published FCC.
+    upper_wind:  { green: 90, yellow: 140 },  // mph at 200 hPa (~12 km)
+    upper_shear: { green: 55, yellow: 90 },   // mph vector diff, 300→200 hPa
+    precip:      { green: 25, yellow: 50 },   // %, hourly probability at T-0
+    cloud:       { green: 50, yellow: 75 },   // %, total cover
+    tempLo:      { red: 35, yellow: 40 },     // °F
+    tempHi:      { yellow: 95, red: 100 },    // °F
 });
 
 const THUNDERSTORM_CODES = new Set([95, 96, 99]);
@@ -94,6 +99,24 @@ function bandLightning(code) {
     return { v: 'green', note: 'no thunderstorms' };
 }
 
+function bandUpperWind(mph, T) {
+    // Forecast-based proxy for balloon-release peak wind at max-Q.
+    // A day-of launch would refine this with an actual jimsphere/balloon
+    // profile; the forecast catches the "clearly over" and "clearly under"
+    // cases, which are the majority of scrubs.
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'pressure-level wind unavailable' };
+    if (mph < T.upper_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph at ~12 km` };
+    if (mph < T.upper_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph at ~12 km — watch jet stream` };
+    return { v: 'red', note: `${Math.round(mph)} mph at ~12 km — jet stream over limit` };
+}
+
+function bandUpperShear(mph, T) {
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'shear unavailable' };
+    if (mph < T.upper_shear.green)  return { v: 'green',  note: `${Math.round(mph)} mph across max-Q band` };
+    if (mph < T.upper_shear.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — elevated shear` };
+    return { v: 'red', note: `${Math.round(mph)} mph — severe wind shear` };
+}
+
 // ── Snapshot helpers ────────────────────────────────────────────────────────
 // Forecast data is laid out as parallel hourly arrays. A snapshot is the
 // projection of those arrays at one hour index — the shape scoreWeather()
@@ -128,6 +151,20 @@ export function snapshotAt(fc, targetIso) {
     }
     const i = best;
     const h = fc.hourly;
+
+    // Upper-level winds and vector shear across the max-Q band. Meteorological
+    // wind direction is the direction wind is blowing FROM, in degrees; we
+    // convert each pressure level to (u, v) components, take the vector
+    // difference 300→200 hPa, and return the magnitude. This is the "shear
+    // across max-Q" signal operators care about: a rocket passing through a
+    // strongly sheared layer experiences rapid lateral loads the TVC has
+    // only milliseconds to null out.
+    const w200 = h.wind_200_mph?.[i];
+    const d200 = h.wind_200_dir_deg?.[i];
+    const w300 = h.wind_300_mph?.[i];
+    const d300 = h.wind_300_dir_deg?.[i];
+    const shearMag = _vectorShear(w300, d300, w200, d200);
+
     return {
         time:             times[i],
         target_iso:       targetIso,
@@ -144,7 +181,28 @@ export function snapshotAt(fc, targetIso) {
         humidity:         h.humidity?.[i]         ?? null,
         visibility_m:     h.visibility_m?.[i]     ?? null,
         cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
+        upper_wind_mph:       Number.isFinite(w200) ? w200 : null,
+        upper_wind_dir_deg:   Number.isFinite(d200) ? d200 : null,
+        upper_wind_500_mph:   Number.isFinite(h.wind_500_mph?.[i]) ? h.wind_500_mph[i] : null,
+        upper_wind_300_mph:   Number.isFinite(w300) ? w300 : null,
+        upper_shear_mph:      Number.isFinite(shearMag) ? shearMag : null,
     };
+}
+
+/**
+ * Magnitude of the vector difference between two winds given as
+ * (speed, meteorological-direction). Returns null if either side is missing.
+ * Output units match the inputs (mph in this module).
+ */
+function _vectorShear(speedA, dirDegA, speedB, dirDegB) {
+    if (!Number.isFinite(speedA) || !Number.isFinite(speedB) ||
+        !Number.isFinite(dirDegA) || !Number.isFinite(dirDegB)) return null;
+    // Meteorological dir is "from"; convert to math radians ("to" vector).
+    const aRad = ((dirDegA + 180) % 360) * Math.PI / 180;
+    const bRad = ((dirDegB + 180) % 360) * Math.PI / 180;
+    const uA = speedA * Math.sin(aRad), vA = speedA * Math.cos(aRad);
+    const uB = speedB * Math.sin(bRad), vB = speedB * Math.cos(bRad);
+    return Math.hypot(uA - uB, vA - vB);
 }
 
 /**
@@ -190,12 +248,14 @@ export function scoreWeather(snap, opts = {}) {
         };
     }
     const rules = [
-        { key: 'wind',      label: 'Ground wind',     ...bandSustainedWind(snap.wind_mph, T) },
-        { key: 'gust',      label: 'Wind gusts',      ...bandGust(snap.wind_gust_mph, T) },
-        { key: 'precip',    label: 'Precipitation',   ...bandPrecip(snap.precip_prob_pct, T) },
-        { key: 'cloud',     label: 'Cloud cover',     ...bandCloud(snap.cloud_cover, T) },
-        { key: 'lightning', label: 'Thunderstorms',   ...bandLightning(snap.weather_code) },
-        { key: 'temp',      label: 'Temperature',     ...bandTemp(snap.temp_f, T) },
+        { key: 'wind',        label: 'Ground wind',      ...bandSustainedWind(snap.wind_mph, T) },
+        { key: 'gust',        label: 'Wind gusts',       ...bandGust(snap.wind_gust_mph, T) },
+        { key: 'upper_wind',  label: 'Upper winds (max-Q)', ...bandUpperWind(snap.upper_wind_mph, T) },
+        { key: 'upper_shear', label: 'Wind shear',       ...bandUpperShear(snap.upper_shear_mph, T) },
+        { key: 'precip',      label: 'Precipitation',    ...bandPrecip(snap.precip_prob_pct, T) },
+        { key: 'cloud',       label: 'Cloud cover',      ...bandCloud(snap.cloud_cover, T) },
+        { key: 'lightning',   label: 'Thunderstorms',    ...bandLightning(snap.weather_code) },
+        { key: 'temp',        label: 'Temperature',      ...bandTemp(snap.temp_f, T) },
     ];
     const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
     return { verdict, rules, ruleset_id: T.id, snapshot: snap };

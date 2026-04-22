@@ -155,6 +155,15 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
             'precipitation', 'precipitation_probability',
             'cloud_cover', 'weather_code',
             'relative_humidity_2m', 'visibility', 'cape',
+            // Pressure-level winds for upper-level shear analysis near max-Q.
+            // 200 hPa ≈ 12 km (the max-Q altitude for most orbital launch
+            // vehicles); 300 hPa ≈ 9 km (below max-Q, needed to compute
+            // vector shear across the high-stress band); 500 hPa ≈ 5.5 km
+            // kept as a mid-layer reference for tall small launchers like
+            // Electron that max-Q higher.
+            'wind_speed_500hPa', 'wind_direction_500hPa',
+            'wind_speed_300hPa', 'wind_direction_300hPa',
+            'wind_speed_200hPa', 'wind_direction_200hPa',
         ].join(','),
         daily: [
             'temperature_2m_max', 'temperature_2m_min',
@@ -202,6 +211,14 @@ export async function fetchLaunchForecast(lat, lon, { forecastDays = 7 } = {}) {
                 humidity:          data.hourly?.relative_humidity_2m ?? [],
                 visibility_m:      data.hourly?.visibility ?? [],
                 cape_j_per_kg:     data.hourly?.cape ?? [],
+                // Pressure-level wind arrays, aligned to the same `time` index.
+                // Units follow wind_speed_unit (mph), direction in degrees.
+                wind_500_mph:      data.hourly?.wind_speed_500hPa ?? [],
+                wind_500_dir_deg:  data.hourly?.wind_direction_500hPa ?? [],
+                wind_300_mph:      data.hourly?.wind_speed_300hPa ?? [],
+                wind_300_dir_deg:  data.hourly?.wind_direction_300hPa ?? [],
+                wind_200_mph:      data.hourly?.wind_speed_200hPa ?? [],
+                wind_200_dir_deg:  data.hourly?.wind_direction_200hPa ?? [],
             },
             daily: {
                 dates:            data.daily?.time ?? [],

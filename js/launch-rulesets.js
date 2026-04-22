@@ -38,12 +38,18 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'high',
         family_keys:   ['falcon heavy'],
+        max_q: { alt_km: 12, t_plus_s: 70, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'falcon-heavy',
             // Falcon Heavy shares LCC with Falcon 9 per SpaceX payload user's
             // guide; taller stack slightly tightens margin in practice.
             wind: { green: 20, yellow: 35 },   // 30 kt sustained published limit
             gust: { green: 25, yellow: 46 },   // ~40 kt gust published limit
+            // Upper winds: balloon-release criteria have cited ~170 fps
+            // (≈116 mph) as an FCC concern; heavier FH has slightly more
+            // margin than F9 in absolute wind but similar shear tolerance.
+            upper_wind:  { green: 100, yellow: 145 },
+            upper_shear: { green: 60,  yellow: 95  },
         },
         sources: [
             'SpaceX Falcon Payload User\'s Guide (Rev. 3)',
@@ -59,19 +65,29 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'high',
         family_keys:   ['falcon 9', 'falcon-9'],
+        max_q: { alt_km: 12, t_plus_s: 78, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'falcon-9',
             wind: { green: 20, yellow: 35 },
             gust: { green: 25, yellow: 46 },
+            // F9 has scrubbed for upper-level winds repeatedly (CRS-19 and
+            // several Starlink flights); 170 fps (~116 mph) is the balloon-
+            // release concern, hard scrub near 140 mph.
+            upper_wind:  { green: 100, yellow: 140 },
+            upper_shear: { green: 60,  yellow: 90  },
         },
         variants: {
             // Crew Dragon missions ratchet the wind limit down because
             // the launch-abort system trades wind push against abort-corridor
             // safety. 15 m/s ≈ 34 mph is the commonly cited abort-wind limit.
+            // Upper-winds likewise tightened because a high-q abort with
+            // crew onboard has narrower trajectory margin.
             crewed: {
                 id:   'falcon-9-crew',
                 wind: { green: 15, yellow: 25 },
                 gust: { green: 20, yellow: 34 },
+                upper_wind:  { green: 80, yellow: 115 },
+                upper_shear: { green: 45, yellow: 70  },
             },
         },
         sources: [
@@ -87,6 +103,10 @@ export const VEHICLES = Object.freeze([
         status:        'ramping',
         confidence:    'medium',
         family_keys:   ['starship', 'super heavy'],
+        // Starship max-Q is lower than F9 despite the vehicle being bigger:
+        // the huge wet mass caps acceleration, so dynamic pressure peaks
+        // in the denser lower stratosphere.
+        max_q: { alt_km: 8, t_plus_s: 55, pressure_hpa: 300 },
         wind_ruleset: {
             id:     'starship',
             // Public statements cite ~28 mph for stacking / catch ops; flight
@@ -94,6 +114,10 @@ export const VEHICLES = Object.freeze([
             // most wind-sensitive of the heavy vehicles on the pad.
             wind: { green: 15, yellow: 28 },
             gust: { green: 20, yellow: 40 },
+            // No published upper-wind criteria. Use conservative generic
+            // heavy-lift defaults pending formal SpaceX LCC.
+            upper_wind:  { green: 90, yellow: 130 },
+            upper_shear: { green: 55, yellow: 85  },
         },
         sources: [
             'FAA Final EIS for Starship Orbital Test Flight (2022)',
@@ -109,10 +133,15 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'high',
         family_keys:   ['vulcan'],
+        max_q: { alt_km: 12, t_plus_s: 80, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'vulcan',
             wind: { green: 22, yellow: 40 },
             gust: { green: 28, yellow: 52 },
+            // ULA inherits CCAFS balloon-release practice from Atlas V;
+            // heavy-lift BE-4 core has similar lateral-load margin.
+            upper_wind:  { green: 105, yellow: 150 },
+            upper_shear: { green: 65,  yellow: 100 },
         },
         sources: [
             'ULA Vulcan Centaur Launch Vehicle User\'s Guide',
@@ -127,11 +156,16 @@ export const VEHICLES = Object.freeze([
         status:        'retiring',
         confidence:    'high',
         family_keys:   ['atlas v', 'atlas-v'],
+        max_q: { alt_km: 12, t_plus_s: 85, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'atlas-v',
             // Atlas V LCC varies with config (401 → 551); these are typical.
             wind: { green: 22, yellow: 40 },
             gust: { green: 28, yellow: 52 },
+            // Atlas V's long operational record at CCAFS established the
+            // balloon-release procedures ULA still uses for Vulcan.
+            upper_wind:  { green: 100, yellow: 140 },
+            upper_shear: { green: 60,  yellow: 90  },
         },
         sources: [
             'ULA Atlas V Launch Services User\'s Guide (Rev. 11)',
@@ -146,6 +180,7 @@ export const VEHICLES = Object.freeze([
         status:        'ramping',
         confidence:    'medium',
         family_keys:   ['new glenn'],
+        max_q: { alt_km: 12, t_plus_s: 85, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'new-glenn',
             // BO has not published granular LCC; numbers below are a
@@ -153,6 +188,10 @@ export const VEHICLES = Object.freeze([
             // pad infrastructure at LC-36).
             wind: { green: 20, yellow: 35 },
             gust: { green: 25, yellow: 46 },
+            // Tall 98 m stack; conservative shear margin vs. F9 pending BO
+            // operational data.
+            upper_wind:  { green: 95, yellow: 140 },
+            upper_shear: { green: 55, yellow: 85  },
         },
         sources: [
             'Blue Origin New Glenn Payload User\'s Guide (v1, public)',
@@ -168,6 +207,10 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'high',
         family_keys:   ['electron'],
+        // Small vehicle + low TWR → max-Q occurs higher than heavy-lift; at
+        // ~14 km we're reading the jet-stream-adjacent 150 hPa band. v1
+        // uses 200 hPa data uniformly; TODO interpolate when alt > 13 km.
+        max_q: { alt_km: 14, t_plus_s: 70, pressure_hpa: 150 },
         wind_ruleset: {
             id:     'electron',
             // Electron is famously wind-sensitive — Mahia Peninsula scrubs
@@ -175,6 +218,11 @@ export const VEHICLES = Object.freeze([
             // structural limit.
             wind: { green: 15, yellow: 30 },
             gust: { green: 20, yellow: 40 },
+            // Small low-mass airframe is very shear-sensitive; Rocket Lab
+            // has scrubbed on jet-stream incursions from Mahia multiple
+            // times over the vehicle's operational life.
+            upper_wind:  { green: 80, yellow: 120 },
+            upper_shear: { green: 40, yellow: 65  },
         },
         sources: [
             'Rocket Lab Electron Payload User\'s Guide',
@@ -189,6 +237,7 @@ export const VEHICLES = Object.freeze([
         status:        'debut',
         confidence:    'public-estimate',
         family_keys:   ['neutron'],
+        max_q: { alt_km: 11, t_plus_s: 75, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'neutron',
             // No published LCC. Conservative medium-lift analog; composite
@@ -196,6 +245,8 @@ export const VEHICLES = Object.freeze([
             // track the class.
             wind: { green: 18, yellow: 35 },
             gust: { green: 25, yellow: 45 },
+            upper_wind:  { green: 85, yellow: 125 },
+            upper_shear: { green: 50, yellow: 80  },
         },
         sources: [
             'Public statements, Rocket Lab investor materials',
@@ -211,6 +262,7 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'high',
         family_keys:   ['ariane 6', 'ariane-6', 'ariane 62', 'ariane 64'],
+        max_q: { alt_km: 11, t_plus_s: 75, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'ariane-6',
             // Kourou launch pads (ELA-4) are equatorial and historically low-
@@ -218,6 +270,12 @@ export const VEHICLES = Object.freeze([
             // A6 inherits similar margins.
             wind: { green: 22, yellow: 40 },
             gust: { green: 28, yellow: 52 },
+            // Heavy vehicle with P120 solid strap-ons — solids are less
+            // sensitive to upper-level shear than liquid stages, so A6 gets
+            // slightly more generous thresholds than equivalent all-liquid
+            // heavy-lift.
+            upper_wind:  { green: 105, yellow: 150 },
+            upper_shear: { green: 65,  yellow: 100 },
         },
         sources: [
             'Arianespace Ariane 6 User\'s Manual (Issue 2)',
@@ -234,6 +292,7 @@ export const VEHICLES = Object.freeze([
         // LL2 family string is "Long March 5" or "Long March". Matches CZ-5,
         // CZ-5B (manned/station), and CZ-5 DY variants.
         family_keys:   ['long march 5', 'cz-5'],
+        max_q: { alt_km: 11, t_plus_s: 75, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'long-march-5',
             // CZ-5 launches from Wenchang (Hainan, tropical). Chinese press
@@ -241,6 +300,9 @@ export const VEHICLES = Object.freeze([
             // ops; structural Level-10 wind (~55 mph) is hard ceiling.
             wind: { green: 18, yellow: 35 },
             gust: { green: 25, yellow: 50 },
+            // No public upper-wind criteria. Conservative heavy-lift analog.
+            upper_wind:  { green: 95, yellow: 140 },
+            upper_shear: { green: 60, yellow: 95  },
         },
         sources: [
             'CASC CZ-5 User\'s Manual (public excerpt)',
@@ -256,6 +318,7 @@ export const VEHICLES = Object.freeze([
         status:        'active',
         confidence:    'medium',
         family_keys:   ['soyuz', 'soyuz-2', 'soyuz 2'],
+        max_q: { alt_km: 11, t_plus_s: 66, pressure_hpa: 200 },
         wind_ruleset: {
             id:     'soyuz-2',
             // Soyuz is robust in wind — Plesetsk and Baikonur launch routinely
@@ -263,6 +326,10 @@ export const VEHICLES = Object.freeze([
             // cited operational limit; 25 m/s structural.
             wind: { green: 22, yellow: 45 },
             gust: { green: 30, yellow: 55 },
+            // Proven tough upper-stage guidance; operational record includes
+            // plenty of jet-stream flights. Most tolerant in the catalog.
+            upper_wind:  { green: 115, yellow: 165 },
+            upper_shear: { green: 70,  yellow: 105 },
         },
         sources: [
             'Arianespace Soyuz User\'s Manual (Issue 2, Kourou ops)',
