@@ -87,7 +87,13 @@ export class WeatherFeed {
         this._cloudBuf   = new Float32Array(TEX_W * TEX_H * 4);
         this._meta       = {
             loaded:    false,
-            source:    'procedural',
+            // `source` is consumer-facing text; `demo` is a structured
+            // boolean so UI panels can style differently without string-
+            // parsing the label. Upstream names (open-meteo, open-meteo-gfs,
+            // …) are passed through verbatim from /api/weather/grid so the
+            // provenance panel can show which model won the cron fallback.
+            source:    'DEMO DATA — synthetic circulation (initializing)',
+            demo:      true,
             fetchTime: null,
             tempMin:   null, tempMax:  null, tempMean: null,
             presMin:   null, presMax:  null,
@@ -146,7 +152,12 @@ export class WeatherFeed {
             const rows = await this._fetchGrid();
             if (rows && rows.length > 0) {
                 this._processRows(rows);
-                this._meta.source    = 'Open-Meteo / GFS';
+                // Pass the upstream provenance through so the UI can show
+                // `open-meteo` vs `open-meteo-gfs` (the pg_cron fallback).
+                // Falling back to 'Open-Meteo / GFS' for servers that
+                // pre-date the source field keeps older clients working.
+                this._meta.source    = this._meta.upstreamSource ?? 'Open-Meteo / GFS';
+                this._meta.demo      = false;
                 this._meta.fetchTime = new Date();
                 this._meta.loaded    = true;
                 this._hasGoodData    = true;
@@ -165,13 +176,15 @@ export class WeatherFeed {
             if (this._hasGoodData) {
                 console.warn(`[WeatherFeed] upstream failed (attempt ${this._failureCount}) — keeping last-known-good buffers:`, err.message);
                 this._meta.loaded    = false;
+                this._meta.demo      = false;   // stale-real data is NOT demo
                 this._meta.source    = `stale · last known (${err.message ?? 'upstream error'})`;
                 this._meta.fetchTime = new Date();
             } else {
                 console.warn(`[WeatherFeed] Falling back to procedural data (attempt ${this._failureCount}):`, err.message);
                 this._buildProcedural();
                 this._meta.loaded    = false;
-                this._meta.source    = 'procedural (GFS unavailable)';
+                this._meta.demo      = true;
+                this._meta.source    = 'DEMO DATA — synthetic circulation (upstream unavailable)';
                 this._meta.fetchTime = new Date();
             }
         } finally {
@@ -204,6 +217,10 @@ export class WeatherFeed {
 
         this._meta.cacheAgeSeconds = body.age_seconds ?? null;
         this._meta.cacheFetchedAt  = body.fetched_at  ?? null;
+        // Preserve the upstream model tag ('open-meteo', 'open-meteo-gfs',
+        // or whatever new entry is added to the pg_cron fallback array).
+        // _fetchAndProcess() reads this into _meta.source on success.
+        this._meta.upstreamSource  = body.source ?? null;
         return body.data;
     }
 

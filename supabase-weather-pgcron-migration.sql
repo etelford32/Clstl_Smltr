@@ -14,8 +14,17 @@
 --   Browsers       (15 min)    ───▶  /api/weather/grid     (cached read)
 --
 -- Run order (one-time, in the Supabase SQL Editor):
---   1. supabase-weather-cache-migration.sql   — creates the table + trim fn
---   2. THIS FILE                              — extensions + refresh fn + schedule
+--   1. supabase-weather-cache-migration.sql        — creates the table + trim fn
+--   2. supabase-pipeline-heartbeat-migration.sql   — shared heartbeat infra
+--   3. THIS FILE                                   — extensions + refresh fn + schedule
+--
+-- Redundancy: this fetch tries the default Open-Meteo forecast
+-- (seamless best-model blend) first, and on any failure retries with
+-- `&models=gfs_seamless` — same provider, different upstream model.
+-- That covers the common failure mode where one ECMWF/GFS cycle is
+-- delayed or a single forecaster returns 5xx without affecting the
+-- others. The `source` column on each row records which won so the
+-- UI can surface provenance.
 --
 -- Safe to re-run; everything uses CREATE OR REPLACE / IF NOT EXISTS,
 -- and the cron job is unscheduled before being re-scheduled.
@@ -51,10 +60,14 @@ DECLARE
     current_vars text;
     lat_csv      text;
     lon_csv      text;
-    full_url     text;
+    base_params  text;
+    attempts     text[];
+    attempt_url  text;
+    win_source   text;
     response_body text;
     payload_json jsonb;
     inserted_id  bigint;
+    last_err     text;
 BEGIN
     -- Build comma-separated lat / lon arrays in row-major order (lat
     -- varies slowest), matching js/weather-feed.js's consumer-side grid
@@ -71,39 +84,81 @@ BEGIN
                  || 'cloud_cover_low,cloud_cover_mid,cloud_cover_high,'
                  || 'precipitation,cape';
 
-    full_url := base_url
-             || '?latitude='        || lat_csv
-             || '&longitude='       || lon_csv
-             || '&current='         || current_vars
-             || '&wind_speed_unit=ms'
-             || '&timezone=UTC';
+    base_params := '?latitude='      || lat_csv
+                || '&longitude='     || lon_csv
+                || '&current='       || current_vars
+                || '&wind_speed_unit=ms'
+                || '&timezone=UTC';
 
-    -- Synchronous GET. http extension blocks ~1-3 s while Open-Meteo
-    -- responds. pg_cron jobs run in background workers, so the block
-    -- never affects user-facing queries.
-    SELECT content INTO response_body
-      FROM http_get(full_url);
+    -- Primary = default Open-Meteo (seamless blend of ECMWF + GFS + …).
+    -- Fallback = GFS-only via Open-Meteo (same provider, different upstream).
+    -- Keeps the codepath narrow; if Open-Meteo is *globally* unreachable
+    -- (DNS, cert, WAF) both will fail and we record the failure. A truly
+    -- separate vendor can be added as a third entry without touching the
+    -- loop body.
+    attempts := ARRAY[
+        'open-meteo'          || '|' || base_url || base_params,
+        'open-meteo-gfs'      || '|' || base_url || base_params || '&models=gfs_seamless'
+    ];
 
-    IF response_body IS NULL OR length(response_body) < 100 THEN
-        RAISE EXCEPTION 'Open-Meteo returned empty response (length %)',
-            COALESCE(length(response_body), 0);
-    END IF;
+    win_source   := NULL;
+    payload_json := NULL;
+    last_err     := NULL;
 
-    -- Open-Meteo returns an array for multi-location queries; coerce
-    -- single-object responses to one-element arrays so /api/weather/grid
-    -- always sees a list (matches the JS parser in weather-feed.js).
-    payload_json := response_body::jsonb;
-    IF jsonb_typeof(payload_json) <> 'array' THEN
-        payload_json := jsonb_build_array(payload_json);
+    FOREACH attempt_url IN ARRAY attempts LOOP
+        DECLARE
+            pipe_pos int;
+            src_tag  text;
+            url_str  text;
+        BEGIN
+            pipe_pos := position('|' in attempt_url);
+            src_tag  := substr(attempt_url, 1, pipe_pos - 1);
+            url_str  := substr(attempt_url, pipe_pos + 1);
+
+            SELECT content INTO response_body
+              FROM http_get(url_str);
+
+            IF response_body IS NULL OR length(response_body) < 100 THEN
+                last_err := format('%s empty response (length %s)',
+                                   src_tag, COALESCE(length(response_body), 0));
+                CONTINUE;
+            END IF;
+
+            payload_json := response_body::jsonb;
+            IF jsonb_typeof(payload_json) <> 'array' THEN
+                payload_json := jsonb_build_array(payload_json);
+            END IF;
+
+            IF jsonb_array_length(payload_json) = 0 THEN
+                last_err := format('%s zero-length array', src_tag);
+                payload_json := NULL;
+                CONTINUE;
+            END IF;
+
+            win_source := src_tag;
+            EXIT;   -- success
+        EXCEPTION WHEN OTHERS THEN
+            last_err := format('%s %s', src_tag, SQLERRM);
+            payload_json := NULL;
+        END;
+    END LOOP;
+
+    IF payload_json IS NULL OR win_source IS NULL THEN
+        PERFORM public.record_pipeline_failure(
+            'weather_grid',
+            COALESCE(last_err, 'all weather sources exhausted')
+        );
+        RAISE EXCEPTION 'weather_grid refresh failed: %', COALESCE(last_err, 'unknown');
     END IF;
 
     INSERT INTO public.weather_grid_cache (source, payload)
-    VALUES ('open-meteo', payload_json)
+    VALUES (win_source, payload_json)
     RETURNING id INTO inserted_id;
 
     -- Trim history opportunistically (function from the prior migration).
     -- Failure here is non-fatal: a few extra rows = a few extra KB.
     PERFORM public.trim_weather_grid_cache();
+    PERFORM public.record_pipeline_success('weather_grid', win_source);
 
     RETURN inserted_id;
 END;
