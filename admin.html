@@ -365,6 +365,21 @@
                 <div id="config-info"></div>
             </div>
         </div>
+        <!-- ── Pipeline Health (data-freshness summary) ─────────────── -->
+        <!-- One row per pipeline (solar_wind, weather_grid, …) showing
+             last successful upstream fetch, consecutive-fail streak, and
+             the last failure reason. This is the "is the feed alive?"
+             card: a green cron job can still be producing stale data if
+             the refresh function succeeded but the upstream was empty.
+             Data is written by record_pipeline_success/_failure inside
+             each refresh function (supabase-pipeline-heartbeat-migration.sql). -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Pipeline Health
+                <button class="btn btn-sm" id="btn-refresh-heartbeat" style="float:right">Refresh</button>
+            </h3>
+            <div id="heartbeat-container"><div class="empty">Loading...</div></div>
+        </div>
         <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
         <!-- Surfaces the most-recent run + 24h failure counts for every
              pg_cron job so silent cron failures are visible BEFORE
@@ -403,7 +418,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -813,6 +828,114 @@ async function loadEmailActivity() {
 document.getElementById('btn-refresh-email').addEventListener('click', loadEmailActivity);
 document.getElementById('email-window').addEventListener('change', loadEmailActivity);
 loadEmailActivity();
+
+// ── Pipeline Health card (per-pipeline data freshness) ─────────────────────
+// Reads the pipeline_heartbeat table. Complementary to the Scheduled Jobs
+// card below: cron can report "succeeded" while the upstream fetch still
+// produced no rows — the heartbeat table is updated *inside* the refresh
+// function after the upstream result is validated, so it's the honest
+// "is the feed alive?" signal.
+//
+// Staleness thresholds are intentionally generous (15 min warning, 60 min
+// critical) because the solar_wind pipeline normally writes every ~2 min
+// and the weather_grid every ~30 min — anything older than 60 min for the
+// slowest feed is a real incident. Tighten if the cron cadence changes.
+const HB_PIPELINES = [
+    { key: 'solar_wind',   label: 'Solar Wind',   expectMin: 5,  expectMax: 60  },
+    { key: 'weather_grid', label: 'Weather Grid', expectMin: 45, expectMax: 180 },
+];
+
+function _hbAgeMin(iso) {
+    if (!iso) return null;
+    return Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+}
+
+function _hbFmtRel(iso) {
+    const m = _hbAgeMin(iso);
+    if (m == null) return 'never';
+    if (m < 1)     return 'just now';
+    if (m < 60)    return `${m}m ago`;
+    if (m < 1440)  return `${Math.round(m / 60)}h ago`;
+    return `${Math.round(m / 1440)}d ago`;
+}
+
+// Classify a heartbeat row into ok/warn/crit. Returns {color, label, emoji}.
+function _hbHealth(row, spec) {
+    const ageMin = _hbAgeMin(row?.last_success_at);
+    const streak = Number(row?.consecutive_fail || 0);
+    const maxMin = spec?.expectMax ?? 60;
+    const warnMin = spec?.expectMin ?? 15;
+
+    if (ageMin == null)               return { color:'#ff6b6b', label:'never succeeded', emoji:'●' };
+    if (streak >= 3 || ageMin > maxMin) return { color:'#ff6b6b', label:'critical',        emoji:'●' };
+    if (streak >= 1 || ageMin > warnMin) return { color:'#ffaa44', label:'stale',          emoji:'●' };
+    return                              { color:'#4eff91', label:'healthy',         emoji:'●' };
+}
+
+async function loadPipelineHeartbeat() {
+    const el = document.getElementById('heartbeat-container');
+    const res = await fetchPipelineHeartbeat();
+
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty">Failed to load: ${_esc(res.error)}</div>`;
+        return;
+    }
+
+    // Build a map of what the DB returned, then iterate over the expected
+    // pipelines so a missing row still shows as "never succeeded" rather
+    // than vanishing from the UI.
+    const byKey = Object.fromEntries((res.data || []).map(r => [r.pipeline_name, r]));
+
+    // Include any extra pipelines the DB knows about but we don't
+    // recognise — future-proof without having to redeploy.
+    const known = new Set(HB_PIPELINES.map(p => p.key));
+    const extras = (res.data || [])
+        .filter(r => !known.has(r.pipeline_name))
+        .map(r => ({ key: r.pipeline_name, label: r.pipeline_name }));
+    const specs = [...HB_PIPELINES, ...extras];
+
+    if (specs.length === 0) {
+        el.innerHTML = `<div class="empty">No pipelines registered yet.<br><br>Apply <code>supabase-pipeline-heartbeat-migration.sql</code> and confirm the refresh functions in <code>supabase-solar-wind-migration.sql</code> + <code>supabase-weather-pgcron-migration.sql</code> are calling <code>record_pipeline_success</code>.</div>`;
+        return;
+    }
+
+    let html = '<table><thead><tr>'
+             + '<th>Pipeline</th><th>Last success</th><th>Source</th>'
+             + '<th>Streak</th><th>Last failure</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const spec of specs) {
+        const row = byKey[spec.key];
+        const h = _hbHealth(row, spec);
+        const streak = Number(row?.consecutive_fail || 0);
+        const streakColor = streak >= 3 ? '#ff6b6b' : streak >= 1 ? '#ffaa44' : '#556';
+        const streakWeight = streak > 0 ? '700' : '400';
+        const failTooltip = row?.last_failure_reason
+            ? ` title="${_esc(row.last_failure_reason)}"`
+            : '';
+        const failCell = row?.last_failure_at
+            ? `<span style="color:#aab;font-size:.78rem"${failTooltip}>${_hbFmtRel(row.last_failure_at)}</span>`
+            : `<span style="color:#445;font-size:.78rem">—</span>`;
+        const sourceCell = row?.last_source
+            ? `<span style="font-family:ui-monospace,monospace;font-size:.72rem;color:#9ad">${_esc(row.last_source)}</span>`
+            : `<span style="color:#445;font-size:.78rem">—</span>`;
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(spec.key)}</div></td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_hbFmtRel(row?.last_success_at)}</td>`
+             +  `<td>${sourceCell}</td>`
+             +  `<td style="color:${streakColor};font-weight:${streakWeight}">${streak}</td>`
+             +  `<td>${failCell}</td>`
+             +  `<td style="color:${h.color};font-weight:600;font-size:.78rem">${h.emoji} ${_esc(h.label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeat);
+loadPipelineHeartbeat();
 
 // ── Scheduled jobs (pg_cron) health card ────────────────────────────────────
 // Reads admin_get_cron_status — returns every pg_cron job's most recent run
