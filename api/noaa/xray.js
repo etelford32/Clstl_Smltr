@@ -55,15 +55,11 @@ export default async function handler() {
         return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
-    // xrays-1-day is a 2-D array: row[0] = headers, rest = string values
-    if (!Array.isArray(raw) || raw.length < 2) {
+    // xrays-1-day is now an array of objects; older NOAA versions were a 2-D
+    // array with a header row. Handle both.
+    if (!Array.isArray(raw) || raw.length === 0) {
         return jsonError('parse_error', 'Unexpected xrays-1-day format', { source: 'NOAA SWPC' });
     }
-
-    const headers = raw[0].map(String);
-    const timeCol = headers.indexOf('time_tag');
-    const fluxCol = headers.indexOf('flux');
-    const satCol  = headers.indexOf('satellite');
 
     const fill = v => {
         if (v == null || v === '') return null;
@@ -71,14 +67,42 @@ export default async function handler() {
         return isNaN(n) || n < 0 ? null : n;
     };
 
-    const rows = raw.slice(1)
-        .filter(r => r[timeCol])
-        .map(r => ({
-            time_tag:  r[timeCol],
-            flux:      fill(r[fluxCol]),
-            satellite: r[satCol] ?? null,
-        }))
-        .filter(r => r.flux != null);
+    let rows;
+    if (typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+        // Object-array form: [{ time_tag, flux, satellite, energy, ... }]
+        // Prefer the long-wavelength 0.1–0.8 nm channel when an energy/band
+        // field is present; otherwise fall through to all rows.
+        const bandKey = ['energy', 'wavelength', 'band'].find(k => k in raw[0]);
+        const longBand = bandKey
+            ? raw.filter(r => {
+                const w = String(r[bandKey] ?? '').toLowerCase();
+                return w.includes('0.1') || w.includes('long') || w.includes('1-8') || w.includes('0.8');
+              })
+            : raw;
+        const candidates = longBand.length ? longBand : raw;
+        rows = candidates
+            .filter(r => r?.time_tag)
+            .map(r => ({
+                time_tag:  r.time_tag,
+                flux:      fill(r.flux ?? r.observed_flux),
+                satellite: r.satellite ?? null,
+            }))
+            .filter(r => r.flux != null);
+    } else {
+        // Legacy 2-D form: row[0] = headers
+        const headers = raw[0].map(String);
+        const timeCol = headers.indexOf('time_tag');
+        const fluxCol = headers.indexOf('flux');
+        const satCol  = headers.indexOf('satellite');
+        rows = raw.slice(1)
+            .filter(r => r[timeCol])
+            .map(r => ({
+                time_tag:  r[timeCol],
+                flux:      fill(r[fluxCol]),
+                satellite: r[satCol] ?? null,
+            }))
+            .filter(r => r.flux != null);
+    }
 
     if (rows.length === 0) {
         return jsonError('no_valid_data', 'All X-ray flux readings are null/fill', { source: 'NOAA SWPC' });
