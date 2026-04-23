@@ -40,14 +40,11 @@ export default async function handler() {
         return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
-    // kyoto-dst.json: 2-D array, row[0] = headers ["time_tag", "dst"]
-    if (!Array.isArray(raw) || raw.length < 2) {
+    // kyoto-dst.json may be an array of objects or a 2-D array with a header
+    // row depending on NOAA version. Handle both.
+    if (!Array.isArray(raw) || raw.length === 0) {
         return jsonError('parse_error', 'Unexpected kyoto-dst format', { source: 'NOAA SWPC' });
     }
-
-    const headers = raw[0].map(String);
-    const timeCol = headers.indexOf('time_tag');
-    const dstCol  = headers.indexOf('dst');
 
     const fill = v => {
         if (v == null || v === '') return null;
@@ -56,10 +53,21 @@ export default async function handler() {
         return isNaN(n) || Math.abs(n) > 1000 ? null : n;
     };
 
-    const rows = raw.slice(1)
-        .filter(r => r[timeCol])
-        .map(r => ({ time_tag: r[timeCol], dst: fill(r[dstCol]) }))
-        .filter(r => r.dst != null);
+    let rows;
+    if (typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+        rows = raw
+            .filter(r => r?.time_tag)
+            .map(r => ({ time_tag: r.time_tag, dst: fill(r.dst ?? r.dst_index) }))
+            .filter(r => r.dst != null);
+    } else {
+        const headers = raw[0].map(String);
+        const timeCol = headers.indexOf('time_tag');
+        const dstCol  = headers.indexOf('dst');
+        rows = raw.slice(1)
+            .filter(r => r[timeCol])
+            .map(r => ({ time_tag: r[timeCol], dst: fill(r[dstCol]) }))
+            .filter(r => r.dst != null);
+    }
 
     if (rows.length === 0) {
         return jsonError('no_valid_data', 'All Dst readings are null/fill', { source: 'NOAA SWPC' });

@@ -38,15 +38,11 @@ export default async function handler() {
         return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
     }
 
-    // 2-D array: row[0] = headers
-    if (!Array.isArray(raw) || raw.length < 2) {
+    // NOAA returns either an array of objects (current) or a 2-D array with a
+    // header row (legacy). Handle both.
+    if (!Array.isArray(raw) || raw.length === 0) {
         return jsonError('parse_error', 'Unexpected integral-protons format', { source: 'NOAA SWPC' });
     }
-
-    const headers    = raw[0].map(String);
-    const timeCol    = headers.indexOf('time_tag');
-    const fluxCol    = headers.indexOf('flux');
-    const energyCol  = headers.indexOf('energy');
 
     const fill = v => {
         if (v == null || v === '') return null;
@@ -54,16 +50,35 @@ export default async function handler() {
         return isNaN(n) || n < 0 ? null : n;
     };
 
-    // Group latest reading per energy channel
+    // Normalize to a uniform row shape: { time_tag, flux, energy }
+    let normalized;
+    if (typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
+        normalized = raw.map(r => ({
+            time_tag: r?.time_tag ?? null,
+            flux:     r?.flux,
+            energy:   r?.energy ?? r?.channel ?? null,
+        }));
+    } else {
+        const headers   = raw[0].map(String);
+        const timeCol   = headers.indexOf('time_tag');
+        const fluxCol   = headers.indexOf('flux');
+        const energyCol = headers.indexOf('energy');
+        normalized = raw.slice(1).map(r => ({
+            time_tag: r[timeCol],
+            flux:     r[fluxCol],
+            energy:   r[energyCol],
+        }));
+    }
+
+    // Group latest reading per energy channel (walk backwards — newest last).
     const channels = {};
-    for (let i = raw.length - 1; i >= 1; i--) {
-        const r      = raw[i];
-        const energy = r[energyCol];
+    for (let i = normalized.length - 1; i >= 0; i--) {
+        const r      = normalized[i];
+        const energy = r.energy;
         if (!energy || channels[energy]) continue;
-        const flux = fill(r[fluxCol]);
+        const flux = fill(r.flux);
         if (flux == null) continue;
-        channels[energy] = { flux, time_tag: r[timeCol] };
-        // Stop once we have the 3 primary channels
+        channels[energy] = { flux, time_tag: r.time_tag };
         if (Object.keys(channels).length >= 3) break;
     }
 
