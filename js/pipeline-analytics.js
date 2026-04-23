@@ -55,6 +55,24 @@ const PROBE_TIMEOUT_MS = 8000;
  * Probe a single pipeline. Returns a result row with status, latency, and
  * whichever freshness signal the upstream exposes (age_seconds / fetched_at).
  */
+/**
+ * Coerce an error-ish value into a short human string. Never returns
+ * "[object Object]" — Vercel's runtime occasionally replies to a crashed
+ * Edge function with a JSON body whose `error` field is itself an object
+ * ({ code, message, …}), and raw template concatenation rendered that as
+ * "[object Object]" in the panel, leaving the operator with no clue what
+ * actually broke.
+ */
+function stringifyErr(v) {
+    if (v == null)            return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+    // Prefer known error-shape fields, in order of specificity.
+    const cand = v.message ?? v.detail ?? v.error ?? v.code ?? v.reason ?? null;
+    if (typeof cand === 'string') return cand;
+    try { return JSON.stringify(v).slice(0, 200); } catch { return String(v); }
+}
+
 async function probe(pipe) {
     const started = performance.now();
     const t0 = Date.now();
@@ -83,7 +101,8 @@ async function probe(pipe) {
             // Try to surface the proxy's structured error detail
             try {
                 const body = await res.json();
-                if (body.error) row.error = `HTTP ${res.status}: ${body.error}`;
+                const detail = stringifyErr(body?.detail) || stringifyErr(body?.error) || stringifyErr(body);
+                if (detail) row.error = `HTTP ${res.status}: ${detail}`;
             } catch (_) {}
             return row;
         }
@@ -91,7 +110,7 @@ async function probe(pipe) {
         const body = await res.json();
         if (body.error) {
             row.status = 'error';
-            row.error  = String(body.error);
+            row.error  = stringifyErr(body.error) || stringifyErr(body);
             return row;
         }
 
@@ -118,7 +137,7 @@ async function probe(pipe) {
     } catch (e) {
         row.latency_ms = Math.round(performance.now() - started);
         row.status     = e.name === 'TimeoutError' ? 'timeout' : 'error';
-        row.error      = e.message || String(e);
+        row.error      = stringifyErr(e) || 'unknown error';
         return row;
     }
 }
