@@ -3,7 +3,7 @@
 -- Run AFTER supabase-weather-pgcron-migration.sql (this replaces
 -- refresh_weather_grid() in place; the schedule row is untouched).
 -- ═══════════════════════════════════════════════════════════════
--- Two bugs in the original refresh_weather_grid():
+-- Three bugs in the original refresh_weather_grid():
 --
 --   1. SSL connection timeout on the single giant 648-location URL.
 --      One `http_get` call of ~5 KB URL + ~800 KB response trips
@@ -27,6 +27,19 @@
 --      (that INSERT now commits) and RETURN NULL. pg_cron marks the
 --      run as succeeded — the TRUTH is in pipeline_heartbeat, which
 --      the admin dashboard reads directly.
+--
+--   3. `cape` was requested as a `current=` variable. Open-Meteo only
+--      offers cape on the hourly endpoint, so the API returned an
+--      ~86-byte {"error":true,"reason":"..."} body, which then failed
+--      the length check and left last_err as "chunk 0 empty response
+--      (length 86)" — masking the actual cause. Observed in
+--      production after applying the chunking fix from bug 1.
+--      Fix: drop cape from `current` (our consumer reads only surface
+--      fields from the grid snapshot anyway — launch-planner uses
+--      /api/weather/forecast?type=launch for the per-pad hourly cape
+--      it actually needs). Also include the first 300 chars of any
+--      short/non-JSON body in last_err so the next class of upstream
+--      rejection is self-diagnosing.
 --
 -- Safe to re-run (CREATE OR REPLACE).
 -- ═══════════════════════════════════════════════════════════════
@@ -62,10 +75,13 @@ DECLARE
     last_err     text;
     chunk_failed boolean;
 BEGIN
+    -- Only fields Open-Meteo accepts on the `current=` endpoint. `cape` was
+    -- here originally but is hourly-only upstream; leaving it in triggered
+    -- a short error body that cascaded to "empty response" in the logs.
     current_vars := 'temperature_2m,relative_humidity_2m,surface_pressure,'
                  || 'wind_speed_10m,wind_direction_10m,'
                  || 'cloud_cover_low,cloud_cover_mid,cloud_cover_high,'
-                 || 'precipitation,cape';
+                 || 'precipitation';
 
     tail_params := '&current='      || current_vars
                 || '&wind_speed_unit=ms'
@@ -109,15 +125,31 @@ BEGIN
             BEGIN
                 SELECT content INTO response_body FROM http_get(chunk_url);
 
-                IF response_body IS NULL OR length(response_body) < 100 THEN
-                    last_err := format('%s chunk %s empty response (length %s)',
-                                       src_tag, chunk_start,
-                                       COALESCE(length(response_body), 0));
+                -- Truly-empty bodies (NULL / 0-length) have no diagnostic
+                -- value; skip parsing them. Everything else goes through
+                -- jsonb cast — a short error body from Open-Meteo like
+                -- {"error":true,"reason":"..."} is still valid JSON and we
+                -- want to surface its `reason` in last_err, not a generic
+                -- "empty response" message.
+                IF response_body IS NULL OR length(response_body) = 0 THEN
+                    last_err := format('%s chunk %s empty response',
+                                       src_tag, chunk_start);
                     chunk_failed := true;
                     EXIT;
                 END IF;
 
                 chunk_json := response_body::jsonb;
+
+                -- If upstream returned an error envelope, surface its reason.
+                -- Open-Meteo uses {"error":true,"reason":"…"} for bad params.
+                IF jsonb_typeof(chunk_json) = 'object'
+                   AND (chunk_json ->> 'error')::boolean IS TRUE THEN
+                    last_err := format('%s chunk %s upstream error: %s',
+                                       src_tag, chunk_start,
+                                       chunk_json ->> 'reason');
+                    chunk_failed := true;
+                    EXIT;
+                END IF;
                 -- Open-Meteo returns an object for a single location (if the
                 -- chunk somehow ended up size 1), an array otherwise.
                 IF jsonb_typeof(chunk_json) <> 'array' THEN
@@ -135,7 +167,12 @@ BEGIN
                 -- jsonb arrays concatenates.
                 merged := merged || chunk_json;
             EXCEPTION WHEN OTHERS THEN
-                last_err := format('%s chunk %s: %s', src_tag, chunk_start, SQLERRM);
+                -- Include a snippet of the offending body so we can tell
+                -- HTML error pages, plaintext rate-limit notices, and
+                -- genuine network failures apart without redeploying.
+                last_err := format('%s chunk %s: %s | body[0..300]=%s',
+                                   src_tag, chunk_start, SQLERRM,
+                                   substring(COALESCE(response_body, '') FROM 1 FOR 300));
                 chunk_failed := true;
                 EXIT;
             END;
