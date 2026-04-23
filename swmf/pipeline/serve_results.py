@@ -12,6 +12,8 @@ Endpoints:
   GET /v1/forecast/latest      — most recent BATS-R-US forecast at Earth
   GET /v1/forecast/{run_id}    — specific forecast run result
   GET /v1/benchmark/ar3842     — AR3842 validation metrics
+  GET /v1/atmosphere/density   — Phase 1 DSMC stub (proxies dsmc service
+                                 when reachable; otherwise empirical baseline)
   GET /v1/metrics              — Prometheus metrics (scrape target)
 
 Rate limiting: 60 req/min per IP (configurable via API key tiers).
@@ -23,15 +25,24 @@ Usage:
 
 import json
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Response
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from pipeline import db as _db
+
+# Phase 1: DSMC service is a sibling container. When it's reachable we
+# proxy atmosphere/drag queries there; otherwise we fall back to a
+# locally-computed empirical baseline so the UI contract never breaks.
+DSMC_SERVICE_URL = os.environ.get("DSMC_SERVICE_URL", "http://dsmc:8001").rstrip("/")
 
 log = logging.getLogger("serve_results")
 
@@ -40,6 +51,45 @@ IMF_DIR     = Path(os.environ.get("IMF_DIR",     "/data/imf"))
 RUNS_DIR    = Path(os.environ.get("RUNS_DIR",    "/data/runs"))
 API_VERSION = "0.1.0"
 PHASE       = "0"
+
+# Optional Redis result cache — keeps hot endpoints off disk I/O.
+REDIS_URL        = os.environ.get("REDIS_URL", "").strip()
+CACHE_TTL_SEC    = int(os.environ.get("CACHE_TTL_SEC", "30"))
+# Optional bearer-token gate. Comma-separated list of accepted keys; unset = open.
+API_KEYS         = {k.strip() for k in os.environ.get("API_KEYS", "").split(",") if k.strip()}
+ALLOW_ORIGINS    = [o.strip() for o in os.environ.get("ALLOW_ORIGINS", "*").split(",") if o.strip()] or ["*"]
+
+_redis: Any = None
+try:
+    if REDIS_URL:
+        import redis as _redis_mod  # type: ignore
+        _redis = _redis_mod.Redis.from_url(REDIS_URL, socket_timeout=1.5,
+                                           socket_connect_timeout=1.5,
+                                           decode_responses=True)
+        _redis.ping()
+        log.info("Redis cache enabled → %s", REDIS_URL)
+except Exception as _exc:
+    log.warning("Redis cache disabled (%s)", _exc)
+    _redis = None
+
+
+def _cache_get(key: str) -> Optional[dict]:
+    if _redis is None:
+        return None
+    try:
+        raw = _redis.get(key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, value: dict, ttl: int = CACHE_TTL_SEC) -> None:
+    if _redis is None:
+        return
+    try:
+        _redis.setex(key, ttl, json.dumps(value, default=str))
+    except Exception:
+        pass
 
 
 # ── App setup ─────────────────────────────────────────────────────────────────
@@ -57,10 +107,38 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],    # tighten in Phase 1
+    allow_origins=ALLOW_ORIGINS,   # override via ALLOW_ORIGINS env
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+# Public endpoints never require an API key — keep health/metrics/docs open so
+# uptime probes and Prometheus can scrape without a secret.
+_PUBLIC_PATHS = {"/", "/health", "/docs", "/redoc", "/openapi.json", "/v1/metrics"}
+
+
+def require_api_key(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_key: Optional[str] = Header(None),
+) -> Optional[str]:
+    """
+    Optional bearer/key guard. No-op when API_KEYS env is empty.
+    Accepts:
+      Authorization: Bearer <key>
+      X-API-Key: <key>
+    """
+    if not API_KEYS:
+        return None
+    if request.url.path in _PUBLIC_PATHS:
+        return None
+    token = x_api_key
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(None, 1)[1].strip()
+    if not token or token not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return token
 
 # ── Simple request metrics (for Prometheus scrape) ────────────────────────────
 _metrics = {
@@ -73,14 +151,32 @@ _metrics = {
 @app.middleware("http")
 async def count_requests(request: Request, call_next):
     _metrics["requests_total"] += 1
+    t0 = time.monotonic()
+    status = 500
     try:
         response = await call_next(request)
-        if response.status_code >= 400:
+        status = response.status_code
+        if status >= 400:
             _metrics["requests_errors"] += 1
         return response
     except Exception:
         _metrics["requests_errors"] += 1
         raise
+    finally:
+        latency_ms = round((time.monotonic() - t0) * 1000.0, 2)
+        client_ip = request.client.host if request.client else None
+        api_key = request.headers.get("x-api-key") or None
+        try:
+            _db.insert_api_request(
+                endpoint=request.url.path,
+                method=request.method,
+                status_code=status,
+                client_ip=client_ip,
+                api_key=api_key,
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            pass
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -160,17 +256,22 @@ async def health():
     return JSONResponse(status, status_code=http_status)
 
 
-@app.get("/v1/solar-wind/current", tags=["observations"])
+@app.get("/v1/solar-wind/current", tags=["observations"],
+         dependencies=[Depends(require_api_key)])
 async def solar_wind_current():
     """
     Current DSCOVR/ACE L1 solar wind conditions.
     Refreshed every ~60 seconds by the ingest daemon.
     Source: NOAA SWPC Real-Time Solar Wind JSON API.
     """
+    cached = _cache_get("v1:sw:current")
+    if cached is not None:
+        return cached
+
     data = _load_json(RESULTS_DIR / "current_conditions.json")
     age  = _file_age_min(RESULTS_DIR / "current_conditions.json")
 
-    return {
+    payload = {
         "source":    "NOAA SWPC DSCOVR/ACE L1",
         "age_min":   age,
         "freshness": _freshness_status(age, 5, 20),
@@ -189,14 +290,21 @@ async def solar_wind_current():
             "parker_spiral_deg": "degrees at 1 AU",
         },
     }
+    _cache_set("v1:sw:current", payload)
+    return payload
 
 
-@app.get("/v1/forecast/latest", tags=["forecast"])
+@app.get("/v1/forecast/latest", tags=["forecast"],
+         dependencies=[Depends(require_api_key)])
 async def forecast_latest():
     """
     Most recent BATS-R-US Inner Heliosphere forecast.
     Contains predicted solar wind conditions at Earth (215 R☉ sphere).
     """
+    cached = _cache_get("v1:forecast:latest")
+    if cached is not None:
+        return cached
+
     data = _load_json(RESULTS_DIR / "forecast_latest.json")
     age  = _file_age_min(RESULTS_DIR / "forecast_latest.json")
 
@@ -208,15 +316,18 @@ async def forecast_latest():
             "See swmf/Dockerfile to build the solver."
         )
 
-    return {
+    payload = {
         "source":    f"Parker Physics BATS-R-US IH ({mode})",
         "age_min":   age,
         "freshness": _freshness_status(age, 90, 360),
         "data":      data,
     }
+    _cache_set("v1:forecast:latest", payload)
+    return payload
 
 
-@app.get("/v1/forecast/{run_id}", tags=["forecast"])
+@app.get("/v1/forecast/{run_id}", tags=["forecast"],
+         dependencies=[Depends(require_api_key)])
 async def forecast_by_id(run_id: str):
     """Retrieve a specific forecast run result by run_id."""
     # Sanitize run_id — only allow alphanumeric + underscore + hyphen
@@ -228,7 +339,8 @@ async def forecast_by_id(run_id: str):
     return {"run_id": run_id, "data": data}
 
 
-@app.get("/v1/benchmark/ar3842", tags=["validation"])
+@app.get("/v1/benchmark/ar3842", tags=["validation"],
+         dependencies=[Depends(require_api_key)])
 async def benchmark_ar3842():
     """
     AR3842 X9.0 flare (2024-10-03) hindcast validation results.
@@ -264,7 +376,8 @@ async def benchmark_ar3842():
     }
 
 
-@app.get("/v1/solar-wind/wind-speed", tags=["observations"])
+@app.get("/v1/solar-wind/wind-speed", tags=["observations"],
+         dependencies=[Depends(require_api_key)])
 async def solar_wind_speed():
     """
     Live solar wind speed time-series (rolling 24-hour window).
@@ -301,7 +414,8 @@ async def solar_wind_speed():
     }
 
 
-@app.get("/v1/solar-wind/history", tags=["observations"])
+@app.get("/v1/solar-wind/history", tags=["observations"],
+         dependencies=[Depends(require_api_key)])
 async def solar_wind_history(hours: float = 24.0):
     """
     Historical L1 conditions from the IMF archive (up to 168 hours = 7 days).
@@ -322,6 +436,63 @@ async def solar_wind_history(hours: float = 24.0):
         "note": (
             "Full time-series available via direct file access in /data/imf/. "
             "Parsed 1-minute JSON series coming in Phase 1 API."
+        ),
+    }
+
+
+@app.get("/v1/atmosphere/density", tags=["atmosphere"],
+         dependencies=[Depends(require_api_key)])
+async def atmosphere_density_stub(
+    alt_km: float = Query(..., ge=80, le=2000),
+    f107:   Optional[float] = Query(None),
+    ap:     Optional[float] = Query(None),
+    lat:    float = Query(0.0, ge=-90, le=90),
+    lon:    float = Query(0.0, ge=-180, le=180),
+):
+    """
+    Phase 1 stub: if the DSMC sibling container is up, proxy to it so
+    the UI always sees the richest available model (SPARTA lookup when
+    available; NRLMSISE-00 otherwise). If DSMC is down, return a
+    transparent exponential baseline so the contract never breaks —
+    callers can check the `model` field to tell them apart.
+    """
+    params = {"alt_km": alt_km, "lat": lat, "lon": lon}
+    if f107 is not None:
+        params["f107"] = f107
+    if ap is not None:
+        params["ap"] = ap
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            r = await client.get(f"{DSMC_SERVICE_URL}/v1/atmosphere/density",
+                                 params=params)
+            if r.status_code == 200:
+                return r.json()
+    except Exception as exc:
+        log.debug("DSMC proxy unavailable (%s); using baseline", exc)
+
+    # Baseline — thermosphere exponential anchored at 150 km.
+    # Returns order-of-magnitude correct values without needing NRLMSISE-00.
+    f107_used = float(f107) if f107 is not None else 150.0
+    ap_used   = float(ap)   if ap   is not None else 15.0
+    T   = max(500.0, 900.0 + 2.0 * (f107_used - 150.0) + 3.0 * ap_used)
+    H   = 0.053 * T
+    if float(alt_km) <= 150.0:
+        rho = 2.0e-9 * math.exp((150.0 - float(alt_km)) / 8.0)
+    else:
+        rho = 2.0e-9 * math.exp(-(float(alt_km) - 150.0) / H)
+    return {
+        "altitude_km":   float(alt_km),
+        "density_kg_m3": rho,
+        "temperature_K": T,
+        "scale_height_km": H,
+        "f107_sfu":      f107_used,
+        "ap":            ap_used,
+        "model":         "swmf-exp-stub",
+        "model_version": "0.1",
+        "note": (
+            "DSMC service not reachable — returning exponential baseline. "
+            "Spin up the dsmc sibling container for NRLMSISE-00 or SPARTA."
         ),
     }
 
@@ -349,6 +520,18 @@ async def prometheus_metrics():
             "# TYPE pp_forecast_age_minutes gauge",
             f"pp_forecast_age_minutes {_metrics['last_forecast_age_min']}",
         ]
+    # Report whether optional back-ends are connected; 0/1 gauges.
+    lines += [
+        "# HELP pp_db_enabled 1 if Postgres persistence is enabled",
+        "# TYPE pp_db_enabled gauge",
+        f"pp_db_enabled {1 if _db.is_enabled() else 0}",
+        "# HELP pp_redis_enabled 1 if Redis cache is enabled",
+        "# TYPE pp_redis_enabled gauge",
+        f"pp_redis_enabled {1 if _redis is not None else 0}",
+        "# HELP pp_auth_enabled 1 if API key auth is enforced",
+        "# TYPE pp_auth_enabled gauge",
+        f"pp_auth_enabled {1 if API_KEYS else 0}",
+    ]
     return Response("\n".join(lines) + "\n", media_type="text/plain")
 
 
@@ -366,6 +549,7 @@ async def root():
             "/v1/forecast/latest",
             "/v1/benchmark/ar3842",
             "/v1/solar-wind/history",
+            "/v1/atmosphere/density",
             "/v1/metrics",
         ],
     }

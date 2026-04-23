@@ -1,0 +1,34 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: parker-physics
+    tier:    swmf
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: swmf-api
+    metrics_path: /v1/metrics
+    static_configs:
+      - targets: ["swmf:8000"]
+        labels:
+          service: swmf-pipeline
+          component: api
+
+  - job_name: dsmc-api
+    metrics_path: /v1/metrics
+    static_configs:
+      - targets: ["dsmc:8001"]
+        labels:
+          service: dsmc-pipeline
+          component: api
+
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres:5432"]
+        labels:
+          service: postgres
+    honor_labels: true

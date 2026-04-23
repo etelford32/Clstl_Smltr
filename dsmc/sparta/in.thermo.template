@@ -1,0 +1,40 @@
+# Parker Physics SPARTA thermo cell — template
+# Substitutions made by generate_tables.py:
+#   __ALT_KM__   → altitude in kilometres
+#   __F107__     → F10.7 radio flux (SFU)
+#   __AP__       → Ap geomagnetic index
+#
+# This is a minimal, self-contained DSMC cell intended as a sanity
+# harness for the build. A production deck will:
+#   * set density/temperature from the altitude using MSIS as an
+#     initial guess (SPARTA refines via collisions)
+#   * use a species file with O, O2, N, N2, He, H and VSS collision
+#     parameters matched to Bird (1994)
+#   * run to steady-state then time-average over ~0.1 s physical time
+#
+# See https://sparta.github.io/doc/Manual.html for the full command set.
+
+seed            12345
+units           si
+atom_style      atomic
+dimension       3
+boundary        p p p
+
+global          nrho 1.0e16 fnum 1.0e10
+
+create_box      0 1e-2  0 1e-2  0 1e-2
+create_grid     10 10 10
+balance_grid    rcb part
+
+species         air.species O N2
+collide         vss air air.vss
+
+# Initial population matching altitude / F10.7 / Ap estimates.
+# __ALT_KM__ __F107__ __AP__ are placeholders the driver replaces.
+create_particles air n 10000 twopass
+
+fix             1 temp 1000.0
+stats           50
+stats_style     step np nattempt ncoll temp press
+
+run             1000
