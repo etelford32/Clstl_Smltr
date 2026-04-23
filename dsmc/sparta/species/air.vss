@@ -1,0 +1,68 @@
+# Parker Physics — VSS pair interaction file for SPARTA
+# ============================================================================
+# Variable Soft Sphere (VSS) collision cross-section parameters for every
+# pairwise interaction among the 7 species in air.species. Self-pair values
+# reproduce the Bird (1994) reference; cross-pair values use the standard
+# combining rules:
+#
+#     d_ij      = 0.5 * (d_i + d_j)
+#     omega_ij  = 0.5 * (omega_i + omega_j)
+#     alpha_ij  = 0.5 * (alpha_i + alpha_j)
+#     Tref_ij   = 273.0 K
+#
+# Combining rules from Bird (1994) §4.3 and SPARTA collide_modify docs.
+# For the species set we use (all alpha = 1.0) VSS collapses to VHS, so
+# the alpha column is informational. When a future revision introduces
+# non-unity alpha for H–O or He–O (Dalgarno & Smith 1962) the mixing rule
+# will need revisiting.
+#
+# Column format expected by `collide vss mix-ID air.vss`:
+#
+#   species1  species2   diameter(m)   omega   Tref(K)   alpha
+#
+# All 28 pairs (7 self + 21 cross) are listed explicitly. SPARTA will
+# error if a pair seen in the mixture is missing from this file.
+# ============================================================================
+
+# ── Self pairs (reference from air.species) ─────────────────────────────────
+# s1  s2     diameter     omega   Tref    alpha
+N2    N2     4.17e-10     0.740   273.0   1.000
+O2    O2     4.07e-10     0.770   273.0   1.000
+NO    NO     4.20e-10     0.790   273.0   1.000
+O     O      3.458e-10    0.800   273.0   1.000
+N     N      3.298e-10    0.750   273.0   1.000
+He    He     2.33e-10     0.660   273.0   1.000
+H     H      2.50e-10     0.800   273.0   1.000
+
+# ── N2 cross-pairs ──────────────────────────────────────────────────────────
+N2    O2     4.120e-10    0.755   273.0   1.000
+N2    NO     4.185e-10    0.765   273.0   1.000
+N2    O      3.814e-10    0.770   273.0   1.000
+N2    N      3.734e-10    0.745   273.0   1.000
+N2    He     3.250e-10    0.700   273.0   1.000
+N2    H      3.335e-10    0.770   273.0   1.000
+
+# ── O2 cross-pairs ──────────────────────────────────────────────────────────
+O2    NO     4.135e-10    0.780   273.0   1.000
+O2    O      3.764e-10    0.785   273.0   1.000
+O2    N      3.684e-10    0.760   273.0   1.000
+O2    He     3.200e-10    0.715   273.0   1.000
+O2    H      3.285e-10    0.785   273.0   1.000
+
+# ── NO cross-pairs ──────────────────────────────────────────────────────────
+NO    O      3.829e-10    0.795   273.0   1.000
+NO    N      3.749e-10    0.770   273.0   1.000
+NO    He     3.265e-10    0.725   273.0   1.000
+NO    H      3.350e-10    0.795   273.0   1.000
+
+# ── O cross-pairs ───────────────────────────────────────────────────────────
+O     N      3.378e-10    0.775   273.0   1.000
+O     He     2.894e-10    0.730   273.0   1.000
+O     H      2.979e-10    0.800   273.0   1.000
+
+# ── N cross-pairs ───────────────────────────────────────────────────────────
+N     He     2.814e-10    0.705   273.0   1.000
+N     H      2.899e-10    0.775   273.0   1.000
+
+# ── He–H pair ───────────────────────────────────────────────────────────────
+He    H      2.415e-10    0.730   273.0   1.000

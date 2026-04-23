@@ -1,0 +1,38 @@
+# Parker Physics — thermosphere/exosphere species file for SPARTA
+# ============================================================================
+# Species set covers the dominant neutrals from 80 km out to ~2000 km:
+#
+#   N2, O2   molecular dominance below ~200 km
+#   O        atomic-O dominance 200–600 km (drives LEO drag)
+#   N        minor neutral, relevant during storms
+#   NO       product of N2/O2 dissociation; included for chemistry continuity
+#   He       dominant 600–1000 km during solar minimum
+#   H        dominant > 1000 km (geocorona)
+#
+# VSS parameters follow Bird (1994) "Molecular Gas Dynamics and the Direct
+# Simulation of Gas Flows", Appendix A, Table A.1, with rotational and
+# vibrational constants from the NIST Chemistry WebBook.
+#
+# Column format expected by SPARTA `species` command:
+#   ID  molwt(amu)  molmass(kg)  diameter(m)  omega  Tref(K)  alpha
+#       rotdof  rotrelax  vibdof  vibrelax  vibtemp(K)
+#
+# omega  viscosity temperature exponent (VSS/VHS)
+# alpha  VSS angular scattering exponent; 1.0 reduces VSS to VHS
+# rotrelax / vibrelax are the Parker rotational / Millikan-White
+# vibrational relaxation numbers (collisions to equilibrate).
+#
+# References:
+#   Bird, G.A. (1994).  Molecular Gas Dynamics and the DSMC of Gas Flows.
+#   NIST Chemistry WebBook, https://webbook.nist.gov/chemistry/
+#   SPARTA species command, https://sparta.github.io/doc/species.html
+# ============================================================================
+
+# ID    molwt    molmass       diameter    omega   Tref    alpha  rotdof  rotrel  vibdof  vibrel   vibtemp
+N2      28.014   4.6518e-26    4.17e-10    0.740   273.0   1.000  2.0     5.0     2.0     9000.0   3371.0
+O2      31.998   5.3133e-26    4.07e-10    0.770   273.0   1.000  2.0     5.0     2.0     9000.0   2256.0
+NO      30.006   4.9826e-26    4.20e-10    0.790   273.0   1.000  2.0     5.0     2.0     9000.0   2719.0
+O       15.999   2.6567e-26    3.458e-10   0.800   273.0   1.000  0.0     0.0     0.0     0.0      0.0
+N       14.007   2.3259e-26    3.298e-10   0.750   273.0   1.000  0.0     0.0     0.0     0.0      0.0
+He       4.003   6.6465e-27    2.33e-10    0.660   273.0   1.000  0.0     0.0     0.0     0.0      0.0
+H        1.008   1.6737e-27    2.50e-10    0.800   273.0   1.000  0.0     0.0     0.0     0.0      0.0
