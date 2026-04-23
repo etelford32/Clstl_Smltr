@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from pipeline.wind_speed_pipeline import append_reading as _wind_append
+from pipeline import db as _db
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 PLASMA_URL = os.environ.get(
@@ -314,6 +315,26 @@ def run_once() -> bool:
                 bz_nT=float(last["bz_gsm"]),
                 timestamp=recent.index[-1].to_pydatetime(),
             )
+
+        # Persist the most recent window to Postgres (upsert; best-effort).
+        if _db.is_enabled() and not recent.empty:
+            obs_rows = []
+            for ts, row in recent.iterrows():
+                bx = float(row["bx_gsm"]); by = float(row["by_gsm"]); bz = float(row["bz_gsm"])
+                obs_rows.append({
+                    "timestamp_utc":  ts.to_pydatetime(),
+                    "speed_kms":      float(-row["vx"]),
+                    "density_cc":     float(row["density"]),
+                    "temperature_k":  float(row["temperature"]),
+                    "bx_gsm_nT":      bx,
+                    "by_gsm_nT":      by,
+                    "bz_gsm_nT":      bz,
+                    "bt_nT":          float(np.sqrt(bx * bx + by * by + bz * bz)),
+                    "source":         "DSCOVR",
+                })
+            n = _db.insert_l1_observations(obs_rows)
+            if n:
+                log.info("Persisted %d L1 observations to Postgres", n)
 
         return True
 

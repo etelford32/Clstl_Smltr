@@ -1,0 +1,149 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "L1 Data Age (min)",
+      "id": 1,
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "pp_l1_data_age_minutes", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          },
+          "unit": "m"
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "type": "stat",
+      "title": "Forecast Age (min)",
+      "id": 2,
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "pp_forecast_age_minutes", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 90 },
+              { "color": "red", "value": 360 }
+            ]
+          },
+          "unit": "m"
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "type": "stat",
+      "title": "API Requests (total)",
+      "id": 3,
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "pp_requests_total", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "API Errors",
+      "id": 4,
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [
+        { "expr": "pp_requests_errors", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "unit": "short"
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "type": "timeseries",
+      "title": "Solar Wind Speed at L1 (km/s)",
+      "id": 5,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "SWMF-Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT timestamp_utc AS time, speed_kms AS speed FROM l1_observations WHERE $__timeFilter(timestamp_utc) ORDER BY timestamp_utc",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "velocitykms" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "IMF Bz at L1 (nT, GSM)",
+      "id": 6,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "SWMF-Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT timestamp_utc AS time, bz_gsm_nT AS bz FROM l1_observations WHERE $__timeFilter(timestamp_utc) ORDER BY timestamp_utc",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none" } }
+    },
+    {
+      "type": "table",
+      "title": "Recent Forecast Runs",
+      "id": 7,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "SWMF-Postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT run_id, run_mode, start_time_utc, forecast_hours, mpi_nproc, status, sim_hours_done, completed_at FROM forecast_runs ORDER BY start_time_utc DESC LIMIT 20",
+          "format": "table"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["parker-physics", "swmf", "space-weather"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "utc",
+  "title": "SWMF Pipeline Health",
+  "uid": "swmf-pipeline-health",
+  "version": 1,
+  "weekStart": ""
+}

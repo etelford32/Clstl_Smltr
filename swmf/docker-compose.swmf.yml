@@ -50,6 +50,11 @@ x-common-env: &common-env
   # Database
   DATABASE_URL:       "postgresql://swmf:swmfpass@postgres:5432/swmf"
   REDIS_URL:          "redis://redis:6379/0"
+  # API surface
+  CACHE_TTL_SEC:      "30"
+  # Comma-separated list of accepted keys; empty = open (demo mode)
+  API_KEYS:           "${SWMF_API_KEYS:-}"
+  ALLOW_ORIGINS:      "${SWMF_ALLOW_ORIGINS:-*}"
 
 services:
 
@@ -111,6 +116,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   # ── PostgreSQL — run history + validation metrics ─────────────────────────
   postgres:

@@ -393,6 +393,27 @@ def _save_results(metrics: dict) -> None:
     out.write_text(json.dumps(metrics, indent=2, default=str))
     log.info("Validation results → %s", out)
 
+    # Persist validation metrics + (stub) forecast_run row to Postgres.
+    try:
+        sys.path.insert(0, str(Path(__file__).parents[1]))
+        from pipeline import db as _db
+
+        run_id = metrics.get("run_id") or f"ar3842_{metrics.get('mode', 'run')}"
+        metrics.setdefault("run_id", run_id)
+        _db.insert_forecast_run(
+            run_id,
+            run_mode="hindcast",
+            start_time_utc=_parse_utc(SIM_START_UTC),
+            forecast_hours=SIM_HOURS,
+            mpi_nproc=None,
+            run_dir=metrics.get("run_dir"),
+            status="complete",
+        )
+        _db.complete_forecast_run(run_id, status="complete")
+        _db.insert_validation_metrics(metrics)
+    except Exception as exc:
+        log.debug("DB persistence skipped for AR3842 metrics: %s", exc)
+
 
 def _print_summary(metrics: dict) -> None:
     log.info("\n" + "=" * 70)

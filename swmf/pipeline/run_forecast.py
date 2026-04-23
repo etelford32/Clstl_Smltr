@@ -36,6 +36,8 @@ from pathlib import Path
 
 import numpy as np
 
+from pipeline import db as _db
+
 log = logging.getLogger("run_forecast")
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -316,6 +318,16 @@ def run_forecast_cycle() -> bool:
     # 3. Launch BATS-R-US
     log.info("── Step 3: Launch BATS-R-US ────────────────────────────")
     run_id = run_dir.name
+    run_start = datetime.now(timezone.utc)
+    _db.insert_forecast_run(
+        run_id,
+        run_mode="forecast",
+        start_time_utc=run_start,
+        forecast_hours=FORECAST_HORIZON,
+        mpi_nproc=MPI_NPROC,
+        run_dir=str(run_dir),
+        status="running",
+    )
     proc   = launch_batsrus(run_dir, nproc=MPI_NPROC)
 
     # 4. Monitor
@@ -326,17 +338,24 @@ def run_forecast_cycle() -> bool:
 
     if not ok:
         log.error("BATS-R-US run failed — check %s", run_dir)
+        _db.complete_forecast_run(run_id, status="failed")
         return False
 
     # 5. Parse output
     log.info("── Step 5: Parse results ────────────────────────────────")
     result = parse_log_output(run_dir)
     result["run_id"]        = run_id
-    result["forecast_start"] = datetime.now(timezone.utc).isoformat()
+    result["forecast_start"] = run_start.isoformat()
     result["forecast_hours"] = FORECAST_HORIZON
     result["mpi_nproc"]      = MPI_NPROC
 
     out = write_result_json(result, run_id)
+    _db.insert_earth_conditions(run_id, result)
+    _db.complete_forecast_run(
+        run_id,
+        status="complete",
+        sim_hours_done=float(result.get("sim_time_h", 0.0)) or None,
+    )
     log.info("── Forecast cycle complete → %s ─────────────────────────", out)
     return True
 
@@ -382,6 +401,19 @@ def _write_mock_result() -> None:
         "kp_proxy":   max(0.0, min(9.0, 2.0 - 0.5 * bz)),
     }
     write_result_json(result, "latest_mock")
+    # Record the mock run so Grafana/api_requests history stays coherent.
+    _db.insert_forecast_run(
+        "latest_mock",
+        run_mode="mock",
+        start_time_utc=now,
+        forecast_hours=FORECAST_HORIZON,
+        mpi_nproc=0,
+        run_dir=None,
+        status="complete",
+    )
+    _db.insert_earth_conditions("latest_mock", result)
+    _db.complete_forecast_run("latest_mock", status="complete",
+                              sim_hours_done=from_l1_h)
     log.info("Mock ballistic result written (BATS-R-US not yet compiled)")
 
 
@@ -420,6 +452,8 @@ def run_daemon() -> None:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global MPI_NPROC
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -433,7 +467,6 @@ def main() -> None:
     parser.add_argument("--nproc", type=int, default=MPI_NPROC)
     args = parser.parse_args()
 
-    global MPI_NPROC
     MPI_NPROC = args.nproc
 
     if args.mock:
