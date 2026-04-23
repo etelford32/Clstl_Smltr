@@ -12,6 +12,8 @@ Endpoints:
   GET /v1/forecast/latest      — most recent BATS-R-US forecast at Earth
   GET /v1/forecast/{run_id}    — specific forecast run result
   GET /v1/benchmark/ar3842     — AR3842 validation metrics
+  GET /v1/atmosphere/density   — Phase 1 DSMC stub (proxies dsmc service
+                                 when reachable; otherwise empirical baseline)
   GET /v1/metrics              — Prometheus metrics (scrape target)
 
 Rate limiting: 60 req/min per IP (configurable via API key tiers).
@@ -23,17 +25,24 @@ Usage:
 
 import json
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+import httpx
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from pipeline import db as _db
+
+# Phase 1: DSMC service is a sibling container. When it's reachable we
+# proxy atmosphere/drag queries there; otherwise we fall back to a
+# locally-computed empirical baseline so the UI contract never breaks.
+DSMC_SERVICE_URL = os.environ.get("DSMC_SERVICE_URL", "http://dsmc:8001").rstrip("/")
 
 log = logging.getLogger("serve_results")
 
@@ -431,6 +440,63 @@ async def solar_wind_history(hours: float = 24.0):
     }
 
 
+@app.get("/v1/atmosphere/density", tags=["atmosphere"],
+         dependencies=[Depends(require_api_key)])
+async def atmosphere_density_stub(
+    alt_km: float = Query(..., ge=80, le=2000),
+    f107:   Optional[float] = Query(None),
+    ap:     Optional[float] = Query(None),
+    lat:    float = Query(0.0, ge=-90, le=90),
+    lon:    float = Query(0.0, ge=-180, le=180),
+):
+    """
+    Phase 1 stub: if the DSMC sibling container is up, proxy to it so
+    the UI always sees the richest available model (SPARTA lookup when
+    available; NRLMSISE-00 otherwise). If DSMC is down, return a
+    transparent exponential baseline so the contract never breaks —
+    callers can check the `model` field to tell them apart.
+    """
+    params = {"alt_km": alt_km, "lat": lat, "lon": lon}
+    if f107 is not None:
+        params["f107"] = f107
+    if ap is not None:
+        params["ap"] = ap
+
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            r = await client.get(f"{DSMC_SERVICE_URL}/v1/atmosphere/density",
+                                 params=params)
+            if r.status_code == 200:
+                return r.json()
+    except Exception as exc:
+        log.debug("DSMC proxy unavailable (%s); using baseline", exc)
+
+    # Baseline — thermosphere exponential anchored at 150 km.
+    # Returns order-of-magnitude correct values without needing NRLMSISE-00.
+    f107_used = float(f107) if f107 is not None else 150.0
+    ap_used   = float(ap)   if ap   is not None else 15.0
+    T   = max(500.0, 900.0 + 2.0 * (f107_used - 150.0) + 3.0 * ap_used)
+    H   = 0.053 * T
+    if float(alt_km) <= 150.0:
+        rho = 2.0e-9 * math.exp((150.0 - float(alt_km)) / 8.0)
+    else:
+        rho = 2.0e-9 * math.exp(-(float(alt_km) - 150.0) / H)
+    return {
+        "altitude_km":   float(alt_km),
+        "density_kg_m3": rho,
+        "temperature_K": T,
+        "scale_height_km": H,
+        "f107_sfu":      f107_used,
+        "ap":            ap_used,
+        "model":         "swmf-exp-stub",
+        "model_version": "0.1",
+        "note": (
+            "DSMC service not reachable — returning exponential baseline. "
+            "Spin up the dsmc sibling container for NRLMSISE-00 or SPARTA."
+        ),
+    }
+
+
 @app.get("/v1/metrics", tags=["meta"], response_class=Response)
 async def prometheus_metrics():
     """Prometheus-compatible metrics endpoint."""
@@ -483,6 +549,7 @@ async def root():
             "/v1/forecast/latest",
             "/v1/benchmark/ar3842",
             "/v1/solar-wind/history",
+            "/v1/atmosphere/density",
             "/v1/metrics",
         ],
     }

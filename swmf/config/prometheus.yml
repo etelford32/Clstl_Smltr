@@ -18,6 +18,14 @@ scrape_configs:
           service: swmf-pipeline
           component: api
 
+  - job_name: dsmc-api
+    metrics_path: /v1/metrics
+    static_configs:
+      - targets: ["dsmc:8001"]
+        labels:
+          service: dsmc-pipeline
+          component: api
+
   - job_name: postgres
     static_configs:
       - targets: ["postgres:5432"]

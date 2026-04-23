@@ -55,6 +55,8 @@ x-common-env: &common-env
   # Comma-separated list of accepted keys; empty = open (demo mode)
   API_KEYS:           "${SWMF_API_KEYS:-}"
   ALLOW_ORIGINS:      "${SWMF_ALLOW_ORIGINS:-*}"
+  # Phase 1 — sibling DSMC service. Proxied by /v1/atmosphere/density.
+  DSMC_SERVICE_URL:   "http://dsmc:8001"
 
 services:
 
@@ -102,6 +104,50 @@ services:
       retries: 5
       start_period: 15s
 
+  # ── DSMC thermosphere + drag prediction (Phase 1) ────────────────────────
+  dsmc:
+    build:
+      context: ../dsmc
+      dockerfile: Dockerfile
+      args:
+        # Flip to 1 to compile SPARTA in the builder stage (slow, one-time).
+        BUILD_SPARTA: "${BUILD_SPARTA:-0}"
+    image: parkerphysics/dsmc:latest
+    container_name: dsmc-pipeline
+    environment:
+      TZ: UTC
+      DATABASE_URL:  "postgresql://swmf:swmfpass@postgres:5432/swmf"
+      REDIS_URL:     "redis://redis:6379/1"
+      CACHE_TTL_SEC: "60"
+      API_KEYS:      "${DSMC_API_KEYS:-}"
+      ALLOW_ORIGINS: "${DSMC_ALLOW_ORIGINS:-*}"
+      SPARTA_TABLES_DIR: "/app/sparta/tables"
+      # Belay tuning
+      F107_CADENCE_S: "3600"
+      KP_CADENCE_S:   "600"
+    volumes:
+      - dsmc-tables:/app/sparta/tables
+      - dsmc-logs:/data/dsmc/logs
+      - ../dsmc/pipeline:/app/pipeline:ro
+      - ../dsmc/sparta:/app/sparta:ro
+      - ../dsmc/benchmark:/app/benchmark:ro
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - swmf-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
   # ── Redis — job queue + result cache ─────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -129,6 +175,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./config/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Phase 1: apply DSMC schema extensions on fresh volumes.
+      - ../dsmc/config/schema.sql:/docker-entrypoint-initdb.d/02-dsmc-schema.sql:ro
     networks:
       - swmf-net
     healthcheck:
@@ -183,6 +231,9 @@ volumes:
   prometheus-data:
   grafana-data:
   swmf-logs:
+  # Phase 1 DSMC volumes
+  dsmc-tables:
+  dsmc-logs:
 
 networks:
   swmf-net:

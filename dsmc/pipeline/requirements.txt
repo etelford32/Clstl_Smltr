@@ -1,0 +1,19 @@
+# Parker Physics DSMC thermosphere pipeline
+# Online fastpath: NRLMSISE-00 empirical model
+msise00>=0.10.0
+# SGP4 propagator (Python) — pairs with the WASM/Rust SGP4 in the frontend
+sgp4>=2.23
+# Core numerics
+numpy>=1.26.0
+pandas>=2.2.0
+scipy>=1.13.0
+# HTTP + API
+httpx>=0.27.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+# Persistence
+psycopg2-binary>=2.9.9
+redis>=5.0.0
+# Monitoring
+prometheus-client>=0.20.0
