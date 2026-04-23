@@ -37,8 +37,13 @@ import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/respo
 
 export const config = { runtime: 'edge' };
 
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+// Accept both the server-only naming (SUPABASE_URL / SUPABASE_SERVICE_KEY)
+// and Supabase/Vercel's current convention (NEXT_PUBLIC_SUPABASE_URL,
+// SUPABASE_SECRET_KEY — "secret key" replaced "service_role key" in
+// Supabase's 2024 rename). This removes a whole class of "I set the var
+// but it still 500s" bugs on fresh deploys.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
 const CACHE_TTL = 3600;   // 1 hour — matches pg_cron cadence
 const CACHE_SWR = 600;    // serve stale up to 10 min while refreshing
@@ -65,8 +70,8 @@ export default async function handler() {
     // is it 500?" detective work. Cache this briefly so a misconfigured
     // environment doesn't get hammered on every pageview.
     const missing = [];
-    if (!SUPABASE_URL) missing.push('SUPABASE_URL');
-    if (!SUPABASE_KEY) missing.push('SUPABASE_SERVICE_KEY');
+    if (!SUPABASE_URL) missing.push('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)');
+    if (!SUPABASE_KEY) missing.push('SUPABASE_SERVICE_KEY (or SUPABASE_SECRET_KEY)');
     if (missing.length) {
         return Response.json({
             error:   'supabase_not_configured',

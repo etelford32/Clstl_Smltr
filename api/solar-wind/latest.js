@@ -39,8 +39,12 @@ import { jsonOk, jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/respo
 
 export const config = { runtime: 'edge' };
 
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+// Accept both the server-only naming (SUPABASE_URL / SUPABASE_SERVICE_KEY)
+// and Supabase/Vercel's current convention (NEXT_PUBLIC_SUPABASE_URL,
+// SUPABASE_SECRET_KEY — "secret key" replaced "service_role key" in
+// Supabase's 2024 rename). Either works.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
 // Keep the edge TTL just under half the pg_cron cadence (60 s) so the
 // CDN copy refreshes mid-cycle — a POP never serves a reading older
@@ -141,8 +145,8 @@ async function readHeartbeat() {
 
 export default async function handler(request) {
     const missing = [];
-    if (!SUPABASE_URL) missing.push('SUPABASE_URL');
-    if (!SUPABASE_KEY) missing.push('SUPABASE_SERVICE_KEY');
+    if (!SUPABASE_URL) missing.push('SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL)');
+    if (!SUPABASE_KEY) missing.push('SUPABASE_SERVICE_KEY (or SUPABASE_SECRET_KEY)');
     if (missing.length) {
         return Response.json({
             error:   'supabase_not_configured',

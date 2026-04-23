@@ -41,8 +41,9 @@ import { jsonError, fetchWithTimeout, CORS_HEADERS } from '../_lib/responses.js'
 
 export const config = { runtime: 'edge' };
 
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+// Dual-name env vars — see api/weather/grid.js for rationale.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
 // Finite-number coercion. Returns null if value is missing / NaN / Inf.
 function num(v) {
