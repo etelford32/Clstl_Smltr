@@ -17,8 +17,9 @@ export const config = { runtime: 'edge' };
 
 const STRIPE_KEY   = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_API   = 'https://api.stripe.com/v1';
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+// Dual-name env vars — see api/weather/grid.js for rationale.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 const PORTAL_CONFIG = process.env.STRIPE_PORTAL_CONFIG_ID || 'bpc_1TKem2CFCdsF8GYJNqf8hKGN';
 

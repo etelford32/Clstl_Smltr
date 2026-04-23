@@ -22,13 +22,16 @@ export const config = { runtime: 'edge' };
 
 const STRIPE_KEY     = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_API     = 'https://api.stripe.com/v1';
-const SUPABASE_URL   = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY || '';
+// Dual-name env vars — see api/weather/grid.js for rationale.
+const SUPABASE_URL   = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY   = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const APP_URL        = process.env.APP_URL || 'https://parkerphysics.com';
 
+// Stripe price IDs: original naming was STRIPE_{TIER}_PRICE_ID; Vercel
+// dashboards often prefix with STRIPE_PRICE_{TIER}. Accept either.
 const PRICE_MAP = {
-    basic:    process.env.STRIPE_BASIC_PRICE_ID    || '',
-    advanced: process.env.STRIPE_ADVANCED_PRICE_ID || '',
+    basic:    process.env.STRIPE_BASIC_PRICE_ID    || process.env.STRIPE_PRICE_BASIC    || '',
+    advanced: process.env.STRIPE_ADVANCED_PRICE_ID || process.env.STRIPE_PRICE_ADVANCED || '',
 };
 
 function json(body, status = 200) {

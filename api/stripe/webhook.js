@@ -24,13 +24,19 @@ export const config = { runtime: 'edge' };
 const STRIPE_KEY        = process.env.STRIPE_SECRET_KEY || '';
 const STRIPE_API        = 'https://api.stripe.com/v1';
 const WEBHOOK_SECRET    = process.env.STRIPE_WEBHOOK_SECRET || '';
-const SUPABASE_URL      = process.env.SUPABASE_URL || '';
-const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || '';
+// Dual-name env vars — see api/weather/grid.js for rationale.
+const SUPABASE_URL      = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 
-// Map Stripe price IDs to plan names (set in env)
+// Map Stripe price IDs to plan names. Accept both the original naming
+// (STRIPE_{TIER}_PRICE_ID) and the Vercel-dashboard convention
+// (STRIPE_PRICE_{TIER}) so the webhook upgrades work regardless of how
+// the env vars were originally created.
 const PRICE_TO_PLAN = {};
-if (process.env.STRIPE_BASIC_PRICE_ID)    PRICE_TO_PLAN[process.env.STRIPE_BASIC_PRICE_ID]    = 'basic';
-if (process.env.STRIPE_ADVANCED_PRICE_ID) PRICE_TO_PLAN[process.env.STRIPE_ADVANCED_PRICE_ID] = 'advanced';
+const _basicPrice    = process.env.STRIPE_BASIC_PRICE_ID    || process.env.STRIPE_PRICE_BASIC;
+const _advancedPrice = process.env.STRIPE_ADVANCED_PRICE_ID || process.env.STRIPE_PRICE_ADVANCED;
+if (_basicPrice)    PRICE_TO_PLAN[_basicPrice]    = 'basic';
+if (_advancedPrice) PRICE_TO_PLAN[_advancedPrice] = 'advanced';
 
 /** Verify Stripe webhook signature (HMAC-SHA256). */
 async function verifySignature(rawBody, sigHeader) {

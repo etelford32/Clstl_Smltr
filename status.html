@@ -46,6 +46,22 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 .deps{margin-top:2px;font-size:.72rem;color:#444;padding-left:20px}
 .deps .dep-miss{color:#ff5555}
 
+/* Runtime-health cards (pipelines + proxies). Rendered with table styling
+   so they match the pattern on admin.html — one view of truth across
+   both surfaces, plus these are the cards that actually tell you whether
+   the user-facing features are working (not just "the HTML file exists"). */
+.rt-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:16px;margin-bottom:14px}
+.rt-card h3{font-size:.78rem;font-weight:700;color:#cde;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.rt-card .rt-refresh{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#aab;font-size:.68rem;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit}
+.rt-card .rt-refresh:hover{background:rgba(255,255,255,.12);color:#fff}
+.rt-card table{width:100%;border-collapse:collapse;font-size:.78rem}
+.rt-card th{text-align:left;color:#556;font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.rt-card td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.03);vertical-align:top}
+.rt-card td:first-child{color:#cde}
+.rt-empty{color:#666;font-size:.74rem;padding:6px 2px}
+.rt-error{color:#ff8888;font-size:.74rem;padding:6px 2px}
+.rt-caveat{color:#777;font-size:.68rem;font-style:italic;margin:0 0 10px;padding-left:2px}
+
 .actions{margin-bottom:18px;display:flex;gap:8px}
 .btn{padding:7px 16px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#ccc;font-family:inherit;font-size:.8rem;cursor:pointer;transition:background .15s}
 .btn:hover{background:rgba(255,255,255,.12);color:#fff}
@@ -77,16 +93,40 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 <p class="sub" id="scan-time">Scanning...</p>
 
 <div class="kpi-strip">
-  <div class="kpi"><div class="kpi-val green" id="k-live">—</div><div class="kpi-label">Pages Live</div></div>
+  <div class="kpi"><div class="kpi-val green" id="k-live">—</div><div class="kpi-label">Pages 2xx</div></div>
   <div class="kpi"><div class="kpi-val red" id="k-404">—</div><div class="kpi-label">404 / Down</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-api">—</div><div class="kpi-label">APIs OK</div></div>
+  <div class="kpi"><div class="kpi-val gold" id="k-pipes">—</div><div class="kpi-label">Pipelines Healthy</div></div>
   <div class="kpi"><div class="kpi-val blue" id="k-js">—</div><div class="kpi-label">JS Modules</div></div>
   <div class="kpi"><div class="kpi-val gold" id="k-deps">—</div><div class="kpi-label">Broken Deps</div></div>
 </div>
 
+<!-- ── RUNTIME HEALTH (superadmin) ────────────────────────────────────────────
+     These two cards are the real health signal. The KPI/section scan below
+     only verifies that static files serve 2xx — a page can return 200 while
+     its sim is crashing. These cards probe the pipelines + proxies the sims
+     actually depend on, so "all green" here matches "the product works." -->
+<div class="rt-card">
+  <h3>Pipeline Health · Supabase heartbeat
+    <button class="rt-refresh" id="rt-refresh-heartbeat">Refresh</button>
+  </h3>
+  <p class="rt-caveat">One row per pg_cron-fed pipeline. Reads pipeline_heartbeat directly — shows last success, failure streak, and the actual upstream error reason.</p>
+  <div id="rt-heartbeat"><div class="rt-empty">Loading…</div></div>
+</div>
+
+<div class="rt-card">
+  <h3>Proxy Freshness · CDN endpoints
+    <button class="rt-refresh" id="rt-refresh-proxies">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Pings the public /api/* endpoints the sims consume. Surfaces structured error codes (cache_empty, supabase_not_configured, …) inline so production breakage is diagnosable without DevTools.</p>
+  <div id="rt-proxies"><div class="rt-empty">Loading…</div></div>
+</div>
+
 <div class="actions">
-  <button class="btn" id="btn-rescan">Re-scan All</button>
+  <button class="btn" id="btn-rescan">Re-scan Static Files</button>
   <button class="btn" id="btn-filter" data-mode="all">Show: All</button>
 </div>
+<p class="rt-caveat" style="margin-bottom:12px">The sections below only check that static bytes serve 2xx — a page can be "live" here while its runtime is broken. Use the cards above for feature health.</p>
 
 <div id="results"></div>
 <div class="timestamp" id="footer-ts"></div>
@@ -95,6 +135,9 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 <script type="module">
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
+// Pipeline Health card queries pipeline_heartbeat directly; we go through
+// the shared supabase-config so RLS + anon-read policy applies normally.
+import { getSupabase, isConfigured } from './js/supabase-config.js';
 await auth.ready();
 
 if (!auth.isSignedIn()) {
@@ -190,19 +233,225 @@ const JS_MODULES = [
 
 // ── Scanner ─────────────────────────────────────────────────────────────────
 async function check(url) {
+    const t0 = performance.now();
     try {
         const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-        return { status: r.status, ok: r.ok, ms: 0 };
+        return { status: r.status, ok: r.ok, ms: Math.round(performance.now() - t0) };
     } catch (e) {
         // HEAD might be blocked; try GET with range
         try {
             const r = await fetch(url, { cache: 'no-store', headers: { Range: 'bytes=0-0' } });
-            return { status: r.status, ok: r.status < 400, ms: 0 };
+            return { status: r.status, ok: r.status < 400, ms: Math.round(performance.now() - t0) };
         } catch (_) {
-            return { status: 0, ok: false, ms: 0, err: e.message };
+            return { status: 0, ok: false, ms: Math.round(performance.now() - t0), err: e.message };
         }
     }
 }
+
+// ── Runtime probes (pipelines + proxies) ─────────────────────────────────────
+// Intentionally inline rather than importing admin-analytics.js so status.html
+// keeps a narrow dependency surface. fetchPipelineHeartbeat() on admin.html
+// runs through the shared supabase-config client; here we do the same thing
+// directly so a bug in admin-analytics can't take the status page down too.
+
+// Cadence-aware staleness thresholds — matches admin.html Pipeline Health
+// card so both UIs agree on what "healthy" means.
+const PIPELINE_SPECS = [
+    { key: 'solar_wind',   label: 'Solar Wind',   warnMin:  5, critMin:  60 },
+    { key: 'weather_grid', label: 'Weather Grid', warnMin: 45, critMin: 180 },
+];
+
+function _rtFmtRel(iso) {
+    if (!iso) return 'never';
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+    if (m < 1)     return 'just now';
+    if (m < 60)    return `${m}m ago`;
+    if (m < 1440)  return `${Math.round(m / 60)}h ago`;
+    return `${Math.round(m / 1440)}d ago`;
+}
+
+function _rtHealth(row, spec) {
+    if (!row || !row.last_success_at) return { color:'#ff5555', label:'never succeeded' };
+    const ageMin = Math.round((Date.now() - new Date(row.last_success_at).getTime()) / 60_000);
+    const streak = Number(row.consecutive_fail || 0);
+    if (streak >= 3 || ageMin > spec.critMin) return { color:'#ff5555', label:'critical' };
+    if (streak >= 1 || ageMin > spec.warnMin) return { color:'#ffd700', label:'stale' };
+    return { color:'#4eff91', label:'healthy' };
+}
+
+function _rtEsc(s) {
+    return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadPipelineHeartbeatCard() {
+    const el = document.getElementById('rt-heartbeat');
+    el.innerHTML = `<div class="rt-empty">Querying pipeline_heartbeat…</div>`;
+
+    if (!isConfigured()) {
+        el.innerHTML = `<div class="rt-error">Supabase not configured on this environment — pipeline_heartbeat unreachable.</div>`;
+        document.getElementById('k-pipes').textContent = '—';
+        return { healthy: 0, total: 0 };
+    }
+
+    let rows = [];
+    try {
+        const client = await getSupabase();
+        const { data, error } = await client
+            .from('pipeline_heartbeat')
+            .select('pipeline_name, last_success_at, last_failure_at, last_failure_reason, last_source, consecutive_fail')
+            .order('pipeline_name', { ascending: true });
+        if (error) throw error;
+        rows = data || [];
+    } catch (err) {
+        el.innerHTML = `<div class="rt-error">pipeline_heartbeat query failed: ${_rtEsc(err.message || err)}. Apply supabase-pipeline-heartbeat-migration.sql.</div>`;
+        document.getElementById('k-pipes').textContent = '—';
+        return { healthy: 0, total: 0 };
+    }
+
+    const byKey = Object.fromEntries(rows.map(r => [r.pipeline_name, r]));
+    const known = new Set(PIPELINE_SPECS.map(s => s.key));
+    const extras = rows.filter(r => !known.has(r.pipeline_name))
+                       .map(r => ({ key: r.pipeline_name, label: r.pipeline_name, warnMin: 15, critMin: 60 }));
+    const specs = [...PIPELINE_SPECS, ...extras];
+
+    let html = '<table><thead><tr>'
+             + '<th>Pipeline</th><th>Last success</th><th>Source</th>'
+             + '<th>Streak</th><th>Last failure</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    let healthy = 0;
+    for (const spec of specs) {
+        const row = byKey[spec.key];
+        const h = _rtHealth(row, spec);
+        if (h.label === 'healthy') healthy++;
+        const streak = Number(row?.consecutive_fail || 0);
+        const streakColor = streak >= 3 ? '#ff5555' : streak >= 1 ? '#ffd700' : '#667';
+        const tooltip = row?.last_failure_reason ? ` title="${_rtEsc(row.last_failure_reason)}"` : '';
+        const failCell = row?.last_failure_at
+            ? `<span${tooltip}>${_rtFmtRel(row.last_failure_at)}</span>`
+            : '<span style="color:#445">—</span>';
+
+        html += `<tr>`
+             +  `<td><strong>${_rtEsc(spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(spec.key)}</div></td>`
+             +  `<td style="color:#aab">${_rtFmtRel(row?.last_success_at)}</td>`
+             +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.7rem">${_rtEsc(row?.last_source ?? '—')}</td>`
+             +  `<td style="color:${streakColor};font-weight:${streak>0?700:400}">${streak}</td>`
+             +  `<td style="color:#aab">${failCell}</td>`
+             +  `<td style="color:${h.color};font-weight:600">● ${h.label}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+    document.getElementById('k-pipes').textContent = `${healthy}/${specs.length}`;
+    document.getElementById('k-pipes').className = 'kpi-val ' + (healthy === specs.length ? 'green' : 'red');
+    return { healthy, total: specs.length };
+}
+
+// Proxy probes — mirrors the admin.html card but trimmed to the endpoints
+// most load-bearing for user-facing features. Extend as new proxy endpoints
+// ship; keep this list tight so the card stays scannable.
+const PROXY_PROBES = [
+    { key: 'weather_grid',     label: 'Weather Grid',     endpoint: '/api/weather/grid',       warnAgeS:  90*60, critAgeS: 180*60 },
+    { key: 'solar_wind',       label: 'Solar Wind',       endpoint: '/api/solar-wind/latest',  warnAgeS:   5*60, critAgeS:  20*60 },
+    { key: 'noaa_kp',          label: 'NOAA Kp 1-min',    endpoint: '/api/noaa/kp-1m',         warnAgeS:  30*60, critAgeS: 120*60 },
+    { key: 'noaa_xray',        label: 'NOAA X-ray',       endpoint: '/api/noaa/xray',          warnAgeS:  30*60, critAgeS: 120*60 },
+    { key: 'noaa_alerts',      label: 'NOAA Alerts',      endpoint: '/api/noaa/alerts',        warnAgeS:  60*60, critAgeS: 360*60 },
+];
+
+async function _probeProxy(spec) {
+    const t0 = performance.now();
+    let status = null, body = null, netErr = null;
+    try {
+        const res = await fetch(spec.endpoint, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+        status = res.status;
+        try { body = await res.json(); } catch { /* non-JSON */ }
+    } catch (e) {
+        netErr = e?.message || String(e);
+    }
+    const latencyMs = Math.round(performance.now() - t0);
+
+    let ageSec = null;
+    if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
+    else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (Array.isArray(body)) {
+        // NOAA JSON feeds are arrays of samples; recency = most recent timestamp.
+        const last = body[body.length - 1];
+        const t = Date.parse(last?.time_tag ?? last?.timestamp ?? last?.observed ?? '');
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    }
+    return { spec, status, body, netErr, latencyMs, ageSec };
+}
+
+function _rtProxyHealth(p) {
+    if (p.netErr)            return { color:'#ff5555', label:`network error` };
+    if (p.status == null)    return { color:'#ff5555', label:'no response' };
+    if (p.status >= 500)     return { color:'#ff5555', label:`HTTP ${p.status} · ${p.body?.error ?? 'error'}` };
+    if (p.status >= 400)     return { color:'#ff5555', label:`HTTP ${p.status}` };
+    if (p.body?.error)       return { color:'#ff5555', label: String(p.body.error) };
+    if (p.ageSec == null)    return { color:'#ffd700', label:'no freshness info' };
+    if (p.ageSec > p.spec.critAgeS) return { color:'#ff5555', label:'critical (stale)' };
+    if (p.ageSec > p.spec.warnAgeS) return { color:'#ffd700', label:'warning (stale)' };
+    if (p.body?.freshness === 'expired') return { color:'#ff5555', label:`freshness=${p.body.freshness}` };
+    if (p.body?.freshness === 'stale')   return { color:'#ffd700', label:`freshness=${p.body.freshness}` };
+    return { color:'#4eff91', label:'healthy' };
+}
+
+function _rtFmtAgeSec(s) {
+    if (s == null) return '—';
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+}
+
+async function loadProxyFreshnessCard() {
+    const el = document.getElementById('rt-proxies');
+    el.innerHTML = `<div class="rt-empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
+
+    const probes = await Promise.all(PROXY_PROBES.map(_probeProxy));
+
+    let html = '<table><thead><tr>'
+             + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+             + '<th>Source</th><th>Latency</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    let healthy = 0;
+    for (const p of probes) {
+        const h = _rtProxyHealth(p);
+        if (h.label === 'healthy') healthy++;
+        const body = p.body || {};
+        const missingEnv = Array.isArray(body.missing) && body.missing.length
+            ? ` <span style="color:#ff5555;font-size:.62rem">missing env: ${_rtEsc(body.missing.join(', '))}</span>`
+            : '';
+        const source = body.source || body.heartbeat?.last_source || '—';
+        const statusCell = p.status != null
+            ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
+            : `<span style="color:#ff5555;font-weight:700">—</span>`;
+
+        html += `<tr>`
+             +  `<td><strong>${_rtEsc(p.spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
+             +  `<td>${statusCell}</td>`
+             +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
+             +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
+             +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
+             +  `<td style="color:${h.color};font-weight:600">● ${_rtEsc(h.label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+    document.getElementById('k-api').textContent = `${healthy}/${probes.length}`;
+    document.getElementById('k-api').className = 'kpi-val ' + (healthy === probes.length ? 'green' : 'red');
+    return { healthy, total: probes.length };
+}
+
+document.getElementById('rt-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeatCard);
+document.getElementById('rt-refresh-proxies').addEventListener('click', loadProxyFreshnessCard);
+loadPipelineHeartbeatCard();
+loadProxyFreshnessCard();
 
 let filterMode = 'all';
 let lastResults = null;

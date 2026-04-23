@@ -1003,6 +1003,18 @@ footer a:hover{color:var(--text)}
   <a href="eula.html">Terms</a>
 </footer>
 
+<!-- Import map — resolves the bare "three" specifier used transitively by
+     js/trip-planner.js → js/geo/coords.js (and anything else that reaches
+     for THREE.Vector3 scratch math). Without this, dashboard.html dies on
+     load with "The specifier 'three' was a bare specifier, but was not
+     remapped to anything." Same CDN + version as every other sim page. -->
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
 <script type="module">
 import { auth } from './js/auth.js';
 import { geocodeQuery, saveUserLocation, loadUserLocation,
