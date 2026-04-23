@@ -180,6 +180,26 @@ input[type=range]::-moz-range-thumb {
     .ua-plot-panel canvas { height:280px; }
 }
 
+/* ─── Layer legend ─────────────────────────────────────── */
+#ua-layer-legend { display:flex; flex-direction:column; gap:5px; }
+.ua-layer-row {
+    display:flex; align-items:center; gap:8px;
+    font-size:.72rem; padding:3px 0;
+    border-bottom:1px dotted rgba(255,255,255,.05);
+    cursor:help;
+}
+.ua-layer-row:last-child { border-bottom:none; }
+.ua-layer-dot {
+    width:10px; height:10px; border-radius:50%;
+    flex-shrink:0;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-layer-name { color:#cde; font-weight:600; }
+.ua-layer-range {
+    margin-left:auto; font-family:monospace;
+    color:#667; font-size:.66rem;
+}
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -255,9 +275,14 @@ input[type=range]::-moz-range-thumb {
             <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
         </div>
 
-        <div class="ua-panel">
+        <div class="ua-panel" style="margin-bottom:14px;">
             <h2>At current altitude</h2>
             <div id="ua-stats"></div>
+        </div>
+
+        <div class="ua-panel">
+            <h2>Atmospheric layers</h2>
+            <div id="ua-layer-legend"></div>
         </div>
     </aside>
 
@@ -306,7 +331,12 @@ input[type=range]::-moz-range-thumb {
             compCanvas:     document.getElementById('ua-comp-plot'),
             stats:          document.getElementById('ua-stats'),
             summary:        document.getElementById('ua-summary'),
+            layerLegend:    document.getElementById('ua-layer-legend'),
         },
+        // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
+        // host window declares PARKER_DSMC_API; silently falls back to
+        // the client-side surrogate otherwise.
+        useBackend: true,
     });
 
     // Expose for devtools poking.

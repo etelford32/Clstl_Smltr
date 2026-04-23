@@ -15,7 +15,16 @@
  * are DPI-aware and resize with the panel.
  */
 
-import { SPECIES, stormPresets, exosphereTempK, dominantSpecies } from './upper-atmosphere-engine.js';
+import {
+    SPECIES,
+    stormPresets,
+    exosphereTempK,
+    dominantSpecies,
+    layerAt,
+    ATMOSPHERIC_LAYERS,
+    SATELLITE_REFERENCES,
+    fetchProfile,
+} from './upper-atmosphere-engine.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -46,15 +55,19 @@ export class UpperAtmosphereUI {
      *                                   presetRow, densityCanvas,
      *                                   compCanvas, stats, summary }
      */
-    constructor({ engine, globe, elements }) {
+    constructor({ engine, globe, elements, useBackend = true }) {
         this.engine = engine;
         this.globe = globe;
         this.el = elements;
+        this.useBackend = useBackend;
 
         this.state = { f107: 150, ap: 15, altitude: 400 };
+        this._refreshInflight = null;
+        this._refreshTimer = null;
 
         this._bindInputs();
         this._renderPresets();
+        this._renderLayerLegend();
         this._bindResize();
         this.refresh();
     }
@@ -74,29 +87,70 @@ export class UpperAtmosphereUI {
     }
 
     /**
-     * Recompute profile + redraw everything. Safe to call any time.
+     * Recompute profile + redraw everything. Safe to call any time;
+     * slider-driven calls are debounced (_scheduleRefresh) so we don't
+     * spam the backend while dragging.
      */
     refresh() {
         const { f107, ap, altitude } = this.state;
 
-        this.profile = this.engine.sampleProfile({
-            f107Sfu: f107, ap,
-            minKm: ALT_MIN, maxKm: ALT_MAX, nPoints: 220,
-        });
-
-        // Update labels.
+        // Update labels immediately (don't wait for the async fetch).
         if (this.el.altVal)  this.el.altVal.textContent  = `${Math.round(altitude)} km`;
         if (this.el.f107Val) this.el.f107Val.textContent = `${Math.round(f107)} SFU`;
         if (this.el.apVal)   this.el.apVal.textContent   = String(Math.round(ap));
 
-        // Push to globe.
-        this.globe.setProfile(this.profile);
+        // Drive the globe state immediately (aurora, ring position).
+        this.globe.setState({ f107, ap });
         this.globe.setAltitude(altitude);
 
-        // Redraw.
+        // Local sample first — so the plots respond on every frame while
+        // dragging. If a backend profile arrives later, we overwrite and
+        // redraw once.
+        const local = this.engine.sampleProfile({
+            f107Sfu: f107, ap,
+            minKm: ALT_MIN, maxKm: ALT_MAX, nPoints: 180,
+        });
+        this.profile = _annotateProfile(local);
+        this.globe.setProfile(this.profile);
         this._drawDensityProfile();
         this._drawComposition();
         this._paintStats();
+
+        if (this.useBackend) this._scheduleBackendRefresh();
+    }
+
+    _scheduleBackendRefresh() {
+        clearTimeout(this._refreshTimer);
+        this._refreshTimer = setTimeout(() => this._fetchAndMerge(), 220);
+    }
+
+    async _fetchAndMerge() {
+        // Cancel an in-flight request if the user has moved on.
+        this._refreshInflight?.abort?.();
+        const controller = new AbortController();
+        this._refreshInflight = controller;
+        const { f107, ap } = this.state;
+        try {
+            const remote = await fetchProfile({
+                f107Sfu: f107, ap,
+                minKm: ALT_MIN, maxKm: ALT_MAX, nPoints: 160,
+                signal: controller.signal,
+            });
+            // If the user has already changed state again since this
+            // request started, drop the stale result.
+            if (this.state.f107 !== f107 || this.state.ap !== ap) return;
+            if (remote?.samples?.length) {
+                this.profile = _annotateProfile(remote);
+                this.globe.setProfile(this.profile);
+                this._drawDensityProfile();
+                this._drawComposition();
+                this._paintStats();
+            }
+        } catch (_) {
+            // fetchProfile already handled the fallback internally
+        } finally {
+            if (this._refreshInflight === controller) this._refreshInflight = null;
+        }
     }
 
     // ── Input wiring ────────────────────────────────────────────────────────
@@ -156,7 +210,7 @@ export class UpperAtmosphereUI {
         const ctx = _prepareCanvas(c);
 
         const W = c.clientWidth, H = c.clientHeight;
-        const pad = { l: 56, r: 14, t: 24, b: 36 };
+        const pad = { l: 72, r: 14, t: 24, b: 36 };
         const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
 
         // Axis extents.
@@ -173,19 +227,49 @@ export class UpperAtmosphereUI {
         ctx.fillStyle = 'rgba(12,7,30,0.85)';
         ctx.fillRect(0, 0, W, H);
 
-        // Grid + axis labels.
+        // ─── Atmospheric-layer bands (behind everything else) ────────────
+        const layers = this.profile.layers || ATMOSPHERIC_LAYERS;
+        for (const L of layers) {
+            const top = Math.max(L.minKm, altMin);
+            const bot = Math.min(L.maxKm, altMax);
+            if (bot <= altMin || top >= altMax) continue;
+            const yTop = yOf(bot);
+            const yBot = yOf(top);
+            ctx.fillStyle = _alpha(L.color, 0.10);
+            ctx.fillRect(pad.l, yTop, plotW, yBot - yTop);
+            // Thin dividing line at each boundary.
+            ctx.strokeStyle = _alpha(L.color, 0.35);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, yBot); ctx.lineTo(pad.l + plotW, yBot);
+            ctx.stroke();
+
+            // Layer label — vertical tick on the far-left gutter.
+            const midY = (yTop + yBot) / 2;
+            ctx.fillStyle = _alpha(L.color, 0.85);
+            ctx.font = '10px system-ui, sans-serif';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            if (yBot - yTop > 24) {
+                ctx.fillText(L.name, pad.l - 8, midY);
+            }
+        }
+
+        // ─── Altitude axis (grid + labels inside the plot area) ─────────
         ctx.strokeStyle = 'rgba(255,255,255,0.06)';
         ctx.fillStyle = '#889';
         ctx.font = '10px system-ui, sans-serif';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        for (let a = 0; a <= 2000; a += 250) {
+        for (let a = 0; a <= 2000; a += 500) {
             const y = yOf(a);
             if (y < pad.t - 1 || y > H - pad.b + 1) continue;
             ctx.beginPath();
             ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
             ctx.stroke();
-            ctx.fillText(`${a}`, pad.l - 6, y);
+            ctx.fillStyle = 'rgba(255,255,255,0.35)';
+            ctx.fillText(`${a}`, W - pad.r - 2, y - 6);
         }
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
@@ -195,7 +279,27 @@ export class UpperAtmosphereUI {
             ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b);
             ctx.strokeStyle = 'rgba(255,255,255,0.04)';
             ctx.stroke();
+            ctx.fillStyle = '#889';
             ctx.fillText(`10^${lr}`, x, H - pad.b + 4);
+        }
+
+        // ─── Satellite reference ticks ──────────────────────────────────
+        const sats = this.profile.satellites || SATELLITE_REFERENCES;
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textBaseline = 'middle';
+        for (const S of sats) {
+            if (S.altitudeKm < altMin || S.altitudeKm > altMax) continue;
+            const y = yOf(S.altitudeKm);
+            ctx.strokeStyle = S.color;
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.65;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + 8, y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = S.color;
+            ctx.textAlign = 'left';
+            ctx.fillText(`${S.name}`, pad.l + 11, y);
         }
 
         // Title.
@@ -371,11 +475,18 @@ export class UpperAtmosphereUI {
         });
         const T_inf = exosphereTempK(this.state.f107, this.state.ap);
         const dom = dominantSpecies(this.state.altitude);
+        const L   = layerAt(this.state.altitude);
+        const src = this.profile?.model || "client";
 
         const domPct = (s.fractions[dom] * 100).toFixed(1);
         const mBarAmu = (s.mBar / 1.66054e-27).toFixed(2);
 
         box.innerHTML = `
+          <div class="ua-stat">
+              <span class="ua-stat-k">layer</span>
+              <span class="ua-stat-v" style="color:${L?.color || '#cdf'}">${L?.name || '—'}</span>
+              <span class="ua-stat-u" title="source model">${_sourceLabel(src)}</span>
+          </div>
           <div class="ua-stat">
               <span class="ua-stat-k">ρ</span>
               <span class="ua-stat-v">${s.rho.toExponential(3)}</span>
@@ -408,6 +519,26 @@ export class UpperAtmosphereUI {
           </div>
         `;
     }
+
+    // ── Layer legend (static, rendered once in constructor) ─────────────────
+
+    _renderLayerLegend() {
+        const el = this.el.layerLegend;
+        if (!el) return;
+        el.innerHTML = '';
+        for (const L of ATMOSPHERIC_LAYERS) {
+            const row = document.createElement('div');
+            row.className = 'ua-layer-row';
+            row.title = L.description;
+            const range = L.maxKm > 1000 ? `${L.minKm}–${L.maxKm >= 10000 ? '∞' : L.maxKm} km` : `${L.minKm}–${L.maxKm} km`;
+            row.innerHTML = `
+                <span class="ua-layer-dot" style="background:${L.color}"></span>
+                <span class="ua-layer-name">${L.name}</span>
+                <span class="ua-layer-range">${range}</span>
+            `;
+            el.appendChild(row);
+        }
+    }
 }
 
 // ── Utility ─────────────────────────────────────────────────────────────────
@@ -423,4 +554,42 @@ function _prepareCanvas(canvas) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     return ctx;
+}
+
+function _annotateProfile(p) {
+    if (!p) return p;
+    return {
+        ...p,
+        layers:     p.layers     || ATMOSPHERIC_LAYERS,
+        satellites: p.satellites || SATELLITE_REFERENCES,
+    };
+}
+
+function _alpha(cssColor, a) {
+    // Accepts "#rgb", "#rrggbb", or "rgb(...)" / "rgba(...)".
+    if (!cssColor) return `rgba(255,255,255,${a})`;
+    if (cssColor.startsWith('#')) {
+        let r, g, b;
+        if (cssColor.length === 4) {
+            r = parseInt(cssColor[1] + cssColor[1], 16);
+            g = parseInt(cssColor[2] + cssColor[2], 16);
+            b = parseInt(cssColor[3] + cssColor[3], 16);
+        } else {
+            r = parseInt(cssColor.slice(1, 3), 16);
+            g = parseInt(cssColor.slice(3, 5), 16);
+            b = parseInt(cssColor.slice(5, 7), 16);
+        }
+        return `rgba(${r},${g},${b},${a})`;
+    }
+    return cssColor;   // leave anything else untouched
+}
+
+function _sourceLabel(model) {
+    if (!model) return 'client';
+    if (model === 'SPARTA-lookup')  return 'SPARTA';
+    if (model === 'NRLMSISE-00')    return 'MSIS';
+    if (model === 'exp-fallback')   return 'fallback';
+    if (model === 'client-fallback')return 'client*';
+    if (model === 'client')         return 'client';
+    return model;
 }

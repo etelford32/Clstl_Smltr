@@ -1849,6 +1849,38 @@ nav {
             </div>
         </div>
 
+        <!-- ── Upper Atmosphere (Parker Physics DSMC surrogate) ─────────────── -->
+        <div class="data-card" id="ua-card">
+            <h3>Upper Atmosphere · Thermosphere<span class="src-chip live" id="src-ua" title="Parker Physics DSMC surrogate. MSIS-style Jacchia exponential until SPARTA tables ship; then SPARTA-refined.">Parker · DSMC</span></h3>
+            <div class="param-row">
+                <span class="param-name">ρ @ ISS (~420 km)</span>
+                <span class="param-val" id="ua-rho-iss">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">ρ @ 600 km</span>
+                <span class="param-val" id="ua-rho-600">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Exosphere T∞</span>
+                <span class="param-val" id="ua-tinf">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Dominant @ 400 km</span>
+                <span class="param-val" id="ua-dom">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">LEO drag regime</span>
+                <span class="param-val" id="ua-regime">–</span>
+            </div>
+            <canvas id="ua-mini-plot" aria-label="Log-density vs altitude mini plot"
+                style="width:100%;height:110px;margin-top:10px;display:block;
+                       background:rgba(0,0,0,.35);border-radius:6px"></canvas>
+            <div style="font-size:.68rem;color:#556;margin-top:6px;display:flex;justify-content:space-between">
+                <span id="ua-src-note">driven by live Kp · F10.7 assumed 150 SFU</span>
+                <a href="upper-atmosphere.html" style="color:#0cc;text-decoration:none;font-weight:600">Full simulator →</a>
+            </div>
+        </div>
+
         <!-- ── Earth Orbit (VSOP87) ───────────────────────────────────────────── -->
         <div class="data-card" id="earth-orbit-card">
             <h3>Earth Orbital State · VSOP87D<span class="src-chip live" id="src-orbit" title="Source: VSOP87D truncated series (Bretagnon &amp; Francou 1988) · &lt;1 arcsec accuracy">VSOP87D · on-device</span></h3>
@@ -3896,5 +3928,150 @@ window.openImg = function(thumb) {
     ov.style.display = 'flex';
 };
 </script>
+
+<!-- ── Upper Atmosphere snapshot card ─────────────────────────────────────── -->
+<script type="module">
+    /**
+     * Feeds the Upper Atmosphere card from the live Kp value in the page.
+     * Reads #kp-val, converts to Ap via the standard SWPC table, and asks
+     * the Parker Physics engine for a getSnapshot() at 200/400/600 km +
+     * a 40-point mini-density profile.
+     */
+    import { getSnapshot, density, SPECIES }
+        from './js/upper-atmosphere-engine.js';
+
+    // NOAA SWPC Kp↔Ap conversion table.
+    const KP_TO_AP = [0, 3, 7, 15, 27, 48, 80, 140, 240, 400];
+    function kpToAp(kp) {
+        if (!Number.isFinite(kp) || kp < 0) return 15;
+        const lo = Math.floor(Math.min(kp, 9));
+        const hi = Math.min(lo + 1, 9);
+        const t = Math.max(0, Math.min(1, kp - lo));
+        return KP_TO_AP[lo] * (1 - t) + KP_TO_AP[hi] * t;
+    }
+
+    function readKp() {
+        const text = document.getElementById('kp-val')?.textContent?.trim() || '';
+        const v = parseFloat(text);
+        return Number.isFinite(v) ? v : 2;
+    }
+
+    function regimeLabel(rho, ap) {
+        // ρ @ 400 km-ish. Quiet Sun ≈ 4×10⁻¹², storm-time Gannon ≈ 1×10⁻¹⁰.
+        if (rho >= 8e-11) return 'severe drag · imminent-decay LEO';
+        if (rho >= 3e-11) return 'elevated drag · accelerated LEO decay';
+        if (rho >= 1e-11) return 'moderate · normal storm profile';
+        return 'nominal · quiet-time operations';
+    }
+
+    function drawMiniPlot(f107, ap) {
+        const canvas = document.getElementById('ua-mini-plot');
+        if (!canvas) return;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        if (!w || !h) return;
+        if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+            canvas.width  = Math.floor(w * dpr);
+            canvas.height = Math.floor(h * dpr);
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        // Sample 50 points from 150 → 1000 km; plot log10 ρ.
+        const pts = [];
+        for (let i = 0; i < 50; i++) {
+            const alt = 150 + (1000 - 150) * (i / 49);
+            const r = density({ altitudeKm: alt, f107Sfu: f107, ap }).rho;
+            pts.push({ alt, lr: Math.log10(Math.max(r, 1e-25)) });
+        }
+        const maxLR = Math.max(...pts.map(p => p.lr));
+        const minLR = Math.min(...pts.map(p => p.lr));
+        const span = Math.max(maxLR - minLR, 1);
+
+        const pad = 6;
+        const xOf = (i) => pad + (i / 49) * (w - 2 * pad);
+        const yOf = (lr) => pad + (1 - (lr - minLR) / span) * (h - 2 * pad);
+
+        // Reference grid: ISS altitude tick.
+        const issIdx = Math.round((420 - 150) / (1000 - 150) * 49);
+        const issX = xOf(issIdx);
+        ctx.strokeStyle = 'rgba(0,255,208,.35)';
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(issX, pad); ctx.lineTo(issX, h - pad); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(0,255,208,.7)';
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('ISS', issX, pad - 1 + 10);
+
+        // ρ curve.
+        const grad = ctx.createLinearGradient(0, 0, 0, h);
+        grad.addColorStop(0, '#ff9060');
+        grad.addColorStop(1, '#0af');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        for (let i = 0; i < pts.length; i++) {
+            const x = xOf(i), y = yOf(pts[i].lr);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Light fill below the curve.
+        ctx.lineTo(xOf(pts.length - 1), h - pad);
+        ctx.lineTo(xOf(0), h - pad);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0,200,255,.07)';
+        ctx.fill();
+
+        // Altitude endpoints.
+        ctx.fillStyle = '#556';
+        ctx.font = '9px system-ui, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('150 km', pad, h - 1);
+        ctx.textAlign = 'right';
+        ctx.fillText('1000 km', w - pad, h - 1);
+    }
+
+    function refresh() {
+        const kp = readKp();
+        const ap = kpToAp(kp);
+        const f107 = 150;
+
+        const snap = getSnapshot({
+            f107Sfu: f107, ap,
+            altitudesKm: [400, 600],
+        });
+        const iss = snap.altitudes.find(h => h.altitudeKm === 400);
+        const k6  = snap.altitudes.find(h => h.altitudeKm === 600);
+
+        const $ = (id) => document.getElementById(id);
+        const setTxt = (id, v) => { const el = $(id); if (el) el.textContent = v; };
+
+        if (iss) setTxt('ua-rho-iss', `${iss.rho.toExponential(2)} kg/m³`);
+        if (k6)  setTxt('ua-rho-600', `${k6.rho.toExponential(2)} kg/m³`);
+        setTxt('ua-tinf', `${Math.round(snap.T)} K`);
+        if (iss) setTxt('ua-dom', `${iss.dominantSpecies} · ${(iss.dominantFraction * 100).toFixed(0)}%`);
+        if (iss) setTxt('ua-regime', regimeLabel(iss.rho, ap));
+
+        drawMiniPlot(f107, ap);
+    }
+
+    // Initial paint + poll every minute + redraw on Kp update + on resize.
+    refresh();
+    setInterval(refresh, 60_000);
+    const kpEl = document.getElementById('kp-val');
+    if (kpEl) {
+        new MutationObserver(refresh).observe(kpEl, {
+            childList: true, characterData: true, subtree: true,
+        });
+    }
+    new ResizeObserver(() => drawMiniPlot(150, kpToAp(readKp())))
+        .observe(document.getElementById('ua-mini-plot'));
+</script>
+
 </body>
 </html>

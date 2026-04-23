@@ -1,66 +1,80 @@
 /**
  * upper-atmosphere-globe.js — 3D Earth + atmosphere-shell visualisation
  * ═══════════════════════════════════════════════════════════════════════════
- * A lightweight Three.js scene tailored for the upper-atmosphere page:
+ * Three.js scene for the upper-atmosphere page. Uses the shared EarthSkin
+ * class from earth-skin.js so the planet matches earth.html / space-
+ * weather.html exactly — day/night mask, ocean specular, topology,
+ * atmosphere rim glow, aurora shader.
  *
- *   • Textured Earth sphere with phong lighting (day-side + ambient fill)
- *   • Star-field background
- *   • Six concentric translucent atmosphere shells at canonical altitudes
- *     (150, 250, 400, 600, 900, 1500 km), each coloured by local log(ρ)
- *     at the current F10.7/Ap state
- *   • A highlighted ring at the user-selected altitude
- *   • OrbitControls (rotate, zoom), auto-resize via ResizeObserver
+ * Layers (Earth radius = 1.0):
+ *   • EarthSkin.earthMesh                         surface, clouds off
+ *   • EarthSkin atmosphere rim                    1.026 R⊕ (provided by skin)
+ *   • density shells  at 100, 600, 1500 km        log-ρ-shaded
+ *   • satellite rings at ISS/HST/Starlink/…       colored tori
+ *   • altitude ring   at the user's current alt   cyan, tracks slider
+ *   • star backdrop
  *
- * The exosphere shell radii are specified in Earth-radius units so the
- * visual scale stays constant as the user sweeps altitude. Each shell
- * opacity tracks log₁₀(ρ_shell / ρ_max), clamped to [0.04, 0.55] so the
- * densest layer never blocks the lower shells and the thinnest layer
- * still shows its presence.
+ * Aurora intensity follows the current Ap — stronger geomagnetic
+ * forcing lights up the auroral oval via the EARTH_FRAG shader.
  *
  * Export:
- *   AtmosphereGlobe              class
+ *   AtmosphereGlobe
  *     new AtmosphereGlobe(canvas, opts)
- *     setProfile(profile)        feed a sampleProfile() result
- *     setAltitude(altitudeKm)    move the highlighted ring
- *     setCameraAltitude(km)      optional external camera control
+ *     setProfile(profile)                         per-shell ρ
+ *     setAltitude(altitudeKm)                     move the cyan ring
+ *     setState({ f107, ap })                      drive aurora + rim
+ *     setVisibility({ satellites, shells })       toggle overlays
  *     dispose()
  */
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EarthSkin } from './earth-skin.js';
+import { SATELLITE_REFERENCES } from './upper-atmosphere-engine.js';
 
 const R_EARTH_KM = 6371;
-const SHELL_ALTS_KM = [150, 250, 400, 600, 900, 1500];
 
-// Textures sourced from the same CDN earth-skin.js uses — we only want
-// the blue-marble day texture, nothing storm-/aurora-related.
-const EARTH_DAY_TEXTURE =
-    'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
+// Three visual density shells — one per atmospheric regime the page
+// actually distinguishes (Kármán edge · thermopause · outer exosphere).
+// Kept distinct from EarthSkin's atmosphere-rim shader so each shell
+// can be lit by local log(ρ) rather than the fresnel glow.
+const DENSITY_SHELLS = [
+    { id: "karman-shell",     altKm:  100, baseColor: 0xff9090 },
+    { id: "thermopause",      altKm:  600, baseColor: 0xffb060 },
+    { id: "outer-exosphere",  altKm: 1500, baseColor: 0xc080ff },
+];
+
+// Formal atmospheric-layer boundary rings — visually subtle, labelled in
+// the UI legend rather than the 3D scene.
+const LAYER_BOUNDARY_RINGS = [
+    { id: "mesopause",  altKm:  85, color: 0x7aa8ff, opacity: 0.45 },
+    { id: "thermopause",altKm: 600, color: 0xff8a4c, opacity: 0.55 },
+];
 
 export class AtmosphereGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
      * @param {object} [opts]
-     * @param {number} [opts.cameraDistance=3.5]  initial camera distance (Earth radii)
-     * @param {boolean}[opts.showLabels=true]     render altitude labels beside shells
+     * @param {number} [opts.cameraDistance=3.2]  initial camera distance (Earth radii)
+     * @param {boolean}[opts.stars=true]
+     * @param {boolean}[opts.autoRotate=true]
      */
     constructor(canvas, opts = {}) {
         this.canvas = canvas;
-        this.opts = {
-            cameraDistance: 3.5,
-            showLabels: true,
-            ...opts,
-        };
+        this.opts = { cameraDistance: 3.2, stars: true, autoRotate: true, ...opts };
 
         this._initRenderer();
         this._initScene();
         this._buildEarth();
         this._buildShells();
-        this._buildRing();
-        this._initStars();
+        this._buildLayerRings();
+        this._buildSatelliteRings();
+        this._buildAltitudeRing();
+        if (this.opts.stars) this._initStars();
         this._initControls();
         this._initResize();
 
+        this._clock = new THREE.Clock();
         this._animate = this._animate.bind(this);
         this._raf = requestAnimationFrame(this._animate);
     }
@@ -68,39 +82,36 @@ export class AtmosphereGlobe {
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
-     * Feed in a full profile (from engine.sampleProfile). Shell colour and
-     * opacity recompute; ring position is left alone (use setAltitude).
+     * Feed a sampled/fetched profile. Each density shell picks its local
+     * ρ via nearest-neighbour in altitude and re-opacities.
      */
     setProfile(profile) {
-        if (!profile || !profile.samples || profile.samples.length === 0) return;
+        if (!profile?.samples?.length) return;
         this._profile = profile;
 
-        // Find ρ(alt) for each shell by nearest-lookup; profile is dense
-        // enough (~200 points) that nearest is fine.
-        const rhoByShell = SHELL_ALTS_KM.map(alt => _nearestRho(profile.samples, alt));
-
-        // Colour scale from log(ρ): tropopause-ish reds → cold black.
-        const logRhos = rhoByShell.map(r => Math.log10(Math.max(r, 1e-30)));
+        const logRhos = this._shells.map(sh => {
+            const rho = _nearestRho(profile.samples, sh.userData.altKm);
+            sh.userData.rho = rho;
+            return Math.log10(Math.max(rho, 1e-30));
+        });
         const maxLR = Math.max(...logRhos);
         const minLR = Math.min(...logRhos);
         const span = Math.max(maxLR - minLR, 1.0);
 
         for (let i = 0; i < this._shells.length; i++) {
             const t = (logRhos[i] - minLR) / span;       // 0 (thin) … 1 (dense)
-            const color = _densityColor(t);
-            const opacity = 0.04 + t * 0.51;             // [0.04, 0.55]
-            this._shells[i].material.color.copy(color);
-            this._shells[i].material.opacity = opacity;
-            this._shells[i].userData.rho = rhoByShell[i];
+            const base = new THREE.Color(this._shells[i].userData.baseColor);
+            base.lerp(new THREE.Color(0xffffff), 0.25 + 0.35 * t);
+            this._shells[i].material.color.copy(base);
+            this._shells[i].material.opacity = 0.05 + t * 0.25;
         }
 
-        // Ring colour follows the closest shell to the current altitude.
         if (this._currentAltKm != null) this.setAltitude(this._currentAltKm);
     }
 
     /**
-     * Move the highlighted ring to a new altitude (km). Also drives the
-     * ring's colour from the local ρ.
+     * Move the highlighted cyan ring to a new altitude (km) and
+     * recolour it by local ρ.
      */
     setAltitude(altitudeKm) {
         this._currentAltKm = altitudeKm;
@@ -110,15 +121,46 @@ export class AtmosphereGlobe {
         let rho = 0;
         if (this._profile) rho = _nearestRho(this._profile.samples, altitudeKm);
         const logR = Math.log10(Math.max(rho, 1e-30));
-        // Warm cyan when dense, cool violet when thin.
         const t = Math.max(0, Math.min(1, (logR + 20) / 16));
-        this._ring.material.color.copy(_densityColor(t));
-        this._ring.material.opacity = 0.55 + t * 0.35;
+        const cold = new THREE.Color(0x8040ff);
+        const warm = new THREE.Color(0x00ffd8);
+        this._ring.material.color.copy(cold.lerp(warm, t));
+        this._ring.material.opacity = 0.55 + t * 0.40;
     }
 
     /**
-     * Clean up GPU + event-listener resources when the page unmounts.
+     * Drive the aurora shader from current space-weather state. Aurora
+     * only visible when Ap > ~20 (roughly Kp≥4); below that it fades to
+     * nothing.
      */
+    setState({ f107 = 150, ap = 15 } = {}) {
+        this._state = { f107, ap };
+        if (!this._skin) return;
+
+        // Map Ap to a Kp-ish value (approximate — Ap = 15 ≈ Kp 3).
+        // Full scale: Ap 400 ≈ Kp 9 (extreme storm).
+        const kp = Math.min(9, Math.max(0, Math.log2(Math.max(ap, 1) / 2) + 2));
+        const auroraAW = Math.max(0, Math.min(1, (ap - 15) / 200));
+
+        this._skin.setSpaceWeather({
+            kp,
+            auroraOn: auroraAW > 0.02,
+            auroraAW,
+            bzSouth: 0,
+            xray: 0,
+            dstNorm: 0,
+        });
+    }
+
+    /**
+     * Toggle overlay groups.
+     */
+    setVisibility({ satellites = true, shells = true, rings = true } = {}) {
+        if (this._satGroup)   this._satGroup.visible   = satellites;
+        if (this._shellGroup) this._shellGroup.visible = shells;
+        if (this._layerGroup) this._layerGroup.visible = rings;
+    }
+
     dispose() {
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
@@ -126,8 +168,14 @@ export class AtmosphereGlobe {
         this._scene.traverse(o => {
             if (o.geometry) o.geometry.dispose?.();
             if (o.material) {
-                if (Array.isArray(o.material)) o.material.forEach(m => m.dispose?.());
-                else o.material.dispose?.();
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+                for (const m of mats) {
+                    for (const k of Object.keys(m.uniforms || {})) {
+                        const v = m.uniforms[k]?.value;
+                        if (v && typeof v.dispose === "function") v.dispose();
+                    }
+                    m.dispose?.();
+                }
             }
         });
         this._renderer.dispose();
@@ -142,106 +190,127 @@ export class AtmosphereGlobe {
             alpha: false,
         });
         this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        this._renderer.setClearColor(0x020016, 1);
+        this._renderer.setClearColor(0x030012, 1);
     }
 
     _initScene() {
         this._scene = new THREE.Scene();
         const { clientWidth: w, clientHeight: h } = this.canvas;
         const aspect = Math.max(w / Math.max(h, 1), 1);
-        this._camera = new THREE.PerspectiveCamera(42, aspect, 0.01, 1000);
-        this._camera.position.set(0, 0.4, this.opts.cameraDistance);
+        this._camera = new THREE.PerspectiveCamera(40, aspect, 0.01, 1000);
+        this._camera.position.set(0, 0.6, this.opts.cameraDistance);
 
-        // Sun — directional light. Ambient fill keeps the night side
-        // visible at low opacity so the shells are readable all around.
-        const sun = new THREE.DirectionalLight(0xfff6e8, 1.35);
-        sun.position.set(5, 2, 3);
-        this._scene.add(sun);
-        this._scene.add(new THREE.AmbientLight(0x334455, 0.8));
+        // Sun direction — mostly from +X with a slight northern tilt.
+        // Used by EarthSkin and by subsequent setState() recomputations.
+        this._sunDir = new THREE.Vector3(1, 0.35, 0.2).normalize();
     }
 
     _buildEarth() {
-        const geom = new THREE.SphereGeometry(1, 64, 64);
-        const mat = new THREE.MeshPhongMaterial({
-            shininess: 12,
-            specular: new THREE.Color(0x111930),
-            color: new THREE.Color(0x3c5c8c),        // fallback tint before texture
+        // Reuse the shared EarthSkin stack so the globe looks identical
+        // to earth.html: day/night, ocean specular, topology, atmosphere
+        // rim glow, aurora. Clouds intentionally off — the upper-
+        // atmosphere page is about what's *above* the troposphere.
+        this._skin = new EarthSkin(this._scene, this._sunDir, {
+            radius: 1.0,
+            icoLevel: 5,
+            clouds: false,
+            atmosphere: true,
+            aurora: true,
         });
-        const loader = new THREE.TextureLoader();
-        loader.setCrossOrigin('anonymous');
-        loader.load(
-            EARTH_DAY_TEXTURE,
-            tex => {
-                mat.map = tex;
-                mat.color.setHex(0xffffff);
-                mat.needsUpdate = true;
-            },
-            undefined,
-            () => { /* keep the fallback tint if CDN is unreachable */ }
-        );
-        this._earth = new THREE.Mesh(geom, mat);
-        this._scene.add(this._earth);
+        // Fire-and-forget texture load. Scene renders with the safe
+        // gray fallback until the CDN responds.
+        this._skin.loadTextures().catch(() => {});
+
+        // EarthSkin shader handles its own lighting (sun_dir uniform) so
+        // we don't add a DirectionalLight. Still add a faint ambient so
+        // the tori look right on the dark side.
+        this._scene.add(new THREE.AmbientLight(0x334466, 0.3));
     }
 
     _buildShells() {
         this._shells = [];
-        const group = new THREE.Group();
-        for (const altKm of SHELL_ALTS_KM) {
-            const r = 1 + altKm / R_EARTH_KM;
-            const geom = new THREE.SphereGeometry(r, 48, 48);
+        this._shellGroup = new THREE.Group();
+        for (const def of DENSITY_SHELLS) {
+            const r = 1 + def.altKm / R_EARTH_KM;
             const mat = new THREE.MeshBasicMaterial({
-                color: 0x3399cc,
+                color: def.baseColor,
                 transparent: true,
-                opacity: 0.15,
-                side: THREE.BackSide,          // render interior so it reads as a shell
+                opacity: 0.10,
+                side: THREE.BackSide,
                 depthWrite: false,
             });
-            const mesh = new THREE.Mesh(geom, mat);
-            mesh.userData = { altKm, rho: 0 };
-            group.add(mesh);
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 48, 48), mat);
+            mesh.userData = { altKm: def.altKm, baseColor: def.baseColor };
             this._shells.push(mesh);
+            this._shellGroup.add(mesh);
         }
-        this._scene.add(group);
-        this._shellGroup = group;
+        this._scene.add(this._shellGroup);
     }
 
-    _buildRing() {
-        // A torus at r=1 that we scale to the selected altitude.
-        // Inclined ~23° so it doesn't collide with the equator visually.
-        const torus = new THREE.TorusGeometry(1, 0.003, 16, 128);
-        const mat = new THREE.MeshBasicMaterial({
-            color: 0x00ffe6,
-            transparent: true,
-            opacity: 0.8,
-            depthWrite: false,
-        });
-        this._ring = new THREE.Mesh(torus, mat);
+    _buildLayerRings() {
+        // Thin tori at key atmospheric-regime boundaries. They read as
+        // equatorial discs rather than full shells so they don't compete
+        // visually with the density shells.
+        this._layerGroup = new THREE.Group();
+        for (const def of LAYER_BOUNDARY_RINGS) {
+            const r = 1 + def.altKm / R_EARTH_KM;
+            const ring = _ringMesh(r, 0.003, def.color, def.opacity);
+            ring.userData = { altKm: def.altKm, id: def.id };
+            this._layerGroup.add(ring);
+        }
+        this._scene.add(this._layerGroup);
+    }
+
+    _buildSatelliteRings() {
+        this._satGroup = new THREE.Group();
+        this._satRings = [];
+        for (const sat of SATELLITE_REFERENCES) {
+            const r = 1 + sat.altitudeKm / R_EARTH_KM;
+            // Slight tilt per ring so they don't all overlap on one plane.
+            const tilt = (sat.altitudeKm % 31) * Math.PI / 180;
+            const ring = _ringMesh(r, 0.004, _hex(sat.color), 0.75);
+            ring.rotation.x = Math.PI / 2 + tilt * 0.05;
+            ring.rotation.y = tilt * 0.8;
+            ring.userData = { altKm: sat.altitudeKm, id: sat.id, name: sat.name };
+            this._satRings.push(ring);
+            this._satGroup.add(ring);
+        }
+        this._scene.add(this._satGroup);
+    }
+
+    _buildAltitudeRing() {
+        this._ring = _ringMesh(1, 0.0045, 0x00ffe6, 0.85);
         this._ring.rotation.x = Math.PI / 2;
         this._ring.rotation.y = 0.4;
         this._scene.add(this._ring);
     }
 
     _initStars() {
-        // Cheap star backdrop — BufferGeometry of random points on a big sphere.
-        const n = 2000;
+        const n = 2500;
         const positions = new Float32Array(n * 3);
+        const colors = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) {
-            // Uniform on sphere
             const theta = 2 * Math.PI * Math.random();
             const phi   = Math.acos(1 - 2 * Math.random());
-            const R = 200 + 100 * Math.random();
+            const R = 220 + 120 * Math.random();
             positions[i * 3 + 0] = R * Math.sin(phi) * Math.cos(theta);
             positions[i * 3 + 1] = R * Math.cos(phi);
             positions[i * 3 + 2] = R * Math.sin(phi) * Math.sin(theta);
+            // Slight warm/cool variation.
+            const shade = 0.75 + 0.25 * Math.random();
+            colors[i * 3 + 0] = shade;
+            colors[i * 3 + 1] = shade * (0.85 + 0.15 * Math.random());
+            colors[i * 3 + 2] = shade * (0.95 + 0.08 * Math.random());
         }
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
         const mat = new THREE.PointsMaterial({
-            color: 0xb8c8ff,
-            size: 0.9,
+            size: 1.2,
             sizeAttenuation: false,
+            vertexColors: true,
             transparent: true,
-            opacity: 0.85,
+            opacity: 0.9,
         });
         this._scene.add(new THREE.Points(geom, mat));
     }
@@ -250,10 +319,10 @@ export class AtmosphereGlobe {
         this._controls = new OrbitControls(this._camera, this.canvas);
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.08;
-        this._controls.minDistance = 1.3;
-        this._controls.maxDistance = 12;
+        this._controls.minDistance = 1.25;
+        this._controls.maxDistance = 14;
         this._controls.enablePan = false;
-        this._controls.rotateSpeed = 0.6;
+        this._controls.rotateSpeed = 0.55;
     }
 
     _initResize() {
@@ -269,16 +338,20 @@ export class AtmosphereGlobe {
         this._resizeObs.observe(this.canvas);
     }
 
-    _animate(t) {
+    _animate() {
         this._raf = requestAnimationFrame(this._animate);
-        // Gentle autorotation if the user hasn't touched OrbitControls
-        // in the last second. Cuts the "dead frame" feel on initial load.
-        if (this._controls && !this._controls.enabled) {
-            // disabled — skip
-        } else {
-            this._earth.rotation.y += 0.0012;
-            if (this._shellGroup) this._shellGroup.rotation.y += 0.0005;
+        const t = this._clock.getElapsedTime();
+
+        if (this._skin) this._skin.update(t);
+
+        // Slow auto-rotation when user isn't actively dragging.
+        if (this.opts.autoRotate && this._skin && !this._controls.dragging) {
+            this._skin.earthMesh.rotation.y += 0.0010;
+            if (this._shellGroup) this._shellGroup.rotation.y += 0.00045;
+            if (this._layerGroup) this._layerGroup.rotation.y += 0.00045;
+            if (this._satGroup)   this._satGroup.rotation.y   += 0.00060;
         }
+
         this._controls.update();
         this._renderer.render(this._scene, this._camera);
     }
@@ -286,18 +359,13 @@ export class AtmosphereGlobe {
 
 // ── Utilities ──────────────────────────────────────────────────────────────
 
-/**
- * Nearest-neighbour ρ lookup on a sorted-by-altitude sample array.
- */
 function _nearestRho(samples, altitudeKm) {
-    // Binary search — samples are monotonic in altitude.
     let lo = 0, hi = samples.length - 1;
     while (lo < hi) {
         const mid = (lo + hi) >> 1;
         if (samples[mid].altitudeKm < altitudeKm) lo = mid + 1;
         else hi = mid;
     }
-    // Pick whichever of [lo-1, lo] is closer.
     const a = samples[Math.max(0, lo - 1)];
     const b = samples[lo];
     return Math.abs(a.altitudeKm - altitudeKm) < Math.abs(b.altitudeKm - altitudeKm)
@@ -305,27 +373,21 @@ function _nearestRho(samples, altitudeKm) {
         : b.rho;
 }
 
-/**
- * Density→colour map. 0 = thin (cool violet), 1 = dense (warm cyan-white).
- * Tuned for the dark-navy site background so both ends stay visible.
- */
-function _densityColor(t) {
-    t = Math.max(0, Math.min(1, t));
-    // Three-stop gradient: violet → teal → warm cyan.
-    const stops = [
-        { t: 0.0, c: [0.40, 0.15, 0.85] },   // violet
-        { t: 0.5, c: [0.05, 0.72, 0.90] },   // teal
-        { t: 1.0, c: [0.90, 0.95, 1.00] },   // warm cyan-white
-    ];
-    let i = 0;
-    while (i + 1 < stops.length && stops[i + 1].t < t) i++;
-    const a = stops[i];
-    const b = stops[i + 1] || a;
-    const u = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
-    const c = new THREE.Color(
-        a.c[0] + (b.c[0] - a.c[0]) * u,
-        a.c[1] + (b.c[1] - a.c[1]) * u,
-        a.c[2] + (b.c[2] - a.c[2]) * u,
-    );
-    return c;
+function _ringMesh(radius, tubeRadius, colorHex, opacity = 0.75) {
+    const geom = new THREE.TorusGeometry(radius, tubeRadius, 12, 160);
+    const mat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity,
+        depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.rotation.x = Math.PI / 2;
+    return mesh;
+}
+
+function _hex(colorStr) {
+    if (typeof colorStr === "number") return colorStr;
+    if (!colorStr) return 0xffffff;
+    return parseInt(colorStr.replace("#", ""), 16);
 }

@@ -39,6 +39,67 @@ const KB = 1.380649e-23;        // Boltzmann [J/K]
 const G0 = 9.80665;             // surface gravity [m/s²]
 const R_EARTH_M = 6_371_000;    // mean Earth radius [m]
 
+// ── Formal atmospheric layers ───────────────────────────────────────────────
+// Altitude bands + regime tag for labeling plots and colouring shells.
+// Mirrors dsmc/pipeline/profile.py:ATMOSPHERIC_LAYERS.
+export const ATMOSPHERIC_LAYERS = [
+    {
+        id: "troposphere",
+        name: "Troposphere",
+        minKm: 0, maxKm: 12,
+        color: "#6ea6ff",
+        description: "Weather layer. Temperature decreases with altitude; ~75% of atmospheric mass.",
+    },
+    {
+        id: "stratosphere",
+        name: "Stratosphere",
+        minKm: 12, maxKm: 50,
+        color: "#9cc6ff",
+        description: "Ozone layer. Temperature rises with altitude due to UV absorption.",
+    },
+    {
+        id: "mesosphere",
+        name: "Mesosphere",
+        minKm: 50, maxKm: 85,
+        color: "#7aa8ff",
+        description: "Meteor burn-up layer. Coldest region of Earth's atmosphere.",
+    },
+    {
+        id: "thermosphere",
+        name: "Thermosphere",
+        minKm: 85, maxKm: 600,
+        color: "#ff8a4c",
+        description: "Absorbs solar EUV. ISS orbits here. Dominant LEO drag source.",
+    },
+    {
+        id: "exosphere",
+        name: "Exosphere",
+        minKm: 600, maxKm: 10_000,
+        color: "#c080ff",
+        description: "Molecular free flight. He/H escape; GPS and GEO satellites live here.",
+    },
+];
+
+// ── Canonical satellite altitudes for the globe overlay ─────────────────────
+// Mirrors dsmc/pipeline/profile.py:SATELLITE_REFERENCES.
+export const SATELLITE_REFERENCES = [
+    { id: "karman",   name: "Kármán line",    altitudeKm:   100, color: "#ff7070" },
+    { id: "iss",      name: "ISS",            altitudeKm:   420, color: "#00ffd0" },
+    { id: "hubble",   name: "Hubble (HST)",   altitudeKm:   540, color: "#ffd060" },
+    { id: "starlink", name: "Starlink shell", altitudeKm:   550, color: "#60a0ff" },
+    { id: "iridium",  name: "Iridium",        altitudeKm:   780, color: "#a080ff" },
+];
+
+/**
+ * Which layer does this altitude fall in? Returns null for < 0 km.
+ */
+export function layerAt(altitudeKm) {
+    for (const L of ATMOSPHERIC_LAYERS) {
+        if (altitudeKm >= L.minKm && altitudeKm < L.maxKm) return L;
+    }
+    return null;
+}
+
 // ── Composition anchors (number-density fractions) ──────────────────────────
 // Shapes tracked against NRL-MSIS / CIRA 1972. Log-space linear blend
 // between adjacent anchors; values below/above the anchor range use
@@ -191,6 +252,148 @@ export function dominantSpecies(altitudeKm) {
         if (frac[s] > bestVal) { best = s; bestVal = frac[s]; }
     }
     return best;
+}
+
+// ── Backend integration ─────────────────────────────────────────────────────
+// The DSMC API lives at a configurable base URL. When the page is served
+// from Vercel + the DSMC container is deployed elsewhere, set
+// `window.PARKER_DSMC_API` before importing this module. Otherwise we
+// stay entirely client-side (no network).
+
+function _apiBase() {
+    if (typeof window === "undefined") return null;
+    return window.PARKER_DSMC_API || window.__PP_CONFIG?.dsmcApi || null;
+}
+
+/**
+ * Fetch a profile from the backend, falling back to the pure-JS
+ * surrogate if the request fails, times out, or no base URL is set.
+ * Returned shape matches sampleProfile() + extra metadata fields
+ * (layers, satellites, model, issued_at_utc, etc.) when the backend
+ * answered.
+ */
+export async function fetchProfile({
+    f107Sfu, ap,
+    minKm = 80, maxKm = 2000, nPoints = 160,
+    lat = 0, lon = 0,
+    timeoutMs = 2500,
+    signal,
+} = {}) {
+    const base = _apiBase();
+    if (!base) return _clientProfile({ f107Sfu, ap, minKm, maxKm, nPoints });
+
+    const url = new URL(`${base.replace(/\/$/, "")}/v1/atmosphere/profile`);
+    if (f107Sfu != null) url.searchParams.set("f107", String(f107Sfu));
+    if (ap != null)      url.searchParams.set("ap",   String(ap));
+    url.searchParams.set("min_km",   String(minKm));
+    url.searchParams.set("max_km",   String(maxKm));
+    url.searchParams.set("n_points", String(nPoints));
+    url.searchParams.set("lat",      String(lat));
+    url.searchParams.set("lon",      String(lon));
+
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    signal?.addEventListener("abort", () => ctl.abort());
+
+    try {
+        const r = await fetch(url, {
+            signal: ctl.signal,
+            headers: { "Accept": "application/json" },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        return _normaliseBackendProfile(data);
+    } catch (err) {
+        // Network / parsing / timeout — surface but keep the page alive
+        // by returning the client surrogate result.
+        if (typeof console !== "undefined") {
+            console.warn("[upper-atmosphere] backend profile unavailable, using client surrogate:", err?.message || err);
+        }
+        return _clientProfile({ f107Sfu, ap, minKm, maxKm, nPoints, fallback: true });
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+function _clientProfile({ f107Sfu, ap, minKm, maxKm, nPoints, fallback = false }) {
+    const p = sampleProfile({ f107Sfu, ap, minKm, maxKm, nPoints });
+    return {
+        ...p,
+        model: fallback ? "client-fallback" : "client",
+        layers: ATMOSPHERIC_LAYERS,
+        satellites: SATELLITE_REFERENCES,
+    };
+}
+
+function _normaliseBackendProfile(data) {
+    // Backend returns altitude_km / density_kg_m3 keys; we use
+    // altitudeKm / rho on the client. Translate once here so callers
+    // treat both sources uniformly.
+    const samples = (data.samples || []).map(s => ({
+        altitudeKm: s.altitude_km,
+        T:          s.temperature_K,
+        rho:        s.density_kg_m3,
+        nTotal:     s.total_number_density,
+        H_km:       s.scale_height_km ?? undefined,
+        mBar:       s.mean_molecular_mass_kg,
+        fractions:  s.fractions,
+        n:          s.number_densities,
+    }));
+    return {
+        f107Sfu:    data.f107_sfu ?? data.f107_used,
+        ap:         data.ap ?? data.ap_used,
+        T:          exosphereTempK(data.f107_sfu ?? 150, data.ap ?? 15),
+        model:      data.model,
+        issuedAt:   data.issued_at_utc,
+        layers:     _normaliseLayers(data.layers) || ATMOSPHERIC_LAYERS,
+        satellites: _normaliseSatellites(data.satellites) || SATELLITE_REFERENCES,
+        samples,
+    };
+}
+
+function _normaliseLayers(list) {
+    if (!Array.isArray(list) || list.length === 0) return null;
+    return list.map(L => ({
+        id: L.id, name: L.name,
+        minKm: L.min_km, maxKm: L.max_km,
+        color: ATMOSPHERIC_LAYERS.find(x => x.id === L.id)?.color || "#889",
+        description: L.description,
+    }));
+}
+function _normaliseSatellites(list) {
+    if (!Array.isArray(list) || list.length === 0) return null;
+    return list.map(S => ({
+        id: S.id, name: S.name,
+        altitudeKm: S.altitude_km,
+        color: S.color || "#0cc",
+    }));
+}
+
+/**
+ * Compact point snapshot for embedding in other pages (space-weather
+ * card, dashboard widgets). Returns {ρ, T, dominant} at 200/400/600 km
+ * by default.
+ */
+export function getSnapshot({
+    f107Sfu, ap,
+    altitudesKm = [200, 400, 600],
+} = {}) {
+    const hits = altitudesKm.map(alt => {
+        const rec = density({ altitudeKm: alt, f107Sfu, ap });
+        const dom = dominantSpecies(alt);
+        return {
+            altitudeKm: alt,
+            rho: rec.rho,
+            T: rec.T,
+            dominantSpecies: dom,
+            dominantFraction: rec.fractions[dom],
+        };
+    });
+    return {
+        f107Sfu, ap,
+        T: exosphereTempK(f107Sfu, ap),
+        altitudes: hits,
+    };
 }
 
 // ── Storm presets ──────────────────────────────────────────────────────────
