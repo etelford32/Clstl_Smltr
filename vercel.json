@@ -4,6 +4,12 @@
   "outputDirectory": ".",
   "framework": null,
   "installCommand": "export PATH=/rust/bin:$HOME/.cargo/bin:$PATH && rustup target add wasm32-unknown-unknown",
+  "crons": [
+    {
+      "path": "/api/cron/refresh-weather-grid",
+      "schedule": "0 * * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/api/stripe/(.*)",
