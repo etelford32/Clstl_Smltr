@@ -32,6 +32,19 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EarthSkin } from './earth-skin.js';
 import { SATELLITE_REFERENCES } from './upper-atmosphere-engine.js';
 
+// NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
+// shader. The shader's own oval-geometry code wants Kp, not Ap.
+const _KP_TO_AP = [0, 3, 7, 15, 27, 48, 80, 140, 240, 400];
+
+function apToKp(ap) {
+    if (!Number.isFinite(ap) || ap <= 0) return 0;
+    for (let i = 0; i < _KP_TO_AP.length - 1; i++) {
+        const a = _KP_TO_AP[i], b = _KP_TO_AP[i + 1];
+        if (ap < b) return i + (ap - a) / (b - a);
+    }
+    return 9;
+}
+
 const R_EARTH_KM = 6371;
 
 // Three visual density shells — one per atmospheric regime the page
@@ -73,6 +86,7 @@ export class AtmosphereGlobe {
         if (this.opts.stars) this._initStars();
         this._initControls();
         this._initResize();
+        this._initTooltip();
 
         this._clock = new THREE.Clock();
         this._animate = this._animate.bind(this);
@@ -129,26 +143,53 @@ export class AtmosphereGlobe {
     }
 
     /**
-     * Drive the aurora shader from current space-weather state. Aurora
-     * only visible when Ap > ~20 (roughly Kp≥4); below that it fades to
-     * nothing.
+     * Drive the aurora shader from current space-weather state. The
+     * EarthSkin shader takes raw Kp + bzSouth and does its own oval-
+     * geometry math (equatorward shift + width growth with Kp); the
+     * caller only has to pass faithful values.
+     *
+     * `bzSouth` is optional — when omitted we synthesise a proxy from
+     * Ap so the storm presets still widen the oval realistically.
+     * `dstNorm` is likewise synthesised when not provided (Dst correlates
+     * strongly with Ap during substorms).
      */
-    setState({ f107 = 150, ap = 15 } = {}) {
-        this._state = { f107, ap };
+    setState({ f107 = 150, ap = 15, bz = null } = {}) {
+        this._state = { f107, ap, bz };
         if (!this._skin) return;
 
-        // Map Ap to a Kp-ish value (approximate — Ap = 15 ≈ Kp 3).
-        // Full scale: Ap 400 ≈ Kp 9 (extreme storm).
-        const kp = Math.min(9, Math.max(0, Math.log2(Math.max(ap, 1) / 2) + 2));
-        const auroraAW = Math.max(0, Math.min(1, (ap - 15) / 200));
+        // Canonical SWPC Kp↔Ap inversion (not the old log2 approximation).
+        const kp = apToKp(ap);
+
+        // bzSouth is a [0..1] normalised "southward-ness" indicator used
+        // by the shader to boost storm effects. When we don't have live
+        // IMF data, approximate from Ap — values of 1 at Ap ≈ 80 (G3),
+        // saturating at Ap ≥ 140 (G4+).
+        let bzSouth;
+        if (Number.isFinite(bz)) {
+            // +bz = northward (suppresses aurora); -bz = southward
+            // (enhances). Clamp magnitude to [0..1] at |Bz| = 30 nT.
+            bzSouth = Math.max(0, Math.min(1, -bz / 30));
+        } else {
+            bzSouth = Math.max(0, Math.min(1, (ap - 15) / 100));
+        }
+
+        // Overall auroral power envelope. Off at quiet time, fully on
+        // by Ap ~80 (G3). Shader multiplies by this; oval width also
+        // scales with Kp so the two work together.
+        const auroraAW = Math.max(0, Math.min(1, (ap - 12) / 110));
+
+        // Dst proxy: linearly negative with Ap; normalised to
+        // [-1..0] where -1 ≈ Ap 300 (G4-G5). Shader uses it for
+        // ring-current effects not modelled here.
+        const dstNorm = -Math.max(0, Math.min(1, ap / 300));
 
         this._skin.setSpaceWeather({
             kp,
-            auroraOn: auroraAW > 0.02,
+            auroraOn: auroraAW > 0.02 ? 1 : 0,
             auroraAW,
-            bzSouth: 0,
+            bzSouth,
             xray: 0,
-            dstNorm: 0,
+            dstNorm,
         });
     }
 
@@ -165,6 +206,7 @@ export class AtmosphereGlobe {
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
         this._controls?.dispose();
+        this._disposeHover?.();
         this._scene.traverse(o => {
             if (o.geometry) o.geometry.dispose?.();
             if (o.material) {
@@ -252,11 +294,18 @@ export class AtmosphereGlobe {
         // equatorial discs rather than full shells so they don't compete
         // visually with the density shells.
         this._layerGroup = new THREE.Group();
+        this._layerRings = [];
         for (const def of LAYER_BOUNDARY_RINGS) {
             const r = 1 + def.altKm / R_EARTH_KM;
             const ring = _ringMesh(r, 0.003, def.color, def.opacity);
-            ring.userData = { altKm: def.altKm, id: def.id };
+            ring.userData = {
+                kind: 'layer-boundary',
+                altKm: def.altKm,
+                id: def.id,
+                name: _layerBoundaryName(def.id),
+            };
             this._layerGroup.add(ring);
+            this._layerRings.push(ring);
         }
         this._scene.add(this._layerGroup);
     }
@@ -271,7 +320,13 @@ export class AtmosphereGlobe {
             const ring = _ringMesh(r, 0.004, _hex(sat.color), 0.75);
             ring.rotation.x = Math.PI / 2 + tilt * 0.05;
             ring.rotation.y = tilt * 0.8;
-            ring.userData = { altKm: sat.altitudeKm, id: sat.id, name: sat.name };
+            ring.userData = {
+                kind: 'satellite',
+                altKm: sat.altitudeKm,
+                id: sat.id,
+                name: sat.name,
+                color: sat.color,
+            };
             this._satRings.push(ring);
             this._satGroup.add(ring);
         }
@@ -338,6 +393,75 @@ export class AtmosphereGlobe {
         this._resizeObs.observe(this.canvas);
     }
 
+    _initTooltip() {
+        // Build the tooltip DOM once. Positioned absolutely inside the
+        // canvas's parent so it follows the mouse; hidden by default.
+        const parent = this.canvas.parentElement;
+        if (!parent) return;
+        // Ensure the parent is a positioning context.
+        if (getComputedStyle(parent).position === 'static') {
+            parent.style.position = 'relative';
+        }
+        const tip = document.createElement('div');
+        tip.className = 'ua-tooltip';
+        tip.style.cssText = `
+            position:absolute; pointer-events:none;
+            background:rgba(8,4,22,.92);
+            border:1px solid rgba(0,200,200,.35);
+            border-radius:6px;
+            padding:6px 9px;
+            font: 11px system-ui, sans-serif;
+            color:#cde;
+            box-shadow: 0 2px 14px rgba(0,0,0,.6);
+            transform: translate(-50%, -110%);
+            white-space: nowrap;
+            opacity: 0; transition: opacity 90ms;
+            z-index: 10;
+        `;
+        parent.appendChild(tip);
+        this._tip = tip;
+
+        this._raycaster = new THREE.Raycaster();
+        // Thicker hit area than the visual torus — makes these thin rings
+        // actually catchable with the mouse.
+        this._raycaster.params.Line = { threshold: 0.02 };
+        this._mouse = new THREE.Vector2(-9, -9);
+
+        const hittable = () => [...(this._satRings || []), ...(this._layerRings || [])];
+
+        const onMove = (e) => {
+            const rect = this.canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            this._mouse.x = (x / rect.width)  *  2 - 1;
+            this._mouse.y = (y / rect.height) * -2 + 1;
+            this._raycaster.setFromCamera(this._mouse, this._camera);
+            const hits = this._raycaster.intersectObjects(hittable(), false);
+            if (hits.length > 0) {
+                const ud = hits[0].object.userData || {};
+                tip.innerHTML = _tipHTML(ud, this._profile);
+                tip.style.left = `${x}px`;
+                tip.style.top  = `${y}px`;
+                tip.style.opacity = '1';
+                this.canvas.style.cursor = 'pointer';
+            } else {
+                tip.style.opacity = '0';
+                this.canvas.style.cursor = 'grab';
+            }
+        };
+        const onLeave = () => {
+            tip.style.opacity = '0';
+            this.canvas.style.cursor = 'grab';
+        };
+        this.canvas.addEventListener('mousemove', onMove);
+        this.canvas.addEventListener('mouseleave', onLeave);
+        this._disposeHover = () => {
+            this.canvas.removeEventListener('mousemove', onMove);
+            this.canvas.removeEventListener('mouseleave', onLeave);
+            tip.remove();
+        };
+    }
+
     _animate() {
         this._raf = requestAnimationFrame(this._animate);
         const t = this._clock.getElapsedTime();
@@ -390,4 +514,34 @@ function _hex(colorStr) {
     if (typeof colorStr === "number") return colorStr;
     if (!colorStr) return 0xffffff;
     return parseInt(colorStr.replace("#", ""), 16);
+}
+
+// Pretty-print name for a layer-boundary ring.
+function _layerBoundaryName(id) {
+    switch (id) {
+        case 'mesopause':   return 'Mesopause';
+        case 'thermopause': return 'Thermopause';
+        default:            return id;
+    }
+}
+
+// Build the tooltip HTML for a hovered ring. Pulls ρ from the current
+// profile when available so users see the local density at that shell.
+function _tipHTML(userData, profile) {
+    const colour = userData.color || '#0cc';
+    let rhoLine = '';
+    if (profile?.samples?.length) {
+        const alt = userData.altKm;
+        const rho = _nearestRho(profile.samples, alt);
+        rhoLine = `<div style="color:#889;margin-top:3px">ρ ≈ ${rho.toExponential(2)} kg/m³</div>`;
+    }
+    const kindLabel =
+        userData.kind === 'satellite'      ? 'satellite shell'  :
+        userData.kind === 'layer-boundary' ? 'atmospheric boundary' :
+                                             '';
+    return `
+        <div style="color:${colour};font-weight:600">${userData.name || userData.id}</div>
+        <div>${userData.altKm} km · ${kindLabel}</div>
+        ${rhoLine}
+    `;
 }

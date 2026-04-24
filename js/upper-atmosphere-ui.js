@@ -24,6 +24,7 @@ import {
     ATMOSPHERIC_LAYERS,
     SATELLITE_REFERENCES,
     fetchProfile,
+    fetchLiveIndices,
 } from './upper-atmosphere-engine.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
@@ -68,8 +69,88 @@ export class UpperAtmosphereUI {
         this._bindInputs();
         this._renderPresets();
         this._renderLayerLegend();
+        this._bindLiveButton();
+        this._bindSourcePill();
+        this._bindSwpcEventBus();
         this._bindResize();
+        this._paintSourcePill();
         this.refresh();
+    }
+
+    // ── Data-source pill ────────────────────────────────────────────────────
+
+    _bindSourcePill() {
+        const pill = this.el.sourcePill;
+        if (!pill) return;
+        // Two states: 'auto' (try backend, client-fallback) and
+        // 'client' (force client surrogate, no network). The pill label
+        // reflects whichever model actually answered.
+        pill.addEventListener('click', () => {
+            this.useBackend = !this.useBackend;
+            this._paintSourcePill();
+            this.refresh();
+        });
+    }
+
+    _paintSourcePill() {
+        const pill = this.el.sourcePill;
+        if (!pill) return;
+        const model = this.profile?.model || 'client';
+        const { cls, label, tip } = _pillFor(model, this.useBackend);
+        pill.className = `ua-source-pill ${cls}`
+            + (this.useBackend ? '' : ' ua-source--forced');
+        pill.querySelector('.ua-source-label').textContent = label;
+        pill.title = tip;
+    }
+
+    // ── Live-indices wiring ─────────────────────────────────────────────────
+
+    async _bindLiveButton() {
+        const btn = this.el.liveBtn;
+        const statusEl = this.el.liveStatus;
+        if (!btn) return;
+        btn.addEventListener('click', async () => {
+            btn.disabled = true;
+            if (statusEl) statusEl.textContent = 'fetching…';
+            try {
+                const live = await fetchLiveIndices();
+                if (!live) throw new Error('no data');
+                this.setState({ f107: live.f107Sfu, ap: live.ap });
+                if (statusEl) {
+                    const ts = new Date().toLocaleTimeString([], {
+                        hour: '2-digit', minute: '2-digit',
+                    });
+                    statusEl.textContent =
+                        `live · ${live.source} · ${ts}`;
+                }
+                if (this.el.summary) {
+                    this.el.summary.innerHTML =
+                        `<strong>Live NOAA conditions</strong> <span class="ua-dim">· ${live.source}</span>`
+                        + `<br>F10.7 ${live.f107Sfu.toFixed(1)} SFU · Ap ${live.ap.toFixed(0)}`
+                        + (Number.isFinite(live.kp) ? ` (from Kp ${live.kp.toFixed(1)})` : '');
+                }
+            } catch (err) {
+                if (statusEl) statusEl.textContent = 'unavailable — CORS or offline';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    }
+
+    _bindSwpcEventBus() {
+        // If the host page boots SpaceWeatherFeed (e.g. the user also has
+        // space-weather.html open in a parent frame), soak up values
+        // passively to keep the source-chip honest. Does NOT override user
+        // slider positions.
+        window.addEventListener('swpc-update', (e) => {
+            const d = e?.detail;
+            if (!d) return;
+            this._liveBusValues = {
+                f107: d.solar_activity?.f107_sfu ?? null,
+                kp:   d.geomagnetic?.kp ?? d.kp ?? null,
+                bz:   d.solar_wind?.bz ?? d.bz ?? null,
+            };
+        });
     }
 
     // ── Public ──────────────────────────────────────────────────────────────
@@ -100,7 +181,14 @@ export class UpperAtmosphereUI {
         if (this.el.apVal)   this.el.apVal.textContent   = String(Math.round(ap));
 
         // Drive the globe state immediately (aurora, ring position).
-        this.globe.setState({ f107, ap });
+        // If the host page is broadcasting live Bz via swpc-update, hand
+        // it through so the aurora shader uses real southward-IMF forcing
+        // instead of the Ap-derived proxy.
+        const liveBz = this._liveBusValues?.bz;
+        this.globe.setState({
+            f107, ap,
+            bz: Number.isFinite(liveBz) ? liveBz : null,
+        });
         this.globe.setAltitude(altitude);
 
         // Local sample first — so the plots respond on every frame while
@@ -115,6 +203,7 @@ export class UpperAtmosphereUI {
         this._drawDensityProfile();
         this._drawComposition();
         this._paintStats();
+        this._paintSourcePill();
 
         if (this.useBackend) this._scheduleBackendRefresh();
     }
@@ -145,6 +234,7 @@ export class UpperAtmosphereUI {
                 this._drawDensityProfile();
                 this._drawComposition();
                 this._paintStats();
+                this._paintSourcePill();
             }
         } catch (_) {
             // fetchProfile already handled the fallback internally
@@ -592,4 +682,48 @@ function _sourceLabel(model) {
     if (model === 'client-fallback')return 'client*';
     if (model === 'client')         return 'client';
     return model;
+}
+
+/**
+ * Map a model string + mode to a pill class / label / tooltip.
+ *   cls      CSS class (ua-source--{client,fallback,backend,sparta})
+ *   label    short user-visible text
+ *   tip      hover tooltip
+ */
+function _pillFor(model, useBackend) {
+    const mode = useBackend ? 'Auto' : 'Client only';
+    switch (model) {
+        case 'SPARTA-lookup':
+            return {
+                cls: 'ua-source--sparta',
+                label: `SPARTA · ${mode}`,
+                tip: 'Backend answered from a precomputed SPARTA DSMC lookup table. Highest-fidelity source. Click to toggle Auto / Client-only.',
+            };
+        case 'NRLMSISE-00':
+            return {
+                cls: 'ua-source--backend',
+                label: `MSIS · ${mode}`,
+                tip: 'Backend answered from NRLMSISE-00. SPARTA tables not yet populated. Click to toggle Auto / Client-only.',
+            };
+        case 'exp-fallback':
+            return {
+                cls: 'ua-source--fallback',
+                label: `Backend fallback · ${mode}`,
+                tip: 'Backend is alive but NRLMSISE-00 and SPARTA both unavailable; server is on its exponential fallback. Click to toggle.',
+            };
+        case 'client-fallback':
+            return {
+                cls: 'ua-source--fallback',
+                label: `Client fallback · ${mode}`,
+                tip: 'Backend unreachable; page is running its in-browser surrogate. Click to toggle.',
+            };
+        default:
+            return {
+                cls: 'ua-source--client',
+                label: `Client · ${mode}`,
+                tip: useBackend
+                    ? 'In-browser surrogate (no backend reachable or configured yet). Click to toggle.'
+                    : 'In-browser surrogate — backend calls disabled. Click to re-enable Auto mode.',
+            };
+    }
 }

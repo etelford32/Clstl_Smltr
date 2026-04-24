@@ -4036,10 +4036,28 @@ window.openImg = function(thumb) {
         ctx.fillText('1000 km', w - pad, h - 1);
     }
 
+    // ── Live state sourced from the `swpc-update` event bus ──────────────
+    // Falls back to reading #kp-val (MutationObserver path) if the bus
+    // event hasn't fired yet — keeps the card useful during slow boots.
+    let _liveF107 = null;            // SFU — null means "use fallback 150"
+    let _liveKp   = null;
+    let _liveBz   = null;
+    window.addEventListener('swpc-update', (e) => {
+        const d = e?.detail;
+        if (!d) return;
+        const f = d.solar_activity?.f107_sfu;
+        const k = d.geomagnetic?.kp ?? d.kp;
+        const bz = d.solar_wind?.bz ?? d.bz;
+        if (Number.isFinite(f)) _liveF107 = f;
+        if (Number.isFinite(k)) _liveKp   = k;
+        if (Number.isFinite(bz)) _liveBz  = bz;
+        refresh();
+    });
+
     function refresh() {
-        const kp = readKp();
+        const kp = Number.isFinite(_liveKp) ? _liveKp : readKp();
         const ap = kpToAp(kp);
-        const f107 = 150;
+        const f107 = Number.isFinite(_liveF107) ? _liveF107 : 150;
 
         const snap = getSnapshot({
             f107Sfu: f107, ap,
@@ -4057,6 +4075,16 @@ window.openImg = function(thumb) {
         if (iss) setTxt('ua-dom', `${iss.dominantSpecies} · ${(iss.dominantFraction * 100).toFixed(0)}%`);
         if (iss) setTxt('ua-regime', regimeLabel(iss.rho, ap));
 
+        // Update the source-note line so the user can see what's driving
+        // the card.
+        const note = $('ua-src-note');
+        if (note) {
+            const f107Label = Number.isFinite(_liveF107)
+                ? `F10.7 ${_liveF107.toFixed(0)} SFU (live · NOAA)`
+                : `F10.7 150 SFU (climatology)`;
+            note.textContent = `Kp ${kp.toFixed(1)} → Ap ${ap.toFixed(0)} · ${f107Label}`;
+        }
+
         drawMiniPlot(f107, ap);
     }
 
@@ -4069,8 +4097,11 @@ window.openImg = function(thumb) {
             childList: true, characterData: true, subtree: true,
         });
     }
-    new ResizeObserver(() => drawMiniPlot(150, kpToAp(readKp())))
-        .observe(document.getElementById('ua-mini-plot'));
+    new ResizeObserver(() => {
+        const kp = Number.isFinite(_liveKp) ? _liveKp : readKp();
+        const f107 = Number.isFinite(_liveF107) ? _liveF107 : 150;
+        drawMiniPlot(f107, kpToAp(kp));
+    }).observe(document.getElementById('ua-mini-plot'));
 </script>
 
 </body>

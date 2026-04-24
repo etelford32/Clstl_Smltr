@@ -369,6 +369,92 @@ function _normaliseSatellites(list) {
     }));
 }
 
+// ── NOAA SWPC Kp↔Ap conversion table (SWPC canonical) ──────────────────────
+const _KP_TO_AP = [0, 3, 7, 15, 27, 48, 80, 140, 240, 400];
+
+/**
+ * Fractional-Kp → Ap. Outside the [0, 9] band we clamp to the table
+ * endpoints; NaN / bogus input → quiet-time default 15.
+ */
+export function kpToAp(kp) {
+    if (!Number.isFinite(kp) || kp < 0) return 15;
+    const lo = Math.floor(Math.min(kp, 9));
+    const hi = Math.min(lo + 1, 9);
+    const t = Math.max(0, Math.min(1, kp - lo));
+    return _KP_TO_AP[lo] * (1 - t) + _KP_TO_AP[hi] * t;
+}
+
+/**
+ * Fetch current NOAA indices (F10.7, Kp, Ap) for "Live NOAA" buttons.
+ * Preference order:
+ *   1. Parker Physics DSMC backend — GET /v1/atmosphere/indices
+ *      (already pre-ingested by the Belay supervisor; fastest, cached).
+ *   2. NOAA SWPC direct JSON endpoints (CORS-enabled).
+ *      f107_cm_flux.json  → { flux: SFU, ... }[]      — daily F10.7
+ *      planetary_k_index_1m.json → [[time, kp], ...]  — 1-minute Kp
+ *
+ * Resolves to null on any failure — callers should handle gracefully.
+ */
+export async function fetchLiveIndices({ timeoutMs = 3500 } = {}) {
+    const base = _apiBase();
+
+    // Try backend first (faster + authoritative).
+    if (base) {
+        try {
+            const r = await _timedFetch(
+                `${base.replace(/\/$/, "")}/v1/atmosphere/indices`,
+                timeoutMs,
+            );
+            if (r.ok) {
+                const d = await r.json();
+                const f107 = d?.f107_latest?.f107_obs_sfu
+                          ?? d?.f107_latest?.f107_adj_sfu
+                          ?? null;
+                const ap   = d?.ap_latest?.ap ?? null;
+                if (Number.isFinite(f107) && Number.isFinite(ap)) {
+                    return { f107Sfu: f107, ap, source: "backend" };
+                }
+            }
+        } catch (_) { /* fall through to NOAA direct */ }
+    }
+
+    // NOAA direct — two concurrent fetches.
+    try {
+        const [fluxRes, kpRes] = await Promise.all([
+            _timedFetch("https://services.swpc.noaa.gov/json/f107_cm_flux.json", timeoutMs),
+            _timedFetch("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", timeoutMs),
+        ]);
+        let f107 = null, kp = null;
+        if (fluxRes.ok) {
+            const arr = await fluxRes.json();
+            const cur = Array.isArray(arr) ? arr[arr.length - 1] : null;
+            const raw = cur?.flux ?? cur?.f107 ?? cur?.f107_flux ?? null;
+            if (Number.isFinite(raw)) f107 = raw;
+        }
+        if (kpRes.ok) {
+            const arr = await kpRes.json();
+            // Format: [["time_tag","Kp","a_running","station_count"], [...]]
+            if (Array.isArray(arr) && arr.length > 1) {
+                const last = arr[arr.length - 1];
+                const raw = parseFloat(last[1]);
+                if (Number.isFinite(raw)) kp = raw;
+            }
+        }
+        if (Number.isFinite(f107) && Number.isFinite(kp)) {
+            return { f107Sfu: f107, ap: kpToAp(kp), kp, source: "noaa-direct" };
+        }
+    } catch (_) { /* fall through */ }
+
+    return null;
+}
+
+function _timedFetch(url, timeoutMs) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    return fetch(url, { signal: ctl.signal, headers: { Accept: "application/json" } })
+        .finally(() => clearTimeout(t));
+}
+
 /**
  * Compact point snapshot for embedding in other pages (space-weather
  * card, dashboard widgets). Returns {ρ, T, dominant} at 200/400/600 km
