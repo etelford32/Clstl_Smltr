@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TON 618 Research Observatory — Parker Physics App</title>
+<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0: Schwarzschild baseline with RK45 null-geodesic ray tracing.">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
+
+#app { display:flex; height:calc(100vh - 48px); }
+#canvas-area { flex:1; position:relative; background:#000; overflow:hidden; }
+#glCanvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; image-rendering:auto; }
+
+/* HUD */
+#hud {
+    position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
+    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
+    background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
+    border:1px solid rgba(255,140,0,.15); border-radius:6px;
+    padding:10px 14px; min-width:320px; color:#cca266; white-space:pre;
+}
+#hud-title {
+    position:absolute; top:10px; left:10px; transform:translateY(-18px);
+    font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
+    pointer-events:none;
+}
+#validation {
+    position:absolute; bottom:14px; left:14px; z-index:10;
+    font-size:10px; line-height:1.6; color:#8fd7ff;
+    background:rgba(0,0,0,.6); border:1px solid rgba(143,215,255,.25);
+    border-radius:6px; padding:10px 14px; white-space:pre; display:none;
+}
+#controls-hint {
+    position:absolute; bottom:14px; right:14px; z-index:10;
+    font-size:9.5px; color:#777; background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:7px 10px;
+}
+
+/* Right panel */
+#panel {
+    width:270px; min-width:270px; background:rgba(8,4,20,.95);
+    border-left:1px solid rgba(255,120,0,.2);
+    display:flex; flex-direction:column; overflow-y:auto;
+    padding:12px; gap:10px;
+}
+#panel::-webkit-scrollbar { width:4px; }
+#panel::-webkit-scrollbar-thumb { background:rgba(255,140,0,.3); border-radius:2px; }
+.sec-title {
+    font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800;
+    border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px;
+}
+.ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
+.ctrl label { font-size:10px; color:#aaa; }
+.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
+.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+select {
+    background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc;
+    padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%;
+}
+.toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.toggle-row input { accent-color:#ff8800; }
+.toggle-row label { font-size:10px; color:#aaa; cursor:pointer; }
+.btn {
+    background:rgba(255,100,0,.15); border:1px solid rgba(255,120,0,.4);
+    color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; width:100%; transition:background .2s;
+}
+.btn:hover { background:rgba(255,100,0,.3); }
+.shader-badge {
+    display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
+    color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
+    letter-spacing:.08em; margin-bottom:6px;
+}
+.info-box {
+    font-size:10px; color:#888; line-height:1.6;
+    border:1px solid rgba(255,255,255,.06); border-radius:4px;
+    padding:8px; background:rgba(255,255,255,.02);
+}
+.info-box b { color:#ffaa44; }
+.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
+.note { font-size:9.5px; color:#777; line-height:1.5; margin-top:4px; }
+.phase-pill {
+    display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
+    color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
+}
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("ton618");</script>
+
+<div id="app">
+    <div id="canvas-area">
+        <canvas id="glCanvas"></canvas>
+        <div id="hud-title">Phase 0 · Schwarzschild Baseline · RK45 null-geodesic</div>
+        <div id="hud">booting…</div>
+        <div id="validation"></div>
+        <div id="controls-hint">Drag: orbit &nbsp;·&nbsp; Shift+Drag: look &nbsp;·&nbsp; Wheel: dolly &nbsp;·&nbsp; WASD/QE: strafe &nbsp;·&nbsp; R: reset</div>
+    </div>
+
+    <aside id="panel">
+        <div>
+            <div class="shader-badge">▸ WebGL2 · RK45</div>
+            <div class="sec-title"><span class="phase-pill">Phase 0</span> Observatory</div>
+            <div class="note">Research-grade Kerr geodesic observatory for TON 618
+                (M ≈ 6.6×10¹⁰ M☉). Currently a Schwarzschild baseline; spin is fixed at
+                <i>a = 0</i> until Phase 1 lands.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Observer (geometrized, M = 1)</div>
+            <div class="ctrl">
+                <label>Radial distance r [M]</label>
+                <input type="range" id="s-r" min="2.5" max="200" step="0.5" value="30">
+                <div class="val" id="v-r">30 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Polar angle θ</label>
+                <input type="range" id="s-theta" min="2" max="178" step="1" value="90">
+                <div class="val" id="v-theta">90°</div>
+            </div>
+            <div class="ctrl">
+                <label>Azimuth φ</label>
+                <input type="range" id="s-phi" min="0" max="360" step="1" value="0">
+                <div class="val" id="v-phi">0°</div>
+            </div>
+            <div class="ctrl">
+                <label>Field of view</label>
+                <input type="range" id="s-fov" min="15" max="120" step="1" value="45">
+                <div class="val" id="v-fov">45°</div>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Integrator</div>
+            <div class="ctrl">
+                <label>Quality preset</label>
+                <select id="quality">
+                    <option value="mobile">Mobile (0.5× · 400 steps)</option>
+                    <option value="standard" selected>Standard (0.75× · 900 steps)</option>
+                    <option value="cinema">Cinema (1.0× · 1600 steps)</option>
+                    <option value="research">Research (1.0× · 3000 steps)</option>
+                </select>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showRing" checked>
+                <label for="showRing">Highlight photon ring</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Validation</div>
+            <button class="btn" id="btnValidate">⊙ Measure photon ring</button>
+            <div class="note">Expected apparent ring radius at infinity:
+                <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
+                (Bardeen-Press-Teukolsky, Schwarzschild).</div>
+        </div>
+
+        <div class="sep"></div>
+        <div class="info-box">
+            <b>Phase 0 physics</b><br>
+            <span style="color:#ffaa44">① Tetrad:</span> static-observer orthonormal frame
+            {e_(t), e_(r), e_(θ), e_(φ)} in Schwarzschild coords; valid only for r &gt; 2M.<br>
+            <span style="color:#ffaa44">② Ray construction:</span> pixel → local 3-direction
+            → null 4-momentum k^μ via tetrad.<br>
+            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5) adaptive on 8-D
+            phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
+            <span style="color:#ffaa44">④ Termination:</span> horizon capture at r ≲ 2M, or
+            escape past r_far = 1200 M onto the celestial sphere.<br>
+            <span style="color:#ffaa44">⑤ Starfield:</span> procedural, hash-based — lensed
+            by construction (the shadow + photon-ring pattern emerges from the geodesics, not
+            a post-process).
+        </div>
+        <div class="note">
+            UI note: TON 618 mass is <i>measured</i> (virial/SED);
+            spin <i>a = 0.95</i> (Phase 1 default) is <i>inferred</i>;
+            super-Eddington phases are <i>hypothetical</i>.
+        </div>
+    </aside>
+</div>
+
+<script type="module">
+    import { boot } from './js/ton618/main.js';
+
+    const canvas = document.getElementById('glCanvas');
+    const hud    = document.getElementById('hud');
+
+    const app = await boot({ canvas, hud });
+
+    // ── panel wiring ───────────────────────────────────────────────
+    const $ = (id) => document.getElementById(id);
+
+    function bindRange(id, valId, fmt, onChange) {
+        const el  = $(id);
+        const val = $(valId);
+        el.addEventListener('input', () => {
+            val.textContent = fmt(+el.value);
+            onChange(+el.value);
+        });
+    }
+
+    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,   (v) => { app.state.cam.r = v; app.forceRender(); });
+    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.forceRender(); });
+    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.forceRender(); });
+    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,    (v) => { app.setFov(v); });
+
+    $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
+    $('showRing').addEventListener('change', () => app.toggleRing());
+
+    $('btnValidate').addEventListener('click', () => {
+        const v = $('validation');
+        v.style.display = 'block';
+        v.textContent = 'measuring…';
+        setTimeout(() => {
+            const result = app.runPhotonRingValidation();
+            if (!result) {
+                v.textContent = 'validation failed: no shadow detected';
+                return;
+            }
+            const pass = Math.abs(result.error_pct) < 1.0;
+            v.textContent = [
+                `PHOTON RING VALIDATION`,
+                `  measured b  = ${result.b_measured.toFixed(4)} M`,
+                `  expected b  = ${result.b_expected.toFixed(4)} M`,
+                `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
+                `  expected    = ${result.ring_rs_expected.toFixed(4)} r_s`,
+                `  error       = ${result.error_pct.toFixed(3)} %`,
+                `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
+            ].join('\n');
+        }, 50);
+    });
+</script>
+</body>
+</html>
