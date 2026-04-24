@@ -166,6 +166,10 @@
       "destination": "/missions.html"
     },
     {
+      "source": "/upper-atmosphere",
+      "destination": "/upper-atmosphere.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },

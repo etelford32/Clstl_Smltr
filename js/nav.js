@@ -96,6 +96,36 @@ function _tierRequired(tier) {
     return 0;
 }
 
+// ── Global-listener guard ──────────────────────────────────────────────────
+// initNav() is called once on import and again on every `auth-changed`
+// event (so the admin badge / sign-in state stays fresh). Without this
+// guard each re-entry would stack ANOTHER copy of the document/window
+// event listeners — the earliest ones then reference stale burger/menu
+// DOM nodes (nav.innerHTML = html blows them away on every build), which
+// on mobile produced the "can't re-toggle the burger" bug: the original
+// click handler was wired to a now-detached element.
+//
+// We bind once, then always resolve burger/menu via document.getElementById
+// so we're operating on the live DOM regardless of how many re-renders
+// have happened.
+let _globalListenersBound = false;
+
+function _getBurger() { return document.getElementById('nav-burger'); }
+function _getMenu()   { return document.getElementById('nav-menu');  }
+
+function _closeAll() {
+    const menu = _getMenu();
+    const burger = _getBurger();
+    menu?.classList.remove('open');
+    burger?.classList.remove('open');
+    burger?.setAttribute('aria-expanded', 'false');
+    document.body.style.overflow = '';
+    document.querySelectorAll('nav .nav-drop.open').forEach(d => {
+        d.classList.remove('open');
+        d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
+    });
+}
+
 // ── Nav Builder ──────────────────────────────────────────────────────────────
 
 export function initNav(activeId = '') {
@@ -119,7 +149,7 @@ export function initNav(activeId = '') {
             <img src="${LOGO_IMG}" class="nav-logo-img" alt="Parker Physics">
             Parker Physics
         </a>
-        <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">
+        <button type="button" class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">
             <span class="burger-line"></span>
             <span class="burger-line"></span>
             <span class="burger-line"></span>
@@ -228,59 +258,62 @@ export function initNav(activeId = '') {
 
     // ── Event handlers ────────────────────────────────────────────────────
 
+    // ── Per-render, bound to the FRESH burger/menu DOM nodes ──────────────
+    // These two listeners live on elements that were just created by
+    // `nav.innerHTML = html`, so each initNav re-entry gets them anew
+    // without any stale references. The globally-bound listeners below
+    // always look up the live DOM by id.
     const burger = document.getElementById('nav-burger');
     const menu   = document.getElementById('nav-menu');
 
-    // Track whether last interaction was touch (for hybrid devices)
-    let lastWasTouch = false;
-    nav.addEventListener('touchstart', () => { lastWasTouch = true; }, { passive: true });
-    nav.addEventListener('mousemove', () => { lastWasTouch = false; }, { passive: true });
-
-    // Burger toggle with animated hamburger
-    burger?.addEventListener('click', () => {
-        const open = menu.classList.toggle('open');
-        burger.classList.toggle('open', open);
-        burger.setAttribute('aria-expanded', open);
-        // Prevent body scroll when menu is open on mobile
-        document.body.style.overflow = open ? 'hidden' : '';
-    });
-
-    // Close on outside click/touch
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
+    burger?.addEventListener('click', (e) => {
+        // stopPropagation keeps the "close on outside click" handler
+        // below from firing on the same event bubble path.
+        e.stopPropagation();
+        const willOpen = !menu.classList.contains('open');
+        if (willOpen) {
+            menu.classList.add('open');
+            burger.classList.add('open');
+            burger.setAttribute('aria-expanded', 'true');
+            document.body.style.overflow = 'hidden';
+        } else {
             _closeAll();
         }
     });
 
-    // Close mobile menu when a link is clicked (navigation)
     menu?.addEventListener('click', e => {
         if (e.target.closest('.nav-drop-link') || e.target.closest('.nav-item')) {
-            // Only close on mobile — on desktop, dropdown link clicks navigate normally
-            if (window.innerWidth <= 1024) {
-                _closeAll();
-            }
+            // Only close on mobile — on desktop, dropdown link clicks
+            // navigate normally and the menu goes away with the page.
+            if (window.innerWidth <= 1024) _closeAll();
         }
     });
 
-    // Keyboard: Escape closes dropdowns and mobile menu
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') {
+    // ── Global listeners — bound ONCE across all initNav re-entries ───────
+    if (!_globalListenersBound) {
+        _globalListenersBound = true;
+
+        // Track whether last interaction was touch (for hybrid devices).
+        // Attached to document (not nav) so the flag survives re-renders.
+        document.addEventListener('touchstart', () => {
+            document.body.dataset.ppLastWasTouch = 'true';
+        }, { passive: true });
+        document.addEventListener('mousemove', () => {
+            document.body.dataset.ppLastWasTouch = 'false';
+        }, { passive: true });
+
+        // Close on outside click.
+        document.addEventListener('click', e => {
+            if (!e.target.closest('nav')) _closeAll();
+        });
+
+        // Escape closes dropdowns and mobile menu.
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
             _closeAll();
-            // Return focus to the last opened dropdown button or burger
-            const openBtn = nav.querySelector('.nav-drop.open .nav-drop-btn');
+            const openBtn = document.querySelector('nav .nav-drop.open .nav-drop-btn');
             if (openBtn) openBtn.focus();
-            else burger?.focus();
-        }
-    });
-
-    function _closeAll() {
-        menu?.classList.remove('open');
-        burger?.classList.remove('open');
-        if (burger) burger.setAttribute('aria-expanded', 'false');
-        document.body.style.overflow = '';
-        nav.querySelectorAll('.nav-drop.open').forEach(d => {
-            d.classList.remove('open');
-            d.querySelector('.nav-drop-btn')?.setAttribute('aria-expanded', 'false');
+            else _getBurger()?.focus();
         });
     }
 
@@ -313,19 +346,19 @@ export function initNav(activeId = '') {
 
         // Desktop: hover with 250ms grace period
         drop.addEventListener('mouseenter', () => {
-            if (!lastWasTouch) openDrop();
+            if (document.body.dataset.ppLastWasTouch !== 'true') openDrop();
         });
         drop.addEventListener('mouseleave', () => {
-            if (!lastWasTouch) scheduleClose();
+            if (document.body.dataset.ppLastWasTouch !== 'true') scheduleClose();
         });
 
         // Keep open when hovering the dropdown menu itself
         if (dropMenu) {
             dropMenu.addEventListener('mouseenter', () => {
-                if (!lastWasTouch) clearTimeout(closeTimer);
+                if (document.body.dataset.ppLastWasTouch !== 'true') clearTimeout(closeTimer);
             });
             dropMenu.addEventListener('mouseleave', () => {
-                if (!lastWasTouch) scheduleClose();
+                if (document.body.dataset.ppLastWasTouch !== 'true') scheduleClose();
             });
         }
 
