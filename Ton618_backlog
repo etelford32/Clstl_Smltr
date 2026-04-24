@@ -1,0 +1,182 @@
+# TON 618 Research Observatory — Project Backlog
+
+**A close-up, research-grade Kerr geodesic observatory for the most massive known black hole.**
+
+---
+
+## Architecture decisions (locked)
+
+- **Coordinates:** Hybrid Kerr-Schild (primary, horizon-penetrating) with Boyer-Lindquist diagnostics (constants of motion as accuracy checks).
+- **Rendering backend:** WebGL2 baseline, WebGPU acceleration path when available. Ray-tracing kernel isolated behind a backend-agnostic interface.
+- **Spin parameter:** `a` slider 0 → 0.998, default 0.95. UI notes default reflects plausible inference, not direct measurement.
+- **Accretion rate:** `ṁ` slider 0.001 → 10 (log scale), default 0.95. Regime labels on slider.
+- **Units:** Internal code in geometrized units (G = c = M = 1). UI displays r_s, AU, light-hours, light-years.
+- **Target host:** `elliottelford.com` (static embed) and standalone research tool.
+
+---
+
+## Phase 0 — Scaffold & Schwarzschild baseline
+
+Goal: verifiable, photograph-matchable Schwarzschild render. No disk yet. Prove the pipeline.
+
+- [ ] Project structure (Vite or bare ES modules, your call)
+- [ ] WebGL2 renderer with WebGPU capability detection + fallback stub
+- [ ] Camera system in geometrized units: position (r, θ, φ, t), local orthonormal tetrad construction
+- [ ] Pixel → null 4-momentum conversion (tetrad-based, the unsexy foundation everything rides on)
+- [ ] Schwarzschild metric in fragment shader
+- [ ] RK45 adaptive-step geodesic integrator on 8D phase space
+- [ ] Termination tests: horizon (r < 2M), celestial sphere (r > r_far), step count cap
+- [ ] Celestial sphere texture (high-res starfield, gravitationally lensed by construction)
+- [ ] Visible event horizon + photon ring
+- [ ] **Validation:** photon ring apparent radius = 2.6 r_s at infinity (analytical)
+- [ ] God-mode camera controls (orbit, pan, dolly, crash-through-horizon)
+
+---
+
+## Phase 1 — Kerr metric
+
+Goal: full rotating black hole with ergosphere and spin-dependent shadow.
+
+- [ ] Kerr-Schild metric in shader (replaces Schwarzschild)
+- [ ] BL-coordinate constants of motion (E, L_z, Carter Q) computed as diagnostics per geodesic
+- [ ] Horizon: r_+ = M + √(M² − a²)
+- [ ] Ergosphere surface: r_ergo(θ) = M + √(M² − a²cos²θ)
+- [ ] Frame-dragging angular velocity field ω(r, θ) = −g_tφ / g_φφ
+- [ ] Prograde vs retrograde photon spheres
+- [ ] Spin slider 0 → 0.998 with live re-render
+- [ ] **Validation:** Kerr shadow shape at a = 0.998 equatorial observer vs Bardeen 1973 analytic result
+
+---
+
+## Phase 2 — Accretion disk physics
+
+Goal: visually convincing, physically grounded disk across the full phase spectrum.
+
+- [ ] **Novikov-Thorne thin disk** — T(r), H(r), surface density
+- [ ] ISCO calculation for arbitrary spin (prograde + retrograde)
+- [ ] Disk intersection logic in Kerr-Schild (z ≈ 0 plane, r_ISCO < r < r_outer)
+- [ ] Redshift factor g = E_obs / E_emit including gravitational + Doppler components
+- [ ] Intensity transform I_ν / ν³ = invariant (the Interstellar effect, correct)
+- [ ] Blackbody spectrum at T·g, integrated against CIE color matching → sRGB
+- [ ] **Slim disk branch** (Abramowicz et al. 1988) — geometric puffing H/R → 1, photon trapping, advection
+- [ ] **ADAF/RIAF branch** for ṁ < 0.01 — geometrically thick, optically thin, hot
+- [ ] Keplerian time evolution — local Ω(r) driving procedural noise for MRI turbulence visualization
+- [ ] ṁ slider with regime labels (RIAF / thin disk / slim disk / extreme super-Eddington)
+- [ ] Radiation-driven winds at high ṁ (cosmetic wind layer above disk)
+
+---
+
+## Phase 3 — Jet module
+
+Goal: relativistic jet with adjustable physics.
+
+- [ ] Parametric jet geometry (paraboloid or cone from pole, Blandford-Znajek morphology)
+- [ ] Synchrotron emission with power-law index α (0.5–1)
+- [ ] Doppler beaming factor δ = 1/[γ(1 − β cosθ)], intensity ∝ δ^(2+α)
+- [ ] Velocity slider (0.1c → 0.999c, i.e. Γ = 1.005 → 22.4)
+- [ ] Jet launching efficiency slider η_jet = L_jet / (Ṁc²) with Blandford-Znajek upper bound tied to spin
+- [ ] Counter-jet rendering (Doppler-suppressed, often invisible)
+- [ ] Jet knots / shock structures (time-variable brightness spots)
+- [ ] Jet-disk coupling: jet power scales with ṁ and a²
+
+---
+
+## Phase 4 — Visual analytics overlays
+
+Goal: make the invisible visible. Research-grade annotations.
+
+- [ ] Photon sphere(s) — prograde + retrograde, spin-dependent
+- [ ] Ergosphere translucent surface (toggle)
+- [ ] ISCO ring (toggle) — shrinks live as user adjusts spin
+- [ ] Horizon surface (opaque toggle vs translucent diagnostic toggle)
+- [ ] Frame-dragging vector field inside ergosphere
+- [ ] **Click-a-pixel → trace that photon's full geodesic path in 3D** (killer feature)
+- [ ] **Kip Thorne embedding diagram** — 2D equatorial slice embedded in 3D Euclidean, rendered as the funnel surface
+- [ ] Penrose diagram as **side panel** (not 3D overlay) — conformal structure, updates with camera position
+- [ ] Twistor-space panel deferred / optional — not a natural 3D overlay; revisit post-launch
+
+---
+
+## Phase 5 — Gravity Lab (side panel)
+
+Goal: simulation-lab vibe. Physics instrumentation alongside the render.
+
+- [ ] Panel 1: Proper distance vs coordinate r — diverges at horizon
+- [ ] Panel 2: Effective gravity for stationary observer — g = GM/(r²√(1 − r_s/r))
+- [ ] Panel 3: Circular orbit velocities (prograde + retrograde) vs r
+- [ ] Panel 4: Gravitational time dilation γ_grav(r)
+- [ ] Panel 5: Tidal gravity Δg/L — demonstrates gentle horizon tides for SMBH (human survives crossing!)
+- [ ] Panel 6: Ergosphere geometry cutaway (equator vs pole extent vs spin)
+- [ ] **Crosshair linking:** hover main render → panels show values at that location
+- [ ] **Click disk/jet:** full physical state readout (v_orbital, τ_local, g-factor, T_local, ρ_local)
+
+---
+
+## Phase 6 — Time series & evolution
+
+Goal: grounded temporal exploration.
+
+- [ ] Time slider with physically labeled scales:
+  - ISCO orbit period (~weeks–months for TON 618)
+  - Inner disk dynamical time
+  - Disk warping / precession timescale (~years)
+  - Jet propagation timescale (~years–decades for visible kpc-scale)
+- [ ] "1 year of rotation" vs "100 years of rotation" modes with correct dynamical scaling
+- [ ] Time-evolving MRI turbulence pattern (procedural noise keyed to Ω(r))
+- [ ] Jet knot ejection events on long timescales
+- [ ] Playback controls: play / pause / scrub / speed multiplier
+
+---
+
+## Phase 7 — Performance & polish
+
+Goal: 60fps on mid-range hardware, 30fps minimum on mobile.
+
+- [ ] Half-resolution ray tracing + temporal upscaling (TAA)
+- [ ] Importance sampling near photon ring (adaptive ray density)
+- [ ] Early termination heuristics for escaped rays
+- [ ] WebGPU compute shader path (2–4× speedup)
+- [ ] Quality presets: mobile / standard / cinema / research
+- [ ] Screenshot + video capture
+- [ ] Preset scenarios: "pole-on blazar," "edge-on disk," "horizon plunge," "jet flythrough"
+- [ ] Embed-friendly iframe mode for elliottelford.com
+
+---
+
+## Validation & scientific integrity
+
+- [ ] Constants of motion (E, L_z, Q) drift < 10⁻⁶ over typical integration
+- [ ] Schwarzschild photon ring at 2.6 r_s ± 0.1%
+- [ ] Kerr shadow shape matches Bardeen analytic at a = 0.998
+- [ ] ISCO radius matches Bardeen, Press, Teukolsky 1972 table across spin range
+- [ ] Novikov-Thorne disk temperature profile matches reference at M = 10¹⁰ M_☉
+- [ ] UI copy distinguishes **measured** (mass, luminosity) from **inferred** (spin) from **hypothetical** (super-Eddington phase)
+
+---
+
+## Stretch / post-launch
+
+- [ ] Comparative mode: TON 618 vs M87* vs Sgr A* vs stellar-mass (scale rendering)
+- [ ] Educational guided tours (narrated camera paths with annotations)
+- [ ] Spectrum panel: live SED from current render state
+- [ ] Binary SMBH mode (gravitational wave precursor visualization)
+- [ ] Shareable URL state (encode full parameter set in hash)
+- [ ] VR mode (WebXR)
+
+---
+
+## Reference reading (to have open while building)
+
+- Bardeen, Press, Teukolsky 1972 — Kerr geodesics, ISCO
+- Bardeen 1973 — Black hole shadow
+- Novikov & Thorne 1973 — Relativistic thin disk
+- Shakura & Sunyaev 1973 — Standard disk model
+- Abramowicz, Czerny, Lasota, Szuszkiewicz 1988 — Slim disk
+- Blandford & Znajek 1977 — Jet power from spin
+- James, Tunzelmann, Franklin, Thorne 2015 — *Interstellar* gravitational lensing paper
+- rantonels' `starless` — reference Schwarzschild WebGL implementation
+- Narayan, Sądowski, Tchekhovskoy — MAD / GRMHD super-Eddington papers
+
+---
+
+*Next action: Phase 0, scaffold the project.*
