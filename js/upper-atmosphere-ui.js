@@ -676,11 +676,12 @@ function _alpha(cssColor, a) {
 
 function _sourceLabel(model) {
     if (!model) return 'client';
-    if (model === 'SPARTA-lookup')  return 'SPARTA';
-    if (model === 'NRLMSISE-00')    return 'MSIS';
-    if (model === 'exp-fallback')   return 'fallback';
-    if (model === 'client-fallback')return 'client*';
-    if (model === 'client')         return 'client';
+    if (model === 'SPARTA-lookup')    return 'SPARTA';
+    if (model === 'SPARTA-bootstrap') return 'SPARTA·boot';
+    if (model === 'NRLMSISE-00')      return 'MSIS';
+    if (model === 'exp-fallback')     return 'fallback';
+    if (model === 'client-fallback')  return 'client*';
+    if (model === 'client')           return 'client';
     return model;
 }
 
@@ -698,6 +699,12 @@ function _pillFor(model, useBackend) {
                 cls: 'ua-source--sparta',
                 label: `SPARTA · ${mode}`,
                 tip: 'Backend answered from a precomputed SPARTA DSMC lookup table. Highest-fidelity source. Click to toggle Auto / Client-only.',
+            };
+        case 'SPARTA-bootstrap':
+            return {
+                cls: 'ua-source--bootstrap',
+                label: `SPARTA·boot · ${mode}`,
+                tip: 'Backend served an MSIS-seeded bootstrap table (grid is populated but rows have not yet been refined by a SPARTA run). Click to toggle.',
             };
         case 'NRLMSISE-00':
             return {

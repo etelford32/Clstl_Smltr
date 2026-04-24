@@ -262,6 +262,15 @@ export function dominantSpecies(altitudeKm) {
 
 function _apiBase() {
     if (typeof window === "undefined") return null;
+    // Precedence (highest to lowest):
+    //   ?api=https://host  — URL-param override (CI / one-shot tests)
+    //   window.PARKER_DSMC_API
+    //   window.__PP_CONFIG.dsmcApi
+    try {
+        const qp = new URLSearchParams(window.location?.search || "");
+        const fromQuery = qp.get("api");
+        if (fromQuery) return fromQuery;
+    } catch (_) { /* SSR / malformed URL — ignore */ }
     return window.PARKER_DSMC_API || window.__PP_CONFIG?.dsmcApi || null;
 }
 

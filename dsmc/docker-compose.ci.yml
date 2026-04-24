@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Parker Physics — DSMC end-to-end CI stack
+#
+# Minimal compose used by .github/workflows/dsmc-e2e.yml to bring up the
+# DSMC API, seed a bootstrap SPARTA table, and run the Playwright E2E
+# against it. No Postgres, no Redis, no Prometheus — the API works
+# without them (it falls back to climatology for indices and skips the
+# cache).
+#
+# Local usage:
+#   # 1. Seed bootstrap tables (one-shot)
+#   docker compose -f dsmc/docker-compose.ci.yml build
+#   docker compose -f dsmc/docker-compose.ci.yml run --rm dsmc \
+#       python3 /app/sparta/generate_tables.py --use-msis-fallback
+#
+#   # 2. Start the API
+#   docker compose -f dsmc/docker-compose.ci.yml up -d
+#   curl -fs http://localhost:8001/health
+#   curl -s 'http://localhost:8001/v1/atmosphere/profile?n_points=6' | jq .
+#
+#   # 3. Tear down
+#   docker compose -f dsmc/docker-compose.ci.yml down -v
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  dsmc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # CI never compiles SPARTA — we seed via --use-msis-fallback
+        # so every row is tagged source=msis_bootstrap, and the API
+        # reports model="SPARTA-bootstrap". Flip to "1" locally if you
+        # want to test the real SPARTA path.
+        BUILD_SPARTA: "0"
+    image: parkerphysics/dsmc:ci
+    container_name: dsmc-ci
+    environment:
+      TZ: UTC
+      LOG_LEVEL: INFO
+      # CORS open for the Playwright-driven browser on a different port.
+      ALLOW_ORIGINS: "*"
+      # No API keys in CI — auth-gated endpoints are still reachable.
+      API_KEYS: ""
+      SPARTA_TABLES_DIR: "/app/sparta/tables"
+      # Small grid keeps the bootstrap seed fast (~45 rows total).
+      SPARTA_GRID_ALTS: "200 400 600 900"
+      SPARTA_GRID_F107: "100 150 200"
+      SPARTA_GRID_AP:   "10 30 100"
+    volumes:
+      - dsmc-ci-tables:/app/sparta/tables
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 4s
+      timeout: 5s
+      retries: 20
+      start_period: 8s
+
+volumes:
+  dsmc-ci-tables:
