@@ -19,17 +19,17 @@
 
 Goal: verifiable, photograph-matchable Schwarzschild render. No disk yet. Prove the pipeline.
 
-- [ ] Project structure (Vite or bare ES modules, your call)
-- [ ] WebGL2 renderer with WebGPU capability detection + fallback stub
-- [ ] Camera system in geometrized units: position (r, θ, φ, t), local orthonormal tetrad construction
-- [ ] Pixel → null 4-momentum conversion (tetrad-based, the unsexy foundation everything rides on)
-- [ ] Schwarzschild metric in fragment shader
-- [ ] RK45 adaptive-step geodesic integrator on 8D phase space
-- [ ] Termination tests: horizon (r < 2M), celestial sphere (r > r_far), step count cap
-- [ ] Celestial sphere texture (high-res starfield, gravitationally lensed by construction)
-- [ ] Visible event horizon + photon ring
-- [ ] **Validation:** photon ring apparent radius = 2.6 r_s at infinity (analytical)
-- [ ] God-mode camera controls (orbit, pan, dolly, crash-through-horizon)
+- [x] Project structure (bare ES modules under `js/ton618/`, page at `ton618.html`, Black Holes nav dropdown)
+- [x] WebGL2 renderer with WebGPU capability detection + fallback stub
+- [x] Camera system in geometrized units: position (r, θ, φ, t), local orthonormal tetrad construction
+- [x] Pixel → null 4-momentum conversion (tetrad-based, the unsexy foundation everything rides on)
+- [x] Schwarzschild metric in fragment shader
+- [x] RK45 adaptive-step geodesic integrator on 8D phase space (Cash-Karp)
+- [x] Termination tests: horizon (r < 2M), celestial sphere (r > r_far), step count cap
+- [x] Celestial sphere texture (procedural starfield — lensed by construction)
+- [x] Visible event horizon + photon ring
+- [x] **Validation:** photon ring apparent radius = 2.6 r_s at infinity (analytical) — see `js/ton618/validation.js`; button in UI
+- [~] God-mode camera controls (orbit, pan, dolly; crash-through-horizon blocked at r = 2.02 M — free-fall tetrad lands in Phase 1)
 
 ---
 

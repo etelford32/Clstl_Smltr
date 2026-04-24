@@ -25,7 +25,15 @@ const NAV_DROPDOWNS = [
             { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
             { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
             { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
-            { href: 'sagittarius.html',   label: 'Sagittarius A*', sub: 'Live galactic center simulation', tier: 'public', icon: '🕳️', id: 'sagittarius' },
+        ],
+    },
+    {
+        label: 'Black Holes',
+        id: 'black-holes',
+        items: [
+            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
+            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
+            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
         ],
     },
     {
@@ -59,8 +67,6 @@ const NAV_DROPDOWNS = [
             { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
-            { section: 'Black Holes' },
-            { href: 'black-hole-fluid.html',  label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',       tier: 'public', icon: '🕳️' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
             { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Intro, Advanced plans',     tier: 'public', icon: '💰' },
