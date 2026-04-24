@@ -201,6 +201,21 @@ def _load_sparta_tables() -> None:
                         ap   = float(row["ap"])
                     except (KeyError, ValueError):
                         continue
+                    # Propagate the row's origin into the model string so
+                    # the API honestly reports whether this number came
+                    # from a real SPARTA DSMC run or an MSIS bootstrap
+                    # seed (Phase-1 `--use-msis-fallback`). The client
+                    # pill colour-codes these separately.
+                    source = (row.get("source") or "").strip().lower()
+                    if source == "sparta":
+                        model_tag = "SPARTA-lookup"
+                    elif source == "msis_bootstrap":
+                        model_tag = "SPARTA-bootstrap"
+                    else:
+                        # Legacy CSVs without a `source` column — assume
+                        # SPARTA to preserve pre-Phase-1 behaviour.
+                        model_tag = "SPARTA-lookup"
+
                     _sparta_grid.append((alt, f107, ap, {
                         "altitude_km":        alt,
                         "density_kg_m3":      float(row.get("density_kg_m3", 0.0) or 0.0),
@@ -210,8 +225,9 @@ def _load_sparta_tables() -> None:
                         "n2_number_density":  float(row.get("n2_number_density", 0.0) or 0.0),
                         "f107_sfu":           f107,
                         "ap":                 ap,
-                        "model":              "SPARTA-lookup",
+                        "model":              model_tag,
                         "model_version":      csv_path.stem,
+                        "table_source":       source or "unknown",
                     }))
         except Exception as exc:   # noqa: BLE001
             log.warning("SPARTA table %s unreadable: %s", csv_path, exc)

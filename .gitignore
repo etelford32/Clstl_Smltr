@@ -46,3 +46,8 @@ celestial_scene.json
 # and deterministic; commit them when you run a full build.
 data/history/archive-hourly/
 data/history/archive-daily.bin
+
+# npm — devDependencies only (Playwright); we never check in node_modules.
+node_modules/
+test-results/
+playwright-report/

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upper Atmosphere Simulator — Thermosphere & Exosphere · Parker Physics</title>
+<meta name="description" content="Interactive Parker Physics thermosphere + exosphere simulator. Explore density, temperature, and per-species composition from 80 to 2000 km under any F10.7 / Ap state, with historical storm presets (Starlink Feb 2022, Gannon May 2024, AR3842). PRO access.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ─── Layout ───────────────────────────────────────────── */
+#ua-app {
+    display:grid;
+    grid-template-columns:320px 1fr 420px;
+    gap:14px;
+    padding:14px;
+    min-height:calc(100vh - 50px);
+}
+@media (max-width:1280px) {
+    #ua-app { grid-template-columns:280px 1fr; }
+    #ua-right { grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+}
+@media (max-width:900px) {
+    #ua-app { grid-template-columns:1fr; padding:10px; gap:10px; }
+    #ua-right { grid-template-columns:1fr; }
+}
+
+.ua-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    padding:14px 16px;
+}
+.ua-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#8ab; font-weight:700; margin-bottom:10px;
+}
+
+/* ─── Hero ─────────────────────────────────────────────── */
+#ua-hero { padding:18px 20px 14px; grid-column:1 / -1; }
+#ua-hero-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+#ua-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 40%,#9cc);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin:0;
+}
+#ua-hero p { font-size:.82rem; color:#8ab; line-height:1.5; margin-top:4px; }
+.ua-badge-pro {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background:rgba(0,200,200,.12); color:#0cc;
+    border:1px solid rgba(0,200,200,.28);
+}
+
+/* ─── Data-source pill ─────────────────────────────────── */
+.ua-source-pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family:monospace;
+    cursor:pointer;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.18);
+    color:#bcd;
+    transition:all .15s;
+}
+.ua-source-pill:hover { border-color:rgba(255,255,255,.35); color:#fff; }
+.ua-source-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 8px currentColor;
+}
+.ua-source--client   { color:#889; }
+.ua-source--fallback { color:#c86; }
+.ua-source--backend  { color:#0cc; border-color:rgba(0,200,200,.4); }
+.ua-source--sparta   { color:#fd6; border-color:rgba(255,215,96,.5);
+    background:rgba(255,215,96,.08); }
+.ua-source--bootstrap{ color:#f9a; border-color:rgba(255,160,200,.5);
+    background:rgba(255,160,200,.06); }
+.ua-source--forced   { outline:1px dashed rgba(255,255,255,.3);
+    outline-offset:2px; }
+
+/* ─── Chips ────────────────────────────────────────────── */
+.ua-chip-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.ua-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 11px;
+    font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+}
+.ua-chip:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.ua-chip--on {
+    background:rgba(0,200,200,.2); border-color:#0cc; color:#0ff;
+}
+.ua-chip--live {
+    background:rgba(255,200,0,.10);
+    border-color:rgba(255,200,0,.35);
+    color:#ffcc66;
+}
+.ua-chip--live:hover {
+    background:rgba(255,200,0,.22);
+    border-color:#fc6; color:#ffe;
+}
+
+/* ─── Sliders ──────────────────────────────────────────── */
+.ua-slider-row {
+    margin-bottom:14px;
+}
+.ua-slider-row:last-child { margin-bottom:0; }
+.ua-slider-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-bottom:4px;
+}
+.ua-slider-hd label {
+    font-size:.72rem; text-transform:uppercase;
+    letter-spacing:.08em; color:#9ab; font-weight:700;
+}
+.ua-slider-hd .ua-val {
+    font-size:.86rem; color:#0ff; font-family:monospace; font-weight:600;
+}
+.ua-slider-hd .ua-note {
+    font-size:.64rem; color:#556; margin-left:8px;
+}
+input[type=range] {
+    width:100%;
+    -webkit-appearance:none; appearance:none;
+    height:4px; background:rgba(255,255,255,.08);
+    border-radius:2px; outline:none; cursor:pointer;
+    margin:8px 0 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; border-radius:50%;
+    background:#0cc; border:2px solid #033;
+    cursor:pointer; transition:background .15s;
+}
+input[type=range]:hover::-webkit-slider-thumb { background:#0ff; }
+input[type=range]::-moz-range-thumb {
+    width:14px; height:14px; border-radius:50%;
+    background:#0cc; border:2px solid #033; cursor:pointer;
+}
+
+.ua-range-legend {
+    display:flex; justify-content:space-between;
+    font-size:.6rem; color:#667; margin-top:2px;
+}
+
+/* ─── Stats ────────────────────────────────────────────── */
+#ua-stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px 12px;
+}
+.ua-stat {
+    display:flex; align-items:baseline; gap:6px;
+    font-size:.74rem;
+    border-bottom:1px dotted rgba(255,255,255,.06);
+    padding:3px 0;
+}
+.ua-stat-k { color:#8ab; font-weight:600; min-width:58px; }
+.ua-stat-v { color:#fff; font-family:monospace; flex:1; }
+.ua-stat-u { color:#556; font-size:.66rem; }
+
+/* ─── Preset summary ───────────────────────────────────── */
+#ua-summary {
+    font-size:.72rem; color:#aac;
+    line-height:1.5;
+    padding:10px 12px;
+    background:rgba(0,200,200,.04);
+    border:1px solid rgba(0,200,200,.12);
+    border-radius:8px;
+    margin-top:10px;
+}
+.ua-dim { color:#667; }
+
+/* ─── Globe ────────────────────────────────────────────── */
+#ua-globe-wrap {
+    position:relative;
+    background:radial-gradient(circle at 50% 40%, #0a0622 0%, #020008 90%);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    overflow:hidden;
+    min-height:520px;
+    display:flex;
+}
+#ua-globe { width:100%; height:100%; display:block; }
+#ua-globe-legend {
+    position:absolute; left:14px; bottom:14px;
+    background:rgba(0,0,0,.55);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px; padding:8px 10px;
+    font-size:.66rem; color:#9cc;
+    pointer-events:none;
+    line-height:1.5;
+    font-family:monospace;
+}
+#ua-globe-legend b { color:#0ff; font-weight:600; }
+
+/* ─── Plots ────────────────────────────────────────────── */
+#ua-right { display:flex; flex-direction:column; gap:14px; }
+.ua-plot-panel { padding:0; overflow:hidden; }
+.ua-plot-panel canvas {
+    width:100%; display:block;
+    height:320px;
+}
+@media (max-width:1280px) {
+    .ua-plot-panel canvas { height:280px; }
+}
+
+/* ─── Layer legend ─────────────────────────────────────── */
+#ua-layer-legend { display:flex; flex-direction:column; gap:5px; }
+.ua-layer-row {
+    display:flex; align-items:center; gap:8px;
+    font-size:.72rem; padding:3px 0;
+    border-bottom:1px dotted rgba(255,255,255,.05);
+    cursor:help;
+}
+.ua-layer-row:last-child { border-bottom:none; }
+.ua-layer-dot {
+    width:10px; height:10px; border-radius:50%;
+    flex-shrink:0;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-layer-name { color:#cde; font-weight:600; }
+.ua-layer-range {
+    margin-left:auto; font-family:monospace;
+    color:#667; font-size:.66rem;
+}
+
+/* ─── Scrollbar polish ─────────────────────────────────── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+::-webkit-scrollbar-track { background:transparent; }
+</style>
+</head>
+<body>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js"; initNav("upper-atmosphere");</script>
+
+<!-- ─── Hero ─────────────────────────────────────────────────── -->
+<div id="ua-hero" class="ua-panel">
+    <div id="ua-hero-row">
+        <h1>Upper Atmosphere Simulator</h1>
+        <span class="ua-badge-pro">PRO</span>
+        <button type="button" id="ua-source-pill" class="ua-source-pill ua-source--client"
+                title="Click to cycle data source: Auto → Client-only → Auto.&#10;Shows which model answered the last profile query.">
+            <span class="ua-source-dot"></span>
+            <span class="ua-source-label">Client</span>
+        </button>
+    </div>
+    <p>
+        Interactive thermosphere + exosphere (80–2000 km). Jacchia-style
+        surrogate mirroring the Parker Physics DSMC pipeline; switches to
+        SPARTA-refined tables once the offline grid ships. Inputs are live
+        indices — F10.7 cm flux and Ap.
+    </p>
+    <div class="ua-chip-row" id="ua-presets"></div>
+</div>
+
+<!-- ─── App ──────────────────────────────────────────────────── -->
+<div id="ua-app">
+
+    <!-- Left: Controls + stats -->
+    <aside>
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>State</h2>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-alt">Altitude</label>
+                    <span class="ua-val" id="ua-alt-val">400 km</span>
+                </div>
+                <input id="ua-alt" type="range" min="80" max="2000" step="1" value="400">
+                <div class="ua-range-legend"><span>80</span><span>1040</span><span>2000 km</span></div>
+            </div>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-f107">F10.7</label>
+                    <span class="ua-val" id="ua-f107-val">150 SFU</span>
+                    <span class="ua-note">solar radio flux</span>
+                </div>
+                <input id="ua-f107" type="range" min="60" max="300" step="1" value="150">
+                <div class="ua-range-legend"><span>60 (quiet)</span><span>300 (solar max)</span></div>
+            </div>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-ap">Ap</label>
+                    <span class="ua-val" id="ua-ap-val">15</span>
+                    <span class="ua-note">geomagnetic</span>
+                </div>
+                <input id="ua-ap" type="range" min="0" max="400" step="1" value="15">
+                <div class="ua-range-legend"><span>0 (calm)</span><span>400 (severe storm)</span></div>
+            </div>
+
+            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+                <button id="ua-live-btn" type="button" class="ua-chip ua-chip--live"
+                        title="Fetch current F10.7 and Kp from NOAA SWPC and apply to the sliders">
+                    ⚡ Use live NOAA
+                </button>
+                <span id="ua-live-status" class="ua-dim" style="font-size:.64rem;align-self:center;font-style:italic"></span>
+            </div>
+
+            <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>At current altitude</h2>
+            <div id="ua-stats"></div>
+        </div>
+
+        <div class="ua-panel">
+            <h2>Atmospheric layers</h2>
+            <div id="ua-layer-legend"></div>
+        </div>
+    </aside>
+
+    <!-- Center: 3D globe -->
+    <section id="ua-globe-wrap">
+        <canvas id="ua-globe"></canvas>
+        <div id="ua-globe-legend">
+            <b>shells</b> at 150 · 250 · 400 · 600 · 900 · 1500 km<br>
+            opacity ∝ log ρ · cyan ring = current altitude
+        </div>
+    </section>
+
+    <!-- Right: Plots -->
+    <section id="ua-right">
+        <div class="ua-panel ua-plot-panel">
+            <canvas id="ua-density-plot"></canvas>
+        </div>
+        <div class="ua-panel ua-plot-panel">
+            <canvas id="ua-comp-plot"></canvas>
+        </div>
+    </section>
+
+</div>
+
+<!-- ─── Engine boot ──────────────────────────────────────────── -->
+<script type="module">
+    import * as engine from './js/upper-atmosphere-engine.js';
+    import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
+    import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
+
+    const canvas = document.getElementById('ua-globe');
+    const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
+
+    const ui = new UpperAtmosphereUI({
+        engine,
+        globe,
+        elements: {
+            altInput:       document.getElementById('ua-alt'),
+            f107Input:      document.getElementById('ua-f107'),
+            apInput:        document.getElementById('ua-ap'),
+            altVal:         document.getElementById('ua-alt-val'),
+            f107Val:        document.getElementById('ua-f107-val'),
+            apVal:          document.getElementById('ua-ap-val'),
+            presetRow:      document.getElementById('ua-presets'),
+            densityCanvas:  document.getElementById('ua-density-plot'),
+            compCanvas:     document.getElementById('ua-comp-plot'),
+            stats:          document.getElementById('ua-stats'),
+            summary:        document.getElementById('ua-summary'),
+            layerLegend:    document.getElementById('ua-layer-legend'),
+            liveBtn:        document.getElementById('ua-live-btn'),
+            liveStatus:     document.getElementById('ua-live-status'),
+            sourcePill:     document.getElementById('ua-source-pill'),
+        },
+        // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
+        // host window declares PARKER_DSMC_API; silently falls back to
+        // the client-side surrogate otherwise.
+        useBackend: true,
+    });
+
+    // Expose for devtools poking.
+    window.__ua = { engine, globe, ui };
+</script>
+
+</body>
+</html>

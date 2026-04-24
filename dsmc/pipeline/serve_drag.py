@@ -43,6 +43,7 @@ from pipeline import db as _db
 from pipeline.atmosphere import density, reload_sparta_tables
 from pipeline.drag_forecast import forecast_drag
 from pipeline.ingest_indices import build_belay
+from pipeline.profile import profile as _profile_fn, snapshot as _snapshot_fn
 
 log = logging.getLogger("dsmc.serve_drag")
 logging.basicConfig(
@@ -253,6 +254,78 @@ async def atmosphere_indices():
     }
 
 
+@app.get("/v1/atmosphere/profile", tags=["atmosphere"],
+         dependencies=[Depends(require_api_key)])
+async def atmosphere_profile(
+    f107:     Optional[float] = Query(None, description="F10.7 flux SFU; omit to use latest"),
+    ap:       Optional[float] = Query(None, description="Ap index; omit to use latest"),
+    min_km:   float = Query(80.0,    ge=50,   le=500,
+                            description="Lower altitude bound (km)"),
+    max_km:   float = Query(2000.0,  ge=200,  le=10_000,
+                            description="Upper altitude bound (km)"),
+    n_points: int   = Query(160,     ge=8,    le=600,
+                            description="Uniform samples between min_km and max_km"),
+    lat:      float = Query(0.0, ge=-90, le=90),
+    lon:      float = Query(0.0, ge=-180, le=180),
+):
+    """
+    Vertical profile of ρ, T, and 7-species composition from the MSIS-
+    backed density model, with SPARTA lookup tables preempting when they
+    exist. Used by the upper-atmosphere.html simulator and space-weather
+    cards; the same contract is served by the client-side surrogate in
+    js/upper-atmosphere-engine.js so pages degrade gracefully if this
+    endpoint is unreachable.
+    """
+    if max_km <= min_km:
+        raise HTTPException(status_code=400, detail="max_km must exceed min_km")
+
+    cache_key = f"prof:{f107}:{ap}:{min_km}:{max_km}:{n_points}:{lat}:{lon}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    f107_used, ap_used, f107_avg = _resolve_indices(f107, ap)
+    result = _profile_fn(
+        f107_sfu=f107_used,
+        ap=ap_used,
+        f107_81day_avg=f107_avg,
+        min_km=min_km,
+        max_km=max_km,
+        n_points=n_points,
+        lat_deg=lat,
+        lon_deg=lon,
+    )
+    result["f107_used"] = f107_used
+    result["ap_used"] = ap_used
+    result["issued_at_utc"] = datetime.now(timezone.utc).isoformat()
+    _cache_set(cache_key, result, ttl=CACHE_TTL_SEC)
+    return result
+
+
+@app.get("/v1/atmosphere/snapshot", tags=["atmosphere"],
+         dependencies=[Depends(require_api_key)])
+async def atmosphere_snapshot(
+    f107: Optional[float] = Query(None),
+    ap:   Optional[float] = Query(None),
+):
+    """
+    Compact snapshot (ρ + dominant species at 200/400/600 km) intended
+    for the space-weather.html card. Cheap — ~3 density() calls.
+    """
+    cache_key = f"snap:{f107}:{ap}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    f107_used, ap_used, _ = _resolve_indices(f107, ap)
+    result = _snapshot_fn(f107_sfu=f107_used, ap=ap_used)
+    result["f107_used"] = f107_used
+    result["ap_used"] = ap_used
+    result["issued_at_utc"] = datetime.now(timezone.utc).isoformat()
+    _cache_set(cache_key, result, ttl=CACHE_TTL_SEC)
+    return result
+
+
 @app.get("/v1/drag/forecast", tags=["drag"],
          dependencies=[Depends(require_api_key)])
 async def drag_forecast(
@@ -348,6 +421,8 @@ async def root():
         "endpoints": [
             "/v1/atmosphere/density",
             "/v1/atmosphere/indices",
+            "/v1/atmosphere/profile",
+            "/v1/atmosphere/snapshot",
             "/v1/drag/forecast",
             "/v1/pipeline/heartbeat",
             "/v1/metrics",
