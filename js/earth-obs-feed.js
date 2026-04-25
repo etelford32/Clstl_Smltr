@@ -74,7 +74,14 @@ import * as THREE from 'three';
 
 // ── GIBS Configuration ───────────────────────────────────────────────────────
 
-const GIBS_SNAPSHOT = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
+// GIBS snapshot — fetched via our same-origin proxy
+// (api/nasa/gibs-snapshot.js). The browser-direct WVS endpoint
+// returns CORS-stripped 500s on a non-trivial fraction of requests
+// (NASA load-balancer rate-limiting); the server-side proxy avoids
+// both the CORS and the rate-limit, plus picks up Vercel Edge
+// caching at every POP.
+const GIBS_SNAPSHOT = '/api/nasa/gibs-snapshot';
+// WMS fallback — direct hit (lower volume, has CORS support).
 const GIBS_WMS      = 'https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi';
 
 const GLOBAL_BBOX   = '-90,-180,90,180';
@@ -235,15 +242,19 @@ function isoDate(date) {
 }
 
 function gibsSnapshotUrl(layer, date) {
+    // Lowercase params canonicalize cache keys against
+    // /api/nasa/gibs-snapshot. The proxy forwards to NASA WVS using
+    // the upstream's uppercase convention; on the client side we keep
+    // a single canonical form so two callers requesting the same
+    // logical image hit the same Vercel Edge cache entry.
     const params = new URLSearchParams({
-        REQUEST: 'GetSnapshot',
-        TIME:    date instanceof Date ? date.toISOString().replace(/\.\d+Z$/, 'Z') : date,
-        BBOX:    GLOBAL_BBOX,
-        CRS,
-        LAYERS:  layer.gibs,
-        FORMAT:  layer.format,
-        WIDTH:   layer.resolution.w,
-        HEIGHT:  layer.resolution.h,
+        layers:  layer.gibs,
+        time:    date instanceof Date ? date.toISOString().replace(/\.\d+Z$/, 'Z') : date,
+        bbox:    GLOBAL_BBOX,
+        crs:     CRS,
+        format:  layer.format,
+        width:   layer.resolution.w,
+        height:  layer.resolution.h,
     });
     return `${GIBS_SNAPSHOT}?${params}`;
 }
