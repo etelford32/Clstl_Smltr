@@ -266,12 +266,14 @@ function _apiBase() {
     //   ?api=https://host  — URL-param override (CI / one-shot tests)
     //   window.PARKER_DSMC_API
     //   window.__PP_CONFIG.dsmcApi
+    // Default: '' (same-origin) so the bundled Vercel Edge functions
+    // under /v1/atmosphere/* answer without any explicit config.
     try {
         const qp = new URLSearchParams(window.location?.search || "");
         const fromQuery = qp.get("api");
         if (fromQuery) return fromQuery;
     } catch (_) { /* SSR / malformed URL — ignore */ }
-    return window.PARKER_DSMC_API || window.__PP_CONFIG?.dsmcApi || null;
+    return window.PARKER_DSMC_API ?? window.__PP_CONFIG?.dsmcApi ?? "";
 }
 
 /**
@@ -289,9 +291,15 @@ export async function fetchProfile({
     signal,
 } = {}) {
     const base = _apiBase();
-    if (!base) return _clientProfile({ f107Sfu, ap, minKm, maxKm, nPoints });
+    // null = explicit opt-out (no API attempted); '' = same-origin
+    // (the default — works against Vercel-hosted /api/atmosphere/*).
+    if (base === null) return _clientProfile({ f107Sfu, ap, minKm, maxKm, nPoints });
 
-    const url = new URL(`${base.replace(/\/$/, "")}/v1/atmosphere/profile`);
+    // Build the URL: same-origin if base is '', absolute otherwise.
+    const path = '/v1/atmosphere/profile';
+    const url  = base
+        ? new URL(`${base.replace(/\/$/, "")}${path}`)
+        : new URL(path, window.location.origin);
     if (f107Sfu != null) url.searchParams.set("f107", String(f107Sfu));
     if (ap != null)      url.searchParams.set("ap",   String(ap));
     url.searchParams.set("min_km",   String(minKm));

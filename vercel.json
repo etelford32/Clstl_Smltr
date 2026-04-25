@@ -213,6 +213,14 @@
     {
       "source": "/v1/horizons",
       "destination": "/api/horizons"
+    },
+    {
+      "source": "/v1/atmosphere/:path*",
+      "destination": "/api/atmosphere/:path*"
+    },
+    {
+      "source": "/v1/weather/:path*",
+      "destination": "/api/weather/:path*"
     }
   ]
 }
