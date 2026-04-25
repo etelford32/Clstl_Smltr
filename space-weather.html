@@ -357,6 +357,27 @@ nav {
 .param-val.danger { color:#ff4444; }
 .param-val.warn   { color:#ff9900; }
 .param-val.ok     { color:#00e874; }
+
+/* ── SSW track-record card rows ─────────────────────────────────────── */
+.ssw-row {
+    display:grid;
+    grid-template-columns: 84px 1fr 1.4fr auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 8px;
+    background:rgba(255,255,255,.02);
+    border:1px solid rgba(255,255,255,.04);
+    border-radius:6px;
+    cursor:help;
+    transition: border-color .15s;
+}
+.ssw-row:hover { border-color:rgba(0,200,200,.2); }
+.ssw-date    { color:#aab; font-family:monospace; font-size:.75rem; }
+.ssw-regime  { font-weight:700; }
+.ssw-outcome { color:#bcd; font-size:.74rem; overflow:hidden;
+               text-overflow:ellipsis; white-space:nowrap; }
+.ssw-verdict { font-size:.6rem; padding:2px 7px; }
+
 .param-bar-wrap { display:flex; align-items:center; gap:8px; }
 .param-bar-bg { flex:1; height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; }
 .param-bar-fill { height:100%; border-radius:2px; transition:width .6s; }
@@ -1846,6 +1867,40 @@ nav {
                     <span class="param-name">S-level</span>
                     <span class="param-val" id="sep-level">–</span>
                 </div>
+            </div>
+        </div>
+
+        <!-- ── SSW Forecast Track Record ─────────────────────────────────────── -->
+        <div class="data-card" id="ssw-track-card">
+            <h3>SSW Forecast Track Record
+                <span class="src-chip live" id="src-ssw"
+                      title="Backtests the combiner against historical SSW events using ERA5 surface temperatures from Open-Meteo's archive. Verdict per event: verified / partial / ambiguous / falsified.">ERA5 · backtest</span>
+            </h3>
+
+            <div class="param-row">
+                <span class="param-name">Hit rate</span>
+                <span class="param-val">
+                    <span id="ssw-hit-rate">—</span>
+                    <span style="color:#445;margin-left:6px">events</span>
+                    <span id="ssw-pct" style="color:#cdf;margin-left:6px">—</span>
+                </span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Mean anomaly</span>
+                <span class="param-val" id="ssw-mean-anom">—</span>
+            </div>
+
+            <div id="ssw-event-list" style="
+                margin-top:10px;display:flex;flex-direction:column;gap:4px;
+                font-size:.74rem">
+                <div style="color:#778;padding:8px">Loading verification log…</div>
+            </div>
+
+            <div style="font-size:.66rem;color:#556;margin-top:8px;line-height:1.5">
+                Each event compares mean ERA5 temperature in predicted regions
+                during the 14-day verification window against the 14 days before
+                the event. Verified ≤ −3 °C; partial ≤ −1 °C; falsified ≥ +1 °C.
+                Append new events to <code>data/ssw-events.json</code> when they fire.
             </div>
         </div>
 
@@ -4279,10 +4334,11 @@ window.openImg = function(thumb) {
 
 <!-- ── Atmospheric / polar cards boot ──────────────────────────────────────── -->
 <script type="module">
-    import { PolarVortexCard }    from './js/polar-vortex.js';
-    import { PolarMagneticCard }  from './js/polar-magnetic.js';
-    import { GravityWaveCard }    from './js/gravity-wave.js';
-    import { SurfaceOutlookCard } from './js/surface-weather.js';
+    import { PolarVortexCard }       from './js/polar-vortex.js';
+    import { PolarMagneticCard }     from './js/polar-magnetic.js';
+    import { GravityWaveCard }       from './js/gravity-wave.js';
+    import { SurfaceOutlookCard }    from './js/surface-weather.js';
+    import { SSWVerificationCard }   from './js/ssw-verification.js';
 
     const vortex = new PolarVortexCard();
     vortex.start();
@@ -4296,11 +4352,15 @@ window.openImg = function(thumb) {
     const surf = new SurfaceOutlookCard();
     surf.start();
 
+    const ssw = new SSWVerificationCard();
+    ssw.start();
+
     // Expose for devtools introspection.
     window.__vortex = vortex;
     window.__pmag   = pmag;
     window.__gw     = gw;
     window.__surf   = surf;
+    window.__ssw    = ssw;
 
     // Resize the mini plots + oval canvas when their cards resize.
     const cvVortex = document.getElementById('vortex-mini-plot');
