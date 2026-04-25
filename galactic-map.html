@@ -2373,6 +2373,127 @@ function makeGalaxySpriteCanvas(type, colorHex) {
             ctx.beginPath(); ctx.arc(sx,sy,sr,0,Math.PI*2); ctx.fill();
         });
         ctx.restore();
+
+    } else if (type === 'primordial') {
+        // Compact, clumpy proto-galaxy. Strong red-IR core (extreme redshift
+        // pushes Lyman-α into the observer-frame red) with a faint outer
+        // Lyman-α "edge" lip and small star-forming knots.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Outer Lyman-α halo — thin reddish shell at the observer-frame edge
+        const lyHalo = ctx.createRadialGradient(0,0, 36, 0,0, 62);
+        lyHalo.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
+        lyHalo.addColorStop(0.45, `rgba(255,90,50,0.22)`);
+        lyHalo.addColorStop(0.7,  `rgba(${r},${g},${b},0.10)`);
+        lyHalo.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = lyHalo;
+        ctx.beginPath(); ctx.arc(0,0,62,0,Math.PI*2); ctx.fill();
+
+        // Multi-clump core (a few overlapping star-forming knots)
+        const clumps = [[0,0,18,0.85],[7,-5,9,0.55],[-6,4,8,0.45],[3,8,7,0.38]];
+        clumps.forEach(([x,y,rad,op]) => {
+            const cg = ctx.createRadialGradient(x,y,0, x,y,rad);
+            cg.addColorStop(0,    `rgba(255,210,150,${op})`);
+            cg.addColorStop(0.3,  `rgba(${r},${g},${b},${(op*0.7).toFixed(3)})`);
+            cg.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = cg;
+            ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+        });
+
+        // Very faint extended envelope — gives the sprite a soft outer falloff
+        const env = ctx.createRadialGradient(0,0, 22, 0,0, cx*0.7);
+        env.addColorStop(0,   `rgba(${r},${g},${b},0.05)`);
+        env.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = env;
+        ctx.beginPath(); ctx.arc(0,0,cx*0.7,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+
+    } else if (type === 'lensed_star') {
+        // Bright stellar core at the centre + perpendicular caustic streaks
+        // (signature of being projected onto a lensing critical curve) inside
+        // a violet magnification halo.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Violet magnification halo (lensing arc glow)
+        const halo = ctx.createRadialGradient(0,0,0, 0,0,cx*0.85);
+        halo.addColorStop(0,    `rgba(180,120,255,0.18)`);
+        halo.addColorStop(0.35, `rgba(150,100,220,0.08)`);
+        halo.addColorStop(1,    `rgba(150,100,220,0.0)`);
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(0,0,cx*0.85,0,Math.PI*2); ctx.fill();
+
+        // Major caustic streak — long horizontal glowing line
+        const major = ctx.createLinearGradient(-95, 0, 95, 0);
+        major.addColorStop(0,    `rgba(255,220,140,0.0)`);
+        major.addColorStop(0.35, `rgba(255,220,140,0.55)`);
+        major.addColorStop(0.5,  `rgba(255,255,220,0.95)`);
+        major.addColorStop(0.65, `rgba(255,220,140,0.55)`);
+        major.addColorStop(1,    `rgba(255,220,140,0.0)`);
+        ctx.fillStyle = major;
+        ctx.fillRect(-95, -2, 190, 4);
+
+        // Minor caustic — short perpendicular streak
+        const minor = ctx.createLinearGradient(0, -30, 0, 30);
+        minor.addColorStop(0,    `rgba(255,220,140,0.0)`);
+        minor.addColorStop(0.5,  `rgba(255,240,180,0.7)`);
+        minor.addColorStop(1,    `rgba(255,220,140,0.0)`);
+        ctx.fillStyle = minor;
+        ctx.fillRect(-1.5, -30, 3, 60);
+
+        // Bright golden stellar core
+        const core = ctx.createRadialGradient(0,0,0, 0,0,16);
+        core.addColorStop(0,    `rgba(255,255,250,1.0)`);
+        core.addColorStop(0.25, `rgba(${r},${g},${b},0.95)`);
+        core.addColorStop(0.7,  `rgba(${r},${g},${b},0.35)`);
+        core.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = core;
+        ctx.beginPath(); ctx.arc(0,0,16,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+
+    } else if (type === 'grb') {
+        // Brilliant transient point with bipolar relativistic jet lobes and
+        // four short burst rays — the collapsar gamma-ray-burst signature.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Outer afterglow halo (UV/X afterglow redshifted into the visible)
+        const after = ctx.createRadialGradient(0,0, 8, 0,0, cx*0.85);
+        after.addColorStop(0,    `rgba(${r},${g},${b},0.32)`);
+        after.addColorStop(0.3,  `rgba(${r},${g},${b},0.12)`);
+        after.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = after;
+        ctx.beginPath(); ctx.arc(0,0, cx*0.85, 0, Math.PI*2); ctx.fill();
+
+        // Two bipolar jet lobes — narrow, elongated along the polar axis
+        [-1, 1].forEach(dir => {
+            ctx.save();
+            ctx.scale(0.45, 1.2);  // squeeze horizontally to make a teardrop
+            const lobe = ctx.createRadialGradient(0, dir*32, 4, 0, dir*32, 26);
+            lobe.addColorStop(0,    `rgba(220,180,255,0.85)`);
+            lobe.addColorStop(0.4,  `rgba(${r},${g},${b},0.45)`);
+            lobe.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = lobe;
+            ctx.beginPath(); ctx.arc(0, dir*32, 26, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        });
+
+        // Brilliant white-violet point source
+        const core = ctx.createRadialGradient(0,0,0, 0,0, 18);
+        core.addColorStop(0,    `rgba(255,255,255,1.0)`);
+        core.addColorStop(0.2,  `rgba(240,220,255,0.9)`);
+        core.addColorStop(0.5,  `rgba(${r},${g},${b},0.55)`);
+        core.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = core;
+        ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.fill();
+
+        // Four short burst rays
+        ctx.strokeStyle = `rgba(255,240,255,0.55)`;
+        ctx.lineWidth = 1.5;
+        [[1,0],[0,1],[-1,0],[0,-1]].forEach(([dx,dy]) => {
+            ctx.beginPath(); ctx.moveTo(0,0);
+            ctx.lineTo(dx*60, dy*60);
+            ctx.stroke();
+        });
+        ctx.restore();
     }
     return cv;
 }
@@ -2384,6 +2505,13 @@ function buildGalaxySprite(s, pos) {
         m87: 'elliptical',
         ton618: 'quasar', '3c273': 'quasar', 'apm08279': 'quasar',
         phoenix_cluster: 'galaxy_cluster',
+        // Cosmic Dawn (z > 6)
+        jades_z14_0: 'primordial', jades_z14_1: 'primordial', jades_z13_0: 'primordial',
+        ghz2: 'primordial', gn_z11: 'primordial',
+        macs0647_jd: 'primordial', macs1149_jd1: 'primordial',
+        j0313_1806: 'quasar',           // re-use the existing quasar sprite for J0313
+        grb090423: 'grb',
+        earendel: 'lensed_star',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
