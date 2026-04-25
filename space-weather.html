@@ -1849,6 +1849,54 @@ nav {
             </div>
         </div>
 
+        <!-- ── Surface Outlook · vortex × AO/NAO ─────────────────────────────── -->
+        <div class="data-card" id="surf-card">
+            <h3>Surface Outlook · stratosphere → troposphere
+                <span class="src-chip live" id="src-surf"
+                      title="Combines polar-vortex state (Open-Meteo GFS) with NOAA CPC daily AO + NAO indices into a 7-21 day cold-air-outbreak forecast.">Parker · combiner</span>
+            </h3>
+
+            <div class="param-row" style="align-items:center;gap:8px">
+                <span class="param-name">Regime</span>
+                <span class="param-val" id="surf-regime" style="font-weight:700">–</span>
+                <span class="cme-card-badge badge-minor" id="surf-risk"
+                      style="margin-left:auto">–</span>
+            </div>
+
+            <div class="param-row">
+                <span class="param-name">AO  (current · 7d trend)</span>
+                <span class="param-val" id="surf-ao">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">NAO (current · 7d trend)</span>
+                <span class="param-val" id="surf-nao">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Lead time</span>
+                <span class="param-val" id="surf-lead">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Confidence</span>
+                <span class="param-val" id="surf-conf">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Affected</span>
+                <span class="param-val" id="surf-affected" style="font-size:.72rem">—</span>
+            </div>
+
+            <canvas id="surf-mini-plot"
+                    aria-label="60-day AO and NAO daily index timeseries"
+                    style="width:100%;height:140px;margin-top:10px;display:block;
+                           background:rgba(0,0,0,.35);border-radius:6px"></canvas>
+
+            <div style="font-size:.72rem;color:#aac;line-height:1.5;margin-top:8px"
+                 id="surf-summary">–</div>
+            <div style="font-size:.66rem;color:#556;margin-top:6px">
+                Coupled-cold = vortex disturbance + AO already negative.
+                Emerging-cold = vortex disturbance with AO trending down (7-21 day lead).
+            </div>
+        </div>
+
         <!-- ── Stratospheric Polar Vortex ────────────────────────────────────── -->
         <div class="data-card" id="vortex-card">
             <h3>Stratospheric Polar Vortex · 60°N
@@ -4231,9 +4279,10 @@ window.openImg = function(thumb) {
 
 <!-- ── Atmospheric / polar cards boot ──────────────────────────────────────── -->
 <script type="module">
-    import { PolarVortexCard }   from './js/polar-vortex.js';
-    import { PolarMagneticCard } from './js/polar-magnetic.js';
-    import { GravityWaveCard }   from './js/gravity-wave.js';
+    import { PolarVortexCard }    from './js/polar-vortex.js';
+    import { PolarMagneticCard }  from './js/polar-magnetic.js';
+    import { GravityWaveCard }    from './js/gravity-wave.js';
+    import { SurfaceOutlookCard } from './js/surface-weather.js';
 
     const vortex = new PolarVortexCard();
     vortex.start();
@@ -4244,10 +4293,14 @@ window.openImg = function(thumb) {
     const gw = new GravityWaveCard();
     gw.start();
 
+    const surf = new SurfaceOutlookCard();
+    surf.start();
+
     // Expose for devtools introspection.
     window.__vortex = vortex;
     window.__pmag   = pmag;
     window.__gw     = gw;
+    window.__surf   = surf;
 
     // Resize the mini plots + oval canvas when their cards resize.
     const cvVortex = document.getElementById('vortex-mini-plot');
@@ -4258,6 +4311,9 @@ window.openImg = function(thumb) {
 
     const cvGW = document.getElementById('gw-mini-plot');
     if (cvGW) new ResizeObserver(() => gw.refresh()).observe(cvGW);
+
+    const cvSurf = document.getElementById('surf-mini-plot');
+    if (cvSurf) new ResizeObserver(() => surf.refresh()).observe(cvSurf);
 </script>
 
 </body>
