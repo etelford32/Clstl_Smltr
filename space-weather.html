@@ -1849,6 +1849,88 @@ nav {
             </div>
         </div>
 
+        <!-- ── Stratospheric Polar Vortex ────────────────────────────────────── -->
+        <div class="data-card" id="vortex-card">
+            <h3>Stratospheric Polar Vortex · 60°N
+                <span class="src-chip live" id="src-vortex"
+                      title="Source: Open-Meteo GFS pressure-level analysis at 10/30/50 hPa, zonal-mean over 6 longitudes at 60°N. Updates every 6 hours.">Open-Meteo · GFS</span>
+            </h3>
+
+            <div class="param-row" style="align-items:center;gap:8px">
+                <span class="param-name">State</span>
+                <span class="param-val" id="vortex-state" style="font-weight:700">–</span>
+                <span class="cme-card-badge badge-minor" id="vortex-risk"
+                      style="margin-left:auto">–</span>
+            </div>
+
+            <div class="param-row">
+                <span class="param-name">U @ 10 hPa</span>
+                <span class="param-val" id="vortex-u10">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">U @ 30 hPa</span>
+                <span class="param-val" id="vortex-u30">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">T @ 10 hPa</span>
+                <span class="param-val" id="vortex-t10">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">U @ 10 hPa  +7 d</span>
+                <span class="param-val" id="vortex-d7">–</span>
+            </div>
+
+            <canvas id="vortex-mini-plot" aria-label="14-day forecast of zonal-mean wind at 10 hPa, 60°N"
+                    style="width:100%;height:120px;margin-top:10px;display:block;
+                           background:rgba(0,0,0,.35);border-radius:6px"></canvas>
+
+            <div style="font-size:.72rem;color:#aac;line-height:1.5;margin-top:8px"
+                 id="vortex-summary">–</div>
+            <div style="font-size:.66rem;color:#556;margin-top:6px">
+                Zonal-wind reversal at 10 hPa is the canonical SSW indicator —
+                mid-latitude cold-air outbreaks typically follow within 10–21 days.
+            </div>
+        </div>
+
+        <!-- ── Polar Magnetic State ──────────────────────────────────────────── -->
+        <div class="data-card" id="polar-mag-card">
+            <h3>Polar Magnetic State
+                <span class="src-chip live" id="src-pmag"
+                      title="Computed on device from current Kp, SEP S-level, and IGRF-2025 dipole. No new feed.">on-device</span>
+            </h3>
+
+            <div class="param-row" style="align-items:center;gap:8px">
+                <span class="param-name">Storm state</span>
+                <span class="param-val" id="pmag-state" style="font-weight:700">–</span>
+                <span class="cme-card-badge badge-minor" id="pmag-pca"
+                      style="margin-left:auto">–</span>
+            </div>
+
+            <div class="param-row">
+                <span class="param-name">Auroral oval (eq.)</span>
+                <span class="param-val" id="pmag-oval-lat">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Hemispheric power</span>
+                <span class="param-val" id="pmag-hpi">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Dipole tilt</span>
+                <span class="param-val" id="pmag-tilt">–</span>
+            </div>
+
+            <canvas id="pmag-oval-canvas" aria-label="North polar projection with auroral oval"
+                    style="width:100%;height:170px;margin-top:10px;display:block;
+                           background:rgba(0,0,0,.35);border-radius:6px"></canvas>
+
+            <div style="font-size:.72rem;color:#aac;line-height:1.5;margin-top:8px"
+                 id="pmag-city">–</div>
+            <div style="font-size:.66rem;color:#556;margin-top:6px">
+                Oval boundary = Feldstein–Starkov from Kp · HPI from Newell 2009 ·
+                tilt from IGRF-2025 dipole + UTC.
+            </div>
+        </div>
+
         <!-- ── Upper Atmosphere (Parker Physics DSMC surrogate) ─────────────── -->
         <div class="data-card" id="ua-card">
             <h3>Upper Atmosphere · Thermosphere<span class="src-chip live" id="src-ua" title="Parker Physics DSMC surrogate. MSIS-style Jacchia exponential until SPARTA tables ship; then SPARTA-refined.">Parker · DSMC</span></h3>
@@ -4102,6 +4184,29 @@ window.openImg = function(thumb) {
         const f107 = Number.isFinite(_liveF107) ? _liveF107 : 150;
         drawMiniPlot(f107, kpToAp(kp));
     }).observe(document.getElementById('ua-mini-plot'));
+</script>
+
+<!-- ── Stratospheric Polar Vortex card boot ───────────────────────────────── -->
+<script type="module">
+    import { PolarVortexCard }   from './js/polar-vortex.js';
+    import { PolarMagneticCard } from './js/polar-magnetic.js';
+
+    const vortex = new PolarVortexCard();
+    vortex.start();
+
+    const pmag = new PolarMagneticCard();
+    pmag.start();
+
+    // Expose for devtools introspection.
+    window.__vortex = vortex;
+    window.__pmag   = pmag;
+
+    // Resize the mini plot + oval canvas when their cards resize.
+    const cvVortex = document.getElementById('vortex-mini-plot');
+    if (cvVortex) new ResizeObserver(() => vortex.refresh()).observe(cvVortex);
+
+    const cvOval = document.getElementById('pmag-oval-canvas');
+    if (cvOval) new ResizeObserver(() => pmag._render?.()).observe(cvOval);
 </script>
 
 </body>
