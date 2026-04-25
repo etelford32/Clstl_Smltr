@@ -349,14 +349,34 @@ function _normaliseBackendProfile(data) {
         n:          s.number_densities,
     }));
     return {
-        f107Sfu:    data.f107_sfu ?? data.f107_used,
-        ap:         data.ap ?? data.ap_used,
-        T:          exosphereTempK(data.f107_sfu ?? 150, data.ap ?? 15),
-        model:      data.model,
-        issuedAt:   data.issued_at_utc,
-        layers:     _normaliseLayers(data.layers) || ATMOSPHERIC_LAYERS,
-        satellites: _normaliseSatellites(data.satellites) || SATELLITE_REFERENCES,
+        f107Sfu:     data.f107_sfu ?? data.f107_used,
+        ap:          data.ap ?? data.ap_used,
+        T:           exosphereTempK(data.f107_sfu ?? 150, data.ap ?? 15),
+        model:       data.model,
+        issuedAt:    data.issued_at_utc,
+        layers:      _normaliseLayers(data.layers) || ATMOSPHERIC_LAYERS,
+        satellites:  _normaliseSatellites(data.satellites) || SATELLITE_REFERENCES,
+        gravityWave: _normaliseGW(data.gravity_wave),
         samples,
+    };
+}
+
+function _normaliseGW(gw) {
+    // Backend uses snake_case for the GW block. Translate to the same
+    // camelCase the JS engine emits so callers can treat both paths
+    // uniformly.
+    if (!gw || typeof gw !== 'object') return null;
+    return {
+        state:       gw.state,
+        rmsPct:      gw.rms_pct,
+        peakAltKm:   gw.peak_alt_km,
+        peakPct:     gw.peak_pct,
+        fitScaleHkm: gw.fit_scale_h_km,
+        nPoints:     gw.n_points,
+        residuals:   (gw.residuals || []).map(r => ({
+            altitudeKm:  r.altitude_km,
+            residualPct: r.residual_pct,
+        })),
     };
 }
 
@@ -391,6 +411,81 @@ export function kpToAp(kp) {
     const hi = Math.min(lo + 1, 9);
     const t = Math.max(0, Math.min(1, kp - lo));
     return _KP_TO_AP[lo] * (1 - t) + _KP_TO_AP[hi] * t;
+}
+
+/**
+ * Estimate gravity-wave activity from a vertical profile by fitting a
+ * smooth log-ρ exponential through the thermosphere (≥150 km) and
+ * returning the RMS residual amplitude. Mirrors
+ * dsmc/pipeline/profile.py:_gravity_wave_activity exactly so the
+ * client surrogate and the SPARTA-backed backend agree on contract.
+ *
+ * The surrogate's profile follows the same Jacchia exponential as the
+ * fit, so on the client this returns near-zero RMS (state="quiet").
+ * Once a SPARTA-refined profile arrives via fetchProfile(), real
+ * residuals show up because SPARTA captures collisional dynamics that
+ * the empirical model smears over.
+ *
+ * @param {Array} samples — output of sampleProfile().samples or
+ *                          fetchProfile().samples (each has altitudeKm + rho)
+ * @returns {{ state, rmsPct, peakAltKm, peakPct, fitScaleHkm, nPoints, residuals }}
+ */
+export function gravityWaveActivity(samples) {
+    if (!samples || samples.length < 4) return _quietGW();
+
+    const pts = samples
+        .filter(s => s.altitudeKm >= 150 && s.rho > 0)
+        .map(s => [s.altitudeKm, Math.log(s.rho)]);
+    if (pts.length < 4) return _quietGW();
+
+    // Linear LSQ fit: log ρ = a + b·z   (b < 0, H_eff = -1/b in km)
+    const n = pts.length;
+    let sx=0, sy=0, sxx=0, sxy=0;
+    for (const [z, lr] of pts) {
+        sx += z; sy += lr; sxx += z*z; sxy += z*lr;
+    }
+    const denom = n * sxx - sx * sx;
+    if (denom === 0) return _quietGW();
+    const b = (n * sxy - sx * sy) / denom;
+    const a = (sy - b * sx) / n;
+    const H_eff_km = b < 0 ? (-1 / b) : null;
+
+    let sumsq = 0, peakPct = 0, peakAlt = null;
+    const residuals = [];
+    for (const [z, lr] of pts) {
+        const fit_lr = a + b * z;
+        const pct = (Math.exp(lr - fit_lr) - 1) * 100;
+        residuals.push({ altitudeKm: Math.round(z * 10) / 10,
+                         residualPct: Math.round(pct * 1000) / 1000 });
+        sumsq += pct * pct;
+        if (Math.abs(pct) > Math.abs(peakPct)) {
+            peakPct = pct; peakAlt = z;
+        }
+    }
+    const rmsPct = Math.sqrt(sumsq / n);
+
+    let state;
+    if (rmsPct < 0.5) state = 'quiet';
+    else if (rmsPct < 2) state = 'active';
+    else if (rmsPct < 6) state = 'strong';
+    else state = 'extreme';
+
+    return {
+        state,
+        rmsPct:      Math.round(rmsPct * 1000) / 1000,
+        peakAltKm:   peakAlt != null ? Math.round(peakAlt * 10) / 10 : null,
+        peakPct:     Math.round(peakPct * 1000) / 1000,
+        fitScaleHkm: H_eff_km != null ? Math.round(H_eff_km * 10) / 10 : null,
+        nPoints:     n,
+        residuals,
+    };
+}
+
+function _quietGW() {
+    return {
+        state: 'quiet', rmsPct: 0, peakAltKm: null, peakPct: 0,
+        fitScaleHkm: null, nPoints: 0, residuals: [],
+    };
 }
 
 /**

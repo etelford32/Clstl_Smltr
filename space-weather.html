@@ -1931,6 +1931,49 @@ nav {
             </div>
         </div>
 
+        <!-- ── Atmospheric Gravity-Wave Activity ─────────────────────────────── -->
+        <div class="data-card" id="gw-card">
+            <h3>Gravity-Wave Activity · DSMC residual
+                <span class="src-chip live" id="src-gw"
+                      title="RMS amplitude of the residual between the SPARTA-refined density profile and a smooth log-ρ exponential fit ≥150 km. Quiet by construction until SPARTA tables populate.">Parker · DSMC</span>
+            </h3>
+
+            <div class="param-row" style="align-items:center;gap:8px">
+                <span class="param-name">State</span>
+                <span class="param-val" id="gw-state" style="font-weight:700">–</span>
+                <span class="cme-card-badge badge-minor" id="gw-risk"
+                      style="margin-left:auto">–</span>
+            </div>
+
+            <div class="param-row">
+                <span class="param-name">RMS amplitude</span>
+                <span class="param-val" id="gw-rms">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Peak residual</span>
+                <span class="param-val" id="gw-peak">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Peak altitude</span>
+                <span class="param-val" id="gw-peak-alt">–</span>
+            </div>
+            <div class="param-row">
+                <span class="param-name">Eff. scale height</span>
+                <span class="param-val" id="gw-h-eff">–</span>
+            </div>
+
+            <canvas id="gw-mini-plot" aria-label="Per-altitude residual amplitude bar chart"
+                    style="width:100%;height:130px;margin-top:10px;display:block;
+                           background:rgba(0,0,0,.35);border-radius:6px"></canvas>
+
+            <div style="font-size:.72rem;color:#aac;line-height:1.5;margin-top:8px"
+                 id="gw-detail">–</div>
+            <div style="font-size:.66rem;color:#556;margin-top:6px">
+                Proxy: residual of log ρ vs barometric fit ≥ 150 km.
+                Tracks GW-driven LEO drag variability that empirical models miss.
+            </div>
+        </div>
+
         <!-- ── Upper Atmosphere (Parker Physics DSMC surrogate) ─────────────── -->
         <div class="data-card" id="ua-card">
             <h3>Upper Atmosphere · Thermosphere<span class="src-chip live" id="src-ua" title="Parker Physics DSMC surrogate. MSIS-style Jacchia exponential until SPARTA tables ship; then SPARTA-refined.">Parker · DSMC</span></h3>
@@ -4186,10 +4229,11 @@ window.openImg = function(thumb) {
     }).observe(document.getElementById('ua-mini-plot'));
 </script>
 
-<!-- ── Stratospheric Polar Vortex card boot ───────────────────────────────── -->
+<!-- ── Atmospheric / polar cards boot ──────────────────────────────────────── -->
 <script type="module">
     import { PolarVortexCard }   from './js/polar-vortex.js';
     import { PolarMagneticCard } from './js/polar-magnetic.js';
+    import { GravityWaveCard }   from './js/gravity-wave.js';
 
     const vortex = new PolarVortexCard();
     vortex.start();
@@ -4197,16 +4241,23 @@ window.openImg = function(thumb) {
     const pmag = new PolarMagneticCard();
     pmag.start();
 
+    const gw = new GravityWaveCard();
+    gw.start();
+
     // Expose for devtools introspection.
     window.__vortex = vortex;
     window.__pmag   = pmag;
+    window.__gw     = gw;
 
-    // Resize the mini plot + oval canvas when their cards resize.
+    // Resize the mini plots + oval canvas when their cards resize.
     const cvVortex = document.getElementById('vortex-mini-plot');
     if (cvVortex) new ResizeObserver(() => vortex.refresh()).observe(cvVortex);
 
     const cvOval = document.getElementById('pmag-oval-canvas');
     if (cvOval) new ResizeObserver(() => pmag._render?.()).observe(cvOval);
+
+    const cvGW = document.getElementById('gw-mini-plot');
+    if (cvGW) new ResizeObserver(() => gw.refresh()).observe(cvGW);
 </script>
 
 </body>

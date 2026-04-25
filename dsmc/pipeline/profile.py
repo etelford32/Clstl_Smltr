@@ -184,6 +184,109 @@ def profile(
         "layers":         ATMOSPHERIC_LAYERS,
         "satellites":     SATELLITE_REFERENCES,
         "samples":        samples,
+        "gravity_wave":   _gravity_wave_activity(samples),
+    }
+
+
+def _gravity_wave_activity(samples: list[dict]) -> dict:
+    """
+    Estimate gravity-wave activity from the residual of log(ρ) vs a smooth
+    least-squares barometric fit through the thermosphere (≥150 km).
+
+    Why this works: in the real atmosphere, ρ(z) closely tracks an
+    altitude-dependent scale-height fit; departures from that fit at
+    LEO altitudes correlate with vertical-wave activity (this is how
+    GOCE / GRACE accelerometer GW retrievals are normalised). The
+    Jacchia / Jacchia-77 / NRLMSIS empirical models all bake in a
+    smooth profile by construction, so a surrogate that mirrors them
+    will show ~zero residual — that's the "quiet · climatology" state.
+    Once SPARTA-refined rows replace MSIS-bootstrap rows in the table
+    directory, the SPARTA collisional dynamics introduce real
+    departures and this proxy lights up.
+
+    Returns:
+        {
+          state:           'quiet' | 'active' | 'strong' | 'extreme'
+          rms_pct:         RMS amplitude of (ρ - fit)/fit, %
+          peak_alt_km:     altitude of the largest residual
+          peak_pct:        signed peak residual, %
+          residuals:       [{ altitude_km, residual_pct }, …]   (≥150 km only)
+          fit_scale_h_km:  effective scale height from the fit
+          n_points:        number of samples used in the fit
+        }
+    """
+    if not samples or len(samples) < 4:
+        return _quiet_gw()
+
+    pts = [
+        (s["altitude_km"], s["density_kg_m3"])
+        for s in samples
+        if s["altitude_km"] >= 150 and s["density_kg_m3"] > 0
+    ]
+    if len(pts) < 4:
+        return _quiet_gw()
+
+    alts = [p[0] for p in pts]
+    log_rho = [math.log(p[1]) for p in pts]
+
+    # Linear LSQ fit: log(ρ) = a + b·z  (b is negative; H_eff = -1/b in km)
+    n = len(alts)
+    sx  = sum(alts)
+    sy  = sum(log_rho)
+    sxx = sum(z * z for z in alts)
+    sxy = sum(alts[i] * log_rho[i] for i in range(n))
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        return _quiet_gw()
+    b = (n * sxy - sx * sy) / denom
+    a = (sy - b * sx) / n
+    H_eff_km = (-1.0 / b) if b < 0 else None
+
+    # Residuals: percentage departure from the smooth exponential fit.
+    residuals = []
+    sumsq = 0.0
+    peak_pct = 0.0
+    peak_alt = None
+    for z, lr in zip(alts, log_rho):
+        fit_lr = a + b * z
+        # (ρ - ρ_fit) / ρ_fit  =  exp(lr - fit_lr) - 1
+        rel = math.exp(lr - fit_lr) - 1.0
+        pct = rel * 100.0
+        residuals.append({"altitude_km": round(z, 1), "residual_pct": round(pct, 3)})
+        sumsq += pct * pct
+        if abs(pct) > abs(peak_pct):
+            peak_pct = pct
+            peak_alt = z
+    rms_pct = math.sqrt(sumsq / n)
+
+    # State thresholds tuned to GOCE/GRACE GW climatology — quiet-time
+    # accelerometer-derived RMS at ~250 km is ~0.5%, storm-time peaks
+    # 4-8%, extreme events >10%.
+    if rms_pct < 0.5:   state = "quiet"
+    elif rms_pct < 2:   state = "active"
+    elif rms_pct < 6:   state = "strong"
+    else:               state = "extreme"
+
+    return {
+        "state":          state,
+        "rms_pct":        round(rms_pct, 3),
+        "peak_alt_km":    round(peak_alt, 1) if peak_alt is not None else None,
+        "peak_pct":       round(peak_pct, 3),
+        "fit_scale_h_km": round(H_eff_km, 1) if H_eff_km is not None else None,
+        "n_points":       n,
+        "residuals":      residuals,
+    }
+
+
+def _quiet_gw() -> dict:
+    return {
+        "state":          "quiet",
+        "rms_pct":        0.0,
+        "peak_alt_km":    None,
+        "peak_pct":       0.0,
+        "fit_scale_h_km": None,
+        "n_points":       0,
+        "residuals":      [],
     }
 
 
