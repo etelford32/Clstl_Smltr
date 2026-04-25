@@ -5439,6 +5439,29 @@ animate();
 // ═══════════════════════════════════════════════════════════════
 //  LOCAL CLOCK  (updates every second)
 // ═══════════════════════════════════════════════════════════════
+// State for the location-panel pieces that _tickLocalClock writes
+// into. Declared here (not next to the LOCATION PANEL LOGIC section
+// below) because _tickLocalClock() runs synchronously at the bottom
+// of this section, and through _updateLocSunCard / _updateLocPassCard
+// it indirectly references all three of these bindings. If they live
+// further down the file, the synchronous call hits the temporal-dead-
+// zone and ReferenceError-throws — which kills the rest of this
+// module's top-level execution and silently breaks every panel below.
+//
+//   _issPassTle  is populated the first time satTracker reports ISS
+//                (NORAD 25544). Passes are recomputed when (a) a new
+//                user location is saved, (b) we attach the ISS TLE for
+//                the first time, or (c) the cached pass has elapsed.
+//   _issNextPass cached output of the most recent pass-predictor run.
+//   _fmtHM       short HH:MM formatter used by the Sun + ISS-pass
+//                cards.
+let _issPassTle  = null;
+let _issNextPass = null;
+
+const _fmtHM = d => d
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '—';
+
 function _tickLocalClock() {
     // Follow the scrubber — every time-sensitive DOM readout on the page
     // should move together when the user pulls sim time forward or back.
@@ -5539,16 +5562,10 @@ function updateUserAuroraVis(kp) {
 // ═══════════════════════════════════════════════════════════════
 //  LOCATION PANEL LOGIC
 // ═══════════════════════════════════════════════════════════════
-// Cached ISS TLE + last-computed next pass. `_issPassTle` is populated
-// the first time the satellite tracker reports ISS (NORAD 25544). Passes
-// are recomputed when (a) a new user location is saved, (b) we attach the
-// ISS TLE for the first time, or (c) the cached pass has already elapsed.
-let _issPassTle   = null;
-let _issNextPass  = null;
-
-const _fmtHM = d => d
-    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : '—';
+// NOTE: `_issPassTle`, `_issNextPass`, and `_fmtHM` were moved up to
+// the LOCAL CLOCK section above so the synchronous _tickLocalClock()
+// call at the bottom of that section doesn't hit a temporal-dead-zone
+// error. See the comment block at that hoisted declaration for why.
 
 function _fmtDurationMin(m) {
     if (m == null || !isFinite(m)) return '—';
