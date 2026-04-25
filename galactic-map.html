@@ -1338,6 +1338,206 @@ const CATALOG = [
             ['Apparent mag', '15.9 (V-band)'],
         ],
     },
+
+    // ── Section header (sidebar only — no 3D object) ───────────────────────
+    { id: '__sep_cosmic_dawn', sectionHeader: 'Cosmic Dawn (z > 6)', isHeader: true },
+
+    // ── Cosmic Dawn objects (z > 6) ────────────────────────────────────────
+    // All ten currently sit in a ~1.5k-unit shell beyond Ton 618 due to the
+    // log compression. LOD logic (updateLabelScales) hides them at galaxy
+    // zoom and caps their sprite size at universe zoom to prevent merging.
+    {
+        id: 'jades_z14_0', name: 'JADES-GS-z14-0', abbr: 'JADES z14-0', type: 'Primordial Galaxy',
+        l: 223.55, b: -54.39, dist: 13_520_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.2,
+        desc: 'Most distant spectroscopically confirmed object known. Light left this galaxy when the universe was only ~290 million years old. JWST NIRSpec confirmation announced May 2024 (Carniani et al.). Surprisingly luminous and ~1,600 ly across — challenging models of early galaxy formation.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-break)'],
+            ['Distance', '13.52 Gly (light-travel) · ~34 Gly comoving'],
+            ['Galactic l / b', '223.55° / −54.39°'],
+            ['Redshift', 'z = 14.32'],
+            ['Universe age at emission', '~290 Myr'],
+            ['Diameter', '~1,600 ly (extremely compact)'],
+            ['Discovery', 'JWST NIRSpec — Carniani et al. 2024'],
+            ['Field', 'GOODS-S / Hubble Ultra Deep Field'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'jades_z14_1', name: 'JADES-GS-z14-1', abbr: 'JADES z14-1', type: 'Primordial Galaxy',
+        l: 223.51, b: -54.42, dist: 13_490_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.0,
+        desc: 'Companion record-holder confirmed alongside JADES-GS-z14-0 in the same JWST Advanced Deep Extragalactic Survey paper. Light left when the universe was ~310 Myr old. Smaller and fainter than its sibling but still spectroscopically secure via Lyman-α break.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-break)'],
+            ['Distance', '13.49 Gly (light-travel) · ~33.5 Gly comoving'],
+            ['Galactic l / b', '223.51° / −54.42°'],
+            ['Redshift', 'z = 13.90'],
+            ['Universe age at emission', '~310 Myr'],
+            ['Discovery', 'JWST NIRSpec — Carniani et al. 2024'],
+            ['Field', 'GOODS-S / Hubble Ultra Deep Field'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'jades_z13_0', name: 'JADES-GS-z13-0', abbr: 'JADES z13-0', type: 'Primordial Galaxy',
+        l: 223.44, b: -54.45, dist: 13_430_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.0,
+        desc: 'First JADES galaxy spectroscopically confirmed beyond z=13. Light left when the universe was ~330 Myr old. Set the redshift record from December 2022 until JADES-GS-z14-0 surpassed it in May 2024.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-break)'],
+            ['Distance', '13.43 Gly (light-travel) · ~33.2 Gly comoving'],
+            ['Galactic l / b', '223.44° / −54.45°'],
+            ['Redshift', 'z = 13.20'],
+            ['Universe age at emission', '~330 Myr'],
+            ['Discovery', 'JWST NIRSpec — Curtis-Lake et al. 2023'],
+            ['Field', 'GOODS-S / Hubble Ultra Deep Field'],
+            ['Notable', 'Held the spectroscopic redshift record 2022–2024'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'ghz2', name: 'GHZ2 (GLASS-z12)', abbr: 'GHZ2', type: 'Primordial Galaxy',
+        l: 9.10, b: -81.13, dist: 13_350_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.1,
+        desc: 'Extraordinarily compact primordial galaxy lensed by the Abell 2744 ("Pandora") cluster. Spectroscopy revealed unusually strong nitrogen-to-carbon ratios — possible signature of a runaway-collapse super-massive star or globular-cluster precursor. Universe was ~360 Myr old at emission.',
+        props: [
+            ['Type', 'Primordial Galaxy (compact, N-rich)'],
+            ['Distance', '13.35 Gly (light-travel) · ~32.6 Gly comoving'],
+            ['Galactic l / b', '9.10° / −81.13°'],
+            ['Redshift', 'z = 12.34'],
+            ['Universe age at emission', '~360 Myr'],
+            ['Diameter', '~330 ly (extremely compact)'],
+            ['Lensing', 'Magnified by Abell 2744 cluster'],
+            ['Discovery', 'JWST GLASS / NIRCam — Castellano et al. 2022'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'gn_z11', name: 'GN-z11', abbr: 'GN-z11', type: 'Primordial Galaxy',
+        l: 125.92, b: 54.83, dist: 13_200_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.2,
+        desc: 'Held the spectroscopic redshift record from 2016 to 2022 (Hubble grism), reconfirmed by JWST in 2024. Surprisingly luminous — ~25× more massive than expected at its epoch. Hosts an active galactic nucleus suggesting an early supermassive black hole seed.',
+        props: [
+            ['Type', 'Primordial Galaxy + AGN'],
+            ['Distance', '13.20 Gly (light-travel) · ~32.0 Gly comoving'],
+            ['Galactic l / b', '125.92° / +54.83°'],
+            ['Redshift', 'z = 10.957'],
+            ['Universe age at emission', '~400 Myr'],
+            ['Stellar mass', '~10⁹ M☉'],
+            ['Notable', 'Held the redshift record 2016–2022'],
+            ['Discovery', 'Hubble WFC3 grism — Oesch et al. 2016'],
+            ['Field', 'GOODS-N'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'macs0647_jd', name: 'MACS0647-JD', abbr: 'MACS0647-JD', type: 'Primordial Galaxy (lensed)',
+        l: 142.93, b: 25.16, dist: 13_070_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.0,
+        desc: 'Gravitationally lensed by the MACS J0647+7015 galaxy cluster into three separate images of the same galaxy. JWST NIRCam (2022) revealed it as two merging components — the earliest galaxy merger ever observed. Lensing magnification ~8×.',
+        props: [
+            ['Type', 'Primordial Galaxy (lensed triple image)'],
+            ['Distance', '13.07 Gly (light-travel) · ~31.4 Gly comoving'],
+            ['Galactic l / b', '142.93° / +25.16°'],
+            ['Redshift', 'z = 10.17'],
+            ['Universe age at emission', '~430 Myr'],
+            ['Lensing', 'Magnified ~8× by MACS J0647+7015'],
+            ['Discovery', 'Hubble — Coe et al. 2013; JWST 2022'],
+            ['Notable', 'Earliest galaxy merger ever observed'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'macs1149_jd1', name: 'MACS1149-JD1', abbr: 'MACS1149-JD1', type: 'Primordial Galaxy (lensed)',
+        l: 228.5, b: 76.1, dist: 13_030_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3300, size: 2.0,
+        desc: 'ALMA detection of doubly-ionised oxygen ([O III] 88 µm) provided indirect evidence of star formation as early as z≈15 — meaning some of its stars formed when the universe was only ~250 Myr old. JWST has since resolved the galaxy and confirmed the ancient stellar population.',
+        props: [
+            ['Type', 'Primordial Galaxy (mature stellar pop.)'],
+            ['Distance', '13.03 Gly (light-travel) · ~30.7 Gly comoving'],
+            ['Galactic l / b', '228.5° / +76.1°'],
+            ['Redshift', 'z = 9.11'],
+            ['Universe age at emission', '~550 Myr'],
+            ['Earlier star formation', 'Inferred at z ≈ 15 (~250 Myr)'],
+            ['Lensing', 'Magnified by MACS J1149.5+2223'],
+            ['Discovery', 'ALMA [O III] — Hashimoto et al. 2018'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'grb090423', name: 'GRB 090423', abbr: 'GRB 090423', type: 'Gamma-Ray Burst',
+        l: 220.4, b: 45.1, dist: 12_920_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'GRB',
+        color: 0x6600ff, glowColor: 0xaa44ff, size: 1.8,
+        desc: 'Most distant gamma-ray burst ever observed. Triggered NASA Swift on 23 April 2009. The collapse of a primordial massive star released ~10⁵² erg of gamma rays — briefly outshining its entire host galaxy. The afterglow let astronomers probe the early-universe interstellar medium.',
+        props: [
+            ['Type', 'Long-duration GRB (collapsar)'],
+            ['Distance', '12.92 Gly (light-travel) · ~30.0 Gly comoving'],
+            ['Galactic l / b', '220.4° / +45.1°'],
+            ['Redshift', 'z = 8.20'],
+            ['Universe age at emission', '~630 Myr'],
+            ['Duration (T₉₀)', '~10.3 seconds'],
+            ['Isotropic energy', '~10⁵² erg'],
+            ['Discovery', 'Swift BAT — 23 April 2009'],
+            ['Notable', 'Most distant GRB ever observed'],
+        ],
+    },
+    {
+        id: 'j0313_1806', name: 'J0313-1806', abbr: 'J0313-1806', type: 'Most Distant Quasar',
+        l: 209.84, b: -57.14, dist: 12_850_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xffaa33, size: 2.8,
+        desc: 'Most distant quasar known. Hosts a 1.6-billion-M☉ supermassive black hole already in place when the universe was only ~670 Myr old — a profound challenge to standard BH growth models. Drives a fast (~20 % c) ionised wind, evidence of ongoing super-Eddington accretion.',
+        props: [
+            ['Type', 'Quasar / Hyperluminous AGN'],
+            ['Distance', '12.85 Gly (light-travel) · ~29.5 Gly comoving'],
+            ['Galactic l / b', '209.84° / −57.14°'],
+            ['Redshift', 'z = 7.642'],
+            ['Universe age at emission', '~670 Myr'],
+            ['BH mass', '1.6 × 10⁹ M☉'],
+            ['Luminosity', '~3.6 × 10¹³ L☉'],
+            ['Wind velocity', '~0.2 c (super-Eddington outflow)'],
+            ['Discovery', 'Magellan / Wang et al. 2021'],
+            ['Notable', 'Most distant quasar known'],
+        ],
+    },
+    {
+        id: 'earendel', name: 'Earendel (WHL0137-LS)', abbr: 'Earendel', type: 'Most Distant Star',
+        l: 153.42, b: -68.43, dist: 12_600_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 20000, spectral: 'B',
+        color: 0xffcc66, glowColor: 0x9966ff, size: 2.4,
+        desc: 'Most distant individual star ever resolved. Discovered by Hubble (2022) and confirmed by JWST (2023). Lensed by the WHL0137-08 galaxy cluster onto a "lensing critical curve" that magnifies it by a factor of thousands. Likely a massive (>50 M☉) hot blue B-type star or close binary in an early host galaxy nicknamed the "Sunrise Arc."',
+        props: [
+            ['Type', 'Massive lensed star (B-type)'],
+            ['Distance', '12.6 Gly (light-travel) · ~28 Gly comoving'],
+            ['Galactic l / b', '153.42° / −68.43°'],
+            ['Redshift', 'z = 6.2'],
+            ['Universe age at emission', '~900 Myr'],
+            ['Mass (estimate)', '50–500 M☉ (possible binary)'],
+            ['Lensing magnification', '~1,000–40,000×'],
+            ['Host', 'Sunrise Arc galaxy'],
+            ['Discovery', 'Hubble — Welch et al. 2022; JWST 2023'],
+            ['Notable', 'Most distant individual star ever resolved'],
+        ],
+    },
 ];
 
 // Pre-compute Three.js positions + galactic-center distance
@@ -1379,7 +1579,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.screenSpacePanning = true;
 controls.minDistance = 0.5;
-controls.maxDistance = 900_000;
+controls.maxDistance = 1_200_000;   // raised from 900k to give breathing room for cosmic-dawn shell at ~220k
 controls.zoomSpeed = 1.4;
 
 // ── Sun reference point ─────────────────────────────────────────────────
@@ -3202,6 +3402,39 @@ function updateLabelScales() {
                 const nearObj  = camToObj < s.pos3.distanceTo(SUN3) * 0.4;
                 const universeView = camDist > 200000;
                 lbl.visible = nearObj || universeView;
+            }
+        }
+
+        // ── Cosmic-dawn LOD override ─────────────────────────────────
+        // z>6 objects sit in a ~1.5k-unit shell at scene-radius ~220k. They
+        // would smear into a single bright blob without active LOD control.
+        //   • Hidden entirely below universe-zoom (camDist < 100k) — they're
+        //     too far away to be physically sensible at galactic scale.
+        //   • Sprite size capped so neighbouring objects in the shell remain
+        //     visually distinct rather than overlapping into one disk.
+        //   • Labels suppressed unless deeply zoomed out OR closely approached.
+        if (s.isCosmicDawn) {
+            const camToObj   = camera.position.distanceTo(s.pos3);
+            const universeV  = camDist > 100_000;
+            const closeApp   = camToObj < 50_000;
+            const visible    = universeV || closeApp;
+            if (mesh)  mesh.visible  = visible;
+            if (glow)  glow.visible  = visible;
+            if (gxSpr) gxSpr.visible = visible;
+            if (lbl)   lbl.visible   = visible && (camDist > 180_000 || closeApp);
+
+            // Cap sprite size at 16k scene units so the ten cosmic-dawn
+            // sprites don't merge at universe zoom (avg radial separation
+            // between adjacent shell members is only ~30 units).
+            if (gxSpr && visible) {
+                const cur = gxSpr.scale.x;
+                if (cur > 16_000) gxSpr.scale.setScalar(16_000);
+            }
+            // Glow capped at 8k for the same reason — the additive halo would
+            // otherwise dominate at universe view.
+            if (glow && visible) {
+                const cur = glow.scale.x;
+                if (cur > 8_000) glow.scale.setScalar(8_000);
             }
         }
     });
