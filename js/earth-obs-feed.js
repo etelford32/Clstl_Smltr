@@ -277,6 +277,16 @@ function loadTexture(url) {
                 tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
                 tex.minFilter = THREE.LinearFilter;
                 tex.magFilter = THREE.LinearFilter;
+                // CRITICAL: match earth-skin.js's surface convention.
+                // TextureLoader defaults flipY=true, which would map
+                // image row 0 (top) to v=1 (south pole). The Earth
+                // surface shader's normalToUV() (and the matching
+                // ShaderMaterial used by _createObsOverlay in
+                // earth.html) expects v=0 at the north pole — i.e.
+                // image row 0 stays at v=0. Without flipY=false the
+                // overlay is vertically inverted vs the day/night
+                // Earth below it.
+                tex.flipY = false;
                 tex.needsUpdate = true;
                 resolve(tex);
             },
