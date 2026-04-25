@@ -97,23 +97,44 @@ jobs:
 
   build-docker:
     runs-on: ubuntu-latest
-    # Only run Docker build if Docker Hub secrets are configured.
-    # This prevents the job from failing when secrets are missing.
-    if: ${{ secrets.DOCKER_USERNAME != '' }}
-    continue-on-error: true  # Don't fail the entire workflow if Docker build fails
+    # NOTE: GitHub Actions does NOT allow `secrets.*` in job-level `if:`
+    # expressions — secrets aren't part of the workflow-validation context.
+    # The canonical workaround is a leading "secrets-check" step that
+    # reads the secret into an env var (which IS allowed) and exposes a
+    # boolean output the rest of the steps gate on. Each subsequent step
+    # then no-ops cleanly when DOCKER_USERNAME isn't configured, instead
+    # of the whole workflow failing to parse.
+    continue-on-error: true   # Don't fail the whole workflow if Docker build fails
     steps:
-      - uses: actions/checkout@v4
+      - name: Check Docker Hub credentials
+        id: secrets-check
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          if [ -n "$DOCKER_USERNAME" ]; then
+            echo "available=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKER_USERNAME secret not set — skipping Docker build."
+          fi
+
+      - name: Checkout
+        if: steps.secrets-check.outputs.available == 'true'
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: steps.secrets-check.outputs.available == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
+        if: steps.secrets-check.outputs.available == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push
+        if: steps.secrets-check.outputs.available == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
