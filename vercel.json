@@ -8,6 +8,18 @@
     {
       "path": "/api/cron/refresh-weather-grid",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-hot",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-medium",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/prewarm-cold",
+      "schedule": "0 */6 * * *"
     }
   ],
   "headers": [

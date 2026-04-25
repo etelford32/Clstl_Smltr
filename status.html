@@ -135,6 +135,7 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 <script type="module">
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
+import { PIPELINES, CATEGORIES, pipelinesByCategory } from './js/pipeline-registry.js';
 // Pipeline Health card queries pipeline_heartbeat directly; we go through
 // the shared supabase-config so RLS + anon-read policy applies normally.
 import { getSupabase, isConfigured } from './js/supabase-config.js';
@@ -348,16 +349,19 @@ async function loadPipelineHeartbeatCard() {
     return { healthy, total: specs.length };
 }
 
-// Proxy probes — mirrors the admin.html card but trimmed to the endpoints
-// most load-bearing for user-facing features. Extend as new proxy endpoints
-// ship; keep this list tight so the card stays scannable.
-const PROXY_PROBES = [
-    { key: 'weather_grid',     label: 'Weather Grid',     endpoint: '/api/weather/grid',       warnAgeS:  90*60, critAgeS: 180*60 },
-    { key: 'solar_wind',       label: 'Solar Wind',       endpoint: '/api/solar-wind/latest',  warnAgeS:   5*60, critAgeS:  20*60 },
-    { key: 'noaa_kp',          label: 'NOAA Kp 1-min',    endpoint: '/api/noaa/kp-1m',         warnAgeS:  30*60, critAgeS: 120*60 },
-    { key: 'noaa_xray',        label: 'NOAA X-ray',       endpoint: '/api/noaa/xray',          warnAgeS:  30*60, critAgeS: 120*60 },
-    { key: 'noaa_alerts',      label: 'NOAA Alerts',      endpoint: '/api/noaa/alerts',        warnAgeS:  60*60, critAgeS: 360*60 },
-];
+// Proxy probes — sourced from js/pipeline-registry.js so this list and
+// the cron pre-warm jobs share one definition. Adding a new endpoint
+// requires only a registry append; this card picks it up automatically.
+const PROXY_PROBES = PIPELINES.map(p => ({
+    key:       p.id,
+    label:     p.label,
+    endpoint:  p.endpoint,
+    category:  p.category,
+    upstream:  p.upstream,
+    warnAgeS:  p.warnAgeS,
+    critAgeS:  p.critAgeS,
+    prewarm:   p.prewarm,
+}));
 
 async function _probeProxy(spec) {
     const t0 = performance.now();
@@ -406,41 +410,78 @@ function _rtFmtAgeSec(s) {
     return `${Math.round(s / 86400)}d ago`;
 }
 
+function _prewarmBadge(tier) {
+    if (!tier) return '';
+    const colour =
+        tier === 'hot'    ? '#ff8a4c' :
+        tier === 'medium' ? '#ffcc66' :
+        tier === 'cold'   ? '#5cd9ff' : '#778';
+    return ` <span style="display:inline-block;padding:1px 6px;border-radius:8px;
+              background:rgba(255,255,255,.05);border:1px solid ${colour}55;
+              color:${colour};font-size:.58rem;letter-spacing:.04em;
+              font-weight:700;text-transform:uppercase">prewarm·${tier}</span>`;
+}
+
+function _renderProbeRow(p) {
+    const h = _rtProxyHealth(p);
+    const body = p.body || {};
+    const missingEnv = Array.isArray(body.missing) && body.missing.length
+        ? ` <span style="color:#ff5555;font-size:.62rem">missing env: ${_rtEsc(body.missing.join(', '))}</span>`
+        : '';
+    const source = body.source || body.heartbeat?.last_source || p.spec.upstream || '—';
+    const statusCell = p.status != null
+        ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
+        : `<span style="color:#ff5555;font-weight:700">—</span>`;
+
+    return `<tr>`
+         +  `<td><strong>${_rtEsc(p.spec.label)}</strong>${_prewarmBadge(p.spec.prewarm)}`
+         +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
+         +  `<td>${statusCell}</td>`
+         +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
+         +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
+         +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
+         +  `<td style="color:${h.color};font-weight:600">● ${_rtEsc(h.label)}</td>`
+         +  `</tr>`;
+}
+
 async function loadProxyFreshnessCard() {
     const el = document.getElementById('rt-proxies');
     el.innerHTML = `<div class="rt-empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
 
     const probes = await Promise.all(PROXY_PROBES.map(_probeProxy));
+    const probeBySpec = new Map(probes.map(p => [p.spec.endpoint, p]));
 
-    let html = '<table><thead><tr>'
-             + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
-             + '<th>Source</th><th>Latency</th><th>Status</th>'
-             + '</tr></thead><tbody>';
-
+    // Per-category mini-tables — keeps the expanded probe list scannable.
+    let html = '';
     let healthy = 0;
-    for (const p of probes) {
-        const h = _rtProxyHealth(p);
-        if (h.label === 'healthy') healthy++;
-        const body = p.body || {};
-        const missingEnv = Array.isArray(body.missing) && body.missing.length
-            ? ` <span style="color:#ff5555;font-size:.62rem">missing env: ${_rtEsc(body.missing.join(', '))}</span>`
-            : '';
-        const source = body.source || body.heartbeat?.last_source || '—';
-        const statusCell = p.status != null
-            ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
-            : `<span style="color:#ff5555;font-weight:700">—</span>`;
+    for (const cat of CATEGORIES) {
+        const catProbes = pipelinesByCategory(cat.id)
+            .map(spec => probeBySpec.get(spec.endpoint))
+            .filter(Boolean);
+        if (catProbes.length === 0) continue;
 
-        html += `<tr>`
-             +  `<td><strong>${_rtEsc(p.spec.label)}</strong>`
-             +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
-             +  `<td>${statusCell}</td>`
-             +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
-             +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
-             +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
-             +  `<td style="color:${h.color};font-weight:600">● ${_rtEsc(h.label)}</td>`
-             +  `</tr>`;
+        const catHealthy = catProbes.filter(p =>
+            _rtProxyHealth(p).label === 'healthy').length;
+        healthy += catHealthy;
+
+        html += `<div style="margin-top:14px;display:flex;align-items:baseline;
+                  gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding-bottom:4px">
+                  <h3 style="font-size:.78rem;color:#bcd;font-weight:700;
+                            letter-spacing:.04em;text-transform:uppercase;margin:0">
+                    ${_rtEsc(cat.label)}
+                  </h3>
+                  <span style="color:#556;font-size:.66rem">
+                    ${catHealthy}/${catProbes.length} healthy
+                  </span>
+                </div>`;
+        html += '<table style="margin-top:6px"><thead><tr>'
+              + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+              + '<th>Source</th><th>Latency</th><th>Status</th>'
+              + '</tr></thead><tbody>';
+        for (const p of catProbes) html += _renderProbeRow(p);
+        html += '</tbody></table>';
     }
-    html += '</tbody></table>';
+
     el.innerHTML = html;
 
     document.getElementById('k-api').textContent = `${healthy}/${probes.length}`;
