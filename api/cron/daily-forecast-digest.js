@@ -325,6 +325,19 @@ function escHtml(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/**
+ * Reduce an email to a low-PII identifier for log / dry-run output.
+ *   alice.smith@gmail.com → ali***@gmail.com
+ * Distinct enough for ops to differentiate users when debugging without
+ * round-tripping a full address through HTTP responses.
+ */
+function maskEmail(email) {
+    if (!email || typeof email !== 'string' || !email.includes('@')) return '***';
+    const [local, domain] = email.split('@');
+    const head = local.slice(0, Math.min(3, local.length));
+    return `${head}***@${domain}`;
+}
+
 function wxLabel(code) {
     if (code == null) return 'Mixed';
     if (code === 0)   return 'Clear';
@@ -562,15 +575,19 @@ export default async function handler(req) {
             const subjectPrefix = days === 7 ? 'Week ahead' : 'Tomorrow';
             const subject  = `${subjectPrefix} at ${loc.label}: ${lead.high != null ? Math.round(lead.high) + '°' : '—'} ${wxLabel(lead.code)}`;
             if (dryRun) {
+                // Never echo recipient emails back in HTTP responses, even
+                // behind CRON_SECRET. Mask to local-part-prefix + domain so
+                // ops can still spot bad addresses without a PII trail in
+                // Vercel function logs / curl history.
                 if (dryList.length < 50) dryList.push({
-                    plan:    loc.plan,
-                    label:   loc.label,
-                    city:    loc.city,
-                    days:    days,
-                    leadHigh: lead.high,
-                    leadCode: lead.code,
+                    plan:           loc.plan,
+                    label:          loc.label,
+                    city:           loc.city,
+                    days,
+                    leadHigh:       lead.high,
+                    leadCode:       lead.code,
                     subject,
-                    recipient: loc.email,
+                    recipientMasked: maskEmail(loc.email),
                 });
             } else {
                 const html = buildDigestHtml({
