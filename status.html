@@ -97,6 +97,7 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
   <div class="kpi"><div class="kpi-val red" id="k-404">—</div><div class="kpi-label">404 / Down</div></div>
   <div class="kpi"><div class="kpi-val blue" id="k-api">—</div><div class="kpi-label">APIs OK</div></div>
   <div class="kpi"><div class="kpi-val gold" id="k-pipes">—</div><div class="kpi-label">Pipelines Healthy</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-gibs">—</div><div class="kpi-label">NASA GIBS</div></div>
   <div class="kpi"><div class="kpi-val blue" id="k-js">—</div><div class="kpi-label">JS Modules</div></div>
   <div class="kpi"><div class="kpi-val gold" id="k-deps">—</div><div class="kpi-label">Broken Deps</div></div>
 </div>
@@ -122,6 +123,19 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
   <div id="rt-proxies"><div class="rt-empty">Loading…</div></div>
 </div>
 
+<!-- ── NASA Earth Observations ─────────────────────────────────────────────────
+     Probes each GIBS layer the Earth sim renders. CORS-enabled, no key needed.
+     Drives whether the SST / AOD / fires / snow / precip overlays on earth.html
+     can fetch imagery — silent NASA breakage (layer rename, GIBS outage) shows
+     up here as a red row instead of an invisible empty overlay. -->
+<div class="rt-card">
+  <h3>NASA Earth Observations · GIBS layers
+    <button class="rt-refresh" id="rt-refresh-gibs">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Probes the NASA GIBS Snapshot endpoint for each layer earth.html requests (precipitation, SST, AOD, cloud thickness, fires, snow). HEAD-only — no full-image download. Red rows usually mean GIBS retired the layer ID (see MODIS_Terra_Snow_Cover → MODIS_Terra_NDSI_Snow_Cover).</p>
+  <div id="rt-gibs"><div class="rt-empty">Loading…</div></div>
+</div>
+
 <div class="actions">
   <button class="btn" id="btn-rescan">Re-scan Static Files</button>
   <button class="btn" id="btn-filter" data-mode="all">Show: All</button>
@@ -136,6 +150,10 @@ h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff
 // ── Auth gate: superadmin only ──────────────────────────────────────────────
 import { auth } from './js/auth.js';
 import { PIPELINES, CATEGORIES, pipelinesByCategory } from './js/pipeline-registry.js';
+// EARTH_OBS_LAYERS is the single source of truth for which NASA GIBS
+// products earth.html renders. Status page imports it directly so adding
+// a layer there auto-registers a probe row here.
+import { EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
 // Pipeline Health card queries pipeline_heartbeat directly; we go through
 // the shared supabase-config so RLS + anon-read policy applies normally.
 import { getSupabase, isConfigured } from './js/supabase-config.js';
@@ -489,10 +507,123 @@ async function loadProxyFreshnessCard() {
     return { healthy, total: probes.length };
 }
 
+// ── NASA GIBS probes ────────────────────────────────────────────────────────
+// HEAD-pings each GIBS Snapshot URL for the layers earth.html consumes.
+// GIBS is CORS-enabled with no API key; HEAD avoids downloading the full
+// imagery (each layer is ~500 KB-2 MB PNG). A 200 means the layer ID is
+// still live and date-aligned; 404 typically means NASA renamed/retired it.
+const GIBS_SNAPSHOT = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
+const GIBS_BBOX     = '-90,-180,90,180';
+const GIBS_CRS      = 'EPSG:4326';
+
+function _gibsProbeUrl(layer) {
+    const target = new Date(Date.now() - layer.timeOffset * 86_400_000);
+    const time   = target.toISOString().replace(/\.\d+Z$/, 'Z');
+    // Probe at a tiny resolution so HEAD-equivalent cost stays trivial
+    // even if the upstream falls through to a GET — we only care about
+    // status code, not the bytes.
+    const params = new URLSearchParams({
+        REQUEST: 'GetSnapshot',
+        TIME:    time,
+        BBOX:    GIBS_BBOX,
+        CRS:     GIBS_CRS,
+        LAYERS:  layer.gibs,
+        FORMAT:  layer.format ?? 'image/png',
+        WIDTH:   '64',
+        HEIGHT:  '32',
+    });
+    return `${GIBS_SNAPSHOT}?${params}`;
+}
+
+async function _probeGibs(layer) {
+    const url = _gibsProbeUrl(layer);
+    const t0  = performance.now();
+    try {
+        // Try HEAD first; many CDNs short-circuit it. If it 405s or
+        // CORS rejects, fall through to GET — we still only read the
+        // status code, the image body is discarded.
+        let res = await fetch(url, { method: 'HEAD', cache: 'no-store',
+                                     signal: AbortSignal.timeout(8000) });
+        if (res.status === 405 || res.status === 0) {
+            res = await fetch(url, { cache: 'no-store',
+                                     signal: AbortSignal.timeout(8000) });
+        }
+        return {
+            layer,
+            url,
+            status:    res.status,
+            ok:        res.ok,
+            latencyMs: Math.round(performance.now() - t0),
+        };
+    } catch (e) {
+        return {
+            layer,
+            url,
+            status:    null,
+            ok:        false,
+            latencyMs: Math.round(performance.now() - t0),
+            netErr:    e?.message || String(e),
+        };
+    }
+}
+
+async function loadGibsCard() {
+    const el = document.getElementById('rt-gibs');
+    el.innerHTML = `<div class="rt-empty">Probing ${EARTH_OBS_LAYERS.length} GIBS layers…</div>`;
+
+    const probes  = await Promise.all(EARTH_OBS_LAYERS.map(_probeGibs));
+    const healthy = probes.filter(p => p.ok).length;
+
+    let html = '<table><thead><tr>'
+             + '<th>Layer</th><th>GIBS ID</th><th>HTTP</th>'
+             + '<th>Latency</th><th>Default</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const p of probes) {
+        const colour =
+            p.ok                 ? '#4eff91' :
+            p.status === 404     ? '#ff5555' :
+            p.netErr             ? '#ffd700' :  // network/CORS — usually transient
+            p.status >= 500      ? '#ff5555' :
+                                   '#ffd700';
+        const label =
+            p.ok                 ? 'live' :
+            p.status === 404     ? 'retired/renamed (404)' :
+            p.netErr             ? `network: ${p.netErr}` :
+            p.status             ? `HTTP ${p.status}` :
+                                   'no response';
+        const statusCell = p.status != null
+            ? `<span style="color:${p.ok ? '#aab' : '#ff5555'};font-weight:${p.ok ? 400 : 700}">${p.status}</span>`
+            : `<span style="color:#ff5555;font-weight:700">—</span>`;
+        const defaultBadge = p.layer.defaultOn !== false
+            ? `<span style="color:#4fc3f7">on</span>`
+            : `<span style="color:#667">opt-in</span>`;
+
+        html += `<tr>`
+             +  `<td><strong>${_rtEsc(p.layer.name)}</strong>`
+             +      `<div style="color:#556;font-size:.65rem">${_rtEsc(p.layer.category)} · ${_rtEsc(p.layer.latency ?? '—')}</div></td>`
+             +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.66rem">${_rtEsc(p.layer.gibs)}</td>`
+             +  `<td>${statusCell}</td>`
+             +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
+             +  `<td style="font-size:.7rem">${defaultBadge}</td>`
+             +  `<td style="color:${colour};font-weight:600">● ${_rtEsc(label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+    const k = document.getElementById('k-gibs');
+    k.textContent = `${healthy}/${probes.length}`;
+    k.className   = 'kpi-val ' + (healthy === probes.length ? 'green' : healthy === 0 ? 'red' : 'gold');
+    return { healthy, total: probes.length };
+}
+
 document.getElementById('rt-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeatCard);
 document.getElementById('rt-refresh-proxies').addEventListener('click', loadProxyFreshnessCard);
+document.getElementById('rt-refresh-gibs').addEventListener('click', loadGibsCard);
 loadPipelineHeartbeatCard();
 loadProxyFreshnessCard();
+loadGibsCard();
 
 let filterMode = 'all';
 let lastResults = null;
