@@ -41,8 +41,13 @@ jobs:
           for f in *.html; do
             cp "$f" build/web/ && echo "Copied $f"
           done
-          # Copy any top-level CSS/JS if present
-          for f in *.css *.js 2>/dev/null; do
+          # Copy any top-level CSS/JS if present.
+          # The inner `[ -f "$f" ]` guard handles the case where the
+          # glob matches nothing (bash leaves the literal pattern, the
+          # guard returns false, the cp is skipped). Putting `2>/dev/null`
+          # in the for-header is a syntax error — bash parses `2` as a
+          # redirection target on `do`, not as a literal filename.
+          for f in *.css *.js; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # Copy JS modules directory
@@ -58,12 +63,13 @@ jobs:
             mkdir -p build/web/rust/www
             cp -r rust/www/* build/web/rust/www/ && echo "Copied rust/www/"
           fi
-          # Copy static assets (images, logos, etc.)
-          for f in *.png *.jpg *.svg *.ico *.webp 2>/dev/null; do
+          # Copy static assets (images, logos, etc.) — same guard pattern
+          # as the CSS/JS loop above; no for-header redirection.
+          for f in *.png *.jpg *.svg *.ico *.webp; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
-          # Copy sitemap/robots
-          for f in sitemap.xml robots.txt 2>/dev/null; do
+          # Copy sitemap/robots if present.
+          for f in sitemap.xml robots.txt; do
             [ -f "$f" ] && cp "$f" build/web/ && echo "Copied $f"
           done
           # List what we're deploying
