@@ -28,6 +28,7 @@ import {
 } from './upper-atmosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
+import { SolarWindLiveFeed } from './upper-atmosphere-live-feed.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -82,6 +83,15 @@ export class UpperAtmosphereUI {
         // hard-coded uniform value.
         this._applySolarWindToGlobe();
         this._paintSolarWindStats();
+        // Boot the dedicated /api/solar-wind/latest poller. It dispatches
+        // the same `swpc-update` event SpaceWeatherFeed publishes so the
+        // existing _bindSwpcEventBus() hook fires automatically — and
+        // the onTick callback retriggers the "Live solar wind" pulse so
+        // users can *see* fresh data arriving.
+        this._liveFeed = new SolarWindLiveFeed({
+            onTick: (last, info) => this._onLiveFeedTick(last, info),
+        });
+        this._liveFeed.start();
         this.refresh();
     }
 
@@ -146,10 +156,11 @@ export class UpperAtmosphereUI {
     }
 
     _bindSwpcEventBus() {
-        // If the host page boots SpaceWeatherFeed (e.g. the user also has
-        // space-weather.html open in a parent frame), soak up values
-        // passively to keep the source-chip honest. Does NOT override user
-        // slider positions.
+        // Soaks up `swpc-update` from any producer — SolarWindLiveFeed
+        // (this page's dedicated poller) and SpaceWeatherFeed (when the
+        // user also has space-weather.html mounted in a parent context)
+        // both publish the same shape, so the consumer is producer-
+        // agnostic. Does NOT override user slider positions.
         window.addEventListener('swpc-update', (e) => {
             const d = e?.detail;
             if (!d) return;
@@ -160,9 +171,78 @@ export class UpperAtmosphereUI {
                 speed:   d.solar_wind?.speed   ?? d.speed   ?? null,
                 density: d.solar_wind?.density ?? d.density ?? null,
             };
+            // Diagnostic meta — only present when the poller publishes
+            // (SpaceWeatherFeed doesn't include `meta`). Used by the
+            // freshness badge + the "Live solar wind" tile pulse.
+            if (d.meta) this._liveBusMeta = d.meta;
             this._applySolarWindToGlobe();
             this._paintSolarWindStats();
         });
+    }
+
+    /**
+     * Called by SolarWindLiveFeed on every poll tick (success or fail).
+     * Drives the visible "Live solar wind" tile so users can see fresh
+     * data arriving — the pulse animation retriggers each time, the age
+     * counter resets to "just now", and the alert badge picks up the
+     * latest classification.
+     */
+    _onLiveFeedTick(last, info) {
+        // Repaint the tile regardless — the state badge needs to update
+        // even on a fail tick (so users don't think a stale value is fresh).
+        this._paintLiveFeedTile(last, info);
+        // On success the swpc-update path has already pushed values into
+        // the globe + side-panel; nothing more to do here. On failure
+        // we leave the existing globe state alone (last good wins).
+    }
+
+    _paintLiveFeedTile(last, info) {
+        const tile = this.el.liveFeedTile;
+        if (!tile) return;
+
+        const ok = !!last;
+        const ageSec = ok ? Math.round((Date.now() - last.receivedAt) / 1000) : null;
+        const cur    = last?.payload?.data?.current ?? {};
+        const meta   = last?.payload ?? {};
+        const alert  = cur.alert_level ?? null;
+        const freshness = meta.freshness ?? null;
+        const upstreamAge = Number.isFinite(meta.age_min)
+            ? `${meta.age_min} min upstream`
+            : 'upstream age unknown';
+
+        const alertCls = ({
+            EXTREME:  'ua-lf-extreme',
+            HIGH:     'ua-lf-high',
+            MODERATE: 'ua-lf-moderate',
+            QUIET:    'ua-lf-quiet',
+        })[alert] || 'ua-lf-unknown';
+
+        const failNote = (info && !info.ok && info.failStreak > 0)
+            ? `<div class="ua-lf-fail">poll failed (×${info.failStreak}) — backing off</div>`
+            : '';
+
+        tile.innerHTML = `
+            <div class="ua-lf-row">
+                <span class="ua-lf-pulse" aria-hidden="true"></span>
+                <span class="ua-lf-title">Live solar wind</span>
+                <span class="ua-lf-age">${ok ? `· received ${ageSec}s ago` : '· awaiting first tick…'}</span>
+            </div>
+            <div class="ua-lf-row">
+                <span class="ua-lf-alert ${alertCls}">${alert ?? '—'}</span>
+                <span class="ua-lf-fresh">${freshness ?? '—'}</span>
+                <span class="ua-lf-up">${upstreamAge}</span>
+            </div>
+            ${failNote}
+        `;
+        // Retrigger the pulse animation: remove + add the class.
+        const pulse = tile.querySelector('.ua-lf-pulse');
+        if (pulse && ok) {
+            pulse.classList.remove('ua-lf-pulse--tick');
+            // Force reflow so the animation restarts.
+            // eslint-disable-next-line no-unused-expressions
+            pulse.offsetWidth;
+            pulse.classList.add('ua-lf-pulse--tick');
+        }
     }
 
     // Push the latest solar-wind plasma state to the globe + the side
@@ -182,6 +262,7 @@ export class UpperAtmosphereUI {
         const box = this.el.solarWindStats;
         if (!box) return;
         const sw = this._liveBusValues || {};
+        const meta = this._liveBusMeta || {};
         const speed   = Number.isFinite(sw.speed)   ? sw.speed   : 400;
         const density = Number.isFinite(sw.density) ? sw.density : 5;
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : 0;
