@@ -330,9 +330,41 @@ input[type=range]::-moz-range-thumb {
             <div id="ua-stats"></div>
         </div>
 
-        <div class="ua-panel">
+        <div class="ua-panel" style="margin-bottom:14px;">
             <h2>Atmospheric layers</h2>
             <div id="ua-layer-legend"></div>
+        </div>
+
+        <div class="ua-panel">
+            <h2>Solar wind &amp; magnetosphere</h2>
+            <div id="ua-sw-stats"></div>
+            <div id="ua-sw-legend">
+                <div class="ua-layer-row" title="Boundary where Earth's magnetic pressure balances solar-wind dynamic pressure (Shue-1998).">
+                    <span class="ua-layer-dot" style="background:#60d8ff"></span>
+                    <span class="ua-layer-name">Magnetopause</span>
+                    <span class="ua-layer-range">~10 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Where supersonic solar wind decelerates to subsonic on impact with the magnetosphere (Farris–Russell).">
+                    <span class="ua-layer-dot" style="background:#ffc070"></span>
+                    <span class="ua-layer-name">Bow shock</span>
+                    <span class="ua-layer-range">~14 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Compressed, heated solar-wind plasma between the bow shock and the magnetopause.">
+                    <span class="ua-layer-dot" style="background:#ff9944"></span>
+                    <span class="ua-layer-name">Magnetosheath</span>
+                    <span class="ua-layer-range">10–14 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Bulk plasma flow from the Sun. Brightness scales with dynamic pressure.">
+                    <span class="ua-layer-dot" style="background:#6cc8ff"></span>
+                    <span class="ua-layer-name">Flux streamers</span>
+                    <span class="ua-layer-range">∝ ρv²</span>
+                </div>
+            </div>
+            <div class="ua-dim" style="font-size:.66rem;margin-top:8px;line-height:1.4">
+                Zoom out to see the magnetopause + bow shock at full Shue scale.
+                Live values arrive via the <code>swpc-update</code> bus when a
+                Space-Weather feed is running on the same origin.
+            </div>
         </div>
     </aside>
 
@@ -342,7 +374,9 @@ input[type=range]::-moz-range-thumb {
         <div id="ua-globe-legend">
             <b>gradient shells</b> · mesosphere → outer exosphere<br>
             colour = layer · brightness ∝ log ρ · warmth ∝ Ap<br>
-            cyan ring = current altitude
+            cyan ring = current altitude<br>
+            <span style="color:#60d8ff">·</span> magnetopause · <span style="color:#ffc070">·</span> bow shock<br>
+            <span style="color:#aac">drag to rotate · scroll out for the magnetosphere</span>
         </div>
     </section>
 
@@ -386,6 +420,7 @@ input[type=range]::-moz-range-thumb {
             liveBtn:        document.getElementById('ua-live-btn'),
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),
+            solarWindStats: document.getElementById('ua-sw-stats'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to
