@@ -1965,11 +1965,18 @@ initAll();
     const planCap  = isAdmin ? '∞' : (PLAN_LIMITS[plan] ?? 0);
     // Feature gates:
     //   Hourly strip → any tier with alert access (basic + advanced).
-    //   Daily forecast digest (email) → basic plan only — value-add for the
-    //   Intro tier; Pro users get real-time alerts via /api/alerts/email and
-    //   are deliberately excluded from this duplicate channel.
+    //   Daily forecast digest (email):
+    //     basic plan    → up to 5 digest-enabled locations · tomorrow's forecast (1 day)
+    //     advanced plan → up to 10 digest-enabled locations · 7-day forecast
+    //   The cap is enforced both client-side (this file) and server-side
+    //   (api/cron/daily-forecast-digest.js orders by created_at and slices).
     const canUseHourly   = isAdmin || auth.canUseAlerts?.();
-    const canUseDigest   = isAdmin || plan === 'basic';
+    const canUseDigest   = isAdmin || plan === 'basic' || plan === 'advanced';
+    const digestCap      = isAdmin ? Infinity
+                          : plan === 'advanced' ? 10
+                          : plan === 'basic'    ? 5
+                          : 0;
+    const digestDays     = plan === 'advanced' ? 7 : 1;
 
     if (cardTitle) {
         cardTitle.textContent = isAdmin
@@ -2228,12 +2235,16 @@ initAll();
     </div>
   </div>` : '';
 
-        // Daily digest toggle is shown only for Intro-tier users (and admins
-        // for testing). Pro users get real-time alerts and are intentionally
-        // excluded from this duplicate channel.
+        // Daily digest toggle.
+        // Capacity hint mirrors the per-tier cap so users see "X / N enabled"
+        // before they hit the limit. Cap enforcement on save: see the click
+        // handler at [data-action="save"].
+        const digestTitle = digestDays === 7
+            ? 'One email each morning with the next 7 days of forecast for this location (Pro)'
+            : "One email each morning with tomorrow's forecast for this location";
         const digestRow = canUseDigest ? `
       <div class="sl-cfg-row">
-        <label title="One email each morning with tomorrow's forecast for this location"><input type="checkbox" data-cfg="daily_digest_enabled" ${row.daily_digest_enabled?'checked':''}> Daily forecast digest</label>
+        <label title="${digestTitle}"><input type="checkbox" data-cfg="daily_digest_enabled" ${row.daily_digest_enabled?'checked':''}> Daily forecast digest</label>
       </div>` : '';
 
         return `
@@ -2340,6 +2351,17 @@ initAll();
                     cfg[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
                 }
             });
+            // Per-plan digest cap. Counted from the freshest list rather than
+            // `row` so quick toggles across multiple rows can't slip past the
+            // limit. (Cron also re-applies this server-side as defense in depth.)
+            if (patch.daily_digest_enabled === true && !row.daily_digest_enabled) {
+                const fresh = await listLocations({ force: true });
+                const enabled = fresh.filter(r => r.daily_digest_enabled).length;
+                if (enabled >= digestCap) {
+                    showErr(`Digest cap reached: ${digestCap} location${digestCap === 1 ? '' : 's'} on the ${plan.toUpperCase()} plan. Disable another or upgrade.`);
+                    return;
+                }
+            }
             const res = await updateLocation(row.id, patch);
             if (res.ok) {
                 const msg = el.querySelector('[data-role="save-msg"]');
