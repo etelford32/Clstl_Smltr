@@ -37,11 +37,20 @@ import { jsonOk, jsonError, fetchWithTimeout } from '../_lib/responses.js';
 
 export const config = { runtime: 'edge' };
 
-const NOAA_F107 = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
+// Primary: NOAA SWPC's daily F10.7 file (object-array). Sometimes stalls when
+// the Penticton observatory has a feed gap.
+// Fallback: 30-day summary product, populated from a different SWPC pipeline
+// so a single-source outage doesn't blank our card.
+const NOAA_F107          = 'https://services.swpc.noaa.gov/json/f107_cm_flux.json';
+const NOAA_F107_FALLBACK = 'https://services.swpc.noaa.gov/products/summary/10cm-flux-30day.json';
 const CACHE_TTL = 3600;   // 1 hour — F10.7 updates once daily, no need to rush
 const CACHE_SWR = 1800;   // daily-cadence endpoint gets a longer SWR window
 const RECENT_N  = 7;      // days of history in `recent` array
 const TREND_WIN = 7;      // days for slope calculation
+// Anything older than this means the upstream feed itself is broken — don't
+// serve a 200 with month-old "current" flux. F10.7 cadence is daily; 7d gives
+// us a margin for legitimate observatory weather/holiday gaps.
+const STALE_HOURS = 168;
 
 // ── Activity classification ───────────────────────────────────────────────────
 function activityLabel(sfu) {
@@ -87,34 +96,23 @@ function freshnessStatus(ageHours) {
     return 'expired';
 }
 
-// ── Main handler ─────────────────────────────────────────────────────────────
-export default async function handler() {
-    let raw;
-    try {
-        const res = await fetchWithTimeout(NOAA_F107, { headers: { Accept: 'application/json' } });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        raw = await res.json();
-    } catch (e) {
-        return jsonError('upstream_unavailable', e.message, { source: 'NOAA SWPC' });
-    }
+const fill = v => {
+    if (v == null || v === '') return null;
+    const n = parseFloat(v);
+    return isNaN(n) || n <= 0 ? null : n;
+};
 
-    // f107_cm_flux.json may be an array of objects or a 2-D array depending on
-    // NOAA version. Handle both shapes.
+async function fetchPrimary() {
+    const res = await fetchWithTimeout(NOAA_F107, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`primary HTTP ${res.status}`);
+    const raw = await res.json();
     if (!Array.isArray(raw) || raw.length === 0) {
-        return jsonError('parse_error', 'Unexpected f107_cm_flux format', { source: 'NOAA SWPC' });
+        throw new Error('primary: unexpected f107_cm_flux format');
     }
-
-    const fill = v => {
-        if (v == null || v === '') return null;
-        const n = parseFloat(v);
-        return isNaN(n) || n <= 0 ? null : n;
-    };
-
-    let rows;
 
     if (typeof raw[0] === 'object' && !Array.isArray(raw[0])) {
         // Object-array form: [{ time_tag, flux, adjusted_flux }, …]
-        rows = raw
+        return raw
             .filter(r => r?.time_tag)
             .map(r => ({
                 date:           r.time_tag,
@@ -122,30 +120,99 @@ export default async function handler() {
                 adjusted_flux:  fill(r.adjusted_flux ?? r.adjusted),
             }))
             .filter(r => r.flux != null);
-    } else {
-        // 2-D array form: row[0] = headers
-        const headers      = raw[0].map(String);
-        const timeCol      = headers.indexOf('time_tag');
-        const fluxCol      = headers.findIndex(h => /^flux$/i.test(h));
-        const adjCol       = headers.findIndex(h => /adjusted/i.test(h));
-        rows = raw.slice(1)
-            .filter(r => r[timeCol])
-            .map(r => ({
-                date:          r[timeCol],
-                flux:          fill(r[fluxCol]),
-                adjusted_flux: adjCol >= 0 ? fill(r[adjCol]) : null,
-            }))
-            .filter(r => r.flux != null);
+    }
+    // 2-D array form: row[0] = headers
+    const headers      = raw[0].map(String);
+    const timeCol      = headers.indexOf('time_tag');
+    const fluxCol      = headers.findIndex(h => /^flux$/i.test(h));
+    const adjCol       = headers.findIndex(h => /adjusted/i.test(h));
+    return raw.slice(1)
+        .filter(r => r[timeCol])
+        .map(r => ({
+            date:          r[timeCol],
+            flux:          fill(r[fluxCol]),
+            adjusted_flux: adjCol >= 0 ? fill(r[adjCol]) : null,
+        }))
+        .filter(r => r.flux != null);
+}
+
+async function fetchFallback() {
+    // 10cm-flux-30day.json shape (NOAA SWPC product summary):
+    //   { "30-day": [ { "time-tag": "2026-04-25", "flux": "152" }, … ] }
+    // No adjusted flux in this product — we leave that field null.
+    const res = await fetchWithTimeout(NOAA_F107_FALLBACK, { headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`fallback HTTP ${res.status}`);
+    const raw = await res.json();
+    const arr = raw?.['30-day'] ?? raw?.['30day'] ?? raw?.thirty_day ?? null;
+    if (!Array.isArray(arr) || arr.length === 0) {
+        throw new Error('fallback: unexpected 10cm-flux-30day format');
+    }
+    return arr
+        .filter(r => r?.['time-tag'] || r?.time_tag)
+        .map(r => ({
+            date:           r['time-tag'] ?? r.time_tag,
+            flux:           fill(r.flux),
+            adjusted_flux:  null,
+        }))
+        .filter(r => r.flux != null);
+}
+
+function rowAgeHours(row) {
+    const iso = isoDate(row?.date);
+    const ms  = iso ? new Date(iso).getTime() : NaN;
+    return isNaN(ms) ? null : (Date.now() - ms) / 3_600_000;
+}
+
+// ── Main handler ─────────────────────────────────────────────────────────────
+export default async function handler() {
+    // Try primary first; if it fails OR returns stale data, retry against the
+    // 30-day fallback before deciding the feed is broken.
+    let rows = [];
+    let usedFallback = false;
+    let primaryErr;
+
+    try {
+        rows = await fetchPrimary();
+    } catch (e) {
+        primaryErr = e.message;
+    }
+
+    const primaryAge = rows.length ? rowAgeHours(rows[rows.length - 1]) : null;
+    const primaryStale = primaryAge == null || primaryAge > STALE_HOURS;
+
+    if (primaryStale) {
+        try {
+            const fallbackRows = await fetchFallback();
+            if (fallbackRows.length) {
+                const fallbackAge = rowAgeHours(fallbackRows[fallbackRows.length - 1]);
+                if (fallbackAge != null && (primaryAge == null || fallbackAge < primaryAge)) {
+                    rows = fallbackRows;
+                    usedFallback = true;
+                }
+            }
+        } catch {
+            // fall through — we'll surface the primary error below
+        }
     }
 
     if (rows.length === 0) {
-        return jsonError('no_valid_data', 'All F10.7 readings are null/fill', { source: 'NOAA SWPC' });
+        return jsonError('upstream_unavailable',
+            primaryErr || 'No F10.7 rows available from primary or fallback',
+            { source: 'NOAA SWPC' });
     }
 
     const latest      = rows[rows.length - 1];
     const updatedISO  = isoDate(latest.date);
     const updatedMs   = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageHours    = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 3_600_000;
+
+    // Both feeds came back stale — surface as an upstream error so the dashboard
+    // flags it red, instead of serving a HTTP 200 with month-old "current" flux.
+    if (ageHours == null || ageHours > STALE_HOURS) {
+        return jsonError('upstream_stale',
+            `latest F10.7 reading is ${ageHours == null ? 'undated' : Math.round(ageHours / 24) + 'd'} old`,
+            { source: usedFallback ? 'NOAA SWPC 10cm-flux-30day' : 'NOAA SWPC f107_cm_flux' });
+    }
 
     const trendRows   = rows.slice(-TREND_WIN);
     const slope       = linearSlope(trendRows.map(r => r.flux));
@@ -158,7 +225,9 @@ export default async function handler() {
     }));
 
     return jsonOk({
-        source:     'NOAA SWPC f107_cm_flux via Vercel Edge',
+        source:     usedFallback
+            ? 'NOAA SWPC 10cm-flux-30day via Vercel Edge (primary stale)'
+            : 'NOAA SWPC f107_cm_flux via Vercel Edge',
         age_hours:  ageHours != null ? Math.round(ageHours * 10) / 10 : null,
         freshness:  freshnessStatus(ageHours),
         data: {
