@@ -9,7 +9,10 @@
  * Layers (Earth radius = 1.0):
  *   • EarthSkin.earthMesh                         surface, clouds off
  *   • EarthSkin atmosphere rim                    1.026 R⊕ (provided by skin)
- *   • density shells  at 100, 600, 1500 km        log-ρ-shaded
+ *   • gradient shells × 5 (mesosphere → outer exosphere)
+ *                                                  fresnel halo, inner→outer
+ *                                                  colour gradient, opacity
+ *                                                  driven by local log(ρ)
  *   • satellite rings at ISS/HST/Starlink/…       colored tori
  *   • altitude ring   at the user's current alt   cyan, tracks slider
  *   • star backdrop
@@ -47,22 +50,109 @@ function apToKp(ap) {
 
 const R_EARTH_KM = 6371;
 
-// Three visual density shells — one per atmospheric regime the page
-// actually distinguishes (Kármán edge · thermopause · outer exosphere).
-// Kept distinct from EarthSkin's atmosphere-rim shader so each shell
-// can be lit by local log(ρ) rather than the fresnel glow.
-const DENSITY_SHELLS = [
-    { id: "karman-shell",     altKm:  100, baseColor: 0xff9090 },
-    { id: "thermopause",      altKm:  600, baseColor: 0xffb060 },
-    { id: "outer-exosphere",  altKm: 1500, baseColor: 0xc080ff },
+// ── Gradient layer shells ──────────────────────────────────────────────────
+// Five concentric translucent shells, one per physical regime the page
+// distinguishes within the 80–2000 km band. Each shell is a back-side
+// sphere at the layer's outer altitude, rendered with a custom GLSL
+// shader that paints a fresnel-driven limb glow whose colour gradients
+// from `colorLow` (layer floor) to `colorHigh` (layer top). Per-shell
+// opacity is driven by local log(ρ) so the visual reads as data, not
+// decoration: dense regimes glow brighter; the rarefied outer exosphere
+// fades to a faint halo.
+//
+// `peakKm` is the altitude where we sample the profile to scale
+// brightness; usually the layer's mid-point on a log-altitude scale so
+// the thermosphere's wide vertical range still has a stable peak.
+const LAYER_SHELLS = [
+    {
+        id:         "mesosphere",
+        name:       "Mesosphere",
+        minKm:       50, maxKm:   85,  peakKm:   80,
+        colorLow:   0x6e9bff, colorHigh: 0x9cc3ff,
+        baseAlpha:  0.22, rimPower: 2.4,
+    },
+    {
+        id:         "lower-thermosphere",
+        name:       "Lower Thermosphere",
+        minKm:       85, maxKm:  250,  peakKm:  170,
+        colorLow:   0xff7a3d, colorHigh: 0xffb060,
+        baseAlpha:  0.30, rimPower: 2.8,
+    },
+    {
+        id:         "upper-thermosphere",
+        name:       "Upper Thermosphere",
+        minKm:      250, maxKm:  600,  peakKm:  420,
+        colorLow:   0xffa050, colorHigh: 0xffe0a0,
+        baseAlpha:  0.22, rimPower: 3.0,
+    },
+    {
+        id:         "inner-exosphere",
+        name:       "Inner Exosphere",
+        minKm:      600, maxKm: 1200,  peakKm:  900,
+        colorLow:   0xb672ff, colorHigh: 0xe2a8ff,
+        baseAlpha:  0.16, rimPower: 3.2,
+    },
+    {
+        id:         "outer-exosphere",
+        name:       "Outer Exosphere",
+        minKm:     1200, maxKm: 2000,  peakKm: 1600,
+        colorLow:   0x7a3dff, colorHigh: 0xb47cff,
+        baseAlpha:  0.10, rimPower: 3.6,
+    },
 ];
 
-// Formal atmospheric-layer boundary rings — visually subtle, labelled in
-// the UI legend rather than the 3D scene.
-const LAYER_BOUNDARY_RINGS = [
-    { id: "mesopause",  altKm:  85, color: 0x7aa8ff, opacity: 0.45 },
-    { id: "thermopause",altKm: 600, color: 0xff8a4c, opacity: 0.55 },
-];
+// ── Layer-shell GLSL ───────────────────────────────────────────────────────
+// Vert: pass world-space position + normal so the fragment shader can
+// compute view-direction fresnel against the camera.
+const LAYER_VERT = /* glsl */`
+    varying vec3 vWorldPos;
+    varying vec3 vWorldNormal;
+    void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos    = wp.xyz;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position  = projectionMatrix * viewMatrix * wp;
+    }
+`;
+
+// Frag: limb-darkened fresnel halo with a colour gradient from
+// uColorLow (centre / layer floor) to uColorHigh (limb / layer top).
+// uIntensity couples the brightness to local log(rho) and uStorm adds
+// a warm tint when geomagnetic forcing rises (the thermosphere literally
+// inflates and heats during storms — colouring it conveys that).
+const LAYER_FRAG = /* glsl */`
+    uniform vec3  uCameraPos;
+    uniform vec3  uColorLow;
+    uniform vec3  uColorHigh;
+    uniform float uOpacity;
+    uniform float uIntensity;
+    uniform float uRimPower;
+    uniform float uStorm;
+    varying vec3  vWorldPos;
+    varying vec3  vWorldNormal;
+    void main() {
+        vec3 V = normalize(uCameraPos - vWorldPos);
+        // BackSide rendering: flip the normal so fresnel peaks at the
+        // limb when seen from outside the planet.
+        vec3 N = -normalize(vWorldNormal);
+        float NV = clamp(dot(N, V), 0.0, 1.0);
+        float rim = pow(1.0 - NV, uRimPower);
+
+        // Inner -> outer colour blend follows the rim term: centre of
+        // the visible shell shows uColorLow (layer floor), the limb
+        // shows uColorHigh (layer top). A gentle latitude darkening
+        // mimics density falloff toward the polar cusps.
+        float lat = abs(normalize(vWorldPos).y);
+        vec3 col = mix(uColorLow, uColorHigh, rim);
+        col = mix(col, col * 0.78, lat * 0.35);
+
+        // Storm warming: push hue toward orange-red as Ap rises.
+        col = mix(col, vec3(1.0, 0.55, 0.25), uStorm * 0.45 * (0.4 + 0.6 * rim));
+
+        float alpha = uOpacity * uIntensity * (0.10 + 0.90 * rim);
+        gl_FragColor = vec4(col, alpha);
+    }
+`;
 
 export class AtmosphereGlobe {
     /**
@@ -79,8 +169,7 @@ export class AtmosphereGlobe {
         this._initRenderer();
         this._initScene();
         this._buildEarth();
-        this._buildShells();
-        this._buildLayerRings();
+        this._buildLayerShells();
         this._buildSatelliteRings();
         this._buildAltitudeRing();
         if (this.opts.stars) this._initStars();
@@ -96,15 +185,21 @@ export class AtmosphereGlobe {
     // ── Public API ──────────────────────────────────────────────────────────
 
     /**
-     * Feed a sampled/fetched profile. Each density shell picks its local
-     * ρ via nearest-neighbour in altitude and re-opacities.
+     * Feed a sampled/fetched profile. Each gradient shell normalises its
+     * intensity uniform against the in-band density range so the visual
+     * tracks the data without dynamic-range collapse.
      */
     setProfile(profile) {
         if (!profile?.samples?.length) return;
         this._profile = profile;
 
+        // Sample log(ρ) at each shell's reference altitude. The min/max
+        // of the *current* profile defines the dynamic range — this way
+        // a quiet preset and a G5-storm preset both light up the shells
+        // proportionally without saturating one or going invisible in the
+        // other.
         const logRhos = this._shells.map(sh => {
-            const rho = _nearestRho(profile.samples, sh.userData.altKm);
+            const rho = _nearestRho(profile.samples, sh.userData.peakKm);
             sh.userData.rho = rho;
             return Math.log10(Math.max(rho, 1e-30));
         });
@@ -113,11 +208,11 @@ export class AtmosphereGlobe {
         const span = Math.max(maxLR - minLR, 1.0);
 
         for (let i = 0; i < this._shells.length; i++) {
-            const t = (logRhos[i] - minLR) / span;       // 0 (thin) … 1 (dense)
-            const base = new THREE.Color(this._shells[i].userData.baseColor);
-            base.lerp(new THREE.Color(0xffffff), 0.25 + 0.35 * t);
-            this._shells[i].material.color.copy(base);
-            this._shells[i].material.opacity = 0.05 + t * 0.25;
+            const t = (logRhos[i] - minLR) / span;   // 0 (thin) … 1 (dense)
+            // Compress so even the rarefied outer exosphere keeps a
+            // visible halo, but dense regimes still pop.
+            const intensity = 0.35 + 0.85 * t;
+            this._shells[i].material.uniforms.uIntensity.value = intensity;
         }
 
         if (this._currentAltKm != null) this.setAltitude(this._currentAltKm);
@@ -191,15 +286,22 @@ export class AtmosphereGlobe {
             xray: 0,
             dstNorm,
         });
+
+        // Storm warming for the gradient layer shells. Same envelope as
+        // auroraAW so the colour shift stays in lock-step with the oval.
+        if (this._shells) {
+            for (const sh of this._shells) {
+                sh.material.uniforms.uStorm.value = auroraAW;
+            }
+        }
     }
 
     /**
      * Toggle overlay groups.
      */
-    setVisibility({ satellites = true, shells = true, rings = true } = {}) {
+    setVisibility({ satellites = true, shells = true } = {}) {
         if (this._satGroup)   this._satGroup.visible   = satellites;
         if (this._shellGroup) this._shellGroup.visible = shells;
-        if (this._layerGroup) this._layerGroup.visible = rings;
     }
 
     dispose() {
@@ -269,45 +371,52 @@ export class AtmosphereGlobe {
         this._scene.add(new THREE.AmbientLight(0x334466, 0.3));
     }
 
-    _buildShells() {
+    _buildLayerShells() {
+        // Build the five gradient layer shells back-to-front (outermost
+        // first) and assign explicit `renderOrder` so the additive
+        // compositing stacks correctly even when transparent-sort
+        // disagrees with our intent.
         this._shells = [];
         this._shellGroup = new THREE.Group();
-        for (const def of DENSITY_SHELLS) {
-            const r = 1 + def.altKm / R_EARTH_KM;
-            const mat = new THREE.MeshBasicMaterial({
-                color: def.baseColor,
+
+        const ordered = [...LAYER_SHELLS].sort((a, b) => b.maxKm - a.maxKm);
+        let renderOrder = 0;
+        for (const def of ordered) {
+            // Outer radius of the shell (in Earth radii).
+            const r = 1 + def.maxKm / R_EARTH_KM;
+            const mat = new THREE.ShaderMaterial({
+                vertexShader:   LAYER_VERT,
+                fragmentShader: LAYER_FRAG,
+                uniforms: {
+                    uCameraPos: { value: this._camera.position.clone() },
+                    uColorLow:  { value: new THREE.Color(def.colorLow) },
+                    uColorHigh: { value: new THREE.Color(def.colorHigh) },
+                    uOpacity:   { value: def.baseAlpha },
+                    uIntensity: { value: 0.7 },
+                    uRimPower:  { value: def.rimPower },
+                    uStorm:     { value: 0 },
+                },
                 transparent: true,
-                opacity: 0.10,
                 side: THREE.BackSide,
                 depthWrite: false,
+                blending: THREE.AdditiveBlending,
             });
-            const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 48, 48), mat);
-            mesh.userData = { altKm: def.altKm, baseColor: def.baseColor };
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 64, 48), mat);
+            mesh.renderOrder = renderOrder++;
+            mesh.userData = {
+                kind:    'layer-shell',
+                id:      def.id,
+                name:    def.name,
+                minKm:   def.minKm,
+                maxKm:   def.maxKm,
+                peakKm:  def.peakKm,
+                altKm:   def.peakKm,                  // for tooltip ρ readout
+                color:   `#${def.colorHigh.toString(16).padStart(6, '0')}`,
+            };
             this._shells.push(mesh);
             this._shellGroup.add(mesh);
         }
         this._scene.add(this._shellGroup);
-    }
-
-    _buildLayerRings() {
-        // Thin tori at key atmospheric-regime boundaries. They read as
-        // equatorial discs rather than full shells so they don't compete
-        // visually with the density shells.
-        this._layerGroup = new THREE.Group();
-        this._layerRings = [];
-        for (const def of LAYER_BOUNDARY_RINGS) {
-            const r = 1 + def.altKm / R_EARTH_KM;
-            const ring = _ringMesh(r, 0.003, def.color, def.opacity);
-            ring.userData = {
-                kind: 'layer-boundary',
-                altKm: def.altKm,
-                id: def.id,
-                name: _layerBoundaryName(def.id),
-            };
-            this._layerGroup.add(ring);
-            this._layerRings.push(ring);
-        }
-        this._scene.add(this._layerGroup);
     }
 
     _buildSatelliteRings() {
@@ -427,7 +536,7 @@ export class AtmosphereGlobe {
         this._raycaster.params.Line = { threshold: 0.02 };
         this._mouse = new THREE.Vector2(-9, -9);
 
-        const hittable = () => [...(this._satRings || []), ...(this._layerRings || [])];
+        const hittable = () => [...(this._satRings || []), ...(this._shells || [])];
 
         const onMove = (e) => {
             const rect = this.canvas.getBoundingClientRect();
@@ -472,8 +581,15 @@ export class AtmosphereGlobe {
         if (this.opts.autoRotate && this._skin && !this._controls.dragging) {
             this._skin.earthMesh.rotation.y += 0.0010;
             if (this._shellGroup) this._shellGroup.rotation.y += 0.00045;
-            if (this._layerGroup) this._layerGroup.rotation.y += 0.00045;
             if (this._satGroup)   this._satGroup.rotation.y   += 0.00060;
+        }
+
+        // Push the live camera position into the shell shaders so their
+        // limb fresnel tracks the current viewpoint.
+        if (this._shells) {
+            for (const sh of this._shells) {
+                sh.material.uniforms.uCameraPos.value.copy(this._camera.position);
+            }
         }
 
         this._controls.update();
@@ -516,17 +632,9 @@ function _hex(colorStr) {
     return parseInt(colorStr.replace("#", ""), 16);
 }
 
-// Pretty-print name for a layer-boundary ring.
-function _layerBoundaryName(id) {
-    switch (id) {
-        case 'mesopause':   return 'Mesopause';
-        case 'thermopause': return 'Thermopause';
-        default:            return id;
-    }
-}
-
-// Build the tooltip HTML for a hovered ring. Pulls ρ from the current
-// profile when available so users see the local density at that shell.
+// Build the tooltip HTML for a hovered ring or shell. Pulls ρ from the
+// current profile when available so users see the local density at the
+// hover target.
 function _tipHTML(userData, profile) {
     const colour = userData.color || '#0cc';
     let rhoLine = '';
@@ -535,13 +643,17 @@ function _tipHTML(userData, profile) {
         const rho = _nearestRho(profile.samples, alt);
         rhoLine = `<div style="color:#889;margin-top:3px">ρ ≈ ${rho.toExponential(2)} kg/m³</div>`;
     }
-    const kindLabel =
-        userData.kind === 'satellite'      ? 'satellite shell'  :
-        userData.kind === 'layer-boundary' ? 'atmospheric boundary' :
-                                             '';
+    let detail = '';
+    if (userData.kind === 'satellite') {
+        detail = `${userData.altKm} km · satellite shell`;
+    } else if (userData.kind === 'layer-shell') {
+        detail = `${userData.minKm}–${userData.maxKm} km · atmospheric layer`;
+    } else {
+        detail = `${userData.altKm} km`;
+    }
     return `
         <div style="color:${colour};font-weight:600">${userData.name || userData.id}</div>
-        <div>${userData.altKm} km · ${kindLabel}</div>
+        <div>${detail}</div>
         ${rhoLine}
     `;
 }
