@@ -9,10 +9,19 @@
  * Layers (Earth radius = 1.0):
  *   • EarthSkin.earthMesh                         surface, clouds off
  *   • EarthSkin atmosphere rim                    1.026 R⊕ (provided by skin)
- *   • gradient shells × 5 (mesosphere → outer exosphere)
- *                                                  fresnel halo, inner→outer
- *                                                  colour gradient, opacity
- *                                                  driven by local log(ρ)
+ *   • volumetric shells × 5 (mesosphere → outer exosphere)
+ *                                                  ray-march shader: each
+ *                                                  shell mesh is a sphere at
+ *                                                  the layer's outer radius;
+ *                                                  fragment shader integrates
+ *                                                  the view ray's segment
+ *                                                  *inside* the shell volume
+ *                                                  (between inner & outer
+ *                                                  radii, capped by planet)
+ *                                                  and shades by path length
+ *                                                  → real sphere sheets with
+ *                                                  visible depth, not 2-D
+ *                                                  limb rings
  *   • satellite rings at ISS/HST/Starlink/…       colored tori
  *   • altitude ring   at the user's current alt   cyan, tracks slider
  *   • star backdrop
@@ -105,56 +114,113 @@ const LAYER_SHELLS = [
     },
 ];
 
-// ── Layer-shell GLSL ───────────────────────────────────────────────────────
-// Vert: pass world-space position + normal so the fragment shader can
-// compute view-direction fresnel against the camera.
+// ── Layer-shell GLSL — volumetric ray-march ──────────────────────────────
+// The shell isn't a 2D ring around the limb — it's a 3D spherical *sheet*
+// with a real inner/outer radius. The fragment shader treats the mesh
+// surface as a "front door" into a volume bounded by uInnerR and uOuterR
+// and computes how much of that volume the view ray traverses.
+//
+// For each fragment:
+//   1. Cast a ray from the camera through the world-space fragment.
+//   2. Intersect with the outer & inner spheres (analytic, cheap).
+//   3. The visible shell-segment is everything the ray spends inside
+//      the (inner < r < outer) annulus *in front* of the planet.
+//   4. Color comes from the radial position of the segment's mid-point
+//      (low → high altitude inside the layer) with a storm warming term.
+//   5. Alpha is proportional to path length × layer base opacity ×
+//      density-driven uIntensity. Long limb chords accumulate more
+//      "atmosphere", short on-axis chords accumulate less — gives the
+//      shell a real sense of *depth*.
+//
+// This replaces the old fresnel-only shader where the shell was only
+// visible at the limb (which is exactly what made it look like a ring).
 const LAYER_VERT = /* glsl */`
     varying vec3 vWorldPos;
-    varying vec3 vWorldNormal;
     void main() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos    = wp.xyz;
-        vWorldNormal = normalize(mat3(modelMatrix) * normal);
-        gl_Position  = projectionMatrix * viewMatrix * wp;
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
     }
 `;
 
-// Frag: limb-darkened fresnel halo with a colour gradient from
-// uColorLow (centre / layer floor) to uColorHigh (limb / layer top).
-// uIntensity couples the brightness to local log(rho) and uStorm adds
-// a warm tint when geomagnetic forcing rises (the thermosphere literally
-// inflates and heats during storms — colouring it conveys that).
 const LAYER_FRAG = /* glsl */`
     uniform vec3  uCameraPos;
     uniform vec3  uColorLow;
     uniform vec3  uColorHigh;
+    uniform float uOuterR;       // outer radius of this shell  (R⊕)
+    uniform float uInnerR;       // inner radius of this shell  (R⊕)
+    uniform float uPlanetR;      // opaque planet radius        (R⊕)
     uniform float uOpacity;
-    uniform float uIntensity;
-    uniform float uRimPower;
-    uniform float uStorm;
+    uniform float uIntensity;    // density-driven multiplier (0.35..1.2)
+    uniform float uStorm;        // 0..1 geomagnetic forcing
+    uniform vec3  uSunDir;       // unit vector, world frame
+    uniform float uSwForcing;    // 0..1 dynamic-pressure proxy from solar wind
     varying vec3  vWorldPos;
-    varying vec3  vWorldNormal;
+
+    // Ray-sphere intersection. Returns vec2(tNear, tFar). Negative
+    // values mean the ray origin is inside / behind that sphere.
+    vec2 raySphere(vec3 ro, vec3 rd, float r) {
+        float b = dot(ro, rd);
+        float c = dot(ro, ro) - r * r;
+        float disc = b * b - c;
+        if (disc < 0.0) return vec2(1e9, -1e9);
+        float sq = sqrt(disc);
+        return vec2(-b - sq, -b + sq);
+    }
+
     void main() {
-        vec3 V = normalize(uCameraPos - vWorldPos);
-        // BackSide rendering: flip the normal so fresnel peaks at the
-        // limb when seen from outside the planet.
-        vec3 N = -normalize(vWorldNormal);
-        float NV = clamp(dot(N, V), 0.0, 1.0);
-        float rim = pow(1.0 - NV, uRimPower);
+        vec3 ro = uCameraPos;
+        vec3 rd = normalize(vWorldPos - uCameraPos);
 
-        // Inner -> outer colour blend follows the rim term: centre of
-        // the visible shell shows uColorLow (layer floor), the limb
-        // shows uColorHigh (layer top). A gentle latitude darkening
-        // mimics density falloff toward the polar cusps.
-        float lat = abs(normalize(vWorldPos).y);
-        vec3 col = mix(uColorLow, uColorHigh, rim);
-        col = mix(col, col * 0.78, lat * 0.35);
+        vec2 hOut = raySphere(ro, rd, uOuterR);
+        vec2 hIn  = raySphere(ro, rd, uInnerR);
+        vec2 hPl  = raySphere(ro, rd, uPlanetR);
 
-        // Storm warming: push hue toward orange-red as Ap rises.
-        col = mix(col, vec3(1.0, 0.55, 0.25), uStorm * 0.45 * (0.4 + 0.6 * rim));
+        if (hOut.y < 0.0) discard;          // outer shell entirely behind us
 
-        float alpha = uOpacity * uIntensity * (0.10 + 0.90 * rim);
-        gl_FragColor = vec4(col, alpha);
+        // Near boundary of the shell-segment along the ray.
+        float t0 = max(0.0, hOut.x);
+
+        // Far boundary — whichever opaque thing the ray hits first:
+        //   inner-shell entry, planet entry, or outer-shell exit.
+        float t1 = hOut.y;
+        if (hIn.x > 0.0) t1 = min(t1, hIn.x);
+        else if (hIn.y > 0.0) t0 = max(t0, hIn.y);   // camera is below inner
+        if (hPl.x > 0.0) t1 = min(t1, hPl.x);
+
+        float pathLen = max(0.0, t1 - t0);
+        if (pathLen <= 0.0) discard;
+
+        // Mid-point sample for colour gradient + dayside lighting.
+        vec3 midPos = ro + rd * (t0 + t1) * 0.5;
+        float midR  = length(midPos);
+        float radT  = clamp((midR - uInnerR) / max(uOuterR - uInnerR, 1e-4),
+                            0.0, 1.0);
+        vec3 col = mix(uColorLow, uColorHigh, radT);
+
+        // Storm warming — push toward orange when Ap is high.
+        col = mix(col, vec3(1.0, 0.55, 0.25), uStorm * 0.55);
+
+        // Solar-wind compression cue: strengthens the dayside hemisphere
+        // in proportion to dynamic pressure. The shell physically
+        // compresses on the sunward side during storms; we tint that side
+        // warmer + brighter to convey "this is where the wind is hitting".
+        float sunDot = max(0.0, dot(normalize(midPos), uSunDir));
+        float dayside = sunDot * uSwForcing;
+        col = mix(col, vec3(1.0, 0.72, 0.40), dayside * 0.45);
+
+        // Alpha from path length, normalised to a chord through the
+        // shell's full thickness (the maximum any view ray can spend
+        // inside this single layer when looking edge-on).
+        float maxPath = max(uOuterR - uInnerR, 1e-3);
+        float pn = clamp(pathLen / (maxPath * 1.6), 0.0, 1.0);
+
+        // Mild gamma so thicker chords feel deeper without flattening
+        // the on-axis fragments to nothing.
+        pn = pow(pn, 0.85);
+
+        float alpha = uOpacity * uIntensity * pn * (1.0 + 0.45 * dayside);
+        gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
     }
 `;
 
@@ -625,18 +691,25 @@ export class AtmosphereGlobe {
     }
 
     _buildLayerShells() {
-        // Build the five gradient layer shells back-to-front (outermost
-        // first) and assign explicit `renderOrder` so the additive
-        // compositing stacks correctly even when transparent-sort
-        // disagrees with our intent.
+        // Build the five gradient layer shells as *volumetric* sphere
+        // sheets — each mesh is the shell's outer sphere; the fragment
+        // shader ray-marches the ray segment from there down to the
+        // shell's inner radius (or whichever opaque surface intervenes:
+        // inner shell, planet, etc.). Because the shader does the volume
+        // math we draw the mesh DoubleSide so the shell still renders
+        // when the camera is inside it.
+        //
+        // We render outermost-first so additive blending sums the inner
+        // (denser) layers on top, matching the physical optical depth
+        // intuition: more density = brighter accumulation at the limb.
         this._shells = [];
         this._shellGroup = new THREE.Group();
 
         const ordered = [...LAYER_SHELLS].sort((a, b) => b.maxKm - a.maxKm);
         let renderOrder = 0;
         for (const def of ordered) {
-            // Outer radius of the shell (in Earth radii).
-            const r = 1 + def.maxKm / R_EARTH_KM;
+            const rOut = 1 + def.maxKm / R_EARTH_KM;
+            const rIn  = 1 + def.minKm / R_EARTH_KM;
             const mat = new THREE.ShaderMaterial({
                 vertexShader:   LAYER_VERT,
                 fragmentShader: LAYER_FRAG,
@@ -644,17 +717,31 @@ export class AtmosphereGlobe {
                     uCameraPos: { value: this._camera.position.clone() },
                     uColorLow:  { value: new THREE.Color(def.colorLow) },
                     uColorHigh: { value: new THREE.Color(def.colorHigh) },
+                    uOuterR:    { value: rOut },
+                    uInnerR:    { value: rIn },
+                    uPlanetR:   { value: 1.0 },
                     uOpacity:   { value: def.baseAlpha },
                     uIntensity: { value: 0.7 },
-                    uRimPower:  { value: def.rimPower },
                     uStorm:     { value: 0 },
+                    uSunDir:    { value: this._sunDir.clone() },
+                    uSwForcing: { value: 0 },
                 },
                 transparent: true,
+                // BackSide: draws the far hemisphere when the camera is
+                // outside the sphere (giving a fragment for every view
+                // ray that passes through the volume) and draws the
+                // entire interior when the camera is inside it. Either
+                // way the ray-march shader finds the correct shell
+                // segment to integrate. FrontSide+BackSide together
+                // would render twice and double the additive alpha.
                 side: THREE.BackSide,
                 depthWrite: false,
                 blending: THREE.AdditiveBlending,
             });
-            const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 64, 48), mat);
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(rOut, 96, 64),
+                mat,
+            );
             mesh.renderOrder = renderOrder++;
             mesh.userData = {
                 kind:    'layer-shell',
