@@ -72,6 +72,7 @@ export class UpperAtmosphereUI {
         this._renderPresets();
         this._renderLayerLegend();
         this._renderLayerControls();
+        this._bindFieldModeRadio();
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
@@ -143,6 +144,25 @@ export class UpperAtmosphereUI {
                 btn.disabled = false;
             }
         });
+    }
+
+    /**
+     * Wire the "Field overlay" radio row to the globe's vector-field
+     * controller. Three values match LayerVectorField.setMode():
+     * 'off' | 'temperature' | 'radiation'.
+     */
+    _bindFieldModeRadio() {
+        const row = document.getElementById('ua-field-mode');
+        if (!row) return;
+        // Reflect the globe's initial state (off) into the DOM.
+        const initial = this.globe.getVectorFieldMode?.() ?? 'off';
+        for (const inp of row.querySelectorAll('input[name=ua-field-mode]')) {
+            inp.checked = inp.value === initial;
+            inp.addEventListener('change', () => {
+                if (!inp.checked) return;
+                this.globe.setVectorFieldMode?.(inp.value);
+            });
+        }
     }
 
     _bindSwpcEventBus() {
