@@ -105,6 +105,19 @@ const TYPE_SPECS = Object.freeze({
         build:       buildLaunchParams,
         cacheTier:   'forecast',
     },
+    // Lightweight 24-48h surface hourly forecast. Powers the dashboard
+    // saved-location hourly strip — surface vars only (temperature, wind,
+    // precipitation, cloud, weather_code, humidity, UV). Deliberately
+    // omits CAPE / pressure-level winds / freezing level that `launch`
+    // carries, so the response is ~5× smaller and fits a hot-path
+    // per-row fetch from a 25-location dashboard render.
+    hourly: {
+        defaultDays: 2,
+        maxDays:     2,
+        upstream:    OPEN_METEO_FORECAST,
+        build:       buildHourlyParams,
+        cacheTier:   'forecast',
+    },
     marine: {
         defaultDays: 5,
         maxDays:     7,
@@ -152,6 +165,37 @@ function buildPointParams(lat, lon, days) {
             'precipitation_sum', 'precipitation_probability_max',
             'cloud_cover_mean',  'wind_speed_10m_max',
             'sunrise', 'sunset', 'uv_index_max',
+        ].join(','),
+        temperature_unit: 'fahrenheit',
+        wind_speed_unit:  'mph',
+        timezone:         'auto',
+        forecast_days:    String(days),
+    });
+}
+
+/**
+ * Surface-only hourly forecast for the dashboard saved-location strip.
+ * 24-48h horizon (controlled by `days`), no convective indices or
+ * pressure-level winds — those are `launch`-tier signals that bloat
+ * the response 4-5×. The strip renders the next 12-24 hours; UI slices
+ * past `current_hour` client-side.
+ */
+function buildHourlyParams(lat, lon, days) {
+    return new URLSearchParams({
+        latitude:  lat.toFixed(COORD_DECIMALS),
+        longitude: lon.toFixed(COORD_DECIMALS),
+        current: [
+            'temperature_2m', 'apparent_temperature',
+            'is_day', 'weather_code',
+            'wind_speed_10m',
+        ].join(','),
+        hourly: [
+            'temperature_2m', 'apparent_temperature',
+            'weather_code', 'is_day',
+            'cloud_cover',
+            'precipitation', 'precipitation_probability',
+            'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
+            'relative_humidity_2m', 'uv_index',
         ].join(','),
         temperature_unit: 'fahrenheit',
         wind_speed_unit:  'mph',
