@@ -296,6 +296,45 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Live solar-wind feed tile ────────────────────────── */
+.ua-lf-tile {
+    background:rgba(8,16,30,.55);
+    border:1px solid rgba(110,180,255,.18);
+    border-radius:6px;
+    padding:8px 10px;
+    margin-bottom:10px;
+    font-size:.7rem; color:#bcd;
+    display:flex; flex-direction:column; gap:4px;
+}
+.ua-lf-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.ua-lf-title { color:#dde; font-weight:600; }
+.ua-lf-age   { color:#667; font-size:.62rem; }
+.ua-lf-fresh { color:#9cf; font-size:.62rem; font-family:monospace; }
+.ua-lf-up    { color:#556; font-size:.62rem; margin-left:auto; }
+.ua-lf-fail  { color:#ff8a90; font-size:.62rem; }
+.ua-lf-pulse {
+    width:8px; height:8px; border-radius:50%;
+    background:#445; flex-shrink:0;
+    transition:background .2s, box-shadow .2s, transform .2s;
+}
+.ua-lf-pulse--tick { animation:ua-lf-pulse-anim 1.6s ease-out; }
+@keyframes ua-lf-pulse-anim {
+    0%   { background:#3df; box-shadow:0 0 14px #3df; transform:scale(1.6); }
+    60%  { background:#3df; box-shadow:0 0 6px  #3df; transform:scale(1.0); }
+    100% { background:#445; box-shadow:0 0 0 transparent; transform:scale(1); }
+}
+.ua-lf-alert {
+    padding:1px 6px; border-radius:3px;
+    font-size:.58rem; font-weight:700;
+    letter-spacing:.05em; text-transform:uppercase;
+    border:1px solid currentColor;
+}
+.ua-lf-extreme  { color:#ff5a6a; }
+.ua-lf-high     { color:#ff9060; }
+.ua-lf-moderate { color:#ffcc66; }
+.ua-lf-quiet    { color:#88e08c; }
+.ua-lf-unknown  { color:#778; }
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -407,6 +446,9 @@ input[type=range]::-moz-range-thumb {
 
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
+            <!-- Live-feed confirmation tile. Pulses on every successful
+                 /api/solar-wind/latest tick so users can SEE data arriving. -->
+            <div id="ua-live-feed-tile" class="ua-lf-tile" aria-live="polite"></div>
             <div id="ua-sw-stats"></div>
             <div id="ua-sw-legend">
                 <div class="ua-layer-row" title="Boundary where Earth's magnetic pressure balances solar-wind dynamic pressure (Shue-1998).">
@@ -492,6 +534,7 @@ input[type=range]::-moz-range-thumb {
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),
             solarWindStats: document.getElementById('ua-sw-stats'),
+            liveFeedTile:   document.getElementById('ua-live-feed-tile'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to

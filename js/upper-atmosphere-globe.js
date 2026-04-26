@@ -621,6 +621,19 @@ export class AtmosphereGlobe {
         if (this._sheathMat) {
             this._sheathMat.opacity = 0.05 + 0.10 * pdynNorm;
         }
+
+        // Push the dynamic-pressure proxy into the volumetric layer
+        // shells so the dayside hemisphere physically warms / brightens
+        // when the wind picks up — same value the magnetopause uses, so
+        // a coronal mass ejection visibly compresses both the boundary
+        // surfaces *and* the upper atmosphere on the sunward side.
+        if (this._shells) {
+            for (const sh of this._shells) {
+                const u = sh.material.uniforms;
+                if (u.uSwForcing) u.uSwForcing.value = pdynNorm;
+                if (u.uSunDir)    u.uSunDir.value.copy(this._sunDir);
+            }
+        }
     }
 
     dispose() {
