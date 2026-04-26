@@ -26,6 +26,8 @@ import {
     fetchProfile,
     fetchLiveIndices,
 } from './upper-atmosphere-engine.js';
+import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { layerPhysics } from './upper-atmosphere-physics.js';
 
 // ── Palette (matches the globe's density ramp in spirit) ────────────────────
 const SPECIES_COLORS = {
@@ -69,6 +71,7 @@ export class UpperAtmosphereUI {
         this._bindInputs();
         this._renderPresets();
         this._renderLayerLegend();
+        this._renderLayerControls();
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
@@ -273,6 +276,7 @@ export class UpperAtmosphereUI {
         this._drawDensityProfile();
         this._drawComposition();
         this._paintStats();
+        this._paintLayerControls();
         this._paintSourcePill();
 
         if (this.useBackend) this._scheduleBackendRefresh();
@@ -304,6 +308,7 @@ export class UpperAtmosphereUI {
                 this._drawDensityProfile();
                 this._drawComposition();
                 this._paintStats();
+                this._paintLayerControls();
                 this._paintSourcePill();
             }
         } catch (_) {
@@ -698,6 +703,126 @@ export class UpperAtmosphereUI {
             `;
             el.appendChild(row);
         }
+    }
+
+    // ── Per-layer control panel (toggles + live mini-stats) ─────────────────
+    //
+    // One row per atmospheric regime in the simulator (5 layers from
+    // Mesosphere → Outer Exosphere). Each row carries:
+    //
+    //   • toggle checkbox  → globe.setLayerVisible(id, bool)
+    //   • coloured swatch  → matches the gradient shell's outer hue
+    //   • layer name + altitude band
+    //   • live mini-stats: ρ, T, dominant species, Knudsen + regime
+    //   • pulsing "live" dot that fires on every refresh() so the user
+    //     can confirm the simulator is actively responding to inputs
+
+    _renderLayerControls() {
+        const el = this.el.layerControls;
+        if (!el) return;
+        el.innerHTML = '';
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            const high = `#${L.colorHigh.toString(16).padStart(6, '0')}`;
+            const low  = `#${L.colorLow .toString(16).padStart(6, '0')}`;
+            const row = document.createElement('div');
+            row.className = 'ua-lc-row';
+            row.dataset.layerId = L.id;
+            row.title = L.description;
+            row.innerHTML = `
+                <label class="ua-lc-head">
+                    <input type="checkbox" class="ua-lc-toggle" data-layer-id="${L.id}" checked>
+                    <span class="ua-lc-swatch"
+                          style="background:linear-gradient(45deg,${low},${high});
+                                 box-shadow:0 0 8px ${high}88"></span>
+                    <span class="ua-lc-title">
+                        <span class="ua-lc-name">${L.name}</span>
+                        <span class="ua-lc-band">${L.minKm}–${L.maxKm} km</span>
+                    </span>
+                    <span class="ua-lc-pulse" data-layer-id="${L.id}"
+                          title="pulses on every refresh">●</span>
+                </label>
+                <div class="ua-lc-stats" data-layer-id="${L.id}">
+                    <span class="ua-lc-stat">
+                        <span class="ua-lc-k">ρ</span>
+                        <span class="ua-lc-v" data-stat="rho">–</span>
+                    </span>
+                    <span class="ua-lc-stat">
+                        <span class="ua-lc-k">T</span>
+                        <span class="ua-lc-v" data-stat="T">–</span>
+                    </span>
+                    <span class="ua-lc-stat">
+                        <span class="ua-lc-k">dom</span>
+                        <span class="ua-lc-v" data-stat="dom">–</span>
+                    </span>
+                    <span class="ua-lc-stat">
+                        <span class="ua-lc-k">Kn</span>
+                        <span class="ua-lc-v" data-stat="kn">–</span>
+                    </span>
+                    <span class="ua-lc-regime" data-stat="regime">–</span>
+                </div>
+            `;
+            el.appendChild(row);
+        }
+
+        // Wire toggles after DOM is in place.
+        el.querySelectorAll('.ua-lc-toggle').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const id = cb.dataset.layerId;
+                this.globe.setLayerVisible?.(id, cb.checked);
+                // Reflect the disabled state on the row itself for
+                // visual feedback even before the next refresh().
+                const row = el.querySelector(`.ua-lc-row[data-layer-id="${id}"]`);
+                if (row) row.classList.toggle('ua-lc-row--off', !cb.checked);
+            });
+        });
+
+        // First paint of mini-stats (in case profile already arrived).
+        this._paintLayerControls();
+    }
+
+    /**
+     * Refresh per-layer mini-stats from the current state. Cheap; runs
+     * once per refresh(), not per frame.
+     */
+    _paintLayerControls() {
+        const el = this.el.layerControls;
+        if (!el) return;
+        const { f107, ap } = this.state;
+        for (const L of ATMOSPHERIC_LAYER_SCHEMA) {
+            const phys = layerPhysics(L, { f107Sfu: f107, ap });
+            const row = el.querySelector(`.ua-lc-stats[data-layer-id="${L.id}"]`);
+            if (!row) continue;
+            const set = (sel, v) => {
+                const e = row.querySelector(`[data-stat="${sel}"]`);
+                if (e) e.textContent = v;
+            };
+            set('rho', phys.ρ.toExponential(2) + ' kg/m³');
+            set('T',   `${phys.T.toFixed(0)} K`);
+            set('dom', phys.dominant);
+            set('kn',  Number.isFinite(phys.knudsen)
+                ? (phys.knudsen >= 100 ? phys.knudsen.toExponential(1)
+                  : phys.knudsen.toFixed(2))
+                : '∞');
+            set('regime', phys.regime);
+            // Colour the regime badge by its physics class.
+            const regimeEl = row.querySelector('[data-stat="regime"]');
+            if (regimeEl) {
+                regimeEl.className = `ua-lc-regime ua-lc-regime--${phys.regime}`;
+            }
+        }
+        this._pulseLayerLive();
+    }
+
+    /** Briefly highlight every layer's "live" dot on a refresh tick. */
+    _pulseLayerLive() {
+        const el = this.el.layerControls;
+        if (!el) return;
+        el.querySelectorAll('.ua-lc-pulse').forEach(dot => {
+            dot.classList.remove('ua-lc-pulse--fire');
+            // restart animation: force reflow, re-add the class
+            void dot.offsetWidth;
+            dot.classList.add('ua-lc-pulse--fire');
+        });
     }
 }
 

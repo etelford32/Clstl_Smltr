@@ -237,6 +237,65 @@ input[type=range]::-moz-range-thumb {
     color:#667; font-size:.66rem;
 }
 
+/* ─── Layer-particle controls (per-layer toggle + live stats) ──────── */
+#ua-layer-controls { display:flex; flex-direction:column; gap:6px; }
+.ua-lc-row {
+    display:flex; flex-direction:column; gap:3px;
+    padding:7px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    transition:opacity .15s, border-color .15s;
+}
+.ua-lc-row:hover { border-color:rgba(0,200,200,.25); }
+.ua-lc-row--off { opacity:.45; }
+.ua-lc-head {
+    display:flex; align-items:center; gap:8px;
+    cursor:pointer; user-select:none;
+    font-size:.74rem;
+}
+.ua-lc-toggle { accent-color:#0cc; cursor:pointer; flex-shrink:0; }
+.ua-lc-swatch {
+    width:14px; height:14px; border-radius:3px;
+    flex-shrink:0;
+    border:1px solid rgba(255,255,255,.12);
+}
+.ua-lc-title { display:flex; flex-direction:column; flex:1; line-height:1.2; }
+.ua-lc-name  { color:#dde; font-weight:600; }
+.ua-lc-band  { color:#667; font-size:.62rem; font-family:monospace; }
+.ua-lc-pulse {
+    color:#445; font-size:.7rem;
+    margin-left:auto;
+    transition:color .25s, text-shadow .25s;
+}
+.ua-lc-pulse--fire {
+    animation:ua-lc-pulse-anim 1.0s ease-out;
+}
+@keyframes ua-lc-pulse-anim {
+    0%   { color:#0cc; text-shadow:0 0 8px #0cc; transform:scale(1.15); }
+    100% { color:#445; text-shadow:0 0 0 transparent; transform:scale(1); }
+}
+.ua-lc-stats {
+    display:flex; flex-wrap:wrap; gap:6px 10px;
+    font-size:.64rem; color:#aab;
+    padding-left:30px;
+}
+.ua-lc-stat { display:inline-flex; gap:3px; align-items:baseline; font-family:monospace; }
+.ua-lc-k    { color:#667; font-weight:600; }
+.ua-lc-v    { color:#cde; }
+.ua-lc-regime {
+    margin-left:auto;
+    padding:1px 6px; border-radius:3px;
+    font-size:.58rem; font-weight:700;
+    letter-spacing:.05em; text-transform:uppercase;
+    border:1px solid currentColor;
+}
+.ua-lc-regime--continuum      { color:#88e08c; }
+.ua-lc-regime--slip           { color:#bcd86c; }
+.ua-lc-regime--transition     { color:#ffcc66; }
+.ua-lc-regime--free-molecular { color:#ff9060; }
+.ua-lc-regime--unknown        { color:#778; }
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -335,6 +394,17 @@ input[type=range]::-moz-range-thumb {
             <div id="ua-layer-legend"></div>
         </div>
 
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Layer particles · live</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
+                Each row toggles a layer's gradient shell + particle system.
+                Particles jitter at the layer's thermal speed; flow regime
+                shifts with density; storms (Ap ≥ 27) puff thermosphere &amp;
+                exosphere outward. Pulse fires on every refresh.
+            </p>
+            <div id="ua-layer-controls"></div>
+        </div>
+
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
             <div id="ua-sw-stats"></div>
@@ -417,6 +487,7 @@ input[type=range]::-moz-range-thumb {
             stats:          document.getElementById('ua-stats'),
             summary:        document.getElementById('ua-summary'),
             layerLegend:    document.getElementById('ua-layer-legend'),
+            layerControls:  document.getElementById('ua-layer-controls'),
             liveBtn:        document.getElementById('ua-live-btn'),
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),

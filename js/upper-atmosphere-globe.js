@@ -35,6 +35,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EarthSkin } from './earth-skin.js';
 import { SATELLITE_REFERENCES } from './upper-atmosphere-engine.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
+import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { LayerParticleSystem } from './upper-atmosphere-particles.js';
+import { layerPhysics } from './upper-atmosphere-physics.js';
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
 // shader. The shader's own oval-geometry code wants Kp, not Ap.
@@ -262,6 +265,7 @@ export class AtmosphereGlobe {
         this._initScene();
         this._buildEarth();
         this._buildLayerShells();
+        this._buildLayerParticles();
         this._buildSatelliteRings();
         this._buildAltitudeRing();
         this._buildSolarWind();
@@ -273,6 +277,56 @@ export class AtmosphereGlobe {
         this._clock = new THREE.Clock();
         this._animate = this._animate.bind(this);
         this._raf = requestAnimationFrame(this._animate);
+    }
+
+    // ── Layer particle systems ──────────────────────────────────────────────
+    // Five LayerParticleSystem instances, one per atmospheric regime.
+    // Each system is mounted under its own group (this._particleGroup) so
+    // we can master-toggle all particles independently of the gradient
+    // shells, and each individual system can be hidden via
+    // setLayerVisible(id, false).
+
+    _buildLayerParticles() {
+        this._particleGroup   = new THREE.Group();
+        this._particles       = {};   // id → LayerParticleSystem
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const sys = new LayerParticleSystem({
+                parent: this._particleGroup,
+                layer,
+            });
+            this._particles[layer.id] = sys;
+        }
+        this._scene.add(this._particleGroup);
+    }
+
+    /**
+     * Per-layer visibility toggle — drives the gradient shell AND the
+     * matching particle system together. Layer id matches
+     * ATMOSPHERIC_LAYER_SCHEMA[].id.
+     */
+    setLayerVisible(layerId, visible) {
+        const v = !!visible;
+        // Shell mesh.
+        if (this._shells) {
+            const shell = this._shells.find(s => s.userData?.id === layerId);
+            if (shell) shell.visible = v;
+        }
+        // Particle system.
+        const sys = this._particles?.[layerId];
+        if (sys) sys.setVisible(v);
+    }
+
+    /**
+     * True/false snapshot of every layer's visibility — used by the UI
+     * panel to seed checkbox state on first paint.
+     */
+    getLayerVisibility() {
+        const out = {};
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const shell = this._shells?.find(s => s.userData?.id === layer.id);
+            out[layer.id] = shell ? shell.visible : true;
+        }
+        return out;
     }
 
     // ── Public API ──────────────────────────────────────────────────────────
@@ -306,6 +360,23 @@ export class AtmosphereGlobe {
             // visible halo, but dense regimes still pop.
             const intensity = 0.35 + 0.85 * t;
             this._shells[i].material.uniforms.uIntensity.value = intensity;
+        }
+
+        // Push the latest physics into each particle system. layerPhysics
+        // samples at peakKm with the layer's vertical thickness as the
+        // Knudsen characteristic length, then setPhysics() rescales
+        // particle count / colour / step magnitude / storm-drift in one
+        // shot — no per-frame recompute, the per-frame update only
+        // integrates positions.
+        const f107 = profile.f107Sfu ?? this._lastState?.f107 ?? 150;
+        const ap   = profile.ap      ?? this._lastState?.ap      ??  15;
+        if (this._particles) {
+            for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+                const sys = this._particles[layer.id];
+                if (!sys) continue;
+                const phys = layerPhysics(layer, { f107Sfu: f107, ap });
+                sys.setPhysics(phys, { f107, ap });
+            }
         }
 
         if (this._currentAltKm != null) this.setAltitude(this._currentAltKm);
@@ -343,6 +414,19 @@ export class AtmosphereGlobe {
      */
     setState({ f107 = 150, ap = 15, bz = null } = {}) {
         this._state = { f107, ap, bz };
+        this._lastState = { f107, ap };
+
+        // Push the new (F10.7, Ap) to each particle system so the
+        // storm-drift kicks in as soon as the user clicks a preset —
+        // even before setProfile() runs.
+        if (this._particles && this._profile) {
+            for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+                const sys = this._particles[layer.id];
+                if (!sys?._phys) continue;
+                sys.setPhysics(sys._phys, { f107, ap });
+            }
+        }
+
         if (!this._skin) return;
 
         // Canonical SWPC Kp↔Ap inversion (not the old log2 approximation).
@@ -392,10 +476,12 @@ export class AtmosphereGlobe {
     /**
      * Toggle overlay groups.
      */
-    setVisibility({ satellites = true, shells = true, solarWind = true } = {}) {
-        if (this._satGroup)   this._satGroup.visible   = satellites;
-        if (this._shellGroup) this._shellGroup.visible = shells;
-        if (this._swGroup)    this._swGroup.visible    = solarWind;
+    setVisibility({ satellites = true, shells = true, solarWind = true,
+                    particles = true } = {}) {
+        if (this._satGroup)      this._satGroup.visible      = satellites;
+        if (this._shellGroup)    this._shellGroup.visible    = shells;
+        if (this._swGroup)       this._swGroup.visible       = solarWind;
+        if (this._particleGroup) this._particleGroup.visible = particles;
     }
 
     /**
@@ -923,8 +1009,20 @@ export class AtmosphereGlobe {
     _animate() {
         this._raf = requestAnimationFrame(this._animate);
         const t = this._clock.getElapsedTime();
+        const dt = this._clock.getDelta();
 
         if (this._skin) this._skin.update(t);
+
+        // Per-frame particle integration. Each layer system runs its
+        // thermal jitter + storm-drift step; cheap (~250 particles ×
+        // 5 layers × ~10 ops). Hidden systems early-out via their
+        // `this._n === 0` guard so an off-toggled layer costs nothing.
+        if (this._particles) {
+            for (const id in this._particles) {
+                const sys = this._particles[id];
+                if (sys.points.visible) sys.update(dt);
+            }
+        }
 
         // Slow auto-rotation when user isn't actively dragging.
         if (this.opts.autoRotate && this._skin && !this._controls.dragging) {
