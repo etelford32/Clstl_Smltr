@@ -942,7 +942,7 @@ nav {
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"         checked><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"               ><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-snow"        checked><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
@@ -3022,6 +3022,14 @@ void main() {
     vec3 n = normalize(vNormalLocal);
     vec2 uv = normalToUV(n);
     vec4 col = texture2D(u_tex, uv);
+    // Discard low-alpha pixels outright instead of letting them
+    // smear over the surface at a few percent opacity. GIBS marks
+    // no-data with alpha=0 on most layers, but bilinear filtering
+    // at data/no-data boundaries produces a thin halo of α≈0.05
+    // pixels that, multiplied across 4-5 active overlays, became
+    // the "wall of haze" artefact the user reported. Hard-cut at
+    // 0.1 keeps real data crisp and drops the ghosting.
+    if (col.a < 0.1) discard;
     // Preserve the texture's own alpha (GIBS rasters are RGBA with
     // transparent over land for ocean datasets, transparent over
     // bright surfaces for AOD, etc.) — multiply by the per-layer
@@ -3035,12 +3043,17 @@ function _createObsOverlay(layerId) {
     const layerDef = EARTH_OBS_LAYERS.find(l => l.id === layerId);
     const opacity  = layerDef?.opacity ?? 0.55;
 
-    // Match the surface mesh's icosphere so cloud + obs + earth all
+    // Match the surface mesh's icosphere EXACTLY so cloud + obs + earth all
     // share the same tessellation and don't drift relative to each
     // other when sidereal rotation accumulates floating-point error.
-    const overlayLevel = Math.max(3, ICO_LEVEL - 1);   // overlays don't need
-                                                       // pole-resolution detail
-    const geom = new THREE.IcosahedronGeometry(R_EARTH * 1.002, overlayLevel);
+    //
+    // We previously dropped the obs overlay one subdivision below
+    // ICO_LEVEL "to save fragments", but with multiple overlays
+    // stacked the level mismatch left the obs faces slightly poking
+    // through between Earth-surface triangles — a faint hexagonal
+    // banding the user could clearly see on the AOD layer. Matching
+    // ICO_LEVEL costs <1ms/frame and removes the banding entirely.
+    const geom = new THREE.IcosahedronGeometry(R_EARTH * 1.002, ICO_LEVEL);
 
     const mat = new THREE.ShaderMaterial({
         vertexShader:   OBS_OVERLAY_VERT,

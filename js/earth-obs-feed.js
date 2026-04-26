@@ -148,7 +148,10 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Purple (cold) → blue → cyan → green → yellow → red (warm)',
         format:      'image/png',
         timeOffset:  1,
-        opacity:     0.55, // middle-of-road — paints over oceans only
+        // GHRSST paints every ocean pixel — at 0.55 it drowned out the
+        // BlueMarble ocean tint. Drop to 0.35 so the colour ramp reads
+        // as a layer over the ocean rather than replacing it.
+        opacity:     0.35,
         defaultOn:   true,
     },
     {
@@ -164,8 +167,13 @@ export const EARTH_OBS_LAYERS = [
         colorRamp:   'Clear (transparent) → yellow → orange → red → brown',
         format:      'image/png',
         timeOffset:  1,
-        opacity:     0.4,  // haze should read as *haze*, not a wall of colour
-        defaultOn:   true,
+        // MODIS L3 AOD is gridded at ~1° — at 0.4 opacity its native
+        // pixelation showed through as huge orange/brown blocks across
+        // the entire globe (the user-reported "mesh" artefact).
+        // Default off + lower opacity: it's an opt-in analytic layer,
+        // not a constant haze on every load.
+        opacity:     0.25,
+        defaultOn:   false,
     },
     {
         id:          'cloud-thickness',
