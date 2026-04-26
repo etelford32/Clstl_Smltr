@@ -206,13 +206,15 @@ export default async function handler() {
     const updatedMs   = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageHours    = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 3_600_000;
 
-    // Both feeds came back stale — surface as an upstream error so the dashboard
-    // flags it red, instead of serving a HTTP 200 with month-old "current" flux.
-    if (ageHours == null || ageHours > STALE_HOURS) {
-        return jsonError('upstream_stale',
-            `latest F10.7 reading is ${ageHours == null ? 'undated' : Math.round(ageHours / 24) + 'd'} old`,
-            { source: usedFallback ? 'NOAA SWPC 10cm-flux-30day' : 'NOAA SWPC f107_cm_flux' });
-    }
+    // When both feeds are stale we used to return 503 (upstream_stale).
+    // That made the dashboard's solar-activity banner blank entirely
+    // even though we still had a valid (just old) reading. SWPC has
+    // genuine multi-day gaps during Penticton weather, so degrading
+    // gracefully — serve the most-recent reading at HTTP 200 with
+    // freshness='expired' — gives users SOMETHING to look at while the
+    // status page still flags the row red (the existing freshness
+    // logic in status.html maps freshness=='expired' to red).
+    const tooStale = ageHours == null || ageHours > STALE_HOURS;
 
     const trendRows   = rows.slice(-TREND_WIN);
     const slope       = linearSlope(trendRows.map(r => r.flux));
@@ -224,12 +226,25 @@ export default async function handler() {
         flux_adjusted_sfu: r.adjusted_flux ?? null,
     }));
 
+    // Build the source label: when degraded, prefix so consumers can see
+    // they're being served a legacy reading at a glance.
+    const sourceLabel = usedFallback
+        ? 'NOAA SWPC 10cm-flux-30day via Vercel Edge (primary stale)'
+        : 'NOAA SWPC f107_cm_flux via Vercel Edge';
+    const finalSource = tooStale
+        ? `${sourceLabel} · DEGRADED: latest reading ${
+            ageHours == null ? 'undated' : Math.round(ageHours / 24) + 'd'
+          } old`
+        : sourceLabel;
+
     return jsonOk({
-        source:     usedFallback
-            ? 'NOAA SWPC 10cm-flux-30day via Vercel Edge (primary stale)'
-            : 'NOAA SWPC f107_cm_flux via Vercel Edge',
+        source:     finalSource,
         age_hours:  ageHours != null ? Math.round(ageHours * 10) / 10 : null,
-        freshness:  freshnessStatus(ageHours),
+        // freshnessStatus() already returns 'expired' when ageHours > 72,
+        // so the explicit tooStale path here is just to ensure callers see
+        // 'expired' even on edge gaps where ageHours overflows the helper.
+        freshness:  tooStale ? 'expired' : freshnessStatus(ageHours),
+        degraded:   tooStale || undefined,
         data: {
             updated: updatedISO,
             current: {
