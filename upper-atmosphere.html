@@ -296,6 +296,29 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Field-overlay radio row ──────────────────────────── */
+.ua-field-mode-row {
+    display:flex; flex-wrap:wrap; gap:6px;
+    font-size:.72rem;
+}
+.ua-field-mode-opt {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 10px; border-radius:999px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd; cursor:pointer;
+    transition:background .15s, border-color .15s;
+}
+.ua-field-mode-opt:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.ua-field-mode-opt input[type=radio] { accent-color:#0cc; }
+.ua-field-mode-opt:has(input:checked) {
+    background:rgba(0,200,200,.10);
+    border-color:rgba(0,200,200,.45);
+    color:#fff;
+}
+.ua-fm-temperature { color:#ffaa20; }
+.ua-fm-radiation   { color:#ff4dff; }
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -403,6 +426,31 @@ input[type=range]::-moz-range-thumb {
                 exosphere outward. Pulse fires on every refresh.
             </p>
             <div id="ua-layer-controls"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Field overlay</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Vectorised fields rendered as instanced cones across each
+                layer. <strong>Temperature</strong> shows ∇T (radial + dayside
+                tilt, magnitude ∝ layer T). <strong>Radiation</strong> shows
+                EUV + energetic-particle flux flowing inward (magnitude ∝
+                F10.7 + Ap, with cusp boost on the polar field lines).
+            </p>
+            <div id="ua-field-mode" class="ua-field-mode-row">
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="off" checked>
+                    <span>Off</span>
+                </label>
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="temperature">
+                    <span class="ua-fm-temperature">Temperature ∇T</span>
+                </label>
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="radiation">
+                    <span class="ua-fm-radiation">Radiation Φ</span>
+                </label>
+            </div>
         </div>
 
         <div class="ua-panel">

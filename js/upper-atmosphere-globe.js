@@ -38,6 +38,7 @@ import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics } from './upper-atmosphere-physics.js';
+import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
 // shader. The shader's own oval-geometry code wants Kp, not Ap.
@@ -266,6 +267,7 @@ export class AtmosphereGlobe {
         this._buildEarth();
         this._buildLayerShells();
         this._buildLayerParticles();
+        this._buildLayerVectorFields();
         this._buildSatelliteRings();
         this._buildAltitudeRing();
         this._buildSolarWind();
@@ -298,6 +300,54 @@ export class AtmosphereGlobe {
         }
         this._scene.add(this._particleGroup);
     }
+
+    // ── Layer vector fields ─────────────────────────────────────────────────
+    // One LayerVectorField per atmospheric regime. Mode is a single
+    // global toggle ('off' | 'temperature' | 'radiation') applied to all
+    // five fields together, since the user-facing question is "which
+    // *kind* of field do I want to see across the atmosphere", not
+    // "which kind on layer 3 specifically". Per-layer toggle is a
+    // straight-line follow-up if it ever matters.
+
+    _buildLayerVectorFields() {
+        this._fieldGroup     = new THREE.Group();
+        this._fields         = {};
+        this._fieldMode      = 'off';
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const f = new LayerVectorField({
+                parent: this._fieldGroup,
+                layer,
+                sunDir: this._sunDir,
+            });
+            this._fields[layer.id] = f;
+        }
+        this._scene.add(this._fieldGroup);
+    }
+
+    /**
+     * Set the global vector-field mode. 'off' hides every layer's
+     * field; 'temperature' or 'radiation' shows them, recomputing
+     * vectors against the current physics + state.
+     */
+    setVectorFieldMode(mode) {
+        const m = mode === 'temperature' || mode === 'radiation' ? mode : 'off';
+        this._fieldMode = m;
+        if (!this._fields) return;
+        for (const id in this._fields) {
+            const f = this._fields[id];
+            f.setMode(m);
+            // On switching ON we want fresh vectors — push the latest
+            // physics for the matching layer, if we have it cached.
+            if (m !== 'off' && this._lastFieldPhys?.[id]) {
+                f.setPhysics(
+                    this._lastFieldPhys[id],
+                    this._lastFieldState ?? {},
+                );
+            }
+        }
+    }
+
+    getVectorFieldMode() { return this._fieldMode ?? 'off'; }
 
     /**
      * Per-layer visibility toggle — drives the gradient shell AND the
@@ -370,12 +420,22 @@ export class AtmosphereGlobe {
         // integrates positions.
         const f107 = profile.f107Sfu ?? this._lastState?.f107 ?? 150;
         const ap   = profile.ap      ?? this._lastState?.ap      ??  15;
-        if (this._particles) {
-            for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
-                const sys = this._particles[layer.id];
-                if (!sys) continue;
-                const phys = layerPhysics(layer, { f107Sfu: f107, ap });
-                sys.setPhysics(phys, { f107, ap });
+        // Cache layerPhysics() once per layer + share it with both the
+        // particle system AND the vector-field overlay so we're not
+        // sampling the engine twice for the same (layer, F10.7, Ap)
+        // tuple. Cheap, but pointless to do twice.
+        this._lastFieldPhys  = this._lastFieldPhys || {};
+        this._lastFieldState = { f107, ap };
+        for (const layer of ATMOSPHERIC_LAYER_SCHEMA) {
+            const phys = layerPhysics(layer, { f107Sfu: f107, ap });
+            this._lastFieldPhys[layer.id] = phys;
+
+            const sys = this._particles?.[layer.id];
+            if (sys) sys.setPhysics(phys, { f107, ap });
+
+            const fld = this._fields?.[layer.id];
+            if (fld && this._fieldMode !== 'off') {
+                fld.setPhysics(phys, { f107, ap });
             }
         }
 
@@ -477,11 +537,18 @@ export class AtmosphereGlobe {
      * Toggle overlay groups.
      */
     setVisibility({ satellites = true, shells = true, solarWind = true,
-                    particles = true } = {}) {
+                    particles = true, vectorFields } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
         if (this._shellGroup)    this._shellGroup.visible    = shells;
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
+        // vectorFields visibility is driven by the field MODE — passing
+        // false explicitly here forces the whole group off without
+        // changing the mode (a user-friendly "hide" without losing
+        // their last-selected mode).
+        if (this._fieldGroup && vectorFields !== undefined) {
+            this._fieldGroup.visible = !!vectorFields;
+        }
     }
 
     /**
