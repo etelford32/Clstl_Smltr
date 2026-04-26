@@ -74,6 +74,11 @@ export class UpperAtmosphereUI {
         this._bindSwpcEventBus();
         this._bindResize();
         this._paintSourcePill();
+        // Push climatology defaults so the magnetopause / bow shock /
+        // streamers all light up at first paint instead of sitting on a
+        // hard-coded uniform value.
+        this._applySolarWindToGlobe();
+        this._paintSolarWindStats();
         this.refresh();
     }
 
@@ -146,11 +151,76 @@ export class UpperAtmosphereUI {
             const d = e?.detail;
             if (!d) return;
             this._liveBusValues = {
-                f107: d.solar_activity?.f107_sfu ?? null,
-                kp:   d.geomagnetic?.kp ?? d.kp ?? null,
-                bz:   d.solar_wind?.bz ?? d.bz ?? null,
+                f107:    d.solar_activity?.f107_sfu ?? null,
+                kp:      d.geomagnetic?.kp ?? d.kp ?? null,
+                bz:      d.solar_wind?.bz      ?? d.bz      ?? null,
+                speed:   d.solar_wind?.speed   ?? d.speed   ?? null,
+                density: d.solar_wind?.density ?? d.density ?? null,
             };
+            this._applySolarWindToGlobe();
+            this._paintSolarWindStats();
         });
+    }
+
+    // Push the latest solar-wind plasma state to the globe + the side
+    // panel. Called whenever swpc-update fires, when the user clicks the
+    // live-NOAA button, or once on boot with climatology defaults so the
+    // surfaces don't sit at a default value forever.
+    _applySolarWindToGlobe() {
+        const sw = this._liveBusValues || {};
+        this.globe.setSolarWind({
+            speed:   Number.isFinite(sw.speed)   ? sw.speed   : 400,
+            density: Number.isFinite(sw.density) ? sw.density : 5,
+            bz:      Number.isFinite(sw.bz)      ? sw.bz      : 0,
+        });
+    }
+
+    _paintSolarWindStats() {
+        const box = this.el.solarWindStats;
+        if (!box) return;
+        const sw = this._liveBusValues || {};
+        const speed   = Number.isFinite(sw.speed)   ? sw.speed   : 400;
+        const density = Number.isFinite(sw.density) ? sw.density : 5;
+        const bz      = Number.isFinite(sw.bz)      ? sw.bz      : 0;
+        const live    = Number.isFinite(sw.speed) || Number.isFinite(sw.density);
+        const pdyn    = 1.67e-6 * density * speed * speed;          // nPa
+        // Magnetopause / bow-shock standoff comes from the globe's last
+        // setSolarWind() call so the panel and the 3D scene agree.
+        const mp = this.globe._swGeometry?.mp;
+        const bs = this.globe._swGeometry?.bs;
+
+        box.innerHTML = `
+          <div class="ua-stat">
+              <span class="ua-stat-k">v_sw</span>
+              <span class="ua-stat-v">${speed.toFixed(0)}</span>
+              <span class="ua-stat-u">km/s</span>
+          </div>
+          <div class="ua-stat">
+              <span class="ua-stat-k">n</span>
+              <span class="ua-stat-v">${density.toFixed(1)}</span>
+              <span class="ua-stat-u">cm⁻³</span>
+          </div>
+          <div class="ua-stat">
+              <span class="ua-stat-k">Bz</span>
+              <span class="ua-stat-v" style="color:${bz < 0 ? '#ff7a90' : '#9cf'}">${bz >= 0 ? '+' : ''}${bz.toFixed(1)}</span>
+              <span class="ua-stat-u">nT</span>
+          </div>
+          <div class="ua-stat">
+              <span class="ua-stat-k">Pdyn</span>
+              <span class="ua-stat-v">${pdyn.toFixed(2)}</span>
+              <span class="ua-stat-u">nPa</span>
+          </div>
+          <div class="ua-stat">
+              <span class="ua-stat-k">MP</span>
+              <span class="ua-stat-v">${mp ? mp.r0.toFixed(1) : '—'}</span>
+              <span class="ua-stat-u">R⊕</span>
+          </div>
+          <div class="ua-stat">
+              <span class="ua-stat-k">BS</span>
+              <span class="ua-stat-v">${bs ? bs.r0.toFixed(1) : '—'}</span>
+              <span class="ua-stat-u">R⊕ ${live ? '· live' : '· clim'}</span>
+          </div>
+        `;
     }
 
     // ── Public ──────────────────────────────────────────────────────────────
