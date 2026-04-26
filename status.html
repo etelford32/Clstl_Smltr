@@ -374,6 +374,11 @@ const PROXY_PROBES = PIPELINES.map(p => ({
     key:       p.id,
     label:     p.label,
     endpoint:  p.endpoint,
+    // Probe URL — defaults to the endpoint itself, but registry entries
+    // can override when the endpoint legitimately requires query params
+    // (e.g. /api/weather/forecast needs ?type=&lat=&lon= or it 400s).
+    probeUrl:  p.probeUrl ?? p.endpoint,
+    feature:   p.feature ?? null,
     category:  p.category,
     upstream:  p.upstream,
     warnAgeS:  p.warnAgeS,
@@ -385,7 +390,7 @@ async function _probeProxy(spec) {
     const t0 = performance.now();
     let status = null, body = null, netErr = null;
     try {
-        const res = await fetch(spec.endpoint, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+        const res = await fetch(spec.probeUrl, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
         status = res.status;
         try { body = await res.json(); } catch { /* non-JSON */ }
     } catch (e) {
@@ -451,9 +456,19 @@ function _renderProbeRow(p) {
         ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
         : `<span style="color:#ff5555;font-weight:700">—</span>`;
 
+    // `feature` (when present) tells operators which user-facing feature
+    // a row backs — so "Weather forecast 400" reads as "the dashboard's
+    // 7-day forecast is broken" without grepping. Italicised + dimmed so
+    // it doesn't compete with the label.
+    const featureLine = p.spec.feature
+        ? `<div style="color:#7a8;font-size:.62rem;font-style:italic">${_rtEsc(p.spec.feature)}</div>`
+        : '';
+
     return `<tr>`
          +  `<td><strong>${_rtEsc(p.spec.label)}</strong>${_prewarmBadge(p.spec.prewarm)}`
-         +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
+         +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div>`
+         +      featureLine
+         +  `</td>`
          +  `<td>${statusCell}</td>`
          +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
          +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
@@ -467,14 +482,17 @@ async function loadProxyFreshnessCard() {
     el.innerHTML = `<div class="rt-empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
 
     const probes = await Promise.all(PROXY_PROBES.map(_probeProxy));
-    const probeBySpec = new Map(probes.map(p => [p.spec.endpoint, p]));
+    // Key by id (unique per registry entry) — endpoints can repeat when
+    // two registry rows probe the same path with different params (e.g.
+    // weather-forecast vs weather-archive both hit /api/weather/forecast).
+    const probeBySpec = new Map(probes.map(p => [p.spec.key, p]));
 
     // Per-category mini-tables — keeps the expanded probe list scannable.
     let html = '';
     let healthy = 0;
     for (const cat of CATEGORIES) {
         const catProbes = pipelinesByCategory(cat.id)
-            .map(spec => probeBySpec.get(spec.endpoint))
+            .map(spec => probeBySpec.get(spec.id))
             .filter(Boolean);
         if (catProbes.length === 0) continue;
 
