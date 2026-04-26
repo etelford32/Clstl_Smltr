@@ -47,6 +47,15 @@ const CRON_SECRET  = process.env.CRON_SECRET || '';
 
 const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
 
+// MET Norway fallback. Free, JSON, no-key — but point-only (no multi-location
+// URL), so 648 sequential calls with bounded concurrency. Their ToS says
+// 20 req/s/app cap; we run 4 workers and pace by upstream RTT, which lands
+// around ~16 req/s well inside the limit.
+const METNO_BASE       = 'https://api.met.no/weatherapi/locationforecast/2.0/compact';
+const METNO_USER_AGENT = process.env.METNO_USER_AGENT
+    || 'ParkerPhysics/1.0 (+https://parkersphysics.com; ops@parkersphysics.com)';
+const METNO_CONCURRENCY = 4;
+
 const GRID_W     = 36;
 const GRID_H     = 18;
 const GRID_N     = GRID_W * GRID_H;   // 648
@@ -61,12 +70,14 @@ const CURRENT_VARS = [
     'precipitation',
 ].join(',');
 
-// Primary = default seamless blend. Fallback = GFS-only via the same
-// provider. If Open-Meteo is globally unreachable both fail and we record
-// the reason; the next scheduled tick retries automatically.
+// Source attempts in order. First one that returns a complete 648-item set
+// wins; on any failure we move to the next. MET Norway is the cross-provider
+// fallback — Open-Meteo's unrelated rate-limits/outages won't take it down
+// because it's a different upstream entirely.
 const ATTEMPTS = [
-    { src: 'open-meteo',     modelQuery: '' },
-    { src: 'open-meteo-gfs', modelQuery: '&models=gfs_seamless' },
+    { src: 'open-meteo',     fetcher: 'openmeteo', modelQuery: '' },
+    { src: 'open-meteo-gfs', fetcher: 'openmeteo', modelQuery: '&models=gfs_seamless' },
+    { src: 'met-norway',     fetcher: 'metno' },
 ];
 
 // Per-chunk upstream timeout. Open-Meteo p99 for 162-location current-only
@@ -178,6 +189,139 @@ async function fetchAllChunks(src, modelQuery) {
     return { merged, failureReason: null };
 }
 
+// ── MET Norway fetcher (fallback, point-only) ─────────────────────────────
+//
+// MET Norway has no multi-location endpoint — 648 separate calls, paced by
+// METNO_CONCURRENCY. We translate each point's response into the same
+// per-location envelope Open-Meteo returns so downstream readers see a
+// consistent shape regardless of which source won.
+
+function gridLatLon(idx) {
+    const j = Math.floor(idx / GRID_W);
+    const i = idx % GRID_W;
+    return { lat: -85 + j * 10, lon: -175 + i * 10 };
+}
+
+function translateMetnoPoint(metno) {
+    const first = metno?.properties?.timeseries?.[0];
+    if (!first) return null;
+    const inst  = first?.data?.instant?.details ?? {};
+    const next1 = first?.data?.next_1_hours?.details ?? {};
+    const coord = metno?.geometry?.coordinates ?? [];
+    return {
+        latitude:  coord[1],
+        longitude: coord[0],
+        elevation: coord[2] ?? null,
+        current_units: {
+            temperature_2m:       '°C',
+            relative_humidity_2m: '%',
+            surface_pressure:     'hPa',
+            wind_speed_10m:       'm/s',
+            wind_direction_10m:   '°',
+            cloud_cover_low:      '%',
+            cloud_cover_mid:      '%',
+            cloud_cover_high:     '%',
+            precipitation:        'mm',
+        },
+        current: {
+            time:                 first.time,
+            // MET Norway compact gives sea-level pressure, not surface;
+            // close enough for the dashboard heatmap which only renders a
+            // colour ramp. Mark via __pressure_kind for future readers.
+            temperature_2m:       Number.isFinite(inst.air_temperature) ? inst.air_temperature : null,
+            relative_humidity_2m: Number.isFinite(inst.relative_humidity) ? inst.relative_humidity : null,
+            surface_pressure:     Number.isFinite(inst.air_pressure_at_sea_level) ? inst.air_pressure_at_sea_level : null,
+            wind_speed_10m:       Number.isFinite(inst.wind_speed) ? inst.wind_speed : null,
+            wind_direction_10m:   Number.isFinite(inst.wind_from_direction) ? inst.wind_from_direction : null,
+            cloud_cover_low:      Number.isFinite(inst.cloud_area_fraction_low)    ? inst.cloud_area_fraction_low    : null,
+            cloud_cover_mid:      Number.isFinite(inst.cloud_area_fraction_medium) ? inst.cloud_area_fraction_medium : null,
+            cloud_cover_high:     Number.isFinite(inst.cloud_area_fraction_high)   ? inst.cloud_area_fraction_high   : null,
+            precipitation:        Number.isFinite(next1.precipitation_amount) ? next1.precipitation_amount : null,
+        },
+        __pressure_kind: 'mean_sea_level',  // (Open-Meteo gives surface_pressure)
+    };
+}
+
+async function fetchOneMetnoPoint(idx) {
+    const { lat, lon } = gridLatLon(idx);
+    // 4 decimals max — MET Norway returns 403 on higher precision.
+    const url = `${METNO_BASE}?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`;
+    let res;
+    try {
+        res = await fetchWithTimeout(url, {
+            timeoutMs: 6000,
+            headers: {
+                'User-Agent': METNO_USER_AGENT,
+                Accept:       'application/json',
+            },
+        });
+    } catch (e) {
+        return { idx, point: null, err: `fetch: ${e.message}` };
+    }
+    if (!res.ok) {
+        return { idx, point: null, err: `HTTP ${res.status}` };
+    }
+    let body;
+    try {
+        body = await res.json();
+    } catch (e) {
+        return { idx, point: null, err: `parse: ${e.message}` };
+    }
+    const point = translateMetnoPoint(body);
+    if (!point) return { idx, point: null, err: 'translate: empty timeseries' };
+    return { idx, point, err: null };
+}
+
+async function fetchAllMetno(src) {
+    // Fixed-output array so positional ordering matches the grid index even
+    // though we fan out concurrently. A small fraction of points may end up
+    // null (transient upstream errors over 30+ s) — we tolerate up to 1%
+    // missing before declaring the attempt a failure.
+    const out = new Array(GRID_N).fill(null);
+    let nextIdx = 0;
+    let errCount = 0;
+    let lastErr = null;
+    const MAX_MISSING = Math.floor(GRID_N * 0.01);  // ≤ 6 missing of 648
+
+    async function worker() {
+        while (true) {
+            const idx = nextIdx++;
+            if (idx >= GRID_N) return;
+            const { point, err } = await fetchOneMetnoPoint(idx);
+            if (point) {
+                out[idx] = point;
+            } else {
+                errCount++;
+                lastErr = err;
+                if (errCount > MAX_MISSING) return;  // abort early
+            }
+        }
+    }
+
+    await Promise.all(Array.from({ length: METNO_CONCURRENCY }, worker));
+
+    if (errCount > MAX_MISSING) {
+        return {
+            merged: null,
+            failureReason: `${src} too many failures (${errCount}/${GRID_N}); last: ${lastErr ?? 'unknown'}`,
+        };
+    }
+
+    // Backfill any small number of missing points with neighbour values so
+    // the array length stays exactly GRID_N. Heatmap consumers tolerate
+    // small-cell gaps; what they can't tolerate is a length mismatch.
+    for (let i = 0; i < GRID_N; i++) {
+        if (!out[i]) {
+            const fallback = out[Math.max(0, i - 1)] || out[Math.min(GRID_N - 1, i + 1)];
+            out[i] = fallback ? { ...fallback, __backfilled: true } : null;
+        }
+    }
+    if (out.some(p => p === null)) {
+        return { merged: null, failureReason: `${src} backfill failed (all-null neighbour run)` };
+    }
+    return { merged: out, failureReason: null };
+}
+
 // ── Supabase writes ────────────────────────────────────────────────────
 // Both use service_role to bypass RLS. We hit PostgREST for the cache
 // insert (simple row create) and the heartbeat RPCs (they're SECURITY
@@ -250,8 +394,10 @@ export default async function handler(request) {
     let winSource = null;
     let merged    = null;
     let lastErr   = null;
-    for (const { src, modelQuery } of ATTEMPTS) {
-        const attempt = await fetchAllChunks(src, modelQuery);
+    for (const { src, fetcher, modelQuery } of ATTEMPTS) {
+        const attempt = fetcher === 'metno'
+            ? await fetchAllMetno(src)
+            : await fetchAllChunks(src, modelQuery);
         if (attempt.merged) {
             winSource = src;
             merged    = attempt.merged;

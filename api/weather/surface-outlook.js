@@ -41,6 +41,12 @@ export const config = { runtime: 'edge' };
 const CACHE_TTL = 21_600;   // 6 h
 const CACHE_SWR = 1_800;
 
+async function _fetchJson(url) {
+    const res = await fetchWithTimeout(url, { timeoutMs: 12_000 });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+}
+
 export default async function handler(req) {
     const url = new URL(req.url);
     // Pass through to the proxies on the same origin so this composes
@@ -48,44 +54,144 @@ export default async function handler(req) {
     // long-cached, so the doubled fan-out is cheap.
     const origin = url.origin;
 
-    let vortex, teleco;
-    try {
-        const [vRes, tRes] = await Promise.all([
-            fetchWithTimeout(`${origin}/v1/weather/polar-vortex`,    { timeoutMs: 12_000 }),
-            fetchWithTimeout(`${origin}/v1/weather/teleconnections`, { timeoutMs: 12_000 }),
-        ]);
-        if (!vRes.ok)  throw new Error(`polar-vortex HTTP ${vRes.status}`);
-        if (!tRes.ok)  throw new Error(`teleconnections HTTP ${tRes.status}`);
-        vortex = await vRes.json();
-        teleco = await tRes.json();
-    } catch (e) {
-        return jsonError('upstream_unavailable', e.message,
+    // Independent fetches. Either upstream can fail — we still try to
+    // compose a partial outlook from whatever survived. Previously we used
+    // Promise.all which made polar-vortex 503s cascade into a full 503
+    // here, killing the surface-outlook card every time Open-Meteo's GFS
+    // pressure-level endpoint hiccupped. Promise.allSettled lets us
+    // degrade gracefully.
+    const [vSettled, tSettled] = await Promise.allSettled([
+        _fetchJson(`${origin}/v1/weather/polar-vortex`),
+        _fetchJson(`${origin}/v1/weather/teleconnections`),
+    ]);
+    const vortex = vSettled.status === 'fulfilled' ? vSettled.value : null;
+    const teleco = tSettled.status === 'fulfilled' ? tSettled.value : null;
+
+    if (!vortex && !teleco) {
+        return jsonError('upstream_unavailable',
+            `vortex: ${vSettled.reason?.message ?? '—'}; teleco: ${tSettled.reason?.message ?? '—'}`,
             { source: 'surface-outlook composer' });
     }
 
-    const out = _combine(vortex, teleco);
+    const haveBoth   = vortex && teleco;
+    const out = haveBoth
+        ? _combine(vortex, teleco)
+        : _partial(vortex, teleco);
+
     return jsonOk({
         source: 'Parker Physics surface-outlook · vortex × AO/NAO combiner',
         as_of:  new Date().toISOString(),
+        degraded: !haveBoth,
+        degraded_reason: haveBoth ? null
+            : !vortex ? 'polar-vortex unavailable'
+            : 'teleconnections unavailable',
         ...out,
         drivers: {
-            vortex: {
+            vortex: vortex ? {
                 state:    vortex.classification?.state,
                 u10_now:  vortex.current?.U_10hPa,
                 u10_d7:   vortex.forecast_d7?.U_10hPa,
-            },
-            ao: {
+            } : null,
+            ao: teleco ? {
                 current:  teleco.ao?.current,
                 trend_7d: teleco.ao?.trend_7d,
                 state:    teleco.ao?.state,
-            },
-            nao: {
+            } : null,
+            nao: teleco ? {
                 current:  teleco.nao?.current,
                 trend_7d: teleco.nao?.trend_7d,
                 state:    teleco.nao?.state,
-            },
+            } : null,
         },
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+}
+
+// Degraded-mode combiner: emits a coarser outlook from a single driver.
+// Confidence is intentionally capped lower than the full coupled product so
+// callers/UI can show "partial" badging without sniffing both drivers.
+function _partial(vortex, teleco) {
+    if (vortex && !teleco) {
+        const vState = vortex?.classification?.state ?? 'unknown';
+        const stratoCold = vState === 'ssw' || vState === 'disturbed' || vState === 'weakening';
+        const stratoMild = vState === 'strong';
+        if (stratoCold) {
+            return {
+                regime: 'emerging-cold',
+                label:  'Vortex-only signal · AO/NAO unavailable',
+                risk:   vState === 'ssw' ? 'elevated' : 'moderate',
+                lead_time_days:   vState === 'ssw' ? 14 : 10,
+                affected_regions: ['mid-latitudes (broad)'],
+                confidence:       0.45,
+                summary:
+                    `Stratospheric vortex ${vortex.classification.label.toLowerCase()}; `
+                  + 'tropospheric AO/NAO indices unavailable so coupling strength can\'t '
+                  + 'be confirmed. Treat as a watch, not a forecast.',
+            };
+        }
+        if (stratoMild) {
+            return {
+                regime: 'mild-zonal',
+                label:  'Strong vortex · AO/NAO unavailable',
+                risk:   'low',
+                lead_time_days:   0,
+                affected_regions: [],
+                confidence:       0.5,
+                summary: 'Strong polar vortex aloft; surface coupling unconfirmed without AO/NAO.',
+            };
+        }
+        return {
+            regime: 'neutral',
+            label:  'Vortex-only signal · near-climatological',
+            risk:   'low',
+            lead_time_days:   0,
+            affected_regions: [],
+            confidence:       0.3,
+            summary: 'No strong stratospheric signal; AO/NAO indices unavailable for confirmation.',
+        };
+    }
+
+    // teleco-only (vortex unavailable)
+    const ao  = teleco?.ao?.current  ?? null;
+    const nao = teleco?.nao?.current ?? null;
+    const aoNeg = Number.isFinite(ao) && ao <= -1;
+    const aoPos = Number.isFinite(ao) && ao >=  1;
+    if (aoNeg) {
+        return {
+            regime: 'emerging-cold',
+            label:  'AO/NAO-only signal · stratosphere unavailable',
+            risk:   'moderate',
+            lead_time_days:   0,
+            affected_regions: nao != null && nao <= -1 ? ['Western Europe', 'US Northeast']
+                            : nao != null && nao >=  1 ? ['US Midwest', 'Central Asia']
+                            : ['mid-latitudes (broad)'],
+            confidence:       0.5,
+            summary:
+                `AO ${ao.toFixed(1)} (negative) — surface cold pattern in progress. `
+              + 'Stratospheric vortex state unavailable; persistence horizon uncertain.',
+        };
+    }
+    if (aoPos) {
+        return {
+            regime: 'mild-zonal',
+            label:  'AO/NAO-only signal · zonal pattern',
+            risk:   'low',
+            lead_time_days:   0,
+            affected_regions: [],
+            confidence:       0.5,
+            summary:
+                `AO ${ao.toFixed(1)} (positive) — zonal flow, mid-latitudes shielded. `
+              + 'Stratospheric state unavailable.',
+        };
+    }
+    return {
+        regime: 'neutral',
+        label:  'AO/NAO-only signal · near-climatological',
+        risk:   'low',
+        lead_time_days:   0,
+        affected_regions: [],
+        confidence:       0.3,
+        summary: 'AO/NAO near climatology; stratospheric vortex unavailable for confirmation.',
+    };
 }
 
 function _combine(vortex, teleco) {

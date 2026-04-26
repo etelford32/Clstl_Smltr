@@ -49,6 +49,16 @@ export const config = { runtime: 'edge' };
 // else lives on the main forecast API.
 const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_MARINE   = 'https://marine-api.open-meteo.com/v1/marine';
+
+// MET Norway Locationforecast — Edge-friendly JSON fallback for the `point`
+// type when Open-Meteo is unavailable or rate-limited. We translate its
+// hourly timeseries into the Open-Meteo `current + daily` shape so callers
+// don't need to handle two response formats. Only used for `point` —
+// `launch` (CAPE / pressure-level winds), `marine`, and `archive` have no
+// MET Norway equivalent and stay Open-Meteo-only.
+const METNO_URL = 'https://api.met.no/weatherapi/locationforecast/2.0/compact';
+const METNO_USER_AGENT = process.env.METNO_USER_AGENT
+    || 'ParkerPhysics/1.0 (+https://parkersphysics.com; ops@parkersphysics.com)';
 // Historical archive is served from a separate subdomain — not the live
 // forecast API. Data horizon reaches back ~80 years; we only ask for the
 // last 90 days because that's what temp-forecast.js's regression needs.
@@ -214,6 +224,137 @@ function buildArchiveParams(lat, lon, days) {
     });
 }
 
+// ── MET Norway fallback (point type only) ───────────────────────────────────
+//
+// Translate MET Norway's per-hour timeseries → Open-Meteo `point` shape so the
+// dashboard / trip card consumers don't see a different envelope on fallback.
+// Lossy fields (apparent_temperature, weather_code, wind_gusts_10m, UV index,
+// sunrise/sunset, precipitation probability) are returned as null — clients
+// handle null fields gracefully (they already do for stale data).
+
+function _isoDate(t) { return String(t).slice(0, 10); }
+
+function _msToMph(v) { return Number.isFinite(v) ? v * 2.23694 : null; }
+function _cToF(v)    { return Number.isFinite(v) ? v * 9 / 5 + 32 : null; }
+function _round1(v)  { return Number.isFinite(v) ? Math.round(v * 10) / 10 : null; }
+
+function translateMetnoToOpenMeteoPoint(metno, days) {
+    const series = metno?.properties?.timeseries ?? [];
+    if (!series.length) return null;
+
+    const first = series[0];
+    const inst  = first?.data?.instant?.details ?? {};
+    const next1 = first?.data?.next_1_hours?.details ?? {};
+
+    const current = {
+        time:                 first.time,
+        temperature_2m:       _round1(_cToF(inst.air_temperature)),
+        apparent_temperature: null,
+        relative_humidity_2m: Number.isFinite(inst.relative_humidity) ? Math.round(inst.relative_humidity) : null,
+        cloud_cover:          Number.isFinite(inst.cloud_area_fraction) ? Math.round(inst.cloud_area_fraction) : null,
+        is_day:               null,
+        weather_code:         null,
+        wind_speed_10m:       _round1(_msToMph(inst.wind_speed)),
+        wind_direction_10m:   Number.isFinite(inst.wind_from_direction) ? Math.round(inst.wind_from_direction) : null,
+        wind_gusts_10m:       null,
+        precipitation:        Number.isFinite(next1.precipitation_amount) ? next1.precipitation_amount : null,
+        pressure_msl:         _round1(inst.air_pressure_at_sea_level),
+    };
+
+    // Group hourly samples by ISO date so we can derive daily max/min and
+    // precipitation totals — the MET Norway compact product doesn't carry
+    // a pre-aggregated daily block.
+    const byDate = new Map();
+    for (const s of series) {
+        const d = _isoDate(s.time);
+        if (!byDate.has(d)) byDate.set(d, { temps: [], precip: 0, winds: [], clouds: [] });
+        const bucket = byDate.get(d);
+        const t = s?.data?.instant?.details?.air_temperature;
+        const w = s?.data?.instant?.details?.wind_speed;
+        const c = s?.data?.instant?.details?.cloud_area_fraction;
+        const p = s?.data?.next_1_hours?.details?.precipitation_amount;
+        if (Number.isFinite(t)) bucket.temps.push(t);
+        if (Number.isFinite(w)) bucket.winds.push(w);
+        if (Number.isFinite(c)) bucket.clouds.push(c);
+        if (Number.isFinite(p)) bucket.precip += p;
+    }
+
+    const dates = [...byDate.keys()].slice(0, days);
+    const daily = {
+        time:                          dates,
+        temperature_2m_max:            [],
+        temperature_2m_min:            [],
+        precipitation_sum:             [],
+        precipitation_probability_max: [],
+        cloud_cover_mean:              [],
+        wind_speed_10m_max:            [],
+        sunrise:                       [],
+        sunset:                        [],
+        uv_index_max:                  [],
+    };
+    const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+    for (const d of dates) {
+        const b = byDate.get(d);
+        const tMax = b.temps.length ? Math.max(...b.temps) : null;
+        const tMin = b.temps.length ? Math.min(...b.temps) : null;
+        const wMax = b.winds.length ? Math.max(...b.winds) : null;
+        daily.temperature_2m_max.push(_round1(_cToF(tMax)));
+        daily.temperature_2m_min.push(_round1(_cToF(tMin)));
+        daily.precipitation_sum.push(_round1(b.precip));
+        daily.precipitation_probability_max.push(null);
+        daily.cloud_cover_mean.push(b.clouds.length ? Math.round(mean(b.clouds)) : null);
+        daily.wind_speed_10m_max.push(_round1(_msToMph(wMax)));
+        daily.sunrise.push(null);
+        daily.sunset.push(null);
+        daily.uv_index_max.push(null);
+    }
+
+    return {
+        latitude:  metno?.geometry?.coordinates?.[1],
+        longitude: metno?.geometry?.coordinates?.[0],
+        timezone:                'UTC',
+        timezone_abbreviation:   'UTC',
+        elevation:               metno?.geometry?.coordinates?.[2] ?? null,
+        current_units: {
+            temperature_2m:       '°F',
+            wind_speed_10m:       'mp/h',
+            wind_direction_10m:   '°',
+            relative_humidity_2m: '%',
+            cloud_cover:          '%',
+            precipitation:        'mm',
+            pressure_msl:         'hPa',
+        },
+        current,
+        daily_units: {
+            temperature_2m_max: '°F',
+            temperature_2m_min: '°F',
+            precipitation_sum: 'mm',
+            wind_speed_10m_max: 'mp/h',
+        },
+        daily,
+        // Mark which source actually filled this response so callers /
+        // dashboards can flag fallback mode without sniffing fields.
+        __source: 'met-norway-locationforecast (Open-Meteo unavailable)',
+    };
+}
+
+async function tryMetnoPoint(lat, lon, days) {
+    try {
+        const res = await fetchWithTimeout(`${METNO_URL}?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}`, {
+            timeoutMs: UPSTREAM_TIMEOUT_MS,
+            headers: {
+                'User-Agent': METNO_USER_AGENT,
+                Accept:       'application/json',
+            },
+        });
+        if (!res.ok) return null;
+        const body = await res.json();
+        return translateMetnoToOpenMeteoPoint(body, days);
+    } catch {
+        return null;
+    }
+}
+
 function buildMarineParams(lat, lon, days) {
     return new URLSearchParams({
         latitude:  lat.toFixed(COORD_DECIMALS),
@@ -284,17 +425,39 @@ export default async function handler(request) {
     const upstreamUrl = `${spec.upstream}?${spec.build(qLat, qLon, days)}`;
 
     let upstream;
+    let upstreamErr;
     try {
         upstream = await fetchWithTimeout(upstreamUrl, {
             timeoutMs: UPSTREAM_TIMEOUT_MS,
             headers:   { Accept: 'application/json' },
         });
     } catch (e) {
-        // Timeout / network error. Shared helper caches the error briefly
-        // so a dead upstream doesn't amplify into retry storms.
-        return jsonError('upstream_unavailable', e.message, { source: 'Open-Meteo' });
+        upstreamErr = e.message;
     }
 
+    // Fallback path (point only): when Open-Meteo is down/rate-limited, try
+    // MET Norway and translate to the same response shape. `launch`/`marine`/
+    // `archive` have no MET Norway equivalent so they still error out below.
+    const openMeteoFailed = upstreamErr || (upstream && !upstream.ok);
+    if (openMeteoFailed && type === 'point') {
+        const fallback = await tryMetnoPoint(qLat, qLon, days);
+        if (fallback) {
+            return new Response(JSON.stringify(fallback), {
+                status:  200,
+                headers: {
+                    'Content-Type':  'application/json',
+                    'Cache-Control': `public, s-maxage=${CACHE_TTL_FORECAST}, stale-while-revalidate=${CACHE_SWR_FORECAST}`,
+                    ...CORS_HEADERS,
+                },
+            });
+        }
+        // fall through — both sources failed; surface the original Open-Meteo
+        // error since that's the more useful diagnostic for ops.
+    }
+
+    if (upstreamErr) {
+        return jsonError('upstream_unavailable', upstreamErr, { source: 'Open-Meteo' });
+    }
     if (!upstream.ok) {
         // Open-Meteo signals rate-limit via 429. Cache 429s a bit longer
         // than generic errors so we back off automatically; the frontend
