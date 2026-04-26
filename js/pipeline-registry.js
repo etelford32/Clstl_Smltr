@@ -26,6 +26,13 @@
  *               event-driven only). Cron jobs filter on this.
  *   warnAgeS    age above which the status pill goes amber
  *   critAgeS    age above which the status pill goes red
+ *   probeUrl    optional — overrides `endpoint` for the status-page probe.
+ *               Use when the endpoint requires query params to return a
+ *               useful response (e.g. weather/forecast needs ?type=&lat=&lon=)
+ *               but the bare path is what callers logically reference.
+ *   feature     optional — short label of the user-facing feature this
+ *               pipeline backs. Surfaces in the status panel so a broken
+ *               row tells operators which page is impacted.
  *   notes       optional one-liner — why this exists, gotchas
  */
 
@@ -163,12 +170,31 @@ export const PIPELINES = [
       warnAgeS:  90 * 60, critAgeS: 180 * 60,
       notes: 'Populated by /api/cron/refresh-weather-grid hourly cron — pre-warm not needed.' },
 
+    // Per-location query; status probe needs a concrete (type, lat, lon)
+    // tuple or the endpoint correctly returns 400 (invalid_type / missing
+    // coords). The probe uses NYC + type=point, which is what the dashboard
+    // location-prediction card calls when no user-set location exists yet.
     { id: 'weather-forecast',   label: 'Weather forecast',
       endpoint: '/api/weather/forecast',
+      probeUrl: '/api/weather/forecast?type=point&lat=40.7&lon=-74.0&days=1',
+      feature:  'dashboard · 7-day temperature forecast',
       category: 'weather', upstream: 'Open-Meteo + NWS',
       cadence_s: 1_800, prewarm: null,
       warnAgeS:  60 * 60, critAgeS: 240 * 60,
       notes: 'Per-location query; not pre-warmable — each call is unique.' },
+
+    // Historical archive feeds the ML ridge regression in temp-forecast.js.
+    // 90-day lookback @ NYC is the canonical training-window probe.
+    { id: 'weather-archive',    label: 'Weather archive (ML training)',
+      endpoint: '/api/weather/forecast',
+      probeUrl: '/api/weather/forecast?type=archive&lat=40.7&lon=-74.0&days=90',
+      feature:  'dashboard · ML temperature regression',
+      category: 'weather', upstream: 'Open-Meteo archive',
+      cadence_s: 86_400, prewarm: null,
+      warnAgeS:  36 * 3600, critAgeS: 72 * 3600,
+      notes: 'Same endpoint as weather-forecast but type=archive — separate '
+           + 'probe so a 400/503 on the historical tier is distinguishable '
+           + 'from the live forecast tier.' },
 
     { id: 'polar-vortex',       label: 'Polar vortex',
       endpoint: '/api/weather/polar-vortex',
