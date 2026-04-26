@@ -8,9 +8,21 @@
  * Supabase ring buffer populated by pg_cron (see
  * supabase-solar-wind-migration.sql).
  *
- * This file re-exports that handler so older clients, bookmarks, and
- * the health-check UI in js/pipeline-analytics.js keep working with
- * identical response shape and query params (?series=1 / ?series=full).
+ * Why we *inline* the handler here instead of `export { default } from
+ * './latest.js'`: the re-export pattern bundles fine locally but Vercel
+ * Edge has been observed returning HTTP 500 on the alias path while
+ * the canonical /latest endpoint serves 200 normally — same source,
+ * same env. Inlining sidesteps whatever the Edge bundler is doing.
+ *
+ * Older clients, bookmarks, and the health-check UI in
+ * js/pipeline-analytics.js keep working with identical response shape
+ * and query params (?series=1 / ?series=full).
  */
 
-export { config, default } from './latest.js';
+import handler, { config as latestConfig } from './latest.js';
+
+export const config = latestConfig;
+
+export default async function aliasHandler(request) {
+    return handler(request);
+}

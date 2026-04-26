@@ -120,20 +120,29 @@ export const EARTH_OBS_LAYERS = [
         defaultOn:   true,
     },
     {
+        // NASA GIBS retired AMSR2_Surface_Precipitation_Rate_Day on
+        // 2025-01-13 — the layer 404'd in production, surfacing as a
+        // "NetworkError when attempting to fetch resource" on the
+        // status panel's GIBS probe. AMSR2_Cloud_Liquid_Water_Day is
+        // the closest atmosphere-category replacement still actively
+        // produced (passive microwave column-integrated cloud water,
+        // useful as a "precipitation in waiting" overlay alongside
+        // IMERG's actual rain rate).
         id:          'precip-amsr2',
-        gibs:        'AMSR2_Surface_Precipitation_Rate_Day',
-        name:        'AMSR2 Precip Rate (Day)',
+        gibs:        'AMSR2_Cloud_Liquid_Water_Day',
+        name:        'AMSR2 Cloud Liquid Water (Day)',
         category:    'atmosphere',
-        description: 'GCOM-W1 AMSR2 passive microwave precipitation rate',
-        unit:        'mm/hr',
+        description: 'GCOM-W1 AMSR2 passive-microwave column-integrated '
+                   + 'cloud liquid water — strong precip precursor.',
+        unit:        'kg/m²',
         resolution:  { w: 2048, h: 1024 },
         cadence:     60 * 60_000,
         latency:     '~3 hours',
-        colorRamp:   'Blue → green → yellow → red',
+        colorRamp:   'Blue (dry) → cyan → green → yellow → red (saturated)',
         format:      'image/png',
         timeOffset:  1,
-        opacity:     0.6,
-        defaultOn:   false,   // redundant with IMERG on first paint
+        opacity:     0.55,
+        defaultOn:   false,
     },
     {
         id:          'sst',
