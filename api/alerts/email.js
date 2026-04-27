@@ -47,17 +47,26 @@ const SUPABASE_URL  = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABA
 const SUPABASE_KEY  = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_SECRET_KEY || '';
 const RESEND_API    = 'https://api.resend.com/emails';
 const RESEND_KEY    = process.env.RESEND_API_KEY || '';
-const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkerphysics.com>';
+const FROM_EMAIL    = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkersphysics.com>';
 const MAX_PER_HOUR  = 10;
+
+// CORS: same-site only. Aligned with the vercel.json header rule on
+// `/api/alerts/*`. The function MUST emit the same value its parent rule
+// declares — Vercel's edge does NOT layer them; the function-set header
+// wins. Wildcard would accept credentialed cross-origin requests from
+// any third-party page that obtained a user JWT.
+const ALLOW_ORIGIN  = 'https://parkersphysics.com';
+const CORS_HEADERS = Object.freeze({
+    'Access-Control-Allow-Origin':  ALLOW_ORIGIN,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    Vary:                           'Origin',
+});
 
 function jsonResp(body, status = 200) {
     return Response.json(body, {
         status,
-        headers: {
-            'Access-Control-Allow-Origin':  '*',
-            'Access-Control-Allow-Methods': 'POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
+        headers: { ...CORS_HEADERS },
     });
 }
 
@@ -171,11 +180,7 @@ export default async function handler(req) {
     if (req.method === 'OPTIONS') {
         return new Response(null, {
             status: 204,
-            headers: {
-                'Access-Control-Allow-Origin':  '*',
-                'Access-Control-Allow-Methods': 'POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            },
+            headers: { ...CORS_HEADERS },
         });
     }
 

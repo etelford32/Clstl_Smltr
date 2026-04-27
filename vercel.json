@@ -49,7 +49,11 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "*"
+          "value": "https://parkersphysics.com"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
         },
         {
           "key": "Access-Control-Allow-Methods",
