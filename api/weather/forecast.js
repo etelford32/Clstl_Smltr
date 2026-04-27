@@ -64,15 +64,21 @@ const METNO_USER_AGENT = process.env.METNO_USER_AGENT
 // last 90 days because that's what temp-forecast.js's regression needs.
 const OPEN_METEO_ARCHIVE  = 'https://archive-api.open-meteo.com/v1/archive';
 
-// Cache tuning — two tiers, chosen per type:
+// Cache tuning — three tiers, chosen per type:
 //   FORECAST tier (point / launch / marine): Open-Meteo's deterministic
 //     models refresh hourly. 15 min s-maxage guarantees at least one
 //     refresh per model cycle without hammering the upstream.
+//   HOURLY tier (hourly): 30-min TTL aligned to the saved-locations
+//     refresh cron's 30-min cadence — cron writes the cache then the
+//     CDN holds it continuously until the next refresh, no gap.
+//     Underlying surface vars don't shift meaningfully sub-30m.
 //   ARCHIVE tier (archive): historical daily temps are effectively
 //     immutable for the last ~30 days — they don't change until the next
 //     reanalysis run, days later. Cache 24 hr + long SWR window.
 const CACHE_TTL_FORECAST = 900;    // 15 min
 const CACHE_SWR_FORECAST = 600;    // 10 min stale tolerance
+const CACHE_TTL_HOURLY   = 1800;   // 30 min — matches refresh-saved-locations cron
+const CACHE_SWR_HOURLY   = 900;    // 15 min stale tolerance
 const CACHE_TTL_ARCHIVE  = 86400;  // 24 hr
 const CACHE_SWR_ARCHIVE  = 43200;  // 12 hr — long SWR is free for historical
 
@@ -116,7 +122,7 @@ const TYPE_SPECS = Object.freeze({
         maxDays:     2,
         upstream:    OPEN_METEO_FORECAST,
         build:       buildHourlyParams,
-        cacheTier:   'forecast',
+        cacheTier:   'hourly',
     },
     marine: {
         defaultDays: 5,
@@ -518,8 +524,12 @@ export default async function handler(request) {
     // Passthrough the upstream body verbatim. No re-serialization cost,
     // and trip-planner.js keeps its existing parse logic.
     const body = await upstream.text();
-    const ttl  = spec.cacheTier === 'archive' ? CACHE_TTL_ARCHIVE : CACHE_TTL_FORECAST;
-    const swr  = spec.cacheTier === 'archive' ? CACHE_SWR_ARCHIVE : CACHE_SWR_FORECAST;
+    let ttl, swr;
+    switch (spec.cacheTier) {
+        case 'archive': ttl = CACHE_TTL_ARCHIVE;  swr = CACHE_SWR_ARCHIVE;  break;
+        case 'hourly':  ttl = CACHE_TTL_HOURLY;   swr = CACHE_SWR_HOURLY;   break;
+        default:        ttl = CACHE_TTL_FORECAST; swr = CACHE_SWR_FORECAST;
+    }
     return new Response(body, {
         status:  200,
         headers: {

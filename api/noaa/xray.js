@@ -114,9 +114,14 @@ export default async function handler() {
     const ageMin     = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 60_000;
 
     return jsonOk({
-        source:    'NOAA SWPC GOES primary xrays-1-day via Vercel Edge',
-        age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
-        freshness: freshnessStatus(ageMin),
+        source:      'NOAA SWPC GOES primary xrays-1-day via Vercel Edge',
+        // Canonical freshness field. status.html / admin.html check
+        // body.age_seconds FIRST and skip the Date.parse fallback when it's
+        // present, so emitting it here is the single most reliable freshness
+        // signal regardless of upstream timestamp format drift.
+        age_seconds: ageMin != null ? Math.round(ageMin * 60) : null,
+        age_min:     ageMin != null ? Math.round(ageMin * 10) / 10 : null,
+        freshness:   freshnessStatus(ageMin),
         data: {
             updated: updatedISO,
             current: {

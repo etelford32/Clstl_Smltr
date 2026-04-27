@@ -59,11 +59,17 @@ export default async function handler() {
         raw.south_hemisphere_power      ?? null
     );
     const forecastTime = raw['Forecast Time'] ?? raw.forecast_time ?? null;
+    const updatedISO   = isoTag(forecastTime);
+    const updatedMs    = updatedISO ? new Date(updatedISO).getTime() : NaN;
+    const ageSeconds   = isNaN(updatedMs) ? null : Math.max(0, Math.floor((Date.now() - updatedMs) / 1000));
 
     return jsonOk({
-        source:    'NOAA SWPC OVATION Prime ovation_aurora_latest via Vercel Edge',
+        source:      'NOAA SWPC OVATION Prime ovation_aurora_latest via Vercel Edge',
+        // Canonical freshness field — see xray.js for rationale. Aurora
+        // ships at 5-min cadence; anything older than ~1 hour is suspect.
+        age_seconds: ageSeconds,
         data: {
-            updated: isoTag(forecastTime),
+            updated: updatedISO,
             current: {
                 aurora_power_north_GW: northPower,
                 aurora_power_south_GW: southPower,

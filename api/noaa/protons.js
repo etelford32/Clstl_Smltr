@@ -101,8 +101,10 @@ export default async function handler() {
     const sep = sepStorm(flux10);
 
     return jsonOk({
-        source:    'NOAA SWPC GOES primary integral-protons-1-day via Vercel Edge',
-        age_min:   ageMin != null ? Math.round(ageMin * 10) / 10 : null,
+        source:      'NOAA SWPC GOES primary integral-protons-1-day via Vercel Edge',
+        // Canonical freshness field — see xray.js for rationale.
+        age_seconds: ageMin != null ? Math.round(ageMin * 60) : null,
+        age_min:     ageMin != null ? Math.round(ageMin * 10) / 10 : null,
         data: {
             updated: updatedISO,
             current: {
