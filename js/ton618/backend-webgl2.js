@@ -14,22 +14,30 @@ export function createWebGL2Backend(canvas) {
     const vao = gl.createVertexArray();
 
     const uLoc = {
-        resolution:    gl.getUniformLocation(program, 'u_resolution'),
-        fovY:          gl.getUniformLocation(program, 'u_fov_y'),
-        camPos:        gl.getUniformLocation(program, 'u_cam_pos'),
-        camBasis:      gl.getUniformLocation(program, 'u_cam_basis'),
-        rFar:          gl.getUniformLocation(program, 'u_r_far'),
-        maxSteps:      gl.getUniformLocation(program, 'u_max_steps'),
-        tol:           gl.getUniformLocation(program, 'u_tol'),
-        showRing:      gl.getUniformLocation(program, 'u_show_ring'),
-        time:          gl.getUniformLocation(program, 'u_time'),
-        observerType:  gl.getUniformLocation(program, 'u_observer_type'),
-        showDisk:      gl.getUniformLocation(program, 'u_show_disk'),
-        diskInner:     gl.getUniformLocation(program, 'u_disk_inner'),
-        diskOuter:     gl.getUniformLocation(program, 'u_disk_outer'),
-        diskThickness: gl.getUniformLocation(program, 'u_disk_thickness'),
-        diskBrightness:gl.getUniformLocation(program, 'u_disk_brightness'),
-        showGrid:      gl.getUniformLocation(program, 'u_show_grid'),
+        resolution:       gl.getUniformLocation(program, 'u_resolution'),
+        fovY:             gl.getUniformLocation(program, 'u_fov_y'),
+        camPos:           gl.getUniformLocation(program, 'u_cam_pos'),
+        camBasis:         gl.getUniformLocation(program, 'u_cam_basis'),
+        rFar:             gl.getUniformLocation(program, 'u_r_far'),
+        maxSteps:         gl.getUniformLocation(program, 'u_max_steps'),
+        tol:              gl.getUniformLocation(program, 'u_tol'),
+        showRing:         gl.getUniformLocation(program, 'u_show_ring'),
+        time:             gl.getUniformLocation(program, 'u_time'),
+        observerType:     gl.getUniformLocation(program, 'u_observer_type'),
+        showDisk:         gl.getUniformLocation(program, 'u_show_disk'),
+        diskInner:        gl.getUniformLocation(program, 'u_disk_inner'),
+        diskOuter:        gl.getUniformLocation(program, 'u_disk_outer'),
+        diskThickness:    gl.getUniformLocation(program, 'u_disk_thickness'),
+        diskBrightness:   gl.getUniformLocation(program, 'u_disk_brightness'),
+        diskTInner:       gl.getUniformLocation(program, 'u_disk_T_inner'),
+        diskShearSpeed:   gl.getUniformLocation(program, 'u_disk_shear_speed'),
+        diskMode:         gl.getUniformLocation(program, 'u_disk_mode'),
+        showHotspot:      gl.getUniformLocation(program, 'u_show_hotspot'),
+        hotspotRadius:    gl.getUniformLocation(program, 'u_hotspot_radius'),
+        hotspotPhi0:      gl.getUniformLocation(program, 'u_hotspot_phi0'),
+        hotspotStrength:  gl.getUniformLocation(program, 'u_hotspot_strength'),
+        showGrid:         gl.getUniformLocation(program, 'u_show_grid'),
+        showPhotonSphere: gl.getUniformLocation(program, 'u_show_photon_sphere'),
     };
 
     function resize(w, h) {
@@ -50,12 +58,20 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.showRing, u.showRing ? 1 : 0);
         gl.uniform1f(uLoc.time, u.time);
         gl.uniform1i(uLoc.observerType, u.observerType | 0);
-        gl.uniform1i(uLoc.showDisk,       u.showDisk ? 1 : 0);
-        gl.uniform1f(uLoc.diskInner,      u.diskInner ?? 6.0);
-        gl.uniform1f(uLoc.diskOuter,      u.diskOuter ?? 24.0);
-        gl.uniform1f(uLoc.diskThickness,  u.diskThickness ?? 0.0);
-        gl.uniform1f(uLoc.diskBrightness, u.diskBrightness ?? 1.0);
-        gl.uniform1i(uLoc.showGrid,       u.showGrid ? 1 : 0);
+        gl.uniform1i(uLoc.showDisk,         u.showDisk ? 1 : 0);
+        gl.uniform1f(uLoc.diskInner,        u.diskInner ?? 6.0);
+        gl.uniform1f(uLoc.diskOuter,        u.diskOuter ?? 24.0);
+        gl.uniform1f(uLoc.diskThickness,    u.diskThickness ?? 0.0);
+        gl.uniform1f(uLoc.diskBrightness,   u.diskBrightness ?? 1.0);
+        gl.uniform1f(uLoc.diskTInner,       u.diskTInner ?? 12000.0);
+        gl.uniform1f(uLoc.diskShearSpeed,   u.diskShearSpeed ?? 18.0);
+        gl.uniform1i(uLoc.diskMode,         u.diskMode | 0);
+        gl.uniform1i(uLoc.showHotspot,      u.showHotspot ? 1 : 0);
+        gl.uniform1f(uLoc.hotspotRadius,    u.hotspotRadius ?? 6.5);
+        gl.uniform1f(uLoc.hotspotPhi0,      u.hotspotPhi0 ?? 0.0);
+        gl.uniform1f(uLoc.hotspotStrength,  u.hotspotStrength ?? 1.5);
+        gl.uniform1i(uLoc.showGrid,         u.showGrid ? 1 : 0);
+        gl.uniform1i(uLoc.showPhotonSphere, u.showPhotonSphere ? 1 : 0);
     }
 
     function draw() {

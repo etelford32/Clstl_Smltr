@@ -93,6 +93,46 @@ export function gravRedshiftFactor(r_emit, r_recv) {
     return Math.sqrt(f_r / f_e);
 }
 
+// Tortoise coordinate r* = r + 2M ln(r/2M − 1). Pulls the horizon out to
+// −∞ in the (t, r*) plane, in which radial null geodesics are 45° lines.
+// Useful as a "true distance" measure for radial light propagation.
+export function tortoise(r) {
+    if (r <= 2.0) return -Infinity;
+    return r + 2.0 * Math.log(r / 2.0 - 1.0);
+}
+
+// Flamm's paraboloid: equatorial t = const slice embedded in 3-D Euclidean
+// space has z(r) = sqrt(8M(r − 2M)). The depth of this funnel below the
+// asymptotic plane is the visualisation of "how curved" space is at the
+// camera location.
+export function flammEmbedding(r) {
+    if (r <= 2.0) return 0;
+    return Math.sqrt(8.0 * (r - 2.0));
+}
+
+// Light-bending angle for a photon at impact parameter b far from the hole.
+// Weak-field (Einstein) result Δφ = 4M/b is exact at first order in M/b;
+// Bozza's strong-deflection expansion takes over for b near b_crit but for
+// HUD purposes we just present the lowest-order value.
+export function deflectionAngle(b) {
+    if (b <= 0) return Infinity;
+    return 4.0 / b;        // radians
+}
+
+// Black-hole thermodynamics for the host TON 618.
+//   horizon area A = 16 π M^2     (geometric units)
+//   Bekenstein-Hawking entropy S_BH = A c^3 / (4 G ℏ k_B)
+//                                   = (k_B / 4) (A / ℓ_p^2)
+const PLANCK_LENGTH = Math.sqrt(HBAR * G_SI / Math.pow(C_SI, 3));     // m
+export function horizonArea() {
+    // 16 π M^2 in geometric M; convert to m^2 with M_meters^2.
+    return 16 * Math.PI * M_METERS * M_METERS;                          // m^2
+}
+export function bekensteinEntropyOverK() {
+    // S/k_B = A / (4 ℓ_p^2). Returns a dimensionless count of bits-ish.
+    return horizonArea() / (4.0 * PLANCK_LENGTH * PLANCK_LENGTH);
+}
+
 // Coordinate light-travel time r_emit -> r_recv (radial null geodesic, infall
 // path, integrated). Closed form: ∫ dr / (1 - 2M/r) = (r2 - r1) + 2M ln |...|.
 export function coordinateLightTime(r1, r2) {
@@ -175,12 +215,34 @@ export function diagnostics(cam) {
     const t_light_geom = coordinateLightTime(2.001, r);
     const t_light_seconds = t_light_geom * T_sec_per_M;
 
+    // Radial-distance / embedding diagnostics.
+    const r_star_geom        = tortoise(r);
+    const z_flamm_geom       = flammEmbedding(r);
+    // Asymptotic deflection of a photon grazing the camera at the FOV edge.
+    // b ≈ r * tan(fov/2) for a static observer at large r.
+    const b_edge = (cam.fovY != null) ? r * Math.tan(0.5 * cam.fovY) : r;
+    const defl_rad           = deflectionAngle(b_edge);
+
+    // Black-hole thermodynamics (constants for TON 618).
+    const A_horizon_m2       = horizonArea();
+    const S_over_k           = bekensteinEntropyOverK();
+
     return {
         // fundamentals
         r_M:           r,
         r_rs:          r / 2.0,
         f,                                         // metric coefficient 1 - 2M/r
         valid_static:  r > 2.0,
+
+        // radial-distance math
+        r_star_geom:                  r_star_geom,
+        z_flamm_geom:                 z_flamm_geom,
+        proper_circumference_geom:    2 * Math.PI * r,
+        deflection_angle_rad_at_fov:  defl_rad,
+
+        // global thermodynamics
+        horizon_area_m2:              A_horizon_m2,
+        bekenstein_entropy_over_k:    S_over_k,
 
         // observer kinematics
         gamma_static:  td,                          // static-observer time dilation
