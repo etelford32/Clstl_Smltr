@@ -367,6 +367,10 @@ export class AtmosphereGlobe {
             const sys = new LayerParticleSystem({
                 parent: this._particleGroup,
                 layer,
+                // Sun direction drives the per-particle thermospheric
+                // wind (subsolar→antisolar tangent flow). Stored on
+                // each system; setSunDir() can update it later.
+                sunDir: this._sunDir,
             });
             this._particles[layer.id] = sys;
         }
