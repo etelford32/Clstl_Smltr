@@ -286,13 +286,24 @@ async function fetchEdge(url) {
 
 // ── 2D-array helpers (NOAA "CSV-in-JSON" format used by several endpoints) ───
 
-/** Parse a NOAA 2D-array response into an array of plain objects. */
+/** Parse a NOAA 2D-array response into an array of plain objects.
+ *  Defensive: NOAA occasionally serves an *object* in place of a tabular
+ *  array (mostly when the upstream is mid-deploy or rate-limited and
+ *  returns an error envelope with the same HTTP 200). Callers usually
+ *  pre-check `Array.isArray(raw)` but not `Array.isArray(raw[0])` —
+ *  doing both here so a single malformed feed can never throw past this
+ *  layer and take down the whole `Promise.allSettled` batch in
+ *  `_runT3`. Observed in production as
+ *  `[SWPC T3] feed N: raw[0].map is not a function`. */
 function parse2D(raw) {
     if (!Array.isArray(raw) || raw.length < 2) return [];
+    if (!Array.isArray(raw[0])) return [];        // ← defensive
     const headers = raw[0].map(h => String(h).trim().toLowerCase().replace(/\s+/g, '_'));
     return raw.slice(1).map(row =>
-        Object.fromEntries(headers.map((h, i) => [h, row[i]]))
-    );
+        Array.isArray(row)
+            ? Object.fromEntries(headers.map((h, i) => [h, row[i]]))
+            : null
+    ).filter(Boolean);
 }
 
 /** Fill sentinel for NOAA numeric columns (values ≤ −9990 or > 1e20). */

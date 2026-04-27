@@ -36,8 +36,12 @@
 
 import * as THREE from 'three';
 
-// NASA GIBS snapshot endpoint (CORS-enabled, no API key required)
-const GIBS_SNAPSHOT = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
+// NASA GIBS snapshot — fetched via our own same-origin proxy
+// (api/nasa/gibs-snapshot.js). The browser-direct fetch fails ~50%
+// of the time with CORS-missing 500s from NASA's WVS load balancer;
+// the server-side proxy avoids both the CORS issue and the burst
+// rate-limit (Vercel edge caches every URL we hit).
+const GIBS_SNAPSHOT = '/api/nasa/gibs-snapshot';
 
 // Full equirectangular extent
 const GLOBAL_BBOX = '-90,-180,90,180';
@@ -106,17 +110,19 @@ function loadTexture(url) {
     });
 }
 
-/** Build a GIBS snapshot URL for a given layer and time. */
+/** Build a GIBS snapshot URL for a given layer and time.
+ *  Routes through /api/nasa/gibs-snapshot (same-origin proxy) which
+ *  accepts lowercase param names — keeps cache keys uniform across
+ *  every caller. */
 function gibsUrl(layer, time) {
     const params = new URLSearchParams({
-        REQUEST: 'GetSnapshot',
-        TIME:    isoTime(time),
-        BBOX:    GLOBAL_BBOX,
-        CRS,
-        LAYERS:  layer,
-        FORMAT:  'image/jpeg',
-        WIDTH:   SAT_W,
-        HEIGHT:  SAT_H,
+        layers:  layer,
+        time:    isoTime(time),
+        bbox:    GLOBAL_BBOX,
+        crs:     CRS,
+        format:  'image/jpeg',
+        width:   SAT_W,
+        height:  SAT_H,
     });
     return `${GIBS_SNAPSHOT}?${params}`;
 }
