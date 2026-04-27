@@ -1048,6 +1048,27 @@ export class AtmosphereGlobe {
     }
 
     /**
+     * Fly the camera to a specific debris piece by index. Position
+     * comes from the cloud's flat position buffer (not a per-piece
+     * mesh) since debris are rendered as a single THREE.Points draw
+     * call. Also auto-switches into fly mode so the camera anim
+     * doesn't get clamped back to the planet centre by OrbitControls.
+     */
+    flyToDebris(idx, durationSec = 1.6) {
+        if (!this._debrisPositions || !this._debris?.[idx]) return;
+        const p = this._debrisPositions;
+        const o = idx * 3;
+        const debrisPos = new THREE.Vector3(p[o], p[o + 1], p[o + 2]);
+        const radial = debrisPos.clone().normalize();
+        const offset = radial.multiplyScalar(0.18);
+        const target = debrisPos.clone().add(offset);
+        if (this._controls.getMode?.() === 'orbit') {
+            this._controls.setMode('fly');
+        }
+        this.flyTo(target, debrisPos, durationSec);
+    }
+
+    /**
      * Upgrade every orbital probe from hardcoded mean elements to the
      * live TLE for that NORAD ID. Hits the same /api/celestrak/tle
      * Edge proxy that the rest of the repo uses; the proxy parses the
@@ -1798,7 +1819,12 @@ export class AtmosphereGlobe {
         this._raycaster = new THREE.Raycaster();
         // Thicker hit area than the visual torus — makes these thin rings
         // actually catchable with the mouse.
-        this._raycaster.params.Line = { threshold: 0.02 };
+        this._raycaster.params.Line   = { threshold: 0.02 };
+        // Per-point picking on the debris cloud. Threshold is in world
+        // units (R⊕); 0.02 ≈ 127 km, generous enough to catch a 0.014-
+        // size sprite without overlap between dots in the typical
+        // viewing range.
+        this._raycaster.params.Points = { threshold: 0.02 };
         this._mouse = new THREE.Vector2(-9, -9);
 
         const hittable = () => [
@@ -1812,6 +1838,10 @@ export class AtmosphereGlobe {
             // hittable so the tooltip + click-to-fly resolves to the
             // right satellite.
             ...Object.values(this._satProbes || {}).map(p => p.mesh),
+            // Debris cloud — single Points object, but Three's Points
+            // raycaster returns a per-point .index we use to resolve
+            // which dot was hovered. See _findTaggedUserData below.
+            ...(this._debrisCloud ? [this._debrisCloud] : []),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -1828,6 +1858,38 @@ export class AtmosphereGlobe {
             return obj.userData || {};
         };
 
+        /**
+         * Per-debris userData resolver. The cloud-level userData has
+         * kind='debris-cloud' (good for the legend) but we want the
+         * tooltip + click-to-fly to talk about the *specific* piece
+         * the user is pointing at. Three's points raycaster returns
+         * an .index field on the intersection; we map it back into
+         * the parallel this._debris array.
+         */
+        const _userDataForHit = (hit) => {
+            if (!hit) return {};
+            // Debris cloud hit → resolve to a specific piece.
+            if (hit.object === this._debrisCloud
+                && Number.isFinite(hit.index)
+                && this._debris?.[hit.index]) {
+                const d = this._debris[hit.index];
+                return {
+                    kind:     'debris-piece',
+                    id:       d.spec.id,
+                    name:     d.spec.name,
+                    altKm:    d.spec.altitudeKm,
+                    color:    d.spec.color,
+                    noradId:  d.spec.orbital?.noradId,
+                    inclinationDeg: d.spec.orbital?.inclinationDeg,
+                    periodMin:      d.spec.orbital?.periodMin,
+                    debrisIdx:      hit.index,
+                    tooltip:  'Click to fly the camera to this debris piece. '
+                            + 'Drag pressure uses the live ρ at its current altitude.',
+                };
+            }
+            return _findTaggedUserData(hit.object);
+        };
+
         const onMove = (e) => {
             const rect = this.canvas.getBoundingClientRect();
             const x = e.clientX - rect.left;
@@ -1837,7 +1899,7 @@ export class AtmosphereGlobe {
             this._raycaster.setFromCamera(this._mouse, this._camera);
             const hits = this._raycaster.intersectObjects(hittable(), true);
             if (hits.length > 0) {
-                const ud = _findTaggedUserData(hits[0].object);
+                const ud = _userDataForHit(hits[0]);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
                 tip.style.left = `${x}px`;
                 tip.style.top  = `${y}px`;
@@ -1879,6 +1941,8 @@ export class AtmosphereGlobe {
                 // Legacy: keep the kind='iss-probe' path working in
                 // case anything still emits that tag.
                 this.flyToISS();
+            } else if (ud?.kind === 'debris-piece' && Number.isFinite(ud.debrisIdx)) {
+                this.flyToDebris(ud.debrisIdx);
             }
         };
         this.canvas.addEventListener('mousemove', onMove);
@@ -2667,6 +2731,31 @@ function _tipHTML(userData, profile, swState) {
             detail = `${userData.altKm} km · orbital track`;
             dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             break;
+        case 'debris-piece': {
+            // Per-piece debris readout. Live ρ at the piece's altitude
+            // + drag pressure q = ½ρv² at the circular orbital speed.
+            const incl = userData.inclinationDeg;
+            const period = userData.periodMin;
+            const norad = userData.noradId;
+            detail = `${userData.altKm} km · debris`
+                + (incl  ? ` · ${incl.toFixed(1)}°` : '')
+                + (period ? ` · ${period.toFixed(1)} min` : '')
+                + ` · click to fly here`;
+            const lines = [];
+            if (norad) lines.push(`<div style="color:#9ab">NORAD ${norad}</div>`);
+            if (profile?.samples?.length) {
+                const rho = _nearestRho(profile.samples, userData.altKm);
+                const v = _circularOrbitalSpeedKmS(userData.altKm) * 1000;
+                const q = 0.5 * rho * v * v;
+                lines.push(
+                    `<div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ ${(v / 1000).toFixed(2)} km/s</div>`,
+                    `<div style="color:#0fc">drag q ≈ ${(q * 1000).toFixed(2)} mPa</div>`,
+                );
+            }
+            lines.push(`<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`);
+            dataLines = lines.join('');
+            break;
+        }
         default:
             detail = userData.altKm != null ? `${userData.altKm} km` : '';
     }
