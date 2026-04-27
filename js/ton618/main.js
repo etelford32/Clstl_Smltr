@@ -36,12 +36,20 @@ export async function boot({ canvas, hud, minimapCanvas }) {
     }
 
     const state = {
-        cam:       createCamera({ r: 30, theta: Math.PI / 2, phi: 0, fovY: DEFAULTS.fovY }),
+        cam:       createCamera({ r: 30, theta: Math.PI / 2 - 0.18, phi: 0, fovY: (60 * Math.PI) / 180 }),
         quality:   'standard',
         maxSteps:  DEFAULTS.maxSteps,
         tol:       DEFAULTS.tol,
         showRing:  DEFAULTS.showRing,
         rFar:      DEFAULTS.rFar,
+        // Visible 3-D scene content (this is what makes the render look 3-D
+        // instead of a black disc on stars).
+        showDisk:       true,
+        diskInner:      6.0,    // ISCO for Schwarzschild
+        diskOuter:      24.0,
+        diskThickness:  0.0,
+        diskBrightness: 1.0,
+        showGrid:       false,
         dirty:     true,
         time:      0,
         backend,
@@ -74,12 +82,18 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         const u = cameraUniforms(state.cam, { width: canvas.width, height: canvas.height });
         backend.setUniforms({
             ...u,
-            rFar:         state.rFar,
-            maxSteps:     state.maxSteps,
-            tol:          state.tol,
-            showRing:     state.showRing,
-            time:         state.time,
-            observerType: state.cam.observerType,
+            rFar:           state.rFar,
+            maxSteps:       state.maxSteps,
+            tol:            state.tol,
+            showRing:       state.showRing,
+            time:           state.time,
+            observerType:   state.cam.observerType,
+            showDisk:       state.showDisk,
+            diskInner:      state.diskInner,
+            diskOuter:      state.diskOuter,
+            diskThickness:  state.diskThickness,
+            diskBrightness: state.diskBrightness,
+            showGrid:       state.showGrid,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -122,6 +136,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.dirty = true;
         },
         toggleRing()    { state.showRing = !state.showRing; state.dirty = true; },
+        toggleDisk()    { state.showDisk = !state.showDisk; state.dirty = true; return state.showDisk; },
+        toggleGrid()    { state.showGrid = !state.showGrid; state.dirty = true; return state.showGrid; },
+        setDiskInner(v){ state.diskInner = Math.max(2.5, Math.min(state.diskOuter - 0.5, v)); state.dirty = true; },
+        setDiskOuter(v){ state.diskOuter = Math.max(state.diskInner + 0.5, Math.min(200, v)); state.dirty = true; },
+        setDiskBrightness(v){ state.diskBrightness = Math.max(0, Math.min(8, v)); state.dirty = true; },
         setObserverType(t) {
             const v = OBSERVER_TYPES[t] ?? OBSERVER_TYPES.static;
             state.cam.observerType = v;
@@ -146,6 +165,7 @@ export async function boot({ canvas, hud, minimapCanvas }) {
                 r: state.cam.r, theta: state.cam.theta, phi: state.cam.phi,
                 yaw: state.cam.yaw, pitch: state.cam.pitch, roll: state.cam.roll,
                 obs: state.cam.observerType, transition: state.cam.transition,
+                showDisk: state.showDisk, showGrid: state.showGrid,
             };
             state.cam.transition = null;
             state.cam.r = 500;
@@ -153,12 +173,17 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.cam.phi = 0;
             state.cam.yaw = state.cam.pitch = state.cam.roll = 0;
             state.cam.observerType = OBSERVER_TYPES.static;
+            // The validation harness measures the pure shadow rim — disk and
+            // grid would contaminate it.
+            state.showDisk = false;
+            state.showGrid = false;
             render();
             const result = measurePhotonRing(backend, state.cam);
             // restore
             state.cam.r = saved.r; state.cam.theta = saved.theta; state.cam.phi = saved.phi;
             state.cam.yaw = saved.yaw; state.cam.pitch = saved.pitch; state.cam.roll = saved.roll;
             state.cam.observerType = saved.obs; state.cam.transition = saved.transition;
+            state.showDisk = saved.showDisk; state.showGrid = saved.showGrid;
             state.dirty = true;
             return result;
         },
