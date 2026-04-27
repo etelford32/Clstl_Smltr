@@ -113,6 +113,63 @@
         }
         .billing-toggle strong { color: #ffd700; }
 
+        /* ─── Persona Strip ───────────────────────────────────────────── */
+        .persona-strip {
+            display: flex; flex-wrap: wrap; justify-content: center;
+            gap: 10px; max-width: 900px; margin: 1.6rem auto 0;
+            padding: 0 16px;
+        }
+        .persona-chip {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 8px 14px; border-radius: 999px;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.1);
+            color: #ccc; text-decoration: none;
+            font-size: .85rem; font-weight: 600;
+            transition: background .2s, border-color .2s, color .2s, transform .15s;
+        }
+        .persona-chip:hover {
+            background: rgba(255,255,255,.09);
+            border-color: rgba(255,200,0,.4);
+            color: #fff; transform: translateY(-1px);
+        }
+        .persona-chip .icon { font-size: 1.05rem; }
+        .persona-chip .arrow { color: #888; font-size: .75rem; margin-left: 2px; }
+
+        /* ─── Risk-Reversal Row ──────────────────────────────────────── */
+        .risk-row {
+            display: flex; flex-wrap: wrap; justify-content: center;
+            gap: 18px 28px; max-width: 900px; margin: 1.6rem auto 0;
+            padding: 0 16px;
+            font-size: .82rem; color: #9aa;
+        }
+        .risk-row span {
+            display: inline-flex; align-items: center; gap: 6px;
+            white-space: nowrap;
+        }
+        .risk-row span::before {
+            content: '✓'; color: #4eff91;
+            font-weight: 700; font-size: .9rem;
+        }
+        @media (max-width: 640px) {
+            .risk-row { gap: 8px 18px; font-size: .76rem; }
+        }
+
+        /* ─── Enterprise "starts at" pill ────────────────────────────── */
+        .price-pill {
+            display: inline-block;
+            font-size: 1.05rem; font-weight: 700;
+            color: #ffd700;
+            background: rgba(255,215,0,.08);
+            border: 1px solid rgba(255,215,0,.3);
+            border-radius: 999px;
+            padding: 8px 16px;
+            margin: 12px 0 4px;
+            line-height: 1.2;
+        }
+        .price-pill .from { font-size: .72rem; color: #aaa; font-weight: 600;
+            letter-spacing: .08em; text-transform: uppercase; margin-right: 6px; }
+
         /* ─── Cards ───────────────────────────────────────────────────── */
         .pricing-grid {
             display: grid;
@@ -159,6 +216,7 @@
             transition: border-color .25s, transform .25s;
             position: relative;
             overflow: hidden;
+            scroll-margin-top: 70px;  /* clears the 54px sticky nav on persona-chip jumps */
         }
         .price-card::before {
             content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
@@ -359,16 +417,33 @@
 
 <!-- ═══════════════════════════════════════════════════════ HERO ═══ -->
 <div class="pricing-hero">
-    <h1>Simple, Transparent Pricing</h1>
-    <p>Start free, scale as you explore. All plans include access to our WebGL simulations and live space weather data feeds.</p>
+    <h1>From classroom to mission control.</h1>
+    <p>Six tiers — start free, scale to a 200-seat institution or a contracted launch-window briefing. Same WebGL engine and live NASA / NOAA feeds across every plan.</p>
     <div class="billing-toggle">Billed monthly &nbsp;·&nbsp; <strong>Cancel anytime</strong> &nbsp;·&nbsp; No contracts</div>
+
+    <!-- Persona strip: jump-link to whichever card matches the visitor. -->
+    <div class="persona-strip" role="navigation" aria-label="Pick a plan by who you are">
+        <a class="persona-chip" href="#card-free"><span class="icon">🔭</span>Curious explorer<span class="arrow">→ Free</span></a>
+        <a class="persona-chip" href="#card-basic"><span class="icon">🚀</span>Hobbyist or researcher<span class="arrow">→ Basic / Advanced</span></a>
+        <a class="persona-chip" href="#card-educator"><span class="icon">🎓</span>Teacher or lone professor<span class="arrow">→ Educator</span></a>
+        <a class="persona-chip" href="#card-institution"><span class="icon">🏛️</span>Department or agency<span class="arrow">→ Institution / Enterprise</span></a>
+    </div>
+
+    <!-- Risk reversal: four claims that are all literally true today (no
+         credit-card-trial, no money-back claim — see the note in TIER_EXPANSION_SPRINT.md). -->
+    <div class="risk-row" aria-label="Reasons to start without worry">
+        <span>No credit card to start</span>
+        <span>Cancel any time · access until period end</span>
+        <span>Same engine across every tier</span>
+        <span>Stripe-secured · receipts emailed instantly</span>
+    </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ CARDS ═══ -->
 <div class="pricing-grid">
 
     <!-- Free -->
-    <div class="price-card">
+    <div class="price-card" id="card-free">
         <div class="tier-icon">🔭</div>
         <div class="tier-name">Free Trial</div>
         <div class="tier-desc">Explore the cosmos with no commitment. Perfect for students and curious minds.</div>
@@ -389,7 +464,7 @@
     </div>
 
     <!-- Basic -->
-    <div class="price-card featured">
+    <div class="price-card featured" id="card-basic">
         <div class="badge-top">MOST POPULAR</div>
         <div class="tier-icon">⭐</div>
         <div class="tier-name">Basic</div>
@@ -411,7 +486,7 @@
     </div>
 
     <!-- Educator -->
-    <div class="price-card tier-educator">
+    <div class="price-card tier-educator" id="card-educator">
         <div class="tier-icon">🎓</div>
         <div class="tier-name">Educator</div>
         <div class="tier-desc">Lone teachers, professors, and homeschool parents who need classroom licensing without enterprise overhead.</div>
@@ -432,7 +507,7 @@
     </div>
 
     <!-- Advanced -->
-    <div class="price-card">
+    <div class="price-card" id="card-advanced">
         <div class="tier-icon">🚀</div>
         <div class="tier-name">Advanced</div>
         <div class="tier-desc">For researchers and professionals who need deep data access and priority support.</div>
@@ -459,7 +534,7 @@
 <div class="pricing-row-2">
 
     <!-- Institution -->
-    <div class="price-card tier-institution">
+    <div class="price-card tier-institution" id="card-institution">
         <div class="tier-icon">🏛️</div>
         <div class="tier-name">Institution</div>
         <div class="tier-desc">Site licensing for university departments, planetariums, and science centers. Self-serve onboarding — no procurement cycle.</div>
@@ -480,12 +555,16 @@
     </div>
 
     <!-- Enterprise -->
-    <div class="price-card tier-enterprise">
+    <!-- The "From $1,500/mo" anchor tunes how the buyer self-qualifies before
+         filling out the lead form: too low and you drown in tire-kickers; too
+         high and you scare off real prospects. Adjust to your floor when you
+         start booking real contracts. -->
+    <div class="price-card tier-enterprise" id="card-enterprise">
         <div class="tier-icon">🛰️</div>
         <div class="tier-name">Enterprise</div>
         <div class="tier-desc">Satellite operators, financial-services teams, and research labs with custom data &amp; API needs.</div>
-        <div class="price-amount" style="font-size:1.5rem;line-height:1.2;margin-top:8px">Contact for quote</div>
-        <div class="price-note">Annual contracts · custom SLAs</div>
+        <div class="price-pill"><span class="from">From</span>$1,500<span style="color:#aaa;font-weight:600;font-size:.85rem;margin-left:2px">/mo</span></div>
+        <div class="price-note">Annual contracts · custom SLAs · invoice billing</div>
         <hr class="price-divider">
         <ul class="feature-list">
             <li><span class="check">✓</span> Anomaly correlation (live + historical)</li>
@@ -592,11 +671,31 @@
     </div>
     <div class="faq-item">
         <button class="faq-q">How does billing work? <span class="arrow">▼</span></button>
-        <div class="faq-a">All plans are billed monthly via Stripe. You'll receive a receipt by email after each payment. There are no setup fees or long-term contracts.</div>
+        <div class="faq-a">All self-serve plans are billed monthly via Stripe. You'll receive a receipt by email after each payment. There are no setup fees or long-term contracts. Institution and Enterprise can also be billed annually by invoice — contact us.</div>
     </div>
     <div class="faq-item">
         <button class="faq-q">What simulations are in the free tier? <span class="arrow">▼</span></button>
         <div class="faq-a">The free tier includes the Sun simulation, Earth atmospheric view, basic Space Weather dashboard with live solar wind speed, and the 2D Stellar Modeler. Upgrading to Basic unlocks all 17 interactive simulations.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Can I add seats above my plan's cap? <span class="arrow">▼</span></button>
+        <div class="faq-a">Educator includes 30 seats and Institution includes 200. If you need more, the cleanest path is to move up a tier (Educator → Institution → Enterprise). For one-off overage, email <a href="mailto:billing@parkerphysics.app" style="color:#a080ff">billing@parkerphysics.app</a> — we'll quote per-seat overage that's added to your next renewal invoice.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">What's the difference between cancel and downgrade? <span class="arrow">▼</span></button>
+        <div class="faq-a">Cancel ends the subscription at the end of the current billing period — you keep full access until then, and your account drops to Free after. Downgrade switches you to a lower paid tier immediately at the start of the next cycle (proration handled by Stripe). Both are self-serve from your dashboard.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Do you handle sales tax / VAT? <span class="arrow">▼</span></button>
+        <div class="faq-a">Yes. US sales tax and EU/UK VAT are calculated and collected automatically by Stripe Tax at checkout based on your billing address. Tax-exempt institutions: send your exemption certificate to <a href="mailto:billing@parkerphysics.app" style="color:#a080ff">billing@parkerphysics.app</a> and we'll zero out the tax line on your invoice.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Do you accept purchase orders or invoice billing? <span class="arrow">▼</span></button>
+        <div class="faq-a">Yes — for Institution and Enterprise. We can issue a quarterly or annual invoice with NET-30 terms and accept ACH, wire, or PO. Self-serve tiers (Free → Advanced) are credit-card / Stripe only.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">What happens to embedded simulations if my subscription ends? <span class="arrow">▼</span></button>
+        <div class="faq-a">Embedded simulations check your subscription status on each load. When an Educator or Institution subscription ends, the embed shows a small upgrade prompt instead of the simulation. Embeds keep working through the rest of the paid period and stop at <em>period end</em>, not the moment you click Cancel.</div>
     </div>
 </div>
 
