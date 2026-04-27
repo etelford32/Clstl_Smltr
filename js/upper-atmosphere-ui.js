@@ -139,10 +139,70 @@ export class UpperAtmosphereUI {
         const tick = () => {
             this._paintCameraHUD();
             this._paintSatelliteDrag();
+            this._paintConjunctionWatch();
         };
         clearInterval(this._camHUDTimer);
         this._camHUDTimer = setInterval(tick, 250);
         tick();
+    }
+
+    /**
+     * Paint the conjunction-watch panel from the globe's pairwise
+     * screener cache. Each row carries the pair's current centre-to-
+     * centre separation, predicted TCA distance + eta, and a
+     * watch/alert/critical class that drives the row's tinting.
+     *
+     * Row tinting thresholds match the globe's chord coloring:
+     *   crit   < 10 km
+     *   alert  < 50 km
+     *   watch  < 200 km
+     *   muted  >= 200 km
+     */
+    _paintConjunctionWatch() {
+        const box = this.el.conjunctionBox;
+        if (!box) return;
+        const pairs = this.globe?.getConjunctionAnalysis?.() ?? [];
+        if (!pairs.length) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no probe pairs to screen</div>';
+            return;
+        }
+        const html = pairs.map(p => {
+            const cls = p.tcaDistKm < 10  ? 'ua-conj-row--crit'
+                      : p.tcaDistKm < 50  ? 'ua-conj-row--alert'
+                      : p.tcaDistKm < 200 ? 'ua-conj-row--watch'
+                      : '';
+            const tcaCol = p.tcaDistKm < 10  ? '#ff3060'
+                         : p.tcaDistKm < 50  ? '#ff8a3a'
+                         : p.tcaDistKm < 200 ? '#ffcc60'
+                         : '#9ab';
+            const tcaText = p.tcaDistKm > 9999
+                ? p.tcaDistKm.toExponential(2)
+                : p.tcaDistKm.toFixed(p.tcaDistKm < 100 ? 1 : 0);
+            const currText = p.currDistKm.toFixed(p.currDistKm < 100 ? 1 : 0);
+            const etaMin = p.tcaTimeSec / 60;
+            const etaText = etaMin < 1 ? 'now'
+                           : etaMin < 60 ? `${etaMin.toFixed(0)}m`
+                           : `${(etaMin / 60).toFixed(1)}h`;
+            return `
+              <div class="ua-conj-row ${cls}">
+                <span class="ua-conj-pair">
+                    <span class="ua-conj-dot" style="background:${p.aColor};color:${p.aColor}"></span>
+                    <span>${p.aName}</span>
+                    <span class="ua-conj-link">↔</span>
+                    <span class="ua-conj-dot" style="background:${p.bColor};color:${p.bColor}"></span>
+                    <span>${p.bName}</span>
+                </span>
+                <span class="ua-conj-meta">
+                    <span>now ${currText} km</span>
+                </span>
+                <span class="ua-conj-tca" style="color:${tcaCol}">
+                    ${tcaText} km
+                    <span class="ua-conj-eta">in ${etaText}</span>
+                </span>
+              </div>
+            `;
+        }).join('');
+        box.innerHTML = html;
     }
 
     // ── TLE freshness pill ─────────────────────────────────────────────────

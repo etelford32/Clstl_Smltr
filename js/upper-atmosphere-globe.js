@@ -341,6 +341,9 @@ export class AtmosphereGlobe {
         this._buildLayerParticles();
         this._buildLayerVectorFields();
         this._buildSatelliteRings();
+        // Pairwise conjunction screener — depends on the probe lookup
+        // tables built inside _buildSatelliteRings, so we set up after.
+        this._setupConjunctionScreener();
         // Fire-and-forget live-TLE upgrade. Each probe starts on its
         // hardcoded mean elements; the fetch resolves a few hundred ms
         // later and patches the probe in place. Failures fall back
@@ -978,10 +981,40 @@ export class AtmosphereGlobe {
         // Cache for per-frame propagation. _phase0 randomises the
         // satellite's starting mean-anomaly so all four don't all start
         // at M=0 simultaneously.
-        this._satProbes[spec.id] = {
+        const probe = {
             mesh, pathLine, spec,
             _phase0: spec.orbital.meanAnomalyDeg0 * Math.PI / 180,
+            _propTable: null,        // populated immediately below
         };
+        this._satProbes[spec.id] = probe;
+        // Pre-bake a phase-indexed position lookup so the conjunction
+        // screener can do O(1) lookups instead of trig calls per step.
+        // 256 samples = 1.4° angular resolution = ~22 s for an ~92-min
+        // orbit; fine enough for 30-s-step TCA finding.
+        this._buildProbeLookup(probe);
+    }
+
+    /**
+     * Pre-bake a 256-entry (x, y, z) Float32Array of probe positions
+     * sampled evenly around the orbital phase. Used by the conjunction
+     * screener — _lookupProbePosition turns simulated-time into a
+     * position via a single integer division + array read.
+     *
+     * Re-run after TLE upgrades (orbital elements change) so the
+     * lookup table stays consistent with the live mean elements.
+     */
+    _buildProbeLookup(probe) {
+        const N = 256;
+        if (!probe._propTable) probe._propTable = new Float32Array(N * 3);
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
+            probe._propTable[k * 3 + 0] = p.x;
+            probe._propTable[k * 3 + 1] = p.y;
+            probe._propTable[k * 3 + 2] = p.z;
+        }
+        probe._propTableN = N;
     }
 
     /**
@@ -1131,6 +1164,10 @@ export class AtmosphereGlobe {
 
         // Rebuild the orbital-path polyline from the new elements.
         this._refreshOrbitalPath(probe);
+        // And the conjunction-screener lookup table — its sampling is
+        // tied to the orbital elements, so a TLE update means stale
+        // entries until we regenerate.
+        this._buildProbeLookup(probe);
     }
 
     /**
@@ -1746,6 +1783,15 @@ export class AtmosphereGlobe {
         // and starting mean anomaly so paths don't all overlap.
         if (this._satProbes) this._stepSatellites(t);
 
+        // Conjunction screener: re-scan every 2 simulated seconds so
+        // TCA times stay current as orbits evolve. Per-frame chord
+        // line updates use whatever the cache holds — cheap.
+        if (this._satProbes && (t - (this._lastConjScanTime ?? -Infinity)) > 2.0) {
+            this._screenConjunctions();
+            this._lastConjScanTime = t;
+        }
+        if (this._conjunctionLines) this._updateConjunctionLines();
+
         // Shell-fade-when-inside: when the camera enters a layer band,
         // drop the shell's opacity so the user can see through the layer
         // they're standing in. Cheap — five comparisons per frame.
@@ -1886,6 +1932,185 @@ export class AtmosphereGlobe {
         out.sort((a, b) => (b.qPa ?? 0) - (a.qPa ?? 0));
         return out;
     }
+
+    // ── Conjunction screening ──────────────────────────────────────────────
+    //
+    // For each pair of orbital probes we sweep simulated-time from
+    // "now" out to `horizonMin` minutes in `stepSec`-second
+    // increments, find the time of closest approach (TCA) and the
+    // miss distance there, plus the current separation. Results are
+    // cached on this._conjunctions; the UI repaints from the cache.
+    //
+    // Cost: 6 pairs × 180 steps × 2 lookups + cheap math = ~10 k ops
+    // per scan. We rerun every 2 s. Imperceptible.
+    //
+    // Time axis is *simulated* seconds (real orbital time), not page-
+    // clock seconds. With opts.satTimeScale = 60×, "TCA in 47 min"
+    // means 47 minutes of physical orbital evolution; the user will
+    // see it occur after ~47 page-seconds.
+
+    _setupConjunctionScreener() {
+        // 6 pairs for 4 probes is the max; we lazily build up to that.
+        this._conjunctions = [];
+        // Lines connecting predicted-close pairs, drawn with additive
+        // blending so they read against the dark backdrop.
+        this._conjunctionGroup = new THREE.Group();
+        this._conjunctionGroup.name = 'conjunction-chords';
+        this._scene.add(this._conjunctionGroup);
+        this._conjunctionLines = {};        // pairKey → THREE.Line
+
+        // Build one line per pair right away so endpoint updates don't
+        // pay for geometry creation in the hot path.
+        const probes = Object.values(this._satProbes || {});
+        for (let i = 0; i < probes.length; i++) {
+            for (let j = i + 1; j < probes.length; j++) {
+                const a = probes[i], b = probes[j];
+                const key = _pairKey(a.spec.id, b.spec.id);
+                const positions = new Float32Array(6);
+                const geom = new THREE.BufferGeometry();
+                geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                const mat = new THREE.LineBasicMaterial({
+                    color:       0x888888,
+                    transparent: true,
+                    opacity:     0.0,
+                    depthWrite:  false,
+                    blending:    THREE.AdditiveBlending,
+                });
+                const line = new THREE.Line(geom, mat);
+                line.frustumCulled = false;
+                line.userData = {
+                    kind: 'conjunction-chord',
+                    id:   key,
+                    aId:  a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                    tooltip: `Predicted close approach between ${a.spec.name} and ${b.spec.name}.`,
+                };
+                this._conjunctionLines[key] = line;
+                this._conjunctionGroup.add(line);
+            }
+        }
+        this._lastConjScanTime = -Infinity;
+    }
+
+    /**
+     * Sweep every probe pair over the next `horizonMin` simulated
+     * minutes and update this._conjunctions in place. Cheap; fed by
+     * the per-probe phase-indexed lookup tables built at probe spawn.
+     */
+    _screenConjunctions({ horizonMin = 90, stepSec = 30 } = {}) {
+        const probes = Object.values(this._satProbes || {});
+        if (probes.length < 2) {
+            this._conjunctions = [];
+            return;
+        }
+
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        // Simulated-orbital seconds since page boot.
+        const tNowSim = this._clock.getElapsedTime() * ts;
+
+        const horizonSec = horizonMin * 60;
+        const nSteps = Math.max(2, Math.floor(horizonSec / stepSec) + 1);
+
+        const out = [];
+        for (let i = 0; i < probes.length; i++) {
+            for (let j = i + 1; j < probes.length; j++) {
+                const a = probes[i], b = probes[j];
+                let minDist = Infinity, minStep = 0;
+                let firstDist = 0;
+
+                for (let k = 0; k < nSteps; k++) {
+                    const tSim = tNowSim + k * stepSec;
+                    const pa = _lookupProbePosition(a, tSim);
+                    const pb = _lookupProbePosition(b, tSim);
+                    const dx = pa.x - pb.x;
+                    const dy = pa.y - pb.y;
+                    const dz = pa.z - pb.z;
+                    const d2 = dx * dx + dy * dy + dz * dz;
+                    if (k === 0) firstDist = Math.sqrt(d2);
+                    if (d2 < minDist) {
+                        minDist = d2;
+                        minStep = k;
+                    }
+                }
+
+                const tcaDistRunit = Math.sqrt(minDist);
+                out.push({
+                    aId: a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                    aColor: a.spec.color, bColor: b.spec.color,
+                    currDistKm:  firstDist * R_EARTH_KM,
+                    tcaDistKm:   tcaDistRunit * R_EARTH_KM,
+                    tcaTimeSec:  minStep * stepSec,
+                });
+            }
+        }
+        out.sort((p, q) => p.tcaDistKm - q.tcaDistKm);
+        this._conjunctions = out;
+    }
+
+    /**
+     * Update each per-pair chord line's endpoints to the live probe
+     * positions and set color/opacity from the cached TCA prediction.
+     * Drawn faint by default; intensifies for pairs with a tight TCA.
+     */
+    _updateConjunctionLines() {
+        if (!this._conjunctionLines || !this._conjunctions) return;
+        // Build a quick id-pair → cached entry map for O(1) lookup.
+        const byKey = {};
+        for (const c of this._conjunctions) byKey[_pairKey(c.aId, c.bId)] = c;
+
+        for (const key in this._conjunctionLines) {
+            const line = this._conjunctionLines[key];
+            const c = byKey[key];
+            const pa = this._satProbes?.[line.userData.aId]?.mesh.position;
+            const pb = this._satProbes?.[line.userData.bId]?.mesh.position;
+            if (!c || !pa || !pb) {
+                line.material.opacity = 0;
+                continue;
+            }
+            // Filter: only show chords for pairs predicted to come
+            // within the watch threshold. Prevents the scene from
+            // looking like a yarn ball with all 6 chords always on.
+            const watchKm = 200;
+            if (c.tcaDistKm > watchKm) {
+                line.material.opacity = 0;
+                continue;
+            }
+
+            // Endpoints: live positions.
+            const pos = line.geometry.attributes.position.array;
+            pos[0] = pa.x; pos[1] = pa.y; pos[2] = pa.z;
+            pos[3] = pb.x; pos[4] = pb.y; pos[5] = pb.z;
+            line.geometry.attributes.position.needsUpdate = true;
+
+            // Color by TCA distance — red <10 km, orange <50 km,
+            // yellow <200 km. Opacity ramps up as the actual current
+            // separation drops, so the line "lights up" right around
+            // the moment of closest approach.
+            const col = c.tcaDistKm < 10  ? 0xff3060
+                      : c.tcaDistKm < 50  ? 0xff8a3a
+                      : 0xffd060;
+            line.material.color.setHex(col);
+            // Opacity: 0.20 baseline + boost as current separation
+            // approaches TCA distance (i.e., they're nearly there).
+            const ratio = Math.max(0, 1 - (c.currDistKm / Math.max(watchKm, c.tcaDistKm * 4)));
+            line.material.opacity = 0.20 + 0.55 * ratio;
+        }
+    }
+
+    /**
+     * Public snapshot for the UI conjunction-watch panel. Triggers
+     * a screen if cache is stale (> 2 s old). Returns the cached
+     * pair list sorted by TCA-distance ascending.
+     */
+    getConjunctionAnalysis() {
+        const now = performance.now() / 1000;
+        if (!this._conjunctions || (now - (this._lastConjScanTime ?? -Infinity)) > 2.0) {
+            this._screenConjunctions();
+            this._lastConjScanTime = now;
+        }
+        return this._conjunctions || [];
+    }
 }
 
 // ── Keplerian orbit helper ─────────────────────────────────────────────────
@@ -2019,6 +2244,50 @@ function _circularOrbitalSpeedKmS(altKm) {
     const RE = 6378.135;        // km, WGS-72
     const r = RE + altKm;
     return Math.sqrt(MU / r);
+}
+
+/**
+ * Stable key for an unordered probe pair. Sorted-string concat so
+ * (iss, hubble) and (hubble, iss) hash to the same chord line.
+ */
+function _pairKey(idA, idB) {
+    return idA < idB ? `${idA}__${idB}` : `${idB}__${idA}`;
+}
+
+/**
+ * O(1) probe-position lookup via the precomputed phase-indexed
+ * table. simSec is the current simulated-orbital-time in seconds;
+ * we resolve it to a fractional phase index, then linearly
+ * interpolate between adjacent table entries for sub-sample
+ * smoothness (matters at TCA where the curve is flattest).
+ *
+ * Falls back to a fresh trig-based propagate if the lookup table
+ * isn't built yet — happens only on the very first frame post-spawn.
+ */
+function _lookupProbePosition(probe, simSec) {
+    const periodSec = probe.spec.orbital.periodMin * 60;
+    if (!probe._propTable || !periodSec) {
+        const M = probe._phase0 + 2 * Math.PI * simSec / Math.max(periodSec, 1);
+        const TAU = 2 * Math.PI;
+        const tFrac = ((M / TAU) % 1 + 1) % 1;
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        return _propagateKeplerian(probe.spec.orbital, tFrac, r);
+    }
+    const N = probe._propTableN;
+    const M = probe._phase0 + 2 * Math.PI * simSec / periodSec;
+    const TAU = 2 * Math.PI;
+    const phaseFrac = ((M / TAU) % 1 + 1) % 1;
+    const fIdx = phaseFrac * N;
+    const k0 = Math.floor(fIdx) % N;
+    const k1 = (k0 + 1) % N;
+    const t  = fIdx - Math.floor(fIdx);
+    const tbl = probe._propTable;
+    const a0 = k0 * 3, a1 = k1 * 3;
+    return {
+        x: tbl[a0]     * (1 - t) + tbl[a1]     * t,
+        y: tbl[a0 + 1] * (1 - t) + tbl[a1 + 1] * t,
+        z: tbl[a0 + 2] * (1 - t) + tbl[a1 + 2] * t,
+    };
 }
 
 // Distribute streamer launch points across the sunward hemisphere — a
