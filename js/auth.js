@@ -307,13 +307,17 @@ class AuthManager {
     async signUp({ email, password, name, plan = 'free' }) {
         if (this._supabase) {
             try {
-                // Always sign up as 'free' — Stripe webhook upgrades the plan after payment.
-                // Store the intended plan in user_metadata for reference, but enforce free.
+                // Plan is decided server-side. The signup trigger
+                // (supabase-plan-lockdown-migration.sql) HARD-CODES plan='free'
+                // and IGNORES any client-supplied plan/role metadata — passing
+                // them here would be a silent no-op. We omit them entirely so
+                // the contract is obvious to readers and we don't tempt anyone
+                // into thinking client-side state controls billing tier.
                 const { data, error } = await this._supabase.auth.signUp({
                     email,
                     password,
                     options: {
-                        data: { name, plan: 'free', intended_plan: plan },
+                        data: { name },
                     },
                 });
                 if (error) return { success: false, error: error.message };
