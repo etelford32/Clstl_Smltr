@@ -103,9 +103,20 @@ export default async function handler(req) {
     if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 });
     if (!STRIPE_KEY) return new Response('Webhook not configured: STRIPE_SECRET_KEY missing', { status: 501 });
 
+    // Fail CLOSED on missing webhook secret. Previously, an unset
+    // STRIPE_WEBHOOK_SECRET caused every unsigned POST to be processed
+    // (the bad-signature branch was guarded by `&& WEBHOOK_SECRET`).
+    // That meant an env-var rotation in progress, a fresh deployment, or
+    // a misconfigured preview URL became a "any anonymous request can
+    // grant any plan" endpoint. Refuse the request instead.
+    if (!WEBHOOK_SECRET) {
+        console.error('[StripeWebhook] STRIPE_WEBHOOK_SECRET not set — refusing all events');
+        return new Response('Webhook not configured: STRIPE_WEBHOOK_SECRET missing', { status: 503 });
+    }
+
     const rawBody  = await req.text();
     const sigValid = await verifySignature(rawBody, req.headers.get('stripe-signature'));
-    if (!sigValid && WEBHOOK_SECRET) {
+    if (!sigValid) {
         console.warn('[StripeWebhook] Invalid signature');
         return new Response('Invalid signature', { status: 400 });
     }
