@@ -37,7 +37,10 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .plan-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
 .plan-free{background:#1a3a1a;color:#6fcf6f}
 .plan-basic{background:#1a2a3a;color:#4fc3f7}
+.plan-educator{background:#1f2f1a;color:#9ad36f}
 .plan-advanced{background:#2a1a3a;color:#c77dff}
+.plan-institution{background:#3a1a2a;color:#ff8cc8}
+.plan-enterprise{background:#3a3a1a;color:#ffd700}
 
 /* ── SECTION LABELS ── */
 .section-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700;margin-bottom:14px}
@@ -705,7 +708,7 @@ footer a:hover{color:var(--text)}
       <div id="alert-prefs-gate" style="text-align:center;padding:16px 0;display:none">
         <div style="font-size:1.2rem;margin-bottom:6px">&#128276;</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
-          Alerts are available on <strong style="color:var(--accent2)">Basic</strong> and <strong style="color:var(--accent)">Advanced</strong> plans.
+          Alerts are available on <strong style="color:var(--accent2)">Basic</strong>, <strong style="color:#9ad36f">Educator</strong>, <strong style="color:var(--accent)">Advanced</strong>, <strong style="color:#ff8cc8">Institution</strong>, and <strong style="color:#ffd700">Enterprise</strong> plans.
         </div>
         <a href="pricing.html" style="display:inline-block;padding:6px 18px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;text-decoration:none;font-size:.78rem">Upgrade</a>
       </div>
@@ -1120,8 +1123,13 @@ if (!_auth || !_auth.signedIn) {
           badge.textContent = r === 'superadmin' ? 'Superadmin' : 'Admin';
           badge.className   = 'plan-badge plan-advanced';
       } else {
+          // CSS class set per plan; unrecognized plans fall through to 'free'
+          // styling so a future tier added to the DB doesn't render with no
+          // background.
+          const KNOWN = new Set(['free','basic','educator','advanced','institution','enterprise']);
+          const cls   = KNOWN.has(p) ? p : 'free';
           badge.textContent = p.charAt(0).toUpperCase() + p.slice(1);
-          badge.className   = 'plan-badge plan-' + (p === 'advanced' ? 'advanced' : p === 'basic' ? 'basic' : 'free');
+          badge.className   = 'plan-badge plan-' + cls;
       }
   }
 
@@ -1227,17 +1235,33 @@ if (!_auth || !_auth.signedIn) {
       return;
     }
 
-    if (p === 'basic' || p === 'advanced') {
+    const PAID = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
+    if (PAID.has(p)) {
+      // Per-tier accent color matches the .plan-* CSS above.
+      const TIER_COLOR = {
+        basic:       '#4488ff',
+        educator:    '#9ad36f',
+        advanced:    '#a080ff',
+        institution: '#ff8cc8',
+        enterprise:  '#ffd700',
+      };
       subStatus.textContent = p.charAt(0).toUpperCase() + p.slice(1) + ' Plan';
-      subStatus.style.color = p === 'advanced' ? '#a080ff' : '#4488ff';
-      const subState = liveUser.alerts?.subscription_status ?? liveUser.subscription_status ?? 'active';
-      subDetail.textContent = subState === 'active' ? 'Active subscription'
+      subStatus.style.color = TIER_COLOR[p] || '#4488ff';
+      const subState = liveUser.subscription_status ?? liveUser.alerts?.subscription_status ?? 'active';
+      const baseDetail = subState === 'active' ? 'Active subscription'
         : subState === 'trialing' ? 'Free trial active'
         : subState === 'past_due' ? 'Payment past due — please update your card'
         : subState === 'canceled' ? 'Canceled — access until period end'
         : 'Active subscription';
+      // Surface seat usage on tiers that have it.
+      const seats = liveUser.classroom_seats;
+      const used  = liveUser.seats_used ?? 0;
+      const seatsSuffix = (p === 'educator' || p === 'institution' || p === 'enterprise') && seats
+        ? ` · ${used} / ${seats} seats used`
+        : '';
+      subDetail.textContent = baseDetail + seatsSuffix;
       upgradeBtn.style.display = 'none';
-      manageBtn.style.display = '';
+      manageBtn.style.display  = p === 'enterprise' ? 'none' : '';  // Enterprise billing handled via account manager
       if (!_subManageBound) {
         _subManageBound = true;
         manageBtn.addEventListener('click', async () => {
@@ -1971,12 +1995,17 @@ initAll();
     //   The cap is enforced both client-side (this file) and server-side
     //   (api/cron/daily-forecast-digest.js orders by created_at and slices).
     const canUseHourly   = isAdmin || auth.canUseAlerts?.();
-    const canUseDigest   = isAdmin || plan === 'basic' || plan === 'advanced';
+    // Digest tier mapping mirrors saved-locations cap groupings:
+    //   basic + educator   → 5 digest locations · 1-day forecast
+    //   advanced + inst+   → 10 digest locations · 7-day forecast
+    const _digestPaidLow  = new Set(['basic', 'educator']);
+    const _digestPaidHigh = new Set(['advanced', 'institution', 'enterprise']);
+    const canUseDigest   = isAdmin || _digestPaidLow.has(plan) || _digestPaidHigh.has(plan);
     const digestCap      = isAdmin ? Infinity
-                          : plan === 'advanced' ? 10
-                          : plan === 'basic'    ? 5
+                          : _digestPaidHigh.has(plan) ? 10
+                          : _digestPaidLow.has(plan)  ? 5
                           : 0;
-    const digestDays     = plan === 'advanced' ? 7 : 1;
+    const digestDays     = _digestPaidHigh.has(plan) ? 7 : 1;
 
     if (cardTitle) {
         cardTitle.textContent = isAdmin

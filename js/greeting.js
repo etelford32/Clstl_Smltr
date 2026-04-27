@@ -81,7 +81,7 @@ function pick(arr) {
  *
  * @param {string|null} userId - Supabase user ID (null = anonymous)
  * @param {string} firstName - User's first name
- * @param {string} plan - 'free' | 'basic' | 'advanced'
+ * @param {string} plan - 'free' | 'basic' | 'educator' | 'advanced' | 'institution' | 'enterprise'
  * @returns {Promise<{ message: string, suggestion: object|null, isNewUser: boolean }>}
  */
 export async function getGreeting(userId, firstName, plan = 'free') {
@@ -122,14 +122,20 @@ export async function getGreeting(userId, firstName, plan = 'free') {
         ? pick(NEW_USER_MESSAGES)(name)
         : pick(RETURN_MESSAGES)(name);
 
-    // Find a feature they haven't tried yet
-    const tierLevel = plan === 'advanced' ? 3 : plan === 'basic' ? 2 : 1;
+    // Find a feature they haven't tried yet. Tier-level mapping mirrors
+    // js/nav.js _tierLevel() so the suggestion engine and the nav agree
+    // on what the user can see.
+    const tierLevelFor = p => {
+        if (p === 'enterprise' || p === 'institution' || p === 'advanced') return 3;
+        if (p === 'educator' || p === 'basic') return 2;
+        return 1;  // free / unknown
+    };
+    const tierLevel = tierLevelFor(plan);
     const available = FEATURES.filter(f => {
         // Don't suggest pages they've already visited
         if (visitedPages.has(f.page)) return false;
         // Don't suggest pages above their tier
-        const fLevel = f.tier === 'advanced' ? 3 : f.tier === 'basic' ? 2 : 1;
-        return fLevel <= tierLevel;
+        return tierLevelFor(f.tier) <= tierLevel;
     });
 
     // Pick a random suggestion from unvisited features

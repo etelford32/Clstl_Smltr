@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT,
     display_name TEXT,
-    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise')),
     role TEXT DEFAULT 'user' CHECK (role IN ('user', 'tester', 'admin', 'superadmin')),
     -- Stripe billing
     stripe_customer_id TEXT,
@@ -213,7 +213,7 @@ CREATE POLICY "Users can manage own locations"
 CREATE TABLE IF NOT EXISTS public.invite_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code TEXT UNIQUE NOT NULL,
-    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'advanced')),
+    plan TEXT DEFAULT 'free' CHECK (plan IN ('free', 'basic', 'educator', 'advanced', 'institution', 'enterprise')),
     max_uses INTEGER DEFAULT 1,
     used_count INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ,

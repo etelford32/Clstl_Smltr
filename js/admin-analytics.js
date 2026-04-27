@@ -132,10 +132,14 @@ export async function fetchKPIs() {
 
         // Plan/role breakdown
         let introSubs = 0, proSubs = 0, adminUsers = 0;
+        let educatorSubs = 0, institutionSubs = 0, enterpriseSubs = 0;
         if (plansRes.status === 'fulfilled' && !plansRes.value.error) {
             for (const u of plansRes.value.data || []) {
-                if (u.plan === 'basic') introSubs++;
-                if (u.plan === 'advanced') proSubs++;
+                if (u.plan === 'basic')       introSubs++;
+                if (u.plan === 'educator')    educatorSubs++;
+                if (u.plan === 'advanced')    proSubs++;
+                if (u.plan === 'institution') institutionSubs++;
+                if (u.plan === 'enterprise')  enterpriseSubs++;
                 if (u.role === 'admin' || u.role === 'superadmin') adminUsers++;
             }
         }
@@ -156,7 +160,10 @@ export async function fetchKPIs() {
                 minutesUsed,
                 signUps: signUpsRes.status === 'fulfilled' ? (signUpsRes.value.count || 0) : 0,
                 introSubs,
+                educatorSubs,
                 proSubs,
+                institutionSubs,
+                enterpriseSubs,
                 adminUsers,
                 onlineNow,
             },
@@ -413,7 +420,9 @@ export async function fetchAnnouncements() {
 }
 
 const VALID_SEVERITY = new Set(['info', 'success', 'warning', 'critical']);
-const VALID_TARGET_PLAN = new Set(['all', 'free', 'basic', 'advanced']);
+const VALID_TARGET_PLAN = new Set([
+    'all', 'free', 'basic', 'educator', 'advanced', 'institution', 'enterprise',
+]);
 
 export async function createAnnouncement({ title, body, severity = 'info', targetPlan = 'all', published = false }) {
     const client = await sb();
@@ -428,7 +437,7 @@ export async function createAnnouncement({ title, body, severity = 'info', targe
     if (!VALID_SEVERITY.has(severity))
         return { ok: false, error: 'Invalid severity. Must be: info, success, warning, critical' };
     if (!VALID_TARGET_PLAN.has(targetPlan))
-        return { ok: false, error: 'Invalid target plan. Must be: all, free, basic, advanced' };
+        return { ok: false, error: `Invalid target plan. Must be one of: ${[...VALID_TARGET_PLAN].join(', ')}` };
 
     try {
         const { data, error } = await client

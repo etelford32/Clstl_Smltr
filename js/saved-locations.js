@@ -5,10 +5,14 @@
  * ("Home", "Cabin", "Office", …) with per-location alert config
  * (which alert types fire + per-type thresholds).
  *
- * Plan caps (enforced both client-side and by a DB trigger):
- *   free      → 0 saved locations
- *   basic     → 5 saved locations
- *   advanced  → 25 saved locations
+ * Plan caps (enforced both client-side and by a DB trigger).
+ * Mirrors public.plan_location_limit() in Supabase migrations:
+ *   free         → 0 saved locations
+ *   basic        → 5 saved locations
+ *   educator     → 5 saved locations
+ *   advanced     → 25 saved locations
+ *   institution  → 25 saved locations
+ *   enterprise   → 100 saved locations
  *
  * Alert config stored on each row as JSONB. Any field left null
  * falls back to the account-level default on user_profiles.
@@ -24,9 +28,12 @@ import { getSupabase, isConfigured } from './supabase-config.js';
 const EVT = 'saved-locations-changed';
 
 export const PLAN_LIMITS = Object.freeze({
-    free:     0,
-    basic:    5,
-    advanced: 25,
+    free:        0,
+    basic:       5,
+    educator:    5,
+    advanced:    25,
+    institution: 25,
+    enterprise:  100,
 });
 
 /** Columns fetched from user_locations. */
