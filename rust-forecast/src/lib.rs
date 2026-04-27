@@ -52,6 +52,7 @@
 //! line in `ensemble::run`. No cross-module state.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
 pub mod astro;
@@ -126,7 +127,11 @@ pub struct ForecastRequest {
     pub config:  Option<ForecastConfig>,
 }
 
-/// One predicted hour from the ensemble.
+/// One predicted hour from the ensemble. Scalar fields carry the weighted-
+/// mean ("best estimate") consensus across members; the `quantiles` map
+/// carries the corresponding P10/P50/P90 spread for each scalar field
+/// (skipped for circular fields like wind direction). The UI renders the
+/// scalar as a center line and the quantile band as an uncertainty cloud.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ForecastHour {
     pub t:                    f64,
@@ -141,8 +146,17 @@ pub struct ForecastHour {
     pub precipitation:        Option<f64>,
     pub precip_probability:   Option<f64>,
     pub cloud_cover:          Option<f64>,
-    /// Per-hour confidence ∈ [0, 1] derived from inter-member spread.
+    /// Wind directional uncertainty in degrees: angular standard deviation
+    /// across members after u/v decomposition (so 350°/10°/0° produce a
+    /// small σ, not 180°). Useful for fan-shaped UI plots.
+    pub wind_direction_sigma: Option<f64>,
+    /// Per-hour confidence ∈ [0, 1] derived from normalized inter-member
+    /// quantile spread (P90 − P10) divided by per-field scale.
     pub confidence:           f64,
+    /// Field name → [P10, P50, P90]. BTreeMap keeps the JSON output ordered
+    /// alphabetically — important so the WASM and Python paths produce
+    /// byte-identical output for tests.
+    pub quantiles:            BTreeMap<String, [f64; 3]>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -164,7 +178,18 @@ pub struct ForecastResponse {
     pub version:  String,
 }
 
-pub const VERSION: &str = "0.1.0";
+pub const VERSION: &str = "0.2.0";
+
+/// Member names — order is meaningful (matches the order returned by
+/// `stats::score_members` and used throughout). Adding a new member means
+/// extending this list AND `members::run_all` AND `stats::score_members`.
+pub const MEMBER_NAMES: [&str; 5] = ["persist", "diurnal", "ar1", "nwp", "nwp_bc"];
+
+/// Quantile breakpoints emitted in `ForecastHour::quantiles`. Choosing
+/// 10/50/90 gives an 80 % central credibility band — the most common UI
+/// rendering. Add 5/95 here later if a tighter probabilistic story is
+/// needed; the underlying `weighted_quantiles` is generic.
+pub const QUANTILES: [f64; 3] = [0.10, 0.50, 0.90];
 
 // ────────────────────────────────────────────────────────────────────────────
 // Top-level ensemble entry point. Pure Rust — also used by Python via FFI
@@ -184,7 +209,11 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     // The forecast grid is hourly aligned to t0_unix.
     let grid: Vec<f64> = (0..horizon).map(|h| req.t0_unix + h as f64 * 3600.0).collect();
 
-    // Which scalar fields do we have data for? Each is forecast independently.
+    // Scalar fields forecast independently. wind_direction_10m is in this
+    // list so it gets per-member predictions populated, but we skip the
+    // scalar-mean blender for it in Phase 2 — the u/v pass (Phase 3) is
+    // the source of truth for direction since linear averaging of
+    // direction is wrong (350° + 10° → 180°, not 0°).
     let fields = vec![
         "temperature_2m",
         "apparent_temperature",
@@ -202,74 +231,155 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     let mut hours: Vec<ForecastHour> = grid.iter().map(|&t| ForecastHour { t, ..Default::default() }).collect();
     let mut skills: Vec<MemberSkill> = Vec::new();
 
+    // ── Phase 1 ──────────────────────────────────────────────────────────
+    // For every field, run all 5 members against the full grid, score them
+    // on the recent obs window, and record (predictions, weights). We keep
+    // the per-member predictions around because Phase 3 needs them for the
+    // wind u/v decomposition — that pass blends u and v across members
+    // using each member's own (speed_i, dir_i) pair, which can't be
+    // recovered from a post-blended scalar.
+    let mut predictions: BTreeMap<&str, [Vec<Option<f64>>; 5]> = BTreeMap::new();
+    let mut weights:     BTreeMap<&str, [f64; 5]>              = BTreeMap::new();
+
     for fname in &fields {
         let f = field_accessor(fname);
         let obs_y = extract_field(&obs, &f);
         let nwp_y = extract_field(&nwp, &f);
 
-        // Skip fields where we have neither obs nor NWP — nothing to do.
+        // Skip fields where we have neither obs nor NWP — no input → no output.
         if obs_y.iter().all(|v| v.is_none()) && nwp_y.iter().all(|v| v.is_none()) {
             continue;
         }
 
-        // Run each member to produce a 24-vec of predictions.
-        let m_persist = members::persist::predict_24h(&obs, &obs_y, &grid);
-        let m_diurnal = members::diurnal::predict_24h(&obs, &obs_y, &grid, req.lat, req.lon, &cfg);
-        let m_ar1     = members::ar1::predict_24h(&obs, &obs_y, &grid, &cfg);
-        let m_nwp     = members::nwp_raw::predict_24h(&nwp, &nwp_y, &grid);
-        let m_nwp_bc  = members::nwp_bc::predict_24h(&obs, &obs_y, &nwp, &nwp_y, &grid, &cfg);
-
-        let members_named: Vec<(&str, Vec<Option<f64>>)> = vec![
-            ("persist", m_persist),
-            ("diurnal", m_diurnal),
-            ("ar1",     m_ar1),
-            ("nwp",     m_nwp),
-            ("nwp_bc",  m_nwp_bc),
+        let preds = [
+            members::persist::predict_24h(&obs, &obs_y, &grid),
+            members::diurnal::predict_24h(&obs, &obs_y, &grid, req.lat, req.lon, &cfg),
+            members::ar1::predict_24h    (&obs, &obs_y, &grid, &cfg),
+            members::nwp_raw::predict_24h(&nwp, &nwp_y, &grid),
+            members::nwp_bc::predict_24h (&obs, &obs_y, &nwp, &nwp_y, &grid, &cfg),
         ];
 
-        // Score each member on the most recent `score_window` observed hours.
-        // For each scored hour we re-run the member as if "now" were that hour
-        // (cheap: each member's predict_24h is O(N) and only needs the obs
-        // history before that hour — handled via slicing inside the closures).
-        let scored = stats::score_members(
+        let rmses = stats::score_members(
             &obs, &obs_y, &nwp, &nwp_y,
-            req.lat, req.lon, &cfg,
-            &fname,
+            req.lat, req.lon, &cfg, fname,
         );
+        let w_vec = stats::softmax_neg(&rmses, cfg.blend_temp);
+        // softmax_neg returns Vec<f64> but our Phase 3 code (and skill
+        // bookkeeping) wants the fixed-size [f64; 5] mirror of MEMBER_NAMES.
+        // Pad / truncate defensively — score_members already guarantees 5,
+        // but this keeps the code obviously sound under future refactors.
+        let mut w = [0.0_f64; 5];
+        for i in 0..5.min(w_vec.len()) { w[i] = w_vec[i]; }
 
-        // Convert RMSEs → softmax weights.
-        let weights = stats::softmax_neg(&scored, cfg.blend_temp);
-
-        // Hour-by-hour weighted average across members. Only counts the
-        // members that produced a non-null prediction for that hour.
-        for (h, hour) in hours.iter_mut().enumerate() {
-            let mut num = 0.0;
-            let mut den = 0.0;
-            let mut vals_for_spread: Vec<f64> = Vec::with_capacity(members_named.len());
-            for (i, (_name, vec)) in members_named.iter().enumerate() {
-                if let Some(v) = vec[h] {
-                    num += weights[i] * v;
-                    den += weights[i];
-                    vals_for_spread.push(v);
-                }
-            }
-            if den > 1e-9 {
-                let blended = num / den;
-                set_field(hour, fname, Some(blended));
-                // Confidence is a normalized 1 − spread/scale heuristic;
-                // averaged across fields below.
-                let spread = stats::stddev(&vals_for_spread);
-                let scale  = stats::field_scale(fname);
-                hour.confidence += (1.0 - (spread / scale).clamp(0.0, 1.0)) / fields.len() as f64;
-            }
-        }
-
-        for (i, (name, _)) in members_named.iter().enumerate() {
+        for (i, name) in MEMBER_NAMES.iter().enumerate() {
             skills.push(MemberSkill {
                 name:   format!("{}::{}", fname, name),
-                rmse:   scored[i],
-                weight: weights[i],
+                rmse:   rmses[i],
+                weight: w[i],
             });
+        }
+        predictions.insert(fname, preds);
+        weights.insert(fname, w);
+    }
+
+    // ── Phase 2 ──────────────────────────────────────────────────────────
+    // Scalar-blend each non-circular field: weighted mean for the central
+    // estimate, weighted P10/P50/P90 for the uncertainty band, and a
+    // confidence contribution from the normalized P90−P10 spread.
+    let mut conf_n = 0_usize;
+    for fname in &fields {
+        if *fname == "wind_direction_10m" { continue; }
+        let preds = match predictions.get(fname) { Some(p) => p, None => continue };
+        let w     = weights[fname];
+        let scale = stats::field_scale(fname);
+
+        for (h, hour) in hours.iter_mut().enumerate() {
+            // Collect (value, weight) pairs from members that produced a
+            // non-null prediction for this hour.
+            let mut vw: Vec<(f64, f64)> = (0..5)
+                .filter_map(|i| preds[i][h].map(|v| (v, w[i])))
+                .collect();
+            if vw.is_empty() { continue; }
+
+            // Weighted mean → "best estimate".
+            let den: f64 = vw.iter().map(|(_, w)| *w).sum();
+            if den <= 1e-12 { continue; }
+            let mean = vw.iter().map(|(v, w)| v * w).sum::<f64>() / den;
+            set_field(hour, fname, Some(mean));
+
+            // Weighted quantiles → uncertainty band.
+            let qs = stats::weighted_quantiles(&mut vw, &QUANTILES);
+            hour.quantiles.insert(fname.to_string(), [qs[0], qs[1], qs[2]]);
+
+            // Confidence contribution from this field. (P90 − P10) / scale
+            // bounded to [0, 1]; we average across fields at the end.
+            let band = (qs[2] - qs[0]).max(0.0);
+            hour.confidence += 1.0 - (band / scale).clamp(0.0, 1.0);
+        }
+        conf_n += 1;
+    }
+    if conf_n > 0 {
+        for hour in hours.iter_mut() {
+            hour.confidence /= conf_n as f64;
+        }
+    }
+
+    // ── Phase 3 ──────────────────────────────────────────────────────────
+    // Wind u/v pass — fixes the circular-averaging bug. For each member we
+    // form (u_i, v_i) = (-s_i sin θ_i, -s_i cos θ_i), blend u and v with
+    // the same softmax weights derived for wind_direction_10m, and recover
+    // the consensus direction via atan2. Speed quantiles already came from
+    // Phase 2; here we additionally emit a directional σ in degrees,
+    // computed from the cross-member spread of the unit vector — it stays
+    // small near 0°/360° crossings (which the linear average cannot).
+    if let (Some(sp), Some(dr)) = (predictions.get("wind_speed_10m"),
+                                   predictions.get("wind_direction_10m")) {
+        // Use direction's weights when available; fall back to speed's.
+        let w = weights.get("wind_direction_10m")
+            .copied()
+            .or_else(|| weights.get("wind_speed_10m").copied())
+            .unwrap_or([0.2; 5]);
+
+        for (h, hour) in hours.iter_mut().enumerate() {
+            let mut uvw: Vec<(f64, f64, f64)> = Vec::with_capacity(5);
+            for i in 0..5 {
+                if let (Some(s), Some(d)) = (sp[i][h], dr[i][h]) {
+                    let r = d.to_radians();
+                    uvw.push((-s * r.sin(), -s * r.cos(), w[i]));
+                }
+            }
+            if uvw.is_empty() { continue; }
+
+            let den: f64 = uvw.iter().map(|x| x.2).sum();
+            if den <= 1e-12 { continue; }
+            let u_b = uvw.iter().map(|(u, _, w)| u * w).sum::<f64>() / den;
+            let v_b = uvw.iter().map(|(_, v, w)| v * w).sum::<f64>() / den;
+
+            // atan2(-u, -v): convert "blowing-toward" components back to
+            // "coming-from" meteorological direction in [0°, 360°).
+            let dir = ((-u_b).atan2(-v_b).to_degrees() + 360.0) % 360.0;
+            hour.wind_direction_10m = Some(dir);
+
+            // Directional spread: angular σ from unit-vector dispersion.
+            // Each member's unit wind vector contributes (cos α, sin α);
+            // the magnitude of the *mean* unit vector R ∈ [0, 1] reflects
+            // angular concentration. σ_deg = √(−2 ln R) in radians, then
+            // clamped to a sensible 0–180° range.
+            let mut cs = 0.0;
+            let mut sn = 0.0;
+            let mut wsum = 0.0;
+            for (u, v, w) in &uvw {
+                let mag = (u * u + v * v).sqrt();
+                if mag < 1e-9 { continue; }
+                cs += w * (-v / mag);   // cos(direction_from)
+                sn += w * (-u / mag);   // sin(direction_from)
+                wsum += w;
+            }
+            if wsum > 1e-9 {
+                let r = ((cs / wsum).powi(2) + (sn / wsum).powi(2)).sqrt().min(1.0);
+                let sigma_rad = if r > 1e-6 { (-2.0 * r.ln()).sqrt() } else { std::f64::consts::PI };
+                hour.wind_direction_sigma = Some(sigma_rad.to_degrees().min(180.0));
+            }
         }
     }
 
@@ -349,4 +459,108 @@ pub fn forecast24(req: JsValue) -> Result<JsValue, JsError> {
     let resp = run(req);
     serde_wasm_bindgen::to_value(&resp)
         .map_err(|e| JsError::new(&format!("serialization failed: {e}")))
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Smoke tests — validate the most subtle bits of the algorithm. Run with
+// `cargo test` (host target — wasm32 doesn't run unit tests).
+// ────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Linear averaging would give 180°. u/v decomposition must give ~0°
+    /// (i.e. close to 0 or 360).
+    #[test]
+    fn wind_uv_handles_zero_crossing() {
+        let t0 = 1_700_000_000.0_f64;
+        // 48 obs hours, all wind from ~0° at 10 mph (alternating 350°/10°).
+        let obs: Vec<HourSample> = (0..48)
+            .map(|i| HourSample {
+                t: t0 - (48 - i) as f64 * 3600.0,
+                wind_speed_10m:     Some(10.0),
+                wind_direction_10m: Some(if i % 2 == 0 { 350.0 } else { 10.0 }),
+                ..Default::default()
+            })
+            .collect();
+        // NWP says wind from 5° at 10 mph for the next 24 h.
+        let nwp: Vec<HourSample> = (0..24)
+            .map(|i| HourSample {
+                t: t0 + i as f64 * 3600.0,
+                wind_speed_10m:     Some(10.0),
+                wind_direction_10m: Some(5.0),
+                ..Default::default()
+            })
+            .collect();
+
+        let resp = run(ForecastRequest {
+            lat: 40.0, lon: -75.0, t0_unix: t0,
+            obs, nwp, config: None,
+        });
+
+        let dir0 = resp.hours[0].wind_direction_10m.expect("direction");
+        // Pass if within 30° of 0/360 (the broken linear blend would be ~180°).
+        let folded = dir0.min((dir0 - 360.0).abs());
+        assert!(folded < 30.0, "direction should land near 0°, got {dir0}°");
+    }
+
+    /// Quantiles must satisfy P10 ≤ P50 ≤ P90 for any field that emits them.
+    #[test]
+    fn quantiles_are_monotone() {
+        let t0 = 1_700_000_000.0_f64;
+        let obs: Vec<HourSample> = (0..72)
+            .map(|i| HourSample {
+                t: t0 - (72 - i) as f64 * 3600.0,
+                temperature_2m: Some(60.0 + (i as f64 * 0.5).sin() * 8.0),
+                ..Default::default()
+            })
+            .collect();
+        let nwp: Vec<HourSample> = (0..24)
+            .map(|i| HourSample {
+                t: t0 + i as f64 * 3600.0,
+                temperature_2m: Some(62.0 + i as f64 * 0.1),
+                ..Default::default()
+            })
+            .collect();
+        let resp = run(ForecastRequest {
+            lat: 40.0, lon: -75.0, t0_unix: t0,
+            obs, nwp, config: None,
+        });
+        for hour in &resp.hours {
+            if let Some(q) = hour.quantiles.get("temperature_2m") {
+                assert!(q[0] <= q[1] + 1e-9, "P10 > P50: {q:?}");
+                assert!(q[1] <= q[2] + 1e-9, "P50 > P90: {q:?}");
+            }
+        }
+    }
+
+    /// Determinism: identical inputs must produce identical outputs.
+    /// Catches non-deterministic iteration (HashMap, etc.) before it
+    /// breaks the Python-vs-WASM golden test.
+    #[test]
+    fn deterministic_runs() {
+        let t0 = 1_700_000_000.0_f64;
+        let obs: Vec<HourSample> = (0..48)
+            .map(|i| HourSample {
+                t: t0 - (48 - i) as f64 * 3600.0,
+                temperature_2m: Some(50.0 + i as f64 * 0.1),
+                pressure_msl:   Some(1013.0),
+                ..Default::default()
+            })
+            .collect();
+        let r1 = run(ForecastRequest {
+            lat: 40.0, lon: -75.0, t0_unix: t0,
+            obs: obs.clone(), nwp: vec![], config: None,
+        });
+        let r2 = run(ForecastRequest {
+            lat: 40.0, lon: -75.0, t0_unix: t0,
+            obs, nwp: vec![], config: None,
+        });
+        for (a, b) in r1.hours.iter().zip(&r2.hours) {
+            assert_eq!(a.temperature_2m, b.temperature_2m);
+            assert_eq!(a.quantiles.get("temperature_2m"),
+                       b.quantiles.get("temperature_2m"));
+        }
+    }
 }

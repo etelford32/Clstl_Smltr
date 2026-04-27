@@ -15,6 +15,62 @@ pub fn stddev(xs: &[f64]) -> f64 {
     v.sqrt()
 }
 
+/// Weighted quantile (Type 7-equivalent on midpoint cumulative weights).
+///
+///   - sorts the (value, weight) pairs by value
+///   - assigns each value the cumulative-midpoint position
+///         p_i = (W_i − w_i / 2) / W_total
+///     where W_i is the running sum of weights up to and including i
+///   - linearly interpolates between adjacent (p_i, value_i) for each
+///     requested probability q ∈ [0, 1]
+///
+/// This is the same scheme NumPy's `np.quantile(..., method='linear')`
+/// converges to in the equal-weight limit, so the Python reference can
+/// reuse `np.quantile` for unweighted cases without numerical drift.
+///
+/// Mutates the input vector for in-place sorting (avoids an allocation
+/// in the hot loop). Caller doesn't need the original order back.
+pub fn weighted_quantiles(vw: &mut Vec<(f64, f64)>, qs: &[f64]) -> Vec<f64> {
+    // Drop non-finite values up front so they don't poison the sort or
+    // total-weight calculation. NaN < NaN is false → the sort would be
+    // undefined behavior territory in stable Rust.
+    vw.retain(|(v, w)| v.is_finite() && w.is_finite() && *w > 0.0);
+    if vw.is_empty() {
+        return qs.iter().map(|_| f64::NAN).collect();
+    }
+    if vw.len() == 1 {
+        return qs.iter().map(|_| vw[0].0).collect();
+    }
+    vw.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    let total: f64 = vw.iter().map(|(_, w)| w).sum();
+
+    // Build (cumulative_midpoint_fraction, value) anchor points.
+    let mut anchors: Vec<(f64, f64)> = Vec::with_capacity(vw.len());
+    let mut cum = 0.0;
+    for (v, w) in vw.iter() {
+        let mid = cum + w / 2.0;
+        cum += w;
+        anchors.push((mid / total, *v));
+    }
+
+    qs.iter().map(|&q| {
+        let q = q.clamp(0.0, 1.0);
+        if q <= anchors[0].0          { return anchors[0].1; }
+        if q >= anchors.last().unwrap().0 { return anchors.last().unwrap().1; }
+        // Linear search is fine — we only ever have 5 anchors.
+        for i in 0..anchors.len() - 1 {
+            let (p0, v0) = anchors[i];
+            let (p1, v1) = anchors[i + 1];
+            if q <= p1 {
+                let denom = (p1 - p0).max(1e-12);
+                let t = (q - p0) / denom;
+                return v0 + t * (v1 - v0);
+            }
+        }
+        anchors.last().unwrap().1
+    }).collect()
+}
+
 /// Convert RMSE vector → softmax-ish weights via softmax(-rmse / temperature).
 /// NaN / non-finite RMSEs map to zero weight (member is treated as failed).
 pub fn softmax_neg(rmses: &[f64], temperature: f64) -> Vec<f64> {
