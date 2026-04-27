@@ -76,6 +76,7 @@ export class UpperAtmosphereUI {
         this._bindLiveButton();
         this._bindSourcePill();
         this._bindSwpcEventBus();
+        this._bindCameraControls();
         this._bindResize();
         this._paintSourcePill();
         // Push climatology defaults so the magnetopause / bow shock /
@@ -84,6 +85,87 @@ export class UpperAtmosphereUI {
         this._applySolarWindToGlobe();
         this._paintSolarWindStats();
         this.refresh();
+        this._startCameraHUDLoop();
+    }
+
+    // ── Camera HUD ──────────────────────────────────────────────────────────
+    // Wires the orbit/fly toggle + Visit ISS button + the live readout
+    // panel that samples the engine at the camera's current altitude. The
+    // readout updates on a 4-Hz tick instead of every frame so a 60 fps
+    // user doesn't pay 60× the engine cost for a panel they aren't even
+    // necessarily looking at.
+
+    _bindCameraControls() {
+        const { camOrbitBtn, camFlyBtn, camIssBtn } = this.el;
+        const setMode = (mode) => {
+            const m = this.globe.setCameraMode?.(mode) || mode;
+            camOrbitBtn?.classList.toggle('ua-cam-on', m === 'orbit');
+            camFlyBtn  ?.classList.toggle('ua-cam-on', m === 'fly');
+            if (this.el.camMode) this.el.camMode.textContent = m;
+            if (this.el.camHint) {
+                this.el.camHint.textContent = m === 'fly'
+                    ? 'WASD move · Q/E down/up · Shift fast · drag to look'
+                    : 'drag to rotate · scroll to zoom';
+            }
+        };
+        camOrbitBtn?.addEventListener('click', () => setMode('orbit'));
+        camFlyBtn  ?.addEventListener('click', () => setMode('fly'));
+        camIssBtn  ?.addEventListener('click', () => {
+            // Switching to fly mode + flying the camera at the ISS gives
+            // a good "explorable" first impression — the user can take
+            // over with WASD afterward.
+            setMode('fly');
+            this.globe.flyToISS?.();
+        });
+    }
+
+    /**
+     * Tick the HUD readout at 4 Hz, reading camera altitude from the
+     * globe and re-sampling local physics from the engine. Decoupled
+     * from refresh() so the HUD stays correct as the user flies around
+     * without having to spam the full slider-driven refresh.
+     */
+    _startCameraHUDLoop() {
+        const tick = () => {
+            this._paintCameraHUD();
+        };
+        clearInterval(this._camHUDTimer);
+        this._camHUDTimer = setInterval(tick, 250);
+        tick();
+    }
+
+    _paintCameraHUD() {
+        const { camAlt, camLayer, camRho, camT, camKn } = this.el;
+        if (!camAlt) return;
+        const sample = this.globe.getCameraSampleAtState?.({
+            f107: this.state.f107, ap: this.state.ap,
+        });
+        if (!sample) return;
+
+        const altKm = sample.altitudeKm;
+        camAlt.textContent = Number.isFinite(altKm)
+            ? `${altKm.toFixed(0)} km`
+            : '—';
+
+        if (sample.outOfDomain) {
+            camLayer.textContent = altKm < 80 ? '< sim domain' : '—';
+            camRho.textContent = '—';
+            camT.textContent   = '—';
+            camKn.textContent  = '—';
+            return;
+        }
+
+        const layerName = sample.layer?.name || '—';
+        const layerHi   = sample.layer
+            ? `#${sample.layer.colorHigh.toString(16).padStart(6, '0')}`
+            : '#0cc';
+        camLayer.innerHTML = `<span class="ua-cam-layer-tag" style="color:${layerHi};border-color:${layerHi}66">${layerName}</span>`;
+        camRho.textContent = sample.ρ.toExponential(2) + ' kg/m³';
+        camT.textContent   = `${sample.T.toFixed(0)} K`;
+        camKn.textContent  = Number.isFinite(sample.knudsen)
+            ? (sample.knudsen >= 100 ? sample.knudsen.toExponential(1)
+              : sample.knudsen.toFixed(2))
+            : '∞';
     }
 
     // ── Data-source pill ────────────────────────────────────────────────────

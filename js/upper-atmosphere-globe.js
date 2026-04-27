@@ -40,14 +40,15 @@
  */
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EarthSkin } from './earth-skin.js';
-import { SATELLITE_REFERENCES } from './upper-atmosphere-engine.js';
+import { SATELLITE_REFERENCES, density } from './upper-atmosphere-engine.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
-import { ATMOSPHERIC_LAYER_SCHEMA } from './upper-atmosphere-layers.js';
+import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
+    from './upper-atmosphere-layers.js';
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
-import { layerPhysics } from './upper-atmosphere-physics.js';
+import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { CameraController } from './upper-atmosphere-camera.js';
 
 // NOAA SWPC Kp→Ap table, used to invert Ap back to Kp for the aurora
 // shader. The shader's own oval-geometry code wants Kp, not Ap.
@@ -156,6 +157,10 @@ const LAYER_FRAG = /* glsl */`
     uniform float uStorm;        // 0..1 geomagnetic forcing
     uniform vec3  uSunDir;       // unit vector, world frame
     uniform float uSwForcing;    // 0..1 dynamic-pressure proxy from solar wind
+    uniform float uFade;         // 0..1 — drops to ~0.18 when camera is
+                                 //        inside this shell's altitude band
+                                 //        so free-fly users can see through
+                                 //        the layer they're standing in.
     varying vec3  vWorldPos;
 
     // Ray-sphere intersection. Returns vec2(tNear, tFar). Negative
@@ -221,6 +226,7 @@ const LAYER_FRAG = /* glsl */`
         pn = pow(pn, 0.85);
 
         float alpha = uOpacity * uIntensity * pn * (1.0 + 0.45 * dayside);
+        alpha *= uFade;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));
     }
 `;
@@ -597,6 +603,10 @@ export class AtmosphereGlobe {
                 sh.material.uniforms.uStorm.value = auroraAW;
             }
         }
+
+        // Drive the sun's emission visuals from F10.7 — corona glow,
+        // streamer brightness/length, core temperature.
+        this.setF107(f107);
     }
 
     /**
@@ -693,7 +703,9 @@ export class AtmosphereGlobe {
     dispose() {
         cancelAnimationFrame(this._raf);
         this._resizeObs?.disconnect();
-        this._controls?.dispose();
+        // CameraController owns OrbitControls + the WASD bindings; its
+        // dispose() unwinds both.
+        this._controls?.dispose?.();
         this._disposeHover?.();
         this._scene.traverse(o => {
             if (o.geometry) o.geometry.dispose?.();
@@ -792,6 +804,7 @@ export class AtmosphereGlobe {
                     uStorm:     { value: 0 },
                     uSunDir:    { value: this._sunDir.clone() },
                     uSwForcing: { value: 0 },
+                    uFade:      { value: 1.0 },
                 },
                 transparent: true,
                 // BackSide: draws the far hemisphere when the camera is
@@ -847,6 +860,78 @@ export class AtmosphereGlobe {
             this._satGroup.add(ring);
         }
         this._scene.add(this._satGroup);
+
+        // ── ISS as a moving probe ─────────────────────────────────────
+        // The static ring already exists for ISS at 420 km — we add a
+        // small sprite *along* it that propagates the orbit so users
+        // have a moving marker to click on. The sprite carries the
+        // kind='iss-probe' userData so the click handler can fly the
+        // camera to it and the tooltip can show local atmosphere
+        // physics + drag pressure.
+        this._buildISSProbe();
+    }
+
+    _buildISSProbe() {
+        const issAlt = 420;
+        const r = 1 + issAlt / R_EARTH_KM;
+
+        // A small bright sphere reads as "object" against the layer
+        // shells without the visual noise of a 3D model. Tagged with
+        // kind='iss-probe' so the existing tooltip + click pipeline
+        // picks it up.
+        const geo = new THREE.SphereGeometry(0.012, 14, 10);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0x00ffd0,
+            transparent: true,
+            opacity: 1.0,
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.userData = {
+            kind:     'iss-probe',
+            id:       'iss',
+            name:     'ISS · live probe',
+            altKm:    issAlt,
+            color:    '#00ffd0',
+            tooltip:  'Click to fly the camera here. Drag pressure '
+                    + '≈ ½ρv² uses local ρ from the current state and '
+                    + 'v ≈ 7.66 km/s circular orbital speed.',
+        };
+        // Halo: a slightly larger transparent sphere that gives the
+        // probe a glow at distance (the inner sphere is too small to
+        // see from outside the magnetopause).
+        const haloGeo = new THREE.SphereGeometry(0.026, 14, 10);
+        const haloMat = new THREE.MeshBasicMaterial({
+            color: 0x00ffd0,
+            transparent: true,
+            opacity: 0.25,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const halo = new THREE.Mesh(haloGeo, haloMat);
+        halo.userData = mesh.userData;       // share so raycaster on halo also resolves to ISS
+        mesh.add(halo);
+
+        // Initial position on orbit so first paint isn't at origin.
+        mesh.position.set(r, 0, 0);
+        this._iss = mesh;
+        this._scene.add(mesh);
+    }
+
+    /**
+     * Fly the camera to the moving ISS probe with a small offset so
+     * the probe stays in frame; lookAt the probe. Called by the click
+     * handler on the canvas + by an external "Visit ISS" button.
+     */
+    flyToISS(durationSec = 1.6) {
+        if (!this._iss) return;
+        const issPos = this._iss.position.clone();
+        // Offset behind the velocity vector — gives a chase-cam feel
+        // and lets users see the probe move forward through the
+        // upper-thermosphere band.
+        const radial = issPos.clone().normalize();
+        const offset = radial.multiplyScalar(0.18);   // ~1146 km out from probe
+        const target = issPos.clone().add(offset);
+        this.flyTo(target, issPos, durationSec);
     }
 
     _buildAltitudeRing() {
@@ -1000,25 +1085,12 @@ export class AtmosphereGlobe {
         }
         this._swGroup.add(this._streamGroup);
 
-        // ── Sun marker — small disc far up the sun line so users have ──
-        // ── a visual reference for "this way is sunward". ──────────────
-        const sunGeo = new THREE.SphereGeometry(0.6, 18, 14);
-        const sunMat = new THREE.MeshBasicMaterial({
-            color:       0xffe080,
-            transparent: true,
-            opacity:     0.85,
-            blending:    THREE.AdditiveBlending,
-            depthWrite:  false,
-        });
-        this._sunMarker = new THREE.Mesh(sunGeo, sunMat);
-        this._sunMarker.position.set(0, bs0.r0 + 8, 0);
-        this._sunMarker.userData = {
-            kind:    'sun-marker',
-            id:      'sun',
-            name:    'Sun (direction)',
-            tooltip: 'Direction toward the Sun. Solar wind streams from here.',
-        };
-        this._swGroup.add(this._sunMarker);
+        // ── Sun glow + EUV streamers ───────────────────────────────────
+        // Replaces the flat sphere marker with a proper "the Sun is
+        // emitting" cue: a hot core, a soft corona halo, and a cluster
+        // of outgoing radial photon streamers whose count + brightness
+        // scale with F10.7. setF107() updates them live.
+        this._buildSun(bs0);
 
         this._scene.add(this._swGroup);
 
@@ -1026,6 +1098,146 @@ export class AtmosphereGlobe {
         // the engine already has a feel for this. setSolarWind() is also
         // called externally once SwpcFeed pushes real data.
         this.setSolarWind(SW_DEFAULTS);
+    }
+
+    /**
+     * Build the sun: a hot inner core + a soft halo + 24 outgoing
+     * radial streamers that read as photon emission. F10.7 modulates
+     * the corona brightness + streamer length so users see "active
+     * sun" vs "quiet sun" at a glance. Mounted in the solar group so
+     * "+Y == sunward" alignment is automatic.
+     */
+    _buildSun(bs0) {
+        const sunDistance = bs0.r0 + 8;
+        const coreR = 0.55;
+        const haloR = 1.4;
+
+        // Hot core — solid bright disc.
+        const coreGeo = new THREE.SphereGeometry(coreR, 22, 16);
+        const coreMat = new THREE.MeshBasicMaterial({
+            color: 0xfff4c4,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        const core = new THREE.Mesh(coreGeo, coreMat);
+        core.userData = {
+            kind:    'sun-marker',
+            id:      'sun',
+            name:    'Sun',
+            tooltip: 'Solar emission source. Brightness + streamer '
+                   + 'length scale with F10.7 (10.7-cm radio flux, an '
+                   + 'EUV proxy used by NRL-MSIS / Jacchia models).',
+        };
+
+        // Halo — fresnel-bright corona that breathes with the F10.7
+        // driver. We re-use the SW_VERT/SW_FRAG shaders since they
+        // already implement a viewer-direction limb glow.
+        const haloMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffd060) },
+                uRimColor:  { value: new THREE.Color(0xffe5a8) },
+                uBaseAlpha: { value: 0.18 },
+                uRimPower:  { value: 1.6 },
+                uIntensity: { value: 1.0 },
+                uTime:      { value: 0 },
+            },
+            vertexShader:   SW_VERT,
+            fragmentShader: SW_FRAG,
+            transparent:    true,
+            side:           THREE.DoubleSide,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+        const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(haloR, 32, 22),
+            haloMat,
+        );
+        halo.userData = core.userData;
+        core.add(halo);
+
+        // Outgoing photon streamers — radial line strips emanating
+        // from the core in 24 directions on a Fibonacci sphere. Each
+        // streamer carries an aProgress attribute (0 at core, 1 at
+        // tip) so the SW_STREAM shaders can paint the travelling-dash
+        // pattern radiating *outward* (negative speed → outward dash).
+        const N_STREAMS = 24;
+        const streamMat = new THREE.ShaderMaterial({
+            uniforms: {
+                uColor:     { value: new THREE.Color(0xffe080) },
+                uTime:      { value: 0 },
+                uIntensity: { value: 0.7 },
+                uSpeed:     { value: -0.22 },     // negative → flow outward
+            },
+            vertexShader:   SW_STREAM_VERT,
+            fragmentShader: SW_STREAM_FRAG,
+            transparent:    true,
+            depthWrite:     false,
+            blending:       THREE.AdditiveBlending,
+        });
+
+        const streamGroup = new THREE.Group();
+        const phi = Math.PI * (3 - Math.sqrt(5));
+        for (let i = 0; i < N_STREAMS; i++) {
+            const y    = 1 - (i / (N_STREAMS - 1)) * 2;
+            const r    = Math.sqrt(Math.max(0, 1 - y * y));
+            const lon  = i * phi;
+            const dx = r * Math.cos(lon);
+            const dy = y;
+            const dz = r * Math.sin(lon);
+            const tipLen = 2.4;     // R⊕ from the core; modulated below
+            const positions = new Float32Array([
+                dx * coreR, dy * coreR, dz * coreR,
+                dx * (coreR + tipLen), dy * (coreR + tipLen), dz * (coreR + tipLen),
+            ]);
+            const progress = new Float32Array([0, 1]);
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position',  new THREE.BufferAttribute(positions, 3));
+            g.setAttribute('aProgress', new THREE.BufferAttribute(progress, 1));
+            const line = new THREE.Line(g, streamMat);
+            line.userData = {
+                kind:    'sun-stream',
+                id:      'sun-stream',
+                name:    'Sun · radial emission',
+                tooltip: 'Radial photon flow. Length + brightness scale with F10.7.',
+            };
+            streamGroup.add(line);
+        }
+        core.add(streamGroup);
+
+        core.position.set(0, sunDistance, 0);
+        this._sunMarker  = core;
+        this._sunCoreMat = coreMat;
+        this._sunHaloMat = haloMat;
+        this._sunStreamMat = streamMat;
+        this._sunStreamGroup = streamGroup;
+        this._swGroup.add(core);
+    }
+
+    /**
+     * Drive the sun's emission visuals from the solar-flux index
+     * (F10.7 in SFU). Quiet-sun ≈ 70 SFU; cycle-max ≈ 250–300. Maps
+     * to streamer brightness, halo glow, and core size.
+     */
+    setF107(f107Sfu) {
+        const f = Number.isFinite(f107Sfu) ? f107Sfu : 150;
+        const q = Math.max(0, Math.min(1, (f - 65) / (300 - 65)));   // 0..1
+        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uIntensity.value = 0.55 + 0.85 * q;
+        if (this._sunStreamMat) this._sunStreamMat.uniforms.uIntensity.value = 0.30 + 0.95 * q;
+        // Subtle core warming with activity: cooler yellow at quiet,
+        // hotter white at max.
+        if (this._sunCoreMat) {
+            const cool = new THREE.Color(0xffd06c);
+            const hot  = new THREE.Color(0xffffe8);
+            this._sunCoreMat.color.copy(cool.clone().lerp(hot, q));
+            this._sunCoreMat.opacity = 0.85 + 0.13 * q;
+        }
+        // Stream group scales radially so high F10.7 = longer EUV reach.
+        if (this._sunStreamGroup) {
+            const s = 0.85 + 0.55 * q;
+            this._sunStreamGroup.scale.setScalar(s);
+        }
     }
 
     _initStars() {
@@ -1059,16 +1271,56 @@ export class AtmosphereGlobe {
     }
 
     _initControls() {
-        this._controls = new OrbitControls(this._camera, this.canvas);
-        this._controls.enableDamping = true;
-        this._controls.dampingFactor = 0.08;
-        this._controls.minDistance = 1.25;
-        // Bumped from 14 → 28 so users can pull back far enough to see
-        // the bow shock + magnetopause in full. Atmosphere-shell visuals
-        // remain sized to Earth radii so they don't grow with zoom.
-        this._controls.maxDistance = 28;
-        this._controls.enablePan = false;
-        this._controls.rotateSpeed = 0.55;
+        // CameraController wraps OrbitControls + a hand-rolled fly mode
+        // behind a single setMode() switch. Default = orbit so existing
+        // behaviour is unchanged on first paint; the UI exposes a toggle
+        // to switch into fly mode where users can move *into* the layers.
+        this._controls = new CameraController(this._camera, this.canvas);
+    }
+
+    /**
+     * Toggle the camera between 'orbit' (planet-locked, OrbitControls)
+     * and 'fly' (free 6-DOF, WASD + mouse-drag look). Returns the new
+     * mode so callers can sync a UI toggle.
+     */
+    setCameraMode(mode) {
+        this._controls.setMode(mode);
+        return this._controls.getMode();
+    }
+    getCameraMode() { return this._controls.getMode(); }
+
+    /**
+     * Smoothly fly the camera to a world-space target, optionally aiming
+     * at lookAt. Used by satellite click-to-fly and ISS focus.
+     */
+    flyTo(targetVec3, lookAtVec3 = null, duration = 1.4) {
+        this._controls.flyTo(targetVec3, lookAtVec3, duration);
+    }
+
+    /**
+     * Camera altitude above 1 R⊕ in km. The HUD reads this every frame to
+     * paint the local-altitude readout + sample the engine for ρ/T/Kn.
+     */
+    getCameraAltitudeKm() {
+        return this._controls.getAltitudeKm();
+    }
+
+    /**
+     * Sample local atmospheric physics at the current camera altitude.
+     * Returns null if the camera is below the simulator's domain (< 80 km).
+     * Cheap; uses the same engine call the side panel uses.
+     */
+    getCameraSampleAtState({ f107, ap }) {
+        const altKm = this.getCameraAltitudeKm();
+        if (!Number.isFinite(altKm) || altKm < 80) return { altitudeKm: altKm, outOfDomain: true };
+        const layer = layerForAltitude(altKm);
+        const phys  = pointPhysics({
+            altitudeKm: altKm,
+            f107Sfu:    f107,
+            ap,
+            layerThicknessKm: layer ? Math.max(1, layer.maxKm - layer.minKm) : null,
+        });
+        return { ...phys, layer };
     }
 
     _initResize() {
@@ -1125,7 +1377,22 @@ export class AtmosphereGlobe {
             ...(this._bsMesh     ? [this._bsMesh]     : []),
             ...(this._sheathMesh ? [this._sheathMesh] : []),
             ...(this._sunMarker  ? [this._sunMarker]  : []),
+            ...(this._iss        ? [this._iss]        : []),
         ];
+
+        // Recursive: the ISS sprite carries a child halo mesh; if we
+        // raycast non-recursively the halo eats hits and the parent's
+        // userData isn't found. recursive=true makes the raycaster
+        // descend; we look at hits[0].object.userData OR walk up to a
+        // tagged ancestor.
+        const _findTaggedUserData = (obj) => {
+            let o = obj;
+            while (o) {
+                if (o.userData?.kind) return o.userData;
+                o = o.parent;
+            }
+            return obj.userData || {};
+        };
 
         const onMove = (e) => {
             const rect = this.canvas.getBoundingClientRect();
@@ -1134,28 +1401,56 @@ export class AtmosphereGlobe {
             this._mouse.x = (x / rect.width)  *  2 - 1;
             this._mouse.y = (y / rect.height) * -2 + 1;
             this._raycaster.setFromCamera(this._mouse, this._camera);
-            const hits = this._raycaster.intersectObjects(hittable(), false);
+            const hits = this._raycaster.intersectObjects(hittable(), true);
             if (hits.length > 0) {
-                const ud = hits[0].object.userData || {};
+                const ud = _findTaggedUserData(hits[0].object);
                 tip.innerHTML = _tipHTML(ud, this._profile, this._swState);
                 tip.style.left = `${x}px`;
                 tip.style.top  = `${y}px`;
                 tip.style.opacity = '1';
+                this._hoveredUserData = ud;
                 this.canvas.style.cursor = 'pointer';
             } else {
                 tip.style.opacity = '0';
-                this.canvas.style.cursor = 'grab';
+                this._hoveredUserData = null;
+                if (this._controls.getMode() === 'fly') {
+                    this.canvas.style.cursor = 'crosshair';
+                } else {
+                    this.canvas.style.cursor = 'grab';
+                }
             }
         };
         const onLeave = () => {
             tip.style.opacity = '0';
             this.canvas.style.cursor = 'grab';
         };
+        // Click handler: clicking on the ISS probe flies the camera to it.
+        // Designed to ignore drag-clicks (keep OrbitControls / fly-mode
+        // mouse-look working) by tracking the down-position and only
+        // firing if the mouse hasn't moved more than a few pixels.
+        let downX = 0, downY = 0, downT = 0;
+        const onDown = (e) => {
+            downX = e.clientX; downY = e.clientY; downT = performance.now();
+        };
+        const onUp = (e) => {
+            const dx = Math.abs(e.clientX - downX);
+            const dy = Math.abs(e.clientY - downY);
+            const dt = performance.now() - downT;
+            if (dx > 4 || dy > 4 || dt > 350) return;     // user dragged
+            const ud = this._hoveredUserData;
+            if (ud?.kind === 'iss-probe') {
+                this.flyToISS();
+            }
+        };
         this.canvas.addEventListener('mousemove', onMove);
         this.canvas.addEventListener('mouseleave', onLeave);
+        this.canvas.addEventListener('mousedown',  onDown);
+        this.canvas.addEventListener('mouseup',    onUp);
         this._disposeHover = () => {
             this.canvas.removeEventListener('mousemove', onMove);
             this.canvas.removeEventListener('mouseleave', onLeave);
+            this.canvas.removeEventListener('mousedown',  onDown);
+            this.canvas.removeEventListener('mouseup',    onUp);
             tip.remove();
         };
     }
@@ -1178,8 +1473,11 @@ export class AtmosphereGlobe {
             }
         }
 
-        // Slow auto-rotation when user isn't actively dragging.
-        if (this.opts.autoRotate && this._skin && !this._controls.dragging) {
+        // Slow auto-rotation when in orbit mode + user isn't dragging.
+        // In fly mode we keep the world stationary so users can orient
+        // themselves against fixed reference frames.
+        const orbitMode = this._controls.getMode() === 'orbit';
+        if (this.opts.autoRotate && orbitMode && this._skin) {
             this._skin.earthMesh.rotation.y += 0.0010;
             if (this._shellGroup) this._shellGroup.rotation.y += 0.00045;
             if (this._satGroup)   this._satGroup.rotation.y   += 0.00060;
@@ -1195,12 +1493,96 @@ export class AtmosphereGlobe {
 
         // Solar-wind shaders: advance time for fresnel pulse + streamer
         // dash animation.
-        if (this._mpMat)     this._mpMat.uniforms.uTime.value     = t;
-        if (this._bsMat)     this._bsMat.uniforms.uTime.value     = t;
-        if (this._streamMat) this._streamMat.uniforms.uTime.value = t;
+        if (this._mpMat)       this._mpMat.uniforms.uTime.value       = t;
+        if (this._bsMat)       this._bsMat.uniforms.uTime.value       = t;
+        if (this._streamMat)   this._streamMat.uniforms.uTime.value   = t;
+        // Sun shaders: corona breathing pulse + outgoing-streamer dash.
+        if (this._sunHaloMat)   this._sunHaloMat.uniforms.uTime.value   = t;
+        if (this._sunStreamMat) this._sunStreamMat.uniforms.uTime.value = t;
 
-        this._controls.update();
+        this._controls.update(dt);
+
+        // Per-frame ISS orbit propagation. ISS sits at ~420 km on a
+        // 51.6° inclined orbit with a ~92.7-min period; that's plenty
+        // close enough for a benchmark probe. Visual time can be sped up
+        // via opts.issTimeScale so a user sees a full pass in seconds.
+        if (this._iss) this._stepISS(t);
+
+        // Shell-fade-when-inside: when the camera enters a layer band,
+        // drop the shell's opacity so the user can see through the layer
+        // they're standing in. Cheap — five comparisons per frame.
+        if (this._shells) this._fadeShellsForCameraAltitude();
+
         this._renderer.render(this._scene, this._camera);
+    }
+
+    /**
+     * Drop the gradient shell's opacity when the camera is inside its
+     * altitude band; restore otherwise. Without this, free-fly users see
+     * the additive blend stack up against the inside of every shell they
+     * pass through, which reads as a wall of orange.
+     */
+    _fadeShellsForCameraAltitude() {
+        const altKm = this.getCameraAltitudeKm();
+        for (const sh of this._shells) {
+            const ud = sh.userData;
+            const inside = altKm >= ud.minKm && altKm <= ud.maxKm;
+            // Use an explicit fade factor on each shell's intensity
+            // uniform — multiplied with the base log-ρ intensity that
+            // setProfile() set up.
+            const baseFade = inside ? 0.18 : 1.0;
+            // Smoothly blend so the transition isn't abrupt.
+            const cur = sh.material.uniforms.uFade?.value ?? 1.0;
+            const next = cur + (baseFade - cur) * 0.12;
+            if (sh.material.uniforms.uFade) {
+                sh.material.uniforms.uFade.value = next;
+            }
+        }
+    }
+
+    /**
+     * Advance the ISS sprite along a 51.6°-inclined circular orbit at
+     * 420 km. Position is in world frame; we expose .userData.altKm so
+     * the existing tooltip pipeline keeps working unchanged.
+     */
+    _stepISS(elapsedSec) {
+        const ts = this.opts.issTimeScale ?? 60;   // 60× real time
+        // Mean motion: 2π / orbit_period. ISS period ≈ 92.7 min.
+        const period = 92.7 * 60;
+        const meanAnomaly = (elapsedSec * ts / period) * 2 * Math.PI;
+
+        const r = 1 + 420 / R_EARTH_KM;
+        const incl = 51.6 * Math.PI / 180;
+        // Argument of right-ascension precesses slowly; not modelling
+        // here — keep the ascending node fixed and let users see one
+        // representative pass.
+        const ω = meanAnomaly;
+        // Position in orbital plane, then rotate by inclination around X.
+        const x =  r * Math.cos(ω);
+        const y0 = r * Math.sin(ω);
+        const y =  y0 * Math.cos(incl);
+        const z = -y0 * Math.sin(incl);
+
+        this._iss.position.set(x, y, z);
+
+        // Orient the sprite so its long axis lies along the velocity
+        // vector — derivative of position in orbit. Velocity gives a
+        // consistent visual cue when users zoom in.
+        const vx = -r * Math.sin(ω);
+        const vy0 =  r * Math.cos(ω);
+        const vx_w = vx;
+        const vy_w =  vy0 * Math.cos(incl);
+        const vz_w = -vy0 * Math.sin(incl);
+        const vel = new THREE.Vector3(vx_w, vy_w, vz_w).normalize();
+        // Look "ahead" along the velocity, with up = radial-out so the
+        // sprite sits flat against the orbit plane.
+        const radial = this._iss.position.clone().normalize();
+        const m = new THREE.Matrix4().lookAt(
+            this._iss.position,
+            this._iss.position.clone().add(vel),
+            radial,
+        );
+        this._iss.quaternion.setFromRotationMatrix(m);
     }
 }
 
@@ -1322,8 +1704,26 @@ function _tipHTML(userData, profile, swState) {
             }
             break;
         case 'sun-marker':
-            detail = `sunward direction`;
+        case 'sun-stream':
+            detail = `solar emission source`;
             dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            break;
+        case 'iss-probe':
+            // Live benchmark probe — show local atmospheric ρ at ISS
+            // altitude + the resulting drag pressure q = ½ρv² at the
+            // circular orbital speed for 420 km (~7.66 km/s).
+            detail = `${userData.altKm} km · 51.6° · click to fly here`;
+            if (profile?.samples?.length) {
+                const rho = _nearestRho(profile.samples, userData.altKm);
+                const v = 7660;       // m/s, circular @ 420 km
+                const q = 0.5 * rho * v * v;       // Pa
+                dataLines = `
+                    <div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ 7.66 km/s</div>
+                    <div style="color:#0fc">drag q ≈ ${(q * 1000).toFixed(2)} mPa</div>
+                    <div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            } else {
+                dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
+            }
             break;
         default:
             detail = userData.altKm != null ? `${userData.altKm} km` : '';

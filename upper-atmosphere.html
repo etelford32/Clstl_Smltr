@@ -206,6 +206,70 @@ input[type=range]::-moz-range-thumb {
 }
 #ua-globe-legend b { color:#0ff; font-weight:600; }
 
+/* ─── Camera HUD (top-right of globe) ──────────────────── */
+#ua-camera-hud {
+    position:absolute; right:14px; top:14px;
+    display:flex; flex-direction:column; gap:8px;
+    align-items:flex-end;
+    pointer-events:none;          /* children re-enable */
+    z-index:5;
+}
+#ua-camera-hud .ua-cam-controls {
+    display:flex; gap:6px;
+    pointer-events:auto;
+}
+#ua-camera-hud button {
+    background:rgba(8,4,22,.78);
+    border:1px solid rgba(0,200,200,.28);
+    color:#bcd;
+    border-radius:6px; padding:5px 10px;
+    font:11px/1 system-ui, sans-serif; font-weight:600;
+    cursor:pointer; letter-spacing:.04em;
+    transition:all .12s;
+}
+#ua-camera-hud button:hover {
+    border-color:rgba(0,255,230,.55);
+    color:#0ff;
+}
+#ua-camera-hud button.ua-cam-on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+#ua-cam-readout {
+    background:rgba(8,4,22,.82);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    padding:8px 11px;
+    font:11px monospace;
+    line-height:1.45;
+    color:#cde;
+    min-width:170px;
+    pointer-events:auto;
+    box-shadow:0 2px 10px rgba(0,0,0,.4);
+}
+#ua-cam-readout .ua-cam-row {
+    display:flex; justify-content:space-between; gap:10px;
+}
+#ua-cam-readout .ua-cam-k    { color:#789; }
+#ua-cam-readout .ua-cam-v    { color:#fff; }
+#ua-cam-readout .ua-cam-mode {
+    margin-top:5px; padding-top:5px;
+    border-top:1px dotted rgba(255,255,255,.08);
+    color:#0cc; font-weight:600;
+    text-align:center;
+}
+#ua-cam-readout .ua-cam-hint {
+    color:#556; font-size:10px;
+    text-align:center; margin-top:2px;
+}
+#ua-cam-readout .ua-cam-layer-tag {
+    display:inline-block; padding:1px 5px; border-radius:3px;
+    font-size:10px; font-weight:700; letter-spacing:.04em;
+    background:rgba(0,200,200,.14);
+    color:#9ff; border:1px solid rgba(0,200,200,.3);
+}
+
 /* ─── Plots ────────────────────────────────────────────── */
 #ua-right { display:flex; flex-direction:column; gap:14px; }
 .ua-plot-panel { padding:0; overflow:hidden; }
@@ -489,12 +553,49 @@ input[type=range]::-moz-range-thumb {
     <!-- Center: 3D globe -->
     <section id="ua-globe-wrap">
         <canvas id="ua-globe"></canvas>
+
+        <!-- Camera HUD: mode toggle + Visit ISS + live altitude readout -->
+        <div id="ua-camera-hud">
+            <div class="ua-cam-controls">
+                <button type="button" id="ua-cam-orbit" class="ua-cam-on"
+                        title="Orbit the planet (drag to rotate, scroll to zoom)">Orbit</button>
+                <button type="button" id="ua-cam-fly"
+                        title="Free-fly · WASD to move, Q/E down/up, Shift faster, drag to look">Fly</button>
+                <button type="button" id="ua-cam-iss"
+                        title="Fly to the live ISS probe at 420 km · 51.6° inclination">↥ Visit ISS</button>
+            </div>
+            <div id="ua-cam-readout">
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">camera alt</span>
+                    <span class="ua-cam-v" id="ua-cam-alt">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">layer</span>
+                    <span class="ua-cam-v" id="ua-cam-layer">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">ρ</span>
+                    <span class="ua-cam-v" id="ua-cam-rho">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">T</span>
+                    <span class="ua-cam-v" id="ua-cam-T">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">Kn</span>
+                    <span class="ua-cam-v" id="ua-cam-Kn">—</span>
+                </div>
+                <div class="ua-cam-mode" id="ua-cam-mode">orbit</div>
+                <div class="ua-cam-hint" id="ua-cam-hint">drag to rotate · scroll to zoom</div>
+            </div>
+        </div>
+
         <div id="ua-globe-legend">
             <b>gradient shells</b> · mesosphere → outer exosphere<br>
             colour = layer · brightness ∝ log ρ · warmth ∝ Ap<br>
-            cyan ring = current altitude<br>
+            cyan ring = current altitude · cyan dot = ISS probe<br>
             <span style="color:#60d8ff">·</span> magnetopause · <span style="color:#ffc070">·</span> bow shock<br>
-            <span style="color:#aac">drag to rotate · scroll out for the magnetosphere</span>
+            <span style="color:#aac">switch to Fly mode to enter the layers</span>
         </div>
     </section>
 
@@ -540,6 +641,17 @@ input[type=range]::-moz-range-thumb {
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),
             solarWindStats: document.getElementById('ua-sw-stats'),
+            // Camera HUD
+            camOrbitBtn:    document.getElementById('ua-cam-orbit'),
+            camFlyBtn:      document.getElementById('ua-cam-fly'),
+            camIssBtn:      document.getElementById('ua-cam-iss'),
+            camAlt:         document.getElementById('ua-cam-alt'),
+            camLayer:       document.getElementById('ua-cam-layer'),
+            camRho:         document.getElementById('ua-cam-rho'),
+            camT:           document.getElementById('ua-cam-T'),
+            camKn:          document.getElementById('ua-cam-Kn'),
+            camMode:        document.getElementById('ua-cam-mode'),
+            camHint:        document.getElementById('ua-cam-hint'),
         },
         // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
         // host window declares PARKER_DSMC_API; silently falls back to
