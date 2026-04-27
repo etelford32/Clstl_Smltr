@@ -24,6 +24,12 @@ export function createWebGL2Backend(canvas) {
         showRing:      gl.getUniformLocation(program, 'u_show_ring'),
         time:          gl.getUniformLocation(program, 'u_time'),
         observerType:  gl.getUniformLocation(program, 'u_observer_type'),
+        showDisk:      gl.getUniformLocation(program, 'u_show_disk'),
+        diskInner:     gl.getUniformLocation(program, 'u_disk_inner'),
+        diskOuter:     gl.getUniformLocation(program, 'u_disk_outer'),
+        diskThickness: gl.getUniformLocation(program, 'u_disk_thickness'),
+        diskBrightness:gl.getUniformLocation(program, 'u_disk_brightness'),
+        showGrid:      gl.getUniformLocation(program, 'u_show_grid'),
     };
 
     function resize(w, h) {
@@ -44,6 +50,12 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1i(uLoc.showRing, u.showRing ? 1 : 0);
         gl.uniform1f(uLoc.time, u.time);
         gl.uniform1i(uLoc.observerType, u.observerType | 0);
+        gl.uniform1i(uLoc.showDisk,       u.showDisk ? 1 : 0);
+        gl.uniform1f(uLoc.diskInner,      u.diskInner ?? 6.0);
+        gl.uniform1f(uLoc.diskOuter,      u.diskOuter ?? 24.0);
+        gl.uniform1f(uLoc.diskThickness,  u.diskThickness ?? 0.0);
+        gl.uniform1f(uLoc.diskBrightness, u.diskBrightness ?? 1.0);
+        gl.uniform1i(uLoc.showGrid,       u.showGrid ? 1 : 0);
     }
 
     function draw() {

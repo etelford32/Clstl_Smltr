@@ -30,6 +30,12 @@ uniform float u_tol;                    // RK45 abs/rel tolerance
 uniform int   u_show_ring;              // 1 = tint photon ring on capture
 uniform float u_time;
 uniform int   u_observer_type;          // 0 = static, 1 = free-fall (Painlevé-Gullstrand), 2 = ZAMO (= static for Schwarzschild), 3 = circular Keplerian (equator)
+uniform int   u_show_disk;               // 1 = render thin equatorial accretion disk
+uniform float u_disk_inner;              // r_in (in M); ~6 for Schwarzschild ISCO
+uniform float u_disk_outer;              // r_out (in M); ~24
+uniform float u_disk_thickness;          // half-thickness in M; 0 = razor thin
+uniform float u_disk_brightness;         // overall intensity multiplier
+uniform int   u_show_grid;               // 1 = draw faint 3D coordinate grid sphere
 
 #define M 1.0
 #define HORIZON_EPS 1.0e-3
@@ -294,11 +300,118 @@ void build_initial_ray(vec2 ndc, out float y0[8]) {
 }
 
 // ---------------------------------------------------------------------------
+// Accretion-disk emission model (thin disk in equatorial plane).
+// ---------------------------------------------------------------------------
+// Computes the photon's redshift / Doppler factor g = E_obs / E_emit assuming
+// emission from a prograde Keplerian orbiter at the disk crossing radius.
+// Returns the observed RGB radiance. The intensity invariant I_nu / nu^3 means
+// the observer sees emitter intensity * g^4 (after integrating over a thermal
+// spectrum). This produces the iconic asymmetric "left side bright, right
+// side dim" Doppler beaming AND a brilliant inner edge from gravitational
+// blueshift -- the visual cue that the spacetime is 3D.
+vec3 disk_emission(float r, float ph, float kt, float kph) {
+    if (r < u_disk_inner || r > u_disk_outer) return vec3(0.0);
+
+    // Keplerian 4-velocity at equator (sin theta = 1):
+    //   Omega = sqrt(M / r^3),  u^t = 1/sqrt(1 - 3M/r),  u^phi = Omega * u^t.
+    float fac_orb = 1.0 - 3.0 * M / r;
+    if (fac_orb <= 0.0) return vec3(0.0);          // no circular orbit r < 3M
+
+    float ut    = 1.0 / sqrt(fac_orb);
+    float Omega = pow(r, -1.5);                    // M = 1
+    float uph   = Omega * ut;
+
+    // E_emit = -g_{mu nu} k^mu u^nu, equator, Schwarzschild signature -+++.
+    //   g_tt = -(1 - 2M/r),  g_phph = r^2 sin^2(theta) = r^2.
+    //   E_emit = (1 - 2/r) * k^t * u^t  -  r^2 * k^phi * u^phi.
+    float E_emit = (1.0 - 2.0 * M / r) * kt * ut - r * r * kph * uph;
+    E_emit = max(E_emit, 1.0e-3);
+
+    // E_obs at camera: in the camera's local Lorentz frame the photon was
+    // built with k^(t)_tetrad = 1, so E_obs = 1 by construction.
+    float g = 1.0 / E_emit;
+
+    // Brightness (intensity transform for thermal spectrum): I ∝ g^4.
+    float bright = pow(g, 4.0);
+
+    // Procedural disk pattern: a logarithmic spiral + radial fall-off so the
+    // disk reads as a structured surface even before redshift coloring kicks in.
+    float u = (r - u_disk_inner) / max(u_disk_outer - u_disk_inner, 0.1);
+    float radial = exp(-u * 1.6) * (1.0 - smoothstep(0.85, 1.0, u))
+                 * smoothstep(0.0, 0.05, u);    // soft inner edge
+    float spiral_phase = 4.0 * ph - 3.5 * log(r / u_disk_inner) + 0.3 * u_time;
+    float spiral = 0.55 + 0.45 * sin(spiral_phase);
+    // High-frequency turbulence flicker (cheap 1D hash).
+    float turb = 0.7 + 0.3 * fract(sin(r * 17.3 + ph * 9.7) * 43758.5);
+
+    // Color palette: hot inner edge → cool outer edge, biased by g.
+    //   hot    ~ blue/white       (blueshifted approaching side)
+    //   cool   ~ orange/red       (redshifted receding side)
+    vec3 hot   = vec3(1.10, 1.00, 0.85);
+    vec3 mid   = vec3(1.00, 0.65, 0.30);
+    vec3 cool  = vec3(0.55, 0.18, 0.08);
+    vec3 base  = mix(cool, mid, smoothstep(0.65, 1.05, g));
+    base       = mix(base, hot, smoothstep(1.05, 1.55, g));
+
+    return base * bright * radial * spiral * turb * u_disk_brightness;
+}
+
+// Detect equatorial-plane crossing inside [r_in, r_out]. Returns 1 if hit.
+// On hit, refines (r, phi, k^t, k^phi) to the crossing point by linear interp
+// in cos(theta), and writes them out.
+int disk_intersect(float y_prev[8], float y_new[8],
+                   out float r_hit, out float phi_hit,
+                   out float kt_hit, out float kph_hit) {
+    float costh_o = cos(y_prev[2]);
+    float costh_n = cos(y_new[2]);
+    if (costh_o * costh_n >= 0.0) return 0;                   // no sign change
+
+    float r_n = y_new[1];
+    if (r_n < u_disk_inner - 1.0 || r_n > u_disk_outer + 1.0) return 0;
+
+    float t = costh_o / (costh_o - costh_n);                  // ∈ (0,1)
+    r_hit   = mix(y_prev[1], y_new[1], t);
+    phi_hit = mix(y_prev[3], y_new[3], t);
+    kt_hit  = mix(y_prev[4], y_new[4], t);
+    kph_hit = mix(y_prev[7], y_new[7], t);
+    if (r_hit < u_disk_inner || r_hit > u_disk_outer) return 0;
+    return 1;
+}
+
+// 3-D coordinate grid: faint glow when the ray crosses a small angular
+// neighborhood of an integer-degree latitude/longitude line at a milestone
+// radius. Cheap and gives strong depth cues.
+vec3 grid_overlay(float y_prev[8], float y_new[8]) {
+    if (u_show_grid == 0) return vec3(0.0);
+    // Sample at midpoint of the step.
+    float r  = 0.5 * (y_prev[1] + y_new[1]);
+    float th = 0.5 * (y_prev[2] + y_new[2]);
+    float ph = 0.5 * (y_prev[3] + y_new[3]);
+
+    // Reference shells at 10 M and 30 M. Reading where the rays land on these
+    // gives an instant "you are here" sense of the spatial geometry.
+    float shell_w = 0.6;
+    float near10 = exp(-pow((r - 10.0) / shell_w, 2.0));
+    float near30 = exp(-pow((r - 30.0) / shell_w, 2.0));
+    float shell  = max(near10 * 0.10, near30 * 0.05);
+    if (shell < 1.0e-3) return vec3(0.0);
+
+    // Latitude/longitude line proximity (every 15° = π/12).
+    float lat = fract(th * 12.0 / PI);
+    float lon = fract(ph * 12.0 / PI);
+    float lat_line = max(0.0, 1.0 - 14.0 * min(lat, 1.0 - lat));
+    float lon_line = max(0.0, 1.0 - 14.0 * min(lon, 1.0 - lon));
+
+    return shell * (lat_line + lon_line) * vec3(0.20, 0.45, 0.65);
+}
+
+// ---------------------------------------------------------------------------
 // Main integration loop.
 // ---------------------------------------------------------------------------
 // Termination flags: 0 = still integrating, 1 = captured by horizon,
-// 2 = escaped to celestial sphere, 3 = step budget exhausted.
-void trace(inout float y[8], out int term, out int steps_taken, out float affine_used) {
+// 2 = escaped to celestial sphere, 3 = step budget exhausted, 4 = disk hit.
+void trace(inout float y[8], out int term, out int steps_taken, out float affine_used,
+           out vec3 disk_rgb, out vec3 grid_accum) {
     float h = 0.5;     // initial step (affine parameter)
     float h_min = 1.0e-4;
     float h_max = 50.0;
@@ -306,46 +419,65 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
     term = 0;
     steps_taken = 0;
     affine_used = 0.0;
+    disk_rgb = vec3(0.0);
+    grid_accum = vec3(0.0);
 
     float y_try[8];
+    float y_prev[8];
     float err;
 
     for (int step = 0; step < 4096; ++step) {
         if (step >= u_max_steps) break;
 
-        // Pre-step termination tests. Catches captured/escaped rays before we
-        // feed a marginal state into the integrator.
         if (y[1] <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
         if (y[1] >= u_r_far)                { term = 2; return; }
 
-        ck_step(y, h, y_try, err);
+        // Snapshot pre-step state for crossing tests.
+        for (int i = 0; i < 8; ++i) y_prev[i] = y[i];
 
-        // Guard against NaN/inf error: treat as "reject, shrink" to recover.
+        ck_step(y, h, y_try, err);
         if (!(err < 1.0e20)) { h = max(h * 0.25, h_min); continue; }
 
         if (err < u_tol) {
-            // accept
             for (int i = 0; i < 8; ++i) y[i] = y_try[i];
             affine_used += h;
             steps_taken = step + 1;
 
-            // termination tests on accepted state
+            // Disk crossing test on accepted sub-arc.
+            if (u_show_disk == 1) {
+                float r_h, ph_h, kt_h, kph_h;
+                if (disk_intersect(y_prev, y, r_h, ph_h, kt_h, kph_h) == 1) {
+                    disk_rgb = disk_emission(r_h, ph_h, kt_h, kph_h);
+                    term = 4;
+                    return;
+                }
+            }
+
+            // Grid sampling (cheap, accumulates).
+            grid_accum += grid_overlay(y_prev, y);
+
             float r = y[1];
             if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
             if (r >= u_r_far)                { term = 2; return; }
 
-            // grow step size
             float factor = 0.9 * pow(u_tol / max(err, 1.0e-12), 0.2);
             h = clamp(h * min(factor, 4.0), h_min, h_max);
         } else {
-            // shrink step size
             float factor = 0.9 * pow(u_tol / max(err, 1.0e-12), 0.25);
             h = clamp(h * max(factor, 0.1), h_min, h_max);
             if (h <= h_min + 1.0e-12) {
-                // proceed with min-step if clamped to floor
                 for (int i = 0; i < 8; ++i) y[i] = y_try[i];
                 affine_used += h;
                 steps_taken = step + 1;
+                if (u_show_disk == 1) {
+                    float r_h, ph_h, kt_h, kph_h;
+                    if (disk_intersect(y_prev, y, r_h, ph_h, kt_h, kph_h) == 1) {
+                        disk_rgb = disk_emission(r_h, ph_h, kt_h, kph_h);
+                        term = 4;
+                        return;
+                    }
+                }
+                grid_accum += grid_overlay(y_prev, y);
                 float r = y[1];
                 if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
                 if (r >= u_r_far)                { term = 2; return; }
@@ -393,7 +525,9 @@ void main() {
     int term;
     int steps;
     float aff;
-    trace(y, term, steps, aff);
+    vec3 disk_rgb;
+    vec3 grid_rgb;
+    trace(y, term, steps, aff, disk_rgb, grid_rgb);
 
     vec3 color;
     if (term == 1) {
@@ -402,10 +536,16 @@ void main() {
     } else if (term == 2) {
         vec3 dir = outgoing_direction(y);
         color = celestial_sphere(dir);
+    } else if (term == 4) {
+        // Disk hit: emitter radiance with full Doppler+gravitational redshift.
+        color = disk_rgb;
     } else {
         // Step budget exhausted (shouldn't normally happen). Mark faintly for debug.
         color = vec3(0.02, 0.0, 0.02);
     }
+
+    // Add accumulated 3D-grid overlay (cheap depth cue, never overrides disk).
+    color += grid_rgb;
 
     // Photon-ring accent: rays that integrated many steps grazed the ring.
     if (u_show_ring == 1) {

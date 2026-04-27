@@ -166,8 +166,8 @@ select {
             </div>
             <div class="ctrl">
                 <label>Polar angle θ</label>
-                <input type="range" id="s-theta" min="2" max="178" step="1" value="90">
-                <div class="val" id="v-theta">90°</div>
+                <input type="range" id="s-theta" min="2" max="178" step="1" value="80">
+                <div class="val" id="v-theta">80°</div>
             </div>
             <div class="ctrl">
                 <label>Azimuth φ</label>
@@ -176,8 +176,8 @@ select {
             </div>
             <div class="ctrl">
                 <label>Field of view</label>
-                <input type="range" id="s-fov" min="15" max="120" step="1" value="45">
-                <div class="val" id="v-fov">45°</div>
+                <input type="range" id="s-fov" min="15" max="120" step="1" value="60">
+                <div class="val" id="v-fov">60°</div>
             </div>
             <div class="toggle-row">
                 <input type="checkbox" id="flyMode">
@@ -197,6 +197,36 @@ select {
                 <button class="btn-sm" data-preset="wide-survey">wide survey</button>
             </div>
             <div class="note">Smooth cinematic transitions (~1.4 s, log-r interp).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Accretion disk (3D scene)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showDisk" checked>
+                <label for="showDisk">Render thin disk (ISCO → outer)</label>
+            </div>
+            <div class="ctrl">
+                <label>r_inner [M]</label>
+                <input type="range" id="s-disk-in" min="2.5" max="20" step="0.1" value="6">
+                <div class="val" id="v-disk-in">6.0 M (ISCO)</div>
+            </div>
+            <div class="ctrl">
+                <label>r_outer [M]</label>
+                <input type="range" id="s-disk-out" min="8" max="80" step="0.5" value="24">
+                <div class="val" id="v-disk-out">24 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-disk-bright" min="0" max="4" step="0.05" value="1">
+                <div class="val" id="v-disk-bright">1.00×</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showGrid">
+                <label for="showGrid">3-D coordinate grid (depth cue)</label>
+            </div>
+            <div class="note">Doppler beaming + gravitational blueshift at the
+                inner edge are computed via the photon's g-factor against a
+                local prograde-Keplerian emitter (I<sub>obs</sub> = g⁴ I<sub>emit</sub>).</div>
         </div>
 
         <div>
@@ -280,6 +310,21 @@ select {
     $('observer').addEventListener('change', (e) => app.setObserverType(e.target.value));
     $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
     $('showRing').addEventListener('change', () => app.toggleRing());
+
+    // Disk + grid controls
+    $('showDisk').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showDisk) app.toggleDisk();
+    });
+    $('showGrid').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showGrid) app.toggleGrid();
+    });
+    bindRange('s-disk-in', 'v-disk-in',
+        (v) => `${v.toFixed(1)} M${Math.abs(v - 6) < 0.05 ? ' (ISCO)' : ''}`,
+        (v) => app.setDiskInner(v));
+    bindRange('s-disk-out', 'v-disk-out',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setDiskOuter(v));
+    bindRange('s-disk-bright', 'v-disk-bright',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setDiskBrightness(v));
 
     const flyToggle = $('flyMode');
     const flyPill   = $('fly-pill');
