@@ -41,7 +41,8 @@
 
 import * as THREE from 'three';
 import { EarthSkin } from './earth-skin.js';
-import { SATELLITE_REFERENCES, density } from './upper-atmosphere-engine.js';
+import { SATELLITE_REFERENCES, density, fetchDebrisSample }
+    from './upper-atmosphere-engine.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
@@ -350,6 +351,13 @@ export class AtmosphereGlobe {
         // silently to the hardcoded values.
         this._fetchLiveTLEs().catch(err => {
             console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
+        });
+        // Background debris sample — 50 LEO debris pieces in the same
+        // altitude band as our assets, fetched from CelesTrak's debris
+        // SPECIAL list. Failures are silent; the page stays usable
+        // without debris context.
+        this._loadDebrisSample().catch(err => {
+            console.debug('[upper-atmosphere] debris load skipped:', err?.message || err);
         });
         this._buildAltitudeRing();
         this._buildSolarWind();
@@ -1201,6 +1209,162 @@ export class AtmosphereGlobe {
         return this._tleSummary || null;
     }
 
+    // ── LEO debris cloud ──────────────────────────────────────────────────
+    //
+    // Background hazards drawn as a single THREE.Points cloud (one
+    // draw call regardless of count). Each piece is propagated with
+    // the same phase-indexed lookup-table machinery the named probes
+    // use. They feed the conjunction screener so the asset-vs-debris
+    // risk surfaces in the panel.
+    //
+    // Visualization-grade only — operational risk modelling needs the
+    // full ~30k-object catalog (see js/satellite-tracker.js). 50 dots
+    // gives users visible LEO context without the Kessler-syndrome
+    // cost of a quadratic 4-asset × 30k debris screen.
+
+    async _loadDebrisSample({ count = 50 } = {}) {
+        let records;
+        try {
+            records = await fetchDebrisSample({ count, altMinKm: 350, altMaxKm: 900 });
+        } catch (err) {
+            console.debug('[upper-atmosphere] debris fetch failed:', err?.message || err);
+            return;
+        }
+        if (!records?.length) return;
+
+        // Build one probe entry per debris record. Each gets:
+        //   • Spec block with orbital + epoch
+        //   • _phase0 set to *current* M (M_epoch + n·dt) so the dot
+        //     starts where it should be in real-world right now.
+        //   • _propTable for O(1) screener lookup.
+        // They live in this._debris (parallel to _satProbes) so they
+        // don't pollute satellite drag analysis or the named-probe
+        // tooltip pipeline.
+        const debris = [];
+        for (const rec of records) {
+            const probe = this._buildDebrisProbe(rec);
+            if (probe) debris.push(probe);
+        }
+        this._debris = debris;
+        if (!debris.length) return;
+
+        this._buildDebrisCloud(debris);
+        // Re-screen now that we have debris in scope.
+        this._screenConjunctions();
+        try {
+            window.dispatchEvent(new CustomEvent('ua-debris-update', {
+                detail: { count: debris.length },
+            }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+    }
+
+    /**
+     * Build one debris probe from a parsed CelesTrak record. Computes
+     * M_now from epoch + mean motion (same convention as
+     * _upgradeProbeFromTLE), bakes the lookup table, and returns the
+     * probe entry. Returns null when the record has bogus elements.
+     */
+    _buildDebrisProbe(rec) {
+        const orb = rec.orbital;
+        const epochMs = orb.epoch ? Date.parse(orb.epoch) : NaN;
+        if (!Number.isFinite(epochMs) || !Number.isFinite(orb.meanMotionRevPerDay)) {
+            return null;
+        }
+        const n_rad_s = (orb.meanMotionRevPerDay * 2 * Math.PI) / 86400;
+        const dtSec   = (Date.now() - epochMs) / 1000;
+        const TAU = 2 * Math.PI;
+        let M_now = (orb.meanAnomalyDeg0 * Math.PI / 180) + n_rad_s * dtSec;
+        M_now = ((M_now % TAU) + TAU) % TAU;
+
+        const probe = {
+            spec: {
+                id: rec.id,
+                name: rec.name,
+                color: rec.color,
+                altitudeKm: rec.altitudeKm,
+                orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
+            },
+            _phase0: M_now,
+            _propTable: null,
+            _propTableN: 0,
+            _kind: 'debris',
+            mesh: null,           // debris are points in a shared cloud, not individual meshes
+        };
+        this._buildProbeLookup(probe);
+        return probe;
+    }
+
+    /**
+     * Build a single THREE.Points cloud for the debris. One draw call
+     * regardless of count; per-frame _stepDebris updates positions
+     * from the cached lookup tables.
+     */
+    _buildDebrisCloud(debris) {
+        const N = debris.length;
+        const positions = new Float32Array(N * 3);
+        // Seed with current positions so first paint isn't at origin.
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        for (let i = 0; i < N; i++) {
+            const p = _lookupProbePosition(debris[i], tNowSim);
+            positions[i * 3]     = p.x;
+            positions[i * 3 + 1] = p.y;
+            positions[i * 3 + 2] = p.z;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            color:       0xff7099,           // hazard pink
+            size:        0.014,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity:     0.75,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        if (this._debrisCloud) {
+            // Re-load: dispose the old.
+            this._satProbeGrp?.remove(this._debrisCloud);
+            this._debrisCloud.geometry.dispose();
+            this._debrisCloud.material.dispose();
+        }
+        this._debrisCloud = new THREE.Points(geom, mat);
+        this._debrisCloud.frustumCulled = false;
+        this._debrisCloud.userData = {
+            kind: 'debris-cloud',
+            id:   'debris',
+            name: `LEO debris sample (n=${N})`,
+            tooltip: 'Random sample of CelesTrak debris in the 350–900 km '
+                   + 'altitude band. Visualization context only — full '
+                   + 'risk modelling needs the complete catalog.',
+        };
+        this._debrisPositions = positions;
+        this._satProbeGrp.add(this._debrisCloud);
+    }
+
+    /**
+     * Per-frame debris position update. Uses the same simulated-time
+     * axis as _stepSatellites so debris and assets stay coherent.
+     */
+    _stepDebris(t) {
+        if (!this._debris?.length || !this._debrisPositions) return;
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = t * ts;
+        const pos = this._debrisPositions;
+        for (let i = 0; i < this._debris.length; i++) {
+            const p = _lookupProbePosition(this._debris[i], tNowSim);
+            const o = i * 3;
+            pos[o]     = p.x;
+            pos[o + 1] = p.y;
+            pos[o + 2] = p.z;
+        }
+        this._debrisCloud.geometry.attributes.position.needsUpdate = true;
+    }
+
+    /** Count of currently-tracked debris pieces. UI uses this for the
+     *  panel header. Returns 0 if the fetch hasn't resolved yet. */
+    getDebrisCount() { return this._debris?.length ?? 0; }
+
     _buildAltitudeRing() {
         this._ring = _ringMesh(1, 0.0045, 0x00ffe6, 0.85);
         this._ring.rotation.x = Math.PI / 2;
@@ -1782,6 +1946,7 @@ export class AtmosphereGlobe {
         // pass in seconds. Each probe has its own period, inclination,
         // and starting mean anomaly so paths don't all overlap.
         if (this._satProbes) this._stepSatellites(t);
+        if (this._debris)    this._stepDebris(t);
 
         // Conjunction screener: re-scan every 2 simulated seconds so
         // TCA times stay current as orbits evolve. Per-frame chord
@@ -1950,45 +2115,42 @@ export class AtmosphereGlobe {
     // see it occur after ~47 page-seconds.
 
     _setupConjunctionScreener() {
-        // 6 pairs for 4 probes is the max; we lazily build up to that.
         this._conjunctions = [];
         // Lines connecting predicted-close pairs, drawn with additive
         // blending so they read against the dark backdrop.
         this._conjunctionGroup = new THREE.Group();
         this._conjunctionGroup.name = 'conjunction-chords';
         this._scene.add(this._conjunctionGroup);
-        this._conjunctionLines = {};        // pairKey → THREE.Line
+        this._conjunctionLines = {};        // pairKey → THREE.Line — asset-asset, fixed
+        this._debrisChordPool  = [];        // reusable pool for top-N asset-debris threats
 
-        // Build one line per pair right away so endpoint updates don't
-        // pay for geometry creation in the hot path.
+        // Build one line per asset-asset pair right away so endpoint
+        // updates don't pay for geometry creation in the hot path.
         const probes = Object.values(this._satProbes || {});
         for (let i = 0; i < probes.length; i++) {
             for (let j = i + 1; j < probes.length; j++) {
                 const a = probes[i], b = probes[j];
                 const key = _pairKey(a.spec.id, b.spec.id);
-                const positions = new Float32Array(6);
-                const geom = new THREE.BufferGeometry();
-                geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-                const mat = new THREE.LineBasicMaterial({
-                    color:       0x888888,
-                    transparent: true,
-                    opacity:     0.0,
-                    depthWrite:  false,
-                    blending:    THREE.AdditiveBlending,
-                });
-                const line = new THREE.Line(geom, mat);
-                line.frustumCulled = false;
-                line.userData = {
-                    kind: 'conjunction-chord',
-                    id:   key,
-                    aId:  a.spec.id, bId: b.spec.id,
+                const line = _buildChordLine({
+                    aId:   a.spec.id, bId: b.spec.id,
                     aName: a.spec.name, bName: b.spec.name,
-                    tooltip: `Predicted close approach between ${a.spec.name} and ${b.spec.name}.`,
-                };
+                });
                 this._conjunctionLines[key] = line;
                 this._conjunctionGroup.add(line);
             }
         }
+
+        // Pre-allocate a small pool of chord lines for asset↔debris
+        // threats so the per-frame logic doesn't allocate. Three is
+        // enough — beyond that the scene gets cluttered and the panel
+        // already lists more in detail.
+        const POOL_SIZE = 3;
+        for (let i = 0; i < POOL_SIZE; i++) {
+            const line = _buildChordLine({});       // anonymous; reassigned per scan
+            this._debrisChordPool.push(line);
+            this._conjunctionGroup.add(line);
+        }
+
         this._lastConjScanTime = -Infinity;
     }
 
@@ -1997,9 +2159,10 @@ export class AtmosphereGlobe {
      * minutes and update this._conjunctions in place. Cheap; fed by
      * the per-probe phase-indexed lookup tables built at probe spawn.
      */
-    _screenConjunctions({ horizonMin = 90, stepSec = 30 } = {}) {
-        const probes = Object.values(this._satProbes || {});
-        if (probes.length < 2) {
+    _screenConjunctions({ horizonMin = 90, stepSec = 30, altPreFilterKm = 250 } = {}) {
+        const assets = Object.values(this._satProbes || {});
+        const debris = this._debris || [];
+        if (assets.length < 1) {
             this._conjunctions = [];
             return;
         }
@@ -2012,38 +2175,72 @@ export class AtmosphereGlobe {
         const nSteps = Math.max(2, Math.floor(horizonSec / stepSec) + 1);
 
         const out = [];
-        for (let i = 0; i < probes.length; i++) {
-            for (let j = i + 1; j < probes.length; j++) {
-                const a = probes[i], b = probes[j];
-                let minDist = Infinity, minStep = 0;
-                let firstDist = 0;
 
-                for (let k = 0; k < nSteps; k++) {
-                    const tSim = tNowSim + k * stepSec;
-                    const pa = _lookupProbePosition(a, tSim);
-                    const pb = _lookupProbePosition(b, tSim);
-                    const dx = pa.x - pb.x;
-                    const dy = pa.y - pb.y;
-                    const dz = pa.z - pb.z;
-                    const d2 = dx * dx + dy * dy + dz * dz;
-                    if (k === 0) firstDist = Math.sqrt(d2);
-                    if (d2 < minDist) {
-                        minDist = d2;
-                        minStep = k;
-                    }
-                }
+        // Inner helper to scan one pair across the horizon.
+        const scan = (a, b) => {
+            let minDist = Infinity, minStep = 0;
+            let firstDist = 0;
+            for (let k = 0; k < nSteps; k++) {
+                const tSim = tNowSim + k * stepSec;
+                const pa = _lookupProbePosition(a, tSim);
+                const pb = _lookupProbePosition(b, tSim);
+                const dx = pa.x - pb.x;
+                const dy = pa.y - pb.y;
+                const dz = pa.z - pb.z;
+                const d2 = dx * dx + dy * dy + dz * dz;
+                if (k === 0) firstDist = Math.sqrt(d2);
+                if (d2 < minDist) { minDist = d2; minStep = k; }
+            }
+            return {
+                currDistKm: firstDist * R_EARTH_KM,
+                tcaDistKm:  Math.sqrt(minDist) * R_EARTH_KM,
+                tcaTimeSec: minStep * stepSec,
+            };
+        };
 
-                const tcaDistRunit = Math.sqrt(minDist);
+        // ── Asset ↔ asset (always screened; the small N=4 case) ───────
+        for (let i = 0; i < assets.length; i++) {
+            for (let j = i + 1; j < assets.length; j++) {
+                const a = assets[i], b = assets[j];
+                // Altitude pre-filter — paired LEO assets pass easily,
+                // but it costs nothing here and keeps GEO/MEO additions
+                // robust against quadratic blow-ups in future rounds.
+                if (Math.abs(a.spec.altitudeKm - b.spec.altitudeKm) > altPreFilterKm) continue;
+                const r = scan(a, b);
                 out.push({
+                    kind: 'asset-asset',
                     aId: a.spec.id, bId: b.spec.id,
                     aName: a.spec.name, bName: b.spec.name,
                     aColor: a.spec.color, bColor: b.spec.color,
-                    currDistKm:  firstDist * R_EARTH_KM,
-                    tcaDistKm:   tcaDistRunit * R_EARTH_KM,
-                    tcaTimeSec:  minStep * stepSec,
+                    aNorad: a.spec.orbital?.noradId,
+                    bNorad: b.spec.orbital?.noradId,
+                    ...r,
                 });
             }
         }
+
+        // ── Asset ↔ debris ────────────────────────────────────────────
+        // Pre-filter cuts the propagation cost for orbits that can
+        // never come within altPreFilterKm anyway. For 4 assets × 50
+        // debris, typical post-filter pair count is 30–80 — a small
+        // fraction of the worst-case 200. Each surviving pair still
+        // runs nSteps=180 lookups so the screener stays bounded.
+        for (const a of assets) {
+            for (const b of debris) {
+                if (Math.abs(a.spec.altitudeKm - b.spec.altitudeKm) > altPreFilterKm) continue;
+                const r = scan(a, b);
+                out.push({
+                    kind: 'asset-debris',
+                    aId: a.spec.id, bId: b.spec.id,
+                    aName: a.spec.name, bName: b.spec.name,
+                    aColor: a.spec.color, bColor: b.spec.color,
+                    aNorad: a.spec.orbital?.noradId,
+                    bNorad: b.spec.orbital?.noradId,
+                    ...r,
+                });
+            }
+        }
+
         out.sort((p, q) => p.tcaDistKm - q.tcaDistKm);
         this._conjunctions = out;
     }
@@ -2055,46 +2252,65 @@ export class AtmosphereGlobe {
      */
     _updateConjunctionLines() {
         if (!this._conjunctionLines || !this._conjunctions) return;
-        // Build a quick id-pair → cached entry map for O(1) lookup.
+        const watchKm = 200;
+
+        // Build a quick id-pair → cached entry map for O(1) lookup
+        // when refreshing the fixed asset-asset chord lines.
         const byKey = {};
         for (const c of this._conjunctions) byKey[_pairKey(c.aId, c.bId)] = c;
 
+        // ── Asset ↔ asset: fixed lines, keyed by pair ─────────────────
         for (const key in this._conjunctionLines) {
             const line = this._conjunctionLines[key];
             const c = byKey[key];
             const pa = this._satProbes?.[line.userData.aId]?.mesh.position;
             const pb = this._satProbes?.[line.userData.bId]?.mesh.position;
-            if (!c || !pa || !pb) {
+            if (!c || !pa || !pb || c.tcaDistKm > watchKm) {
                 line.material.opacity = 0;
                 continue;
             }
-            // Filter: only show chords for pairs predicted to come
-            // within the watch threshold. Prevents the scene from
-            // looking like a yarn ball with all 6 chords always on.
-            const watchKm = 200;
-            if (c.tcaDistKm > watchKm) {
+            _paintChordLine(line, pa, pb, c, watchKm);
+        }
+
+        // ── Asset ↔ debris: top-N threats, painted into a small pool ──
+        // The pool is a fixed-size set of THREE.Lines that we
+        // repurpose each scan. Lines beyond the live threat count are
+        // hidden by setting opacity to 0.
+        const pool = this._debrisChordPool || [];
+        const debrisThreats = this._conjunctions
+            .filter(c => c.kind === 'asset-debris' && c.tcaDistKm <= watchKm)
+            .slice(0, pool.length);
+
+        for (let i = 0; i < pool.length; i++) {
+            const line = pool[i];
+            const c = debrisThreats[i];
+            if (!c) {
                 line.material.opacity = 0;
                 continue;
             }
-
-            // Endpoints: live positions.
-            const pos = line.geometry.attributes.position.array;
-            pos[0] = pa.x; pos[1] = pa.y; pos[2] = pa.z;
-            pos[3] = pb.x; pos[4] = pb.y; pos[5] = pb.z;
-            line.geometry.attributes.position.needsUpdate = true;
-
-            // Color by TCA distance — red <10 km, orange <50 km,
-            // yellow <200 km. Opacity ramps up as the actual current
-            // separation drops, so the line "lights up" right around
-            // the moment of closest approach.
-            const col = c.tcaDistKm < 10  ? 0xff3060
-                      : c.tcaDistKm < 50  ? 0xff8a3a
-                      : 0xffd060;
-            line.material.color.setHex(col);
-            // Opacity: 0.20 baseline + boost as current separation
-            // approaches TCA distance (i.e., they're nearly there).
-            const ratio = Math.max(0, 1 - (c.currDistKm / Math.max(watchKm, c.tcaDistKm * 4)));
-            line.material.opacity = 0.20 + 0.55 * ratio;
+            const pa = this._satProbes?.[c.aId]?.mesh.position;
+            // Debris position from the cloud's flat position buffer —
+            // O(1) lookup via the debris index.
+            const debrisIdx = (this._debris || []).findIndex(d => d.spec.id === c.bId);
+            if (!pa || debrisIdx < 0) {
+                line.material.opacity = 0;
+                continue;
+            }
+            const pos = this._debrisPositions;
+            const pb = {
+                x: pos[debrisIdx * 3],
+                y: pos[debrisIdx * 3 + 1],
+                z: pos[debrisIdx * 3 + 2],
+            };
+            // Update the line's userData with the live pair so the
+            // tooltip pipeline (raycaster) can describe the threat
+            // even though the pool slot was repurposed.
+            line.userData.aId  = c.aId;
+            line.userData.bId  = c.bId;
+            line.userData.aName = c.aName;
+            line.userData.bName = c.bName;
+            line.userData.tooltip = `Predicted close approach: ${c.aName} ↔ ${c.bName} (debris).`;
+            _paintChordLine(line, pa, pb, c, watchKm);
         }
     }
 
@@ -2252,6 +2468,51 @@ function _circularOrbitalSpeedKmS(altKm) {
  */
 function _pairKey(idA, idB) {
     return idA < idB ? `${idA}__${idB}` : `${idB}__${idA}`;
+}
+
+/**
+ * Build one chord-line scaffold (2-vertex BufferGeometry +
+ * additive-blended LineBasicMaterial). Used both for the fixed
+ * asset-asset pairs and for the recyclable debris-threat pool;
+ * userData is filled in by the caller / per-frame update.
+ */
+/**
+ * Paint one chord line from `pa` to `pb` and color/opacity-modulate
+ * by the TCA prediction `c`. Shared by the asset-asset branch and
+ * the debris-pool branch of _updateConjunctionLines.
+ */
+function _paintChordLine(line, pa, pb, c, watchKm) {
+    const pos = line.geometry.attributes.position.array;
+    pos[0] = pa.x; pos[1] = pa.y; pos[2] = pa.z;
+    pos[3] = pb.x; pos[4] = pb.y; pos[5] = pb.z;
+    line.geometry.attributes.position.needsUpdate = true;
+    // Color by predicted TCA distance — red <10 km, orange <50 km,
+    // yellow <200 km. Opacity ramps up as the *current* separation
+    // approaches the predicted TCA distance, so the line literally
+    // lights up at the moment of closest approach.
+    const col = c.tcaDistKm < 10  ? 0xff3060
+              : c.tcaDistKm < 50  ? 0xff8a3a
+              : 0xffd060;
+    line.material.color.setHex(col);
+    const ratio = Math.max(0, 1 - (c.currDistKm / Math.max(watchKm, c.tcaDistKm * 4)));
+    line.material.opacity = 0.20 + 0.55 * ratio;
+}
+
+function _buildChordLine(userData) {
+    const positions = new Float32Array(6);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color:       0x888888,
+        transparent: true,
+        opacity:     0.0,
+        depthWrite:  false,
+        blending:    THREE.AdditiveBlending,
+    });
+    const line = new THREE.Line(geom, mat);
+    line.frustumCulled = false;
+    line.userData = { kind: 'conjunction-chord', ...userData };
+    return line;
 }
 
 /**

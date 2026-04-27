@@ -661,13 +661,21 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>Conjunction watch</h2>
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">Conjunction watch</h2>
+                <span id="ua-debris-pill" class="ua-tle-pill ua-tle-pill--pending"
+                      title="LEO debris sample from CelesTrak (350–900 km altitude band)">
+                    <span class="ua-tle-dot"></span>
+                    <span id="ua-debris-label">no debris yet</span>
+                </span>
+            </div>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
                 Pairwise predicted closest-approach over the next 90
                 minutes of physical orbital evolution. Distances are
                 3-D centre-to-centre (not in-track). Chord lines on
                 the globe light up when a pair is predicted within
-                200 km.
+                200 km. <span style="color:#ff7099">●</span> = debris,
+                <span style="color:#0cc">●</span> = asset.
             </p>
             <div id="ua-conjunction"></div>
         </div>
@@ -800,6 +808,8 @@ input[type=range]::-moz-range-thumb {
             tleFreshness:   document.getElementById('ua-tle-freshness'),
             tleLabel:       document.getElementById('ua-tle-label'),
             conjunctionBox: document.getElementById('ua-conjunction'),
+            debrisPill:     document.getElementById('ua-debris-pill'),
+            debrisLabel:    document.getElementById('ua-debris-label'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
