@@ -29,7 +29,7 @@ uniform int   u_max_steps;
 uniform float u_tol;                    // RK45 abs/rel tolerance
 uniform int   u_show_ring;              // 1 = tint photon ring on capture
 uniform float u_time;
-uniform int   u_observer_type;          // 0 = static (outside horizon), 1 = free-fall (inside or near)
+uniform int   u_observer_type;          // 0 = static, 1 = free-fall (Painlevé-Gullstrand), 2 = ZAMO (= static for Schwarzschild), 3 = circular Keplerian (equator)
 
 #define M 1.0
 #define HORIZON_EPS 1.0e-3
@@ -240,22 +240,47 @@ void build_initial_ray(vec2 ndc, out float y0[8]) {
     float sinth = max(abs(sin(th)), 1.0e-4) * sign(sin(th) + (sin(th) == 0.0 ? 1.0 : 0.0));
 
     float kt_coord, kr_coord, kth_coord, kph_coord;
+    float n_r  = n_tetrad.x;
+    float n_th = n_tetrad.y;
+    float n_ph = n_tetrad.z;
 
-    if (u_observer_type == 0) {
-        // Static observer tetrad (valid only for r > 2M).
-        kt_coord  = 1.0 / sqf;
-        kr_coord  = n_tetrad.x * sqf;
-        kth_coord = n_tetrad.y / r;
-        kph_coord = n_tetrad.z / (r * sinth);
+    if (u_observer_type == 1) {
+        // Free-fall (Painleve-Gullstrand): infall from rest at infinity.
+        //   u^mu = (1/f, -sqrt(2M/r), 0, 0).
+        // Boosted radial tetrad vector: e_(r)^mu = (-sqrt(2M/r)/f, 1, 0, 0).
+        // theta and phi tetrad legs unchanged from static frame.
+        float v = sqrt(2.0 * M / r);
+        kt_coord  = (1.0 - n_r * v) / max(f, 1.0e-6);
+        kr_coord  = -v + n_r;
+        kth_coord = n_th / r;
+        kph_coord = n_ph / (r * sinth);
+    } else if (u_observer_type == 3 && abs(th - 0.5 * PI) < 0.05 && r > 3.0 * M + 0.01) {
+        // Prograde circular Keplerian orbit (equator only, r > 3M).
+        //   Omega_K = sqrt(M / r^3) (coordinate)
+        //   v_local = sqrt(M / (r - 2M)) (in static frame, +phi direction)
+        //   gamma   = 1 / sqrt(1 - 3M/r)
+        // Boost static tetrad in +phi -> rotate (e_t, e_ph).
+        float v_orb     = sqrt(M / (r - 2.0 * M));
+        float gamma_orb = 1.0 / sqrt(1.0 - 3.0 * M / r);
+        // boosted basis (in coord components):
+        //   e_(t)'  = gamma * (1/sqf, 0, 0, v_orb / (r sinth))
+        //   e_(ph)' = gamma * (v_orb/sqf, 0, 0, 1/(r sinth))
+        //   e_(r)', e_(th)' unchanged from static
+        float et_t  = gamma_orb / sqf;
+        float et_ph = gamma_orb * v_orb / (r * sinth);
+        float ep_t  = gamma_orb * v_orb / sqf;
+        float ep_ph = gamma_orb / (r * sinth);
+
+        kt_coord  = et_t   + n_ph * ep_t;
+        kr_coord  = n_r * sqf;
+        kth_coord = n_th / r;
+        kph_coord = et_ph + n_ph * ep_ph;
     } else {
-        // Radially in-falling observer from rest at infinity (Painleve-Gullstrand-like).
-        // u^mu = (1/f, -sqrt(2M/r), 0, 0) satisfies g_{mu nu} u^mu u^nu = -1 for r > 2M,
-        // and remains regular as r -> 2M except for the kt = 1/f term which still blows up
-        // in Schwarzschild t. For Phase 0 we just use static outside and never cross.
+        // Static / ZAMO observer (identical for Schwarzschild). Valid only r > 2M.
         kt_coord  = 1.0 / sqf;
-        kr_coord  = n_tetrad.x * sqf;
-        kth_coord = n_tetrad.y / r;
-        kph_coord = n_tetrad.z / (r * sinth);
+        kr_coord  = n_r * sqf;
+        kth_coord = n_th / r;
+        kph_coord = n_ph / (r * sinth);
     }
 
     y0[0] = u_cam_pos.x;     // t

@@ -29,7 +29,9 @@ Goal: verifiable, photograph-matchable Schwarzschild render. No disk yet. Prove 
 - [x] Celestial sphere texture (procedural starfield — lensed by construction)
 - [x] Visible event horizon + photon ring
 - [x] **Validation:** photon ring apparent radius = 2.6 r_s at infinity (analytical) — see `js/ton618/validation.js`; button in UI
-- [~] God-mode camera controls (orbit, pan, dolly; crash-through-horizon blocked at r = 2.02 M — free-fall tetrad lands in Phase 1)
+- [x] God-mode camera controls (full 3-DOF yaw/pitch/roll, inertia & drag, orbit + free-fly modes, cinematic presets, mini-map; crash-through-horizon blocked at r = 2.05 M — true horizon-crossing in Painlevé coords lands in Phase 1)
+- [x] Multi-tetrad observer dispatcher (static, Painlevé-Gullstrand free-fall, prograde Keplerian) with shader-side fallbacks
+- [x] Live GR diagnostics module (γ_static, proper accel., tidal Δa/L, free-fall &amp; orbital v/c, orbital period, proper distance &amp; light-time to horizon, Hawking T)
 
 ---
 

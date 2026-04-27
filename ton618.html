@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TON 618 Research Observatory — Parker Physics App</title>
-<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0: Schwarzschild baseline with RK45 null-geodesic ray tracing.">
+<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0.5: Schwarzschild baseline with RK45 null-geodesic ray tracing and a 3D god-mode camera.">
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
@@ -18,14 +18,25 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
     position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
     font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
     background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
-    border:1px solid rgba(255,140,0,.15); border-radius:6px;
-    padding:10px 14px; min-width:320px; color:#cca266; white-space:pre;
+    border:1px solid rgba(255,140,0,.18); border-radius:6px;
+    padding:10px 14px; min-width:380px; color:#cca266; white-space:pre;
 }
 #hud-title {
     position:absolute; top:10px; left:10px; transform:translateY(-18px);
     font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
     pointer-events:none;
 }
+#minimap-wrap {
+    position:absolute; top:10px; right:10px; z-index:10;
+    width:300px; height:140px;
+    background:rgba(0,0,0,.45); border:1px solid rgba(255,140,0,.18);
+    border-radius:6px; padding:4px;
+}
+#minimap-wrap > .mm-label {
+    position:absolute; top:-14px; left:6px; font-size:9px; letter-spacing:.2em;
+    color:#ff8800; text-transform:uppercase;
+}
+#minimap { width:100%; height:100%; display:block; }
 #validation {
     position:absolute; bottom:14px; left:14px; z-index:10;
     font-size:10px; line-height:1.6; color:#8fd7ff;
@@ -34,13 +45,22 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 #controls-hint {
     position:absolute; bottom:14px; right:14px; z-index:10;
-    font-size:9.5px; color:#777; background:rgba(0,0,0,.5);
-    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:7px 10px;
+    font-size:9.5px; color:#888; background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:8px 10px;
+    line-height:1.55; max-width:330px;
 }
+#controls-hint b { color:#ffaa44; letter-spacing:.05em; }
+#fly-pill {
+    position:absolute; top:160px; right:10px; z-index:10;
+    font-size:10px; letter-spacing:.18em; text-transform:uppercase;
+    color:#000; background:#ff8800; padding:3px 9px; border-radius:11px;
+    display:none;
+}
+#fly-pill.on { display:inline-block; }
 
 /* Right panel */
 #panel {
-    width:270px; min-width:270px; background:rgba(8,4,20,.95);
+    width:290px; min-width:290px; background:rgba(8,4,20,.95);
     border-left:1px solid rgba(255,120,0,.2);
     display:flex; flex-direction:column; overflow-y:auto;
     padding:12px; gap:10px;
@@ -68,6 +88,15 @@ select {
     font-family:inherit; font-size:11px; width:100%; transition:background .2s;
 }
 .btn:hover { background:rgba(255,100,0,.3); }
+.btn-row {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+}
+.btn-sm {
+    background:rgba(120,60,180,.15); border:1px solid rgba(160,100,220,.35);
+    color:#cda8ff; padding:5px 8px; border-radius:4px; cursor:pointer;
+    font-family:inherit; font-size:10.5px; transition:background .2s;
+}
+.btn-sm:hover { background:rgba(160,100,220,.3); }
 .shader-badge {
     display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
     color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
@@ -95,23 +124,41 @@ select {
 <div id="app">
     <div id="canvas-area">
         <canvas id="glCanvas"></canvas>
-        <div id="hud-title">Phase 0 · Schwarzschild Baseline · RK45 null-geodesic</div>
+        <div id="hud-title">Phase 0.5 · Schwarzschild · RK45 · 3D God-mode Camera</div>
         <div id="hud">booting…</div>
+        <div id="minimap-wrap">
+            <div class="mm-label">god-view · top / side</div>
+            <canvas id="minimap"></canvas>
+        </div>
+        <div id="fly-pill">⊙ free-fly</div>
         <div id="validation"></div>
-        <div id="controls-hint">Drag: orbit &nbsp;·&nbsp; Shift+Drag: look &nbsp;·&nbsp; Wheel: dolly &nbsp;·&nbsp; WASD/QE: strafe &nbsp;·&nbsp; R: reset</div>
+        <div id="controls-hint">
+            <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
+            <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
+            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset
+        </div>
     </div>
 
     <aside id="panel">
         <div>
-            <div class="shader-badge">▸ WebGL2 · RK45</div>
-            <div class="sec-title"><span class="phase-pill">Phase 0</span> Observatory</div>
+            <div class="shader-badge">▸ WebGL2 · RK45 · Tetrad-3DOF</div>
+            <div class="sec-title"><span class="phase-pill">Phase 0.5</span> Observatory</div>
             <div class="note">Research-grade Kerr geodesic observatory for TON 618
-                (M ≈ 6.6×10¹⁰ M☉). Currently a Schwarzschild baseline; spin is fixed at
+                (M ≈ 6.6×10¹⁰ M☉). Schwarzschild baseline with a 3D god-mode camera
+                that can sit in any of three physical observer frames. Spin remains
                 <i>a = 0</i> until Phase 1 lands.</div>
         </div>
 
         <div>
             <div class="sec-title">Observer (geometrized, M = 1)</div>
+            <div class="ctrl">
+                <label>Frame</label>
+                <select id="observer">
+                    <option value="static" selected>Static stationary (r &gt; 2M)</option>
+                    <option value="freefall">Painlevé-Gullstrand (free-fall)</option>
+                    <option value="keplerian">Circular Keplerian (eq., r &gt; 3M)</option>
+                </select>
+            </div>
             <div class="ctrl">
                 <label>Radial distance r [M]</label>
                 <input type="range" id="s-r" min="2.5" max="200" step="0.5" value="30">
@@ -132,6 +179,24 @@ select {
                 <input type="range" id="s-fov" min="15" max="120" step="1" value="45">
                 <div class="val" id="v-fov">45°</div>
             </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="flyMode">
+                <label for="flyMode">Free-fly (FPS) mode — press F</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Camera presets</div>
+            <div class="btn-row">
+                <button class="btn-sm" data-preset="far-equator">far · equator</button>
+                <button class="btn-sm" data-preset="iconic">iconic Interstellar</button>
+                <button class="btn-sm" data-preset="pole-down">pole-down</button>
+                <button class="btn-sm" data-preset="photon-graze">photon graze</button>
+                <button class="btn-sm" data-preset="horizon-skim">horizon skim</button>
+                <button class="btn-sm" data-preset="isco-orbit">ISCO orbit</button>
+                <button class="btn-sm" data-preset="wide-survey">wide survey</button>
+            </div>
+            <div class="note">Smooth cinematic transitions (~1.4 s, log-r interp).</div>
         </div>
 
         <div>
@@ -161,18 +226,19 @@ select {
 
         <div class="sep"></div>
         <div class="info-box">
-            <b>Phase 0 physics</b><br>
-            <span style="color:#ffaa44">① Tetrad:</span> static-observer orthonormal frame
-            {e_(t), e_(r), e_(θ), e_(φ)} in Schwarzschild coords; valid only for r &gt; 2M.<br>
-            <span style="color:#ffaa44">② Ray construction:</span> pixel → local 3-direction
-            → null 4-momentum k^μ via tetrad.<br>
-            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5) adaptive on 8-D
-            phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
-            <span style="color:#ffaa44">④ Termination:</span> horizon capture at r ≲ 2M, or
-            escape past r_far = 1200 M onto the celestial sphere.<br>
-            <span style="color:#ffaa44">⑤ Starfield:</span> procedural, hash-based — lensed
-            by construction (the shadow + photon-ring pattern emerges from the geodesics, not
-            a post-process).
+            <b>Phase 0.5 physics</b><br>
+            <span style="color:#ffaa44">① Tetrads:</span> three physically distinct
+            local Lorentz frames — static, Painlevé-Gullstrand free-faller, prograde
+            Keplerian. Each gives a different aberration / Doppler response.<br>
+            <span style="color:#ffaa44">② Ray construction:</span> pixel → local
+            3-direction → null 4-momentum k^μ via the active tetrad.<br>
+            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5)
+            adaptive on 8-D phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
+            <span style="color:#ffaa44">④ Termination:</span> horizon capture at
+            r ≲ 2M, or escape past r_far = 1200 M onto the celestial sphere.<br>
+            <span style="color:#ffaa44">⑤ HUD/mini-map:</span> live γ_static,
+            tidal Δa/L, free-fall &amp; orbital v/c, proper distance / light-time
+            to horizon, ISCO &amp; photon-sphere overlays.
         </div>
         <div class="note">
             UI note: TON 618 mass is <i>measured</i> (virial/SED);
@@ -185,12 +251,12 @@ select {
 <script type="module">
     import { boot } from './js/ton618/main.js';
 
-    const canvas = document.getElementById('glCanvas');
-    const hud    = document.getElementById('hud');
+    const canvas        = document.getElementById('glCanvas');
+    const hud           = document.getElementById('hud');
+    const minimapCanvas = document.getElementById('minimap');
 
-    const app = await boot({ canvas, hud });
+    const app = await boot({ canvas, hud, minimapCanvas });
 
-    // ── panel wiring ───────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
 
     function bindRange(id, valId, fmt, onChange) {
@@ -202,13 +268,52 @@ select {
         });
     }
 
-    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,   (v) => { app.state.cam.r = v; app.forceRender(); });
-    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.forceRender(); });
-    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,    (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.forceRender(); });
-    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,    (v) => { app.setFov(v); });
+    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,
+        (v) => { app.state.cam.r = v;             app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.setFov(v); });
 
+    $('observer').addEventListener('change', (e) => app.setObserverType(e.target.value));
     $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
     $('showRing').addEventListener('change', () => app.toggleRing());
+
+    const flyToggle = $('flyMode');
+    const flyPill   = $('fly-pill');
+    flyToggle.addEventListener('change', () => {
+        if (flyToggle.checked !== app.state.cam.flyMode) {
+            app.toggleFlyMode();
+        }
+        flyPill.classList.toggle('on', app.state.cam.flyMode);
+    });
+    // Sync the pill if the user presses F instead of clicking the checkbox.
+    setInterval(() => {
+        const on = app.state.cam.flyMode;
+        flyToggle.checked = on;
+        flyPill.classList.toggle('on', on);
+    }, 250);
+
+    document.querySelectorAll('[data-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const name = btn.getAttribute('data-preset');
+            app.applyPreset(name);
+            // Sync the sliders to the preset target after the transition begins;
+            // since the cam state lerps, watch a frame later.
+            setTimeout(() => {
+                $('s-r').value     = app.state.cam.r.toFixed(1);
+                $('v-r').textContent = `${app.state.cam.r.toFixed(1)} M`;
+                $('s-theta').value = (app.state.cam.theta * 180 / Math.PI).toFixed(0);
+                $('v-theta').textContent = `${(app.state.cam.theta * 180 / Math.PI).toFixed(0)}°`;
+                $('s-phi').value   = ((app.state.cam.phi * 180 / Math.PI) + 360) % 360;
+                $('v-phi').textContent = `${(((app.state.cam.phi * 180 / Math.PI) + 360) % 360).toFixed(0)}°`;
+                $('s-fov').value   = (app.state.cam.fovY * 180 / Math.PI).toFixed(0);
+                $('v-fov').textContent = `${(app.state.cam.fovY * 180 / Math.PI).toFixed(0)}°`;
+            }, 1500);
+        });
+    });
 
     $('btnValidate').addEventListener('click', () => {
         const v = $('validation');
