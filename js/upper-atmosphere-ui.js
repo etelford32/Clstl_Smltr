@@ -166,7 +166,15 @@ export class UpperAtmosphereUI {
             box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no probe pairs to screen</div>';
             return;
         }
-        const html = pairs.map(p => {
+        // Cap visible row count so a debris-heavy snapshot doesn't
+        // unroll a massive list. Asset-asset pairs always show; we
+        // append the closest debris threats up to a budget.
+        const MAX_ROWS = 12;
+        const assetPairs = pairs.filter(p => p.kind === 'asset-asset');
+        const debrisPairs = pairs.filter(p => p.kind === 'asset-debris');
+        const displayed = assetPairs.concat(debrisPairs).slice(0, MAX_ROWS);
+
+        const html = displayed.map(p => {
             const cls = p.tcaDistKm < 10  ? 'ua-conj-row--crit'
                       : p.tcaDistKm < 50  ? 'ua-conj-row--alert'
                       : p.tcaDistKm < 200 ? 'ua-conj-row--watch'
@@ -183,14 +191,21 @@ export class UpperAtmosphereUI {
             const etaText = etaMin < 1 ? 'now'
                            : etaMin < 60 ? `${etaMin.toFixed(0)}m`
                            : `${(etaMin / 60).toFixed(1)}h`;
+            // Truncate long debris names so the layout stays tidy.
+            const bShort = p.bName.length > 22 ? p.bName.slice(0, 21) + '…' : p.bName;
+            const aShort = p.aName.length > 22 ? p.aName.slice(0, 21) + '…' : p.aName;
+            const kindBadge = p.kind === 'asset-debris'
+                ? `<span style="color:#ff7099;font-size:.58rem;font-weight:700;letter-spacing:.04em">DEB</span>`
+                : '';
             return `
-              <div class="ua-conj-row ${cls}">
+              <div class="ua-conj-row ${cls}" title="${p.aName} ↔ ${p.bName}${p.bNorad ? ' · NORAD ' + p.bNorad : ''}">
                 <span class="ua-conj-pair">
                     <span class="ua-conj-dot" style="background:${p.aColor};color:${p.aColor}"></span>
-                    <span>${p.aName}</span>
+                    <span>${aShort}</span>
                     <span class="ua-conj-link">↔</span>
                     <span class="ua-conj-dot" style="background:${p.bColor};color:${p.bColor}"></span>
-                    <span>${p.bName}</span>
+                    <span>${bShort}</span>
+                    ${kindBadge}
                 </span>
                 <span class="ua-conj-meta">
                     <span>now ${currText} km</span>
@@ -202,7 +217,11 @@ export class UpperAtmosphereUI {
               </div>
             `;
         }).join('');
-        box.innerHTML = html;
+        // Footer when we truncated.
+        const trailing = pairs.length > displayed.length
+            ? `<div class="ua-dim" style="font-size:.62rem;margin-top:4px;text-align:right">+${pairs.length - displayed.length} more pairs screened</div>`
+            : '';
+        box.innerHTML = html + trailing;
     }
 
     // ── TLE freshness pill ─────────────────────────────────────────────────
@@ -218,8 +237,24 @@ export class UpperAtmosphereUI {
      */
     _bindTleFreshnessBus() {
         window.addEventListener('ua-tle-update', () => this._paintTleFreshness());
+        window.addEventListener('ua-debris-update', () => this._paintDebrisPill());
         clearInterval(this._tleAgeTimer);
         this._tleAgeTimer = setInterval(() => this._paintTleFreshness(), 60_000);
+        this._paintDebrisPill();
+    }
+
+    _paintDebrisPill() {
+        const pill  = this.el.debrisPill;
+        const label = this.el.debrisLabel;
+        if (!pill || !label) return;
+        const n = this.globe?.getDebrisCount?.() ?? 0;
+        if (n === 0) {
+            pill.className = 'ua-tle-pill ua-tle-pill--pending';
+            label.textContent = 'fetching debris…';
+        } else {
+            pill.className = 'ua-tle-pill ua-tle-pill--live';
+            label.textContent = `${n} debris tracked · LEO`;
+        }
     }
 
     _paintTleFreshness() {

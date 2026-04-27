@@ -666,6 +666,92 @@ export function getSnapshot({
     };
 }
 
+// ── Debris sampler ──────────────────────────────────────────────────────────
+//
+// Pulls a small random sample from CelesTrak's `debris` SPECIAL list,
+// filtered to the LEO band that matches our asset altitudes (so the
+// conjunction screener sees plausible threats rather than GEO debris
+// 36 000 km out of plane).
+//
+// Sample size is intentionally tiny — operational risk modelling needs
+// the full 30k-object catalog (see js/satellite-tracker.js); this
+// function is for *visualization-grade* debris context only. ~50
+// objects gives users a sense of the LEO density without burying the
+// scene in dots or driving the screener into a 4-asset × 30k
+// quadratic blow-up.
+//
+// CelesTrak is free, CORS-enabled, no auth. The /api/celestrak/tle
+// Edge proxy parses TLEs server-side and returns mean-element JSON.
+//
+// Deterministic-by-default: the `seed` option (when provided) drives
+// a tiny LCG so the same sample is reproducible across reloads —
+// useful for screenshots / regression tests.
+export async function fetchDebrisSample({
+    count       = 50,
+    altMinKm    = 350,
+    altMaxKm    = 900,
+    timeoutMs   = 5000,
+    seed        = null,
+} = {}) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+        const r = await fetch('/api/celestrak/tle?group=debris', {
+            signal: ctl.signal,
+            headers: { Accept: 'application/json' },
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const all = data?.satellites || [];
+        // Filter to LEO debris in our altitude band. Skip anything with
+        // a NaN inclination / mean motion / element so downstream
+        // propagation never hits NaNs.
+        const inBand = all.filter(s =>
+            Number.isFinite(s.perigee_km) && Number.isFinite(s.apogee_km) &&
+            Number.isFinite(s.inclination) && Number.isFinite(s.mean_motion) &&
+            s.perigee_km >= altMinKm && s.apogee_km <= altMaxKm
+        );
+        // Shuffle + take. Use a seeded RNG when `seed` is provided so
+        // the same set of debris shows on each reload.
+        const rand = seed != null ? _seededRand(seed) : Math.random;
+        const pool = inBand.slice();
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+        return pool.slice(0, count).map(s => ({
+            id:        `debris-${s.norad_id}`,
+            name:      s.name || `Debris ${s.norad_id}`,
+            noradId:   s.norad_id,
+            altitudeKm: Math.round((s.perigee_km + s.apogee_km) / 2),
+            color:     '#ff6688',
+            orbital:   {
+                noradId:        s.norad_id,
+                inclinationDeg: s.inclination,
+                raanDeg:        s.raan,
+                argPerigeeDeg:  s.arg_perigee,
+                meanAnomalyDeg0: s.mean_anomaly,        // M at TLE epoch — globe converts to M_now
+                eccentricity:   s.eccentricity,
+                periodMin:      s.period_min,
+                meanMotionRevPerDay: s.mean_motion,     // needed by globe for M_now propagation
+                epoch:          s.epoch,
+            },
+        }));
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+/** Tiny 32-bit LCG for the seeded debris sample. Good enough for
+ *  reproducibility — not cryptographically anything. */
+function _seededRand(seed) {
+    let s = (seed | 0) || 1;
+    return () => {
+        s = (Math.imul(s, 1664525) + 1013904223) | 0;
+        return ((s >>> 0) % 1_000_003) / 1_000_003;
+    };
+}
+
 // ── Storm presets ──────────────────────────────────────────────────────────
 // Archive values for the three events we gate SPARTA validation against.
 // "level" is a 0..1 visual cue for shell colouring; tune as the storm
