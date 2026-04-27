@@ -345,6 +345,10 @@ export class AtmosphereGlobe {
         // Pairwise conjunction screener — depends on the probe lookup
         // tables built inside _buildSatelliteRings, so we set up after.
         this._setupConjunctionScreener();
+        // Hover-highlight reticle for the debris cloud. Built up-front
+        // (cheap; one mesh) so _updateDebrisHighlight has a target to
+        // poke at the moment a hover lands on a dot.
+        this._buildDebrisHighlight();
         // Fire-and-forget live-TLE upgrade. Each probe starts on its
         // hardcoded mean elements; the fetch resolves a few hundred ms
         // later and patches the probe in place. Failures fall back
@@ -1386,6 +1390,63 @@ export class AtmosphereGlobe {
      *  panel header. Returns 0 if the fetch hasn't resolved yet. */
     getDebrisCount() { return this._debris?.length ?? 0; }
 
+    /**
+     * Build the hover-highlight ring used to disambiguate which dot
+     * the tooltip is describing. 50 pink dots all look the same; the
+     * cyan reticle gives the user a clear visual anchor. Ring orients
+     * perpendicular to the view direction each frame (always face-on)
+     * + pulses subtly so the eye lands on it immediately.
+     */
+    _buildDebrisHighlight() {
+        const geom = new THREE.TorusGeometry(0.025, 0.0028, 8, 32);
+        const mat  = new THREE.MeshBasicMaterial({
+            color:       0x00ffe6,
+            transparent: true,
+            opacity:     0.0,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        this._debrisHighlight = new THREE.Mesh(geom, mat);
+        this._debrisHighlight.visible = false;
+        this._debrisHighlight.frustumCulled = false;
+        this._debrisHighlight.userData = {
+            kind:    'debris-highlight',
+            tooltip: 'Currently-hovered debris piece.',
+        };
+        this._scene.add(this._debrisHighlight);
+    }
+
+    /**
+     * Per-frame: keep the highlight ring stuck to the hovered debris
+     * piece's live position + face-on to the camera. Reads
+     * _hoveredDebrisIdx (set by the tooltip pipeline) and pulses the
+     * ring scale slightly to draw the eye.
+     */
+    _updateDebrisHighlight(elapsedSec) {
+        if (!this._debrisHighlight) return;
+        const idx = this._hoveredDebrisIdx;
+        if (!Number.isFinite(idx) || !this._debrisPositions
+            || !this._debris?.[idx]) {
+            // Smoothly fade out instead of hard-hide so the ring
+            // doesn't pop when the cursor leaves the dot.
+            const m = this._debrisHighlight.material;
+            m.opacity = Math.max(0, m.opacity - 0.12);
+            this._debrisHighlight.visible = m.opacity > 0.01;
+            return;
+        }
+        const o = idx * 3;
+        const p = this._debrisPositions;
+        this._debrisHighlight.position.set(p[o], p[o + 1], p[o + 2]);
+        // Face-on to the camera: ring plane perpendicular to view ray.
+        this._debrisHighlight.lookAt(this._camera.position);
+        // Subtle pulse — sin(2π · 1.4 Hz · t) at ±10 % scale.
+        const s = 1 + 0.10 * Math.sin(elapsedSec * 8.8);
+        this._debrisHighlight.scale.setScalar(s);
+        const m = this._debrisHighlight.material;
+        m.opacity = Math.min(0.9, m.opacity + 0.18);
+        this._debrisHighlight.visible = true;
+    }
+
     _buildAltitudeRing() {
         this._ring = _ringMesh(1, 0.0045, 0x00ffe6, 0.85);
         this._ring.rotation.x = Math.PI / 2;
@@ -1905,10 +1966,18 @@ export class AtmosphereGlobe {
                 tip.style.top  = `${y}px`;
                 tip.style.opacity = '1';
                 this._hoveredUserData = ud;
+                // Drive the debris-cloud highlight reticle. Stays in
+                // sync with whichever dot the tooltip is describing —
+                // if the hover moves off a debris hit, the index is
+                // cleared and the reticle fades out.
+                this._hoveredDebrisIdx = ud?.kind === 'debris-piece'
+                    ? ud.debrisIdx
+                    : null;
                 this.canvas.style.cursor = 'pointer';
             } else {
                 tip.style.opacity = '0';
                 this._hoveredUserData = null;
+                this._hoveredDebrisIdx = null;
                 if (this._controls.getMode() === 'fly') {
                     this.canvas.style.cursor = 'crosshair';
                 } else {
@@ -1918,6 +1987,7 @@ export class AtmosphereGlobe {
         };
         const onLeave = () => {
             tip.style.opacity = '0';
+            this._hoveredDebrisIdx = null;
             this.canvas.style.cursor = 'grab';
         };
         // Click handler: clicking on the ISS probe flies the camera to it.
@@ -2011,6 +2081,10 @@ export class AtmosphereGlobe {
         // and starting mean anomaly so paths don't all overlap.
         if (this._satProbes) this._stepSatellites(t);
         if (this._debris)    this._stepDebris(t);
+        // Track the hovered debris with a face-on cyan reticle so
+        // users can tell which of 50 identical-looking pink dots the
+        // tooltip is describing. Cheap; just position + scale + lookAt.
+        this._updateDebrisHighlight(t);
 
         // Conjunction screener: re-scan every 2 simulated seconds so
         // TCA times stay current as orbits evolve. Per-frame chord
