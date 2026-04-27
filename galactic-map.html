@@ -301,7 +301,9 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <div><span class="label">Galactic b: </span><span class="val" id="hud-b">—</span></div>
             <div class="sep"></div>
             <div><span class="label">Dist from GC: </span><span class="val" id="hud-gc">—</span></div>
-            <div><span class="label">View radius: </span><span class="val" id="hud-view">—</span></div>
+            <div title="Real cosmological distance from the Sun corresponding to the camera's position (inverse log-mapping beyond 60 kly)">
+                <span class="label">Cam → Sun: </span><span class="val" id="hud-view">—</span>
+            </div>
         </div>
 
         <!-- Sidebar toggle -->
@@ -491,6 +493,18 @@ function fmtDist(ly) {
 function superscript(n) {
     return String(n).split('').map(c => '⁰¹²³⁴⁵⁶⁷⁸⁹'[+c] ?? c).join('');
 }
+// Display-compression ratio: real-distance / scene-distance.  Used to show
+// the user that a 13.5-Gly object is, e.g., displayed at 1 : 60,000 scale.
+// Returns formatted string like "1 : 4.8 × 10⁴".
+function fmtCompression(real_ly, scene_ly) {
+    if (scene_ly <= 0 || !isFinite(real_ly / scene_ly)) return '—';
+    const ratio = real_ly / scene_ly;
+    if (ratio < 1.05) return '1 : 1  (linear scale, no compression)';
+    if (ratio < 100)  return '1 : ' + ratio.toFixed(1);
+    const order    = Math.floor(Math.log10(ratio));
+    const mantissa = ratio / Math.pow(10, order);
+    return '1 : ' + mantissa.toFixed(1) + ' × 10' + superscript(order);
+}
 
 // ══════════════════════════════════════════════════════════════════════════
 //  GALACTIC COORDINATE SYSTEM (GCC = Galactic Center Cartesian)
@@ -565,6 +579,15 @@ const LOG_K       = 30000;   // scene-unit scale factor for log region
 function mapDistToScene(dist_ly) {
     if (dist_ly <= SCALE_BREAK) return dist_ly;
     return SCALE_BREAK + LOG_K * Math.log10(dist_ly / SCALE_BREAK);
+}
+
+// Reverse of mapDistToScene — given a scene-radius (from Sun), what real
+// cosmological distance does it correspond to?  Used by the HUD to convert
+// camera-position back to true ly so the user sees the actual distance they
+// are "at" rather than scene units.
+function inverseMapDistToScene(sceneR) {
+    if (sceneR <= SCALE_BREAK) return sceneR;
+    return SCALE_BREAK * Math.pow(10, (sceneR - SCALE_BREAK) / LOG_K);
 }
 
 // Like starPos() but uses the log-compressed radial distance.
@@ -1982,9 +2005,9 @@ function flyTo(preset, duration = 1400) {
     currentZoom = preset;
     document.querySelectorAll('#zoom-bar button').forEach(b => b.classList.remove('active'));
     document.getElementById('zoom-' + preset).classList.add('active');
-    const r = ZOOM_PRESETS[preset].radius;
-    document.getElementById('hud-view').textContent =
-        r >= 1000 ? fmtLy(r) : r + ' ly';
+    // hud-view is now updated live every frame in updateCoordDisplay() so
+    // it reflects the actual inverse-mapped camera distance, not the preset
+    // label.  No need to set anything here.
 }
 
 // ── Fly camera to orbit near a specific catalog star ────────────────────
@@ -3940,6 +3963,73 @@ const universeGuides = [];   // mesh objects toggled by camera distance
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
+//  DECADE RINGS — log-spaced scale markers
+//  One ring per order of magnitude (10 kly → 10 Gly), drawn at the
+//  log-compressed scene radius corresponding to that real distance.  Turns
+//  the log compression into a *visible* scale bar so users can read distance
+//  off the screen rather than guess from object proximity.
+//
+//  Visibility is per-ring: each appears when the camera is within
+//  [0.3 × sceneR, 8 × sceneR] of origin — enough to give context without
+//  cluttering the view.  Toggled in animate().
+// ══════════════════════════════════════════════════════════════════════════
+const decadeGuides = [];   // [{ring, lbl, sceneR}, ...]
+(function buildDecadeRings() {
+    const decades = [
+        { d:           10_000, label: '10 kly'  },
+        { d:          100_000, label: '100 kly' },
+        { d:        1_000_000, label: '1 Mly'   },
+        { d:       10_000_000, label: '10 Mly'  },
+        { d:      100_000_000, label: '100 Mly' },
+        { d:    1_000_000_000, label: '1 Gly'   },
+        { d:   10_000_000_000, label: '10 Gly'  },
+    ];
+    decades.forEach(({ d, label }) => {
+        const sceneR = mapDistToScene(d);
+
+        // ── Ring (full circle in galactic XZ plane) ────────────────
+        const pts = [];
+        for (let i = 0; i <= 360; i++) {
+            const a = i * Math.PI / 180;
+            pts.push(new THREE.Vector3(sceneR * Math.cos(a), 0, sceneR * Math.sin(a)));
+        }
+        const ring = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({
+                color: 0x4a5570, transparent: true, opacity: 0.32,
+                depthWrite: false,
+            }),
+        );
+        ring.visible = false;
+        scene.add(ring);
+
+        // ── Label sprite (anchored at +z edge of ring) ─────────────
+        const cv = document.createElement('canvas');
+        cv.width = 512; cv.height = 96;
+        const cx = cv.getContext('2d');
+        cx.font = 'bold 30px Segoe UI, sans-serif';
+        cx.fillStyle = 'rgba(170,190,225,0.90)';
+        cx.textAlign = 'center';
+        cx.fillText(label, 256, 46);
+        cx.font = '15px Segoe UI, sans-serif';
+        cx.fillStyle = 'rgba(120,140,180,0.65)';
+        cx.fillText('from Sun', 256, 76);
+
+        const lbl = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false,
+        }));
+        lbl.position.set(0, 0, sceneR);
+        // Scale label so it stays readable across the wide range of ring sizes
+        const lblBase = Math.max(2200, sceneR * 0.045);
+        lbl.scale.set(lblBase * 4, lblBase, 1);
+        lbl.visible = false;
+        scene.add(lbl);
+
+        decadeGuides.push({ ring, lbl, sceneR });
+    });
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
 //  SIDEBAR STAR LIST
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
@@ -4012,7 +4102,9 @@ function selectStar(id, doFly = false) {
         ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
         ['Distance from Sun', fmtDist(s.dist)],
         ['Distance from GC',  fmtDist(s.gcDist)],
-        ['⚠ Scale note', 'Scene position is log-compressed beyond 60 kly'],
+        ['Scene radius (from Sun)', fmtLy(mapDistToScene(s.dist))],
+        ['Display compression', fmtCompression(s.dist, mapDistToScene(s.dist)) + '  (real : displayed)'],
+        ['⚠ Scale note', 'Direction (l, b) is exact; radial distance is log-compressed beyond 60 kly'],
     ] : [
         ['Galactic l (longitude)', s.l.toFixed(4) + '°'],
         ['Galactic b (latitude)',  s.b.toFixed(4) + '°'],
@@ -4133,6 +4225,28 @@ function updateCoordDisplay() {
     document.getElementById('cd-l').textContent   = l_deg.toFixed(2) + '°';
     document.getElementById('cd-b').textContent   = b_deg.toFixed(2) + '°';
     document.getElementById('cd-dgc').textContent = fmtLy(camera.position.length()) + ' from GC';
+
+    // ── HUD "View radius" — inverse-mapped real distance ─────────────────
+    // The camera sits in scene space; objects beyond 60 kly are log-compressed
+    // by mapDistToScene().  Inverting that gives the user the *real* distance
+    // they're looking at (e.g. cam at scene-distance 200k from Sun corresponds
+    // to ~7 Gly real distance into the cosmos).  Capped at the cosmic-dawn
+    // shell — beyond ~13.5 Gly we're outside the observable universe.
+    const camFromSun = camera.position.distanceTo(SUN3);
+    const COSMIC_HORIZON = 13_500_000_000;
+    let viewLabel;
+    if (camFromSun <= SCALE_BREAK) {
+        // Linear region: scene units = ly, no remapping needed
+        viewLabel = fmtLy(camFromSun);
+    } else {
+        const realDist = inverseMapDistToScene(camFromSun);
+        if (realDist >= COSMIC_HORIZON) {
+            viewLabel = '≥ 13.5 Gly  (beyond cosmic horizon)';
+        } else {
+            viewLabel = fmtLy(realDist);
+        }
+    }
+    document.getElementById('hud-view').textContent = viewLabel;
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -4335,6 +4449,16 @@ function animate() {
         universeGuides.forEach(o => { o.visible = showGuides; });
     }
 
+    // ── Decade rings (10 kly · 100 kly · 1 Mly · ... · 10 Gly).  Each ring
+    //    appears only when the camera is within a useful range of it: too
+    //    close → ring is bigger than the view; too far → ring is a tiny dot.
+    decadeGuides.forEach(({ ring, lbl, sceneR }) => {
+        const v = camDistFromOrigin > sceneR * 0.30
+               && camDistFromOrigin < sceneR * 8.0;
+        ring.visible = v;
+        lbl.visible  = v;
+    });
+
     // ── M31 trajectory: show only in universe view ────────────────
     const showTraj = camDistFromOrigin > 200000;
     m31TrajObjects.forEach(o => { o.visible = showTraj; });
@@ -4356,7 +4480,7 @@ controls.update();
 // Mark galaxy button active
 document.getElementById('zoom-galaxy').classList.add('active');
 document.getElementById('zoom-local').classList.remove('active');
-document.getElementById('hud-view').textContent = fmtLy(ZOOM_PRESETS.galaxy.radius);
+// hud-view will be populated by updateCoordDisplay() on the first animate frame
 
 // ── Solar System cross-scale navigation ───────────────────────────────────────
 // The "☀️ Solar Sys." zoom-bar button navigates out to threejs.html
