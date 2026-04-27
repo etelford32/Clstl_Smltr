@@ -44,12 +44,25 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         rFar:      DEFAULTS.rFar,
         // Visible 3-D scene content (this is what makes the render look 3-D
         // instead of a black disc on stars).
-        showDisk:       true,
-        diskInner:      6.0,    // ISCO for Schwarzschild
-        diskOuter:      24.0,
-        diskThickness:  0.0,
-        diskBrightness: 1.0,
-        showGrid:       false,
+        showDisk:         true,
+        diskInner:        6.0,    // ISCO for Schwarzschild
+        diskOuter:        24.0,
+        diskThickness:    0.0,
+        diskBrightness:   1.0,
+        diskTInner:       12000.0,    // Kelvin (visualization-tuned, peak ≈ 12000 K)
+        diskShearSpeed:   18.0,       // multiplier on Keplerian Ω(r) for visible motion
+        diskMode:         0,          // 0 = opaque thin disk, 1 = translucent (RIAF)
+        showHotspot:      true,
+        hotspotRadius:    6.5,        // just outside ISCO
+        hotspotPhi0:      0.0,
+        hotspotStrength:  1.5,
+        showGrid:         false,
+        showPhotonSphere: false,
+
+        // Animation pump.
+        animate:        true,
+        animSpeed:      1.0,          // multiplier on real time
+        timeAccum:      0,            // accumulated "scene time" (sec) — passed to shader
         dirty:     true,
         time:      0,
         backend,
@@ -82,18 +95,26 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         const u = cameraUniforms(state.cam, { width: canvas.width, height: canvas.height });
         backend.setUniforms({
             ...u,
-            rFar:           state.rFar,
-            maxSteps:       state.maxSteps,
-            tol:            state.tol,
-            showRing:       state.showRing,
-            time:           state.time,
-            observerType:   state.cam.observerType,
-            showDisk:       state.showDisk,
-            diskInner:      state.diskInner,
-            diskOuter:      state.diskOuter,
-            diskThickness:  state.diskThickness,
-            diskBrightness: state.diskBrightness,
-            showGrid:       state.showGrid,
+            rFar:             state.rFar,
+            maxSteps:         state.maxSteps,
+            tol:              state.tol,
+            showRing:         state.showRing,
+            time:             state.timeAccum,
+            observerType:     state.cam.observerType,
+            showDisk:         state.showDisk,
+            diskInner:        state.diskInner,
+            diskOuter:        state.diskOuter,
+            diskThickness:    state.diskThickness,
+            diskBrightness:   state.diskBrightness,
+            diskTInner:       state.diskTInner,
+            diskShearSpeed:   state.diskShearSpeed,
+            diskMode:         state.diskMode,
+            showHotspot:      state.showHotspot,
+            hotspotRadius:    state.hotspotRadius,
+            hotspotPhi0:      state.hotspotPhi0,
+            hotspotStrength:  state.hotspotStrength,
+            showGrid:         state.showGrid,
+            showPhotonSphere: state.showPhotonSphere,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -117,6 +138,15 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         const moved = integrate(state.cam, dt);
         if (moved) state.dirty = true;
 
+        // Animation pump: advance scene-time so the disk shears, the hot-spot
+        // orbits, and turbulence churns. This forces a render every frame
+        // when there's anything moving — which is the whole point of an
+        // accretion disk.
+        if (state.animate && (state.showDisk || state.showHotspot)) {
+            state.timeAccum += dt * state.animSpeed;
+            state.dirty = true;
+        }
+
         if (state.dirty) {
             render();
             state.dirty = false;
@@ -138,9 +168,16 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         toggleRing()    { state.showRing = !state.showRing; state.dirty = true; },
         toggleDisk()    { state.showDisk = !state.showDisk; state.dirty = true; return state.showDisk; },
         toggleGrid()    { state.showGrid = !state.showGrid; state.dirty = true; return state.showGrid; },
+        togglePhotonSphere() { state.showPhotonSphere = !state.showPhotonSphere; state.dirty = true; return state.showPhotonSphere; },
+        toggleHotspot() { state.showHotspot = !state.showHotspot; state.dirty = true; return state.showHotspot; },
+        toggleAnim()    { state.animate = !state.animate; state.dirty = true; return state.animate; },
         setDiskInner(v){ state.diskInner = Math.max(2.5, Math.min(state.diskOuter - 0.5, v)); state.dirty = true; },
         setDiskOuter(v){ state.diskOuter = Math.max(state.diskInner + 0.5, Math.min(200, v)); state.dirty = true; },
         setDiskBrightness(v){ state.diskBrightness = Math.max(0, Math.min(8, v)); state.dirty = true; },
+        setDiskTInner(v){ state.diskTInner = Math.max(1500, Math.min(40000, v)); state.dirty = true; },
+        setDiskMode(m){ state.diskMode = (m === 'translucent' || m === 1) ? 1 : 0; state.dirty = true; },
+        setHotspotRadius(v){ state.hotspotRadius = Math.max(state.diskInner + 0.1, Math.min(state.diskOuter - 0.1, v)); state.dirty = true; },
+        setAnimSpeed(v){ state.animSpeed = Math.max(0, Math.min(20, v)); },
         setObserverType(t) {
             const v = OBSERVER_TYPES[t] ?? OBSERVER_TYPES.static;
             state.cam.observerType = v;
@@ -210,13 +247,24 @@ function updateHUD(hud, state, backend, backendName) {
         return x.toFixed(digits);
     };
 
+    const diskTag = !state.showDisk ? 'off'
+        : (state.diskMode === 1 ? `RIAF · T_in=${state.diskTInner|0}K`
+                                : `thin · T_in=${state.diskTInner|0}K`);
+    const animTag = state.animate ? `${state.animSpeed.toFixed(1)}× · t=${state.timeAccum.toFixed(1)}s`
+                                  : 'paused';
+
     const lines = [
         `[${backendName.toUpperCase()}] obs=${obs}  mode=${flyTag}  q=${state.quality}`,
         `r = ${fmt(cam.r)} M (${fmt(d.r_rs)} r_s)   θ = ${(cam.theta * 180/Math.PI).toFixed(1)}°   φ = ${(cam.phi * 180/Math.PI).toFixed(1)}°`,
         `yaw=${(cam.yaw*180/Math.PI).toFixed(1)}°  pitch=${(cam.pitch*180/Math.PI).toFixed(1)}°  roll=${(cam.roll*180/Math.PI).toFixed(1)}°  fov=${(cam.fovY*180/Math.PI).toFixed(1)}°`,
         `distance ≈ ${L.lh.toExponential(2)} lt-hr   ${L.ly.toExponential(2)} lt-yr`,
-        `proper distance to horizon: ${fmt(d.proper_distance_to_horizon_geom)} M`,
-        `light-time horizon→here: ${fmt(d.light_time_to_horizon_seconds)} s   (${fmt(d.light_time_to_horizon_seconds/86400)} d)`,
+        `─── radial-distance math ──────────────────────`,
+        `proper Δs (horizon→here)   = ${fmt(d.proper_distance_to_horizon_geom)} M`,
+        `tortoise r* = r + 2M ln…   = ${fmt(d.r_star_geom)} M`,
+        `Flamm embedding z(r)       = ${fmt(d.z_flamm_geom)} M`,
+        `proper circumference 2πr   = ${fmt(d.proper_circumference_geom)} M`,
+        `light-time horizon→here    = ${fmt(d.light_time_to_horizon_seconds)} s  (${fmt(d.light_time_to_horizon_seconds/86400)} d)`,
+        `Einstein deflection 4M/b   = ${fmt(d.deflection_angle_rad_at_fov*180/Math.PI, 3)}°  (b ≈ FOV edge)`,
         `─── observer kinematics ───────────────────────`,
         `time dilation γ_static = ${fmt(d.gamma_static, 4)}`,
         `proper grav. accel.    = ${fmt(d.a_static_SI, 3)} m/s²`,
@@ -224,10 +272,14 @@ function updateHUD(hud, state, backend, backendName) {
         `free-fall v/c          = ${fmt(d.v_freefall, 4)}`,
         `circular v/c (eq.)     = ${fmt(d.v_orbital, 4)}    γ_orb = ${fmt(d.gamma_orbit, 4)}`,
         `circular period (eq.)  = ${fmt(d.period_orbit_years, 3)} yr`,
-        `─── landmarks ─────────────────────────────────`,
-        `horizon r_h = ${d.r_horizon} M    photon sphere = ${d.r_photon} M    ISCO = ${d.r_isco} M`,
+        `─── landmarks & thermodynamics ─────────────────`,
+        `horizon r_h = ${d.r_horizon} M   photon sphere = ${d.r_photon} M   ISCO = ${d.r_isco} M`,
         `photon ring (analytic) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
-        `T_Hawking = ${fmt(d.T_hawking_K, 3)} K   (a heat death)`,
+        `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
+        `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
+        `─── scene ─────────────────────────────────────`,
+        `disk: ${diskTag}   r_in=${state.diskInner.toFixed(1)}M  r_out=${state.diskOuter.toFixed(1)}M`,
+        `anim: ${animTag}   hotspot: ${state.showHotspot ? `r=${state.hotspotRadius.toFixed(1)}M` : 'off'}`,
         `resolution ${backend.canvas.width}×${backend.canvas.height}   max_steps=${state.maxSteps}`,
     ];
     hud.textContent = lines.join('\n');

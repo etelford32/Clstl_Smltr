@@ -203,7 +203,14 @@ select {
             <div class="sec-title">Accretion disk (3D scene)</div>
             <div class="toggle-row">
                 <input type="checkbox" id="showDisk" checked>
-                <label for="showDisk">Render thin disk (ISCO → outer)</label>
+                <label for="showDisk">Render disk (ISCO → outer)</label>
+            </div>
+            <div class="ctrl">
+                <label>Optical regime</label>
+                <select id="diskMode">
+                    <option value="opaque" selected>Opaque thin disk</option>
+                    <option value="translucent">Translucent (RIAF / multi-image)</option>
+                </select>
             </div>
             <div class="ctrl">
                 <label>r_inner [M]</label>
@@ -216,17 +223,56 @@ select {
                 <div class="val" id="v-disk-out">24 M</div>
             </div>
             <div class="ctrl">
+                <label>Inner-edge T (Shakura-Sunyaev peak)</label>
+                <input type="range" id="s-disk-T" min="1500" max="40000" step="100" value="12000">
+                <div class="val" id="v-disk-T">12000 K (white-hot)</div>
+            </div>
+            <div class="ctrl">
                 <label>Brightness</label>
                 <input type="range" id="s-disk-bright" min="0" max="4" step="0.05" value="1">
                 <div class="val" id="v-disk-bright">1.00×</div>
             </div>
+            <div class="note">Color is a Tanner-Helland blackbody fit to T(r) =
+                T<sub>in</sub>(r<sub>in</sub>/r)<sup>3/4</sup>(1−√(r<sub>in</sub>/r))<sup>1/4</sup>,
+                Doppler-shifted by the photon's g-factor against the local
+                prograde-Keplerian emitter. I<sub>obs</sub> = g⁴ I<sub>emit</sub>.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Animation</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="anim" checked>
+                <label for="anim">Animate (Keplerian shear + hot-spot)</label>
+            </div>
+            <div class="ctrl">
+                <label>Speed (× Ω<sub>K</sub>(r))</label>
+                <input type="range" id="s-anim" min="0" max="20" step="0.5" value="1">
+                <div class="val" id="v-anim">1.0×</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showHotspot" checked>
+                <label for="showHotspot">Orbiting hot-spot</label>
+            </div>
+            <div class="ctrl">
+                <label>Hot-spot r [M]</label>
+                <input type="range" id="s-hot-r" min="3.5" max="40" step="0.1" value="6.5">
+                <div class="val" id="v-hot-r">6.5 M</div>
+            </div>
+            <div class="note">The disk pattern shears at the local Ω(r) ∝ r<sup>−3/2</sup>,
+                so inner orbits visibly out-pace outer ones — the same physics
+                that drives MRI turbulence.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Overlays</div>
             <div class="toggle-row">
                 <input type="checkbox" id="showGrid">
-                <label for="showGrid">3-D coordinate grid (depth cue)</label>
+                <label for="showGrid">3-D coordinate grid shells (10M, 30M)</label>
             </div>
-            <div class="note">Doppler beaming + gravitational blueshift at the
-                inner edge are computed via the photon's g-factor against a
-                local prograde-Keplerian emitter (I<sub>obs</sub> = g⁴ I<sub>emit</sub>).</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showPhotonSphere">
+                <label for="showPhotonSphere">Photon-sphere shell glow (r = 3M)</label>
+            </div>
         </div>
 
         <div>
@@ -318,6 +364,17 @@ select {
     $('showGrid').addEventListener('change', (e) => {
         if (e.target.checked !== app.state.showGrid) app.toggleGrid();
     });
+    $('showPhotonSphere').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showPhotonSphere) app.togglePhotonSphere();
+    });
+    $('showHotspot').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showHotspot) app.toggleHotspot();
+    });
+    $('anim').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.animate) app.toggleAnim();
+    });
+    $('diskMode').addEventListener('change', (e) => app.setDiskMode(e.target.value));
+
     bindRange('s-disk-in', 'v-disk-in',
         (v) => `${v.toFixed(1)} M${Math.abs(v - 6) < 0.05 ? ' (ISCO)' : ''}`,
         (v) => app.setDiskInner(v));
@@ -325,6 +382,21 @@ select {
         (v) => `${v.toFixed(1)} M`, (v) => app.setDiskOuter(v));
     bindRange('s-disk-bright', 'v-disk-bright',
         (v) => `${v.toFixed(2)}×`, (v) => app.setDiskBrightness(v));
+    bindRange('s-disk-T', 'v-disk-T',
+        (v) => {
+            let label;
+            if (v < 3500) label = 'red-hot';
+            else if (v < 6500) label = 'sun-like';
+            else if (v < 10000) label = 'white-hot';
+            else if (v < 20000) label = 'blue-hot';
+            else label = 'UV';
+            return `${(v|0)} K (${label})`;
+        },
+        (v) => app.setDiskTInner(v));
+    bindRange('s-anim', 'v-anim',
+        (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
+    bindRange('s-hot-r', 'v-hot-r',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
 
     const flyToggle = $('flyMode');
     const flyPill   = $('fly-pill');
