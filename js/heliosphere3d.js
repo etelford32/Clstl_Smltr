@@ -120,9 +120,11 @@ const ORBIT_INCL = {
 /**
  * Visual Moon orbit radius (scene units).
  * Real Moon orbit is 0.00257 AU = 0.257 scene units, which is INSIDE Earth's
- * sphere (R.earth = 0.78).  Scale up ~12× for visibility.
+ * visual sphere (R.earth = 0.78).  Scaled out so the Moon also sits *outside*
+ * Earth's bow shock (~13 R⊕) — this lets the lunar wake become visible in the
+ * solar wind particle stream rather than being hidden inside the magnetopause.
  */
-const MOON_VIS_AU = 0.032;
+const MOON_VIS_AU = 0.16;
 
 /**
  * Mars moon orbital data (J2000 epoch, simplified synodic elements).
@@ -460,6 +462,8 @@ export class Heliosphere3D {
         // Sweet-Parker / Petschek reconnection events at HCS
         this._reconnEvents = [];
         this._planetMeshes = {};
+        // Scratch vector reused each frame to avoid per-particle allocation
+        this._tmpVec3 = new THREE.Vector3();
 
         // Bound handlers
         this._onSwpc      = this._onSwpc.bind(this);
@@ -1805,21 +1809,51 @@ export class Heliosphere3D {
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
         }
 
-        // ── Earth bow shock — magnetosheath particle marking ─────────────────
+        // ── Boundary interactions: bow shock, magnetopause, moon ─────────────
         //
-        // Particles whose Parker-spiral position lands inside the bow shock are
-        // compressed and shock-heated at the magnetosheath.  We flag them with
-        // a_speed = 0.3 so the vertex shader renders them as hot orange plasma.
-        // The physical bow shock radius (Farris-Russell) comes from the live
-        // MagnetosphereEngine analysis; fallback is 13 Re (scene units).
+        //  Layer 1 — Bow shock (Farris-Russell)
+        //     Particles inside bsR are flagged a_speed = 0.3 → vertex shader
+        //     renders them as hot, compressed magnetosheath plasma.
         //
-        // Implementation note: we do NOT override _windPos — particles continue
-        // along their natural Parker spiral.  Only the shader colour/size changes
-        // to visualise the interaction zone.  This avoids discontinuities.
+        //  Layer 2 — Magnetopause (Shue-1998 R0, sphere approximation)
+        //     Particles inside mpR are *deflected*: projected radially out to
+        //     the boundary so the streamline drapes around it.  This produces
+        //     the visible bowed plasma shell on the dayside.
+        //
+        //  Layer 3 — Cusp absorption
+        //     A small fraction of particles in the inner magnetopause shell
+        //     (deeper than 0.85 R0) precipitate into the polar cusps each
+        //     frame — visualised by respawning them at the corona.  Rate is
+        //     amplified by southward Bz (substorm injection).
+        //
+        //  Layer 4 — Lunar regolith absorption
+        //     The Moon has no atmosphere or magnetic field; any particle that
+        //     touches its surface is absorbed.  The downstream void becomes a
+        //     visible lunar wake whenever the moon is outside the magnetotail.
+        //
+        // All four checks share a single per-particle loop so the per-frame
+        // cost is ~one extra distance test.
         if (this._earthGroup && this._windSpeedAttr) {
-            const ep  = this._earthGroup.position;
-            const bsR = (this._magnetosphere?.analysis?.bowShockR0 ?? 13) * 1.1; // slight padding
+            const ep   = this._earthGroup.position;
+            const A    = this._magnetosphere?.analysis;
+            const bsR  = (A?.bowShockR0     ?? 13) * 1.1;   // bow shock + small pad
             const bsR2 = bsR * bsR;
+            const mpR  = (A?.magnetopauseR0 ?? 10);          // magnetopause R0
+            const mpR2 = mpR * mpR;
+            const cuspR  = mpR * 0.85;                        // inner cusp shell
+            const cuspR2 = cuspR * cuspR;
+            // Cusp-precipitation probability per frame (rises with southward Bz)
+            const cuspProb = 0.012 * (1 + bzSouth * 4);
+
+            // Resolve moon world position once (Earth-local moon × earthGroup xform)
+            let mwx = NaN, mwy = 0, mwz = 0, mr2 = 0;
+            if (this._moonMesh) {
+                this._moonMesh.updateWorldMatrix(true, false);
+                const mp = this._moonMesh.getWorldPosition(this._tmpVec3);
+                mwx = mp.x; mwy = mp.y; mwz = mp.z;
+                const mr = R.moon * 1.45;   // capture radius slightly > visual sphere
+                mr2 = mr * mr;
+            }
 
             for (let i = 0; i < N_WIND; i++) {
                 const px = this._windPos[i * 3]     - ep.x;
@@ -1830,11 +1864,37 @@ export class Heliosphere3D {
                 if (d2 < bsR2) {
                     // Inside bow shock — mark as magnetosheath plasma
                     this._windSpeedAttr[i] = 0.3;
+
+                    if (d2 < mpR2) {
+                        // Inside magnetopause — deflect tangentially to the
+                        // closed-magnetosphere surface (sphere approximation).
+                        const d = Math.sqrt(d2);
+                        const k = mpR / Math.max(0.001, d);
+                        this._windPos[i * 3]     = ep.x + px * k;
+                        this._windPos[i * 3 + 1] = ep.y + py * k;
+                        this._windPos[i * 3 + 2] = ep.z + pz * k;
+
+                        // Cusp leakage: rare absorption deep inside the shell
+                        if (d2 < cuspR2 && Math.random() < cuspProb) {
+                            this._spawnWind(i, false);
+                            continue;   // skip moon check — particle is gone
+                        }
+                    }
                 } else if (this._windSpeedAttr[i] > 0.15 && this._windSpeedAttr[i] < 0.45) {
                     // Exited bow shock — restore normal fast/slow stream type
                     const armIdx = this._windArmIdx ? this._windArmIdx[i] : 0;
                     this._windSpeedAttr[i] =
                         (this._armTypes && this._armTypes[armIdx] === 1) ? 1.0 : 0.0;
+                }
+
+                // Lunar absorption — independent of magnetosphere check
+                if (!isNaN(mwx)) {
+                    const lx = this._windPos[i * 3]     - mwx;
+                    const ly = this._windPos[i * 3 + 1] - mwy;
+                    const lz = this._windPos[i * 3 + 2] - mwz;
+                    if (lx * lx + ly * ly + lz * lz < mr2) {
+                        this._spawnWind(i, false);
+                    }
                 }
             }
         }
