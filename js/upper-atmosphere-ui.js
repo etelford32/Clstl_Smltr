@@ -77,8 +77,13 @@ export class UpperAtmosphereUI {
         this._bindSourcePill();
         this._bindSwpcEventBus();
         this._bindCameraControls();
+        this._bindTleFreshnessBus();
         this._bindResize();
         this._paintSourcePill();
+        // Initial paint of the TLE-freshness pill — mostly so the
+        // pulsing "fetching" state shows on first paint instead of
+        // appearing on the first refresh().
+        this._paintTleFreshness();
         // Push climatology defaults so the magnetopause / bow shock /
         // streamers all light up at first paint instead of sitting on a
         // hard-coded uniform value.
@@ -124,14 +129,135 @@ export class UpperAtmosphereUI {
      * globe and re-sampling local physics from the engine. Decoupled
      * from refresh() so the HUD stays correct as the user flies around
      * without having to spam the full slider-driven refresh.
+     *
+     * Also re-paints the satellite drag-analysis panel — its altitudes
+     * change every frame as probes orbit, so a static refresh-only
+     * paint would show stale values for every satellite with non-zero
+     * eccentricity. 4 Hz is plenty smooth for a side panel.
      */
     _startCameraHUDLoop() {
         const tick = () => {
             this._paintCameraHUD();
+            this._paintSatelliteDrag();
         };
         clearInterval(this._camHUDTimer);
         this._camHUDTimer = setInterval(tick, 250);
         tick();
+    }
+
+    // ── TLE freshness pill ─────────────────────────────────────────────────
+
+    /**
+     * Listen for ua-tle-update events fired by the globe's
+     * _fetchLiveTLEs(). The event detail is { total, live, fetchedAt }
+     * — we use that to repaint the freshness pill from "fetching…"
+     * to "live · X ago" (or "fallback" if every fetch failed).
+     *
+     * Also schedule a 60-s repaint so the "X ago" text stays current
+     * as time advances (without forcing a network refetch).
+     */
+    _bindTleFreshnessBus() {
+        window.addEventListener('ua-tle-update', () => this._paintTleFreshness());
+        clearInterval(this._tleAgeTimer);
+        this._tleAgeTimer = setInterval(() => this._paintTleFreshness(), 60_000);
+    }
+
+    _paintTleFreshness() {
+        const pill  = this.el.tleFreshness;
+        const label = this.el.tleLabel;
+        if (!pill || !label) return;
+
+        const summary = this.globe?.getTleSummary?.();
+        // Keep CSS class names in sync with upper-atmosphere.html.
+        const setKind = (kind) => {
+            pill.className = `ua-tle-pill ua-tle-pill--${kind}`;
+        };
+
+        if (!summary) {
+            setKind('pending');
+            label.textContent = 'fetching TLEs…';
+            return;
+        }
+        const { total, live, fetchedAt } = summary;
+        const ageS = Math.max(0, (Date.now() - fetchedAt) / 1000);
+        const agoStr = _ageString(ageS);
+
+        if (live === 0) {
+            setKind('fallback');
+            label.textContent = `fallback elements · 0 / ${total} live`;
+        } else if (live < total) {
+            setKind('partial');
+            label.textContent = `live ${live} / ${total} · ${agoStr}`;
+        } else {
+            setKind('live');
+            label.textContent = `live TLEs · ${total} sats · ${agoStr}`;
+        }
+    }
+
+    /**
+     * Render the per-satellite drag-analysis rows. Pulls a snapshot
+     * from globe.getSatelliteDragAnalysis() (sorted by q descending)
+     * and lays out one row per satellite with a horizontal q-bar so
+     * users see "ISS feels 10× more drag than Iridium" at a glance.
+     *
+     * Click on a row flies the camera to that satellite — same path
+     * the canvas-click on a probe sprite uses.
+     */
+    _paintSatelliteDrag() {
+        const box = this.el.satDrag;
+        if (!box) return;
+        const states = this.globe.getSatelliteDragAnalysis?.() || [];
+        if (states.length === 0) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no orbital satellites tracked</div>';
+            return;
+        }
+        // Use the highest q in the snapshot to scale the bars so the
+        // ranking is visible even when all values are tiny.
+        const maxQ = states.reduce((m, s) => Math.max(m, s.qPa ?? 0), 1e-12);
+        const html = states.map(s => {
+            const colour   = s.color || '#0cc';
+            const qmPaText = Number.isFinite(s.qmPa) ? s.qmPa.toFixed(2) : '—';
+            const altText  = Number.isFinite(s.altKm) ? `${s.altKm.toFixed(0)} km` : '—';
+            const noradTxt = s.noradId ? `NORAD ${s.noradId}` : '';
+            const inclTxt  = Number.isFinite(s.inclinationDeg) ? `${s.inclinationDeg.toFixed(1)}°` : '';
+            const liveTxt  = s.tleSource === 'live' ? '● live' : '○ fallback';
+            const liveCol  = s.tleSource === 'live' ? '#0cc'   : '#c87';
+            const meta     = [noradTxt, inclTxt].filter(Boolean).join(' · ')
+                          + ` · <span style="color:${liveCol}">${liveTxt}</span>`;
+            const fillPct  = Math.max(2, Math.min(100, ((s.qPa ?? 0) / maxQ) * 100));
+            return `
+                <div class="ua-sat-row" data-sat-id="${s.id}" title="Click to fly the camera to ${s.name}">
+                    <span class="ua-sat-dot" style="background:${colour};color:${colour}"></span>
+                    <span class="ua-sat-name">
+                        <span class="ua-sat-title">${s.name}</span>
+                        <span class="ua-sat-meta">${meta}</span>
+                    </span>
+                    <span class="ua-sat-alt">${altText}</span>
+                    <span class="ua-sat-q" style="color:${colour}">${qmPaText}<span style="color:#556;font-weight:400"> mPa</span></span>
+                    <span class="ua-sat-q-bar"><span class="ua-sat-q-fill" style="width:${fillPct}%;background:${colour}"></span></span>
+                </div>
+            `;
+        }).join('');
+        // innerHTML is fine here — values come from engine + spec
+        // (no user-supplied strings). Re-attach click handlers each
+        // re-paint since we rewrite the DOM.
+        box.innerHTML = html;
+        box.querySelectorAll('.ua-sat-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const id = row.dataset.satId;
+                if (!id) return;
+                // Switch to fly mode if we're still in orbit so the
+                // camera-anim lands somewhere useful instead of being
+                // clamped back to the planet centre.
+                if (this.globe.getCameraMode?.() === 'orbit') {
+                    this.globe.setCameraMode?.('fly');
+                    if (this.el.camOrbitBtn) this.el.camOrbitBtn.classList.remove('ua-cam-on');
+                    if (this.el.camFlyBtn)   this.el.camFlyBtn  .classList.add('ua-cam-on');
+                    if (this.el.camMode)     this.el.camMode.textContent = 'fly';
+                }
+                this.globe.flyToSatellite?.(id);
+            });
+        });
     }
 
     _paintCameraHUD() {
@@ -1030,4 +1156,15 @@ function _pillFor(model, useBackend) {
                     : 'In-browser surrogate — backend calls disabled. Click to re-enable Auto mode.',
             };
     }
+}
+
+/**
+ * Compact "N s/m/h ago" formatter for the TLE freshness pill.
+ * Caps at hours since CelesTrak refreshes every ~8h — anything
+ * older than that and the user should see the unit clearly.
+ */
+function _ageString(seconds) {
+    if (seconds < 60)   return `${Math.round(seconds)}s ago`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+    return `${(seconds / 3600).toFixed(1)}h ago`;
 }

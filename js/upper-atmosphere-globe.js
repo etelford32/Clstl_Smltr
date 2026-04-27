@@ -341,6 +341,13 @@ export class AtmosphereGlobe {
         this._buildLayerParticles();
         this._buildLayerVectorFields();
         this._buildSatelliteRings();
+        // Fire-and-forget live-TLE upgrade. Each probe starts on its
+        // hardcoded mean elements; the fetch resolves a few hundred ms
+        // later and patches the probe in place. Failures fall back
+        // silently to the hardcoded values.
+        this._fetchLiveTLEs().catch(err => {
+            console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
+        });
         this._buildAltitudeRing();
         this._buildSolarWind();
         if (this.opts.stars) this._initStars();
@@ -367,6 +374,10 @@ export class AtmosphereGlobe {
             const sys = new LayerParticleSystem({
                 parent: this._particleGroup,
                 layer,
+                // Sun direction drives the per-particle thermospheric
+                // wind (subsolar→antisolar tangent flow). Stored on
+                // each system; setSunDir() can update it later.
+                sunDir: this._sunDir,
             });
             this._particles[layer.id] = sys;
         }
@@ -840,13 +851,27 @@ export class AtmosphereGlobe {
     }
 
     _buildSatelliteRings() {
-        this._satGroup = new THREE.Group();
-        this._satRings = [];
+        // Two-tier overlay:
+        //  • _satGroup     — flat reference rings at each altitude. The
+        //                    Kármán line (non-orbital) gets only this.
+        //  • _satProbeGrp  — moving sprites + inclined orbital paths for
+        //                    every entry that has an `orbital` block.
+        //
+        // The rings are kept around as zoomed-out "altitude shell"
+        // indicators; the sprites + paths render the actual inclined
+        // orbit at one period worth of points so users see the real
+        // geometry instead of a fictitious flat circle.
+        this._satGroup     = new THREE.Group();
+        this._satProbeGrp  = new THREE.Group();
+        this._satProbeGrp.name = 'satellite-probes';
+        this._satRings     = [];
+        this._satProbes    = {};      // id → { mesh, path, spec, _phase0 }
+
         for (const sat of SATELLITE_REFERENCES) {
             const r = 1 + sat.altitudeKm / R_EARTH_KM;
             // Slight tilt per ring so they don't all overlap on one plane.
             const tilt = (sat.altitudeKm % 31) * Math.PI / 180;
-            const ring = _ringMesh(r, 0.004, _hex(sat.color), 0.75);
+            const ring = _ringMesh(r, 0.004, _hex(sat.color), sat.orbital ? 0.45 : 0.75);
             ring.rotation.x = Math.PI / 2 + tilt * 0.05;
             ring.rotation.y = tilt * 0.8;
             ring.userData = {
@@ -858,80 +883,285 @@ export class AtmosphereGlobe {
             };
             this._satRings.push(ring);
             this._satGroup.add(ring);
+
+            // For orbital objects, also build a moving probe + an
+            // inclined orbital-path polyline.
+            if (sat.orbital) this._buildSatelliteProbe(sat);
         }
         this._scene.add(this._satGroup);
-
-        // ── ISS as a moving probe ─────────────────────────────────────
-        // The static ring already exists for ISS at 420 km — we add a
-        // small sprite *along* it that propagates the orbit so users
-        // have a moving marker to click on. The sprite carries the
-        // kind='iss-probe' userData so the click handler can fly the
-        // camera to it and the tooltip can show local atmosphere
-        // physics + drag pressure.
-        this._buildISSProbe();
+        this._scene.add(this._satProbeGrp);
     }
 
-    _buildISSProbe() {
-        const issAlt = 420;
-        const r = 1 + issAlt / R_EARTH_KM;
+    /**
+     * Build a moving satellite probe + an inclined orbital-path
+     * polyline for one SATELLITE_REFERENCES entry. The probe is
+     * tagged kind='sat-probe' (identical handling for every satellite)
+     * with `id` carrying the satellite key so click/tooltip can resolve
+     * the right spec.
+     *
+     * Orbital propagation uses the entry's mean elements directly —
+     * good enough for a "visualisation-grade" ground track. A live TLE
+     * fetch from /api/celestrak/tle can upgrade the elements after boot.
+     */
+    _buildSatelliteProbe(spec) {
+        const colorHex = _hex(spec.color);
+        const altKm    = spec.altitudeKm;
+        const r        = 1 + altKm / R_EARTH_KM;
 
-        // A small bright sphere reads as "object" against the layer
-        // shells without the visual noise of a 3D model. Tagged with
-        // kind='iss-probe' so the existing tooltip + click pipeline
-        // picks it up.
+        // ── Probe sprite ──────────────────────────────────────────────
         const geo = new THREE.SphereGeometry(0.012, 14, 10);
         const mat = new THREE.MeshBasicMaterial({
-            color: 0x00ffd0,
+            color: colorHex,
             transparent: true,
             opacity: 1.0,
         });
         const mesh = new THREE.Mesh(geo, mat);
         mesh.userData = {
-            kind:     'iss-probe',
-            id:       'iss',
-            name:     'ISS · live probe',
-            altKm:    issAlt,
-            color:    '#00ffd0',
-            tooltip:  'Click to fly the camera here. Drag pressure '
-                    + '≈ ½ρv² uses local ρ from the current state and '
-                    + 'v ≈ 7.66 km/s circular orbital speed.',
+            kind:    'sat-probe',
+            id:      spec.id,
+            name:    spec.name,
+            altKm,                // updated each frame as the probe moves
+            color:   spec.color,
+            spec,                 // full orbital + descriptive metadata
+            tooltip: spec.description ||
+                     'Click to fly the camera here. Drag pressure '
+                   + '≈ ½ρv² uses live ρ at the probe\'s current altitude.',
         };
-        // Halo: a slightly larger transparent sphere that gives the
-        // probe a glow at distance (the inner sphere is too small to
-        // see from outside the magnetopause).
-        const haloGeo = new THREE.SphereGeometry(0.026, 14, 10);
+        // Halo for distance visibility.
         const haloMat = new THREE.MeshBasicMaterial({
-            color: 0x00ffd0,
+            color: colorHex,
             transparent: true,
             opacity: 0.25,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
         });
-        const halo = new THREE.Mesh(haloGeo, haloMat);
-        halo.userData = mesh.userData;       // share so raycaster on halo also resolves to ISS
+        const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(0.026, 14, 10),
+            haloMat,
+        );
+        halo.userData = mesh.userData;
         mesh.add(halo);
-
-        // Initial position on orbit so first paint isn't at origin.
+        // Seed the probe's position on first paint at one orbital point
+        // so it's not stuck at origin until the first animate() tick.
         mesh.position.set(r, 0, 0);
-        this._iss = mesh;
-        this._scene.add(mesh);
+        this._satProbeGrp.add(mesh);
+
+        // ── Orbital-path polyline ─────────────────────────────────────
+        // 96 points around a full period — closed loop. Drawn in the
+        // same satellite-probe group so visibility stays in sync.
+        const N = 96;
+        const pathPts = new Float32Array(N * 3);
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(spec.orbital, tFrac, r);
+            pathPts[k * 3 + 0] = p.x;
+            pathPts[k * 3 + 1] = p.y;
+            pathPts[k * 3 + 2] = p.z;
+        }
+        const pathGeo = new THREE.BufferGeometry();
+        pathGeo.setAttribute('position', new THREE.BufferAttribute(pathPts, 3));
+        const pathMat = new THREE.LineBasicMaterial({
+            color: colorHex,
+            transparent: true,
+            opacity: 0.55,
+            depthWrite: false,
+        });
+        const pathLine = new THREE.LineLoop(pathGeo, pathMat);
+        pathLine.userData = {
+            kind: 'sat-orbit-path', id: spec.id, name: `${spec.name} orbit`,
+            color: spec.color, altKm,
+            tooltip: `Real-period inclined orbit · i = ${spec.orbital.inclinationDeg}° · `
+                   + `period ≈ ${spec.orbital.periodMin.toFixed(1)} min · NORAD ${spec.orbital.noradId}`,
+        };
+        this._satProbeGrp.add(pathLine);
+
+        // Cache for per-frame propagation. _phase0 randomises the
+        // satellite's starting mean-anomaly so all four don't all start
+        // at M=0 simultaneously.
+        this._satProbes[spec.id] = {
+            mesh, pathLine, spec,
+            _phase0: spec.orbital.meanAnomalyDeg0 * Math.PI / 180,
+        };
     }
 
     /**
-     * Fly the camera to the moving ISS probe with a small offset so
-     * the probe stays in frame; lookAt the probe. Called by the click
-     * handler on the canvas + by an external "Visit ISS" button.
+     * Fly the camera to one satellite probe by id. Falls through to
+     * the ISS probe if id is omitted (preserves the original
+     * .flyToISS() entry point).
      */
+    flyToSatellite(id = 'iss', durationSec = 1.6) {
+        const probe = this._satProbes?.[id];
+        if (!probe) return;
+        const pos = probe.mesh.position.clone();
+        // Offset behind the velocity-side of the probe so the camera
+        // sees it move forward through the layer.
+        const radial = pos.clone().normalize();
+        const offset = radial.multiplyScalar(0.18);
+        const target = pos.clone().add(offset);
+        this.flyTo(target, pos, durationSec);
+    }
+
+    /** Backwards-compatible wrapper retained for the existing UI button. */
     flyToISS(durationSec = 1.6) {
-        if (!this._iss) return;
-        const issPos = this._iss.position.clone();
-        // Offset behind the velocity vector — gives a chase-cam feel
-        // and lets users see the probe move forward through the
-        // upper-thermosphere band.
-        const radial = issPos.clone().normalize();
-        const offset = radial.multiplyScalar(0.18);   // ~1146 km out from probe
-        const target = issPos.clone().add(offset);
-        this.flyTo(target, issPos, durationSec);
+        return this.flyToSatellite('iss', durationSec);
+    }
+
+    /**
+     * Upgrade every orbital probe from hardcoded mean elements to the
+     * live TLE for that NORAD ID. Hits the same /api/celestrak/tle
+     * Edge proxy that the rest of the repo uses; the proxy parses the
+     * raw TLE into { inclination, raan, arg_perigee, mean_anomaly,
+     * mean_motion, eccentricity, epoch, period_min, ... } so we don't
+     * need to parse anything ourselves.
+     *
+     * Per satellite:
+     *   1. Fetch /api/celestrak/tle?norad=<id>
+     *   2. Compute the *current* mean anomaly:
+     *        M_now = M_epoch + n · (now − epoch)
+     *      where n is the mean motion in rad/s. This pins the probe
+     *      to its real orbital position at page-boot time; subsequent
+     *      per-frame propagation continues from there.
+     *   3. Replace the spec.orbital block in place + rebuild the
+     *      orbital-path polyline geometry from the new elements so
+     *      visual track + sprite stay coherent.
+     *
+     * Doesn't apply J2 secular drift to RAAN/argP between epoch and
+     * now — for typical TLEs <1 day old this is sub-degree on RAAN
+     * for ISS, fine for visual-grade fidelity. A future round can
+     * add the Brouwer-Lyddane secular terms if the precision matters.
+     *
+     * Concurrent fetches via Promise.allSettled — one slow satellite
+     * doesn't block the others. Returns the count of upgraded probes
+     * for the UI's freshness indicator.
+     */
+    async _fetchLiveTLEs() {
+        if (!this._satProbes) return 0;
+        const probes = Object.values(this._satProbes)
+            .filter(p => p.spec?.orbital?.noradId);
+
+        const fetchOne = async (probe) => {
+            const id = probe.spec.orbital.noradId;
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), 4000);
+            try {
+                const r = await fetch(`/api/celestrak/tle?norad=${id}`, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                const sat = data?.satellites?.[0];
+                if (!sat) throw new Error('no satellites in response');
+                this._upgradeProbeFromTLE(probe, sat);
+                return { id: probe.spec.id, ok: true };
+            } catch (err) {
+                return { id: probe.spec.id, ok: false, err };
+            } finally {
+                clearTimeout(t);
+            }
+        };
+
+        const results = await Promise.allSettled(probes.map(fetchOne));
+        const ok = results.filter(r => r.value?.ok).length;
+        // Stash a manifest so the UI's freshness pill knows what's live
+        // vs fallback. window event so the UI module doesn't need an
+        // explicit hook into globe internals.
+        this._tleSummary = {
+            total:    probes.length,
+            live:     ok,
+            fetchedAt: Date.now(),
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('ua-tle-update',
+                { detail: this._tleSummary }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+        return ok;
+    }
+
+    /**
+     * Apply one parsed TLE to one probe in place. Splits out from the
+     * fetch loop so unit tests / future scheduled-refresh paths can
+     * call it directly with a mock element set.
+     *
+     * @param {object} probe   from this._satProbes[id]
+     * @param {object} sat     parsed CelesTrak entry — see
+     *                         api/celestrak/tle.js parseSingleTle()
+     */
+    _upgradeProbeFromTLE(probe, sat) {
+        const orb = probe.spec.orbital;
+        const epochMs = Date.parse(sat.epoch);
+        if (!Number.isFinite(epochMs)) return;
+
+        // Mean motion: rev/day → rad/s.
+        const n_rad_s = (sat.mean_motion * 2 * Math.PI) / 86400;
+        const dtSec = (Date.now() - epochMs) / 1000;
+        // Wrap to [0, 2π) so the propagator's tFrac stays clean.
+        let M_now_rad = (sat.mean_anomaly * Math.PI / 180) + n_rad_s * dtSec;
+        const TAU = 2 * Math.PI;
+        M_now_rad = ((M_now_rad % TAU) + TAU) % TAU;
+
+        // Patch the orbital element block. Keep noradId; replace the
+        // mean elements + period from the live TLE.
+        orb.inclinationDeg   = sat.inclination;
+        orb.raanDeg          = sat.raan;
+        orb.argPerigeeDeg    = sat.arg_perigee;
+        orb.eccentricity     = sat.eccentricity;
+        orb.meanAnomalyDeg0  = M_now_rad * 180 / Math.PI;
+        orb.periodMin        = sat.period_min;
+
+        // Update the average altitude from apogee/perigee — used by
+        // the orbital-path polyline radius and the static ring. For
+        // near-circular orbits this is essentially unchanged; for
+        // eccentric orbits this is a sensible "shell" altitude.
+        const meanAltKm = (sat.apogee_km + sat.perigee_km) / 2;
+        if (Number.isFinite(meanAltKm) && meanAltKm > 0) {
+            probe.spec.altitudeKm = Math.round(meanAltKm);
+        }
+
+        // Reset the per-frame phase to "now" — propagation in
+        // _stepSatellites uses _phase0 as the M at elapsedSec=0.
+        probe._phase0 = M_now_rad;
+
+        // Carry the source + epoch into the probe's userData so the
+        // tooltip + drag panel can show TLE freshness.
+        if (probe.mesh?.userData) {
+            probe.mesh.userData.tleSource = 'live';
+            probe.mesh.userData.tleEpoch  = sat.epoch;
+        }
+
+        // Rebuild the orbital-path polyline from the new elements.
+        this._refreshOrbitalPath(probe);
+    }
+
+    /**
+     * Re-sample the orbital-path polyline for one probe using its
+     * current spec.orbital. Cheap (96 points, no allocations) so
+     * we can call it any time elements change.
+     */
+    _refreshOrbitalPath(probe) {
+        const path = probe.pathLine;
+        if (!path) return;
+        const positions = path.geometry.attributes.position.array;
+        const N = positions.length / 3;
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
+            positions[k * 3 + 0] = p.x;
+            positions[k * 3 + 1] = p.y;
+            positions[k * 3 + 2] = p.z;
+        }
+        path.geometry.attributes.position.needsUpdate = true;
+        path.geometry.computeBoundingSphere();
+    }
+
+    /**
+     * Read the live-TLE summary set by _fetchLiveTLEs. Returns
+     * { total, live, fetchedAt } or null if no fetch has resolved yet.
+     * UI uses this to paint the "Live TLE · 2h ago" freshness pill.
+     */
+    getTleSummary() {
+        return this._tleSummary || null;
     }
 
     _buildAltitudeRing() {
@@ -1377,7 +1607,10 @@ export class AtmosphereGlobe {
             ...(this._bsMesh     ? [this._bsMesh]     : []),
             ...(this._sheathMesh ? [this._sheathMesh] : []),
             ...(this._sunMarker  ? [this._sunMarker]  : []),
-            ...(this._iss        ? [this._iss]        : []),
+            // Each satellite probe (moving sprite) is independently
+            // hittable so the tooltip + click-to-fly resolves to the
+            // right satellite.
+            ...Object.values(this._satProbes || {}).map(p => p.mesh),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -1438,7 +1671,12 @@ export class AtmosphereGlobe {
             const dt = performance.now() - downT;
             if (dx > 4 || dy > 4 || dt > 350) return;     // user dragged
             const ud = this._hoveredUserData;
-            if (ud?.kind === 'iss-probe') {
+            // Click on any satellite probe → fly there.
+            if (ud?.kind === 'sat-probe' && ud.id) {
+                this.flyToSatellite(ud.id);
+            } else if (ud?.kind === 'iss-probe') {
+                // Legacy: keep the kind='iss-probe' path working in
+                // case anything still emits that tag.
                 this.flyToISS();
             }
         };
@@ -1502,11 +1740,11 @@ export class AtmosphereGlobe {
 
         this._controls.update(dt);
 
-        // Per-frame ISS orbit propagation. ISS sits at ~420 km on a
-        // 51.6° inclined orbit with a ~92.7-min period; that's plenty
-        // close enough for a benchmark probe. Visual time can be sped up
-        // via opts.issTimeScale so a user sees a full pass in seconds.
-        if (this._iss) this._stepISS(t);
+        // Per-frame satellite orbit propagation. Visual time is sped
+        // up via opts.satTimeScale (default 60×) so a user sees a full
+        // pass in seconds. Each probe has its own period, inclination,
+        // and starting mean anomaly so paths don't all overlap.
+        if (this._satProbes) this._stepSatellites(t);
 
         // Shell-fade-when-inside: when the camera enters a layer band,
         // drop the shell's opacity so the user can see through the layer
@@ -1541,49 +1779,194 @@ export class AtmosphereGlobe {
     }
 
     /**
-     * Advance the ISS sprite along a 51.6°-inclined circular orbit at
-     * 420 km. Position is in world frame; we expose .userData.altKm so
-     * the existing tooltip pipeline keeps working unchanged.
+     * Advance every cached satellite probe along its mean-element
+     * orbit. Each probe carries its own (i, RAAN, M₀, period); the
+     * helper _propagateKeplerian computes a position on the inclined
+     * orbital plane in world frame.
+     *
+     * The probe's userData.altKm is updated each frame from the
+     * computed |position| so the tooltip drag-pressure readout uses
+     * the *current* altitude (not the spec's nominal value) — this
+     * matters when we eventually upgrade to elliptical orbits with
+     * non-zero eccentricity.
      */
-    _stepISS(elapsedSec) {
-        const ts = this.opts.issTimeScale ?? 60;   // 60× real time
-        // Mean motion: 2π / orbit_period. ISS period ≈ 92.7 min.
-        const period = 92.7 * 60;
-        const meanAnomaly = (elapsedSec * ts / period) * 2 * Math.PI;
+    _stepSatellites(elapsedSec) {
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        for (const id in this._satProbes) {
+            const probe = this._satProbes[id];
+            const periodSec = probe.spec.orbital.periodMin * 60;
+            // Total mean anomaly traveled at compressed time.
+            const M = probe._phase0 + (elapsedSec * ts / periodSec) * 2 * Math.PI;
+            // Convert M back into an orbit fraction for the helper.
+            const tFrac = (M / (2 * Math.PI)) % 1;
+            const altShellR = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, altShellR);
 
-        const r = 1 + 420 / R_EARTH_KM;
-        const incl = 51.6 * Math.PI / 180;
-        // Argument of right-ascension precesses slowly; not modelling
-        // here — keep the ascending node fixed and let users see one
-        // representative pass.
-        const ω = meanAnomaly;
-        // Position in orbital plane, then rotate by inclination around X.
-        const x =  r * Math.cos(ω);
-        const y0 = r * Math.sin(ω);
-        const y =  y0 * Math.cos(incl);
-        const z = -y0 * Math.sin(incl);
+            probe.mesh.position.set(p.x, p.y, p.z);
+            // Update altitude from current radial distance — keeps the
+            // tooltip honest if eccentricity is non-zero (apogee/perigee
+            // sweep). For circular orbits the value is constant.
+            const rNow = Math.hypot(p.x, p.y, p.z);
+            probe.mesh.userData.altKm = (rNow - 1) * R_EARTH_KM;
 
-        this._iss.position.set(x, y, z);
-
-        // Orient the sprite so its long axis lies along the velocity
-        // vector — derivative of position in orbit. Velocity gives a
-        // consistent visual cue when users zoom in.
-        const vx = -r * Math.sin(ω);
-        const vy0 =  r * Math.cos(ω);
-        const vx_w = vx;
-        const vy_w =  vy0 * Math.cos(incl);
-        const vz_w = -vy0 * Math.sin(incl);
-        const vel = new THREE.Vector3(vx_w, vy_w, vz_w).normalize();
-        // Look "ahead" along the velocity, with up = radial-out so the
-        // sprite sits flat against the orbit plane.
-        const radial = this._iss.position.clone().normalize();
-        const m = new THREE.Matrix4().lookAt(
-            this._iss.position,
-            this._iss.position.clone().add(vel),
-            radial,
-        );
-        this._iss.quaternion.setFromRotationMatrix(m);
+            // Orient the sprite along the velocity tangent so users
+            // can see direction-of-travel when zoomed in.
+            const v = _propagateKeplerianVelocity(probe.spec.orbital, tFrac, altShellR);
+            const radial = probe.mesh.position.clone().normalize();
+            const m = new THREE.Matrix4().lookAt(
+                probe.mesh.position,
+                probe.mesh.position.clone().add(v),
+                radial,
+            );
+            probe.mesh.quaternion.setFromRotationMatrix(m);
+        }
     }
+
+    /**
+     * Snapshot of every satellite probe's *current* state, used by the
+     * UI's drag-analysis side panel. Cheap — just reads cached probe
+     * positions; no engine sampling here. Returns one entry per
+     * orbital satellite; non-orbital references (Kármán) are skipped.
+     */
+    getSatelliteStates() {
+        const out = [];
+        if (!this._satProbes) return out;
+        for (const id in this._satProbes) {
+            const probe = this._satProbes[id];
+            const rNow  = probe.mesh.position.length();
+            const altKm = (rNow - 1) * R_EARTH_KM;
+            out.push({
+                id,
+                name:    probe.spec.name,
+                color:   probe.spec.color,
+                altKm,
+                noradId: probe.spec.orbital.noradId,
+                periodMin: probe.spec.orbital.periodMin,
+                inclinationDeg: probe.spec.orbital.inclinationDeg,
+            });
+        }
+        return out;
+    }
+
+    /**
+     * Full drag-analysis snapshot for every orbital satellite at the
+     * current state. Returns altitude, ρ (sampled from the active
+     * profile), circular orbital speed, drag pressure q = ½ρv², and a
+     * Knudsen-derived regime label. Sorted descending by drag — the UI
+     * panel shows "ISS feels the most drag" most-prominently.
+     *
+     * This couples globe state (probe altitude) with engine state
+     * (profile from setProfile) so the panel reads off the same source
+     * of truth as the rest of the page.
+     */
+    getSatelliteDragAnalysis() {
+        const states = this.getSatelliteStates();
+        if (!this._profile?.samples?.length) return states.map(s => ({ ...s, rho: null, q: null }));
+        const out = states.map(s => {
+            const rho = _nearestRho(this._profile.samples, s.altKm);
+            const vKmS = _circularOrbitalSpeedKmS(s.altKm);
+            const v = vKmS * 1000;                          // m/s
+            const q = 0.5 * rho * v * v;                    // Pa
+            // Carry the live/fallback flag + epoch into the panel so
+            // users can see which probes are running on real CelesTrak
+            // elements vs the hardcoded backstop.
+            const probe = this._satProbes?.[s.id];
+            const tleSource = probe?.mesh?.userData?.tleSource ?? 'fallback';
+            const tleEpoch  = probe?.mesh?.userData?.tleEpoch  ?? null;
+            return {
+                ...s,
+                rho,
+                vKmS,
+                qPa: q,
+                qmPa: q * 1000,
+                tleSource, tleEpoch,
+            };
+        });
+        // Highest drag first — useful ranking for the panel.
+        out.sort((a, b) => (b.qPa ?? 0) - (a.qPa ?? 0));
+        return out;
+    }
+}
+
+// ── Keplerian orbit helper ─────────────────────────────────────────────────
+// Visualisation-grade propagator. Inputs are mean elements; output is a
+// position on the inclined orbital plane in world frame, scaled to a
+// `radius` representative altitude so the math stays in R⊕ units the rest
+// of the page works in.
+//
+// Convention: orbital plane is rotated from the equatorial plane by the
+// inclination around X, then around Y by RAAN. Argument of perigee is
+// folded into the in-plane angle so we can keep argP non-zero for users
+// who want to play with apsides later.
+//
+// For circular orbits (eccentricity ≈ 0) we skip Kepler's-equation
+// solving entirely — eccentric anomaly equals mean anomaly, and the
+// in-plane radius is constant. tFrac is in [0, 1) along one orbit; the
+// caller advances it deterministically each frame.
+function _propagateKeplerian(orb, tFrac, radius) {
+    const i = orb.inclinationDeg * Math.PI / 180;
+    const Ω = orb.raanDeg         * Math.PI / 180;
+    const ω = orb.argPerigeeDeg   * Math.PI / 180;
+    const M = tFrac * 2 * Math.PI;
+    const e = orb.eccentricity ?? 0;
+
+    // True anomaly = mean anomaly for circular orbit; otherwise solve
+    // Kepler's equation by Newton-Raphson and convert.
+    let nu;
+    if (e < 1e-4) {
+        nu = M;
+    } else {
+        let E = M;
+        for (let k = 0; k < 6; k++) {
+            E = E - (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+        }
+        nu = 2 * Math.atan2(
+            Math.sqrt(1 + e) * Math.sin(E / 2),
+            Math.sqrt(1 - e) * Math.cos(E / 2),
+        );
+    }
+    const θ = ω + nu;
+    const r = radius * (e < 1e-4 ? 1 : (1 - e * e) / (1 + e * Math.cos(nu)));
+
+    // In-plane (perifocal) coordinates with x along ascending node.
+    const xp = r * Math.cos(θ);
+    const yp = r * Math.sin(θ);
+
+    // Rotate to ECI using the standard 3-1-3 sequence (RAAN, incl,
+    // argP); since argP was folded into θ above, we only need the
+    // incl + RAAN rotations here. ECI is the canonical Z-up,
+    // equatorial-XY frame used by SGP4 and pretty much every
+    // satellite catalog.
+    const cosI = Math.cos(i), sinI = Math.sin(i);
+    const cosΩ = Math.cos(Ω), sinΩ = Math.sin(Ω);
+    // Rotation around X by inclination: (xp, yp, 0) → (xp, yp·cosI, yp·sinI).
+    const xa = xp;
+    const ya = yp * cosI;
+    const za = yp * sinI;
+    // Rotation around Z by RAAN.
+    const xEci = xa * cosΩ - ya * sinΩ;
+    const yEci = xa * sinΩ + ya * cosΩ;
+    const zEci = za;
+
+    // Map ECI Z-up → Three.js world Y-up by swapping y and z.
+    // (Three.js convention used throughout the page: +Y is north pole.)
+    return { x: xEci, y: zEci, z: yEci };
+}
+
+/**
+ * Velocity tangent at the same orbital position. Used for sprite
+ * orientation; returned as a unit vector in world frame.
+ */
+function _propagateKeplerianVelocity(orb, tFrac, radius) {
+    // Forward-difference: sample a hair ahead and subtract. Cheap and
+    // mode-agnostic (works for circular and elliptical alike) without
+    // re-deriving the analytic dr/dν.
+    const dt = 1e-4;
+    const a = _propagateKeplerian(orb, tFrac,             radius);
+    const b = _propagateKeplerian(orb, (tFrac + dt) % 1,  radius);
+    const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+    const len = Math.hypot(dx, dy, dz) || 1;
+    return new THREE.Vector3(dx / len, dy / len, dz / len);
 }
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -1619,6 +2002,23 @@ function _hex(colorStr) {
     if (typeof colorStr === "number") return colorStr;
     if (!colorStr) return 0xffffff;
     return parseInt(colorStr.replace("#", ""), 16);
+}
+
+/**
+ * Circular orbital speed at altitude `altKm`. Uses Earth's standard
+ * gravitational parameter μ = 398 600.4418 km³/s² and the WGS-72 mean
+ * radius (matches the SGP4 propagator's RE_KM upstream so we stay on
+ * one consistent reference). Returns km/s.
+ *
+ *   v = √(μ / (Rₑ + h))
+ *
+ * For ISS @ 420 km this gives 7.66 km/s, the canonical value.
+ */
+function _circularOrbitalSpeedKmS(altKm) {
+    const MU = 398600.4418;     // km³/s²
+    const RE = 6378.135;        // km, WGS-72
+    const r = RE + altKm;
+    return Math.sqrt(MU / r);
 }
 
 // Distribute streamer launch points across the sunward hemisphere — a
@@ -1709,21 +2109,33 @@ function _tipHTML(userData, profile, swState) {
             dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             break;
         case 'iss-probe':
-            // Live benchmark probe — show local atmospheric ρ at ISS
-            // altitude + the resulting drag pressure q = ½ρv² at the
-            // circular orbital speed for 420 km (~7.66 km/s).
-            detail = `${userData.altKm} km · 51.6° · click to fly here`;
+        case 'sat-probe': {
+            // Live satellite probe. Drag pressure q = ½ρv² uses the
+            // *current* probe altitude (so eccentric-orbit apogee/
+            // perigee swings show up) and the circular orbital speed
+            // at that altitude: v = √(μ/(R+h)).
+            const incl = userData.spec?.orbital?.inclinationDeg;
+            const period = userData.spec?.orbital?.periodMin;
+            detail = `${userData.altKm.toFixed(0)} km`
+                + (incl ? ` · ${incl}°` : '')
+                + (period ? ` · ${period.toFixed(1)} min` : '')
+                + ` · click to fly here`;
             if (profile?.samples?.length) {
                 const rho = _nearestRho(profile.samples, userData.altKm);
-                const v = 7660;       // m/s, circular @ 420 km
-                const q = 0.5 * rho * v * v;       // Pa
+                const v = _circularOrbitalSpeedKmS(userData.altKm) * 1000;   // m/s
+                const q = 0.5 * rho * v * v;                                  // Pa
                 dataLines = `
-                    <div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ 7.66 km/s</div>
+                    <div style="color:#9cf">ρ = ${rho.toExponential(2)} kg/m³ · v ≈ ${(v / 1000).toFixed(2)} km/s</div>
                     <div style="color:#0fc">drag q ≈ ${(q * 1000).toFixed(2)} mPa</div>
                     <div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             } else {
                 dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             }
+            break;
+        }
+        case 'sat-orbit-path':
+            detail = `${userData.altKm} km · orbital track`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`;
             break;
         default:
             detail = userData.altKm != null ? `${userData.altKm} km` : '';

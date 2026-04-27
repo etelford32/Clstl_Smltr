@@ -360,6 +360,90 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Satellite drag analysis ──────────────────────────── */
+.ua-tle-pill {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:2px 8px; border-radius:999px;
+    font-size:.6rem; font-weight:700;
+    letter-spacing:.04em;
+    font-family:monospace;
+    border:1px solid rgba(255,255,255,.15);
+    background:rgba(255,255,255,.04);
+    color:#9ab;
+    transition:all .2s;
+}
+.ua-tle-pill--pending { color:#9ab; }
+.ua-tle-pill--live    { color:#0cc; border-color:rgba(0,200,200,.45);
+                        background:rgba(0,200,200,.08); }
+.ua-tle-pill--partial { color:#ffcc66; border-color:rgba(255,204,102,.45);
+                        background:rgba(255,204,102,.06); }
+.ua-tle-pill--fallback{ color:#c87; border-color:rgba(200,130,90,.4);
+                        background:rgba(200,130,90,.05); }
+.ua-tle-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 5px currentColor;
+}
+.ua-tle-pill--pending .ua-tle-dot {
+    animation: ua-tle-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ua-tle-pulse {
+    0%, 100% { opacity: .35; }
+    50%      { opacity: 1.0; }
+}
+
+#ua-sat-drag { display:flex; flex-direction:column; gap:5px; }
+.ua-sat-row {
+    display:grid;
+    grid-template-columns: 14px 1fr auto auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 8px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .12s;
+    font-size:.72rem;
+}
+.ua-sat-row:hover {
+    border-color:rgba(0,200,200,.35);
+    background:rgba(0,200,200,.06);
+}
+.ua-sat-dot {
+    width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-sat-name {
+    display:flex; flex-direction:column; gap:1px;
+    line-height:1.2;
+}
+.ua-sat-name .ua-sat-title {
+    color:#cde; font-weight:600;
+}
+.ua-sat-name .ua-sat-meta {
+    color:#667; font-size:.6rem; font-family:monospace;
+}
+.ua-sat-alt {
+    color:#9cf; font-family:monospace; font-size:.7rem;
+}
+.ua-sat-q {
+    font-family:monospace; font-weight:700;
+    text-align:right; min-width:84px;
+}
+.ua-sat-q-bar {
+    grid-column:1 / -1;
+    height:3px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px;
+    overflow:hidden;
+    margin-top:3px;
+}
+.ua-sat-q-fill {
+    height:100%;
+    transition:width .25s;
+}
+
 /* ─── Field-overlay radio row ──────────────────────────── */
 .ua-field-mode-row {
     display:flex; flex-wrap:wrap; gap:6px;
@@ -517,6 +601,24 @@ input[type=range]::-moz-range-thumb {
             </div>
         </div>
 
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">Satellite drag analysis</h2>
+                <span id="ua-tle-freshness" class="ua-tle-pill ua-tle-pill--pending"
+                      title="TLE fetch status from /api/celestrak/tle">
+                    <span class="ua-tle-dot"></span>
+                    <span id="ua-tle-label">fetching TLEs…</span>
+                </span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live drag pressure q = ½ρv² for each tracked object, using
+                the current state's local ρ and circular orbital speed
+                v = √(μ/(R+h)). Click any row to fly the camera there.
+                Orbital elements from <a href="https://celestrak.org" target="_blank" rel="noopener" style="color:#0cc">CelesTrak</a>.
+            </p>
+            <div id="ua-sat-drag"></div>
+        </div>
+
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
             <div id="ua-sw-stats"></div>
@@ -641,6 +743,9 @@ input[type=range]::-moz-range-thumb {
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),
             solarWindStats: document.getElementById('ua-sw-stats'),
+            satDrag:        document.getElementById('ua-sat-drag'),
+            tleFreshness:   document.getElementById('ua-tle-freshness'),
+            tleLabel:       document.getElementById('ua-tle-label'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
