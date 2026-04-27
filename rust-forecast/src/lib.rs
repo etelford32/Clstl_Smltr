@@ -83,6 +83,21 @@ pub struct HourSample {
     pub cloud_cover:           Option<f64>,   // 0–100
 }
 
+/// One NWP provider's hourly forecast. Each provider produces two ensemble
+/// members: a raw passthrough (`nwp_<name>`) and a bias-corrected variant
+/// (`nwp_bc_<name>`). Adding ICON / GEM / JMA alongside GFS + ECMWF needs
+/// no algorithm change — the softmax blender auto-discovers per-location
+/// skill from the recent obs window.
+///
+/// `name` is a short identifier used to build the member labels. Stick to
+/// lower-case ASCII without spaces; the wire format and skill JSON expose
+/// it verbatim.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NwpProvider {
+    pub name:    String,
+    pub samples: Vec<HourSample>,
+}
+
 /// Tuning knobs for the ensemble. All have safe defaults; the JS layer can
 /// override them via `ForecastRequest.config`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,7 +138,10 @@ pub struct ForecastRequest {
     pub t0_unix: f64,
     /// Most-recent first or oldest-first; we sort by `t` regardless.
     pub obs:     Vec<HourSample>,
-    pub nwp:     Vec<HourSample>,
+    /// One entry per NWP provider (GFS, ECMWF, ICON, …). An empty vec is
+    /// legal — the ensemble degrades gracefully to obs-only members
+    /// (persist + diurnal + AR1).
+    pub nwp:     Vec<NwpProvider>,
     pub config:  Option<ForecastConfig>,
 }
 
@@ -180,10 +198,32 @@ pub struct ForecastResponse {
 
 pub const VERSION: &str = "0.2.0";
 
-/// Member names — order is meaningful (matches the order returned by
-/// `stats::score_members` and used throughout). Adding a new member means
-/// extending this list AND `members::run_all` AND `stats::score_members`.
-pub const MEMBER_NAMES: [&str; 5] = ["persist", "diurnal", "ar1", "nwp", "nwp_bc"];
+/// Number of obs-only ensemble members. They run regardless of whether any
+/// NWP provider is present: persist (0), diurnal (1), AR1 (2). NWP raw and
+/// NWP_BC members are appended after these for each provider.
+pub const NUM_OBS_MEMBERS: usize = 3;
+
+/// Build the per-run member name list. Order matches the prediction /
+/// weight / skill arrays everywhere downstream:
+///
+///   [0]                              persist
+///   [1]                              diurnal
+///   [2]                              ar1
+///   [3 .. 3 + N]                     nwp_<name_i>           (raw)
+///   [3 + N .. 3 + 2N]                nwp_bc_<name_i>        (bias-corrected)
+///
+/// where N = providers.len(). The blender treats every member uniformly —
+/// each one is just a (Vec<f64>, weight) pair scored against the recent
+/// obs window. Providers contribute exactly one raw + one BC member each.
+pub fn member_names(providers: &[NwpProvider]) -> Vec<String> {
+    let mut names = Vec::with_capacity(NUM_OBS_MEMBERS + 2 * providers.len());
+    names.push("persist".to_string());
+    names.push("diurnal".to_string());
+    names.push("ar1".to_string());
+    for p in providers { names.push(format!("nwp_{}", p.name)); }
+    for p in providers { names.push(format!("nwp_bc_{}", p.name)); }
+    names
+}
 
 /// Quantile breakpoints emitted in `ForecastHour::quantiles`. Choosing
 /// 10/50/90 gives an 80 % central credibility band — the most common UI
@@ -203,8 +243,13 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     // Sort once — defensive; downstream code assumes ascending time.
     let mut obs = req.obs.clone();
     obs.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap());
-    let mut nwp = req.nwp.clone();
-    nwp.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap());
+    let mut providers = req.nwp.clone();
+    for p in providers.iter_mut() {
+        p.samples.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap());
+    }
+    let num_providers = providers.len();
+    let num_members   = NUM_OBS_MEMBERS + 2 * num_providers;
+    let names         = member_names(&providers);
 
     // The forecast grid is hourly aligned to t0_unix.
     let grid: Vec<f64> = (0..horizon).map(|h| req.t0_unix + h as f64 * 3600.0).collect();
@@ -232,46 +277,55 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     let mut skills: Vec<MemberSkill> = Vec::new();
 
     // ── Phase 1 ──────────────────────────────────────────────────────────
-    // For every field, run all 5 members against the full grid, score them
-    // on the recent obs window, and record (predictions, weights). We keep
-    // the per-member predictions around because Phase 3 needs them for the
-    // wind u/v decomposition — that pass blends u and v across members
-    // using each member's own (speed_i, dir_i) pair, which can't be
-    // recovered from a post-blended scalar.
-    let mut predictions: BTreeMap<&str, [Vec<Option<f64>>; 5]> = BTreeMap::new();
-    let mut weights:     BTreeMap<&str, [f64; 5]>              = BTreeMap::new();
+    // For every field, run all members (3 obs-only + 2 per provider) against
+    // the full grid, score them on the recent obs window, and record
+    // (predictions, weights). We keep the per-member predictions around
+    // because Phase 3 needs them for the wind u/v decomposition — that
+    // pass blends u and v across members using each member's own
+    // (speed_i, dir_i) pair, which can't be recovered from a post-blended
+    // scalar.
+    let mut predictions: BTreeMap<&str, Vec<Vec<Option<f64>>>> = BTreeMap::new();
+    let mut weights:     BTreeMap<&str, Vec<f64>>              = BTreeMap::new();
 
     for fname in &fields {
         let f = field_accessor(fname);
         let obs_y = extract_field(&obs, &f);
-        let nwp_y = extract_field(&nwp, &f);
 
-        // Skip fields where we have neither obs nor NWP — no input → no output.
-        if obs_y.iter().all(|v| v.is_none()) && nwp_y.iter().all(|v| v.is_none()) {
+        // Per-provider field extractions used for both the forecast pass
+        // and the scoring pass.
+        let provider_fields: Vec<Vec<Option<f64>>> = providers.iter()
+            .map(|p| extract_field(&p.samples, &f))
+            .collect();
+
+        // Skip fields where neither obs nor any provider has data.
+        let any_provider_data = provider_fields.iter().any(|v| v.iter().any(|x| x.is_some()));
+        if obs_y.iter().all(|v| v.is_none()) && !any_provider_data {
             continue;
         }
 
-        let preds = [
-            members::persist::predict_24h(&obs, &obs_y, &grid),
-            members::diurnal::predict_24h(&obs, &obs_y, &grid, req.lat, req.lon, &cfg),
-            members::ar1::predict_24h    (&obs, &obs_y, &grid, &cfg),
-            members::nwp_raw::predict_24h(&nwp, &nwp_y, &grid),
-            members::nwp_bc::predict_24h (&obs, &obs_y, &nwp, &nwp_y, &grid, &cfg),
-        ];
+        let mut preds: Vec<Vec<Option<f64>>> = Vec::with_capacity(num_members);
+        // Obs-only members (indices 0, 1, 2).
+        preds.push(members::persist::predict_24h(&obs, &obs_y, &grid));
+        preds.push(members::diurnal::predict_24h(&obs, &obs_y, &grid, req.lat, req.lon, &cfg));
+        preds.push(members::ar1::predict_24h    (&obs, &obs_y, &grid, &cfg));
+        // Per-provider raw NWP members (indices 3 .. 3+N).
+        for (pi, p) in providers.iter().enumerate() {
+            preds.push(members::nwp_raw::predict_24h(&p.samples, &provider_fields[pi], &grid));
+        }
+        // Per-provider bias-corrected NWP members (indices 3+N .. 3+2N).
+        for (pi, p) in providers.iter().enumerate() {
+            preds.push(members::nwp_bc::predict_24h(
+                &obs, &obs_y, &p.samples, &provider_fields[pi], &grid, &cfg,
+            ));
+        }
 
         let rmses = stats::score_members(
-            &obs, &obs_y, &nwp, &nwp_y,
+            &obs, &obs_y, &providers,
             req.lat, req.lon, &cfg, fname,
         );
-        let w_vec = stats::softmax_neg(&rmses, cfg.blend_temp);
-        // softmax_neg returns Vec<f64> but our Phase 3 code (and skill
-        // bookkeeping) wants the fixed-size [f64; 5] mirror of MEMBER_NAMES.
-        // Pad / truncate defensively — score_members already guarantees 5,
-        // but this keeps the code obviously sound under future refactors.
-        let mut w = [0.0_f64; 5];
-        for i in 0..5.min(w_vec.len()) { w[i] = w_vec[i]; }
+        let w = stats::softmax_neg(&rmses, cfg.blend_temp);
 
-        for (i, name) in MEMBER_NAMES.iter().enumerate() {
+        for (i, name) in names.iter().enumerate() {
             skills.push(MemberSkill {
                 name:   format!("{}::{}", fname, name),
                 rmse:   rmses[i],
@@ -290,13 +344,13 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     for fname in &fields {
         if *fname == "wind_direction_10m" { continue; }
         let preds = match predictions.get(fname) { Some(p) => p, None => continue };
-        let w     = weights[fname];
+        let w     = &weights[fname];
         let scale = stats::field_scale(fname);
 
         for (h, hour) in hours.iter_mut().enumerate() {
             // Collect (value, weight) pairs from members that produced a
             // non-null prediction for this hour.
-            let mut vw: Vec<(f64, f64)> = (0..5)
+            let mut vw: Vec<(f64, f64)> = (0..num_members)
                 .filter_map(|i| preds[i][h].map(|v| (v, w[i])))
                 .collect();
             if vw.is_empty() { continue; }
@@ -334,15 +388,16 @@ pub fn run(req: ForecastRequest) -> ForecastResponse {
     // small near 0°/360° crossings (which the linear average cannot).
     if let (Some(sp), Some(dr)) = (predictions.get("wind_speed_10m"),
                                    predictions.get("wind_direction_10m")) {
-        // Use direction's weights when available; fall back to speed's.
-        let w = weights.get("wind_direction_10m")
-            .copied()
-            .or_else(|| weights.get("wind_speed_10m").copied())
-            .unwrap_or([0.2; 5]);
+        // Use direction's weights when available; fall back to speed's;
+        // last resort is uniform weighting across whatever members ran.
+        let uniform: Vec<f64> = vec![1.0 / num_members.max(1) as f64; num_members];
+        let w: &Vec<f64> = weights.get("wind_direction_10m")
+            .or_else(|| weights.get("wind_speed_10m"))
+            .unwrap_or(&uniform);
 
         for (h, hour) in hours.iter_mut().enumerate() {
-            let mut uvw: Vec<(f64, f64, f64)> = Vec::with_capacity(5);
-            for i in 0..5 {
+            let mut uvw: Vec<(f64, f64, f64)> = Vec::with_capacity(num_members);
+            for i in 0..num_members {
                 if let (Some(s), Some(d)) = (sp[i][h], dr[i][h]) {
                     let r = d.to_radians();
                     uvw.push((-s * r.sin(), -s * r.cos(), w[i]));
@@ -485,7 +540,7 @@ mod tests {
             })
             .collect();
         // NWP says wind from 5° at 10 mph for the next 24 h.
-        let nwp: Vec<HourSample> = (0..24)
+        let gfs: Vec<HourSample> = (0..24)
             .map(|i| HourSample {
                 t: t0 + i as f64 * 3600.0,
                 wind_speed_10m:     Some(10.0),
@@ -496,7 +551,9 @@ mod tests {
 
         let resp = run(ForecastRequest {
             lat: 40.0, lon: -75.0, t0_unix: t0,
-            obs, nwp, config: None,
+            obs,
+            nwp: vec![NwpProvider { name: "gfs".into(), samples: gfs }],
+            config: None,
         });
 
         let dir0 = resp.hours[0].wind_direction_10m.expect("direction");
@@ -516,7 +573,7 @@ mod tests {
                 ..Default::default()
             })
             .collect();
-        let nwp: Vec<HourSample> = (0..24)
+        let gfs: Vec<HourSample> = (0..24)
             .map(|i| HourSample {
                 t: t0 + i as f64 * 3600.0,
                 temperature_2m: Some(62.0 + i as f64 * 0.1),
@@ -525,7 +582,9 @@ mod tests {
             .collect();
         let resp = run(ForecastRequest {
             lat: 40.0, lon: -75.0, t0_unix: t0,
-            obs, nwp, config: None,
+            obs,
+            nwp: vec![NwpProvider { name: "gfs".into(), samples: gfs }],
+            config: None,
         });
         for hour in &resp.hours {
             if let Some(q) = hour.quantiles.get("temperature_2m") {
@@ -533,6 +592,67 @@ mod tests {
                 assert!(q[1] <= q[2] + 1e-9, "P50 > P90: {q:?}");
             }
         }
+    }
+
+    /// Multi-provider ensemble: when one model is consistently right and
+    /// another is consistently wrong on the recent obs window, the softmax
+    /// blender must up-weight the accurate one. This is the whole point of
+    /// running multiple NWP providers — auto-discovery of per-location skill.
+    #[test]
+    fn multi_provider_skill_weighting() {
+        let t0 = 1_700_000_000.0_f64;
+        // 48 hours of "ground truth" temperature, smoothly varying.
+        let truth = |t: f64| 60.0 + 8.0 * ((t - t0) / 3600.0 * 0.2).sin();
+        let obs: Vec<HourSample> = (0..48)
+            .map(|i| {
+                let t = t0 - (48 - i) as f64 * 3600.0;
+                HourSample { t, temperature_2m: Some(truth(t)), ..Default::default() }
+            })
+            .collect();
+
+        // "Good" provider tracks truth almost perfectly across the score
+        // window AND the forecast horizon. "Bad" provider is offset +20°F
+        // everywhere — large, persistent bias that's bigger than the
+        // bias-correction member can fully absorb in a 12-hour window.
+        let mk_provider = |name: &str, offset: f64| {
+            let samples: Vec<HourSample> = (0..72)
+                .map(|i| {
+                    // Cover the score window (past 24 h of obs) AND the next
+                    // 24 h of forecast horizon.
+                    let t = t0 - 48.0 * 3600.0 + i as f64 * 3600.0;
+                    HourSample { t, temperature_2m: Some(truth(t) + offset), ..Default::default() }
+                })
+                .collect();
+            NwpProvider { name: name.into(), samples }
+        };
+
+        let resp = run(ForecastRequest {
+            lat: 40.0, lon: -75.0, t0_unix: t0,
+            obs,
+            nwp: vec![mk_provider("good", 0.0), mk_provider("bad", 20.0)],
+            config: None,
+        });
+
+        // Pull skill rows for temperature_2m. Member labels:
+        //   nwp_good (raw), nwp_bad (raw), nwp_bc_good, nwp_bc_bad.
+        let weight_for = |label: &str| -> f64 {
+            resp.skill.iter()
+                .find(|s| s.name == format!("temperature_2m::{label}"))
+                .map(|s| s.weight)
+                .unwrap_or(0.0)
+        };
+        let w_good = weight_for("nwp_good");
+        let w_bad  = weight_for("nwp_bad");
+        assert!(w_good > w_bad,
+            "good provider must outweigh bad: w_good={w_good} w_bad={w_bad}");
+        // Sanity: skill rows for both providers exist and sum across all
+        // members for this field is ~1.0.
+        let total: f64 = resp.skill.iter()
+            .filter(|s| s.name.starts_with("temperature_2m::"))
+            .map(|s| s.weight)
+            .sum();
+        assert!((total - 1.0).abs() < 1e-6,
+            "weights for temperature_2m must sum to 1, got {total}");
     }
 
     /// Determinism: identical inputs must produce identical outputs.

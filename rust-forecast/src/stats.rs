@@ -1,7 +1,7 @@
 //! Pure-stats helpers shared across members and the blender. No allocations
 //! beyond the obvious Vecs we return.
 
-use crate::{members, HourSample, ForecastConfig};
+use crate::{members, HourSample, ForecastConfig, NwpProvider, NUM_OBS_MEMBERS};
 
 pub fn mean(xs: &[f64]) -> f64 {
     if xs.is_empty() { return 0.0; }
@@ -93,49 +93,73 @@ pub fn softmax_neg(rmses: &[f64], temperature: f64) -> Vec<f64> {
 /// hours via leave-one-out: at hour h ∈ [N − W, N), re-run the member using
 /// only obs strictly before h, then compare its h-step prediction to obs[h].
 ///
-/// Returns the per-member RMSE in the same order as the members are run in
-/// `lib::run`. Members that produce no usable predictions on the score window
-/// get `NaN` (which the softmax treats as zero weight).
+/// Returns the per-member RMSE in the same order as `member_names`:
+///
+///   [0]                     persist
+///   [1]                     diurnal
+///   [2]                     ar1
+///   [3 .. 3 + N]            nwp_<name_i>      (raw, per provider)
+///   [3 + N .. 3 + 2N]       nwp_bc_<name_i>   (bias-corrected, per provider)
+///
+/// Members that produce no usable predictions on the score window get `NaN`
+/// (the softmax treats that as zero weight). When the obs window is too
+/// short (< 4 hours) we return uniform 1.0s so the softmax falls back to
+/// equal-weight averaging — strictly better than crashing on cold-start.
 pub fn score_members(
-    obs:   &[HourSample],
-    obs_y: &[Option<f64>],
-    nwp:   &[HourSample],
-    _nwp_y: &[Option<f64>],
+    obs:        &[HourSample],
+    obs_y:      &[Option<f64>],
+    providers:  &[NwpProvider],
     lat: f64, lon: f64,
     cfg: &ForecastConfig,
     field_name: &str,
-) -> [f64; 5] {
+) -> Vec<f64> {
+    let m      = NUM_OBS_MEMBERS + 2 * providers.len();
     let n      = obs.len();
     let window = cfg.score_window.min(n.saturating_sub(1));
     if window < 4 {
-        // Not enough history to score reliably → treat all members as
-        // equally good; downstream softmax falls back to uniform weights
-        // which makes the blender a simple equal-weight average.
-        return [1.0; 5];
+        return vec![1.0; m];
     }
 
     let start = n - window;
-    let mut errs: [Vec<f64>; 5] = Default::default();
+    let mut errs: Vec<Vec<f64>> = vec![Vec::new(); m];
 
     for h in start..n {
         let truth = match obs_y[h] { Some(v) => v, None => continue };
 
-        // Slice obs/nwp histories to "before h" only.
+        // Slice obs history to "before h" only. NWP provider samples are
+        // NOT filtered: a provider's forecast was issued at a single past
+        // run-time and its samples are valid at various future hours. To
+        // ask "what would this NWP have predicted for hour h?" we just
+        // look up its sample valid at obs[h].t — there's no time-travel
+        // concern. Filtering by `s.t < obs[h].t` would push the closest
+        // available sample to obs[h].t − 1 hr, outside `nwp_raw`'s 30-min
+        // tolerance, which would make every NWP member silently score NaN
+        // and collapse to zero weight regardless of actual skill.
         let obs_h = &obs[..h];
         let oy_h: Vec<Option<f64>> = obs_y[..h].to_vec();
-        let nwp_h: Vec<HourSample> = nwp.iter().filter(|s| s.t < obs[h].t).cloned().collect();
-        let ny_h: Vec<Option<f64>> = nwp_h.iter().map(|s| field_get(s, field_name)).collect();
+        let provider_hist: Vec<(&Vec<HourSample>, Vec<Option<f64>>)> = providers.iter().map(|p| {
+            let h_field: Vec<Option<f64>> = p.samples.iter()
+                .map(|s| field_get(s, field_name))
+                .collect();
+            (&p.samples, h_field)
+        }).collect();
 
         // Each member predicts a single-hour grid pinned at obs[h].t.
         let grid = vec![obs[h].t];
 
-        let preds: [Vec<Option<f64>>; 5] = [
-            members::persist::predict_24h(obs_h, &oy_h, &grid),
-            members::diurnal::predict_24h(obs_h, &oy_h, &grid, lat, lon, cfg),
-            members::ar1::predict_24h    (obs_h, &oy_h, &grid, cfg),
-            members::nwp_raw::predict_24h(&nwp_h, &ny_h, &grid),
-            members::nwp_bc::predict_24h (obs_h, &oy_h, &nwp_h, &ny_h, &grid, cfg),
-        ];
+        // Obs-only members (always run).
+        let mut preds: Vec<Vec<Option<f64>>> = Vec::with_capacity(m);
+        preds.push(members::persist::predict_24h(obs_h, &oy_h, &grid));
+        preds.push(members::diurnal::predict_24h(obs_h, &oy_h, &grid, lat, lon, cfg));
+        preds.push(members::ar1::predict_24h    (obs_h, &oy_h, &grid, cfg));
+        // Per-provider raw NWP.
+        for (samples, field) in &provider_hist {
+            preds.push(members::nwp_raw::predict_24h(samples, field, &grid));
+        }
+        // Per-provider bias-corrected NWP.
+        for (samples, field) in &provider_hist {
+            preds.push(members::nwp_bc::predict_24h(obs_h, &oy_h, samples, field, &grid, cfg));
+        }
 
         for (i, p) in preds.iter().enumerate() {
             if let Some(v) = p[0] {
@@ -144,8 +168,8 @@ pub fn score_members(
         }
     }
 
-    let mut out = [f64::NAN; 5];
-    for i in 0..5 {
+    let mut out = vec![f64::NAN; m];
+    for i in 0..m {
         if errs[i].is_empty() { continue; }
         let mse: f64 = errs[i].iter().sum::<f64>() / errs[i].len() as f64;
         out[i] = mse.sqrt();
