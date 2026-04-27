@@ -23,6 +23,7 @@
  */
 
 import { PIPELINES } from '../../js/pipeline-registry.js';
+import { recordPipelineSuccess, recordPipelineFailure } from './heartbeat.js';
 
 const TIER_TIMEOUT_MS = {
     hot:    8_000,    // small NOAA payloads — should be quick
@@ -84,6 +85,26 @@ export async function prewarmTier(tier, req) {
 
     const okCount  = results.filter(r => r.ok).length;
     const errCount = results.filter(r => !r.ok).length;
+
+    // Heartbeat — fire-and-forget (write best-effort, swallow errors).
+    // Each tier becomes a row in pipeline_heartbeat the status page can
+    // surface independently. "Healthy" = at least half the fanout
+    // succeeded; "failure" otherwise. The failure-streak counter +
+    // last-failure-reason in pipeline_heartbeat then tells the operator
+    // which specific upstreams are flapping.
+    const pipelineName = `prewarm_${tier}`;
+    if (errCount === 0) {
+        recordPipelineSuccess(pipelineName, `cron-fanout · ${targets.length}/${targets.length} ok in ${durMs}ms`);
+    } else if (okCount >= errCount) {
+        // Partial success — still mark green but encode the count in
+        // last_source so the UI shows operators what's degraded.
+        recordPipelineSuccess(pipelineName,
+            `cron-fanout · ${okCount}/${targets.length} ok in ${durMs}ms`);
+    } else {
+        const failed = results.filter(r => !r.ok).map(r => r.id).slice(0, 5).join(', ');
+        recordPipelineFailure(pipelineName,
+            `${errCount}/${targets.length} endpoints failed in ${durMs}ms (e.g. ${failed})`);
+    }
 
     return Response.json({
         tier,

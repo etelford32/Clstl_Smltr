@@ -275,9 +275,19 @@ async function check(url) {
 
 // Cadence-aware staleness thresholds — matches admin.html Pipeline Health
 // card so both UIs agree on what "healthy" means.
+// warnMin / critMin tuned per pipeline cadence — the heartbeat is
+// "stale" once we've missed N+1 expected ticks, "critical" once we've
+// missed enough to assume the cron is down rather than slow.
 const PIPELINE_SPECS = [
-    { key: 'solar_wind',   label: 'Solar Wind',   warnMin:  5, critMin:  60 },
-    { key: 'weather_grid', label: 'Weather Grid', warnMin: 45, critMin: 180 },
+    { key: 'solar_wind',     label: 'Solar Wind',                   warnMin:   5, critMin:   60 },
+    { key: 'weather_grid',   label: 'Weather Grid',                 warnMin:  45, critMin:  180 },
+    // ── Cache-prewarm crons (PR-D coverage) ─────────────────────────
+    // /api/cron/prewarm-hot fires every 5 min → 10/30 min thresholds
+    { key: 'prewarm_hot',    label: 'Pre-warm · hot (5 min)',       warnMin:  10, critMin:   30 },
+    // /api/cron/prewarm-medium fires every 30 min → 60/180 min
+    { key: 'prewarm_medium', label: 'Pre-warm · medium (30 min)',   warnMin:  60, critMin:  180 },
+    // /api/cron/prewarm-cold fires every 6 h → 7 h / 24 h
+    { key: 'prewarm_cold',   label: 'Pre-warm · cold (6 h)',        warnMin: 420, critMin: 1440 },
 ];
 
 function _rtFmtRel(iso) {
