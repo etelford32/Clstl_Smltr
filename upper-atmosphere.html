@@ -444,6 +444,47 @@ input[type=range]::-moz-range-thumb {
     transition:width .25s;
 }
 
+/* ─── Conjunction watch ────────────────────────────────── */
+#ua-conjunction { display:flex; flex-direction:column; gap:5px; }
+.ua-conj-row {
+    display:grid;
+    grid-template-columns: auto 1fr auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:7px;
+    font-size:.7rem;
+}
+.ua-conj-row--watch { border-color: rgba(255,204,96,.4); background: rgba(255,204,96,.05); }
+.ua-conj-row--alert { border-color: rgba(255,138,58,.55); background: rgba(255,138,58,.07); }
+.ua-conj-row--crit  { border-color: rgba(255,48,96,.65);  background: rgba(255,48,96,.08); }
+.ua-conj-pair {
+    display:flex; align-items:center; gap:5px;
+    color:#cde; font-weight:600;
+}
+.ua-conj-pair .ua-conj-dot {
+    width:8px; height:8px; border-radius:50%;
+    box-shadow:0 0 5px currentColor;
+}
+.ua-conj-pair .ua-conj-link {
+    color:#556; font-weight:400;
+    margin: 0 1px;
+}
+.ua-conj-meta {
+    display:flex; flex-direction:column; gap:1px;
+    font-family:monospace; font-size:.62rem; line-height:1.25;
+    color:#aab;
+}
+.ua-conj-tca {
+    font-family:monospace; font-weight:700;
+    text-align:right; min-width:78px;
+}
+.ua-conj-tca .ua-conj-eta {
+    display:block; color:#778; font-weight:400; font-size:.58rem;
+}
+
 /* ─── Field-overlay radio row ──────────────────────────── */
 .ua-field-mode-row {
     display:flex; flex-wrap:wrap; gap:6px;
@@ -619,6 +660,18 @@ input[type=range]::-moz-range-thumb {
             <div id="ua-sat-drag"></div>
         </div>
 
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Conjunction watch</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Pairwise predicted closest-approach over the next 90
+                minutes of physical orbital evolution. Distances are
+                3-D centre-to-centre (not in-track). Chord lines on
+                the globe light up when a pair is predicted within
+                200 km.
+            </p>
+            <div id="ua-conjunction"></div>
+        </div>
+
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
             <div id="ua-sw-stats"></div>
@@ -746,6 +799,7 @@ input[type=range]::-moz-range-thumb {
             satDrag:        document.getElementById('ua-sat-drag'),
             tleFreshness:   document.getElementById('ua-tle-freshness'),
             tleLabel:       document.getElementById('ua-tle-label'),
+            conjunctionBox: document.getElementById('ua-conjunction'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
