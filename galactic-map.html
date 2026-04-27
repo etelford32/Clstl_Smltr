@@ -386,6 +386,18 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <div class="legend-item"><div class="legend-dot" style="background:#ff4400"></div>M — red</div>
         <div class="legend-item"><div class="legend-dot" style="background:#aaddff;opacity:.7"></div>Cluster / other</div>
 
+        <div class="sb-hd" style="margin-top:16px">Extragalactic Symbols</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aaccff"></div>Galaxy (spiral / elliptical / dwarf)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffaa00"></div>Quasar / AGN — bright point + spikes</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff3300"></div>Cosmic Dawn galaxy (z &gt; 6)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#aa44ff"></div>Gamma-Ray Burst</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#9966ff"></div>Lensed star (caustic crossing)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#6688ff"></div>Great Wall / cosmic filament</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#c080ff"></div>Supercluster</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+
         <div class="sb-hd" style="margin-top:16px">Coordinate Reference</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
             <strong style="color:#999">Galactic longitude (l):</strong> 0° = toward Sgr A*, 90° = rotation direction.<br>
@@ -1343,9 +1355,28 @@ const CATALOG = [
     { id: '__sep_cosmic_dawn', sectionHeader: 'Cosmic Dawn (z > 6)', isHeader: true },
 
     // ── Cosmic Dawn objects (z > 6) ────────────────────────────────────────
-    // All ten currently sit in a ~1.5k-unit shell beyond Ton 618 due to the
-    // log compression. LOD logic (updateLabelScales) hides them at galaxy
-    // zoom and caps their sprite size at universe zoom to prevent merging.
+    // Sixteen objects sit in a thin ~3k-unit shell beyond Ton 618 due to the
+    // log compression (true distances 12.6–13.6 Gly span <1 dex).  LOD logic
+    // (updateLabelScales) hides them at galaxy zoom and caps sprite/glow size
+    // at universe zoom so neighbouring members stay visually distinct.
+    {
+        id: 'mom_z14', name: 'MoM-z14 (CAPERS-LRD-z14)', abbr: 'MoM-z14', type: 'Primordial Galaxy (LRD)',
+        l: 235.4, b: 43.1, dist: 13_550_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff2200, size: 2.3,
+        desc: 'Candidate for most-distant spectroscopically confirmed object — light left when the universe was only ~280 Myr old. A "Little Red Dot" (LRD): an extraordinarily compact, red, point-like source whose nature (compact star-forming galaxy or accreting massive seed black hole) is still being debated. Submitted June 2025 (Naidu et al.) from the COSMOS-Web/CAPERS programmes.',
+        props: [
+            ['Type', 'Primordial Galaxy / LRD'],
+            ['Distance', '13.55 Gly (light-travel) · ~34.1 Gly comoving'],
+            ['Galactic l / b', '235.4° / +43.1°'],
+            ['Redshift', 'z ≈ 14.44'],
+            ['Universe age at emission', '~280 Myr'],
+            ['Discovery', 'JWST CAPERS / COSMOS-Web — Naidu et al. 2025'],
+            ['Notable', 'Possibly displaces JADES-GS-z14-0 from the record'],
+        ],
+        isCluster: true,
+    },
     {
         id: 'jades_z14_0', name: 'JADES-GS-z14-0', abbr: 'JADES z14-0', type: 'Primordial Galaxy',
         l: 223.55, b: -54.39, dist: 13_520_000_000,
@@ -1384,6 +1415,25 @@ const CATALOG = [
         isCluster: true,
     },
     {
+        id: 'hd1', name: 'HD1', abbr: 'HD1', type: 'Primordial Galaxy / Quasar?',
+        l: 235.6, b: 43.4, dist: 13_460_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff2a00, size: 2.0,
+        desc: 'Candidate for the most-distant galaxy at the time of its 2022 announcement (Harikane et al.) — photometrically placed at z ≈ 13.27 from a 1,200-hr Subaru/HSC + VISTA + Spitzer search. ALMA tentative [O III] line set z ≈ 13.27. Star-forming rate (~110 M☉/yr) so high it has been suggested to host a Population III starburst or a 10⁷ M☉ direct-collapse seed black hole. Spectroscopic confirmation remains contested.',
+        props: [
+            ['Type', 'Primordial Galaxy candidate (z drop-out)'],
+            ['Distance', '13.46 Gly (light-travel) · ~33.4 Gly comoving'],
+            ['Galactic l / b', '235.6° / +43.4°'],
+            ['Redshift', 'z ≈ 13.27 (photometric)'],
+            ['Universe age at emission', '~330 Myr'],
+            ['Star-formation rate', '~110 M☉/yr (extreme)'],
+            ['Discovery', 'Subaru / HSC — Harikane et al. 2022'],
+            ['Notable', 'Briefly held the most-distant-galaxy record'],
+        ],
+        isCluster: true,
+    },
+    {
         id: 'jades_z13_0', name: 'JADES-GS-z13-0', abbr: 'JADES z13-0', type: 'Primordial Galaxy',
         l: 223.44, b: -54.45, dist: 13_430_000_000,
         isIntergalactic: true, isCosmicDawn: true,
@@ -1418,6 +1468,25 @@ const CATALOG = [
             ['Diameter', '~330 ly (extremely compact)'],
             ['Lensing', 'Magnified by Abell 2744 cluster'],
             ['Discovery', 'JWST GLASS / NIRCam — Castellano et al. 2022'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'jades_gs_z11_0', name: 'JADES-GS-z11-0', abbr: 'JADES z11-0', type: 'Primordial Galaxy',
+        l: 223.61, b: -54.52, dist: 13_270_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1100, glowColor: 0xff3a00, size: 2.0,
+        desc: 'JWST/NIRSpec spectroscopic confirmation of a Lyman-α drop-out at z ≈ 11.58 in the GOODS-S/JADES field. A surprisingly mature stellar population for the cosmic age (~410 Myr) — suggesting earlier formation in the universe\'s first 200 Myr. Compact (~620 ly), with a stellar mass already approaching 10⁹ M☉.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-break)'],
+            ['Distance', '13.27 Gly (light-travel) · ~32.4 Gly comoving'],
+            ['Galactic l / b', '223.61° / −54.52°'],
+            ['Redshift', 'z = 11.58'],
+            ['Universe age at emission', '~410 Myr'],
+            ['Stellar mass', '~6 × 10⁸ M☉'],
+            ['Diameter', '~620 ly (compact)'],
+            ['Discovery', 'JWST NIRSpec — Curtis-Lake et al. 2023'],
         ],
         isCluster: true,
     },
@@ -1480,6 +1549,25 @@ const CATALOG = [
         isCluster: true,
     },
     {
+        id: 'egsy8p7', name: 'EGSY8p7', abbr: 'EGSY8p7', type: 'Primordial Galaxy',
+        l: 96.7, b: 60.4, dist: 12_960_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa1500, glowColor: 0xff5022, size: 1.9,
+        desc: 'Held the spectroscopic redshift record (z = 8.683) from 2015 to 2016. Notable for showing strong Lyman-α emission despite sitting deep in the era of Reionization — implying an unusually large ionised "bubble" had already opened around it, allowing the photons to escape. Located in the Extended Groth Strip (EGS) survey field.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-α emitter)'],
+            ['Distance', '12.96 Gly (light-travel) · ~30.4 Gly comoving'],
+            ['Galactic l / b', '96.7° / +60.4°'],
+            ['Redshift', 'z = 8.683'],
+            ['Universe age at emission', '~570 Myr'],
+            ['Discovery', 'Keck MOSFIRE — Zitrin et al. 2015'],
+            ['Field', 'EGS / Extended Groth Strip'],
+            ['Notable', 'Held the redshift record 2015–2016'],
+        ],
+        isCluster: true,
+    },
+    {
         id: 'grb090423', name: 'GRB 090423', abbr: 'GRB 090423', type: 'Gamma-Ray Burst',
         l: 220.4, b: 45.1, dist: 12_920_000_000,
         isIntergalactic: true, isCosmicDawn: true,
@@ -1519,6 +1607,45 @@ const CATALOG = [
         ],
     },
     {
+        id: 'ulas_j1342', name: 'ULAS J1342+0928', abbr: 'ULAS J1342', type: 'Quasar (z ≈ 7.54)',
+        l: 343.2, b: 70.5, dist: 12_830_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xffaa44, size: 2.6,
+        desc: 'Held the most-distant-quasar record from 2017 to 2021 (until J0313-1806). An ~800 million M☉ supermassive black hole already in place when the universe was only ~690 Myr old — a profound challenge to standard accretion-rate models. Its spectrum reveals a surprisingly large neutral-hydrogen fraction along the line of sight, pinpointing the tail end of cosmic reionisation.',
+        props: [
+            ['Type', 'Quasar / Hyperluminous AGN'],
+            ['Distance', '12.83 Gly (light-travel) · ~29.3 Gly comoving'],
+            ['Galactic l / b', '343.2° / +70.5°'],
+            ['Redshift', 'z = 7.541'],
+            ['Universe age at emission', '~690 Myr'],
+            ['BH mass', '~8 × 10⁸ M☉'],
+            ['Bolometric luminosity', '~4 × 10¹³ L☉'],
+            ['Discovery', 'Magellan / VLT — Bañados et al. 2018'],
+            ['Notable', 'Most-distant quasar 2017–2021; reionisation probe'],
+        ],
+    },
+    {
+        id: 'gn_108036', name: 'GN-108036', abbr: 'GN-108036', type: 'Primordial Galaxy',
+        l: 124.9, b: 54.4, dist: 12_780_000_000,
+        isIntergalactic: true, isCosmicDawn: true,
+        temp: 0, spectral: 'Primordial Galaxy',
+        color: 0xaa2200, glowColor: 0xff6633, size: 1.9,
+        desc: 'Held the spectroscopic redshift record (z = 7.213) from 2010 to 2012. Discovered in the GOODS-N deep field with Hubble + Spitzer photometry, then confirmed via a Lyman-α line at Subaru. Its star-formation rate (~30 M☉/yr) is unusually vigorous for its modest stellar mass, an early hint at "burstier" early-universe galaxy growth.',
+        props: [
+            ['Type', 'Primordial Galaxy (Lyman-α emitter)'],
+            ['Distance', '12.78 Gly (light-travel) · ~29.0 Gly comoving'],
+            ['Galactic l / b', '124.9° / +54.4°'],
+            ['Redshift', 'z = 7.213'],
+            ['Universe age at emission', '~750 Myr'],
+            ['Star-formation rate', '~30 M☉/yr'],
+            ['Discovery', 'Subaru / HST — Ono et al. 2012'],
+            ['Field', 'GOODS-N'],
+            ['Notable', 'Held the redshift record 2010–2012'],
+        ],
+        isCluster: true,
+    },
+    {
         id: 'earendel', name: 'Earendel (WHL0137-LS)', abbr: 'Earendel', type: 'Most Distant Star',
         l: 153.42, b: -68.43, dist: 12_600_000_000,
         isIntergalactic: true, isCosmicDawn: true,
@@ -1537,6 +1664,209 @@ const CATALOG = [
             ['Discovery', 'Hubble — Welch et al. 2022; JWST 2023'],
             ['Notable', 'Most distant individual star ever resolved'],
         ],
+    },
+
+    // ── Section header (sidebar only — no 3D object) ───────────────────────
+    { id: '__sep_largest', sectionHeader: 'Largest Structures (Top 10 by extent)', isHeader: true },
+
+    // ── Top 10 largest known structures ────────────────────────────────────
+    // Entries span 9 orders of magnitude — from compact galaxy groups (~150 kly)
+    // up to the Hercules–Corona Borealis Great Wall (~10 Gly).  Positions use
+    // catalogued centroids; visualisations use bespoke sprites (great_wall,
+    // supercluster, void, lqg, compact_group, giant_galaxy).
+    {
+        id: 'hcb_great_wall', name: 'Hercules–Corona Borealis Great Wall', abbr: 'HCB Great Wall',
+        type: 'Largest Known Structure (~10 Gly)',
+        l: 78.0, b: 79.0, dist: 9_500_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Structure',
+        color: 0x1a3060, glowColor: 0x6688ff, size: 6.5,
+        desc: 'The largest known structure in the observable universe — a filamentary overdensity of long-duration gamma-ray-burst host galaxies stretching ~10 Gly across the Hercules / Corona Borealis sky. Its existence (Horváth, Bagoly & Tóth 2014) tests the cosmological principle: at this scale, the universe is supposed to be smooth, yet here is a coherent feature ~10% the size of the observable universe itself.',
+        props: [
+            ['Type', 'Great Wall / GRB cluster overdensity'],
+            ['Extent', '~10 Gly long (largest known)'],
+            ['Distance to centroid', '~9.5 Gly light-travel'],
+            ['Galactic l / b', '78° / +79° (centroid)'],
+            ['Redshift range', 'z ≈ 1.6 – 2.1'],
+            ['Members', '~19 long GRBs in 1.6 < z < 2.1'],
+            ['Discovery', 'Horváth, Bagoly & Tóth 2014'],
+            ['Notable', '>10% of the observable-universe diameter'],
+        ],
+    },
+    {
+        id: 'huge_lqg', name: 'Huge-LQG (Large Quasar Group)', abbr: 'Huge-LQG',
+        type: 'Quasar Filament (~4 Gly)',
+        l: 234.0, b: 52.0, dist: 8_950_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'LQG',
+        color: 0x442200, glowColor: 0xffaa55, size: 5.5,
+        desc: 'A coherent filament of 73 quasars at z ≈ 1.27, spanning ~4 Gly along its longest axis (Clowes et al. 2013). Its discovery in SDSS DR7Q briefly held the title of "largest known structure" until being eclipsed by the Hercules–Corona Borealis Great Wall. Statistically inconsistent with the homogeneity scale predicted by ΛCDM (~370 Mpc) — still actively debated.',
+        props: [
+            ['Type', 'Large Quasar Group (LQG)'],
+            ['Extent', '~4 Gly major axis'],
+            ['Distance to centroid', '~8.95 Gly light-travel'],
+            ['Galactic l / b', '234° / +52° (centroid)'],
+            ['Redshift', 'z ≈ 1.27'],
+            ['Member quasars', '73'],
+            ['Discovery', 'Clowes et al. 2013 (SDSS DR7Q)'],
+            ['Notable', 'Challenges the cosmological homogeneity scale'],
+        ],
+    },
+    {
+        id: 'sloan_great_wall', name: 'Sloan Great Wall', abbr: 'Sloan Great Wall',
+        type: 'Galaxy Filament (~1.4 Gly)',
+        l: 320.0, b: 60.0, dist: 1_000_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Structure',
+        color: 0x223355, glowColor: 0x88aaee, size: 5.0,
+        desc: 'A wall-like sheet of galaxy clusters and superclusters identified in the Sloan Digital Sky Survey (Gott et al. 2005). At ~1.4 Gly long it was the largest known structure in the universe at its discovery. Sits roughly in the same direction as Virgo / Coma but ~3× more distant. Comprises several rich clusters bound by an ~80 Mpc-thick filament.',
+        props: [
+            ['Type', 'Galaxy filament / wall'],
+            ['Extent', '~1.4 Gly long'],
+            ['Distance to centroid', '~1.0 Gly'],
+            ['Galactic l / b', '320° / +60° (centroid)'],
+            ['Redshift', 'z ≈ 0.073'],
+            ['Members', 'Multiple superclusters (incl. SCL 111, 126)'],
+            ['Discovery', 'Gott et al. 2005 (SDSS Main)'],
+        ],
+    },
+    {
+        id: 'saraswati', name: 'Saraswati Supercluster', abbr: 'Saraswati',
+        type: 'Massive Supercluster (~600 Mly)',
+        l: 198.0, b: -82.0, dist: 4_000_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Supercluster',
+        color: 0x402266, glowColor: 0xc080ff, size: 4.8,
+        desc: 'One of the most massive supercluster structures known (~2 × 10¹⁶ M☉, ~600 Mly across) at the high-z (z ≈ 0.28) era of cosmic acceleration. Its discovery (Bagchi et al. 2017) shows that very-large-mass clusters were already in place when dark energy began to dominate cosmic dynamics — pushing the lower bound on supercluster formation timescales.',
+        props: [
+            ['Type', 'Massive Supercluster'],
+            ['Extent', '~600 Mly across'],
+            ['Distance', '~4.0 Gly (z ≈ 0.28)'],
+            ['Galactic l / b', '198° / −82° (centroid)'],
+            ['Mass', '~2 × 10¹⁶ M☉'],
+            ['Member clusters', '~43 rich clusters'],
+            ['Discovery', 'Bagchi et al. 2017 (SDSS-III)'],
+            ['Notable', 'Tests dark-energy-era structure formation'],
+        ],
+    },
+    {
+        id: 'laniakea', name: 'Laniakea Supercluster', abbr: 'Laniakea',
+        type: 'Our Home Supercluster (~520 Mly)',
+        l: 305.0, b: -7.0, dist: 250_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Supercluster',
+        color: 0x223855, glowColor: 0x66aaee, size: 5.0,
+        desc: 'The supercluster the Milky Way actually belongs to — defined dynamically (Tully et al. 2014) as the basin of attraction of the Great Attractor. Contains ~100,000 galaxies organised into the Virgo, Hydra-Centaurus, Pavo-Indus and Norma sub-superclusters. We sit on its periphery and are flowing inward at ~600 km/s.',
+        props: [
+            ['Type', 'Supercluster (basin of attraction)'],
+            ['Extent', '~520 Mly diameter'],
+            ['Distance to centroid', '~250 Mly (Norma cluster region)'],
+            ['Galactic l / b', '305° / −7° (Great Attractor)'],
+            ['Member galaxies', '~100,000'],
+            ['Mass', '~10¹⁷ M☉'],
+            ['Includes', 'Virgo, Hydra-Cen, Pavo-Indus, Norma'],
+            ['Discovery', 'Tully et al. 2014 (Cosmicflows-2)'],
+            ['Notable', 'The Milky Way is on its outskirts'],
+        ],
+    },
+    {
+        id: 'bootes_void', name: 'Boötes Void', abbr: 'Boötes Void',
+        type: 'Largest Known Void (~330 Mly)',
+        l: 75.0, b: 60.0, dist: 700_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Void',
+        color: 0x080612, glowColor: 0x554477, size: 6.0,
+        desc: 'A roughly spherical region of the universe ~330 Mly across that contains essentially no galaxies — fewer than 60 known where ~10,000 are expected. Discovered serendipitously by Kirshner et al. 1981 in a redshift survey of the constellation Boötes. The largest known void; its existence places strong constraints on the initial power spectrum of cosmic structure.',
+        props: [
+            ['Type', 'Cosmic Void'],
+            ['Diameter', '~330 Mly (largest known)'],
+            ['Distance to centre', '~700 Mly'],
+            ['Galactic l / b', '75° / +60° (centre)'],
+            ['Redshift', 'z ≈ 0.05'],
+            ['Galaxies inside', '~60 known (~10,000 expected)'],
+            ['Discovery', 'Kirshner et al. 1981'],
+            ['Notable', 'Largest known low-density region'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'great_attractor', name: 'Great Attractor (Norma Cluster region)', abbr: 'Great Attractor',
+        type: 'Gravitational Anomaly',
+        l: 325.0, b: -7.0, dist: 220_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Cluster',
+        color: 0x553300, glowColor: 0xff8844, size: 4.5,
+        desc: 'A gravitational focal point pulling the Local Group at ~600 km/s toward the constellation Norma. Centred near the Norma Cluster (Abell 3627), its density is ~10× the cosmic mean. Largely hidden behind the Milky Way\'s "Zone of Avoidance" — its existence was first inferred from the dipole anisotropy of the cosmic microwave background.',
+        props: [
+            ['Type', 'Massive overdensity / cluster complex'],
+            ['Distance', '~220 Mly'],
+            ['Galactic l / b', '325° / −7° (Norma Cluster)'],
+            ['Mass', '~5 × 10¹⁶ M☉'],
+            ['Pull on Local Group', '~600 km/s (peculiar velocity)'],
+            ['Discovery', 'Lynden-Bell et al. 1988'],
+            ['Notable', 'Hidden behind Milky Way Zone of Avoidance'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'coma_cluster', name: 'Coma Cluster (Abell 1656)', abbr: 'Coma Cluster',
+        type: 'Galaxy Cluster (~20 Mly)',
+        l: 58.1, b: 87.96, dist: 321_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Cluster',
+        color: 0x222244, glowColor: 0xaaccff, size: 4.0,
+        desc: 'One of the densest known galaxy clusters — ~1,000 identified members plus thousands of dwarfs. Historically pivotal: Fritz Zwicky\'s 1933 study of its galaxy velocity dispersion produced the first quantitative evidence for dark matter. Two giant cD galaxies (NGC 4874 and NGC 4889) anchor its core. Hot intracluster gas at ~10⁸ K dominates its X-ray sky.',
+        props: [
+            ['Type', 'Rich galaxy cluster (Bautz–Morgan B-II)'],
+            ['Diameter', '~20 Mly'],
+            ['Distance', '~321 Mly (98 Mpc)'],
+            ['Galactic l / b', '58.1° / +88.0° (galactic north pole)'],
+            ['Redshift', 'z ≈ 0.0231'],
+            ['Member galaxies', '~1,000 (+ thousands of dwarfs)'],
+            ['ICM temperature', '~9 keV (~10⁸ K)'],
+            ['Discovery', 'F. Zwicky 1933 — first dark-matter evidence'],
+            ['Notable', 'Birthplace of the dark-matter problem'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'ic1101', name: 'IC 1101', abbr: 'IC 1101',
+        type: 'Largest Known Galaxy (~6 Mly)',
+        l: 7.0, b: 50.5, dist: 1_045_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 4500, spectral: 'cD',
+        color: 0xffd09a, glowColor: 0xffe0a0, size: 4.5,
+        desc: 'Among the largest single galaxies known — a supergiant cD elliptical at the centre of the Abell 2029 cluster. Its diffuse stellar envelope spans ~6 million light-years (~50× the Milky Way), although ~75% of that "size" is intracluster light. Hosts a ~4 × 10¹⁰ M☉ central black hole and ~100 trillion stars.',
+        props: [
+            ['Type', 'Supergiant cD Elliptical (E / S0)'],
+            ['Diameter', '~6 Mly (incl. ICL halo)'],
+            ['Distance', '~1.045 Gly (320 Mpc)'],
+            ['Galactic l / b', '7.0° / +50.5°'],
+            ['Star count', '~10¹⁴ stars'],
+            ['Mass', '~4 × 10¹⁵ M☉ (with halo)'],
+            ['Central BH', '~4 × 10¹⁰ M☉'],
+            ['Cluster', 'BCG of Abell 2029'],
+            ['Notable', 'One of the largest known galaxies'],
+        ],
+    },
+    {
+        id: 'stephans_quintet', name: "Stephan's Quintet (HCG 92)", abbr: "Stephan's Quintet",
+        type: 'Compact Galaxy Group',
+        l: 96.9, b: -22.2, dist: 280_000_000,
+        isIntergalactic: true, isLargest: true, isStructure: true,
+        temp: 0, spectral: 'Group',
+        color: 0x55aabb, glowColor: 0xaaeeff, size: 3.6,
+        desc: 'A compact group of five galaxies (four interacting at ~290 Mly + one foreground member at 39 Mly) showcasing one of the most violent ongoing intergalactic collisions. Featured in JWST\'s 2022 first-light imagery; the intruder NGC 7318B is plowing into the group at ~1,000 km/s, generating a galaxy-scale shock wave detected from radio through X-ray.',
+        props: [
+            ['Type', 'Hickson Compact Group (HCG 92)'],
+            ['Distance', '~290 Mly (interacting four)'],
+            ['Galactic l / b', '96.9° / −22.2°'],
+            ['Members', '5 galaxies (1 foreground at ~39 Mly)'],
+            ['Notable feature', 'Galaxy-scale shock wave from NGC 7318B'],
+            ['Discovery', 'Édouard Stephan 1877 (Marseille)'],
+            ['Famous appearance', 'JWST first-light release, Jul 2022'],
+        ],
+        isCluster: true,
     },
 ];
 
@@ -2450,6 +2780,232 @@ function makeGalaxySpriteCanvas(type, colorHex) {
         ctx.beginPath(); ctx.arc(0,0,16,0,Math.PI*2); ctx.fill();
         ctx.restore();
 
+    } else if (type === 'great_wall') {
+        // Elongated filament: long horizontal axis with bright "node" galaxies
+        // strung along it inside a faint diffuse envelope.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Outer envelope (cosmic-web filament glow)
+        const env = ctx.createRadialGradient(0,0,0, 0,0, cx*0.95);
+        env.addColorStop(0,    `rgba(${r},${g},${b},0.10)`);
+        env.addColorStop(0.4,  `rgba(${r},${g},${b},0.06)`);
+        env.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = env;
+        ctx.save(); ctx.scale(1.5, 0.6);
+        ctx.beginPath(); ctx.arc(0,0, cx*0.85, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // Bright filament backbone (long thin stripe)
+        const bone = ctx.createLinearGradient(-cx*0.85, 0, cx*0.85, 0);
+        bone.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
+        bone.addColorStop(0.15, `rgba(${r},${g},${b},0.35)`);
+        bone.addColorStop(0.5,  `rgba(${r},${g},${b},0.55)`);
+        bone.addColorStop(0.85, `rgba(${r},${g},${b},0.35)`);
+        bone.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = bone;
+        ctx.fillRect(-cx*0.85, -3, cx*1.7, 6);
+
+        // ~9 bright cluster nodes scattered along the backbone
+        const nodes = [
+            [-95,  -3, 8], [-72,  4, 6], [-48,  -2, 9], [-24,  3, 7],
+            [  0,  -2,11], [ 22,  4, 8], [ 50,  -3, 9], [ 76,  3, 7],
+            [ 98,  -2, 8],
+        ];
+        nodes.forEach(([x,y,rad]) => {
+            const ng = ctx.createRadialGradient(x,y,0, x,y,rad);
+            ng.addColorStop(0,   `rgba(255,245,210,0.95)`);
+            ng.addColorStop(0.4, `rgba(${r},${g},${b},0.65)`);
+            ng.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = ng;
+            ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+        });
+        ctx.restore();
+
+    } else if (type === 'lqg') {
+        // Large Quasar Group: scattered distinct point sources with subtle
+        // connecting filament — each quasar has tiny spike + glow halo.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Connecting filament backbone (faint, shows the group is coherent)
+        ctx.strokeStyle = `rgba(${r},${g},${b},0.18)`;
+        ctx.lineWidth   = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(-90,  35); ctx.bezierCurveTo(-40,-20, 30, 25, 95, -40);
+        ctx.stroke();
+
+        // Quasar dots — 11 points with diffraction-spike glow
+        const quasars = [
+            [-90, 35], [-65,  -5], [-42, 22], [-20, -20], [ -2, 15], [ 20,  -8],
+            [ 40, 28], [ 58, -25], [ 75, 18], [ 92, -38], [-12, 42],
+        ];
+        quasars.forEach(([x,y]) => {
+            // Glow halo
+            const qg = ctx.createRadialGradient(x,y,0, x,y, 14);
+            qg.addColorStop(0,   `rgba(255,250,220,1.0)`);
+            qg.addColorStop(0.3, `rgba(${r},${g},${b},0.65)`);
+            qg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = qg;
+            ctx.beginPath(); ctx.arc(x,y,14,0,Math.PI*2); ctx.fill();
+            // Tiny diffraction cross
+            ctx.strokeStyle = `rgba(255,240,200,0.55)`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x-9,y); ctx.lineTo(x+9,y);
+            ctx.moveTo(x,y-9); ctx.lineTo(x,y+9);
+            ctx.stroke();
+        });
+        ctx.restore();
+
+    } else if (type === 'supercluster') {
+        // Large diffuse glow with several embedded cluster cores — a supercluster
+        // is a network of clusters bound on Mpc scales.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Outer faint envelope
+        const env = ctx.createRadialGradient(0,0, 0, 0,0, cx);
+        env.addColorStop(0,   `rgba(${r},${g},${b},0.18)`);
+        env.addColorStop(0.5, `rgba(${r},${g},${b},0.08)`);
+        env.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = env;
+        ctx.beginPath(); ctx.arc(0,0,cx,0,Math.PI*2); ctx.fill();
+
+        // 4 embedded cluster cores
+        const cores = [[ -28,-12, 22, 0.7], [ 26, 18, 26, 0.65],
+                       [-14, 32, 16, 0.55], [ 36,-30, 14, 0.50]];
+        cores.forEach(([x,y,rad,op]) => {
+            const cg = ctx.createRadialGradient(x,y,0, x,y,rad);
+            cg.addColorStop(0,   `rgba(255,255,235,${op})`);
+            cg.addColorStop(0.4, `rgba(${r},${g},${b},${(op*0.55).toFixed(3)})`);
+            cg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = cg;
+            ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+        });
+
+        // Sprinkle of tiny galaxy points throughout
+        for (let i = 0; i < 24; i++) {
+            const ang = Math.random() * Math.PI * 2;
+            const rd  = 18 + Math.random() * (cx*0.78);
+            const x = rd*Math.cos(ang), y = rd*Math.sin(ang) * 0.8;
+            ctx.beginPath();
+            ctx.fillStyle = `rgba(${r},${g},${b},${(0.18 + Math.random()*0.25).toFixed(3)})`;
+            ctx.arc(x,y, 1.5 + Math.random()*1.2, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+    } else if (type === 'void') {
+        // A cosmic void: dark interior + thin bright rim that traces the
+        // surrounding "wall" of galaxies on its boundary.
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Subtle dark "anti-fill" so it reads as negative space
+        const dark = ctx.createRadialGradient(0,0,0, 0,0, cx*0.7);
+        dark.addColorStop(0,    `rgba(${r},${g},${b},0.18)`);
+        dark.addColorStop(0.6,  `rgba(${r},${g},${b},0.05)`);
+        dark.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = dark;
+        ctx.beginPath(); ctx.arc(0,0, cx*0.7, 0, Math.PI*2); ctx.fill();
+
+        // Bright rim: galaxies clinging to the void wall
+        const rim = ctx.createRadialGradient(0,0, cx*0.62, 0,0, cx*0.78);
+        rim.addColorStop(0,    `rgba(${r},${g},${b},0.0)`);
+        rim.addColorStop(0.3,  `rgba(${r},${g},${b},0.45)`);
+        rim.addColorStop(0.55, `rgba(255,235,200,0.55)`);
+        rim.addColorStop(0.75, `rgba(${r},${g},${b},0.30)`);
+        rim.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = rim;
+        ctx.beginPath(); ctx.arc(0,0, cx*0.78, 0, Math.PI*2); ctx.fill();
+
+        // Sprinkle a few "wall galaxies" around the perimeter
+        for (let i = 0; i < 18; i++) {
+            const ang = (i / 18) * Math.PI * 2 + Math.random() * 0.18;
+            const rd  = cx*0.66 + (Math.random() - 0.5) * 14;
+            const x = rd*Math.cos(ang), y = rd*Math.sin(ang);
+            ctx.beginPath();
+            ctx.fillStyle = `rgba(255,230,200,${(0.45 + Math.random()*0.35).toFixed(3)})`;
+            ctx.arc(x,y, 1.5 + Math.random()*1.3, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.restore();
+
+    } else if (type === 'compact_group') {
+        // Hickson compact group: 4-5 galaxy spots tightly packed
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Soft envelope hinting at intra-group medium
+        const env = ctx.createRadialGradient(0,0,0, 0,0, 70);
+        env.addColorStop(0,   `rgba(${r},${g},${b},0.22)`);
+        env.addColorStop(0.55,`rgba(${r},${g},${b},0.10)`);
+        env.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = env;
+        ctx.beginPath(); ctx.arc(0,0,70,0,Math.PI*2); ctx.fill();
+
+        // 5 individual galaxies, each a small spiral/elliptical blob
+        const members = [
+            [  0,   0, 18, 'spiral'],
+            [-32, -10, 12, 'ellip'],
+            [ 22, -18, 11, 'ellip'],
+            [-12,  26, 10, 'spiral'],
+            [ 30,  20,  8, 'ellip'],
+        ];
+        members.forEach(([x,y,rad,kind]) => {
+            const mg = ctx.createRadialGradient(x,y,0, x,y,rad);
+            mg.addColorStop(0,   `rgba(255,250,225,1.0)`);
+            mg.addColorStop(0.35,`rgba(${r},${g},${b},0.75)`);
+            mg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = mg;
+            ctx.save();
+            if (kind === 'ellip') ctx.scale(1.25, 0.75);
+            ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        });
+
+        // Faint "shock-wave" arc — a nod to NGC 7318B intruder
+        ctx.strokeStyle = `rgba(180,230,255,0.40)`;
+        ctx.lineWidth   = 1.2;
+        ctx.beginPath();
+        ctx.arc(8, -2, 28, -0.4*Math.PI, 0.6*Math.PI);
+        ctx.stroke();
+        ctx.restore();
+
+    } else if (type === 'giant_galaxy') {
+        // Supergiant cD elliptical: huge stellar envelope + bright nucleus
+        ctx.save(); ctx.translate(cx, cx);
+
+        // Extreme outer ICL halo (intracluster light)
+        const halo = ctx.createRadialGradient(0,0,0, 0,0, cx);
+        halo.addColorStop(0,   `rgba(${r},${g},${b},0.30)`);
+        halo.addColorStop(0.30,`rgba(${r},${g},${b},0.18)`);
+        halo.addColorStop(0.60,`rgba(${r},${g},${b},0.07)`);
+        halo.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = halo;
+        ctx.save(); ctx.scale(1.2, 0.85);
+        ctx.beginPath(); ctx.arc(0,0, cx, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+
+        // Mid stellar envelope — softly textured de Vaucouleurs profile
+        for (let pass = 0; pass < 4; pass++) {
+            const sr = [38, 60, 84, 110][pass];
+            const op = [0.78, 0.50, 0.28, 0.14][pass];
+            const eg = ctx.createRadialGradient(0,0,0, 0,0,sr);
+            eg.addColorStop(0,   `rgba(255,235,200,${op})`);
+            eg.addColorStop(0.5, `rgba(${r},${g},${b},${(op*0.7).toFixed(3)})`);
+            eg.addColorStop(1,   `rgba(${r},${g},${b},0.0)`);
+            ctx.fillStyle = eg;
+            ctx.save(); ctx.scale(1.18, 0.85);
+            ctx.beginPath(); ctx.arc(0,0,sr,0,Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+
+        // Bright nucleus
+        const nuc = ctx.createRadialGradient(0,0,0, 0,0,14);
+        nuc.addColorStop(0,    `rgba(255,255,250,1.0)`);
+        nuc.addColorStop(0.5,  `rgba(255,230,180,0.85)`);
+        nuc.addColorStop(1,    `rgba(${r},${g},${b},0.0)`);
+        ctx.fillStyle = nuc;
+        ctx.beginPath(); ctx.arc(0,0,14,0,Math.PI*2); ctx.fill();
+        ctx.restore();
+
     } else if (type === 'grb') {
         // Brilliant transient point with bipolar relativistic jet lobes and
         // four short burst rays — the collapsar gamma-ray-burst signature.
@@ -2506,12 +3062,25 @@ function buildGalaxySprite(s, pos) {
         ton618: 'quasar', '3c273': 'quasar', 'apm08279': 'quasar',
         phoenix_cluster: 'galaxy_cluster',
         // Cosmic Dawn (z > 6)
+        mom_z14: 'primordial', hd1: 'primordial',
         jades_z14_0: 'primordial', jades_z14_1: 'primordial', jades_z13_0: 'primordial',
-        ghz2: 'primordial', gn_z11: 'primordial',
+        ghz2: 'primordial', jades_gs_z11_0: 'primordial', gn_z11: 'primordial',
         macs0647_jd: 'primordial', macs1149_jd1: 'primordial',
-        j0313_1806: 'quasar',           // re-use the existing quasar sprite for J0313
+        egsy8p7: 'primordial', gn_108036: 'primordial',
+        j0313_1806: 'quasar', ulas_j1342: 'quasar',     // re-use the quasar sprite
         grb090423: 'grb',
         earendel: 'lensed_star',
+        // Largest Structures (Top 10 by extent)
+        hcb_great_wall:   'great_wall',
+        sloan_great_wall: 'great_wall',
+        huge_lqg:         'lqg',
+        saraswati:        'supercluster',
+        laniakea:         'supercluster',
+        bootes_void:      'void',
+        great_attractor:  'galaxy_cluster',
+        coma_cluster:     'galaxy_cluster',
+        ic1101:           'giant_galaxy',
+        stephans_quintet: 'compact_group',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
@@ -3283,6 +3852,94 @@ const m31TrajObjects = [];  // toggled in animate loop
 })();
 
 // ══════════════════════════════════════════════════════════════════════════
+//  UNIVERSE-VIEW REFERENCE GUIDES
+//  Three faint horizontal rings, each at the log-compressed scene radius of
+//  a major cosmic shell, give the universe view a sense of scale.  Plus a
+//  sparse "cosmic web" point cloud that suggests structure between objects.
+//  All visible only when camDist > 90k (toggled in animate()).
+// ══════════════════════════════════════════════════════════════════════════
+const universeGuides = [];   // mesh objects toggled by camera distance
+(function buildUniverseGuides() {
+    // Helper — make a horizontal ring with a label sprite anchored on +x edge
+    function makeShellRing(sceneR, color, opacity, label, labelColor, labelY) {
+        const pts = [];
+        for (let i = 0; i <= 360; i++) {
+            const a = i * Math.PI / 180;
+            pts.push(new THREE.Vector3(sceneR * Math.cos(a), 0, sceneR * Math.sin(a)));
+        }
+        const ring = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }),
+        );
+        ring.visible = false;
+        scene.add(ring);
+        universeGuides.push(ring);
+
+        // Label
+        const cv = document.createElement('canvas');
+        cv.width = 512; cv.height = 64;
+        const cx = cv.getContext('2d');
+        cx.font = 'bold 22px Segoe UI, sans-serif';
+        cx.fillStyle = labelColor;
+        cx.textAlign = 'center';
+        cx.fillText(label, 256, 36);
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false,
+        }));
+        sp.position.set(sceneR * 0.72, labelY, sceneR * 0.72);
+        sp.scale.set(22000, 2750, 1);
+        sp.visible = false;
+        scene.add(sp);
+        universeGuides.push(sp);
+    }
+
+    // Three nested cosmic shells. Radii match mapDistToScene() for:
+    //   Local Group       : 5 Mly      → ~117 k
+    //   Laniakea SC       : 260 Mly    → ~169 k
+    //   Cosmic Dawn shell : 13.5 Gly   → ~220 k
+    makeShellRing(mapDistToScene(5_000_000),    0x335577, 0.22,
+                  'Local Group  (~5 Mly radius)',          'rgba(140,180,230,0.55)',  900);
+    makeShellRing(mapDistToScene(260_000_000),  0x6644aa, 0.22,
+                  'Laniakea Supercluster  (~260 Mly)',     'rgba(180,140,230,0.55)',  1200);
+    makeShellRing(mapDistToScene(13_500_000_000), 0x884422, 0.30,
+                  'Cosmic Dawn shell  (z > 6,  ~13 Gly)',  'rgba(255,120,80,0.65)',   1500);
+
+    // ── Cosmic-web background — sparse point cloud filling the log-compressed
+    // shell so the universe view doesn't feel completely empty between markers.
+    const N = 1400;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+        // Sample log-uniform radius from 80k → 230k scene units (Local Group → CMB)
+        const u = Math.random();
+        const sceneR = 80000 + Math.pow(u, 0.6) * 150000;
+        // Random direction on sphere
+        const theta = Math.random() * Math.PI * 2;
+        const phi   = Math.acos(2 * Math.random() - 1);
+        pos[i*3]   = sceneR * Math.sin(phi) * Math.cos(theta);
+        pos[i*3+1] = sceneR * Math.cos(phi) * 0.55;   // flatten slightly toward galactic plane
+        pos[i*3+2] = sceneR * Math.sin(phi) * Math.sin(theta);
+        // Tinted toward cosmic-web red (the deeper, the redder)
+        const t = (sceneR - 80000) / 150000;
+        col[i*3]   = 0.35 + t * 0.40;
+        col[i*3+1] = 0.20 + (1 - t) * 0.18;
+        col[i*3+2] = 0.30 + (1 - t) * 0.20;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.PointsMaterial({
+        vertexColors: true, size: 280, sizeAttenuation: true,
+        transparent: true, opacity: 0.34, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+    const web = new THREE.Points(geo, mat);
+    web.visible = false;
+    scene.add(web);
+    universeGuides.push(web);
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
 //  SIDEBAR STAR LIST
 // ══════════════════════════════════════════════════════════════════════════
 const starListEl = document.getElementById('star-list');
@@ -3534,7 +4191,7 @@ function updateLabelScales() {
         }
 
         // ── Cosmic-dawn LOD override ─────────────────────────────────
-        // z>6 objects sit in a ~1.5k-unit shell at scene-radius ~220k. They
+        // z>6 objects sit in a ~3k-unit shell at scene-radius ~220k. They
         // would smear into a single bright blob without active LOD control.
         //   • Hidden entirely below universe-zoom (camDist < 100k) — they're
         //     too far away to be physically sensible at galactic scale.
@@ -3551,18 +4208,46 @@ function updateLabelScales() {
             if (gxSpr) gxSpr.visible = visible;
             if (lbl)   lbl.visible   = visible && (camDist > 180_000 || closeApp);
 
-            // Cap sprite size at 16k scene units so the ten cosmic-dawn
-            // sprites don't merge at universe zoom (avg radial separation
-            // between adjacent shell members is only ~30 units).
+            // Cap sprite size at 13k scene units so the now-sixteen cosmic-dawn
+            // sprites don't merge at universe zoom (average radial separation
+            // between adjacent shell members is ~25 units).
             if (gxSpr && visible) {
                 const cur = gxSpr.scale.x;
-                if (cur > 16_000) gxSpr.scale.setScalar(16_000);
+                if (cur > 13_000) gxSpr.scale.setScalar(13_000);
             }
-            // Glow capped at 8k for the same reason — the additive halo would
+            // Glow capped at 6k for the same reason — the additive halo would
             // otherwise dominate at universe view.
             if (glow && visible) {
                 const cur = glow.scale.x;
-                if (cur > 8_000) glow.scale.setScalar(8_000);
+                if (cur > 6_000) glow.scale.setScalar(6_000);
+            }
+        }
+
+        // ── Largest-structure LOD override ────────────────────────────
+        // The Top-10 largest structures span ~150 Mly (Stephan's Quintet) up
+        // to ~9.5 Gly (HCB Great Wall) and so live in the same log-compressed
+        // shell as the cosmic-dawn objects. Visible only in universe view or
+        // when the camera is within ~80k of the object itself.
+        if (s.isLargest) {
+            const camToObj  = camera.position.distanceTo(s.pos3);
+            const universeV = camDist > 90_000;
+            const closeApp  = camToObj < 80_000;
+            const visible   = universeV || closeApp;
+            if (mesh)  mesh.visible  = visible;
+            if (glow)  glow.visible  = visible;
+            if (gxSpr) gxSpr.visible = visible;
+            if (lbl)   lbl.visible   = visible && (camDist > 170_000 || closeApp);
+
+            // Cap sprite scale — these have intrinsically big "size" values
+            // because they ARE big, but we shouldn't let any one structure
+            // wipe out the entire view at universe zoom.
+            if (gxSpr && visible) {
+                const cur = gxSpr.scale.x;
+                if (cur > 22_000) gxSpr.scale.setScalar(22_000);
+            }
+            if (glow && visible) {
+                const cur = glow.scale.x;
+                if (cur > 11_000) glow.scale.setScalar(11_000);
             }
         }
     });
@@ -3641,6 +4326,13 @@ function animate() {
     // ── MW outer sprite: show only in universe view ───────────────
     if (mwOuterSprite) {
         mwOuterSprite.visible = camDistFromOrigin > 140000;
+    }
+
+    // ── Universe-scale reference guides (LG / Laniakea / Cosmic Dawn rings
+    //    + cosmic-web filament background) — universe view only.
+    {
+        const showGuides = camDistFromOrigin > 90000;
+        universeGuides.forEach(o => { o.visible = showGuides; });
     }
 
     // ── M31 trajectory: show only in universe view ────────────────
