@@ -82,12 +82,84 @@ export const ATMOSPHERIC_LAYERS = [
 
 // ── Canonical satellite altitudes for the globe overlay ─────────────────────
 // Mirrors dsmc/pipeline/profile.py:SATELLITE_REFERENCES.
+//
+// Each entry that represents an actual orbiting object also carries an
+// `orbital` block — Keplerian mean elements at a representative epoch,
+// good enough for visual-grade ground-track propagation in the absence
+// of a live TLE refresh. The CelesTrak proxy at /api/celestrak/tle can
+// upgrade these to real-time mean elements when the page is online; the
+// hardcoded values here are the fallback so the visual works offline.
+//
+// noradId is the NORAD catalog number (also called SATCAT or SCC). It's
+// the canonical key for fetching a single satellite's TLE from CelesTrak.
+//
+// `orbital: null` means "this is a reference altitude, not an object" —
+// e.g. the Kármán line. Such entries get a static ring overlay only.
 export const SATELLITE_REFERENCES = [
-    { id: "karman",   name: "Kármán line",    altitudeKm:   100, color: "#ff7070" },
-    { id: "iss",      name: "ISS",            altitudeKm:   420, color: "#00ffd0" },
-    { id: "hubble",   name: "Hubble (HST)",   altitudeKm:   540, color: "#ffd060" },
-    { id: "starlink", name: "Starlink shell", altitudeKm:   550, color: "#60a0ff" },
-    { id: "iridium",  name: "Iridium",        altitudeKm:   780, color: "#a080ff" },
+    {
+        id: "karman", name: "Kármán line", altitudeKm: 100,
+        color: "#ff7070",
+        orbital: null,
+        description: "Internationally recognised threshold of space (FAI). Below this, aerodynamic flight is possible.",
+    },
+    {
+        id: "iss", name: "ISS", altitudeKm: 420,
+        color: "#00ffd0",
+        orbital: {
+            noradId: 25544,
+            inclinationDeg:    51.6,
+            raanDeg:            0,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:    0,
+            eccentricity:       0.0006,
+            periodMin:         92.7,
+        },
+        description: "International Space Station. Crewed since 2000. Heaviest LEO drag testbed.",
+    },
+    {
+        id: "hubble", name: "Hubble (HST)", altitudeKm: 540,
+        color: "#ffd060",
+        orbital: {
+            noradId: 20580,
+            inclinationDeg:    28.5,
+            raanDeg:           120,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   80,
+            eccentricity:       0.0003,
+            periodMin:         95.4,
+        },
+        description: "Hubble Space Telescope. Reboost-dependent; entered atmospheric drag regime in 1990.",
+    },
+    {
+        id: "starlink", name: "Starlink shell", altitudeKm: 550,
+        color: "#60a0ff",
+        orbital: {
+            // STARLINK-1007 — first operational v1.0 birds, representative.
+            noradId: 44713,
+            inclinationDeg:    53.0,
+            raanDeg:           240,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   160,
+            eccentricity:       0.0001,
+            periodMin:         95.6,
+        },
+        description: "SpaceX Starlink representative shell at 550 km, 53° inclined. ~5000 active birds.",
+    },
+    {
+        id: "iridium", name: "Iridium NEXT", altitudeKm: 780,
+        color: "#a080ff",
+        orbital: {
+            // IRIDIUM 102 — representative NEXT-generation bird.
+            noradId: 41917,
+            inclinationDeg:    86.4,
+            raanDeg:            60,
+            argPerigeeDeg:      0,
+            meanAnomalyDeg0:   240,
+            eccentricity:       0.0002,
+            periodMin:        100.4,
+        },
+        description: "Iridium NEXT polar constellation. 86.4° inclined; covers high-latitude comms.",
+    },
 ];
 
 /**

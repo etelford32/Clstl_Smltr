@@ -124,14 +124,83 @@ export class UpperAtmosphereUI {
      * globe and re-sampling local physics from the engine. Decoupled
      * from refresh() so the HUD stays correct as the user flies around
      * without having to spam the full slider-driven refresh.
+     *
+     * Also re-paints the satellite drag-analysis panel — its altitudes
+     * change every frame as probes orbit, so a static refresh-only
+     * paint would show stale values for every satellite with non-zero
+     * eccentricity. 4 Hz is plenty smooth for a side panel.
      */
     _startCameraHUDLoop() {
         const tick = () => {
             this._paintCameraHUD();
+            this._paintSatelliteDrag();
         };
         clearInterval(this._camHUDTimer);
         this._camHUDTimer = setInterval(tick, 250);
         tick();
+    }
+
+    /**
+     * Render the per-satellite drag-analysis rows. Pulls a snapshot
+     * from globe.getSatelliteDragAnalysis() (sorted by q descending)
+     * and lays out one row per satellite with a horizontal q-bar so
+     * users see "ISS feels 10× more drag than Iridium" at a glance.
+     *
+     * Click on a row flies the camera to that satellite — same path
+     * the canvas-click on a probe sprite uses.
+     */
+    _paintSatelliteDrag() {
+        const box = this.el.satDrag;
+        if (!box) return;
+        const states = this.globe.getSatelliteDragAnalysis?.() || [];
+        if (states.length === 0) {
+            box.innerHTML = '<div class="ua-dim" style="font-size:.7rem">no orbital satellites tracked</div>';
+            return;
+        }
+        // Use the highest q in the snapshot to scale the bars so the
+        // ranking is visible even when all values are tiny.
+        const maxQ = states.reduce((m, s) => Math.max(m, s.qPa ?? 0), 1e-12);
+        const html = states.map(s => {
+            const colour   = s.color || '#0cc';
+            const qmPaText = Number.isFinite(s.qmPa) ? s.qmPa.toFixed(2) : '—';
+            const altText  = Number.isFinite(s.altKm) ? `${s.altKm.toFixed(0)} km` : '—';
+            const noradTxt = s.noradId ? `NORAD ${s.noradId}` : '';
+            const inclTxt  = Number.isFinite(s.inclinationDeg) ? `${s.inclinationDeg}°` : '';
+            const meta     = [noradTxt, inclTxt].filter(Boolean).join(' · ');
+            const fillPct  = Math.max(2, Math.min(100, ((s.qPa ?? 0) / maxQ) * 100));
+            return `
+                <div class="ua-sat-row" data-sat-id="${s.id}" title="Click to fly the camera to ${s.name}">
+                    <span class="ua-sat-dot" style="background:${colour};color:${colour}"></span>
+                    <span class="ua-sat-name">
+                        <span class="ua-sat-title">${s.name}</span>
+                        <span class="ua-sat-meta">${meta}</span>
+                    </span>
+                    <span class="ua-sat-alt">${altText}</span>
+                    <span class="ua-sat-q" style="color:${colour}">${qmPaText}<span style="color:#556;font-weight:400"> mPa</span></span>
+                    <span class="ua-sat-q-bar"><span class="ua-sat-q-fill" style="width:${fillPct}%;background:${colour}"></span></span>
+                </div>
+            `;
+        }).join('');
+        // innerHTML is fine here — values come from engine + spec
+        // (no user-supplied strings). Re-attach click handlers each
+        // re-paint since we rewrite the DOM.
+        box.innerHTML = html;
+        box.querySelectorAll('.ua-sat-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const id = row.dataset.satId;
+                if (!id) return;
+                // Switch to fly mode if we're still in orbit so the
+                // camera-anim lands somewhere useful instead of being
+                // clamped back to the planet centre.
+                if (this.globe.getCameraMode?.() === 'orbit') {
+                    this.globe.setCameraMode?.('fly');
+                    if (this.el.camOrbitBtn) this.el.camOrbitBtn.classList.remove('ua-cam-on');
+                    if (this.el.camFlyBtn)   this.el.camFlyBtn  .classList.add('ua-cam-on');
+                    if (this.el.camMode)     this.el.camMode.textContent = 'fly';
+                }
+                this.globe.flyToSatellite?.(id);
+            });
+        });
     }
 
     _paintCameraHUD() {

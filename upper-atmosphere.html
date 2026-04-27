@@ -360,6 +360,59 @@ input[type=range]::-moz-range-thumb {
 .ua-lc-regime--free-molecular { color:#ff9060; }
 .ua-lc-regime--unknown        { color:#778; }
 
+/* ─── Satellite drag analysis ──────────────────────────── */
+#ua-sat-drag { display:flex; flex-direction:column; gap:5px; }
+.ua-sat-row {
+    display:grid;
+    grid-template-columns: 14px 1fr auto auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 8px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .12s;
+    font-size:.72rem;
+}
+.ua-sat-row:hover {
+    border-color:rgba(0,200,200,.35);
+    background:rgba(0,200,200,.06);
+}
+.ua-sat-dot {
+    width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-sat-name {
+    display:flex; flex-direction:column; gap:1px;
+    line-height:1.2;
+}
+.ua-sat-name .ua-sat-title {
+    color:#cde; font-weight:600;
+}
+.ua-sat-name .ua-sat-meta {
+    color:#667; font-size:.6rem; font-family:monospace;
+}
+.ua-sat-alt {
+    color:#9cf; font-family:monospace; font-size:.7rem;
+}
+.ua-sat-q {
+    font-family:monospace; font-weight:700;
+    text-align:right; min-width:84px;
+}
+.ua-sat-q-bar {
+    grid-column:1 / -1;
+    height:3px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px;
+    overflow:hidden;
+    margin-top:3px;
+}
+.ua-sat-q-fill {
+    height:100%;
+    transition:width .25s;
+}
+
 /* ─── Field-overlay radio row ──────────────────────────── */
 .ua-field-mode-row {
     display:flex; flex-wrap:wrap; gap:6px;
@@ -517,6 +570,17 @@ input[type=range]::-moz-range-thumb {
             </div>
         </div>
 
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Satellite drag analysis</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live drag pressure q = ½ρv² for each tracked object, using
+                the current state's local ρ and circular orbital speed
+                v = √(μ/(R+h)). Click any row to fly the camera there.
+                Orbital elements from <a href="https://celestrak.org" target="_blank" rel="noopener" style="color:#0cc">CelesTrak</a>.
+            </p>
+            <div id="ua-sat-drag"></div>
+        </div>
+
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
             <div id="ua-sw-stats"></div>
@@ -641,6 +705,7 @@ input[type=range]::-moz-range-thumb {
             liveStatus:     document.getElementById('ua-live-status'),
             sourcePill:     document.getElementById('ua-source-pill'),
             solarWindStats: document.getElementById('ua-sw-stats'),
+            satDrag:        document.getElementById('ua-sat-drag'),
             // Camera HUD
             camOrbitBtn:    document.getElementById('ua-cam-orbit'),
             camFlyBtn:      document.getElementById('ua-cam-fly'),
