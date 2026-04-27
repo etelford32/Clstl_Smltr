@@ -370,11 +370,15 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
-    import { validateInviteCode, redeemInviteCode } from './js/admin-invites.js';
+    import { validateInviteCode, applyInvitePlan } from './js/admin-invites.js';
 
     await auth.ready();
     if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
-    window._ppAuth = { auth, validateInviteCode, redeemInviteCode };
+    // applyInvitePlan replaces redeemInviteCode in the post-signup flow:
+    // it atomically marks the invite as used AND writes the comped plan
+    // onto user_profiles, so an Educator/Advanced/etc. invite no longer
+    // silently lands the user on 'free'.
+    window._ppAuth = { auth, validateInviteCode, applyInvitePlan };
 
     // ── Invite code: URL pre-fill + live validation ──────────────────────
     // The ?code= and ?email= params are populated by the magic link sent
@@ -531,7 +535,7 @@
             const emailVal = document.getElementById('email').value;
             const passwordVal = document.getElementById('password').value;
 
-            const { auth, redeemInviteCode } = window._ppAuth || {};
+            const { auth, applyInvitePlan } = window._ppAuth || {};
             const invite = (typeof window._ppGetInvite === 'function')
                 ? window._ppGetInvite() : null;
             if (!auth) {
@@ -560,12 +564,22 @@
                 return;
             }
 
-            // Redeem the invite (idempotent on the server: ON CONFLICT no-op,
-            // accepted_at set only on first redeem). Failure here does NOT
-            // block signup — the account exists, the user can be upgraded
-            // manually if redemption breaks.
-            if (invite?.inviteId && redeemInviteCode) {
-                redeemInviteCode(invite.inviteId, emailVal).catch(() => {});
+            // Atomic redeem + plan upgrade. Skips the Stripe redirect if the
+            // invite already comped a paid tier — the user is already on
+            // 'educator' / 'advanced' / 'institution' / etc. server-side.
+            // Failure does NOT block signup: the account exists, an admin
+            // can apply the plan manually if the RPC misbehaves.
+            let invitedComp = false;     // true when invite landed user on a paid tier
+            if (invite?.inviteId && applyInvitePlan) {
+                try {
+                    const ar = await applyInvitePlan(invite.inviteId, emailVal);
+                    if (ar?.applied && ar.plan && ar.plan !== 'free') {
+                        invitedComp = true;
+                        // Refresh local auth state so the dashboard renders the
+                        // new plan immediately without another round-trip.
+                        await auth.fetchProfile?.();
+                    }
+                } catch (_) { /* swallow; signup already succeeded */ }
             }
 
             if (result.needsConfirmation) {
@@ -573,7 +587,7 @@
                 document.getElementById('form-view').style.display = 'none';
                 document.getElementById('success-view').classList.add('show');
                 const msgEl = document.querySelector('#success-view p');
-                const confirmMsg = plan !== 'free'
+                const confirmMsg = (plan !== 'free' && !invitedComp)
                     ? `${result.message || 'Check your email for a confirmation link.'} After confirming, you'll be able to subscribe to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan.`
                     : result.message || 'Check your email for a confirmation link.';
                 if (msgEl) msgEl.textContent = confirmMsg;
@@ -584,7 +598,10 @@
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
 
-            if (plan !== 'free') {
+            // Skip Stripe checkout when the invite already comped a paid tier —
+            // the user shouldn't be charged for what an admin granted.
+            const goToCheckout = plan !== 'free' && !invitedComp;
+            if (goToCheckout) {
                 // User selected a paid plan — redirect to checkout after brief delay
                 const msgEl = document.querySelector('#success-view p');
                 if (msgEl) msgEl.innerHTML = 'Account created! Redirecting to checkout&hellip;<br><a href="dashboard.html" style="color:#a080ff;font-size:.82rem">Or go to dashboard &rarr;</a>';
@@ -603,6 +620,10 @@
                     window.location.href = 'dashboard.html';
                 }, 1500);
             } else {
+                if (invitedComp) {
+                    const msgEl = document.querySelector('#success-view p');
+                    if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
+                }
                 setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);
             }
         })();

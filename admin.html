@@ -254,6 +254,15 @@
 
     <!-- ═══════════════════ INVITES TAB ═══════════════════ -->
     <div class="tab-panel" id="panel-invites">
+        <!-- ── Operator note ───────────────────────────────────────── -->
+        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(128,64,255,.06);border:1px solid rgba(128,64,255,.18);border-radius:8px;font-size:.78rem;color:#cdd;line-height:1.5">
+            <strong style="color:#c080ff">Operator note:</strong>
+            For a paid-tier invite (Educator / Advanced / Institution / Enterprise) to actually land the recipient on that plan instead of "free", make sure both
+            <code style="color:#fff">supabase-tier-expansion-migration.sql</code> and
+            <code style="color:#fff">supabase-invites-apply-plan-migration.sql</code> have been run.
+            Free invites work without either.
+        </div>
+
         <!-- ── Email invite (single recipient) ───────────────────── -->
         <div class="card" style="margin-bottom:18px">
             <h3>Invite by Email</h3>
@@ -261,10 +270,13 @@
             <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
                 <input id="invite-email-addr"  type="email" placeholder="recipient@example.com" class="btn" style="padding:8px 12px;flex:2;min-width:220px;text-align:left;font-family:inherit">
                 <input id="invite-email-name"  type="text"  placeholder="Recipient name (optional)" class="btn" style="padding:8px 12px;flex:1;min-width:160px;text-align:left;font-family:inherit">
-                <select id="invite-email-plan" class="btn" style="padding:8px 12px">
+                <select id="invite-email-plan" class="btn" style="padding:8px 12px" title="Plan tier the invite grants when redeemed">
                     <option value="free">Free</option>
-                    <option value="basic">Basic</option>
-                    <option value="advanced">Advanced</option>
+                    <option value="basic">Basic ($10/mo equiv.)</option>
+                    <option value="educator">Educator ($25/mo equiv.)</option>
+                    <option value="advanced">Advanced ($100/mo equiv.)</option>
+                    <option value="institution">Institution ($500/mo equiv.)</option>
+                    <option value="enterprise">Enterprise (custom)</option>
                 </select>
                 <select id="invite-email-expiry" class="btn" style="padding:8px 12px">
                     <option value="7">7-day expiry</option>
@@ -281,10 +293,13 @@
                 <h3>Generate Bulk Code</h3>
                 <div style="font-size:.74rem;color:#778;margin-bottom:10px">Anonymous code (no email target). Share manually; anyone with the code can redeem until max-uses runs out.</div>
                 <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
-                    <select id="invite-plan" class="btn" style="padding:8px 12px">
+                    <select id="invite-plan" class="btn" style="padding:8px 12px" title="Plan tier the bulk code grants when redeemed">
                         <option value="free">Free tier</option>
                         <option value="basic">Basic tier</option>
+                        <option value="educator">Educator tier</option>
                         <option value="advanced">Advanced tier</option>
+                        <option value="institution">Institution tier</option>
+                        <option value="enterprise">Enterprise tier</option>
                     </select>
                     <select id="invite-uses" class="btn" style="padding:8px 12px">
                         <option value="1">1 use</option>

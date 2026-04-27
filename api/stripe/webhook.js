@@ -170,10 +170,18 @@ export default async function handler(req) {
                 if (!uid) break;
                 const priceId = sub.items?.data?.[0]?.price?.id;
                 const plan    = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? 'basic';
+                // Surface "scheduled to cancel" state immediately rather than
+                // waiting for subscription.deleted at period end. Stripe fires
+                // this event the moment the user clicks Cancel in the billing
+                // portal (cancel_at_period_end=true, status still 'active'),
+                // and the dashboard renders 'canceled' as "access until period
+                // end" — so flipping subscription_status here lets the user
+                // see the wind-down date right away.
+                const status = sub.cancel_at_period_end ? 'canceled' : sub.status;
                 const updates = {
                     stripe_subscription_id: sub.id,
                     stripe_price_id:        priceId,
-                    subscription_status:    sub.status,
+                    subscription_status:    status,
                     subscription_period_end: new Date(sub.current_period_end * 1000).toISOString(),
                 };
                 // Only update plan if subscription is active/trialing (not on cancel)
@@ -188,12 +196,36 @@ export default async function handler(req) {
                 const sub = event.data.object;
                 const uid = await resolveUserId(sub);
                 if (!uid) break;
-                await updateProfile(uid, {
-                    plan: 'free',
-                    subscription_status: 'canceled',
-                    stripe_subscription_id: null,
-                    stripe_price_id: null,
-                });
+                // Two cases for this event:
+                //   1. cancel_at_period_end → fires AT period end, subscription
+                //      is fully wound down. Downgrade to free.
+                //   2. immediate cancel via Stripe API or admin portal "Cancel
+                //      immediately". Fires now, but the user paid for a period
+                //      that hasn't elapsed. Honor the paid period: keep their
+                //      plan + record the cutoff. The expire-canceled-subscriptions
+                //      cron (or auth.js client-side guard) downgrades after.
+                const periodEndMs = (sub.current_period_end ?? 0) * 1000;
+                const stillPaid   = periodEndMs > Date.now() + 60_000;  // 60s skew tolerance
+                if (stillPaid) {
+                    console.warn(
+                        `[StripeWebhook] subscription.deleted with future period_end ` +
+                        `(${new Date(periodEndMs).toISOString()}) for user ${uid} — ` +
+                        `preserving plan until expiry`
+                    );
+                    await updateProfile(uid, {
+                        subscription_status:     'canceled',
+                        subscription_period_end: new Date(periodEndMs).toISOString(),
+                        stripe_subscription_id:  null,
+                        stripe_price_id:         null,
+                    });
+                } else {
+                    await updateProfile(uid, {
+                        plan: 'free',
+                        subscription_status: 'canceled',
+                        stripe_subscription_id: null,
+                        stripe_price_id: null,
+                    });
+                }
                 break;
             }
 

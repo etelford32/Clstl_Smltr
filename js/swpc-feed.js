@@ -32,7 +32,22 @@
  *  feed.start();
  */
 
-import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER } from './config.js';
+import { API, NOAA, INTERVALS, STORM, STORM_TRIGGERS, TIER, planToTier } from './config.js';
+
+// ── Lazy auth-derived tier ──────────────────────────────────────────────────
+// Read the live auth state from the same localStorage key auth.js writes to.
+// Avoids importing the auth module (and its Supabase + Three.js deps) into
+// pages that only want the feed. Falls back to TIER.FREE if not signed in.
+const _AUTH_KEY = 'pp_auth';
+function _detectTierFromStorage() {
+    try {
+        const raw = localStorage.getItem(_AUTH_KEY) || sessionStorage.getItem(_AUTH_KEY);
+        if (!raw) return TIER.FREE;
+        const a = JSON.parse(raw);
+        if (!a?.signedIn) return TIER.FREE;
+        return planToTier(a.plan, a.role);
+    } catch { return TIER.FREE; }
+}
 
 // ── Quiet-Sun fallback state ──────────────────────────────────────────────────
 export const FALLBACK = {
@@ -767,11 +782,20 @@ async function fetchRadioFlux(state) {
 
 export class SpaceWeatherFeed {
     /**
-     * @param {object} opts
-     * @param {string} opts.tier  TIER.FREE (default) or TIER.PRO
+     * @param {object}  opts
+     * @param {string} [opts.tier]  Override the auto-detected tier. Pass
+     *                              TIER.PRO to force T4 + faster storm
+     *                              multipliers (e.g. for an admin preview);
+     *                              omit to derive from the signed-in user's
+     *                              plan via planToTier().
      */
-    constructor({ tier = TIER.FREE } = {}) {
-        this.tier        = tier;
+    constructor({ tier } = {}) {
+        // Auto-derive from auth when not explicitly specified. Historical
+        // call sites (`new SpaceWeatherFeed()` without a tier arg) used to
+        // get TIER.FREE unconditionally — meaning Advanced/Institution/
+        // Enterprise users were silently downgraded to free-tier polling
+        // intervals + no T4. Now those tiers correctly land in TIER.PRO.
+        this.tier        = tier ?? _detectTierFromStorage();
         this._raw        = { ...FALLBACK };
         this._timers     = {};
         this._stormMode  = false;
@@ -781,6 +805,24 @@ export class SpaceWeatherFeed {
         this.failStreak  = 0;
         this._lastFlareKey = null;
         this._lastCmeKey   = null;
+
+        // Re-evaluate tier on auth changes (sign-in, plan upgrade via
+        // checkout). Reschedule active timers if the bucket flipped, so a
+        // user who upgrades mid-session immediately gets the faster
+        // intervals + T4 without a page reload.
+        if (typeof window !== 'undefined' && tier == null) {
+            this._authListener = () => {
+                const next = _detectTierFromStorage();
+                if (next === this.tier) return;
+                const wasRunning = !!this._timers.t1;
+                this.tier = next;
+                if (!wasRunning) return;
+                // Tear down + re-start so T4 schedule respects the new tier.
+                this.stop();
+                this.start();
+            };
+            window.addEventListener('auth-changed', this._authListener);
+        }
     }
 
     // ── Public API ────────────────────────────────────────────────────────────

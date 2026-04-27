@@ -15,6 +15,11 @@
  *  TIER.FREE  — T1 (60s) + T2 (5min).  3 most-recent flare events.
  *  TIER.PRO   — All tiers including T3 (15min) + T4 (60min), full history,
  *               storm-mode acceleration, and on-demand series endpoints.
+ *
+ *  TIER.* is the feed's *feature bucket*, not the user-facing plan. Use
+ *  `planToTier(plan)` to translate a Stripe/Supabase plan name into a
+ *  bucket — everything 'advanced' or above lands in TIER.PRO, including
+ *  'institution' and 'enterprise'.
  */
 
 // ── NASA API key (local dev only; replaced by env var in production) ─────────
@@ -25,6 +30,25 @@ export const TIER = Object.freeze({
     FREE: 'free',
     PRO:  'pro',
 });
+
+/**
+ * Map a user-facing plan name (free/basic/educator/advanced/institution/enterprise)
+ * to a feed feature bucket (TIER.FREE / TIER.PRO).
+ *
+ * Educator and Basic share data depth — they pay for licensing/embed terms,
+ * not for richer feeds, so they stay in the FREE bucket. Advanced and above
+ * unlock T4 and the faster storm-mode multipliers.
+ *
+ * Accepts admin/tester role hints so a tester account gets PRO data without
+ * needing a paid plan.
+ */
+export function planToTier(plan, role) {
+    const r = String(role || '').toLowerCase();
+    if (r === 'admin' || r === 'superadmin' || r === 'tester') return TIER.PRO;
+    const p = String(plan || '').toLowerCase();
+    if (p === 'advanced' || p === 'institution' || p === 'enterprise') return TIER.PRO;
+    return TIER.FREE;
+}
 
 // ── Base poll intervals (milliseconds) ───────────────────────────────────────
 // These are the CALM-sun defaults.  Storm-mode escalation multiplies them down.

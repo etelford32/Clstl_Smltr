@@ -155,6 +155,10 @@ export async function validateInviteCode(code, email = null) {
  * Call after successful signup. The RPC enforces that email-targeted
  * invites only redeem when the email matches.
  *
+ * Note: this only marks the invite as used. It does NOT apply the
+ * invite's plan to the user. For paid-tier comp invites use
+ * applyInvitePlan() instead — it's atomic redeem + plan upgrade.
+ *
  * @param {string} inviteId  - UUID of the invite code
  * @param {string} [email]   - Email the user signed up with (for targeted invites)
  * @returns {{ ok: boolean }}
@@ -173,6 +177,45 @@ export async function redeemInviteCode(inviteId, email = null) {
         return { ok: data === true || data === null };
     } catch (_) {
         return { ok: false };
+    }
+}
+
+/**
+ * Atomic redeem + plan upgrade. Use this from signup.html so an
+ * Educator/Advanced/Institution invite actually lands the user on
+ * that plan, not 'free'. The user_profiles row is updated server-
+ * side via the apply_invite_plan() SECURITY DEFINER RPC, which
+ * bypasses the column-level guard trigger that prevents users from
+ * self-elevating from the browser.
+ *
+ * @param {string} inviteId  - UUID of the invite code
+ * @param {string} [email]   - Email the user signed up with (for targeted invites)
+ * @returns {{ ok: boolean, applied: boolean, plan?: string, error?: string }}
+ */
+export async function applyInvitePlan(inviteId, email = null) {
+    if (!isConfigured()) return { ok: false, applied: false, error: 'Supabase not configured' };
+    if (!inviteId)       return { ok: false, applied: false, error: 'Missing invite id' };
+    try {
+        const sb = await getSupabase();
+        const { data, error } = await sb.rpc('apply_invite_plan', {
+            p_invite_id: inviteId,
+            p_email:     email,
+        });
+        if (error) {
+            // Most common: the RPC isn't installed yet. Surface a helpful
+            // hint instead of a generic Postgres error.
+            const hint = /function .* does not exist/i.test(error.message || '')
+                ? 'apply_invite_plan RPC missing — run supabase-invites-apply-plan-migration.sql'
+                : error.message;
+            return { ok: false, applied: false, error: hint };
+        }
+        // RPC returns SETOF (applied bool, plan text); supabase-js gives us
+        // an array. Empty array means the invite was rejected silently.
+        const row = Array.isArray(data) ? data[0] : data;
+        if (!row) return { ok: true, applied: false };
+        return { ok: true, applied: !!row.applied, plan: row.plan };
+    } catch (err) {
+        return { ok: false, applied: false, error: err.message };
     }
 }
 
