@@ -190,8 +190,16 @@ input[type=range]::-moz-range-thumb {
     border:1px solid rgba(0,200,200,.14);
     border-radius:12px;
     overflow:hidden;
-    min-height:520px;
+    height:500px;
+    min-height:500px;
+    max-height:500px;
     display:flex;
+    align-self:start;
+    position:sticky;
+    top:14px;
+}
+@media (max-width:1280px) {
+    #ua-globe-wrap { position:relative; top:auto; }
 }
 #ua-globe { width:100%; height:100%; display:block; }
 #ua-globe-legend {
@@ -508,6 +516,49 @@ input[type=range]::-moz-range-thumb {
 .ua-fm-temperature { color:#ffaa20; }
 .ua-fm-radiation   { color:#ff4dff; }
 
+/* ─── Side-aside tabs (Controls / Analysis) ────────────── */
+#ua-aside-tabs {
+    display:flex; gap:4px;
+    background:rgba(10,6,28,.72);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:10px;
+    padding:4px;
+    margin-bottom:14px;
+    backdrop-filter:blur(14px);
+    position:sticky; top:14px; z-index:3;
+}
+.ua-tab-btn {
+    flex:1;
+    background:transparent;
+    border:none;
+    color:#9ab;
+    font:700 .7rem 'Segoe UI', system-ui, sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    padding:8px 10px;
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .15s;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+}
+.ua-tab-btn:hover { color:#cde; background:rgba(255,255,255,.04); }
+.ua-tab-btn.ua-tab-on {
+    background:rgba(0,200,200,.18);
+    color:#0ff;
+    box-shadow:inset 0 0 0 1px rgba(0,200,200,.4);
+}
+.ua-tab-btn .ua-tab-count {
+    font-size:.6rem; font-weight:700;
+    padding:1px 6px; border-radius:999px;
+    background:rgba(255,255,255,.08);
+    color:#aab;
+}
+.ua-tab-btn.ua-tab-on .ua-tab-count {
+    background:rgba(0,255,230,.2); color:#9ff;
+}
+.ua-tab-pane { display:none; flex-direction:column; gap:0; }
+.ua-tab-pane.ua-tab-pane-on { display:flex; }
+
 /* ─── Scrollbar polish ─────────────────────────────────── */
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
@@ -553,6 +604,21 @@ input[type=range]::-moz-range-thumb {
 
     <!-- Left: Controls + stats -->
     <aside>
+        <div id="ua-aside-tabs" role="tablist" aria-label="Aside view">
+            <button type="button" class="ua-tab-btn ua-tab-on" role="tab"
+                    data-ua-tab="controls" aria-selected="true" aria-controls="ua-pane-controls">
+                <span>Controls</span>
+                <span class="ua-tab-count">UI</span>
+            </button>
+            <button type="button" class="ua-tab-btn" role="tab"
+                    data-ua-tab="analysis" aria-selected="false" aria-controls="ua-pane-analysis">
+                <span>Analysis</span>
+                <span class="ua-tab-count">live</span>
+            </button>
+        </div>
+
+        <div id="ua-pane-controls" class="ua-tab-pane ua-tab-pane-on" role="tabpanel"
+             aria-labelledby="ua-aside-tabs" data-ua-pane="controls">
         <div class="ua-panel" style="margin-bottom:14px;">
             <h2>State</h2>
 
@@ -597,16 +663,6 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>At current altitude</h2>
-            <div id="ua-stats"></div>
-        </div>
-
-        <div class="ua-panel" style="margin-bottom:14px;">
-            <h2>Atmospheric layers</h2>
-            <div id="ua-layer-legend"></div>
-        </div>
-
-        <div class="ua-panel" style="margin-bottom:14px;">
             <h2>Layer particles · live</h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
                 Each row toggles a layer's gradient shell + particle system.
@@ -640,6 +696,20 @@ input[type=range]::-moz-range-thumb {
                     <span class="ua-fm-radiation">Radiation Φ</span>
                 </label>
             </div>
+        </div>
+        </div><!-- /#ua-pane-controls -->
+
+        <div id="ua-pane-analysis" class="ua-tab-pane" role="tabpanel"
+             aria-labelledby="ua-aside-tabs" data-ua-pane="analysis">
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>At current altitude</h2>
+            <div id="ua-stats"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Atmospheric layers</h2>
+            <div id="ua-layer-legend"></div>
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
@@ -711,6 +781,7 @@ input[type=range]::-moz-range-thumb {
                 Space-Weather feed is running on the same origin.
             </div>
         </div>
+        </div><!-- /#ua-pane-analysis -->
     </aside>
 
     <!-- Center: 3D globe -->
@@ -830,6 +901,25 @@ input[type=range]::-moz-range-thumb {
 
     // Expose for devtools poking.
     window.__ua = { engine, globe, ui };
+
+    /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
+    const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');
+    const tabPanes = document.querySelectorAll('.ua-tab-pane');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.uaTab;
+            tabBtns.forEach(b => {
+                const on = b.dataset.uaTab === target;
+                b.classList.toggle('ua-tab-on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            tabPanes.forEach(p => {
+                p.classList.toggle('ua-tab-pane-on', p.dataset.uaPane === target);
+            });
+            // Nudge the globe canvas to repaint at the new column height.
+            window.dispatchEvent(new Event('resize'));
+        });
+    });
 </script>
 
 </body>
