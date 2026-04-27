@@ -38,6 +38,22 @@ export function createWebGL2Backend(canvas) {
         hotspotStrength:  gl.getUniformLocation(program, 'u_hotspot_strength'),
         showGrid:         gl.getUniformLocation(program, 'u_show_grid'),
         showPhotonSphere: gl.getUniformLocation(program, 'u_show_photon_sphere'),
+        // Multi-component radiation
+        showJets:         gl.getUniformLocation(program, 'u_show_jets'),
+        jetVelocity:      gl.getUniformLocation(program, 'u_jet_velocity'),
+        jetAlpha:         gl.getUniformLocation(program, 'u_jet_alpha'),
+        jetOpen:          gl.getUniformLocation(program, 'u_jet_open'),
+        jetRMax:          gl.getUniformLocation(program, 'u_jet_r_max'),
+        jetIntensity:     gl.getUniformLocation(program, 'u_jet_intensity'),
+        showCorona:       gl.getUniformLocation(program, 'u_show_corona'),
+        coronaRadius:     gl.getUniformLocation(program, 'u_corona_radius'),
+        coronaWidth:      gl.getUniformLocation(program, 'u_corona_width'),
+        coronaIntensity:  gl.getUniformLocation(program, 'u_corona_intensity'),
+        showWind:         gl.getUniformLocation(program, 'u_show_wind'),
+        windIntensity:    gl.getUniformLocation(program, 'u_wind_intensity'),
+        showFeLine:       gl.getUniformLocation(program, 'u_show_fe_line'),
+        feIntensity:      gl.getUniformLocation(program, 'u_fe_intensity'),
+        farShortcutR:     gl.getUniformLocation(program, 'u_far_shortcut_r'),
     };
 
     function resize(w, h) {
@@ -72,6 +88,22 @@ export function createWebGL2Backend(canvas) {
         gl.uniform1f(uLoc.hotspotStrength,  u.hotspotStrength ?? 1.5);
         gl.uniform1i(uLoc.showGrid,         u.showGrid ? 1 : 0);
         gl.uniform1i(uLoc.showPhotonSphere, u.showPhotonSphere ? 1 : 0);
+        // Multi-component radiation uniforms
+        gl.uniform1i(uLoc.showJets,         u.showJets ? 1 : 0);
+        gl.uniform1f(uLoc.jetVelocity,      u.jetVelocity      ?? 0.95);
+        gl.uniform1f(uLoc.jetAlpha,         u.jetAlpha         ?? 0.7);
+        gl.uniform1f(uLoc.jetOpen,          u.jetOpen          ?? 0.18);
+        gl.uniform1f(uLoc.jetRMax,          u.jetRMax          ?? 200.0);
+        gl.uniform1f(uLoc.jetIntensity,     u.jetIntensity     ?? 0.06);
+        gl.uniform1i(uLoc.showCorona,       u.showCorona ? 1 : 0);
+        gl.uniform1f(uLoc.coronaRadius,     u.coronaRadius     ?? 10.0);
+        gl.uniform1f(uLoc.coronaWidth,      u.coronaWidth      ?? 4.0);
+        gl.uniform1f(uLoc.coronaIntensity,  u.coronaIntensity  ?? 0.04);
+        gl.uniform1i(uLoc.showWind,         u.showWind ? 1 : 0);
+        gl.uniform1f(uLoc.windIntensity,    u.windIntensity    ?? 0.04);
+        gl.uniform1i(uLoc.showFeLine,       u.showFeLine ? 1 : 0);
+        gl.uniform1f(uLoc.feIntensity,      u.feIntensity      ?? 0.6);
+        gl.uniform1f(uLoc.farShortcutR,     u.farShortcutR     ?? 120.0);
     }
 
     function draw() {

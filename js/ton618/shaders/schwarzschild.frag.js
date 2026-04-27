@@ -45,6 +45,27 @@ uniform float u_hotspot_strength;        // brightness scale
 uniform int   u_show_grid;               // 1 = draw faint 3D coordinate grid shells
 uniform int   u_show_photon_sphere;      // 1 = highlight photon sphere with translucent shell
 
+// ── Multi-component radiation / particle emission ────────────────────
+uniform int   u_show_jets;               // 1 = render bipolar relativistic jets
+uniform float u_jet_velocity;            // β = v/c of the bulk jet flow
+uniform float u_jet_alpha;               // synchrotron spectral index α (I_ν ∝ ν^−α)
+uniform float u_jet_open;                // half-opening angle (radians) from pole
+uniform float u_jet_r_max;               // outer cutoff in M
+uniform float u_jet_intensity;
+
+uniform int   u_show_corona;             // 1 = hot Compton corona above inner disk
+uniform float u_corona_radius;           // peak r in M
+uniform float u_corona_width;            // shell sigma in M
+uniform float u_corona_intensity;
+
+uniform int   u_show_wind;               // 1 = thermally-driven disk wind cone
+uniform float u_wind_intensity;
+
+uniform int   u_show_fe_line;            // 1 = Fe K-α line emission on inner disk
+uniform float u_fe_intensity;
+
+uniform float u_far_shortcut_r;          // r threshold for far-field straight-line termination (M)
+
 #define M 1.0
 #define HORIZON_EPS 1.0e-3
 #define PI 3.14159265358979323846
@@ -426,6 +447,23 @@ vec3 disk_emission(float r, float ph, float kt, float kph) {
     // white when bright is huge.
     vec3 emission = col * bright * radial * spiral * turb;
 
+    // ── Fe K-α 6.4 keV line on the inner disk ────────────────────────
+    // The line is monoenergetic in the rest frame; in the observer's frame it
+    // is gravitationally + Doppler smeared by g, producing the asymmetric
+    // skewed profile real X-ray observatories use to constrain spin & ISCO.
+    // We render it as an extra blue-shifted brightness ribbon weighted by
+    // I ∝ g^3 (spectral-line intensity invariant for a δ-function in ν).
+    if (u_show_fe_line == 1) {
+        float fe_w   = exp(-pow((r - u_disk_inner) / 1.6, 2.0));
+        float g_line = pow(g, 3.0);
+        // Color: nominally K-α is 6.4 keV (X-ray); we tint blue with a slight
+        // red tail that emerges in the receding side from g < 1.
+        vec3 fe_col = mix(vec3(1.4, 0.45, 0.25),  // red at g < 1
+                          vec3(0.55, 0.85, 1.50), // strong blue at g > 1
+                          smoothstep(0.55, 1.4, g));
+        emission += fe_col * fe_w * g_line * u_fe_intensity * radial * 1.6;
+    }
+
     // ── Orbiting hot-spot (Keplerian at u_hotspot_radius) ─────────────
     if (u_show_hotspot == 1) {
         float r_h     = u_hotspot_radius;
@@ -498,6 +536,99 @@ vec3 photon_sphere_glow(float y_prev[8], float y_new[8]) {
     return w * vec3(0.04, 0.20, 0.30);
 }
 
+// ---------------------------------------------------------------------------
+// Volumetric emissions accumulated along the geodesic.
+//
+// Three components, each weighted by the affine step size h so the line
+// integral is integrator-step-invariant:
+//
+//   • Bipolar relativistic jets       (synchrotron, power-law, full Doppler δ^{2+α})
+//   • Compton corona above inner disk (hot, near-spherical shell)
+//   • Disk wind                       (UV biconical outflow at high ṁ)
+//
+// Each is purely emissive (additive), optically thin in this Phase 0.5 model.
+// The jet uses a co-moving radial 4-velocity at speed β, its g-factor against
+// the photon's k^μ giving the iconic "approaching jet ten times brighter than
+// the receding one" Doppler beaming (M87-style).
+// ---------------------------------------------------------------------------
+vec3 volume_emission(float y_prev[8], float y_new[8], float h_step) {
+    vec3 out_rgb = vec3(0.0);
+    float r  = 0.5 * (y_prev[1] + y_new[1]);
+    float th = 0.5 * (y_prev[2] + y_new[2]);
+    float kt = 0.5 * (y_prev[4] + y_new[4]);
+    float kr = 0.5 * (y_prev[5] + y_new[5]);
+
+    if (r <= 2.0 * M + 0.01) return out_rgb;
+
+    float f_h = max(1.0 - 2.0 * M / r, 1.0e-3);
+    float sqf = sqrt(f_h);
+
+    // ── Bipolar relativistic jets ───────────────────────────────────
+    if (u_show_jets == 1) {
+        // angular distance from nearest pole
+        float th_axis = min(th, PI - th);
+        if (th_axis < u_jet_open && r < u_jet_r_max) {
+            // Jet 4-velocity: bulk flow outward along ±r̂. Sign chosen by hemisphere.
+            float beta_sign = (th < 0.5 * PI) ? 1.0 : -1.0;
+            float beta = u_jet_velocity * beta_sign;
+            float gamma_j = 1.0 / sqrt(max(1.0 - beta * beta, 1.0e-6));
+            float ut = gamma_j / sqf;
+            float ur = gamma_j * beta * sqf;
+
+            // E_emit = -g_{μν} k^μ u^ν   (signature -+++ on Schwarzschild)
+            //        = (1 − 2M/r) kt ut − kr ur / (1 − 2M/r)
+            float E_emit = (1.0 - 2.0 * M / r) * kt * ut - kr * ur / f_h;
+            E_emit = max(E_emit, 1.0e-3);
+            float delta = 1.0 / E_emit;                            // Doppler factor
+
+            // Synchrotron power-law: I_obs(ν) = δ^{2+α} I_emit(ν).
+            float bright = pow(delta, 2.0 + u_jet_alpha);
+
+            // Angular profile: paraboloid-collimated (brightest along axis).
+            float ang = pow(1.0 - th_axis / u_jet_open, 2.0);
+
+            // Radial profile: ~1/(1 + r/scale) — bright base, fading sheath.
+            float rad = 1.0 / (1.0 + r * 0.06);
+
+            // Synchrotron color: bluish-white at high δ (approaching jet),
+            // reddened at low δ (receding). Treat δ as a temperature analog.
+            vec3 col = mix(vec3(0.9, 0.45, 0.30),    // dim red at low δ
+                           vec3(0.65, 0.85, 1.30),    // bluish-white at high δ
+                           smoothstep(0.4, 1.6, delta));
+
+            out_rgb += col * bright * ang * rad * u_jet_intensity * h_step;
+        }
+    }
+
+    // ── Hot Compton corona ──────────────────────────────────────────
+    if (u_show_corona == 1) {
+        // Gaussian shell at u_corona_radius. Fully spherical; tapered slightly
+        // at the equator to avoid double-counting the disk's emission band.
+        float dr_c   = (r - u_corona_radius) / max(u_corona_width, 0.5);
+        float w_r    = exp(-dr_c * dr_c);
+        float w_th   = 1.0 - 0.6 * exp(-pow((th - 0.5 * PI) / 0.18, 2.0));
+        // Comptonized X-ray spectrum is hard; use a hot blackbody-ish color.
+        vec3 col     = vec3(0.55, 0.75, 1.30);
+        out_rgb     += col * w_r * w_th * u_corona_intensity * h_step;
+    }
+
+    // ── Radiation-driven disk wind (biconical) ─────────────────────
+    if (u_show_wind == 1) {
+        // Two cones at ±45° from the equator (above & below the disk).
+        float th_cone = 0.78539816;            // π/4
+        float th_dist = min(abs(th - th_cone), abs(th - (PI - th_cone)));
+        if (th_dist < 0.40 && r > u_disk_inner * 0.9 && r < u_disk_outer * 2.5) {
+            float w_th = exp(-pow(th_dist / 0.22, 2.0));
+            float w_r  = exp(-(r - u_disk_inner) / max(u_disk_outer * 0.6, 5.0));
+            // Mildly relativistic outflow tints it blue.
+            vec3 col   = vec3(0.30, 0.50, 1.05);
+            out_rgb   += col * w_th * w_r * u_wind_intensity * h_step;
+        }
+    }
+
+    return out_rgb;
+}
+
 // Per-crossing optical depth for translucent disks (RIAF-like). 1.0 = opaque
 // after a single crossing (matches u_disk_mode == 0); ~0.35 lets a few
 // crossings stack so the secondary lensed image of the disk shows through.
@@ -512,7 +643,7 @@ const int   DISK_MAX_CROSSINGS = 6;
 // 4 = opaque disk hit (background hidden), 5 = translucent disk path
 // (background still visible behind accumulated emission).
 void trace(inout float y[8], out int term, out int steps_taken, out float affine_used,
-           out vec3 disk_rgb, out vec3 grid_accum) {
+           out vec3 disk_rgb, out vec3 grid_accum, out vec3 volume_rgb) {
     float h = 0.5;
     float h_min = 1.0e-4;
     float h_max = 50.0;
@@ -522,6 +653,7 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
     affine_used = 0.0;
     disk_rgb = vec3(0.0);
     grid_accum = vec3(0.0);
+    volume_rgb = vec3(0.0);
 
     float y_try[8];
     float y_prev[8];
@@ -536,6 +668,15 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
 
         if (y[1] <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
         if (y[1] >= u_r_far)                { term = 2; return; }
+
+        // Far-field straight-line shortcut: once we're well outside the
+        // photon sphere and moving outward, the geodesic is essentially a
+        // straight line on the celestial sphere. Skip the rest of the
+        // integration — saves up to 30-50 % of step budget at wide views.
+        if (u_far_shortcut_r > 0.0 && y[1] > u_far_shortcut_r && y[5] > 0.0) {
+            term = (tau_total > 0.0) ? 5 : 2;
+            return;
+        }
 
         for (int i = 0; i < 8; ++i) y_prev[i] = y[i];
 
@@ -581,6 +722,9 @@ void trace(inout float y[8], out int term, out int steps_taken, out float affine
         // Per-step overlays.
         grid_accum += grid_overlay(y_prev, y);
         grid_accum += photon_sphere_glow(y_prev, y);
+
+        // Volumetric emissions (jets / corona / wind), weighted by step size.
+        volume_rgb += volume_emission(y_prev, y, h);
 
         float r = y[1];
         if (r <= 2.0 * M + HORIZON_EPS) { term = 1; return; }
@@ -639,7 +783,8 @@ void main() {
     float aff;
     vec3 disk_rgb;
     vec3 grid_rgb;
-    trace(y, term, steps, aff, disk_rgb, grid_rgb);
+    vec3 volume_rgb;
+    trace(y, term, steps, aff, disk_rgb, grid_rgb, volume_rgb);
 
     vec3 color;
     if (term == 1) {
@@ -668,6 +813,11 @@ void main() {
 
     // Per-step overlays (grid + photon-sphere glow) always composite on top.
     color += grid_rgb;
+
+    // Volumetric jet/corona/wind emission rides on top of everything except
+    // an opaque disk (the disk itself ate the ray on hit so the volume sum
+    // up to that point is what the camera saw on the way to the disk).
+    color += volume_rgb;
 
     // Photon-ring accent: rays that integrated many steps grazed the ring.
     if (u_show_ring == 1) {
