@@ -20,6 +20,14 @@
     {
       "path": "/api/cron/prewarm-cold",
       "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/daily-forecast-digest",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-saved-locations",
+      "schedule": "*/30 * * * *"
     }
   ],
   "headers": [
@@ -45,7 +53,11 @@
       "headers": [
         {
           "key": "Access-Control-Allow-Origin",
-          "value": "*"
+          "value": "https://parkersphysics.com"
+        },
+        {
+          "key": "Vary",
+          "value": "Origin"
         },
         {
           "key": "Access-Control-Allow-Methods",

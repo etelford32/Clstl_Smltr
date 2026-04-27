@@ -155,6 +155,20 @@ main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
 .sl-btn.primary{border-color:var(--accent);color:var(--accent)}
 .sl-config{padding:0 12px 12px;border-top:1px solid var(--border);display:none}
 .sl-item.expanded .sl-config{display:block}
+/* Hourly forecast strip (Pro + Intro tiers only) */
+.sl-hourly{padding:8px 12px 10px;border-top:1px solid var(--border);overflow-x:auto;overflow-y:hidden;display:flex;gap:6px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+.sl-hourly::-webkit-scrollbar{height:6px}
+.sl-hourly::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+.sl-hourly-loading,.sl-hourly-err{font-size:.65rem;color:var(--muted);padding:6px 4px;font-style:italic}
+.sl-hourly-err{color:#ff8888}
+.sl-hr{flex:0 0 auto;min-width:54px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 6px;background:#08051a;border:1px solid var(--border);border-radius:6px}
+.sl-hr.now{border-color:rgba(255,184,48,.45);box-shadow:0 0 6px rgba(255,184,48,.12)}
+.sl-hr-time{font-size:.58rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.sl-hr.now .sl-hr-time{color:var(--accent)}
+.sl-hr-icon{font-size:1rem;line-height:1.1}
+.sl-hr-temp{font-size:.78rem;font-weight:700;color:#e8f4ff;font-variant-numeric:tabular-nums}
+.sl-hr-pop{font-size:.55rem;color:#4fc3f7;line-height:1;min-height:.55rem}
+.sl-hr-wind{font-size:.55rem;color:#889;line-height:1}
 .sl-cfg-section{margin-top:10px}
 .sl-cfg-title{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;font-weight:700}
 .sl-cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px}
@@ -1949,6 +1963,20 @@ initAll();
     const isAdmin  = auth.isAdmin?.() || auth.isTester?.();
     const cap      = locationLimit();
     const planCap  = isAdmin ? '∞' : (PLAN_LIMITS[plan] ?? 0);
+    // Feature gates:
+    //   Hourly strip → any tier with alert access (basic + advanced).
+    //   Daily forecast digest (email):
+    //     basic plan    → up to 5 digest-enabled locations · tomorrow's forecast (1 day)
+    //     advanced plan → up to 10 digest-enabled locations · 7-day forecast
+    //   The cap is enforced both client-side (this file) and server-side
+    //   (api/cron/daily-forecast-digest.js orders by created_at and slices).
+    const canUseHourly   = isAdmin || auth.canUseAlerts?.();
+    const canUseDigest   = isAdmin || plan === 'basic' || plan === 'advanced';
+    const digestCap      = isAdmin ? Infinity
+                          : plan === 'advanced' ? 10
+                          : plan === 'basic'    ? 5
+                          : 0;
+    const digestDays     = plan === 'advanced' ? 7 : 1;
 
     if (cardTitle) {
         cardTitle.textContent = isAdmin
@@ -1997,6 +2025,126 @@ initAll();
 
         // Wire per-row controls
         for (const row of rows) wireItem(row);
+
+        // Fan out hourly-strip fetches once the DOM is in place. Edge proxy
+        // dedupes per (lat, lon) so concurrent calls collapse to one upstream
+        // hit when the same location appears for multiple users this minute.
+        if (canUseHourly) populateHourlyStrips(rows);
+    }
+
+    // ── Hourly forecast strip (Pro + Intro) ──────────────────────────────────
+    // Renders the next ~12 hours per saved location as a compact horizontal
+    // scroll. One /api/weather/forecast?type=hourly call per row, in parallel.
+    // Strips that 404 / fall back / time-out simply replace their placeholder
+    // text with a quiet error — the rest of the row stays usable.
+
+    const HOURLY_STRIP_HOURS = 12;
+    const HOURLY_FETCH_TIMEOUT_MS = 10_000;
+
+    /** Map an Open-Meteo weather_code + is_day flag → emoji glyph. */
+    function _wxIcon(code, isDay) {
+        // Codes per WMO 4677 (Open-Meteo passthrough). Coarsened buckets
+        // because we only have one tiny glyph slot.
+        if (code == null) return '·';
+        if (code === 0)  return isDay ? '☀️' : '🌙';
+        if (code <= 2)   return isDay ? '🌤' : '☁️';
+        if (code === 3)  return '☁️';
+        if (code <= 49)  return '🌫';
+        if (code <= 59)  return '🌦';
+        if (code <= 69)  return '🌧';
+        if (code <= 79)  return '🌨';
+        if (code <= 84)  return '🌧';
+        if (code <= 99)  return '⛈';
+        return '·';
+    }
+
+    function _findCurrentHourIdx(times) {
+        if (!Array.isArray(times) || !times.length) return 0;
+        const now = Date.now();
+        // Open-Meteo timeseries is local-time but ISO-8601 with no zone
+        // offset. Date.parse treats unzoned strings as local — exactly what
+        // we want for a "what's the user-local hour right now" pick.
+        for (let i = 0; i < times.length; i++) {
+            const t = Date.parse(times[i]);
+            if (Number.isFinite(t) && t >= now - 30 * 60_000) return i;
+        }
+        return 0;
+    }
+
+    function renderHourlyStrip(el, data) {
+        const hourly = data?.hourly;
+        if (!hourly?.time?.length) {
+            el.innerHTML = '<span class="sl-hourly-err">No hourly data available</span>';
+            return;
+        }
+        const startIdx = _findCurrentHourIdx(hourly.time);
+        const slots    = Math.min(HOURLY_STRIP_HOURS, hourly.time.length - startIdx);
+        if (slots <= 0) {
+            el.innerHTML = '<span class="sl-hourly-err">Hourly forecast caught up — try again shortly</span>';
+            return;
+        }
+
+        const cells = [];
+        for (let k = 0; k < slots; k++) {
+            const i      = startIdx + k;
+            const tStr   = hourly.time[i];
+            const tDate  = new Date(tStr);
+            const hourLbl = k === 0
+                ? 'Now'
+                : tDate.toLocaleTimeString([], { hour: 'numeric' });
+            const temp   = hourly.temperature_2m?.[i];
+            const code   = hourly.weather_code?.[i];
+            const isDay  = hourly.is_day?.[i] !== 0;
+            const pop    = hourly.precipitation_probability?.[i];
+            const wind   = hourly.wind_speed_10m?.[i];
+            const popLbl = (pop != null && pop >= 10) ? `${Math.round(pop)}%` : '';
+            const tempLbl = (temp != null) ? `${Math.round(temp)}°` : '–';
+            const windLbl = (wind != null) ? `${Math.round(wind)}mph` : '';
+            cells.push(
+                `<div class="sl-hr${k === 0 ? ' now' : ''}">`
+              +     `<span class="sl-hr-time">${escHtml(hourLbl)}</span>`
+              +     `<span class="sl-hr-icon">${_wxIcon(code, isDay)}</span>`
+              +     `<span class="sl-hr-temp">${tempLbl}</span>`
+              +     `<span class="sl-hr-pop">${popLbl}</span>`
+              +     `<span class="sl-hr-wind">${windLbl}</span>`
+              + `</div>`,
+            );
+        }
+        el.innerHTML = cells.join('');
+    }
+
+    async function fetchHourly(lat, lon) {
+        const url = `/api/weather/forecast?type=hourly&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+        const ctrl = new AbortController();
+        const to   = setTimeout(() => ctrl.abort(), HOURLY_FETCH_TIMEOUT_MS);
+        try {
+            const res = await fetch(url, { signal: ctrl.signal });
+            if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+            const json = await res.json();
+            return { ok: true, data: json };
+        } catch (e) {
+            return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
+        } finally {
+            clearTimeout(to);
+        }
+    }
+
+    async function populateHourlyStrips(rows) {
+        const strips = listEl.querySelectorAll('.sl-hourly');
+        await Promise.all([...strips].map(async el => {
+            const lat = parseFloat(el.dataset.lat);
+            const lon = parseFloat(el.dataset.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                el.innerHTML = '<span class="sl-hourly-err">Missing coordinates</span>';
+                return;
+            }
+            const res = await fetchHourly(lat, lon);
+            if (!res.ok) {
+                el.innerHTML = `<span class="sl-hourly-err">Forecast unavailable (${escHtml(res.error)})</span>`;
+                return;
+            }
+            renderHourlyStrip(el, res.data);
+        }));
     }
 
     function renderItem(row) {
@@ -2005,6 +2153,13 @@ initAll();
         const muted    = !row.notify_enabled ? ' disabled'  : '';
         const dotClass = row.notify_enabled  ? 'on' : 'off';
         const summary  = buildSummary(row, cfg);
+        // Hourly strip is a placeholder until populateHourlyStrips() hydrates
+        // it with real data. Free / no-alert tiers don't see the element at
+        // all — keeps the row compact and avoids dangling "loading…" text
+        // for users who can't use the feature.
+        const hourlyEl = canUseHourly
+            ? `<div class="sl-hourly" data-hourly-id="${row.id}" data-lat="${row.lat}" data-lon="${row.lon}"><span class="sl-hourly-loading">Loading hourly forecast…</span></div>`
+            : '';
         return `
 <div class="sl-item${primary}${muted}" data-id="${row.id}">
   <div class="sl-row">
@@ -2023,6 +2178,7 @@ initAll();
       <button class="sl-btn danger" data-action="delete" title="Delete this location">&times;</button>
     </div>
   </div>
+  ${hourlyEl}
   <div class="sl-config">
     ${renderConfigPanel(row, cfg)}
   </div>
@@ -2079,6 +2235,18 @@ initAll();
     </div>
   </div>` : '';
 
+        // Daily digest toggle.
+        // Capacity hint mirrors the per-tier cap so users see "X / N enabled"
+        // before they hit the limit. Cap enforcement on save: see the click
+        // handler at [data-action="save"].
+        const digestTitle = digestDays === 7
+            ? 'One email each morning with the next 7 days of forecast for this location (Pro)'
+            : "One email each morning with tomorrow's forecast for this location";
+        const digestRow = canUseDigest ? `
+      <div class="sl-cfg-row">
+        <label title="${digestTitle}"><input type="checkbox" data-cfg="daily_digest_enabled" ${row.daily_digest_enabled?'checked':''}> Daily forecast digest</label>
+      </div>` : '';
+
         return `
   <div class="sl-cfg-section">
     <div class="sl-cfg-title">Delivery at this location</div>
@@ -2089,6 +2257,7 @@ initAll();
       <div class="sl-cfg-row">
         <label><input type="checkbox" data-cfg="email_alerts_enabled" ${row.email_alerts_enabled?'checked':''}> Email on</label>
       </div>
+      ${digestRow}
     </div>
   </div>
 
@@ -2171,6 +2340,8 @@ initAll();
                     patch.notify_enabled = inp.checked;
                 } else if (k === 'email_alerts_enabled') {
                     patch.email_alerts_enabled = inp.checked;
+                } else if (k === 'daily_digest_enabled') {
+                    patch.daily_digest_enabled = inp.checked;
                 } else if (inp.type === 'checkbox') {
                     cfg[k] = inp.checked;
                 } else if (inp.type === 'number') {
@@ -2180,6 +2351,17 @@ initAll();
                     cfg[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
                 }
             });
+            // Per-plan digest cap. Counted from the freshest list rather than
+            // `row` so quick toggles across multiple rows can't slip past the
+            // limit. (Cron also re-applies this server-side as defense in depth.)
+            if (patch.daily_digest_enabled === true && !row.daily_digest_enabled) {
+                const fresh = await listLocations({ force: true });
+                const enabled = fresh.filter(r => r.daily_digest_enabled).length;
+                if (enabled >= digestCap) {
+                    showErr(`Digest cap reached: ${digestCap} location${digestCap === 1 ? '' : 's'} on the ${plan.toUpperCase()} plan. Disable another or upgrade.`);
+                    return;
+                }
+            }
             const res = await updateLocation(row.id, patch);
             if (res.ok) {
                 const msg = el.querySelector('[data-role="save-msg"]');

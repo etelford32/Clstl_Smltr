@@ -124,10 +124,23 @@ export async function fetchWithTimeout(url, init = {}) {
  * Normalize an upstream "YYYY-MM-DD HH:MM" timestamp string into ISO-8601.
  * NOAA and DONKI return times in a non-ISO "space-separated" format; this
  * flips the space to a T and adds the Z so Date.parse() works anywhere.
+ *
+ * Idempotent — if the input already ends in Z or carries a numeric offset
+ * (`+HH:MM` / `-HH:MM`), it's returned as-is so we never produce `...ZZ`
+ * (which Date.parse coerces to NaN in some engines, breaking the status
+ * page's freshness chain). NOAA has been progressively migrating feeds to
+ * fully-ISO timestamps; this guards against that drift.
+ *
  * Returns null if the input is falsy.
  */
 export function isoTag(t) {
-    return t ? String(t).replace(' ', 'T') + 'Z' : null;
+    if (!t) return null;
+    const s = String(t).trim();
+    // Already a valid ISO-with-zone form? Leave it alone.
+    if (/[zZ]$/.test(s))            return s;
+    if (/[+-]\d{2}:?\d{2}$/.test(s)) return s;
+    // Local-style "YYYY-MM-DD HH:MM[:SS]" or "YYYY-MM-DDTHH:MM[:SS]" → add Z.
+    return s.replace(' ', 'T') + 'Z';
 }
 
 /**

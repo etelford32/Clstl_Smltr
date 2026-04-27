@@ -206,13 +206,16 @@ export default async function handler() {
     const updatedMs   = updatedISO ? new Date(updatedISO).getTime() : NaN;
     const ageHours    = isNaN(updatedMs) ? null : (Date.now() - updatedMs) / 3_600_000;
 
-    // Both feeds came back stale — surface as an upstream error so the dashboard
-    // flags it red, instead of serving a HTTP 200 with month-old "current" flux.
-    if (ageHours == null || ageHours > STALE_HOURS) {
-        return jsonError('upstream_stale',
-            `latest F10.7 reading is ${ageHours == null ? 'undated' : Math.round(ageHours / 24) + 'd'} old`,
-            { source: usedFallback ? 'NOAA SWPC 10cm-flux-30day' : 'NOAA SWPC f107_cm_flux' });
-    }
+    // Both feeds came back stale. We DON'T return a 5xx here — Vercel's edge
+    // can serve the previous fresh-200 cached body in preference to a fresh
+    // 5xx (stale-on-error semantics), which is exactly the failure mode that
+    // produced the "200 + 40d-old data" pattern on the status board. Instead,
+    // return 200 with `freshness:'expired'` and `age_seconds` set to the real
+    // value. status.html / admin.html both colour red on
+    // body.freshness === 'expired' (status.html:418), and the canonical
+    // age_seconds breaks any tie. Cache-control is also tightened below so
+    // the CDN evicts faster while we're in degraded mode.
+    const stale = ageHours == null || ageHours > STALE_HOURS;
 
     const trendRows   = rows.slice(-TREND_WIN);
     const slope       = linearSlope(trendRows.map(r => r.flux));
@@ -225,11 +228,16 @@ export default async function handler() {
     }));
 
     return jsonOk({
-        source:     usedFallback
+        source:      usedFallback
             ? 'NOAA SWPC 10cm-flux-30day via Vercel Edge (primary stale)'
             : 'NOAA SWPC f107_cm_flux via Vercel Edge',
-        age_hours:  ageHours != null ? Math.round(ageHours * 10) / 10 : null,
-        freshness:  freshnessStatus(ageHours),
+        // Canonical freshness field — single integer, no Date.parse round-trip.
+        age_seconds: ageHours != null ? Math.round(ageHours * 3600) : null,
+        age_hours:   ageHours != null ? Math.round(ageHours * 10) / 10 : null,
+        // 'expired' when ageHours > STALE_HOURS — status.html honours this and
+        // colours the row red even on a 200 response (status.html:418).
+        freshness:   stale ? 'expired' : freshnessStatus(ageHours),
+        stale,
         data: {
             updated: updatedISO,
             current: {
@@ -247,5 +255,10 @@ export default async function handler() {
         units: {
             flux_sfu: 'sfu (10⁻²² W m⁻² Hz⁻¹) at 10.7 cm / 2.8 GHz',
         },
-    }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+    }, {
+        // Tighten cache while stale so a recovered upstream is reflected
+        // within one prewarm cycle instead of an hour. Fresh: full TTL.
+        maxAge: stale ? 300 : CACHE_TTL,
+        swr:    stale ? 60  : CACHE_SWR,
+    });
 }

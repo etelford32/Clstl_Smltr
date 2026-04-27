@@ -30,7 +30,7 @@ export const PLAN_LIMITS = Object.freeze({
 });
 
 /** Columns fetched from user_locations. */
-const COLS = 'id, label, lat, lon, city, is_primary, notify_enabled, email_alerts_enabled, alert_config, timezone, created_at, updated_at';
+const COLS = 'id, label, lat, lon, city, is_primary, notify_enabled, email_alerts_enabled, daily_digest_enabled, alert_config, timezone, created_at, updated_at';
 
 /** Cache keyed by user id so repeat calls in the same tick are cheap. */
 let _cache = null;
@@ -115,6 +115,7 @@ export async function addLocation(loc) {
         is_primary:           !!loc.is_primary,
         notify_enabled:       loc.notify_enabled ?? true,
         email_alerts_enabled: loc.email_alerts_enabled ?? true,
+        daily_digest_enabled: loc.daily_digest_enabled ?? false,
         alert_config:         loc.alert_config ?? {},
         timezone:             loc.timezone ?? null,
     };
@@ -153,6 +154,7 @@ export async function updateLocation(id, patch) {
     const allowed = [
         'label', 'lat', 'lon', 'city',
         'is_primary', 'notify_enabled', 'email_alerts_enabled',
+        'daily_digest_enabled',
         'alert_config', 'timezone',
     ];
     const row = {};

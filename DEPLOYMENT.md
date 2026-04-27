@@ -128,6 +128,36 @@ deliberately can't reach `auth.users` from plpgsql.
 subscription via the Stripe Dashboard. Future work is wrapping all
 four steps behind a single `/api/admin/delete-user` endpoint.
 
+## 🛡️ Vercel Firewall — required rate-limit rules
+
+These rules live in the Vercel dashboard, not in `vercel.json`, so this
+section is the system-of-record for what should be configured. After
+provisioning a new Vercel project for this codebase, recreate them here:
+
+**Vercel dashboard → Project → Firewall → Rate Limiting → Add rule**
+
+| Rule | Path pattern | Limit | Action |
+|---|---|---|---|
+| `forecast-per-ip`         | `/api/weather/forecast`         | 60 req / min / IP | 429, 60s deny window |
+| `weather-grid-per-ip`     | `/api/weather/grid`             | 30 req / min / IP | 429, 60s deny window |
+| `alerts-email-per-ip`     | `/api/alerts/email`             | 20 req / min / IP | 429, 60s deny window |
+
+**Why:** The hourly forecast strip (added in `claude/add-location-forecasting`)
+fans out one `/api/weather/forecast?type=hourly` call per saved location on
+every dashboard render. A 25-saved-location Pro user is already a 25× amplifier
+at the application layer, so abuse from a logged-in attacker scales fast.
+60 req/min is well above any legitimate dashboard load (one render = ~25
+calls; bouncing a refresh every 5 s for diagnostics is ~5 req/s = 300/min,
+still flagged but not user-blocking).
+
+WAF rate limits block **before** the function invokes, which means a blocked
+request costs nothing (no Vercel function $, no Open-Meteo quota). This is
+strictly cheaper than any in-code limiter.
+
+**Cron auth (recommended):** also set `CRON_SECRET` in
+**Vercel → Project → Settings → Environment Variables** so the cron
+endpoints can drop their `x-vercel-cron`-header fallback if needed.
+
 ## 🐳 Option 2: Docker with VNC (Full 3D Version)
 
 Run the full OpenGL version in a container with remote access via VNC.
