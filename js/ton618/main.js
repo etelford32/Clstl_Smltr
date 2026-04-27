@@ -16,6 +16,7 @@ import { formatLength, PHOTON_RING_RS, R_HORIZON_GEOM } from './units.js';
 import { measurePhotonRing } from './validation.js';
 import { diagnostics } from './physics.js';
 import { createMinimap } from './minimap.js';
+import { traceRay } from './inspector.js';
 
 const DEFAULTS = {
     maxSteps: 900,
@@ -59,10 +60,41 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         showGrid:         false,
         showPhotonSphere: false,
 
+        // Multi-component radiation
+        showJets:         true,
+        jetVelocity:      0.95,        // β = v/c
+        jetAlpha:         0.7,         // synchrotron α (I_ν ∝ ν^−α)
+        jetOpen:          0.18,        // half-opening angle (radians)
+        jetRMax:          200.0,
+        jetIntensity:     0.06,
+        showCorona:       false,
+        coronaRadius:     10.0,
+        coronaWidth:      4.0,
+        coronaIntensity:  0.04,
+        showWind:         false,
+        windIntensity:    0.04,
+        showFeLine:       false,
+        feIntensity:      0.6,
+
+        // Mass accretion rate (relative to Eddington) — drives HUD luminosity
+        // readouts. Doesn't yet affect the shader; Phase 2 connects this to
+        // the disk emission scaling.
+        mdotRel:          0.10,
+
         // Animation pump.
         animate:        true,
-        animSpeed:      1.0,          // multiplier on real time
-        timeAccum:      0,            // accumulated "scene time" (sec) — passed to shader
+        animSpeed:      1.0,
+        timeAccum:      0,
+
+        // Performance: motion-aware LOD.
+        autoLOD:        true,
+        // Last time the camera moved or a setting changed.
+        lastMotionAt:   0,
+        // Resolution-scale overrides applied on top of qualityProfile().scale.
+        motionScaleMul: 1.0,
+        // Far-field shortcut radius (M). 0 disables.
+        farShortcutR:   120.0,
+
         dirty:     true,
         time:      0,
         backend,
@@ -83,8 +115,11 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
         const cssW = canvas.clientWidth  || window.innerWidth;
         const cssH = canvas.clientHeight || window.innerHeight;
-        const w = Math.max(16, Math.floor(cssW * dpr * q.scale));
-        const h = Math.max(16, Math.floor(cssH * dpr * q.scale));
+        // Motion-aware LOD: while the camera is moving (last motion < 0.25 s
+        // ago) or transitioning, drop to half-resolution so interactive frames
+        // stay snappy; settle back to full when idle.
+        const w = Math.max(16, Math.floor(cssW * dpr * q.scale * state.motionScaleMul));
+        const h = Math.max(16, Math.floor(cssH * dpr * q.scale * state.motionScaleMul));
         backend.resize(w, h);
         state.maxSteps = q.steps;
         state.tol      = q.tol;
@@ -115,6 +150,22 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             hotspotStrength:  state.hotspotStrength,
             showGrid:         state.showGrid,
             showPhotonSphere: state.showPhotonSphere,
+            // Multi-component radiation
+            showJets:         state.showJets,
+            jetVelocity:      state.jetVelocity,
+            jetAlpha:         state.jetAlpha,
+            jetOpen:          state.jetOpen,
+            jetRMax:          state.jetRMax,
+            jetIntensity:     state.jetIntensity,
+            showCorona:       state.showCorona,
+            coronaRadius:     state.coronaRadius,
+            coronaWidth:      state.coronaWidth,
+            coronaIntensity:  state.coronaIntensity,
+            showWind:         state.showWind,
+            windIntensity:    state.windIntensity,
+            showFeLine:       state.showFeLine,
+            feIntensity:      state.feIntensity,
+            farShortcutR:     state.farShortcutR,
         });
         backend.draw();
         updateHUD(hud, state, backend, name);
@@ -136,13 +187,31 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         // Always pump inputs and physics so the camera glides smoothly.
         controls.pumpThrust();
         const moved = integrate(state.cam, dt);
-        if (moved) state.dirty = true;
+        if (moved) {
+            state.dirty = true;
+            state.lastMotionAt = state.time;
+        }
+
+        // Motion-aware LOD: while the camera is moving or smoothly transitioning,
+        // drop the resolution scale to keep interactive frames responsive. As soon
+        // as motion settles, restore full quality.
+        if (state.autoLOD) {
+            const movingNow = (state.time - state.lastMotionAt) < 0.25 ||
+                              (state.cam.transition != null);
+            const desired = movingNow ? 0.55 : 1.0;
+            if (Math.abs(state.motionScaleMul - desired) > 0.01) {
+                state.motionScaleMul = desired;
+                resize();
+            }
+        }
 
         // Animation pump: advance scene-time so the disk shears, the hot-spot
         // orbits, and turbulence churns. This forces a render every frame
         // when there's anything moving — which is the whole point of an
         // accretion disk.
-        if (state.animate && (state.showDisk || state.showHotspot)) {
+        if (state.animate && (state.showDisk || state.showHotspot ||
+                              state.showJets || state.showCorona ||
+                              state.showWind || state.showFeLine)) {
             state.timeAccum += dt * state.animSpeed;
             state.dirty = true;
         }
@@ -154,6 +223,23 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
+
+    // ── Pixel inspector: click anywhere to retrace that ray in JS and
+    //    surface a numerical readout (b, r_min, term, conservation drift).
+    const onInspect = [];
+    canvas.addEventListener('click', (e) => {
+        if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return;
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const result = traceRay(
+            { x, y, width: rect.width, height: rect.height },
+            state.cam,
+        );
+        result._click_x = x | 0;
+        result._click_y = y | 0;
+        onInspect.forEach((cb) => cb(result));
+    });
 
     return {
         state,
@@ -178,6 +264,32 @@ export async function boot({ canvas, hud, minimapCanvas }) {
         setDiskMode(m){ state.diskMode = (m === 'translucent' || m === 1) ? 1 : 0; state.dirty = true; },
         setHotspotRadius(v){ state.hotspotRadius = Math.max(state.diskInner + 0.1, Math.min(state.diskOuter - 0.1, v)); state.dirty = true; },
         setAnimSpeed(v){ state.animSpeed = Math.max(0, Math.min(20, v)); },
+
+        // ── Multi-component radiation toggles & sliders ─────────────
+        toggleJets()    { state.showJets = !state.showJets; state.dirty = true; return state.showJets; },
+        toggleCorona()  { state.showCorona = !state.showCorona; state.dirty = true; return state.showCorona; },
+        toggleWind()    { state.showWind = !state.showWind; state.dirty = true; return state.showWind; },
+        toggleFeLine()  { state.showFeLine = !state.showFeLine; state.dirty = true; return state.showFeLine; },
+        setJetVelocity(v) { state.jetVelocity = Math.max(0, Math.min(0.999, v)); state.dirty = true; },
+        setJetAlpha(v)    { state.jetAlpha = Math.max(0, Math.min(2.0, v)); state.dirty = true; },
+        setJetOpen(rad)   { state.jetOpen = Math.max(0.02, Math.min(0.6, rad)); state.dirty = true; },
+        setJetIntensity(v){ state.jetIntensity = Math.max(0, Math.min(1.0, v)); state.dirty = true; },
+        setCoronaRadius(v){ state.coronaRadius = Math.max(2.5, Math.min(60, v)); state.dirty = true; },
+        setCoronaIntensity(v){ state.coronaIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        setWindIntensity(v){ state.windIntensity = Math.max(0, Math.min(0.5, v)); state.dirty = true; },
+        setFeIntensity(v) { state.feIntensity = Math.max(0, Math.min(5.0, v)); state.dirty = true; },
+        setMdotRel(v)     { state.mdotRel = Math.max(0, Math.min(10.0, v)); state.dirty = true; },
+        setFarShortcutR(v){ state.farShortcutR = Math.max(0, v); state.dirty = true; },
+        toggleAutoLOD()   { state.autoLOD = !state.autoLOD; if (!state.autoLOD) { state.motionScaleMul = 1.0; resize(); } return state.autoLOD; },
+
+        // Pixel inspector subscription.
+        onInspect(cb) { onInspect.push(cb); return () => { const i = onInspect.indexOf(cb); if (i >= 0) onInspect.splice(i, 1); }; },
+        inspectPixel(x, y) {
+            return traceRay(
+                { x, y, width: canvas.clientWidth, height: canvas.clientHeight },
+                state.cam,
+            );
+        },
         setObserverType(t) {
             const v = OBSERVER_TYPES[t] ?? OBSERVER_TYPES.static;
             state.cam.observerType = v;
@@ -203,6 +315,9 @@ export async function boot({ canvas, hud, minimapCanvas }) {
                 yaw: state.cam.yaw, pitch: state.cam.pitch, roll: state.cam.roll,
                 obs: state.cam.observerType, transition: state.cam.transition,
                 showDisk: state.showDisk, showGrid: state.showGrid,
+                showJets: state.showJets, showCorona: state.showCorona,
+                showWind: state.showWind, showFeLine: state.showFeLine,
+                showHotspot: state.showHotspot, showPhotonSphere: state.showPhotonSphere,
             };
             state.cam.transition = null;
             state.cam.r = 500;
@@ -210,10 +325,16 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.cam.phi = 0;
             state.cam.yaw = state.cam.pitch = state.cam.roll = 0;
             state.cam.observerType = OBSERVER_TYPES.static;
-            // The validation harness measures the pure shadow rim — disk and
-            // grid would contaminate it.
+            // Validation harness measures the pure shadow rim — disable any
+            // overlay or emission that would contaminate the dark column.
             state.showDisk = false;
             state.showGrid = false;
+            state.showJets = false;
+            state.showCorona = false;
+            state.showWind = false;
+            state.showFeLine = false;
+            state.showHotspot = false;
+            state.showPhotonSphere = false;
             render();
             const result = measurePhotonRing(backend, state.cam);
             // restore
@@ -221,6 +342,9 @@ export async function boot({ canvas, hud, minimapCanvas }) {
             state.cam.yaw = saved.yaw; state.cam.pitch = saved.pitch; state.cam.roll = saved.roll;
             state.cam.observerType = saved.obs; state.cam.transition = saved.transition;
             state.showDisk = saved.showDisk; state.showGrid = saved.showGrid;
+            state.showJets = saved.showJets; state.showCorona = saved.showCorona;
+            state.showWind = saved.showWind; state.showFeLine = saved.showFeLine;
+            state.showHotspot = saved.showHotspot; state.showPhotonSphere = saved.showPhotonSphere;
             state.dirty = true;
             return result;
         },
@@ -234,7 +358,7 @@ function updateHUD(hud, state, backend, backendName) {
     if (!hud) return;
     const cam = state.cam;
     const L = formatLength(cam.r);
-    const d = diagnostics(cam);
+    const d = diagnostics(cam, state.mdotRel);
 
     const obsLabels = ['static', 'Painlevé in-fall', 'ZAMO', 'Keplerian (eq.)'];
     const obs = obsLabels[cam.observerType] ?? '?';
@@ -277,9 +401,21 @@ function updateHUD(hud, state, backend, backendName) {
         `photon ring (analytic) ${PHOTON_RING_RS.toFixed(4)} r_s = ${d.b_crit.toFixed(4)} M`,
         `horizon area A = ${fmt(d.horizon_area_m2, 3)} m²`,
         `Bekenstein S/k = ${fmt(d.bekenstein_entropy_over_k, 3)}    T_H = ${fmt(d.T_hawking_K, 3)} K`,
+        `─── disk luminosity ───────────────────────────`,
+        `efficiency η (NT, ISCO=${d.r_isco}M)  = ${(d.disk_efficiency*100).toFixed(2)} %`,
+        `L_Edd          = ${fmt(d.eddington_solar_lum, 3)} L☉   (${fmt(d.eddington_W, 3)} W)`,
+        `L_disk @ ṁ_rel = ${fmt(d.mdot_rel, 3)} → ${fmt(d.disk_lum_solar_lum, 3)} L☉`,
+        `ṁ              = ${fmt(d.mdot_solar_per_year, 3)} M☉/yr   (ṁ_Edd = ${fmt(d.mdot_edd_solar_per_year, 3)})`,
         `─── scene ─────────────────────────────────────`,
         `disk: ${diskTag}   r_in=${state.diskInner.toFixed(1)}M  r_out=${state.diskOuter.toFixed(1)}M`,
-        `anim: ${animTag}   hotspot: ${state.showHotspot ? `r=${state.hotspotRadius.toFixed(1)}M` : 'off'}`,
+        `radiation: ${[
+            state.showJets ? `jets(β=${state.jetVelocity.toFixed(2)},α=${state.jetAlpha.toFixed(2)})` : null,
+            state.showCorona ? `corona(r=${state.coronaRadius.toFixed(0)}M)` : null,
+            state.showWind ? 'wind' : null,
+            state.showFeLine ? 'Fe-Kα' : null,
+            state.showHotspot ? `hotspot(r=${state.hotspotRadius.toFixed(1)}M)` : null,
+        ].filter(Boolean).join(' · ') || 'disk only'}`,
+        `anim: ${animTag}    LOD: ${state.autoLOD ? `auto ×${state.motionScaleMul.toFixed(2)}` : 'fixed'}`,
         `resolution ${backend.canvas.width}×${backend.canvas.height}   max_steps=${state.maxSteps}`,
     ];
     hud.textContent = lines.join('\n');

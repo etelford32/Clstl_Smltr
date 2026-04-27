@@ -58,6 +58,24 @@ body { font-family:'Courier New',monospace; background:#000; color:#ccc; display
 }
 #fly-pill.on { display:inline-block; }
 
+#inspector {
+    position:absolute; bottom:50px; left:14px; z-index:10;
+    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.6;
+    color:#9eecff; background:rgba(0,12,28,.78);
+    border:1px solid rgba(120,200,255,.30); border-radius:6px;
+    padding:9px 12px; white-space:pre; min-width:300px; display:none;
+    backdrop-filter:blur(4px);
+}
+#inspector .ic-title {
+    font-size:9px; letter-spacing:.18em; color:#7adcff; text-transform:uppercase;
+    margin-bottom:4px;
+}
+#inspector .ic-close {
+    position:absolute; top:4px; right:7px; cursor:pointer; color:#5e9bbf;
+    font-size:11px; pointer-events:auto;
+}
+#inspector .ic-close:hover { color:#fff; }
+
 /* Right panel */
 #panel {
     width:290px; min-width:290px; background:rgba(8,4,20,.95);
@@ -131,11 +149,17 @@ select {
             <canvas id="minimap"></canvas>
         </div>
         <div id="fly-pill">⊙ free-fly</div>
+        <div id="inspector">
+            <div class="ic-title">▸ Geodesic inspector</div>
+            <span class="ic-close" id="ic-close">✕</span>
+            <div id="inspector-body">click anywhere on the render</div>
+        </div>
         <div id="validation"></div>
         <div id="controls-hint">
             <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
             <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
-            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset
+            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset<br>
+            <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
         </div>
     </div>
 
@@ -264,6 +288,79 @@ select {
         </div>
 
         <div>
+            <div class="sec-title">Radiation &amp; particle emissions</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showJets" checked>
+                <label for="showJets">Bipolar synchrotron jets (Doppler δ<sup>2+α</sup>)</label>
+            </div>
+            <div class="ctrl">
+                <label>Jet β = v/c</label>
+                <input type="range" id="s-jet-v" min="0" max="0.999" step="0.005" value="0.95">
+                <div class="val" id="v-jet-v">0.950 c   (γ ≈ 3.20)</div>
+            </div>
+            <div class="ctrl">
+                <label>Spectral index α (I<sub>ν</sub> ∝ ν<sup>−α</sup>)</label>
+                <input type="range" id="s-jet-a" min="0" max="2" step="0.05" value="0.7">
+                <div class="val" id="v-jet-a">0.70</div>
+            </div>
+            <div class="ctrl">
+                <label>Half-opening angle</label>
+                <input type="range" id="s-jet-o" min="2" max="35" step="1" value="10">
+                <div class="val" id="v-jet-o">10°</div>
+            </div>
+            <div class="ctrl">
+                <label>Jet intensity</label>
+                <input type="range" id="s-jet-i" min="0" max="0.4" step="0.005" value="0.06">
+                <div class="val" id="v-jet-i">0.060</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showCorona">
+                <label for="showCorona">Hot Compton corona (X-ray scatter)</label>
+            </div>
+            <div class="ctrl">
+                <label>Corona peak r [M]</label>
+                <input type="range" id="s-cor-r" min="3" max="40" step="0.5" value="10">
+                <div class="val" id="v-cor-r">10 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Corona intensity</label>
+                <input type="range" id="s-cor-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-cor-i">0.040</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showWind">
+                <label for="showWind">Radiation-driven disk wind (UV cone)</label>
+            </div>
+            <div class="ctrl">
+                <label>Wind intensity</label>
+                <input type="range" id="s-wind-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-wind-i">0.040</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showFeLine">
+                <label for="showFeLine">Fe K-α line emission (6.4 keV)</label>
+            </div>
+            <div class="ctrl">
+                <label>Fe-line intensity</label>
+                <input type="range" id="s-fe-i" min="0" max="3" step="0.05" value="0.6">
+                <div class="val" id="v-fe-i">0.60</div>
+            </div>
+
+            <div class="ctrl" style="margin-top:8px;">
+                <label>ṁ / ṁ_Edd  (drives HUD luminosity)</label>
+                <input type="range" id="s-mdot" min="0.001" max="2" step="0.005" value="0.10">
+                <div class="val" id="v-mdot">0.100  (typical AGN)</div>
+            </div>
+            <div class="note">Jets use a co-moving radial 4-velocity at β; their
+                g-factor against the photon's k<sup>μ</sup> gives I<sub>obs</sub>
+                = δ<sup>2+α</sup> I<sub>emit</sub> — the iconic M87-style
+                approaching/receding asymmetry.</div>
+        </div>
+
+        <div>
             <div class="sec-title">Overlays</div>
             <div class="toggle-row">
                 <input type="checkbox" id="showGrid">
@@ -273,6 +370,22 @@ select {
                 <input type="checkbox" id="showPhotonSphere">
                 <label for="showPhotonSphere">Photon-sphere shell glow (r = 3M)</label>
             </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Performance</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="autoLOD" checked>
+                <label for="autoLOD">Auto-LOD (drop res while moving)</label>
+            </div>
+            <div class="ctrl">
+                <label>Far-field shortcut r [M] (0 = off)</label>
+                <input type="range" id="s-far" min="0" max="500" step="10" value="120">
+                <div class="val" id="v-far">120 M</div>
+            </div>
+            <div class="note">Geodesics that pass r and are heading outward
+                quit integration early — saves 30–50 % of step budget on wide
+                views without altering the celestial-sphere result.</div>
         </div>
 
         <div>
@@ -397,6 +510,75 @@ select {
         (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
     bindRange('s-hot-r', 'v-hot-r',
         (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
+
+    // ── Multi-component radiation controls ─────────────────────────
+    $('showJets').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showJets) app.toggleJets();
+    });
+    $('showCorona').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showCorona) app.toggleCorona();
+    });
+    $('showWind').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showWind) app.toggleWind();
+    });
+    $('showFeLine').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showFeLine) app.toggleFeLine();
+    });
+    bindRange('s-jet-v', 'v-jet-v',
+        (v) => {
+            const gamma = 1 / Math.sqrt(Math.max(1 - v * v, 1e-9));
+            return `${v.toFixed(3)} c   (γ ≈ ${gamma.toFixed(2)})`;
+        }, (v) => app.setJetVelocity(v));
+    bindRange('s-jet-a', 'v-jet-a', (v) => v.toFixed(2), (v) => app.setJetAlpha(v));
+    bindRange('s-jet-o', 'v-jet-o', (v) => `${v.toFixed(0)}°`,
+        (v) => app.setJetOpen((v * Math.PI) / 180));
+    bindRange('s-jet-i', 'v-jet-i', (v) => v.toFixed(3), (v) => app.setJetIntensity(v));
+    bindRange('s-cor-r', 'v-cor-r', (v) => `${v.toFixed(1)} M`, (v) => app.setCoronaRadius(v));
+    bindRange('s-cor-i', 'v-cor-i', (v) => v.toFixed(3), (v) => app.setCoronaIntensity(v));
+    bindRange('s-wind-i', 'v-wind-i', (v) => v.toFixed(3), (v) => app.setWindIntensity(v));
+    bindRange('s-fe-i', 'v-fe-i', (v) => v.toFixed(2), (v) => app.setFeIntensity(v));
+    bindRange('s-mdot', 'v-mdot',
+        (v) => {
+            let label;
+            if (v < 0.005) label = 'RIAF (LLAGN)';
+            else if (v < 0.05) label = 'sub-Eddington';
+            else if (v < 0.3) label = 'typical AGN';
+            else if (v < 1.0) label = 'near-Eddington';
+            else label = 'super-Eddington';
+            return `${v.toFixed(3)}  (${label})`;
+        }, (v) => app.setMdotRel(v));
+
+    // ── Performance ────────────────────────────────────────────────
+    $('autoLOD').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.autoLOD) app.toggleAutoLOD();
+    });
+    bindRange('s-far', 'v-far',
+        (v) => v == 0 ? 'off' : `${(v|0)} M`, (v) => app.setFarShortcutR(v));
+
+    // ── Pixel inspector ────────────────────────────────────────────
+    const inspector = $('inspector');
+    const inspBody  = $('inspector-body');
+    $('ic-close').addEventListener('click', () => { inspector.style.display = 'none'; });
+    app.onInspect((r) => {
+        inspector.style.display = 'block';
+        const bRel = r.b_impact / r.b_crit;
+        const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
+        inspBody.textContent = [
+            `pixel (${r._click_x}, ${r._click_y})`,
+            `term       : ${r.term.toUpperCase()}`,
+            `verdict    : ${r.verdict}`,
+            `impact b   : ${r.b_impact.toFixed(4)} M  (b/b_crit = ${bRel.toFixed(4)})`,
+            `b_crit     : ${r.b_crit.toFixed(4)} M`,
+            `r_min      : ${r.r_min.toFixed(3)} M   (horizon = 2M, photon sphere = 3M)`,
+            `r_max      : ${r.r_max.toFixed(3)} M`,
+            `Δφ total   : ${(r.deflection_total).toFixed(3)} rad   (${(r.deflection_total*180/Math.PI).toFixed(1)}°)`,
+            `eq. crossings: ${r.equator_crossings}`,
+            `steps      : ${r.steps}`,
+            `─── conservation drift (RK4 fixed-step) ───`,
+            `E drift    : ${fmtPct(r.E_drift_pct)}`,
+            `L_z drift  : ${fmtPct(r.L_drift_pct)}`,
+        ].join('\n');
+    });
 
     const flyToggle = $('flyMode');
     const flyPill   = $('fly-pill');

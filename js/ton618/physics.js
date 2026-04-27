@@ -133,6 +133,62 @@ export function bekensteinEntropyOverK() {
     return horizonArea() / (4.0 * PLANCK_LENGTH * PLANCK_LENGTH);
 }
 
+// ---------------------------------------------------------------------------
+// Accretion-disk luminosity / Eddington diagnostics.
+// ---------------------------------------------------------------------------
+// Eddington luminosity L_Edd = 4 π G M m_p c / σ_T  (radiation-pressure cap
+// for fully ionised hydrogen). Returns watts.
+const M_PROTON = 1.67262192e-27;          // kg
+const SIGMA_T  = 6.6524587321e-29;        // m^2 (Thomson cross-section)
+export function eddingtonLuminosityW() {
+    return (4.0 * Math.PI * G_SI * M_KG * M_PROTON * C_SI) / SIGMA_T;
+}
+
+// ṁ_Edd, the accretion rate that yields L = L_Edd at efficiency η:
+//   ṁ_Edd = L_Edd / (η c²)
+// Schwarzschild Novikov-Thorne efficiency (ISCO at r = 6M):
+//   η = 1 − √(8/9) ≈ 0.0572
+export function novikovThorneEfficiency(r_isco_M = R_ISCO_GEOM) {
+    // Generalised: η = 1 − E_ISCO / m c²  with
+    //   E_ISCO = (1 − 2/r_isco) / √(1 − 3/r_isco)   for prograde Schwarzschild
+    const r = r_isco_M;
+    if (r <= 3) return null;                // unphysical
+    const E_isco = (1 - 2 / r) / Math.sqrt(1 - 3 / r);
+    return 1 - E_isco;
+}
+
+export function eddingtonAccretionRateKgPerSec(eta) {
+    return eddingtonLuminosityW() / (eta * C_SI * C_SI);
+}
+
+// Convert kg/s → solar masses per year.
+const SECONDS_PER_YEAR = 3600 * 24 * 365.25;
+export function kgPerSecToSolarPerYear(rate_kgs) {
+    return rate_kgs * SECONDS_PER_YEAR / M_SUN_KG;
+}
+
+// Bundle disk diagnostics for a chosen ṁ relative to Eddington.
+// mdot_rel ∈ [0, ∞): 1.0 = Eddington-limited, 0.1 = typical AGN, 0.01 = LLAGN
+// (the regime where translucent / RIAF disks live).
+export function diskDiagnostics(mdot_rel = 0.10, r_isco_M = R_ISCO_GEOM) {
+    const eta = novikovThorneEfficiency(r_isco_M) ?? 0.057;
+    const L_edd = eddingtonLuminosityW();
+    const mdot_edd_kgs = eddingtonAccretionRateKgPerSec(eta);
+    const mdot_kgs = mdot_rel * mdot_edd_kgs;
+    const L_disk = mdot_rel * L_edd;
+    return {
+        eta,
+        L_edd_W:                 L_edd,
+        L_edd_solar_lum:         L_edd / 3.828e26,
+        L_disk_W:                L_disk,
+        L_disk_solar_lum:        L_disk / 3.828e26,
+        mdot_edd_solar_per_year: kgPerSecToSolarPerYear(mdot_edd_kgs),
+        mdot_solar_per_year:     kgPerSecToSolarPerYear(mdot_kgs),
+        mdot_rel,
+        r_isco_M,
+    };
+}
+
 // Coordinate light-travel time r_emit -> r_recv (radial null geodesic, infall
 // path, integrated). Closed form: ∫ dr / (1 - 2M/r) = (r2 - r1) + 2M ln |...|.
 export function coordinateLightTime(r1, r2) {
@@ -184,7 +240,7 @@ export function hawkingTemperatureK() {
 // ---------------------------------------------------------------------------
 // Convenience: bundle everything for the HUD at a given observer state.
 // ---------------------------------------------------------------------------
-export function diagnostics(cam) {
+export function diagnostics(cam, mdot_rel = 0.10) {
     const r = cam.r;
     const f = Math.max(1 - 2 / r, 0);
     const td = lapse(r);
@@ -227,6 +283,9 @@ export function diagnostics(cam) {
     const A_horizon_m2       = horizonArea();
     const S_over_k           = bekensteinEntropyOverK();
 
+    // Accretion luminosity / Eddington fraction.
+    const disk_d             = diskDiagnostics(mdot_rel, R_ISCO_GEOM);
+
     return {
         // fundamentals
         r_M:           r,
@@ -243,6 +302,16 @@ export function diagnostics(cam) {
         // global thermodynamics
         horizon_area_m2:              A_horizon_m2,
         bekenstein_entropy_over_k:    S_over_k,
+
+        // disk luminosity (parameter-driven; not a function of camera)
+        disk_efficiency:              disk_d.eta,
+        eddington_W:                  disk_d.L_edd_W,
+        eddington_solar_lum:          disk_d.L_edd_solar_lum,
+        disk_lum_W:                   disk_d.L_disk_W,
+        disk_lum_solar_lum:           disk_d.L_disk_solar_lum,
+        mdot_solar_per_year:          disk_d.mdot_solar_per_year,
+        mdot_edd_solar_per_year:      disk_d.mdot_edd_solar_per_year,
+        mdot_rel:                     disk_d.mdot_rel,
 
         // observer kinematics
         gamma_static:  td,                          // static-observer time dilation
