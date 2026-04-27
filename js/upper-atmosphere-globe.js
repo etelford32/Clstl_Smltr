@@ -341,6 +341,13 @@ export class AtmosphereGlobe {
         this._buildLayerParticles();
         this._buildLayerVectorFields();
         this._buildSatelliteRings();
+        // Fire-and-forget live-TLE upgrade. Each probe starts on its
+        // hardcoded mean elements; the fetch resolves a few hundred ms
+        // later and patches the probe in place. Failures fall back
+        // silently to the hardcoded values.
+        this._fetchLiveTLEs().catch(err => {
+            console.debug('[upper-atmosphere] live TLE upgrade skipped:', err?.message || err);
+        });
         this._buildAltitudeRing();
         this._buildSolarWind();
         if (this.opts.stars) this._initStars();
@@ -997,6 +1004,164 @@ export class AtmosphereGlobe {
     /** Backwards-compatible wrapper retained for the existing UI button. */
     flyToISS(durationSec = 1.6) {
         return this.flyToSatellite('iss', durationSec);
+    }
+
+    /**
+     * Upgrade every orbital probe from hardcoded mean elements to the
+     * live TLE for that NORAD ID. Hits the same /api/celestrak/tle
+     * Edge proxy that the rest of the repo uses; the proxy parses the
+     * raw TLE into { inclination, raan, arg_perigee, mean_anomaly,
+     * mean_motion, eccentricity, epoch, period_min, ... } so we don't
+     * need to parse anything ourselves.
+     *
+     * Per satellite:
+     *   1. Fetch /api/celestrak/tle?norad=<id>
+     *   2. Compute the *current* mean anomaly:
+     *        M_now = M_epoch + n · (now − epoch)
+     *      where n is the mean motion in rad/s. This pins the probe
+     *      to its real orbital position at page-boot time; subsequent
+     *      per-frame propagation continues from there.
+     *   3. Replace the spec.orbital block in place + rebuild the
+     *      orbital-path polyline geometry from the new elements so
+     *      visual track + sprite stay coherent.
+     *
+     * Doesn't apply J2 secular drift to RAAN/argP between epoch and
+     * now — for typical TLEs <1 day old this is sub-degree on RAAN
+     * for ISS, fine for visual-grade fidelity. A future round can
+     * add the Brouwer-Lyddane secular terms if the precision matters.
+     *
+     * Concurrent fetches via Promise.allSettled — one slow satellite
+     * doesn't block the others. Returns the count of upgraded probes
+     * for the UI's freshness indicator.
+     */
+    async _fetchLiveTLEs() {
+        if (!this._satProbes) return 0;
+        const probes = Object.values(this._satProbes)
+            .filter(p => p.spec?.orbital?.noradId);
+
+        const fetchOne = async (probe) => {
+            const id = probe.spec.orbital.noradId;
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), 4000);
+            try {
+                const r = await fetch(`/api/celestrak/tle?norad=${id}`, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                const sat = data?.satellites?.[0];
+                if (!sat) throw new Error('no satellites in response');
+                this._upgradeProbeFromTLE(probe, sat);
+                return { id: probe.spec.id, ok: true };
+            } catch (err) {
+                return { id: probe.spec.id, ok: false, err };
+            } finally {
+                clearTimeout(t);
+            }
+        };
+
+        const results = await Promise.allSettled(probes.map(fetchOne));
+        const ok = results.filter(r => r.value?.ok).length;
+        // Stash a manifest so the UI's freshness pill knows what's live
+        // vs fallback. window event so the UI module doesn't need an
+        // explicit hook into globe internals.
+        this._tleSummary = {
+            total:    probes.length,
+            live:     ok,
+            fetchedAt: Date.now(),
+        };
+        try {
+            window.dispatchEvent(new CustomEvent('ua-tle-update',
+                { detail: this._tleSummary }));
+        } catch (_) { /* SSR / no-window — ignore */ }
+        return ok;
+    }
+
+    /**
+     * Apply one parsed TLE to one probe in place. Splits out from the
+     * fetch loop so unit tests / future scheduled-refresh paths can
+     * call it directly with a mock element set.
+     *
+     * @param {object} probe   from this._satProbes[id]
+     * @param {object} sat     parsed CelesTrak entry — see
+     *                         api/celestrak/tle.js parseSingleTle()
+     */
+    _upgradeProbeFromTLE(probe, sat) {
+        const orb = probe.spec.orbital;
+        const epochMs = Date.parse(sat.epoch);
+        if (!Number.isFinite(epochMs)) return;
+
+        // Mean motion: rev/day → rad/s.
+        const n_rad_s = (sat.mean_motion * 2 * Math.PI) / 86400;
+        const dtSec = (Date.now() - epochMs) / 1000;
+        // Wrap to [0, 2π) so the propagator's tFrac stays clean.
+        let M_now_rad = (sat.mean_anomaly * Math.PI / 180) + n_rad_s * dtSec;
+        const TAU = 2 * Math.PI;
+        M_now_rad = ((M_now_rad % TAU) + TAU) % TAU;
+
+        // Patch the orbital element block. Keep noradId; replace the
+        // mean elements + period from the live TLE.
+        orb.inclinationDeg   = sat.inclination;
+        orb.raanDeg          = sat.raan;
+        orb.argPerigeeDeg    = sat.arg_perigee;
+        orb.eccentricity     = sat.eccentricity;
+        orb.meanAnomalyDeg0  = M_now_rad * 180 / Math.PI;
+        orb.periodMin        = sat.period_min;
+
+        // Update the average altitude from apogee/perigee — used by
+        // the orbital-path polyline radius and the static ring. For
+        // near-circular orbits this is essentially unchanged; for
+        // eccentric orbits this is a sensible "shell" altitude.
+        const meanAltKm = (sat.apogee_km + sat.perigee_km) / 2;
+        if (Number.isFinite(meanAltKm) && meanAltKm > 0) {
+            probe.spec.altitudeKm = Math.round(meanAltKm);
+        }
+
+        // Reset the per-frame phase to "now" — propagation in
+        // _stepSatellites uses _phase0 as the M at elapsedSec=0.
+        probe._phase0 = M_now_rad;
+
+        // Carry the source + epoch into the probe's userData so the
+        // tooltip + drag panel can show TLE freshness.
+        if (probe.mesh?.userData) {
+            probe.mesh.userData.tleSource = 'live';
+            probe.mesh.userData.tleEpoch  = sat.epoch;
+        }
+
+        // Rebuild the orbital-path polyline from the new elements.
+        this._refreshOrbitalPath(probe);
+    }
+
+    /**
+     * Re-sample the orbital-path polyline for one probe using its
+     * current spec.orbital. Cheap (96 points, no allocations) so
+     * we can call it any time elements change.
+     */
+    _refreshOrbitalPath(probe) {
+        const path = probe.pathLine;
+        if (!path) return;
+        const positions = path.geometry.attributes.position.array;
+        const N = positions.length / 3;
+        const r = 1 + probe.spec.altitudeKm / R_EARTH_KM;
+        for (let k = 0; k < N; k++) {
+            const tFrac = k / N;
+            const p = _propagateKeplerian(probe.spec.orbital, tFrac, r);
+            positions[k * 3 + 0] = p.x;
+            positions[k * 3 + 1] = p.y;
+            positions[k * 3 + 2] = p.z;
+        }
+        path.geometry.attributes.position.needsUpdate = true;
+        path.geometry.computeBoundingSphere();
+    }
+
+    /**
+     * Read the live-TLE summary set by _fetchLiveTLEs. Returns
+     * { total, live, fetchedAt } or null if no fetch has resolved yet.
+     * UI uses this to paint the "Live TLE · 2h ago" freshness pill.
+     */
+    getTleSummary() {
+        return this._tleSummary || null;
     }
 
     _buildAltitudeRing() {
@@ -1702,12 +1867,19 @@ export class AtmosphereGlobe {
             const vKmS = _circularOrbitalSpeedKmS(s.altKm);
             const v = vKmS * 1000;                          // m/s
             const q = 0.5 * rho * v * v;                    // Pa
+            // Carry the live/fallback flag + epoch into the panel so
+            // users can see which probes are running on real CelesTrak
+            // elements vs the hardcoded backstop.
+            const probe = this._satProbes?.[s.id];
+            const tleSource = probe?.mesh?.userData?.tleSource ?? 'fallback';
+            const tleEpoch  = probe?.mesh?.userData?.tleEpoch  ?? null;
             return {
                 ...s,
                 rho,
                 vKmS,
                 qPa: q,
                 qmPa: q * 1000,
+                tleSource, tleEpoch,
             };
         });
         // Highest drag first — useful ranking for the panel.

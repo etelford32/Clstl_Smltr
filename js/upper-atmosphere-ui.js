@@ -77,8 +77,13 @@ export class UpperAtmosphereUI {
         this._bindSourcePill();
         this._bindSwpcEventBus();
         this._bindCameraControls();
+        this._bindTleFreshnessBus();
         this._bindResize();
         this._paintSourcePill();
+        // Initial paint of the TLE-freshness pill — mostly so the
+        // pulsing "fetching" state shows on first paint instead of
+        // appearing on the first refresh().
+        this._paintTleFreshness();
         // Push climatology defaults so the magnetopause / bow shock /
         // streamers all light up at first paint instead of sitting on a
         // hard-coded uniform value.
@@ -140,6 +145,55 @@ export class UpperAtmosphereUI {
         tick();
     }
 
+    // ── TLE freshness pill ─────────────────────────────────────────────────
+
+    /**
+     * Listen for ua-tle-update events fired by the globe's
+     * _fetchLiveTLEs(). The event detail is { total, live, fetchedAt }
+     * — we use that to repaint the freshness pill from "fetching…"
+     * to "live · X ago" (or "fallback" if every fetch failed).
+     *
+     * Also schedule a 60-s repaint so the "X ago" text stays current
+     * as time advances (without forcing a network refetch).
+     */
+    _bindTleFreshnessBus() {
+        window.addEventListener('ua-tle-update', () => this._paintTleFreshness());
+        clearInterval(this._tleAgeTimer);
+        this._tleAgeTimer = setInterval(() => this._paintTleFreshness(), 60_000);
+    }
+
+    _paintTleFreshness() {
+        const pill  = this.el.tleFreshness;
+        const label = this.el.tleLabel;
+        if (!pill || !label) return;
+
+        const summary = this.globe?.getTleSummary?.();
+        // Keep CSS class names in sync with upper-atmosphere.html.
+        const setKind = (kind) => {
+            pill.className = `ua-tle-pill ua-tle-pill--${kind}`;
+        };
+
+        if (!summary) {
+            setKind('pending');
+            label.textContent = 'fetching TLEs…';
+            return;
+        }
+        const { total, live, fetchedAt } = summary;
+        const ageS = Math.max(0, (Date.now() - fetchedAt) / 1000);
+        const agoStr = _ageString(ageS);
+
+        if (live === 0) {
+            setKind('fallback');
+            label.textContent = `fallback elements · 0 / ${total} live`;
+        } else if (live < total) {
+            setKind('partial');
+            label.textContent = `live ${live} / ${total} · ${agoStr}`;
+        } else {
+            setKind('live');
+            label.textContent = `live TLEs · ${total} sats · ${agoStr}`;
+        }
+    }
+
     /**
      * Render the per-satellite drag-analysis rows. Pulls a snapshot
      * from globe.getSatelliteDragAnalysis() (sorted by q descending)
@@ -165,8 +219,11 @@ export class UpperAtmosphereUI {
             const qmPaText = Number.isFinite(s.qmPa) ? s.qmPa.toFixed(2) : '—';
             const altText  = Number.isFinite(s.altKm) ? `${s.altKm.toFixed(0)} km` : '—';
             const noradTxt = s.noradId ? `NORAD ${s.noradId}` : '';
-            const inclTxt  = Number.isFinite(s.inclinationDeg) ? `${s.inclinationDeg}°` : '';
-            const meta     = [noradTxt, inclTxt].filter(Boolean).join(' · ');
+            const inclTxt  = Number.isFinite(s.inclinationDeg) ? `${s.inclinationDeg.toFixed(1)}°` : '';
+            const liveTxt  = s.tleSource === 'live' ? '● live' : '○ fallback';
+            const liveCol  = s.tleSource === 'live' ? '#0cc'   : '#c87';
+            const meta     = [noradTxt, inclTxt].filter(Boolean).join(' · ')
+                          + ` · <span style="color:${liveCol}">${liveTxt}</span>`;
             const fillPct  = Math.max(2, Math.min(100, ((s.qPa ?? 0) / maxQ) * 100));
             return `
                 <div class="ua-sat-row" data-sat-id="${s.id}" title="Click to fly the camera to ${s.name}">
@@ -1099,4 +1156,15 @@ function _pillFor(model, useBackend) {
                     : 'In-browser surrogate — backend calls disabled. Click to re-enable Auto mode.',
             };
     }
+}
+
+/**
+ * Compact "N s/m/h ago" formatter for the TLE freshness pill.
+ * Caps at hours since CelesTrak refreshes every ~8h — anything
+ * older than that and the user should see the unit clearly.
+ */
+function _ageString(seconds) {
+    if (seconds < 60)   return `${Math.round(seconds)}s ago`;
+    if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`;
+    return `${(seconds / 3600).toFixed(1)}h ago`;
 }
