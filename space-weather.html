@@ -140,11 +140,42 @@ nav {
     margin-bottom: 24px; flex-wrap: wrap;
 }
 .sw-title {
-    font-size: 1.75rem; font-weight: 700; letter-spacing: -.02em;
-    background: linear-gradient(135deg,#00c6ff,#7b2ff7);
+    font-size: 1.85rem; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase;
+    /* Brushed-chrome vertical sheen: bright top + bottom, dim midline */
+    background:
+        linear-gradient(180deg,
+            rgba(228,238,250,1.00)   0%,
+            rgba(168,196,224,0.96)  36%,
+            rgba(86,128,176,0.86)   50%,
+            rgba(168,196,224,0.96)  64%,
+            rgba(228,238,250,1.00) 100%);
     -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    /* Subtle cyan neon halo — present, not loud */
+    text-shadow:
+        0 0 8px rgba(120,180,230,0.20),
+        0 0 22px rgba(70,140,210,0.10);
+    position: relative;
+    padding: 2px 0 6px;
+    line-height: 1;
 }
-.sw-subtitle { font-size:.85rem; color:#889; }
+/* Thin under-rule, fading at the right — feels like signage trim */
+.sw-title::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 28%;
+    bottom: 0; height: 1px;
+    background: linear-gradient(90deg,
+        rgba(160,200,240,0)    0%,
+        rgba(160,200,240,0.55) 22%,
+        rgba(160,200,240,0.55) 78%,
+        rgba(160,200,240,0)  100%);
+    box-shadow: 0 0 6px rgba(80,150,220,0.25);
+}
+.sw-subtitle {
+    font-size:.78rem; color:#8a93a4;
+    letter-spacing: 0.09em; text-transform: uppercase;
+}
 .live-badge {
     display:flex; align-items:center; gap:6px;
     padding:4px 10px; background:rgba(0,255,136,.08);
@@ -909,13 +940,13 @@ nav {
 
 /* ── HELIOSPHERE HERO CANVAS ─────────────────────────────────────────────── */
 .helio-hero-wrap {
-    position: relative; width: 100%; height: 620px;
+    position: relative; width: 100%; height: 520px;
     border-radius: 16px; overflow: hidden; margin-bottom: 16px;
     border: 1px solid rgba(255,180,40,0.14); background: #02010a;
     box-shadow: 0 4px 40px rgba(0,0,0,0.8), inset 0 0 100px rgba(255,100,20,0.03);
 }
-@media (max-width: 700px) { .helio-hero-wrap { height: 460px; } }
-@media (max-width: 480px) { .helio-hero-wrap { height: 380px; } }
+@media (max-width: 700px) { .helio-hero-wrap { height: 380px; } }
+@media (max-width: 480px) { .helio-hero-wrap { height: 320px; } }
 #helio-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
 #helio-canvas:active { cursor: grabbing; }
 /* Corner link removed from canvas — accessible via nav menu */
