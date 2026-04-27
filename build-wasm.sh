@@ -44,6 +44,24 @@ else
 fi
 cd ..
 
+# ── Build 24-hour location forecast core ─────────────────────
+echo "Building forecast24 WASM (deterministic ensemble core)..."
+cd rust-forecast
+cargo build --release --target wasm32-unknown-unknown
+
+echo "Generating forecast24 JS bindings..."
+if command -v wasm-bindgen &> /dev/null; then
+    wasm-bindgen --target web --out-dir ../js/forecast-wasm/ \
+        target/wasm32-unknown-unknown/release/forecast24_wasm.wasm
+else
+    # No wasm-bindgen available → locationforecast.html falls back to its
+    # bundled JS port (algorithmically identical, ~3× slower in tight loops).
+    echo "WARN: wasm-bindgen CLI not found — locationforecast.html will use its JS port."
+    mkdir -p ../js/forecast-wasm
+    cp target/wasm32-unknown-unknown/release/forecast24_wasm.wasm ../js/forecast-wasm/forecast24_wasm_bg.wasm 2>/dev/null || true
+fi
+cd ..
+
 # ── Build star renderer (solar flare sim) ─────────────────────
 # NOT built on Vercel. The Bevy dep graph (~479 crates) is too fragile for
 # Vercel's older rustc — a transitive `constant_time_eq 0.4.3` release broke
@@ -58,6 +76,7 @@ cd ..
 # source change.
 
 echo "✅ WASM build complete!"
-echo "   Built:   js/sstar-wasm/ (S-star orbital propagator)"
+echo "   Built:   js/sstar-wasm/    (S-star orbital propagator)"
+echo "   Built:   js/forecast-wasm/ (24-hour location forecast core)"
 echo "   Skipped: rust/www/ star renderer — served from committed binary"
-ls -lh js/sstar-wasm/*.wasm 2>/dev/null || true
+ls -lh js/sstar-wasm/*.wasm js/forecast-wasm/*.wasm 2>/dev/null || true
