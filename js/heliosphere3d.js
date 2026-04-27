@@ -6,7 +6,8 @@
  *   • Mercury, Venus, Earth+Moon, Mars at real ephemeris positions
  *   • Earth's full magnetosphere via MagnetosphereEngine, parented to Earth's
  *     orbital group — works because Group.add() mirrors Scene.add()
- *   • 3D Parker spiral solar wind particles (3 000 CPU-advected Points)
+ *   • 3D Parker spiral solar wind particles (25 000 fine-grain Points with
+ *     CPU-advected position + Alfvén-wave turbulence and per-particle eddies)
  *   • CME expanding shell (triggered by earth_directed_cme in swpc-update)
  *   • Solar flare burst ring on sun surface (triggered by M/X class events)
  *   • Starfield backdrop
@@ -138,7 +139,7 @@ const MARS_MOONS = {
 // Mars equatorial tilt relative to ecliptic plane (approximate, scene Y-axis tilt)
 const MARS_MOON_TILT = 26 * D2R;
 
-const N_WIND    = 8000;   // solar wind particles
+const N_WIND    = 25000;  // solar wind particles (fine-grain plasma flow)
 const MAX_R_AU  = 1.65;   // kill particles beyond this
 const N_LINE    = 90;     // points per spiral field-line sample
 const N_SPIRAL  = 8;      // field lines sampled (uniformly around the solar disk)
@@ -232,13 +233,14 @@ void main() {
     bool inMagsheath = (a_speed > 0.15 && a_speed < 0.45);
 
     // ── Perspective-correct size with corona brightness fall-off ────────────
-    // Particles glow large near the corona (r~0.008 AU) and shrink to subtle
-    // points at MAX_R_AU.  Clamp prevents GPU point-size overflow on some drivers.
-    // Magnetosheath particles are ~50% larger (compressed, denser plasma).
+    // Particles render as fine plasma grains — sub-pixel near the outer wind,
+    // up to a few px in the dense coronal base.  Lower bound is 0.5 px so
+    // distant particles vanish gracefully into the background flow rather than
+    // piling up at a 1 px minimum.  Magnetosheath grains stay visible (~2x).
     float baseSize  = inMagsheath
-        ? 3.5 + 6.0 / (1.0 + r * 3.5)
-        : 2.0 + 5.0 / (1.0 + r * 3.5);
-    gl_PointSize = clamp(baseSize * u_scale / max(0.001, -mvPos.z), 1.0, 96.0);
+        ? 0.55 + 1.30 / (1.0 + r * 3.5)
+        : 0.32 + 0.95 / (1.0 + r * 3.5);
+    gl_PointSize = clamp(baseSize * u_scale / max(0.001, -mvPos.z), 0.5, 18.0);
 
     // ── Thermal colour (Parker-CGL) ─────────────────────────────────────────
     float T_K = plasmaTemp(r);
@@ -1745,6 +1747,17 @@ export class Heliosphere3D {
         // are updated by writing into the same Float32Arrays the BufferAttributes
         // wrap — needsUpdate flags sync them to the GPU.
 
+        // Turbulence frequencies & wavenumbers (hoisted — same for all particles).
+        // Rates are tuned for visible-but-not-jittery flow: large-scale undulation
+        // every few seconds, smaller eddies overlaid on top.  ALFVEN_K controls the
+        // along-spiral wavelength of the perpendicular Alfvén wave (per AU).
+        const t              = this._t;
+        const TURB_LARGE_F   = 0.42;
+        const TURB_SMALL_F   = 1.35;
+        const TURB_YWAVE_F   = 0.58;
+        const TURB_RWAVE_F   = 0.85;
+        const ALFVEN_K       = 14.0;
+
         for (let i = 0; i < N_WIND; i++) {
             this._windAge[i] += dt;
 
@@ -1763,15 +1776,32 @@ export class Heliosphere3D {
 
             const r_new  = this._windR[i];
             const srcLon = this._windArm[i];
+            const baseJ  = this._windJitter[i];
             const sinLat = this._windPY[i];
             const cosLat = Math.sqrt(Math.max(0, 1 - sinLat * sinLat));
 
+            // ── Alfvén-wave turbulence ────────────────────────────────────────
+            // Per-particle phase derived from srcLon + jitter so neighbouring
+            // streamlines are not in lock-step.  Amplitude grows as √r up to
+            // ~0.3 AU and saturates beyond, matching the perpendicular B/v
+            // fluctuation envelope from PSP/Helios.  Three components:
+            //   • angWave — slow large-scale eddy in the spiral plane
+            //   • angEddy — small-scale inertial-range jitter
+            //   • yWave   — perpendicular Alfvén displacement (out of ecliptic)
+            //   • rRipple — weak compressive ripple along the streamline
+            const phase    = srcLon * 7.3 + baseJ * 47.0;
+            const ampGrow  = Math.min(1, Math.sqrt(Math.max(1e-4, r_new) / 0.3));
+            const angWave  = 0.030 * ampGrow * Math.sin(t * TURB_LARGE_F + phase            + r_new * ALFVEN_K);
+            const angEddy  = 0.014 * ampGrow * Math.sin(t * TURB_SMALL_F + phase * 1.7      + r_new * ALFVEN_K * 2.1);
+            const yWave    = 0.022 * ampGrow * Math.sin(t * TURB_YWAVE_F + phase * 0.8      + r_new * ALFVEN_K * 0.7);
+            const rRipple  = 1.0 + 0.010 * ampGrow * Math.sin(t * TURB_RWAVE_F + phase * 1.3 + r_new * ALFVEN_K * 1.4);
+
             const V_lat = armV * V_local_frac;
-            const ang   = srcLon + this._rot - (428.6 / V_lat) * r_new + this._windJitter[i];
-            const rPx   = r_new * AU;
+            const ang   = srcLon + this._rot - (428.6 / V_lat) * r_new + baseJ + angWave + angEddy;
+            const rPx   = r_new * rRipple * AU;
 
             this._windPos[i * 3]     = rPx * cosLat * Math.cos(ang);
-            this._windPos[i * 3 + 1] = rPx * sinLat;
+            this._windPos[i * 3 + 1] = rPx * sinLat + yWave * AU * cosLat;
             this._windPos[i * 3 + 2] = rPx * cosLat * Math.sin(ang);
         }
 
