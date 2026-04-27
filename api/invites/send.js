@@ -42,7 +42,17 @@ const FROM_EMAIL   = process.env.INVITE_FROM_EMAIL
                   || 'Parker Physics <invites@parkerphysics.com>';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 
-const VALID_PLANS  = new Set(['free', 'basic', 'advanced']);
+const VALID_PLANS  = new Set(['free', 'basic', 'educator', 'advanced', 'institution', 'enterprise']);
+
+/** Display label for each tier; used in email copy + audit log subjects. */
+const PLAN_LABEL = {
+    free:        'Free',
+    basic:       'Basic',
+    educator:    'Educator',
+    advanced:    'Advanced',
+    institution: 'Institution',
+    enterprise:  'Enterprise',
+};
 const CODE_ALPHA   = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // no I/O/0/1
 const CODE_LEN     = 8;
 
@@ -193,9 +203,7 @@ async function insertInvite({ code, plan, invitedEmail, expiryDays, createdBy })
 }
 
 function buildInviteHtml({ recipientName, recipientEmail, plan, link, code, inviterName }) {
-    const planLabel = plan === 'advanced' ? 'Advanced'
-                    : plan === 'basic'    ? 'Basic'
-                    :                       'Free';
+    const planLabel = PLAN_LABEL[plan] || 'Free';
     const greeting  = recipientName
         ? `Hi ${escHtml(recipientName)},`
         : `Hi there,`;
@@ -272,7 +280,11 @@ export default async function handler(req) {
     }
 
     // Rate limit + audit log (atomic, global across POPs).
-    const subject = `You're invited to Parker Physics`;
+    // Including the tier in the subject is a defense-in-depth measure: if
+    // an admin account is compromised and starts issuing Advanced/
+    // Institution invites in bulk, the audit log makes the abuse pattern
+    // obvious instead of burying high-value invites among Free ones.
+    const subject = `You're invited to Parker Physics — ${PLAN_LABEL[plan] || 'Free'} tier`;
     const allowed = await checkAdminRate({
         userId:    auth.user_id,
         recipient: recipientEmail,

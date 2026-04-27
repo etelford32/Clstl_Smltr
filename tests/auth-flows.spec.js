@@ -401,3 +401,56 @@ test.describe('API Edge Functions', () => {
         expect([401, 501]).toContain(res.status());
     });
 });
+
+// ── 10. Tier expansion (Educator / Institution / Enterprise) ───────────────
+
+test.describe('Tier expansion', () => {
+    test('pricing page renders all six tier cards', async ({ page }) => {
+        await page.goto('/pricing.html');
+        await expect(page.locator('.tier-name', { hasText: /^Free Trial$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Basic$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Educator$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Advanced$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Institution$/ })).toBeVisible();
+        await expect(page.locator('.tier-name', { hasText: /^Enterprise$/ })).toBeVisible();
+    });
+
+    test('signup page exposes all five self-serve plan pills', async ({ page }) => {
+        await page.goto('/signup.html');
+        for (const id of ['pill-free', 'pill-basic', 'pill-educator', 'pill-advanced', 'pill-institution']) {
+            await expect(page.locator('#' + id)).toBeVisible();
+        }
+        // Enterprise has no pill — it's a link to contact-enterprise.html
+        await expect(page.locator('a[href="contact-enterprise.html"]')).toBeVisible();
+    });
+
+    test('?plan=educator pre-selects Educator pill', async ({ page }) => {
+        await page.goto('/signup.html?plan=educator');
+        await expect(page.locator('#pill-educator')).toHaveClass(/selected/);
+    });
+
+    test('stripe checkout rejects enterprise plan', async ({ request }) => {
+        const res = await request.post('/api/stripe/checkout', {
+            data:    { plan: 'enterprise' },
+            headers: { Authorization: 'Bearer fake-token' },
+        });
+        // 401 (unauthorized — JWT rejected first) OR 400 (contact_required) OR 501 (not configured)
+        // The test runs with no Stripe / Supabase config in CI.
+        expect([400, 401, 501]).toContain(res.status());
+    });
+
+    test('contact-enterprise endpoint rejects missing email', async ({ request }) => {
+        const res = await request.post('/api/contact/enterprise', {
+            data: { name: 'Test User' },
+        });
+        // 400 (invalid_email) OR 403 (origin_blocked from test runner) OR 501 (not configured)
+        expect([400, 403, 501]).toContain(res.status());
+    });
+
+    test('contact-enterprise page renders form', async ({ page }) => {
+        await page.goto('/contact-enterprise.html');
+        await expect(page.locator('#contact-form')).toBeVisible();
+        await expect(page.locator('input[name="email"]')).toBeVisible();
+        await expect(page.locator('input[name="use_case"][value="anomaly_correlation"]')).toBeAttached();
+    });
+});

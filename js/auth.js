@@ -106,15 +106,59 @@ class AuthManager {
         return this._user?.role === 'tester';
     }
 
-    /** Check if user's plan allows alerts (basic or advanced). */
+    // ── Tier-tier feature gates ──────────────────────────────────────────
+    // Plans, lowest → highest:
+    //   free → basic → educator → advanced → institution → enterprise
+    //
+    // Educator is positioned BETWEEN basic and advanced because it gates
+    // on use case (classroom + embed) rather than data depth — Educator
+    // gets all Basic data feeds but adds embed permission and the
+    // Powered-by attribution flag. Institution and Enterprise are
+    // Advanced-equivalent for data access.
+
+    /** Tiers that get any kind of alert (everything except free). */
     canUseAlerts() {
-        const plan = this.getPlan();
-        return plan === 'basic' || plan === 'advanced' || this.isAdmin() || this.isTester();
+        const PAID = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
+        return PAID.has(this.getPlan()) || this.isAdmin() || this.isTester();
     }
 
-    /** Check if user's plan allows advanced alerts (advanced only). */
+    /** Tiers that get the full advanced alert set (advanced data feeds). */
     canUseAdvancedAlerts() {
-        return this.getPlan() === 'advanced' || this.isAdmin() || this.isTester();
+        const plan = this.getPlan();
+        return plan === 'advanced'
+            || plan === 'institution'
+            || plan === 'enterprise'
+            || this.isAdmin()
+            || this.isTester();
+    }
+
+    /** Tiers that may embed the simulator in third-party pages. */
+    canUseEmbed() {
+        const plan = this.getPlan();
+        return plan === 'educator'
+            || plan === 'institution'
+            || plan === 'enterprise'
+            || this.isAdmin()
+            || this.isTester();
+    }
+
+    /** Tiers that may replace the Parker Physics branding with their own. */
+    hasCustomBranding() {
+        const plan = this.getPlan();
+        return plan === 'institution' || plan === 'enterprise';
+    }
+
+    /**
+     * True when the user's tier requires the "Powered by Parker Physics"
+     * attribution badge to render. Reads the server-side flag if available
+     * (set by the sync_tier_derived_columns trigger), else falls back to
+     * the plan name. Educator is the only paid tier where attribution is
+     * a licensing condition — Basic doesn't embed at all, and
+     * Institution+ get to white-label.
+     */
+    requiresAttribution() {
+        if (this._user?.attribution_required != null) return !!this._user.attribution_required;
+        return this.getPlan() === 'educator';
     }
 
     /** Get alert preferences (or defaults if not loaded). */
@@ -141,7 +185,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
+                .select('role, plan, display_name, subscription_status, subscription_period_end, classroom_seats, seats_used, attribution_required, branding, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -168,6 +212,13 @@ class AuthManager {
                 if (data.role) this._user.role = data.role;
                 this._user.plan = data.plan || this._user.plan;
                 if (data.display_name) this._user.name = data.display_name;
+                // Tier metadata used by dashboard subscription card + attribution badge
+                this._user.subscription_status     = data.subscription_status     ?? null;
+                this._user.subscription_period_end = data.subscription_period_end ?? null;
+                this._user.classroom_seats         = data.classroom_seats         ?? null;
+                this._user.seats_used              = data.seats_used              ?? 0;
+                this._user.attribution_required    = data.attribution_required    ?? false;
+                this._user.branding                = data.branding                ?? {};
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;

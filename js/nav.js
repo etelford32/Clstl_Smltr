@@ -69,7 +69,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
-            { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Intro, Advanced plans',     tier: 'public', icon: '💰' },
+            { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Basic, Educator, Advanced, Institution, Enterprise', tier: 'public', icon: '💰' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
     },
@@ -86,10 +86,16 @@ function _getAuth() {
     return auth?.signedIn ? auth : null;
 }
 
+// Tier level determines which menu items + features a user can see.
+// Educator sits alongside Basic (level 2) — same data feeds, plus embed
+// permission. Institution + Enterprise are Advanced-equivalent (level 3).
 function _tierLevel(plan, role) {
     if (role === 'admin' || role === 'superadmin') return 99;
     if (role === 'tester') return 98;  // testers get full feature access
-    if (plan === 'advanced') return 3;
+    if (plan === 'enterprise')  return 3;
+    if (plan === 'institution') return 3;
+    if (plan === 'advanced')    return 3;
+    if (plan === 'educator')    return 2;
     if (plan === 'basic' || plan === 'intro') return 2;
     if (plan === 'free') return 1;
     return 0;
@@ -142,6 +148,14 @@ export function initNav(activeId = '') {
     const userTier = _tierLevel(auth?.plan, auth?.role);
     const isSignedIn = !!auth;
     const isAdmin = auth?.role === 'admin' || auth?.role === 'superadmin';
+
+    // Educator tier carries a "Powered by Parker Physics" attribution
+    // requirement. Mount the badge once; it self-renders on auth-changed
+    // so a plan switch toggles visibility without a reload. Cheap to
+    // import even when no badge is shown — the module is ~1.5kb.
+    import('./attribution-badge.js')
+        .then(m => m.mountAttributionBadge?.())
+        .catch(() => { /* nav must not break if the badge module fails */ });
 
     // Re-render nav when profile fetches real role (fixes admin button
     // not showing because nav rendered before fetchProfile() resolved)
@@ -224,8 +238,9 @@ export function initNav(activeId = '') {
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
-        // Notification bell (subscribers only)
-        const canAlert = auth?.plan === 'basic' || auth?.plan === 'advanced' || isAdmin;
+        // Notification bell (any paid tier or admin)
+        const PAID_PLANS = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
+        const canAlert = PAID_PLANS.has(auth?.plan) || isAdmin;
         if (canAlert) {
             html += `<div class="nav-bell-wrap" id="nav-bell-wrap">
                 <button class="nav-bell" id="nav-bell-btn" title="Alerts" aria-label="Notifications">

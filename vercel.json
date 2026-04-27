@@ -215,6 +215,10 @@
       "destination": "/api-policy.html"
     },
     {
+      "source": "/contact-enterprise",
+      "destination": "/contact-enterprise.html"
+    },
+    {
       "source": "/admin",
       "destination": "/admin.html"
     },

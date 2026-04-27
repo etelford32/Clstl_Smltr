@@ -13,7 +13,7 @@
  *     user_locations  WHERE daily_digest_enabled
  *                       AND notify_enabled
  *                       AND email_alerts_enabled
- *     ⨝ user_profiles WHERE plan IN ('basic','advanced')
+ *     ⨝ user_profiles WHERE plan IN ('basic','educator','advanced','institution','enterprise')
  *     ⨝ auth.users    (for the recipient email)
  *
  * Per-user digest caps are enforced AFTER the join (group by user_id,
@@ -72,17 +72,27 @@ const MAX_LOCATIONS_PER_RUN = 2000;
 // actually deliver in one run. Locations beyond the cap (ordered by
 // created_at ASC) are silently skipped server-side; the dashboard prevents
 // users from enabling more than the cap in the first place.
+//
+// Tier mapping mirrors dashboard.html "_digestPaidLow / High":
+//   basic + educator   → 5 locations · 1-day forecast
+//   advanced + institution + enterprise → 10 locations · 7-day forecast
 const PLAN_DIGEST_CAP = Object.freeze({
-    basic:    5,
-    advanced: 10,
+    basic:       5,
+    educator:    5,
+    advanced:    10,
+    institution: 10,
+    enterprise:  10,
 });
 
-// Per-plan forecast horizon in days. Intro gets tomorrow only; Pro gets
-// the full week. We always request 8 from Open-Meteo (today + 7) and slice
-// from index 1 so "today" never appears in the digest.
+// Per-plan forecast horizon in days. Lower tiers get tomorrow only; higher
+// tiers get the full week. We always request 8 from Open-Meteo (today + 7)
+// and slice from index 1 so "today" never appears in the digest.
 const PLAN_FORECAST_DAYS = Object.freeze({
-    basic:    1,
-    advanced: 7,
+    basic:       1,
+    educator:    1,
+    advanced:    7,
+    institution: 7,
+    enterprise:  7,
 });
 
 // Per-location upstream timeout. Forecast calls cache aggressively at
@@ -129,7 +139,7 @@ async function fetchEligibleLocations() {
         + `&daily_digest_enabled=eq.true`
         + `&notify_enabled=eq.true`
         + `&email_alerts_enabled=eq.true`
-        + `&user_profiles.plan=in.(basic,advanced)`
+        + `&user_profiles.plan=in.(basic,educator,advanced,institution,enterprise)`
         + `&order=created_at.asc`
         + `&limit=${MAX_LOCATIONS_PER_RUN}`;
     const res = await fetchWithTimeout(url, {
@@ -465,7 +475,10 @@ function buildDigestHtml({ label, city, forecast, plan }) {
     const days = forecast.days;
     const lead = days[0];
     const rest = days.slice(1);
-    const planLabel = plan === 'advanced' ? '7-Day Forecast' : "Tomorrow's Forecast";
+    // High tiers (advanced/institution/enterprise) get the 7-day strip; the
+    // rest get tomorrow only. Mirrors PLAN_FORECAST_DAYS above.
+    const _highTier = plan === 'advanced' || plan === 'institution' || plan === 'enterprise';
+    const planLabel = _highTier ? '7-Day Forecast' : "Tomorrow's Forecast";
 
     return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head>

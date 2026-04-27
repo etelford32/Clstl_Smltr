@@ -5,17 +5,22 @@
  *
  * POST /api/stripe/checkout
  *   Headers: Authorization: Bearer <supabase-jwt>
- *   Body:    { plan: 'basic' | 'advanced' }
+ *   Body:    { plan: 'basic' | 'educator' | 'advanced' | 'institution' }
  *
  * Returns: { url: 'https://checkout.stripe.com/...' }
  *
+ * Note: 'enterprise' is rejected with 400 — Enterprise pricing is custom
+ * and routed through /contact-enterprise.html → /api/contact/enterprise.
+ *
  * ── Env vars required ────────────────────────────────────────────────────────
- *   STRIPE_SECRET_KEY        — sk_live_... or sk_test_...
- *   STRIPE_BASIC_PRICE_ID    — price_... for Basic $10/mo
- *   STRIPE_ADVANCED_PRICE_ID — price_... for Advanced $100/mo
- *   SUPABASE_URL             — https://xxx.supabase.co
- *   SUPABASE_SERVICE_KEY     — service_role key (server-side only)
- *   APP_URL                  — https://parkerphysics.com (for redirect URLs)
+ *   STRIPE_SECRET_KEY            — sk_live_... or sk_test_...
+ *   STRIPE_BASIC_PRICE_ID        — price_... for Basic $10/mo
+ *   STRIPE_EDUCATOR_PRICE_ID     — price_... for Educator $25/mo
+ *   STRIPE_ADVANCED_PRICE_ID     — price_... for Advanced $100/mo
+ *   STRIPE_INSTITUTION_PRICE_ID  — price_... for Institution $500/mo
+ *   SUPABASE_URL                 — https://xxx.supabase.co
+ *   SUPABASE_SERVICE_KEY         — service_role key (server-side only)
+ *   APP_URL                      — https://parkerphysics.com (for redirect URLs)
  */
 
 export const config = { runtime: 'edge' };
@@ -30,9 +35,16 @@ const APP_URL        = process.env.APP_URL || 'https://parkerphysics.com';
 // Stripe price IDs: original naming was STRIPE_{TIER}_PRICE_ID; Vercel
 // dashboards often prefix with STRIPE_PRICE_{TIER}. Accept either.
 const PRICE_MAP = {
-    basic:    process.env.STRIPE_BASIC_PRICE_ID    || process.env.STRIPE_PRICE_BASIC    || '',
-    advanced: process.env.STRIPE_ADVANCED_PRICE_ID || process.env.STRIPE_PRICE_ADVANCED || '',
+    basic:       process.env.STRIPE_BASIC_PRICE_ID       || process.env.STRIPE_PRICE_BASIC       || '',
+    educator:    process.env.STRIPE_EDUCATOR_PRICE_ID    || process.env.STRIPE_PRICE_EDUCATOR    || '',
+    advanced:    process.env.STRIPE_ADVANCED_PRICE_ID    || process.env.STRIPE_PRICE_ADVANCED    || '',
+    institution: process.env.STRIPE_INSTITUTION_PRICE_ID || process.env.STRIPE_PRICE_INSTITUTION || '',
 };
+
+// Tiers that are NEVER self-serve. enterprise = custom contract; free = no
+// Stripe interaction at all. Returning 400 with a hint keeps the client
+// from getting a confusing "invalid_plan" when they hit the wrong button.
+const NON_SELFSERVE_TIERS = new Set(['enterprise']);
 
 function json(body, status = 200) {
     return Response.json(body, {
@@ -104,8 +116,20 @@ export default async function handler(req) {
     try { body = await req.json(); } catch { return json({ error: 'invalid_body' }, 400); }
 
     const plan = body.plan;
+    if (NON_SELFSERVE_TIERS.has(plan)) {
+        return json({
+            error: 'contact_required',
+            detail: `${plan} pricing is custom — please use the contact form at /contact-enterprise.html`,
+            redirect: `${APP_URL}/contact-enterprise.html`,
+        }, 400);
+    }
     const priceId = PRICE_MAP[plan];
-    if (!priceId) return json({ error: 'invalid_plan', detail: `Plan must be 'basic' or 'advanced'` }, 400);
+    if (!priceId) {
+        return json({
+            error:  'invalid_plan',
+            detail: `Plan must be one of: ${Object.keys(PRICE_MAP).join(', ')}`,
+        }, 400);
+    }
 
     try {
         const customerId = await getOrCreateCustomer(user.id, user.email);

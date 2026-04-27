@@ -128,21 +128,30 @@
 
         /* Plan selector */
         .plan-pills {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 22px;
+            display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 14px;
         }
+        @media (max-width: 540px) { .plan-pills { grid-template-columns: repeat(2, 1fr); } }
         .plan-pill {
             border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
-            padding: 10px 6px; text-align: center; cursor: pointer;
+            padding: 9px 4px; text-align: center; cursor: pointer;
             transition: border-color .2s, background .2s;
             background: rgba(255,255,255,.04);
         }
         .plan-pill:hover { border-color: rgba(255,255,255,.28); background: rgba(255,255,255,.08); }
         .plan-pill.selected { border-color: #8040ff; background: rgba(128,64,255,.15); }
-        .plan-pill.selected.basic { border-color: #ffd700; background: rgba(255,215,0,.1); }
-        .plan-pill.selected.advanced { border-color: #8040ff; background: rgba(128,64,255,.15); }
-        .plan-pill-name { font-size: .8rem; font-weight: 700; color: #ddd; display: block; }
-        .plan-pill-price { font-size: .72rem; color: #777; display: block; margin-top: 2px; }
+        .plan-pill.selected.basic       { border-color: #ffd700; background: rgba(255,215,0,.1); }
+        .plan-pill.selected.educator    { border-color: #9ad36f; background: rgba(154,211,111,.1); }
+        .plan-pill.selected.advanced    { border-color: #8040ff; background: rgba(128,64,255,.15); }
+        .plan-pill.selected.institution { border-color: #ff8cc8; background: rgba(255,140,200,.12); }
+        .plan-pill-name { font-size: .76rem; font-weight: 700; color: #ddd; display: block; }
+        .plan-pill-price { font-size: .68rem; color: #777; display: block; margin-top: 2px; }
         .plan-pill input[type=radio] { display: none; }
+        .enterprise-link {
+            display: block; margin: 0 0 22px; text-align: center;
+            font-size: .78rem; color: #888;
+        }
+        .enterprise-link a { color: #ffd700; text-decoration: none; font-weight: 600; }
+        .enterprise-link a:hover { text-decoration: underline; }
 
         /* Form fields */
         .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -189,8 +198,10 @@
         .btn-submit:hover { opacity: .9; transform: translateY(-1px); }
         .btn-submit:active { transform: translateY(0); }
         .btn-submit:disabled { opacity: .5; cursor: not-allowed; transform: none; }
-        .btn-submit.basic-plan { background: linear-gradient(45deg,#ffd700,#ff8c00); color: #0a0a1a; }
-        .btn-submit.advanced-plan { background: linear-gradient(45deg,#8040ff,#4080ff); }
+        .btn-submit.basic-plan       { background: linear-gradient(45deg,#ffd700,#ff8c00); color: #0a0a1a; }
+        .btn-submit.educator-plan    { background: linear-gradient(45deg,#9ad36f,#3fa05a); color: #0a1a0a; }
+        .btn-submit.advanced-plan    { background: linear-gradient(45deg,#8040ff,#4080ff); }
+        .btn-submit.institution-plan { background: linear-gradient(45deg,#ff8cc8,#c845a0); color: #1a0a14; }
 
         .divider {
             display: flex; align-items: center; gap: 10px;
@@ -269,11 +280,25 @@
                         <span class="plan-pill-name">⭐ Basic</span>
                         <span class="plan-pill-price">$10 / mo</span>
                     </label>
+                    <label class="plan-pill educator" id="pill-educator">
+                        <input type="radio" name="plan" value="educator">
+                        <span class="plan-pill-name">🎓 Educator</span>
+                        <span class="plan-pill-price">$25 / mo</span>
+                    </label>
                     <label class="plan-pill advanced" id="pill-advanced">
                         <input type="radio" name="plan" value="advanced">
                         <span class="plan-pill-name">🚀 Advanced</span>
                         <span class="plan-pill-price">$100 / mo</span>
                     </label>
+                    <label class="plan-pill institution" id="pill-institution">
+                        <input type="radio" name="plan" value="institution">
+                        <span class="plan-pill-name">🏛️ Institution</span>
+                        <span class="plan-pill-price">$500 / mo</span>
+                    </label>
+                </div>
+                <div class="enterprise-link">
+                    Need a custom plan, custom data, or 200+ seats?
+                    <a href="contact-enterprise.html">Talk to Enterprise sales →</a>
                 </div>
 
                 <form id="signup-form" novalidate>
@@ -380,9 +405,15 @@
         statusEl.style.color = '#778';
         const res = await validateInviteCode(code, email || null);
         if (res.ok) {
-            const planLabel = res.plan === 'advanced' ? 'Advanced'
-                            : res.plan === 'basic'    ? 'Basic'
-                            :                           'Free';
+            const _PLAN_LABELS = {
+                free:        'Free',
+                basic:       'Basic',
+                educator:    'Educator',
+                advanced:    'Advanced',
+                institution: 'Institution',
+                enterprise:  'Enterprise',
+            };
+            const planLabel = _PLAN_LABELS[res.plan] || 'Free';
             statusEl.textContent = `✓ Valid invite — ${planLabel} tier${res.isTargeted ? ' (email-locked)' : ''}`;
             statusEl.style.color = '#4eff91';
             _validatedInvite = res;
@@ -406,8 +437,25 @@
 </script>
 <script>
     // ── Plan pre-selection from URL param ──────────────────────────
-    const urlPlan = new URLSearchParams(location.search).get('plan') || 'free';
-    const planMap = { free: 'pill-free', basic: 'pill-basic', advanced: 'pill-advanced' };
+    // Enterprise routes through contact-enterprise.html, not the signup
+    // form, so it has no pill — but we accept the URL param so that
+    // marketing copy linking ?plan=enterprise still pre-selects something
+    // sensible (advanced) instead of crashing the renderer.
+    const _rawUrlPlan = new URLSearchParams(location.search).get('plan') || 'free';
+    const urlPlan     = _rawUrlPlan === 'enterprise' ? 'advanced' : _rawUrlPlan;
+    const planMap = {
+        free:        'pill-free',
+        basic:       'pill-basic',
+        educator:    'pill-educator',
+        advanced:    'pill-advanced',
+        institution: 'pill-institution',
+    };
+    const PLAN_BTN_CLASS = {
+        basic:       ' basic-plan',
+        educator:    ' educator-plan',
+        advanced:    ' advanced-plan',
+        institution: ' institution-plan',
+    };
     function selectPlan(val) {
         document.querySelectorAll('.plan-pill').forEach(p => p.classList.remove('selected'));
         const pill = document.getElementById(planMap[val]);
@@ -416,7 +464,7 @@
             pill.querySelector('input').checked = true;
         }
         const btn = document.getElementById('btn-submit');
-        btn.className = 'btn-submit' + (val === 'basic' ? ' basic-plan' : val === 'advanced' ? ' advanced-plan' : '');
+        btn.className = 'btn-submit' + (PLAN_BTN_CLASS[val] || '');
     }
     // Expose for the invite-validation module above to auto-pick the
     // tier the invite was issued for.

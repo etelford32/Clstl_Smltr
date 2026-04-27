@@ -32,11 +32,26 @@ const SUPABASE_KEY      = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABA
 // (STRIPE_{TIER}_PRICE_ID) and the Vercel-dashboard convention
 // (STRIPE_PRICE_{TIER}) so the webhook upgrades work regardless of how
 // the env vars were originally created.
+//
+// Enterprise has no price ID — it's a manually-assigned plan set by an
+// admin once a custom contract is signed. The webhook never touches it.
 const PRICE_TO_PLAN = {};
-const _basicPrice    = process.env.STRIPE_BASIC_PRICE_ID    || process.env.STRIPE_PRICE_BASIC;
-const _advancedPrice = process.env.STRIPE_ADVANCED_PRICE_ID || process.env.STRIPE_PRICE_ADVANCED;
-if (_basicPrice)    PRICE_TO_PLAN[_basicPrice]    = 'basic';
-if (_advancedPrice) PRICE_TO_PLAN[_advancedPrice] = 'advanced';
+const _basicPrice       = process.env.STRIPE_BASIC_PRICE_ID       || process.env.STRIPE_PRICE_BASIC;
+const _educatorPrice    = process.env.STRIPE_EDUCATOR_PRICE_ID    || process.env.STRIPE_PRICE_EDUCATOR;
+const _advancedPrice    = process.env.STRIPE_ADVANCED_PRICE_ID    || process.env.STRIPE_PRICE_ADVANCED;
+const _institutionPrice = process.env.STRIPE_INSTITUTION_PRICE_ID || process.env.STRIPE_PRICE_INSTITUTION;
+if (_basicPrice)       PRICE_TO_PLAN[_basicPrice]       = 'basic';
+if (_educatorPrice)    PRICE_TO_PLAN[_educatorPrice]    = 'educator';
+if (_advancedPrice)    PRICE_TO_PLAN[_advancedPrice]    = 'advanced';
+if (_institutionPrice) PRICE_TO_PLAN[_institutionPrice] = 'institution';
+
+/** Constant-time string compare — same length required, returns false on mismatch. */
+function constantTimeEqual(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+}
 
 /** Verify Stripe webhook signature (HMAC-SHA256). */
 async function verifySignature(rawBody, sigHeader) {
@@ -59,7 +74,8 @@ async function verifySignature(rawBody, sigHeader) {
     const expected = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
     const expectedHex = [...new Uint8Array(expected)].map(b => b.toString(16).padStart(2, '0')).join('');
 
-    return expectedHex === sig;
+    // Constant-time compare — `===` leaks length-prefix matches via timing.
+    return constantTimeEqual(expectedHex, sig);
 }
 
 /** Update user_profiles via Supabase REST API (service key, bypasses RLS). */

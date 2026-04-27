@@ -106,7 +106,10 @@
         .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
         .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
         .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        .b-educator { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
         .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
+        .b-institution { background: rgba(255,140,200,.1); color: #ff8cc8; border: 1px solid rgba(255,140,200,.25); }
+        .b-enterprise { background: rgba(255,215,0,.1); color: #ffd700; border: 1px solid rgba(255,215,0,.25); }
 
         /* Sparkline canvas */
         .sparkline-wrap { height: 80px; margin-bottom: 8px; }
@@ -179,8 +182,11 @@
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-intro">--</div><div class="kpi-label">Intro Subscribers</div></div>
-            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-pro">--</div><div class="kpi-label">Pro Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-intro">--</div><div class="kpi-label">Basic Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-educator">--</div><div class="kpi-label">Educator Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-pro">--</div><div class="kpi-label">Advanced Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-institution">--</div><div class="kpi-label">Institution Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-enterprise">--</div><div class="kpi-label">Enterprise Accounts</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
             <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
         </div>
@@ -494,7 +500,10 @@ async function loadKPIs() {
     set('kpi-minutes', d.minutesUsed, 'blue');
     set('kpi-signups', d.signUps, 'green');
     set('kpi-intro', d.introSubs, 'purple');
+    set('kpi-educator', d.educatorSubs ?? 0, 'green');
     set('kpi-pro', d.proSubs, 'gold');
+    set('kpi-institution', d.institutionSubs ?? 0, 'purple');
+    set('kpi-enterprise', d.enterpriseSubs ?? 0, 'gold');
     set('kpi-admins', d.adminUsers, 'red');
     set('kpi-online', d.onlineNow, 'green');
 }
@@ -512,20 +521,29 @@ async function loadRevenueKPIs() {
 
         if (!profiles) return;
 
-        let basic = 0, advanced = 0, free = 0, trialing = 0, pastDue = 0, canceled = 0, testers = 0;
+        let basic = 0, educator = 0, advanced = 0, institution = 0, enterprise = 0, free = 0;
+        let trialing = 0, pastDue = 0, canceled = 0, testers = 0;
         for (const p of profiles) {
             if (p.role === 'tester') testers++;
             if (p.subscription_status === 'trialing') trialing++;
             else if (p.subscription_status === 'past_due') pastDue++;
             else if (p.subscription_status === 'canceled') canceled++;
 
-            if (p.plan === 'basic') basic++;
-            else if (p.plan === 'advanced') advanced++;
-            else free++;
+            switch (p.plan) {
+                case 'basic':       basic++;       break;
+                case 'educator':    educator++;    break;
+                case 'advanced':    advanced++;    break;
+                case 'institution': institution++; break;
+                case 'enterprise':  enterprise++;  break;
+                default:            free++;
+            }
         }
 
-        const activeSubs = basic + advanced;
-        const mrr = basic * 10 + advanced * 100;
+        const activeSubs = basic + educator + advanced + institution + enterprise;
+        // Enterprise pricing is custom — exclude from MRR until we have a
+        // reliable per-account contract value column. For now we treat it
+        // as $0 in the published KPI to avoid misleading the dashboard.
+        const mrr = basic * 10 + educator * 25 + advanced * 100 + institution * 500;
         const total = profiles.length;
         const conversion = total > 0 ? ((activeSubs / total) * 100).toFixed(1) + '%' : '0%';
         const arpu = activeSubs > 0 ? '$' + (mrr / activeSubs).toFixed(0) : '$0';
@@ -673,7 +691,7 @@ async function loadUsers() {
     let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
     for (const u of res.data) {
         const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
-        const pc = u.plan === 'advanced' ? 'b-advanced' : u.plan === 'basic' ? 'b-basic' : 'b-free';
+        const pc = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
         html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
     }
@@ -748,7 +766,7 @@ async function loadInvites() {
         const full    = c.used_count >= c.max_uses;
         const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
         const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
-        const pc      = c.plan === 'advanced' ? 'b-advanced' : c.plan === 'basic' ? 'b-basic' : 'b-free';
+        const pc      = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
         const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
         const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
         html += `<tr>

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pricing — Parker Physics App</title>
-    <meta name="description" content="Choose your Parker Physics plan. Free trial, Basic at $10/mo, or Advanced at $100/mo. Interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
+    <meta name="description" content="Parker Physics plans: Free, Basic ($10/mo), Educator ($25/mo classroom license), Advanced ($100/mo), Institution ($500/mo site license), and Enterprise (custom). Interactive astrophysics simulations powered by WebGL and live NASA/NOAA data.">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -116,13 +116,39 @@
         /* ─── Cards ───────────────────────────────────────────────────── */
         .pricing-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 24px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
             margin: 3rem auto 0;
-            max-width: 1100px;
+            max-width: 1240px;
             padding: 0 24px;
         }
-        @media (max-width: 900px) { .pricing-grid { grid-template-columns: 1fr; max-width: 480px; } }
+        @media (max-width: 1100px) { .pricing-grid { grid-template-columns: repeat(2, 1fr); max-width: 760px; } }
+        @media (max-width: 640px)  { .pricing-grid { grid-template-columns: 1fr; max-width: 460px; } }
+
+        /* Education & Institutions row */
+        .pricing-row-2 {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin: 1.5rem auto 0;
+            max-width: 760px;
+            padding: 0 24px;
+        }
+        @media (max-width: 760px) { .pricing-row-2 { grid-template-columns: 1fr; max-width: 460px; } }
+        .pricing-row-label {
+            text-align: center;
+            margin: 3rem 0 .5rem;
+            font-size: .78rem;
+            color: #888;
+            font-weight: 700;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+        }
+        .pricing-row-label::before, .pricing-row-label::after {
+            content: ''; display: inline-block; width: 60px;
+            border-top: 1px solid rgba(255,255,255,.1);
+            vertical-align: middle; margin: 0 14px;
+        }
 
         .price-card {
             background: rgba(255,255,255,.05);
@@ -201,9 +227,41 @@
             background: linear-gradient(45deg,#ffd700,#ff8c00);
             color: #0a0a1a;
         }
+        .btn-plan.educator {
+            background: linear-gradient(45deg,#9ad36f,#3fa05a);
+            color: #0a1a0a;
+        }
         .btn-plan.advanced {
             background: linear-gradient(45deg,#8040ff,#4080ff);
             color: #fff;
+        }
+        .btn-plan.institution {
+            background: linear-gradient(45deg,#ff8cc8,#c845a0);
+            color: #1a0a14;
+        }
+        .btn-plan.enterprise {
+            background: rgba(255,255,255,.08);
+            border: 1px solid rgba(255,215,0,.35);
+            color: #ffd700;
+        }
+        .btn-plan.enterprise:hover { background: rgba(255,215,0,.1); }
+
+        /* Tier-specific accent colors on featured cards */
+        .price-card.tier-educator    { border-color: rgba(154,211,111,.35); background: rgba(154,211,111,.05); }
+        .price-card.tier-educator::before    { background: linear-gradient(90deg, #9ad36f, #3fa05a); }
+        .price-card.tier-institution { border-color: rgba(255,140,200,.35); background: rgba(255,140,200,.04); }
+        .price-card.tier-institution::before { background: linear-gradient(90deg, #ff8cc8, #c845a0); }
+        .price-card.tier-enterprise  { border-color: rgba(255,215,0,.35); background: rgba(255,215,0,.04); }
+        .price-card.tier-enterprise::before  { background: linear-gradient(90deg, #ffd700, #ff8c00); }
+
+        .badge-attr {
+            display: inline-block;
+            font-size: .68rem; font-weight: 700;
+            background: rgba(154,211,111,.12);
+            border: 1px solid rgba(154,211,111,.3);
+            color: #9ad36f;
+            padding: 2px 8px; border-radius: 10px;
+            margin-left: 6px; letter-spacing: .04em;
         }
 
         /* ─── Comparison Table ────────────────────────────────────────── */
@@ -227,7 +285,10 @@
         }
         .compare-table thead th:first-child { text-align: left; }
         .compare-table th.col-basic { color: #ffd700; }
+        .compare-table th.col-educator { color: #9ad36f; }
         .compare-table th.col-advanced { color: #b080ff; }
+        .compare-table th.col-institution { color: #ff8cc8; }
+        .compare-table th.col-enterprise { color: #ffd700; }
         .compare-table tbody tr { border-bottom: 1px solid rgba(255,255,255,.05); }
         .compare-table tbody tr:last-child { border-bottom: none; }
         .compare-table tbody tr:hover { background: rgba(255,255,255,.03); }
@@ -332,7 +393,7 @@
         <div class="badge-top">MOST POPULAR</div>
         <div class="tier-icon">⭐</div>
         <div class="tier-name">Basic</div>
-        <div class="tier-desc">Full simulation suite for enthusiasts, educators, and early-career researchers.</div>
+        <div class="tier-desc">Full simulation suite for enthusiasts and early-career researchers.</div>
         <div class="price-amount"><sup>$</sup>10<span class="period">/mo</span></div>
         <div class="price-note">~$0.33 per day</div>
         <hr class="price-divider">
@@ -349,11 +410,32 @@
         <a href="signup.html?plan=basic" class="btn-plan basic" data-checkout="basic">Get Basic &rarr;</a>
     </div>
 
+    <!-- Educator -->
+    <div class="price-card tier-educator">
+        <div class="tier-icon">🎓</div>
+        <div class="tier-name">Educator</div>
+        <div class="tier-desc">Lone teachers, professors, and homeschool parents who need classroom licensing without enterprise overhead.</div>
+        <div class="price-amount"><sup>$</sup>25<span class="period">/mo</span></div>
+        <div class="price-note">Up to 30 students per classroom</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> Everything in Basic</li>
+            <li><span class="check">✓</span> Classroom license · 30 student seats</li>
+            <li><span class="check">✓</span> Embed simulations on your LMS / site</li>
+            <li><span class="check">✓</span> Lesson-plan templates &amp; rubrics</li>
+            <li><span class="check">✓</span> Educator-only Discord channel</li>
+            <li><span class="check">✓</span> "Powered by Parker Physics" attribution<span class="badge-attr">REQ'D</span></li>
+            <li class="dim"><span class="cross">✗</span> White-label / custom branding</li>
+            <li class="dim"><span class="cross">✗</span> REST API access</li>
+        </ul>
+        <a href="signup.html?plan=educator" class="btn-plan educator" data-checkout="educator">Get Educator &rarr;</a>
+    </div>
+
     <!-- Advanced -->
     <div class="price-card">
         <div class="tier-icon">🚀</div>
         <div class="tier-name">Advanced</div>
-        <div class="tier-desc">For researchers, institutions, and professionals who need deep data access and priority support.</div>
+        <div class="tier-desc">For researchers and professionals who need deep data access and priority support.</div>
         <div class="price-amount"><sup>$</sup>100<span class="period">/mo</span></div>
         <div class="price-note">Billed monthly, cancel anytime</div>
         <hr class="price-divider">
@@ -372,43 +454,108 @@
 
 </div><!-- /pricing-grid -->
 
+<!-- ═══════════════════════ EDUCATION & INSTITUTIONS ROW ═══════════════════ -->
+<div class="pricing-row-label">For institutions &amp; organizations</div>
+<div class="pricing-row-2">
+
+    <!-- Institution -->
+    <div class="price-card tier-institution">
+        <div class="tier-icon">🏛️</div>
+        <div class="tier-name">Institution</div>
+        <div class="tier-desc">Site licensing for university departments, planetariums, and science centers. Self-serve onboarding — no procurement cycle.</div>
+        <div class="price-amount"><sup>$</sup>500<span class="period">/mo</span></div>
+        <div class="price-note">Up to 200 users · billed monthly</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> Everything in Advanced</li>
+            <li><span class="check">✓</span> Site license · 200 named users</li>
+            <li><span class="check">✓</span> Custom branding &amp; white-label</li>
+            <li><span class="check">✓</span> Single Sign-On (SAML / OIDC)</li>
+            <li><span class="check">✓</span> Department admin dashboard</li>
+            <li><span class="check">✓</span> Priority support · SLA-backed</li>
+            <li><span class="check">✓</span> Quarterly briefings with our team</li>
+            <li><span class="check">✓</span> Public-outreach embed permission</li>
+        </ul>
+        <a href="signup.html?plan=institution" class="btn-plan institution" data-checkout="institution">Get Institution &rarr;</a>
+    </div>
+
+    <!-- Enterprise -->
+    <div class="price-card tier-enterprise">
+        <div class="tier-icon">🛰️</div>
+        <div class="tier-name">Enterprise</div>
+        <div class="tier-desc">Satellite operators, financial-services teams, and research labs with custom data &amp; API needs.</div>
+        <div class="price-amount" style="font-size:1.5rem;line-height:1.2;margin-top:8px">Contact for quote</div>
+        <div class="price-note">Annual contracts · custom SLAs</div>
+        <hr class="price-divider">
+        <ul class="feature-list">
+            <li><span class="check">✓</span> Anomaly correlation (live + historical)</li>
+            <li><span class="check">✓</span> GNSS scintillation forecasting</li>
+            <li><span class="check">✓</span> Launch-window briefings &amp; reports</li>
+            <li><span class="check">✓</span> Dedicated data-pipeline endpoints</li>
+            <li><span class="check">✓</span> Bring-your-own-data ingestion</li>
+            <li><span class="check">✓</span> 99.9% uptime SLA · 24/7 on-call</li>
+            <li><span class="check">✓</span> Named technical account manager</li>
+            <li><span class="check">✓</span> Compliance review (SOC 2, FedRAMP path)</li>
+        </ul>
+        <a href="contact-enterprise.html" class="btn-plan enterprise">Talk to Sales &rarr;</a>
+    </div>
+
+</div><!-- /pricing-row-2 -->
+
 <!-- ═══════════════════════════════════════════════════════ TABLE ═══ -->
 <div class="compare-section">
     <h2>Full Feature Comparison</h2>
+    <div style="overflow-x:auto">
     <table class="compare-table">
         <thead>
             <tr>
                 <th style="text-align:left">Feature</th>
                 <th>Free</th>
                 <th class="col-basic">Basic</th>
+                <th class="col-educator">Educator</th>
                 <th class="col-advanced">Advanced</th>
+                <th class="col-institution">Inst.</th>
+                <th class="col-enterprise">Ent.</th>
             </tr>
         </thead>
         <tbody>
-            <tr class="section-header"><td colspan="4">Simulations</td></tr>
-            <tr><td>Sun &amp; Earth simulations</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Space Weather dashboard</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Full 3D WebGL stellar sims (17 total)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Fluid dynamics (NSE, accretion disk)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Galactic map &amp; solar system 3D</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Rust/WASM high-performance engine</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr class="section-header"><td colspan="7">Simulations</td></tr>
+            <tr><td>Sun &amp; Earth simulations</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Space Weather dashboard</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Full 3D WebGL stellar sims (17 total)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Fluid dynamics (NSE, accretion disk)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Galactic map &amp; solar system 3D</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Rust/WASM high-performance engine</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
 
-            <tr class="section-header"><td colspan="4">Data &amp; Feeds</td></tr>
-            <tr><td>Basic NOAA solar wind readout</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Full NASA DONKI feed (CME, flares)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Real-time Kp, Bz, X-ray, density</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>SWMF magnetosphere pipeline</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Solar wind prediction models (L1)</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>REST API access</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>CSV / JSON data export</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr class="section-header"><td colspan="7">Licensing &amp; Embedding</td></tr>
+            <tr><td>Single user account</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Seats / classroom users</td><td>1</td><td>1</td><td>30</td><td>1</td><td>200</td><td>Custom</td></tr>
+            <tr><td>Embed simulator in third-party sites</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Custom branding / white-label</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>"Powered by Parker Physics" required</td><td><span class="no">—</span></td><td><span class="no">—</span></td><td><span class="partial">Required</span></td><td><span class="no">—</span></td><td><span class="no">Optional</span></td><td><span class="no">Optional</span></td></tr>
+            <tr><td>SSO (SAML / OIDC)</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
 
-            <tr class="section-header"><td colspan="4">Support</td></tr>
-            <tr><td>Community forum access</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Email support</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Priority &amp; dedicated support</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
-            <tr><td>Early access to new features</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr class="section-header"><td colspan="7">Data &amp; Feeds</td></tr>
+            <tr><td>Basic NOAA solar wind readout</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Full NASA DONKI feed (CME, flares)</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Real-time Kp, Bz, X-ray, density</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>SWMF magnetosphere pipeline</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Solar wind prediction models (L1)</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>REST API access</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>CSV / JSON data export</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>GNSS scintillation forecasting</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Anomaly correlation reports</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Launch-window briefings</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
+
+            <tr class="section-header"><td colspan="7">Support</td></tr>
+            <tr><td>Community forum access</td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Email support</td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Priority &amp; dedicated support</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>SLA-backed uptime &amp; on-call</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td><td><span class="yes">✓</span></td></tr>
+            <tr><td>Named account manager</td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td><span class="yes">✓</span></td></tr>
         </tbody>
     </table>
+    </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════ FAQ ═══ -->
@@ -428,8 +575,20 @@
         <div class="faq-a">SWMF (Space Weather Modeling Framework) is a physics-based magnetosphere simulation tool used by NASA and NOAA researchers. Advanced members can run and retrieve magnetosphere model outputs driven by live solar wind data from the L1 Lagrange point.</div>
     </div>
     <div class="faq-item">
+        <button class="faq-q">What's the difference between Educator and Institution? <span class="arrow">▼</span></button>
+        <div class="faq-a">Educator is for a single teacher, professor, or homeschool parent who wants to license up to 30 student seats — billed monthly with a "Powered by Parker Physics" attribution badge on embedded simulations. Institution is for a whole university department, planetarium, or science center: 200 seats, full white-label / custom branding, SSO, and SLA-backed support. Above 200 seats or with custom data needs, talk to us about Enterprise.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">Can I embed simulations on my school's website or LMS? <span class="arrow">▼</span></button>
+        <div class="faq-a">Yes, on the Educator, Institution, and Enterprise tiers. Educator embeds carry the "Powered by Parker Physics" attribution badge (a licensing condition); Institution and Enterprise can white-label.</div>
+    </div>
+    <div class="faq-item">
+        <button class="faq-q">When should I contact Enterprise sales? <span class="arrow">▼</span></button>
+        <div class="faq-a">If you're a satellite operator, financial-services team, or research lab that needs anomaly correlation, GNSS scintillation forecasting, launch-window briefings, custom data ingestion, or contractual SLAs — that's Enterprise. Pricing is bespoke and starts above the Institution tier. <a href="contact-enterprise.html" style="color:#a080ff">Talk to us →</a></div>
+    </div>
+    <div class="faq-item">
         <button class="faq-q">Is there an academic or institutional discount? <span class="arrow">▼</span></button>
-        <div class="faq-a">Yes — universities, research institutions, and K–12 educators can contact us for discounted or site-license pricing. Reach out via the support link in your account.</div>
+        <div class="faq-a">Educator ($25/mo for 30 seats) and Institution ($500/mo for 200 seats) are themselves the academic-discounted tiers. For larger organizations or seat counts above 200, contact Enterprise sales.</div>
     </div>
     <div class="faq-item">
         <button class="faq-q">How does billing work? <span class="arrow">▼</span></button>
@@ -481,9 +640,19 @@
     });
 
     // ── Stripe Checkout integration ──────────────────────────────────────
-    // If user is signed in, Basic/Advanced buttons open Stripe Checkout.
-    // If not signed in, they go to signup (existing href= fallback).
+    // Self-serve tiers all use the same Stripe Checkout flow. Enterprise is
+    // intentionally not data-checkout — its CTA is a plain link to the
+    // contact form. The endpoint also rejects 'enterprise' with a 400 if a
+    // client somehow submits one, so this is defense in depth.
+    const PLAN_LABEL = {
+        basic:       'Get Basic',
+        educator:    'Get Educator',
+        advanced:    'Get Advanced',
+        institution: 'Get Institution',
+    };
     document.querySelectorAll('[data-checkout]').forEach(btn => {
+        const plan = btn.dataset.checkout;
+        const labelArrow = ` →`;
         btn.addEventListener('click', async (e) => {
             // Check if user is signed in via localStorage
             let auth;
@@ -491,7 +660,6 @@
             if (!auth?.signedIn) return; // let href= take them to signup
 
             e.preventDefault();
-            const plan = btn.dataset.checkout;
             btn.textContent = 'Redirecting...';
             btn.style.pointerEvents = 'none';
 
@@ -512,13 +680,14 @@
                 if (data.url) {
                     window.location.href = data.url;
                 } else {
+                    if (data.redirect) { window.location.href = data.redirect; return; }
                     alert(data.detail || data.error || 'Checkout failed');
-                    btn.textContent = plan === 'basic' ? 'Get Basic →' : 'Get Advanced →';
+                    btn.textContent = (PLAN_LABEL[plan] || 'Subscribe') + labelArrow;
                     btn.style.pointerEvents = '';
                 }
             } catch (err) {
                 console.error('Checkout error:', err);
-                btn.textContent = plan === 'basic' ? 'Get Basic →' : 'Get Advanced →';
+                btn.textContent = (PLAN_LABEL[plan] || 'Subscribe') + labelArrow;
                 btn.style.pointerEvents = '';
             }
         });
