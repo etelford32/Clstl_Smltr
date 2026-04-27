@@ -297,8 +297,31 @@ class AuthManager {
         return this.getDisplayName().split(' ')[0];
     }
 
+    /**
+     * Effective plan after applying client-side guards. Reads `plan` straight
+     * from the user_profiles row, then downgrades to 'free' if the
+     * subscription is in the 'canceled' state AND the period_end has already
+     * elapsed.
+     *
+     * Why: when Stripe receives an immediate-cancel-via-API request the
+     * webhook keeps the paid plan until period_end so the user gets the
+     * value they paid for. We don't have a cron that flips them back to
+     * 'free' once that boundary passes — this guard makes the UI honest
+     * even if the row hasn't been touched in a while.
+     *
+     * Admins/testers ALWAYS see their stored plan (an expired admin row
+     * is still an admin row).
+     */
     getPlan() {
-        return (this._user?.plan || 'free').toLowerCase();
+        const stored = (this._user?.plan || 'free').toLowerCase();
+        if (this.isAdmin?.() || this.isTester?.()) return stored;
+        if ((this._user?.subscription_status || '').toLowerCase() !== 'canceled') return stored;
+        const endIso = this._user?.subscription_period_end;
+        if (!endIso) return stored;
+        const ts = Date.parse(endIso);
+        if (!Number.isFinite(ts)) return stored;
+        // Subscription is canceled AND we're past the paid window — treat as free.
+        return ts < Date.now() ? 'free' : stored;
     }
 
     /**

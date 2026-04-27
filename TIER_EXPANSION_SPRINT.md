@@ -186,3 +186,62 @@ Day-3, and Day-4 items above plus the schema + Stripe + frontend changes
 needed to ship Educator and Institution as self-serve tiers and Enterprise
 as a lead-capture form. Items flagged "follow-up" or "out-of-band" are
 deliberately not touched.
+
+## Follow-up commit (post-initial-ship)
+
+Cleared the integration-review backlog from the original section above:
+
+- **`js/config.js` TIER.PRO is dead.** Added `planToTier(plan, role)`
+  that maps Advanced/Institution/Enterprise → `TIER.PRO`. `swpc-feed.js`
+  now auto-detects the tier from `localStorage.pp_auth` instead of
+  hard-coding `TIER.FREE`, and reschedules its timers on `auth-changed`
+  so a mid-session upgrade kicks in without a reload.
+- **Webhook cancel-on-deletion is silent.** Reworked
+  `customer.subscription.updated` to set `subscription_status='canceled'`
+  the moment Stripe sees `cancel_at_period_end=true` (instead of waiting
+  for `subscription.deleted` to fire at period end). On
+  `subscription.deleted`, if `current_period_end` is still in the future
+  (rare immediate-cancel via API), the webhook now keeps the plan and
+  marks the period_end so the user gets the value they paid for. `auth.js`'s
+  `getPlan()` adds a client-side guard that downgrades to `free` once
+  the period end actually passes — eliminating the need for a new
+  expire-canceled-subs cron.
+- **`getOrCreateCustomer` race.** Stripe `Idempotency-Key: pp-cust-<uid>`
+  on the customer-create call. Two concurrent checkouts (double-click)
+  return the same customer record from Stripe, so the Supabase PATCH is
+  naturally idempotent. Same key strategy applied to the Checkout
+  Session create call (salted with the UTC day so retries after a real
+  failure get a fresh session).
+- **CSRF / origin check on `/api/stripe/checkout`.** Origin allow-list
+  driven by `ALLOWED_ORIGINS` env var (defaults to parkerphysics.com +
+  parkerphysics.app). Non-allow-listed cross-origin POSTs get 403; the
+  CORS response also stops echoing `Access-Control-Allow-Origin: *`
+  and only reflects allow-listed origins.
+- **Admin invites flow couldn't actually grant paid tiers.** The old
+  `redeem_invite` RPC just incremented `used_count` — an Educator or
+  Advanced invite quietly landed the recipient on `free`. New
+  `apply_invite_plan(invite_id, p_email)` SECURITY DEFINER RPC
+  atomically redeems AND writes the comped plan onto `user_profiles`.
+  signup.html now calls this in place of `redeem_invite`, skips the
+  Stripe checkout redirect when an invite already comped a paid tier,
+  and refreshes the local profile so the dashboard renders the new
+  plan immediately.
+- **Self-elevation via direct UPDATE was wide open.** The "Users can
+  update own profile" RLS policy let any signed-in user
+  `UPDATE user_profiles SET plan='enterprise'` from the browser console.
+  Added a BEFORE UPDATE trigger (`guard_user_profile_self_update`) that
+  pins `plan`, `role`, `stripe_*`, `subscription_*`, `classroom_seats`,
+  `attribution_required`, `parent_account_id`, and `branding` for non-
+  admin self-updates. Trusted paths (apply_invite_plan, the Stripe
+  webhook via service-role) bypass via a session-local config flag.
+
+Migrations to run after this commit (idempotent — safe to re-run):
+
+1. `supabase-tier-expansion-migration.sql` (already required for tiers)
+2. `supabase-invites-apply-plan-migration.sql` (NEW — required for
+   admin invites to apply paid-tier plans + closes self-elevation hole)
+
+Admin invite UI is now functional end-to-end:
+"Admin → Invites → Invite by Email" → Resend → recipient clicks magic link
+→ signup.html → `apply_invite_plan` → user lands on the comped plan with
+no Stripe charge.
