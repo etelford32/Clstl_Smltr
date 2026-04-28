@@ -33,8 +33,14 @@
 // Supabase pg_cron (see supabase-weather-pgcron-migration.sql), so visitor
 // count never drives upstream load.
 const WEATHER_ENDPOINT = '/api/weather/grid';
-const GRID_W       = 36;                // longitude grid points (10° spacing)
-const GRID_H       = 18;                // latitude  grid points (10° spacing)
+// Default coarse-grid dimensions — used by the procedural fallback and by
+// _processRows() until the upstream response tells us a different resolution.
+// The cron writer (api/cron/refresh-weather-grid.js) currently ships 72×36
+// (5° spacing); older rows in the cache may still be 36×18 (10°). Frontend
+// detects the live resolution from response.grid (preferred) or falls back
+// to inferring from data.length (= 2·H², where H = sqrt(N/2)).
+const DEFAULT_GRID_W = 72;
+const DEFAULT_GRID_H = 36;
 export const TEX_W = 360;               // output texture width  (1°/pixel)
 export const TEX_H = 180;               // output texture height (1°/pixel)
 export const MAX_WIND_MS = 60;          // m/s — wind-speed normalisation ceiling
@@ -85,6 +91,11 @@ export class WeatherFeed {
         this._windBuf    = new Float32Array(TEX_W * TEX_H * 4);
         // cloudBuf: R=cloud_low, G=cloud_mid, B=cloud_high, A=precipitation_rate
         this._cloudBuf   = new Float32Array(TEX_W * TEX_H * 4);
+        // Live coarse-grid dims — overwritten on each fetch from the response
+        // metadata (or inferred from data.length). Keep defaults so the
+        // procedural fallback has something usable on the very first frame.
+        this._gridW = DEFAULT_GRID_W;
+        this._gridH = DEFAULT_GRID_H;
         this._meta       = {
             loaded:    false,
             // `source` is consumer-facing text; `demo` is a structured
@@ -99,17 +110,10 @@ export class WeatherFeed {
             presMin:   null, presMax:  null,
             windMax:   null,
             cloudMax:  null,
+            gridW:     DEFAULT_GRID_W,
+            gridH:     DEFAULT_GRID_H,
+            gridDeg:   180 / DEFAULT_GRID_H,
         };
-
-        // Build coarse grid lat/lon arrays (row-major: lat varies slowest)
-        this._gridLats = [];
-        this._gridLons = [];
-        for (let j = 0; j < GRID_H; j++) {
-            for (let i = 0; i < GRID_W; i++) {
-                this._gridLats.push(-85 + j * 10);   // -85 … +85
-                this._gridLons.push(-175 + i * 10);  // -175 … +175
-            }
-        }
 
         // Prefer the session-cached snapshot on first paint — avoids the
         // flash-of-procedural that used to show for ~1 frame before the
@@ -239,12 +243,49 @@ export class WeatherFeed {
         // or whatever new entry is added to the pg_cron fallback array).
         // _fetchAndProcess() reads this into _meta.source on success.
         this._meta.upstreamSource  = body.source ?? null;
+
+        // Grid resolution — prefer the response's explicit `grid` block
+        // (added in the 5°-grid bump). For older rows that ship only the
+        // legacy data array, infer from length: 2·H² = N → H = √(N/2),
+        // W = 2H, since every grid we ship is 2:1 aspect (lon:lat).
+        const N = Array.isArray(body.data) ? body.data.length : 0;
+        let gridW, gridH;
+        if (body.grid && Number.isFinite(body.grid.w) && Number.isFinite(body.grid.h)) {
+            gridW = body.grid.w;
+            gridH = body.grid.h;
+        } else if (N > 0) {
+            const inferredH = Math.round(Math.sqrt(N / 2));
+            // Sanity-check: 2·H² should equal N exactly. If it doesn't,
+            // keep the previous-known dims rather than corrupting the
+            // bilinear with a wrong shape.
+            if (2 * inferredH * inferredH === N) {
+                gridH = inferredH;
+                gridW = 2 * inferredH;
+            } else {
+                gridW = this._gridW;
+                gridH = this._gridH;
+                console.warn(`[WeatherFeed] payload length ${N} doesn't match a 2:1 grid; keeping ${gridW}×${gridH}`);
+            }
+        } else {
+            gridW = this._gridW;
+            gridH = this._gridH;
+        }
+        this._gridW = gridW;
+        this._gridH = gridH;
+        this._meta.gridW   = gridW;
+        this._meta.gridH   = gridH;
+        this._meta.gridDeg = 180 / gridH;
         return body.data;
     }
 
     // ── Parse location array → coarse grid → interpolated textures ───────────
+    // Reads this._gridW × this._gridH (set by _fetchGrid from the response's
+    // grid metadata or inferred from data.length). The bilinear/blur stack
+    // below scales seamlessly to any grid that fits the 2:1 aspect convention.
     _processRows(rows) {
-        const N    = GRID_W * GRID_H;
+        const gridW = this._gridW;
+        const gridH = this._gridH;
+        const N    = gridW * gridH;
         const DEG  = Math.PI / 180;
         const temp = new Float32Array(N).fill(NaN);
         const hum  = new Float32Array(N).fill(NaN);
@@ -271,7 +312,7 @@ export class WeatherFeed {
         });
 
         // Fill any NaN gaps (missing ocean cells, polar regions, etc.)
-        [temp, hum, pres, wspd, wdir].forEach(a => this._fillNaN(a, GRID_W, GRID_H));
+        [temp, hum, pres, wspd, wdir].forEach(a => this._fillNaN(a, gridW, gridH));
 
         // Decompose wind speed+direction into U/V on the coarse grid BEFORE
         // interpolation.  Bilinear interpolation of angles is wrong because
@@ -348,12 +389,13 @@ export class WeatherFeed {
     // Wind U/V are now pre-decomposed on the coarse grid and interpolated
     // as Cartesian components (no angle-wrapping artifacts).
     _interpolateToTextures(rawTemp, rawHum, rawPres, rawWSpd, rawWindU, rawWindV) {
-        const temp  = this._bilinear(rawTemp,  GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const hum   = this._bilinear(rawHum,   GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const pres  = this._bilinear(rawPres,  GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const wspd  = this._bilinear(rawWSpd,  GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const windU = this._bilinear(rawWindU, GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const windV = this._bilinear(rawWindV, GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const gw = this._gridW, gh = this._gridH;
+        const temp  = this._bilinear(rawTemp,  gw, gh, TEX_W, TEX_H, true);
+        const hum   = this._bilinear(rawHum,   gw, gh, TEX_W, TEX_H, true);
+        const pres  = this._bilinear(rawPres,  gw, gh, TEX_W, TEX_H, true);
+        const wspd  = this._bilinear(rawWSpd,  gw, gh, TEX_W, TEX_H, true);
+        const windU = this._bilinear(rawWindU, gw, gh, TEX_W, TEX_H, true);
+        const windV = this._bilinear(rawWindV, gw, gh, TEX_W, TEX_H, true);
 
         for (let k = 0; k < TEX_W * TEX_H; k++) {
             const t4 = k * 4;
@@ -374,21 +416,27 @@ export class WeatherFeed {
 
     // ── Pack cloud-layer fractions + precipitation into cloudBuf ─────────────
     // After bilinear interpolation, apply a box-blur smoothing pass to reduce
-    // visible 10° grid-cell blockiness in the cloud fraction data.
+    // visible grid-cell blockiness in the cloud fraction data.
+    //
+    // Blur radius is scaled to the grid pitch: it should span roughly one
+    // input cell so that the blockiness from upsampling is averaged away
+    // without erasing real coverage features. At 10° pitch (legacy), one
+    // cell ≈ 11 px on the 360 wide texture → R=5. At 5° pitch (current),
+    // one cell ≈ 5 px → R=3. Two passes ≈ Gaussian σ ≈ R·√2.
     _interpolateCloudTexture(rawLow, rawMid, rawHigh, rawPrecip) {
-        const low    = this._bilinear(rawLow,    GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const mid    = this._bilinear(rawMid,    GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const high   = this._bilinear(rawHigh,   GRID_W, GRID_H, TEX_W, TEX_H, true);
-        const precip = this._bilinear(rawPrecip, GRID_W, GRID_H, TEX_W, TEX_H, true);
+        const gw = this._gridW, gh = this._gridH;
+        const low    = this._bilinear(rawLow,    gw, gh, TEX_W, TEX_H, true);
+        const mid    = this._bilinear(rawMid,    gw, gh, TEX_W, TEX_H, true);
+        const high   = this._bilinear(rawHigh,   gw, gh, TEX_W, TEX_H, true);
+        const precip = this._bilinear(rawPrecip, gw, gh, TEX_W, TEX_H, true);
 
-        // Smooth cloud fractions to soften grid-cell boundaries.
-        // Two passes of radius-5 (11×11) box blur ≈ Gaussian σ≈8 px,
-        // which spans roughly two 10°-grid cells and fully eliminates
-        // the visible block edges from the coarse input grid.
-        const sLow    = this._boxBlur(this._boxBlur(low,    TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
-        const sMid    = this._boxBlur(this._boxBlur(mid,    TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
-        const sHigh   = this._boxBlur(this._boxBlur(high,   TEX_W, TEX_H, 5), TEX_W, TEX_H, 5);
-        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, 4);
+        const cellPx  = Math.max(1, Math.round(TEX_W / gw));
+        const blurR   = Math.max(2, Math.round(cellPx * 0.55));   // ~half a cell
+        const precipR = Math.max(2, Math.round(cellPx * 0.45));
+        const sLow    = this._boxBlur(this._boxBlur(low,  TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sMid    = this._boxBlur(this._boxBlur(mid,  TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sHigh   = this._boxBlur(this._boxBlur(high, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, precipR);
 
         for (let k = 0; k < TEX_W * TEX_H; k++) {
             const t4 = k * 4;

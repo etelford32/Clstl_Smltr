@@ -22,11 +22,17 @@
  *
  * Response shape (consumed by js/weather-feed.js):
  *   {
- *     source:      "open-meteo",
+ *     source:      "open-meteo:72x36",          // optional :WxH grid suffix
  *     fetched_at:  "2025-…Z",
  *     age_seconds: 1234,
- *     data:        [ { current: { temperature_2m, … } }, … ]   // 648 items
+ *     grid:        { w: 72, h: 36, deg: 5 },    // null for legacy rows
+ *     data:        [ { current: { temperature_2m, … } }, … ]   // 2592 items
  *   }
+ *
+ * The `grid` object is parsed out of the `source` column's `:WxH` suffix the
+ * cron writer attaches (see api/cron/refresh-weather-grid.js). For older rows
+ * written by the previous cron build the suffix is absent — frontend infers
+ * dims from data.length in that case.
  *
  * ── Env vars ────────────────────────────────────────────────────────
  *   SUPABASE_URL
@@ -105,10 +111,25 @@ export default async function handler() {
         ? Math.max(0, Math.floor((Date.now() - fetchedMs) / 1000))
         : null;
 
+    // Source format: "<provider>" or "<provider>:<W>x<H>" — the grid suffix
+    // the cron writer adds when it knows the resolution. Old rows lack the
+    // suffix; clients fall back to inferring W,H from data.length.
+    const rawSource = row.source ?? 'open-meteo';
+    let grid = null;
+    const m = /:(\d+)x(\d+)$/.exec(rawSource);
+    if (m) {
+        const w = parseInt(m[1], 10);
+        const h = parseInt(m[2], 10);
+        if (Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+            grid = { w, h, deg: 180 / h };
+        }
+    }
+
     return jsonOk({
-        source:      row.source ?? 'open-meteo',
+        source:      rawSource,
         fetched_at:  row.fetched_at,
         age_seconds: ageSec,
+        grid,
         data:        row.payload,
     }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
 }
