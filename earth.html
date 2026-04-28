@@ -899,6 +899,7 @@ nav {
             <div class="lyr-section-hdr"><span>SURFACE &amp; ATMOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label></label>
+                <label class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
@@ -1219,6 +1220,9 @@ nav {
         <div class="wx-row"><span class="wx-k">Source</span>   <span class="wx-v" id="wx-src">procedural</span></div>
         <div class="wx-row"><span class="wx-k">Updated</span>  <span class="wx-v" id="wx-upd">—</span></div>
         <div class="wx-row"><span class="wx-k">Data age</span> <span class="wx-v" id="wx-age">—</span></div>
+        <div class="wx-row" title="Coarse-grid resolution from the cron pull. Lower number = finer grid (5° is current; 10° was the legacy)."><span class="wx-k">Grid</span>     <span class="wx-v" id="wx-grid">—</span></div>
+        <div class="wx-row" title="Live satellite imagery layer feeding the cloud mosaic. Geostationary mosaic = ~10-min cadence, no orbiter swath gaps in the tropics."><span class="wx-k">Satellite</span><span class="wx-v" id="wx-sat">—</span></div>
+        <div class="wx-row" id="wx-research-row" style="display:none;color:#6cf;font-weight:600"><span class="wx-k">Mode</span>     <span class="wx-v">Research (measured-only)</span></div>
         <hr class="ir-sep">
         <div class="wx-row"><span class="wx-k">T° min</span>   <span class="wx-v" id="wx-tmin">—</span></div>
         <div class="wx-row"><span class="wx-k">T° max</span>   <span class="wx-v" id="wx-tmax">—</span></div>
@@ -1883,26 +1887,12 @@ cloudU.u_cloud_layers.value.wrapT     = THREE.ClampToEdgeWrapping;
 cloudU.u_cloud_layers.value.flipY = true;
 cloudU.u_cloud_layers.value.needsUpdate = true;
 
-// ── Live cloud imagery (NASA GIBS MODIS) ─────────────────────────────────
-// Loaded asynchronously; the procedural cloud shader renders immediately
-// and is blended with the satellite composite when (and if) it arrives.
-// The imagery is a daily MODIS true-colour snapshot — clouds are bright,
-// ocean/land dark, which the shader reads as a coverage brightness proxy.
-(async () => {
-    try {
-        const { fetchLatestCloudImagery } = await import('./js/cloud-imagery.js');
-        const hit = await fetchLatestCloudImagery(THREE, { width: 2048 });
-        if (hit) {
-            cloudU.u_satellite.value   = hit.texture;
-            cloudU.u_satellite_on.value = 1.0;
-            console.info(`[CloudImagery] Loaded MODIS ${hit.date}`);
-        } else {
-            console.info('[CloudImagery] Imagery unavailable — procedural clouds only');
-        }
-    } catch (e) {
-        console.warn('[CloudImagery] Failed:', e.message);
-    }
-})();
+// Live cloud imagery is delivered by SatelliteFeed below — it polls a
+// GOES-East / GOES-West / Himawari / Meteosat geostationary mosaic with
+// MODIS polar fill every 10 minutes (see js/satellite-feed.js → cloud-imagery.js)
+// and dispatches `satellite-update` events that the provenance overlay
+// listens to. Procedural clouds render immediately so the globe never goes
+// blank waiting for the first fetch.
 
 // ═══════════════════════════════════════════════════════════════
 //  LAT / LON GRID
@@ -2252,6 +2242,27 @@ window.addEventListener('swpc-update', e => {
 document.getElementById('lyr-clouds').addEventListener('change', e => {
     cloudMesh.visible = e.target.checked;
 });
+// Research mode: disable procedural fill, show measured cloud cover only
+// with hatched no-data regions. Persists across reloads via URL param so
+// researchers can deep-link a measured-only view of the globe.
+{
+    const researchToggle = document.getElementById('lyr-research-mode');
+    function applyResearchMode(on) {
+        cloudU.u_research_mode.value = on ? 1.0 : 0.0;
+        document.body.classList.toggle('research-mode', on);
+        // The provenance panel highlights itself in research mode so the
+        // user can see at a glance which feed they're looking at.
+        const wxPanel = document.getElementById('wx-panel');
+        if (wxPanel) wxPanel.classList.toggle('research', on);
+    }
+    // Honour ?research=1 on first load.
+    const rParam = new URLSearchParams(location.search).get('research');
+    if (rParam === '1' || rParam === 'true') {
+        researchToggle.checked = true;
+        applyResearchMode(true);
+    }
+    researchToggle.addEventListener('change', e => applyResearchMode(e.target.checked));
+}
 document.getElementById('lyr-atm').addEventListener('change', e => {
     atmMat.visible = e.target.checked;
 });
@@ -3383,6 +3394,18 @@ document.addEventListener('weather-update', e => {
     document.getElementById('wx-upd').textContent  = meta.fetchTime
         ? meta.fetchTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : '—';
 
+    // Grid resolution (e.g. "72×36 · 5°"). meta.gridW/H/Deg arrive on every
+    // weather-update from weather-feed.js — see the grid-metadata block in
+    // _fetchGrid(). Falls back to em-dash when the response has no grid info
+    // (fresh boot before the first fetch lands).
+    if (meta.gridW && meta.gridH) {
+        const deg = (meta.gridDeg ?? 180 / meta.gridH);
+        const degStr = Number.isInteger(deg) ? `${deg}°` : `${deg.toFixed(1)}°`;
+        document.getElementById('wx-grid').textContent = `${meta.gridW}×${meta.gridH} · ${degStr}`;
+    } else {
+        document.getElementById('wx-grid').textContent = '—';
+    }
+
     // Data age — how old the cached row from Supabase is, NOT how long ago
     // the browser fetched. Surfaces pg_cron failures to visitors: fresh ≤ 90
     // min (default colour), warn 90–180 min (amber), stale > 180 min (red
@@ -3427,6 +3450,38 @@ document.addEventListener('weather-status', e => {
         document.getElementById('wx-status-dot').className = 'fetch';
     }
 });
+
+// Cloud-imagery provenance — driven by satellite-update events from
+// SatelliteFeed. Composite mode shows the headline source; the full layer
+// list lives in the title attribute so research-mode users can audit which
+// satellite contributed which region of the globe.
+function renderSatelliteProvenance(detail) {
+    const el = document.getElementById('wx-sat');
+    if (!el) return;
+    if (!detail) {
+        el.textContent = 'unavailable';
+        el.removeAttribute('title');
+        return;
+    }
+    const dateStr = detail.modisDate
+        ?? (detail.time instanceof Date ? detail.time.toISOString().slice(0, 10) : '—');
+    const regions = Array.isArray(detail.regions) ? detail.regions : [];
+    const headline = detail.mosaic
+        ? `mosaic · ${regions.join('+')} · ${dateStr}`
+        : `${detail.source ?? 'satellite'} · ${dateStr}`;
+    el.textContent = headline;
+    el.title       = Array.isArray(detail.layers) ? detail.layers.join('\n') : '';
+}
+window.addEventListener('satellite-update', e => renderSatelliteProvenance(e.detail));
+
+// Toggle the research-mode banner row in the wx-panel when the checkbox flips.
+{
+    const researchToggle = document.getElementById('lyr-research-mode');
+    const banner         = document.getElementById('wx-research-row');
+    function syncBanner() { banner.style.display = researchToggle.checked ? '' : 'none'; }
+    researchToggle.addEventListener('change', syncBanner);
+    syncBanner();
+}
 
 document.getElementById('wx-refresh').addEventListener('click', () => {
     document.getElementById('wx-status-dot').className = 'fetch';

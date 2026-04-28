@@ -54,12 +54,31 @@ const OPEN_METEO_BASE = 'https://api.open-meteo.com/v1/forecast';
 const METNO_BASE       = 'https://api.met.no/weatherapi/locationforecast/2.0/compact';
 const METNO_USER_AGENT = process.env.METNO_USER_AGENT
     || 'ParkerPhysics/1.0 (+https://parkersphysics.com; ops@parkersphysics.com)';
-const METNO_CONCURRENCY = 4;
+// 8 workers × ~2 req/s/worker ≈ 16 req/s — under MET Norway's 20 req/s ToS
+// cap. The 4-wide setting was tuned for a 648-point grid; bumping to 8
+// keeps the worst-case fallback time bounded as we densify the grid.
+const METNO_CONCURRENCY = 8;
 
-const GRID_W     = 36;
-const GRID_H     = 18;
-const GRID_N     = GRID_W * GRID_H;   // 648
-const CHUNK_SIZE = 162;                // GRID_N / 4
+// Grid resolution. Bumped from 10° (36×18=648) to 5° (72×36=2592) to give
+// the cloud / temp / pressure textures four pixels where they used to have
+// one. The downstream consumer (js/weather-feed.js) infers W and H from
+// payload length (sqrt(N/2)·2), so a denser cron row drops in without a
+// coordinated frontend deploy. To go denser later (e.g. 2.5° = 144×72),
+// bump GRID_W/H here and adjust CHUNK_SIZE / CHUNK_CONCURRENCY only.
+const GRID_W           = 72;
+const GRID_H           = 36;
+const GRID_N           = GRID_W * GRID_H;   // 2592
+const CHUNK_SIZE       = 162;                // 16 chunks @ 162 each
+// Run chunks in parallel so the 4× location bump doesn't 4× the wallclock.
+// Open-Meteo absorbs ~20 concurrent requests per source IP before throttling;
+// 4-wide stays well inside that and matches the MET Norway worker count.
+const CHUNK_CONCURRENCY = 4;
+const GRID_DEG          = 180 / GRID_H;       // 5° latitude step (also longitude)
+// Centered-cell origin: half a step inside each pole so cells are symmetric
+// about lat 0 (the equator falls on a cell edge, not a centre, which keeps
+// equatorial averages honest).
+const LAT_ORIGIN        = -90 + GRID_DEG / 2;  // -87.5 for 5° grid
+const LON_ORIGIN        = -180 + GRID_DEG / 2; // -177.5 for 5° grid
 
 // Open-Meteo `current=` variables. `cape` is hourly-only upstream — keeping
 // it here returned an 86-byte error body and masqueraded as a timeout.
@@ -102,8 +121,8 @@ function chunkCoords(start, end) {
     for (let idx = start; idx <= end; idx++) {
         const j = Math.floor(idx / GRID_W);
         const i = idx % GRID_W;
-        lats.push(-85  + j * 10);
-        lons.push(-175 + i * 10);
+        lats.push(LAT_ORIGIN + j * GRID_DEG);
+        lons.push(LON_ORIGIN + i * GRID_DEG);
     }
     return { lat: lats.join(','), lon: lons.join(',') };
 }
@@ -120,65 +139,90 @@ function chunkUrl(start, end, modelQuery) {
 }
 
 /**
- * One attempt: fetch all chunks sequentially, concatenate in order.
- * Returns { merged, failureReason }. `merged` is an array of exactly
- * GRID_N items on success, null on any failure.
+ * Fetch one chunk and parse it into a per-location array. Returns either
+ * { items } on success or { failureReason } on any failure. Used by the
+ * concurrent worker pool below.
+ */
+async function fetchOneChunk(src, modelQuery, start, end) {
+    const url = chunkUrl(start, end, modelQuery);
+    let body;
+    try {
+        const res = await fetchWithTimeout(url, {
+            timeoutMs: UPSTREAM_TIMEOUT_MS,
+            headers:   { Accept: 'application/json' },
+        });
+        body = await res.text();
+        if (!res.ok) {
+            return {
+                failureReason: `${src} chunk ${start} HTTP ${res.status}: ${body.slice(0, 300)}`,
+            };
+        }
+    } catch (e) {
+        return { failureReason: `${src} chunk ${start} fetch: ${e.message}` };
+    }
+    if (!body || body.length === 0) {
+        return { failureReason: `${src} chunk ${start} empty response` };
+    }
+
+    let parsed;
+    try {
+        parsed = JSON.parse(body);
+    } catch (e) {
+        return {
+            failureReason: `${src} chunk ${start} parse: ${e.message} | body[0..300]=${body.slice(0, 300)}`,
+        };
+    }
+    // Open-Meteo error envelope: {"error":true,"reason":"..."}
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.error === true) {
+        return {
+            failureReason: `${src} chunk ${start} upstream error: ${parsed.reason ?? 'unknown'}`,
+        };
+    }
+    const items = Array.isArray(parsed) ? parsed : [parsed];
+    if (items.length === 0) {
+        return { failureReason: `${src} chunk ${start} zero-length array` };
+    }
+    return { items };
+}
+
+/**
+ * One attempt: fetch all chunks with bounded concurrency, slot results back
+ * into row-major order. Bails on the first failure (returns null) so the
+ * caller can move down the ATTEMPTS list to the next source.
+ *
+ * Concurrency keeps wallclock close to single-chunk latency even as GRID_N
+ * grows — e.g. 16 chunks at 4-wide ≈ 4 batches × ~2-3 s each.
  */
 async function fetchAllChunks(src, modelQuery) {
-    const merged = [];
+    const chunkRanges = [];
     for (let start = 0; start < GRID_N; start += CHUNK_SIZE) {
         const end = Math.min(start + CHUNK_SIZE - 1, GRID_N - 1);
-        const url = chunkUrl(start, end, modelQuery);
-
-        let body, parsed;
-        try {
-            const res = await fetchWithTimeout(url, {
-                timeoutMs: UPSTREAM_TIMEOUT_MS,
-                headers:   { Accept: 'application/json' },
-            });
-            body = await res.text();
-            if (!res.ok) {
-                // Surface the body snippet so rate-limit / WAF pages are
-                // distinguishable from real JSON errors.
-                return {
-                    merged: null,
-                    failureReason: `${src} chunk ${start} HTTP ${res.status}: ${body.slice(0, 300)}`,
-                };
-            }
-        } catch (e) {
-            return {
-                merged: null,
-                failureReason: `${src} chunk ${start} fetch: ${e.message}`,
-            };
-        }
-
-        if (!body || body.length === 0) {
-            return { merged: null, failureReason: `${src} chunk ${start} empty response` };
-        }
-
-        try {
-            parsed = JSON.parse(body);
-        } catch (e) {
-            return {
-                merged: null,
-                failureReason: `${src} chunk ${start} parse: ${e.message} | body[0..300]=${body.slice(0, 300)}`,
-            };
-        }
-
-        // Open-Meteo error envelope: {"error":true,"reason":"..."}
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.error === true) {
-            return {
-                merged: null,
-                failureReason: `${src} chunk ${start} upstream error: ${parsed.reason ?? 'unknown'}`,
-            };
-        }
-
-        const items = Array.isArray(parsed) ? parsed : [parsed];
-        if (items.length === 0) {
-            return { merged: null, failureReason: `${src} chunk ${start} zero-length array` };
-        }
-        merged.push(...items);
+        chunkRanges.push({ start, end });
     }
+    const results  = new Array(chunkRanges.length).fill(null);
+    let cursor     = 0;
+    let earlyFail  = null;
+
+    async function worker() {
+        while (earlyFail === null) {
+            const idx = cursor++;
+            if (idx >= chunkRanges.length) return;
+            const { start, end } = chunkRanges[idx];
+            const r = await fetchOneChunk(src, modelQuery, start, end);
+            if (r.failureReason) {
+                if (earlyFail === null) earlyFail = r.failureReason;
+                return;
+            }
+            results[idx] = r.items;
+        }
+    }
+    await Promise.all(Array.from({ length: CHUNK_CONCURRENCY }, worker));
+
+    if (earlyFail) {
+        return { merged: null, failureReason: earlyFail };
+    }
+    const merged = [];
+    for (const items of results) merged.push(...items);
 
     if (merged.length !== GRID_N) {
         return {
@@ -199,7 +243,7 @@ async function fetchAllChunks(src, modelQuery) {
 function gridLatLon(idx) {
     const j = Math.floor(idx / GRID_W);
     const i = idx % GRID_W;
-    return { lat: -85 + j * 10, lon: -175 + i * 10 };
+    return { lat: LAT_ORIGIN + j * GRID_DEG, lon: LON_ORIGIN + i * GRID_DEG };
 }
 
 function translateMetnoPoint(metno) {
@@ -418,9 +462,15 @@ export default async function handler(request) {
         });
     }
 
+    // Tag the source with the grid dimensions so the frontend (and the
+    // admin-side pipeline_heartbeat panel) can show "open-meteo:72x36"
+    // verbatim in provenance overlays. The reader keeps `source` opaque,
+    // so the frontend regex-parses `:WxH` to surface grid resolution.
+    const sourceWithGrid = `${winSource}:${GRID_W}x${GRID_H}`;
+
     let insertedId;
     try {
-        insertedId = await supabaseInsertGridRow(winSource, merged);
+        insertedId = await supabaseInsertGridRow(sourceWithGrid, merged);
     } catch (e) {
         await supabaseCallRpc('record_pipeline_failure', {
             p_name:   'weather_grid',
@@ -436,13 +486,14 @@ export default async function handler(request) {
     await supabaseCallRpc('trim_weather_grid_cache', {});
     await supabaseCallRpc('record_pipeline_success', {
         p_name:   'weather_grid',
-        p_source: winSource,
+        p_source: sourceWithGrid,
     });
 
     return new Response(JSON.stringify({
         ok:        true,
         id:        insertedId,
-        source:    winSource,
+        source:    sourceWithGrid,
         locations: merged.length,
+        grid:      { w: GRID_W, h: GRID_H, deg: GRID_DEG },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
