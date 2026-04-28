@@ -25,12 +25,20 @@
  * client URLs → high hit rate.
  *
  * ── Query params ────────────────────────────────────────────────────────────
- *   ?type=point|launch|marine   Required.
- *     point   — 3-day current + daily, for dashboard/trip cards
- *     launch  — 7-day current + hourly + daily, with pressure-level winds,
- *               convective indices, cloud-layer decomposition, freezing
- *               level. Feeds the launch-planner scorer.
- *     marine  — 5-day wave/swell/ocean-current. Recovery-zone scoring.
+ *   ?type=point|launch|marine|hourly|archive|ensemble   Required.
+ *     point    — 3-day current + daily, for dashboard/trip cards
+ *     launch   — 7-day current + hourly + daily, with pressure-level winds,
+ *                convective indices, cloud-layer decomposition, freezing
+ *                level. Feeds the launch-planner scorer.
+ *     hourly   — 24-48h surface hourly strip, lighter than `launch`.
+ *     marine   — 5-day wave/swell/ocean-current. Recovery-zone scoring.
+ *     archive  — N days of historical daily highs/lows for the local
+ *                ridge-regression model in temp-forecast.js.
+ *     ensemble — multi-model NWP fan-out (GFS + ECMWF + ICON + GEM) plus
+ *                2 past_days, feeding the rust-forecast WASM blender which
+ *                discovers per-location skill from the recent obs window.
+ *                Response shape carries per-model suffixed arrays
+ *                (e.g. `temperature_2m_gfs_seamless`).
  *   ?lat=<num>, ?lon=<num>      Required. Quantized to 3dp on the way in
  *                               so near-duplicate coords share cache keys.
  *   ?days=<int>                 Optional. Forecast horizon. Clamped per type.
@@ -49,6 +57,29 @@ export const config = { runtime: 'edge' };
 // else lives on the main forecast API.
 const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_MARINE   = 'https://marine-api.open-meteo.com/v1/marine';
+
+// Multi-model ensemble — feeds the rust-forecast WASM blender. Each entry
+// here becomes one independent NWP member (raw + bias-corrected) inside
+// the softmax-weighted ensemble; the blender auto-discovers per-location
+// skill from the recent obs window, so adding/removing a model here is the
+// only knob needed to expand the ensemble. All four are free-tier with
+// no API key required.
+//
+//   gfs_seamless    NCEP / NOAA — global, US-tuned
+//   ecmwf_ifs025    ECMWF       — global, generally best at 3-7 day skill
+//   icon_seamless   DWD         — global + Europe high-res
+//   gem_seamless    ECCC        — global, strong over North America
+//
+// Open-Meteo returns the listed models' values as variable arrays suffixed
+// with the model id (e.g. `temperature_2m_gfs_seamless`). The browser
+// adapter explodes those into per-provider HourSample lists for the WASM
+// `nwp: Vec<NwpProvider>` payload. Order here is preserved verbatim.
+const ENSEMBLE_MODELS = Object.freeze([
+    'gfs_seamless',
+    'ecmwf_ifs025',
+    'icon_seamless',
+    'gem_seamless',
+]);
 
 // MET Norway Locationforecast — Edge-friendly JSON fallback for the `point`
 // type when Open-Meteo is unavailable or rate-limited. We translate its
@@ -144,6 +175,19 @@ const TYPE_SPECS = Object.freeze({
         build:       buildArchiveParams,
         cacheTier:   'archive',
     },
+    // Multi-model NWP ensemble — feeds the rust-forecast WASM blender.
+    // Same surface variable set as `point` plus `past_days=2` so the
+    // returned hourly arrays cover the recent obs window the blender
+    // needs to score each model's per-location skill via leave-one-out
+    // RMSE. Response carries per-model suffixed arrays (e.g.
+    // `temperature_2m_gfs_seamless`); see ENSEMBLE_MODELS above.
+    ensemble: {
+        defaultDays: 3,
+        maxDays:     7,
+        upstream:    OPEN_METEO_FORECAST,
+        build:       buildEnsembleParams,
+        cacheTier:   'forecast',
+    },
 });
 
 // ── Parameter-set builders ──────────────────────────────────────────────────
@@ -203,6 +247,46 @@ function buildHourlyParams(lat, lon, days) {
             'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
             'relative_humidity_2m', 'uv_index',
         ].join(','),
+        temperature_unit: 'fahrenheit',
+        wind_speed_unit:  'mph',
+        timezone:         'auto',
+        forecast_days:    String(days),
+    });
+}
+
+/**
+ * Multi-model ensemble — same surface vars as `point` (so the response is
+ * a drop-in superset for any current consumer that wants only one model's
+ * fields), plus `models=<comma-list>` to fan out across NWP providers, and
+ * `past_days=2` so the returned hourly arrays cover the score window the
+ * WASM blender needs to compute leave-one-out RMSE per provider.
+ *
+ * The response is large-ish (≈ 4 × the per-model size) but still well under
+ * a megabyte for 3 forecast days × 4 models, and it gets cached at the
+ * edge for 15 min — at scale this is cheaper than 4 separate calls because
+ * Open-Meteo can short-circuit shared geometry / grid lookups internally.
+ */
+function buildEnsembleParams(lat, lon, days) {
+    return new URLSearchParams({
+        latitude:  lat.toFixed(COORD_DECIMALS),
+        longitude: lon.toFixed(COORD_DECIMALS),
+        models:    ENSEMBLE_MODELS.join(','),
+        // Surface obs the blender needs. Match the `point` set so a single
+        // ensemble fetch can replace a `point` fetch for power users who
+        // want both raw + ensemble views without paying the cache cost
+        // twice.
+        hourly: [
+            'temperature_2m', 'apparent_temperature',
+            'relative_humidity_2m', 'dew_point_2m',
+            'pressure_msl',
+            'wind_speed_10m', 'wind_gusts_10m', 'wind_direction_10m',
+            'precipitation', 'precipitation_probability',
+            'cloud_cover',
+        ].join(','),
+        // 2 days of past hourly samples line up with the default 24-hour
+        // score window with comfortable headroom for the AR1 / diurnal
+        // members that need >48 h of obs history to fit cleanly.
+        past_days:        '2',
         temperature_unit: 'fahrenheit',
         wind_speed_unit:  'mph',
         timezone:         'auto',
