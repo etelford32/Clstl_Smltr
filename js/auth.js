@@ -52,11 +52,45 @@ class AuthManager {
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
-                this._supabase.auth.onAuthStateChange((event, session) => {
-                    if (session?.user) {
-                        this._user = this._mapSupabaseUser(session.user);
-                    } else {
+                // CRITICAL: _mapSupabaseUser builds the user from user_metadata,
+                // which doesn't carry role/plan/seat info — that lives in
+                // user_profiles and is set by fetchProfile(). Wiping the
+                // existing user object on every auth event silently demotes
+                // admins on token refresh, breaking the admin gate. So:
+                //   - On SIGNED_OUT we clear _user.
+                //   - On any other event with a session, we MERGE the new
+                //     auth payload onto the existing _user (preserving role/
+                //     plan/etc.) and refresh from user_profiles after a
+                //     token refresh / sign-in so the server stays the source
+                //     of truth.
+                this._supabase.auth.onAuthStateChange(async (event, session) => {
+                    if (event === 'SIGNED_OUT' || !session?.user) {
                         this._user = null;
+                    } else {
+                        const supaUser = session.user;
+                        const mapped = this._mapSupabaseUser(supaUser);
+                        // Preserve fields that come from user_profiles (role,
+                        // server-side plan, seat info) across token refreshes.
+                        const preserved = this._user ? {
+                            role:                       this._user.role,
+                            plan:                       this._user.plan,
+                            display_name:               this._user.display_name,
+                            subscription_status:        this._user.subscription_status,
+                            subscription_period_end:    this._user.subscription_period_end,
+                            classroom_seats:            this._user.classroom_seats,
+                            seats_used:                 this._user.seats_used,
+                            attribution_required:       this._user.attribution_required,
+                            branding:                   this._user.branding,
+                            parent_account_id:          this._user.parent_account_id,
+                            effective_plan:             this._user.effective_plan,
+                            alerts:                     this._user.alerts,
+                        } : {};
+                        this._user = { ...mapped, ...preserved };
+                        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+                            // Re-pull server state so role/plan are current.
+                            // Fire-and-forget — don't block the auth event.
+                            this.fetchProfile().catch(() => {});
+                        }
                     }
                     window.dispatchEvent(new CustomEvent('auth-changed', {
                         detail: { event, user: this._user }
@@ -465,30 +499,54 @@ class AuthManager {
      */
     async verifyAdminServerSide() {
         if (!this._supabase) {
-            // No Supabase — fall back to local check
             return { verified: this.isAdmin(), role: this.getRole(), error: 'Supabase not configured' };
         }
         try {
-            const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
-            if (authErr || !user) return { verified: false, error: authErr?.message || 'No session' };
+            // Try getUser() first — it cross-checks the JWT against the
+            // Supabase Auth server (so a tampered local token gets rejected).
+            // If that fails (auth-session-missing on cold load, network hiccup,
+            // refresh window) fall back to getSession().user since the JWT
+            // has already been validated once during _init/onAuthStateChange.
+            let userId = null;
+            let authErrMsg = null;
+            try {
+                const { data: { user }, error: authErr } = await this._supabase.auth.getUser();
+                if (authErr) authErrMsg = authErr.message;
+                userId = user?.id || null;
+            } catch (e) { authErrMsg = e.message; }
+
+            if (!userId) {
+                const { data: { session } } = await this._supabase.auth.getSession();
+                userId = session?.user?.id || null;
+                if (!userId) {
+                    return { verified: false, error: authErrMsg || 'No session' };
+                }
+            }
 
             const { data, error: dbErr } = await this._supabase
                 .from('user_profiles')
                 .select('role')
-                .eq('id', user.id)
+                .eq('id', userId)
                 .single();
             if (dbErr) {
-                // If role column doesn't exist, the error will mention "role".
-                // Provide a helpful message so the admin knows to run the migration.
                 const msg = dbErr.message || '';
-                const hint = msg.includes('role') || msg.includes('column')
-                    ? 'Role column missing — run supabase-admin.sql in Supabase SQL Editor'
-                    : msg;
-                return { verified: false, error: hint };
+                // Most common failure modes — surface the recovery action,
+                // not just the raw error.
+                let hint;
+                if (msg.includes('role') || msg.toLowerCase().includes('column')) {
+                    hint = 'Role column missing — run supabase-admin.sql in Supabase SQL Editor';
+                } else if (msg.toLowerCase().includes('no rows')
+                        || msg.toLowerCase().includes('multiple') ) {
+                    hint = 'No user_profiles row — sign out, sign back in, then run the supabase-make-owner-superadmin.sql migration';
+                } else if (dbErr.code === '42501' || msg.toLowerCase().includes('permission')) {
+                    hint = `RLS denied SELECT on user_profiles — verify the "Users see own profile" policy is in place`;
+                } else {
+                    hint = msg;
+                }
+                return { verified: false, error: hint, dbCode: dbErr.code };
             }
 
             const role = data?.role || 'user';
-            // Update local state to match server
             if (this._user) this._user.role = role;
             this._persistToStorage();
 

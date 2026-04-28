@@ -1241,6 +1241,25 @@ if (!_auth || !_auth.signedIn) {
       return;
     }
 
+    // Class student? Show a "you're in a class" card without the upgrade
+    // pitch — their effective plan is the parent's, billing is the parent's.
+    if (liveUser.parent_account_id) {
+      const parentPlan = (liveUser.effective_plan || 'free').toLowerCase();
+      const TIER_COLOR = {
+        basic:       '#4488ff',
+        educator:    '#9ad36f',
+        advanced:    '#a080ff',
+        institution: '#ff8cc8',
+        enterprise:  '#ffd700',
+      };
+      subStatus.textContent = `Class member · ${parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1)}`;
+      subStatus.style.color = TIER_COLOR[parentPlan] || '#9ad36f';
+      subDetail.textContent = 'Access provided by your instructor — no card on file.';
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display  = 'none';
+      return;
+    }
+
     const PAID = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
     if (PAID.has(p)) {
       // Per-tier accent color matches the .plan-* CSS above.
