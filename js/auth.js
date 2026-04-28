@@ -185,7 +185,7 @@ class AuthManager {
         try {
             const { data, error } = await this._supabase
                 .from('user_profiles')
-                .select('role, plan, display_name, subscription_status, subscription_period_end, classroom_seats, seats_used, attribution_required, branding, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
+                .select('role, plan, display_name, subscription_status, subscription_period_end, classroom_seats, seats_used, attribution_required, branding, parent_account_id, location_lat, location_lon, location_city, notify_aurora, notify_storm, notify_flare, notify_cme, notify_temperature, notify_sat_pass, notify_conjunction, notify_radio_blackout, notify_gps, notify_power_grid, notify_collision, notify_recurrence, notify_iono_disturbance, aurora_kp_threshold, storm_g_threshold, flare_class_threshold, conjunction_threshold_km, temp_high_f, temp_low_f, radio_r_threshold, gnss_risk_threshold, power_grid_g_threshold, email_alerts, email_min_severity, alert_cooldown_min')
                 .eq('id', this._user.id)
                 .single();
             if (error) {
@@ -219,6 +219,19 @@ class AuthManager {
                 this._user.seats_used              = data.seats_used              ?? 0;
                 this._user.attribution_required    = data.attribution_required    ?? false;
                 this._user.branding                = data.branding                ?? {};
+                this._user.parent_account_id       = data.parent_account_id       ?? null;
+                // Resolve effective plan through parent_account_id for class
+                // students. effective_plan_for() is a SECURITY DEFINER RPC
+                // that returns the parent's plan (or the user's own when
+                // there's no parent). Failure here is non-fatal — getPlan()
+                // falls back to the stored value.
+                this._user.effective_plan = data.plan || 'free';
+                if (data.parent_account_id) {
+                    try {
+                        const { data: ep } = await this._supabase.rpc('effective_plan_for', { p_user_id: this._user.id });
+                        if (ep && typeof ep === 'string') this._user.effective_plan = ep;
+                    } catch (_) { /* keep fallback */ }
+                }
                 this._user.location = data.location_lat ? {
                     lat: data.location_lat, lon: data.location_lon, city: data.location_city
                 } : null;
@@ -313,7 +326,15 @@ class AuthManager {
      * is still an admin row).
      */
     getPlan() {
-        const stored = (this._user?.plan || 'free').toLowerCase();
+        // Class students inherit their parent's plan via effective_plan
+        // (cached during fetchProfile). When set, it short-circuits the
+        // canceled-subscription guard below — a student's "subscription"
+        // is the parent's, which is whatever Stripe says it is.
+        const effective = (this._user?.effective_plan || '').toLowerCase();
+        const stored    = (this._user?.plan || 'free').toLowerCase();
+        if (effective && effective !== stored && this._user?.parent_account_id) {
+            return effective;
+        }
         if (this.isAdmin?.() || this.isTester?.()) return stored;
         if ((this._user?.subscription_status || '').toLowerCase() !== 'canceled') return stored;
         const endIso = this._user?.subscription_period_end;

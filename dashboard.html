@@ -333,6 +333,10 @@ footer a:hover{color:var(--text)}
     </div>
   </div>
 
+  <!-- ── CLASS ROSTER (educator/institution/enterprise) ── -->
+  <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
+  <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>
+
   <!-- ── PIPELINE ANALYTICS (superadmin only) ── -->
   <div class="card" id="pipeline-card" style="margin-bottom:16px;display:none">
     <div class="card-head">
@@ -1049,6 +1053,8 @@ import {
     fetchTripWeather, encodeTripParam, weatherCodeLabel, compassLabel,
     greatCircleDistanceKm,
 } from './js/trip-planner.js';
+import { mountClassRoster } from './js/class-roster.js';
+import { logActivation, EVENTS } from './js/activation.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1864,6 +1870,30 @@ initAll();
     setTimeout(() => tour.start(), 1500);
     // Re-trigger link
     document.getElementById('retake-tour')?.addEventListener('click', () => tour.forceStart());
+}
+
+// ── Activation events ───────────────────────────────────────────────────────
+// First-X events the team can use to measure how many signups got value.
+// All idempotent at the DB layer (unique partial index on (user_id, event)),
+// so spamming is harmless.
+{
+    // Signup landmark — first dashboard load IS effectively the activated
+    // signup. The DB unique index dedupes so this firing on every load is fine.
+    logActivation(EVENTS.SIGNUP);
+
+    // First sim opened — fires once when the user clicks any sim card.
+    const onceSim = (e) => {
+        const a = e.target.closest('a.sim-card');
+        if (!a) return;
+        const dest = (a.getAttribute('href') || '').replace(/\.html$/, '').replace(/^\//, '');
+        logActivation(EVENTS.FIRST_SIM_OPENED, { sim: dest });
+    };
+    document.querySelector('.sim-grid')?.addEventListener('click', onceSim, { capture: true });
+
+    // Location saved — fires the first time the user successfully sets a location.
+    window.addEventListener('user-location-changed', (e) => {
+        if (e.detail) logActivation(EVENTS.LOCATION_SAVED, { source: 'dashboard' });
+    });
 }
 
 // ── Alert Engine + Preferences Wiring ────────────────────────────────────────

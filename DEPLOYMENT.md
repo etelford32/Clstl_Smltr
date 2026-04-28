@@ -67,6 +67,9 @@ supabase-retention-cron-migration.sql     # analytics/alert retention + cron-sta
 # Onboarding-blocker fixes (added April 2026 — REQUIRED before opening signups)
 supabase-daily-digest-migration.sql       # per-location digest opt-in column
 supabase-plan-lockdown-migration.sql      # blocks self-grant of paid plans (CRITICAL)
+
+# Educator wedge (April 2026)
+supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_events table
 ```
 
 If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>For Educators — Parker Physics Classroom Astrophysics</title>
+    <meta name="description" content="Bring real NASA &amp; NOAA space-weather data into your classroom. 17+ interactive astrophysics simulations, 30 student seats, $25/mo. No card required for students; instant magic-link enrollment; works in any modern browser.">
+    <meta property="og:title"       content="Parker Physics for Educators">
+    <meta property="og:description" content="Real NASA/NOAA space-weather data. 17 simulations. 30 seats. $25/mo. Magic-link student enrollment.">
+    <meta property="og:type"        content="website">
+    <meta property="og:url"         content="https://parkerphysics.com/for-educators">
+    <meta name="twitter:card"       content="summary_large_image">
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        nav { position: sticky; top: 0; z-index: 600; height: 54px; background: rgba(4,2,16,.94); backdrop-filter: blur(14px); border-bottom: 1px solid rgba(255,200,0,.12); display: flex; align-items: center; padding: 0 16px; gap: 10px; }
+
+        main { flex: 1; max-width: 1100px; margin: 0 auto; padding: 3rem 24px 4rem; width: 100%; }
+
+        .hero {
+            text-align: center;
+            padding: 1rem 0 2.4rem;
+        }
+        .eyebrow {
+            font-size: .72rem; font-weight: 700; letter-spacing: .12em;
+            color: #9ad36f; text-transform: uppercase; margin-bottom: 16px;
+        }
+        .hero h1 {
+            font-size: 2.6rem; font-weight: 800; line-height: 1.15;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: 14px;
+        }
+        @media (max-width: 600px) { .hero h1 { font-size: 1.9rem; } }
+        .hero p {
+            color: #aab; font-size: 1.1rem; max-width: 720px; margin: 0 auto;
+            line-height: 1.65;
+        }
+        .hero-cta {
+            display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
+            margin-top: 28px;
+        }
+        .btn-primary {
+            display: inline-block; padding: 13px 30px; border-radius: 8px;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            color: #0a0a1a; font-weight: 700; text-decoration: none;
+            font-size: 1rem; border: none; cursor: pointer; font-family: inherit;
+            transition: filter .15s, transform .15s;
+        }
+        .btn-primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+        .btn-secondary {
+            display: inline-block; padding: 13px 24px; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.18);
+            color: #ddd; font-weight: 600; text-decoration: none;
+            font-size: .92rem; transition: border-color .15s;
+        }
+        .btn-secondary:hover { border-color: rgba(255,200,0,.5); color: #fff; }
+
+        .price-badge {
+            display: inline-block; margin-top: 24px;
+            padding: 10px 18px; border-radius: 999px;
+            background: rgba(154,211,111,.08);
+            border: 1px solid rgba(154,211,111,.3);
+            color: #9ad36f; font-weight: 700; font-size: .82rem;
+            letter-spacing: .04em;
+        }
+        .price-badge strong { color: #fff; font-size: 1rem; }
+
+        section.what-you-get {
+            margin-top: 3rem;
+        }
+        .section-title {
+            font-size: 1.5rem; font-weight: 800; text-align: center;
+            margin-bottom: 8px;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .section-sub {
+            text-align: center; color: #889; font-size: .95rem;
+            max-width: 680px; margin: 0 auto 2rem; line-height: 1.6;
+        }
+
+        .grid-3 {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px;
+        }
+        @media (max-width: 800px) { .grid-3 { grid-template-columns: 1fr; } }
+
+        .panel {
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            padding: 22px 20px;
+            transition: border-color .2s, transform .2s;
+        }
+        .panel:hover { border-color: rgba(255,200,0,.25); transform: translateY(-2px); }
+        .panel-icon {
+            font-size: 1.8rem; margin-bottom: 10px;
+        }
+        .panel h3 {
+            font-size: 1.05rem; color: #fff; font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .panel p { color: #aab; font-size: .88rem; line-height: 1.6; }
+
+        section.flow {
+            margin-top: 3rem;
+            background: rgba(255,255,255,.02);
+            border: 1px solid rgba(255,255,255,.06);
+            border-radius: 14px;
+            padding: 32px 28px;
+        }
+        @media (max-width: 600px) { section.flow { padding: 24px 18px; } }
+
+        .flow-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+            margin-top: 24px;
+        }
+        @media (max-width: 800px) { .flow-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 480px) { .flow-grid { grid-template-columns: 1fr; } }
+
+        .flow-step .step-num {
+            display: inline-block; width: 28px; height: 28px;
+            border-radius: 50%; background: rgba(154,211,111,.15);
+            border: 1px solid rgba(154,211,111,.5);
+            color: #9ad36f; font-weight: 700; text-align: center;
+            line-height: 26px; font-size: .82rem; margin-bottom: 10px;
+        }
+        .flow-step h4 {
+            font-size: .9rem; color: #fff; font-weight: 700; margin-bottom: 6px;
+        }
+        .flow-step p { color: #889; font-size: .82rem; line-height: 1.55; }
+
+        section.pitch {
+            margin-top: 3rem;
+            text-align: center;
+            padding: 32px 24px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(255,200,0,.08), rgba(154,211,111,.06));
+            border: 1px solid rgba(255,200,0,.18);
+        }
+        section.pitch h2 {
+            font-size: 1.4rem; color: #fff; margin-bottom: 8px; font-weight: 800;
+        }
+        section.pitch p {
+            color: #cdd; font-size: .98rem; max-width: 640px; margin: 0 auto 22px;
+            line-height: 1.6;
+        }
+
+        section.faq {
+            margin-top: 3rem;
+        }
+        details {
+            background: rgba(255,255,255,.03);
+            border: 1px solid rgba(255,255,255,.07);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        details summary {
+            font-size: .92rem; font-weight: 700; color: #fff;
+            list-style: none;
+        }
+        details summary::-webkit-details-marker { display: none; }
+        details[open] summary { color: #ffd700; margin-bottom: 8px; }
+        details p {
+            color: #aab; font-size: .85rem; line-height: 1.65;
+            padding-top: 6px;
+        }
+
+        footer { text-align: center; padding: 2rem; color: #444; font-size: .8rem; border-top: 1px solid rgba(255,255,255,.06); margin-top: 3rem; }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("pricing");</script>
+
+<main>
+
+    <!-- ─── Hero ─────────────────────────────────────────────────── -->
+    <section class="hero">
+        <div class="eyebrow">For physics &amp; earth-science teachers</div>
+        <h1>Real NASA data. 17 live simulations. <br>Your whole class for $25.</h1>
+        <p>Parker Physics turns the live solar wind, the Earth's magnetosphere, and a dozen other live data feeds into something your students can poke at. Solar Maximum is happening right now — bring it into the lesson.</p>
+
+        <div class="hero-cta">
+            <a class="btn-primary" href="signup.html?plan=educator">Start your class — $25/mo</a>
+            <a class="btn-secondary" href="pricing.html">See all plans</a>
+        </div>
+
+        <div class="price-badge">
+            <strong>$25/mo</strong> · 30 student seats · cancel anytime
+        </div>
+    </section>
+
+    <!-- ─── What you get ─────────────────────────────────────────── -->
+    <section class="what-you-get">
+        <h2 class="section-title">Built for the classroom</h2>
+        <p class="section-sub">Every feature exists because a teacher asked for it. No login walls for students; no card-on-file for minors; no dark patterns.</p>
+
+        <div class="grid-3">
+
+            <div class="panel">
+                <div class="panel-icon">🛰️</div>
+                <h3>Live data, not stock animations</h3>
+                <p>Kp index, IMF Bz, GOES X-ray flux, satellite TLEs, NWS warnings — all updating every 60 seconds. The aurora chart is what the aurora is doing tonight, not last decade.</p>
+            </div>
+
+            <div class="panel">
+                <div class="panel-icon">🎓</div>
+                <h3>30 magic-link seats</h3>
+                <p>Drop 30 student emails into your roster. They get a one-click sign-up; their account is free; their access expires when the school year ends and you cancel.</p>
+            </div>
+
+            <div class="panel">
+                <div class="panel-icon">🔬</div>
+                <h3>17 interactive simulations</h3>
+                <p>Solar surface, Earth magnetosphere, the Sun's corona, a Kerr black hole observatory (TON 618), the Milky Way galactic map, the upper atmosphere — all WebGL, no install.</p>
+            </div>
+
+            <div class="panel">
+                <div class="panel-icon">📚</div>
+                <h3>Embed permission</h3>
+                <p>Drop any sim into your LMS or class blog. The embed inherits your "Powered by Parker Physics" attribution — that's the only string attached.</p>
+            </div>
+
+            <div class="panel">
+                <div class="panel-icon">🔒</div>
+                <h3>FERPA-aware</h3>
+                <p>Email, display name, and saved location are the only PII collected per student. No analytics scripts, no advertising trackers, no third-party cookies.</p>
+            </div>
+
+            <div class="panel">
+                <div class="panel-icon">📡</div>
+                <h3>Roster you control</h3>
+                <p>Add students, remove students, see who's joined, cancel pending invites. Seats free up the moment you remove a student. No support ticket required.</p>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ─── How it flows ─────────────────────────────────────────── -->
+    <section class="flow">
+        <h2 class="section-title">From sign-up to class in under five minutes</h2>
+        <p class="section-sub">No district IT ticket, no LMS integration, no software install.</p>
+
+        <div class="flow-grid">
+            <div class="flow-step">
+                <span class="step-num">1</span>
+                <h4>Subscribe</h4>
+                <p>$25/month with a card. Cancel anytime; you keep access through the paid period.</p>
+            </div>
+            <div class="flow-step">
+                <span class="step-num">2</span>
+                <h4>Invite students</h4>
+                <p>Paste up to 30 emails into your dashboard's class roster. Each student gets a single magic link.</p>
+            </div>
+            <div class="flow-step">
+                <span class="step-num">3</span>
+                <h4>Students click in</h4>
+                <p>One click → make a password → they're in. Their account inherits your plan; no card on file.</p>
+            </div>
+            <div class="flow-step">
+                <span class="step-num">4</span>
+                <h4>Teach</h4>
+                <p>Open a simulation, project it, point at it. Students bring up their own session on phones or laptops.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ─── Pitch / mid-page CTA ─────────────────────────────────── -->
+    <section class="pitch">
+        <h2>Why now?</h2>
+        <p>The Sun is in the most active part of its 11-year cycle for the first time since 2014. Sunspot counts are at a 24-year high; aurora has been visible from Texas. Whatever your unit on stars, magnetism, or atmospheric physics, the live data this year is unusually rich.</p>
+        <a class="btn-primary" href="signup.html?plan=educator">Start your class — $25/mo →</a>
+    </section>
+
+    <!-- ─── FAQ ──────────────────────────────────────────────────── -->
+    <section class="faq">
+        <h2 class="section-title">Common questions</h2>
+        <div style="max-width:760px;margin:0 auto">
+
+            <details>
+                <summary>Do students need to pay anything?</summary>
+                <p>No. Students sign up free under your subscription. They don't need a credit card and can't be charged. Their access ends when you remove them or cancel the subscription.</p>
+            </details>
+
+            <details>
+                <summary>What grade level is this?</summary>
+                <p>Grades 9–12 and undergraduate physics most directly. The simulations have both a "show me the cool thing" surface and an "explain the math" panel underneath, so they scale up to upper-division and down to middle-school demonstrations.</p>
+            </details>
+
+            <details>
+                <summary>Does it work on Chromebooks / iPads / phones?</summary>
+                <p>Yes. The simulations are WebGL — no install, no plugin. We test on Chromebooks (the most common school device) every release.</p>
+            </details>
+
+            <details>
+                <summary>Can I exceed 30 seats?</summary>
+                <p>Yes — the Institution plan ($500/mo) gives you 200 seats, custom branding, and priority support. If you need more than 200, the <a href="contact-enterprise.html" style="color:#ffd700">Enterprise tier</a> negotiates per-contract.</p>
+            </details>
+
+            <details>
+                <summary>What happens at the end of the school year?</summary>
+                <p>Cancel from the dashboard's billing portal. You keep access through the end of the current paid period. Students retain their accounts but lose the inherited plan — they fall back to the free tier with reduced features.</p>
+            </details>
+
+            <details>
+                <summary>Can I see lesson plans / activity ideas?</summary>
+                <p>Yes — once enrolled, the dashboard surfaces an "Activities" panel with grade-banded prompts that map to NGSS HS-ESS1 (stars), HS-ESS2 (Earth's systems), and HS-PS2 (forces). We add new ones every few weeks based on instructor feedback.</p>
+            </details>
+
+            <details>
+                <summary>Is the data really live?</summary>
+                <p>Yes. We pull from NASA SWPC, NOAA, NWS, USGS, MET Norway, NASA Earth Observatory, and CelesTrak (TLEs). The pipeline status page (linked in nav) shows real-time freshness.</p>
+            </details>
+
+            <details>
+                <summary>What about privacy?</summary>
+                <p>We store the student's email, display name, and (optionally) their saved location. No analytics scripts, no advertising IDs. Detailed policy on the <a href="privacy.html" style="color:#ffd700">privacy page</a>; the <a href="eula.html" style="color:#ffd700">EULA</a> covers classroom use.</p>
+            </details>
+
+        </div>
+    </section>
+
+</main>
+
+<footer>
+    <a href="index.html">Parker Physics</a> ·
+    <a href="pricing.html">Pricing</a> ·
+    <a href="privacy.html">Privacy</a> ·
+    <a href="eula.html">Terms</a> ·
+    <a href="contact-enterprise.html">Enterprise</a>
+</footer>
+
+</body>
+</html>
