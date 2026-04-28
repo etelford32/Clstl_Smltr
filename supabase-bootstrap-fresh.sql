@@ -1,28 +1,22 @@
 -- ═══════════════════════════════════════════════════════════════
--- Parker Physics — One-Paste Bootstrap (FRESH PROJECT)
+-- Parker Physics — One-Paste Bootstrap (FRESH OR EXISTING PROJECT)
 -- ═══════════════════════════════════════════════════════════════
 --
--- Apply this single file in the Supabase SQL Editor on a fresh project.
--- Bundles every foundational migration in the right dependency order.
--- Each section is fenced with a banner so re-running halts at the first
--- failure with a clear breadcrumb.
+-- Apply this single file in the Supabase SQL Editor on ANY Parker
+-- Physics project. Bundles every foundational migration in
+-- dependency order, with idempotency wrappers so re-running on a
+-- partially-deployed project is safe (each CREATE POLICY /
+-- CREATE TRIGGER is preceded by a matching DROP IF EXISTS).
 --
--- WHEN TO USE THIS:
---   • Brand-new Supabase project, never had any Parker Physics schema
---   • You want to deploy the educator wedge in one paste
+-- WHEN TO USE:
+--   • Brand-new project — bootstraps from zero.
+--   • Existing project missing a recent migration — adds the
+--     missing pieces without conflicting with what's already there.
+--   • You want to replay everything cleanly after a manual edit.
 --
--- WHEN NOT TO USE:
---   • Existing project — apply the individual migrations from
---     DEPLOYMENT.md instead. Schema-creating statements in this
---     bootstrap are NOT idempotent for policies (CREATE POLICY
---     without IF NOT EXISTS will fail on re-run).
---
--- AFTER THIS RUNS:
---   1. Sign up your founding admin via /signup on the web app.
---   2. Run supabase-make-owner-superadmin.sql with your email
---      to grant yourself superadmin.
---   3. Optional: run the data-pipeline migrations (weather, solar-wind,
---      pipeline-heartbeat) per DEPLOYMENT.md for the data feeds.
+-- AT THE END:
+--   • etelford32@gmail.com is promoted to superadmin / enterprise
+--     (silently skipped if that account hasn't signed up yet).
 -- ═══════════════════════════════════════════════════════════════
 
 
@@ -105,14 +99,17 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
 -- RLS: users can only read/update their own profile
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own profile" ON public.user_profiles;
 CREATE POLICY "Users can view own profile"
     ON public.user_profiles FOR SELECT
     USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can update own profile" ON public.user_profiles;
 CREATE POLICY "Users can update own profile"
     ON public.user_profiles FOR UPDATE
     USING (auth.uid() = id);
 
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.user_profiles;
 CREATE POLICY "Users can insert own profile"
     ON public.user_profiles FOR INSERT
     WITH CHECK (auth.uid() = id);
@@ -137,6 +134,7 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Admin policy: admins can read ALL user profiles (for admin dashboard)
+DROP POLICY IF EXISTS "Admins can view all profiles" ON public.user_profiles;
 CREATE POLICY "Admins can view all profiles"
     ON public.user_profiles FOR SELECT
     USING (
@@ -145,6 +143,7 @@ CREATE POLICY "Admins can view all profiles"
     );
 
 -- Admin policy: admins can view all alert history
+DROP POLICY IF EXISTS "Admins can view all alerts" ON public.alert_history;
 CREATE POLICY "Admins can view all alerts"
     ON public.alert_history FOR SELECT
     USING (auth.uid() = user_id OR public.is_admin());
@@ -186,6 +185,7 @@ CREATE TABLE IF NOT EXISTS public.satellite_alerts (
 
 ALTER TABLE public.satellite_alerts ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own alerts" ON public.satellite_alerts;
 CREATE POLICY "Users can manage own alerts"
     ON public.satellite_alerts FOR ALL
     USING (auth.uid() = user_id);
@@ -207,10 +207,12 @@ CREATE TABLE IF NOT EXISTS public.alert_history (
 
 ALTER TABLE public.alert_history ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own alerts" ON public.alert_history;
 CREATE POLICY "Users can view own alerts"
     ON public.alert_history FOR SELECT
     USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Users can mark alerts read" ON public.alert_history;
 CREATE POLICY "Users can mark alerts read"
     ON public.alert_history FOR UPDATE
     USING (auth.uid() = user_id);
@@ -235,6 +237,7 @@ CREATE TABLE IF NOT EXISTS public.user_locations (
 
 ALTER TABLE public.user_locations ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can manage own locations" ON public.user_locations;
 CREATE POLICY "Users can manage own locations"
     ON public.user_locations FOR ALL
     USING (auth.uid() = user_id);
@@ -258,11 +261,13 @@ CREATE TABLE IF NOT EXISTS public.invite_codes (
 ALTER TABLE public.invite_codes ENABLE ROW LEVEL SECURITY;
 
 -- Admins can do everything with invite codes
+DROP POLICY IF EXISTS "Admins manage invites" ON public.invite_codes;
 CREATE POLICY "Admins manage invites"
     ON public.invite_codes FOR ALL
     USING (public.is_admin());
 
 -- Anyone can read a specific active invite code (for validation during signup)
+DROP POLICY IF EXISTS "Public can validate invite codes" ON public.invite_codes;
 CREATE POLICY "Public can validate invite codes"
     ON public.invite_codes FOR SELECT
     USING (active = true);
@@ -298,10 +303,12 @@ CREATE TABLE IF NOT EXISTS public.analytics_events (
 ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
 
 -- Admins can read all events; regular inserts are allowed for any authenticated user
+DROP POLICY IF EXISTS "Anyone can insert analytics events" ON public.analytics_events;
 CREATE POLICY "Anyone can insert analytics events"
     ON public.analytics_events FOR INSERT
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins can view all analytics" ON public.analytics_events;
 CREATE POLICY "Admins can view all analytics"
     ON public.analytics_events FOR SELECT
     USING (public.is_admin());
@@ -332,11 +339,13 @@ CREATE TABLE IF NOT EXISTS public.user_sessions (
 
 ALTER TABLE public.user_sessions ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Anyone can upsert sessions" ON public.user_sessions;
 CREATE POLICY "Anyone can upsert sessions"
     ON public.user_sessions FOR ALL
     USING (true)
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Admins can view all sessions" ON public.user_sessions;
 CREATE POLICY "Admins can view all sessions"
     ON public.user_sessions FOR SELECT
     USING (public.is_admin());
@@ -377,7 +386,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- ══════════════════════════════════════════════════════════════
 -- ▶ STEP: supabase-admin.sql
---   Admin role + is_admin() (idempotent extension of schema.sql)
+--   Admin role + is_admin() (idempotent overlay)
 -- ══════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════
@@ -406,6 +415,7 @@ RETURNS BOOLEAN AS $$
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 -- Admin policy: admins can read ALL user profiles (for admin dashboard)
+DROP POLICY IF EXISTS "Admins can view all profiles" ON public.user_profiles;
 CREATE POLICY "Admins can view all profiles"
     ON public.user_profiles FOR SELECT
     USING (
@@ -419,6 +429,7 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_policies WHERE policyname = 'Admins can view all alerts'
     ) THEN
+        DROP POLICY IF EXISTS "Admins can view all alerts" ON public.alert_history;
         CREATE POLICY "Admins can view all alerts"
             ON public.alert_history FOR SELECT
             USING (auth.uid() = user_id OR public.is_admin());
@@ -578,7 +589,7 @@ CREATE TRIGGER trg_single_primary_location
 
 -- ══════════════════════════════════════════════════════════════
 -- ▶ STEP: supabase-invites-email-migration.sql
---   Email-targeted invites (validate_invite RPC)
+--   Email-targeted invites + validate_invite RPC
 -- ══════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1255,7 +1266,7 @@ CREATE TRIGGER trg_lock_user_profile_protected
 
 -- ══════════════════════════════════════════════════════════════
 -- ▶ STEP: supabase-class-seats-migration.sql
---   Class-seat invites + activation_events table
+--   Class-seat invite RPCs + activation_events table
 -- ══════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════
@@ -1742,18 +1753,63 @@ GRANT EXECUTE ON FUNCTION public.class_roster() TO authenticated;
 
 
 -- ══════════════════════════════════════════════════════════════
--- ✅  All migrations applied. Verify with:
+-- ▶ STEP: superadmin bootstrap (etelford32@gmail.com)
+--   Hardcoded so the founding admin doesn't need a separate paste.
+--   Tolerates a not-yet-signed-up email — emits NOTICE and continues
+--   instead of aborting the bootstrap.
+-- ══════════════════════════════════════════════════════════════
+
+DO $owner_promote$
+DECLARE
+    v_uid UUID;
+    v_email TEXT := 'etelford32@gmail.com';
+BEGIN
+    SELECT id INTO v_uid
+      FROM auth.users
+     WHERE lower(email) = lower(v_email)
+     LIMIT 1;
+
+    IF v_uid IS NULL THEN
+        RAISE NOTICE 'Skipping superadmin promotion: no auth.users row for %. Sign up at /signup.html, then re-run this bootstrap (idempotent).', v_email;
+        RETURN;
+    END IF;
+
+    -- Ensure a profile row exists (auth trigger normally creates it).
+    INSERT INTO public.user_profiles (id, email, plan, role)
+    VALUES (v_uid, v_email, 'enterprise', 'superadmin')
+    ON CONFLICT (id) DO NOTHING;
+
+    -- The lockdown trigger pins privileged columns for non-admin self-
+    -- updates. Service-role context (SQL editor) has auth.uid() IS NULL,
+    -- which the trigger treats as a trusted bypass — but we set the flag
+    -- explicitly anyway in case the bypass logic changes.
+    PERFORM set_config('pp.privileged_update', '1', true);
+
+    UPDATE public.user_profiles
+       SET role                 = 'superadmin',
+           plan                 = 'enterprise',
+           subscription_status  = 'active',
+           classroom_seats      = 1000,
+           seats_used           = COALESCE(seats_used, 0),
+           attribution_required = FALSE,
+           branding             = COALESCE(branding, '{}'::jsonb),
+           updated_at           = now()
+     WHERE id = v_uid;
+
+    PERFORM set_config('pp.privileged_update', '', true);
+
+    RAISE NOTICE 'Promoted % (uid=%) to superadmin / enterprise.', v_email, v_uid;
+END
+$owner_promote$;
+
+-- ══════════════════════════════════════════════════════════════
+-- ✅  Verification queries — paste after the run completes.
 -- ══════════════════════════════════════════════════════════════
 --
---   SELECT to_regclass('public.user_profiles') AS user_profiles,
---          to_regclass('public.invite_codes')  AS invite_codes,
+--   SELECT to_regclass('public.user_profiles')    AS user_profiles,
+--          to_regclass('public.invite_codes')     AS invite_codes,
 --          to_regclass('public.activation_events') AS activation_events;
 --   -- Expect three non-NULL rows.
---
---   SELECT public.tier_default_seats('educator')      AS educator_seats,
---          public.tier_default_seats('institution')   AS institution_seats,
---          public.tier_attribution_required('educator') AS edu_attribution;
---   -- Expect 30, 200, true.
 --
 --   SELECT proname FROM pg_proc
 --    WHERE proname IN (
@@ -1761,3 +1817,7 @@ GRANT EXECUTE ON FUNCTION public.class_roster() TO authenticated;
 --        'effective_plan_for', 'log_activation_event', 'activation_funnel'
 --    ) ORDER BY proname;
 --   -- Expect six rows.
+--
+--   SELECT email, role, plan FROM public.user_profiles
+--    WHERE lower(email) = 'etelford32@gmail.com';
+--   -- Expect role=superadmin, plan=enterprise (or zero rows if not signed up yet).
