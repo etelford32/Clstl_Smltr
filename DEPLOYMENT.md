@@ -72,6 +72,15 @@ supabase-plan-lockdown-migration.sql      # blocks self-grant of paid plans (CRI
 supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_events table
 ```
 
+> **Prerequisites for `supabase-class-seats-migration.sql`** — the migration
+> performs a preflight check and aborts with the missing items if any are
+> absent. It needs (in any order, all idempotent):
+> `supabase-schema.sql` (for `invite_codes` + `user_profiles`), and
+> `supabase-tier-expansion-migration.sql` (for the `parent_account_id`,
+> `classroom_seats`, `seats_used` columns). The
+> `supabase-invites-apply-plan-migration.sql` is recommended (provides the
+> guard trigger) but not strictly required.
+
 If any `CREATE EXTENSION` line errors out (`pg_cron`, `http`), enable
 the extension via Database → Extensions in the Supabase dashboard,
 then re-run the migration.
