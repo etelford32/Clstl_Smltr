@@ -1204,7 +1204,27 @@ async function loadInvites() {
     document.getElementById('kpi-invites-active').textContent = active;
 
     if (!res.ok || !res.data?.length) {
-        el.innerHTML = `<div class="empty">${res.error ? _esc(res.error) + '<br><br>' : ''}No invite codes yet. Generate one above.<br><br>If the table doesn't exist, run:<br><code>CREATE TABLE invite_codes (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code TEXT UNIQUE NOT NULL, plan TEXT DEFAULT \'free\', max_uses INTEGER DEFAULT 1, used_count INTEGER DEFAULT 0, expires_at TIMESTAMPTZ, created_by UUID, created_at TIMESTAMPTZ DEFAULT now(), active BOOLEAN DEFAULT true); ALTER TABLE invite_codes ENABLE ROW LEVEL SECURITY; CREATE POLICY "Admins manage invites" ON invite_codes FOR ALL USING (public.is_admin());</code></div>`;
+        // Distinguish "table missing" from "table exists but no rows yet" —
+        // the operator action is completely different. The Postgres error
+        // "relation \"public.invite_codes\" does not exist" matches the
+        // "does not exist" probe in the error message; PostgREST surfaces
+        // it as PGRST205 / 42P01.
+        const errMsg  = String(res.error || '');
+        const missing = /does not exist|relation .* does not exist|PGRST205|42P01/i.test(errMsg);
+        if (missing) {
+            el.innerHTML = `<div class="empty" style="text-align:left;color:#ffaa44">
+                <strong style="color:#ff6060">⚠ invite_codes table not found.</strong><br><br>
+                Your Supabase project hasn't been bootstrapped yet. Apply
+                <code style="color:#9ad36f">supabase-bootstrap-fresh.sql</code>
+                in the Supabase SQL Editor (one-paste, all foundational
+                migrations in dependency order).<br><br>
+                Or apply the individual migrations from <code>DEPLOYMENT.md</code> step 1
+                — at minimum <code>supabase-schema.sql</code> creates this table.<br><br>
+                <span style="color:#666;font-size:.78rem">Postgres error: ${_esc(errMsg)}</span>
+            </div>`;
+        } else {
+            el.innerHTML = `<div class="empty">${res.error ? _esc(res.error) + '<br><br>' : ''}No invite codes yet. Generate one above.</div>`;
+        }
         return;
     }
 

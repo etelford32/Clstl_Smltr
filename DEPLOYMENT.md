@@ -36,6 +36,12 @@ migrations are idempotent — safe to re-run if you ever rebuild.
 **1. Apply the schema migrations in order** (Supabase Dashboard → SQL
 Editor → paste each file → Run):
 
+> 🚀 **Fresh project? One-paste shortcut:** apply
+> [`supabase-bootstrap-fresh.sql`](supabase-bootstrap-fresh.sql) once. It
+> bundles every foundational migration below in dependency order, so a
+> brand-new Supabase project comes up correctly with a single SQL Editor
+> paste. Skip the rest of step 1 and jump to step 2 if you used it.
+
 ```
 # Foundational schema
 supabase-schema.sql                       # core tables, RLS, helpers
