@@ -4,7 +4,8 @@
  * Generates a full navigation bar with:
  *   - Logo + brand
  *   - Dropdown menus: Space Weather, Earth, Stars, Tools
- *   - Tier-gated items (free, intro, advanced)
+ *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
+ *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
  *   - Mobile burger with full menu expansion + accordion dropdowns
  *   - Robust hover with delay for desktop, touch-aware for hybrid devices
