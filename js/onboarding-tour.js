@@ -17,58 +17,206 @@
 
 const LS_KEY = 'ppx_tour_completed';
 
-const STEPS = [
-    {
-        title: 'Welcome to Parker Physics',
-        body: 'Your personal astrophysics command center — powered by live NASA and NOAA satellite data, updated every 60 seconds.',
-        icon: '&#128640;',
-        target: null,
-        cta: 'Show me around',
-    },
-    {
-        title: 'Set Your Location',
-        body: 'Enter your city or use GPS to unlock personalized aurora forecasts, satellite pass predictions, and local weather alerts.',
-        icon: '&#128205;',
-        target: '#location-card',
-        cta: 'Next',
-    },
-    {
-        title: 'Live Space Weather',
-        body: 'Real-time Kp index, solar wind speed, IMF Bz, and storm conditions from NOAA SWPC. Updates every 60 seconds automatically.',
-        icon: '&#127758;',
-        target: '#sw-card',
-        cta: 'Next',
-    },
-    {
-        title: 'Your Impact Score',
-        body: 'A personalized 0–100 score combining geomagnetic activity, solar radiation, CME threats, and your location — with 24h, 3-day, and 7-day storm probability forecasts.',
-        icon: '&#127919;',
-        target: '#impact-card',
-        cta: 'Next',
-    },
-    {
-        title: 'Custom Alerts',
-        body: 'Set alerts for aurora visibility, solar flares, geomagnetic storms, temperature extremes, and more. Subscribers get email delivery and advanced alerts like satellite collision detection.',
-        icon: '&#128276;',
-        target: '#alert-prefs-card',
-        cta: 'Next',
-    },
-    {
-        title: 'Interactive Simulations',
-        body: '17+ WebGL simulations — from the Sun\'s photosphere to Earth\'s magnetosphere, black hole accretion disks, and the Milky Way. All driven by real physics engines.',
-        icon: '&#9788;',
-        target: '.sim-grid',
-        cta: 'Next',
-    },
-    {
-        title: 'You\'re All Set!',
-        body: 'Start by setting your location, then explore a simulation. Solar Maximum is happening right now — the best aurora season in over a decade.',
-        icon: '&#127775;',
-        target: null,
-        cta: 'Start exploring',
-        final: true,
-    },
-];
+// Steps shared across personas. Each entry has a `personas` array — the
+// step is shown only when the user's resolved persona is in the list, OR
+// when `personas` is omitted (meaning: show for everyone).
+//
+// Personas:
+//   'educator'   — user is on educator/institution/enterprise (parent of class)
+//   'student'    — user has a parent_account_id (joined a class)
+//   'advanced'   — advanced/institution/enterprise paid tier
+//   'basic'      — basic plan
+//   'free'       — no subscription
+//
+// The first step (welcome) is rewritten per persona. The class-roster step
+// only fires for educators. Everyone gets the location + alerts steps.
+const STEPS_BY_PERSONA = {
+    educator: [
+        {
+            title: 'Welcome, instructor',
+            body: 'Your Parker Physics class is live. The first thing to do is invite your students — they\'ll get a magic link, sign up free, and inherit your plan automatically.',
+            icon: '&#127979;',
+            target: null,
+            cta: 'Show me how',
+        },
+        {
+            title: 'Invite your class',
+            body: 'Drop your students\' emails into this roster panel. Each invite uses one of your seats; remove a student to free a seat back up.',
+            icon: '&#128231;',
+            target: '#class-roster-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Set a teaching location',
+            body: 'Pin your school\'s coordinates so the live aurora, satellite-pass, and weather forecasts in every simulation are personalized to your students\' sky.',
+            icon: '&#128205;',
+            target: '#location-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Pick a simulation to demo',
+            body: '17+ WebGL labs driven by real NASA/NOAA data — the Sun\'s magnetic field, Earth\'s magnetosphere, accretion disks around supermassive black holes. Every sim is classroom-shareable.',
+            icon: '&#9788;',
+            target: '.sim-grid',
+            cta: 'Next',
+        },
+        {
+            title: 'You\'re ready to teach',
+            body: 'Tip: every page carries a "Powered by Parker Physics" badge for your students — that\'s the educator-tier licensing terms in action. Solar Maximum is now; the data is rich.',
+            icon: '&#127775;',
+            target: null,
+            cta: 'Start teaching',
+            final: true,
+        },
+    ],
+
+    student: [
+        {
+            title: 'Welcome to your class',
+            body: 'You\'ve joined a Parker Physics class — your instructor\'s plan covers full access. No card on file, no upgrade pitch.',
+            icon: '&#127891;',
+            target: null,
+            cta: 'Show me around',
+        },
+        {
+            title: 'Set your location',
+            body: 'Drop a pin where you are so the aurora, sky charts, and satellite passes match your view.',
+            icon: '&#128205;',
+            target: '#location-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Pick a simulation',
+            body: 'Black holes, the Sun\'s atmosphere, the magnetosphere, the inner Milky Way — all interactive, all driven by live data. Start anywhere.',
+            icon: '&#9788;',
+            target: '.sim-grid',
+            cta: 'Next',
+        },
+        {
+            title: 'You\'re all set',
+            body: 'Ask your instructor which sim ties to the lesson — or just explore. Solar Maximum is happening right now; the activity is unusually high.',
+            icon: '&#127775;',
+            target: null,
+            cta: 'Explore',
+            final: true,
+        },
+    ],
+
+    advanced: [
+        {
+            title: 'Welcome, professional',
+            body: 'Advanced tier unlocks the full pipeline: collision screens, GNSS scintillation forecasts, satellite alerts, the API. Let\'s tour the operator surface.',
+            icon: '&#128752;',
+            target: null,
+            cta: 'Show me',
+        },
+        {
+            title: 'Pin your operating area',
+            body: 'Saved locations drive forecast pre-warming and per-site alerts. You can save up to 25 locations on the Advanced tier.',
+            icon: '&#128205;',
+            target: '#location-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Configure your alerts',
+            body: 'Solar flare class, Kp threshold, conjunction radius, GNSS risk, power-grid storm severity — all configurable, all delivered by email when triggered.',
+            icon: '&#128276;',
+            target: '#alert-prefs-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Open the operator console',
+            body: 'The simulations double as analysis tools: TLE conjunction watch on Upper Atmosphere, real GFS+ECMWF ensemble on Earth, full TON 618 GR observatory.',
+            icon: '&#9788;',
+            target: '.sim-grid',
+            cta: 'Next',
+        },
+        {
+            title: 'You\'re live',
+            body: 'API keys + rate-limit policy live in /api-policy. Reach out for custom integrations or a higher cap.',
+            icon: '&#127775;',
+            target: null,
+            cta: 'Get to work',
+            final: true,
+        },
+    ],
+
+    // Default flow for free / basic — same five-step tour as before but
+    // re-targeted to be more concrete about the "what would I get if I
+    // upgraded" pitch on the alerts step.
+    default: [
+        {
+            title: 'Welcome to Parker Physics',
+            body: 'Your personal astrophysics command center — powered by live NASA and NOAA satellite data, updated every 60 seconds.',
+            icon: '&#128640;',
+            target: null,
+            cta: 'Show me around',
+        },
+        {
+            title: 'Set your location',
+            body: 'Enter your city or use GPS to unlock personalized aurora forecasts, satellite pass predictions, and local weather alerts.',
+            icon: '&#128205;',
+            target: '#location-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Live space weather',
+            body: 'Real-time Kp index, solar wind speed, IMF Bz, and storm conditions from NOAA SWPC. Updates every 60 seconds automatically.',
+            icon: '&#127758;',
+            target: '#sw-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Your impact score',
+            body: 'A personalized 0–100 score combining geomagnetic activity, solar radiation, CME threats, and your location — with 24h, 3-day, and 7-day storm probability forecasts.',
+            icon: '&#127919;',
+            target: '#impact-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Custom alerts',
+            body: 'Set alerts for aurora visibility, solar flares, geomagnetic storms, temperature extremes, and more. Subscribers get email delivery and advanced alerts like satellite collision detection.',
+            icon: '&#128276;',
+            target: '#alert-prefs-card',
+            cta: 'Next',
+        },
+        {
+            title: 'Interactive simulations',
+            body: '17+ WebGL simulations — from the Sun\'s photosphere to Earth\'s magnetosphere, black hole accretion disks, and the Milky Way. All driven by real physics engines.',
+            icon: '&#9788;',
+            target: '.sim-grid',
+            cta: 'Next',
+        },
+        {
+            title: 'You\'re all set!',
+            body: 'Start by setting your location, then explore a simulation. Solar Maximum is happening right now — the best aurora season in over a decade.',
+            icon: '&#127775;',
+            target: null,
+            cta: 'Start exploring',
+            final: true,
+        },
+    ],
+};
+
+/**
+ * Resolve which persona's tour to play. Reads from window._ppAuth.auth or
+ * the global auth singleton. Falls back to 'default' if it can't tell.
+ */
+function resolvePersona() {
+    try {
+        const a = window._ppAuth?.auth || window.auth;
+        if (!a) return 'default';
+        const plan = (a.getPlan?.() || 'free').toLowerCase();
+        const user = a.getUser?.() || {};
+        if (user.parent_account_id) return 'student';
+        if (['educator', 'institution', 'enterprise'].includes(plan)) return 'educator';
+        if (['advanced'].includes(plan)) return 'advanced';
+        return 'default';
+    } catch {
+        return 'default';
+    }
+}
+
 
 // ── Styles ───────────────────────────────────────────────────────────────────
 
@@ -184,6 +332,8 @@ export class OnboardingTour {
         this._card = null;
         this._active = false;
         this._onKey = this._onKey.bind(this);
+        this._steps = STEPS_BY_PERSONA.default;
+        this._persona = 'default';
     }
 
     start() {
@@ -193,6 +343,11 @@ export class OnboardingTour {
 
     forceStart() {
         if (this._active) return;
+        // Persona is resolved fresh each time forceStart is called so the
+        // "Retake tour" button picks up plan changes (e.g. user just
+        // upgraded to Educator).
+        this._persona = resolvePersona();
+        this._steps = STEPS_BY_PERSONA[this._persona] || STEPS_BY_PERSONA.default;
         this._active = true;
         this._step = 0;
         this._inject();
@@ -229,20 +384,21 @@ export class OnboardingTour {
     }
 
     _render() {
-        const step = STEPS[this._step];
+        const steps = this._steps;
+        const step = steps[this._step];
         if (!step) { this._close(); return; }
 
-        const pct = (((this._step + 1) / STEPS.length) * 100).toFixed(0);
+        const pct = (((this._step + 1) / steps.length) * 100).toFixed(0);
 
         // Build card HTML
         this._card.innerHTML = `
-            <div class="tour-step-badge">Step ${this._step + 1} of ${STEPS.length}</div>
+            <div class="tour-step-badge">Step ${this._step + 1} of ${steps.length}</div>
             <div class="tour-icon">${step.icon}</div>
             <div class="tour-title">${step.title}</div>
             <div class="tour-body">${step.body}</div>
             <div class="tour-footer">
                 <div class="tour-dots">
-                    ${STEPS.map((_, i) =>
+                    ${steps.map((_, i) =>
                         `<span class="tour-dot${i === this._step ? ' active' : i < this._step ? ' done' : ''}"></span>`
                     ).join('')}
                 </div>
@@ -367,7 +523,7 @@ export class OnboardingTour {
         if (!this._active) return;
         if (e.key === 'Escape') { this._close(); return; }
         if (e.key === 'ArrowRight' || e.key === 'Enter') {
-            if (STEPS[this._step]?.final) { this._close(); return; }
+            if (this._steps[this._step]?.final) { this._close(); return; }
             this._step++;
             this._render();
             return;

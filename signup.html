@@ -375,15 +375,19 @@
 
 <script type="module">
     import { auth } from './js/auth.js';
-    import { validateInviteCode, applyInvitePlan } from './js/admin-invites.js';
+    import {
+        validateInviteCode,
+        applyInvitePlan,
+        applyClassInvite,
+        isClassInvite,
+    } from './js/admin-invites.js';
 
     await auth.ready();
     if (auth.isSignedIn()) { window.location.href = 'dashboard.html'; }
-    // applyInvitePlan replaces redeemInviteCode in the post-signup flow:
-    // it atomically marks the invite as used AND writes the comped plan
-    // onto user_profiles, so an Educator/Advanced/etc. invite no longer
-    // silently lands the user on 'free'.
-    window._ppAuth = { auth, validateInviteCode, applyInvitePlan };
+    // applyInvitePlan handles plan-comp invites; applyClassInvite handles
+    // educator/institution seat invites that attach the student to a
+    // parent_account_id without billing them.
+    window._ppAuth = { auth, validateInviteCode, applyInvitePlan, applyClassInvite, isClassInvite };
 
     // ── Invite code: URL pre-fill + live validation ──────────────────────
     // The ?code= and ?email= params are populated by the magic link sent
@@ -422,12 +426,22 @@
                 institution: 'Institution',
                 enterprise:  'Enterprise',
             };
-            const planLabel = _PLAN_LABELS[res.plan] || 'Free';
-            statusEl.textContent = `✓ Valid invite — ${planLabel} tier${res.isTargeted ? ' (email-locked)' : ''}`;
-            statusEl.style.color = '#4eff91';
+            // Class-seat invites carry plan='free' but the recipient
+            // inherits the parent's plan via parent_account_id. Surface
+            // this in the status string so the user sees what's happening.
+            const isSeat = await window._ppAuth.isClassInvite(res.inviteId);
+            res.isClassSeat = isSeat;
+            if (isSeat) {
+                statusEl.textContent = `✓ Valid class invite${res.isTargeted ? ' (email-locked)' : ''} — joins your instructor's roster, no card required`;
+                statusEl.style.color = '#80d4ff';
+                if (typeof window.selectPlan === 'function') window.selectPlan('free');
+            } else {
+                const planLabel = _PLAN_LABELS[res.plan] || 'Free';
+                statusEl.textContent = `✓ Valid invite — ${planLabel} tier${res.isTargeted ? ' (email-locked)' : ''}`;
+                statusEl.style.color = '#4eff91';
+                if (typeof window.selectPlan === 'function') window.selectPlan(res.plan);
+            }
             _validatedInvite = res;
-            // Auto-select the plan to match the invite
-            if (typeof window.selectPlan === 'function') window.selectPlan(res.plan);
         } else {
             statusEl.textContent = `✗ ${res.error || 'Invalid code'}`;
             statusEl.style.color = '#ffaaaa';
@@ -540,7 +554,7 @@
             const emailVal = document.getElementById('email').value;
             const passwordVal = document.getElementById('password').value;
 
-            const { auth, applyInvitePlan } = window._ppAuth || {};
+            const { auth, applyInvitePlan, applyClassInvite, isClassInvite } = window._ppAuth || {};
             const invite = (typeof window._ppGetInvite === 'function')
                 ? window._ppGetInvite() : null;
             if (!auth) {
@@ -549,13 +563,22 @@
                 return;
             }
 
+            // Detect class-seat invites BEFORE signup — their flow is
+            // different (no plan comp, no Stripe checkout, attach to
+            // parent_account_id). The validate_invite RPC returns plan='free'
+            // for class seats so we have to ask is_class_invite explicitly.
+            const isClassSeat = invite?.inviteId
+                ? await isClassInvite(invite.inviteId)
+                : false;
+
             const result = await auth.signUp({
                 email: emailVal,
                 password: passwordVal,
                 name: `${firstName} ${lastName}`.trim(),
-                // Trust the invite's plan over the radio if both are present —
-                // the invite was issued by an admin for a specific tier.
-                plan: invite?.plan || plan,
+                // Class seats inherit the parent's plan via parent_account_id —
+                // signup must not request a paid plan or it'll trigger checkout.
+                // For non-class invites, trust the invite's plan over the radio.
+                plan: isClassSeat ? 'free' : (invite?.plan || plan),
             });
 
             if (!result.success) {
@@ -569,19 +592,34 @@
                 return;
             }
 
-            // Atomic redeem + plan upgrade. Skips the Stripe redirect if the
-            // invite already comped a paid tier — the user is already on
-            // 'educator' / 'advanced' / 'institution' / etc. server-side.
-            // Failure does NOT block signup: the account exists, an admin
-            // can apply the plan manually if the RPC misbehaves.
+            // Class-seat invite: attach the new account to the parent's
+            // roster. The RPC sets parent_account_id and bumps the parent's
+            // seats_used, all atomically. The student's `plan` stays 'free'
+            // — feature-gating reads through effective_plan_for() which
+            // falls back to the parent's plan.
             let invitedComp = false;     // true when invite landed user on a paid tier
-            if (invite?.inviteId && applyInvitePlan) {
+            let classSeatApplied = false;
+            let parentPlan = null;
+            if (isClassSeat && invite?.inviteId && applyClassInvite) {
+                try {
+                    const ar = await applyClassInvite(invite.inviteId, emailVal);
+                    if (ar?.applied) {
+                        classSeatApplied = true;
+                        parentPlan = ar.parentPlan;
+                        await auth.fetchProfile?.();
+                    }
+                } catch (_) { /* signup already succeeded */ }
+            } else if (invite?.inviteId && applyInvitePlan) {
+                // Standard plan-comp invite: atomic redeem + plan upgrade.
+                // Skips the Stripe redirect if the invite already comped
+                // a paid tier — the user is already on 'educator' /
+                // 'advanced' / 'institution' / etc. server-side.
+                // Failure does NOT block signup: the account exists, an admin
+                // can apply the plan manually if the RPC misbehaves.
                 try {
                     const ar = await applyInvitePlan(invite.inviteId, emailVal);
                     if (ar?.applied && ar.plan && ar.plan !== 'free') {
                         invitedComp = true;
-                        // Refresh local auth state so the dashboard renders the
-                        // new plan immediately without another round-trip.
                         await auth.fetchProfile?.();
                     }
                 } catch (_) { /* swallow; signup already succeeded */ }
@@ -592,9 +630,15 @@
                 document.getElementById('form-view').style.display = 'none';
                 document.getElementById('success-view').classList.add('show');
                 const msgEl = document.querySelector('#success-view p');
-                const confirmMsg = (plan !== 'free' && !invitedComp)
-                    ? `${result.message || 'Check your email for a confirmation link.'} After confirming, you'll be able to subscribe to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan.`
-                    : result.message || 'Check your email for a confirmation link.';
+                let confirmMsg;
+                if (classSeatApplied) {
+                    const plabel = parentPlan ? parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1) : 'class';
+                    confirmMsg = `${result.message || 'Check your email for a confirmation link.'} You'll join the ${plabel} class as soon as you confirm.`;
+                } else if (plan !== 'free' && !invitedComp) {
+                    confirmMsg = `${result.message || 'Check your email for a confirmation link.'} After confirming, you'll be able to subscribe to the ${plan.charAt(0).toUpperCase() + plan.slice(1)} plan.`;
+                } else {
+                    confirmMsg = result.message || 'Check your email for a confirmation link.';
+                }
                 if (msgEl) msgEl.textContent = confirmMsg;
                 return;
             }
@@ -603,9 +647,10 @@
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
 
-            // Skip Stripe checkout when the invite already comped a paid tier —
-            // the user shouldn't be charged for what an admin granted.
-            const goToCheckout = plan !== 'free' && !invitedComp;
+            // Skip Stripe checkout when:
+            //   - the invite already comped a paid tier (admin granted), OR
+            //   - this was a class-seat invite (student rides parent's plan).
+            const goToCheckout = plan !== 'free' && !invitedComp && !classSeatApplied;
             if (goToCheckout) {
                 // User selected a paid plan — redirect to checkout after brief delay
                 const msgEl = document.querySelector('#success-view p');
@@ -625,8 +670,11 @@
                     window.location.href = 'dashboard.html';
                 }, 1500);
             } else {
-                if (invitedComp) {
-                    const msgEl = document.querySelector('#success-view p');
+                const msgEl = document.querySelector('#success-view p');
+                if (classSeatApplied) {
+                    const plabel = parentPlan ? parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1) : 'class';
+                    if (msgEl) msgEl.innerHTML = `Welcome! You've joined a Parker Physics ${plabel} class.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
+                } else if (invitedComp) {
                     if (msgEl) msgEl.innerHTML = `Welcome! Your invite unlocked the <strong>${invite.plan.charAt(0).toUpperCase() + invite.plan.slice(1)}</strong> plan.<br><a href="dashboard.html" style="color:#a080ff;">Open your dashboard →</a>`;
                 }
                 setTimeout(() => { window.location.href = 'dashboard.html'; }, 2500);

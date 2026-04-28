@@ -219,6 +219,18 @@
       "destination": "/contact-enterprise.html"
     },
     {
+      "source": "/for-educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/educators",
+      "destination": "/for-educators.html"
+    },
+    {
+      "source": "/teachers",
+      "destination": "/for-educators.html"
+    },
+    {
       "source": "/admin",
       "destination": "/admin.html"
     },

@@ -583,3 +583,321 @@ export async function fetchPipelineHeartbeat() {
         return { ok: false, error: err.message };
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Activation analytics — backed by activation_events + supabase-class-seats
+// migration. All queries gated on requireAdmin(); RLS on activation_events
+// enforces the same bound at the DB layer (admins-only SELECT).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Activation funnel summary by plan + event for the last N days.
+ * Calls activation_funnel(p_days) which returns rows shaped:
+ *   { plan, event, user_count, median_hours }
+ *
+ * Useful for the headline "of N signups in the last 30 days, how many
+ * configured an alert / opened a sim / sent an invite, and how long
+ * did it take them?"
+ */
+export async function fetchActivationFunnel(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('activation_funnel', { p_days: days });
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        // Migration not applied yet — surface a recoverable hint.
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'activation_funnel RPC missing — run supabase-class-seats-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Daily activation rollup for the last N days. Returns one row per
+ * (day, event) bucket — used by the activation chart in the admin
+ * dashboard.
+ */
+export async function fetchActivationDaily(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('activation_events')
+            .select('event, plan, created_at')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+        // Bucket client-side — there are at most a few thousand rows in a
+        // 30-day window for a small product, and a SQL view would lock us
+        // into the bucket size. Do it once here.
+        const buckets = new Map();   // 'YYYY-MM-DD::event' -> count
+        for (const row of (data || [])) {
+            const day = (row.created_at || '').slice(0, 10);
+            const key = `${day}::${row.event}`;
+            buckets.set(key, (buckets.get(key) || 0) + 1);
+        }
+        return { ok: true, data: Array.from(buckets, ([k, v]) => {
+            const [day, event] = k.split('::');
+            return { day, event, count: v };
+        }) };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cohort retention — by signup-week, week-N return-visit rate.
+// "Did the user have ANY activation event in week N after signup?"
+// Approximation of true retention; cheaper than maintaining a session table.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns N weeks of cohorts × N weekly retention buckets.
+ * Result shape: [{ cohort: 'YYYY-MM-DD', size, weeks: [pct,pct,…] }]
+ */
+export async function fetchCohortRetention(weeks = 6) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        // Pull every signup + activation event in the last N+1 weeks.
+        const since = daysAgo(weeks * 7 + 7);
+        const { data, error } = await client
+            .from('activation_events')
+            .select('user_id, event, created_at')
+            .gte('created_at', since)
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        const signups = new Map();   // user_id -> Date(signup)
+        const visits  = new Map();   // user_id -> Set(week_index)
+        for (const r of (data || [])) {
+            if (r.event === 'signup' && !signups.has(r.user_id)) {
+                signups.set(r.user_id, new Date(r.created_at));
+            }
+        }
+        for (const r of (data || [])) {
+            const su = signups.get(r.user_id);
+            if (!su) continue;
+            const wkIdx = Math.floor((new Date(r.created_at) - su) / (7 * 86400_000));
+            if (wkIdx < 0 || wkIdx >= weeks) continue;
+            if (!visits.has(r.user_id)) visits.set(r.user_id, new Set());
+            visits.get(r.user_id).add(wkIdx);
+        }
+
+        // Group signups by cohort (week of signup).
+        const cohorts = new Map();   // 'YYYY-MM-DD' (Mon) -> { size, weeks:[count,…] }
+        for (const [uid, suDate] of signups.entries()) {
+            const monday = new Date(suDate);
+            monday.setUTCHours(0, 0, 0, 0);
+            monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+            const key = monday.toISOString().slice(0, 10);
+            if (!cohorts.has(key)) cohorts.set(key, { size: 0, weeks: Array(weeks).fill(0) });
+            const c = cohorts.get(key);
+            c.size++;
+            const v = visits.get(uid);
+            if (v) for (const wk of v) c.weeks[wk]++;
+        }
+
+        const out = Array.from(cohorts, ([cohort, c]) => ({
+            cohort,
+            size: c.size,
+            weeks: c.weeks.map(n => c.size > 0 ? Math.round((n / c.size) * 100) : 0),
+        })).sort((a, b) => a.cohort < b.cohort ? -1 : 1);
+
+        return { ok: true, data: out };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversion: free → paid funnel rate, by week.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function fetchConversionRate(weeks = 8) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const since = daysAgo(weeks * 7);
+        const { data, error } = await client
+            .from('activation_events')
+            .select('user_id, event, plan, created_at')
+            .gte('created_at', since)
+            .in('event', ['signup', 'subscription_started']);
+        if (error) throw error;
+
+        const buckets = new Map();   // 'YYYY-Wnn' -> { signups, conversions }
+        const isoWeek = (d) => {
+            // ISO week (Mon-anchored) format YYYY-Www
+            const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+            date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+            const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+            const wk = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+            return `${date.getUTCFullYear()}-W${String(wk).padStart(2, '0')}`;
+        };
+
+        for (const r of (data || [])) {
+            const wk = isoWeek(new Date(r.created_at));
+            if (!buckets.has(wk)) buckets.set(wk, { signups: 0, conversions: 0 });
+            const b = buckets.get(wk);
+            if (r.event === 'signup') b.signups++;
+            if (r.event === 'subscription_started') b.conversions++;
+        }
+
+        const out = Array.from(buckets, ([week, b]) => ({
+            week,
+            signups: b.signups,
+            conversions: b.conversions,
+            rate: b.signups > 0 ? Math.round((b.conversions / b.signups) * 1000) / 10 : 0,
+        })).sort((a, b) => a.week < b.week ? -1 : 1);
+
+        return { ok: true, data: out };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Top sims / pages — already exists as fetchTopPages, but admin/analytics
+// surface wants a per-plan breakdown for "do paid users actually use Advanced
+// features?". We piggyback on user_analytics + user_profiles via a join.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function fetchTopSimsByPlan(days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        // user_analytics lacks plan; we map user_id -> plan in two queries
+        // and join client-side. Cheaper than a SQL view, simple to reason
+        // about.
+        const { data: analytics, error: aErr } = await client
+            .from('user_analytics')
+            .select('user_id, page_path, event_name, created_at')
+            .gte('created_at', daysAgo(days))
+            .eq('event_name', 'page_view')
+            .limit(20000);
+        if (aErr) throw aErr;
+
+        const userIds = Array.from(new Set((analytics || []).map(r => r.user_id).filter(Boolean)));
+        let planMap = new Map();
+        if (userIds.length) {
+            const { data: profiles } = await client
+                .from('user_profiles')
+                .select('id, plan')
+                .in('id', userIds);
+            for (const p of (profiles || [])) planMap.set(p.id, p.plan || 'free');
+        }
+
+        const PAGE_TO_SIM = (path) => {
+            // Strip query/hash, normalize to filename, map a few aliases.
+            const clean = String(path || '').split('?')[0].split('#')[0]
+                .replace(/^\/+/, '').replace(/\.html$/, '');
+            if (!clean || clean === 'index') return null;
+            // Only count actual sim pages, not auth/admin/legal.
+            const SKIP = new Set(['signin', 'signup', 'admin', 'pricing', 'eula',
+                                  'privacy', 'reset-password', 'api-policy',
+                                  'contact-enterprise', 'for-educators',
+                                  'dashboard', 'status']);
+            if (SKIP.has(clean)) return null;
+            return clean;
+        };
+
+        // sim -> { plan -> count }
+        const matrix = new Map();
+        for (const row of (analytics || [])) {
+            const sim = PAGE_TO_SIM(row.page_path);
+            if (!sim) continue;
+            const plan = row.user_id ? (planMap.get(row.user_id) || 'free') : 'anon';
+            if (!matrix.has(sim)) matrix.set(sim, new Map());
+            const inner = matrix.get(sim);
+            inner.set(plan, (inner.get(plan) || 0) + 1);
+        }
+
+        const out = Array.from(matrix, ([sim, planCounts]) => ({
+            sim,
+            total:       Array.from(planCounts.values()).reduce((a, b) => a + b, 0),
+            byPlan:      Object.fromEntries(planCounts),
+        })).sort((a, b) => b.total - a.total).slice(0, 12);
+
+        return { ok: true, data: out };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Class-roster aggregate — # of educators with N students. Helps the team see
+// whether educators are actually onboarding their classes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function fetchClassRosterStats() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('user_profiles')
+            .select('id, plan, classroom_seats, seats_used, display_name')
+            .in('plan', ['educator', 'institution', 'enterprise']);
+        if (error) throw error;
+        const educators = (data || []).map(r => ({
+            id:        r.id,
+            name:      r.display_name || '(no name)',
+            plan:      r.plan,
+            seats:     r.classroom_seats || 0,
+            used:      r.seats_used || 0,
+            fillRate:  r.classroom_seats > 0
+                ? Math.round((r.seats_used / r.classroom_seats) * 100)
+                : 0,
+        }));
+
+        const totals = educators.reduce((a, e) => {
+            a.educators++;
+            a.totalSeats += e.seats;
+            a.usedSeats  += e.used;
+            if (e.used === 0) a.dormant++;
+            else if (e.fillRate >= 80) a.healthy++;
+            return a;
+        }, { educators: 0, totalSeats: 0, usedSeats: 0, dormant: 0, healthy: 0 });
+
+        return { ok: true, data: { educators, totals } };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Churn / past-due / at-risk — surface subscriptions in the danger zones so
+// the team can act.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function fetchAtRiskSubscriptions() {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('user_profiles')
+            .select('id, display_name, plan, subscription_status, subscription_period_end, updated_at')
+            .in('subscription_status', ['past_due', 'canceled', 'trialing'])
+            .order('subscription_period_end', { ascending: true, nullsFirst: false });
+        if (error) throw error;
+        const now = Date.now();
+        const enriched = (data || []).map(r => {
+            const ts = r.subscription_period_end ? Date.parse(r.subscription_period_end) : null;
+            const daysLeft = ts ? Math.round((ts - now) / 86400_000) : null;
+            return { ...r, daysLeft };
+        });
+        return { ok: true, data: enriched };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}

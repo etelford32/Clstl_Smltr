@@ -454,3 +454,49 @@ test.describe('Tier expansion', () => {
         await expect(page.locator('input[name="use_case"][value="anomaly_correlation"]')).toBeAttached();
     });
 });
+
+// ── 7. Educator wedge: landing page + class-invite endpoint ─────────────────
+
+test.describe('Educator Wedge', () => {
+    test('for-educators page renders hero + CTA', async ({ page }) => {
+        await page.goto('/for-educators.html');
+        await expect(page.locator('h1')).toContainText(/NASA|class|simulations/i);
+        const cta = page.locator('a.btn-primary[href*="signup"]').first();
+        await expect(cta).toBeVisible();
+        await expect(cta).toHaveAttribute('href', /plan=educator/);
+    });
+
+    test('/educators pretty URL works', async ({ page }) => {
+        const res = await page.goto('/educators');
+        // Vercel rewrite serves /for-educators.html under both URLs.
+        // In dev (no Vercel rewrites), this may 404 — accept either the rewrite or the source.
+        if (res && res.ok()) {
+            await expect(page.locator('h1')).toBeVisible();
+        }
+    });
+
+    test('class invite endpoint rejects unauthorized POST', async ({ request }) => {
+        const res = await request.post('/api/class/invite', {
+            data: { email: 'student@example.com' },
+        });
+        // 401 (no auth) or 501 (not configured in CI) — never 200.
+        expect([401, 403, 501]).toContain(res.status());
+    });
+
+    test('class roster endpoint rejects unauthorized GET', async ({ request }) => {
+        const res = await request.get('/api/class/roster');
+        expect([401, 403, 501]).toContain(res.status());
+    });
+
+    test('class invite endpoint rejects invalid origin', async ({ request }) => {
+        const res = await request.post('/api/class/invite', {
+            data:    { email: 'student@example.com' },
+            headers: {
+                Authorization: 'Bearer fake-token',
+                Origin:        'https://evil.example.com',
+            },
+        });
+        // 403 (forbidden_origin) or 401 (auth) or 501 (not configured).
+        expect([401, 403, 501]).toContain(res.status());
+    });
+});

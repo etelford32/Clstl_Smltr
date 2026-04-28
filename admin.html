@@ -157,10 +157,15 @@
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("admin");</script>
 
 <div class="auth-gate" id="auth-gate">
-    <div>
+    <div style="max-width:560px">
         <h2>Admin Access Required</h2>
         <p>You must be signed in with an admin account to view this page.</p>
-        <a href="signin.html">Sign In</a>
+        <pre id="auth-gate-diag" style="display:none;text-align:left;font-size:.72rem;color:#888;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;margin-bottom:14px;white-space:pre-wrap;word-break:break-word;font-family:'SFMono-Regular',Consolas,monospace"></pre>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <a href="signin.html">Sign In</a>
+            <button class="btn" id="auth-gate-retry" style="display:none">Refresh session &amp; retry</button>
+            <button class="btn" id="auth-gate-signout" style="display:none">Sign out</button>
+        </div>
     </div>
 </div>
 
@@ -173,6 +178,7 @@
     <div class="tabs" id="tabs">
         <button class="tab active" data-tab="overview">Overview</button>
         <button class="tab" data-tab="users">Users</button>
+        <button class="tab" data-tab="activation">Activation</button>
         <button class="tab" data-tab="analytics">Analytics</button>
         <button class="tab" data-tab="invites">Invites</button>
         <button class="tab" data-tab="system">System</button>
@@ -236,6 +242,75 @@
         <div class="card">
             <h3>All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
             <div id="users-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ ACTIVATION TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-activation">
+        <!-- ── Activation funnel ──────────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Activation Funnel
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last
+                    <select id="activation-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">7 days</option>
+                        <option value="30" selected>30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                </span>
+                <button class="btn btn-sm" id="btn-refresh-activation" style="float:right">Refresh</button>
+            </h3>
+            <p style="font-size:.78rem;color:#666;margin-bottom:14px">
+                Each row counts unique users who hit that event in the window. Median hours = signup→event delay.
+                Backed by the <code style="color:#9ad36f">activation_events</code> table.
+            </p>
+            <div id="activation-funnel-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Daily activation chart ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Daily Activation Events <span style="font-size:.72rem;color:#666;font-weight:400">stacked by event</span></h3>
+            <div style="height:140px;margin-bottom:8px">
+                <canvas id="activation-canvas" style="width:100%;height:100%"></canvas>
+            </div>
+            <div id="activation-legend" style="display:flex;flex-wrap:wrap;gap:10px;font-size:.72rem;color:#888"></div>
+        </div>
+
+        <!-- ── Conversion rate (free→paid) ─────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Free → Paid Conversion <span style="font-size:.72rem;color:#666;font-weight:400">last 8 weeks</span></h3>
+            <div id="conversion-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Cohort retention table ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Weekly Cohort Retention <span style="font-size:.72rem;color:#666;font-weight:400">% of cohort returning week-N</span></h3>
+            <div id="cohort-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Class-roster snapshot (educator/institution health) ──── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Educator / Institution Roster Health</h3>
+            <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-count" style="color:#9ad36f">--</div><div class="kpi-label">Seated accounts</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-seats" style="color:#fff">--</div><div class="kpi-label">Total seats</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-used" style="color:#4eff91">--</div><div class="kpi-label">Seats filled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-healthy" style="color:#4fc3f7">--</div><div class="kpi-label">≥80% filled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-dormant" style="color:#ff8c00">--</div><div class="kpi-label">Dormant (0 used)</div></div>
+            </div>
+            <div id="edu-roster-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Top sims by plan ──────────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Top Simulations <span style="font-size:.72rem;color:#666;font-weight:400">last 7 days · views by plan</span></h3>
+            <div id="sims-by-plan-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── At-risk subscriptions ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>At-Risk Subscriptions <span style="font-size:.72rem;color:#666;font-weight:400">past_due / canceled / trialing</span></h3>
+            <div id="at-risk-container"><div class="empty">Loading...</div></div>
         </div>
     </div>
 
@@ -458,7 +533,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -474,27 +549,104 @@ document.getElementById('tabs').addEventListener('click', e => {
 // ── Auth gate ────────────────────────────────────────────────────────────────
 await auth.ready();
 
-function showGate(heading, message) {
-    const gate = document.getElementById('auth-gate');
+function showGate(heading, message, diag) {
+    const gate    = document.getElementById('auth-gate');
+    const diagEl  = document.getElementById('auth-gate-diag');
+    const retry   = document.getElementById('auth-gate-retry');
+    const signout = document.getElementById('auth-gate-signout');
     gate.querySelector('h2').textContent = heading;
     gate.querySelector('p').textContent = message;
+    if (diag) {
+        diagEl.textContent = diag;
+        diagEl.style.display = 'block';
+        retry.style.display = '';
+        signout.style.display = auth.isSignedIn() ? '' : 'none';
+    } else {
+        diagEl.style.display = 'none';
+        retry.style.display = 'none';
+        signout.style.display = 'none';
+    }
     gate.style.display = 'flex';
+    document.getElementById('admin-main').style.display = 'none';
 }
 
+document.getElementById('auth-gate-retry')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing session…';
+    try {
+        const sb = await getSupabase();
+        await sb.auth.refreshSession();
+        await auth.fetchProfile();
+    } catch (_) { /* fall through to recheck */ }
+    btn.disabled = false;
+    btn.textContent = 'Refresh session & retry';
+    location.reload();
+});
+
+document.getElementById('auth-gate-signout')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+        const sb = await getSupabase();
+        await sb.auth.signOut();
+    } catch (_) {}
+    try { localStorage.removeItem('pp_auth'); sessionStorage.removeItem('pp_auth'); } catch (_) {}
+    location.href = 'signin.html';
+});
+
 if (!auth.isSignedIn()) {
-    showGate('Admin Access Required', 'You must be signed in with an admin account to view this page.');
+    showGate(
+        'Admin Access Required',
+        'You must be signed in with an admin account to view this page.'
+    );
     throw '';
 }
 
 // Server-side admin verification: validates JWT with Supabase Auth server
 // and queries user_profiles for role. Cannot be bypassed via localStorage.
-const adminCheck = await auth.verifyAdminServerSide();
+// Retry once after a session refresh — the most common transient failure
+// is a token that's between expiry and refresh on cold page load.
+async function verifyOnce() {
+    return auth.verifyAdminServerSide();
+}
+
+let adminCheck = await verifyOnce();
 if (!adminCheck.verified) {
-    // Fallback: also check local state (for when Supabase is unavailable in dev)
+    // First retry: refresh the session and try again. This catches the
+    // "auth-session-missing" race where the page beat the Supabase token
+    // refresh.
+    try {
+        const sb = await getSupabase();
+        await sb.auth.refreshSession();
+    } catch (_) { /* swallow, fall through */ }
+    adminCheck = await verifyOnce();
+}
+if (!adminCheck.verified) {
+    // Fallback: pull profile and check local state.
     await auth.fetchProfile();
     if (!auth.isAdmin()) {
-        const reason = adminCheck.error || 'Unknown';
-        showGate('Insufficient Permissions', `Access denied. Server verification: ${_esc(reason)}. Role: ${_esc(auth.getRole())}.`);
+        const u = auth.getUser?.() || {};
+        const diag = [
+            `Local role:       ${auth.getRole?.() || '(none)'}`,
+            `Local plan:       ${auth.getPlan?.() || '(none)'}`,
+            `Email:            ${u.email || '(none)'}`,
+            `User id:          ${u.id || '(none)'}`,
+            `Server check:     ${adminCheck.error || 'verified=false'}`,
+            adminCheck.dbCode ? `Postgres code:    ${adminCheck.dbCode}` : '',
+            ``,
+            `Recovery options:`,
+            ` 1. Sign out + sign back in (refreshes JWT cleanly).`,
+            ` 2. If your account is brand-new, the user_profiles row may`,
+            `    not exist yet. Run supabase-make-owner-superadmin.sql in`,
+            `    the Supabase SQL Editor with your email substituted.`,
+            ` 3. If "Role column missing", run supabase-admin.sql.`,
+        ].filter(Boolean).join('\n');
+        showGate(
+            'Insufficient Permissions',
+            'Server admin verification failed. Diagnostics below — copy/paste if you need help.',
+            diag,
+        );
         throw '';
     }
 }
@@ -698,6 +850,282 @@ function _timeAgo(iso) {
     if (s < 86400) return Math.floor(s/3600) + 'h ago';
     return Math.floor(s/86400) + 'd ago';
 }
+
+// ── Activation Tab ───────────────────────────────────────────────────────────
+// All sections degrade gracefully if the supabase-class-seats-migration.sql
+// hasn't been applied — the activation_events table simply returns no rows
+// or the activation_funnel RPC errors with "function does not exist".
+
+// Stable color per event for the daily chart + funnel.
+const EVENT_COLOR = {
+    signup:                 '#9ad36f',
+    profile_completed:      '#66d9ff',
+    location_saved:         '#4eff91',
+    first_sim_opened:       '#ffd700',
+    first_alert_configured: '#ff8c00',
+    first_email_alert_sent: '#ffaa44',
+    invite_sent:            '#c080ff',
+    student_joined:         '#80d4ff',
+    subscription_started:   '#4eff91',
+    subscription_canceled:  '#ff6060',
+};
+const EVENT_LABEL = {
+    signup:                 'Signup',
+    profile_completed:      'Profile completed',
+    location_saved:         'Location saved',
+    first_sim_opened:       'First sim opened',
+    first_alert_configured: 'First alert configured',
+    first_email_alert_sent: 'First email alert sent',
+    invite_sent:            'Invite sent',
+    student_joined:         'Student joined',
+    subscription_started:   'Subscription started',
+    subscription_canceled:  'Subscription canceled',
+};
+
+async function loadActivationFunnel() {
+    const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
+    const el = document.getElementById('activation-funnel-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchActivationFunnel(days);
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`;
+        return;
+    }
+    if (!res.data.length) {
+        el.innerHTML = '<div class="empty">No activation events yet — once users sign up + open a sim, rows appear here.</div>';
+        return;
+    }
+    // Pivot to plan × event matrix; signup acts as the denominator within each plan.
+    const planEvents = new Map();   // plan -> Map(event -> { count, median })
+    const signupByPlan = new Map(); // plan -> count
+    for (const r of res.data) {
+        const plan = r.plan || 'free';
+        if (!planEvents.has(plan)) planEvents.set(plan, new Map());
+        planEvents.get(plan).set(r.event, { count: r.user_count, median: r.median_hours });
+        if (r.event === 'signup') signupByPlan.set(plan, r.user_count);
+    }
+
+    const EVENT_ORDER = [
+        'signup',
+        'profile_completed',
+        'location_saved',
+        'first_sim_opened',
+        'first_alert_configured',
+        'first_email_alert_sent',
+        'invite_sent',
+        'student_joined',
+        'subscription_started',
+        'subscription_canceled',
+    ];
+
+    let html = '<table><thead><tr><th>Plan</th><th>Signups</th>';
+    for (const ev of EVENT_ORDER) {
+        if (ev === 'signup') continue;
+        html += `<th title="median hours from signup → first occurrence">${_esc(EVENT_LABEL[ev])}</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    const plans = Array.from(planEvents.keys()).sort();
+    for (const plan of plans) {
+        const m = planEvents.get(plan);
+        const denom = signupByPlan.get(plan) || 0;
+        html += `<tr><td><span class="badge b-${plan}">${_esc(plan)}</span></td><td><strong>${denom.toLocaleString()}</strong></td>`;
+        for (const ev of EVENT_ORDER) {
+            if (ev === 'signup') continue;
+            const cell = m.get(ev);
+            if (!cell) { html += '<td style="color:#444">—</td>'; continue; }
+            const pct = denom > 0 ? Math.round((cell.count / denom) * 100) : null;
+            const median = cell.median != null ? `${cell.median}h` : '—';
+            html += `<td><div style="font-size:.86rem;color:#fff">${cell.count.toLocaleString()}${pct != null ? ` <span style="color:#666">(${pct}%)</span>` : ''}</div><div style="font-size:.7rem;color:#555">${median}</div></td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadActivationChart() {
+    const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
+    const res = await fetchActivationDaily(days);
+    const canvas = document.getElementById('activation-canvas');
+    const legend = document.getElementById('activation-legend');
+    if (!res.ok || !res.data.length) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        legend.innerHTML = '';
+        return;
+    }
+    // Index by day, keep a sorted day list + event totals.
+    const byDay = new Map();
+    const eventsSeen = new Set();
+    for (const row of res.data) {
+        if (!byDay.has(row.day)) byDay.set(row.day, {});
+        byDay.get(row.day)[row.event] = (byDay.get(row.day)[row.event] || 0) + row.count;
+        eventsSeen.add(row.event);
+    }
+    const days_ = Array.from(byDay.keys()).sort();
+    const events = Array.from(eventsSeen);
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = canvas.offsetWidth  * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    const maxStack = Math.max(...days_.map(d => events.reduce((a, e) => a + (byDay.get(d)[e] || 0), 0)), 1);
+    const barW = Math.max(4, Math.floor((W - 12) / days_.length) - 1);
+
+    days_.forEach((d, i) => {
+        let yCursor = H - 4;
+        const x = 6 + i * (barW + 1);
+        for (const ev of events) {
+            const v = byDay.get(d)[ev] || 0;
+            if (!v) continue;
+            const h = (v / maxStack) * (H - 12);
+            ctx.fillStyle = EVENT_COLOR[ev] || '#888';
+            ctx.fillRect(x, yCursor - h, barW, h);
+            yCursor -= h;
+        }
+    });
+
+    legend.innerHTML = events.map(ev =>
+        `<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:${EVENT_COLOR[ev] || '#888'};border-radius:2px"></span>${_esc(EVENT_LABEL[ev] || ev)}</span>`
+    ).join('');
+}
+
+async function loadConversion() {
+    const el = document.getElementById('conversion-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchConversionRate(8);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No data yet.</div>'; return; }
+    let html = '<table><thead><tr><th>Week</th><th>Signups</th><th>Subscribed</th><th>Rate</th></tr></thead><tbody>';
+    for (const r of res.data) {
+        const rateColor = r.rate >= 5 ? '#4eff91' : r.rate >= 2 ? '#ffd700' : '#aaa';
+        html += `<tr><td style="font-family:monospace">${_esc(r.week)}</td><td>${r.signups}</td><td>${r.conversions}</td><td style="color:${rateColor};font-weight:600">${r.rate}%</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadCohorts() {
+    const el = document.getElementById('cohort-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchCohortRetention(6);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No cohorts yet.</div>'; return; }
+    const weeks = res.data[0]?.weeks?.length || 0;
+    let html = '<table><thead><tr><th>Cohort (week of)</th><th>Size</th>';
+    for (let i = 0; i < weeks; i++) html += `<th>W${i}</th>`;
+    html += '</tr></thead><tbody>';
+    for (const c of res.data) {
+        html += `<tr><td style="font-family:monospace">${_esc(c.cohort)}</td><td>${c.size}</td>`;
+        for (const pct of c.weeks) {
+            // Heat-map cell: green for high, red for low.
+            const hue = Math.min(120, Math.max(0, pct * 1.2));
+            html += `<td style="background:hsla(${hue},60%,30%,${pct/100*0.45 + 0.05});color:${pct >= 30 ? '#fff' : '#888'}">${pct}%</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadEducatorRoster() {
+    const el = document.getElementById('edu-roster-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchClassRosterStats();
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    const t = res.data.totals;
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = (v ?? 0).toLocaleString(); };
+    set('kpi-edu-count',   t.educators);
+    set('kpi-edu-seats',   t.totalSeats);
+    set('kpi-edu-used',    t.usedSeats);
+    set('kpi-edu-healthy', t.healthy);
+    set('kpi-edu-dormant', t.dormant);
+
+    if (!res.data.educators.length) {
+        el.innerHTML = '<div class="empty">No educators / institutions yet.</div>';
+        return;
+    }
+    let html = '<table><thead><tr><th>Account</th><th>Plan</th><th>Used</th><th>Seats</th><th>Fill</th></tr></thead><tbody>';
+    const sorted = [...res.data.educators].sort((a, b) => b.fillRate - a.fillRate);
+    for (const e of sorted) {
+        const fillColor = e.fillRate >= 80 ? '#4eff91' : e.fillRate >= 30 ? '#ffd700' : e.fillRate > 0 ? '#ff8c00' : '#666';
+        html += `<tr><td>${_esc(e.name)}</td><td><span class="badge b-${e.plan}">${_esc(e.plan)}</span></td><td>${e.used}</td><td>${e.seats}</td><td style="color:${fillColor};font-weight:600">${e.fillRate}%</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadTopSimsByPlan() {
+    const el = document.getElementById('sims-by-plan-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchTopSimsByPlan(7);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No sim views in the last 7 days.</div>'; return; }
+    const plans = ['anon', 'free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
+    let html = '<table><thead><tr><th>Sim</th><th>Total</th>';
+    for (const p of plans) html += `<th>${_esc(p)}</th>`;
+    html += '</tr></thead><tbody>';
+    for (const r of res.data) {
+        html += `<tr><td><a href="${_esc(r.sim)}.html" style="color:#9cf;text-decoration:none">${_esc(r.sim)}</a></td><td><strong>${r.total.toLocaleString()}</strong></td>`;
+        for (const p of plans) {
+            const v = r.byPlan[p] || 0;
+            html += `<td style="color:${v ? '#bbb' : '#444'}">${v || '—'}</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadAtRisk() {
+    const el = document.getElementById('at-risk-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchAtRiskSubscriptions();
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty" style="color:#4eff91">No at-risk subscriptions — nice.</div>'; return; }
+    let html = '<table><thead><tr><th>Account</th><th>Plan</th><th>Status</th><th>Days left</th><th>Period end</th></tr></thead><tbody>';
+    for (const r of res.data) {
+        const statusColor = r.subscription_status === 'past_due' ? '#ff6060'
+                          : r.subscription_status === 'canceled' ? '#ff8c00'
+                          : '#ffd700';
+        const daysColor = r.daysLeft != null && r.daysLeft < 3 ? '#ff6060'
+                        : r.daysLeft != null && r.daysLeft < 7 ? '#ffd700'
+                        : '#aaa';
+        const end = r.subscription_period_end ? new Date(r.subscription_period_end).toLocaleDateString() : '—';
+        html += `<tr><td>${_esc(r.display_name || r.id?.slice(0,8) || '—')}</td><td><span class="badge b-${r.plan}">${_esc(r.plan)}</span></td><td style="color:${statusColor};font-weight:600">${_esc(r.subscription_status)}</td><td style="color:${daysColor}">${r.daysLeft ?? '—'}</td><td style="color:#777;font-size:.78rem">${_esc(end)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+// Lazy-load activation tab on first switch (the queries are heavier than
+// the overview cards — no point hammering Supabase if the user never
+// opens the tab).
+let _activationLoaded = false;
+async function loadActivationAll() {
+    await Promise.all([
+        loadActivationFunnel(),
+        loadActivationChart(),
+        loadConversion(),
+        loadCohorts(),
+        loadEducatorRoster(),
+        loadTopSimsByPlan(),
+        loadAtRisk(),
+    ]);
+    _activationLoaded = true;
+}
+document.querySelector('.tab[data-tab="activation"]')?.addEventListener('click', () => {
+    if (!_activationLoaded) loadActivationAll();
+});
+document.getElementById('btn-refresh-activation')?.addEventListener('click', loadActivationAll);
+document.getElementById('activation-window')?.addEventListener('change', () => {
+    loadActivationFunnel();
+    loadActivationChart();
+});
 
 // ── Users Tab ────────────────────────────────────────────────────────────────
 async function loadUsers() {
