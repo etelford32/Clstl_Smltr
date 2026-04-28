@@ -32,10 +32,201 @@
 --
 -- Idempotent: CREATE OR REPLACE FUNCTION + CREATE TABLE IF NOT
 -- EXISTS + DROP POLICY IF EXISTS. Run AFTER:
---   * supabase-schema.sql
---   * supabase-tier-expansion-migration.sql
---   * supabase-invites-apply-plan-migration.sql
+--   * supabase-schema.sql                          — invite_codes, user_profiles
+--   * supabase-tier-expansion-migration.sql        — parent_account_id, seats columns
+--   * supabase-invites-apply-plan-migration.sql    — privileged_update flag + guard
 -- ═══════════════════════════════════════════════════════════════
+
+
+-- ── 0. Preflight check ───────────────────────────────────────────
+-- Surface a clear, actionable error when a prerequisite migration
+-- hasn't been applied, instead of dying mid-migration with
+-- "relation public.invite_codes does not exist" or similar.
+-- Each missing piece points at the migration that defines it.
+
+DO $preflight$
+DECLARE
+    missing TEXT := '';
+BEGIN
+    IF to_regclass('public.user_profiles') IS NULL THEN
+        missing := missing || E'\n  • table public.user_profiles      — run supabase-schema.sql';
+    END IF;
+
+    IF to_regclass('public.invite_codes') IS NULL THEN
+        missing := missing || E'\n  • table public.invite_codes       — run supabase-schema.sql';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name   = 'user_profiles'
+           AND column_name  = 'parent_account_id'
+    ) THEN
+        missing := missing || E'\n  • column user_profiles.parent_account_id  — run supabase-tier-expansion-migration.sql';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name   = 'user_profiles'
+           AND column_name  = 'classroom_seats'
+    ) THEN
+        missing := missing || E'\n  • column user_profiles.classroom_seats    — run supabase-tier-expansion-migration.sql';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name   = 'user_profiles'
+           AND column_name  = 'seats_used'
+    ) THEN
+        missing := missing || E'\n  • column user_profiles.seats_used         — run supabase-tier-expansion-migration.sql';
+    END IF;
+
+    -- guard_user_profile_self_update isn't strictly required (the RPCs
+    -- below set the privileged_update flag defensively), but flag its
+    -- absence so the operator knows their schema is incomplete.
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_proc
+         WHERE proname = 'guard_user_profile_self_update'
+    ) THEN
+        RAISE NOTICE 'guard_user_profile_self_update() trigger not present — supabase-invites-apply-plan-migration.sql is recommended for plan-tier integrity.';
+    END IF;
+
+    IF missing <> '' THEN
+        -- Use 'feature_not_supported' (0A000) so the message is the
+        -- prominent thing the operator sees. SQLSTATE 42P01 (undefined_table)
+        -- would be misleading when the missing piece is a column or function.
+        RAISE EXCEPTION
+            E'supabase-class-seats-migration.sql cannot be applied — prerequisites missing:%\n\nApply the listed migrations (in order, idempotent so re-running is safe) and try again. See DEPLOYMENT.md for the full list.', missing
+            USING ERRCODE = '0A000';
+    END IF;
+END
+$preflight$ LANGUAGE plpgsql;
+
+
+-- ─────────────────────────────────────────────────────────────────
+-- PART A — Activation events
+--
+-- Doesn't depend on invite_codes / class seats, so we install it
+-- first. A fresh project that hasn't run the tier-expansion migration
+-- still benefits from the activation funnel (and the preflight above
+-- would already have aborted before reaching here).
+-- ─────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.activation_events (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    event       TEXT NOT NULL CHECK (event IN (
+        'signup',
+        'profile_completed',
+        'location_saved',
+        'first_sim_opened',
+        'first_alert_configured',
+        'first_email_alert_sent',
+        'invite_sent',
+        'student_joined',
+        'subscription_started',
+        'subscription_canceled'
+    )),
+    plan        TEXT,
+    metadata    JSONB DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_activation_events_user
+    ON public.activation_events(user_id, event, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_activation_events_event_time
+    ON public.activation_events(event, created_at DESC);
+
+ALTER TABLE public.activation_events ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users see own activation" ON public.activation_events;
+CREATE POLICY "Users see own activation"
+    ON public.activation_events FOR SELECT
+    USING (user_id = auth.uid() OR public.is_admin());
+
+DROP POLICY IF EXISTS "Admins manage activation" ON public.activation_events;
+CREATE POLICY "Admins manage activation"
+    ON public.activation_events FOR ALL
+    USING (public.is_admin());
+
+-- Idempotency for "first_*" events — at most one row per user per
+-- event so a chatty client can't bloat the table.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_activation_events_first
+    ON public.activation_events(user_id, event)
+    WHERE event IN (
+        'signup',
+        'profile_completed',
+        'location_saved',
+        'first_sim_opened',
+        'first_alert_configured',
+        'first_email_alert_sent'
+    );
+
+CREATE OR REPLACE FUNCTION public.log_activation_event(
+    p_event    TEXT,
+    p_plan     TEXT DEFAULT NULL,
+    p_metadata JSONB DEFAULT '{}'::jsonb
+) RETURNS BOOLEAN AS $$
+DECLARE
+    v_caller UUID := auth.uid();
+    v_inserted INT;
+BEGIN
+    IF v_caller IS NULL THEN RETURN FALSE; END IF;
+
+    INSERT INTO public.activation_events (user_id, event, plan, metadata)
+    VALUES (v_caller, p_event, p_plan, COALESCE(p_metadata, '{}'::jsonb))
+    ON CONFLICT DO NOTHING;
+
+    GET DIAGNOSTICS v_inserted = ROW_COUNT;
+    RETURN v_inserted > 0;
+EXCEPTION
+    WHEN check_violation THEN
+        RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.log_activation_event(TEXT, TEXT, JSONB) TO authenticated;
+
+-- Funnel summary RPC for the admin dashboard.
+CREATE OR REPLACE FUNCTION public.activation_funnel(p_days INT DEFAULT 30)
+RETURNS TABLE(
+    plan         TEXT,
+    event        TEXT,
+    user_count   BIGINT,
+    median_hours NUMERIC
+) AS $$
+    WITH signups AS (
+        SELECT user_id, plan, created_at AS signed_up_at
+          FROM public.activation_events
+         WHERE event = 'signup'
+           AND created_at > now() - (p_days || ' days')::interval
+    )
+    SELECT
+        COALESCE(s.plan, ae.plan, 'free')                 AS plan,
+        ae.event                                           AS event,
+        COUNT(DISTINCT ae.user_id)                         AS user_count,
+        ROUND(EXTRACT(EPOCH FROM
+            percentile_cont(0.5) WITHIN GROUP (ORDER BY ae.created_at - s.signed_up_at)
+        ) / 3600.0, 2)                                     AS median_hours
+      FROM public.activation_events ae
+      LEFT JOIN signups s USING (user_id)
+     WHERE ae.created_at > now() - (p_days || ' days')::interval
+     GROUP BY 1, 2
+     ORDER BY 1, 2;
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+GRANT EXECUTE ON FUNCTION public.activation_funnel(INT) TO authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────
+-- PART B — Class-seat invites
+--
+-- All of these touch invite_codes / user_profiles / parent_account_id,
+-- so the preflight above guarantees they'll succeed.
+-- ─────────────────────────────────────────────────────────────────
 
 
 -- ── 1. Mark class-seat invites with a flag on invite_codes ──────
@@ -268,133 +459,6 @@ RETURNS TABLE(
 $$ LANGUAGE sql SECURITY DEFINER STABLE;
 
 GRANT EXECUTE ON FUNCTION public.class_roster() TO authenticated;
-
-
--- ── 7. Activation events table ───────────────────────────────────
--- Append-only event log. Narrow on purpose: just the dimensions
--- we need to answer "which signups got value?". Heavy enrichment
--- happens at query time via JOIN to user_profiles.
---
--- Allow-list of event names is enforced both at insert time (CHECK)
--- and in the RPC, so the table never bloats with typos like
--- "first_sim_open" vs "first-sim-open".
-CREATE TABLE IF NOT EXISTS public.activation_events (
-    id          BIGSERIAL PRIMARY KEY,
-    user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    event       TEXT NOT NULL CHECK (event IN (
-        'signup',
-        'profile_completed',
-        'location_saved',
-        'first_sim_opened',
-        'first_alert_configured',
-        'first_email_alert_sent',
-        'invite_sent',
-        'student_joined',
-        'subscription_started',
-        'subscription_canceled'
-    )),
-    plan        TEXT,
-    metadata    JSONB DEFAULT '{}'::jsonb,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_activation_events_user
-    ON public.activation_events(user_id, event, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_activation_events_event_time
-    ON public.activation_events(event, created_at DESC);
-
-ALTER TABLE public.activation_events ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Users see own activation" ON public.activation_events;
-CREATE POLICY "Users see own activation"
-    ON public.activation_events FOR SELECT
-    USING (user_id = auth.uid() OR public.is_admin());
-
-DROP POLICY IF EXISTS "Admins manage activation" ON public.activation_events;
-CREATE POLICY "Admins manage activation"
-    ON public.activation_events FOR ALL
-    USING (public.is_admin());
-
-
--- ── 8. log_activation_event() — idempotent insert ─────────────────
--- Most events are "first X" events, so we want at-most-once per
--- (user, event) pair. The unique partial index below + ON
--- CONFLICT DO NOTHING gives the RPC at-most-once semantics for
--- the "first_*" events, and at-most-once-per-day for the rest.
---
--- Returns true if a new row was inserted, false if the event was
--- already logged for this user (so the client can stop retrying).
-CREATE UNIQUE INDEX IF NOT EXISTS uq_activation_events_first
-    ON public.activation_events(user_id, event)
-    WHERE event IN (
-        'signup',
-        'profile_completed',
-        'location_saved',
-        'first_sim_opened',
-        'first_alert_configured',
-        'first_email_alert_sent'
-    );
-
-CREATE OR REPLACE FUNCTION public.log_activation_event(
-    p_event    TEXT,
-    p_plan     TEXT DEFAULT NULL,
-    p_metadata JSONB DEFAULT '{}'::jsonb
-) RETURNS BOOLEAN AS $$
-DECLARE
-    v_caller UUID := auth.uid();
-    v_inserted INT;
-BEGIN
-    IF v_caller IS NULL THEN RETURN FALSE; END IF;
-
-    INSERT INTO public.activation_events (user_id, event, plan, metadata)
-    VALUES (v_caller, p_event, p_plan, COALESCE(p_metadata, '{}'::jsonb))
-    ON CONFLICT DO NOTHING;
-
-    GET DIAGNOSTICS v_inserted = ROW_COUNT;
-    RETURN v_inserted > 0;
-EXCEPTION
-    WHEN check_violation THEN
-        -- Unknown event name — silently drop so a stale client
-        -- can't spam errors into the logs.
-        RETURN FALSE;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-GRANT EXECUTE ON FUNCTION public.log_activation_event(TEXT, TEXT, JSONB) TO authenticated;
-
-
--- ── 9. Activation funnel summary RPC for the admin dashboard ─────
--- Returns event counts + median time-to-event by plan, last 30 days.
--- Admin-only.
-CREATE OR REPLACE FUNCTION public.activation_funnel(p_days INT DEFAULT 30)
-RETURNS TABLE(
-    plan         TEXT,
-    event        TEXT,
-    user_count   BIGINT,
-    median_hours NUMERIC
-) AS $$
-    WITH signups AS (
-        SELECT user_id, plan, created_at AS signed_up_at
-          FROM public.activation_events
-         WHERE event = 'signup'
-           AND created_at > now() - (p_days || ' days')::interval
-    )
-    SELECT
-        COALESCE(s.plan, ae.plan, 'free')                 AS plan,
-        ae.event                                           AS event,
-        COUNT(DISTINCT ae.user_id)                         AS user_count,
-        ROUND(EXTRACT(EPOCH FROM
-            percentile_cont(0.5) WITHIN GROUP (ORDER BY ae.created_at - s.signed_up_at)
-        ) / 3600.0, 2)                                     AS median_hours
-      FROM public.activation_events ae
-      LEFT JOIN signups s USING (user_id)
-     WHERE ae.created_at > now() - (p_days || ' days')::interval
-     GROUP BY 1, 2
-     ORDER BY 1, 2;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
-
-GRANT EXECUTE ON FUNCTION public.activation_funnel(INT) TO authenticated;
 
 
 -- ═══════════════════════════════════════════════════════════════
