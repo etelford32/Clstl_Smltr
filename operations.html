@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations — Fleet & Debris Console · Parker Physics</title>
+<meta name="description" content="Decision-grade satellite operations console. Fleet drag and decay analysis, pairwise conjunction screening against the public debris catalog, deterministic time scrub, and full provenance on every number. PRO Preview — open beta.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ─── Layout ───────────────────────────────────────────── */
+#op-app {
+    display:grid;
+    grid-template-columns:300px 1fr 420px;
+    grid-template-rows:auto 1fr auto;
+    grid-template-areas:
+        "hero  hero   hero"
+        "left  globe  right"
+        "scrub scrub  scrub";
+    gap:14px;
+    padding:14px;
+    min-height:calc(100vh - 50px);
+}
+#op-hero    { grid-area:hero; }
+#op-left    { grid-area:left; }
+#op-globe-wrap { grid-area:globe; }
+#op-right   { grid-area:right; }
+#op-scrub   { grid-area:scrub; }
+
+@media (max-width:1280px) {
+    #op-app {
+        grid-template-columns:280px 1fr;
+        grid-template-areas:
+            "hero  hero"
+            "left  globe"
+            "right right"
+            "scrub scrub";
+    }
+}
+@media (max-width:900px) {
+    #op-app {
+        grid-template-columns:1fr;
+        grid-template-areas:
+            "hero"
+            "globe"
+            "left"
+            "right"
+            "scrub";
+        padding:10px; gap:10px;
+    }
+}
+
+.op-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    padding:14px 16px;
+}
+.op-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#8ab; font-weight:700; margin-bottom:10px;
+}
+.op-panel + .op-panel { margin-top:14px; }
+
+/* ─── Hero ─────────────────────────────────────────────── */
+#op-hero { padding:18px 20px 14px; }
+#op-hero-row {
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+}
+#op-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 40%,#9cc);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin:0;
+}
+#op-hero-sub {
+    font-size:.82rem; color:#8ab; line-height:1.5; margin-top:4px;
+    max-width:780px;
+}
+.op-badge-preview {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background:rgba(0,200,200,.12); color:#0cc;
+    border:1px solid rgba(0,200,200,.28);
+}
+
+/* ─── Persona switch ───────────────────────────────────── */
+#op-personas {
+    display:flex; gap:4px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:3px;
+    margin-top:10px;
+    flex-wrap:wrap;
+}
+.op-persona-btn {
+    background:transparent; border:0; color:#aab;
+    font:inherit; font-size:.74rem; font-weight:600;
+    padding:6px 12px; border-radius:5px;
+    cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+    transition:all .15s;
+}
+.op-persona-btn:hover:not(:disabled) { color:#fff; background:rgba(255,255,255,.05); }
+.op-persona-btn.op-persona-on {
+    background:rgba(0,200,200,.18); color:#0ff;
+}
+.op-persona-btn:disabled {
+    opacity:.45; cursor:not-allowed;
+}
+.op-persona-btn .op-persona-soon {
+    font-size:.55rem; letter-spacing:.08em; text-transform:uppercase;
+    color:#667; font-weight:700;
+}
+
+/* ─── Scenario chips (hash, model, source) ─────────────── */
+#op-scenario-row {
+    display:flex; flex-wrap:wrap; gap:6px;
+    margin-top:10px;
+    align-items:center;
+}
+.op-chip {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family:monospace;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.18);
+    color:#bcd;
+    cursor:default;
+}
+.op-chip-button { cursor:pointer; transition:all .15s; }
+.op-chip-button:hover { border-color:rgba(255,255,255,.35); color:#fff; }
+.op-chip-dot {
+    width:7px; height:7px; border-radius:50%;
+    background:currentColor; box-shadow:0 0 6px currentColor;
+}
+.op-chip--live { color:#0fa; border-color:rgba(0,255,170,.3); }
+.op-chip--scrub { color:#fc6; border-color:rgba(255,200,100,.3); }
+.op-chip--replay { color:#6cf; border-color:rgba(110,200,255,.3); }
+.op-chip--hash { color:#aac; }
+.op-chip--model { color:#9bd; }
+
+/* ─── Globe placeholder ────────────────────────────────── */
+#op-globe-wrap {
+    position:relative;
+    background:radial-gradient(circle at 50% 40%, #0a0622 0%, #020008 90%);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    overflow:hidden;
+    min-height:560px;
+}
+#op-globe { width:100%; height:100%; display:block; }
+#op-globe-stub {
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    color:#556; font-size:.78rem; line-height:1.6; text-align:center;
+    padding:20px;
+}
+#op-globe-stub .op-stub-title {
+    color:#8ab; font-size:.86rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:.14em;
+    margin-bottom:8px;
+}
+#op-globe-stub code {
+    color:#0cc; font-family:monospace;
+    background:rgba(0,200,200,.06); padding:1px 6px; border-radius:3px;
+}
+
+/* ─── Coming next placeholders ─────────────────────────── */
+.op-coming {
+    color:#556; font-size:.72rem; line-height:1.5;
+    border:1px dashed rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:10px 12px;
+    background:rgba(255,255,255,.02);
+}
+.op-coming b { color:#8ab; font-weight:700; }
+.op-coming code {
+    color:#0cc; font-family:monospace; font-size:.68rem;
+    background:rgba(0,200,200,.06); padding:1px 5px; border-radius:3px;
+}
+
+/* ─── Scrub strip ──────────────────────────────────────── */
+#op-scrub { padding:10px 14px; }
+#op-scrub-row {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+}
+.op-scrub-btn {
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.12);
+    color:#aab; font:inherit; font-size:.7rem; font-weight:600;
+    padding:5px 10px; border-radius:5px; cursor:pointer;
+    transition:all .15s;
+}
+.op-scrub-btn:hover:not(:disabled) { color:#fff; border-color:rgba(255,255,255,.25); }
+.op-scrub-btn:disabled { opacity:.4; cursor:not-allowed; }
+#op-scrub-track {
+    flex:1; min-width:200px;
+    height:4px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px;
+    position:relative;
+}
+#op-scrub-now {
+    position:absolute;
+    top:-3px; bottom:-3px;
+    left:50%;
+    width:1px;
+    background:rgba(0,255,170,.5);
+}
+#op-scrub-cursor {
+    position:absolute;
+    top:-5px;
+    left:50%;
+    width:14px; height:14px;
+    border-radius:50%;
+    background:#0cc;
+    border:2px solid #033;
+    transform:translateX(-50%);
+    pointer-events:none;
+}
+
+/* ─── PRO PREVIEW ribbon ───────────────────────────────── */
+#op-ribbon {
+    position:fixed;
+    top:60px; right:14px;
+    z-index:200;
+    max-width:360px;
+    background:linear-gradient(135deg, rgba(0,200,200,.18), rgba(0,80,200,.10));
+    border:1px solid rgba(0,200,200,.4);
+    border-radius:10px;
+    padding:10px 36px 10px 14px;
+    box-shadow:0 8px 28px rgba(0,0,0,.4);
+    backdrop-filter:blur(10px);
+    font-size:.74rem; line-height:1.5;
+    color:#cef;
+    transform:translateY(-8px);
+    opacity:0;
+    pointer-events:none;
+    transition:transform .25s ease, opacity .25s ease;
+}
+#op-ribbon.op-ribbon-on {
+    transform:translateY(0);
+    opacity:1;
+    pointer-events:auto;
+}
+#op-ribbon strong { color:#0ff; font-weight:800; letter-spacing:.04em; }
+#op-ribbon a {
+    color:#0ff; text-decoration:none; font-weight:700;
+    border-bottom:1px solid rgba(0,255,255,.4);
+}
+#op-ribbon a:hover { border-bottom-color:#0ff; }
+#op-ribbon-close {
+    position:absolute; top:6px; right:8px;
+    background:transparent; border:0; color:#9bd;
+    font:inherit; font-size:1.1rem; line-height:1;
+    cursor:pointer; padding:2px 6px;
+    border-radius:4px;
+}
+#op-ribbon-close:hover { color:#fff; background:rgba(255,255,255,.08); }
+@media (max-width:640px) {
+    #op-ribbon {
+        left:10px; right:10px; max-width:none;
+    }
+}
+
+/* ─── Decision deck list rows ──────────────────────────── */
+.op-deck-empty {
+    color:#667; font-size:.72rem; line-height:1.5;
+    font-style:italic;
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("operations");</script>
+
+<!-- ─── PRO PREVIEW ribbon ──────────────────────────────────── -->
+<div id="op-ribbon" role="status" aria-live="polite">
+    <button id="op-ribbon-close" aria-label="Dismiss">×</button>
+    <div id="op-ribbon-body">
+        <strong>PRO Preview</strong> — Operations is normally on the
+        <a href="/pricing#advanced">Advanced</a> plan.
+        Free during open beta.
+    </div>
+</div>
+
+<!-- ─── App ──────────────────────────────────────────────────── -->
+<div id="op-app">
+
+    <!-- Hero -->
+    <div id="op-hero" class="op-panel">
+        <div id="op-hero-row">
+            <h1>Operations</h1>
+            <span class="op-badge-preview">PRO PREVIEW</span>
+        </div>
+        <p id="op-hero-sub">
+            Decision-grade fleet and debris analysis. Deterministic time
+            scrub, confidence bands, and full provenance on every number.
+            Open beta — no sign-in required.
+        </p>
+
+        <div id="op-personas" role="tablist" aria-label="Operator persona">
+            <button type="button" class="op-persona-btn op-persona-on"
+                    role="tab" aria-selected="true"
+                    data-op-persona="sat-ops">
+                <span>🛰️ Sat Ops</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="aviation" disabled
+                    title="Pilot / avionics persona — coming next">
+                <span>✈️ Aviation</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="astronaut" disabled
+                    title="Crewed-mission persona — coming next">
+                <span>👩‍🚀 Astronaut</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="adventurer" disabled
+                    title="Mountain weather + 30-day forecast — coming next">
+                <span>🏔️ Adventurer</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+        </div>
+
+        <div id="op-scenario-row">
+            <span class="op-chip op-chip--live" id="op-mode-chip"
+                  title="Live mode — auto-advancing real-time state.">
+                <span class="op-chip-dot"></span>
+                <span id="op-mode-label">Live</span>
+            </span>
+            <span class="op-chip op-chip--hash op-chip-button" id="op-hash-chip"
+                  title="Scenario hash. Click to copy a permalink that reproduces this exact view.">
+                <span>scenario</span>
+                <span id="op-hash-val">—</span>
+            </span>
+            <span class="op-chip op-chip--model op-chip-button" id="op-model-chip"
+                  title="Pinned model versions. Click to see the model card.">
+                <span>models</span>
+                <span id="op-model-val">SGP4 · NRLMSISE-00</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- Left rail: Fleet + Layers (placeholders) -->
+    <aside id="op-left">
+        <div class="op-panel">
+            <h2>My Fleet</h2>
+            <div class="op-coming">
+                <b>Coming next.</b> Paste TLEs or NORAD IDs to track your assets.
+                Anonymous fleets soft-save to <code>localStorage</code> (max 10).
+                Persistent multi-fleet management ships with the
+                <code>fleets</code> table for signed-in PRO users.
+            </div>
+        </div>
+        <div class="op-panel">
+            <h2>Layers</h2>
+            <div class="op-coming">
+                <b>Coming next.</b> Constellations (Starlink, OneWeb, Iridium,
+                GPS / Galileo / BeiDou / GLONASS, geostationary) and tracked
+                debris from CelesTrak. Sample loads default-on; full catalogs
+                lazy-load on demand. The existing
+                <code>satellite-tracker.js</code> + <code>debris-threat-cache.js</code>
+                pipeline will back this panel.
+            </div>
+        </div>
+    </aside>
+
+    <!-- Center: Globe -->
+    <section id="op-globe-wrap">
+        <canvas id="op-globe"></canvas>
+        <div id="op-globe-stub">
+            <div class="op-stub-title">Globe — wiring next</div>
+            <div>
+                3D scene with constellation streaks, threat-band shells,<br>
+                Δv-coloured debris, TCA fly-to, and per-orbit risk trails.<br>
+                Time scrub will drive every panel from a single
+                <code>simTimeMs</code>.
+            </div>
+        </div>
+    </section>
+
+    <!-- Right rail: Decision deck (placeholders) -->
+    <section id="op-right">
+        <div class="op-panel">
+            <h2>Decay Watch</h2>
+            <div class="op-deck-empty">No fleet selected.</div>
+        </div>
+        <div class="op-panel">
+            <h2>Conjunctions · 7 days</h2>
+            <div class="op-deck-empty">No fleet selected.</div>
+        </div>
+        <div class="op-panel">
+            <h2>Prop Budget</h2>
+            <div class="op-deck-empty">No fleet selected.</div>
+        </div>
+        <div class="op-panel">
+            <h2>Export</h2>
+            <div class="op-coming">
+                <b>Coming next.</b> JSON + CSV open to all. CDM export is
+                <a href="/pricing#advanced" style="color:#0cc">PRO-gated</a> —
+                the button doubles as the upsell point.
+            </div>
+        </div>
+    </section>
+
+    <!-- Bottom: scrub strip (placeholder) -->
+    <div id="op-scrub" class="op-panel">
+        <div id="op-scrub-row">
+            <button class="op-scrub-btn" disabled title="Jump to −7 days">⏮</button>
+            <button class="op-scrub-btn" disabled title="Step back">⏪</button>
+            <button class="op-scrub-btn" disabled title="Play / pause">▶︎</button>
+            <button class="op-scrub-btn" disabled title="Step forward">⏩</button>
+            <button class="op-scrub-btn" disabled title="Jump to +7 days">⏭</button>
+            <div id="op-scrub-track">
+                <div id="op-scrub-now"></div>
+                <div id="op-scrub-cursor"></div>
+            </div>
+            <button class="op-scrub-btn" disabled title="Jump to real time">Now</button>
+            <span style="font-size:.66rem; color:#556; font-style:italic">
+                Scrub wiring lands next — three modes: Live · Scrub · Replay (±7 d).
+            </span>
+        </div>
+    </div>
+
+</div>
+
+<!-- ─── Boot ──────────────────────────────────────────────────── -->
+<script type="module">
+/**
+ * operations.html boot — step 1 of the build.
+ *
+ * Wires:
+ *   - PRO PREVIEW ribbon (open beta copy + dismiss + state-aware copy
+ *     for signed-in non-PRO users).
+ *   - Persona switch (Sat Ops live; Aviation / Astronaut / Adventurer
+ *     are stubs).
+ *   - Hash + model pills with placeholder values pending the determinism
+ *     foundations (step 5).
+ *
+ * Everything labelled "Coming next" in the DOM is intentionally a stub.
+ * Subsequent steps land the time scrub, constellation/debris loaders,
+ * provenance store, confidence bands, and decision deck.
+ */
+
+const AUTH_KEY = 'pp_auth';
+const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
+
+function readAuth() {
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
+    if (!a) { try { a = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {} }
+    return a?.signedIn ? a : null;
+}
+
+function isProPlan(plan) {
+    return plan === 'advanced' || plan === 'institution' || plan === 'enterprise';
+}
+
+/* ─── Ribbon ────────────────────────────────────────────── */
+function mountRibbon() {
+    const el = document.getElementById('op-ribbon');
+    const body = document.getElementById('op-ribbon-body');
+    const close = document.getElementById('op-ribbon-close');
+    if (!el || !body || !close) return;
+
+    if (sessionStorage.getItem(RIBBON_DISMISS_KEY) === '1') return;
+
+    const auth = readAuth();
+    const plan = auth?.plan || null;
+    const role = auth?.role || null;
+    const adminish = role === 'admin' || role === 'superadmin' || role === 'tester';
+
+    if (!auth) {
+        body.innerHTML =
+            '<strong>PRO Preview</strong> — Operations is normally on the ' +
+            '<a href="/pricing#advanced">Advanced</a> plan. ' +
+            'Free during open beta. ' +
+            '<a href="/signup">Sign up</a> to save fleets and get alerts.';
+    } else if (adminish || isProPlan(plan)) {
+        // Skip the ribbon for users who already have full access.
+        return;
+    } else {
+        body.innerHTML =
+            '<strong>PRO Preview</strong> — Operations is included in your ' +
+            '<a href="/pricing#advanced">Advanced</a> upgrade. ' +
+            'You’re previewing it free during open beta.';
+    }
+
+    requestAnimationFrame(() => el.classList.add('op-ribbon-on'));
+    close.addEventListener('click', () => {
+        el.classList.remove('op-ribbon-on');
+        sessionStorage.setItem(RIBBON_DISMISS_KEY, '1');
+    });
+}
+
+/* ─── Persona switch ────────────────────────────────────── */
+function mountPersonas() {
+    const btns = document.querySelectorAll('#op-personas .op-persona-btn');
+    btns.forEach(btn => {
+        if (btn.disabled) return;
+        btn.addEventListener('click', () => {
+            btns.forEach(b => {
+                const on = b === btn;
+                b.classList.toggle('op-persona-on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+        });
+    });
+}
+
+/* ─── Placeholder hash + model pills ───────────────────── */
+function mountChips() {
+    // Real hash composition lands in step 5 (determinism foundations).
+    // For now we surface a stable placeholder so the chip layout is
+    // visible and the click-to-copy plumbing is exercised end-to-end.
+    const hashVal = document.getElementById('op-hash-val');
+    if (hashVal) hashVal.textContent = 'preview';
+
+    const hashChip = document.getElementById('op-hash-chip');
+    if (hashChip) {
+        hashChip.addEventListener('click', () => {
+            const url = `${location.origin}/operations`;
+            navigator.clipboard?.writeText(url).catch(() => {});
+            const prev = hashVal?.textContent;
+            if (hashVal) {
+                hashVal.textContent = 'copied';
+                setTimeout(() => { if (hashVal) hashVal.textContent = prev || 'preview'; }, 900);
+            }
+        });
+    }
+
+    const modelChip = document.getElementById('op-model-chip');
+    if (modelChip) {
+        modelChip.addEventListener('click', () => {
+            // Model card drawer ships with the provenance work in step 6.
+        });
+    }
+}
+
+mountRibbon();
+mountPersonas();
+mountChips();
+
+// Devtools handle.
+window.__op = { readAuth, isProPlan };
+</script>
+
+</body>
+</html>
