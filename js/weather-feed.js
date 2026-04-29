@@ -33,6 +33,21 @@
 // Supabase pg_cron (see supabase-weather-pgcron-migration.sql), so visitor
 // count never drives upstream load.
 const WEATHER_ENDPOINT = '/api/weather/grid';
+
+// Coarse on-disk channel layout (mirrored by js/weather-history.js).
+// Channel-major (CHW) so the inner loop in _bilinear walks one channel
+// at a time — better L1 hit rate than HWC pixel-major, and trivially
+// sliceable into per-channel views with .subarray().
+//
+//   0 = T (°C)   1 = P (hPa)   2 = RH (%)
+//   3 = U (m/s)  4 = V (m/s)        ← post-decomposition, eastward / northward
+//   5 = cloud_low   6 = cloud_mid   7 = cloud_high   (% each)
+//   8 = precipitation (mm)
+//
+// Wind speed is *derived* on decode (hypot(U, V)) — storing it would be
+// redundant with U/V and risks drift. wdir is never stored; bilinear of
+// degrees wraps wrong (350°→10° averages to 180° not 0°).
+const NUM_COARSE_CHANNELS = 9;
 // Default coarse-grid dimensions — used by the procedural fallback and by
 // _processRows() until the upstream response tells us a different resolution.
 // The cron writer (api/cron/refresh-weather-grid.js) currently ships 72×36
@@ -84,7 +99,17 @@ function _base64ToF32(s) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export class WeatherFeed {
-    constructor() {
+    /**
+     * @param {object} [opts]
+     * @param {import('./weather-history.js').WeatherHistory} [opts.history]
+     *   Optional 24-hr ring buffer. When provided, every successful live
+     *   fetch pushes its coarse frame to history.ingest() so the resolver
+     *   (next module) can replay the past day. Procedural fallback and
+     *   sessionStorage-restored snapshots are *not* ingested — replay
+     *   should show "no data" rather than synthetic or compressed data.
+     */
+    constructor({ history = null } = {}) {
+        this._history    = history;
         this._timer      = null;
         this._failureCount = 0;    // consecutive-failure counter → RETRY_BACKOFF_MS index
         this._weatherBuf = new Float32Array(TEX_W * TEX_H * 4);
@@ -278,13 +303,66 @@ export class WeatherFeed {
         return body.data;
     }
 
-    // ── Parse location array → coarse grid → interpolated textures ───────────
-    // Reads this._gridW × this._gridH (set by _fetchGrid from the response's
-    // grid metadata or inferred from data.length). The bilinear/blur stack
-    // below scales seamlessly to any grid that fits the 2:1 aspect convention.
+    // ── Live-fetch orchestrator ───────────────────────────────────────────────
+    // Extract → (history.ingest) → stats → decode → copy into instance
+    // buffers. The split lets the future replay resolver call _decodeCoarse
+    // directly with a frame loaded from WeatherHistory, without re-parsing
+    // the upstream JSONB.
     _processRows(rows) {
         const gridW = this._gridW;
         const gridH = this._gridH;
+
+        // 1. Extract — JSONB rows → CHW-packed coarse Float32Array.
+        const coarse = this._extractCoarse(rows, gridW, gridH);
+
+        // 2. Push to history *before* decode so the resolver has a fresh
+        //    frame ready the moment the scrubber lands on this hour. Best-
+        //    effort: history.ingest() is a no-op if the optional dependency
+        //    wasn't injected. Procedural fallback and snapshot-restore paths
+        //    deliberately don't reach here — replay should show "no data"
+        //    rather than synthetic.
+        if (this._history) {
+            try {
+                const cacheMs = this._meta.cacheFetchedAt
+                    ? Date.parse(this._meta.cacheFetchedAt)
+                    : NaN;
+                const t = Number.isFinite(cacheMs) ? cacheMs : Date.now();
+                this._history.ingest({
+                    t,
+                    fetchedAt: t,
+                    source:    this._meta.upstreamSource ?? null,
+                    gridW, gridH,
+                    coarse,
+                });
+            } catch (err) {
+                console.debug('[WeatherFeed] history ingest skipped:', err?.message);
+            }
+        }
+
+        // 3. Stats — wx-panel readouts. Computed from the coarse field
+        //    (one value per upstream cell, not per upsampled pixel) to
+        //    match the units the panel labels expect.
+        this._computeCoarseStats(coarse, gridW, gridH);
+
+        // 4. Decode — coarse → trio of full-res packed Float32Array.
+        const { weatherBuf, windBuf, cloudBuf } = this._decodeCoarse(coarse, gridW, gridH);
+
+        // 5. Copy into the stable instance buffers. Downstream consumers
+        //    receive these references via 'weather-update' and may hold
+        //    them across frames, so we mutate-in-place rather than swapping
+        //    references — matches the pattern _buildProcedural() uses.
+        this._weatherBuf.set(weatherBuf);
+        this._windBuf.set(windBuf);
+        this._cloudBuf.set(cloudBuf);
+    }
+
+    // ── Extract: rows → CHW-packed coarse Float32Array ───────────────────────
+    // Pure (modulo `this._fillNaN`, which is itself pure but lives on the
+    // class for code-organisation reasons). Output layout matches
+    // NUM_COARSE_CHANNELS at the top of this file and the on-disk format
+    // in weather-history.js. NaN gap-fill happens here so on-disk frames
+    // are always clean and decode is a pure bilinear path.
+    _extractCoarse(rows, gridW, gridH) {
         const N    = gridW * gridH;
         const DEG  = Math.PI / 180;
         const temp = new Float32Array(N).fill(NaN);
@@ -311,36 +389,166 @@ export class WeatherFeed {
             precip[idx] = c.precipitation          ?? 0;
         });
 
-        // Fill any NaN gaps (missing ocean cells, polar regions, etc.)
+        // Fill NaN gaps (missing ocean cells, polar regions, etc.) before
+        // we decompose or write to disk — keeps stored frames clean and
+        // avoids conditional logic in the bilinear inner loop.
         [temp, hum, pres, wspd, wdir].forEach(a => this._fillNaN(a, gridW, gridH));
 
         // Decompose wind speed+direction into U/V on the coarse grid BEFORE
-        // interpolation.  Bilinear interpolation of angles is wrong because
-        // degrees wrap at 360°→0° (e.g. avg of 350° and 10° gives 180° not 0°).
-        // Interpolating the Cartesian components avoids this entirely.
-        const windUCoarse = new Float32Array(N);
-        const windVCoarse = new Float32Array(N);
+        // anything downstream. Bilinear interpolation of angles is wrong
+        // because degrees wrap at 360°→0° (e.g. avg of 350° and 10° gives
+        // 180° not 0°). Interpolating the Cartesian components avoids this.
+        const windU = new Float32Array(N);
+        const windV = new Float32Array(N);
         for (let k = 0; k < N; k++) {
             const dir = wdir[k] * DEG;
-            // Meteorological convention: FROM direction → negate for velocity
-            windUCoarse[k] = -wspd[k] * Math.sin(dir);  // eastward  m/s
-            windVCoarse[k] = -wspd[k] * Math.cos(dir);  // northward m/s
+            // Meteorological convention: FROM direction → negate for velocity.
+            windU[k] = -wspd[k] * Math.sin(dir);  // eastward  m/s
+            windV[k] = -wspd[k] * Math.cos(dir);  // northward m/s
         }
 
-        // Compute global stats for the analysis panel
-        const vt = Array.from(temp).filter(isFinite);
-        const vp = Array.from(pres).filter(isFinite);
-        const vw = Array.from(wspd).filter(isFinite);
-        this._meta.tempMin  = Math.min(...vt);
-        this._meta.tempMax  = Math.max(...vt);
-        this._meta.tempMean = vt.reduce((a, b) => a + b, 0) / vt.length;
-        this._meta.presMin  = Math.min(...vp);
-        this._meta.presMax  = Math.max(...vp);
-        this._meta.windMax  = Math.max(...vw);
-        this._meta.cloudMax = Math.max(...Array.from(clLow), ...Array.from(clMid), ...Array.from(clHigh));
+        // Pack CHW into a single Float32Array — channel-major so .subarray()
+        // gives a zero-copy view of each channel for the decode path.
+        // Channel order MUST stay in lockstep with NUM_COARSE_CHANNELS.
+        const coarse = new Float32Array(N * NUM_COARSE_CHANNELS);
+        coarse.set(temp,   0 * N);
+        coarse.set(pres,   1 * N);
+        coarse.set(hum,    2 * N);
+        coarse.set(windU,  3 * N);
+        coarse.set(windV,  4 * N);
+        coarse.set(clLow,  5 * N);
+        coarse.set(clMid,  6 * N);
+        coarse.set(clHigh, 7 * N);
+        coarse.set(precip, 8 * N);
+        return coarse;
+    }
 
-        this._interpolateToTextures(temp, hum, pres, wspd, windUCoarse, windVCoarse);
-        this._interpolateCloudTexture(clLow, clMid, clHigh, precip);
+    // ── Stats: coarse → wx-panel meta fields ─────────────────────────────────
+    // Reads channels 0..7 of the coarse array and populates the same _meta
+    // fields the wx-panel UI consumes (tempMin/Max/Mean, presMin/Max,
+    // windMax via hypot(U,V), cloudMax across the three layers). Cloud
+    // and precip channels deliberately don't contribute to tempMin/etc;
+    // wspd is *derived* on the fly from U,V here exactly like _decodeCoarse
+    // does, so the panel reading matches what the renderer shows.
+    _computeCoarseStats(coarse, gridW, gridH) {
+        const N = gridW * gridH;
+        const T   = coarse.subarray(0 * N, 1 * N);
+        const P   = coarse.subarray(1 * N, 2 * N);
+        const U   = coarse.subarray(3 * N, 4 * N);
+        const V   = coarse.subarray(4 * N, 5 * N);
+        const cL  = coarse.subarray(5 * N, 6 * N);
+        const cM  = coarse.subarray(6 * N, 7 * N);
+        const cH  = coarse.subarray(7 * N, 8 * N);
+
+        let tMin = Infinity, tMax = -Infinity, tSum = 0, tN = 0;
+        let pMin = Infinity, pMax = -Infinity;
+        let wMax = 0;
+        let cMax = 0;
+        for (let k = 0; k < N; k++) {
+            const t = T[k];
+            if (Number.isFinite(t)) {
+                if (t < tMin) tMin = t;
+                if (t > tMax) tMax = t;
+                tSum += t; tN++;
+            }
+            const p = P[k];
+            if (Number.isFinite(p)) {
+                if (p < pMin) pMin = p;
+                if (p > pMax) pMax = p;
+            }
+            const w = Math.hypot(U[k], V[k]);
+            if (w > wMax) wMax = w;
+            const cmax = Math.max(cL[k], cM[k], cH[k]);
+            if (cmax > cMax) cMax = cmax;
+        }
+
+        this._meta.tempMin  = tN > 0 ? tMin : null;
+        this._meta.tempMax  = tN > 0 ? tMax : null;
+        this._meta.tempMean = tN > 0 ? tSum / tN : null;
+        this._meta.presMin  = Number.isFinite(pMin) ? pMin : null;
+        this._meta.presMax  = Number.isFinite(pMax) ? pMax : null;
+        this._meta.windMax  = wMax;
+        this._meta.cloudMax = cMax;
+    }
+
+    // ── Decode: coarse → trio of packed full-res Float32Arrays ───────────────
+    // Pure: same coarse input always produces the same output trio. Used
+    // by both the live-fetch path (via _processRows) and — once the
+    // resolver lands — by historical replay, where it operates on a frame
+    // pulled out of WeatherHistory. The output shape matches what
+    // earth.html's updateWeatherTextures() expects so the downstream
+    // shader path is unchanged.
+    _decodeCoarse(coarse, gridW, gridH) {
+        const N = gridW * gridH;
+
+        // Per-channel views — zero-copy slices of the packed CHW buffer.
+        const T   = coarse.subarray(0 * N, 1 * N);
+        const P   = coarse.subarray(1 * N, 2 * N);
+        const RH  = coarse.subarray(2 * N, 3 * N);
+        const U   = coarse.subarray(3 * N, 4 * N);
+        const V   = coarse.subarray(4 * N, 5 * N);
+        const cL  = coarse.subarray(5 * N, 6 * N);
+        const cM  = coarse.subarray(6 * N, 7 * N);
+        const cH  = coarse.subarray(7 * N, 8 * N);
+        const Pr  = coarse.subarray(8 * N, 9 * N);
+
+        // Wind speed is derived on the coarse grid from U,V. Mathematically
+        // identical to what the upstream wind_speed_10m would have been —
+        // U,V were constructed from wspd*sin/cos(dir), so hypot(U,V) == wspd.
+        const W = new Float32Array(N);
+        for (let k = 0; k < N; k++) W[k] = Math.hypot(U[k], V[k]);
+
+        // Bilinear upsample. wrapX=true so the antimeridian doesn't seam.
+        const fT  = this._bilinear(T,  gridW, gridH, TEX_W, TEX_H, true);
+        const fP  = this._bilinear(P,  gridW, gridH, TEX_W, TEX_H, true);
+        const fH  = this._bilinear(RH, gridW, gridH, TEX_W, TEX_H, true);
+        const fU  = this._bilinear(U,  gridW, gridH, TEX_W, TEX_H, true);
+        const fV  = this._bilinear(V,  gridW, gridH, TEX_W, TEX_H, true);
+        const fW  = this._bilinear(W,  gridW, gridH, TEX_W, TEX_H, true);
+
+        // Cloud channels: bilinear + box-blur to soften upsample blockiness.
+        // Blur radius scales to the upstream cell pitch so the blur covers
+        // about one input cell — at 10° grid (legacy) one cell ≈ 11 px → R≈5,
+        // at 5° (current) one cell ≈ 5 px → R≈3. Two passes ≈ Gaussian σ ≈ R·√2.
+        const fCL = this._bilinear(cL, gridW, gridH, TEX_W, TEX_H, true);
+        const fCM = this._bilinear(cM, gridW, gridH, TEX_W, TEX_H, true);
+        const fCH = this._bilinear(cH, gridW, gridH, TEX_W, TEX_H, true);
+        const fPr = this._bilinear(Pr, gridW, gridH, TEX_W, TEX_H, true);
+        const cellPx  = Math.max(1, Math.round(TEX_W / gridW));
+        const blurR   = Math.max(2, Math.round(cellPx * 0.55));
+        const precipR = Math.max(2, Math.round(cellPx * 0.45));
+        const sLow    = this._boxBlur(this._boxBlur(fCL, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sMid    = this._boxBlur(this._boxBlur(fCM, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sHigh   = this._boxBlur(this._boxBlur(fCH, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
+        const sPrecip = this._boxBlur(fPr, TEX_W, TEX_H, precipR);
+
+        const NTEX = TEX_W * TEX_H;
+        const weatherBuf = new Float32Array(NTEX * 4);
+        const windBuf    = new Float32Array(NTEX * 4);
+        const cloudBuf   = new Float32Array(NTEX * 4);
+
+        for (let k = 0; k < NTEX; k++) {
+            const t4 = k * 4;
+
+            // weatherBuffer — normalised scalars for colour overlays
+            weatherBuf[t4+0] = Math.max(0, Math.min(1, (fT[k] + 60) / 110));   // -60…+50 °C
+            weatherBuf[t4+1] = Math.max(0, Math.min(1, (fP[k] - 850) / 210));  // 850…1060 hPa
+            weatherBuf[t4+2] = Math.max(0, Math.min(1,  fH[k] / 100));
+            weatherBuf[t4+3] = Math.max(0, Math.min(1,  fW[k] / MAX_WIND_MS));
+
+            // windBuffer — signed U,V for particle advection (already in m/s)
+            windBuf[t4+0] = fU[k] / MAX_WIND_MS;   // [-1, 1]
+            windBuf[t4+1] = fV[k] / MAX_WIND_MS;   // [-1, 1]
+            windBuf[t4+2] = fW[k] / MAX_WIND_MS;   // [0, 1]
+            windBuf[t4+3] = 1.0;
+
+            cloudBuf[t4+0] = Math.max(0, Math.min(1, sLow[k]    / 100));
+            cloudBuf[t4+1] = Math.max(0, Math.min(1, sMid[k]    / 100));
+            cloudBuf[t4+2] = Math.max(0, Math.min(1, sHigh[k]   / 100));
+            cloudBuf[t4+3] = Math.max(0, Math.min(1, sPrecip[k] / 10));   // cap 10 mm/hr
+        }
+
+        return { weatherBuf, windBuf, cloudBuf };
     }
 
     // ── Bilinear interpolation: inW×inH → outW×outH ──────────────────────────
@@ -382,68 +590,6 @@ export class WeatherFeed {
                     }
                 }
             }
-        }
-    }
-
-    // ── Write interpolated data into Float32 texture buffers ──────────────────
-    // Wind U/V are now pre-decomposed on the coarse grid and interpolated
-    // as Cartesian components (no angle-wrapping artifacts).
-    _interpolateToTextures(rawTemp, rawHum, rawPres, rawWSpd, rawWindU, rawWindV) {
-        const gw = this._gridW, gh = this._gridH;
-        const temp  = this._bilinear(rawTemp,  gw, gh, TEX_W, TEX_H, true);
-        const hum   = this._bilinear(rawHum,   gw, gh, TEX_W, TEX_H, true);
-        const pres  = this._bilinear(rawPres,  gw, gh, TEX_W, TEX_H, true);
-        const wspd  = this._bilinear(rawWSpd,  gw, gh, TEX_W, TEX_H, true);
-        const windU = this._bilinear(rawWindU, gw, gh, TEX_W, TEX_H, true);
-        const windV = this._bilinear(rawWindV, gw, gh, TEX_W, TEX_H, true);
-
-        for (let k = 0; k < TEX_W * TEX_H; k++) {
-            const t4 = k * 4;
-
-            // weatherBuffer — normalised scalars for colour overlays
-            this._weatherBuf[t4+0] = Math.max(0, Math.min(1, (temp[k] + 60) / 110)); // -60…+50 °C
-            this._weatherBuf[t4+1] = Math.max(0, Math.min(1, (pres[k] - 850) / 210));// 850…1060 hPa
-            this._weatherBuf[t4+2] = Math.max(0, Math.min(1,  hum[k] / 100));
-            this._weatherBuf[t4+3] = Math.max(0, Math.min(1,  wspd[k] / MAX_WIND_MS));
-
-            // windBuffer — signed U,V for particle advection (already in m/s)
-            this._windBuf[t4+0] = windU[k] / MAX_WIND_MS;   // [-1, 1]
-            this._windBuf[t4+1] = windV[k] / MAX_WIND_MS;   // [-1, 1]
-            this._windBuf[t4+2] = wspd[k]  / MAX_WIND_MS;   // [0, 1]
-            this._windBuf[t4+3] = 1.0;
-        }
-    }
-
-    // ── Pack cloud-layer fractions + precipitation into cloudBuf ─────────────
-    // After bilinear interpolation, apply a box-blur smoothing pass to reduce
-    // visible grid-cell blockiness in the cloud fraction data.
-    //
-    // Blur radius is scaled to the grid pitch: it should span roughly one
-    // input cell so that the blockiness from upsampling is averaged away
-    // without erasing real coverage features. At 10° pitch (legacy), one
-    // cell ≈ 11 px on the 360 wide texture → R=5. At 5° pitch (current),
-    // one cell ≈ 5 px → R=3. Two passes ≈ Gaussian σ ≈ R·√2.
-    _interpolateCloudTexture(rawLow, rawMid, rawHigh, rawPrecip) {
-        const gw = this._gridW, gh = this._gridH;
-        const low    = this._bilinear(rawLow,    gw, gh, TEX_W, TEX_H, true);
-        const mid    = this._bilinear(rawMid,    gw, gh, TEX_W, TEX_H, true);
-        const high   = this._bilinear(rawHigh,   gw, gh, TEX_W, TEX_H, true);
-        const precip = this._bilinear(rawPrecip, gw, gh, TEX_W, TEX_H, true);
-
-        const cellPx  = Math.max(1, Math.round(TEX_W / gw));
-        const blurR   = Math.max(2, Math.round(cellPx * 0.55));   // ~half a cell
-        const precipR = Math.max(2, Math.round(cellPx * 0.45));
-        const sLow    = this._boxBlur(this._boxBlur(low,  TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
-        const sMid    = this._boxBlur(this._boxBlur(mid,  TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
-        const sHigh   = this._boxBlur(this._boxBlur(high, TEX_W, TEX_H, blurR), TEX_W, TEX_H, blurR);
-        const sPrecip = this._boxBlur(precip, TEX_W, TEX_H, precipR);
-
-        for (let k = 0; k < TEX_W * TEX_H; k++) {
-            const t4 = k * 4;
-            this._cloudBuf[t4+0] = Math.max(0, Math.min(1, sLow[k]    / 100));
-            this._cloudBuf[t4+1] = Math.max(0, Math.min(1, sMid[k]    / 100));
-            this._cloudBuf[t4+2] = Math.max(0, Math.min(1, sHigh[k]   / 100));
-            this._cloudBuf[t4+3] = Math.max(0, Math.min(1, sPrecip[k] / 10));  // cap 10 mm/hr
         }
     }
 

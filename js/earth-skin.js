@@ -535,7 +535,7 @@ void main() {
         if (u_research_mode > 0.5) {
             // Research / measured-only: alpha = data, period. The texture has
             // already been bilinearly upsampled and box-blurred from the
-            // coarse grid (see weather-feed.js _interpolateCloudTexture), so
+            // coarse grid (see weather-feed.js _decodeCoarse), so
             // showing it raw is honest, not noisy. The procedural shape
             // factors (shapeLow / shapeMid / shapeHigh) act only as a fine-
             // scale dither at low amplitude so the eye can resolve the 5°
