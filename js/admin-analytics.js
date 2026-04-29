@@ -194,9 +194,9 @@ export async function fetchUsers(limit = 100) {
     }
 }
 
-// ── 3. Top pages (last 7 days) ──────────────────────────────────────────────
+// ── 3. Top pages (last N days) ──────────────────────────────────────────────
 
-export async function fetchTopPages() {
+export async function fetchTopPages(days = 7) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
@@ -206,7 +206,7 @@ export async function fetchTopPages() {
             .from('analytics_events')
             .select('event_name, session_id')
             .eq('event_type', 'page_view')
-            .gte('created_at', daysAgo(7));
+            .gte('created_at', daysAgo(days));
 
         if (error) throw error;
 
@@ -232,7 +232,31 @@ export async function fetchTopPages() {
 
 // ── 4. Recent events (live feed) ─────────────────────────────────────────────
 
-export async function fetchRecentEvents(limit = 30) {
+export async function fetchRecentEvents(limit = 30, opts = {}) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        let q = client
+            .from('analytics_events')
+            .select('event_type, event_name, page_path, session_id, user_id, created_at, properties')
+            .order('created_at', { ascending: false })
+            .limit(limit);
+
+        if (opts.eventType) q = q.eq('event_type', opts.eventType);
+
+        const { data, error } = await q;
+        if (error) throw error;
+        return { ok: true, data: data || [] };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ── 4b. Average time-on-page (from page_close events) ───────────────────────
+
+export async function fetchAvgTimeOnPage(days = 14) {
     const client = await sb();
     if (!client) return { ok: false, error: 'Supabase not configured' };
     if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
@@ -240,9 +264,41 @@ export async function fetchRecentEvents(limit = 30) {
     try {
         const { data, error } = await client
             .from('analytics_events')
-            .select('event_type, event_name, page_path, session_id, user_id, created_at, properties')
+            .select('properties')
+            .eq('event_name', 'page_close')
+            .gte('created_at', daysAgo(days))
+            .limit(5000);
+
+        if (error) throw error;
+
+        let total = 0, n = 0;
+        for (const row of data || []) {
+            const t = row.properties?.time_on_page_s;
+            // Cap a single value at 1 hour to keep one stuck tab from dominating.
+            if (typeof t === 'number' && t > 0 && t < 3600) { total += t; n++; }
+        }
+        return { ok: true, data: { avg_s: n > 0 ? Math.round(total / n) : null, sample: n } };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+// ── 4c. Click heatmap (raw click events for one page) ───────────────────────
+
+export async function fetchClickHeatmap(pageName, days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, page_path, session_id, properties, created_at')
+            .eq('event_type', 'click')
+            .eq('event_name', pageName)
+            .gte('created_at', daysAgo(days))
             .order('created_at', { ascending: false })
-            .limit(limit);
+            .limit(5000);
 
         if (error) throw error;
         return { ok: true, data: data || [] };

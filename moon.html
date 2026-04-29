@@ -569,10 +569,9 @@ _updateRadPanel();
 animate();
 </script>
 <script type="module">
-import { analytics } from './js/analytics.js';
+import './js/analytics.js';
 import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
-analytics.page('moon');
 recordVisit('moon');
 userState.trackPage('moon');
 </script>

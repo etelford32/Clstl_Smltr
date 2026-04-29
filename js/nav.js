@@ -157,6 +157,10 @@ export function initNav(activeId = '') {
         .then(m => m.mountAttributionBadge?.())
         .catch(() => { /* nav must not break if the badge module fails */ });
 
+    // First-party analytics: auto-tracks page views, time-on-page, scroll
+    // depth, and (opt-in) clicks. Side-effect import — singleton inside.
+    import('./analytics.js').catch(() => { /* analytics must not break nav */ });
+
     // Re-render nav when profile fetches real role (fixes admin button
     // not showing because nav rendered before fetchProfile() resolved)
     if (!nav._authListener) {
