@@ -631,9 +631,13 @@ nav {
     z-index: 60;
     background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
     border: 1px solid rgba(0,200,255,.2); border-radius: 9px;
-    padding: 6px 8px; display: flex; align-items: center; gap: 3px;
+    padding: 6px 8px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 5px;
     font-size: 11px;
+    min-width: 360px;
 }
+/* Buttons row keeps the original flex-row behaviour. */
+#tc-buttons-row { display: flex; align-items: center; gap: 3px; }
 .tc-btn {
     background: rgba(0,200,200,.08); border: 1px solid rgba(0,200,200,.18);
     border-radius: 4px; color: #9cc; cursor: pointer;
@@ -654,15 +658,51 @@ nav {
 }
 .tc-time   { color: #0ee; font-size: 11px; line-height: 1;   letter-spacing: .02em; }
 .tc-offset { color: #667; font-size: 9px;  line-height: 1.2; margin-top: 2px; }
+
+/* 24-h replay slider. Range covers -1440..0 minutes (= -24 h..now); each
+   step is one minute so keyboard arrows are usable. The native input
+   handles drag; the resolver translates value→simTimeMs every frame. */
+#tc-scrub-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 2px 4px 0;
+}
+.tc-scrub-edge {
+    color: #557; font-size: 9px; font-family: monospace;
+    min-width: 26px; user-select: none;
+}
+.tc-scrub-edge.right { text-align: right; color: #0ee; }
+#tc-scrub {
+    flex: 1; min-width: 240px;
+    -webkit-appearance: none; appearance: none;
+    height: 4px; background: linear-gradient(to right, rgba(0,200,200,.10), rgba(0,200,200,.26));
+    border-radius: 2px; outline: none; margin: 0;
+    cursor: pointer;
+}
+#tc-scrub::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #0cc; border: 1px solid #088;
+    cursor: pointer; box-shadow: 0 0 6px rgba(0,200,200,.45);
+}
+#tc-scrub::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #0cc; border: 1px solid #088;
+    cursor: pointer; box-shadow: 0 0 6px rgba(0,200,200,.45);
+}
+#tc-scrub:focus::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(0,200,200,.7); }
+#tc-scrub:focus::-moz-range-thumb     { box-shadow: 0 0 10px rgba(0,200,200,.7); }
+
 /* On mobile the #mobile-toolbar lives at bottom:0 / height:56px, so the
    scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
    bottom:12px is fine. */
 @media (max-width:1024px) {
-    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; }
+    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
     .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
     .tc-display    { min-width: 128px; }
     .tc-time       { font-size: 10px; }
     .tc-offset     { font-size: 8px; }
+    #tc-scrub      { min-width: 180px; }
+    .tc-scrub-edge { font-size: 8px; min-width: 22px; }
 }
 
 /* ─── Mobile bottom toolbar ──────────────────────────────────────── */
@@ -1346,21 +1386,36 @@ nav {
 
     <!-- Time-scrub controls (bottom-centre). One simTimeMs variable
          drives GMST, sun direction, sub-solar point, sun card, ISS pass
-         card, and on-globe solar markers.  Press Space to toggle
+         card, on-globe solar markers, AND (via WeatherFrameResolver)
+         24-hour wind/temp/cloud replay.  Press Space to toggle
          play/pause; N snaps back to real time. -->
     <div id="time-controls">
-        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
-        <span class="tc-sep"></span>
-        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
-        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
-        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
-        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
-        <span class="tc-sep"></span>
-        <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
-        <span class="tc-display">
-            <span class="tc-time"   id="tc-time-utc">—</span>
-            <span class="tc-offset" id="tc-time-offset">now</span>
-        </span>
+        <!-- Replay slider: -1440..0 minutes from now, 1-min step. The
+             resolver listens via animate()'s tick; the input handler
+             writes simTimeMs so satellites + sun + weather all replay
+             together. -->
+        <div id="tc-scrub-row">
+            <span class="tc-scrub-edge">−24h</span>
+            <input type="range" id="tc-scrub"
+                   min="-1440" max="0" step="1" value="0"
+                   aria-label="Time scrub — drag to replay last 24 hours"
+                   title="Drag to replay the last 24 h of wind, temperature, and cloud data">
+            <span class="tc-scrub-edge right">now</span>
+        </div>
+        <div id="tc-buttons-row">
+            <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+            <span class="tc-sep"></span>
+            <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+            <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+            <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+            <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+            <span class="tc-sep"></span>
+            <button class="tc-btn" id="tc-now" title="Jump to real time (N)">Now</button>
+            <span class="tc-display">
+                <span class="tc-time"   id="tc-time-utc">—</span>
+                <span class="tc-offset" id="tc-time-offset">now</span>
+            </span>
+        </div>
     </div>
 
     <!-- Mobile bottom toolbar -->
@@ -1443,6 +1498,8 @@ import {
     clearUserLocation, auroraVisibility,
 } from './js/user-location.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
+import { WeatherHistory }       from './js/weather-history.js';
+import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -2944,10 +3001,38 @@ function _updateLayerTooltips() {
 setInterval(_updateLayerTooltips, 30_000);
 
 // ═══════════════════════════════════════════════════════════════
-//  WEATHER FEED — real-time Open-Meteo / GFS data
+//  WEATHER FEED + 24-h replay history + resolver
+//  ──────────────────────────────────────────────────────────────
+//  Three collaborators:
+//    wxGridHistory  — IndexedDB ring buffer of 24 hourly coarse frames
+//                     (named wxGridHistory because the existing solar-
+//                     side `wxHistory` already owns the variable name)
+//    wxFeed         — live Open-Meteo poll; pushes each frame to history
+//    wxResolver     — translates simTimeMs into the right paint, lerping
+//                     between the two bracketing history frames during
+//                     replay and short-circuiting through wxFeed.* buffers
+//                     when the user is parked at "now".
+//
+//  Wiring order matters:
+//    1. construct wxGridHistory (cheap)
+//    2. await wxGridHistory.open() so the very first wxFeed dispatch
+//       can persist its frame to disk (otherwise it'd land in-memory
+//       only)
+//    3. construct wxFeed with { history }, kick off wxFeed.start()
+//    4. construct wxResolver with { feed, history }; the animate loop
+//       below calls wxResolver.tick(simTimeMs) once per rAF.
 // ═══════════════════════════════════════════════════════════════
-const wxFeed = new WeatherFeed();
+const wxGridHistory = new WeatherHistory();
+let wxFeed = null;
+let wxResolver = null;
+// Top-level await is allowed inside <script type="module">, which is
+// what this page loads as. If wxGridHistory.open() rejects (e.g.
+// IndexedDB blocked in private mode) it still resolves — degraded to
+// in-memory only — so the rest of the chain always runs.
+await wxGridHistory.open();
+wxFeed = new WeatherFeed({ history: wxGridHistory });
 wxFeed.start();
+wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
@@ -5435,7 +5520,20 @@ function _setSimPaused(paused) {
     const b = document.getElementById('tc-play');
     if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
 }
-function _jumpToNow() { simTimeMs = Date.now(); }
+function _jumpToNow() {
+    simTimeMs = Date.now();
+    // Snap the scrub bar back to live so the renderer's mode flips
+    // immediately on the next animate frame. We bypass the normal
+    // writeback skip-while-focused logic here because this is an
+    // explicit user command (Now button or N keypress), not the
+    // animate loop trying to track natural advance.
+    if (_scrubEl) _scrubEl.value = 0;
+    // Resume natural advance. If the user was paused because they
+    // were exploring the past (auto-pause on slider drag), Now means
+    // "back to live" — including time moving again. If they want to
+    // freeze at "now" they can still hit Space.
+    if (simPaused) _setSimPaused(false);
+}
 
 document.getElementById('tc-play')?.addEventListener('click', () => _setSimPaused(!simPaused));
 document.getElementById('tc-now')?.addEventListener('click', _jumpToNow);
@@ -5445,8 +5543,39 @@ document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
 _setSimSpeed(1);
 _setSimPaused(false);
 
+// ── 24-h replay slider ──────────────────────────────────────────────────
+// Bidirectional binding to simTimeMs:
+//   • input event (drag / keyboard)   → write simTimeMs
+//   • animate() natural advance (1×, 60×, …) → write slider.value
+// The writeback is suppressed while the slider has focus so we don't
+// fight the user mid-drag (browsers fire `input` continuously during
+// drag; document.activeElement === slider lasts from pointerdown
+// through pointerup-or-tab-out).
+const _scrubEl = document.getElementById('tc-scrub');
+if (_scrubEl) {
+    _scrubEl.addEventListener('input', () => {
+        const minutesAgo = Number(_scrubEl.value);
+        // value is "minutes from now" in [-1440, 0]. Negative = past.
+        simTimeMs = Date.now() + minutesAgo * 60_000;
+        // Auto-pause when scrubbing into the past so the user's view
+        // doesn't drift forward under them at simSpeed×; releasing
+        // back to 0 leaves them paused, but Now/N or the play button
+        // resumes. This matches how every video scrubber on the web
+        // behaves and keeps the analysis use-case (parking on a
+        // moment to inspect it) the default.
+        if (minutesAgo < 0 && !simPaused) _setSimPaused(true);
+    });
+    // Resume playback on release if the user dragged back to "now" —
+    // otherwise leave them paused at the historical moment they chose.
+    _scrubEl.addEventListener('change', () => {
+        if (Number(_scrubEl.value) === 0 && simPaused) _setSimPaused(false);
+    });
+}
+
 // Keyboard shortcuts — ignored when a text input / textarea is focused
 // so typing in the location search doesn't accidentally pause the sim.
+// (The scrub slider is type=range, not text, so arrow keys nudge it
+// natively.)
 window.addEventListener('keydown', (e) => {
     const tag = e.target?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -5466,6 +5595,32 @@ function animate() {
     const realNow = performance.now();
     if (!simPaused) simTimeMs += (realNow - _realLast) * simSpeed;
     _realLast = realNow;
+
+    // ── Weather frame resolution ─────────────────────────────────────────
+    // resolver.tick decides — based on simTimeMs vs wall-clock — whether
+    // to short-circuit through the live wxFeed buffers or lerp two
+    // bracketing frames pulled out of wxGridHistory. Internal change-
+    // detection makes this a no-op (~10 µs) when the visible frame
+    // hasn't moved appreciably, so we can call it every rAF.
+    wxResolver?.tick(simTimeMs);
+
+    // Slider writeback: while the user isn't actively scrubbing (slider
+    // not focused), keep the slider position in sync with simTimeMs so
+    // natural advance at 60× / 600× / 3600× drags the thumb along with
+    // the data. Skipping while focused prevents the slider from jumping
+    // out from under the user mid-drag.
+    if (_scrubEl && document.activeElement !== _scrubEl) {
+        const minutesAgo = (simTimeMs - Date.now()) / 60_000;
+        // Clamp to the slider's [-1440, 0] domain. Future-time scrub
+        // (already shown by satellites/sun) clamps to 0 here because
+        // weather replay doesn't cover the future yet.
+        const clamped = Math.max(-1440, Math.min(0, minutesAgo));
+        // Only write if it actually changed by at least a step (1 min)
+        // — avoids triggering UA-side restyles every frame on idle.
+        if (Math.abs(clamped - Number(_scrubEl.value)) >= 1) {
+            _scrubEl.value = String(clamped.toFixed(0));
+        }
+    }
 
     // ── Real-time astronomical state ────────────────────────────────────
     // Single source of truth per frame: one simTimeMs drives both Earth's
