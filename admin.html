@@ -110,6 +110,7 @@
         .b-super { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
         .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
         .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-tester { background: rgba(255,140,0,.1); color: #ffb74d; border: 1px solid rgba(255,140,0,.28); }
         .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
         .b-educator { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
         .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
@@ -411,6 +412,7 @@
                 <input id="invite-email-name"  type="text"  placeholder="Recipient name (optional)" class="btn" style="padding:8px 12px;flex:1;min-width:160px;text-align:left;font-family:inherit">
                 <select id="invite-email-plan" class="btn" style="padding:8px 12px" title="Plan tier the invite grants when redeemed">
                     <option value="free">Free</option>
+                    <option value="tester" selected>Tester (full access, comp)</option>
                     <option value="basic">Basic ($10/mo equiv.)</option>
                     <option value="educator">Educator ($25/mo equiv.)</option>
                     <option value="advanced">Advanced ($100/mo equiv.)</option>
@@ -434,6 +436,7 @@
                 <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
                     <select id="invite-plan" class="btn" style="padding:8px 12px" title="Plan tier the bulk code grants when redeemed">
                         <option value="free">Free tier</option>
+                        <option value="tester">Tester tier (full access, comp)</option>
                         <option value="basic">Basic tier</option>
                         <option value="educator">Educator tier</option>
                         <option value="advanced">Advanced tier</option>
@@ -1262,7 +1265,7 @@ async function loadTopSimsByPlan() {
     const res = await fetchTopSimsByPlan(7);
     if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
     if (!res.data.length) { el.innerHTML = '<div class="empty">No sim views in the last 7 days.</div>'; return; }
-    const plans = ['anon', 'free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
+    const plans = ['anon', 'free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
     let html = '<table><thead><tr><th>Sim</th><th>Total</th>';
     for (const p of plans) html += `<th>${_esc(p)}</th>`;
     html += '</tr></thead><tbody>';
@@ -1336,7 +1339,7 @@ async function loadUsers() {
     let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
     for (const u of res.data) {
         const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
-        const pc = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
+        const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
         html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
     }
@@ -1431,7 +1434,7 @@ async function loadInvites() {
         const full    = c.used_count >= c.max_uses;
         const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
         const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
-        const pc      = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
+        const pc      = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
         const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
         const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
         html += `<tr>
