@@ -420,9 +420,17 @@ body {
     font-size: .72rem;
     border-bottom: 1px dotted rgba(255,255,255,.05);
 }
-.op-fleet-row:hover { background: rgba(255,255,255,.03); }
+.op-fleet-row { cursor: pointer; transition: background .12s, border-color .12s; }
+.op-fleet-row:hover { background: rgba(0,200,200,.06); }
+.op-fleet-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
 .op-fleet-row-pending { opacity: .6; }
 .op-fleet-row-error   { opacity: .55; }
+.op-fleet-row-selected {
+    background: rgba(0,255,200,.08);
+    border-bottom-color: rgba(0,255,200,.3);
+    box-shadow: inset 3px 0 0 rgba(0,255,200,.7);
+}
+.op-fleet-row-selected .op-fleet-name { color: #0ff; }
 .op-fleet-name {
     color: #cef;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -515,6 +523,9 @@ body {
 .op-conj-row-med    { border-left-color: rgba(255,200,80,.55); background: rgba(255,200,80,.04); }
 .op-conj-row-high   { border-left-color: rgba(255,80,120,.7);  background: rgba(255,80,120,.05); color: #fda; }
 .op-conj-row-err    { color: #f88; font-style: italic; }
+.op-conj-row[data-tca-ms] { cursor: pointer; transition: background .12s; }
+.op-conj-row[data-tca-ms]:hover { background: rgba(0,200,200,.08); }
+.op-conj-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
 .op-conj-name { color: #cef; }
 .op-conj-count {
     font-family: monospace;
@@ -1214,6 +1225,7 @@ import { MyFleet }            from './js/operations/my-fleet.js';
 import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
 } from './js/operations/decision-deck.js';
+import { OperationsVisuals }  from './js/operations/visuals.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 // Mount tooltip delegations up front so anything that binds later
@@ -1409,11 +1421,25 @@ layerLoad
 // activate naturally on the value transition.
 const stopSwpcBridge = startSwpcBridge();
 
-/* ─── My Fleet + decision deck ──────────────────────────── */
+/* ─── My Fleet + decision deck + visuals ───────────────── */
 const myFleet = new MyFleet(fleet.tracker);
-mountMyFleet(myFleet);
+const visuals = new OperationsVisuals({
+    globe,
+    fleet,
+    myFleet,
+    tracker: fleet.tracker,
+});
+visuals.start();
+
+mountMyFleet(myFleet, {
+    onSelect:       (id) => visuals.setSelectedAsset(id),
+    getSelectedId:  ()   => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
 mountDecayWatch(myFleet);
-mountConjunctions(myFleet, fleet.tracker);
+mountConjunctions(myFleet, fleet.tracker, {
+    onSelect: (id) => visuals.setSelectedAsset(id),
+});
 mountPropBudget(myFleet);
 
 /* ─── Layer panel ───────────────────────────────────────── */
@@ -1547,7 +1573,7 @@ mountDataDictionary();
 // Devtools handle.
 window.__op = {
     readAuth, isProPlan, timeBus, globe, fleet, scenario,
-    provStore, delta, myFleet, stopSwpcBridge,
+    provStore, delta, myFleet, visuals, stopSwpcBridge,
 };
 </script>
 
