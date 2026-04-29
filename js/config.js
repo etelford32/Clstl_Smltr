@@ -16,10 +16,12 @@
  *  TIER.PRO   — All tiers including T3 (15min) + T4 (60min), full history,
  *               storm-mode acceleration, and on-demand series endpoints.
  *
- *  TIER.* is the feed's *feature bucket*, not the user-facing plan. Use
- *  `planToTier(plan)` to translate a Stripe/Supabase plan name into a
- *  bucket — everything 'advanced' or above lands in TIER.PRO, including
- *  'institution' and 'enterprise'.
+ *  PRO ≡ Advanced. TIER.* is the feed's *feature bucket*, not the
+ *  user-facing plan. Use `planToTier(plan)` to translate a Stripe/Supabase
+ *  plan name into a bucket — everything 'advanced' or above lands in
+ *  TIER.PRO, including 'institution' and 'enterprise'. The canonical
+ *  client-side gate is `auth.isPro()` in js/auth.js, which mirrors this
+ *  mapping for any feature-flag check that isn't feed-cadence-related.
  */
 
 // ── NASA API key (local dev only; replaced by env var in production) ─────────

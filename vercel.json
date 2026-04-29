@@ -203,6 +203,14 @@
       "destination": "/upper-atmosphere.html"
     },
     {
+      "source": "/operations",
+      "destination": "/operations.html"
+    },
+    {
+      "source": "/ops",
+      "destination": "/operations.html"
+    },
+    {
       "source": "/privacy",
       "destination": "/privacy.html"
     },

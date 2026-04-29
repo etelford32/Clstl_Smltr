@@ -145,15 +145,20 @@ class AuthManager {
         return this._user?.role === 'tester' || this._user?.plan === 'tester';
     }
 
-    // ── Tier-tier feature gates ──────────────────────────────────────────
+    // ── Tier feature gates ───────────────────────────────────────────────
     // Plans, lowest → highest:
     //   free → basic → educator → advanced → institution → enterprise
+    //
+    // PRO ≡ Advanced. The "PRO" badge in the UI and the TIER.PRO feed
+    // bucket both mean exactly: Advanced or above (Institution and
+    // Enterprise are Advanced-equivalent on data access; they layer on
+    // seats, branding, and support). Use isPro() below as the canonical
+    // gate.
     //
     // Educator is positioned BETWEEN basic and advanced because it gates
     // on use case (classroom + embed) rather than data depth — Educator
     // gets all Basic data feeds but adds embed permission and the
-    // Powered-by attribution flag. Institution and Enterprise are
-    // Advanced-equivalent for data access.
+    // Powered-by attribution flag.
 
     /** Tiers that get any kind of alert (everything except free). */
     canUseAlerts() {
@@ -185,6 +190,27 @@ class AuthManager {
     hasCustomBranding() {
         const plan = this.getPlan();
         return plan === 'institution' || plan === 'enterprise';
+    }
+
+    /**
+     * Canonical PRO gate. PRO ≡ Advanced.
+     *
+     * Advanced, Institution, and Enterprise plans share the same data
+     * depth, the same advanced alerts, and the same simulators — they
+     * differ only on seat count, branding, and support. Admins and
+     * testers also pass.
+     *
+     * Use this for any feature gate that asks "does this user get the
+     * full advanced product?". This is the canonical equivalent of the
+     * `tier: 'advanced'` nav label and the `TIER.PRO` feed bucket from
+     * config.js (planToTier()).
+     */
+    isPro() {
+        if (this.isAdmin() || this.isTester()) return true;
+        const plan = this.getPlan();
+        return plan === 'advanced'
+            || plan === 'institution'
+            || plan === 'enterprise';
     }
 
     /**
