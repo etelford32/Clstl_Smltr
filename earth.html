@@ -623,9 +623,12 @@ nav {
 
 /* ─── Time controls (bottom-centre) ────────────────────────────── */
 /* Same pattern as satellites.html so both pages share muscle memory.
-   One simTimeMs drives the Earth rotation, sun direction, sub-solar
-   point, sun card, ISS pass card, and on-globe solar markers.  UI
-   speed presets: 1× (real), 60× (1 min/s), 600×, 3600× (1 hr/s). */
+   simTimeMs drives sun direction, sub-solar point, sun card, ISS pass
+   card, on-globe solar markers, and the 24-h weather replay.  Earth
+   ROTATION is intentionally decoupled — see the "Planet rotation"
+   toggle at the top of the SW panel — so the slider scrubs data
+   across a stationary globe.  UI speed presets: 1× (real), 60×
+   (1 min/s), 600×, 3600× (1 hr/s). */
 #time-controls {
     position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
     z-index: 60;
@@ -1037,6 +1040,22 @@ nav {
             </div>
         </div>
         <div class="panel-body">
+
+        <!-- Planetary rotation toggle. OFF by default so the time slider
+             can scrub data (terminator, weather replay, satellites) across
+             a fixed globe — i.e. "watch the storm move across LA over the
+             last 24 h" without the geometry yanking around. ON makes the
+             Earth rotate at WALL-CLOCK time (real seconds → real degrees),
+             independent of the slider. State is persisted in localStorage
+             so a user's preference survives reload. -->
+        <div class="ir" style="margin-bottom:7px;">
+            <label for="ip-rotate" class="ik" style="cursor:pointer;user-select:none;">Planet rotation</label>
+            <input type="checkbox" id="ip-rotate"
+                   style="cursor:pointer;accent-color:#00c6ff;width:14px;height:14px;margin:0;"
+                   title="ON: Earth rotates at real time. OFF: Earth orientation locked; slider only moves data and the terminator.">
+        </div>
+
+        <hr class="ir-sep">
 
         <!-- Kp gauge -->
         <div style="margin-bottom:7px;">
@@ -1694,11 +1713,15 @@ onResize();
 // rotation and the terminator, with no per-frame drift between them.
 const SUN_EQ = sunDirectionEquatorial(julianDay(new Date()));
 
-// The Earth mesh's Y-axis is the geographic north pole. animate() sets
-// earthMesh.rotation.y = gmst(jd) * DEG every frame, which carries the
-// prime meridian around the scene's equatorial +X axis (vernal equinox)
-// at the exact sidereal rate baked into the GMST formula — no separate
-// rate constant needed, and no accumulator to drift over long sessions.
+// The Earth mesh's Y-axis is the geographic north pole. When the
+// "Planet rotation" toggle in the SW panel is ON, animate() sets
+// earthMesh.rotation.y = gmst(julianDay(Date.now())) * DEG every frame,
+// which carries the prime meridian around the scene's equatorial +X
+// axis (vernal equinox) at the exact sidereal rate baked into the
+// GMST formula — no separate rate constant needed, and no accumulator
+// to drift over long sessions. When the toggle is OFF (default), the
+// orientation is pinned to a single GMST snapshot so the time slider's
+// data scrubbing happens on a stationary globe.
 
 // ═══════════════════════════════════════════════════════════════
 //  SHARED UNIFORMS
@@ -5500,15 +5523,72 @@ let lastT = 0;
 const _sunDirScratch = new THREE.Vector3();
 
 // ── Simulation-time state ──────────────────────────────────────────────
-// One simTimeMs variable is the single source of truth for every
-// time-sensitive part of the scene — GMST-driven rotation, sun direction,
-// sub-solar point, sun card, ISS pass card, on-globe solar markers. It
-// advances by real-dt × simSpeed unless paused.  Same pattern as
-// satellites.html; both pages now share the scrubber muscle memory.
+// One simTimeMs variable is the source of truth for every TIME-sensitive
+// part of the scene — sun direction, sub-solar point, sun card, ISS pass
+// card, on-globe solar markers, and (via WeatherFrameResolver) the
+// 24-hour wind/temp/cloud replay. It advances by real-dt × simSpeed
+// unless paused.
+//
+// Earth's ROTATION is intentionally NOT tied to simTimeMs — it's a
+// separate concern controlled by the user-facing "Planet rotation"
+// toggle in the SW panel header. See the rotation block in animate()
+// for the read site. Decoupling lets the slider act as a pure data
+// scrubber: drag back -6 h and the terminator + weather + satellites
+// move while the geometry stays put, so analysts can park their gaze
+// on a region and watch conditions evolve over it.
 let simTimeMs = Date.now();
 let simSpeed  = 1;                  // sim seconds per real second
 let simPaused = false;
 let _realLast = performance.now();
+
+// ── Planet-rotation state ──────────────────────────────────────────────
+// `planetRotationEnabled = true`  → earthMesh.rotation.y follows
+//   gmst(WALL-CLOCK now) every frame. The Earth visibly spins at real
+//   time, independent of the slider.
+// `planetRotationEnabled = false` (default) → earthMesh.rotation.y is
+//   pinned to `_pageLoadEarthRot`, captured once at module init from
+//   gmst(Date.now()). The orientation matches reality at the moment the
+//   user opened the page and never changes after that.
+//
+// Either way the slider DOES NOT touch rotation. simTimeMs continues to
+// drive the sun direction (terminator), so scrubbing always sweeps the
+// day-night line across the globe — that's the cleanest visual
+// confirmation that simTime is changing.
+const ROTATION_PREF_KEY = 'parkersphysics.planetRotation';
+// Mutable: re-captured every time the user toggles rotation OFF, so
+// "frozen orientation" tracks the live world if they open the page,
+// keep it open for an hour, then flip rotation off — they get the
+// current sub-solar point, not a stale one from page load.
+let _pageLoadEarthRot = gmst(julianDay(new Date(Date.now()))) * DEG;
+let planetRotationEnabled = false;
+try {
+    // Survives reload. First-ever visit defaults to OFF (analysis-tool
+    // posture). Catch covers privacy-mode storage exceptions.
+    planetRotationEnabled = localStorage.getItem(ROTATION_PREF_KEY) === '1';
+} catch (_) { /* storage blocked → keep default */ }
+
+// Wire the SW-panel checkbox once the DOM is ready (this script is
+// already a module loaded after the panel HTML, so the element exists
+// here). Reflect persisted state, then attach the change listener.
+{
+    const _rotEl = document.getElementById('ip-rotate');
+    if (_rotEl) {
+        _rotEl.checked = planetRotationEnabled;
+        _rotEl.addEventListener('change', () => {
+            planetRotationEnabled = _rotEl.checked;
+            // When flipping OFF, snapshot the current wall-clock GMST so
+            // the planet freezes at the orientation it had at this
+            // instant — not a stale one from page load.
+            if (!planetRotationEnabled) {
+                _pageLoadEarthRot = gmst(julianDay(new Date(Date.now()))) * DEG;
+            }
+            try {
+                localStorage.setItem(ROTATION_PREF_KEY,
+                    planetRotationEnabled ? '1' : '0');
+            } catch (_) { /* storage blocked → in-memory only */ }
+        });
+    }
+}
 
 function _fmtSimUTC(d) {
     return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -5636,20 +5716,28 @@ function animate() {
         }
     }
 
-    // ── Real-time astronomical state ────────────────────────────────────
-    // Single source of truth per frame: one simTimeMs drives both Earth's
-    // rotation (via GMST) and the sun direction (via mean ecliptic longitude
-    // → equatorial frame). Because both derive from the same jd, the
-    // sub-solar point can never drift relative to the globe — and a time
-    // scrub (any simSpeed ≠ 1) moves both together, so the terminator
-    // tracks wherever the user pulls time to.
-    const simDate = new Date(simTimeMs);
-    const jd      = julianDay(simDate);
-    earthMesh.rotation.y = gmst(jd) * DEG;
+    // ── Earth rotation (decoupled from simTimeMs) ───────────────────────
+    // Toggle in the SW panel header. ON: track real wall-clock GMST so
+    // the planet visibly spins. OFF (default): freeze at the orientation
+    // captured at page load — the analyst's gaze stays parked while the
+    // slider scrubs data and the terminator across a stationary globe.
+    //
+    // Either branch keeps simTimeMs out of the rotation calculation; the
+    // slider can never drag the geometry around even when rotation is on.
+    if (planetRotationEnabled) {
+        const wallJd = julianDay(new Date(Date.now()));
+        earthMesh.rotation.y = gmst(wallJd) * DEG;
+    } else {
+        earthMesh.rotation.y = _pageLoadEarthRot;
+    }
     cloudMesh.rotation.y = earthMesh.rotation.y;   // clouds locked to ground
 
-    // Sun direction recomputed from the same jd so the shaders' NdotL test
-    // agrees with the Earth's current rotation angle down to float precision.
+    // ── Sun direction (still tied to simTimeMs) ─────────────────────────
+    // Computed from simTimeMs's JD so the slider scrubs the day-night
+    // terminator across the (rotation-decoupled) globe. This is the
+    // primary visual cue that simTime is moving when rotation is off.
+    const simDate = new Date(simTimeMs);
+    const jd      = julianDay(simDate);
     _sunDirScratch.copy(sunDirectionEquatorial(jd));
     earthU.u_sun_dir.value.copy(_sunDirScratch);
     cloudU.u_sun_dir.value.copy(_sunDirScratch);
