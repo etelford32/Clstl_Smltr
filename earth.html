@@ -3034,6 +3034,20 @@ wxFeed = new WeatherFeed({ history: wxGridHistory });
 wxFeed.start();
 wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 
+// Cold-start backfill. /api/weather/grid?since=… serves up to 24 frames
+// from the same Supabase ring buffer the cron writes to (server-side
+// retention is 72 h; we only ask for 24 to match the slider's range).
+// Non-blocking: the live feed and resolver are already running, so the
+// page is fully interactive while the ~MB-scale historical payload is
+// in flight. invalidate() forces the next animate tick to re-resolve
+// in case the user is already parked at a past instant when backfill
+// lands — without it, they'd need to nudge the slider to see the new
+// frames. Also a second invalidate when at least one frame ingested
+// from a fresh disk store (warmed history would already serve replay).
+wxFeed.backfill(wxGridHistory, 24).then(n => {
+    if (n > 0) wxResolver?.invalidate();
+});
+
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
 // ═══════════════════════════════════════════════════════════════
