@@ -206,19 +206,38 @@ body {
 }
 .op-scrub-btn:hover:not(:disabled) { color:#fff; border-color:rgba(255,255,255,.25); }
 .op-scrub-btn:disabled { opacity:.4; cursor:not-allowed; }
+.op-scrub-btn--on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+.op-scrub-speed {
+    min-width:38px;
+    font-family:monospace;
+}
+#op-scrub-speeds {
+    display:inline-flex; gap:3px;
+    border-left:1px solid rgba(255,255,255,.08);
+    padding-left:10px; margin-left:4px;
+}
 #op-scrub-track {
     flex:1; min-width:200px;
-    height:4px;
+    height:6px;
     background:rgba(255,255,255,.06);
-    border-radius:2px;
+    border-radius:3px;
     position:relative;
+    cursor:pointer;
+    outline:none;
 }
+#op-scrub-track:hover    { background:rgba(255,255,255,.10); }
+#op-scrub-track:focus    { box-shadow:0 0 0 2px rgba(0,200,200,.35); }
 #op-scrub-now {
     position:absolute;
     top:-3px; bottom:-3px;
     left:50%;
     width:1px;
-    background:rgba(0,255,170,.5);
+    background:rgba(0,255,170,.55);
+    pointer-events:none;
 }
 #op-scrub-cursor {
     position:absolute;
@@ -230,6 +249,14 @@ body {
     border:2px solid #033;
     transform:translateX(-50%);
     pointer-events:none;
+    box-shadow:0 0 6px rgba(0,200,200,.4);
+}
+#op-tc-readout {
+    font-family:monospace;
+    font-size:.7rem;
+    color:#9bd;
+    margin-left:auto;
+    white-space:nowrap;
 }
 
 /* ─── PRO PREVIEW ribbon ───────────────────────────────── */
@@ -425,22 +452,26 @@ body {
         </div>
     </section>
 
-    <!-- Bottom: scrub strip (placeholder) -->
+    <!-- Bottom: scrub strip -->
     <div id="op-scrub" class="op-panel">
         <div id="op-scrub-row">
-            <button class="op-scrub-btn" disabled title="Jump to −7 days">⏮</button>
-            <button class="op-scrub-btn" disabled title="Step back">⏪</button>
-            <button class="op-scrub-btn" disabled title="Play / pause">▶︎</button>
-            <button class="op-scrub-btn" disabled title="Step forward">⏩</button>
-            <button class="op-scrub-btn" disabled title="Jump to +7 days">⏭</button>
+            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −7 days">⏮</button>
+            <button class="op-scrub-btn" id="op-tc-back" title="Step back 1 hour (←)">⏪</button>
+            <button class="op-scrub-btn" id="op-tc-play" title="Play replay (Space)">▶︎</button>
+            <button class="op-scrub-btn" id="op-tc-fwd"  title="Step forward 1 hour (→)">⏩</button>
+            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +7 days">⏭</button>
             <div id="op-scrub-track">
                 <div id="op-scrub-now"></div>
                 <div id="op-scrub-cursor"></div>
             </div>
-            <button class="op-scrub-btn" disabled title="Jump to real time">Now</button>
-            <span style="font-size:.66rem; color:#556; font-style:italic">
-                Scrub wiring lands next — three modes: Live · Scrub · Replay (±7 d).
+            <button class="op-scrub-btn" id="op-tc-now" title="Jump to real time (N)">Now</button>
+            <span id="op-scrub-speeds">
+                <button class="op-scrub-btn op-scrub-speed" data-speed="1"    title="Replay at real time (1×)">1×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="60"   title="Replay at 60× — 1 minute per second">60×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="600"  title="Replay at 600× — 10 minutes per second">600×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="3600" title="Replay at 3600× — 1 hour per second">3600×</button>
             </span>
+            <span id="op-tc-readout">—</span>
         </div>
     </div>
 
@@ -449,7 +480,7 @@ body {
 <!-- ─── Boot ──────────────────────────────────────────────────── -->
 <script type="module">
 /**
- * operations.html boot — step 1 of the build.
+ * operations.html boot — steps 1 + 3.
  *
  * Wires:
  *   - PRO PREVIEW ribbon (open beta copy + dismiss + state-aware copy
@@ -458,11 +489,14 @@ body {
  *     are stubs).
  *   - Hash + model pills with placeholder values pending the determinism
  *     foundations (step 5).
- *
- * Everything labelled "Coming next" in the DOM is intentionally a stub.
- * Subsequent steps land the time scrub, constellation/debris loaders,
- * provenance store, confidence bands, and decision deck.
+ *   - Time bus + transport strip + hero mode chip (step 3): Live / Scrub
+ *     / Replay over a moving ±7 day window. Drag the cursor or press
+ *     Space / N / ←→ to drive simTimeMs. Subsequent steps wire
+ *     constellation propagation and the decision deck to the same bus.
  */
+
+import { timeBus }        from './js/operations/time-bus.js';
+import { mountTimeStrip } from './js/operations/time-strip.js';
 
 const AUTH_KEY = 'pp_auth';
 const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
@@ -563,8 +597,26 @@ mountRibbon();
 mountPersonas();
 mountChips();
 
+/* ─── Time bus + transport strip ───────────────────────── */
+mountTimeStrip({
+    track:     document.getElementById('op-scrub-track'),
+    cursor:    document.getElementById('op-scrub-cursor'),
+    nowTick:   document.getElementById('op-scrub-now'),
+    modeChip:  document.getElementById('op-mode-chip'),
+    modeLabel: document.getElementById('op-mode-label'),
+    btnHome:   document.getElementById('op-tc-home'),
+    btnBack:   document.getElementById('op-tc-back'),
+    btnPlay:   document.getElementById('op-tc-play'),
+    btnFwd:    document.getElementById('op-tc-fwd'),
+    btnEnd:    document.getElementById('op-tc-end'),
+    btnNow:    document.getElementById('op-tc-now'),
+    speedBtns: document.querySelectorAll('#op-scrub-speeds .op-scrub-speed'),
+    readout:   document.getElementById('op-tc-readout'),
+});
+timeBus.start();
+
 // Devtools handle.
-window.__op = { readAuth, isProPlan };
+window.__op = { readAuth, isProPlan, timeBus };
 </script>
 
 </body>
