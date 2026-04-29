@@ -59,6 +59,18 @@ export class OperationsFleet {
     isLoaded(id)  { return this.tracker.hasGroup(id); }
     counts()      { return this.tracker.getGroupCounts(); }
 
+    /**
+     * IDs of layers currently being rendered (toggled on AND loaded).
+     * Used by the scenario module to bind the hash to what's actually
+     * on-screen — loading state changes produce hash flips when the
+     * fetch completes.
+     */
+    activeLayerIds() {
+        return LAYER_CATALOG
+            .filter(l => this.isOn(l.id) && this.isLoaded(l.id))
+            .map(l => l.id);
+    }
+
     onChange(fn) {
         this._listeners.add(fn);
         try { fn(); } catch (_) {}

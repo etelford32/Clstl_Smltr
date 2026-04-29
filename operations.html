@@ -537,6 +537,7 @@ import { timeBus }            from './js/operations/time-bus.js';
 import { mountTimeStrip }     from './js/operations/time-strip.js';
 import { OperationsGlobe }    from './js/operations/globe.js';
 import { OperationsFleet }    from './js/operations/fleet.js';
+import { scenario }           from './js/operations/scenario.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 const AUTH_KEY = 'pp_auth';
@@ -601,35 +602,52 @@ function mountPersonas() {
                 b.classList.toggle('op-persona-on', on);
                 b.setAttribute('aria-selected', on ? 'true' : 'false');
             });
+            scenario.setPersona(btn.dataset.opPersona);
         });
     });
 }
 
-/* ─── Placeholder hash + model pills ───────────────────── */
+/* ─── Hash + model pills (scenario-driven) ─────────────── */
 function mountChips() {
-    // Real hash composition lands in step 5 (determinism foundations).
-    // For now we surface a stable placeholder so the chip layout is
-    // visible and the click-to-copy plumbing is exercised end-to-end.
-    const hashVal = document.getElementById('op-hash-val');
-    if (hashVal) hashVal.textContent = 'preview';
-
+    const hashVal  = document.getElementById('op-hash-val');
     const hashChip = document.getElementById('op-hash-chip');
-    if (hashChip) {
-        hashChip.addEventListener('click', () => {
-            const url = `${location.origin}/operations`;
-            navigator.clipboard?.writeText(url).catch(() => {});
-            const prev = hashVal?.textContent;
-            if (hashVal) {
-                hashVal.textContent = 'copied';
-                setTimeout(() => { if (hashVal) hashVal.textContent = prev || 'preview'; }, 900);
-            }
-        });
+    const modelVal = document.getElementById('op-model-val');
+    const modelChip = document.getElementById('op-model-chip');
+
+    if (modelVal) modelVal.textContent = scenario.modelLabel;
+    if (modelChip) {
+        const m = scenario.MODEL_VERSIONS;
+        modelChip.title = [
+            'Pinned model versions',
+            `· orbit:        ${m.sgp4}`,
+            `· atmosphere:   ${m.atmosphere}`,
+            `· magnetopause: ${m.magnetopause}`,
+            `· covariance:   ${m.covariance}`,
+            '',
+            'Synthetic covariance (Vallado age-map). Real Space-Track / commercial covariance is an Enterprise upgrade.',
+        ].join('\n');
     }
 
-    const modelChip = document.getElementById('op-model-chip');
-    if (modelChip) {
-        modelChip.addEventListener('click', () => {
-            // Model card drawer ships with the provenance work in step 6.
+    // Live hash binding. The scenario module only fires this when the
+    // hash actually moves (live-mode emits collapse to the same value).
+    scenario.subscribe(() => {
+        if (hashVal) hashVal.textContent = scenario.getHash();
+    });
+
+    // Click-to-copy permalink. Briefly flashes "copied" on the chip,
+    // then restores the hash. URL roundtrips on next load via
+    // scenario.parseUrl() in the boot block below.
+    if (hashChip) {
+        hashChip.addEventListener('click', async () => {
+            const link = scenario.getPermalink();
+            try { await navigator.clipboard.writeText(link); } catch (_) {}
+            if (!hashVal) return;
+            const prev = hashVal.textContent;
+            hashVal.textContent = 'copied';
+            setTimeout(() => {
+                hashVal.textContent = scenario.getHash();
+                if (prev) {/* prev is captured for closure paranoia, not used */}
+            }, 900);
         });
     }
 }
@@ -663,12 +681,43 @@ globe.start();
 
 mountLayerPanel(fleet);
 
-// Default-on subset (stations + debris) loads in parallel; the heavier
-// constellations (Starlink, GNSS, OneWeb, Iridium, last-30-days) wait
-// for an explicit user toggle so the open-beta first paint stays fast.
-fleet.bootstrap().catch(err => {
-    console.warn('[operations] fleet bootstrap failed:', err);
-});
+// Keep scenario in sync with what the fleet is actually rendering so
+// the hash binds to the user's view, not their intent. Loading state
+// also flips here — when a fetch completes, the hash advances.
+fleet.onChange(() => scenario.setLayers(fleet.activeLayerIds()));
+
+// Permalink load. If `?l=…` is present we honour the URL exactly and
+// skip the default-on bootstrap; otherwise we load the standard subset.
+// `?t` / `?m` / `?sp` push directly into the time bus before any
+// rendering work so the very first frame paints at the requested
+// instant — no Live → Scrub flicker.
+const requested = scenario.parseUrl();
+
+if (requested.persona) scenario.setPersona(requested.persona);
+if (requested.time != null && requested.mode) {
+    timeBus.setSimTime(requested.time, { mode: requested.mode });
+    if (requested.mode === 'replay' && requested.speed) {
+        timeBus.setSpeed(requested.speed);
+    }
+}
+
+const layerLoad = requested.layers
+    ? Promise.all(requested.layers.map(id => fleet.setLayerOn(id, true)))
+    : fleet.bootstrap();
+
+layerLoad
+    .then(() => {
+        if (requested.hash) {
+            const got = scenario.getHash();
+            if (got !== requested.hash) {
+                console.warn(
+                    `[operations] permalink hash mismatch (url=${requested.hash}, computed=${got}). ` +
+                    'TLE catalog may have rolled forward since the link was issued.',
+                );
+            }
+        }
+    })
+    .catch(err => console.warn('[operations] layer load failed:', err));
 
 /* ─── Layer panel ───────────────────────────────────────── */
 function mountLayerPanel(fleet) {
@@ -719,7 +768,7 @@ function mountLayerPanel(fleet) {
 }
 
 // Devtools handle.
-window.__op = { readAuth, isProPlan, timeBus, globe, fleet };
+window.__op = { readAuth, isProPlan, timeBus, globe, fleet, scenario };
 </script>
 
 </body>
