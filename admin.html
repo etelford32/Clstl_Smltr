@@ -110,6 +110,7 @@
         .b-super { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
         .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
         .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-tester { background: rgba(255,140,0,.1); color: #ffb74d; border: 1px solid rgba(255,140,0,.28); }
         .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
         .b-educator { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
         .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
@@ -219,21 +220,80 @@
 
         <div class="row2">
             <div class="card">
-                <h3>Daily Trend (14 days)</h3>
+                <h3>Daily Trend
+                    <select id="trend-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem;font-weight:400;margin-left:6px">
+                        <option value="7">7 days</option>
+                        <option value="14" selected>14 days</option>
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                </h3>
                 <div class="sparkline-wrap"><canvas id="trend-canvas"></canvas></div>
                 <div style="display:flex;justify-content:space-between;font-size:.72rem;color:#444;">
                     <span id="trend-start"></span><span id="trend-end"></span>
                 </div>
+                <div style="display:flex;gap:14px;font-size:.72rem;color:#888;margin-top:8px">
+                    <span><span style="display:inline-block;width:10px;height:2px;background:#8040ff;vertical-align:middle"></span> Page views</span>
+                    <span><span style="display:inline-block;width:10px;height:2px;background:#4eff91;vertical-align:middle"></span> Unique users</span>
+                    <span style="margin-left:auto;color:#666" id="trend-avg-time">avg time on page: --</span>
+                </div>
             </div>
             <div class="card">
-                <h3>Top Pages (7 days)</h3>
+                <h3>Top Pages
+                    <select id="top-pages-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem;font-weight:400;margin-left:6px">
+                        <option value="1">24 hours</option>
+                        <option value="7" selected>7 days</option>
+                        <option value="30">30 days</option>
+                    </select>
+                </h3>
                 <div id="top-pages-list"><div class="empty">Loading...</div></div>
             </div>
         </div>
 
         <div class="card">
-            <h3>Live Event Feed <button class="btn btn-sm" id="btn-refresh-feed" style="float:right">Refresh</button></h3>
+            <h3>Live Event Feed
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="feed-event-filter" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="">All events</option>
+                        <option value="page_view">Page views</option>
+                        <option value="event">Custom events</option>
+                        <option value="click">Clicks (heatmap)</option>
+                    </select>
+                    <select id="feed-user-filter" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="">All users</option>
+                        <option value="signed">Signed-in</option>
+                        <option value="anon">Anonymous</option>
+                    </select>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" id="feed-autorefresh" checked style="cursor:pointer"> auto-refresh 10s
+                    </label>
+                    <button class="btn btn-sm" id="btn-refresh-feed">Refresh</button>
+                </span>
+            </h3>
             <div id="event-feed"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Click Heatmap (earth.html) ─────────────────────────────────── -->
+        <div class="card" id="heatmap-card">
+            <h3>Click Heatmap
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">where users click on a sim page</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="heatmap-page" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="earth">earth (live)</option>
+                    </select>
+                    <select id="heatmap-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="1">last 24h</option>
+                        <option value="7" selected>last 7d</option>
+                        <option value="30">last 30d</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-heatmap">Refresh</button>
+                </span>
+            </h3>
+            <div id="heatmap-stats" style="font-size:.78rem;color:#888;margin-bottom:10px">--</div>
+            <div id="heatmap-wrap" style="position:relative;width:100%;aspect-ratio:16/10;background:#0c0c1a;border:1px solid rgba(255,255,255,.05);border-radius:8px;overflow:hidden">
+                <canvas id="heatmap-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+            </div>
+            <div id="heatmap-targets" style="margin-top:12px;font-size:.78rem;color:#aaa"></div>
         </div>
     </div>
 
@@ -352,6 +412,7 @@
                 <input id="invite-email-name"  type="text"  placeholder="Recipient name (optional)" class="btn" style="padding:8px 12px;flex:1;min-width:160px;text-align:left;font-family:inherit">
                 <select id="invite-email-plan" class="btn" style="padding:8px 12px" title="Plan tier the invite grants when redeemed">
                     <option value="free">Free</option>
+                    <option value="tester" selected>Tester (full access, comp)</option>
                     <option value="basic">Basic ($10/mo equiv.)</option>
                     <option value="educator">Educator ($25/mo equiv.)</option>
                     <option value="advanced">Advanced ($100/mo equiv.)</option>
@@ -375,6 +436,7 @@
                 <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
                     <select id="invite-plan" class="btn" style="padding:8px 12px" title="Plan tier the bulk code grants when redeemed">
                         <option value="free">Free tier</option>
+                        <option value="tester">Tester tier (full access, comp)</option>
                         <option value="basic">Basic tier</option>
                         <option value="educator">Educator tier</option>
                         <option value="advanced">Advanced tier</option>
@@ -533,7 +595,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -747,9 +809,10 @@ async function loadRevenueKPIs() {
 }
 loadRevenueKPIs();
 
-// ── Daily Trend sparkline ────────────────────────────────────────────────────
+// ── Daily Trend sparkline (page views + unique users + avg time-on-page) ────
 async function loadTrend() {
-    const res = await fetchDailyTrend(14);
+    const days = parseInt(document.getElementById('trend-window').value, 10) || 14;
+    const res = await fetchDailyTrend(days);
     if (!res.ok || !res.data.length) return;
     const data = res.data;
     document.getElementById('trend-start').textContent = data[0]?.day?.slice(5) || '';
@@ -762,83 +825,220 @@ async function loadTrend() {
     canvas.height = canvas.offsetHeight * dpr;
     ctx.scale(dpr, dpr);
     const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
 
     const maxV = Math.max(...data.map(d => d.views), 1);
-    const pts = data.map((d, i) => ({
-        x: (i / (data.length - 1)) * W,
-        y: H - (d.views / maxV) * (H - 10) - 5,
-    }));
+    const maxU = Math.max(...data.map(d => d.users || 0), 1);
 
-    // Area fill
-    ctx.beginPath();
-    ctx.moveTo(pts[0].x, H);
-    pts.forEach(p => ctx.lineTo(p.x, p.y));
-    ctx.lineTo(pts[pts.length-1].x, H);
-    ctx.closePath();
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, 'rgba(128,64,255,.25)');
-    grad.addColorStop(1, 'rgba(128,64,255,.02)');
-    ctx.fillStyle = grad;
-    ctx.fill();
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,.04)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+        const y = (i / 4) * H;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
 
-    // Line
-    ctx.beginPath();
-    pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
-    ctx.strokeStyle = '#8040ff';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Dots
-    pts.forEach(p => {
+    const drawSeries = (key, max, rgb) => {
+        const pts = data.map((d, i) => ({
+            x: data.length === 1 ? W / 2 : (i / (data.length - 1)) * W,
+            y: H - ((d[key] || 0) / max) * (H - 10) - 5,
+        }));
+        // Area
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
-        ctx.fillStyle = '#8040ff';
+        ctx.moveTo(pts[0].x, H);
+        pts.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.lineTo(pts[pts.length-1].x, H);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, `rgba(${rgb},.22)`);
+        grad.addColorStop(1, `rgba(${rgb},.02)`);
+        ctx.fillStyle = grad;
         ctx.fill();
-    });
+        // Line
+        ctx.beginPath();
+        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = `rgb(${rgb})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Dots
+        pts.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2.5, 0, Math.PI*2);
+            ctx.fillStyle = `rgb(${rgb})`;
+            ctx.fill();
+        });
+    };
+    drawSeries('views', maxV, '128,64,255');
+    drawSeries('users', maxU, '78,255,145');
+
+    // Pull avg time-on-page over the same window
+    try {
+        const avgEl = document.getElementById('trend-avg-time');
+        const r = await fetchAvgTimeOnPage(days);
+        if (r.ok && r.data.avg_s != null) {
+            const s = r.data.avg_s;
+            const txt = s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+            avgEl.textContent = `avg time on page: ${txt} (${r.data.sample.toLocaleString()} samples)`;
+        }
+    } catch (_) {}
 }
 loadTrend();
+document.getElementById('trend-window').addEventListener('change', loadTrend);
 
 // ── Top Pages ────────────────────────────────────────────────────────────────
 async function loadTopPages() {
-    const res = await fetchTopPages();
+    const days = parseInt(document.getElementById('top-pages-window').value, 10) || 7;
+    const res = await fetchTopPages(days);
     const el = document.getElementById('top-pages-list');
     if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No page view data yet.</div>'; return; }
 
+    const total = res.data.reduce((s, p) => s + p.views, 0);
     const maxV = Math.max(...res.data.map(p => p.views));
     el.innerHTML = res.data.map(p => {
         const pct = Math.max(4, (p.views / maxV) * 100);
+        const share = total > 0 ? Math.round((p.views / total) * 1000) / 10 : 0;
         return `<div style="margin-bottom:8px">
             <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
                 <span style="color:#ccc">${_esc(p.name)}</span>
-                <span style="color:#666">${_esc(p.views)} views &middot; ${_esc(p.unique)} unique</span>
+                <span style="color:#666">${_esc(p.views)} views &middot; ${_esc(p.unique)} unique &middot; ${share}%</span>
             </div>
             <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
                 <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#8040ff,#4080ff);border-radius:2px"></div>
             </div>
         </div>`;
-    }).join('');
+    }).join('') + `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.05);font-size:.74rem;color:#666">Total: ${total.toLocaleString()} views across ${res.data.length} page${res.data.length===1?'':'s'}</div>`;
 }
 loadTopPages();
+document.getElementById('top-pages-window').addEventListener('change', loadTopPages);
 
-// ── Live Event Feed ──────────────────────────────────────────────────────────
+// ── Live Event Feed (auto-refresh + filters) ────────────────────────────────
+const _eventColor = {
+    page_view: '#4080ff',
+    click: '#ff8c00',
+    page_close: '#8888aa',
+    scroll_depth: '#66d9ff',
+    sign_in: '#4eff91',
+    sign_up: '#9ad36f',
+    identify: '#c080ff',
+    simulation_start: '#ffd700',
+};
+function _evColor(ev) {
+    return _eventColor[ev.event_type] || _eventColor[ev.event_name] || '#ffd700';
+}
+
 async function loadFeed() {
-    const res = await fetchRecentEvents(25);
+    const evType = document.getElementById('feed-event-filter').value;
+    const userType = document.getElementById('feed-user-filter').value;
+    const res = await fetchRecentEvents(80, { eventType: evType || null });
     const el = document.getElementById('event-feed');
-    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No events recorded yet. Events appear once analytics.js is loaded on pages.</div>'; return; }
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
 
-    el.innerHTML = res.data.map(ev => {
-        const color = ev.event_type === 'page_view' ? '#4080ff' : ev.event_name === 'sign_in' ? '#4eff91' : '#ffd700';
+    let rows = res.data;
+    if (userType === 'signed') rows = rows.filter(r => r.user_id);
+    else if (userType === 'anon') rows = rows.filter(r => !r.user_id);
+    rows = rows.slice(0, 30);
+
+    if (!rows.length) { el.innerHTML = '<div class="empty">No matching events. Events appear once analytics.js is loaded on pages.</div>'; return; }
+
+    el.innerHTML = rows.map(ev => {
+        const color = _evColor(ev);
         const ago = _timeAgo(ev.created_at);
+        const userTag = ev.user_id
+            ? `<span style="color:#4eff91;font-size:.72rem;font-family:monospace" title="${_esc(ev.user_id)}">${_esc(ev.user_id.slice(0,8))}</span>`
+            : `<span style="color:#666;font-size:.72rem">anon</span>`;
+        let extra = '';
+        if (ev.event_name === 'page_close' && ev.properties?.time_on_page_s != null) {
+            extra = ` <span style="color:#888;font-size:.72rem">${ev.properties.time_on_page_s}s</span>`;
+        } else if (ev.event_type === 'click' && ev.properties?.t) {
+            extra = ` <span style="color:#888;font-size:.72rem">${_esc(ev.properties.t)}</span>`;
+        }
         return `<div class="event-row">
             <span class="event-dot" style="background:${color}"></span>
             <span class="event-name">${_esc(ev.event_name)}</span>
             <span style="color:#444;font-size:.75rem">${_esc(ev.page_path || '')}</span>
+            ${extra}
+            ${userTag}
             <span class="event-time">${_esc(ago)}</span>
         </div>`;
     }).join('');
 }
 loadFeed();
 document.getElementById('btn-refresh-feed').addEventListener('click', loadFeed);
+document.getElementById('feed-event-filter').addEventListener('change', loadFeed);
+document.getElementById('feed-user-filter').addEventListener('change', loadFeed);
+
+let _feedTimer = null;
+function _setFeedAuto(on) {
+    if (_feedTimer) { clearInterval(_feedTimer); _feedTimer = null; }
+    if (on) _feedTimer = setInterval(loadFeed, 10_000);
+}
+_setFeedAuto(true);
+document.getElementById('feed-autorefresh').addEventListener('change', e => _setFeedAuto(e.target.checked));
+
+// ── Click Heatmap (per page) ────────────────────────────────────────────────
+async function loadHeatmap() {
+    const page = document.getElementById('heatmap-page').value;
+    const days = parseInt(document.getElementById('heatmap-window').value, 10) || 7;
+    const statsEl = document.getElementById('heatmap-stats');
+    const targetsEl = document.getElementById('heatmap-targets');
+    const canvas = document.getElementById('heatmap-canvas');
+
+    statsEl.textContent = 'Loading…';
+    const res = await fetchClickHeatmap(page, days);
+    if (!res.ok) { statsEl.textContent = res.error; return; }
+    const clicks = res.data;
+    if (!clicks.length) {
+        statsEl.textContent = `No click events recorded for "${page}" in the last ${days}d. Add data-clickmap to the body of that page to enable.`;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        targetsEl.innerHTML = '';
+        return;
+    }
+
+    statsEl.textContent = `${clicks.length.toLocaleString()} clicks · ${new Set(clicks.map(c => c.session_id)).size} sessions · last ${days}d`;
+
+    // Render heatmap: additive radial gradients for each click.
+    const wrap = document.getElementById('heatmap-wrap');
+    const dpr = window.devicePixelRatio || 1;
+    const W = wrap.offsetWidth, H = wrap.offsetHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    const r = Math.max(18, Math.min(W, H) * 0.04);
+    for (const c of clicks) {
+        const xp = c.properties?.x_pct, yp = c.properties?.y_pct;
+        if (xp == null || yp == null) continue;
+        const x = (xp / 100) * W, y = (yp / 100) * H;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, 'rgba(255,80,80,.55)');
+        g.addColorStop(0.4, 'rgba(255,200,0,.25)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Top targets list
+    const targetCount = {};
+    for (const c of clicks) {
+        const t = c.properties?.t || '(unknown)';
+        targetCount[t] = (targetCount[t] || 0) + 1;
+    }
+    const topTargets = Object.entries(targetCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+    targetsEl.innerHTML = '<div style="font-weight:600;color:#ccc;margin-bottom:6px">Most-clicked targets</div>' +
+        topTargets.map(([t, n]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="font-family:monospace;color:#9ac">${_esc(t)}</span>
+            <span style="color:#888">${n}</span>
+        </div>`).join('');
+}
+loadHeatmap();
+document.getElementById('btn-refresh-heatmap').addEventListener('click', loadHeatmap);
+document.getElementById('heatmap-page').addEventListener('change', loadHeatmap);
+document.getElementById('heatmap-window').addEventListener('change', loadHeatmap);
 
 /** Escape HTML entities to prevent stored XSS from user-controlled data */
 function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -1065,7 +1265,7 @@ async function loadTopSimsByPlan() {
     const res = await fetchTopSimsByPlan(7);
     if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
     if (!res.data.length) { el.innerHTML = '<div class="empty">No sim views in the last 7 days.</div>'; return; }
-    const plans = ['anon', 'free', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
+    const plans = ['anon', 'free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
     let html = '<table><thead><tr><th>Sim</th><th>Total</th>';
     for (const p of plans) html += `<th>${_esc(p)}</th>`;
     html += '</tr></thead><tbody>';
@@ -1139,7 +1339,7 @@ async function loadUsers() {
     let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
     for (const u of res.data) {
         const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
-        const pc = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
+        const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
         html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
     }
@@ -1234,7 +1434,7 @@ async function loadInvites() {
         const full    = c.used_count >= c.max_uses;
         const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
         const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
-        const pc      = ({advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
+        const pc      = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
         const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
         const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
         html += `<tr>

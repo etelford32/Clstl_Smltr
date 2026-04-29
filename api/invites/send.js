@@ -42,11 +42,12 @@ const FROM_EMAIL   = process.env.INVITE_FROM_EMAIL
                   || 'Parker Physics <invites@parkerphysics.com>';
 const APP_URL      = process.env.APP_URL || 'https://parkerphysics.com';
 
-const VALID_PLANS  = new Set(['free', 'basic', 'educator', 'advanced', 'institution', 'enterprise']);
+const VALID_PLANS  = new Set(['free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise']);
 
 /** Display label for each tier; used in email copy + audit log subjects. */
 const PLAN_LABEL = {
     free:        'Free',
+    tester:      'Tester',
     basic:       'Basic',
     educator:    'Educator',
     advanced:    'Advanced',

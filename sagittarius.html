@@ -527,10 +527,9 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) cloc
 </script>
 
 <script type="module">
-import { analytics } from './js/analytics.js';
+import './js/analytics.js';
 import { userState } from './js/user-state.js';
 import { recordVisit } from './js/greeting.js';
-analytics.page('sagittarius');
 recordVisit('sagittarius');
 userState.trackPage('sagittarius');
 </script>

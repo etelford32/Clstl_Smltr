@@ -32,21 +32,22 @@ export const TIER = Object.freeze({
 });
 
 /**
- * Map a user-facing plan name (free/basic/educator/advanced/institution/enterprise)
+ * Map a user-facing plan name (free/tester/basic/educator/advanced/institution/enterprise)
  * to a feed feature bucket (TIER.FREE / TIER.PRO).
  *
  * Educator and Basic share data depth — they pay for licensing/embed terms,
  * not for richer feeds, so they stay in the FREE bucket. Advanced and above
  * unlock T4 and the faster storm-mode multipliers.
  *
- * Accepts admin/tester role hints so a tester account gets PRO data without
- * needing a paid plan.
+ * "tester" is a comp tier issued via admin invite — testers get PRO data
+ * without paying. Accepts admin/tester role hints too, so a QA account
+ * with role='tester' but plan='free' (legacy) still gets PRO.
  */
 export function planToTier(plan, role) {
     const r = String(role || '').toLowerCase();
     if (r === 'admin' || r === 'superadmin' || r === 'tester') return TIER.PRO;
     const p = String(plan || '').toLowerCase();
-    if (p === 'advanced' || p === 'institution' || p === 'enterprise') return TIER.PRO;
+    if (p === 'tester' || p === 'advanced' || p === 'institution' || p === 'enterprise') return TIER.PRO;
     return TIER.FREE;
 }
 

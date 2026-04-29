@@ -91,7 +91,8 @@ function _getAuth() {
 // permission. Institution + Enterprise are Advanced-equivalent (level 3).
 function _tierLevel(plan, role) {
     if (role === 'admin' || role === 'superadmin') return 99;
-    if (role === 'tester') return 98;  // testers get full feature access
+    if (role === 'tester') return 98;   // legacy: role='tester' grants full access
+    if (plan === 'tester') return 98;   // tester comp plan unlocks every menu item
     if (plan === 'enterprise')  return 3;
     if (plan === 'institution') return 3;
     if (plan === 'advanced')    return 3;
@@ -156,6 +157,10 @@ export function initNav(activeId = '') {
     import('./attribution-badge.js')
         .then(m => m.mountAttributionBadge?.())
         .catch(() => { /* nav must not break if the badge module fails */ });
+
+    // First-party analytics: auto-tracks page views, time-on-page, scroll
+    // depth, and (opt-in) clicks. Side-effect import — singleton inside.
+    import('./analytics.js').catch(() => { /* analytics must not break nav */ });
 
     // Re-render nav when profile fetches real role (fixes admin button
     // not showing because nav rendered before fetchProfile() resolved)

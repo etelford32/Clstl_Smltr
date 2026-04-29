@@ -135,9 +135,14 @@ class AuthManager {
         return this._user?.role === 'admin' || this._user?.role === 'superadmin';
     }
 
-    /** Check if current user is a tester (full feature access for testing). */
+    /**
+     * Check if current user is a tester (full feature access for testing).
+     * Accepts EITHER role='tester' (legacy QA accounts) OR plan='tester'
+     * (the new comp tier issued via admin invite). Both grant the same
+     * access — every paid-tier gate that delegates to isTester() lights up.
+     */
     isTester() {
-        return this._user?.role === 'tester';
+        return this._user?.role === 'tester' || this._user?.plan === 'tester';
     }
 
     // ── Tier-tier feature gates ──────────────────────────────────────────

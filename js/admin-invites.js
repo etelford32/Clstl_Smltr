@@ -9,7 +9,7 @@
  *   CREATE TABLE public.invite_codes (
  *       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
  *       code TEXT UNIQUE NOT NULL,
- *       plan TEXT DEFAULT 'free' CHECK (plan IN ('free','basic','educator','advanced','institution','enterprise')),
+ *       plan TEXT DEFAULT 'free' CHECK (plan IN ('free','tester','basic','educator','advanced','institution','enterprise')),
  *       max_uses INTEGER DEFAULT 1,
  *       used_count INTEGER DEFAULT 0,
  *       expires_at TIMESTAMPTZ,
