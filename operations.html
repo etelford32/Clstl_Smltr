@@ -193,6 +193,48 @@ body {
     background:rgba(0,200,200,.06); padding:1px 5px; border-radius:3px;
 }
 
+/* ─── Layer toggle rows ────────────────────────────────── */
+.op-layer-section {
+    font-size:.58rem;
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    color:#556;
+    font-weight:700;
+    margin:8px 0 4px;
+    padding-top:6px;
+    border-top:1px solid rgba(255,255,255,.04);
+}
+.op-layer-section:first-child { border-top:0; padding-top:0; margin-top:0; }
+.op-layer-row {
+    display:flex; align-items:center; gap:8px;
+    padding:4px 6px;
+    border-radius:5px;
+    cursor:pointer;
+    font-size:.74rem;
+    color:#bcd;
+    transition:background .12s;
+}
+.op-layer-row:hover { background:rgba(255,255,255,.04); }
+.op-layer-row input[type=checkbox] {
+    width:13px; height:13px;
+    accent-color:#0cc;
+    cursor:pointer;
+    flex-shrink:0;
+}
+.op-layer-dot {
+    width:8px; height:8px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+    flex-shrink:0;
+}
+.op-layer-name { flex:1; min-width:0; }
+.op-layer-count {
+    color:#778; font-family:monospace; font-size:.68rem;
+    min-width:40px; text-align:right;
+}
+.op-layer-count.op-layer-loading {
+    color:#fc6;
+}
+
 /* ─── Scrub strip ──────────────────────────────────────── */
 #op-scrub { padding:10px 14px; }
 #op-scrub-row {
@@ -312,6 +354,16 @@ body {
 </head>
 <body>
 
+<!-- Three.js + addons via CDN. Same versions as satellites.html / upper-atmosphere.html. -->
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
 <!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
@@ -403,13 +455,8 @@ body {
         </div>
         <div class="op-panel">
             <h2>Layers</h2>
-            <div class="op-coming">
-                <b>Coming next.</b> Constellations (Starlink, OneWeb, Iridium,
-                GPS / Galileo / BeiDou / GLONASS, geostationary) and tracked
-                debris from CelesTrak. Sample loads default-on; full catalogs
-                lazy-load on demand. The existing
-                <code>satellite-tracker.js</code> + <code>debris-threat-cache.js</code>
-                pipeline will back this panel.
+            <div id="op-layers-list">
+                <div class="op-deck-empty">Loading catalogs…</div>
             </div>
         </div>
     </aside>
@@ -417,15 +464,6 @@ body {
     <!-- Center: Globe -->
     <section id="op-globe-wrap">
         <canvas id="op-globe"></canvas>
-        <div id="op-globe-stub">
-            <div class="op-stub-title">Globe — wiring next</div>
-            <div>
-                3D scene with constellation streaks, threat-band shells,<br>
-                Δv-coloured debris, TCA fly-to, and per-orbit risk trails.<br>
-                Time scrub will drive every panel from a single
-                <code>simTimeMs</code>.
-            </div>
-        </div>
     </section>
 
     <!-- Right rail: Decision deck (placeholders) -->
@@ -495,8 +533,11 @@ body {
  *     constellation propagation and the decision deck to the same bus.
  */
 
-import { timeBus }        from './js/operations/time-bus.js';
-import { mountTimeStrip } from './js/operations/time-strip.js';
+import { timeBus }            from './js/operations/time-bus.js';
+import { mountTimeStrip }     from './js/operations/time-strip.js';
+import { OperationsGlobe }    from './js/operations/globe.js';
+import { OperationsFleet }    from './js/operations/fleet.js';
+import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 const AUTH_KEY = 'pp_auth';
 const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
@@ -615,8 +656,70 @@ mountTimeStrip({
 });
 timeBus.start();
 
+/* ─── Globe + fleet ─────────────────────────────────────── */
+const globe = new OperationsGlobe(document.getElementById('op-globe'));
+const fleet = new OperationsFleet(globe);
+globe.start();
+
+mountLayerPanel(fleet);
+
+// Default-on subset (stations + debris) loads in parallel; the heavier
+// constellations (Starlink, GNSS, OneWeb, Iridium, last-30-days) wait
+// for an explicit user toggle so the open-beta first paint stays fast.
+fleet.bootstrap().catch(err => {
+    console.warn('[operations] fleet bootstrap failed:', err);
+});
+
+/* ─── Layer panel ───────────────────────────────────────── */
+function mountLayerPanel(fleet) {
+    const root = document.getElementById('op-layers-list');
+    if (!root) return;
+
+    const layers   = fleet.layers();
+    const sections = [...new Set(layers.map(l => l.section))];
+
+    let html = '';
+    for (const section of sections) {
+        html += `<div class="op-layer-section">${section}</div>`;
+        for (const l of layers.filter(x => x.section === section)) {
+            const color = getGroupColorHex(l.group);
+            html += `
+                <label class="op-layer-row" data-layer-row="${l.id}">
+                    <input type="checkbox" class="op-layer-cb" data-layer="${l.id}"${l.on ? ' checked' : ''}>
+                    <span class="op-layer-dot" style="color:${color};background:${color}"></span>
+                    <span class="op-layer-name">${l.label}</span>
+                    <span class="op-layer-count" data-layer-count="${l.id}">—</span>
+                </label>`;
+        }
+    }
+    root.innerHTML = html;
+
+    root.querySelectorAll('.op-layer-cb').forEach(cb => {
+        cb.addEventListener('change', () => {
+            fleet.setLayerOn(cb.dataset.layer, cb.checked);
+        });
+    });
+
+    fleet.onChange(() => {
+        const counts = fleet.counts();
+        root.querySelectorAll('[data-layer-count]').forEach(el => {
+            const id = el.dataset.layerCount;
+            const layer = layers.find(l => l.id === id);
+            if (!layer) return;
+            const isLoading = fleet.isLoading(id);
+            el.classList.toggle('op-layer-loading', isLoading);
+            if (isLoading) {
+                el.textContent = '…';
+            } else {
+                const n = counts[layer.group];
+                el.textContent = n != null ? n.toLocaleString() : '—';
+            }
+        });
+    });
+}
+
 // Devtools handle.
-window.__op = { readAuth, isProPlan, timeBus };
+window.__op = { readAuth, isProPlan, timeBus, globe, fleet };
 </script>
 
 </body>

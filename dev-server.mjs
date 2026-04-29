@@ -75,6 +75,10 @@ const API_ROUTES = {
     '/api/lightning/strikes':      'api/lightning/strikes.js',
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/storms':                 'api/storms.js',
+    '/api/celestrak/tle':          'api/celestrak/tle.js',
+    '/api/atmosphere/profile':     'api/atmosphere/profile.js',
+    '/api/atmosphere/snapshot':    'api/atmosphere/snapshot.js',
+    '/api/horizons':               'api/horizons.js',
 };
 
 // Cache imported edge-function modules (stateless, so caching is safe)
