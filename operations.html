@@ -345,6 +345,213 @@ body {
     }
 }
 
+/* ─── My Fleet panel ───────────────────────────────────── */
+.op-fleet-add {
+    display: flex; gap: 6px; margin-bottom: 6px;
+}
+.op-fleet-add input {
+    flex: 1; min-width: 0;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 5px;
+    color: #cef;
+    font: inherit; font-size: .76rem;
+    padding: 5px 9px;
+    outline: none;
+    transition: border-color .12s, background .12s;
+}
+.op-fleet-add input:focus {
+    border-color: rgba(0,200,200,.5);
+    background: rgba(0,200,200,.04);
+}
+.op-fleet-add button {
+    background: rgba(0,200,200,.16);
+    border: 1px solid rgba(0,200,200,.4);
+    color: #0ff;
+    font: inherit; font-size: .72rem; font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.op-fleet-add button:hover { background: rgba(0,200,200,.28); }
+.op-fleet-presets {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+.op-fleet-preset {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.1);
+    color: #aab;
+    font: inherit; font-size: .65rem; font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .12s;
+}
+.op-fleet-preset:hover {
+    background: rgba(0,200,200,.12);
+    border-color: rgba(0,200,200,.4);
+    color: #0ff;
+}
+.op-fleet-msg {
+    font-size: .66rem;
+    color: #788;
+    min-height: 14px;
+    margin-bottom: 4px;
+}
+.op-fleet-msg-err { color: #f88; }
+.op-fleet-empty {
+    font-size: .68rem; color: #556;
+    font-style: italic;
+    padding: 4px 0;
+}
+.op-fleet-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+    gap: 2px;
+}
+.op-fleet-row {
+    display: grid;
+    grid-template-columns: 1fr 50px 70px 22px;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    border-radius: 4px;
+    font-size: .72rem;
+    border-bottom: 1px dotted rgba(255,255,255,.05);
+}
+.op-fleet-row:hover { background: rgba(255,255,255,.03); }
+.op-fleet-row-pending { opacity: .6; }
+.op-fleet-row-error   { opacity: .55; }
+.op-fleet-name {
+    color: #cef;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-fleet-norad {
+    color: #788; font-family: monospace; font-size: .68rem;
+    text-align: right;
+}
+.op-fleet-alt {
+    color: #9bd; font-family: monospace;
+    text-align: right;
+}
+.op-fleet-alt-pending { color: #667; font-style: italic; font-size: .65rem; }
+.op-fleet-remove {
+    background: transparent;
+    border: 0;
+    color: #667;
+    font: inherit; font-size: .9rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.op-fleet-remove:hover { color: #f88; }
+
+/* ─── Deck shared ──────────────────────────────────────── */
+.op-deck-btn {
+    margin-left: auto;
+    background: rgba(0,200,200,.12);
+    border: 1px solid rgba(0,200,200,.35);
+    color: #0ff;
+    font: inherit; font-size: .62rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background .12s;
+}
+.op-deck-btn:hover { background: rgba(0,200,200,.24); }
+
+/* ─── Decay Watch ──────────────────────────────────────── */
+.op-decay-list-ul {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+}
+.op-decay-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 6px 2px;
+    border-bottom: 1px dotted rgba(255,255,255,.06);
+    font-size: .76rem;
+    gap: 8px;
+}
+.op-decay-row:last-child { border-bottom: 0; }
+.op-decay-name {
+    color: #cef;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.op-decay-life-cell {
+    display: flex; align-items: baseline; gap: 4px;
+    font-family: monospace;
+    flex-shrink: 0;
+}
+.op-decay-life {
+    color: #fff;
+    cursor: help;
+    text-decoration: underline dotted rgba(0,255,200,.22);
+    text-underline-offset: 2px;
+}
+
+/* ─── Conjunctions ─────────────────────────────────────── */
+.op-conj-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+    gap: 2px;
+}
+.op-conj-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: .72rem;
+    border-left: 3px solid transparent;
+}
+.op-conj-row-clear  { border-left-color: rgba(0,255,170,.4); color: #aac; }
+.op-conj-row-low    { border-left-color: rgba(0,200,200,.4); }
+.op-conj-row-med    { border-left-color: rgba(255,200,80,.55); background: rgba(255,200,80,.04); }
+.op-conj-row-high   { border-left-color: rgba(255,80,120,.7);  background: rgba(255,80,120,.05); color: #fda; }
+.op-conj-row-err    { color: #f88; font-style: italic; }
+.op-conj-name { color: #cef; }
+.op-conj-count {
+    font-family: monospace;
+    font-weight: 700; color: #0ff;
+}
+.op-conj-row-clear .op-conj-count { color: #0fa; }
+.op-conj-row-high  .op-conj-count { color: #f8a; }
+.op-conj-closest {
+    font-family: monospace; color: #9bd; font-size: .68rem;
+    text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ─── Prop Budget ──────────────────────────────────────── */
+.op-prop-headline {
+    display: flex; align-items: baseline; gap: 10px;
+    margin-bottom: 4px;
+}
+.op-prop-pct {
+    font-family: monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+.op-prop-pct.has-storm { color: #fc6; }
+.op-prop-label {
+    color: #88a; font-size: .66rem;
+    text-transform: uppercase; letter-spacing: .08em;
+    font-weight: 700;
+}
+.op-prop-detail {
+    color: #788; font-size: .68rem;
+    line-height: 1.5;
+    margin-top: 4px;
+}
+
 /* ─── Decision deck list rows ──────────────────────────── */
 .op-deck-empty {
     color:#667; font-size:.72rem; line-height:1.5;
@@ -885,14 +1092,9 @@ body {
 
     <!-- Left rail: Fleet + Layers (placeholders) -->
     <aside id="op-left">
-        <div class="op-panel">
+        <div class="op-panel" id="op-fleet-panel">
             <h2>My Fleet</h2>
-            <div class="op-coming">
-                <b>Coming next.</b> Paste TLEs or NORAD IDs to track your assets.
-                Anonymous fleets soft-save to <code>localStorage</code> (max 10).
-                Persistent multi-fleet management ships with the
-                <code>fleets</code> table for signed-in PRO users.
-            </div>
+            <div id="op-fleet-panel-body"></div>
         </div>
         <div class="op-panel">
             <h2>Layers</h2>
@@ -926,15 +1128,25 @@ body {
     <section id="op-right">
         <div class="op-panel">
             <h2>Decay Watch</h2>
-            <div class="op-deck-empty">No fleet selected.</div>
+            <div id="op-decay-list">
+                <div class="op-deck-empty">Add fleet assets to see decay estimates.</div>
+            </div>
         </div>
         <div class="op-panel">
-            <h2>Conjunctions · 7 days</h2>
-            <div class="op-deck-empty">No fleet selected.</div>
+            <h2 style="display:flex;align-items:baseline;gap:8px">
+                Conjunctions · 7 days
+                <button id="op-conj-btn" class="op-deck-btn" type="button"
+                        title="Run a 7-day SGP4 conjunction screen against the loaded debris catalog (50 km threshold).">
+                    Screen 7 d
+                </button>
+            </h2>
+            <div id="op-conj-body">
+                <div class="op-deck-empty">Add assets and toggle <b>Tracked Debris</b>, then click <b>Screen 7 d</b>.</div>
+            </div>
         </div>
         <div class="op-panel">
             <h2>Prop Budget</h2>
-            <div class="op-deck-empty">No fleet selected.</div>
+            <div id="op-prop-body"></div>
         </div>
         <div class="op-panel">
             <h2>Export</h2>
@@ -997,6 +1209,11 @@ import { scenario }           from './js/operations/scenario.js';
 import { provStore }          from './js/operations/provenance.js';
 import { bindBand }           from './js/operations/bands.js';
 import { delta, attachDelta } from './js/operations/delta.js';
+import { startSwpcBridge }    from './js/operations/swpc-bridge.js';
+import { MyFleet }            from './js/operations/my-fleet.js';
+import {
+    mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
+} from './js/operations/decision-deck.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 // Mount tooltip delegations up front so anything that binds later
@@ -1185,6 +1402,20 @@ layerLoad
     })
     .catch(err => console.warn('[operations] layer load failed:', err));
 
+/* ─── Live SWPC indices (overrides synthetic from mountIndices) ─ */
+// Synthetic F10.7/Ap stand-ins from mountIndices() stay in place
+// until the first swpc-update event lands; the bridge then
+// overwrites those records with cacheState='live' and the Δ icons
+// activate naturally on the value transition.
+const stopSwpcBridge = startSwpcBridge();
+
+/* ─── My Fleet + decision deck ──────────────────────────── */
+const myFleet = new MyFleet(fleet.tracker);
+mountMyFleet(myFleet);
+mountDecayWatch(myFleet);
+mountConjunctions(myFleet, fleet.tracker);
+mountPropBudget(myFleet);
+
 /* ─── Layer panel ───────────────────────────────────────── */
 function mountLayerPanel(fleet) {
     const root = document.getElementById('op-layers-list');
@@ -1314,7 +1545,10 @@ function mountDataDictionary() {
 mountDataDictionary();
 
 // Devtools handle.
-window.__op = { readAuth, isProPlan, timeBus, globe, fleet, scenario, provStore, delta };
+window.__op = {
+    readAuth, isProPlan, timeBus, globe, fleet, scenario,
+    provStore, delta, myFleet, stopSwpcBridge,
+};
 </script>
 
 </body>
