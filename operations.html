@@ -351,6 +351,75 @@ body {
     font-style:italic;
 }
 
+/* ─── Confidence bands ──────────────────────────────────── */
+.op-band-v {
+    font-family: monospace;
+    color: #fff;
+    font-weight: 600;
+}
+.op-band-sigma {
+    color: #9bd;
+    font-family: monospace;
+    font-size: .92em;
+    font-weight: 500;
+    margin-left: 4px;
+    letter-spacing: 0;
+}
+.op-band-u {
+    color: #88a;
+    font-size: .9em;
+}
+.op-band-range {
+    color: #788;
+    font-family: monospace;
+    font-size: .85em;
+    margin-left: 6px;
+    font-weight: 500;
+}
+.op-band-whisker {
+    display: inline-block;
+    vertical-align: middle;
+    overflow: visible;
+}
+.op-band-whisker .op-band-whisker-track   { fill: rgba(255,255,255,.12); }
+.op-band-whisker .op-band-whisker-range   { fill: rgba(0,200,200,.28); }
+.op-band-whisker .op-band-whisker-tick    { stroke: rgba(0,255,200,.55); stroke-width: 1; }
+.op-band-whisker .op-band-whisker-dot     {
+    fill: #0ff;
+    stroke: #022;
+    stroke-width: 1;
+    filter: drop-shadow(0 0 3px rgba(0,255,255,.35));
+}
+
+/* ─── Indices panel rows ────────────────────────────────── */
+.op-indices {
+    display: flex; flex-direction: column;
+    gap: 7px;
+}
+.op-index-row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px dotted rgba(255,255,255,.05);
+}
+.op-index-row:last-child { border-bottom: 0; }
+.op-index-k {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #8ab;
+    font-weight: 700;
+}
+.op-index-v {
+    font-size: .82rem;
+    line-height: 1.1;
+}
+.op-index-w {
+    flex-shrink: 0;
+}
+
 /* ─── Provenance affordance ─────────────────────────────── */
 [data-prov-key] {
     text-decoration: underline dotted rgba(0,255,200,.22);
@@ -700,6 +769,21 @@ body {
                 <div class="op-deck-empty">Loading catalogs…</div>
             </div>
         </div>
+        <div class="op-panel">
+            <h2>Indices</h2>
+            <div class="op-indices">
+                <div class="op-index-row">
+                    <span class="op-index-k">F10.7</span>
+                    <span class="op-index-v" id="op-idx-f107"></span>
+                    <span class="op-index-w" id="op-idx-f107-w"></span>
+                </div>
+                <div class="op-index-row">
+                    <span class="op-index-k">Ap</span>
+                    <span class="op-index-v" id="op-idx-ap"></span>
+                    <span class="op-index-w" id="op-idx-ap-w"></span>
+                </div>
+            </div>
+        </div>
     </aside>
 
     <!-- Center: Globe -->
@@ -780,6 +864,7 @@ import { OperationsGlobe }    from './js/operations/globe.js';
 import { OperationsFleet }    from './js/operations/fleet.js';
 import { scenario }           from './js/operations/scenario.js';
 import { provStore }          from './js/operations/provenance.js';
+import { bindBand }           from './js/operations/bands.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 // Mount provenance event delegation up front so anything that binds
@@ -1031,6 +1116,41 @@ function mountLayerPanel(fleet) {
         });
     });
 }
+
+/* ─── Indices (synthetic stand-ins; step 9 wires real SWPC) ── */
+function mountIndices() {
+    // The cacheState 'synthetic' makes the tooltip pill say "Synthetic"
+    // so operators see immediately that these are placeholders, not
+    // live SWPC numbers. The σ values mirror NOAA's published
+    // 27-day forecast spread for F10.7 and the typical short-horizon
+    // Ap forecast residual.
+    provStore.set('idx.f107', {
+        value: 142, unit: 'SFU', sigma: 12,
+        source: 'NOAA SWPC RTSW (synthetic stand-in)',
+        model:  'NOAA 27-day ensemble',
+        cacheState: 'synthetic',
+        description: 'Solar 10.7 cm radio flux. Direct driver of thermospheric heating: higher F10.7 → denser air at LEO altitudes → more drag on every satellite.',
+    });
+    provStore.set('idx.ap', {
+        value: 18, unit: '', sigma: 6,
+        source: 'NOAA SWPC RTSW (synthetic stand-in)',
+        model:  'NOAA 3-day forecast spread',
+        cacheState: 'synthetic',
+        description: 'Daily geomagnetic Ap. Above 27 = G1+ storm; above 50 = G2+; storm activity puffs the thermosphere outward and cleanly steps the drag floor up by 20–40%.',
+    });
+
+    bindBand(document.getElementById('op-idx-f107'),   'idx.f107', { style: 'sigma' });
+    bindBand(document.getElementById('op-idx-f107-w'), 'idx.f107', {
+        style: 'whiskers',
+        range: { min: 60, max: 300 },     // calm-min → solar-max
+    });
+    bindBand(document.getElementById('op-idx-ap'),     'idx.ap', { style: 'sigma' });
+    bindBand(document.getElementById('op-idx-ap-w'),   'idx.ap', {
+        style: 'whiskers',
+        range: { min: 0, max: 80 },       // calm → severe storm
+    });
+}
+mountIndices();
 
 /* ─── Data dictionary export ───────────────────────────── */
 function mountDataDictionary() {
