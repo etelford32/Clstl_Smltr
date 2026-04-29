@@ -179,6 +179,150 @@ body {
     background:rgba(0,200,200,.06); padding:1px 6px; border-radius:3px;
 }
 
+/* ─── B-plane inset (bottom-right of globe) ────────────── */
+#op-bplane {
+    position: absolute;
+    bottom: 12px; right: 12px;
+    width: 220px;
+    background: rgba(8,4,22,.88);
+    border: 1px solid rgba(0,200,200,.28);
+    border-radius: 8px;
+    padding: 8px 10px 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .68rem;
+    z-index: 30;
+    user-select: none;
+    transition: opacity .15s;
+}
+#op-bplane.op-bplane-empty { opacity: 0.62; }
+#op-bplane .op-bplane-head {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-bottom: 4px;
+}
+#op-bplane .op-bplane-title {
+    color: #8ab; font-size: .58rem;
+    text-transform: uppercase; letter-spacing: .14em;
+    font-weight: 700;
+}
+#op-bplane .op-bplane-name {
+    color: #cef; font-size: .66rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+}
+#op-bplane svg {
+    display: block;
+    width: 100%; height: auto;
+}
+#op-bplane .op-bplane-bg { fill: rgba(0,0,0,.25); }
+#op-bplane .op-bplane-axis {
+    stroke: rgba(255,255,255,.12);
+    stroke-width: 1;
+}
+#op-bplane .op-bplane-sigma-ring {
+    fill: none;
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+}
+#op-bplane .op-bplane-sigma-1 { stroke: rgba(0,255,200,.6); }
+#op-bplane .op-bplane-sigma-2 { stroke: rgba(0,255,200,.35); }
+#op-bplane .op-bplane-sigma-3 { stroke: rgba(0,255,200,.18); }
+#op-bplane .op-bplane-sigma-label {
+    fill: rgba(0,255,200,.7);
+    font-family: monospace;
+    font-size: 9px;
+}
+#op-bplane .op-bplane-miss-vec {
+    stroke: rgba(255,140,200,.55);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+#op-bplane .op-bplane-miss-dot {
+    fill: #ff7099;
+    stroke: rgba(255,160,200,.9);
+    stroke-width: 1;
+    filter: drop-shadow(0 0 4px rgba(255,80,140,.55));
+}
+#op-bplane .op-bplane-foot {
+    display: flex; justify-content: space-between;
+    margin-top: 4px;
+    font-family: monospace;
+    color: #9bd;
+    font-size: .64rem;
+}
+#op-bplane .op-bplane-miss { color: #fb8; }
+
+/* ─── Density heatmap (top-right of globe) ─────────────── */
+#op-density {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 380px;
+    background: rgba(8,4,22,.92);
+    border: 1px solid rgba(255,140,200,.25);
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .68rem;
+    z-index: 30;
+    user-select: none;
+    transition: opacity .15s, transform .15s;
+}
+#op-density.op-density-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+}
+#op-density .op-density-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
+}
+#op-density .op-density-title {
+    color: #fbf; font-size: .68rem; font-weight: 700;
+}
+#op-density .op-density-sub {
+    color: #889; font-size: .58rem;
+    flex: 1;
+}
+#op-density .op-density-close {
+    background: transparent; border: 0;
+    color: #9bd; font-size: 1rem; line-height: 1;
+    cursor: pointer; padding: 2px 6px; border-radius: 3px;
+}
+#op-density .op-density-close:hover { color: #fff; background: rgba(255,255,255,.08); }
+#op-density svg {
+    display: block;
+    width: 100%; height: auto;
+}
+#op-density .op-density-bg { fill: rgba(0,0,0,.25); }
+#op-density .op-density-tick { stroke: rgba(255,255,255,.15); }
+#op-density .op-density-tick-label {
+    fill: rgba(190,210,250,.6);
+    font-family: monospace; font-size: 8.5px;
+}
+#op-density .op-density-axis {
+    fill: rgba(190,210,250,.7);
+    font-size: 9.5px;
+    font-weight: 600;
+}
+#op-density .op-density-cell { stroke: none; }
+#op-density .op-density-legend {
+    display: flex; justify-content: space-between;
+    margin-top: 4px;
+    font-family: monospace;
+    color: #aac;
+    font-size: .62rem;
+}
+#op-density .op-density-empty { color: #788; font-style: italic; }
+#op-density .op-density-max { color: #fbf; }
+
+@media (max-width: 720px) {
+    #op-bplane, #op-density { width: 92vw; right: 4vw; }
+    #op-density { top: auto; bottom: 200px; }
+}
+
 /* ─── Coming next placeholders ─────────────────────────── */
 .op-coming {
     color:#556; font-size:.72rem; line-height:1.5;
@@ -1112,6 +1256,12 @@ body {
             <div id="op-layers-list">
                 <div class="op-deck-empty">Loading catalogs…</div>
             </div>
+            <div class="op-layer-section" style="margin-top:10px">Overlays</div>
+            <label class="op-layer-row">
+                <input type="checkbox" id="op-toggle-density">
+                <span class="op-layer-dot" style="color:#f9a;background:#f9a"></span>
+                <span class="op-layer-name">Debris density map</span>
+            </label>
         </div>
         <div class="op-panel">
             <h2>Indices</h2>
@@ -1226,6 +1376,8 @@ import {
     mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
 } from './js/operations/decision-deck.js';
 import { OperationsVisuals }  from './js/operations/visuals.js';
+import * as bPlane            from './js/operations/b-plane.js';
+import * as densityMap        from './js/operations/density-map.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 // Mount tooltip delegations up front so anything that binds later
@@ -1438,7 +1590,18 @@ mountMyFleet(myFleet, {
 });
 mountDecayWatch(myFleet);
 mountConjunctions(myFleet, fleet.tracker, {
-    onSelect: (id) => visuals.setSelectedAsset(id),
+    onSelect:      (id)   => visuals.setSelectedAsset(id),
+    onConjunction: (conj) => {
+        bPlane.showConjunction(conj);
+        visuals.showConjunction(conj);
+    },
+});
+
+bPlane.mountBPlane();
+densityMap.mountDensityMap(fleet.tracker);
+
+document.getElementById('op-toggle-density')?.addEventListener('change', (e) => {
+    densityMap.setVisible(e.target.checked);
 });
 mountPropBudget(myFleet);
 
@@ -1574,6 +1737,7 @@ mountDataDictionary();
 window.__op = {
     readAuth, isProPlan, timeBus, globe, fleet, scenario,
     provStore, delta, myFleet, visuals, stopSwpcBridge,
+    bPlane, densityMap,
 };
 </script>
 
