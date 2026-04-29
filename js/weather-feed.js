@@ -150,6 +150,90 @@ export class WeatherFeed {
     }
 
     // ── Public API ───────────────────────────────────────────────────────────
+
+    /**
+     * Cold-start backfill — fetches up to `hours` of historical frames
+     * from /api/weather/grid?since=… and pushes each one through
+     * _extractCoarse → history.ingest. Lets the 24-h replay slider
+     * have data to scrub through on the very first session, instead
+     * of waiting 24 hours of session lifetime for the live ring to
+     * fill.
+     *
+     * Best-effort: catches every error, returns the count of frames
+     * successfully ingested, never throws. Safe to fire-and-forget.
+     *
+     * Race with live ingest: WeatherHistory.ingest dedupes on hour-
+     * rounded `t`, replacing in place if a record for the same hour
+     * already exists. Live and backfill can land in any order — both
+     * pull the same Supabase row for the current hour, so dedup is
+     * idempotent.
+     *
+     * @param {import('./weather-history.js').WeatherHistory} history
+     * @param {number} [hours=24]   — lookback window in hours (capped
+     *                                server-side at 72)
+     * @returns {Promise<number>}   — frames ingested
+     */
+    async backfill(history, hours = 24) {
+        if (!history) return 0;
+        const sinceMs = Date.now() - hours * 3_600_000;
+        const sinceISO = new Date(sinceMs).toISOString();
+        try {
+            const url = `${WEATHER_ENDPOINT}` +
+                `?since=${encodeURIComponent(sinceISO)}` +
+                `&limit=${hours}`;
+            // 30 s timeout — the response can be ~10 MB JSON over a
+            // slow link, well past the 20 s the live single-frame
+            // fetch uses. Backfill failure is silent and decorative;
+            // we'd rather time out cleanly than hold a request open.
+            const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const body = await res.json();
+            if (body?.error) throw new Error(body.detail || body.error);
+            if (!Array.isArray(body?.frames)) throw new Error('missing frames array');
+
+            let ingested = 0;
+            for (const frame of body.frames) {
+                if (!Array.isArray(frame?.data) || frame.data.length === 0) continue;
+
+                // Per-frame grid dims. The endpoint provides explicit
+                // grid metadata when the cron writer attached the WxH
+                // suffix; otherwise we infer from data.length the same
+                // way _fetchGrid does (mirroring its 2:1 aspect logic).
+                const N = frame.data.length;
+                let gridW, gridH;
+                if (frame.grid?.w && frame.grid?.h) {
+                    gridW = frame.grid.w;
+                    gridH = frame.grid.h;
+                } else {
+                    const inferredH = Math.round(Math.sqrt(N / 2));
+                    if (2 * inferredH * inferredH !== N) continue;   // unknown shape, skip
+                    gridH = inferredH;
+                    gridW = 2 * inferredH;
+                }
+
+                // _extractCoarse handles NaN-fill + U/V decomposition
+                // so the on-disk frame is exactly what the live path
+                // would have written. CHW layout matches what
+                // weather-history.js expects.
+                const coarse = this._extractCoarse(frame.data, gridW, gridH);
+                const t = Date.parse(frame.fetched_at);
+                history.ingest({
+                    t:         Number.isFinite(t) ? t : Date.now(),
+                    fetchedAt: Number.isFinite(t) ? t : Date.now(),
+                    source:    frame.source ?? null,
+                    gridW, gridH,
+                    coarse,
+                });
+                ingested++;
+            }
+            console.info(`[WeatherFeed] backfilled ${ingested} historical frame(s)`);
+            return ingested;
+        } catch (err) {
+            console.warn('[WeatherFeed] backfill failed:', err.message);
+            return 0;
+        }
+    }
+
     // Self-rescheduling timer (setTimeout, not setInterval) so each success
     // or failure can dial its own delay. Success → REFRESH_MS; failure →
     // RETRY_BACKOFF_MS[min(failureCount-1, end)].
