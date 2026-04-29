@@ -29,6 +29,7 @@
 import { provStore }   from './provenance.js';
 import { bindBand }    from './bands.js';
 import { attachDelta } from './delta.js';
+import { timeBus }     from './time-bus.js';
 
 /* ─── Decay heuristic ─────────────────────────────────────────
  * The existing js/orbital-analytics.js estimateOrbitLifetime() ships
@@ -143,9 +144,12 @@ const PRESETS = Object.freeze([
     { norad: 43013, label: 'NOAA-20' },
 ]);
 
-export function mountMyFleet(fleet, opts) {
+export function mountMyFleet(fleet, opts = {}) {
     const root = document.getElementById('op-fleet-panel-body');
     if (!root) return;
+    const onSelect       = opts.onSelect       ?? (() => {});
+    const getSelectedFn  = opts.getSelectedId  ?? (() => null);
+    const onSelectChange = opts.onSelectChange ?? ((fn) => () => {});
 
     root.innerHTML = `
         <div class="op-fleet-add">
@@ -198,13 +202,16 @@ export function mountMyFleet(fleet, opts) {
         const empty = root.querySelector('#op-fleet-empty');
         empty.style.display = list.length === 0 ? '' : 'none';
 
+        const selected = getSelectedFn();
+
         ul.innerHTML = list.map(a => {
-            const cls = a.status === 'ready' ? '' : `op-fleet-row-${a.status}`;
+            const stateCls = a.status === 'ready' ? '' : `op-fleet-row-${a.status}`;
+            const selCls   = a.noradId === selected ? ' op-fleet-row-selected' : '';
             const altSpan = a.tle?.apogee_km != null
                 ? `<span class="op-fleet-alt" id="op-alt-${a.noradId}">${Math.round((a.tle.apogee_km + a.tle.perigee_km) / 2)} km</span>`
                 : `<span class="op-fleet-alt op-fleet-alt-pending">${a.status === 'error' ? 'unresolved' : 'loading…'}</span>`;
             return `
-                <li class="op-fleet-row ${cls}" data-norad="${a.noradId}">
+                <li class="op-fleet-row ${stateCls}${selCls}" data-norad="${a.noradId}" tabindex="0" role="button" aria-pressed="${a.noradId === selected ? 'true' : 'false'}">
                     <span class="op-fleet-name" title="${escapeHtml(a.name)}">${escapeHtml(a.name)}</span>
                     <span class="op-fleet-norad">${a.noradId}</span>
                     ${altSpan}
@@ -214,7 +221,34 @@ export function mountMyFleet(fleet, opts) {
         }).join('');
 
         ul.querySelectorAll('[data-remove]').forEach(btn => {
-            btn.addEventListener('click', () => fleet.remove(parseInt(btn.dataset.remove, 10)));
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                fleet.remove(parseInt(btn.dataset.remove, 10));
+            });
+        });
+        ul.querySelectorAll('.op-fleet-row').forEach(row => {
+            const id = parseInt(row.dataset.norad, 10);
+            const select = () => onSelect(getSelectedFn() === id ? null : id);
+            row.addEventListener('click', select);
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    select();
+                }
+            });
+        });
+    });
+
+    // Re-paint selection state when visuals announces a change from
+    // elsewhere (e.g. globe pick, conjunction-row click).
+    onSelectChange(() => {
+        const ul = root.querySelector('#op-fleet-list');
+        if (!ul) return;
+        const selected = getSelectedFn();
+        ul.querySelectorAll('.op-fleet-row').forEach(row => {
+            const on = parseInt(row.dataset.norad, 10) === selected;
+            row.classList.toggle('op-fleet-row-selected', on);
+            row.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
     });
 }
@@ -310,9 +344,10 @@ export function mountDecayWatch(fleet) {
 
 /* ─── Conjunctions 7d panel ───────────────────────────────── */
 
-export function mountConjunctions(fleet, tracker) {
+export function mountConjunctions(fleet, tracker, opts = {}) {
     const root = document.getElementById('op-conj-body');
     if (!root) return;
+    const onSelect = opts.onSelect ?? (() => {});
 
     let runId = 0;
     let busy = false;
@@ -357,7 +392,7 @@ export function mountConjunctions(fleet, tracker) {
                 continue;
             }
             if (conjs.length === 0) {
-                html += `<li class="op-conj-row op-conj-row-clear">
+                html += `<li class="op-conj-row op-conj-row-clear" data-norad="${asset.noradId}" tabindex="0" role="button">
                     <span class="op-conj-name">${escapeHtml(asset.name)}</span>
                     <span class="op-conj-status">clear · 7 d</span>
                 </li>`;
@@ -365,13 +400,36 @@ export function mountConjunctions(fleet, tracker) {
             }
             const closest = conjs.reduce((a, b) => (a.dist_km <= b.dist_km ? a : b));
             const sev = closest.dist_km < 5 ? 'high' : closest.dist_km < 15 ? 'med' : 'low';
-            html += `<li class="op-conj-row op-conj-row-${sev}">
+            const tcaMs = Date.now() + closest.hours_ahead * 3600 * 1000;
+            html += `<li class="op-conj-row op-conj-row-${sev}" data-norad="${asset.noradId}" data-tca-ms="${tcaMs}" tabindex="0" role="button"
+                title="Click to scrub time to TCA and select ${escapeHtml(asset.name)}">
                 <span class="op-conj-name">${escapeHtml(asset.name)}</span>
                 <span class="op-conj-count">${conjs.length}</span>
                 <span class="op-conj-closest">closest ${closest.dist_km.toFixed(1)} km @ +${closest.hours_ahead.toFixed(1)} h</span>
             </li>`;
         }
         root.innerHTML = `<ul class="op-conj-list">${html}</ul>`;
+
+        // Click → select + scrub to TCA. Skip rows that don't carry a
+        // TCA (the "clear · 7 d" path still selects the asset for
+        // Δv coloring without moving time).
+        root.querySelectorAll('.op-conj-row[data-norad]').forEach(row => {
+            const id = parseInt(row.dataset.norad, 10);
+            const tcaMs = parseInt(row.dataset.tcaMs, 10);
+            const fire = () => {
+                onSelect(id);
+                if (Number.isFinite(tcaMs)) {
+                    timeBus.setSimTime(tcaMs, { mode: 'scrub' });
+                }
+            };
+            row.addEventListener('click', fire);
+            row.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    fire();
+                }
+            });
+        });
     }
 
     document.getElementById('op-conj-btn')?.addEventListener('click', screen);
