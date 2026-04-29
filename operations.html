@@ -391,6 +391,137 @@ body {
     filter: drop-shadow(0 0 3px rgba(0,255,255,.35));
 }
 
+/* ─── Δ icon ────────────────────────────────────────────── */
+.op-delta {
+    display: inline-block;
+    margin: 0 0 0 5px;
+    font-size: .68em;
+    line-height: 1;
+    color: rgba(120,128,150,.5);
+    cursor: help;
+    user-select: none;
+    transform-origin: center;
+    transition:
+        color 220ms ease,
+        opacity 220ms ease,
+        transform 220ms ease;
+}
+.op-delta:hover { color: #fff; opacity: 1; }
+.op-delta.op-delta-up { color: rgba(0,255,200,.55); }
+.op-delta.op-delta-down { color: rgba(255,140,200,.65); }
+.op-delta.op-delta-recent.op-delta-up { color: rgba(0,255,200,.85); }
+.op-delta.op-delta-recent.op-delta-down { color: rgba(255,140,200,.85); }
+.op-delta.op-delta-fresh {
+    animation: op-delta-pulse 1400ms cubic-bezier(.2,.7,.3,1) 1;
+}
+@keyframes op-delta-pulse {
+    0% {
+        transform: scale(1.6);
+        filter: drop-shadow(0 0 8px currentColor);
+    }
+    60% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 3px currentColor);
+    }
+    100% {
+        transform: scale(1);
+        filter: none;
+    }
+}
+
+/* ─── Δ tooltip ────────────────────────────────────────── */
+#op-delta-tooltip {
+    position: fixed; left: -9999px; top: -9999px;
+    z-index: 5500; pointer-events: none;
+    max-width: 320px;
+    background: rgba(8,4,22,.97);
+    border: 1px solid rgba(0,255,200,.32);
+    border-radius: 7px;
+    padding: 9px 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(0,255,200,.06) inset;
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .72rem;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(-3px) scale(.985);
+    transition:
+        opacity 80ms ease,
+        transform 80ms cubic-bezier(.2,.7,.3,1);
+}
+#op-delta-tooltip.op-delta-tooltip-prepaint {
+    visibility: hidden;
+}
+#op-delta-tooltip.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+#op-delta-tooltip:not(.open) {
+    transition-duration: 60ms;
+}
+#op-delta-tooltip .op-delta-tip-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-family: monospace;
+    font-size: .76rem;
+    color: #fff;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+#op-delta-tooltip .op-delta-tip-up { border-left: 3px solid rgba(0,255,200,.5); padding-left: 8px; margin-left: -8px; }
+#op-delta-tooltip .op-delta-tip-down { border-left: 3px solid rgba(255,140,200,.6); padding-left: 8px; margin-left: -8px; }
+#op-delta-tooltip .op-delta-tip-mag {
+    font-family: monospace;
+    color: #0ff;
+    font-weight: 700;
+    font-size: .82rem;
+    white-space: nowrap;
+}
+#op-delta-tooltip .op-delta-tip-down .op-delta-tip-mag { color: #f9b; }
+#op-delta-tooltip .op-delta-tip-was {
+    color: #aac;
+    font-size: .68rem;
+}
+#op-delta-tooltip .op-delta-tip-was strong {
+    color: #fff;
+    font-family: monospace;
+    font-weight: 600;
+}
+#op-delta-tooltip .op-delta-tip-driver {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,.06);
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 6px;
+    font-size: .66rem;
+    color: #cef;
+}
+#op-delta-tooltip .op-delta-tip-driver code {
+    color: #0cc;
+    font-family: monospace;
+    background: rgba(0,200,200,.06);
+    padding: 0 4px; border-radius: 2px;
+}
+#op-delta-tooltip .op-delta-tip-driver em {
+    color: #0ff;
+    font-style: normal;
+    font-weight: 600;
+}
+#op-delta-tooltip .op-delta-tip-label {
+    color: #88a; font-size: .58rem; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding-top: 1px;
+}
+#op-delta-tooltip .op-delta-tip-source {
+    color: #788; font-size: .62rem;
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255,255,255,.04);
+}
+
 /* ─── Indices panel rows ────────────────────────────────── */
 .op-indices {
     display: flex; flex-direction: column;
@@ -865,12 +996,15 @@ import { OperationsFleet }    from './js/operations/fleet.js';
 import { scenario }           from './js/operations/scenario.js';
 import { provStore }          from './js/operations/provenance.js';
 import { bindBand }           from './js/operations/bands.js';
+import { delta, attachDelta } from './js/operations/delta.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
-// Mount provenance event delegation up front so anything that binds
-// later (layer counts, future decision-deck values) is hover-ready
-// without per-binding setup.
+// Mount tooltip delegations up front so anything that binds later
+// (layer counts, future decision-deck values) is hover-ready without
+// per-binding setup. Provenance and Δ have separate tooltips with
+// shared timing constants — one for "where", one for "why."
 provStore.mount();
+delta.mount();
 
 const AUTH_KEY = 'pp_auth';
 const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
@@ -1139,16 +1273,27 @@ function mountIndices() {
         description: 'Daily geomagnetic Ap. Above 27 = G1+ storm; above 50 = G2+; storm activity puffs the thermosphere outward and cleanly steps the drag floor up by 20–40%.',
     });
 
-    bindBand(document.getElementById('op-idx-f107'),   'idx.f107', { style: 'sigma' });
+    const f107Node = document.getElementById('op-idx-f107');
+    const apNode   = document.getElementById('op-idx-ap');
+
+    bindBand(f107Node, 'idx.f107', { style: 'sigma' });
     bindBand(document.getElementById('op-idx-f107-w'), 'idx.f107', {
         style: 'whiskers',
         range: { min: 60, max: 300 },     // calm-min → solar-max
     });
-    bindBand(document.getElementById('op-idx-ap'),     'idx.ap', { style: 'sigma' });
+    bindBand(apNode,   'idx.ap', { style: 'sigma' });
     bindBand(document.getElementById('op-idx-ap-w'),   'idx.ap', {
         style: 'whiskers',
         range: { min: 0, max: 80 },       // calm → severe storm
     });
+
+    // Δ icons stay quiet until SWPC actually moves these values
+    // (step 9). On first set there's no prior snapshot so the
+    // glyph is a neutral '·'; subsequent updates flip it to ▲ / ▼,
+    // pulse fresh for ~10 s, hold a coloured tint for ~5 min, then
+    // decay to neutral via the periodic refresh.
+    attachDelta(f107Node, 'idx.f107');
+    attachDelta(apNode,   'idx.ap');
 }
 mountIndices();
 
@@ -1169,7 +1314,7 @@ function mountDataDictionary() {
 mountDataDictionary();
 
 // Devtools handle.
-window.__op = { readAuth, isProPlan, timeBus, globe, fleet, scenario, provStore };
+window.__op = { readAuth, isProPlan, timeBus, globe, fleet, scenario, provStore, delta };
 </script>
 
 </body>
