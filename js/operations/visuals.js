@@ -39,14 +39,20 @@ import * as THREE              from 'three';
 import { propagate, tleEpochToJd } from '../satellite-tracker.js';
 import { geo }                  from '../geo/coords.js';
 import { timeBus }              from './time-bus.js';
+import { rtnBasis, tleAgeUncertainty } from './uncertainty.js';
+import { provStore }            from './provenance.js';
 
 const RE_KM        = 6378.135;
 const MIN_PER_DAY  = 1440;
 
-const TRAIL_POINTS         = 30;        // 30 samples
-const TRAIL_SPAN_MIN       = 30;        // 30 min look-ahead
+const TRAIL_POINTS         = 30;        // 30 samples (basic streak)
+const TRAIL_SPAN_MIN       = 30;        // 30 min look-ahead (basic streak)
 const TRAIL_DT_MIN         = TRAIL_SPAN_MIN / TRAIL_POINTS;
 const TRAIL_REBUILD_FRAMES = 60;        // ~1 s
+
+const RISK_POINTS          = 50;        // 50 samples over one orbit
+const RISK_NEAR_KM         = 100;       // probe distance for "any debris near"
+const RISK_REBUILD_FRAMES  = 180;       // ~3 s — risk trail is heavier
 
 const DV_REBUILD_FRAMES    = 30;        // ~0.5 s
 const RING_REBUILD_FRAMES  = 6;         // ~10 Hz
@@ -121,6 +127,24 @@ export class OperationsVisuals {
         this._ring     = null;
         this._ringGeo  = null;
         this._ringMat  = null;
+
+        // Covariance tubes (lazy: created on first conjunction click).
+        // Two ellipsoids — primary (asset) + secondary (debris).
+        this._covGroup = new THREE.Group();
+        this._covGroup.name = 'op-covariance';
+        this._covGroup.visible = false;
+        this._scene.add(this._covGroup);
+        this._covPrimary   = null;
+        this._covSecondary = null;
+        this._activeConj   = null;   // { assetTle, secondaryTle, tcaMs, missKm }
+
+        // Per-orbit risk trail (replaces the basic streak when set).
+        this._riskLine = null;
+        this._riskGeo  = null;
+        this._riskMat  = null;
+        this._riskGroup = new THREE.Group();
+        this._riskGroup.name = 'op-risk-trail';
+        this._scene.add(this._riskGroup);
 
         // Δv color overrides applied through the tracker.
         this._dvScratch = new THREE.Color();
@@ -197,6 +221,10 @@ export class OperationsVisuals {
         if (this._frame % TRAIL_REBUILD_FRAMES === 1) this._rebuildTrails(simTimeMs);
         if (this._frame % DV_REBUILD_FRAMES    === 1) this._refreshDeltaV(simTimeMs);
         if (this._frame % RING_REBUILD_FRAMES  === 1) this._refreshRing(simTimeMs);
+        if (this._frame % RISK_REBUILD_FRAMES  === 1) this._rebuildRiskTrail(simTimeMs);
+        if (this._activeConj && this._frame % RING_REBUILD_FRAMES === 1) {
+            this._refreshCovTubes(simTimeMs);
+        }
     }
 
     /* ─── Trails ───────────────────────────────────────────── */
@@ -372,8 +400,231 @@ export class OperationsVisuals {
         const q = new THREE.Quaternion().setFromUnitVectors(up, hScene.clone().normalize());
         this._ring.quaternion.copy(q);
     }
+
+    /* ─── Covariance tubes ───────────────────────────────── */
+
+    /**
+     * Activate covariance ellipsoids for a conjunction. Called by the
+     * decision-deck conjunction-row click handler (which also scrubs
+     * time to TCA). Pass null to clear.
+     */
+    showConjunction(conj) {
+        if (!conj) {
+            this._activeConj = null;
+            this._covGroup.visible = false;
+            return;
+        }
+        this._activeConj = conj;
+        this._ensureCovTubes();
+        this._covGroup.visible = true;
+        this._refreshCovTubes(timeBus.getState().simTimeMs);
+
+        provStore.set('conj.miss.combined', {
+            value: conj.missKm,
+            unit:  'km',
+            sigma: conj.combinedSigmaKm ?? null,
+            source: 'derived (Operations conjunction screening)',
+            model:  'SGP4 closest-approach + Vallado age-map covariance',
+            inputs: ['idx.f107', 'idx.ap'],
+            cacheState: 'synthetic',
+            description:
+                `Predicted closest approach between the selected asset and the ` +
+                `secondary at TCA. Combined uncertainty σ = sqrt(σ_a² + σ_b²) ` +
+                `with each object's σ from its TLE age (Vallado map). Real ` +
+                `Space-Track / commercial covariance is an Enterprise upgrade.`,
+        });
+    }
+
+    _ensureCovTubes() {
+        if (this._covPrimary && this._covSecondary) return;
+        const buildEllipsoid = (color) => {
+            const geo = new THREE.SphereGeometry(1, 18, 12);
+            const mat = new THREE.MeshBasicMaterial({
+                color, transparent: true, opacity: 0.18,
+                blending: THREE.AdditiveBlending, depthWrite: false,
+                side: THREE.DoubleSide,
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.frustumCulled = false;
+            this._covGroup.add(mesh);
+            return mesh;
+        };
+        this._covPrimary   = buildEllipsoid(0x00ffcc);   // asset
+        this._covSecondary = buildEllipsoid(0xff7099);   // debris
+    }
+
+    _refreshCovTubes(simTimeMs) {
+        const c = this._activeConj;
+        if (!c?.assetTle || !c?.secondaryTle) return;
+
+        const ap = provStore.get('idx.ap')?.value ?? 15;
+        const jdNow   = jdFromMs(simTimeMs);
+        const gmstRad = geo.greenwichSiderealTimeFromJD(jdNow);
+        const km = this._kmToScene;
+
+        const place = (mesh, tle) => {
+            const basis = rtnBasis(tle, simTimeMs, ap);
+            // Position in scene frame (rotate TEME → ECEF then scale).
+            geo.eciToEcef(basis.posTeme, gmstRad, _scnA);
+            mesh.position.set(_scnA.x * km, _scnA.y * km, _scnA.z * km);
+
+            // Rotate basis vectors into scene frame too.
+            const Rscn = new THREE.Vector3(); geo.eciToEcef(basis.R, gmstRad, Rscn);
+            const Tscn = new THREE.Vector3(); geo.eciToEcef(basis.T, gmstRad, Tscn);
+            const Nscn = new THREE.Vector3(); geo.eciToEcef(basis.N, gmstRad, Nscn);
+            // Build rotation matrix from RTN basis (T→x, N→y, R→z).
+            const m = new THREE.Matrix4().makeBasis(
+                Tscn.normalize(),
+                Nscn.normalize(),
+                Rscn.normalize(),
+            );
+            mesh.setRotationFromMatrix(m);
+
+            // Non-uniform scale in scene units (sigma values are in km).
+            mesh.scale.set(
+                basis.sigmaAlong  * km,
+                basis.sigmaCross  * km,
+                basis.sigmaRadial * km,
+            );
+        };
+
+        place(this._covPrimary,   c.assetTle);
+        place(this._covSecondary, c.secondaryTle);
+    }
+
+    /* ─── Per-orbit risk trail ─────────────────────────── */
+
+    _rebuildRiskTrail(simTimeMs) {
+        const id = this._selectedNorad;
+        if (id == null) {
+            if (this._riskLine) this._riskLine.visible = false;
+            return;
+        }
+        const sat = this.tracker.getSatellite?.(id);
+        if (!sat?.tle) return;
+
+        // Hide the basic streak for the selected asset since this
+        // replaces it with a risk-coloured version.
+        const streak = this._trails.get(id);
+        if (streak) streak.line.visible = false;
+
+        const periodMin = sat.tle.period_min || 90;
+        const tle = sat.tle;
+        const epochJd = tleEpochToJd(tle);
+        const jdNow   = jdFromMs(simTimeMs);
+        const gmstRad = geo.greenwichSiderealTimeFromJD(jdNow);
+        const tsBase  = (jdNow - epochJd) * MIN_PER_DAY;
+
+        // Sample asset positions over one full orbit.
+        const dtMin = periodMin / RISK_POINTS;
+        const positions = [];
+        const minDists  = new Float32Array(RISK_POINTS);
+
+        const debrisTles = this.tracker.getTlesByGroup?.('debris') || [];
+
+        for (let i = 0; i < RISK_POINTS; i++) {
+            const tsince = tsBase + i * dtMin;
+            const aProp = propagate(tle, tsince);
+            positions.push({ x: aProp.x, y: aProp.y, z: aProp.z, tsince });
+
+            // Min distance to any debris at this sample time.
+            let minSq = Infinity;
+            for (const dTle of debrisTles) {
+                const dts = (jdNow - tleEpochToJd(dTle)) * MIN_PER_DAY + i * dtMin;
+                const dProp = propagate(dTle, dts);
+                const dx = dProp.x - aProp.x;
+                const dy = dProp.y - aProp.y;
+                const dz = dProp.z - aProp.z;
+                const r2 = dx * dx + dy * dy + dz * dz;
+                if (r2 < minSq) minSq = r2;
+            }
+            minDists[i] = Math.sqrt(minSq);
+        }
+
+        // Build geometry with vertex colors.
+        const km = this._kmToScene;
+        const posArr  = new Float32Array(RISK_POINTS * 3);
+        const colArr  = new Float32Array(RISK_POINTS * 3);
+
+        for (let i = 0; i < RISK_POINTS; i++) {
+            const p = positions[i];
+            _temeA.set(p.x, p.y, p.z);
+            geo.eciToEcef(_temeA, gmstRad, _scnA);
+            posArr[i * 3]     = _scnA.x * km;
+            posArr[i * 3 + 1] = _scnA.y * km;
+            posArr[i * 3 + 2] = _scnA.z * km;
+
+            // Risk colour: closer = hotter.
+            const d = minDists[i];
+            const c = riskColor(d);
+            colArr[i * 3]     = c.r;
+            colArr[i * 3 + 1] = c.g;
+            colArr[i * 3 + 2] = c.b;
+        }
+
+        if (!this._riskLine) {
+            this._riskGeo = new THREE.BufferGeometry();
+            this._riskMat = new THREE.LineBasicMaterial({
+                vertexColors: true,
+                transparent: true,
+                opacity: 0.85,
+                depthWrite: false,
+                linewidth: 2,
+            });
+            this._riskLine = new THREE.Line(this._riskGeo, this._riskMat);
+            this._riskLine.frustumCulled = false;
+            this._riskGroup.add(this._riskLine);
+        }
+        this._riskGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+        this._riskGeo.setAttribute('color',    new THREE.BufferAttribute(colArr, 3));
+        this._riskGeo.attributes.position.needsUpdate = true;
+        this._riskGeo.attributes.color.needsUpdate    = true;
+        this._riskLine.visible = true;
+
+        // Surface the closest pass distance via provStore so the
+        // decision deck can show it next iteration.
+        let worstIdx = 0;
+        for (let i = 1; i < RISK_POINTS; i++) {
+            if (minDists[i] < minDists[worstIdx]) worstIdx = i;
+        }
+        provStore.set(`risk.minDist.${id}`, {
+            value: minDists[worstIdx],
+            unit:  'km',
+            source: 'derived (per-orbit risk trail)',
+            model:  'SGP4 sweep × debris catalog at sample time',
+            cacheState: 'derived',
+            inputs: ['fleet.count.debris'],
+            description:
+                `Minimum distance from the selected asset to any debris over its ` +
+                `next full orbital period (${Math.round(periodMin)} min) at ` +
+                `${RISK_POINTS} samples. Each sample propagates the asset and ` +
+                `every loaded debris object to the same instant via SGP4.`,
+        });
+    }
+
+    /* ─── Asset TLE getter for external callers (b-plane etc.) ─ */
+
+    getAssetTle(noradId) {
+        return this.tracker.getSatellite?.(noradId)?.tle ?? null;
+    }
+}
+
+/* ─── Risk colour ramp ────────────────────────────────────── */
+
+const _riskColor = new THREE.Color();
+function riskColor(distKm) {
+    // > 100 km: cyan low-key (clear)
+    // 50-100  : teal
+    // 25-50   : yellow
+    // 10-25   : orange
+    // < 10    : red
+    if (distKm > 100) return _riskColor.setHSL(0.50, 0.4, 0.45);
+    if (distKm > 50)  return _riskColor.setHSL(0.45, 0.7, 0.5);
+    if (distKm > 25)  return _riskColor.setHSL(0.16, 0.85, 0.55);
+    if (distKm > 10)  return _riskColor.setHSL(0.08, 0.90, 0.55);
+    return _riskColor.setHSL(0.0, 0.95, 0.55);
 }
 
 /* ─── exports for tests ───────────────────────────────────── */
 
-export { dvColor, temeVelocity, DV_FULL_KMS, TRAIL_POINTS, TRAIL_SPAN_MIN };
+export { dvColor, temeVelocity, DV_FULL_KMS, TRAIL_POINTS, TRAIL_SPAN_MIN, riskColor };

@@ -347,7 +347,8 @@ export function mountDecayWatch(fleet) {
 export function mountConjunctions(fleet, tracker, opts = {}) {
     const root = document.getElementById('op-conj-body');
     if (!root) return;
-    const onSelect = opts.onSelect ?? (() => {});
+    const onSelect       = opts.onSelect       ?? (() => {});
+    const onConjunction  = opts.onConjunction  ?? (() => {});
 
     let runId = 0;
     let busy = false;
@@ -410,16 +411,36 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
         }
         root.innerHTML = `<ul class="op-conj-list">${html}</ul>`;
 
-        // Click → select + scrub to TCA. Skip rows that don't carry a
-        // TCA (the "clear · 7 d" path still selects the asset for
-        // Δv coloring without moving time).
+        // Click → select asset + scrub to TCA + push the rich
+        // conjunction shape (asset TLE, secondary TLE, miss, TCA) to
+        // any listener that wants it (b-plane inset, covariance
+        // tubes). Rows without a TCA (the "clear · 7 d" path) still
+        // select the asset for Δv coloring without moving time.
         root.querySelectorAll('.op-conj-row[data-norad]').forEach(row => {
-            const id = parseInt(row.dataset.norad, 10);
+            const id    = parseInt(row.dataset.norad, 10);
             const tcaMs = parseInt(row.dataset.tcaMs, 10);
+            const rowData = rows.find(r => r.asset.noradId === id);
+            const closest = rowData?.conjs.length
+                ? rowData.conjs.reduce((a, b) => (a.dist_km <= b.dist_km ? a : b))
+                : null;
+
             const fire = () => {
                 onSelect(id);
                 if (Number.isFinite(tcaMs)) {
                     timeBus.setSimTime(tcaMs, { mode: 'scrub' });
+                }
+                if (closest) {
+                    const secondary = tracker.getSatellite?.(closest.norad_id);
+                    onConjunction({
+                        assetName:     rowData.asset.name,
+                        assetTle:      rowData.asset.tle,
+                        secondaryName: closest.name || `#${closest.norad_id}`,
+                        secondaryTle:  secondary?.tle ?? null,
+                        tcaMs,
+                        missKm:        closest.dist_km,
+                    });
+                } else {
+                    onConjunction(null);
                 }
             };
             row.addEventListener('click', fire);
