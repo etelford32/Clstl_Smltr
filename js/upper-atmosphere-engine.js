@@ -861,19 +861,47 @@ export async function fetchDebrisSample({
     count       = 50,
     altMinKm    = 350,
     altMaxKm    = 900,
-    timeoutMs   = 5000,
+    timeoutMs   = 8000,
     seed        = null,
 } = {}) {
+    // Try the composite group first; fall through to per-event groups if
+    // the composite is empty or returns an upstream error. Per-event
+    // groups are individually <2 MB and far more resilient than the
+    // 4-way fan-out, so the user always sees *some* debris even when
+    // CelesTrak rolls a group name or hits a rate limit.
+    const SOURCES = [
+        '/api/celestrak/tle?group=debris',
+        '/api/celestrak/tle?group=cosmos-1408-debris',
+        '/api/celestrak/tle?group=fengyun-1c-debris',
+        '/api/celestrak/tle?group=iridium-33-debris',
+        '/api/celestrak/tle?group=cosmos-2251-debris',
+    ];
+
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-        const r = await fetch('/api/celestrak/tle?group=debris', {
-            signal: ctl.signal,
-            headers: { Accept: 'application/json' },
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        const all = data?.satellites || [];
+        let all = [];
+        let lastErr = null;
+        for (const url of SOURCES) {
+            try {
+                const r = await fetch(url, {
+                    signal: ctl.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                if (!r.ok) { lastErr = new Error(`HTTP ${r.status} (${url})`); continue; }
+                const data = await r.json();
+                const sats = data?.satellites || [];
+                if (sats.length > 0) {
+                    all = sats;
+                    break;
+                }
+            } catch (e) {
+                lastErr = e;
+                // AbortError aborts the whole fallback chain — bail out.
+                if (e?.name === 'AbortError') throw e;
+            }
+        }
+        if (all.length === 0 && lastErr) throw lastErr;
         // Filter to LEO debris in our altitude band. Skip anything with
         // a NaN inclination / mean motion / element so downstream
         // propagation never hits NaNs.
