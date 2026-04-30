@@ -7,9 +7,10 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.json">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Dashboard — Parker Physics</title>
 <meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="js/nav-styles.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -20,17 +21,9 @@
 html{height:auto;overflow-y:auto}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
 
-/* ── NAV ── */
-nav#dash-nav{position:sticky;top:0;z-index:100;background:rgba(6,3,15,.94);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between}
-.nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
-.nav-logo img{height:32px;width:32px;border-radius:50%;object-fit:cover}
-.nav-logo-text{font-size:.95rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.nav-actions{display:flex;align-items:center;gap:12px}
-.nav-user{font-size:.82rem;color:var(--muted)}
-.nav-user strong{color:var(--text)}
+/* Local button helper used by the subscription card upgrade CTA. The
+   shared nav uses its own .nav-item class from nav-styles.css. */
 .btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
-.btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);transition:border-color .2s,color .2s}
-.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
 
 /* ── LAYOUT ── */
 main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
@@ -279,9 +272,73 @@ footer a:hover{color:var(--text)}
 .gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
 .gate-signup{background:var(--accent);color:#0a0510}
 
+/* ── MOBILE / TOUCH RESPONSIVENESS ────────────────────────────────────────
+   Tuned against iPhone (375 / 390 / 430px wide) and the Safari address-bar
+   resize behavior. The shared nav (nav-styles.css) handles its own breakpoint
+   at 1024px; rules below target the dashboard chrome only. */
+
+/* Tablet & narrow desktop — tighten the welcome row before it wraps. */
+@media(max-width:760px){
+  .welcome h1{font-size:1.55rem}
+  .welcome-sub{font-size:.82rem;gap:6px}
+}
+
+/* Phone — give every interactive control at least a 36-44px tap target,
+   tighten card padding, and make horizontal scrollers explicit. */
 @media(max-width:600px){
-  .welcome h1{font-size:1.35rem}
-  main{padding:22px 14px 48px}
+  main{padding:18px 12px 56px}
+  .welcome{margin-bottom:24px}
+  .welcome h1{font-size:1.3rem;line-height:1.25}
+  .welcome-sub{font-size:.78rem}
+  .section-label{margin-bottom:10px}
+
+  /* Cards — narrower padding so content gets the screen. */
+  .card{border-radius:13px}
+  .card-head{padding:13px 13px 0}
+  .card-body{padding:13px}
+
+  /* Bigger tap targets on the dense control rows. */
+  .sl-btn{font-size:.72rem;padding:7px 12px;min-height:32px}
+  .loc-action-btn{font-size:.78rem;padding:8px 14px;min-height:36px}
+  .loc-input,.sl-add-row input{font-size:.9rem;padding:10px 12px;min-height:40px}
+  .loc-btn{padding:10px 12px;min-height:40px;min-width:40px}
+  .tp-earth-btn,.tp-go-btn{font-size:.78rem;padding:9px 16px;min-height:36px}
+  .tp-select{font-size:.88rem;padding:9px 11px;min-height:38px}
+  .alert-pref-row{padding:8px 10px}
+  .alert-pref-toggle{font-size:.82rem}
+
+  /* Stacked saved-location row — let the action buttons fall onto their
+     own line below the name instead of compressing the label. */
+  .sl-row{padding:10px;gap:8px}
+  .sl-actions{width:100%;justify-content:flex-end}
+  .sl-label-wrap{flex-basis:100%;min-width:0}
+  .sl-status{flex:0 0 auto}
+
+  /* Condition grid in the alert card — min 120 keeps two columns at 320px. */
+  #alert-card-body > div[style*="grid-template-columns"]{
+    grid-template-columns:repeat(auto-fit,minmax(120px,1fr))!important;
+  }
+
+  /* Sim grid — one card per row at <380, two above. */
+  .sim-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:32px}
+  .sim-thumb{height:88px;font-size:1.9rem}
+  .sim-info{padding:9px 12px 11px}
+
+  /* Space-weather metric strip — wrap two-up instead of three-up so the
+     numbers don't truncate on a 320px iPhone SE. */
+  .sw-cell{flex:1 1 calc(50% - 4px);min-width:0}
+
+  /* Safe-area padding for notched iPhones. */
+  footer{padding-bottom:calc(22px + env(safe-area-inset-bottom))}
+  main{padding-bottom:calc(56px + env(safe-area-inset-bottom))}
+}
+
+/* Very narrow (iPhone SE) — drop one more notch. */
+@media(max-width:360px){
+  .welcome h1{font-size:1.18rem}
+  .card-head{padding:11px 10px 0}
+  .card-body{padding:11px 10px}
+  main{padding:14px 8px 56px}
 }
 </style>
 </head>
@@ -298,17 +355,9 @@ footer a:hover{color:var(--text)}
   </div>
 </div>
 
-<!-- ── NAV ── -->
-<nav id="dash-nav" aria-label="Dashboard navigation">
-  <a href="index.html" class="nav-logo" aria-label="Parker Physics home">
-    <img src="ParkersPhysics_logo2.jpg" alt="">
-    <span class="nav-logo-text">Parker Physics</span>
-  </a>
-  <div class="nav-actions">
-    <span class="nav-user">Welcome, <strong id="user-name">–</strong></span>
-    <button class="btn-sm btn-outline" id="signout-btn" aria-label="Sign out">Sign Out</button>
-  </div>
-</nav>
+<!-- ── NAV (shared component, see js/nav.js) ── -->
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260429"; initNav("dashboard");</script>
 
 <!-- ── MAIN ── -->
 <main>
@@ -1100,7 +1149,9 @@ console.info('[Dashboard] auth gate:', {
 });
 
 if (!_auth || !_auth.signedIn) {
-  document.getElementById('dash-nav').style.visibility = 'hidden';
+  // Nav stays visible so a stuck/unauthenticated visitor still has the
+  // sign-in / sign-up buttons rendered by nav.js. Only the protected
+  // dashboard chrome gets hidden behind the auth gate.
   document.querySelector('main').style.visibility = 'hidden';
   document.querySelector('footer').style.visibility = 'hidden';
 } else {
@@ -1113,7 +1164,8 @@ if (!_auth || !_auth.signedIn) {
 
   const name  = _auth.name || _auth.email || 'Explorer';
   const first = name.split(' ')[0];
-  document.getElementById('user-name').textContent = first;
+  // Nav now owns the welcome / sign-out chrome (nav.js renders the
+  // dashboard + sign-out buttons), so we only need the greeting heading.
 
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -1206,17 +1258,8 @@ if (!_auth || !_auth.signedIn) {
       });
   }
 
-  function signOut() {
-    if (_authMod) {
-        _authMod.signOut('index.html');
-    } else {
-        // Fallback: clear both storages
-        try { localStorage.removeItem('pp_auth'); } catch(_){}
-        try { sessionStorage.removeItem('pp_auth'); } catch(_){}
-        window.location.href = 'index.html';
-    }
-  }
-  document.getElementById('signout-btn').addEventListener('click', signOut);
+  // Sign-out is wired by nav.js (the shared #nav-signout-btn). The legacy
+  // dashboard-local sign-out button no longer exists in the DOM.
 
   // ── Subscription card ─────────────────────────────────────────────────────
   // Rendered as a function so auth-changed (e.g. PROFILE_FETCHED, post-checkout
