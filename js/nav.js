@@ -12,6 +12,10 @@
  *   - Keyboard support (Escape, Tab focus management)
  */
 
+// Side-effect import: cross-page guided tour controller. Hooks the hero CTA
+// on the home page and renders a progress banner on each tour stop.
+import './explore-tour.js';
+
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 
 // ── Navigation Structure ─────────────────────────────────────────────────────
