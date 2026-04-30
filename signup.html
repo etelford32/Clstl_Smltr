@@ -660,10 +660,15 @@
                     try {
                         const sb = await (await import('./js/supabase-config.js')).getSupabase();
                         const { data: { session } } = await sb.auth.getSession();
+                        // Forward any promo-trial code from the URL — the server
+                        // validates which (plan, code) pairs are real promotions
+                        // and silently drops anything else, so this is safe to
+                        // pass through verbatim.
+                        const trial = (new URLSearchParams(location.search).get('trial') || '').slice(0, 64);
                         const res = await fetch('/api/stripe/checkout', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
-                            body: JSON.stringify({ plan }),
+                            body: JSON.stringify(trial ? { plan, trial } : { plan }),
                         });
                         const data = await res.json();
                         if (data.url) { window.location.href = data.url; return; }
