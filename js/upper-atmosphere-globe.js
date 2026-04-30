@@ -56,6 +56,7 @@ import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
 import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
+import { SubstormController } from './upper-atmosphere-substorm.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint } from './sun-altitude.js';
 
@@ -845,6 +846,28 @@ export class AtmosphereGlobe {
                 density: this._swState?.density,
                 by:      this._swState?.by,
             });
+        }
+
+        // Feed a substorm-index proxy into the controller's auto-
+        // trigger. We synthesise the index from the same drivers
+        // solar-wind-magnetosphere.js uses: an Ap-driven storm-norm
+        // plus a southward-Bz integrand. Climbing across 0.6 fires
+        // an auto-substorm if the controller is idle + past the
+        // refractory period.
+        if (this._substorm) {
+            const stormNorm = Math.max(0, Math.min(1, (ap - 12) / 200));
+            // Bz drive integrand — accumulates while Bz is southward,
+            // decays exponentially otherwise. Half-life ~30 sec wall-
+            // clock so a state push of southward Bz primes the next
+            // few sets of pushes (mirrors the real magnetosphere's
+            // memory of recent driving).
+            const bzS = Number.isFinite(bz)
+                ? Math.max(0, -bz / 20)        // 0 at +Bz, 1 at -20 nT
+                : stormNorm * 0.7;
+            this._bzDriveAccum = Math.max(0, Math.min(1,
+                0.85 * (this._bzDriveAccum || 0) + 0.45 * bzS));
+            const idx = Math.min(1, 0.55 * stormNorm + 0.65 * this._bzDriveAccum);
+            this._substorm.setSubstormIndex(idx);
         }
     }
 
@@ -2192,7 +2215,32 @@ export class AtmosphereGlobe {
         // Apply the climatology so first paint shows a baseline cascade
         // even before setState() arrives.
         this._cascade.setState({ f107: 150, ap: 15 });
+
+        // Substorm state machine — drives the growth → expansion →
+        // recovery animation. 'demo' mode walks through a substorm
+        // in ~30 s wall-clock; auto-triggered when the cumulative
+        // southward-Bz drive (substorm-index proxy) crosses 0.6.
+        this._substorm = new SubstormController({ mode: 'demo' });
+
+        // Local accumulator of southward-Bz drive — fed into the
+        // controller as a substorm-index proxy. Re-evaluated whenever
+        // setState() pushes a fresh (Ap, Bz) tuple.
+        this._bzDriveAccum = 0;
     }
+
+    /**
+     * Manually trigger a substorm. Returns true on success (controller
+     * was IDLE), false if a substorm is already in progress.
+     */
+    triggerSubstorm(opts) {
+        return this._substorm?.trigger(opts) ?? false;
+    }
+    /** Force-end any in-progress substorm. */
+    resetSubstorm() { this._substorm?.reset(); }
+    /** 'demo' (compressed ~30 s) or 'realtime' (literal-minutes timing). */
+    setSubstormMode(mode) { this._substorm?.setMode(mode); }
+    /** Toggle the auto-trigger from substorm-index threshold. */
+    setSubstormAuto(v) { this._substorm?.setAutoEnabled(v); }
 
     /**
      * Build the sun: a hot inner core + a soft halo + 24 outgoing
@@ -2796,6 +2844,34 @@ export class AtmosphereGlobe {
         // Magnetic-field cascade: advance the packet-dash phase. One
         // uniform write feeds every L-shell field line.
         if (this._cascade) this._cascade.update(t);
+
+        // Substorm state machine: tick → push to cascade → broadcast
+        // for the UI panel. Skip the heavy refresh path while idle so
+        // we don't spend cycles re-rebuilding the oval every frame
+        // when nothing is happening.
+        if (this._substorm && this._cascade) {
+            const prevPhase = this._substorm.getTick().phase;
+            const tick = this._substorm.update(dt);
+            const isActive   = tick.phase !== 'idle';
+            const wasActive  = prevPhase   !== 'idle';
+            // Only push to cascade when the substorm is doing
+            // something — every frame during active phases (so the
+            // bulge / WTS / AE proxy update smoothly), plus a one-
+            // shot zero-state push on the active→idle transition so
+            // the oval snaps back to its quiet position.
+            if (isActive || wasActive) {
+                this._cascade.setSubstormState(
+                    tick,
+                    this._cascade._lastKpCached,
+                );
+                // Broadcast for the UI panel.
+                try {
+                    window.dispatchEvent(new CustomEvent('ua-substorm-tick', {
+                        detail: tick,
+                    }));
+                } catch (_) { /* SSR / no-window — ignore */ }
+            }
+        }
 
         this._controls.update(dt);
 
