@@ -1643,10 +1643,15 @@ export class AtmosphereGlobe {
         geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
         const mat = new THREE.PointsMaterial({
             vertexColors: true,
-            size:         0.014,             // base size; per-vertex via sizes via shader is overkill
+            // 2.4× the previous size so the cloud reads as "hazard" at the
+            // default 3.2 Earth-radii camera distance instead of needing
+            // the user to zoom in.
+            size:         0.034,
             sizeAttenuation: true,
             transparent: true,
-            opacity:     0.85,
+            // Bumped opacity so the additive blend doesn't wash the dots
+            // out against the day-side Earth.
+            opacity:     1.0,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
         });

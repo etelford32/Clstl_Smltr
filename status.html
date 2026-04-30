@@ -401,6 +401,12 @@ async function _probeProxy(spec) {
     let ageSec = null;
     if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
     else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    // CelesTrak proxies (TLE + Aristotle/SOCRATES) and many SWPC feeds
+    // emit a top-level `fetched` ISO-8601 instead of `fetched_at`. NHC
+    // storm feed uses `updated`. Accept all three so the status card
+    // doesn't show "no freshness info" for endpoints that are healthy.
+    else if (body?.fetched)          { const t = Date.parse(body.fetched);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (body?.updated)          { const t = Date.parse(body.updated);          if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
     else if (Array.isArray(body)) {
         // NOAA JSON feeds are arrays of samples; recency = most recent timestamp.
