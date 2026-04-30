@@ -343,6 +343,22 @@ nav {
 #wx-age[data-staleness="warn"]  { color:#ffaa44; }
 #wx-age[data-staleness="stale"] { color:#ff6b6b; font-weight:600; }
 .wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
+
+/* Forecast skill matrix — fixed grid (channel rows × horizon cols).
+   Lives in #wx-panel under the isobar / centers section. Empty cells
+   render as em-dashes so the layout doesn't reflow as the validator
+   accumulates samples. Header row shares the same grid template so
+   columns align with their MAE values below. */
+.wx-skill-grid { font-family: monospace; font-size: 10px; color: #88b; }
+.wx-skill-grid .skill-row {
+    display: grid; grid-template-columns: 36px repeat(5, 1fr);
+    gap: 4px; align-items: center;
+    padding: 2px 0;
+}
+.wx-skill-grid .skill-head      { color: #557; font-size: 9px; padding-bottom: 2px; }
+.wx-skill-grid .skill-head span { text-align: right; }
+.wx-skill-grid .skill-ch        { color: #99a; }
+.wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
 #wx-refresh {
@@ -1351,6 +1367,19 @@ nav {
         </div>
         <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
         <hr class="ir-sep">
+        <!-- Forecaster skill table (Phase 1: persistence baseline only).
+             Cells = pooled MAE per channel × horizon. Future ML models
+             register into the same table; the registry lets them compete
+             on Murphy skill against persistence. Values are dashes until
+             the validator has matched at least one forecast against a
+             ground-truth observation (≥ 1 cron interval after page load
+             on a fresh session). -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;"
+             title="Pooled mean absolute error per channel × horizon, baseline = persistence ('tomorrow looks like today').">
+            Forecast skill (MAE)
+        </div>
+        <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <hr class="ir-sep">
         <!-- NWS alert summary -->
         <div class="wx-row">
             <span class="wx-k" style="display:flex;align-items:center;gap:4px;">
@@ -1549,6 +1578,8 @@ import {
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { WeatherHistory }       from './js/weather-history.js';
 import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
+import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -3450,6 +3481,75 @@ wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
+
+// ── Forecaster registry + skill validator ──────────────────────────────────
+// Phase 1 of the predictive-analytics ladder (see WEATHER_FORECAST_PLAN.md
+// and EARTH_ML_FIRST_PRINCIPLES.md). A registry of forecasters competes on
+// Murphy skill-vs-persistence; the persistence baseline is registered first
+// so every future model has a reference to be scored against.
+//
+// Wiring sequence matters: the validator must be `.start()`ed *before* any
+// 'weather-forecast-update' fires, because the first ingest event below
+// triggers a runAll() and we want the resulting pending records to land in
+// the validator's IDB store rather than the in-memory fallback.
+const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
+wxForecastRegistry.register(new PersistenceForecaster());
+
+const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
+// Best-effort: validator.start() awaits IDB open. Don't block the page.
+wxForecastValidator.start().catch(err => {
+    console.info('[earth] forecast validator start failed:', err?.message);
+});
+
+// If a frame is already in the ring at construction time (warmup from IDB
+// resolved earlier in this script), kick off the first forecast manually
+// so the SW-panel skill table doesn't sit empty until the next live
+// ingest 15 min later.
+if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+
+// ── SW-panel skill table painter ──────────────────────────────────────────
+// Listens for the validator's summary updates and re-renders the small
+// table embedded in #wx-panel. Pure DOM write — no layout thrash beyond
+// textContent updates because the row/column structure is fixed.
+function _paintForecastSkill(summary) {
+    const root = document.getElementById('wx-skill-grid');
+    if (!root) return;
+    // Render channels we actually care about for the headline (T, U, V,
+    // RH). The full 9-channel matrix is in `summary` for power users; we
+    // surface the four most physically interpretable here.
+    const VISIBLE_CHANNELS = ['T', 'U', 'V', 'RH'];
+    const persistence = summary['persistence-v1'];
+    if (!persistence) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    let html = '<div class="skill-row skill-head"><span></span>';
+    for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+    html += '</div>';
+    for (const ch of VISIBLE_CHANNELS) {
+        html += `<div class="skill-row"><span class="skill-ch">${ch}</span>`;
+        for (const h of FORECAST_HORIZONS_H) {
+            const bin = persistence[ch]?.[h];
+            const n = bin?.n | 0;
+            const mae = bin?.mae;
+            // Show MAE with one significant figure, or em-dash when no
+            // matched targets yet. The validator needs ≥1 ingest after a
+            // forecast to populate; fresh sessions show all dashes for up
+            // to one cron interval (~1 h).
+            html += `<span class="skill-cell" title="n=${n}">${
+                Number.isFinite(mae) ? mae.toFixed(2) : '—'
+            }</span>`;
+        }
+        html += '</div>';
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastSkill(ev.detail?.summary ?? {});
+});
+// Initial paint with whatever the validator already has on disk so the
+// table isn't blank on a fresh page load with prior history.
+_paintForecastSkill(wxForecastValidator.summary());
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery

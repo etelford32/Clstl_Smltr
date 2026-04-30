@@ -259,6 +259,17 @@ export class WeatherHistory {
             // until the next hour. Force the put on first ingest.
             this._idbPut(rec);
         }
+
+        // Notify subscribers (forecaster registry, validator, future ML
+        // pipelines) that a fresh observation is in the ring. The detail
+        // object hands over the same record we just stored — receivers
+        // are free to read its `coarse` Float32Array but MUST treat it
+        // as immutable (it's the live ring entry, not a copy).
+        if (typeof document !== 'undefined') {
+            document.dispatchEvent(new CustomEvent('weather-history-ingest', {
+                detail: { frame: rec },
+            }));
+        }
     }
 
     /**
