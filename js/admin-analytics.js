@@ -673,6 +673,99 @@ export async function fetchActivationFunnel(days = 30) {
 }
 
 /**
+ * Activation overview KPIs for the last N days. Single round trip to
+ * activation_events; aggregated client-side. Returns:
+ *   {
+ *     signups,                  // # users who signed up in the window
+ *     activated,                // # of those signups with ANY post-signup event
+ *     activationRate,           // activated / signups (0..1)
+ *     medianTimeToSimHours,     // median signup → first_sim_opened (or null)
+ *     newSubscriptions,         // # subscription_started in window
+ *     canceledSubscriptions,    // # subscription_canceled in window
+ *     totalEvents,              // raw event count in window
+ *   }
+ *
+ * Designed so a fresh table (no rows) returns all-zeros rather than
+ * erroring — the dashboard renders it as a quiet "—".
+ */
+export async function fetchActivationOverview(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('activation_events')
+            .select('user_id, event, created_at')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true });
+        if (error) throw error;
+
+        // Bucket events per user. Per-event sets allow us to derive
+        // activation rate + time-to-first-sim without a second query.
+        const POST_SIGNUP_EVENTS = new Set([
+            'profile_completed', 'location_saved', 'first_sim_opened',
+            'first_alert_configured', 'first_email_alert_sent',
+            'invite_sent', 'student_joined', 'subscription_started',
+        ]);
+        const signupAt = new Map();      // user_id → first signup ts
+        const firstSimAt = new Map();    // user_id → first first_sim_opened ts
+        const activated = new Set();     // user_id with any post-signup event
+        let newSubscriptions = 0;
+        let canceledSubscriptions = 0;
+        let totalEvents = 0;
+
+        for (const row of (data || [])) {
+            totalEvents++;
+            const uid = row.user_id;
+            const ev  = row.event;
+            const ts  = Date.parse(row.created_at);
+            if (ev === 'signup') {
+                if (!signupAt.has(uid)) signupAt.set(uid, ts);
+            } else if (POST_SIGNUP_EVENTS.has(ev)) {
+                activated.add(uid);
+                if (ev === 'first_sim_opened' && !firstSimAt.has(uid)) {
+                    firstSimAt.set(uid, ts);
+                }
+            }
+            if (ev === 'subscription_started')  newSubscriptions++;
+            if (ev === 'subscription_canceled') canceledSubscriptions++;
+        }
+
+        const signups = signupAt.size;
+        // Only count "activated" within the cohort that actually signed up
+        // in this window — a user who signed up months ago and just opened
+        // a sim shouldn't inflate the rate.
+        let activatedInCohort = 0;
+        const deltas = [];
+        for (const [uid, suTs] of signupAt.entries()) {
+            if (activated.has(uid)) activatedInCohort++;
+            const simTs = firstSimAt.get(uid);
+            if (simTs && simTs >= suTs) deltas.push((simTs - suTs) / 3_600_000);
+        }
+        deltas.sort((a, b) => a - b);
+        const medianTimeToSimHours = deltas.length
+            ? Math.round(deltas[Math.floor(deltas.length / 2)] * 10) / 10
+            : null;
+
+        return {
+            ok: true,
+            data: {
+                signups,
+                activated:             activatedInCohort,
+                activationRate:        signups > 0 ? activatedInCohort / signups : 0,
+                medianTimeToSimHours,
+                newSubscriptions,
+                canceledSubscriptions,
+                totalEvents,
+                windowDays:            days,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
  * Daily activation rollup for the last N days. Returns one row per
  * (day, event) bucket — used by the activation chart in the admin
  * dashboard.
