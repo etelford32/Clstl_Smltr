@@ -56,8 +56,35 @@ export class OperationsFleet {
 
     isOn(id)      { return this._on.get(id) === true; }
     isLoading(id) { return this._loading.has(id); }
-    isLoaded(id)  { return this.tracker.hasGroup(id); }
+    isLoaded(id)  {
+        // hasGroup is true even for failed loads (we cache the failure
+        // so the panel can show it). isLoaded should reflect *successful*
+        // loads only; otherwise the panel renders "12 objects" when it's
+        // actually 0-with-error.
+        const layer = LAYER_CATALOG.find(l => l.id === id);
+        if (!layer) return false;
+        const info = this.tracker.getGroupInfo(layer.group);
+        return !!info && !info.error;
+    }
     counts()      { return this.tracker.getGroupCounts(); }
+
+    /** Returns the error message for a failed group, or null. */
+    errorFor(id) {
+        const layer = LAYER_CATALOG.find(l => l.id === id);
+        if (!layer) return null;
+        const info = this.tracker.getGroupInfo(layer.group);
+        return info?.error ?? null;
+    }
+
+    /** Forget a failed load so the next setLayerOn(id, true) refetches. */
+    async retry(id) {
+        const layer = LAYER_CATALOG.find(l => l.id === id);
+        if (!layer) return;
+        this.tracker.forgetGroup(layer.group);
+        // Force re-fetch path: pretend the layer was off, then turn back on.
+        this._on.set(id, false);
+        await this.setLayerOn(id, true);
+    }
 
     /**
      * IDs of layers currently being rendered (toggled on AND loaded).

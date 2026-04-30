@@ -378,6 +378,36 @@ body {
 .op-layer-count.op-layer-loading {
     color:#fc6;
 }
+.op-layer-count.op-layer-error {
+    color:#f55;
+    text-decoration:underline dotted;
+}
+.op-layer-count.op-layer-error:hover {
+    color:#fff;
+    background:rgba(255,68,68,.18);
+    border-radius:3px;
+}
+
+/* ─── Aristotle conjunction table ──────────────────────── */
+.op-aristotle-tbl {
+    width:100%; border-collapse:collapse; font-size:.7rem;
+}
+.op-aristotle-tbl th {
+    text-align:left; color:#778; font-weight:600;
+    padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.08);
+}
+.op-aristotle-tbl td {
+    padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.04);
+    vertical-align:middle;
+}
+.op-aristotle-tbl tr:hover td {
+    background:rgba(255,255,255,.03);
+}
+.op-aristotle-link {
+    color:#9cf; cursor:pointer;
+    text-decoration:underline dotted rgba(153,204,255,.3);
+}
+.op-aristotle-link:hover { color:#fff; }
 
 /* ─── Scrub strip ──────────────────────────────────────── */
 #op-scrub { padding:10px 14px; }
@@ -1294,6 +1324,15 @@ body {
             </div>
         </div>
         <div class="op-panel">
+            <h2 style="display:flex;align-items:baseline;gap:8px"
+                title="Daily worst-case conjunctions from CelesTrak SOCRATES, rebranded Aristotle in our UI to disambiguate from the LLM that took the original name.">
+                Aristotle · daily conjunctions
+            </h2>
+            <div id="op-aristotle-body">
+                <div class="op-deck-empty">Loading conjunction feed…</div>
+            </div>
+        </div>
+        <div class="op-panel">
             <h2 style="display:flex;align-items:baseline;gap:8px">
                 Conjunctions · 7 days
                 <button id="op-conj-btn" class="op-deck-btn" type="button"
@@ -1378,6 +1417,7 @@ import {
 import { OperationsVisuals }  from './js/operations/visuals.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
+import { mountAristotle }     from './js/operations/aristotle.js';
 import { getGroupColorHex }   from './js/satellite-tracker.js';
 
 // Mount tooltip delegations up front so anything that binds later
@@ -1600,6 +1640,18 @@ mountConjunctions(myFleet, fleet.tracker, {
 bPlane.mountBPlane();
 densityMap.mountDensityMap(fleet.tracker);
 
+// Aristotle (SOCRATES) daily-conjunction feed. Clicking a primary or
+// secondary in the table tries to select that asset in visuals — only
+// works if the asset is in a loaded layer (visuals quietly no-ops
+// otherwise; we don't auto-load Starlink just to highlight one row).
+mountAristotle(document.getElementById('op-aristotle-body'), {
+    onSelect: (noradId) => {
+        if (fleet.tracker.getPositionXYZ(noradId, { x:0, y:0, z:0 })) {
+            visuals.setSelectedAsset?.(noradId);
+        }
+    },
+});
+
 document.getElementById('op-toggle-density')?.addEventListener('change', (e) => {
     densityMap.setVisible(e.target.checked);
 });
@@ -1642,10 +1694,28 @@ function mountLayerPanel(fleet) {
             const layer = layers.find(l => l.id === id);
             if (!layer) return;
             const isLoading = fleet.isLoading(id);
+            const err = fleet.errorFor(id);
             el.classList.toggle('op-layer-loading', isLoading);
+            el.classList.toggle('op-layer-error', !!err && !isLoading);
 
             const n = counts[layer.group];
-            if (n != null && fleet.isLoaded(id)) {
+            if (err && !isLoading) {
+                // Failed load — show 'retry' affordance and the upstream
+                // error in the title. Click rewinds the group and re-fetches.
+                el.textContent = 'retry';
+                el.title = `Load failed: ${err}\nClick to retry.`;
+                el.style.cursor = 'pointer';
+                el.onclick = (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    fleet.retry(id);
+                };
+            } else if (n != null && fleet.isLoaded(id)) {
+                // Reset retry handler in case a previously-failed group
+                // succeeded on retry.
+                el.onclick = null;
+                el.style.cursor = '';
+                el.title = '';
                 // Record the count's provenance the moment a group lands.
                 // We attribute the catalog to CelesTrak GP via our edge
                 // proxy (api/celestrak/tle.js), and the propagator is the

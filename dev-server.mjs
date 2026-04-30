@@ -76,6 +76,7 @@ const API_ROUTES = {
     '/api/nws/convective':         'api/nws/convective.js',
     '/api/storms':                 'api/storms.js',
     '/api/celestrak/tle':          'api/celestrak/tle.js',
+    '/api/celestrak/aristotle':    'api/celestrak/aristotle.js',
     '/api/atmosphere/profile':     'api/atmosphere/profile.js',
     '/api/atmosphere/snapshot':    'api/atmosphere/snapshot.js',
     '/api/horizons':               'api/horizons.js',
