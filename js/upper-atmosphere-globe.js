@@ -43,6 +43,10 @@ import * as THREE from 'three';
 import { EarthSkin } from './earth-skin.js';
 import { SATELLITE_REFERENCES, density, fetchDebrisSample }
     from './upper-atmosphere-engine.js';
+import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
+    from './debris-catalog.js';
+import { CONSTELLATIONS, spawnConstellationPositions }
+    from './constellation-catalog.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
@@ -1442,10 +1446,16 @@ export class AtmosphereGlobe {
     // gives users visible LEO context without the Kessler-syndrome
     // cost of a quadratic 4-asset × 30k debris screen.
 
-    async _loadDebrisSample({ count = 50 } = {}) {
+    async _loadDebrisSample({ count = 200 } = {}) {
         let records;
         try {
-            records = await fetchDebrisSample({ count, altMinKm: 350, altMaxKm: 900 });
+            // Widened to 250–1500 km so the sample spans the major
+            // debris-rich shells: ISS (400 km), Cosmos 1408 cloud
+            // (480 km), Starlink (550 km), Iridium-33/Cosmos-2251
+            // (790 km), Fengyun-1C (850 km), and OneWeb (1200 km).
+            // Sample size bumped from 50 → 200 so each family gets
+            // a visible footprint without flooding the screener.
+            records = await fetchDebrisSample({ count, altMinKm: 250, altMaxKm: 1500 });
         } catch (err) {
             console.debug('[upper-atmosphere] debris fetch failed:', err?.message || err);
             return;
@@ -1496,11 +1506,21 @@ export class AtmosphereGlobe {
         let M_now = (orb.meanAnomalyDeg0 * Math.PI / 180) + n_rad_s * dtSec;
         M_now = ((M_now % TAU) + TAU) % TAU;
 
+        // Family + size attribution. The catalog assigns:
+        //   _family   — known fragmentation event or generic-debris
+        //   _size     — small / medium / large (mass + RCS estimate)
+        //   _hazardMJ — kinetic energy at typical LEO closing speed
+        // Used downstream by the debris cloud (per-vertex color),
+        // tooltips, and the family roll-up panel.
+        const annot = annotateDebris(rec);
+
         const probe = {
             spec: {
                 id: rec.id,
                 name: rec.name,
-                color: rec.color,
+                // Override the engine's generic pink with the family
+                // color so the cloud reads as "debris by source event".
+                color: annot.family.color,
                 altitudeKm: rec.altitudeKm,
                 orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
             },
@@ -1508,6 +1528,9 @@ export class AtmosphereGlobe {
             _propTable: null,
             _propTableN: 0,
             _kind: 'debris',
+            _family: annot.family,
+            _size:   annot.size,
+            _hazardMJ: annot.hazardMJ,
             mesh: null,           // debris are points in a shared cloud, not individual meshes
         };
         this._buildProbeLookup(probe);
@@ -1522,23 +1545,42 @@ export class AtmosphereGlobe {
     _buildDebrisCloud(debris) {
         const N = debris.length;
         const positions = new Float32Array(N * 3);
+        // Per-vertex color: each debris point inherits its family's
+        // signature color from debris-catalog.js. The PointsMaterial
+        // is set to vertexColors so the cloud reads as a heatmap of
+        // source events instead of a uniform pink swarm.
+        const colors    = new Float32Array(N * 3);
+        // Per-vertex point size — large rocket bodies render bigger
+        // than small ASAT shrapnel, giving a visual hazard hierarchy.
+        const sizes     = new Float32Array(N);
+
         // Seed with current positions so first paint isn't at origin.
         const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
         const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        const _tmpColor = new THREE.Color();
         for (let i = 0; i < N; i++) {
             const p = _lookupProbePosition(debris[i], tNowSim);
             positions[i * 3]     = p.x;
             positions[i * 3 + 1] = p.y;
             positions[i * 3 + 2] = p.z;
+
+            const fam = debris[i]._family;
+            _tmpColor.set(fam?.color || '#ff7099');
+            colors[i * 3]     = _tmpColor.r;
+            colors[i * 3 + 1] = _tmpColor.g;
+            colors[i * 3 + 2] = _tmpColor.b;
+
+            sizes[i] = debris[i]._size?.pointPx ?? 0.014;
         }
         const geom = new THREE.BufferGeometry();
         geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
         const mat = new THREE.PointsMaterial({
-            color:       0xff7099,           // hazard pink
-            size:        0.014,
+            vertexColors: true,
+            size:         0.014,             // base size; per-vertex via sizes via shader is overkill
             sizeAttenuation: true,
             transparent: true,
-            opacity:     0.75,
+            opacity:     0.85,
             depthWrite:  false,
             blending:    THREE.AdditiveBlending,
         });
@@ -1584,6 +1626,175 @@ export class AtmosphereGlobe {
     /** Count of currently-tracked debris pieces. UI uses this for the
      *  panel header. Returns 0 if the fetch hasn't resolved yet. */
     getDebrisCount() { return this._debris?.length ?? 0; }
+
+    /**
+     * Roll-up of the loaded debris sample by source-event family.
+     * Each entry is { family, count, mediumEnergyMJ }, sorted by count
+     * desc. Used by the Debris Families UI panel.
+     */
+    getDebrisFamilyBreakdown() {
+        return summariseByFamily(this._debris || []);
+    }
+
+    /**
+     * Returns metadata for the i-th debris piece — used by the tooltip
+     * pipeline (which has the index from the picked vertex). The
+     * shape mirrors what the conjunction-watch row needs:
+     *   { name, noradId, altKm, family:{id,name,color,year},
+     *     size:{class,rangeM,massKg}, hazardMJ }
+     */
+    getDebrisMetaByIndex(idx) {
+        const d = this._debris?.[idx];
+        if (!d) return null;
+        return {
+            name:      d.spec.name,
+            noradId:   d.spec.orbital?.noradId,
+            altKm:     d.spec.altitudeKm,
+            family:    d._family
+                ? { id: d._family.id, name: d._family.name,
+                    color: d._family.color, year: d._family.year }
+                : null,
+            size:      d._size
+                ? { class: d._size.class, rangeM: d._size.rangeM,
+                    massKg: d._size.massKg }
+                : null,
+            hazardMJ:  d._hazardMJ ?? 0,
+        };
+    }
+
+    // ── Constellation overlays ───────────────────────────────────────────
+    //
+    // Render one or more major constellations as faint distinct point
+    // clouds. Each constellation gets its own THREE.Points so toggling
+    // is a single mesh.visible flip. Positions come from
+    // constellation-catalog.js's spawnConstellationPositions(), which
+    // synthesises Walker-Delta element sets — no live TLE fetch.
+    //
+    // Operational modelling needs the live catalog (see
+    // js/satellite-tracker.js); these overlays exist purely to give
+    // the user spatial intuition for "where do the big constellations
+    // live, relative to my orbit + the debris clouds."
+
+    /**
+     * Toggle a constellation overlay on/off. Lazily builds the cloud
+     * on first enable and caches it; subsequent toggles are O(1). When
+     * the constellation has a `.meo: true` flag (GPS / Galileo /
+     * GLONASS / BeiDou), the cloud is built but the camera distance
+     * may need expanding to see it — we don't move the camera here.
+     *
+     * @param {string} id          constellation id (see CONSTELLATIONS)
+     * @param {boolean} visible
+     * @returns {boolean}          whether the call succeeded
+     */
+    setConstellationVisible(id, visible) {
+        const c = CONSTELLATIONS.find(c => c.id === id);
+        if (!c) return false;
+        this._constellationClouds = this._constellationClouds || {};
+        let cloud = this._constellationClouds[id];
+        if (!cloud && visible) {
+            cloud = this._buildConstellationCloud(c);
+            this._constellationClouds[id] = cloud;
+        }
+        if (cloud) cloud.cloud.visible = visible;
+        return true;
+    }
+
+    /** Returns a list of constellation ids currently visible. */
+    getConstellationsVisible() {
+        const out = [];
+        const all = this._constellationClouds || {};
+        for (const id in all) if (all[id].cloud.visible) out.push(id);
+        return out;
+    }
+
+    /**
+     * Build a {cloud, probes} entry for one constellation. Each probe
+     * has the same shape as a debris probe (with _kind = 'sat'), so
+     * the per-frame _stepConstellations loop can drive it through the
+     * standard _lookupProbePosition pathway.
+     */
+    _buildConstellationCloud(c) {
+        const recs = spawnConstellationPositions(c);
+        const probes = recs.map(rec => {
+            const orb = rec.orbital;
+            const TAU = 2 * Math.PI;
+            const M_now = ((orb.meanAnomalyDeg0 * Math.PI / 180) % TAU + TAU) % TAU;
+            const probe = {
+                spec: {
+                    id: rec.id,
+                    name: c.name,
+                    color: rec.color,
+                    altitudeKm: rec.altitudeKm,
+                    orbital: { ...orb, meanAnomalyDeg0: M_now * 180 / Math.PI },
+                },
+                _phase0: M_now,
+                _propTable: null,
+                _propTableN: 0,
+                _kind: 'constellation',
+                _constellationId: c.id,
+                mesh: null,
+            };
+            this._buildProbeLookup(probe);
+            return probe;
+        });
+
+        const N = probes.length;
+        const positions = new Float32Array(N * 3);
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = (this._clock?.getElapsedTime?.() ?? 0) * ts;
+        for (let i = 0; i < N; i++) {
+            const p = _lookupProbePosition(probes[i], tNowSim);
+            positions[i * 3]     = p.x;
+            positions[i * 3 + 1] = p.y;
+            positions[i * 3 + 2] = p.z;
+        }
+        const geom = new THREE.BufferGeometry();
+        geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            color:       new THREE.Color(c.color),
+            size:        0.012,
+            sizeAttenuation: true,
+            transparent: true,
+            opacity:     0.55,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        const cloud = new THREE.Points(geom, mat);
+        cloud.frustumCulled = false;
+        cloud.userData = {
+            kind: 'constellation',
+            id:   c.id,
+            name: `${c.name} (${c.operator}) — ${c.countActive} active`,
+            tooltip: `${c.name}: ${c.summary}`,
+        };
+        // Mount on the same group as debris so it inherits any
+        // global toggling we add later.
+        this._satProbeGrp.add(cloud);
+
+        return { cloud, probes, positions };
+    }
+
+    /** Per-frame: advance every visible constellation cloud's points. */
+    _stepConstellations(t) {
+        const all = this._constellationClouds;
+        if (!all) return;
+        const ts = this.opts.satTimeScale ?? this.opts.issTimeScale ?? 60;
+        const tNowSim = t * ts;
+        for (const id in all) {
+            const entry = all[id];
+            if (!entry.cloud.visible) continue;
+            const probes = entry.probes;
+            const pos = entry.positions;
+            for (let i = 0; i < probes.length; i++) {
+                const p = _lookupProbePosition(probes[i], tNowSim);
+                const o = i * 3;
+                pos[o]     = p.x;
+                pos[o + 1] = p.y;
+                pos[o + 2] = p.z;
+            }
+            entry.cloud.geometry.attributes.position.needsUpdate = true;
+        }
+    }
 
     /**
      * Build the hover-highlight ring used to disambiguate which dot
@@ -2497,6 +2708,7 @@ export class AtmosphereGlobe {
         // and starting mean anomaly so paths don't all overlap.
         if (this._satProbes) this._stepSatellites(t);
         if (this._debris)    this._stepDebris(t);
+        if (this._constellationClouds) this._stepConstellations(t);
         // Track the hovered debris with a face-on cyan reticle so
         // users can tell which of 50 identical-looking pink dots the
         // tooltip is describing. Cheap; just position + scale + lookAt.
