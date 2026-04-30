@@ -343,6 +343,22 @@ nav {
 #wx-age[data-staleness="warn"]  { color:#ffaa44; }
 #wx-age[data-staleness="stale"] { color:#ff6b6b; font-weight:600; }
 .wx-row { display:flex; justify-content:space-between; margin-bottom:5px; }
+
+/* Forecast skill matrix — fixed grid (channel rows × horizon cols).
+   Lives in #wx-panel under the isobar / centers section. Empty cells
+   render as em-dashes so the layout doesn't reflow as the validator
+   accumulates samples. Header row shares the same grid template so
+   columns align with their MAE values below. */
+.wx-skill-grid { font-family: monospace; font-size: 10px; color: #88b; }
+.wx-skill-grid .skill-row {
+    display: grid; grid-template-columns: 36px repeat(5, 1fr);
+    gap: 4px; align-items: center;
+    padding: 2px 0;
+}
+.wx-skill-grid .skill-head      { color: #557; font-size: 9px; padding-bottom: 2px; }
+.wx-skill-grid .skill-head span { text-align: right; }
+.wx-skill-grid .skill-ch        { color: #99a; }
+.wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
 #wx-refresh {
@@ -630,7 +646,10 @@ nav {
    across a stationary globe.  UI speed presets: 1× (real), 60×
    (1 min/s), 600×, 3600× (1 hr/s). */
 #time-controls {
-    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    /* 10 px floor above the viewport edge so the bar is never flush with
+       the bottom of #app on any breakpoint — keeps it visually anchored
+       even when window heights are awkward. */
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     z-index: 60;
     background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
     border: 1px solid rgba(0,200,255,.2); border-radius: 9px;
@@ -674,10 +693,31 @@ nav {
     min-width: 26px; user-select: none;
 }
 .tc-scrub-edge.right { text-align: right; color: #0ee; }
+/* Slider domain is [-10080, +4320] minutes (= -7d .. +3d). The "now"
+   mark sits at (10080 / 14400) = 70% across the track. CSS gradient
+   below paints the past side (left of 70%) cyan and the future side
+   (right of 70%) amber-dashed-ish so users can read at a glance which
+   half of the timeline they're scrubbing. */
 #tc-scrub {
     flex: 1; min-width: 240px;
     -webkit-appearance: none; appearance: none;
-    height: 4px; background: linear-gradient(to right, rgba(0,200,200,.10), rgba(0,200,200,.26));
+    height: 4px;
+    background: linear-gradient(to right,
+        rgba(0,200,200,.10) 0%,
+        rgba(0,200,200,.26) 70%,
+        rgba(255,170,60,.10) 70.01%,
+        rgba(255,170,60,.30) 100%);
+    /* Vertical "now" tick painted on top of the track. */
+    background-image:
+        linear-gradient(to right,
+            rgba(0,200,200,.10) 0%,
+            rgba(0,200,200,.26) 70%,
+            rgba(255,170,60,.10) 70.01%,
+            rgba(255,170,60,.30) 100%),
+        linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55));
+    background-size: 100% 100%, 1px 10px;
+    background-position: 0 0, 70% center;
+    background-repeat: no-repeat, no-repeat;
     border-radius: 2px; outline: none; margin: 0;
     cursor: pointer;
 }
@@ -699,7 +739,8 @@ nav {
    scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
    bottom:12px is fine. */
 @media (max-width:1024px) {
-    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
+    /* 56-px mobile toolbar + 10 px floor = 66 px above the viewport bottom. */
+    #time-controls { bottom: 66px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
     .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
     .tc-display    { min-width: 128px; }
     .tc-time       { font-size: 10px; }
@@ -1327,6 +1368,19 @@ nav {
         </div>
         <div id="wx-centers-list" style="font-size:9px;color:#668;margin-top:2px;margin-bottom:4px;line-height:1.6;"></div>
         <hr class="ir-sep">
+        <!-- Forecaster skill table (Phase 1: persistence baseline only).
+             Cells = pooled MAE per channel × horizon. Future ML models
+             register into the same table; the registry lets them compete
+             on Murphy skill against persistence. Values are dashes until
+             the validator has matched at least one forecast against a
+             ground-truth observation (≥ 1 cron interval after page load
+             on a fresh session). -->
+        <div style="font-size:9px;color:#336a8a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;"
+             title="Pooled mean absolute error per channel × horizon, baseline = persistence ('tomorrow looks like today').">
+            Forecast skill (MAE)
+        </div>
+        <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
+        <hr class="ir-sep">
         <!-- NWS alert summary -->
         <div class="wx-row">
             <span class="wx-k" style="display:flex;align-items:center;gap:4px;">
@@ -1434,13 +1488,18 @@ nav {
              resolver listens via animate()'s tick; the input handler
              writes simTimeMs so satellites + sun + weather all replay
              together. -->
+        <!-- Range covers -10080..+4320 minutes (= -7d past .. +3d future).
+             "Now" sits at value=0, which the CSS paints at 70 % across the
+             track. Past frames are real observations; future frames are
+             forecast (currently a persistence stand-in until the
+             weather-forecast pipeline lands). -->
         <div id="tc-scrub-row">
-            <span class="tc-scrub-edge">−24h</span>
+            <span class="tc-scrub-edge">−1w</span>
             <input type="range" id="tc-scrub"
-                   min="-1440" max="0" step="1" value="0"
-                   aria-label="Time scrub — drag to replay last 24 hours"
-                   title="Drag to replay the last 24 h of wind, temperature, and cloud data">
-            <span class="tc-scrub-edge right">now</span>
+                   min="-10080" max="4320" step="1" value="0"
+                   aria-label="Time scrub — drag left for up to 1 week of history, right for up to 3 days of forecast"
+                   title="Drag left to replay (up to 1 week back) or right to preview (up to 3 days ahead)">
+            <span class="tc-scrub-edge right">+3d</span>
         </div>
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
@@ -1540,6 +1599,8 @@ import {
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { WeatherHistory }       from './js/weather-history.js';
 import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
+import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
+import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -3527,6 +3588,75 @@ wxResolver = new WeatherFrameResolver({ feed: wxFeed, history: wxGridHistory });
 wxFeed.backfill(wxGridHistory, 24).then(n => {
     if (n > 0) wxResolver?.invalidate();
 });
+
+// ── Forecaster registry + skill validator ──────────────────────────────────
+// Phase 1 of the predictive-analytics ladder (see WEATHER_FORECAST_PLAN.md
+// and EARTH_ML_FIRST_PRINCIPLES.md). A registry of forecasters competes on
+// Murphy skill-vs-persistence; the persistence baseline is registered first
+// so every future model has a reference to be scored against.
+//
+// Wiring sequence matters: the validator must be `.start()`ed *before* any
+// 'weather-forecast-update' fires, because the first ingest event below
+// triggers a runAll() and we want the resulting pending records to land in
+// the validator's IDB store rather than the in-memory fallback.
+const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
+wxForecastRegistry.register(new PersistenceForecaster());
+
+const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
+// Best-effort: validator.start() awaits IDB open. Don't block the page.
+wxForecastValidator.start().catch(err => {
+    console.info('[earth] forecast validator start failed:', err?.message);
+});
+
+// If a frame is already in the ring at construction time (warmup from IDB
+// resolved earlier in this script), kick off the first forecast manually
+// so the SW-panel skill table doesn't sit empty until the next live
+// ingest 15 min later.
+if (wxGridHistory.size > 0) wxForecastRegistry.runAll();
+
+// ── SW-panel skill table painter ──────────────────────────────────────────
+// Listens for the validator's summary updates and re-renders the small
+// table embedded in #wx-panel. Pure DOM write — no layout thrash beyond
+// textContent updates because the row/column structure is fixed.
+function _paintForecastSkill(summary) {
+    const root = document.getElementById('wx-skill-grid');
+    if (!root) return;
+    // Render channels we actually care about for the headline (T, U, V,
+    // RH). The full 9-channel matrix is in `summary` for power users; we
+    // surface the four most physically interpretable here.
+    const VISIBLE_CHANNELS = ['T', 'U', 'V', 'RH'];
+    const persistence = summary['persistence-v1'];
+    if (!persistence) {
+        root.textContent = 'awaiting first validation cycle…';
+        return;
+    }
+    let html = '<div class="skill-row skill-head"><span></span>';
+    for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+    html += '</div>';
+    for (const ch of VISIBLE_CHANNELS) {
+        html += `<div class="skill-row"><span class="skill-ch">${ch}</span>`;
+        for (const h of FORECAST_HORIZONS_H) {
+            const bin = persistence[ch]?.[h];
+            const n = bin?.n | 0;
+            const mae = bin?.mae;
+            // Show MAE with one significant figure, or em-dash when no
+            // matched targets yet. The validator needs ≥1 ingest after a
+            // forecast to populate; fresh sessions show all dashes for up
+            // to one cron interval (~1 h).
+            html += `<span class="skill-cell" title="n=${n}">${
+                Number.isFinite(mae) ? mae.toFixed(2) : '—'
+            }</span>`;
+        }
+        html += '</div>';
+    }
+    root.innerHTML = html;
+}
+document.addEventListener('weather-forecast-validation-update', (ev) => {
+    _paintForecastSkill(ev.detail?.summary ?? {});
+});
+// Initial paint with whatever the validator already has on disk so the
+// table isn't blank on a fresh page load with prior history.
+_paintForecastSkill(wxForecastValidator.summary());
 
 // ═══════════════════════════════════════════════════════════════
 //  SATELLITE FEED — NASA GIBS GOES-16 + MODIS cloud imagery
@@ -6105,16 +6235,14 @@ _setSimPaused(false);
 const _scrubEl = document.getElementById('tc-scrub');
 if (_scrubEl) {
     _scrubEl.addEventListener('input', () => {
-        const minutesAgo = Number(_scrubEl.value);
-        // value is "minutes from now" in [-1440, 0]. Negative = past.
-        simTimeMs = Date.now() + minutesAgo * 60_000;
-        // Auto-pause when scrubbing into the past so the user's view
-        // doesn't drift forward under them at simSpeed×; releasing
-        // back to 0 leaves them paused, but Now/N or the play button
-        // resumes. This matches how every video scrubber on the web
-        // behaves and keeps the analysis use-case (parking on a
-        // moment to inspect it) the default.
-        if (minutesAgo < 0 && !simPaused) _setSimPaused(true);
+        const minutesFromNow = Number(_scrubEl.value);
+        // value is "minutes from now" in [-10080, +4320]. Negative = past
+        // (replay observations); positive = future (forecast preview).
+        simTimeMs = Date.now() + minutesFromNow * 60_000;
+        // Auto-pause whenever the user parks anywhere off "now" so the
+        // view doesn't drift under them at simSpeed×. Now/N or the
+        // play button resumes natural advance.
+        if (minutesFromNow !== 0 && !simPaused) _setSimPaused(true);
     });
     // Resume playback on release if the user dragged back to "now" —
     // otherwise leave them paused at the historical moment they chose.
@@ -6162,10 +6290,12 @@ function animate() {
     // out from under the user mid-drag.
     if (_scrubEl && document.activeElement !== _scrubEl) {
         const minutesAgo = (simTimeMs - Date.now()) / 60_000;
-        // Clamp to the slider's [-1440, 0] domain. Future-time scrub
-        // (already shown by satellites/sun) clamps to 0 here because
-        // weather replay doesn't cover the future yet.
-        const clamped = Math.max(-1440, Math.min(0, minutesAgo));
+        // Slider domain is [-10080, +4320] minutes (= -7d .. +3d).
+        // Sun + satellites are deterministic in both directions; the
+        // weather resolver clamps anything outside its bracket window to
+        // the nearest available frame, so future scrub is visually a
+        // persistence forecast until the predictive pipeline lands.
+        const clamped = Math.max(-10080, Math.min(4320, minutesAgo));
         // Only write if it actually changed by at least a step (1 min)
         // — avoids triggering UA-side restyles every frame on idle.
         if (Math.abs(clamped - Number(_scrubEl.value)) >= 1) {
