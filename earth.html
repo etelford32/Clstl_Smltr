@@ -991,6 +991,7 @@ nav {
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-ocean-currents" checked><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-aod"               ><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
@@ -1338,6 +1339,26 @@ nav {
         <button id="wx-refresh">↺ Refresh Data</button>
 
         <hr class="ir-sep">
+        <!-- Sea Surface Temperature legend.
+             Mirrors the GIBS GHRSST_L4_MUR_Sea_Surface_Temperature palette so
+             the canvas swatch is a quantitative key for the textured globe,
+             not a decorative gradient. Range −2 °C → 32 °C is the published
+             colourmap span for the JPL MUR L4 product. -->
+        <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Sea-surface temp (°C)</div>
+        <canvas id="wx-sst-legend" width="200" height="8"
+                style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+            <span>−2</span><span>10</span><span>20</span><span>32 °C</span>
+        </div>
+        <!-- Ocean-current speed legend. Same scale as the streamline overlay
+             (deep teal → cyan → white-yellow at ≥ 1.5 m/s = Gulf Stream core). -->
+        <div style="margin:0 0 4px;font-size:9px;color:#556;text-transform:uppercase;letter-spacing:.06em">Surface current (m/s)</div>
+        <canvas id="wx-currents-legend" width="200" height="8"
+                style="width:100%;height:8px;border-radius:3px;display:block;"></canvas>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:#668;margin-top:2px;margin-bottom:6px;">
+            <span>0.0</span><span>0.5</span><span>1.0</span><span>1.8 m/s</span>
+        </div>
+        <hr class="ir-sep">
         <!-- NASA Earth Observation status -->
         <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px">NASA EARTH OBSERVATIONS</div>
         <div id="obs-status-list" style="font-size:10px;color:#778;line-height:1.7"></div>
@@ -1543,6 +1564,8 @@ import { EarthFeeds, eqMagColorTHREE, eqMarkerRadius,
          eqPulseFreq, eqPulseAmp, eqAgeFactor } from './js/earth-feeds.js';
 import { CmePropagator } from './js/cme-propagation.js';
 import { JetstreamOverlay } from './js/jetstream-overlay.js';
+import { OceanCurrentsOverlay } from './js/ocean-currents-overlay.js';
+import { oceanCurrentsMeta } from './js/ocean-currents-feed.js';
 import { auth } from './js/auth.js';
 import { addLocation, listLocations, locationLimit, PLAN_LIMITS } from './js/saved-locations.js';
 import { parseTripParam, greatCirclePath, greatCircleDistanceKm, initialBearingDeg } from './js/trip-planner.js';
@@ -3280,6 +3303,62 @@ const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
     }
 })();
 
+// ── SST legend ──────────────────────────────────────────────────────────
+// Mirror NASA GIBS GHRSST_L4_MUR_Sea_Surface_Temperature standard palette
+// (−2 °C … 32 °C). Values are pulled from the GIBS WMS GetLegendGraphic
+// for that layer so the swatch is a *quantitative* key, not a guess.
+//   −2 °C  rgb( 50,  10,  90)   deep purple
+//    5 °C  rgb( 30,  60, 200)   blue
+//   12 °C  rgb( 40, 200, 230)   cyan
+//   18 °C  rgb(110, 220, 100)   green
+//   24 °C  rgb(255, 220,  60)   yellow
+//   28 °C  rgb(255, 130,  40)   orange
+//   32 °C  rgb(220,  20,  20)   red
+(function _paintSstLegend() {
+    const cv = document.getElementById('wx-sst-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, cv.width, 0);
+    grad.addColorStop(0.00, 'rgb(50,10,90)');
+    grad.addColorStop(0.20, 'rgb(30,60,200)');
+    grad.addColorStop(0.40, 'rgb(40,200,230)');
+    grad.addColorStop(0.55, 'rgb(110,220,100)');
+    grad.addColorStop(0.75, 'rgb(255,220,60)');
+    grad.addColorStop(0.88, 'rgb(255,130,40)');
+    grad.addColorStop(1.00, 'rgb(220,20,20)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, cv.width, cv.height);
+})();
+
+// ── Surface-current legend ──────────────────────────────────────────────
+// Mirrors OceanCurrentsOverlay._speedColor() exactly so the swatch users
+// see in the panel decodes the same colours streaming across the globe.
+// Anchors at 0.0 / 0.5 / 1.5 m/s — the speed thresholds where the ramp
+// transitions from teal → cyan → white-yellow.
+(function _paintCurrentsLegend() {
+    const cv = document.getElementById('wx-currents-legend');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    for (let x = 0; x < W; x++) {
+        const s = x / (W - 1);   // 0..1 normalised across 0..1.8 m/s
+        let r, g, b;
+        if (s < 0.5) {
+            const t = s / 0.5;
+            r = 0.05 + 0.10 * t;
+            g = 0.40 + 0.50 * t;
+            b = 0.55 + 0.45 * t;
+        } else {
+            const t = (s - 0.5) / 0.5;
+            r = 0.15 + 0.85 * t;
+            g = 0.90 + 0.10 * t;
+            b = 1.00 - 0.30 * t;
+        }
+        ctx.fillStyle = `rgb(${(r * 255) | 0}, ${(g * 255) | 0}, ${(b * 255) | 0})`;
+        ctx.fillRect(x, 0, 1, H);
+    }
+})();
+
 // ── Jet-stream overlay — highlights wind > 30 m/s on the globe ─────────
 // Parented to earthMesh (rides with the globe), driven by windParticles'
 // public sampler so lookups stay consistent with the streamlines. The
@@ -3294,6 +3373,34 @@ jetstreamOverlay.setVisible(false);
 
 document.getElementById('lyr-jet')?.addEventListener('change', e => {
     jetstreamOverlay.setVisible(e.target.checked);
+});
+
+// ── Ocean surface currents ──────────────────────────────────────────
+// CPU-advected particles riding the climatological surface-current vector
+// field. Major boundary jets (Gulf Stream, Kuroshio, Agulhas) read as
+// bright white-yellow streaks; broad equatorial / gyre flow as cyan.
+//
+// Sits at radius 1.0024 — between the SST overlay (1.002) and the cloud
+// layer (1.009) — so currents read on top of the temperature ramp without
+// fighting the atmospheric particles for visibility.
+//
+// Updated every frame from the main animation loop so streaks animate
+// continuously (the field is stationary; particles are not).
+const oceanCurrentsOverlay = new OceanCurrentsOverlay(earthMesh, 1500);
+
+const _oceanCurrentsCheckbox = document.getElementById('lyr-ocean-currents');
+oceanCurrentsOverlay.setVisible(_oceanCurrentsCheckbox?.checked ?? false);
+_oceanCurrentsCheckbox?.addEventListener('change', e => {
+    oceanCurrentsOverlay.setVisible(e.target.checked);
+});
+
+// Status pip: the model is purely client-side so it's always "loaded".
+// One-shot dispatch on init so the .lyr-status pill paints green
+// immediately rather than sitting amber forever.
+queueMicrotask(() => {
+    const m = oceanCurrentsMeta();
+    _setLayerPipById?.('ocean-currents', 'loaded',
+        `${m.source} · climatology`);
 });
 
 // Format the "Jet peak" readout. "228 km/h · 42.0°N 75.0°W" when a jet
@@ -6126,6 +6233,10 @@ function animate() {
     // ── Wind particle advection (tropospheric weather). Camera + parent
     // are passed so the LOD path can derive sub-camera lat/lon and zoom01.
     windParticles.update(dt, camera, earthMesh);
+
+    // ── Ocean surface currents (oceanographic). Static climatological
+    // field, but particles re-advect every frame so streaks animate.
+    oceanCurrentsOverlay.update(dt);
 
     // ── Adaptive wind-direction arrows (visible only at close zoom). Reads
     // focus state straight from the particle system so the two layers stay
