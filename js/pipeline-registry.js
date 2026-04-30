@@ -142,16 +142,21 @@ export const PIPELINES = [
       cadence_s: 1_800, prewarm: 'medium',
       warnAgeS:  60 * 60, critAgeS: 360 * 60 },
 
-    // ── Atmosphere · Parker Physics seed-grid ──────────────────────────────
-    { id: 'atmosphere-profile', label: 'Upper atmosphere profile',
+    // ── Atmosphere · SPARTA DSMC surrogate ──────────────────────────────
+    // Both endpoints serve the SPARTA-bootstrap (climatology) profile until
+    // the SPARTA DSMC pipeline (dsmc/sparta/generate_tables.py) drops
+    // refined CSVs in; same contract on either side, the `model` field in
+    // the response distinguishes 'SPARTA-bootstrap' vs 'SPARTA-lookup'.
+    { id: 'atmosphere-profile', label: 'SPARTA · upper-atm profile',
       endpoint: '/api/atmosphere/profile',
-      category: 'atmosphere', upstream: 'Parker Physics seed grid',
+      category: 'atmosphere', upstream: 'SPARTA DSMC · seed grid',
       cadence_s: 21_600, prewarm: 'cold',
-      warnAgeS:  12 * 3600, critAgeS: 48 * 3600 },
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'Bootstrap climatology served until the SPARTA DSMC build replaces the seed grid.' },
 
-    { id: 'atmosphere-snapshot',label: 'Upper atmosphere snapshot',
+    { id: 'atmosphere-snapshot',label: 'SPARTA · upper-atm snapshot',
       endpoint: '/api/atmosphere/snapshot',
-      category: 'atmosphere', upstream: 'Parker Physics seed grid',
+      category: 'atmosphere', upstream: 'SPARTA DSMC · seed grid',
       cadence_s: 21_600, prewarm: 'cold',
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600 },
 
@@ -202,18 +207,58 @@ export const PIPELINES = [
       warnAgeS:  30 * 60, critAgeS: 120 * 60 },
 
     // ── Orbital · CelesTrak / launches ─────────────────────────────────────
-    { id: 'celestrak-tle',      label: 'CelesTrak TLE',
+    { id: 'celestrak-tle',      label: 'CelesTrak · TLE catalog',
       endpoint: '/api/celestrak/tle',
-      category: 'orbital', upstream: 'CelesTrak',
+      category: 'orbital', upstream: 'CelesTrak GP / 18 SDS',
       cadence_s: 21_600, prewarm: 'cold',
       warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
       notes: 'Per-NORAD query; pre-warm hits a default cohort.' },
+
+    // CelesTrak GP active-payload feed — fronts the satellite-tracker
+    // groups on satellites.html and operations.html. Probed separately so
+    // a stations-only failure surfaces here without polluting the catch-all
+    // celestrak-tle row.
+    { id: 'celestrak-stations', label: 'CelesTrak · stations (ISS, CSS)',
+      endpoint: '/api/celestrak/tle?group=stations',
+      category: 'orbital', upstream: 'CelesTrak GP / 18 SDS',
+      cadence_s: 21_600, prewarm: null,
+      warnAgeS:  12 * 3600, critAgeS: 48 * 3600,
+      notes: 'Default-on layer for satellites.html + operations.html.' },
+
+    // CelesTrak debris feed — composite of FY-1C, Cosmos 1408, Iridium-33,
+    // Cosmos-2251 fragmentation events. Drives the LEO debris cloud on the
+    // Upper Atmosphere, Satellite Track, and Operations sims. Critical
+    // signal: if this row goes red the debris layer disappears.
+    { id: 'celestrak-debris',   label: 'CelesTrak · LEO debris (composite)',
+      endpoint: '/api/celestrak/tle?group=debris',
+      category: 'orbital', upstream: 'CelesTrak GP / 18 SDS',
+      cadence_s: 21_600, prewarm: 'cold',
+      warnAgeS:  24 * 3600, critAgeS: 72 * 3600,
+      notes: 'Fans out to 4 per-event groups; partial failures still serve.' },
+
+    // SOCRATES daily conjunction feed (rebranded "Aristotle" in our UI to
+    // disambiguate from the LLM that took the original name). Powers the
+    // Aristotle decision-deck panel on operations.html.
+    { id: 'celestrak-aristotle',label: 'SOCRATES · Aristotle conjunctions',
+      endpoint: '/api/celestrak/aristotle',
+      category: 'orbital', upstream: 'CelesTrak SOCRATES',
+      cadence_s: 43_200, prewarm: 'medium',
+      warnAgeS:  18 * 3600, critAgeS: 36 * 3600,
+      notes: 'SOCRATES recomputes every ~12h. Format-drift detection runs server-side.' },
 
     { id: 'launches-upcoming',  label: 'Upcoming launches',
       endpoint: '/api/launches/upcoming',
       category: 'orbital', upstream: 'TheSpaceDevs LL2',
       cadence_s: 3_600, prewarm: 'medium',
       warnAgeS:  90 * 60, critAgeS: 180 * 60 },
+
+    // ── Tropical / severe weather ─────────────────────────────────────────
+    { id: 'storms-cyclones',    label: 'NHC active tropical cyclones',
+      endpoint: '/api/storms',
+      category: 'weather', upstream: 'NOAA NHC CurrentStorms',
+      cadence_s: 1_800, prewarm: 'medium',
+      warnAgeS:  6 * 3600, critAgeS: 24 * 3600,
+      notes: 'Powers the storm-feed overlay on Earth + satellite-track sims.' },
 ];
 
 /**

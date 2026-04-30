@@ -257,7 +257,7 @@ nav {
         </div>
         <div class="sp-section">
             <div class="sp-label" style="color:#ff4444">Debris &amp; Hazards</div>
-            <div class="sp-toggle"><input type="checkbox" id="grp-debris"><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-debris" checked><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
             <!-- Status strip for the background debris-threat screen.
                  Collapsed until the user enables debris; the Web Worker
                  then runs once against every loaded operational group and
@@ -551,6 +551,15 @@ function _updateHud() {
 loadGroup('stations').then(() => {
     tracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
 });
+
+// Auto-load the LEO debris layer so first-paint already shows the
+// hazard cloud instead of needing a user toggle. Fire-and-forget — if
+// CelesTrak is slow the rest of the page stays interactive, and the
+// post-load handler (`_maybeRunDebrisScreen` via the
+// `satellites-loaded` event) still fires once the catalog resolves.
+// The matching checkbox in the layer panel is rendered `checked` so
+// the toggle state stays consistent with the actual visibility.
+loadGroup('debris');
 
 // ── Debris-threat pre-compute (Level 2) ──────────────────────────────────
 // Spins up a Module Worker that propagates every loaded operational sat

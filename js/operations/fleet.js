@@ -47,7 +47,13 @@ export class OperationsFleet {
         // bus regardless of mode (live / scrub / replay).
         globe.onTick((simTimeMs) => this.tracker.tick(simTimeMs));
 
-        this._on        = new Map(LAYER_CATALOG.map(l => [l.id, l.on]));
+        // Track desired-on state separately from the catalog defaults so
+        // `bootstrap()` actually fires loads. The previous version
+        // pre-seeded this map with each layer's `on` field, which made
+        // `setLayerOn(id, true)` short-circuit at the equality guard
+        // before it could call `tracker.loadGroup()` — net result was the
+        // default-on layers (stations + debris) never rendered.
+        this._on        = new Map(LAYER_CATALOG.map(l => [l.id, false]));
         this._loading   = new Set();
         this._listeners = new Set();
     }
