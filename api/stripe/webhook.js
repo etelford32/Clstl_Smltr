@@ -6,11 +6,12 @@
  * updates user_profiles.plan and subscription_status based on Stripe events.
  *
  * ── Events handled ───────────────────────────────────────────────────────────
- *   checkout.session.completed    — first subscription created
- *   customer.subscription.updated — plan change, trial end, renewal
- *   customer.subscription.deleted — cancellation
- *   invoice.payment_failed        — mark past_due
- *   invoice.paid                  — confirm active after retry
+ *   checkout.session.completed         — first subscription created
+ *   customer.subscription.updated      — plan change, trial end, renewal
+ *   customer.subscription.deleted      — cancellation
+ *   customer.subscription.trial_will_end — 3-day-out warning (re-engagement)
+ *   invoice.payment_failed             — mark past_due
+ *   invoice.paid                       — confirm active after retry
  *
  * ── Env vars required ────────────────────────────────────────────────────────
  *   STRIPE_SECRET_KEY      — for API calls
@@ -44,15 +45,33 @@ const APP_URL           = process.env.APP_URL || 'https://parkerphysics.com';
 //
 // Enterprise has no price ID — it's a manually-assigned plan set by an
 // admin once a custom contract is signed. The webhook never touches it.
+// Both monthly and yearly price IDs resolve to the SAME plan name — the
+// user is on "educator", whether they're billed monthly or yearly. Cadence
+// lives in subscription metadata, set by the checkout endpoint.
 const PRICE_TO_PLAN = {};
-const _basicPrice       = process.env.STRIPE_BASIC_PRICE_ID       || process.env.STRIPE_PRICE_BASIC;
-const _educatorPrice    = process.env.STRIPE_EDUCATOR_PRICE_ID    || process.env.STRIPE_PRICE_EDUCATOR;
-const _advancedPrice    = process.env.STRIPE_ADVANCED_PRICE_ID    || process.env.STRIPE_PRICE_ADVANCED;
-const _institutionPrice = process.env.STRIPE_INSTITUTION_PRICE_ID || process.env.STRIPE_PRICE_INSTITUTION;
-if (_basicPrice)       PRICE_TO_PLAN[_basicPrice]       = 'basic';
-if (_educatorPrice)    PRICE_TO_PLAN[_educatorPrice]    = 'educator';
-if (_advancedPrice)    PRICE_TO_PLAN[_advancedPrice]    = 'advanced';
-if (_institutionPrice) PRICE_TO_PLAN[_institutionPrice] = 'institution';
+function _bind(planName, ...envValues) {
+    for (const v of envValues) if (v) PRICE_TO_PLAN[v] = planName;
+}
+_bind('basic',
+    process.env.STRIPE_BASIC_PRICE_ID,
+    process.env.STRIPE_PRICE_BASIC,
+    process.env.STRIPE_BASIC_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_BASIC_YEARLY);
+_bind('educator',
+    process.env.STRIPE_EDUCATOR_PRICE_ID,
+    process.env.STRIPE_PRICE_EDUCATOR,
+    process.env.STRIPE_EDUCATOR_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_EDUCATOR_YEARLY);
+_bind('advanced',
+    process.env.STRIPE_ADVANCED_PRICE_ID,
+    process.env.STRIPE_PRICE_ADVANCED,
+    process.env.STRIPE_ADVANCED_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_ADVANCED_YEARLY);
+_bind('institution',
+    process.env.STRIPE_INSTITUTION_PRICE_ID,
+    process.env.STRIPE_PRICE_INSTITUTION,
+    process.env.STRIPE_INSTITUTION_YEARLY_PRICE_ID,
+    process.env.STRIPE_PRICE_INSTITUTION_YEARLY);
 
 /** Constant-time string compare — same length required, returns false on mismatch. */
 function constantTimeEqual(a, b) {
@@ -160,8 +179,8 @@ async function fetchUserSummary(userId) {
     } catch { return null; }
 }
 
-/** Notify the owner that someone subscribed / canceled. Best-effort. */
-async function notifyOwner({ kind, plan, userId, amountCents, currency, periodEndIso }) {
+/** Notify the owner that someone subscribed / started a trial / canceled. */
+async function notifyOwner({ kind, plan, userId, amountCents, currency, periodEndIso, trialCode }) {
     if (!RESEND_KEY)        return;
     if (!SUB_NOTIFY_EMAIL)  return;
     const summary = await fetchUserSummary(userId);
@@ -169,23 +188,34 @@ async function notifyOwner({ kind, plan, userId, amountCents, currency, periodEn
         ? `${summary.display_name || '(no name)'} <${summary.email || 'unknown'}>`
         : `user ${userId || '(unknown)'}`;
     const isCancel = kind === 'subscription_canceled';
+    const isTrial  = kind === 'subscription_trial_started';
+    const headline = isCancel ? 'Subscription canceled'
+                   : isTrial  ? 'Free trial started'
+                   :            'New subscriber';
+    const headlineColor = isCancel ? '#ff8c00' : isTrial ? '#9bff66' : '#4eff91';
     const subject  = isCancel
         ? `[Parker Physics] Subscription canceled — ${plan || '?'}`
+        : isTrial
+        ? `[Parker Physics] Trial started — ${plan || '?'}${trialCode ? ` · ${trialCode}` : ''}`
         : `[Parker Physics] New subscriber — ${plan || '?'}`;
-    const amount = (typeof amountCents === 'number' && currency)
+    const amount = (typeof amountCents === 'number' && currency && amountCents > 0)
         ? `${(amountCents / 100).toFixed(2)} ${currency.toUpperCase()}`
-        : '—';
+        : isTrial ? '$0 (trial)' : '—';
+    const periodLabel = isCancel ? 'Access until'
+                      : isTrial  ? 'Trial ends'
+                      :            'Renews';
     const html = `<!DOCTYPE html>
 <html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0a0a14;color:#e8f4ff;padding:24px">
   <div style="max-width:560px;margin:0 auto;background:#12111a;border:1px solid #222;border-radius:12px;padding:24px">
-    <h2 style="margin:0 0 12px;color:${isCancel ? '#ff8c00' : '#4eff91'}">
-      ${isCancel ? 'Subscription canceled' : 'New subscriber'}
-    </h2>
+    <h2 style="margin:0 0 12px;color:${headlineColor}">${escHtml(headline)}</h2>
     <p style="margin:0 0 14px;font-size:.9rem;color:#aab"><strong style="color:#fff">${escHtml(who)}</strong></p>
     <p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Plan:</strong> ${escHtml(plan || '—')}</p>
     <p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Amount:</strong> ${escHtml(amount)}</p>
+    ${trialCode
+        ? `<p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>Promo:</strong> ${escHtml(trialCode)}</p>`
+        : ''}
     ${periodEndIso
-        ? `<p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>${isCancel ? 'Access until' : 'Renews'}:</strong> ${escHtml(new Date(periodEndIso).toUTCString())}</p>`
+        ? `<p style="margin:0 0 6px;font-size:.85rem;color:#aab"><strong>${periodLabel}:</strong> ${escHtml(new Date(periodEndIso).toUTCString())}</p>`
         : ''}
     <hr style="border:none;border-top:1px solid #333;margin:14px 0">
     <p style="margin:18px 0 0;font-size:.75rem;color:#778"><a href="${APP_URL}/admin.html#activation" style="color:#a080ff">Open admin → activation</a></p>
@@ -273,6 +303,11 @@ export default async function handler(req) {
                 const priceId   = sub.items?.data?.[0]?.price?.id;
                 const plan      = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? 'basic';
                 const periodEnd = new Date(sub.current_period_end * 1000).toISOString();
+                const trialCode = sub.metadata?.trial_code || null;
+                const isTrial   = sub.status === 'trialing';
+                const trialEndIso = sub.trial_end
+                    ? new Date(sub.trial_end * 1000).toISOString()
+                    : null;
                 await updateProfile(uid, {
                     plan,
                     stripe_subscription_id: subId,
@@ -281,18 +316,28 @@ export default async function handler(req) {
                     subscription_period_end: periodEnd,
                 });
                 // Populate the activation funnel so the admin dashboard can
-                // see paying conversions, and ping the owner.
-                await logActivationServerSide(uid, 'subscription_started', plan, {
-                    stripe_subscription_id: subId,
-                    stripe_price_id:        priceId,
-                });
+                // see paying conversions, and ping the owner. Trials get
+                // their own event name so we can chart trial → paid lift
+                // independently from cold-paid conversions.
+                await logActivationServerSide(
+                    uid,
+                    isTrial ? 'subscription_trial_started' : 'subscription_started',
+                    plan,
+                    {
+                        stripe_subscription_id: subId,
+                        stripe_price_id:        priceId,
+                        trial_code:             trialCode,
+                        trial_end:              trialEndIso,
+                    }
+                );
                 await notifyOwner({
-                    kind:        'subscription_started',
+                    kind:        isTrial ? 'subscription_trial_started' : 'subscription_started',
                     plan,
                     userId:      uid,
                     amountCents: session.amount_total,
                     currency:    session.currency,
-                    periodEndIso: periodEnd,
+                    periodEndIso: isTrial ? trialEndIso : periodEnd,
+                    trialCode,
                 });
                 break;
             }
@@ -394,10 +439,44 @@ export default async function handler(req) {
                 if (!uid) break;
                 const priceId = sub.items?.data?.[0]?.price?.id;
                 const plan    = PRICE_TO_PLAN[priceId] ?? 'basic';
+                // Detect trial → paid conversion: this invoice is the first
+                // paid charge after the trial ended. Stripe sets the invoice's
+                // billing_reason to 'subscription_cycle' for normal renewals;
+                // for trial conversions it's also 'subscription_cycle' but we
+                // can identify the moment from the trial metadata + status
+                // flip to 'active'. Best-effort logging; safe to skip silently.
+                const wasTrial = sub.metadata?.trial_code && sub.status === 'active';
+                if (wasTrial) {
+                    await logActivationServerSide(uid, 'subscription_trial_converted', plan, {
+                        stripe_subscription_id: sub.id,
+                        trial_code:             sub.metadata?.trial_code || null,
+                    });
+                }
                 await updateProfile(uid, {
                     plan,
                     subscription_status: 'active',
                     subscription_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+                });
+                break;
+            }
+
+            case 'customer.subscription.trial_will_end': {
+                // Stripe fires this 3 days before trial_end. We use it as the
+                // re-engagement hook the user described — "come back in a
+                // month." Just log to the activation funnel so admin can
+                // chart it; the actual reminder email is sent by Stripe
+                // (built-in trial reminder, configurable in dashboard) so we
+                // don't double-up.
+                const sub = event.data.object;
+                const uid = await resolveUserId(sub);
+                if (!uid) break;
+                const priceId = sub.items?.data?.[0]?.price?.id;
+                const plan    = PRICE_TO_PLAN[priceId] ?? sub.metadata?.plan ?? null;
+                await logActivationServerSide(uid, 'subscription_trial_ending', plan, {
+                    stripe_subscription_id: sub.id,
+                    trial_code:             sub.metadata?.trial_code || null,
+                    trial_end:              sub.trial_end
+                        ? new Date(sub.trial_end * 1000).toISOString() : null,
                 });
                 break;
             }

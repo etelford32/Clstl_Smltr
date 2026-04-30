@@ -294,6 +294,19 @@ function injectFinalOffer(stop) {
     if (currentPage() !== 'pricing.html') return;
     if (document.querySelector('.explore-tour-offer')) return;
 
+    // Stamp ?trial=tour-30day onto the URL so the pricing page's existing
+    // data-checkout handlers forward the promo to /api/stripe/checkout
+    // even when the user clicks a regular pricing card (Basic / Educator)
+    // instead of the offer card. The server allow-lists which (plan, code)
+    // pairs are honored — Advanced/Institution silently ignore the code.
+    try {
+        const params = new URLSearchParams(location.search);
+        if (params.get('trial') !== 'tour-30day') {
+            params.set('trial', 'tour-30day');
+            history.replaceState(null, '', location.pathname + '?' + params.toString() + location.hash);
+        }
+    } catch {}
+
     const card = document.createElement('div');
     card.className = 'explore-tour-offer';
     card.innerHTML = `

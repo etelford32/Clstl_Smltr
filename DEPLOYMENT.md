@@ -103,8 +103,28 @@ Environment Variables, scope = Production):
 | `ALERT_FROM_EMAIL` | optional; defaults to `Parker Physics Alerts <alerts@parkersphysics.com>` | no |
 | `APP_URL` | optional; defaults to `https://parkersphysics.com` (used in invite magic links) | no |
 | `STRIPE_SECRET_KEY` | paid tiers (Stripe API calls from `/api/stripe/*`) | **yes** |
-| `STRIPE_*_PRICE_ID` | one per price; maps Stripe → plan tier | no |
+| `STRIPE_BASIC_PRICE_ID` / `STRIPE_BASIC_YEARLY_PRICE_ID` | Basic monthly + optional yearly | no |
+| `STRIPE_EDUCATOR_PRICE_ID` / `STRIPE_EDUCATOR_YEARLY_PRICE_ID` | Educator monthly + optional yearly | no |
+| `STRIPE_ADVANCED_PRICE_ID` / `STRIPE_ADVANCED_YEARLY_PRICE_ID` | Advanced monthly + optional yearly | no |
+| `STRIPE_INSTITUTION_PRICE_ID` / `STRIPE_INSTITUTION_YEARLY_PRICE_ID` | Institution monthly + optional yearly | no |
 | `STRIPE_WEBHOOK_SECRET` | `/api/stripe/webhook` signature verification | **yes** |
+| `TRIAL_EDU_14DAY_ENABLED=1` | optional; turns on the `edu-14day` trial promo (Educator outreach) | no |
+
+> **Trial promos (server-enforced).** The checkout endpoint accepts an
+> optional `trial: '<code>'` field; the code → days mapping lives in
+> `api/stripe/checkout.js` (`TRIAL_PROMOS`). Codes shipped today:
+>
+> | Code | Days | Plans | Source |
+> |---|---|---|---|
+> | `tour-30day` | 30 | basic, educator | Home-page Explore tour final stop |
+> | `edu-14day`  | 14 | educator        | Educator outreach (gated by `TRIAL_EDU_14DAY_ENABLED=1`) |
+>
+> Stripe's built-in **trial reminder email** (Dashboard →
+> Subscriptions → Settings → Trials) fires 7 days before trial end —
+> turn it on so users get the standard "trial ending" notice. The
+> webhook also logs an `subscription_trial_ending` activation event on
+> `customer.subscription.trial_will_end` so the admin funnel charts trial
+> reminders alongside trial → paid conversions.
 | `CRON_SECRET` | `/api/cron/*` Bearer token (recommended over `x-vercel-cron` fallback) | **yes** |
 | `METNO_USER_AGENT` | optional; identifies us to MET Norway | no |
 

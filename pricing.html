@@ -776,10 +776,15 @@
                 const token = session?.access_token;
                 if (!token) { window.location.href = `signup.html?plan=${plan}`; return; }
 
+                // Forward any promo trial code (e.g. ?trial=tour-30day from
+                // the home-page Explore tour). Server validates the (plan,
+                // code) pair against an allow-list before applying, so this
+                // is fine to pass through unchanged.
+                const trial = (new URLSearchParams(location.search).get('trial') || '').slice(0, 64);
                 const res = await fetch('/api/stripe/checkout', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify({ plan }),
+                    body: JSON.stringify(trial ? { plan, trial } : { plan }),
                 });
                 const data = await res.json();
                 if (data.url) {
