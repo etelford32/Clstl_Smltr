@@ -47,6 +47,8 @@ import { annotate as annotateDebris, summariseByFamily, DEBRIS_FAMILIES }
     from './debris-catalog.js';
 import { CONSTELLATIONS, spawnConstellationPositions }
     from './constellation-catalog.js';
+import { buildSatelliteModel, buildSatelliteModelLow }
+    from './satellite-models.js';
 import { computeShue, computeBowShock } from './magnetosphere-engine.js';
 import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
     from './upper-atmosphere-layers.js';
@@ -1122,43 +1124,78 @@ export class AtmosphereGlobe {
         const altKm    = spec.altitudeKm;
         const r        = 1 + altKm / R_EARTH_KM;
 
-        // ── Probe sprite ──────────────────────────────────────────────
-        const geo = new THREE.SphereGeometry(0.012, 14, 10);
-        const mat = new THREE.MeshBasicMaterial({
-            color: colorHex,
-            transparent: true,
-            opacity: 1.0,
-        });
-        const mesh = new THREE.Mesh(geo, mat);
-        mesh.userData = {
+        // ── Probe LOD ────────────────────────────────────────────────
+        // Three tiers, swapped automatically by THREE.LOD based on
+        // camera distance to the probe (in scene units, where 1 = R⊕):
+        //
+        //   far   (≥ 0.9)  sphere + halo only — the original "dot" look
+        //                   from any zoomed-out camera position.
+        //   mid   (≥ 0.06) low-poly recognisable shape — solar panels,
+        //                   bus, antennas — readable from a few hundred
+        //                   km out (artistic scale).
+        //   near  (≥ 0)    the same shape (kept as a separate level so
+        //                   we can plug a higher-poly variant later).
+        //
+        // The LOD is the picker target — userData is set on it so a
+        // raycast against any of its children resolves up via the
+        // .parent chain in _initTooltip.
+        const lod = new THREE.LOD();
+        lod.userData = {
             kind:    'sat-probe',
             id:      spec.id,
             name:    spec.name,
-            altKm,                // updated each frame as the probe moves
+            altKm,
             color:   spec.color,
-            spec,                 // full orbital + descriptive metadata
+            spec,
             tooltip: spec.description ||
                      'Click to fly the camera here. Drag pressure '
                    + '≈ ½ρv² uses live ρ at the probe\'s current altitude.',
         };
-        // Halo for distance visibility.
-        const haloMat = new THREE.MeshBasicMaterial({
-            color: colorHex,
-            transparent: true,
-            opacity: 0.25,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-        });
+
+        // Far tier: sphere + halo (original look). Wrapped in a Group
+        // so the halo stays a child and follows orientation cleanly.
+        const farGrp = new THREE.Group();
+        const sphere = new THREE.Mesh(
+            new THREE.SphereGeometry(0.012, 14, 10),
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 1.0,
+            }),
+        );
         const halo = new THREE.Mesh(
             new THREE.SphereGeometry(0.026, 14, 10),
-            haloMat,
+            new THREE.MeshBasicMaterial({
+                color: colorHex, transparent: true, opacity: 0.25,
+                depthWrite: false, blending: THREE.AdditiveBlending,
+            }),
         );
-        halo.userData = mesh.userData;
-        mesh.add(halo);
+        farGrp.add(sphere);
+        farGrp.add(halo);
+
+        // Mid + near tiers: recognisable model from satellite-models.js.
+        // The high-detail tier is currently identical to mid — kept
+        // separate so future poly-count work plugs in cleanly.
+        const midGrp = buildSatelliteModel(spec);
+        const nearGrp = buildSatelliteModelLow(spec);
+
+        // LOD distance thresholds. Three.js picks the highest-index
+        // level whose distance ≤ camera-to-LOD distance; smaller
+        // numbers = closer. With camera at ~3.2 R⊕ and probes at
+        // ~1.07 R⊕, the default view sees distance ≈ 2.1 → far tier.
+        // When the user flies to within ~0.3 R⊕ (≈ 2000 km artistic)
+        // we promote to mid; closer than 0.06 R⊕ (≈ 380 km) we render
+        // near. Tuned empirically — bump if the swap reads as a pop.
+        lod.addLevel(nearGrp, 0);
+        lod.addLevel(midGrp,  0.06);
+        lod.addLevel(farGrp,  0.30);
+
         // Seed the probe's position on first paint at one orbital point
         // so it's not stuck at origin until the first animate() tick.
-        mesh.position.set(r, 0, 0);
-        this._satProbeGrp.add(mesh);
+        lod.position.set(r, 0, 0);
+        this._satProbeGrp.add(lod);
+
+        // Keep `mesh` as the LOD object — _stepSatellites and the
+        // public APIs that read probe.mesh.position keep working.
+        const mesh = lod;
 
         // ── Orbital-path polyline ─────────────────────────────────────
         // 96 points around a full period — closed loop. Drawn in the
