@@ -1,0 +1,1983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — Parker Physics App</title>
+    <link rel="stylesheet" href="js/nav-styles.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        .auth-gate {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 3rem;
+        }
+        .auth-gate h2 { color: #ff6060; margin-bottom: .8rem; }
+        .auth-gate p { color: #888; margin-bottom: 1.5rem; }
+        .auth-gate a {
+            display: inline-block; padding: 10px 28px; border-radius: 8px;
+            background: linear-gradient(45deg, #8040ff, #4080ff); color: #fff;
+            text-decoration: none; font-weight: 600; font-size: .9rem;
+        }
+        main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px 48px; }
+        .admin-header { margin-bottom: 8px; }
+        .admin-header h1 {
+            font-size: 1.5rem; font-weight: 800;
+            background: linear-gradient(45deg, #ff6060, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .admin-header p { color: #555; font-size: .85rem; margin-top: 2px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 4px; margin: 18px 0 20px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 0; }
+        .tab {
+            padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid transparent;
+            border-bottom: none; background: transparent; color: #666; font-family: inherit;
+            font-size: .85rem; cursor: pointer; font-weight: 600; transition: all .15s;
+        }
+        .tab:hover { color: #aaa; background: rgba(255,255,255,.03); }
+        .tab.active { color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* KPI Cards */
+        .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
+        @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 550px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+        .kpi {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px; padding: 18px 16px; text-align: center;
+        }
+        .kpi-val { font-size: 1.8rem; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+        .kpi-label { font-size: .72rem; color: #666; text-transform: uppercase; letter-spacing: .06em; }
+        .kpi-val.green { color: #4eff91; }
+        .kpi-val.blue { color: #4fc3f7; }
+        .kpi-val.purple { color: #c080ff; }
+        .kpi-val.gold { color: #ffd700; }
+        .kpi-val.red { color: #ff6060; }
+        .kpi-val.white { color: #fff; }
+        .kpi-loading { color: #333; }
+
+        /* Cards */
+        .card {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 22px; margin-bottom: 18px;
+        }
+        .card h3 { font-size: .95rem; font-weight: 700; margin-bottom: 14px; color: #ccc; }
+        .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+        @media (max-width: 700px) { .row2 { grid-template-columns: 1fr; } }
+
+        /* Connection status */
+        .conn-bar {
+            display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+            border-radius: 8px; font-size: .88rem; font-weight: 600; margin-bottom: 14px;
+        }
+        .conn-bar.ok { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.2); color: #4eff91; }
+        .conn-bar.fail { background: rgba(255,80,80,.08); border: 1px solid rgba(255,80,80,.2); color: #ff6060; }
+        .conn-bar.loading { background: rgba(255,200,0,.06); border: 1px solid rgba(255,200,0,.15); color: #ffd700; }
+        .conn-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .conn-dot.ok { background: #4eff91; box-shadow: 0 0 6px rgba(78,255,145,.5); }
+        .conn-dot.fail { background: #ff6060; box-shadow: 0 0 6px rgba(255,80,80,.5); }
+        .conn-dot.loading { background: #ffd700; animation: pulse 1.2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        .check-list { list-style: none; }
+        .check-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: .84rem; background: rgba(255,255,255,.02); border-radius: 6px; margin-bottom: 4px; }
+        .check-ms { color: #555; font-size: .75rem; font-family: monospace; margin-left: auto; }
+
+        /* Config rows */
+        .cfg { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.05); font-size: .84rem; }
+        .cfg:last-child { border-bottom: none; }
+        .cfg-k { color: #666; }
+        .cfg-v { color: #bbb; font-family: monospace; font-size: .78rem; text-align: right; max-width: 55%; word-break: break-all; }
+
+        /* Tables */
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 8px 10px; font-size: .72rem; color: #555; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid rgba(255,255,255,.07); }
+        td { padding: 9px 10px; font-size: .84rem; color: #bbb; border-bottom: 1px solid rgba(255,255,255,.03); }
+        tr:hover td { background: rgba(255,255,255,.02); }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: .7rem; font-weight: 600; }
+        .b-admin { background: rgba(255,60,60,.12); color: #f66; border: 1px solid rgba(255,60,60,.25); }
+        .b-super { background: rgba(255,200,0,.12); color: #ffd700; border: 1px solid rgba(255,200,0,.25); }
+        .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
+        .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-tester { background: rgba(255,140,0,.1); color: #ffb74d; border: 1px solid rgba(255,140,0,.28); }
+        .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        .b-educator { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
+        .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
+        .b-institution { background: rgba(255,140,200,.1); color: #ff8cc8; border: 1px solid rgba(255,140,200,.25); }
+        .b-enterprise { background: rgba(255,215,0,.1); color: #ffd700; border: 1px solid rgba(255,215,0,.25); }
+
+        /* Sparkline canvas */
+        .sparkline-wrap { height: 80px; margin-bottom: 8px; }
+        .sparkline-wrap canvas { width: 100%; height: 100%; }
+
+        /* Empty / error states */
+        .empty { text-align: center; padding: 28px; color: #444; font-size: .88rem; }
+        .empty code { background: rgba(255,255,255,.06); padding: 2px 6px; border-radius: 4px; font-size: .8rem; }
+
+        /* Buttons */
+        .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #ccc; font-family: inherit; font-size: .82rem; cursor: pointer; transition: background .15s; }
+        .btn:hover { background: rgba(255,255,255,.12); color: #fff; }
+        .btn-sm { padding: 5px 12px; font-size: .76rem; }
+
+        /* Live event feed */
+        .event-row { display: flex; gap: 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.03); font-size: .82rem; }
+        .event-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .event-name { color: #ccc; flex: 1; }
+        .event-time { color: #444; font-size: .75rem; font-family: monospace; }
+
+        /* GA status card */
+        .ga-status { padding: 16px; border-radius: 10px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.06); }
+        .ga-status h4 { font-size: .88rem; margin-bottom: 8px; }
+
+        footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
+        footer a { color: #555; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("admin");</script>
+
+<div class="auth-gate" id="auth-gate">
+    <div style="max-width:560px">
+        <h2>Admin Access Required</h2>
+        <p>You must be signed in with an admin account to view this page.</p>
+        <pre id="auth-gate-diag" style="display:none;text-align:left;font-size:.72rem;color:#888;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;margin-bottom:14px;white-space:pre-wrap;word-break:break-word;font-family:'SFMono-Regular',Consolas,monospace"></pre>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <a href="signin.html">Sign In</a>
+            <button class="btn" id="auth-gate-retry" style="display:none">Refresh session &amp; retry</button>
+            <button class="btn" id="auth-gate-signout" style="display:none">Sign out</button>
+        </div>
+    </div>
+</div>
+
+<main style="display:none" id="admin-main">
+    <div class="admin-header">
+        <h1>Admin Dashboard</h1>
+        <p id="admin-sub">Loading...</p>
+    </div>
+
+    <div class="tabs" id="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="users">Users</button>
+        <button class="tab" data-tab="activation">Activation</button>
+        <button class="tab" data-tab="analytics">Analytics</button>
+        <button class="tab" data-tab="invites">Invites</button>
+        <button class="tab" data-tab="system">System</button>
+    </div>
+
+    <!-- ═══════════════════ OVERVIEW TAB ═══════════════════ -->
+    <div class="tab-panel active" id="panel-overview">
+        <div class="kpi-grid" id="kpi-grid">
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-dau">--</div><div class="kpi-label">Daily Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-wau">--</div><div class="kpi-label">Weekly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mau">--</div><div class="kpi-label">Monthly Uniques</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signins">--</div><div class="kpi-label">Sign-ins (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-minutes">--</div><div class="kpi-label">Minutes Used (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-signups">--</div><div class="kpi-label">Users Signed Up</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-intro">--</div><div class="kpi-label">Basic Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-educator">--</div><div class="kpi-label">Educator Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-pro">--</div><div class="kpi-label">Advanced Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-institution">--</div><div class="kpi-label">Institution Subscribers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-enterprise">--</div><div class="kpi-label">Enterprise Accounts</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-admins">--</div><div class="kpi-label">Admin Users</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-online">--</div><div class="kpi-label">Online Now</div></div>
+        </div>
+
+        <!-- Revenue & Subscription Metrics -->
+        <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#556;font-weight:700;margin-bottom:10px">Revenue &amp; Subscriptions</div>
+        <div class="kpi-grid" id="kpi-revenue-grid" style="margin-bottom:24px">
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-mrr">--</div><div class="kpi-label">MRR (est.)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-active-subs">--</div><div class="kpi-label">Active Subs</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-trialing">--</div><div class="kpi-label">Trialing</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-past-due">--</div><div class="kpi-label">Past Due</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-canceled">--</div><div class="kpi-label">Canceled (30d)</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-free-users">--</div><div class="kpi-label">Free Users</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-conversion">--</div><div class="kpi-label">Conversion Rate</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-testers">--</div><div class="kpi-label">Testers</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-arpu">--</div><div class="kpi-label">ARPU</div></div>
+            <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-alerts-fired">--</div><div class="kpi-label">Alerts Fired (24h)</div></div>
+        </div>
+
+        <div class="row2">
+            <div class="card">
+                <h3>Daily Trend
+                    <select id="trend-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem;font-weight:400;margin-left:6px">
+                        <option value="7">7 days</option>
+                        <option value="14" selected>14 days</option>
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                </h3>
+                <div class="sparkline-wrap"><canvas id="trend-canvas"></canvas></div>
+                <div style="display:flex;justify-content:space-between;font-size:.72rem;color:#444;">
+                    <span id="trend-start"></span><span id="trend-end"></span>
+                </div>
+                <div style="display:flex;gap:14px;font-size:.72rem;color:#888;margin-top:8px">
+                    <span><span style="display:inline-block;width:10px;height:2px;background:#8040ff;vertical-align:middle"></span> Page views</span>
+                    <span><span style="display:inline-block;width:10px;height:2px;background:#4eff91;vertical-align:middle"></span> Unique users</span>
+                    <span style="margin-left:auto;color:#666" id="trend-avg-time">avg time on page: --</span>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Top Pages
+                    <select id="top-pages-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem;font-weight:400;margin-left:6px">
+                        <option value="1">24 hours</option>
+                        <option value="7" selected>7 days</option>
+                        <option value="30">30 days</option>
+                    </select>
+                </h3>
+                <div id="top-pages-list"><div class="empty">Loading...</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Live Event Feed
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="feed-event-filter" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="">All events</option>
+                        <option value="page_view">Page views</option>
+                        <option value="event">Custom events</option>
+                        <option value="click">Clicks (heatmap)</option>
+                    </select>
+                    <select id="feed-user-filter" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="">All users</option>
+                        <option value="signed">Signed-in</option>
+                        <option value="anon">Anonymous</option>
+                    </select>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" id="feed-autorefresh" checked style="cursor:pointer"> auto-refresh 10s
+                    </label>
+                    <button class="btn btn-sm" id="btn-refresh-feed">Refresh</button>
+                </span>
+            </h3>
+            <div id="event-feed"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Click Heatmap (earth.html) ─────────────────────────────────── -->
+        <div class="card" id="heatmap-card">
+            <h3>Click Heatmap
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">where users click on a sim page</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="heatmap-page" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="earth">earth (live)</option>
+                    </select>
+                    <select id="heatmap-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="1">last 24h</option>
+                        <option value="7" selected>last 7d</option>
+                        <option value="30">last 30d</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-heatmap">Refresh</button>
+                </span>
+            </h3>
+            <div id="heatmap-stats" style="font-size:.78rem;color:#888;margin-bottom:10px">--</div>
+            <div id="heatmap-wrap" style="position:relative;width:100%;aspect-ratio:16/10;background:#0c0c1a;border:1px solid rgba(255,255,255,.05);border-radius:8px;overflow:hidden">
+                <canvas id="heatmap-canvas" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+            </div>
+            <div id="heatmap-targets" style="margin-top:12px;font-size:.78rem;color:#aaa"></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ USERS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-users">
+        <div class="card">
+            <h3>All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="users-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ ACTIVATION TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-activation">
+        <!-- ── Activation funnel ──────────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Activation Funnel
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last
+                    <select id="activation-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="7">7 days</option>
+                        <option value="30" selected>30 days</option>
+                        <option value="90">90 days</option>
+                    </select>
+                </span>
+                <button class="btn btn-sm" id="btn-refresh-activation" style="float:right">Refresh</button>
+            </h3>
+            <p style="font-size:.78rem;color:#666;margin-bottom:14px">
+                Each row counts unique users who hit that event in the window. Median hours = signup→event delay.
+                Backed by the <code style="color:#9ad36f">activation_events</code> table.
+            </p>
+            <div id="activation-funnel-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Daily activation chart ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Daily Activation Events <span style="font-size:.72rem;color:#666;font-weight:400">stacked by event</span></h3>
+            <div style="height:140px;margin-bottom:8px">
+                <canvas id="activation-canvas" style="width:100%;height:100%"></canvas>
+            </div>
+            <div id="activation-legend" style="display:flex;flex-wrap:wrap;gap:10px;font-size:.72rem;color:#888"></div>
+        </div>
+
+        <!-- ── Conversion rate (free→paid) ─────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Free → Paid Conversion <span style="font-size:.72rem;color:#666;font-weight:400">last 8 weeks</span></h3>
+            <div id="conversion-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Cohort retention table ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Weekly Cohort Retention <span style="font-size:.72rem;color:#666;font-weight:400">% of cohort returning week-N</span></h3>
+            <div id="cohort-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Class-roster snapshot (educator/institution health) ──── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Educator / Institution Roster Health</h3>
+            <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px">
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-count" style="color:#9ad36f">--</div><div class="kpi-label">Seated accounts</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-seats" style="color:#fff">--</div><div class="kpi-label">Total seats</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-used" style="color:#4eff91">--</div><div class="kpi-label">Seats filled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-healthy" style="color:#4fc3f7">--</div><div class="kpi-label">≥80% filled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-edu-dormant" style="color:#ff8c00">--</div><div class="kpi-label">Dormant (0 used)</div></div>
+            </div>
+            <div id="edu-roster-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Top sims by plan ──────────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Top Simulations <span style="font-size:.72rem;color:#666;font-weight:400">last 7 days · views by plan</span></h3>
+            <div id="sims-by-plan-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── At-risk subscriptions ─────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>At-Risk Subscriptions <span style="font-size:.72rem;color:#666;font-weight:400">past_due / canceled / trialing</span></h3>
+            <div id="at-risk-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ ANALYTICS TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-analytics">
+        <div class="row2" style="margin-bottom:18px">
+            <div class="card">
+                <h3>Google Analytics (GA4)</h3>
+                <div class="ga-status" id="ga-status"></div>
+            </div>
+            <div class="card">
+                <h3>Supabase Analytics</h3>
+                <div id="supa-analytics-status"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Active Sessions <span id="sessions-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <div id="sessions-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ INVITES TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-invites">
+        <!-- ── Operator note ───────────────────────────────────────── -->
+        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(128,64,255,.06);border:1px solid rgba(128,64,255,.18);border-radius:8px;font-size:.78rem;color:#cdd;line-height:1.5">
+            <strong style="color:#c080ff">Operator note:</strong>
+            For a paid-tier invite (Educator / Advanced / Institution / Enterprise) to actually land the recipient on that plan instead of "free", make sure both
+            <code style="color:#fff">supabase-tier-expansion-migration.sql</code> and
+            <code style="color:#fff">supabase-invites-apply-plan-migration.sql</code> have been run.
+            Free invites work without either.
+        </div>
+
+        <!-- ── Email invite (single recipient) ───────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Invite by Email</h3>
+            <div style="font-size:.78rem;color:#778;margin-bottom:12px">Sends a single-use, email-targeted invite via Resend. The recipient gets a magic link that pre-fills the signup form. Code only redeems for the matching email.</div>
+            <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+                <input id="invite-email-addr"  type="email" placeholder="recipient@example.com" class="btn" style="padding:8px 12px;flex:2;min-width:220px;text-align:left;font-family:inherit">
+                <input id="invite-email-name"  type="text"  placeholder="Recipient name (optional)" class="btn" style="padding:8px 12px;flex:1;min-width:160px;text-align:left;font-family:inherit">
+                <select id="invite-email-plan" class="btn" style="padding:8px 12px" title="Plan tier the invite grants when redeemed">
+                    <option value="free">Free</option>
+                    <option value="tester" selected>Tester (full access, comp)</option>
+                    <option value="basic">Basic ($10/mo equiv.)</option>
+                    <option value="educator">Educator ($25/mo equiv.)</option>
+                    <option value="advanced">Advanced ($100/mo equiv.)</option>
+                    <option value="institution">Institution ($500/mo equiv.)</option>
+                    <option value="enterprise">Enterprise (custom)</option>
+                </select>
+                <select id="invite-email-expiry" class="btn" style="padding:8px 12px">
+                    <option value="7">7-day expiry</option>
+                    <option value="30" selected>30-day expiry</option>
+                    <option value="90">90-day expiry</option>
+                </select>
+                <button class="btn" id="btn-send-invite-email" style="background:rgba(255,140,0,.2);border-color:rgba(255,140,0,.4);color:#ffb74d;font-weight:700">Send Invite</button>
+            </div>
+            <div id="invite-email-result" style="display:none;padding:12px 14px;border-radius:8px;font-size:.82rem"></div>
+        </div>
+
+        <div class="row2" style="margin-bottom:18px">
+            <div class="card">
+                <h3>Generate Bulk Code</h3>
+                <div style="font-size:.74rem;color:#778;margin-bottom:10px">Anonymous code (no email target). Share manually; anyone with the code can redeem until max-uses runs out.</div>
+                <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+                    <select id="invite-plan" class="btn" style="padding:8px 12px" title="Plan tier the bulk code grants when redeemed">
+                        <option value="free">Free tier</option>
+                        <option value="tester">Tester tier (full access, comp)</option>
+                        <option value="basic">Basic tier</option>
+                        <option value="educator">Educator tier</option>
+                        <option value="advanced">Advanced tier</option>
+                        <option value="institution">Institution tier</option>
+                        <option value="enterprise">Enterprise tier</option>
+                    </select>
+                    <select id="invite-uses" class="btn" style="padding:8px 12px">
+                        <option value="1">1 use</option>
+                        <option value="5">5 uses</option>
+                        <option value="10">10 uses</option>
+                        <option value="25">25 uses</option>
+                        <option value="100">100 uses</option>
+                    </select>
+                    <select id="invite-expiry" class="btn" style="padding:8px 12px">
+                        <option value="7">Expires in 7 days</option>
+                        <option value="30">Expires in 30 days</option>
+                        <option value="90">Expires in 90 days</option>
+                        <option value="0">Never expires</option>
+                    </select>
+                    <button class="btn" id="btn-gen-invite" style="background:rgba(128,64,255,.2);border-color:rgba(128,64,255,.4);color:#c080ff;font-weight:700">Generate Code</button>
+                </div>
+                <div id="invite-result" style="display:none;padding:14px;border-radius:8px;background:rgba(78,255,145,.06);border:1px solid rgba(78,255,145,.2);margin-bottom:8px">
+                    <div style="font-size:.72rem;color:#4eff91;margin-bottom:6px;font-weight:600">INVITE CODE GENERATED</div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <code id="invite-code-display" style="font-size:1.2rem;color:#fff;letter-spacing:.1em;flex:1"></code>
+                        <button class="btn btn-sm" id="btn-copy-invite">Copy</button>
+                    </div>
+                    <div id="invite-link-display" style="font-size:.75rem;color:#555;margin-top:8px;word-break:break-all"></div>
+                </div>
+            </div>
+            <div class="card">
+                <h3>Invite Stats</h3>
+                <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr)">
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-total" style="color:#c080ff">--</div><div class="kpi-label">Total Codes</div></div>
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-used" style="color:#4eff91">--</div><div class="kpi-label">Times Used</div></div>
+                    <div class="kpi"><div class="kpi-val" id="kpi-invites-active" style="color:#00c6ff">--</div><div class="kpi-label">Active Codes</div></div>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>All Invite Codes <button class="btn btn-sm" id="btn-refresh-invites" style="float:right">Refresh</button></h3>
+            <div id="invites-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <!-- ── Email send activity (rate-limit + audit log) ───────── -->
+        <div class="card" style="margin-top:18px">
+            <h3>
+                Email Activity
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last
+                    <select id="email-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="24">24 hours</option>
+                        <option value="168" selected>7 days</option>
+                        <option value="720">30 days</option>
+                    </select>
+                </span>
+                <button class="btn btn-sm" id="btn-refresh-email" style="float:right">Refresh</button>
+            </h3>
+            <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px">
+                <div class="kpi"><div class="kpi-val" id="kpi-email-sent"      style="color:#4eff91">--</div><div class="kpi-label">Sent</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-throttled" style="color:#ffaa44">--</div><div class="kpi-label">Throttled</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-alerts"    style="color:#00c6ff">--</div><div class="kpi-label">Alerts</div></div>
+                <div class="kpi"><div class="kpi-val" id="kpi-email-invites"   style="color:#c080ff">--</div><div class="kpi-label">Invites</div></div>
+            </div>
+            <div id="email-activity-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ SYSTEM TAB ═══════════════════ -->
+    <div class="tab-panel" id="panel-system">
+        <div class="card" style="margin-bottom:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+            <div>
+                <h3 style="margin:0">Page &amp; Module Health</h3>
+                <p style="font-size:.78rem;color:#555;margin:4px 0 0">Live scan of all pages, JS modules, and dependency chains</p>
+            </div>
+            <a href="status.html" class="btn" style="background:rgba(255,140,0,.15);border-color:rgba(255,140,0,.35);color:#ff8c00;font-weight:700">Open System Status</a>
+        </div>
+        <div class="row2">
+            <div class="card">
+                <h3>Supabase Connection</h3>
+                <div class="conn-bar loading" id="conn-bar">
+                    <span class="conn-dot loading" id="conn-dot"></span>
+                    <span id="conn-label">Checking...</span>
+                    <button class="btn btn-sm" id="btn-recheck" style="margin-left:auto">Re-check</button>
+                </div>
+                <ul class="check-list" id="check-list"></ul>
+            </div>
+            <div class="card">
+                <h3>Configuration</h3>
+                <div id="config-info"></div>
+            </div>
+        </div>
+        <!-- ── Pipeline Health (data-freshness summary) ─────────────── -->
+        <!-- One row per pipeline (solar_wind, weather_grid, …) showing
+             last successful upstream fetch, consecutive-fail streak, and
+             the last failure reason. This is the "is the feed alive?"
+             card: a green cron job can still be producing stale data if
+             the refresh function succeeded but the upstream was empty.
+             Data is written by record_pipeline_success/_failure inside
+             each refresh function (supabase-pipeline-heartbeat-migration.sql). -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Pipeline Health
+                <button class="btn btn-sm" id="btn-refresh-heartbeat" style="float:right">Refresh</button>
+            </h3>
+            <div id="heartbeat-container"><div class="empty">Loading...</div></div>
+        </div>
+        <!-- ── Proxy Freshness (what the browser actually sees) ────── -->
+        <!-- Hits the public proxy endpoints the Earth + Sun sims
+             consume. Complements Pipeline Health by reporting what the
+             CDN is ACTUALLY serving — catches cases where the DB row is
+             fresh but the edge function is 500ing, or the Vercel env
+             vars (SUPABASE_URL / SUPABASE_SERVICE_KEY) are missing in a
+             given environment. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Proxy Freshness
+                <button class="btn btn-sm" id="btn-refresh-proxies" style="float:right">Refresh</button>
+            </h3>
+            <div id="proxy-freshness-container"><div class="empty">Loading...</div></div>
+        </div>
+        <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
+        <!-- Surfaces the most-recent run + 24h failure counts for every
+             pg_cron job so silent cron failures are visible BEFORE
+             users notice stale data downstream. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Scheduled Jobs
+                <button class="btn btn-sm" id="btn-refresh-cron" style="float:right">Refresh</button>
+            </h3>
+            <div id="cron-status-container"><div class="empty">Loading...</div></div>
+        </div>
+
+        <div class="row2">
+            <div class="card">
+                <h3>System Info</h3>
+                <div id="system-info"></div>
+            </div>
+            <div class="card">
+                <h3>Quick Actions</h3>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                    <a href="dashboard.html" class="btn" style="text-align:center;text-decoration:none">User Dashboard</a>
+                    <a href="space-weather.html" class="btn" style="text-align:center;text-decoration:none">Space Weather</a>
+                    <button class="btn" id="btn-schema">View Schema SQL</button>
+                    <button class="btn" id="btn-export">Export Health Report</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p>&copy; 2026 Parker Physics &middot; <a href="index.html">Home</a> &middot; <a href="dashboard.html">Dashboard</a></p>
+</footer>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
+import { GA_MEASUREMENT_ID } from './js/analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap } from './js/admin-analytics.js';
+import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
+
+// ── Tabs (wired first so they always work) ──────────────────────────────────
+document.getElementById('tabs').addEventListener('click', e => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+});
+
+// ── Auth gate ────────────────────────────────────────────────────────────────
+await auth.ready();
+
+function showGate(heading, message, diag) {
+    const gate    = document.getElementById('auth-gate');
+    const diagEl  = document.getElementById('auth-gate-diag');
+    const retry   = document.getElementById('auth-gate-retry');
+    const signout = document.getElementById('auth-gate-signout');
+    gate.querySelector('h2').textContent = heading;
+    gate.querySelector('p').textContent = message;
+    if (diag) {
+        diagEl.textContent = diag;
+        diagEl.style.display = 'block';
+        retry.style.display = '';
+        signout.style.display = auth.isSignedIn() ? '' : 'none';
+    } else {
+        diagEl.style.display = 'none';
+        retry.style.display = 'none';
+        signout.style.display = 'none';
+    }
+    gate.style.display = 'flex';
+    document.getElementById('admin-main').style.display = 'none';
+}
+
+document.getElementById('auth-gate-retry')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Refreshing session…';
+    try {
+        const sb = await getSupabase();
+        await sb.auth.refreshSession();
+        await auth.fetchProfile();
+    } catch (_) { /* fall through to recheck */ }
+    btn.disabled = false;
+    btn.textContent = 'Refresh session & retry';
+    location.reload();
+});
+
+document.getElementById('auth-gate-signout')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+        const sb = await getSupabase();
+        await sb.auth.signOut();
+    } catch (_) {}
+    try { localStorage.removeItem('pp_auth'); sessionStorage.removeItem('pp_auth'); } catch (_) {}
+    location.href = 'signin.html';
+});
+
+if (!auth.isSignedIn()) {
+    showGate(
+        'Admin Access Required',
+        'You must be signed in with an admin account to view this page.'
+    );
+    throw '';
+}
+
+// Server-side admin verification: validates JWT with Supabase Auth server
+// and queries user_profiles for role. Cannot be bypassed via localStorage.
+// Retry once after a session refresh — the most common transient failure
+// is a token that's between expiry and refresh on cold page load.
+async function verifyOnce() {
+    return auth.verifyAdminServerSide();
+}
+
+let adminCheck = await verifyOnce();
+if (!adminCheck.verified) {
+    // First retry: refresh the session and try again. This catches the
+    // "auth-session-missing" race where the page beat the Supabase token
+    // refresh.
+    try {
+        const sb = await getSupabase();
+        await sb.auth.refreshSession();
+    } catch (_) { /* swallow, fall through */ }
+    adminCheck = await verifyOnce();
+}
+if (!adminCheck.verified) {
+    // Fallback: pull profile and check local state.
+    await auth.fetchProfile();
+    if (!auth.isAdmin()) {
+        const u = auth.getUser?.() || {};
+        const diag = [
+            `Local role:       ${auth.getRole?.() || '(none)'}`,
+            `Local plan:       ${auth.getPlan?.() || '(none)'}`,
+            `Email:            ${u.email || '(none)'}`,
+            `User id:          ${u.id || '(none)'}`,
+            `Server check:     ${adminCheck.error || 'verified=false'}`,
+            adminCheck.dbCode ? `Postgres code:    ${adminCheck.dbCode}` : '',
+            ``,
+            `Recovery options:`,
+            ` 1. Sign out + sign back in (refreshes JWT cleanly).`,
+            ` 2. If your account is brand-new, the user_profiles row may`,
+            `    not exist yet. Run supabase-make-owner-superadmin.sql in`,
+            `    the Supabase SQL Editor with your email substituted.`,
+            ` 3. If "Role column missing", run supabase-admin.sql.`,
+        ].filter(Boolean).join('\n');
+        showGate(
+            'Insufficient Permissions',
+            'Server admin verification failed. Diagnostics below — copy/paste if you need help.',
+            diag,
+        );
+        throw '';
+    }
+}
+
+document.getElementById('auth-gate').style.display = 'none';
+document.getElementById('admin-main').style.display = 'block';
+document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
+
+// ── KPI Cards ────────────────────────────────────────────────────────────────
+async function loadKPIs() {
+    const res = await fetchKPIs();
+    if (!res.ok) return;
+    const d = res.data;
+    const set = (id, val, cls) => {
+        const el = document.getElementById(id);
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + cls;
+    };
+    set('kpi-dau', d.dailyUnique, 'white');
+    set('kpi-wau', d.weeklyUnique, 'white');
+    set('kpi-mau', d.monthlyUnique, 'white');
+    set('kpi-signins', d.signIns, 'blue');
+    set('kpi-minutes', d.minutesUsed, 'blue');
+    set('kpi-signups', d.signUps, 'green');
+    set('kpi-intro', d.introSubs, 'purple');
+    set('kpi-educator', d.educatorSubs ?? 0, 'green');
+    set('kpi-pro', d.proSubs, 'gold');
+    set('kpi-institution', d.institutionSubs ?? 0, 'purple');
+    set('kpi-enterprise', d.enterpriseSubs ?? 0, 'gold');
+    set('kpi-admins', d.adminUsers, 'red');
+    set('kpi-online', d.onlineNow, 'green');
+}
+loadKPIs();
+
+// ── Revenue & Subscription KPIs ─────────────────────────────────────────────
+async function loadRevenueKPIs() {
+    const { getSupabase, isConfigured } = await import('./js/supabase-config.js');
+    if (!isConfigured()) return;
+    const sb = await getSupabase();
+
+    try {
+        const { data: profiles } = await sb.from('user_profiles')
+            .select('plan, role, subscription_status, stripe_subscription_id');
+
+        if (!profiles) return;
+
+        let basic = 0, educator = 0, advanced = 0, institution = 0, enterprise = 0, free = 0;
+        let trialing = 0, pastDue = 0, canceled = 0, testers = 0;
+        for (const p of profiles) {
+            if (p.role === 'tester') testers++;
+            if (p.subscription_status === 'trialing') trialing++;
+            else if (p.subscription_status === 'past_due') pastDue++;
+            else if (p.subscription_status === 'canceled') canceled++;
+
+            switch (p.plan) {
+                case 'basic':       basic++;       break;
+                case 'educator':    educator++;    break;
+                case 'advanced':    advanced++;    break;
+                case 'institution': institution++; break;
+                case 'enterprise':  enterprise++;  break;
+                default:            free++;
+            }
+        }
+
+        const activeSubs = basic + educator + advanced + institution + enterprise;
+        // Enterprise pricing is custom — exclude from MRR until we have a
+        // reliable per-account contract value column. For now we treat it
+        // as $0 in the published KPI to avoid misleading the dashboard.
+        const mrr = basic * 10 + educator * 25 + advanced * 100 + institution * 500;
+        const total = profiles.length;
+        const conversion = total > 0 ? ((activeSubs / total) * 100).toFixed(1) + '%' : '0%';
+        const arpu = activeSubs > 0 ? '$' + (mrr / activeSubs).toFixed(0) : '$0';
+
+        const set = (id, val, cls) => {
+            const el = document.getElementById(id);
+            if (el) { el.textContent = typeof val === 'number' ? val.toLocaleString() : val; el.className = 'kpi-val ' + cls; }
+        };
+
+        set('kpi-mrr', '$' + mrr.toLocaleString(), 'green');
+        set('kpi-active-subs', activeSubs, 'blue');
+        set('kpi-trialing', trialing, 'purple');
+        set('kpi-past-due', pastDue, pastDue > 0 ? 'red' : 'white');
+        set('kpi-canceled', canceled, canceled > 0 ? 'red' : 'white');
+        set('kpi-free-users', free, 'white');
+        set('kpi-conversion', conversion, 'green');
+        set('kpi-testers', testers, 'blue');
+        set('kpi-arpu', arpu, 'gold');
+
+        // Alerts fired in last 24h
+        const { count } = await sb.from('alert_history')
+            .select('id', { count: 'exact', head: true })
+            .gte('created_at', new Date(Date.now() - 86400_000).toISOString());
+        set('kpi-alerts-fired', count ?? 0, 'blue');
+
+    } catch (e) {
+        console.warn('[Admin] Revenue KPIs failed:', e.message);
+    }
+}
+loadRevenueKPIs();
+
+// ── Daily Trend sparkline (page views + unique users + avg time-on-page) ────
+async function loadTrend() {
+    const days = parseInt(document.getElementById('trend-window').value, 10) || 14;
+    const res = await fetchDailyTrend(days);
+    if (!res.ok || !res.data.length) return;
+    const data = res.data;
+    document.getElementById('trend-start').textContent = data[0]?.day?.slice(5) || '';
+    document.getElementById('trend-end').textContent = data[data.length-1]?.day?.slice(5) || '';
+
+    const canvas = document.getElementById('trend-canvas');
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.offsetWidth * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    const maxV = Math.max(...data.map(d => d.views), 1);
+    const maxU = Math.max(...data.map(d => d.users || 0), 1);
+
+    // Grid
+    ctx.strokeStyle = 'rgba(255,255,255,.04)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 4; i++) {
+        const y = (i / 4) * H;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    const drawSeries = (key, max, rgb) => {
+        const pts = data.map((d, i) => ({
+            x: data.length === 1 ? W / 2 : (i / (data.length - 1)) * W,
+            y: H - ((d[key] || 0) / max) * (H - 10) - 5,
+        }));
+        // Area
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, H);
+        pts.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.lineTo(pts[pts.length-1].x, H);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, `rgba(${rgb},.22)`);
+        grad.addColorStop(1, `rgba(${rgb},.02)`);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        // Line
+        ctx.beginPath();
+        pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+        ctx.strokeStyle = `rgb(${rgb})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // Dots
+        pts.forEach(p => {
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 2.5, 0, Math.PI*2);
+            ctx.fillStyle = `rgb(${rgb})`;
+            ctx.fill();
+        });
+    };
+    drawSeries('views', maxV, '128,64,255');
+    drawSeries('users', maxU, '78,255,145');
+
+    // Pull avg time-on-page over the same window
+    try {
+        const avgEl = document.getElementById('trend-avg-time');
+        const r = await fetchAvgTimeOnPage(days);
+        if (r.ok && r.data.avg_s != null) {
+            const s = r.data.avg_s;
+            const txt = s >= 60 ? `${Math.floor(s/60)}m ${s%60}s` : `${s}s`;
+            avgEl.textContent = `avg time on page: ${txt} (${r.data.sample.toLocaleString()} samples)`;
+        }
+    } catch (_) {}
+}
+loadTrend();
+document.getElementById('trend-window').addEventListener('change', loadTrend);
+
+// ── Top Pages ────────────────────────────────────────────────────────────────
+async function loadTopPages() {
+    const days = parseInt(document.getElementById('top-pages-window').value, 10) || 7;
+    const res = await fetchTopPages(days);
+    const el = document.getElementById('top-pages-list');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No page view data yet.</div>'; return; }
+
+    const total = res.data.reduce((s, p) => s + p.views, 0);
+    const maxV = Math.max(...res.data.map(p => p.views));
+    el.innerHTML = res.data.map(p => {
+        const pct = Math.max(4, (p.views / maxV) * 100);
+        const share = total > 0 ? Math.round((p.views / total) * 1000) / 10 : 0;
+        return `<div style="margin-bottom:8px">
+            <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px">
+                <span style="color:#ccc">${_esc(p.name)}</span>
+                <span style="color:#666">${_esc(p.views)} views &middot; ${_esc(p.unique)} unique &middot; ${share}%</span>
+            </div>
+            <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#8040ff,#4080ff);border-radius:2px"></div>
+            </div>
+        </div>`;
+    }).join('') + `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.05);font-size:.74rem;color:#666">Total: ${total.toLocaleString()} views across ${res.data.length} page${res.data.length===1?'':'s'}</div>`;
+}
+loadTopPages();
+document.getElementById('top-pages-window').addEventListener('change', loadTopPages);
+
+// ── Live Event Feed (auto-refresh + filters) ────────────────────────────────
+const _eventColor = {
+    page_view: '#4080ff',
+    click: '#ff8c00',
+    page_close: '#8888aa',
+    scroll_depth: '#66d9ff',
+    sign_in: '#4eff91',
+    sign_up: '#9ad36f',
+    identify: '#c080ff',
+    simulation_start: '#ffd700',
+};
+function _evColor(ev) {
+    return _eventColor[ev.event_type] || _eventColor[ev.event_name] || '#ffd700';
+}
+
+async function loadFeed() {
+    const evType = document.getElementById('feed-event-filter').value;
+    const userType = document.getElementById('feed-user-filter').value;
+    const res = await fetchRecentEvents(80, { eventType: evType || null });
+    const el = document.getElementById('event-feed');
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+
+    let rows = res.data;
+    if (userType === 'signed') rows = rows.filter(r => r.user_id);
+    else if (userType === 'anon') rows = rows.filter(r => !r.user_id);
+    rows = rows.slice(0, 30);
+
+    if (!rows.length) { el.innerHTML = '<div class="empty">No matching events. Events appear once analytics.js is loaded on pages.</div>'; return; }
+
+    el.innerHTML = rows.map(ev => {
+        const color = _evColor(ev);
+        const ago = _timeAgo(ev.created_at);
+        const userTag = ev.user_id
+            ? `<span style="color:#4eff91;font-size:.72rem;font-family:monospace" title="${_esc(ev.user_id)}">${_esc(ev.user_id.slice(0,8))}</span>`
+            : `<span style="color:#666;font-size:.72rem">anon</span>`;
+        let extra = '';
+        if (ev.event_name === 'page_close' && ev.properties?.time_on_page_s != null) {
+            extra = ` <span style="color:#888;font-size:.72rem">${ev.properties.time_on_page_s}s</span>`;
+        } else if (ev.event_type === 'click' && ev.properties?.t) {
+            extra = ` <span style="color:#888;font-size:.72rem">${_esc(ev.properties.t)}</span>`;
+        }
+        return `<div class="event-row">
+            <span class="event-dot" style="background:${color}"></span>
+            <span class="event-name">${_esc(ev.event_name)}</span>
+            <span style="color:#444;font-size:.75rem">${_esc(ev.page_path || '')}</span>
+            ${extra}
+            ${userTag}
+            <span class="event-time">${_esc(ago)}</span>
+        </div>`;
+    }).join('');
+}
+loadFeed();
+document.getElementById('btn-refresh-feed').addEventListener('click', loadFeed);
+document.getElementById('feed-event-filter').addEventListener('change', loadFeed);
+document.getElementById('feed-user-filter').addEventListener('change', loadFeed);
+
+let _feedTimer = null;
+function _setFeedAuto(on) {
+    if (_feedTimer) { clearInterval(_feedTimer); _feedTimer = null; }
+    if (on) _feedTimer = setInterval(loadFeed, 10_000);
+}
+_setFeedAuto(true);
+document.getElementById('feed-autorefresh').addEventListener('change', e => _setFeedAuto(e.target.checked));
+
+// ── Click Heatmap (per page) ────────────────────────────────────────────────
+async function loadHeatmap() {
+    const page = document.getElementById('heatmap-page').value;
+    const days = parseInt(document.getElementById('heatmap-window').value, 10) || 7;
+    const statsEl = document.getElementById('heatmap-stats');
+    const targetsEl = document.getElementById('heatmap-targets');
+    const canvas = document.getElementById('heatmap-canvas');
+
+    statsEl.textContent = 'Loading…';
+    const res = await fetchClickHeatmap(page, days);
+    if (!res.ok) { statsEl.textContent = res.error; return; }
+    const clicks = res.data;
+    if (!clicks.length) {
+        statsEl.textContent = `No click events recorded for "${page}" in the last ${days}d. Add data-clickmap to the body of that page to enable.`;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        targetsEl.innerHTML = '';
+        return;
+    }
+
+    statsEl.textContent = `${clicks.length.toLocaleString()} clicks · ${new Set(clicks.map(c => c.session_id)).size} sessions · last ${days}d`;
+
+    // Render heatmap: additive radial gradients for each click.
+    const wrap = document.getElementById('heatmap-wrap');
+    const dpr = window.devicePixelRatio || 1;
+    const W = wrap.offsetWidth, H = wrap.offsetHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    const r = Math.max(18, Math.min(W, H) * 0.04);
+    for (const c of clicks) {
+        const xp = c.properties?.x_pct, yp = c.properties?.y_pct;
+        if (xp == null || yp == null) continue;
+        const x = (xp / 100) * W, y = (yp / 100) * H;
+        const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+        g.addColorStop(0, 'rgba(255,80,80,.55)');
+        g.addColorStop(0.4, 'rgba(255,200,0,.25)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    // Top targets list
+    const targetCount = {};
+    for (const c of clicks) {
+        const t = c.properties?.t || '(unknown)';
+        targetCount[t] = (targetCount[t] || 0) + 1;
+    }
+    const topTargets = Object.entries(targetCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8);
+    targetsEl.innerHTML = '<div style="font-weight:600;color:#ccc;margin-bottom:6px">Most-clicked targets</div>' +
+        topTargets.map(([t, n]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+            <span style="font-family:monospace;color:#9ac">${_esc(t)}</span>
+            <span style="color:#888">${n}</span>
+        </div>`).join('');
+}
+loadHeatmap();
+document.getElementById('btn-refresh-heatmap').addEventListener('click', loadHeatmap);
+document.getElementById('heatmap-page').addEventListener('change', loadHeatmap);
+document.getElementById('heatmap-window').addEventListener('change', loadHeatmap);
+
+/** Escape HTML entities to prevent stored XSS from user-controlled data */
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+function _timeAgo(iso) {
+    const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+}
+
+// ── Activation Tab ───────────────────────────────────────────────────────────
+// All sections degrade gracefully if the supabase-class-seats-migration.sql
+// hasn't been applied — the activation_events table simply returns no rows
+// or the activation_funnel RPC errors with "function does not exist".
+
+// Stable color per event for the daily chart + funnel.
+const EVENT_COLOR = {
+    signup:                 '#9ad36f',
+    profile_completed:      '#66d9ff',
+    location_saved:         '#4eff91',
+    first_sim_opened:       '#ffd700',
+    first_alert_configured: '#ff8c00',
+    first_email_alert_sent: '#ffaa44',
+    invite_sent:            '#c080ff',
+    student_joined:         '#80d4ff',
+    subscription_started:   '#4eff91',
+    subscription_canceled:  '#ff6060',
+};
+const EVENT_LABEL = {
+    signup:                 'Signup',
+    profile_completed:      'Profile completed',
+    location_saved:         'Location saved',
+    first_sim_opened:       'First sim opened',
+    first_alert_configured: 'First alert configured',
+    first_email_alert_sent: 'First email alert sent',
+    invite_sent:            'Invite sent',
+    student_joined:         'Student joined',
+    subscription_started:   'Subscription started',
+    subscription_canceled:  'Subscription canceled',
+};
+
+async function loadActivationFunnel() {
+    const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
+    const el = document.getElementById('activation-funnel-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchActivationFunnel(days);
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`;
+        return;
+    }
+    if (!res.data.length) {
+        el.innerHTML = '<div class="empty">No activation events yet — once users sign up + open a sim, rows appear here.</div>';
+        return;
+    }
+    // Pivot to plan × event matrix; signup acts as the denominator within each plan.
+    const planEvents = new Map();   // plan -> Map(event -> { count, median })
+    const signupByPlan = new Map(); // plan -> count
+    for (const r of res.data) {
+        const plan = r.plan || 'free';
+        if (!planEvents.has(plan)) planEvents.set(plan, new Map());
+        planEvents.get(plan).set(r.event, { count: r.user_count, median: r.median_hours });
+        if (r.event === 'signup') signupByPlan.set(plan, r.user_count);
+    }
+
+    const EVENT_ORDER = [
+        'signup',
+        'profile_completed',
+        'location_saved',
+        'first_sim_opened',
+        'first_alert_configured',
+        'first_email_alert_sent',
+        'invite_sent',
+        'student_joined',
+        'subscription_started',
+        'subscription_canceled',
+    ];
+
+    let html = '<table><thead><tr><th>Plan</th><th>Signups</th>';
+    for (const ev of EVENT_ORDER) {
+        if (ev === 'signup') continue;
+        html += `<th title="median hours from signup → first occurrence">${_esc(EVENT_LABEL[ev])}</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    const plans = Array.from(planEvents.keys()).sort();
+    for (const plan of plans) {
+        const m = planEvents.get(plan);
+        const denom = signupByPlan.get(plan) || 0;
+        html += `<tr><td><span class="badge b-${plan}">${_esc(plan)}</span></td><td><strong>${denom.toLocaleString()}</strong></td>`;
+        for (const ev of EVENT_ORDER) {
+            if (ev === 'signup') continue;
+            const cell = m.get(ev);
+            if (!cell) { html += '<td style="color:#444">—</td>'; continue; }
+            const pct = denom > 0 ? Math.round((cell.count / denom) * 100) : null;
+            const median = cell.median != null ? `${cell.median}h` : '—';
+            html += `<td><div style="font-size:.86rem;color:#fff">${cell.count.toLocaleString()}${pct != null ? ` <span style="color:#666">(${pct}%)</span>` : ''}</div><div style="font-size:.7rem;color:#555">${median}</div></td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadActivationChart() {
+    const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
+    const res = await fetchActivationDaily(days);
+    const canvas = document.getElementById('activation-canvas');
+    const legend = document.getElementById('activation-legend');
+    if (!res.ok || !res.data.length) {
+        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+        legend.innerHTML = '';
+        return;
+    }
+    // Index by day, keep a sorted day list + event totals.
+    const byDay = new Map();
+    const eventsSeen = new Set();
+    for (const row of res.data) {
+        if (!byDay.has(row.day)) byDay.set(row.day, {});
+        byDay.get(row.day)[row.event] = (byDay.get(row.day)[row.event] || 0) + row.count;
+        eventsSeen.add(row.event);
+    }
+    const days_ = Array.from(byDay.keys()).sort();
+    const events = Array.from(eventsSeen);
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = canvas.offsetWidth  * dpr;
+    canvas.height = canvas.offsetHeight * dpr;
+    ctx.scale(dpr, dpr);
+    const W = canvas.offsetWidth, H = canvas.offsetHeight;
+    ctx.clearRect(0, 0, W, H);
+
+    const maxStack = Math.max(...days_.map(d => events.reduce((a, e) => a + (byDay.get(d)[e] || 0), 0)), 1);
+    const barW = Math.max(4, Math.floor((W - 12) / days_.length) - 1);
+
+    days_.forEach((d, i) => {
+        let yCursor = H - 4;
+        const x = 6 + i * (barW + 1);
+        for (const ev of events) {
+            const v = byDay.get(d)[ev] || 0;
+            if (!v) continue;
+            const h = (v / maxStack) * (H - 12);
+            ctx.fillStyle = EVENT_COLOR[ev] || '#888';
+            ctx.fillRect(x, yCursor - h, barW, h);
+            yCursor -= h;
+        }
+    });
+
+    legend.innerHTML = events.map(ev =>
+        `<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:${EVENT_COLOR[ev] || '#888'};border-radius:2px"></span>${_esc(EVENT_LABEL[ev] || ev)}</span>`
+    ).join('');
+}
+
+async function loadConversion() {
+    const el = document.getElementById('conversion-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchConversionRate(8);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No data yet.</div>'; return; }
+    let html = '<table><thead><tr><th>Week</th><th>Signups</th><th>Subscribed</th><th>Rate</th></tr></thead><tbody>';
+    for (const r of res.data) {
+        const rateColor = r.rate >= 5 ? '#4eff91' : r.rate >= 2 ? '#ffd700' : '#aaa';
+        html += `<tr><td style="font-family:monospace">${_esc(r.week)}</td><td>${r.signups}</td><td>${r.conversions}</td><td style="color:${rateColor};font-weight:600">${r.rate}%</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadCohorts() {
+    const el = document.getElementById('cohort-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchCohortRetention(6);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No cohorts yet.</div>'; return; }
+    const weeks = res.data[0]?.weeks?.length || 0;
+    let html = '<table><thead><tr><th>Cohort (week of)</th><th>Size</th>';
+    for (let i = 0; i < weeks; i++) html += `<th>W${i}</th>`;
+    html += '</tr></thead><tbody>';
+    for (const c of res.data) {
+        html += `<tr><td style="font-family:monospace">${_esc(c.cohort)}</td><td>${c.size}</td>`;
+        for (const pct of c.weeks) {
+            // Heat-map cell: green for high, red for low.
+            const hue = Math.min(120, Math.max(0, pct * 1.2));
+            html += `<td style="background:hsla(${hue},60%,30%,${pct/100*0.45 + 0.05});color:${pct >= 30 ? '#fff' : '#888'}">${pct}%</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadEducatorRoster() {
+    const el = document.getElementById('edu-roster-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchClassRosterStats();
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    const t = res.data.totals;
+    const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = (v ?? 0).toLocaleString(); };
+    set('kpi-edu-count',   t.educators);
+    set('kpi-edu-seats',   t.totalSeats);
+    set('kpi-edu-used',    t.usedSeats);
+    set('kpi-edu-healthy', t.healthy);
+    set('kpi-edu-dormant', t.dormant);
+
+    if (!res.data.educators.length) {
+        el.innerHTML = '<div class="empty">No educators / institutions yet.</div>';
+        return;
+    }
+    let html = '<table><thead><tr><th>Account</th><th>Plan</th><th>Used</th><th>Seats</th><th>Fill</th></tr></thead><tbody>';
+    const sorted = [...res.data.educators].sort((a, b) => b.fillRate - a.fillRate);
+    for (const e of sorted) {
+        const fillColor = e.fillRate >= 80 ? '#4eff91' : e.fillRate >= 30 ? '#ffd700' : e.fillRate > 0 ? '#ff8c00' : '#666';
+        html += `<tr><td>${_esc(e.name)}</td><td><span class="badge b-${e.plan}">${_esc(e.plan)}</span></td><td>${e.used}</td><td>${e.seats}</td><td style="color:${fillColor};font-weight:600">${e.fillRate}%</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadTopSimsByPlan() {
+    const el = document.getElementById('sims-by-plan-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchTopSimsByPlan(7);
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No sim views in the last 7 days.</div>'; return; }
+    const plans = ['anon', 'free', 'tester', 'basic', 'educator', 'advanced', 'institution', 'enterprise'];
+    let html = '<table><thead><tr><th>Sim</th><th>Total</th>';
+    for (const p of plans) html += `<th>${_esc(p)}</th>`;
+    html += '</tr></thead><tbody>';
+    for (const r of res.data) {
+        html += `<tr><td><a href="${_esc(r.sim)}.html" style="color:#9cf;text-decoration:none">${_esc(r.sim)}</a></td><td><strong>${r.total.toLocaleString()}</strong></td>`;
+        for (const p of plans) {
+            const v = r.byPlan[p] || 0;
+            html += `<td style="color:${v ? '#bbb' : '#444'}">${v || '—'}</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function loadAtRisk() {
+    const el = document.getElementById('at-risk-container');
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    const res = await fetchAtRiskSubscriptions();
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty" style="color:#4eff91">No at-risk subscriptions — nice.</div>'; return; }
+    let html = '<table><thead><tr><th>Account</th><th>Plan</th><th>Status</th><th>Days left</th><th>Period end</th></tr></thead><tbody>';
+    for (const r of res.data) {
+        const statusColor = r.subscription_status === 'past_due' ? '#ff6060'
+                          : r.subscription_status === 'canceled' ? '#ff8c00'
+                          : '#ffd700';
+        const daysColor = r.daysLeft != null && r.daysLeft < 3 ? '#ff6060'
+                        : r.daysLeft != null && r.daysLeft < 7 ? '#ffd700'
+                        : '#aaa';
+        const end = r.subscription_period_end ? new Date(r.subscription_period_end).toLocaleDateString() : '—';
+        html += `<tr><td>${_esc(r.display_name || r.id?.slice(0,8) || '—')}</td><td><span class="badge b-${r.plan}">${_esc(r.plan)}</span></td><td style="color:${statusColor};font-weight:600">${_esc(r.subscription_status)}</td><td style="color:${daysColor}">${r.daysLeft ?? '—'}</td><td style="color:#777;font-size:.78rem">${_esc(end)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+// Lazy-load activation tab on first switch (the queries are heavier than
+// the overview cards — no point hammering Supabase if the user never
+// opens the tab).
+let _activationLoaded = false;
+async function loadActivationAll() {
+    await Promise.all([
+        loadActivationFunnel(),
+        loadActivationChart(),
+        loadConversion(),
+        loadCohorts(),
+        loadEducatorRoster(),
+        loadTopSimsByPlan(),
+        loadAtRisk(),
+    ]);
+    _activationLoaded = true;
+}
+document.querySelector('.tab[data-tab="activation"]')?.addEventListener('click', () => {
+    if (!_activationLoaded) loadActivationAll();
+});
+document.getElementById('btn-refresh-activation')?.addEventListener('click', loadActivationAll);
+document.getElementById('activation-window')?.addEventListener('change', () => {
+    loadActivationFunnel();
+    loadActivationChart();
+});
+
+// ── Users Tab ────────────────────────────────────────────────────────────────
+async function loadUsers() {
+    const res = await fetchUsers();
+    const el = document.getElementById('users-container');
+    const countEl = document.getElementById('user-count');
+    if (!res.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(res.error)}<br><br>Run <code>supabase-admin.sql</code> to grant admin read access.</div>`; return; }
+    if (!res.data.length) { el.innerHTML = '<div class="empty">No users found.</div>'; countEl.textContent = '(0)'; return; }
+
+    countEl.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
+    for (const u of res.data) {
+        const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
+        const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
+        const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
+        html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadUsers();
+
+// ── Analytics Tab ────────────────────────────────────────────────────────────
+// GA4 status
+const gaEl = document.getElementById('ga-status');
+if (GA_MEASUREMENT_ID) {
+    gaEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:#4eff91">Active</span></div>
+        <div class="cfg"><span class="cfg-k">Measurement ID</span><span class="cfg-v">${GA_MEASUREMENT_ID}</span></div>
+        <div class="cfg"><span class="cfg-k">Dashboard</span><span class="cfg-v"><a href="https://analytics.google.com" target="_blank" style="color:#4080ff">Open GA4</a></span></div>`;
+} else {
+    gaEl.innerHTML = `<div style="text-align:center;padding:12px">
+        <p style="color:#666;margin-bottom:10px">GA4 not configured yet.</p>
+        <p style="font-size:.8rem;color:#444">To enable, set <code>GA_MEASUREMENT_ID</code> in <code>js/analytics.js</code> to your G-XXXXXXXXXX ID.</p>
+        <p style="font-size:.78rem;color:#333;margin-top:8px">GA4 adds: traffic sources, geographic data, device breakdown, funnel analysis, bounce rates.</p>
+    </div>`;
+}
+
+// Supabase analytics status
+const saEl = document.getElementById('supa-analytics-status');
+saEl.innerHTML = `<div class="cfg"><span class="cfg-k">Status</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Active':'Not configured'}</span></div>
+    <div class="cfg"><span class="cfg-k">Tracks</span><span class="cfg-v">Page views, events, sessions, sign-ins</span></div>
+    <div class="cfg"><span class="cfg-k">Ad-blocker proof</span><span class="cfg-v" style="color:#4eff91">Yes (first-party)</span></div>
+    <div class="cfg"><span class="cfg-k">Tables</span><span class="cfg-v">analytics_events, user_sessions</span></div>`;
+
+// Active sessions
+async function loadSessions() {
+    const res = await fetchActiveSessions();
+    const el = document.getElementById('sessions-container');
+    const cnt = document.getElementById('sessions-count');
+    if (!res.ok || !res.data.length) { el.innerHTML = '<div class="empty">No active sessions.</div>'; cnt.textContent = '(0)'; return; }
+
+    cnt.textContent = `(${res.data.length})`;
+    let html = '<table><thead><tr><th>Session</th><th>Page</th><th>Duration</th><th>Last Seen</th></tr></thead><tbody>';
+    for (const s of res.data) {
+        const dur = s.duration_s < 60 ? s.duration_s + 's' : Math.round(s.duration_s / 60) + 'm';
+        const ago = _timeAgo(s.last_seen);
+        const sid = s.session_id?.slice(0, 16) || '--';
+        html += `<tr><td style="font-family:monospace;font-size:.75rem">${sid}</td><td>${s.page_path||'--'}</td><td>${dur}</td><td style="color:#555">${ago}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+loadSessions();
+
+// ── Invites Tab ─────────────────────────────────────────────────────────────
+async function loadInvites() {
+    const res = await fetchInviteCodes();
+    const el = document.getElementById('invites-container');
+
+    // Stats
+    const total  = res.data?.length || 0;
+    const used   = res.data?.reduce((s, c) => s + (c.used_count || 0), 0) || 0;
+    const active = res.data?.filter(c => c.active && (!c.expires_at || new Date(c.expires_at) > new Date()) && c.used_count < c.max_uses).length || 0;
+    document.getElementById('kpi-invites-total').textContent  = total;
+    document.getElementById('kpi-invites-used').textContent   = used;
+    document.getElementById('kpi-invites-active').textContent = active;
+
+    if (!res.ok || !res.data?.length) {
+        // Distinguish "table missing" from "table exists but no rows yet" —
+        // the operator action is completely different. The Postgres error
+        // "relation \"public.invite_codes\" does not exist" matches the
+        // "does not exist" probe in the error message; PostgREST surfaces
+        // it as PGRST205 / 42P01.
+        const errMsg  = String(res.error || '');
+        const missing = /does not exist|relation .* does not exist|PGRST205|42P01/i.test(errMsg);
+        if (missing) {
+            el.innerHTML = `<div class="empty" style="text-align:left;color:#ffaa44">
+                <strong style="color:#ff6060">⚠ invite_codes table not found.</strong><br><br>
+                Your Supabase project hasn't been bootstrapped yet. Apply
+                <code style="color:#9ad36f">supabase-bootstrap-fresh.sql</code>
+                in the Supabase SQL Editor (one-paste, all foundational
+                migrations in dependency order).<br><br>
+                Or apply the individual migrations from <code>DEPLOYMENT.md</code> step 1
+                — at minimum <code>supabase-schema.sql</code> creates this table.<br><br>
+                <span style="color:#666;font-size:.78rem">Postgres error: ${_esc(errMsg)}</span>
+            </div>`;
+        } else {
+            el.innerHTML = `<div class="empty">${res.error ? _esc(res.error) + '<br><br>' : ''}No invite codes yet. Generate one above.</div>`;
+        }
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Code</th><th>Plan</th><th>Uses</th><th>Expires</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody>';
+    for (const c of res.data) {
+        const expired = c.expires_at && new Date(c.expires_at) < new Date();
+        const full    = c.used_count >= c.max_uses;
+        const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
+        const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
+        const pc      = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
+        const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
+        const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
+        html += `<tr>
+            <td style="font-family:monospace;font-size:.85rem;letter-spacing:.08em;color:#fff">${_esc(c.code)}</td>
+            <td><span class="badge ${pc}">${_esc(c.plan || 'free')}</span></td>
+            <td>${c.used_count} / ${c.max_uses}</td>
+            <td style="color:#555;font-size:.78rem">${_esc(exp)}</td>
+            <td style="${sClass};font-size:.78rem;font-weight:600">${status}</td>
+            <td style="color:#555;font-size:.78rem">${_esc(created)}</td>
+            <td>${c.active ? `<button class="btn btn-sm" data-deactivate="${c.id}">Disable</button>` : ''}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+    // Wire deactivate buttons
+    el.querySelectorAll('[data-deactivate]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            btn.textContent = '...';
+            await deactivateInvite(btn.dataset.deactivate);
+            loadInvites();
+        });
+    });
+}
+loadInvites();
+
+// ── Email send activity (rate-limit + audit log) ────────────────────────────
+// Reads public.email_send_log via the admin-analytics helpers. Reflects every
+// send attempt across both endpoints (alerts + invites), including throttled
+// requests, so admins can see at a glance whether someone is hitting the cap.
+// Uses the page-level _esc() defined above for HTML escaping.
+
+function _fmtRelative(iso) {
+    if (!iso) return '—';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000)        return `${Math.round(ms / 1000)}s ago`;
+    if (ms < 3_600_000)     return `${Math.round(ms / 60_000)}m ago`;
+    if (ms < 86_400_000)    return `${Math.round(ms / 3_600_000)}h ago`;
+    return `${Math.round(ms / 86_400_000)}d ago`;
+}
+
+async function loadEmailActivity() {
+    const windowHours = parseInt(document.getElementById('email-window').value, 10) || 168;
+
+    const [statsRes, activityRes] = await Promise.all([
+        fetchEmailStats(windowHours),
+        fetchEmailActivity(40),
+    ]);
+
+    // KPIs
+    if (statsRes.ok) {
+        const s = statsRes.data;
+        document.getElementById('kpi-email-sent').textContent      = s.sent;
+        document.getElementById('kpi-email-throttled').textContent = s.throttled;
+        document.getElementById('kpi-email-alerts').textContent    = (s.byEndpoint.alerts?.sent  || 0);
+        document.getElementById('kpi-email-invites').textContent   = (s.byEndpoint.invites?.sent || 0);
+    } else {
+        ['kpi-email-sent','kpi-email-throttled','kpi-email-alerts','kpi-email-invites']
+            .forEach(id => document.getElementById(id).textContent = '—');
+    }
+
+    // Activity table
+    const el = document.getElementById('email-activity-container');
+    if (!activityRes.ok) {
+        el.innerHTML = `<div class="empty">${_esc(activityRes.error || 'Failed to load email activity')}<br><br>If the table doesn't exist, apply <code>supabase-email-rate-limit-migration.sql</code> in the Supabase SQL Editor.</div>`;
+        return;
+    }
+    if (!activityRes.data.length) {
+        el.innerHTML = `<div class="empty">No email activity in this window.</div>`;
+        return;
+    }
+
+    let html = '<table><thead><tr><th>When</th><th>Endpoint</th><th>Recipient</th><th>Subject</th><th>Status</th></tr></thead><tbody>';
+    for (const r of activityRes.data) {
+        const epColor   = r.endpoint === 'invites' ? '#c080ff' : '#00c6ff';
+        const status    = r.throttled
+            ? `<span style="color:#ffaa44;font-weight:700">throttled</span>`
+            : `<span style="color:#4eff91">sent</span>`;
+        html += `<tr>`
+             +  `<td title="${_esc(r.sent_at)}" style="color:#778;font-size:.78rem">${_fmtRelative(r.sent_at)}</td>`
+             +  `<td><span style="color:${epColor};font-weight:700;font-size:.74rem;text-transform:uppercase">${_esc(r.endpoint)}</span></td>`
+             +  `<td style="font-family:ui-monospace,monospace;font-size:.78rem">${_esc(r.recipient_email || '—')}</td>`
+             +  `<td style="font-size:.78rem;color:#aab">${_esc((r.subject || '').slice(0, 60))}</td>`
+             +  `<td>${status}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-email').addEventListener('click', loadEmailActivity);
+document.getElementById('email-window').addEventListener('change', loadEmailActivity);
+loadEmailActivity();
+
+// ── Pipeline Health card (per-pipeline data freshness) ─────────────────────
+// Reads the pipeline_heartbeat table. Complementary to the Scheduled Jobs
+// card below: cron can report "succeeded" while the upstream fetch still
+// produced no rows — the heartbeat table is updated *inside* the refresh
+// function after the upstream result is validated, so it's the honest
+// "is the feed alive?" signal.
+//
+// Staleness thresholds are intentionally generous (15 min warning, 60 min
+// critical) because the solar_wind pipeline normally writes every ~2 min
+// and the weather_grid every ~30 min — anything older than 60 min for the
+// slowest feed is a real incident. Tighten if the cron cadence changes.
+const HB_PIPELINES = [
+    { key: 'solar_wind',   label: 'Solar Wind',   expectMin: 5,  expectMax: 60  },
+    { key: 'weather_grid', label: 'Weather Grid', expectMin: 45, expectMax: 180 },
+];
+
+function _hbAgeMin(iso) {
+    if (!iso) return null;
+    return Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+}
+
+function _hbFmtRel(iso) {
+    const m = _hbAgeMin(iso);
+    if (m == null) return 'never';
+    if (m < 1)     return 'just now';
+    if (m < 60)    return `${m}m ago`;
+    if (m < 1440)  return `${Math.round(m / 60)}h ago`;
+    return `${Math.round(m / 1440)}d ago`;
+}
+
+// Classify a heartbeat row into ok/warn/crit. Returns {color, label, emoji}.
+function _hbHealth(row, spec) {
+    const ageMin = _hbAgeMin(row?.last_success_at);
+    const streak = Number(row?.consecutive_fail || 0);
+    const maxMin = spec?.expectMax ?? 60;
+    const warnMin = spec?.expectMin ?? 15;
+
+    if (ageMin == null)               return { color:'#ff6b6b', label:'never succeeded', emoji:'●' };
+    if (streak >= 3 || ageMin > maxMin) return { color:'#ff6b6b', label:'critical',        emoji:'●' };
+    if (streak >= 1 || ageMin > warnMin) return { color:'#ffaa44', label:'stale',          emoji:'●' };
+    return                              { color:'#4eff91', label:'healthy',         emoji:'●' };
+}
+
+async function loadPipelineHeartbeat() {
+    const el = document.getElementById('heartbeat-container');
+    const res = await fetchPipelineHeartbeat();
+
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty">Failed to load: ${_esc(res.error)}</div>`;
+        return;
+    }
+
+    // Build a map of what the DB returned, then iterate over the expected
+    // pipelines so a missing row still shows as "never succeeded" rather
+    // than vanishing from the UI.
+    const byKey = Object.fromEntries((res.data || []).map(r => [r.pipeline_name, r]));
+
+    // Include any extra pipelines the DB knows about but we don't
+    // recognise — future-proof without having to redeploy.
+    const known = new Set(HB_PIPELINES.map(p => p.key));
+    const extras = (res.data || [])
+        .filter(r => !known.has(r.pipeline_name))
+        .map(r => ({ key: r.pipeline_name, label: r.pipeline_name }));
+    const specs = [...HB_PIPELINES, ...extras];
+
+    if (specs.length === 0) {
+        el.innerHTML = `<div class="empty">No pipelines registered yet.<br><br>Apply <code>supabase-pipeline-heartbeat-migration.sql</code> and confirm the refresh functions in <code>supabase-solar-wind-migration.sql</code> + <code>supabase-weather-pgcron-migration.sql</code> are calling <code>record_pipeline_success</code>.</div>`;
+        return;
+    }
+
+    let html = '<table><thead><tr>'
+             + '<th>Pipeline</th><th>Last success</th><th>Source</th>'
+             + '<th>Streak</th><th>Last failure</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const spec of specs) {
+        const row = byKey[spec.key];
+        const h = _hbHealth(row, spec);
+        const streak = Number(row?.consecutive_fail || 0);
+        const streakColor = streak >= 3 ? '#ff6b6b' : streak >= 1 ? '#ffaa44' : '#556';
+        const streakWeight = streak > 0 ? '700' : '400';
+        const failTooltip = row?.last_failure_reason
+            ? ` title="${_esc(row.last_failure_reason)}"`
+            : '';
+        const failCell = row?.last_failure_at
+            ? `<span style="color:#aab;font-size:.78rem"${failTooltip}>${_hbFmtRel(row.last_failure_at)}</span>`
+            : `<span style="color:#445;font-size:.78rem">—</span>`;
+        const sourceCell = row?.last_source
+            ? `<span style="font-family:ui-monospace,monospace;font-size:.72rem;color:#9ad">${_esc(row.last_source)}</span>`
+            : `<span style="color:#445;font-size:.78rem">—</span>`;
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(spec.key)}</div></td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_hbFmtRel(row?.last_success_at)}</td>`
+             +  `<td>${sourceCell}</td>`
+             +  `<td style="color:${streakColor};font-weight:${streakWeight}">${streak}</td>`
+             +  `<td>${failCell}</td>`
+             +  `<td style="color:${h.color};font-weight:600;font-size:.78rem">${h.emoji} ${_esc(h.label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeat);
+loadPipelineHeartbeat();
+
+// ── Proxy Freshness card (what the CDN actually serves) ────────────────────
+// Pings the same public proxies the sims consume. If /api/weather/grid is
+// 500ing while Pipeline Health says the pg_cron succeeded, that's an edge
+// function / env-var problem — the Supabase row is fresh but browsers can't
+// read it. Similarly for /api/solar-wind/latest. Both endpoints return JSON
+// on every status so we can surface structured error codes (cache_empty,
+// supabase_not_configured, …) in addition to HTTP status.
+//
+// Probed endpoints are intentionally public; no Supabase admin key needed.
+const PROXY_PROBES = [
+    {
+        key:      'weather_grid',
+        label:    'Weather Grid',
+        endpoint: '/api/weather/grid',
+        // Expected refresh cadence: hourly pg_cron. Age > 90 min = stale,
+        // > 180 min = critical (matches the earth.html wx-age thresholds).
+        warnAgeS: 90 * 60,
+        critAgeS: 180 * 60,
+        sizeHint: (body) => Array.isArray(body?.data) ? `${body.data.length} locs` : null,
+    },
+    {
+        key:      'solar_wind',
+        label:    'Solar Wind',
+        endpoint: '/api/solar-wind/latest',
+        // pg_cron writes every minute; the proxy exposes a `freshness`
+        // enum (fresh/stale/expired/missing) we can trust directly.
+        warnAgeS: 5 * 60,
+        critAgeS: 20 * 60,
+        sizeHint: (body) => body?.data?.current?.speed_km_s != null
+            ? `${Math.round(body.data.current.speed_km_s)} km/s`
+            : null,
+    },
+];
+
+async function _probeOne(spec) {
+    const startedAt = performance.now();
+    let status = null;
+    let body   = null;
+    let netErr = null;
+    try {
+        const res = await fetch(spec.endpoint, {
+            signal: AbortSignal.timeout(8000),
+            cache:  'no-store',   // bypass the service-worker / browser cache
+                                  // so the card reflects the CDN's current state
+        });
+        status = res.status;
+        try { body = await res.json(); } catch { /* non-JSON — report as such */ }
+    } catch (e) {
+        netErr = e?.message || String(e);
+    }
+    const latencyMs = Math.round(performance.now() - startedAt);
+
+    // Pull freshness: prefer explicit age_seconds on the response, fall
+    // back to computing from fetched_at, else null for "unknown".
+    let ageSec = null;
+    if (Number.isFinite(body?.age_seconds)) {
+        ageSec = body.age_seconds;
+    } else if (body?.fetched_at) {
+        const t = Date.parse(body.fetched_at);
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    } else if (body?.data?.updated) {
+        const t = Date.parse(body.data.updated);
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    }
+
+    return { spec, status, body, netErr, latencyMs, ageSec };
+}
+
+function _proxyHealth(probe) {
+    const { spec, status, body, netErr, ageSec } = probe;
+    if (netErr)                              return { color:'#ff6b6b', label:`network error: ${netErr}`, emoji:'●' };
+    if (status == null)                      return { color:'#ff6b6b', label:'no response',                emoji:'●' };
+    if (status >= 500)                       return { color:'#ff6b6b', label:`HTTP ${status} · ${body?.error ?? 'error'}`, emoji:'●' };
+    if (status >= 400)                       return { color:'#ff6b6b', label:`HTTP ${status}`,             emoji:'●' };
+    if (body?.error)                         return { color:'#ff6b6b', label:`${body.error}`,              emoji:'●' };
+    if (ageSec == null)                      return { color:'#ffaa44', label:'no freshness info',          emoji:'●' };
+    if (ageSec > spec.critAgeS)              return { color:'#ff6b6b', label:'critical (stale)',           emoji:'●' };
+    if (ageSec > spec.warnAgeS)              return { color:'#ffaa44', label:'warning (stale)',            emoji:'●' };
+    // /api/solar-wind/latest has a self-reported freshness field — trust it
+    // when present so the card agrees with what earth.html / sun.html show.
+    if (body?.freshness === 'expired')       return { color:'#ff6b6b', label:`freshness=${body.freshness}`,  emoji:'●' };
+    if (body?.freshness === 'stale')         return { color:'#ffaa44', label:`freshness=${body.freshness}`,  emoji:'●' };
+    return { color:'#4eff91', label:'healthy', emoji:'●' };
+}
+
+function _fmtAgeSec(s) {
+    if (s == null) return '—';
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+}
+
+async function loadProxyFreshness() {
+    const el = document.getElementById('proxy-freshness-container');
+    el.innerHTML = `<div class="empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
+
+    const probes = await Promise.all(PROXY_PROBES.map(_probeOne));
+
+    let html = '<table><thead><tr>'
+             + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+             + '<th>Source</th><th>Payload</th><th>Latency</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const p of probes) {
+        const h = _proxyHealth(p);
+        const body = p.body || {};
+        const missingEnv = Array.isArray(body.missing) && body.missing.length
+            ? ` <span style="color:#ff6b6b;font-size:.66rem">missing env: ${_esc(body.missing.join(', '))}</span>`
+            : '';
+        const source = body.source
+            || body.heartbeat?.last_source
+            || '—';
+        const sizeHint = (p.spec.sizeHint?.(body) ?? '—');
+        const statusCell = p.status != null
+            ? `<span style="color:${p.status < 400 ? '#aab' : '#ff6b6b'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
+            : `<span style="color:#ff6b6b;font-weight:700">—</span>`;
+        const latency = p.netErr ? '—' : `${p.latencyMs}ms`;
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(p.spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(p.spec.endpoint)}</div></td>`
+             +  `<td>${statusCell}</td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_fmtAgeSec(p.ageSec)}</td>`
+             +  `<td><span style="font-family:ui-monospace,monospace;font-size:.72rem;color:#9ad">${_esc(String(source))}</span>${missingEnv}</td>`
+             +  `<td style="color:#aab;font-size:.78rem">${_esc(String(sizeHint))}</td>`
+             +  `<td style="color:#9ad;font-size:.72rem;font-family:ui-monospace,monospace">${_esc(latency)}</td>`
+             +  `<td style="color:${h.color};font-weight:600;font-size:.78rem">${h.emoji} ${_esc(h.label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-proxies').addEventListener('click', loadProxyFreshness);
+loadProxyFreshness();
+
+// ── Scheduled jobs (pg_cron) health card ────────────────────────────────────
+// Reads admin_get_cron_status — returns every pg_cron job's most recent run
+// plus 24h fail/total counts. Anything other than "succeeded" in the last run
+// renders red so operators see silent failures before user-facing data goes
+// stale downstream.
+async function loadCronStatus() {
+    const el = document.getElementById('cron-status-container');
+    const res = await fetchCronStatus();
+
+    if (!res.ok) {
+        el.innerHTML = `<div class="empty">Failed to load: ${_esc(res.error)}</div>`;
+        return;
+    }
+    if (!res.data.length) {
+        el.innerHTML = `<div class="empty">No scheduled jobs found.<br><br>pg_cron may not be enabled, or you may not have admin access. Apply <code>supabase-weather-pgcron-migration.sql</code> + <code>supabase-retention-cron-migration.sql</code> in the Supabase SQL Editor.</div>`;
+        return;
+    }
+
+    const fmtRel = (iso) => {
+        if (!iso) return 'never';
+        const ms = Date.now() - new Date(iso).getTime();
+        if (ms < 60_000)     return `${Math.round(ms / 1000)}s ago`;
+        if (ms < 3_600_000)  return `${Math.round(ms / 60_000)}m ago`;
+        if (ms < 86_400_000) return `${Math.round(ms / 3_600_000)}h ago`;
+        return `${Math.round(ms / 86_400_000)}d ago`;
+    };
+
+    let html = '<table><thead><tr>'
+             + '<th>Job</th><th>Schedule</th><th>Last run</th>'
+             + '<th>Status</th><th>24h runs</th><th>24h failures</th>'
+             + '</tr></thead><tbody>';
+
+    for (const j of res.data) {
+        const statusColor = j.last_run_status === 'succeeded' ? '#4eff91'
+                         : j.last_run_status === 'failed'    ? '#ff6b6b'
+                         : j.last_run_status === 'running'   ? '#ffaa44'
+                         :                                      '#778';
+        const statusLabel = j.last_run_status || '— never run';
+        const durStr = j.last_run_duration_s != null
+            ? ` · ${Number(j.last_run_duration_s).toFixed(1)}s`
+            : '';
+        const failColor = Number(j.recent_failures_24h) > 0 ? '#ff6b6b' : '#556';
+        const failWeight = Number(j.recent_failures_24h) > 0 ? '700' : '400';
+        const inactiveChip = j.active
+            ? ''
+            : ` <span style="color:#ff6b6b;font-size:.68rem;background:rgba(255,107,107,.1);padding:1px 6px;border-radius:4px;margin-left:4px">inactive</span>`;
+        const msgTooltip = j.last_run_message
+            ? ` title="${_esc(j.last_run_message)}"`
+            : '';
+
+        html += `<tr>`
+             +  `<td><strong style="color:#cde">${_esc(j.jobname)}</strong>${inactiveChip}<div style="color:#556;font-size:.7rem;font-family:ui-monospace,monospace;margin-top:2px">${_esc(j.command_preview)}${j.command_preview.length >= 80 ? '…' : ''}</div></td>`
+             +  `<td style="font-family:ui-monospace,monospace;font-size:.78rem;color:#9ad">${_esc(j.schedule)}</td>`
+             +  `<td style="color:#aab;font-size:.78rem"${msgTooltip}>${fmtRel(j.last_run_at)}${durStr}</td>`
+             +  `<td style="color:${statusColor};font-weight:600;font-size:.78rem">${_esc(statusLabel)}</td>`
+             +  `<td style="color:#aab">${j.recent_runs_24h}</td>`
+             +  `<td style="color:${failColor};font-weight:${failWeight}">${j.recent_failures_24h}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+document.getElementById('btn-refresh-cron').addEventListener('click', loadCronStatus);
+loadCronStatus();
+
+document.getElementById('btn-gen-invite').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-gen-invite');
+    btn.textContent = 'Generating...'; btn.disabled = true;
+    const plan       = document.getElementById('invite-plan').value;
+    const maxUses    = parseInt(document.getElementById('invite-uses').value);
+    const expiryDays = parseInt(document.getElementById('invite-expiry').value);
+    const res = await createInviteCode({ plan, maxUses, expiryDays });
+    btn.textContent = 'Generate Code'; btn.disabled = false;
+
+    const resultEl = document.getElementById('invite-result');
+    if (res.ok) {
+        resultEl.style.display = 'block';
+        document.getElementById('invite-code-display').textContent = res.code;
+        document.getElementById('invite-link-display').textContent =
+            `${location.origin}/signup.html?invite=${res.code}&plan=${plan}`;
+        loadInvites();
+    } else {
+        resultEl.style.display = 'block';
+        resultEl.style.background = 'rgba(255,80,80,.06)';
+        resultEl.style.borderColor = 'rgba(255,80,80,.2)';
+        document.getElementById('invite-code-display').textContent = res.error || 'Failed';
+    }
+});
+
+document.getElementById('btn-copy-invite').addEventListener('click', () => {
+    const code = document.getElementById('invite-code-display').textContent;
+    navigator.clipboard.writeText(code).then(() => {
+        document.getElementById('btn-copy-invite').textContent = 'Copied!';
+        setTimeout(() => document.getElementById('btn-copy-invite').textContent = 'Copy', 2000);
+    });
+});
+
+// ── Email invite ────────────────────────────────────────────────────────────
+// Calls /api/invites/send (admin-gated) which generates a fresh code,
+// persists it with invited_email + sent_at populated, and dispatches via
+// Resend. Result panel shows the magic link so the admin can copy it as a
+// fallback if delivery fails.
+document.getElementById('btn-send-invite-email').addEventListener('click', async () => {
+    const btn      = document.getElementById('btn-send-invite-email');
+    const emailEl  = document.getElementById('invite-email-addr');
+    const nameEl   = document.getElementById('invite-email-name');
+    const planEl   = document.getElementById('invite-email-plan');
+    const expiryEl = document.getElementById('invite-email-expiry');
+    const result   = document.getElementById('invite-email-result');
+
+    const email      = emailEl.value.trim();
+    const name       = nameEl.value.trim() || undefined;
+    const plan       = planEl.value;
+    const expiryDays = parseInt(expiryEl.value, 10);
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        result.style.display    = 'block';
+        result.style.background = 'rgba(255,80,80,.06)';
+        result.style.border     = '1px solid rgba(255,80,80,.2)';
+        result.style.color      = '#ffaaaa';
+        result.textContent      = 'Enter a valid email address.';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+
+    const res = await sendInviteEmail({ email, name, plan, expiryDays });
+
+    btn.disabled = false;
+    btn.textContent = 'Send Invite';
+    result.style.display = 'block';
+
+    if (res.ok) {
+        result.style.background = 'rgba(78,255,145,.06)';
+        result.style.border     = '1px solid rgba(78,255,145,.2)';
+        result.style.color      = '#cfe';
+        result.innerHTML =
+            `<div style="color:#4eff91;font-weight:700;margin-bottom:6px">✓ Invite sent to ${email}</div>` +
+            `<div style="color:#778;font-size:.74rem;margin-bottom:4px">Code: <code style="color:#fff;letter-spacing:.08em">${res.code}</code></div>` +
+            `<div style="color:#778;font-size:.74rem;word-break:break-all">Link: <a href="${res.link}" target="_blank" style="color:#9ad">${res.link}</a></div>`;
+        emailEl.value = '';
+        nameEl.value  = '';
+        loadInvites();
+        loadEmailActivity();
+    } else {
+        result.style.background = 'rgba(255,80,80,.06)';
+        result.style.border     = '1px solid rgba(255,80,80,.2)';
+        result.style.color      = '#ffaaaa';
+        const detail = res.detail ? ` — ${res.detail}` : '';
+        result.textContent = `Send failed: ${res.error}${detail}`;
+    }
+});
+
+document.getElementById('btn-refresh-invites').addEventListener('click', loadInvites);
+
+// ── System Tab ───────────────────────────────────────────────────────────────
+// Config info
+const maskedKey = SUPABASE_ANON_KEY.length > 12 ? SUPABASE_ANON_KEY.slice(0,6) + '...' + SUPABASE_ANON_KEY.slice(-4) : '(not set)';
+document.getElementById('config-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Supabase URL</span><span class="cfg-v">${_esc(SUPABASE_URL)||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Publishable Key</span><span class="cfg-v">${_esc(maskedKey)}</span></div>
+    <div class="cfg"><span class="cfg-k">Configured</span><span class="cfg-v" style="color:${isConfigured()?'#4eff91':'#ff6060'}">${isConfigured()?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">GA4 ID</span><span class="cfg-v">${GA_MEASUREMENT_ID||'(not set)'}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Role</span><span class="cfg-v" style="color:#ffd700">${auth.getRole()}</span></div>
+    <div class="cfg"><span class="cfg-k">Your Plan</span><span class="cfg-v">${auth.getPlan()}</span></div>`;
+
+// System info
+document.getElementById('system-info').innerHTML = `
+    <div class="cfg"><span class="cfg-k">Browser</span><span class="cfg-v" style="font-size:.7rem;max-width:65%">${navigator.userAgent.slice(0,80)}...</span></div>
+    <div class="cfg"><span class="cfg-k">Viewport</span><span class="cfg-v">${innerWidth}x${innerHeight}</span></div>
+    <div class="cfg"><span class="cfg-k">Pixel Ratio</span><span class="cfg-v">${devicePixelRatio}</span></div>
+    <div class="cfg"><span class="cfg-k">Online</span><span class="cfg-v" style="color:${navigator.onLine?'#4eff91':'#ff6060'}">${navigator.onLine?'Yes':'No'}</span></div>
+    <div class="cfg"><span class="cfg-k">Loaded</span><span class="cfg-v">${new Date().toLocaleString()}</span></div>`;
+
+// Connection health check
+async function runHealthCheck() {
+    const bar = document.getElementById('conn-bar');
+    const dot = document.getElementById('conn-dot');
+    const lbl = document.getElementById('conn-label');
+    const list = document.getElementById('check-list');
+    bar.className = 'conn-bar loading'; dot.className = 'conn-dot loading';
+    lbl.textContent = 'Checking...'; list.innerHTML = '';
+
+    const result = await testConnection();
+    bar.className = 'conn-bar ' + (result.ok ? 'ok' : 'fail');
+    dot.className = 'conn-dot ' + (result.ok ? 'ok' : 'fail');
+    lbl.textContent = result.ok ? 'All systems operational' : 'Issues detected';
+
+    list.innerHTML = result.checks.map(c => {
+        const icon = c.ok ? '<span style="color:#4eff91">&#10003;</span>' : '<span style="color:#ff6060">&#10007;</span>';
+        return `<li class="check-item">${icon} <span style="color:#ccc;flex:1">${c.name}</span><span class="check-ms">${c.ms}ms</span></li>`
+            + (c.detail ? `<li class="check-item" style="padding-top:0"><span style="width:18px"></span><span style="color:#ff8080;font-size:.75rem">${c.detail}</span></li>` : '');
+    }).join('');
+}
+runHealthCheck();
+document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
+document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
+document.getElementById('btn-export').addEventListener('click', async () => {
+    const r = await testConnection();
+    const blob = new Blob([JSON.stringify({ timestamp: new Date().toISOString(), supabase_url: SUPABASE_URL, ok: r.ok, checks: r.checks, user: { email: auth.getUser()?.email, role: auth.getRole() } }, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'health-report.json'; a.click();
+});
+</script>
+</body>
+</html>

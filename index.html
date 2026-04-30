@@ -1,438 +1,1304 @@
-<html lang="en-us"><script src="https://pygame-web.github.io/cdn/0.9.3/pythons.js" type=module id="site" data-python="python3.12" data-LINES=42 data-COLUMNS=132 data-os="vtx,snd,gui" async defer>#<!--
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Parker Physics — Real-time Astrophysics Simulations</title>
+<meta name="description" content="Scientifically accurate, WebGL-powered astrophysics simulations driven by live NASA and NOAA satellite data. Explore the Sun, Earth's magnetosphere, space weather, and deep space.">
+<meta name="theme-color" content="#03010e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Parker Physics">
+<meta property="og:title" content="Parker Physics — Real-time Astrophysics Simulations">
+<meta property="og:description" content="Live NASA/NOAA data. 17+ WebGL simulations. Free to start.">
+<meta property="og:image" content="ParkersPhysics_logo2.jpg">
+<meta property="og:type" content="website">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{overflow-y:auto;scroll-behavior:smooth}
+body{min-height:100vh;overflow-x:hidden;background:#03010e;color:#cdd;font-family:'Segoe UI',system-ui,sans-serif}
+a{text-decoration:none;color:inherit}
+img{display:block}
+.skip-link{position:absolute;left:-9999px;top:0;background:#ffd700;color:#000;padding:8px 16px;font-weight:700;border-radius:0 0 6px 6px;z-index:9999}
+.skip-link:focus{left:16px}
 
-print("""
-Loading clstl_smltr from clstl_smltr.apk
-    Pygbag Version : 0.9.3
-    Template Version : 0.9.3
-    Python  : 3.12
-    CDN URL : https://pygame-web.github.io/cdn/0.9.3/
-    Screen  : 1280x720
-    Title   : clstl_smltr
-    Folder  : clstl_smltr
-    Authors : pgw
-    SPDX-License-Identifier: cookiecutter.spdx
-
-""")
-
-import sys
-import asyncio
-import platform
-import json
-from pathlib import Path
-
-# do not rename
-async def custom_site():
-    import embed
-    platform.document.body.style.background = "#7f7f7f"
-
-    platform.window.transfer.hidden = true
-    platform.window.canvas.style.visibility = "visible"
-
-
-    bundle = "clstl_smltr"
-
-    # the C or js loader could do that but be explicit.
-    appdir = Path(f"/data/data/{bundle}") # /data/data/clstl_smltr
-    appdir.mkdir()
-
-
-    # unpack filesystem from compressed archive into work dir
-    if platform.window.location.host.find('.itch.zone')>0:
-        import zipfile
-        async with platform.fopen("clstl_smltr.apk", "rb") as archive:
-            with zipfile.ZipFile(archive) as zip_ref:
-                zip_ref.extractall(appdir.as_posix())
-    else:
-        import tarfile
-        async with platform.fopen("clstl_smltr.tar.gz", "rb") as archive:
-            tar = tarfile.open(fileobj=archive, mode="r:gz")
-            tar.extractall(path=appdir.as_posix(), filter='tar')
-            tar.close()
-
-    # preloader will change to work dir and prepend it to sys.path
-    platform.run_main(PyConfig, loaderhome= appdir / "assets", loadermain=None)
-
-
-    # wait preloading complete : that includes images and wasm compilation of bundled modules
-    while embed.counter()<0:
-        await asyncio.sleep(.1)
-
-    main = appdir / "assets" / "main.py"
-
-    # TODO: test for window.webkitAudioContext and block aio loop until gesture if accessing media manager play
-    # before a gesture is recorded ( touch or click )
-
-    # test/wait user media interaction
-    if not platform.window.MM.UME:
-
-        # now that apk is mounted we have access to font cache
-        # but we need to fill __file__ that is not yet set
-        __import__(__name__).__file__ = main
-
-        # now make a prompt
-        msg  = "Ready to start ! Please click/touch page"
-        platform.window.infobox.innerText = msg
-        print("\n"*4, f"    * Waiting for media user engagement. {msg} *" , "\n"*4)
-
-        while not platform.window.MM.UME:
-            await asyncio.sleep(.1)
-
-    # start async top level machinery if not started and add a console in any case if requested.
-    await TopLevel_async_handler.start_toplevel(platform.shell, console=window.python.config.debug)
-
-    # now that apk is mounted we have access to font cache
-    # but we need to fill __file__/__name__ that are not yet set
-    __import__(__name__).__file__ = main
-
-
-    def ui_callback(pkg):
-        platform.window.infobox.innerText = f"installing {pkg}"
-
-    await shell.source(main, callback=ui_callback)
-
-    # if you don't reach that step
-    # your main.py has an infinite sync loop somewhere !
-
-    platform.window.infobox.style.display = "none"
-    platform.window.config.gui_divider = 1
-    platform.window.window_resize()
-    print("default.tmpl: done")
-
-    shell.interactive()
-
-asyncio.run( custom_site() )
-
-
-
-
-
-
-
-
-
-
-
-
-# BEGIN BLOCK
-#
-# now this is the html part you can (and should) customize
-# It is not mandatory : pygame-script when it reads the first line (also called
-# shebang ) of above code create absolute minimal widget set
-# required for running with default rules
-#
-# do not alter that comment block it is separating python code from html code
-# =============================================================================
-# --></script><head><!--
-//=============================================================================
-//
-//
-//
-//
-//
-//
-//
-
-    {%- if cookiecutter.comment != "" -%}
-{{cookiecutter.comment}}
-    {% endif %}
-
---><script type="application/javascript">
-// END BLOCK
-
-
-
-// this dict is available under PyConfig.config from __main__
-
-config = {
-    xtermjs : "1" ,
-    _sdl2 : "canvas",
-    user_canvas : 0,
-    user_canvas_managed : 0,
-    gui_divider : 2,
-    ume_block : 1,
-    can_close : 0,
-    archive : "clstl_smltr",
-    gui_debug : 2,
-    cdn : "https://pygame-web.github.io/cdn/0.9.3/",
-    autorun : 0,
-    PYBUILD : "3.12",
-    fb_ar   :  1.77,
-    fb_width : "1280",
-    fb_height : "720"
+/* ── NAV ─────────────────────────────────────────────────────────────────── */
+nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgba(4,2,16,.95);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;padding:0 16px;gap:6px}
+.nav-brand{display:flex;align-items:center;gap:8px;font-size:.95rem;font-weight:700;white-space:nowrap;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-right:8px}
+.nav-logo-img{height:30px;width:auto;border-radius:50%;flex-shrink:0}
+.nav-menu{display:flex;align-items:center;gap:4px;flex:1;min-width:0}
+.nav-item{padding:5px 10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:5px;color:#ccc;font-size:.8rem;white-space:nowrap;transition:background .2s,border-color .2s;flex-shrink:0}
+.nav-item:hover{background:rgba(255,255,255,.16);border-color:rgba(255,200,0,.4);color:#fff}
+.nav-item.active{background:linear-gradient(45deg,#ff8c00,#ffd700);border-color:#ff8c00;color:#000;font-weight:600}
+.nav-spacer{flex:1}
+.nav-auth-sep{width:1px;height:22px;background:rgba(255,255,255,.15);margin:0 3px;flex-shrink:0}
+.nav-login{background:transparent!important;border-color:rgba(255,255,255,.22)!important;color:#bbb!important}
+.nav-login:hover{background:rgba(255,255,255,.1)!important;color:#fff!important;border-color:rgba(255,255,255,.4)!important}
+.nav-signup{background:linear-gradient(45deg,#ff8c00,#ffd700)!important;border-color:#ff8c00!important;color:#000!important;font-weight:700!important}
+.nav-signup:hover{filter:brightness(1.12)!important}
+.nav-burger{display:none;margin-left:auto;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:5px;color:#fff;padding:5px 10px;font-size:1.1rem;cursor:pointer;line-height:1;transition:background .2s}
+.nav-burger:hover{background:rgba(255,255,255,.18)}
+@media(max-width:860px){
+  .nav-burger{display:block}
+  .nav-spacer,.nav-auth-sep{display:none}
+  .nav-menu{display:none;flex-direction:column;align-items:stretch;position:absolute;top:50px;left:0;right:0;background:rgba(3,1,14,.98);backdrop-filter:blur(18px);border-bottom:1px solid rgba(255,255,255,.1);padding:8px 12px 14px;gap:3px;z-index:700;max-height:calc(100vh - 50px);overflow-y:auto}
+  .nav-menu.open{display:flex}
+  .nav-item{padding:11px 14px;font-size:.9rem}
 }
 
-function show_infobox() {
-    infobox.style.display = "block";
+/* ── HERO ─────────────────────────────────────────────────────────────────── */
+#hero{position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;background:radial-gradient(ellipse at 30% 50%,#1a0800 0%,#03010e 70%)}
+#hero-canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:auto;cursor:grab;z-index:0}
+.hero-content{position:relative;z-index:1;max-width:740px;padding:80px 24px 100px;text-align:center}
+.hero-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 14px;background:rgba(255,180,60,.1);border:1px solid rgba(255,180,60,.3);border-radius:20px;font-size:.78rem;color:#ffb830;letter-spacing:.04em;margin-bottom:28px}
+.hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;background:#ffb830;box-shadow:0 0 8px #ffb830;animation:pulse-dot 1.8s ease-in-out infinite;flex-shrink:0}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-h1{font-size:clamp(2.2rem,6vw,4rem);font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:20px;background:linear-gradient(135deg,#fff 0%,#ffd700 50%,#ff6600 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-sub{font-size:clamp(.95rem,2.2vw,1.15rem);color:#99aabb;line-height:1.75;max-width:580px;margin:0 auto 36px}
+.hero-cta{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin-bottom:52px}
+.btn-primary{padding:14px 32px;background:linear-gradient(135deg,#ff8c00,#ffd700);border-radius:8px;color:#000;font-weight:700;font-size:1rem;letter-spacing:.01em;transition:filter .2s,transform .15s;border:none;cursor:pointer}
+.btn-primary:hover{filter:brightness(1.12);transform:translateY(-2px)}
+.btn-secondary{padding:14px 32px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:1rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
+.btn-secondary:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.5);color:#fff;transform:translateY(-2px)}
+.hero-stats{display:flex;flex-wrap:wrap;gap:10px 32px;justify-content:center}
+.hero-stat{display:flex;flex-direction:column;align-items:center;gap:2px}
+.hero-stat-num{font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1}
+.hero-stat-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;color:#778}
 
-    // Measure box
-    const w = infobox.offsetWidth;
-    const h = infobox.offsetHeight;
+/* ── SHARED SECTION CHROME ────────────────────────────────────────────────── */
+.section{padding:88px 24px}
+.section-inner{max-width:1160px;margin:0 auto}
+.section-label{font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:#ff8c00;font-weight:700;margin-bottom:12px}
+.section-h2{font-size:clamp(1.6rem,4vw,2.6rem);font-weight:800;letter-spacing:-.02em;color:#e8f4ff;line-height:1.15;margin-bottom:16px}
+.section-sub{font-size:1rem;color:#778;line-height:1.7;max-width:620px;margin-bottom:52px}
+.fade-in{opacity:0;transform:translateY(28px);transition:opacity .65s ease,transform .65s ease}
+.fade-in.visible{opacity:1;transform:none}
 
-    // Center in viewport
-    const left = (window.innerWidth - w) / 2;
-    const top = (window.innerHeight - h) / 2;
+/* ── SIMULATIONS GRID ─────────────────────────────────────────────────────── */
+#simulations{background:#03010e}
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.sim-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:14px;padding:26px 24px 22px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s,box-shadow .2s;cursor:pointer}
+.sim-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent,#ffd700)}
+.sim-card:hover{transform:translateY(-5px);box-shadow:0 12px 40px rgba(0,0,0,.5);border-color:var(--accent,rgba(255,255,255,.2))}
+.sim-thumb{width:100%;height:160px;border-radius:8px;margin-bottom:18px;overflow:hidden;background:var(--thumb-bg,rgba(255,255,255,.05));border:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:center;font-size:3.5rem;position:relative}
+.sim-thumb-label{position:absolute;bottom:6px;right:8px;font-size:.58rem;font-family:monospace;color:rgba(255,255,255,.35);letter-spacing:.06em;text-transform:uppercase}
+.sim-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.sim-card-title{font-size:1.05rem;font-weight:700;color:#e8f4ff}
+.sim-tier{font-size:.6rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border-radius:4px;flex-shrink:0}
+.sim-tier.free{background:rgba(0,200,100,.12);color:#00e874;border:1px solid rgba(0,200,100,.25)}
+.sim-tier.basic{background:rgba(0,180,255,.12);color:#00c6ff;border:1px solid rgba(0,180,255,.25)}
+.sim-tier.advanced{background:rgba(160,80,255,.12);color:#c080ff;border:1px solid rgba(160,80,255,.25)}
+.sim-card-desc{font-size:.83rem;color:#778;line-height:1.6;margin-bottom:18px}
+.sim-link{display:inline-flex;align-items:center;gap:6px;font-size:.82rem;font-weight:600;color:var(--accent,#ffd700);transition:gap .15s}
+.sim-link:hover{gap:10px}
 
-    infobox.style.left = left + "px";
-    infobox.style.top = top + "px";
+/* ── STATS STRIP ──────────────────────────────────────────────────────────── */
+#stats{background:rgba(255,140,0,.04);border-top:1px solid rgba(255,140,0,.1);border-bottom:1px solid rgba(255,140,0,.1);padding:60px 24px}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:24px 16px;text-align:center}
+.stat-item{}
+.stat-num{display:block;font-size:2.4rem;font-weight:800;background:linear-gradient(135deg,#ffd700,#ff6600);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1;margin-bottom:6px}
+.stat-desc{font-size:.78rem;color:#778;line-height:1.4}
+
+/* ── DATA SOURCES ─────────────────────────────────────────────────────────── */
+#data-sources{background:#040109}
+.sources-grid{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.source-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:8px;font-size:.8rem;font-family:'Segoe UI',monospace;transition:border-color .2s,background .2s}
+.source-chip:hover{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2)}
+.source-chip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;animation:pulse-dot 2.2s ease-in-out infinite}
+.source-chip span{color:#889}
+.source-chip strong{color:#ccd}
+.source-freq{font-size:.65rem;font-family:monospace;color:#556;margin-left:4px}
+
+/* ── FEATURES ─────────────────────────────────────────────────────────────── */
+#features{background:#03010e}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
+.feature-card{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:32px 28px}
+.feature-icon{font-size:2rem;margin-bottom:16px}
+.feature-title{font-size:1.05rem;font-weight:700;color:#e8f4ff;margin-bottom:10px}
+.feature-desc{font-size:.85rem;color:#667;line-height:1.7}
+.feature-desc strong{color:#99b}
+
+/* ── PRICING TEASER ───────────────────────────────────────────────────────── */
+#pricing{background:rgba(0,0,10,.6)}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-bottom:28px}
+.price-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:16px;padding:32px 28px;position:relative;transition:transform .2s,border-color .2s}
+.price-card:hover{transform:translateY(-3px)}
+.price-card.popular{border-color:rgba(255,200,0,.35);background:rgba(255,180,0,.05)}
+.price-popular-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000;font-size:.65rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em;padding:4px 14px;border-radius:20px;white-space:nowrap}
+.price-name{font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;color:#889;margin-bottom:12px}
+.price-amount{font-size:2.8rem;font-weight:800;color:#e8f4ff;line-height:1;margin-bottom:6px}
+.price-amount span{font-size:1rem;font-weight:400;color:#778}
+.price-tagline{font-size:.82rem;color:#778;margin-bottom:24px;line-height:1.5}
+.price-features{list-style:none;margin-bottom:28px;display:flex;flex-direction:column;gap:8px}
+.price-features li{font-size:.83rem;color:#99aabb;display:flex;align-items:flex-start;gap:8px}
+.price-features li::before{content:'✓';color:#00e874;font-weight:700;flex-shrink:0;margin-top:1px}
+.price-btn{display:block;text-align:center;padding:12px;border-radius:8px;font-weight:700;font-size:.9rem;transition:filter .2s,transform .15s}
+.price-btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+.price-btn.free-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#cdd}
+.price-btn.basic-btn{background:linear-gradient(135deg,#ff8c00,#ffd700);color:#000}
+.price-btn.adv-btn{background:linear-gradient(135deg,#7b2ff7,#00c6ff);color:#fff}
+.pricing-compare-link{text-align:center;font-size:.88rem;color:#778}
+.pricing-compare-link a{color:#ffb830;font-weight:600;border-bottom:1px solid rgba(255,180,60,.3);transition:color .2s,border-color .2s}
+.pricing-compare-link a:hover{color:#ffd700;border-color:#ffd700}
+
+/* ── FINAL CTA ────────────────────────────────────────────────────────────── */
+#cta{background:radial-gradient(ellipse at 50% 0%,rgba(255,140,0,.12) 0%,#03010e 70%);border-top:1px solid rgba(255,140,0,.1);text-align:center;padding:100px 24px}
+#cta .section-h2{background:linear-gradient(135deg,#fff,#ffd700);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+#cta .section-sub{margin:0 auto 36px}
+.cta-actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
+.cta-note{margin-top:16px;font-size:.78rem;color:#556}
+
+/* ── FOOTER ───────────────────────────────────────────────────────────────── */
+footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60px 24px 32px}
+.footer-inner{max-width:1160px;margin:0 auto}
+.footer-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:48px}
+@media(max-width:768px){.footer-grid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.footer-grid{grid-template-columns:1fr}}
+.footer-brand-logo{height:36px;width:auto;border-radius:50%;margin-bottom:12px}
+.footer-brand-name{font-size:1rem;font-weight:700;background:linear-gradient(45deg,#ffd700,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:8px}
+.footer-tagline{font-size:.8rem;color:#556;line-height:1.6;margin-bottom:14px}
+.footer-attribution{font-size:.68rem;color:#445;line-height:1.8;font-family:monospace}
+.footer-col-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.1em;color:#778;font-weight:700;margin-bottom:14px}
+.footer-links{display:flex;flex-direction:column;gap:8px}
+.footer-links a{font-size:.83rem;color:#556;transition:color .2s}
+.footer-links a:hover{color:#ffb830}
+.footer-bottom{padding-top:24px;border-top:1px solid rgba(255,255,255,.05);display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center;font-size:.73rem;color:#445}
+.footer-bottom a{color:#445;transition:color .2s}
+.footer-bottom a:hover{color:#778}
+
+@media(max-width:640px){
+  .hero-cta{flex-direction:column;align-items:center}
+  .btn-primary,.btn-secondary{width:100%;max-width:320px;text-align:center}
+  .section{padding:60px 16px}
 }
-
-</script>
-
-    <title>clstl_smltr</title>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="viewport" content="height=device-height, initial-scale=1.0">
-    <meta name="mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-capable" content="yes"/>
-
-
-    <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
-
-    <style>
-        #status {
-            display: inline-block;
-            vertical-align: top;
-            margin-top: 20px;
-            margin-left: 30px;
-            font-weight: bold;
-            color: rgb(120, 120, 120);
-        }
-
-        #progress {
-            height: 20px;
-            width: 300px;
-        }
-
-        #infobox {
-            position: fixed; /* center relative to viewport */
-            background: green;
-            color: blue;
-            font-weight: bold;
-            padding: 12px 24px;
- /*           display: none; */
-            z-index: 999999;
-        }
-        div.emscripten { text-align: center; }
-        div.emscripten_border { border: 1px solid black; }
-        div.thick_border { border: 4px solid black; }
-
-        /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
-        /* average size of droid screen 470dp x 320dp  */
-        canvas.emscripten {
-            border: 0px none;
-            background-color: transparent;
-            width: 100%;
-            height: 100%;
-            z-index: 5;
-
-            padding: 0;
-            margin: 0 auto;
-
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            left: 0;
-            right: 0;
-        }
-
-        body {
-            font-family: arial;
-            margin: 0;
-            padding: none;
-            background-color:powderblue;
-        }
-
-        .topright{
-           position:absolute;
-           top:0px;
-           right:0px;
-        }
-
-        .bottomright {
-            position:absolute;
-            top: 40%;
-            right: 0px;
-        }
-
-        .center {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .trinfo{
-           position: relative;
-           right: 0px;
-           border: 1px solid black;
-        }
-
-        .framed{
-           position: relative;
-           top: 150px;
-           right: 10px;
-           border: 1px solid black;
-        }
-    </style>
-
-    <script>
-/*
-        if (navigator.serviceWorker)
-            navigator.serviceWorker.register("https://pygame-web.github.io/cdn/0.9.3/pygbag0.9.3.js")
-        else
-            console.warn("Service workers not supported")
-*/
-    </script>
-
-    <script src="https://pygame-web.github.io/cdn/0.9.3//browserfs.min.js"></script>
-
+</style>
 </head>
-
 <body>
 
-    <div id="transfer" align=center>
-<!--        <div class="spinner" id='spinner'></div> -->
-        <div class="emscripten" id="status">Downloading...</div>
-        <div class="emscripten">
-            <progress value="0" max="100" id="progress"></progress>
+<script type="importmap">
+{"imports":{
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("home");</script>
+
+<main id="main-content">
+
+<!-- ── HERO ───────────────────────────────────────────────────────────────── -->
+<section id="hero" aria-label="Hero — Parker Physics App">
+  <canvas id="hero-canvas" aria-hidden="true"></canvas>
+  <div class="hero-content">
+    <div class="hero-badge" role="status" aria-live="polite">Live NASA &amp; NOAA Data — Updated Every 60 Seconds</div>
+    <h1 class="hero-h1">Real-time astrophysics<br>at your fingertips</h1>
+    <p class="hero-sub">Explore the Sun's corona, Earth's magnetosphere, space weather events, and deep stellar systems — powered by live satellite feeds and physically accurate WebGL simulations. Built for researchers, educators, and anyone who wants to understand the cosmos that shapes our world.</p>
+    <div class="hero-cta" role="group" aria-label="Primary actions">
+      <a href="signup.html" class="btn-primary" id="hero-cta-primary">Get Started — Free</a>
+      <a href="space-weather.html" class="btn-secondary" aria-label="Explore the live space weather dashboard">Explore Live Demo <span aria-hidden="true">→</span></a>
+    </div>
+    <div class="hero-stats" role="list" aria-label="App statistics">
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">17+</span><span class="hero-stat-label">Simulations</span></div>
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">60s</span><span class="hero-stat-label">Data Refresh</span></div>
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">3D</span><span class="hero-stat-label">WebGL Engine</span></div>
+      <div class="hero-stat" role="listitem"><span class="hero-stat-num">Free</span><span class="hero-stat-label">to Start</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURED SIMULATIONS ───────────────────────────────────────────────── -->
+<section id="simulations" class="section" aria-labelledby="sims-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in">Simulations</div>
+    <h2 class="section-h2 fade-in" id="sims-heading">Five windows into the solar system</h2>
+    <p class="section-sub fade-in">Each simulation runs on real physics equations and pulls from live satellite feeds. What you see is what's actually happening — right now.</p>
+    <div class="sim-grid">
+
+      <article class="sim-card fade-in" style="--accent:#00c6ff;--thumb-bg:linear-gradient(135deg,#001830 0%,#003860 50%,#002040 100%)">
+        <div class="sim-thumb" data-preview="earth" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Earth Magnetosphere</h3>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
         </div>
-    </div>
+        <p class="sim-card-desc">Real-time 3D bow shock, magnetopause, aurora curtains, and substorm dynamics. Driven by live Kp index, IMF Bz, and solar wind pressure from NOAA SWPC.</p>
+        <a href="earth.html" class="sim-link" aria-label="Explore Earth Magnetosphere simulation" style="--accent:#00c6ff">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
 
-
-
-    <canvas class="emscripten" id="canvas"
-width="1px"
-height="1px"
-    oncontextmenu="event.preventDefault()" tabindex=1>
-    </canvas>
-
-    <canvas class="emscripten" id="canvas3d"
-width="1280px"
-height="720px"
-    oncontextmenu="event.preventDefault()" tabindex=1 hidden>
-    </canvas>
-
-    <div id="infobox">Loading, please wait ...</div>
-
-    <div id=html></div>
-
-    <div id=crt  class=bottomright >
-
-        <div id="system" hidden>
-            <div class="button-container">
-                <button id="aiostop" disabled>AIO ⏏︎</button>
-                <button id="aiopaused_true" disabled>AIO ■</button>
-                <button id="aiopaused_false" disabled>AIO ▶</button>
-                <button id="pygame_mixer_music_pause" disabled>Music ■</button>
-            </div>
-
-            <div class="button-container">
-                <div id=load_min>min</div>
-                <div id=load_avg>avg</div>
-                <div id=load_max>max</div>
-              <button id="load_rst" disabled>RESET</button>
-            </div>
-
-            <div id="level">(battery level unknown)</div>
-            <div id="stateBattery">(charging state unknown)</div>
-
+      <article class="sim-card fade-in" style="--accent:#ffb830;--thumb-bg:linear-gradient(135deg,#1a0800 0%,#3d1500 50%,#1a0800 100%)">
+        <div class="sim-thumb" data-preview="sun" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Solar Physics Engine</h3>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
         </div>
+        <p class="sim-card-desc">Parker spiral solar wind, coronal heating, active region tracking, and real-time GOES X-ray flux. CME events pulled from NASA DONKI with impact time estimates.</p>
+        <a href="sun.html" class="sim-link" aria-label="Explore Solar Physics simulation" style="--accent:#ffb830">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
 
-        <div id=box class="emscripten_border" hidden=true>
-
-            <div id="info" class="trinfo"></div>
-
-            <iframe id="iframe" class="framed" name="iframe"
-width="470px" height="90%"
-allowtransparency="true"
-style="z-index: 10;"
-style="background: #FFFFFF;"
-frameborder="1"
-                allowfullscreen="true"
-                webkitallowfullscreen="true"
-                msallowfullscreen="true"
-                mozallowfullscreen="true"
-                sandbox="allow-same-origin allow-top-navigation allow-scripts allow-pointer-lock"
-                allow="autoplay; fullscreen *; geolocation; microphone; camera; midi; monetization; xr-spatial-tracking; gamepad; gyroscope; accelerometer; xr; cross-origin-isolated"
-                src="https://pygame-web.github.io/cdn/0.9.3/empty.html"
-                scrolling="yes">
-            </iframe>
+      <article class="sim-card fade-in" style="--accent:#c080ff;--thumb-bg:linear-gradient(135deg,#0d0020 0%,#200040 50%,#0d0020 100%)">
+        <div class="sim-thumb" data-preview="space-weather" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Space Weather Dashboard</h3>
+          <span class="sim-tier free" aria-label="Available on Free tier">Free</span>
         </div>
+        <p class="sim-card-desc">Full NOAA/SWPC dashboard with heliosphere 3D visualization, storm alerts, aurora forecast, and solar flare history. The control room for space weather operators.</p>
+        <a href="space-weather.html" class="sim-link" aria-label="Explore Space Weather Dashboard" style="--accent:#c080ff">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="sim-card fade-in" style="--accent:#ffd700;--thumb-bg:linear-gradient(135deg,#080808 0%,#1a1400 50%,#080808 100%)">
+        <div class="sim-thumb" data-preview="stars" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Stellar Physics Simulator</h3>
+          <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
+        </div>
+        <p class="sim-card-desc">Multi-star system simulator — Sirius binary orbital mechanics, Betelgeuse convection, Vega rapid rotation, WR 102 Wolf-Rayet winds. Kepler integration with real stellar parameters.</p>
+        <a href="star3d.html" class="sim-link" aria-label="Explore Stellar Physics Simulator" style="--accent:#ffd700">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
+
+      <article class="sim-card fade-in" style="--accent:#7b2ff7;--thumb-bg:linear-gradient(135deg,#050010 0%,#140030 50%,#050010 100%)">
+        <div class="sim-thumb" data-preview="galaxy" aria-hidden="true"><span class="sim-thumb-label">Live Preview</span></div>
+        <div class="sim-card-header">
+          <h3 class="sim-card-title">Galactic Map</h3>
+          <span class="sim-tier basic" aria-label="Available on Basic tier">Basic</span>
+        </div>
+        <p class="sim-card-desc">Navigate the Milky Way's spiral arms, stellar populations, and our position in the galaxy. Positions calculated from VSOP87 ephemeris and parallax-corrected Hipparcos catalog data.</p>
+        <a href="galactic-map.html" class="sim-link" aria-label="Explore Galactic Map simulation" style="--accent:#7b2ff7">Explore simulation <span aria-hidden="true">→</span></a>
+      </article>
 
     </div>
+  </div>
+</section>
 
-
-    <div id="dlg" hidden>
-        <input type="file" id="dlg_multifile" multiple accept="image/*">
-        <label for="dlg_multifile">Select files</label>
+<!-- ── STATS ──────────────────────────────────────────────────────────────── -->
+<section id="stats" aria-labelledby="stats-heading">
+  <div class="section-inner">
+    <h2 class="section-h2 fade-in" id="stats-heading" style="text-align:center;margin-bottom:44px">The numbers behind the engine</h2>
+    <div class="stats-grid">
+      <div class="stat-item fade-in"><span class="stat-num">50,000</span><span class="stat-desc">GPU particles<br>per scene</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">60s</span><span class="stat-desc">Solar wind data<br>refresh rate</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">20s</span><span class="stat-desc">Storm mode<br>refresh rate</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">17+</span><span class="stat-desc">Scientific<br>simulations</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">11</span><span class="stat-desc">Live data<br>feeds</span></div>
+      <div class="stat-item fade-in"><span class="stat-num">6</span><span class="stat-desc">Physics models<br>implemented</span></div>
     </div>
+  </div>
+</section>
 
-    <div id="pyconsole">
-        <div id="terminal" tabIndex=1 align="left"></div>
+<!-- ── DATA SOURCES ───────────────────────────────────────────────────────── -->
+<section id="data-sources" class="section" aria-labelledby="sources-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in">Data Provenance</div>
+    <h2 class="section-h2 fade-in" id="sources-heading">Live feeds from the agencies that monitor the Sun</h2>
+    <p class="section-sub fade-in">Every number in this app comes from a real satellite instrument. No models substituting for measurements. When a solar flare fires, you see it within 60 seconds.</p>
+    <div class="sources-grid fade-in">
+      <div class="source-chip"><span class="source-chip-dot" style="background:#00e874"></span><strong>NOAA SWPC</strong><span>Solar Wind, Kp, X-ray, Alerts</span><span class="source-freq">60s</span></div>
+      <div class="source-chip"><span class="source-chip-dot" style="background:#ffb830"></span><strong>NASA DONKI</strong><span>CME, Flares, SEP, GST events</span><span class="source-freq">15 min</span></div>
+      <div class="source-chip"><span class="source-chip-dot" style="background:#00c6ff"></span><strong>GOES-16/18</strong><span>X-ray flux, Protons, Electrons</span><span class="source-freq">1 min</span></div>
+      <div class="source-chip"><span class="source-chip-dot" style="background:#c080ff"></span><strong>ACE / DSCOVR</strong><span>Solar wind at L1 Lagrange point</span><span class="source-freq">1 min</span></div>
+      <div class="source-chip"><span class="source-chip-dot" style="background:#ff8c00"></span><strong>JPL Horizons</strong><span>Planetary ephemeris &amp; positions</span><span class="source-freq">Daily</span></div>
+      <div class="source-chip"><span class="source-chip-dot" style="background:#0088ff"></span><strong>Kyoto WDC-C2</strong><span>Dst index — geomagnetic storms</span><span class="source-freq">1 hr</span></div>
     </div>
+  </div>
+</section>
 
-    <script type="application/javascript">
+<!-- ── FEATURES ───────────────────────────────────────────────────────────── -->
+<section id="features" class="section" aria-labelledby="features-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in">Why Parker Physics</div>
+    <h2 class="section-h2 fade-in" id="features-heading">Built on real physics. Run on real data.</h2>
+    <p class="section-sub fade-in">Most space visualizations are pre-rendered or decorative. Ours compute the physics equations live and pull actual satellite telemetry — the same data NASA mission operators use.</p>
+    <div class="features-grid">
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">📡</div>
+        <h3 class="feature-title">Live Satellite Data</h3>
+        <p class="feature-desc">Geomagnetic storm indices, solar wind velocity, IMF Bz, X-ray flux, and CME arrival times update continuously from <strong>NOAA SWPC, NASA DONKI, and GOES satellites</strong>. Storm mode escalates refresh rates to 20 seconds when Kp ≥ 6 or an X-class flare fires.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">⚛️</div>
+        <h3 class="feature-title">Real Physics Engines</h3>
+        <p class="feature-desc">Simulations implement published equations: <strong>Parker spiral</strong> solar wind, <strong>Shue et al. (1998)</strong> magnetopause, <strong>Rankine-Hugoniot</strong> bow shock, <strong>VSOP87</strong> planetary ephemeris, and <strong>McPherron (1995)</strong> substorm index — not artistic approximations.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <div class="feature-icon" aria-hidden="true">🎮</div>
+        <h3 class="feature-title">3D WebGL Rendering</h3>
+        <p class="feature-desc">Three.js with custom <strong>GLSL shaders</strong>, HDR bloom post-processing, and GPU-accelerated particle systems. Up to <strong>50,000 particles per scene</strong>. Runs entirely in your browser — no downloads, no installs, no plugins.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
-    globalThis.__canvas_resized = (self, ecw, ech) => {
-        console.warn("TODO: panda3d canvas monitor", self, ecw, ech)
+<!-- ── PRICING TEASER ─────────────────────────────────────────────────────── -->
+<section id="pricing" class="section" aria-labelledby="pricing-heading">
+  <div class="section-inner">
+    <div class="section-label fade-in" style="text-align:center">Pricing</div>
+    <h2 class="section-h2 fade-in" id="pricing-heading" style="text-align:center">Start free. Scale as you explore.</h2>
+    <p class="section-sub fade-in" style="text-align:center;margin:0 auto 52px">No credit card for the free tier. Cancel anytime on paid plans.</p>
+    <div class="pricing-grid">
+
+      <div class="price-card fade-in">
+        <div class="price-name">Free Trial</div>
+        <div class="price-amount">$0<span> / forever</span></div>
+        <p class="price-tagline">Everything you need to experience real space weather data.</p>
+        <ul class="price-features" aria-label="Free tier features">
+          <li>3 core simulations (Sun, Earth, Space Weather)</li>
+          <li>Live NOAA solar wind &amp; Kp data</li>
+          <li>Basic space weather dashboard</li>
+          <li>Community access</li>
+        </ul>
+        <a href="signup.html?plan=free" class="price-btn free-btn" aria-label="Get started with the free plan">Get Started Free</a>
+      </div>
+
+      <div class="price-card popular fade-in">
+        <span class="price-popular-badge" aria-label="Most popular plan">Most Popular</span>
+        <div class="price-name">Basic</div>
+        <div class="price-amount">$10<span> / month</span></div>
+        <p class="price-tagline">Full simulation access for researchers, students, and enthusiasts.</p>
+        <ul class="price-features" aria-label="Basic tier features">
+          <li>All 17 simulations unlocked</li>
+          <li>Full 3D WebGL rendering</li>
+          <li>Live NASA DONKI + NOAA feeds</li>
+          <li>Real-time storm alerts</li>
+          <li>Email support</li>
+        </ul>
+        <a href="signup.html?plan=basic" class="price-btn basic-btn" aria-label="Start the Basic plan for $10 per month">Start Basic — $10/mo</a>
+      </div>
+
+      <div class="price-card fade-in">
+        <div class="price-name">Advanced</div>
+        <div class="price-amount">$100<span> / month</span></div>
+        <p class="price-tagline">For teams, agencies, and applications that need data pipelines.</p>
+        <ul class="price-features" aria-label="Advanced tier features">
+          <li>Everything in Basic</li>
+          <li>Rust/WASM high-performance engine</li>
+          <li>REST API + CSV/JSON export</li>
+          <li>Solar wind prediction models</li>
+          <li>Priority &amp; dedicated support</li>
+        </ul>
+        <a href="signup.html?plan=advanced" class="price-btn adv-btn" aria-label="Start the Advanced plan for $100 per month">Start Advanced — $100/mo</a>
+      </div>
+
+    </div>
+    <p class="pricing-compare-link fade-in">Need to compare every feature? <a href="pricing.html" aria-label="View the full pricing and feature comparison table">See the full comparison table →</a></p>
+  </div>
+</section>
+
+<!-- ── FINAL CTA ───────────────────────────────────────────────────────────── -->
+<section id="cta" aria-labelledby="cta-heading">
+  <div class="section-inner">
+    <h2 class="section-h2 fade-in" id="cta-heading">Start your journey through the cosmos</h2>
+    <p class="section-sub fade-in" style="margin:0 auto 36px">Join researchers, educators, and space enthusiasts already using Parker Physics to understand solar storms, track space weather, and explore the universe — for free.</p>
+    <div class="cta-actions fade-in">
+      <a href="signup.html" class="btn-primary" aria-label="Create your free Parker Physics account">Create Free Account</a>
+      <a href="pricing.html" class="btn-secondary" aria-label="View all pricing plans">View All Plans</a>
+    </div>
+    <p class="cta-note fade-in">No credit card required · Cancel anytime · Free tier always available</p>
+  </div>
+</section>
+
+</main>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────────── -->
+<footer id="site-footer" role="contentinfo">
+  <div class="footer-inner">
+    <div class="footer-grid">
+
+      <div class="footer-brand">
+        <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics logo" class="footer-brand-logo">
+        <p class="footer-brand-name">Parker Physics</p>
+        <p class="footer-tagline">Real-time astrophysics at your fingertips.</p>
+        <p class="footer-attribution">&copy; 2026 Parker Physics.<br>All rights reserved.</p>
+      </div>
+
+      <nav aria-label="Simulations">
+        <p class="footer-col-title">Simulations</p>
+        <div class="footer-links">
+          <a href="earth.html">Earth Magnetosphere</a>
+          <a href="sun.html">Solar Surface</a>
+          <a href="space-weather.html">Space Weather</a>
+          <a href="star3d.html">Stellar Physics</a>
+          <a href="galactic-map.html">Galactic Map</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Product">
+        <p class="footer-col-title">Product</p>
+        <div class="footer-links">
+          <a href="pricing.html">Pricing</a>
+          <a href="dashboard.html">Dashboard</a>
+          <a href="signin.html">Sign In</a>
+          <a href="signup.html">Create Account</a>
+        </div>
+      </nav>
+
+      <nav aria-label="Legal &amp; Sources">
+        <p class="footer-col-title">Legal</p>
+        <div class="footer-links">
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="eula.html">Terms of Service</a>
+        </div>
+        <p class="footer-col-title" style="margin-top:1.4rem">Data Sources</p>
+        <div class="footer-links">
+          <a href="https://www.swpc.noaa.gov/" target="_blank" rel="noopener">NOAA SWPC</a>
+          <a href="https://ssd.jpl.nasa.gov/horizons/" target="_blank" rel="noopener">NASA JPL Horizons</a>
+          <a href="https://api.nasa.gov/" target="_blank" rel="noopener">NASA DONKI</a>
+          <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>
+          <a href="https://github.com/etelford32/heliochronicles" target="_blank" rel="noopener">HelioChronicles · historical (CC BY 4.0)</a>
+        </div>
+      </nav>
+
+    </div>
+  </div>
+</footer>
+
+<script type="module">
+/* ════════════════════════════════════════════════════════════════════════════
+   SAGITTARIUS A* — Ray-Marched Kerr Spacetime Simulation
+   ════════════════════════════════════════════════════════════════════════════
+   Physically-motivated simulation of the 4.15×10⁶ M☉ SMBH at the
+   Galactic Center, ray-marching through Kerr spacetime (a = 0.94M):
+
+     • Exact Kerr-Schild Hamiltonian geodesic integration
+     • Spin a/M = 0.94 — EHT 2022 observational constraint upper range
+     • D-shaped shadow from frame-dragging (oblate horizon at r+ ≈ 1.34M)
+     • Prograde ISCO at r ≈ 2.04M — disk inner edge
+     • RIAF-like temperature profile (T_peak ≈ 16 kK → orange-gold)
+     • Plunging region: free-falling emission inside ISCO → horizon
+     • Corona: hot inverse-Compton electron halo above disk plane
+     • Penrose twistor null geodesics: visualized near photon sphere
+     • Relativistic Doppler beaming (v_ISCO ≈ 0.58c) + grav. redshift
+     • "Wrapped disk" — far-side disk lensed above/below BH
+     • Photon ring + procedural lensed starfield with Einstein ring
+     • Half-resolution rendering (60% scale) for 2.8× performance
+     • Interactive camera: drag to orbit, scroll to zoom
+
+   Physical parameters (Sgr A*):
+     Mass:            4.154 × 10⁶ M☉ (Gravity Collaboration 2022)
+     Spin:            a* ≈ 0.94 (EHT Collaboration 2022, Paper V)
+     Distance:        8.178 kpc (26,673 ly)
+     Shadow diameter: 51.8 ± 2.3 μas (EHT 2022)
+     Accretion rate:  ~10⁻⁸ M☉/yr (quiescent LLAGN / RIAF)
+     Inclination:     ~20–30° (nearly face-on from Earth)
+
+   Physics references:
+     Kerr (1963) Phys. Rev. Lett. 11 — rotating BH metric
+     Penrose (1967) J. Math. Phys. 8 — twistor theory, null geodesics
+     Novikov & Thorne (1973) — relativistic accretion disk
+     Luminet (1979) A&A 75 — first BH disk image computation
+     Narayan & Yi (1994) — RIAF accretion model
+     EHT Collaboration (2022) ApJL 930 — Sgr A* shadow image
+     Oliver James et al. (2015) CQG 32 — Double Negative renderer
+     Gravity Collaboration (2022) — Sgr A* mass & distance
+   ════════════════════════════════════════════════════════════════════════════ */
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass }     from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+try {
+const canvas = document.getElementById('hero-canvas');
+if (canvas) {
+
+    // ── Renderer ──────────────────────────────────────────────────────────
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 1);
+    renderer.toneMapping = THREE.NoToneMapping;
+
+    const scene  = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // ── Ray-march shader uniforms (declared early — needed by sgrAPass) ───
+    const bhUniforms = {
+        u_resolution: { value: new THREE.Vector2() },
+        u_time:       { value: 0 },
+        u_cameraPos:  { value: new THREE.Vector3() },
+        u_fov:        { value: 0.55 },
+        u_quality:    { value: 1.0 },  // 0.0=low (mobile) → 1.0=high (desktop)
+        u_camDist:    { value: 30.0 }, // camera distance — enables zoom-dependent visuals
+    };
+
+    // ── Post-processing pipeline ─────────────────────────────────────────
+    // Ray March → Sgr A* Atmosphere → Bloom → Screen
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+
+    // ── Sgr A* atmosphere pass (cheap screen-space effects) ───────────
+    // Runs BEFORE bloom so flares/halo get the bloom glow treatment.
+    // Cost: 5 texture lookups + simple math. Near-zero GPU impact.
+    const sgrAPass = new ShaderPass({
+        uniforms: {
+            tDiffuse:  { value: null },
+            u_time:    bhUniforms.u_time,
+            u_quality: bhUniforms.u_quality,
+        },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            uniform sampler2D tDiffuse;
+            uniform float u_time;
+            uniform float u_quality;
+            varying vec2 vUv;
+
+            void main() {
+                vec2 center = vec2(0.5);
+                vec2 delta  = vUv - center;
+                float dist  = length(delta);
+                vec2 dir    = delta / max(dist, 1e-5);
+
+                // ── Chromatic aberration (gravitational λ-splitting) ──
+                // Different wavelengths follow slightly different geodesics
+                // in curved spacetime — produces radial RGB fringing.
+                float caStr = 0.0025 * smoothstep(0.0, 0.35, dist) * step(0.3, u_quality);
+                vec2 caOff  = dir * caStr;
+                vec3 col = vec3(
+                    texture2D(tDiffuse, vUv + caOff).r,
+                    texture2D(tDiffuse, vUv).g,
+                    texture2D(tDiffuse, vUv - caOff).b
+                );
+
+                // ── Sgr A* X-ray flare (Baganoff et al. 2001) ────────
+                // Sgr A* produces ~1 flare/day from magnetic reconnection
+                // near the ISCO. Brief bright flash in the inner region.
+                float fp = sin(u_time * 0.35) * sin(u_time * 0.73 + 1.9);
+                float flare = max(0.0, pow(fp, 12.0)) * 0.18;
+                float flareMask = smoothstep(0.18, 0.0, dist);
+                col += vec3(1.0, 0.85, 0.5) * flare * flareMask;
+
+                // ── Accretion variability (stochastic flickering) ────
+                // Sgr A* luminosity varies on minute-to-hour timescales.
+                // Subtle overall brightness modulation.
+                float flicker = 1.0 + 0.03 * sin(u_time * 1.7) * sin(u_time * 2.3 + 0.5);
+                col *= flicker;
+
+                // ── Warm scattered-light halo ────────────────────────
+                // Compton-scattered photons create a diffuse warm glow
+                // extending beyond the visible disk.
+                col += vec3(0.6, 0.42, 0.18) * exp(-dist * dist / 0.07) * 0.018;
+
+                // ── Vignette (cinematic, draws eye to center) ────────
+                col *= 1.0 - smoothstep(0.55, 1.3, dist) * 0.35;
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `,
+    });
+    composer.addPass(sgrAPass);
+
+    // ── Bloom ─────────────────────────────────────────────────────────
+    const bloom = new UnrealBloomPass(
+        new THREE.Vector2(canvas.clientWidth, canvas.clientHeight),
+        0.5,   // strength
+        0.4,   // radius
+        0.65   // threshold
+    );
+    composer.addPass(bloom);
+
+    // ── Full-screen quad with Kerr ray-march material ─────────────────────
+    const bhMaterial = new THREE.ShaderMaterial({
+        vertexShader: /* glsl */`
+            void main() {
+                gl_Position = vec4(position.xy, 0.0, 1.0);
+            }
+        `,
+        fragmentShader: /* glsl */`
+            precision highp float;
+
+            uniform vec2  u_resolution;
+            uniform float u_time;
+            uniform vec3  u_cameraPos;
+            uniform float u_fov;
+            uniform float u_quality; // 0.0=low → 1.0=high
+            uniform float u_camDist; // camera distance in M units
+
+            // ─── Sgr A* Kerr constants (M = 1 natural units) ─────────
+            // Spin: a/M ≈ 0.94 — EHT 2022 upper constraint range
+            // (observational bounds: a* ≈ 0.5–0.9, we use high end
+            //  for visual drama while staying physically plausible)
+            #define BH_M        1.0
+            #define BH_A        0.94
+            #define BH_A2       (BH_A * BH_A)   // 0.8836
+            // Event horizon: r+ = M + √(M² − a²) ≈ 1.341
+            #define R_PLUS      1.341
+            // Prograde ISCO for a = 0.94M ≈ 2.04M
+            #define DISK_INNER  2.04
+            #define DISK_OUTER  20.0
+            #define MAX_STEPS   96      // quality system exits early for low tiers
+            #define GRAD_EPS    0.005
+
+            // Tetrahedron gradient vertices (unit vectors * 1/√3)
+            #define INV_SQRT3 0.57735
+            const vec3 T1 = vec3( INV_SQRT3,  INV_SQRT3,  INV_SQRT3);
+            const vec3 T2 = vec3( INV_SQRT3, -INV_SQRT3, -INV_SQRT3);
+            const vec3 T3 = vec3(-INV_SQRT3,  INV_SQRT3, -INV_SQRT3);
+            const vec3 T4 = vec3(-INV_SQRT3, -INV_SQRT3,  INV_SQRT3);
+
+            // ─── Kerr oblate spheroidal radius from Cartesian ─────────
+            float kerrR(vec3 p) {
+                float rho2 = dot(p, p);
+                float w = rho2 - BH_A2;
+                return sqrt(max(0.5 * (w + sqrt(w * w + 4.0 * BH_A2 * p.y * p.y)), 1e-8));
+            }
+
+            // ─── Kerr-Schild metric: f and null vector l ──────────────
+            // f = 2Mr³/(r⁴ + a²y²)
+            // l = ingoing KS null vector (spatial part, spin along y-axis)
+            void kerrFL(vec3 p, out float r, out float f, out vec3 l) {
+                float rho2 = dot(p, p);
+                float w = rho2 - BH_A2;
+                float r2 = max(0.5 * (w + sqrt(w * w + 4.0 * BH_A2 * p.y * p.y)), 1e-8);
+                r = sqrt(r2);
+                float denom = r2 * r2 + BH_A2 * p.y * p.y;
+                f = 2.0 * BH_M * r * r2 / max(denom, 1e-8);
+                float inv = 1.0 / (r2 + BH_A2);
+                l = vec3(
+                    (r * p.x + BH_A * p.z) * inv,
+                    p.y / max(r, 1e-6),
+                    (r * p.z - BH_A * p.x) * inv
+                );
+            }
+
+            // ─── Kerr geodesic force (Hamiltonian, tetrahedron gradient) ──
+            // dp_i/dλ = ½ξ² ∂f/∂x_i + fξ (∂l_j/∂x_i)p_j
+            // where ξ = l·p − E (KS Hamiltonian inner product)
+            vec3 kerrForce(vec3 pos, vec3 mom, float E, float fc, vec3 lc) {
+                float xi = dot(lc, mom) - E;
+
+                // 4 tetrahedral evaluations for gradient
+                float r1, f1, r2, f2, r3, f3, r4, f4;
+                vec3 l1, l2, l3, l4;
+                kerrFL(pos + GRAD_EPS * T1, r1, f1, l1);
+                kerrFL(pos + GRAD_EPS * T2, r2, f2, l2);
+                kerrFL(pos + GRAD_EPS * T3, r3, f3, l3);
+                kerrFL(pos + GRAD_EPS * T4, r4, f4, l4);
+
+                float invK = 1.0 / (4.0 * GRAD_EPS * INV_SQRT3);
+
+                // Gradient of f
+                vec3 grad_f = vec3(
+                    f1 + f2 - f3 - f4,
+                    f1 - f2 + f3 - f4,
+                    f1 - f2 - f3 + f4
+                ) * invK;
+
+                // Contracted Jacobian of l with momentum: (∂l_j/∂x_i) p_j
+                vec3 Dx = l1 + l2 - l3 - l4;
+                vec3 Dy = l1 - l2 + l3 - l4;
+                vec3 Dz = l1 - l2 - l3 + l4;
+                vec3 dl_dot_p = vec3(dot(Dx, mom), dot(Dy, mom), dot(Dz, mom)) * invK;
+
+                return 0.5 * xi * xi * grad_f + fc * xi * dl_dot_p;
+            }
+
+            // ─── Hash & Noise ─────────────────────────────────────────
+            float hash21(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+            }
+            float hash31(vec3 p) {
+                return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+            }
+            float vnoise(vec2 p) {
+                vec2 i = floor(p), f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(
+                    mix(hash21(i),              hash21(i + vec2(1, 0)), f.x),
+                    mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), f.x),
+                    f.y
+                );
+            }
+            float fbm(vec2 p) {
+                float v = 0.0, a = 0.5;
+                mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
+                int octaves = int(u_quality * 2.0 + 1.0); // 1-3 octaves
+                for (int i = 0; i < 3; i++) {
+                    if (i >= octaves) break;
+                    v += a * vnoise(p);
+                    p = rot * p * 2.1;
+                    a *= 0.45;
+                }
+                return v;
+            }
+
+            // ─── Blackbody RGB (Charity 2001 fit) ─────────────────────
+            vec3 blackbody(float T) {
+                T = clamp(T, 800.0, 1.0e8);
+                float r, g, b;
+                if (T < 6600.0) r = 1.0;
+                else { float x = T / 100.0 - 60.0; r = clamp(329.698727 * pow(x, -0.1332048) / 255.0, 0.0, 1.0); }
+                if (T < 6600.0) { float x = max(1.0, T / 100.0); g = clamp((99.4708 * log(x) - 161.1196) / 255.0, 0.0, 1.0); }
+                else { float x = T / 100.0 - 60.0; g = clamp(288.1222 * pow(x, -0.0755148) / 255.0, 0.0, 1.0); }
+                if (T >= 6600.0) b = 1.0;
+                else if (T < 1900.0) b = 0.0;
+                else { float x = max(1.0, T / 100.0 - 10.0); b = clamp((138.5177 * log(x) - 305.0448) / 255.0, 0.0, 1.0); }
+                vec3 rgb = vec3(r, g, b);
+                rgb = mix(rgb, vec3(0.82, 0.90, 1.0), smoothstep(25000.0, 1.0e5, T));
+                rgb = mix(rgb, vec3(1.0),              smoothstep(5.0e5,  5.0e6, T));
+                return rgb;
+            }
+
+            // ─── ACES filmic tone mapping ─────────────────────────────
+            vec3 aces(vec3 x) {
+                float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+                return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+            }
+
+            // ─── Procedural starfield ─────────────────────────────────
+            vec3 stars(vec3 dir) {
+                vec3 col = vec3(0.0);
+                for (int layer = 0; layer < 3; layer++) {
+                    float sc = 50.0 + float(layer) * 25.0;
+                    vec3 cell = floor(dir * sc);
+                    vec3 f    = fract(dir * sc);
+                    float h   = hash31(cell + float(layer) * 137.0);
+                    if (h > 0.97) {
+                        vec3 sp = vec3(hash31(cell + 1.0), hash31(cell + 2.0), hash31(cell + 3.0));
+                        sp = sp * 0.6 + 0.2;
+                        float dist = length(f - sp);
+                        float br   = smoothstep(0.1, 0.0, dist) * (0.5 + hash31(cell + 4.0) * 1.5);
+                        float temp = 3000.0 + hash31(cell + 5.0) * 22000.0;
+                        col += blackbody(temp) * br * (0.2 / float(layer + 1));
+                    }
+                }
+                float gal = exp(-dir.y * dir.y * 10.0) * 0.015;
+                col += vec3(0.7, 0.6, 0.45) * gal;
+                return col;
+            }
+
+            // ─── Kerr accretion disk + plunging region ──────────────
+            vec3 sampleDisk(vec3 hitPos, vec3 vel, float time) {
+                float cyl2 = hitPos.x * hitPos.x + hitPos.z * hitPos.z;
+                float rDisk = sqrt(max(cyl2 - BH_A2, 1e-8));
+                if (rDisk > DISK_OUTER || rDisk < R_PLUS * 1.05) return vec3(0.0);
+
+                float angle = atan(hitPos.z, hitPos.x);
+                float omega = 1.0 / (pow(max(rDisk, DISK_INNER), 1.5) + BH_A);
+                float phase = angle - time * omega * 8.0;
+
+                // ── Temperature (Sgr A* RIAF-like) ──────────────────
+                // Sgr A* accretes at ~10⁻⁸ M☉/yr (quiescent LLAGN).
+                // Electron synchrotron emission → warm orange-gold.
+                // T_peak ~ 15000 K gives the EHT-like orange palette.
+                float T;
+                float turbScale = 1.0;
+                if (rDisk >= DISK_INNER) {
+                    float x_isco = DISK_INNER / rDisk;
+                    T = 16000.0 * pow(x_isco, 0.75) * pow(max(0.001, 1.0 - sqrt(x_isco)), 0.25);
+                    // Mild heating from magnetic reconnection near inner edge
+                    T += 3000.0 * smoothstep(DISK_INNER * 4.0, DISK_INNER * 1.2, rDisk);
+                } else {
+                    // Plunging region: free-falling matter still radiates
+                    float plunge = smoothstep(R_PLUS * 1.05, DISK_INNER, rDisk);
+                    T = 12000.0 * plunge * plunge;
+                    turbScale = 0.3;
+                }
+
+                // ── Turbulence in co-rotating frame ───────────────────
+                // Temporal terms drive continuous evolution so the disk
+                // never visually "resets" after a full rotation.
+                float turb1 = fbm(vec2(phase * 3.0 + rDisk * 1.5, rDisk * 4.0 + time * 0.15));
+                float turb;
+                if (u_quality > 0.4) {
+                    float turb2 = fbm(vec2(phase * 9.0 - rDisk * 1.0, rDisk * 12.0 + time * 0.10));
+                    turb = turb1 * 0.6 + turb2 * 0.4;
+                } else {
+                    turb = turb1;
+                }
+
+                // Spiral arms (m = 2) with drifting azimuthal phase.
+                // time * 0.4 is incommensurate with Keplerian ω at every
+                // radius, so the pattern never exactly repeats — arms
+                // drift, merge, and reform like real MHD instabilities.
+                float spiralWind = 5.0 + 0.8 * sin(time * 0.09);
+                float spiral = 0.5 + 0.5 * sin(phase * 2.0 + log(rDisk + 0.2) * spiralWind + time * 0.4);
+                turb = mix(turb, turb * spiral, 0.70);
+                // Large-scale orbiting brightness — also drifts to avoid looping
+                turb *= 0.75 + 0.25 * sin(phase + rDisk * 0.3 + time * 0.17);
+
+                // Magnetic filaments near inner edge
+                float hotSpots = smoothstep(0.6, 0.85, turb) * smoothstep(DISK_INNER * 3.0, DISK_INNER * 1.1, rDisk);
+                turb += hotSpots * 0.25;
+
+                // Apply turbulence scaling (reduced in plunging region)
+                turb = mix(0.5, turb, turbScale);
+                T *= (0.5 + turb * 0.8);
+                T = max(T, 1200.0);
+
+                // ── Kerr relativistic Doppler beaming ─────────────────
+                float sqrtCyl = sqrt(max(cyl2, 1e-8));
+                float vOrb = sqrtCyl / (pow(max(rDisk, DISK_INNER * 0.8), 1.5) + BH_A);
+                vOrb = min(vOrb, 0.7);
+
+                vec3 orbDir = vec3(-hitPos.z, 0.0, hitPos.x) / max(sqrtCyl, 1e-6);
+                float betaLos = vOrb * dot(orbDir, -normalize(vel));
+                float gamma   = 1.0 / sqrt(max(0.001, 1.0 - vOrb * vOrb));
+                float delta   = 1.0 / (gamma * (1.0 - betaLos));
+                delta = clamp(delta, 0.08, 6.0);
+
+                // Gravitational redshift
+                float gz = sqrt(max(0.01, 1.0 - 2.0 * BH_M / max(rDisk, R_PLUS * 1.05)));
+
+                float T_obs = T * delta * gz;
+                vec3 col = blackbody(T_obs);
+
+                // Intensity: balanced for natural look
+                float intensity = pow(delta, 3.0) * gz * gz;
+                intensity *= (turb * 0.6 + 0.4);
+                intensity *= 1.0; // natural brightness (no artificial boost)
+
+                // Smooth fades
+                float outerFade = smoothstep(DISK_OUTER, DISK_OUTER * 0.5, rDisk);
+                float innerFade;
+                if (rDisk >= DISK_INNER) {
+                    innerFade = smoothstep(DISK_INNER * 0.9, DISK_INNER * 1.5, rDisk);
+                } else {
+                    // Plunging region fades to horizon
+                    innerFade = smoothstep(R_PLUS * 1.05, R_PLUS * 1.3, rDisk);
+                }
+                intensity *= outerFade * innerFade;
+
+                return col * max(0.0, intensity);
+            }
+
+            // ─── Main: per-pixel Kerr ray march ───────────────────────
+            void main() {
+                vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+
+                // Camera ray construction
+                vec3 target = vec3(0.0);
+                vec3 fwd    = normalize(target - u_cameraPos);
+                vec3 wUp    = abs(fwd.y) > 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+                vec3 right  = normalize(cross(fwd, wUp));
+                vec3 up     = cross(right, fwd);
+
+                vec3 pos = u_cameraPos;
+                vec3 mom = normalize(fwd + u_fov * (uv.x * right + uv.y * up));
+
+                // Compute photon energy E from initial conditions
+                // In KS coords: E = (f·l·p + √(p²(1+f) − f(l·p)²)) / (1+f)
+                float r0, f0; vec3 l0;
+                kerrFL(pos, r0, f0, l0);
+                float lp0 = dot(l0, mom);
+                float p2  = dot(mom, mom);
+                float E   = (f0 * lp0 + sqrt(max(p2 * (1.0 + f0) - f0 * lp0 * lp0, 0.0))) / (1.0 + f0);
+
+                // Ray march state
+                vec3  col   = vec3(0.0);
+                float alpha = 0.0;
+                float minR  = 1e10;
+
+                // Quality-adaptive step budget: 40 (low) → 96 (high)
+                int maxIter = int(24.0 + u_quality * 72.0);
+
+                for (int i = 0; i < MAX_STEPS; i++) {
+                    if (i >= maxIter) break;
+
+                    // Kerr state at current position
+                    float rc, fc; vec3 lc;
+                    if (u_quality < 0.5) {
+                        // Schwarzschild approx — skip full Kerr metric
+                        rc = length(pos);
+                        fc = 2.0 * BH_M / max(rc, 1e-6);
+                        lc = pos / max(rc, 1e-6);
+                    } else {
+                        kerrFL(pos, rc, fc, lc);
+                    }
+                    minR = min(minR, rc);
+
+                    // Captured by event horizon (oblate spheroid)
+                    if (rc < R_PLUS * 1.02) {
+                        alpha = 1.0;
+                        break;
+                    }
+
+                    // Escaped to infinity
+                    if (rc > 50.0 && dot(pos, mom) > 0.0) {
+                        float xi = dot(lc, mom) - E;
+                        vec3 vel = mom - fc * xi * lc;
+                        float lensBoost = 1.0 + 2.5 / max(0.2, rc * (minR - R_PLUS));
+                        lensBoost = min(lensBoost, 6.0);
+                        col += stars(normalize(vel)) * lensBoost * (1.0 - alpha);
+                        alpha = 1.0;
+                        break;
+                    }
+
+                    float prevY = pos.y;
+
+                    // ── Geodesic force ─────────────────────────────
+                    vec3 force;
+                    if (rc > 18.0 || u_quality < 0.5) {
+                        // Schwarzschild approx (always on low quality; skip expensive Kerr gradient)
+                        vec3 hVec = cross(pos, mom);
+                        float h2 = dot(hVec, hVec);
+                        float r5 = rc * rc * rc * rc * rc;
+                        force = -3.0 * BH_M * h2 / r5 * pos;
+                    } else {
+                        // Near field: exact Kerr-Schild Hamiltonian force
+                        force = kerrForce(pos, mom, E, fc, lc);
+                    }
+
+                    // Adaptive step size (larger = fewer steps needed)
+                    float dt = clamp(mix(0.18, 0.1, u_quality) * rc, mix(0.04, 0.006, u_quality), 1.5);
+
+                    // Kick (update momentum)
+                    mom += force * dt;
+
+                    // Compute velocity from momentum: v = p − f·ξ·l
+                    float xi = dot(lc, mom) - E;
+                    vec3 vel = mom - fc * xi * lc;
+
+                    // Drift (update position)
+                    pos += vel * dt;
+
+                    // ── Disk crossing check ───────────────────────
+                    if (prevY * pos.y < 0.0 && alpha < 0.97) {
+                        float t    = -prevY / (pos.y - prevY);
+                        vec3  hitP = mix(pos - vel * dt, pos, t);
+
+                        vec3  dCol = sampleDisk(hitP, vel, u_time);
+                        float lum  = dot(dCol, vec3(0.299, 0.587, 0.114));
+
+                        float a_ = clamp(lum * 1.2, 0.0, 1.0);
+                        col   += dCol * (1.0 - alpha);
+                        alpha  = min(1.0, alpha + a_);
+                    }
+
+                    // ── Corona / hot electron halo (skip on low quality) ──
+                    if (u_quality > 0.5 && alpha < 0.95 && rc < DISK_OUTER * 0.8 && rc > R_PLUS * 1.1) {
+                        float H_cor  = 0.4 + 0.08 * rc;  // corona scale height
+                        float corDen = exp(-pos.y * pos.y / (2.0 * H_cor * H_cor));
+                        // Concentrated near inner disk (r < 8M), fades outward
+                        float corRad = smoothstep(12.0, 3.0, rc) * corDen;
+                        if (corRad > 0.005) {
+                            // Corona temperature ~10⁸ K → visually warm white-gold
+                            vec3 corCol = vec3(1.0, 0.85, 0.55) * corRad * 0.06 * dt;
+                            col  += corCol * (1.0 - alpha);
+                            alpha = min(1.0, alpha + corRad * 0.008 * dt);
+                        }
+                    }
+
+                    // ── Penrose twistor null geodesics (med+ quality) ──
+                    // Twistors Z^α = (ω^A, π_A') — skip on low quality
+                    if (u_quality > 0.6 && alpha < 0.9 && rc > R_PLUS * 1.1 && rc < 6.0 && abs(pos.y) < 1.2) {
+                        float phi = atan(pos.z, pos.x);
+                        float twGlow = 0.0;
+                        int twCount = int(u_quality * 6.0 + 2.0); // 2-8 rays
+                        for (int j = 0; j < 8; j++) {
+                            if (j >= twCount) break;
+                            float fj = float(j);
+                            // Each twistor ray at a different azimuthal phase
+                            float baseA = fj * 0.7854 + u_time * 0.06;
+                            // Logarithmic spiral trajectory near photon sphere
+                            float spiralR = 1.8 * exp(0.12 * sin(phi - baseA + fj * 0.5));
+                            float dr = rc - spiralR;
+                            float dh = pos.y * (1.5 + 0.5 * sin(fj * 1.3));
+                            float tubeDist = dr * dr + dh * dh * 3.0;
+                            // Traveling pulse along the null geodesic
+                            float pulse = 0.5 + 0.5 * sin((phi - baseA) * 3.0 - u_time * 2.5 + fj);
+                            twGlow += exp(-tubeDist / 0.02) * pulse;
+                        }
+                        if (twGlow > 0.001) {
+                            // Cool cyan-blue twistor color (distinct from warm disk)
+                            vec3 twCol = vec3(0.25, 0.5, 0.9) * twGlow * 0.08;
+                            col += twCol * (1.0 - alpha);
+                        }
+                    }
+                }
+
+                // ── Photon ring glow (Kerr a=0.94: asymmetric) ──────────
+                // Prograde photon orbit ≈ 1.43M, retrograde ≈ 3.95M.
+                // Use ~1.8M as visual average weighted toward prograde.
+                float prDist = abs(minR - 1.8 * BH_M);
+                float prGlow = exp(-prDist * prDist / 0.04);
+                vec2 screenDir = normalize(gl_FragCoord.xy - 0.5 * u_resolution);
+                float prDoppler = 1.0 + 0.25 * screenDir.x;
+                col += vec3(1.0, 0.85, 0.55) * prGlow * 0.3 * prDoppler * (1.0 - alpha * 0.5);
+
+                // Background for non-terminated rays
+                if (alpha < 1.0) {
+                    col += stars(normalize(mom)) * (1.0 - alpha) * 0.4;
+                }
+
+                // Exposure + ACES tone mapping + sRGB gamma
+                col *= 0.9;
+                col  = aces(col);
+                col  = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
+
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `,
+        uniforms:   bhUniforms,
+        depthTest:  false,
+        depthWrite: false,
+        toneMapped: false,
+    });
+
+    scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), bhMaterial));
+
+    // ── Camera orbit state ────────────────────────────────────────────────
+    let camTheta = 0.0;
+    let camPhi   = 1.2;      // ~69° from y-axis → ~21° above disk plane
+    let camDist  = 30.0;     // in M=1 units (shadow ≈ 5M, disk out to 20M)
+    const CAM_PHI_MIN  = 0.15;
+    const CAM_PHI_MAX  = Math.PI - 0.15;
+    const CAM_DIST_MIN = 5;
+    const CAM_DIST_MAX = 80;
+
+    let isDragging       = false;
+    let lastMouseX       = 0;
+    let lastMouseY       = 0;
+    let autoRotateActive = true;
+    let autoRotateTimer  = null;
+
+    function updateCameraUniform() {
+        const sp = Math.sin(camPhi);
+        bhUniforms.u_cameraPos.value.set(
+            camDist * sp * Math.sin(camTheta),
+            camDist * Math.cos(camPhi),
+            camDist * sp * Math.cos(camTheta)
+        );
+    }
+    updateCameraUniform();
+
+    // ── Mouse controls: drag to orbit, wheel to zoom ──────────────────────
+    let mouseX = 0, mouseY = 0;  // normalized [-1, 1] for parallax
+
+    canvas.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        canvas.style.cursor = 'grabbing';
+        autoRotateActive = false;
+        clearTimeout(autoRotateTimer);
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        // Parallax tracking (always active, even when not dragging)
+        const rect = canvas.getBoundingClientRect();
+        mouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+        mouseY = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+
+        if (!isDragging) return;
+        const dx = e.clientX - lastMouseX;
+        const dy = e.clientY - lastMouseY;
+        camTheta -= dx * 0.005;
+        camPhi    = Math.max(CAM_PHI_MIN, Math.min(CAM_PHI_MAX, camPhi + dy * 0.005));
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        updateCameraUniform();
+    });
+
+    canvas.addEventListener('mouseleave', () => { mouseX = 0; mouseY = 0; });
+
+    window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        canvas.style.cursor = 'grab';
+        autoRotateTimer = setTimeout(() => { autoRotateActive = true; }, 3000);
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        camDist = Math.max(CAM_DIST_MIN, Math.min(CAM_DIST_MAX, camDist * (1 + e.deltaY * 0.001)));
+        updateCameraUniform();
+        autoRotateActive = false;
+        clearTimeout(autoRotateTimer);
+        autoRotateTimer = setTimeout(() => { autoRotateActive = true; }, 3000);
+    }, { passive: false });
+
+    // ── GPU tier detection ──────────────────────────────────────────────
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '';
+    const isWeak = isMobile || /Intel|Mali|Adreno|PowerVR|Apple/i.test(gpu);
+
+    let quality = isMobile ? 0.0 : isWeak ? 0.15 : 1.0;
+    // Cap pixel ratio on weak/integrated GPUs to avoid Retina overhead
+    renderer.setPixelRatio(isWeak ? 1 : Math.min(window.devicePixelRatio, 2));
+    let lastTimestamp = 0;
+    let qFrames = 0, qTimeSum = 0;
+
+    function applyQuality() {
+        const scale = 0.15 + quality * 0.55;  // 0.15–0.70 resolution
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        const pr = renderer.getPixelRatio();
+        const rw = Math.ceil(w * pr * scale);
+        const rh = Math.ceil(h * pr * scale);
+        composer.setSize(rw, rh);
+        bloom.resolution.set(rw, rh);
+        bhUniforms.u_resolution.value.set(rw, rh);
+        bhUniforms.u_quality.value = quality;
     }
 
-    async function custom_onload(debug_hidden) {
-        // this is called before anything python is loaded
-        // make your js customization here
-        console.log(__FILE__, "custom_onload")
+    // ── Animation loop (frame-time adaptive quality) ──────────────────
+    // simTime: drives the shader (disk rotation, turbulence, flares)
+    // camTime: drives camera choreography on its own long cycle
+    let simTime = 0, camTime = 0, raf, heroVisible = true;
 
-        pyconsole.hidden = debug_hidden
-        system.hidden = debug_hidden
-        transfer.hidden = debug_hidden
-        info.hidden = debug_hidden
-        box.hidden =  debug_hidden
+    function animate(timestamp) {
+        if (!heroVisible) return;
+        raf = requestAnimationFrame(animate);
 
-        show_infobox()
+        // Frame-time quality adaptation (every 15 frames)
+        let dt = 0.016; // default ~60fps; overwritten below when we have a prior frame
+        if (lastTimestamp > 0) {
+            const frameDt = timestamp - lastTimestamp;
+            qTimeSum += frameDt;
+            qFrames++;
+            if (qFrames >= 15) {
+                const avg = qTimeSum / qFrames;
+                if (avg > 20 && quality > 0) {          // < 50 fps → degrade
+                    quality = Math.max(0, quality - 0.2);
+                    applyQuality();
+                } else if (avg < 10 && quality < 1) {    // > 100 fps → upgrade
+                    quality = Math.min(1, quality + 0.05);
+                    applyQuality();
+                }
+                qFrames = 0; qTimeSum = 0;
+            }
+            // Frame-rate independent time — consistent speed at any FPS
+            dt = Math.min(frameDt * 0.001, 0.1);
+            simTime += dt * 1.5;   // simulation runs 1.5× real-time
+            camTime += dt;          // camera runs at real-time
+        }
+        lastTimestamp = timestamp;
+
+        // ── Cinematic camera choreography (decoupled from sim) ────
+        // All movements are incremental lerps — no hard snaps.
+        // Camera smoothly eases toward oscillation targets, so it
+        // blends gracefully when auto-rotate resumes after interaction.
+        if (autoRotateActive) {
+            // Orbit: incremental, time-normalized
+            const orbitSpeed = 0.035 + 0.012 * Math.sin(camTime * 0.05);
+            camTheta += orbitSpeed * dt;
+
+            // Polar bobbing: lerp toward target ±7° over ~3.5 min
+            const targetPhi = 1.2 + Math.sin(camTime * 0.03) * 0.12;
+            camPhi += (targetPhi - camPhi) * 1.2 * dt;
+            camPhi = Math.max(CAM_PHI_MIN, Math.min(CAM_PHI_MAX, camPhi));
+
+            // Distance breathing: lerp toward target ±10% over ~5 min
+            const targetDist = 30.0 + Math.sin(camTime * 0.02) * 3.0;
+            camDist += (targetDist - camDist) * 1.0 * dt;
+        }
+
+        // Mouse parallax: subtle camera offset following cursor
+        // (works even during auto-rotation for a responsive feel)
+        const parallaxStr = 0.4;
+        const px = mouseX * parallaxStr;
+        const py = mouseY * parallaxStr * 0.5;
+        const sp = Math.sin(camPhi);
+        bhUniforms.u_cameraPos.value.set(
+            camDist * sp * Math.sin(camTheta) + px,
+            camDist * Math.cos(camPhi) - py,
+            camDist * sp * Math.cos(camTheta)
+        );
+
+        bhUniforms.u_time.value = simTime;
+        bhUniforms.u_quality.value = quality;
+        bhUniforms.u_camDist.value = camDist;
+        composer.render();
     }
 
-    function custom_prerun(){
-        // no python main and no (MEMFS + VFS) yet.
-        console.log(__FILE__, "custom_prerun")
-
+    function resize() {
+        const w = canvas.clientWidth, h = canvas.clientHeight;
+        renderer.setSize(w, h, false);
+        applyQuality();
     }
+    new ResizeObserver(resize).observe(canvas.parentElement);
+    resize();
+    animate(0);
 
-    function custom_postrun(){
-        // python main and no VFS filesystem yet.
-        console.log(__FILE__, "custom_postrun")
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) cancelAnimationFrame(raf);
+        else if (heroVisible) animate(performance.now());
+    });
 
+    // Pause rendering when hero section is scrolled off-screen
+    const heroEl = document.getElementById('hero');
+    if (heroEl) {
+        new IntersectionObserver(([e]) => {
+            heroVisible = e.isIntersecting;
+            if (heroVisible && !document.hidden) raf = requestAnimationFrame(animate);
+        }, { threshold: 0 }).observe(heroEl);
     }
+}
+} catch(heroErr) { console.warn('Hero init failed:', heroErr); }
 
-    function debug() {
-        // allow to gain access to dev tools from js console
-        // but only on desktop. difficult to reach when in iframe
-        python.config.debug = true
-        custom_onload(false)
-        Module.PyRun_SimpleString("shell.uptime()")
-        window_resize()
+
+
+/* ── MOBILE NAV BURGER ─────────────────────────────────────────────────── */
+(function(){
+  const burger = document.getElementById('nav-burger');
+  const navLinks = document.getElementById('nav-links');
+  if (!burger || !navLinks) return;
+  burger.addEventListener('click', () => {
+    const open = navLinks.classList.toggle('open');
+    burger.setAttribute('aria-expanded', open);
+    burger.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+  });
+  // Close on outside click
+  document.addEventListener('click', e => {
+    if (!burger.contains(e.target) && !navLinks.contains(e.target)){
+      navLinks.classList.remove('open');
+      burger.setAttribute('aria-expanded', 'false');
     }
+  });
+})();
 
-    function info_inline(data){
-        document.getElementById("info").innerHTML = data
+/* ── AUTH STATE (check both localStorage and sessionStorage) ─────────── */
+(function(){
+  let authData = null;
+  try { authData = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
+  if (!authData) {
+    try { authData = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
+  }
+  const signinBtn  = document.getElementById('nav-signin-btn');
+  const signupBtn  = document.getElementById('nav-signup-btn');
+  const dashBtn    = document.getElementById('nav-dash-btn');
+  const heroSignup = document.getElementById('hero-signup-btn');
+
+  if (authData && authData.signedIn){
+    if (signinBtn)  signinBtn.style.display  = 'none';
+    if (signupBtn)  signupBtn.style.display  = 'none';
+    if (dashBtn)    dashBtn.style.display    = '';
+    if (heroSignup){
+      heroSignup.textContent = 'Go to Dashboard';
+      heroSignup.href = 'dashboard.html';
     }
+  }
+})();
 
-    function info_online(url) {
-        // display info about current APK
-        fetch( url /*, options */)
-            .then((response) => response.text())
-            .then((html) => {
-                info_inline(html);
-        })
-        .catch((error) => {
-            console.warn(error);
-        });
-    }
+/* ── INTERSECTION OBSERVER FADE-INS ───────────────────────────────────── */
+(function(){
+  const els = document.querySelectorAll('.fade-in');
+  if (!els.length) return;
+  if (!('IntersectionObserver' in window)){
+    els.forEach(el => el.classList.add('visible'));
+    return;
+  }
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting){ e.target.classList.add('visible'); obs.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  els.forEach(el => obs.observe(el));
+})();
 
-    function frame_online(url) {
-        window.frames["iframe"].location = url;
-    }
-
-    </script>
-
+/* ── CARD PREVIEW ANIMATIONS ──────────────────────────────────────────── */
+import('./js/card-previews.js').then(m => m.initCardPreviews()).catch(() => {});
+</script>
 </body>
 </html>

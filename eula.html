@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>End User License Agreement — Parker Physics App</title>
+    <meta name="description" content="Parker Physics App End User License Agreement (EULA). Terms governing your use of the application and simulations.">
+    <meta name="theme-color" content="#0a0a1a">
+<style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        nav {
+            position: sticky; top: 0; z-index: 600;
+            height: 54px; min-height: 54px;
+            background: rgba(4,2,16,.94); backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(255,200,0,.12);
+            display: flex; align-items: center; padding: 0 16px; gap: 10px;
+        }
+        .nav-logo-wrap { position: relative; width: 36px; height: 36px; flex-shrink: 0; }
+        .nav-logo-wrap::before {
+            content: ''; position: absolute; inset: -5px; border-radius: 50%;
+            border: 1.5px solid transparent;
+            border-top-color: rgba(255,180,0,.85); border-right-color: rgba(128,64,255,.55);
+            animation: navRingSpin 3s linear infinite; pointer-events: none;
+        }
+        .nav-logo-wrap::after {
+            content: ''; position: absolute; inset: -9px; border-radius: 50%;
+            border: 1px solid transparent;
+            border-bottom-color: rgba(64,128,255,.45); border-left-color: rgba(255,100,80,.35);
+            animation: navRingSpin 5.5s linear infinite reverse; pointer-events: none;
+        }
+        @keyframes navRingSpin { to { transform: rotate(360deg); } }
+        .nav-logo-img { height: 36px; width: 36px; border-radius: 50%; object-fit: cover; filter: drop-shadow(0 0 6px rgba(255,180,0,.5)); display: block; }
+        .nav-brand {
+            font-size: .95rem; font-weight: 700; white-space: nowrap;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .nav-menu { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+        .nav-item {
+            padding: 5px 10px; background: rgba(255,255,255,.07);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 5px;
+            color: #ccc; text-decoration: none; font-size: .8rem; white-space: nowrap;
+            transition: background .2s, border-color .2s;
+        }
+        .nav-item:hover { background: rgba(255,255,255,.16); border-color: rgba(255,200,0,.4); color:#fff; }
+        .nav-item.cta { background: linear-gradient(45deg,#ffd700,#ff8c00); border-color:#ffd700; color:#0a0a1a; font-weight:700; }
+        .nav-burger {
+            display: none; margin-left: auto;
+            background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14);
+            border-radius: 5px; color:#fff; padding: 5px 10px; font-size: 1.1rem;
+            cursor: pointer; transition: background .2s;
+        }
+        .nav-burger:hover { background: rgba(255,255,255,.18); }
+        @media (max-width: 768px) {
+            .nav-burger { display: block; }
+            .nav-menu {
+                display: none; flex-direction: column; align-items: stretch;
+                position: absolute; top: 54px; left: 0; right: 0;
+                background: rgba(3,1,14,.97); backdrop-filter: blur(14px);
+                border-bottom: 1px solid rgba(255,255,255,.1);
+                padding: 8px 12px 12px; gap: 4px; z-index: 700;
+            }
+            .nav-menu.open { display: flex; }
+            .nav-item { padding: 11px 14px; font-size: .9rem; }
+        }
+
+        .legal-hero {
+            padding: 3rem 2rem 1.5rem; text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,.07);
+        }
+        .legal-hero h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(45deg,#ffd700,#ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: .5rem;
+        }
+        .legal-meta { color: #666; font-size: .85rem; }
+        .legal-meta strong { color: #888; }
+
+        .legal-body { max-width: 800px; margin: 0 auto; padding: 2.5rem 2rem 4rem; flex: 1; }
+        .toc {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 2.5rem;
+        }
+        .toc h3 { font-size: .85rem; color: #ffd700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: .75rem; }
+        .toc ol { padding-left: 1.2rem; }
+        .toc li { margin-bottom: .3rem; }
+        .toc a { color: #a080ff; text-decoration: none; font-size: .88rem; }
+        .toc a:hover { color: #ffd700; text-decoration: underline; }
+
+        .legal-section { margin-bottom: 2.5rem; }
+        .legal-section h2 {
+            font-size: 1.15rem; color: #ffd700;
+            border-bottom: 1px solid rgba(255,200,0,.18);
+            padding-bottom: .4rem; margin-bottom: 1rem;
+        }
+        .legal-section p, .legal-section li { color: #b0b0c8; font-size: .92rem; line-height: 1.75; }
+        .legal-section ul, .legal-section ol { padding-left: 1.4rem; margin: .6rem 0; }
+        .legal-section li { margin-bottom: .3rem; }
+        .legal-section strong { color: #ddd; }
+        .legal-section a { color: #a080ff; }
+        .legal-section a:hover { color: #ffd700; }
+        .highlight-box {
+            background: rgba(128,64,255,.08); border: 1px solid rgba(128,64,255,.22);
+            border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0;
+            color: #c0a0ff; font-size: .88rem; line-height: 1.65;
+        }
+        .warning-box {
+            background: rgba(255,100,0,.08); border: 1px solid rgba(255,100,0,.25);
+            border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0;
+            color: #ffb080; font-size: .88rem; line-height: 1.65;
+        }
+
+        footer {
+            background: rgba(0,0,0,.4); border-top: 1px solid rgba(255,255,255,.07);
+            padding: 1.5rem 2rem; text-align: center; color: #555; font-size: .82rem;
+        }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+
+        @media (max-width: 480px) {
+            .legal-hero h1 { font-size: 1.8rem; }
+            .legal-body { padding: 1.5rem 1rem 3rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════ NAV ═══ -->
+<nav>
+    <a href="index.html" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+        <div class="nav-logo-wrap">
+            <img src="ParkersPhysics_logo2.jpg" class="nav-logo-img" alt="Parker Physics Logo">
+        </div>
+        <span class="nav-brand">Parker Physics</span>
+    </a>
+    <button class="nav-burger" id="nav-burger" aria-label="Menu" aria-expanded="false">☰</button>
+    <div class="nav-menu" id="nav-menu">
+        <a href="index.html" class="nav-item">Home</a>
+        <a href="pricing.html" class="nav-item">Pricing</a>
+        <a href="signin.html" class="nav-item">Sign In</a>
+        <a href="signup.html" class="nav-item cta">Get Started</a>
+    </div>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════ HERO ═══ -->
+<div class="legal-hero">
+    <h1>End User License Agreement</h1>
+    <p class="legal-meta"><strong>Effective Date:</strong> March 20, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 1.0</p>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ BODY ═══ -->
+<div class="legal-body">
+
+    <div class="highlight-box">
+        Please read this End User License Agreement ("EULA") carefully before using Parker Physics App. By creating an account, accessing, or using the application, you agree to be bound by these terms. If you do not agree, do not use the service.
+    </div>
+
+    <nav class="toc" aria-label="Table of Contents">
+        <h3>Contents</h3>
+        <ol>
+            <li><a href="#parties">Parties</a></li>
+            <li><a href="#license">License Grant</a></li>
+            <li><a href="#permitted">Permitted Uses</a></li>
+            <li><a href="#prohibited">Prohibited Uses</a></li>
+            <li><a href="#subscription">Subscription &amp; Billing</a></li>
+            <li><a href="#sim-data">Simulation Data Disclaimer</a></li>
+            <li><a href="#ip">Intellectual Property</a></li>
+            <li><a href="#ugc">User-Generated Content</a></li>
+            <li><a href="#termination">Termination</a></li>
+            <li><a href="#warranty">Disclaimer of Warranties</a></li>
+            <li><a href="#liability">Limitation of Liability</a></li>
+            <li><a href="#indemnity">Indemnification</a></li>
+            <li><a href="#governing">Governing Law &amp; Disputes</a></li>
+            <li><a href="#updates">Updates to This EULA</a></li>
+            <li><a href="#contact">Contact</a></li>
+        </ol>
+    </nav>
+
+    <section class="legal-section" id="parties">
+        <h2>1. Parties</h2>
+        <p>This EULA is a legal agreement between <strong>you</strong> (the individual or entity using the service, "User") and <strong>Parker Physics App</strong> ("Company," "we," "us"). By using any part of the service — including visiting the website, running simulations, or accessing live data feeds — you confirm you are at least 13 years of age and legally capable of entering into this agreement.</p>
+    </section>
+
+    <section class="legal-section" id="license">
+        <h2>2. License Grant</h2>
+        <p>Subject to your compliance with this EULA and payment of any applicable subscription fees, we grant you a <strong>limited, non-exclusive, non-transferable, revocable license</strong> to:</p>
+        <ul>
+            <li>Access and use the Parker Physics App website and simulations for personal, educational, or internal research purposes.</li>
+            <li>View, interact with, and export simulation outputs for non-commercial use.</li>
+            <li>Install the application as a Progressive Web App (PWA) on your personal devices.</li>
+        </ul>
+        <p>This license does not include any right to sublicense, sell, resell, or commercially exploit the service or its outputs.</p>
+    </section>
+
+    <section class="legal-section" id="permitted">
+        <h2>3. Permitted Uses</h2>
+        <ul>
+            <li>Personal exploration and education about astrophysics and space weather phenomena</li>
+            <li>Academic research and classroom demonstrations (with attribution)</li>
+            <li>Non-commercial science communication, including screenshots or videos with clear attribution to Parker Physics App</li>
+            <li>Integration with your own private tools via our API (Advanced plan only, subject to the <a href="api-policy.html">API Policy</a>)</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="prohibited">
+        <h2>4. Prohibited Uses</h2>
+        <div class="warning-box">The following uses are strictly prohibited and may result in immediate account termination.</div>
+        <ul>
+            <li>Reverse engineering, decompiling, or disassembling any part of the application or its WebAssembly/WASM modules</li>
+            <li>Scraping, crawling, or automated bulk downloading of data feeds, simulation outputs, or any site content</li>
+            <li>Redistributing, reselling, or sublicensing the service or any simulation data commercially without written consent</li>
+            <li>Using the service to build a competing product or to train AI/ML models without a separate written agreement</li>
+            <li>Sharing account credentials with unauthorized users or circumventing subscription tier limits</li>
+            <li>Uploading or transmitting malicious code, interfering with service infrastructure, or conducting denial-of-service attacks</li>
+            <li>Misrepresenting simulation outputs as official NASA, NOAA, or ESA data or analysis</li>
+            <li>Using the service in any manner that violates applicable laws or regulations</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="subscription">
+        <h2>5. Subscription &amp; Billing</h2>
+        <ul>
+            <li><strong>Free Tier:</strong> Access to core simulations with no payment required. Feature set may be limited at our discretion.</li>
+            <li><strong>Paid Plans:</strong> Monthly subscriptions processed by Stripe. You authorize us to charge your payment method on a recurring basis until cancellation.</li>
+            <li><strong>Cancellation:</strong> You may cancel at any time from your account dashboard. Access continues through the end of the paid billing period; no prorated refunds are issued for partial months except where required by law.</li>
+            <li><strong>Price Changes:</strong> We will provide at least 30 days' notice by email before changing subscription prices. Continued use after the effective date constitutes acceptance.</li>
+            <li><strong>Refunds:</strong> Refund requests within 7 days of initial purchase may be considered on a case-by-case basis. Contact <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a>.</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="sim-data">
+        <h2>6. Simulation Data Disclaimer</h2>
+        <p>Parker Physics App provides physics simulations and live data visualizations for <strong>educational and informational purposes only.</strong></p>
+        <div class="warning-box">Simulation outputs are not certified scientific products. Do not use Parker Physics App data for professional aerospace, aviation, emergency management, or safety-critical decision-making. Always consult official sources (NOAA SWPC, NASA, ESA) for operational space weather data.</div>
+        <p>Live data feeds (solar wind, Kp index, X-ray flux, etc.) are sourced from third-party public APIs and are subject to gaps, delays, or inaccuracies. We make no guarantees about data availability or precision.</p>
+    </section>
+
+    <section class="legal-section" id="ip">
+        <h2>7. Intellectual Property</h2>
+        <p>All original software, source code (including WebAssembly/Rust modules), user interface designs, branding, logos, and documentation are the intellectual property of Parker Physics App, protected under applicable copyright and trademark law.</p>
+        <p>Open-source components are used under their respective licenses (MIT, Apache 2.0, etc.) and are acknowledged in our repository. The Parker Physics App codebase is available on <a href="https://github.com/etelford32/Clstl_Smltr" target="_blank" rel="noopener">GitHub</a> under the applicable repository license.</p>
+        <p>NASA, NOAA, JPL, and ESA data and imagery remain the property of those respective agencies, subject to their public use policies. We do not claim ownership of any government-produced scientific data.</p>
+    </section>
+
+    <section class="legal-section" id="ugc">
+        <h2>8. User-Generated Content</h2>
+        <p>If you share simulation screenshots, parameter configurations, or other content in connection with our service (e.g., in community discussions or feedback forms), you grant us a non-exclusive, royalty-free license to use such content to improve and promote the service, with attribution where feasible. You retain ownership of your original contributions.</p>
+    </section>
+
+    <section class="legal-section" id="termination">
+        <h2>9. Termination</h2>
+        <p>We may suspend or terminate your account at any time if you violate this EULA, engage in fraudulent activity, or pose a security risk. You may terminate your account at any time by contacting support. Upon termination, your license to use the service immediately ceases. Sections 7, 10, 11, 12, and 13 survive termination.</p>
+    </section>
+
+    <section class="legal-section" id="warranty">
+        <h2>10. Disclaimer of Warranties</h2>
+        <p>THE SERVICE IS PROVIDED <strong>"AS IS"</strong> AND <strong>"AS AVAILABLE"</strong> WITHOUT WARRANTY OF ANY KIND. TO THE FULLEST EXTENT PERMITTED BY LAW, PARKER PHYSICS APP DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.</p>
+    </section>
+
+    <section class="legal-section" id="liability">
+        <h2>11. Limitation of Liability</h2>
+        <p>TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL PARKER PHYSICS APP, ITS OFFICERS, EMPLOYEES, OR AFFILIATES BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES — INCLUDING LOSS OF PROFITS, DATA, OR GOODWILL — ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
+        <p>OUR TOTAL CUMULATIVE LIABILITY TO YOU FOR ANY CLAIM ARISING FROM OR RELATED TO THIS EULA OR THE SERVICE SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID US IN THE 12 MONTHS PRECEDING THE CLAIM OR (B) USD $50.</p>
+    </section>
+
+    <section class="legal-section" id="indemnity">
+        <h2>12. Indemnification</h2>
+        <p>You agree to indemnify, defend, and hold harmless Parker Physics App and its affiliates from and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising out of or in connection with your violation of this EULA, your use of the service, or your infringement of any third-party rights.</p>
+    </section>
+
+    <section class="legal-section" id="governing">
+        <h2>13. Governing Law &amp; Disputes</h2>
+        <p>This EULA is governed by the laws of the <strong>State of Delaware, United States</strong>, without regard to conflict of law provisions. Any dispute arising under this EULA shall first be attempted to be resolved through good-faith negotiation. If unresolved within 60 days, disputes shall be submitted to binding arbitration administered by the American Arbitration Association (AAA) under its Commercial Arbitration Rules, with proceedings conducted in English. Class action waivers apply to the extent permitted by law.</p>
+        <p>Nothing in this section prevents either party from seeking injunctive or other equitable relief in a court of competent jurisdiction.</p>
+    </section>
+
+    <section class="legal-section" id="updates">
+        <h2>14. Updates to This EULA</h2>
+        <p>We reserve the right to modify this EULA at any time. Material changes will be communicated by email at least 14 days before they take effect. Continued use of the service after the effective date constitutes your acceptance of the revised EULA. The current version is always available at <a href="https://parkerphysics.app/eula">parkerphysics.app/eula</a>.</p>
+    </section>
+
+    <section class="legal-section" id="contact">
+        <h2>15. Contact</h2>
+        <p>Questions about this EULA:</p>
+        <ul>
+            <li><strong>Email:</strong> <a href="mailto:legal@parkerphysics.app">legal@parkerphysics.app</a></li>
+            <li><strong>Support:</strong> <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a></li>
+        </ul>
+    </section>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════ FOOTER ═══ -->
+<footer>
+    <p>© 2026 Parker Physics App &nbsp;·&nbsp;
+        <a href="index.html">Home</a> &nbsp;·&nbsp;
+        <a href="privacy.html">Privacy Policy</a> &nbsp;·&nbsp;
+        <a href="eula.html">EULA</a> &nbsp;·&nbsp;
+        <a href="api-policy.html">API Policy</a> &nbsp;·&nbsp;
+        <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
+        <a href="mailto:support@parkerphysics.app">Contact</a>
+    </p>
+</footer>
+
+<script>
+    const burger = document.getElementById('nav-burger');
+    const navMenu = document.getElementById('nav-menu');
+    burger.addEventListener('click', () => {
+        const open = navMenu.classList.toggle('open');
+        burger.setAttribute('aria-expanded', open);
+    });
+</script>
+<script type="module">import './js/analytics.js';</script>
+</body>
+</html>

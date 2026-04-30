@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced 2D Solar Physics — Parker Physics App</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ─── Nav ────────────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
+}
+.nav-brand {
+    display:flex; align-items:center; gap:8px;
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    margin-right:2px;
+}
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+/* nav-menu stretches to fill all remaining space */
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.nav-item {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0;
+}
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop { position:relative; flex-shrink:0; }
+.nav-drop-btn {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s, border-color .2s; white-space:nowrap;
+}
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+/* Rich dropdown panel */
+.nav-drop-menu {
+    display:block; position:absolute; top:calc(100% + 5px); left:0;
+    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.11); border-radius:9px;
+    padding:6px 0 8px; min-width:268px; z-index:800;
+    box-shadow:0 14px 44px rgba(0,0,0,.80);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:translateY(-4px);
+    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
+}
+/* Each item in the dropdown */
+.nav-drop-link {
+    display:flex; align-items:center; gap:11px;
+    padding:7px 16px; text-decoration:none; transition:background .15s;
+}
+.nav-drop-link:hover { background:rgba(255,255,255,.07); }
+.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+.nav-drop-link.active .ndl-icon  { opacity:1; }
+.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
+.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
+.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.nav-drop-link:hover .ndl-title { color:#fff; }
+.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
+/* Section label inside dropdown */
+.nav-drop-section {
+    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
+    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
+}
+.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+/* Spacer that pushes auth buttons to the far right */
+.nav-spacer { flex:1; }
+/* Auth */
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
+.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
+.nav-signup:hover { filter:brightness(1.12) !important; }
+/* Burger */
+.nav-burger {
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1; transition:background .2s;
+}
+.nav-burger:hover { background:rgba(255,255,255,.18); }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:50px; left:0; right:0;
+        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 14px; gap:3px; z-index:700;
+        max-height:calc(100vh - 50px); overflow-y:auto;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; border-radius:5px; min-width:0;
+        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
+        display:none; opacity:1; visibility:visible; transform:none;
+        transition:none; pointer-events:auto; padding:2px 0 6px;
+    }
+    .nav-drop-link { padding:8px 14px 8px 22px; }
+    .ndl-sub { display:none; }
+    .nav-drop-section { padding:5px 14px 2px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none !important; }
+    .nav-drop.open  .nav-drop-menu { display:block !important; }
+    .nav-spacer { display:none; }
+    .nav-auth-sep { display:none; }
+}
+
+        .page-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #ffd700, #ff8c00, #ff4500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #aaa;
+            font-size: 1.1rem;
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1600px;
+            width: 100%;
+            flex-wrap: wrap;
+        }
+
+        .canvas-container {
+            flex: 1;
+            min-width: 700px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 30px rgba(255, 140, 0, 0.3);
+            position: relative;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            background: #000;
+            border-radius: 8px;
+            cursor: crosshair;
+        }
+
+        .controls {
+            flex: 0 0 380px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            padding: 20px;
+            height: fit-content;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .control-group:last-child {
+            border-bottom: none;
+        }
+
+        .control-group h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #ddd;
+            font-size: 0.95rem;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 5px;
+            color: #fff;
+            font-size: 1rem;
+            margin-bottom: 10px;
+        }
+
+        select {
+            cursor: pointer;
+            height: 40px;
+        }
+
+        select option {
+            background: #1a1a2e;
+            color: #fff;
+        }
+
+        input[type="range"] {
+            padding: 0;
+            height: 30px;
+            cursor: pointer;
+        }
+
+        input[type="checkbox"] {
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+
+        .value-display {
+            text-align: right;
+            color: #ffd700;
+            font-weight: bold;
+            margin-top: -5px;
+            margin-bottom: 10px;
+            font-size: 0.9rem;
+        }
+
+        .star-info {
+            background: rgba(255, 215, 0, 0.1);
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #ffd700;
+            margin-top: 15px;
+            font-size: 0.9rem;
+        }
+
+        .star-info h4 {
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .stat-label {
+            color: #aaa;
+            font-size: 0.8rem;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            color: #ffd700;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .mode-indicator {
+            background: rgba(255, 69, 0, 0.2);
+            border: 1px solid #ff4500;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            text-align: center;
+            font-weight: bold;
+            color: #ff8c00;
+        }
+    
+/* ─── Space Weather link button ─────────────────────────────────── */
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid #ffb830; border-radius: 7px;
+    color: #ffb830; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation; text-decoration: none; display: inline-block;
+}
+.cv-btn:hover { background: rgba(255,140,0,.15); border-color:#ff8c00; color:#ffb830; }
+</style>
+</head>
+<body>
+    <link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("star2d-advanced");</script>
+
+    <div class="page-content">
+        <header>
+        <h1>⭐ Advanced Solar Physics Simulator</h1>
+        <p class="subtitle">Parker Spirals • Fluid Dynamics • CMEs & Solar Flares</p>
+    </header>
+
+    <div class="container">
+        <div class="canvas-container">
+            <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:12px; right:12px;">⚡ Weather</a>
+
+        <canvas id="starCanvas" width="900" height="700"></canvas>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <h3>🔭 Preset Simulation</h3>
+                <label for="presetSelect">Simulation Mode:</label>
+                <select id="presetSelect">
+                    <option value="default" selected>Default (Single Star)</option>
+                    <option value="sirius">Sirius Binary System</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <h3>🌟 Stellar Classification</h3>
+                <label for="starType">Star Type:</label>
+                <select id="starType">
+                    <option value="o-type">O-Type (Blue Giant)</option>
+                    <option value="b-type">B-Type (Blue-White)</option>
+                    <option value="a-type">A-Type (White)</option>
+                    <option value="f-type">F-Type (Yellow-White)</option>
+                    <option value="g-type" selected>G-Type (Yellow - Sun-like)</option>
+                    <option value="k-type">K-Type (Orange)</option>
+                    <option value="m-type">M-Type (Red Dwarf)</option>
+                    <option value="red-giant">Red Giant</option>
+                    <option value="neutron-star">Neutron Star</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <h3>🌀 Emission Mode</h3>
+                <label for="emissionMode">Radiation Pattern:</label>
+                <select id="emissionMode">
+                    <option value="steady">Steady Solar Wind</option>
+                    <option value="cme">Coronal Mass Ejection (CME)</option>
+                    <option value="flare">Solar Flare (Beam)</option>
+                    <option value="coronal-hole">Coronal Hole (Fast Stream)</option>
+                    <option value="active-region">Active Region (Hotspot)</option>
+                    <option value="parker-spiral" selected>Parker Spiral Pattern</option>
+                </select>
+                <div class="mode-indicator" id="modeIndicator">Parker Spiral Mode</div>
+            </div>
+
+            <div class="control-group">
+                <h3>🌊 Fluid Dynamics</h3>
+
+                <label for="rotationSpeed">Star Rotation (Parker Spiral):</label>
+                <input type="range" id="rotationSpeed" min="0" max="10" value="2" step="0.1">
+                <div class="value-display" id="rotationValue">2.0 rad/s</div>
+
+                <label for="windSpeed">Solar Wind Speed:</label>
+                <input type="range" id="windSpeed" min="1" max="20" value="5" step="0.5">
+                <div class="value-display" id="windSpeedValue">5.0x</div>
+
+                <label for="density">Plasma Density:</label>
+                <input type="range" id="density" min="10" max="100" value="50" step="5">
+                <div class="value-display" id="densityValue">50%</div>
+
+                <label for="turbulence">Turbulence:</label>
+                <input type="range" id="turbulence" min="0" max="100" value="20" step="5">
+                <div class="value-display" id="turbulenceValue">20%</div>
+            </div>
+
+            <div class="control-group">
+                <h3>👁️ Visualization</h3>
+
+                <div class="checkbox-label">
+                    <input type="checkbox" id="showTrails" checked>
+                    <label for="showTrails">Particle Trails</label>
+                </div>
+
+                <div class="checkbox-label">
+                    <input type="checkbox" id="showDensity">
+                    <label for="showDensity">Density Heatmap</label>
+                </div>
+
+                <div class="checkbox-label">
+                    <input type="checkbox" id="showVelocity">
+                    <label for="showVelocity">Velocity Vectors</label>
+                </div>
+
+                <div class="checkbox-label">
+                    <input type="checkbox" id="showMagnetic" checked>
+                    <label for="showMagnetic">Magnetic Field Lines</label>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <h3>⚙️ Parameters</h3>
+
+                <label for="size">Star Size:</label>
+                <input type="range" id="size" min="30" max="150" value="60">
+                <div class="value-display" id="sizeValue">60 px</div>
+
+                <label for="particles">Max Particles:</label>
+                <input type="range" id="particles" min="100" max="1000" value="400" step="50">
+                <div class="value-display" id="particlesValue">400</div>
+            </div>
+
+            <div class="control-group">
+                <h3>📊 Statistics</h3>
+                <div class="stats">
+                    <div class="stat-box">
+                        <div class="stat-label">FPS</div>
+                        <div class="stat-value" id="fps">60</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Particles</div>
+                        <div class="stat-value" id="activeParticles">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Wind Speed</div>
+                        <div class="stat-value" id="avgSpeed">0 km/s</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Density</div>
+                        <div class="stat-value" id="avgDensity">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="resetBtn">Reset to Defaults</button>
+        </div>
+    </div>
+
+    <script>
+        // ── SIRIUS BINARY SYSTEM DATA ──
+        const SIRIUS = {
+            A: { mass: 2.06, radius: 1.713, temperature: 9940, luminosity: 24.7,
+                 color: { r: 206, g: 216, b: 255 }, spectralType: 'A1 V (Am)' },
+            B: { mass: 1.018, radius: 0.0081, temperature: 25000, luminosity: 0.0245,
+                 color: { r: 162, g: 199, b: 255 }, spectralType: 'DA2 White Dwarf' },
+            orbit: { period: 50.13, semiMajorAxis: 20.0, eccentricity: 0.5914,
+                     inclination: 136.3, periastronTime: 1994.5715 }
+        };
+        const SIRIUS_TM = SIRIUS.A.mass + SIRIUS.B.mass;
+
+        function solveKeplerAdv(M, e) {
+            let E = M + e * Math.sin(M);
+            for (let i = 0; i < 30; i++) {
+                const dE = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
+                E -= dE;
+                if (Math.abs(dE) < 1e-9) break;
+            }
+            return E;
+        }
+
+        function getSiriusPos2DAdv(epoch) {
+            const o = SIRIUS.orbit;
+            let M = 2 * Math.PI * ((epoch - o.periastronTime) / o.period);
+            M = ((M % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const E = solveKeplerAdv(M, o.eccentricity);
+            const nu = 2 * Math.atan2(
+                Math.sqrt(1 + o.eccentricity) * Math.sin(E / 2),
+                Math.sqrt(1 - o.eccentricity) * Math.cos(E / 2));
+            const r = o.semiMajorAxis * (1 - o.eccentricity * Math.cos(E));
+            const cosI = Math.cos(o.inclination * Math.PI / 180);
+            return { x: r * Math.cos(nu), y: r * Math.sin(nu) * cosI, r, nu };
+        }
+
+        let siriusMode = false;
+        let siriusEpoch = 2026.0;
+
+        // Star type configurations
+        const starTypes = {
+            'o-type': { name: 'O-Type', color: { r: 150, g: 150, b: 255 }, temperature: 30000, defaultSize: 100, rotation: 3.0 },
+            'b-type': { name: 'B-Type', color: { r: 170, g: 191, b: 255 }, temperature: 15000, defaultSize: 85, rotation: 2.5 },
+            'a-type': { name: 'A-Type', color: { r: 213, g: 224, b: 255 }, temperature: 8500, defaultSize: 75, rotation: 2.0 },
+            'f-type': { name: 'F-Type', color: { r: 248, g: 247, b: 255 }, temperature: 6500, defaultSize: 70, rotation: 1.8 },
+            'g-type': { name: 'G-Type', color: { r: 255, g: 230, b: 77 }, temperature: 5500, defaultSize: 60, rotation: 2.0 },
+            'k-type': { name: 'K-Type', color: { r: 255, g: 178, b: 71 }, temperature: 4500, defaultSize: 55, rotation: 1.5 },
+            'm-type': { name: 'M-Type', color: { r: 255, g: 102, b: 51 }, temperature: 3000, defaultSize: 45, rotation: 1.0 },
+            'red-giant': { name: 'Red Giant', color: { r: 255, g: 69, b: 0 }, temperature: 3500, defaultSize: 120, rotation: 0.5 },
+            'neutron-star': { name: 'Neutron Star', color: { r: 200, g: 220, b: 255 }, temperature: 600000, defaultSize: 25, rotation: 10.0 }
+        };
+
+        // Canvas setup
+        const canvas = document.getElementById('starCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // State
+        let currentStarType = 'g-type';
+        let emissionMode = 'parker-spiral';
+        let starSize = 60;
+        let rotationSpeed = 2.0;
+        let windSpeed = 5.0;
+        let plasmaDensity = 50;
+        let turbulence = 20;
+        let maxParticles = 400;
+        let particles = [];
+        let time = 0;
+        let fps = 0;
+        let lastFrameTime = Date.now();
+        let starRotation = 0;
+
+        // Visualization flags
+        let showTrails = true;
+        let showDensity = false;
+        let showVelocity = false;
+        let showMagnetic = true;
+
+        // Density grid for fluid simulation
+        const gridSize = 40;
+        const densityGrid = Array(gridSize).fill(0).map(() => Array(gridSize).fill(0));
+
+        // Particle class with fluid dynamics
+        class Particle {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                const config = starTypes[currentStarType];
+
+                // Emission mode determines spawn position and velocity
+                switch(emissionMode) {
+                    case 'cme':
+                        this.initCME();
+                        break;
+                    case 'flare':
+                        this.initFlare();
+                        break;
+                    case 'coronal-hole':
+                        this.initCoronalHole();
+                        break;
+                    case 'active-region':
+                        this.initActiveRegion();
+                        break;
+                    case 'parker-spiral':
+                    case 'steady':
+                    default:
+                        this.initSteady();
+                        break;
+                }
+
+                this.color = { ...config.color };
+                this.trail = [];
+            }
+
+            initSteady() {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = starSize * 0.5;
+                this.x = canvas.width / 2 + Math.cos(angle) * distance;
+                this.y = canvas.height / 2 + Math.sin(angle) * distance;
+
+                const direction = { x: Math.cos(angle), y: Math.sin(angle) };
+                this.vx = direction.x * windSpeed * 0.5;
+                this.vy = direction.y * windSpeed * 0.5;
+
+                this.life = 1.0;
+                this.maxLife = 2 + Math.random() * 2;
+                this.size = 2 + Math.random() * 2;
+                this.mass = this.size * 0.1;
+            }
+
+            initCME() {
+                // CME: explosive burst in random direction
+                const burstAngle = Math.random() * Math.PI * 2;
+                const spread = 0.3;
+                const angle = burstAngle + (Math.random() - 0.5) * spread;
+
+                this.x = canvas.width / 2;
+                this.y = canvas.height / 2;
+
+                const speed = windSpeed * (2 + Math.random() * 3);
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+
+                this.life = 1.0;
+                this.maxLife = 1.5 + Math.random();
+                this.size = 3 + Math.random() * 3;
+                this.mass = this.size * 0.2;
+            }
+
+            initFlare() {
+                // Solar flare: focused beam
+                const beamAngle = time * 0.5;
+                const spread = 0.1;
+                const angle = beamAngle + (Math.random() - 0.5) * spread;
+
+                this.x = canvas.width / 2;
+                this.y = canvas.height / 2;
+
+                const speed = windSpeed * (3 + Math.random() * 2);
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+
+                this.life = 1.0;
+                this.maxLife = 1.0 + Math.random() * 0.5;
+                this.size = 2 + Math.random() * 2;
+                this.mass = this.size * 0.15;
+            }
+
+            initCoronalHole() {
+                // Coronal hole: fast stream from pole
+                const poleAngle = Math.PI * 0.5;
+                const spread = 0.5;
+                const angle = poleAngle + (Math.random() - 0.5) * spread;
+
+                const distance = starSize * 0.5;
+                this.x = canvas.width / 2 + Math.cos(angle) * distance;
+                this.y = canvas.height / 2 + Math.sin(angle) * distance;
+
+                const speed = windSpeed * (1.5 + Math.random());
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+
+                this.life = 1.0;
+                this.maxLife = 2.5 + Math.random();
+                this.size = 1.5 + Math.random();
+                this.mass = this.size * 0.1;
+            }
+
+            initActiveRegion() {
+                // Active region: localized hotspot
+                const hotspotAngle = time * 0.3 + Math.PI * 0.25;
+                const spread = 0.4;
+                const angle = hotspotAngle + (Math.random() - 0.5) * spread;
+
+                const distance = starSize * 0.5;
+                this.x = canvas.width / 2 + Math.cos(angle) * distance;
+                this.y = canvas.height / 2 + Math.sin(angle) * distance;
+
+                const speed = windSpeed * (1 + Math.random() * 0.5);
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+
+                this.life = 1.0;
+                this.maxLife = 2 + Math.random();
+                this.size = 2.5 + Math.random() * 2;
+                this.mass = this.size * 0.12;
+            }
+
+            update(dt) {
+                // Apply Parker spiral if enabled
+                if (emissionMode === 'parker-spiral' || showMagnetic) {
+                    this.applyParkerSpiral(dt);
+                }
+
+                // Apply turbulence
+                if (turbulence > 0) {
+                    const turbStrength = turbulence / 100 * 0.5;
+                    this.vx += (Math.random() - 0.5) * turbStrength;
+                    this.vy += (Math.random() - 0.5) * turbStrength;
+                }
+
+                // Update position
+                this.x += this.vx * dt * 60;
+                this.y += this.vy * dt * 60;
+
+                // Update life
+                this.life -= dt / this.maxLife;
+
+                // Trail
+                if (showTrails) {
+                    this.trail.push({ x: this.x, y: this.y, life: this.life });
+                    if (this.trail.length > 20) this.trail.shift();
+                } else {
+                    this.trail = [];
+                }
+
+                // Update density grid
+                this.updateDensityGrid();
+
+                if (this.life <= 0 || this.isOffScreen()) {
+                    this.reset();
+                }
+            }
+
+            applyParkerSpiral(dt) {
+                // Parker spiral: particles follow curved path due to rotation
+                const dx = this.x - canvas.width / 2;
+                const dy = this.y - canvas.height / 2;
+                const r = Math.sqrt(dx * dx + dy * dy);
+
+                if (r > starSize * 0.5) {
+                    // Tangential velocity component from rotation
+                    const angularVel = rotationSpeed * (starSize / r);
+                    const perpX = -dy / r;
+                    const perpY = dx / r;
+
+                    this.vx += perpX * angularVel * dt * 10;
+                    this.vy += perpY * angularVel * dt * 10;
+                }
+            }
+
+            updateDensityGrid() {
+                const gridX = Math.floor((this.x / canvas.width) * gridSize);
+                const gridY = Math.floor((this.y / canvas.height) * gridSize);
+
+                if (gridX >= 0 && gridX < gridSize && gridY >= 0 && gridY < gridSize) {
+                    densityGrid[gridY][gridX] += this.mass;
+                }
+            }
+
+            isOffScreen() {
+                const margin = 100;
+                return this.x < -margin || this.x > canvas.width + margin ||
+                       this.y < -margin || this.y > canvas.height + margin;
+            }
+
+            draw() {
+                // Draw trail
+                if (showTrails && this.trail.length > 1) {
+                    ctx.strokeStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${this.life * 0.3})`;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    }
+                    ctx.stroke();
+                }
+
+                // Draw particle
+                const alpha = this.life;
+                ctx.fillStyle = `rgba(${this.color.r}, ${this.color.g}, ${this.color.b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size * this.life, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Initialize particles
+        function initParticles() {
+            particles = [];
+            for (let i = 0; i < maxParticles; i++) {
+                particles.push(new Particle());
+            }
+        }
+
+        // Draw star
+        function drawStar() {
+            const config = starTypes[currentStarType];
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            const pulse = Math.sin(time * 2) * 0.1 + 1;
+            const currentSize = starSize * pulse;
+
+            // Glow
+            const gradient = ctx.createRadialGradient(
+                centerX, centerY, 0,
+                centerX, centerY, currentSize
+            );
+            gradient.addColorStop(0, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, 0.9)`);
+            gradient.addColorStop(0.5, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, 0.6)`);
+            gradient.addColorStop(1, `rgba(${config.color.r}, ${config.color.g}, ${config.color.b}, 0)`);
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, currentSize, 0, Math.PI * 2);
+            ctx.fill();
+
+            starRotation += rotationSpeed * 0.016;
+        }
+
+        // Draw magnetic field lines (Parker spirals)
+        function drawMagneticFieldLines() {
+            if (!showMagnetic) return;
+
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const numLines = 6;
+
+            ctx.strokeStyle = 'rgba(100, 150, 255, 0.3)';
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i < numLines; i++) {
+                const startAngle = (i / numLines) * Math.PI * 2 + starRotation;
+
+                ctx.beginPath();
+                ctx.moveTo(
+                    centerX + Math.cos(startAngle) * starSize * 0.5,
+                    centerY + Math.sin(startAngle) * starSize * 0.5
+                );
+
+                const numSegments = 50;
+                for (let j = 1; j <= numSegments; j++) {
+                    const r = starSize * 0.5 + (j / numSegments) * 300;
+                    const theta = startAngle - (j / numSegments) * rotationSpeed * 2;
+
+                    ctx.lineTo(
+                        centerX + Math.cos(theta) * r,
+                        centerY + Math.sin(theta) * r
+                    );
+                }
+                ctx.stroke();
+            }
+        }
+
+        // Draw density heatmap
+        function drawDensityHeatmap() {
+            if (!showDensity) return;
+
+            const cellWidth = canvas.width / gridSize;
+            const cellHeight = canvas.height / gridSize;
+
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    const density = Math.min(densityGrid[y][x], 1);
+                    if (density > 0.01) {
+                        ctx.fillStyle = `rgba(255, 100, 0, ${density * 0.3})`;
+                        ctx.fillRect(x * cellWidth, y * cellHeight, cellWidth, cellHeight);
+                    }
+                }
+            }
+
+            // Decay density
+            for (let y = 0; y < gridSize; y++) {
+                for (let x = 0; x < gridSize; x++) {
+                    densityGrid[y][x] *= 0.95;
+                }
+            }
+        }
+
+        // Draw velocity vectors
+        function drawVelocityVectors() {
+            if (!showVelocity) return;
+
+            ctx.strokeStyle = 'rgba(0, 255, 100, 0.5)';
+            ctx.lineWidth = 2;
+
+            const step = 60;
+            for (let y = step; y < canvas.height; y += step) {
+                for (let x = step; x < canvas.width; x += step) {
+                    // Find nearby particles
+                    let avgVx = 0, avgVy = 0, count = 0;
+                    particles.forEach(p => {
+                        const dist = Math.sqrt((p.x - x) ** 2 + (p.y - y) ** 2);
+                        if (dist < step) {
+                            avgVx += p.vx;
+                            avgVy += p.vy;
+                            count++;
+                        }
+                    });
+
+                    if (count > 0) {
+                        avgVx /= count;
+                        avgVy /= count;
+
+                        const scale = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x + avgVx * scale, y + avgVy * scale);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+
+        // ── SIRIUS BINARY RENDERING (Advanced 2D) ──
+        function drawSiriusBinary(dt) {
+            siriusEpoch += dt * 1.5;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const scale = 4.0;
+
+            const pos = getSiriusPos2DAdv(siriusEpoch);
+            const qA = SIRIUS.B.mass / SIRIUS_TM;
+            const qB = SIRIUS.A.mass / SIRIUS_TM;
+
+            const axP = { x: cx - pos.x * qA * scale, y: cy - pos.y * qA * scale };
+            const bxP = { x: cx + pos.x * qB * scale, y: cy + pos.y * qB * scale };
+
+            // Orbital paths
+            ctx.strokeStyle = 'rgba(206, 216, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i <= 180; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 180) * SIRIUS.orbit.period;
+                const p = getSiriusPos2DAdv(t);
+                const px = cx - p.x * qA * scale;
+                const py = cy - p.y * qA * scale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            ctx.strokeStyle = 'rgba(162, 199, 255, 0.1)';
+            ctx.beginPath();
+            for (let i = 0; i <= 180; i++) {
+                const t = SIRIUS.orbit.periastronTime + (i / 180) * SIRIUS.orbit.period;
+                const p = getSiriusPos2DAdv(t);
+                const px = cx + p.x * qB * scale;
+                const py = cy + p.y * qB * scale;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // Sirius A glow
+            const sA = SIRIUS.A.color;
+            const pulseA = Math.sin(time * 1.5) * 0.08 + 1;
+            const sizeA = starSize * pulseA;
+            const gradA = ctx.createRadialGradient(axP.x, axP.y, 0, axP.x, axP.y, sizeA);
+            gradA.addColorStop(0, `rgba(${sA.r},${sA.g},${sA.b},0.9)`);
+            gradA.addColorStop(0.5, `rgba(${sA.r},${sA.g},${sA.b},0.5)`);
+            gradA.addColorStop(1, `rgba(${sA.r},${sA.g},${sA.b},0)`);
+            ctx.fillStyle = gradA;
+            ctx.beginPath();
+            ctx.arc(axP.x, axP.y, sizeA, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Sirius B glow
+            const sB = SIRIUS.B.color;
+            const sizeB = Math.max(starSize * 0.12, 5);
+            const pulseB = Math.sin(time * 3) * 0.15 + 1;
+            const gradB = ctx.createRadialGradient(bxP.x, bxP.y, 0, bxP.x, bxP.y, sizeB * 2.5 * pulseB);
+            gradB.addColorStop(0, `rgba(${sB.r},${sB.g},${sB.b},1.0)`);
+            gradB.addColorStop(0.3, `rgba(${sB.r},${sB.g},${sB.b},0.6)`);
+            gradB.addColorStop(1, `rgba(${sB.r},${sB.g},${sB.b},0)`);
+            ctx.fillStyle = gradB;
+            ctx.beginPath();
+            ctx.arc(bxP.x, bxP.y, sizeB * 2.5 * pulseB, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Labels
+            ctx.font = '11px Segoe UI, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(206,216,255,0.7)';
+            ctx.fillText('Sirius A (A1V, 9940 K)', axP.x, axP.y - sizeA - 6);
+            ctx.fillStyle = 'rgba(162,199,255,0.7)';
+            ctx.fillText('Sirius B (DA2, 25000 K)', bxP.x, bxP.y - sizeB * 2.5 - 6);
+
+            // Epoch info
+            ctx.fillStyle = 'rgba(255,215,0,0.5)';
+            ctx.font = '12px Segoe UI, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('Epoch: ' + siriusEpoch.toFixed(1) + ' CE  |  Sep: ' + pos.r.toFixed(2) + ' AU', 10, canvas.height - 14);
+
+            return { axP, bxP };
+        }
+
+        // Animation loop
+        function animate() {
+            const now = Date.now();
+            const dt = Math.min((now - lastFrameTime) / 1000, 0.1);
+            lastFrameTime = now;
+
+            fps = Math.round(1 / dt);
+
+            // Clear with fade effect for trails
+            if (showTrails) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            } else {
+                ctx.fillStyle = '#000';
+            }
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            time += dt;
+
+            // Draw visualizations
+            drawDensityHeatmap();
+            drawMagneticFieldLines();
+
+            let siriusPos = null;
+            if (siriusMode) {
+                siriusPos = drawSiriusBinary(dt);
+            } else {
+                drawStar();
+            }
+
+            // Update and draw particles
+            let totalSpeed = 0;
+            let totalDensity = 0;
+            particles.forEach(p => {
+                // In Sirius mode: dual emission + mutual gravitational attraction
+                if (siriusMode && siriusPos) {
+                    // Respawn dead particles from either star
+                    if (p.life <= 0.01) {
+                        const angle = Math.random() * Math.PI * 2;
+                        const fromB = Math.random() < 0.2;
+                        if (fromB) {
+                            // Emit from Sirius B (white dwarf)
+                            const sizeB = Math.max(starSize * 0.12, 5);
+                            p.x = siriusPos.bxP.x + Math.cos(angle) * sizeB;
+                            p.y = siriusPos.bxP.y + Math.sin(angle) * sizeB;
+                            p.vx = Math.cos(angle) * windSpeed * 1.2;
+                            p.vy = Math.sin(angle) * windSpeed * 1.2;
+                            p.color = { ...SIRIUS.B.color };
+                            p._origin = 'B';
+                        } else {
+                            // Emit from Sirius A
+                            const dist = starSize * 0.5;
+                            p.x = siriusPos.axP.x + Math.cos(angle) * dist;
+                            p.y = siriusPos.axP.y + Math.sin(angle) * dist;
+                            p.vx = Math.cos(angle) * windSpeed * 0.5;
+                            p.vy = Math.sin(angle) * windSpeed * 0.5;
+                            p.color = { ...SIRIUS.A.color };
+                            p._origin = 'A';
+                        }
+                        p.life = 1.0;
+                        p.maxLife = 2 + Math.random() * 2;
+                    }
+
+                    // Gravitational attraction toward Sirius A (2.06 M☉)
+                    const dxA = siriusPos.axP.x - p.x;
+                    const dyA = siriusPos.axP.y - p.y;
+                    const dA = Math.sqrt(dxA * dxA + dyA * dyA);
+                    const captureA = starSize * 0.35;
+                    if (dA < captureA && dA > 0) {
+                        p.life = 0;
+                    } else if (dA < 120 && dA > 3) {
+                        const gravA = 1.0 / (dA * dA + 10);
+                        p.vx += (dxA / dA) * gravA * dt * 60;
+                        p.vy += (dyA / dA) * gravA * dt * 60;
+                    }
+
+                    // Gravitational attraction toward Sirius B (1.018 M☉)
+                    const dxB = siriusPos.bxP.x - p.x;
+                    const dyB = siriusPos.bxP.y - p.y;
+                    const dB = Math.sqrt(dxB * dxB + dyB * dyB);
+                    const captureB = Math.max(starSize * 0.08, 4);
+                    if (dB < captureB && dB > 0) {
+                        p.life = 0;
+                    } else if (dB < 80 && dB > 3) {
+                        const gravB = 0.5 / (dB * dB + 10);
+                        p.vx += (dxB / dB) * gravB * dt * 60;
+                        p.vy += (dyB / dB) * gravB * dt * 60;
+                        if (dB < 30) {
+                            const heat = 1 - dB / 30;
+                            p.color = {
+                                r: Math.round(162 + heat * 40),
+                                g: Math.round(199 + heat * 30),
+                                b: 255
+                            };
+                        }
+                    }
+                }
+
+                p.update(dt);
+                p.draw();
+                totalSpeed += Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+                totalDensity += p.mass;
+            });
+
+            drawVelocityVectors();
+
+            // Update stats
+            document.getElementById('fps').textContent = fps;
+            document.getElementById('activeParticles').textContent = particles.length;
+            document.getElementById('avgSpeed').textContent = Math.round(totalSpeed / particles.length * 50) + ' km/s';
+            document.getElementById('avgDensity').textContent = (totalDensity / particles.length).toFixed(2);
+
+            requestAnimationFrame(animate);
+        }
+
+        // ── SIRIUS PRESET SWITCHING ──
+        document.getElementById('presetSelect').addEventListener('change', (e) => {
+            if (e.target.value === 'sirius') {
+                siriusMode = true;
+                siriusEpoch = 2026.0;
+                currentStarType = 'a-type';
+                document.getElementById('starType').value = 'a-type';
+                const config = starTypes['a-type'];
+                starSize = config.defaultSize;
+                rotationSpeed = 1.0; // Sirius A slow rotator (v sin i = 16 km/s)
+                document.getElementById('size').value = starSize;
+                document.getElementById('sizeValue').textContent = starSize + ' px';
+                document.getElementById('rotationSpeed').value = rotationSpeed;
+                document.getElementById('rotationValue').textContent = rotationSpeed.toFixed(1) + ' rad/s';
+                document.getElementById('modeIndicator').textContent = 'Sirius Binary System';
+                initParticles();
+            } else {
+                siriusMode = false;
+                document.getElementById('modeIndicator').textContent = 'Parker Spiral';
+                initParticles();
+            }
+        });
+
+        // Event listeners
+        document.getElementById('starType').addEventListener('change', (e) => {
+            currentStarType = e.target.value;
+            if (siriusMode) {
+                siriusMode = false;
+                document.getElementById('presetSelect').value = 'default';
+            }
+            const config = starTypes[currentStarType];
+            starSize = config.defaultSize;
+            rotationSpeed = config.rotation;
+            document.getElementById('size').value = starSize;
+            document.getElementById('sizeValue').textContent = `${starSize} px`;
+            document.getElementById('rotationSpeed').value = rotationSpeed;
+            document.getElementById('rotationValue').textContent = `${rotationSpeed.toFixed(1)} rad/s`;
+            initParticles();
+        });
+
+        document.getElementById('emissionMode').addEventListener('change', (e) => {
+            emissionMode = e.target.value;
+            const modeNames = {
+                'steady': 'Steady Wind',
+                'cme': 'CME Event!',
+                'flare': 'Solar Flare!',
+                'coronal-hole': 'Fast Stream',
+                'active-region': 'Active Region',
+                'parker-spiral': 'Parker Spiral'
+            };
+            document.getElementById('modeIndicator').textContent = modeNames[emissionMode];
+            initParticles();
+        });
+
+        document.getElementById('rotationSpeed').addEventListener('input', (e) => {
+            rotationSpeed = parseFloat(e.target.value);
+            document.getElementById('rotationValue').textContent = `${rotationSpeed.toFixed(1)} rad/s`;
+        });
+
+        document.getElementById('windSpeed').addEventListener('input', (e) => {
+            windSpeed = parseFloat(e.target.value);
+            document.getElementById('windSpeedValue').textContent = `${windSpeed.toFixed(1)}x`;
+        });
+
+        document.getElementById('density').addEventListener('input', (e) => {
+            plasmaDensity = parseInt(e.target.value);
+            document.getElementById('densityValue').textContent = `${plasmaDensity}%`;
+        });
+
+        document.getElementById('turbulence').addEventListener('input', (e) => {
+            turbulence = parseInt(e.target.value);
+            document.getElementById('turbulenceValue').textContent = `${turbulence}%`;
+        });
+
+        document.getElementById('size').addEventListener('input', (e) => {
+            starSize = parseInt(e.target.value);
+            document.getElementById('sizeValue').textContent = `${starSize} px`;
+        });
+
+        document.getElementById('particles').addEventListener('input', (e) => {
+            maxParticles = parseInt(e.target.value);
+            document.getElementById('particlesValue').textContent = maxParticles;
+            initParticles();
+        });
+
+        document.getElementById('showTrails').addEventListener('change', (e) => {
+            showTrails = e.target.checked;
+        });
+
+        document.getElementById('showDensity').addEventListener('change', (e) => {
+            showDensity = e.target.checked;
+        });
+
+        document.getElementById('showVelocity').addEventListener('change', (e) => {
+            showVelocity = e.target.checked;
+        });
+
+        document.getElementById('showMagnetic').addEventListener('change', (e) => {
+            showMagnetic = e.target.checked;
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            currentStarType = 'g-type';
+            emissionMode = 'parker-spiral';
+            starSize = 60;
+            rotationSpeed = 2.0;
+            windSpeed = 5.0;
+            plasmaDensity = 50;
+            turbulence = 20;
+            maxParticles = 400;
+            showTrails = true;
+            showDensity = false;
+            showVelocity = false;
+            showMagnetic = true;
+
+            document.getElementById('starType').value = currentStarType;
+            document.getElementById('emissionMode').value = emissionMode;
+            document.getElementById('rotationSpeed').value = rotationSpeed;
+            document.getElementById('windSpeed').value = windSpeed;
+            document.getElementById('density').value = plasmaDensity;
+            document.getElementById('turbulence').value = turbulence;
+            document.getElementById('size').value = starSize;
+            document.getElementById('particles').value = maxParticles;
+            document.getElementById('showTrails').checked = showTrails;
+            document.getElementById('showDensity').checked = showDensity;
+            document.getElementById('showVelocity').checked = showVelocity;
+            document.getElementById('showMagnetic').checked = showMagnetic;
+
+            initParticles();
+        });
+
+        // Initialize
+        initParticles();
+        animate();
+
+        // ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '\u2715' : '\u2630';
+        _navBurger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '\u2630';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
+
+        console.log('🌊 Advanced Solar Physics Simulator loaded!');
+        console.log('Features: Parker Spirals, CMEs, Solar Flares, Fluid Dynamics');
+    </script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="required-tier" content="advanced">
+<title>Satellite Tracker — Parker Physics App</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ─── Nav ────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
+}
+.nav-brand { display:flex; align-items:center; gap:8px; font-size:.95rem; font-weight:700;
+    text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; margin-right:2px; }
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.nav-item { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12);
+    border-radius:5px; color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0; }
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-spacer { flex:1; }
+.nav-burger { display:none; margin-left:auto; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem; cursor:pointer; line-height:1; }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu { display:none; position:absolute; top:50px; left:0; right:0; flex-direction:column;
+        background:rgba(4,2,16,.97); padding:8px 12px; gap:4px; z-index:700; }
+    .nav-menu.open { display:flex; }
+}
+
+/* ─── App layout ─────────────────────────────────────── */
+#app { position:relative; width:100%; height:calc(100vh - 50px); overflow:hidden; }
+#sat-canvas { display:block; width:100%; height:100%; cursor:grab; background:#000; }
+#sat-canvas:active { cursor:grabbing; }
+
+/* ─── HUD overlay ────────────────────────────────────── */
+#sat-hud {
+    position:absolute; top:12px; left:12px; z-index:10;
+    background:rgba(0,0,0,.7); backdrop-filter:blur(8px);
+    border:1px solid rgba(0,200,200,.15); border-radius:8px;
+    padding:8px 12px; font-size:.72rem; line-height:1.7; color:#8ab;
+    pointer-events:none; max-width:300px;
+}
+#sat-hud .val { color:#0ee; font-weight:600; font-family:monospace; }
+#sat-hud .dim { color:#556; }
+
+/* ─── Time controls (bottom-centre) ──────────────────── */
+#time-controls {
+    position:absolute; bottom:12px; left:50%; transform:translateX(-50%);
+    z-index:10;
+    background:rgba(0,0,0,.82); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,200,.2); border-radius:9px;
+    padding:6px 8px; display:flex; align-items:center; gap:3px;
+    font-size:.72rem;
+}
+.tc-btn {
+    background:rgba(0,200,200,.08); border:1px solid rgba(0,200,200,.18);
+    border-radius:4px; color:#9cc; cursor:pointer;
+    font-family:inherit; font-size:.68rem; font-weight:600;
+    padding:4px 8px; min-width:30px; line-height:1;
+    transition:background .12s, color .12s, border-color .12s;
+}
+.tc-btn:hover  { background:rgba(0,200,200,.18); color:#cdd; }
+.tc-btn.active { background:rgba(0,200,200,.30); color:#fff; border-color:#0cc; }
+.tc-sep {
+    width:1px; height:18px; background:rgba(255,255,255,.1); margin:0 4px;
+}
+.tc-display {
+    display:flex; flex-direction:column; align-items:flex-end;
+    margin-left:6px; padding-left:8px;
+    border-left:1px solid rgba(255,255,255,.1);
+    min-width:172px; font-family:monospace;
+}
+.tc-time   { color:#0ee; font-size:.72rem; line-height:1;   letter-spacing:.02em; }
+.tc-offset { color:#667; font-size:.58rem; line-height:1.2; margin-top:2px; }
+@media (max-width:640px) {
+    #time-controls { bottom:6px; padding:4px 6px; font-size:.64rem; }
+    .tc-btn        { min-width:26px; padding:3px 6px; font-size:.60rem; }
+    .tc-display    { min-width:120px; }
+    .tc-time       { font-size:.62rem; }
+    .tc-offset     { font-size:.52rem; }
+}
+
+/* ─── Control panel (right side) ─────────────────────── */
+#sat-panel {
+    position:absolute; top:12px; right:12px; z-index:10;
+    background:rgba(0,0,0,.85); backdrop-filter:blur(12px);
+    border:1px solid rgba(0,200,200,.15); border-radius:10px;
+    padding:12px 14px; width:280px; max-height:calc(100vh - 80px);
+    overflow-y:auto; font-size:.75rem;
+}
+#sat-panel::-webkit-scrollbar { width:4px; }
+#sat-panel::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:2px; }
+.sp-title { font-size:.82rem; font-weight:700; color:#0cc; margin-bottom:8px; letter-spacing:.03em; }
+.sp-section { margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,.06); }
+.sp-label { font-size:.62rem; color:#556; text-transform:uppercase; letter-spacing:.08em; margin-bottom:4px; font-weight:600; }
+.sp-row { display:flex; justify-content:space-between; padding:2px 0; }
+.sp-k { color:#778; }
+.sp-v { color:#aee; font-weight:600; font-family:monospace; }
+
+/* Search input */
+.sp-search { display:flex; gap:4px; margin-bottom:8px; }
+.sp-search input {
+    flex:1; background:rgba(0,200,200,.06); border:1px solid rgba(0,200,200,.2);
+    border-radius:5px; color:#ddd; font-family:monospace; font-size:.78rem;
+    padding:6px 8px; outline:none;
+}
+.sp-search input:focus { border-color:#0cc; }
+.sp-search button {
+    background:rgba(0,200,200,.15); border:1px solid rgba(0,200,200,.3);
+    border-radius:5px; color:#0cc; cursor:pointer; font-size:.72rem; padding:6px 12px;
+    font-weight:600; transition:all .15s; white-space:nowrap;
+}
+.sp-search button:hover { background:rgba(0,200,200,.25); }
+
+/* Group toggles */
+.sp-toggle { display:flex; align-items:center; gap:6px; padding:3px 0; cursor:pointer; }
+.sp-toggle input { accent-color:#0cc; width:14px; height:14px; cursor:pointer; }
+.sp-toggle label { cursor:pointer; color:#99a; font-size:.72rem; }
+.sp-toggle .count { margin-left:auto; color:#445; font-size:.62rem; font-family:monospace; }
+.grp-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.alt-bar { display:flex; align-items:flex-end; gap:1px; height:40px; margin-top:4px; }
+.alt-bar-col { flex:1; min-width:2px; border-radius:1px 1px 0 0; transition:height .3s; }
+.alt-bar-label { display:flex; justify-content:space-between; font-size:.55rem; color:#445; font-family:monospace; margin-top:2px; }
+
+/* Conjunction results */
+.cj-result {
+    padding:4px 0; border-bottom:1px solid rgba(255,255,255,.04);
+    display:flex; justify-content:space-between; align-items:center;
+}
+.cj-dist { font-weight:700; font-family:monospace; min-width:50px; }
+.cj-name { color:#99a; flex:1; margin:0 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cj-time { color:#667; font-family:monospace; font-size:.65rem; }
+
+/* Data section below canvas */
+#sat-data {
+    max-width:1100px; margin:0 auto; padding:20px 16px 40px; color:#ccc;
+}
+.sd-card { background:rgba(0,200,200,.03); border:1px solid rgba(0,200,200,.08); border-radius:10px;
+    padding:14px 16px; margin-bottom:10px; }
+.sd-card h3 { font-size:.72rem; color:#0aa; text-transform:uppercase; letter-spacing:.08em;
+    margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(0,200,200,.08); }
+.sd-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+.sd-stat { display:flex; justify-content:space-between; padding:2px 0; font-size:.74rem; }
+.sd-stat-k { color:#667; }
+.sd-stat-v { color:#aee; font-weight:600; font-family:monospace; }
+.sp-export-btn {
+    background:rgba(0,170,170,.08); border:1px solid rgba(0,170,170,.2);
+    border-radius:4px; color:#0aa; cursor:pointer; font-family:inherit;
+    font-size:.62rem; padding:3px 8px; transition:all .15s;
+}
+.sp-export-btn:hover { background:rgba(0,170,170,.18); color:#0ee; }
+.sp-op-btn {
+    display:block; width:100%; margin-bottom:3px; padding:6px 10px; font-family:inherit;
+    font-size:.68rem; font-weight:600; cursor:pointer; border-radius:4px; transition:all .15s;
+    background:rgba(255,140,0,.08); border:1px solid rgba(255,140,0,.2); color:#ff8c00;
+}
+.sp-op-btn:hover { background:rgba(255,140,0,.2); color:#ffaa44; }
+.op-table { width:100%; border-collapse:collapse; font-size:.62rem; }
+.op-table th { text-align:left; padding:3px 4px; color:#556; border-bottom:1px solid rgba(255,255,255,.06); font-weight:600; text-transform:uppercase; letter-spacing:.04em; }
+.op-table td { padding:3px 4px; color:#99a; border-bottom:1px solid rgba(255,255,255,.02); }
+.op-table tr:hover td { background:rgba(255,255,255,.02); }
+.op-badge { display:inline-block; padding:1px 5px; border-radius:2px; font-size:.55rem; font-weight:700; }
+.op-badge.crit { background:rgba(255,30,0,.15); color:#ff3322; }
+.op-badge.high { background:rgba(255,136,0,.12); color:#ff8800; }
+.op-badge.mod  { background:rgba(255,200,0,.1); color:#ffcc44; }
+.op-badge.ok   { background:rgba(0,200,100,.1); color:#44cc66; }
+.cov-bar { height:10px; border-radius:2px; margin-top:2px; }
+.cov-stat { display:flex; justify-content:space-between; font-size:.62rem; margin:2px 0; }
+.cov-stat-k { color:#556; }
+.cov-stat-v { color:#ff8c00; font-weight:600; font-family:monospace; }
+</style>
+</head>
+<body>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("satellites");</script>
+<script type="module">import "./js/page-tier-gate.js?v=20260428";</script>
+
+<div id="app">
+    <canvas id="sat-canvas"></canvas>
+
+    <!-- HUD (top-left) -->
+    <div id="sat-hud">
+        <div><strong style="color:#0cc">Satellite Tracker</strong></div>
+        <div>Tracked: <span class="val" id="hud-count">0</span> objects</div>
+        <div>Groups: <span class="val" id="hud-groups">—</span></div>
+        <div>Source: <span class="dim">CelesTrak / 18th SDS</span></div>
+        <div>Engine: <span class="val" id="hud-engine">loading...</span></div>
+        <div>Updated: <span class="val" id="hud-updated">—</span></div>
+    </div>
+
+    <!-- Control panel (right side) -->
+    <div id="sat-panel">
+        <div class="sp-title">Satellite Tracker</div>
+
+        <!-- Search -->
+        <div class="sp-section">
+            <div class="sp-label">Search by NORAD ID or Name</div>
+            <div class="sp-search">
+                <input id="sp-search-input" type="text" placeholder="25544 or ISS">
+                <button id="sp-search-btn">Track</button>
+            </div>
+            <div id="sp-search-result" style="color:#667;font-size:.65rem;line-height:1.5"></div>
+        </div>
+
+        <!-- Satellite groups -->
+        <div class="sp-section">
+            <div class="sp-label">Mega-Constellations</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-starlink"><span class="grp-dot" style="background:#ccddff"></span><label for="grp-starlink">Starlink (SpaceX)</label><span class="count" id="cnt-starlink">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-oneweb"><span class="grp-dot" style="background:#4488ff"></span><label for="grp-oneweb">OneWeb</label><span class="count" id="cnt-oneweb">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-iridium"><span class="grp-dot" style="background:#ff66aa"></span><label for="grp-iridium">Iridium</label><span class="count" id="cnt-iridium">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-globalstar"><span class="grp-dot" style="background:#ffaa66"></span><label for="grp-globalstar">Globalstar</label><span class="count" id="cnt-globalstar">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Navigation (GNSS)</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-gps-ops"><span class="grp-dot" style="background:#00ff88"></span><label for="grp-gps-ops">GPS (USA)</label><span class="count" id="cnt-gps-ops">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-galileo"><span class="grp-dot" style="background:#00ccff"></span><label for="grp-galileo">Galileo (EU)</label><span class="count" id="cnt-galileo">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-beidou"><span class="grp-dot" style="background:#ff8844"></span><label for="grp-beidou">BeiDou (China)</label><span class="count" id="cnt-beidou">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-glonass"><span class="grp-dot" style="background:#ff4444"></span><label for="grp-glonass">GLONASS (Russia)</label><span class="count" id="cnt-glonass">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Missions &amp; Infrastructure</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-stations" checked><span class="grp-dot" style="background:#ffffff"></span><label for="grp-stations">Space Stations</label><span class="count" id="cnt-stations">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-weather"><span class="grp-dot" style="background:#ffdd44"></span><label for="grp-weather">Weather</label><span class="count" id="cnt-weather">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-science"><span class="grp-dot" style="background:#cc66ff"></span><label for="grp-science">Science</label><span class="count" id="cnt-science">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-resource"><span class="grp-dot" style="background:#44ff44"></span><label for="grp-resource">Earth Observation</label><span class="count" id="cnt-resource">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-planet"><span class="grp-dot" style="background:#88ff88"></span><label for="grp-planet">Planet Labs</label><span class="count" id="cnt-planet">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-geo"><span class="grp-dot" style="background:#ffaa00"></span><label for="grp-geo">Geostationary</label><span class="count" id="cnt-geo">—</span></div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-last-30-days"><span class="grp-dot" style="background:#00ffaa"></span><label for="grp-last-30-days">Recently Launched</label><span class="count" id="cnt-last-30-days">—</span></div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label" style="color:#ff4444">Debris &amp; Hazards</div>
+            <div class="sp-toggle"><input type="checkbox" id="grp-debris"><span class="grp-dot" style="background:#ff2200"></span><label for="grp-debris" style="color:#ff6644">Tracked Debris</label><span class="count" id="cnt-debris">—</span></div>
+            <!-- Status strip for the background debris-threat screen.
+                 Collapsed until the user enables debris; the Web Worker
+                 then runs once against every loaded operational group and
+                 populates sp-near-miss counts on each selected satellite. -->
+            <div id="debris-screen-status" style="display:none;margin-top:6px;font-size:.62rem;color:#887;line-height:1.5">
+                <div style="display:flex;align-items:center;gap:6px">
+                    <div id="dss-label" style="flex:1;min-width:0">—</div>
+                    <button id="dss-rescan" type="button" title="Discard cached threats and re-run the SGP4 screen against the current catalog"
+                        style="background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:3px;color:#ffaa44;cursor:pointer;font-size:.58rem;padding:2px 6px;font-family:inherit;flex-shrink:0">↻ Rescan</button>
+                </div>
+                <div style="height:3px;background:rgba(255,80,80,.10);border-radius:2px;margin-top:3px;overflow:hidden">
+                    <div id="dss-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#ff4422,#ffaa44);transition:width .15s"></div>
+                </div>
+            </div>
+        </div>
+        <div class="sp-section">
+            <div class="sp-label">Visualization</div>
+            <div class="sp-toggle"><input type="checkbox" id="tog-shells"><label for="tog-shells">Starlink orbital shells</label></div>
+            <div class="sp-toggle"><input type="checkbox" id="tog-heatmap"><label for="tog-heatmap">Altitude density heatmap</label></div>
+            <div id="alt-heatmap" style="display:none;margin-top:6px"></div>
+            <div class="sp-toggle" title="Tint sats whose sub-point is inside an active NWS alert polygon or tropical-cyclone wind radius">
+                <input type="checkbox" id="tog-alerts"><label for="tog-alerts">Alert overpass (sats over active weather)</label>
+                <span class="count" id="cnt-alerts">0</span>
+            </div>
+        </div>
+
+        <!-- Operator Analytics -->
+        <div class="sp-section" id="sp-operator">
+            <div class="sp-label" style="color:#ff8c00">Operator Analytics</div>
+            <button class="sp-op-btn" id="btn-decay-watchlist" title="Find objects reentering soon">Decay Watchlist</button>
+            <button class="sp-op-btn" id="btn-coverage" title="Estimate constellation coverage">Coverage Map</button>
+            <button class="sp-op-btn" id="btn-breakup" title="Detect anomalous debris clusters">Breakup Detection</button>
+            <button class="sp-op-btn" id="btn-constellation-conj" title="Screen two constellations against each other">Cross-Constellation Screening</button>
+            <div id="sp-operator-results" style="margin-top:6px;max-height:300px;overflow-y:auto"></div>
+        </div>
+
+        <!-- Selected satellite info -->
+        <div class="sp-section" id="sp-sat-info" style="display:none">
+            <div class="sp-label">Selected Satellite</div>
+            <div class="sp-row"><span class="sp-k">Name</span><span class="sp-v" id="sp-name">—</span></div>
+            <div class="sp-row"><span class="sp-k">NORAD ID</span><span class="sp-v" id="sp-norad">—</span></div>
+            <div class="sp-row"><span class="sp-k">Inclination</span><span class="sp-v" id="sp-incl">—</span></div>
+            <div class="sp-row"><span class="sp-k">Period</span><span class="sp-v" id="sp-period">—</span></div>
+            <div class="sp-row"><span class="sp-k">Perigee</span><span class="sp-v" id="sp-peri">—</span></div>
+            <div class="sp-row"><span class="sp-k">Apogee</span><span class="sp-v" id="sp-apo">—</span></div>
+            <div class="sp-row"><span class="sp-k">Altitude</span><span class="sp-v" id="sp-alt">—</span></div>
+            <div class="sp-row"><span class="sp-k">Lat / Lon</span><span class="sp-v" id="sp-latlon">—</span></div>
+            <div class="sp-row"><span class="sp-k">Speed</span><span class="sp-v" id="sp-speed">—</span></div>
+
+            <!-- Altitude Cohort — sat + debris sharing the selected object's
+                 altitude shell (±25 km). Live instantaneous count (cheap,
+                 no SGP4). The "Screen debris" button below fires the
+                 tracker's SGP4-based conjunction screen filtered to debris
+                 over 24 h at 50 km — clicks only, because per-run it still
+                 propagates every debris entry against the target. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,170,0,.1);font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
+                Altitude Cohort (±25 km)
+            </div>
+            <div class="sp-row"><span class="sp-k">Debris in band</span>    <span class="sp-v" id="sp-cohort-debris">—</span></div>
+            <div class="sp-row"><span class="sp-k">Active in band</span>    <span class="sp-v" id="sp-cohort-active">—</span></div>
+            <div class="sp-row"><span class="sp-k">Near-miss 24 h</span>    <span class="sp-v" id="sp-near-miss">—</span></div>
+            <button class="sp-op-btn" id="sp-screen-debris" title="Propagate target + debris catalog and list approaches &lt;50 km over next 24 h">Screen debris (24h · 50 km)</button>
+            <div id="sp-debris-results" style="font-size:.62rem;color:#778;margin-top:4px;line-height:1.6;display:none"></div>
+
+            <!-- Trajectory analysis — rebuilt each selection from one
+                 orbital period of SGP4 samples. Shows when the object
+                 next reaches apogee / perigee, whether it's sunlit now,
+                 and when it enters / exits Earth's umbra. -->
+            <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,200,255,.12);font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">
+                Trajectory (next orbit)
+            </div>
+            <div class="sp-row"><span class="sp-k">Next apogee</span>   <span class="sp-v" id="sp-next-apo">—</span></div>
+            <div class="sp-row"><span class="sp-k">Next perigee</span>  <span class="sp-v" id="sp-next-peri">—</span></div>
+            <div class="sp-row"><span class="sp-k">Sun state</span>     <span class="sp-v" id="sp-sunlit">—</span></div>
+            <div class="sp-row"><span class="sp-k">Next eclipse</span>  <span class="sp-v" id="sp-next-eclipse">—</span></div>
+        </div>
+
+        <!-- Conjunction screening -->
+        <div class="sp-section" id="sp-conj-section" style="display:none">
+            <div class="sp-label">Conjunction Screening (72 hr)</div>
+            <div id="sp-conj-status" style="color:#556;font-size:.65rem">—</div>
+            <div id="sp-conj-results"></div>
+        </div>
+
+        <!-- PRO Analytics (shown when satellite selected) -->
+        <div class="sp-section" id="sp-analytics" style="display:none">
+            <div class="sp-label">Orbital Analytics <span style="color:#0aa;font-weight:400;letter-spacing:0">(PRO)</span></div>
+            <div class="sp-row"><span class="sp-k">SMA</span><span class="sp-v" id="sp-sma">—</span></div>
+            <div class="sp-row"><span class="sp-k">Velocity</span><span class="sp-v" id="sp-vel">—</span></div>
+            <div class="sp-row"><span class="sp-k">Revs/day</span><span class="sp-v" id="sp-revs">—</span></div>
+            <div class="sp-row"><span class="sp-k">RAAN drift</span><span class="sp-v" id="sp-raan-drift">—</span></div>
+            <div class="sp-row"><span class="sp-k">Arg.P drift</span><span class="sp-v" id="sp-argp-drift">—</span></div>
+            <div class="sp-row"><span class="sp-k">Sun-sync</span><span class="sp-v" id="sp-sunsync">—</span></div>
+            <div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.04);padding-top:6px">
+                <div style="font-size:.58rem;color:#445;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Orbit Lifetime</div>
+                <div class="sp-row"><span class="sp-k">Estimate</span><span class="sp-v" id="sp-lifetime">—</span></div>
+                <div class="sp-row"><span class="sp-k">Decay rate</span><span class="sp-v" id="sp-decay-rate">—</span></div>
+                <div class="sp-row"><span class="sp-k">Density</span><span class="sp-v" id="sp-atm-rho">—</span></div>
+            </div>
+            <div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.04);padding-top:6px">
+                <div style="font-size:.58rem;color:#445;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Pass Predictions (your location)</div>
+                <div id="sp-passes" style="font-size:.65rem;color:#667"></div>
+            </div>
+            <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap">
+                <button class="sp-export-btn" id="sp-export-json" title="Export full analysis as JSON">Export JSON</button>
+                <button class="sp-export-btn" id="sp-export-csv" title="Export conjunctions as CSV">Export CSV</button>
+                <button class="sp-export-btn" id="sp-export-cdm" title="Export CDM for closest conjunction">Export CDM</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Time controls (bottom-centre): single source of truth for the whole
+         page. All per-frame state (Earth rotation, sun direction, satellite
+         propagation) is derived from simTimeMs in animate(). Keyboard:
+         Space = play/pause, N = jump to now. -->
+    <div id="time-controls">
+        <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" data-speed="1"    title="Real time (1×)">1×</button>
+        <button class="tc-btn" data-speed="60"   title="1 minute per second">60×</button>
+        <button class="tc-btn" data-speed="600"  title="10 minutes per second">600×</button>
+        <button class="tc-btn" data-speed="3600" title="1 hour per second">3600×</button>
+        <span class="tc-sep"></span>
+        <button class="tc-btn" id="tc-now" title="Jump to real time">Now</button>
+        <span class="tc-display">
+            <span class="tc-time"   id="tc-time-utc">—</span>
+            <span class="tc-offset" id="tc-time-offset">now</span>
+        </span>
+    </div>
+</div>
+
+<!-- Data section below canvas -->
+<div id="sat-data">
+    <div class="sd-grid">
+        <div class="sd-card">
+            <h3>Data Source</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Catalog</span><span class="sd-stat-v">CelesTrak GP Elements</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Origin</span><span class="sd-stat-v">18th Space Defense Squadron</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Update cadence</span><span class="sd-stat-v">~8 hours</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Total tracked</span><span class="sd-stat-v" id="sd-total">~30,000 objects</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Format</span><span class="sd-stat-v">TLE (Two-Line Element)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Propagator</span><span class="sd-stat-v">SGP4 (J2 perturbations)</span></div>
+        </div>
+        <div class="sd-card">
+            <h3>Conjunction Screening</h3>
+            <div class="sd-stat"><span class="sd-stat-k">Look-ahead</span><span class="sd-stat-v">72 hours</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Step size</span><span class="sd-stat-v">10 minutes</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Threshold</span><span class="sd-stat-v">25 km</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Pre-filter</span><span class="sd-stat-v">±200 km altitude</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Method</span><span class="sd-stat-v">SGP4 propagation + ECEF distance</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Note</span><span class="sd-stat-v" style="color:#887;font-weight:400">Simplified — not production CDM</span></div>
+        </div>
+        <div class="sd-card">
+            <h3>Coordinate Frames</h3>
+            <div class="sd-stat"><span class="sd-stat-k">TLE reference</span><span class="sd-stat-v">TEME (True Equator Mean Equinox)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Display</span><span class="sd-stat-v">ECEF → geodetic lat/lon/alt</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">GMST rotation</span><span class="sd-stat-v">Simplified (no nutation)</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Position accuracy</span><span class="sd-stat-v">~1 km at epoch</span></div>
+            <div class="sd-stat"><span class="sd-stat-k">Degradation</span><span class="sd-stat-v">~1-2 km/day (LEO)</span></div>
+        </div>
+    </div>
+    <div class="sd-card" style="font-size:.68rem;color:#556;line-height:1.6;margin-top:6px">
+        <h3>References & Accuracy</h3>
+        <p><strong style="color:#778">SGP4:</strong> Hoots & Roehrich (1980) "Spacetrack Report No. 3" · Vallado et al. (2006) "Revisiting Spacetrack Report #3" · AFSPC (now USSF) standard propagator for TLE data</p>
+        <p style="margin-top:3px"><strong style="color:#778">CelesTrak:</strong> Dr. T.S. Kelso, Center for Space Standards & Innovation · Mirrors 18th Space Defense Squadron catalog · celestrak.org</p>
+        <p style="margin-top:3px"><strong style="color:#778">Limitations:</strong> TLEs are mean elements — SGP4 is the ONLY correct propagator. Position accuracy ~1 km at epoch, degrades ~1-2 km/day for LEO. Conjunction screening uses simplified J2 propagation; production CDM generation requires full SGP4 for both target AND catalog with proper covariance estimation.</p>
+    </div>
+</div>
+
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { SatelliteTracker, isWasmLoaded, propagate, tleEpochToJd } from './js/satellite-tracker.js';
+import { orbitalRates, estimateOrbitLifetime, predictPasses, generateCDM,
+         estimateAvoidanceManeuver, buildAnalysisReport, conjunctionsToCSV,
+         decayWatchlist, constellationCoverage, detectBreakupEvents
+       } from './js/orbital-analytics.js';
+import { loadUserLocation, auroraVisibility } from './js/user-location.js';
+import { geo } from './js/geo/coords.js';
+import { sunDirectionEci } from './js/sun-altitude.js';
+import { NWSAlerts, ALERT_CSS_COLORS } from './js/nws-alerts.js';
+import { StormFeed } from './js/storm-feed.js';
+import { findSatsOverAlerts } from './js/sat-alert-matcher.js';
+import { DebrisThreatCache } from './js/debris-threat-cache.js';
+
+// ── Nav burger ──────────────────────────────────────────────────────────────
+const _burger = document.getElementById('nav-burger');
+const _menu   = document.getElementById('nav-menu');
+_burger?.addEventListener('click', () => {
+    const open = _menu.classList.toggle('open');
+    _burger.textContent = open ? '\u2715' : '\u2630';
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  THREE.JS SCENE — Earth globe with satellite overlay
+// ═══════════════════════════════════════════════════════════════
+
+const canvas   = document.getElementById('sat-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setClearColor(0x000005);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, canvas.clientWidth / canvas.clientHeight, 0.01, 100);
+camera.position.set(0, 1.5, 3.5);
+
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 1.2;
+controls.maxDistance = 20;
+
+// Lights — tuned for the sim-time scrubber. At 3600× speed the
+// terminator sweeps a full rotation every 24 s, and with the old
+// 0.4/1.2 ambient-to-directional balance the night hemisphere dropped
+// to ~25% of day-side brightness, making the sweep read as a jarring
+// flicker. Bumping ambient to 0.58 with a slightly warmer tint puts
+// the night side at ~35% — still clearly unlit, but the transition
+// reads as a gradient rather than a flash. Directional trimmed to 1.05
+// to keep the sunlit hemisphere from clipping to pure white.
+//
+// If we later swap the MeshStandardMaterial for the shader-based
+// earth-skin used on earth.html (physically-accurate rim + city lights
+// + atmosphere glow), this balance can go back toward 0.4/1.2 because
+// the shader carries its own night-side ambient floor.
+scene.add(new THREE.AmbientLight(0x445878, 0.58));
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.05);
+sunLight.position.set(10, 2, 3);   // placeholder — animate() drives this from sim time
+scene.add(sunLight);
+
+// Earth sphere — Blue Marble texture from CDN.
+// (This page uses Three.js's native SphereGeometry whose UVs store v=(1-v),
+// i.e. v=1 at the north pole — opposite of the shader-based earth.html
+// convention. Combined with TextureLoader's default flipY=true that
+// correctly lands image row 0 at mesh-north. Do NOT set flipY=false here
+// or the globe renders upside-down.)
+const earthGeo = new THREE.SphereGeometry(1, 64, 64);
+const earthTex = new THREE.TextureLoader().load(
+    'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
+    tex => { tex.colorSpace = THREE.SRGBColorSpace; }
+);
+const earthMat = new THREE.MeshStandardMaterial({ map: earthTex, roughness: 0.85 });
+const earthMesh = new THREE.Mesh(earthGeo, earthMat);
+scene.add(earthMesh);
+
+// Atmosphere glow
+const atmMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.025, 48, 48),
+    new THREE.MeshBasicMaterial({
+        color: 0x4488ff, transparent: true, opacity: 0.08,
+        blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+    })
+);
+scene.add(atmMesh);
+
+// ═══════════════════════════════════════════════════════════════
+//  SATELLITE TRACKER
+// ═══════════════════════════════════════════════════════════════
+
+const tracker = new SatelliteTracker(scene, 1.0, {
+    maxSatellites: 50000,
+    showOrbits: true,
+});
+
+async function loadGroup(name) {
+    if (tracker.hasGroup(name)) return;
+    const countEl = document.getElementById(`cnt-${name}`);
+    if (countEl) countEl.textContent = '…';
+    const count = await tracker.loadGroup(name);
+    if (countEl) countEl.textContent = count.toLocaleString();
+    _updateHud();
+    _updateHeatmap();
+}
+
+function _updateHud() {
+    const total = tracker.getSatellites().length;
+    const groups = tracker.getLoadedGroups();
+    document.getElementById('hud-count').textContent = total.toLocaleString();
+    document.getElementById('hud-groups').textContent = groups.join(', ') || '—';
+    document.getElementById('hud-updated').textContent = new Date().toLocaleTimeString([], {
+        hour: '2-digit', minute: '2-digit',
+    });
+    document.getElementById('sd-total').textContent = `${total.toLocaleString()} loaded`;
+    document.getElementById('hud-engine').textContent = isWasmLoaded() ? 'Rust WASM SGP4' : 'JS Fallback';
+}
+
+// Auto-load stations, then pin the ISS so it's findable among all the
+// other space-station dots.
+loadGroup('stations').then(() => {
+    tracker.setHighlight(25544, { label: 'ISS', color: 0x00ffcc });
+});
+
+// ── Debris-threat pre-compute (Level 2) ──────────────────────────────────
+// Spins up a Module Worker that propagates every loaded operational sat
+// against the debris catalog once, then caches the per-sat near-miss
+// lists. The altitude-cohort card reads this cache so "Near-miss 24 h"
+// is already filled in when the user selects a sat — no click required.
+//
+// Triggered once, the first time the 'debris' group finishes loading.
+// `_debrisScreenRan` ensures we don't re-run on subsequent group loads;
+// a future commit can add a manual "Rescan" button if we want that.
+const _debrisCache  = new DebrisThreatCache();
+let   _debrisScreenRan = false;
+
+_debrisCache.subscribe(_renderDebrisStatus);
+
+function _renderDebrisStatus(evt) {
+    const box   = document.getElementById('debris-screen-status');
+    const label = document.getElementById('dss-label');
+    const bar   = document.getElementById('dss-bar');
+    if (!box || !label || !bar) return;
+
+    if (evt.state === 'idle' || !evt.state) {
+        box.style.display = 'none';
+        return;
+    }
+    box.style.display = '';
+
+    if (evt.state === 'running') {
+        if (evt.phase === 'start') {
+            label.textContent = `Pre-compute launching…`;
+            bar.style.width = '2%';
+            return;
+        }
+        const pct = evt.total > 0 ? (100 * evt.done / evt.total) : 0;
+        label.innerHTML = `Screening debris: <strong>${evt.done.toLocaleString()}</strong> / ${evt.total.toLocaleString()} sats`;
+        bar.style.width = pct.toFixed(1) + '%';
+        return;
+    }
+    if (evt.state === 'done') {
+        // Tag the source so a user can tell whether they're looking at
+        // a fresh run or a restored row from IndexedDB.
+        const source = _debrisCache.source;
+        const srcTag = source === 'idb'
+            ? `<span style="color:#88ccdd" title="Restored from IndexedDB (last run ${evt.ageMs ? (evt.ageMs / 3600000).toFixed(1) + ' h ago' : 'recent'})">cached</span>`
+            : `<span style="color:#4fc97f">✓ Done</span>`;
+        label.innerHTML =
+            `${srcTag} — ${evt.threatCount.toLocaleString()} sat${evt.threatCount === 1 ? '' : 's'} with debris < 50 km in 24 h`;
+        bar.style.width = '100%';
+        // Force the selected-sat card to refresh its readout with the
+        // newly-available count.
+        if (_selectedNorad != null) {
+            const sel = tracker.getSatellites().find(s => s.norad_id === _selectedNorad);
+            if (sel) _updateAltitudeCohort(sel);
+        }
+        return;
+    }
+    if (evt.state === 'error') {
+        label.innerHTML = `<span style="color:#ff4422">⚠ Pre-compute failed</span> — ${_esc(evt.error || 'unknown')}`;
+        bar.style.width = '0%';
+        return;
+    }
+}
+
+async function _maybeRunDebrisScreen() {
+    if (_debrisScreenRan) return;
+    if (!tracker.hasGroup('debris')) return;
+
+    // Target = every loaded group *except* debris. GEO sats won't actually
+    // conjunct with LEO debris, but the altitude pre-filter in the worker
+    // prunes them cheaply and including them keeps the API simple.
+    const loaded  = tracker.getLoadedGroups();
+    const targets = tracker.getTlesByGroup(loaded.filter(g => g !== 'debris'));
+    const debris  = tracker.getTlesByGroup('debris');
+    if (targets.length === 0 || debris.length === 0) return;
+
+    _debrisScreenRan = true;
+
+    // Try the IDB fast path first — a compatible run from the last 6 h
+    // (same params, catalog counts within 5 %) lets us skip the worker
+    // entirely. If it misses, fall through to a live run.
+    const params = { hoursAhead: 24, stepMin: 10, thresholdKm: 50 };
+    const restored = await _debrisCache.restore({
+        params,
+        targetCount: targets.length,
+        debrisCount: debris.length,
+    });
+    if (restored) {
+        console.info('[DebrisThreat] Restored from IndexedDB (skipping worker run)');
+        return;
+    }
+    console.info(`[DebrisThreat] Starting screen: ${targets.length} targets × ${debris.length} debris`);
+    _debrisCache.run(targets, debris, params);
+}
+
+// Fires after every tracker.loadGroup() resolves — use it as the hook for
+// "both catalogs ready, kick off the worker".
+window.addEventListener('satellites-loaded', (e) => {
+    if (e.detail?.group === 'debris') _maybeRunDebrisScreen();
+});
+
+// Manual rescan — drop the IDB row + reset the one-shot flag so the next
+// _maybeRunDebrisScreen() call actually spins the worker instead of
+// hitting the fast-restore path. No-op while a run is already in flight.
+document.getElementById('dss-rescan')?.addEventListener('click', () => {
+    if (_debrisCache.state === 'running') return;
+    _debrisCache.clearCache({ persist: true });
+    _debrisScreenRan = false;
+    _maybeRunDebrisScreen();
+});
+
+// All constellation group toggles
+const ALL_GROUPS = [
+    'stations','starlink','oneweb','iridium','globalstar',
+    'gps-ops','galileo','beidou','glonass',
+    'weather','science','resource','planet','geo','last-30-days',
+    'debris',
+];
+
+for (const name of ALL_GROUPS) {
+    const el = document.getElementById(`grp-${name}`);
+    if (!el) continue;
+    el.addEventListener('change', async e => {
+        if (e.target.checked) {
+            await loadGroup(name);
+        }
+        tracker.setGroupVisible(name, e.target.checked);
+    });
+}
+
+// ── Starlink shell visualization ──────────────────────────────────────────
+document.getElementById('tog-shells')?.addEventListener('change', e => {
+    if (e.target.checked && tracker.getShellGroup().children.length === 0) {
+        tracker.buildStarlinkShells(true);
+    }
+    tracker.setShellsVisible(e.target.checked);
+});
+
+// ── Alert overpass (weather-aware satellite overlay) ─────────────────────
+// Maintains local mirrors of the NWS + StormFeed streams, recomputes the
+// sat/alert match each animation frame, and hands a colour-override map
+// to the tracker. The matcher is cheap (<1 ms for ~5 k sats × ~100
+// events with the lat prefilter) so there's no meaningful cost to
+// running it every frame — which is useful because at high sim speeds
+// sats cross alert zones in a fraction of a second of real time.
+let _nwsAlertsLive = [];
+let _stormsLive    = [];
+let _alertEnabled  = false;
+let _lastMatchMap  = null;    // Map<noradId, { alerts, storms }>
+const _alertFeed   = new NWSAlerts();
+const _stormFeed   = new StormFeed();
+
+// THREE.Color instances reused across frames; severity-weighted so a
+// tornado warning stands out more than a small-craft advisory, and a
+// cyclone-over pass (magenta) is always distinct from either.
+const _ALERT_TINT = {
+    Extreme:  new THREE.Color(0xff2200),
+    Severe:   new THREE.Color(0xff8800),
+    Moderate: new THREE.Color(0xffdd44),
+    Minor:    new THREE.Color(0x00ccff),
+    Unknown:  new THREE.Color(0xcccccc),
+};
+const _STORM_TINT = new THREE.Color(0xff00aa);
+
+// Pick the strongest match colour for a sat that's over multiple events.
+// Storm always wins over a regular alert; among alerts, the most severe.
+function _pickTint(hit) {
+    if (hit.storms && hit.storms.length > 0) return _STORM_TINT;
+    let best = _ALERT_TINT.Unknown;
+    let bestRank = 99;
+    const order = ['Extreme', 'Severe', 'Moderate', 'Minor', 'Unknown'];
+    for (const a of hit.alerts ?? []) {
+        const r = order.indexOf(a.severity);
+        if (r >= 0 && r < bestRank) { bestRank = r; best = _ALERT_TINT[a.severity] ?? best; }
+    }
+    return best;
+}
+
+document.addEventListener('nws-alerts-update', (e) => {
+    _nwsAlertsLive = e.detail?.alerts ?? [];
+    _runMatchNow();   // refresh immediately; don't wait for next frame
+});
+window.addEventListener('storm-update', (e) => {
+    _stormsLive = e.detail?.storms ?? [];
+    _runMatchNow();
+});
+
+function _runMatchNow() {
+    if (!_alertEnabled) return;
+    const sats = tracker.getSatellites();
+    _lastMatchMap = findSatsOverAlerts(sats, _nwsAlertsLive, _stormsLive);
+    const overrides = new Map();
+    for (const [noradId, hit] of _lastMatchMap) {
+        overrides.set(noradId, _pickTint(hit));
+    }
+    tracker.setColorOverrides(overrides);
+    const cnt = document.getElementById('cnt-alerts');
+    if (cnt) cnt.textContent = overrides.size.toLocaleString();
+    // Refresh the selected-sat info panel if it's showing a flagged sat.
+    if (_selectedNorad != null) _renderSelectedAlerts(_selectedNorad);
+}
+
+document.getElementById('tog-alerts')?.addEventListener('change', (e) => {
+    _alertEnabled = e.target.checked;
+    if (_alertEnabled) {
+        // First-time activation — spin up the feeds.  Both are idempotent
+        // (start() on an already-running feed is a no-op via timer reuse).
+        _alertFeed.start();
+        _stormFeed.start();
+        _runMatchNow();
+    } else {
+        tracker.clearColorOverrides();
+        const cnt = document.getElementById('cnt-alerts');
+        if (cnt) cnt.textContent = '0';
+        const row = document.getElementById('sp-alert-row');
+        if (row) row.style.display = 'none';
+    }
+});
+
+// Render the "currently over" list for a selected satellite inside the
+// existing #sp-sat-info panel. Inserts once and updates in place so we
+// don't thrash the DOM.
+function _renderSelectedAlerts(noradId) {
+    const info = document.getElementById('sp-sat-info');
+    if (!info || info.style.display === 'none') return;
+    let row = document.getElementById('sp-alert-row');
+    if (!row) {
+        row = document.createElement('div');
+        row.id = 'sp-alert-row';
+        row.style.cssText = 'margin-top:6px;padding:6px 7px;border-top:1px solid rgba(255,170,0,.18);background:rgba(255,170,0,.04);border-radius:4px;font-size:.65rem;line-height:1.5;color:#cda;display:none';
+        info.appendChild(row);
+    }
+    const hit = _lastMatchMap?.get(noradId);
+    if (!hit || !_alertEnabled) { row.style.display = 'none'; return; }
+    const bits = [];
+    for (const s of hit.storms ?? []) {
+        bits.push(`<div><span style="color:${_STORM_TINT.getStyle()};font-weight:600">🌀 ${_esc(s.name)}</span> · ${s.classification} · ${Math.round(s.distanceKm)} km from eye</div>`);
+    }
+    for (const a of hit.alerts ?? []) {
+        const col = ALERT_CSS_COLORS?.[a.severity] ?? '#ffdd44';
+        bits.push(`<div><span style="color:${col};font-weight:600">⚠ ${_esc(a.event)}</span> — ${_esc(a.area.split(';')[0].trim())} · ${Math.round(a.distanceKm)} km from centroid</div>`);
+    }
+    row.innerHTML = `<div style="font-size:.58rem;color:#887;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Currently Over</div>${bits.join('')}`;
+    row.style.display = '';
+}
+
+// ── Altitude density heatmap ──────────────────────────────────────────────
+function _updateHeatmap() {
+    const container = document.getElementById('alt-heatmap');
+    if (!container || !document.getElementById('tog-heatmap')?.checked) return;
+
+    const dist = tracker.getAltitudeDistribution(50);
+    if (dist.length === 0) { container.innerHTML = '<div style="color:#445;font-size:.6rem">No data</div>'; return; }
+
+    const maxCount = Math.max(...dist.map(d => d.count));
+    const dangerZones = [[750, 900], [1400, 1500]]; // Fengyun/Cosmos debris bands
+
+    let barsHtml = '<div class="alt-bar">';
+    for (const d of dist) {
+        if (d.alt > 2000) continue; // only show LEO
+        const h = Math.max(2, (d.count / maxCount) * 40);
+        const isDanger = dangerZones.some(([lo, hi]) => d.alt >= lo && d.alt <= hi);
+        const color = isDanger ? '#ff3322' : d.count > maxCount * 0.5 ? '#ff8844' : '#0cc';
+        barsHtml += `<div class="alt-bar-col" style="height:${h}px;background:${color}" title="${d.alt}km: ${d.count} objects"></div>`;
+    }
+    barsHtml += '</div>';
+    barsHtml += '<div class="alt-bar-label"><span>200 km</span><span style="color:#ff3322">750-900 km DANGER</span><span>2000 km</span></div>';
+    container.innerHTML = barsHtml;
+    container.style.display = 'block';
+}
+
+document.getElementById('tog-heatmap')?.addEventListener('change', e => {
+    const container = document.getElementById('alt-heatmap');
+    if (e.target.checked) {
+        _updateHeatmap();
+    } else if (container) {
+        container.style.display = 'none';
+    }
+});
+
+// Search handler
+async function doSearch() {
+    const input = document.getElementById('sp-search-input');
+    const resultEl = document.getElementById('sp-search-result');
+    const infoEl = document.getElementById('sp-sat-info');
+    const conjSection = document.getElementById('sp-conj-section');
+    if (!input?.value.trim()) return;
+    const query = input.value.trim();
+    resultEl.textContent = 'Searching…';
+
+    try {
+        const param = /^\d+$/.test(query) ? `norad=${query}` : `search=${encodeURIComponent(query)}`;
+        const res = await fetch(`/api/celestrak/tle?${param}`);
+        const data = await res.json();
+        if (data.error || !data.satellites?.length) {
+            resultEl.textContent = 'Not found — try a different NORAD ID or name';
+            infoEl.style.display = 'none';
+            conjSection.style.display = 'none';
+            return;
+        }
+        const sat = data.satellites[0];
+        resultEl.innerHTML = `Found: <strong style="color:#0cc">${sat.name}</strong>`;
+
+        // Add to tracker for live propagation, then drive the full
+        // selection pipeline. The CelesTrak response IS a TLE object.
+        await tracker.loadNorad(sat.norad_id);
+        _selectByTle(sat);
+
+    } catch (err) {
+        resultEl.textContent = `Error: ${err.message}`;
+    }
+}
+
+/**
+ * Point all the "selected sat" UI at a specific TLE.
+ * Used by both the search box (passes CelesTrak's response directly) and
+ * the right-click picker (passes tracker.getSatellite(id).tle).  The TLE
+ * is the authoritative input — _updateAnalytics needs mean_motion etc.,
+ * and using the same object for panel fields keeps everything in sync.
+ */
+function _selectByTle(tle) {
+    const infoEl = document.getElementById('sp-sat-info');
+    infoEl.style.display = '';
+    document.getElementById('sp-name').textContent   = tle.name ?? `NORAD ${tle.norad_id}`;
+    document.getElementById('sp-norad').textContent  = tle.norad_id;
+    document.getElementById('sp-incl').textContent   = tle.inclination.toFixed(2) + '°';
+    document.getElementById('sp-period').textContent = tle.period_min.toFixed(1) + ' min';
+    document.getElementById('sp-peri').textContent   = tle.perigee_km + ' km';
+    document.getElementById('sp-apo').textContent    = tle.apogee_km + ' km';
+
+    _selectedNorad = tle.norad_id;
+    _drawVisuals(tle.norad_id);
+    _runConjunctionScreening(tle.norad_id, tle.name ?? String(tle.norad_id));
+    _updateAnalytics(tle);                       // reads mean_motion, eccentricity, …
+    _renderSelectedAlerts(tle.norad_id);
+    _renderTrajectoryAnalysis(tle.norad_id);
+}
+
+let _selectedNorad = null;
+let _orbitLine = null;
+let _groundTrackLine = null;
+
+// ── Trajectory analysis ──────────────────────────────────────────────────
+// Samples one orbital period at ~1-minute resolution and pulls out the
+// four things an operator wants to see at a glance:
+//   * next apogee time + altitude
+//   * next perigee time + altitude
+//   * current sunlit / eclipsed state
+//   * next umbra entry (if sunlit) or exit (if eclipsed), with duration
+//
+// Uses the same cylindrical-umbra test as pass-predictor's visibility
+// flag — sat is lit unless it's on the anti-sun side AND its
+// perpendicular distance from the Earth-sun axis is below Earth's radius.
+const _TRAJ_RE_KM = 6378.135;
+function _renderTrajectoryAnalysis(noradId) {
+    const sat = tracker.getSatellite(noradId);
+    const ids = ['sp-next-apo', 'sp-next-peri', 'sp-sunlit', 'sp-next-eclipse'];
+    if (!sat || !sat.tle || !Number.isFinite(sat.period_min)) {
+        for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '—';
+        }
+        return;
+    }
+
+    const periodMin = sat.period_min || 90;
+    const nSteps    = Math.max(30, Math.min(180, Math.round(periodMin)));
+    const stepMin   = periodMin / nSteps;
+
+    // Start from sim time (not wall clock) so the card tracks the time
+    // scrubber — the trajectory card *should* update when the user
+    // scrubs forward, just like the TCA arcs do.
+    const jd0        = simTimeMs / 86400000 + 2440587.5;
+    const epochJd    = tleEpochToJd(sat.tle);
+    const tsinceBase = (jd0 - epochJd) * 1440;
+
+    // Sun direction in ECI at jd0 — constant over one orbit is fine
+    // (sun moves ~0.04° in 90 min, negligible for umbra boundary).
+    const sun = sunDirectionEci(new Date(simTimeMs));
+
+    let minAlt =  Infinity, minAltMin = 0;
+    let maxAlt = -Infinity, maxAltMin = 0;
+    let litNow = null;
+    let nextEclipseEntryMin = null;
+    let nextEclipseExitMin  = null;
+    let prevLit = null;
+
+    for (let i = 0; i <= nSteps; i++) {
+        const dt     = i * stepMin;
+        const p      = propagate(sat.tle, tsinceBase + dt);
+        if (!isFinite(p.x)) continue;
+
+        const magSq  = p.x * p.x + p.y * p.y + p.z * p.z;
+        const alt    = Math.sqrt(magSq) - _TRAJ_RE_KM;
+        if (alt < minAlt) { minAlt = alt; minAltMin = dt; }
+        if (alt > maxAlt) { maxAlt = alt; maxAltMin = dt; }
+
+        const dot = p.x * sun.x + p.y * sun.y + p.z * sun.z;
+        let lit;
+        if (dot >= 0) lit = true;
+        else          lit = (magSq - dot * dot) > _TRAJ_RE_KM * _TRAJ_RE_KM;
+
+        if (i === 0) litNow = lit;
+        if (prevLit !== null && prevLit !== lit) {
+            if (!lit && nextEclipseEntryMin === null) nextEclipseEntryMin = dt;
+            if ( lit && nextEclipseExitMin  === null) nextEclipseExitMin  = dt;
+        }
+        prevLit = lit;
+    }
+
+    const fmtT = (min) => min < 60 ? `+${Math.round(min)}m` : `+${(min / 60).toFixed(1)}h`;
+
+    document.getElementById('sp-next-apo').textContent =
+        isFinite(maxAlt) ? `${fmtT(maxAltMin)} · ${Math.round(maxAlt)} km` : '—';
+    document.getElementById('sp-next-peri').textContent =
+        isFinite(minAlt) ? `${fmtT(minAltMin)} · ${Math.round(minAlt)} km` : '—';
+
+    const sunEl = document.getElementById('sp-sunlit');
+    if (litNow === null) sunEl.textContent = '—';
+    else sunEl.innerHTML = litNow
+        ? '<span style="color:#ffdd44">☀ sunlit</span>'
+        : '<span style="color:#8899bb">⚫ eclipsed</span>';
+
+    const eclEl = document.getElementById('sp-next-eclipse');
+    if (litNow === null) {
+        eclEl.textContent = '—';
+    } else if (litNow && nextEclipseEntryMin !== null) {
+        // If we'll also exit before the orbit wraps, append the duration.
+        const dur = (nextEclipseExitMin !== null && nextEclipseExitMin > nextEclipseEntryMin)
+            ? ` · ${Math.round(nextEclipseExitMin - nextEclipseEntryMin)}m`
+            : '';
+        eclEl.textContent = `enters in ${Math.round(nextEclipseEntryMin)}m${dur}`;
+    } else if (!litNow && nextEclipseExitMin !== null) {
+        eclEl.textContent = `exits in ${Math.round(nextEclipseExitMin)}m`;
+    } else {
+        eclEl.textContent = litNow ? 'none in orbit' : 'stays eclipsed';
+    }
+}
+
+function _drawVisuals(noradId) {
+    // Remove old visuals
+    if (_orbitLine) { scene.remove(_orbitLine); _orbitLine.geometry.dispose(); _orbitLine = null; }
+    if (_groundTrackLine) { scene.remove(_groundTrackLine); _groundTrackLine.geometry.dispose(); _groundTrackLine = null; }
+
+    // Orbit trail (at altitude)
+    _orbitLine = tracker.buildOrbitLine(noradId);
+    if (_orbitLine) {
+        _orbitLine.renderOrder = 5;
+        scene.add(_orbitLine);
+    }
+
+    // Ground track (projected on surface)
+    _groundTrackLine = tracker.buildGroundTrackLine(noradId);
+    if (_groundTrackLine) {
+        _groundTrackLine.renderOrder = 4;
+        scene.add(_groundTrackLine);
+    }
+
+    console.info(`[Satellites] Drew orbit + ground track for NORAD ${noradId}`);
+}
+
+async function _runConjunctionScreening(noradId, name) {
+    const conjSection = document.getElementById('sp-conj-section');
+    const statusEl = document.getElementById('sp-conj-status');
+    const resultsEl = document.getElementById('sp-conj-results');
+    if (!conjSection) return;
+
+    conjSection.style.display = '';
+    statusEl.innerHTML = `<span style="color:#0cc">Screening ${name}… (72 hr, ${tracker.getSatellites().length} objects)</span>`;
+    resultsEl.innerHTML = '';
+
+    // Let UI render
+    await new Promise(r => setTimeout(r, 50));
+
+    const t0 = performance.now();
+    const conjunctions = await tracker.screenConjunctions(noradId, 72, 10, 25);
+    _lastConjunctions = conjunctions;
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+
+    const wasmActive = isWasmLoaded();
+    const engineLabel = wasmActive ? 'WASM SGP4' : 'JS fallback';
+
+    if (conjunctions.length === 0) {
+        statusEl.innerHTML = `<span style="color:#4fc97f">No conjunctions &lt;25 km in 72 hours</span>`;
+        resultsEl.innerHTML = `<div style="color:#556;font-size:.62rem;margin-top:4px">`
+            + `Screened ${tracker.getSatellites().length} objects × 432 steps in ${elapsed}s (${engineLabel})</div>`;
+    } else {
+        statusEl.innerHTML = `<span style="color:#ff8800;font-weight:600">${conjunctions.length} conjunction(s) found</span>`;
+        let html = '';
+        for (const c of conjunctions.slice(0, 15)) {
+            const risk = c.dist_km < 5 ? '#ff2200' : c.dist_km < 10 ? '#ff8800' : '#ffcc44';
+            html += `<div class="cj-result">`
+                + `<span class="cj-dist" style="color:${risk}">${c.dist_km.toFixed(1)} km</span>`
+                + `<span class="cj-name">${c.name} (${c.norad_id})</span>`
+                + `<span class="cj-time">+${c.hours_ahead}h</span>`
+                + `</div>`;
+        }
+        html += `<div style="color:#556;font-size:.62rem;margin-top:6px">`
+            + `Screened ${tracker.getSatellites().length} objects × 432 steps in ${elapsed}s (${engineLabel})</div>`;
+        resultsEl.innerHTML = html;
+    }
+}
+
+document.getElementById('sp-search-btn')?.addEventListener('click', doSearch);
+document.getElementById('sp-search-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  PRO ORBITAL ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+
+let _lastAnalysisTle = null;
+let _lastConjunctions = [];
+let _lastPasses = [];
+
+// ── Altitude-cohort card — live census of what shares the selected
+// satellite's orbital shell. `bandKm` is the half-width, so 25 covers a
+// 50-km-thick band centred on the target. The count is instantaneous
+// and recomputed every animation frame; the near-miss total lives on
+// the same card but is only refreshed when the user clicks "Screen
+// debris" (expensive SGP4 run).
+const _COHORT_BAND_KM = 25;
+function _updateAltitudeCohort(sel) {
+    if (!sel || !Number.isFinite(sel.alt)) return;
+    const c = tracker.getAltitudeCohort(sel.alt, _COHORT_BAND_KM, sel.norad_id);
+    document.getElementById('sp-cohort-debris').textContent = c.debris.toLocaleString();
+    document.getElementById('sp-cohort-active').textContent = c.active.toLocaleString();
+    // If debris group isn't loaded yet, show a hint so the zero isn't
+    // misread as "no debris nearby" when the real answer is "no debris
+    // data". Active count likewise reads 0 for empty catalogs.
+    const hasDebris = tracker.getLoadedGroups?.().includes('debris');
+    if (!hasDebris) {
+        document.getElementById('sp-cohort-debris').textContent = '— (load debris)';
+    }
+    // Near-miss — prefer the pre-computed cache if the worker has run;
+    // fall back to a hint that prompts the user to click Screen when
+    // cache isn't available.
+    const nearEl = document.getElementById('sp-near-miss');
+    if (!nearEl) return;
+    if (_debrisCache.state === 'done') {
+        const n = _debrisCache.getCountFor(sel.norad_id);
+        nearEl.textContent = n === 0
+            ? '0 (safe)'
+            : `${n.toLocaleString()} (cached)`;
+    } else if (_debrisCache.state === 'running') {
+        const pct = _debrisCache.total > 0
+            ? Math.round(100 * _debrisCache.progress / _debrisCache.total)
+            : 0;
+        nearEl.textContent = `computing… ${pct}%`;
+    } else if (!hasDebris) {
+        nearEl.textContent = 'enable debris';
+    } else {
+        nearEl.textContent = 'click Screen';
+    }
+}
+
+// "Screen debris" button — runs the tracker's SGP4 conjunction screen
+// filtered to the debris group only (passes groupFilter='debris' to
+// screenConjunctions, which skips propagation entirely for non-debris
+// objects). Still button-gated because it propagates the entire debris
+// catalog against the target.
+document.getElementById('sp-screen-debris')?.addEventListener('click', async () => {
+    if (_selectedNorad == null) return;
+    const btn     = document.getElementById('sp-screen-debris');
+    const resEl   = document.getElementById('sp-debris-results');
+    const nearEl  = document.getElementById('sp-near-miss');
+    if (!tracker.getLoadedGroups?.().includes('debris')) {
+        resEl.innerHTML = '<span style="color:#ff8800">Load the "Tracked Debris" group first</span>';
+        resEl.style.display = '';
+        return;
+    }
+    btn.disabled   = true;
+    btn.textContent = 'Screening…';
+    resEl.innerHTML = '';
+    resEl.style.display = '';
+
+    // If the background worker has already produced a complete screen,
+    // render from the cache instantly — no new propagate() work. Saves
+    // the ~0.5–2 s wait per selection when the user is browsing many
+    // sats in the same session.
+    let hits = [];
+    if (_debrisCache.state === 'done') {
+        hits = _debrisCache.getThreatsFor(_selectedNorad) ?? [];
+    } else {
+        try {
+            hits = await tracker.countDebrisApproaches(_selectedNorad, {
+                withinKm: 50, horizonH: 24, stepMin: 10,
+            });
+        } catch (err) {
+            resEl.innerHTML = `<span style="color:#ff4422">Screen failed: ${_esc(err.message)}</span>`;
+            btn.disabled   = false;
+            btn.textContent = 'Screen debris (24h · 50 km)';
+            return;
+        }
+    }
+
+    nearEl.textContent = hits.length.toLocaleString();
+    if (hits.length === 0) {
+        resEl.innerHTML = '<span style="color:#4fc97f">No debris within 50 km in next 24 h</span>';
+    } else {
+        hits.sort((a, b) => a.dist_km - b.dist_km);
+        let html = `<span style="color:#ff8800;font-weight:600">${hits.length} debris near-miss${hits.length === 1 ? '' : 'es'}:</span>`;
+        for (const h of hits.slice(0, 10)) {
+            const risk = h.dist_km < 10 ? '#ff2200'
+                      :  h.dist_km < 25 ? '#ff8800' : '#ffcc44';
+            html += `<div style="margin-top:2px"><span style="color:${risk};font-weight:600">${h.dist_km.toFixed(1)} km</span> — ${_esc(h.name)} in <strong>${h.hours_ahead.toFixed(1)}h</strong></div>`;
+        }
+        if (hits.length > 10) {
+            html += `<div style="margin-top:3px;color:#556">+${hits.length - 10} more not shown</div>`;
+        }
+        resEl.innerHTML = html;
+    }
+    btn.disabled   = false;
+    btn.textContent = 'Rescan debris';
+});
+
+function _updateAnalytics(tle) {
+    _lastAnalysisTle = tle;
+    const analyticsEl = document.getElementById('sp-analytics');
+    if (!analyticsEl) return;
+    analyticsEl.style.display = '';
+
+    // Orbital rates
+    const rates = orbitalRates(tle);
+    document.getElementById('sp-sma').textContent = `${rates.sma_km.toFixed(1)} km`;
+    document.getElementById('sp-vel').textContent = `${rates.velocity_kms} km/s`;
+    document.getElementById('sp-revs').textContent = rates.revs_per_day;
+    document.getElementById('sp-raan-drift').textContent = `${rates.raanDot_deg} °/day`;
+    document.getElementById('sp-argp-drift').textContent = `${rates.argpDot_deg} °/day`;
+    document.getElementById('sp-sunsync').textContent = rates.isSunSync ? 'Yes' : 'No';
+
+    // Lifetime
+    const life = estimateOrbitLifetime(tle);
+    document.getElementById('sp-lifetime').textContent = life.lifetime_str;
+    document.getElementById('sp-decay-rate').textContent = `${life.decay_rate_km_day} km/day`;
+    document.getElementById('sp-atm-rho').textContent = life.atm_density_kg_m3.toExponential(2) + ' kg/m³';
+
+    // Pass predictions (if user has location set)
+    const loc = loadUserLocation();
+    const passesEl = document.getElementById('sp-passes');
+    if (loc && passesEl) {
+        // Use JS fallback for pass prediction (no async needed)
+        const jsFn = (t, tsince) => {
+            // Inline propagate using the fallback
+            const n0 = t.mean_motion * TWOPI / MIN_PER_DAY;
+            const e0 = t.eccentricity;
+            const i0 = t.inclination * DEG2RAD;
+            const raan0 = t.raan * DEG2RAD;
+            const argp0 = t.arg_perigee * DEG2RAD;
+            const M0 = t.mean_anomaly * DEG2RAD;
+            const cosI = Math.cos(i0);
+            const a = Math.pow(398600.8 / (n0 * n0 / 3600), 1/3);
+            const p = a * (1 - e0 * e0);
+            const J2v = 0.001082616;
+            const n_c = n0 * (1 + 1.5 * J2v * (6378.135/p)**2 * (1 - 1.5*(1-cosI*cosI)));
+            const rdot = -1.5 * J2v * (6378.135/p)**2 * n0 * cosI;
+            const adot = 0.75 * J2v * (6378.135/p)**2 * n0 * (5*cosI*cosI - 1);
+            const M = M0 + n_c * tsince;
+            const raan = raan0 + rdot * tsince;
+            const argp = argp0 + adot * tsince;
+            let E = M;
+            for (let k = 0; k < 8; k++) E -= (E - e0*Math.sin(E) - M) / (1 - e0*Math.cos(E));
+            const nu = Math.atan2(Math.sqrt(1-e0*e0)*Math.sin(E), Math.cos(E)-e0);
+            const r = a * (1 - e0*Math.cos(E));
+            const u = argp + nu;
+            const cU = Math.cos(u), sU = Math.sin(u);
+            const cR = Math.cos(raan), sR = Math.sin(raan);
+            const cI = Math.cos(i0), sI = Math.sin(i0);
+            return { x: r*(cR*cU - sR*sU*cI), y: r*(sR*cU + cR*sU*cI), z: r*sU*sI };
+        };
+
+        const passes = predictPasses(tle, loc.lat, loc.lon, 0, 24, 10, jsFn);
+        _lastPasses = passes;
+        if (passes.length === 0) {
+            passesEl.textContent = `No passes above 10° in next 24h from ${loc.city || 'your location'}`;
+        } else {
+            passesEl.innerHTML = passes.slice(0, 5).map(p => {
+                const rise = new Date(p.rise_utc);
+                const time = rise.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                return `<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,.03)">`
+                    + `<span style="color:#0cc">${time}</span>`
+                    + ` — ${p.duration_min} min, max elev ${p.max_elev_deg}°</div>`;
+            }).join('');
+        }
+    } else if (passesEl) {
+        passesEl.innerHTML = '<span style="color:#445">Set location on dashboard for pass predictions</span>';
+    }
+
+    console.info(`[Analytics] ${tle.name}: SMA=${rates.sma_km.toFixed(0)}km, `
+        + `lifetime=${life.lifetime_str}, RAAN=${rates.raanDot_deg}°/day`);
+}
+
+// Hook analytics into search — call after conjunction screening
+const _origRunConj = _runConjunctionScreening;
+async function _runConjunctionWithAnalytics(noradId, name) {
+    await _origRunConj(noradId, name);
+
+    // Get the TLE for analytics
+    const sat = tracker.getSatellite(noradId);
+    if (sat?.tle) {
+        _updateAnalytics(sat.tle);
+    }
+}
+// Replace the conjunction function reference
+window._runConjAndAnalytics = _runConjunctionWithAnalytics;
+
+// ── Export handlers ──────────────────────────────────────────────────────────
+
+document.getElementById('sp-export-json')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle) return;
+    const report = buildAnalysisReport(_lastAnalysisTle, _lastConjunctions, _lastPasses, loadUserLocation());
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `orbital-analysis-${_lastAnalysisTle.norad_id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('sp-export-csv')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle) return;
+    const csv = conjunctionsToCSV(_lastConjunctions, _lastAnalysisTle.name, _lastAnalysisTle.norad_id);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `conjunctions-${_lastAnalysisTle.norad_id}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById('sp-export-cdm')?.addEventListener('click', () => {
+    if (!_lastAnalysisTle || _lastConjunctions.length === 0) {
+        alert('No conjunctions to export. Run a conjunction screening first.');
+        return;
+    }
+    const closest = _lastConjunctions[0];
+    const cdm = generateCDM(
+        { name: _lastAnalysisTle.name, norad_id: _lastAnalysisTle.norad_id },
+        { name: closest.name, norad_id: closest.norad_id },
+        closest
+    );
+    const blob = new Blob([JSON.stringify(cdm, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CDM-${_lastAnalysisTle.norad_id}-${closest.norad_id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  PHASE 2: OPERATOR ANALYTICS
+// ═══════════════════════════════════════════════════════════════
+
+const _opResults = document.getElementById('sp-operator-results');
+
+// ── Decay Watchlist ─────────────────────────────────────────────────────────
+document.getElementById('btn-decay-watchlist')?.addEventListener('click', () => {
+    const sats = tracker.getSatellites();
+    if (sats.length === 0) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load satellites first</div>'; return; }
+
+    _opResults.innerHTML = '<div style="color:#ff8c00;font-size:.62rem">Computing decay estimates...</div>';
+    requestAnimationFrame(() => {
+        const watch = decayWatchlist(sats, 180);
+        if (watch.length === 0) {
+            _opResults.innerHTML = '<div style="color:#44cc66;font-size:.62rem">No objects predicted to reenter within 180 days</div>';
+            return;
+        }
+        let html = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${watch.length} objects decaying within 180 days</div>`;
+        html += '<table class="op-table"><thead><tr><th>Object</th><th>Perigee</th><th>Decay</th><th>Lifetime</th></tr></thead><tbody>';
+        for (const w of watch.slice(0, 30)) {
+            const cls = w.lifetime_days < 30 ? 'crit' : w.lifetime_days < 90 ? 'high' : 'mod';
+            html += `<tr><td title="NORAD ${w.norad_id}">${_esc(w.name?.slice(0, 20) || w.norad_id)}</td>`
+                + `<td>${w.perigee_km} km</td>`
+                + `<td>${w.decay_rate} km/d</td>`
+                + `<td><span class="op-badge ${cls}">${w.lifetime_str}</span></td></tr>`;
+        }
+        html += '</tbody></table>';
+        _opResults.innerHTML = html;
+    });
+});
+
+// ── Constellation Coverage ──────────────────────────────────────────────────
+document.getElementById('btn-coverage')?.addEventListener('click', () => {
+    const groups = tracker.getLoadedGroups();
+    if (groups.length === 0) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load constellations first</div>'; return; }
+
+    const allSats = tracker.getSatellites();
+    let html = '<div style="font-size:.58rem;color:#556;margin-bottom:6px">Coverage estimation per loaded constellation</div>';
+
+    for (const group of groups) {
+        const groupSats = allSats.filter(s => s.group === group);
+        const cov = constellationCoverage(groupSats);
+        if (!cov) continue;
+
+        const barColor = cov.est_coverage_pct > 80 ? '#44cc66' : cov.est_coverage_pct > 50 ? '#ffaa44' : '#ff4444';
+        html += `<div style="margin-bottom:8px;padding:6px;background:rgba(255,255,255,.02);border-radius:4px;border-left:3px solid ${barColor}">`;
+        html += `<div style="font-size:.65rem;font-weight:700;color:#ccc;margin-bottom:3px">${_esc(group)} (${cov.sat_count} sats)</div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Altitude</span><span class="cov-stat-v">${cov.avg_alt_km} km</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Inclination</span><span class="cov-stat-v">${cov.inclination}°</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Lat band</span><span class="cov-stat-v">${cov.lat_band}</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Footprint</span><span class="cov-stat-v">${cov.footprint_km} km radius</span></div>`;
+        html += `<div class="cov-stat"><span class="cov-stat-k">Est. coverage</span><span class="cov-stat-v">${cov.est_coverage_pct}%</span></div>`;
+        html += `<div class="cov-bar" style="width:${Math.min(100, cov.est_coverage_pct)}%;background:${barColor}"></div>`;
+        html += '</div>';
+    }
+    _opResults.innerHTML = html;
+});
+
+// ── Breakup Event Detection ─────────────────────────────────────────────────
+document.getElementById('btn-breakup')?.addEventListener('click', () => {
+    const sats = tracker.getSatellites();
+    if (sats.length < 100) { _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load more satellites (need debris or full catalog)</div>'; return; }
+
+    const anomalies = detectBreakupEvents(sats);
+    if (anomalies.length === 0) {
+        _opResults.innerHTML = '<div style="color:#44cc66;font-size:.62rem">No anomalous debris concentrations detected</div>';
+        return;
+    }
+
+    let html = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${anomalies.length} anomalous altitude bands detected</div>`;
+    html += '<table class="op-table"><thead><tr><th>Altitude</th><th>Objects</th><th>Expected</th><th>Excess</th><th>Severity</th></tr></thead><tbody>';
+    for (const a of anomalies.slice(0, 20)) {
+        const cls = a.severity === 'CRITICAL' ? 'crit' : a.severity === 'HIGH' ? 'high' : 'mod';
+        const known = (a.alt_km >= 750 && a.alt_km <= 900) ? ' (Fengyun/Cosmos zone)' :
+                      (a.alt_km >= 1400 && a.alt_km <= 1500) ? ' (Soviet RORSAT zone)' : '';
+        html += `<tr><td>${a.alt_km} km${known}</td><td>${a.count}</td><td>${a.expected}</td>`
+            + `<td style="color:#ff8800">+${a.excess}</td>`
+            + `<td><span class="op-badge ${cls}">${a.severity} (${a.sigma}σ)</span></td></tr>`;
+    }
+    html += '</tbody></table>';
+    _opResults.innerHTML = html;
+});
+
+// ── Cross-Constellation Conjunction Screening ───────────────────────────────
+document.getElementById('btn-constellation-conj')?.addEventListener('click', () => {
+    const groups = tracker.getLoadedGroups();
+    if (groups.length < 2) {
+        _opResults.innerHTML = '<div style="color:#556;font-size:.62rem">Load at least 2 constellations to screen against each other</div>';
+        return;
+    }
+
+    // Show group selector
+    let html = '<div style="font-size:.62rem;color:#ccc;margin-bottom:6px">Select two constellations to screen:</div>';
+    html += '<div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">';
+    html += `<select id="conj-group-a" style="background:#111;color:#ccc;border:1px solid rgba(255,140,0,.3);border-radius:3px;padding:3px 6px;font-size:.62rem;font-family:inherit">`;
+    for (const g of groups) html += `<option value="${g}">${g}</option>`;
+    html += '</select>';
+    html += '<span style="color:#556;font-size:.62rem;align-self:center">vs</span>';
+    html += `<select id="conj-group-b" style="background:#111;color:#ccc;border:1px solid rgba(255,140,0,.3);border-radius:3px;padding:3px 6px;font-size:.62rem;font-family:inherit">`;
+    for (const g of groups) html += `<option value="${g}"${g === 'debris' ? ' selected' : ''}>${g}</option>`;
+    html += '</select>';
+    html += `<button class="sp-op-btn" id="btn-run-xconj" style="width:auto;padding:3px 10px">Screen</button>`;
+    html += '</div>';
+    html += '<div id="xconj-results"></div>';
+    _opResults.innerHTML = html;
+
+    document.getElementById('btn-run-xconj')?.addEventListener('click', async () => {
+        const groupA = document.getElementById('conj-group-a').value;
+        const groupB = document.getElementById('conj-group-b').value;
+        const xEl = document.getElementById('xconj-results');
+        if (!xEl) return;
+
+        const allSats = tracker.getSatellites();
+        const satsA = allSats.filter(s => s.group === groupA);
+        const satsB = allSats.filter(s => s.group === groupB);
+
+        if (satsA.length === 0 || satsB.length === 0) {
+            xEl.innerHTML = '<div style="color:#ff4444;font-size:.62rem">One or both groups are empty</div>';
+            return;
+        }
+
+        xEl.innerHTML = `<div style="color:#ff8c00;font-size:.62rem">Screening ${satsA.length} (${groupA}) vs ${satsB.length} (${groupB})... altitude pre-filter ±200km</div>`;
+        await new Promise(r => setTimeout(r, 50));
+
+        // Altitude-based proximity screening (fast, no propagation needed)
+        const t0 = performance.now();
+        const overlaps = [];
+        for (const a of satsA) {
+            const altA = ((a.perigee_km || 0) + (a.apogee_km || 0)) / 2;
+            for (const b of satsB) {
+                const altB = ((b.perigee_km || 0) + (b.apogee_km || 0)) / 2;
+                const altDiff = Math.abs(altA - altB);
+                if (altDiff < 50) {
+                    overlaps.push({
+                        nameA: a.name, noradA: a.norad_id,
+                        nameB: b.name, noradB: b.norad_id,
+                        altA: Math.round(altA), altB: Math.round(altB),
+                        altDiff: Math.round(altDiff),
+                    });
+                }
+            }
+        }
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+        overlaps.sort((a, b) => a.altDiff - b.altDiff);
+
+        if (overlaps.length === 0) {
+            xEl.innerHTML = `<div style="color:#44cc66;font-size:.62rem">No altitude overlaps within 50 km between ${groupA} and ${groupB} (${elapsed}s)</div>`;
+        } else {
+            let tHtml = `<div style="font-size:.58rem;color:#556;margin-bottom:4px">${overlaps.length} altitude overlaps (<50 km) — ${elapsed}s</div>`;
+            tHtml += '<table class="op-table"><thead><tr><th>' + _esc(groupA) + '</th><th>Alt</th><th>' + _esc(groupB) + '</th><th>Alt</th><th>Gap</th></tr></thead><tbody>';
+            for (const o of overlaps.slice(0, 30)) {
+                const cls = o.altDiff < 10 ? 'crit' : o.altDiff < 25 ? 'high' : 'mod';
+                tHtml += `<tr><td title="${o.noradA}">${_esc((o.nameA || '').slice(0, 16))}</td><td>${o.altA} km</td>`
+                    + `<td title="${o.noradB}">${_esc((o.nameB || '').slice(0, 16))}</td><td>${o.altB} km</td>`
+                    + `<td><span class="op-badge ${cls}">${o.altDiff} km</span></td></tr>`;
+            }
+            tHtml += '</tbody></table>';
+            if (overlaps.length > 30) tHtml += `<div style="color:#556;font-size:.55rem;margin-top:4px">Showing 30 of ${overlaps.length} overlaps</div>`;
+            xEl.innerHTML = tHtml;
+        }
+    });
+});
+
+function _esc(s) { return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ═══════════════════════════════════════════════════════════════
+//  SIMULATION TIME  (single source of truth for all per-frame state)
+// ═══════════════════════════════════════════════════════════════
+// Everything the scene cares about — Earth rotation (GMST), sun direction,
+// and satellite propagation (tracker.tick(nowMs)) — is derived from one
+// `simTimeMs` value. This makes the whole page deterministic: the same
+// simTimeMs produces the exact same render, regardless of how long the
+// user has been watching, whether the tab was backgrounded, or what speed
+// we're stepping through.
+
+let simTimeMs  = Date.now();
+let simSpeed   = 1;                 // sim-seconds per real-second (1 = realtime)
+let simPaused  = false;
+let _realLast  = performance.now();
+
+function _fmtSimUTC(d) {
+    // Compact ISO without milliseconds — easy to read, easy to cross-check.
+    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+function _fmtSimOffset(d) {
+    const deltaS = (d.getTime() - Date.now()) / 1000;
+    const abs    = Math.abs(deltaS);
+    const sign   = deltaS >= 0 ? '+' : '−';
+    if (abs < 1)     return 'now';
+    if (abs < 60)    return `${sign}${abs.toFixed(0)}s`;
+    if (abs < 3600)  return `${sign}${(abs / 60).toFixed(1)}m`;
+    if (abs < 86400) return `${sign}${(abs / 3600).toFixed(1)}h`;
+    return `${sign}${(abs / 86400).toFixed(1)}d`;
+}
+
+function _setSimSpeed(speed) {
+    simSpeed = speed;
+    document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+        btn.classList.toggle('active', Number(btn.dataset.speed) === speed);
+    });
+}
+function _setSimPaused(paused) {
+    simPaused = paused;
+    const b = document.getElementById('tc-play');
+    if (b) { b.textContent = paused ? '▶' : '⏸'; b.title = paused ? 'Resume' : 'Pause'; }
+}
+function _jumpToNow() {
+    simTimeMs = Date.now();
+}
+
+// Wire up buttons once on load.
+document.getElementById('tc-play').addEventListener('click', () => _setSimPaused(!simPaused));
+document.getElementById('tc-now').addEventListener('click', _jumpToNow);
+document.querySelectorAll('.tc-btn[data-speed]').forEach(btn => {
+    btn.addEventListener('click', () => _setSimSpeed(Number(btn.dataset.speed)));
+});
+_setSimSpeed(1);
+_setSimPaused(false);
+
+// Keyboard shortcuts: Space = play/pause, N = jump to now. Matches the
+// convention most video scrubbers / simulators use.
+window.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.code === 'Space') { _setSimPaused(!simPaused); e.preventDefault(); }
+    else if (e.key === 'n' || e.key === 'N') _jumpToNow();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════════
+
+// Scratch vectors for the per-frame sun direction — hot path, no GC.
+const _sunSceneV = new THREE.Vector3();
+let _lastTrajectoryRefresh = 0;   // real-time ms of last trajectory-card scan
+
+// ── TCA collision arcs (Level 3) ─────────────────────────────────────────
+// When a satellite is selected AND the debris-threat cache has populated
+// its threat list, draw a fading line between the sat and each threat
+// debris whose TCA is within _TCA_WINDOW_MIN of the current sim instant.
+// The line brightens as |t − tca| → 0 and fades to invisible outside the
+// window. Entirely sim-time driven: at 3600× scrub the arcs flicker
+// through the catalog in seconds, same way you'd watch a traffic radar.
+//
+// Geometry rebuilt each frame (cheap: one LineSegments, ≤ tens of
+// segments even on the busiest LEO sat). Material + scene group live
+// here and aren't disposed; only the BufferGeometry is churned.
+const _TCA_WINDOW_MIN = 30;                        // ± minutes around TCA
+const _tcaGroup = new THREE.Group();
+_tcaGroup.name  = 'tcaArcs';
+scene.add(_tcaGroup);
+const _tcaMat = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent:  true,
+    opacity:      1.0,
+    blending:     THREE.AdditiveBlending,
+    depthWrite:   false,
+});
+let _tcaMesh = null;
+
+// Scratch vectors for the per-frame position pulls.
+const _tcaVecA = { x: 0, y: 0, z: 0 };
+const _tcaVecB = { x: 0, y: 0, z: 0 };
+
+function _updateTcaArcs() {
+    if (_selectedNorad == null || _debrisCache.state !== 'done') {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+    const threats = _debrisCache.getThreatsFor(_selectedNorad);
+    if (!threats || threats.length === 0) {
+        if (_tcaMesh) _tcaMesh.visible = false;
+        return;
+    }
+
+    // Sim-time Julian Date.  Matches what the tracker uses internally so
+    // cache.tca_jd and "now" are in the same frame.
+    const nowJd = simTimeMs / 86400000 + 2440587.5;
+
+    const positions = [];
+    const colors    = [];
+
+    for (const t of threats) {
+        if (!Number.isFinite(t.tca_jd)) continue;
+        const dtMin = (t.tca_jd - nowJd) * 24 * 60;       // − = already past TCA
+        if (Math.abs(dtMin) > _TCA_WINDOW_MIN) continue;
+
+        const a = tracker.getPositionXYZ(_selectedNorad, _tcaVecA);
+        const b = tracker.getPositionXYZ(t.norad_id,   _tcaVecB);
+        if (!a || !b) continue;
+
+        // Ease: 1 at TCA, 0 at ±window, quadratic so the pop reads sharp.
+        const norm = 1 - Math.min(1, Math.abs(dtMin) / _TCA_WINDOW_MIN);
+        const fade = norm * norm;
+
+        // Severity colour — red for <10 km, orange for <25, amber else.
+        const base = t.dist_km < 10 ? [1.00, 0.15, 0.10]
+                  :  t.dist_km < 25 ? [1.00, 0.55, 0.15]
+                  :                   [1.00, 0.85, 0.35];
+        const r = base[0] * fade;
+        const g = base[1] * fade;
+        const bC = base[2] * fade;
+
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        colors.push(r, g, bC, r, g, bC);
+    }
+
+    // Rebuild LineSegments (cheap; max ~20 edges per selected sat).
+    if (_tcaMesh) {
+        _tcaGroup.remove(_tcaMesh);
+        _tcaMesh.geometry.dispose();
+        _tcaMesh = null;
+    }
+    if (positions.length === 0) return;
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geom.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+    _tcaMesh = new THREE.LineSegments(geom, _tcaMat);
+    _tcaMesh.renderOrder = 11;       // above sat points, below highlight sprite
+    _tcaGroup.add(_tcaMesh);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+
+    // ── Advance simulation time by real-world dt × speed multiplier.
+    const realNow = performance.now();
+    const dtMs    = realNow - _realLast;
+    _realLast     = realNow;
+    if (!simPaused) simTimeMs += dtMs * simSpeed;
+
+    const simDate = new Date(simTimeMs);
+
+    // ── Earth rotation: real GMST at the sim instant. Replaces the old
+    // cosmetic drift — terminator and ground tracks now match the clock.
+    earthMesh.rotation.y = geo.greenwichSiderealTime(simDate);
+
+    // ── Sun direction: astronomical inertial frame (+z = north pole)
+    // remapped to Three.js scene frame (+y = north, scene -Z = 90°E).
+    // Light is placed 10 Earth-radii out along the sun direction so
+    // MeshStandardMaterial treats it as a parallel source.
+    const sun = sunDirectionEci(simDate);
+    _sunSceneV.set(sun.x, sun.z, -sun.y).multiplyScalar(10);
+    sunLight.position.copy(_sunSceneV);
+
+    // ── Satellites — tracker takes an explicit timestamp, so sat
+    // positions are propagated to the sim instant too.
+    tracker.tick(simTimeMs);
+
+    // ── TCA collision arcs — bright ribbons for imminent debris close
+    // approaches to the currently-selected target. Only active when the
+    // background threat cache has populated.
+    _updateTcaArcs();
+
+    // ── Trajectory card refresh — one orbital-period scan is cheap
+    // (~90 propagate() calls ≈ 0.5 ms), but refreshing every frame on
+    // top of everything else adds up. 500 ms real-time throttle is
+    // plenty for a human-readable readout and still feels live during
+    // 3600× scrubs where the sim clock hops hours every real second.
+    if (_selectedNorad != null && realNow - _lastTrajectoryRefresh > 500) {
+        _lastTrajectoryRefresh = realNow;
+        _renderTrajectoryAnalysis(_selectedNorad);
+    }
+
+    // ── Weather-aware alert overlay — recompute per frame when enabled.
+    // Matching is <1 ms for typical catalogs because the matcher has a
+    // latitude-band prefilter; keeping it per-frame lets the overlay
+    // stay honest at high sim-speed scrubs where sats cross alert zones
+    // in a fraction of a real second.
+    if (_alertEnabled) _runMatchNow();
+
+    // ── HUD readouts (cheap; one frame is fine)
+    document.getElementById('tc-time-utc').textContent    = _fmtSimUTC(simDate);
+    document.getElementById('tc-time-offset').textContent = _fmtSimOffset(simDate);
+
+    // Update selected satellite info panel
+    if (_selectedNorad) {
+        const sats = tracker.getSatellites();
+        const sel = sats.find(s => s.norad_id === _selectedNorad);
+        if (sel) {
+            document.getElementById('sp-alt').textContent = `${Math.round(sel.alt)} km`;
+            document.getElementById('sp-latlon').textContent = `${sel.lat.toFixed(2)}°, ${sel.lon.toFixed(2)}°`;
+            const speedKms = sel.alt > 0 ? Math.sqrt(398600.8 / (6378.135 + sel.alt)).toFixed(1) : '—';
+            document.getElementById('sp-speed').textContent = `${speedKms} km/s`;
+            // Live altitude-band cohort. Cheap: O(N_sats) filter on the
+            // alt field the tracker already updates each tick. Runs at
+            // whatever animate framerate is — no throttling needed.
+            _updateAltitudeCohort(sel);
+        }
+    }
+
+    renderer.render(scene, camera);
+}
+
+// Resize
+function resize() {
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+// Right-click any visible satellite dot on the globe to pivot the
+// selected-sat analytics panel onto it — same flow as the search box,
+// but no CelesTrak fetch since the TLE is already in the tracker catalog.
+// Preventing the browser context menu is intentional; there's no
+// default action worth preserving over a 3D pick.
+canvas.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const ndc  = {
+        x:  ((e.clientX - rect.left) / rect.width)  * 2 - 1,
+        y: -((e.clientY - rect.top)  / rect.height) * 2 + 1,
+    };
+    const hit = tracker.pickAtNDC(ndc, camera, { threshold: 0.025 });
+    const resultEl = document.getElementById('sp-search-result');
+    if (!hit) {
+        if (resultEl) resultEl.innerHTML = `<span style="color:#887">No satellite under cursor — try zooming in or moving closer to a dot</span>`;
+        return;
+    }
+    const sat = tracker.getSatellite(hit.noradId);
+    if (!sat || !sat.tle) return;
+    const input = document.getElementById('sp-search-input');
+    if (input)    input.value    = sat.tle.name ?? String(sat.norad_id);
+    if (resultEl) resultEl.innerHTML = `Picked: <strong style="color:#0cc">${_esc(sat.tle.name ?? String(sat.norad_id))}</strong> <span style="color:#887">(right-click)</span>`;
+    _selectByTle(sat.tle);
+});
+
+new ResizeObserver(resize).observe(canvas.parentElement);
+resize();
+
+animate();
+</script>
+</body>
+</html>

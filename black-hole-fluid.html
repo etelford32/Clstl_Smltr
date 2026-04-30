@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Black Hole Accretion — Parker Physics App</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; }
+
+/* ─── Nav ────────────────────────────────────────────────── */
+nav { position:sticky; top:0; z-index:600; height:48px; min-height:48px; background:rgba(4,2,16,.92); backdrop-filter:blur(14px); border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; padding:0 14px; gap:8px; }
+.nav-brand { font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap; background:linear-gradient(45deg,#ffd700,#ff8c00); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.nav-menu { display:flex; align-items:center; gap:4px; margin-left:auto; }
+.nav-item { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); border-radius:5px; color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap; transition:background .2s,border-color .2s; }
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+.nav-drop { position:relative; }
+.nav-drop-btn { padding:5px 10px; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.12); border-radius:5px; color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit; transition:background .2s,border-color .2s; white-space:nowrap; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#8040ff,#4080ff); border-color:#8040ff; color:#fff; font-weight:600; }
+.nav-drop-menu { display:block; position:absolute; top:100%; left:0; background:rgba(4,2,18,.97); backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.11); border-radius:6px; padding:8px 0 4px; min-width:170px; z-index:800; box-shadow:0 8px 28px rgba(0,0,0,.7); opacity:0; visibility:hidden; pointer-events:none; transform:translateY(-6px); transition:opacity .18s,visibility .18s,transform .18s; }
+.nav-drop:hover .nav-drop-menu { opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0); }
+.nav-drop-menu a { display:block; padding:9px 14px; color:#bbb; text-decoration:none; font-size:.82rem; white-space:nowrap; transition:background .15s,color .15s; }
+.nav-drop-menu a:hover { background:rgba(255,255,255,.08); color:#fff; }
+.nav-drop-menu a.active { color:#ff8800; font-weight:600; }
+
+/* ─── Layout ─────────────────────────────────────────────── */
+#container { display:flex; height:calc(100vh - 48px); }
+#canvas-area { flex:1; position:relative; background:#000; overflow:hidden; }
+#glCanvas   { position:absolute; top:0; left:0; width:100%; height:100%; display:block; }
+#overlayCanvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; pointer-events:all; }
+#overlay-info { position:absolute; top:10px; left:10px; font-size:11px; color:#ff9933; pointer-events:none; line-height:1.7; z-index:10; }
+
+/* ─── Controls panel ────────────────────────────────────── */
+#panel { width:250px; min-width:250px; background:rgba(8,4,20,.95); border-left:1px solid rgba(255,120,0,.2); display:flex; flex-direction:column; overflow-y:auto; padding:12px; gap:10px; }
+.section-title { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800; border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px; }
+.ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
+.ctrl label { font-size:10px; color:#aaa; }
+.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
+.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+select { background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc; padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%; }
+.btn { background:rgba(255,100,0,.18); border:1px solid rgba(255,120,0,.4); color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer; font-family:inherit; font-size:11px; width:100%; transition:background .2s; }
+.btn:hover { background:rgba(255,100,0,.35); }
+.btn.danger { background:rgba(200,0,0,.18); border-color:rgba(200,60,0,.4); color:#ff6644; }
+.info-box { font-size:10px; color:#888; line-height:1.6; border:1px solid rgba(255,255,255,.06); border-radius:4px; padding:8px; background:rgba(255,255,255,.02); }
+.info-box b { color:#ffaa44; }
+.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
+.shader-badge { display:inline-block; background:linear-gradient(45deg,#ff4400,#ff8800); color:#fff; font-size:9px; padding:2px 6px; border-radius:3px; letter-spacing:.08em; margin-bottom:6px; }
+
+/* ─── Space Weather link button ─────────────────────────────────── */
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid #cc44ff; border-radius: 7px;
+    color: #cc44ff; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation; text-decoration: none; display: inline-block;
+}
+.cv-btn:hover { background: rgba(255,140,0,.15); border-color:#ff8c00; color:#ffb830; }
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("black-hole-fluid");</script>
+
+<div id="container">
+  <div id="canvas-area">
+    <!-- WebGL canvas: physics-accurate rendering -->
+    <canvas id="glCanvas"></canvas>
+    <!-- 2D overlay: jets, velocity grid, UI chrome -->
+    <canvas id="overlayCanvas"></canvas>
+    <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:12px; right:12px;">⚡ Weather</a>
+    <div id="overlay-info">
+      <div id="oi-preset">Stellar BH — 10 M☉</div>
+      <div id="oi-mass">GM = 0.08</div>
+      <div id="oi-step">Step: 0</div>
+      <div id="oi-fps">FPS: —</div>
+    </div>
+  </div>
+
+        <div id="panel">
+    <div>
+      <div class="shader-badge">▸ WebGL2 GLSL Shader</div>
+      <div class="section-title">⬤ Black Hole Preset</div>
+      <select id="preset">
+        <option value="stellar">Stellar BH — 10 M☉</option>
+        <option value="agn">AGN — 10⁶ M☉</option>
+        <option value="smbh">SMBH — 10⁹ M☉</option>
+        <option value="ton618">Ton 618 — 6.6×10¹⁰ M☉</option>
+      </select>
+    </div>
+
+    <div>
+      <div class="section-title">⚙ Accretion Physics</div>
+      <div class="ctrl"><label>BH Mass (GM)</label><input type="range" id="s-gm" min="1" max="100" value="25"><div class="val" id="v-gm">0.08</div></div>
+      <div class="ctrl"><label>Accretion Rate (ṁ)</label><input type="range" id="s-acc" min="1" max="100" value="35"><div class="val" id="v-acc">0.35</div></div>
+      <div class="ctrl"><label>Angular Momentum (L)</label><input type="range" id="s-spin" min="0" max="100" value="70"><div class="val" id="v-spin">0.70</div></div>
+      <div class="ctrl"><label>Viscosity (α-disk)</label><input type="range" id="s-visc" min="0" max="100" value="8"><div class="val" id="v-visc">0.0008</div></div>
+      <div class="ctrl"><label>Jet Power</label><input type="range" id="s-jet" min="0" max="100" value="40"><div class="val" id="v-jet">0.40</div></div>
+    </div>
+
+    <div>
+      <div class="section-title">🌈 Shader Visualization</div>
+      <select id="colormap">
+        <option value="0" selected>Blackbody (Planck spectrum)</option>
+        <option value="1">Density field</option>
+        <option value="2">Velocity magnitude</option>
+        <option value="3">Pressure map</option>
+      </select>
+      <div style="margin-top:8px;">
+        <div class="ctrl">
+          <label>Viewing inclination (°)</label>
+          <input type="range" id="s-incl" min="0" max="85" value="17">
+          <div class="val" id="v-incl">17°</div>
+        </div>
+        <div class="ctrl">
+          <label>Lensing strength</label>
+          <input type="range" id="s-lens" min="0" max="100" value="100">
+          <div class="val" id="v-lens">1.00×</div>
+        </div>
+        <div class="ctrl">
+          <label>Disk temperature (log K)</label>
+          <input type="range" id="s-tmax" min="4" max="9" step="0.1" value="7">
+          <div class="val" id="v-tmax">10⁷ K</div>
+        </div>
+        <div class="ctrl">
+          <label>Exposure</label>
+          <input type="range" id="s-expo" min="1" max="100" value="30">
+          <div class="val" id="v-expo">0.30</div>
+        </div>
+      </div>
+      <div style="margin-top:4px;">
+        <input type="checkbox" id="showGrid"> <label for="showGrid" style="font-size:10px">Velocity grid overlay</label>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-title">▶ Controls</div>
+      <button class="btn" id="btnReset">↺ Reset Disk</button>
+      <button class="btn" id="btnCME" style="margin-top:5px">💥 Inject Mass</button>
+      <button class="btn danger" id="btnClear" style="margin-top:5px">✕ Clear All</button>
+    </div>
+
+    <div class="sep"></div>
+    <div class="info-box">
+      <b>Shader physics (per-pixel GLSL)</b><br>
+      <span style="color:#ff8800">① Grav. lensing</span> — Schwarzschild null-geodesic deflection. Shadow at b꜀ = 3√3/2 · Rₛ.<br>
+      <span style="color:#ff8800">② Blackbody</span> — Planck B(λ,T) → CIE XYZ → sRGB. T ∝ ρ/r³⁄₄ (thin-disk).<br>
+      <span style="color:#ff8800">③ Doppler beaming</span> — Keplerian β(r) projected by inclination. I_obs = I_emit · δ³.<br>
+      <span style="color:#ff8800">④ Grav. redshift</span> — z = (1 − Rₛ/r)^½ shifts T and dims emission.<br>
+      <span style="color:#ff8800">⑤ Tone mapping</span> — ACES filmic + γ=2.2 sRGB.
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     VERTEX SHADER  (trivial fullscreen quad passthrough)
+     ═══════════════════════════════════════════════════════════════════ -->
+<script id="vs" type="x-shader/x-vertex">#version 300 es
+in vec2 aPos;
+out vec2 vUV;
+void main() {
+    vUV = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+}
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     FRAGMENT SHADER  — gravitational lensing + blackbody + Doppler
+     ═══════════════════════════════════════════════════════════════════ -->
+<script id="fs" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+
+uniform sampler2D uDens;    // density  (R32F, N×N)
+uniform sampler2D uVel;     // velocity (RG32F, N×N)  xy = u,v
+uniform sampler2D uPres;    // pressure (R32F, N×N)
+
+uniform vec2  uRes;         // canvas resolution px
+uniform float uGM;          // gravitational param (sim units)
+uniform float uEH;          // event-horizon radius (normalised [0..1])
+uniform float uRs;          // Schwarzschild radius = uEH (same in geom units)
+uniform float uTmax;        // peak disk temperature (K)
+uniform float uIncl;        // viewing inclination (radians)
+uniform float uLensStr;     // lensing strength multiplier [0..1]
+uniform float uExposure;    // scene exposure
+uniform int   uColorMode;   // 0=blackbody, 1=density, 2=velocity, 3=pressure
+
+out vec4 fragColor;
+
+// ─── Planck blackbody → sRGB ─────────────────────────────────────────────
+// Analytical fit: Charity 2001, extended for astrophysical temperatures.
+// Input T in Kelvin (800 – 1e8), output linear sRGB [0,1].
+vec3 blackbodyRGB(float T) {
+    T = clamp(T, 800.0, 1.0e8);
+
+    float r, g, b;
+
+    // Red
+    if (T < 6600.0) {
+        r = 1.0;
+    } else {
+        float x = T / 100.0 - 60.0;
+        r = clamp(329.698727 * pow(x, -0.1332048) / 255.0, 0.0, 1.0);
+    }
+
+    // Green
+    if (T < 6600.0) {
+        float x = max(1.0, T / 100.0);
+        g = clamp((99.4708 * log(x) - 161.1196) / 255.0, 0.0, 1.0);
+    } else {
+        float x = T / 100.0 - 60.0;
+        g = clamp(288.1222 * pow(x, -0.0755148) / 255.0, 0.0, 1.0);
+    }
+
+    // Blue
+    if (T >= 6600.0) {
+        b = 1.0;
+    } else if (T < 1900.0) {
+        b = 0.0;
+    } else {
+        float x = max(1.0, T / 100.0 - 10.0);
+        b = clamp((138.5177 * log(x) - 305.0448) / 255.0, 0.0, 1.0);
+    }
+
+    vec3 rgb = vec3(r, g, b);
+
+    // Blend toward blue-white for UV/X-ray temperatures
+    float hotFrac = smoothstep(25000.0, 100000.0, T);
+    rgb = mix(rgb, vec3(0.82, 0.90, 1.00), hotFrac);
+
+    // Pure white for X-ray / gamma (T > 1 MK)
+    float xrayFrac = smoothstep(5.0e5, 5.0e6, T);
+    rgb = mix(rgb, vec3(1.0, 1.0, 1.0), xrayFrac);
+
+    return rgb;
+}
+
+// ─── Schwarzschild lensing ───────────────────────────────────────────────
+// Given impact parameter b (screen radius) and Schwarzschild radius rs,
+// return the source radius r_min (closest approach of the photon).
+// Solves: b² = r³ / (r − rs)  via 10 Newton iterations.
+// Returns 0.0 if photon is captured (b ≤ b_critical = 3√3/2 · rs).
+float schwarzschildRmin(float b, float rs) {
+    float bc = 2.598076 * rs;   // critical impact parameter
+    if (b <= bc) return 0.0;
+
+    // Initial guess: close to b for weak field, tighter for strong field
+    float r = b * (0.8 + 0.2 * clamp((b - bc) / bc, 0.0, 1.0)) + rs * 0.3;
+
+    float b2 = b * b;
+    for (int k = 0; k < 12; k++) {
+        // f(r)  = r³ − b²·r + b²·rs = 0
+        // f'(r) = 3r² − b²
+        float f  = r * r * r - b2 * (r - rs);
+        float fp = 3.0 * r * r - b2;
+        if (abs(fp) < 1.0e-12) break;
+        r -= f / fp;
+        r  = max(r, rs * 1.501);   // keep above photon sphere
+    }
+    return r;
+}
+
+// Full lensing: maps screen position → lensed source position in disk.
+// Returns vec2(-9.0) as sentinel when pixel is inside the shadow.
+vec2 applyLensing(vec2 pos, float rs, float strength) {
+    float r = length(pos);
+    if (r < 1.0e-5) return vec2(-9.0);
+
+    // Blend between no lensing and full lensing via strength
+    if (strength < 0.001) return pos;
+
+    float b       = r;                          // impact parameter ≈ screen r
+    float r_min   = schwarzschildRmin(b, rs * strength);
+
+    if (r_min <= 0.0) return vec2(-9.0);        // shadow
+
+    // Scale disk sample radially: pixels near BH see magnified inner disk
+    vec2 dir = pos / r;
+    return dir * r_min;
+}
+
+// ─── Doppler beaming (relativistic) ─────────────────────────────────────
+// Keplerian disk seen at inclination i.
+// Returns intensity boost factor δ³ where δ = 1/[γ(1−β·n̂)].
+float dopplerBoost(vec2 diskPos, float r, float gm, float incl) {
+    if (r < 1.0e-3) return 1.0;
+
+    // Keplerian tangential speed (normalised: c=1)
+    // β_K = sqrt(GM/r) — becomes significant near BH
+    float vK   = sqrt(gm / max(r, gm * 3.0));  // cap at ISCO
+    float beta = min(vK, 0.95);                 // physical cap
+
+    // Azimuthal angle of this disk point
+    float phi  = atan(diskPos.y, diskPos.x);
+
+    // LOS projection for inclination i:
+    //   β_los = β_K · sin(φ) · sin(i)
+    float beta_los = beta * sin(phi) * sin(incl);
+    beta_los = clamp(beta_los, -0.98, 0.98);
+
+    float gamma_ = 1.0 / sqrt(1.0 - beta_los * beta_los);
+    float delta  = 1.0 / (gamma_ * (1.0 - beta_los));
+
+    // Thermal emission: I ∝ δ³ (isotropic in rest frame)
+    return pow(delta, 3.0);
+}
+
+// ─── Gravitational redshift ──────────────────────────────────────────────
+// Photons climbing out of Schwarzschild potential: z = sqrt(1 - rs/r).
+// Temperature is blue/redshifted accordingly.
+float gravZFactor(float r, float rs) {
+    return sqrt(max(0.01, 1.0 - rs / max(r, rs * 1.01)));
+}
+
+// ─── ACES filmic tone mapping ────────────────────────────────────────────
+vec3 acesFilmic(vec3 x) {
+    float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+    return clamp((x*(a*x+b)) / (x*(c*x+d)+e), 0.0, 1.0);
+}
+
+// ─── Main ────────────────────────────────────────────────────────────────
+void main() {
+    // Normalised screen position: [-1, +1] with aspect correction
+    vec2 screenUV = gl_FragCoord.xy / uRes;
+    vec2 pos = screenUV * 2.0 - 1.0;
+    // Correct for non-square canvas (maintain circular disk)
+    float aspect = uRes.x / uRes.y;
+    if (aspect > 1.0) pos.x *= aspect; else pos.y /= aspect;
+
+    float rs       = uRs;
+    float r_screen = length(pos);
+
+    // ── Shadow / photon sphere ──────────────────────────────────
+    float bc         = 2.598076 * rs;           // critical impact parameter
+    float ring_w     = bc * 0.07;               // photon ring half-width
+
+    // ── Gravitational lensing ───────────────────────────────────
+    vec2 lensedPos = applyLensing(pos, rs, uLensStr);
+    bool inShadow  = lensedPos.x < -8.0;
+
+    // ── Sample fluid textures ───────────────────────────────────
+    // lensedPos is in same normalised coords as pos, remap to UV [0,1]
+    vec2 sUV     = clamp(lensedPos * 0.5 + 0.5, 0.001, 0.999);
+    float dens   = max(0.0, texture(uDens,  sUV).r);
+    vec2  vel    = texture(uVel,  sUV).rg;
+    float pres   = texture(uPres, sUV).r;
+
+    float r_src  = length(lensedPos);           // source radius (lensed)
+
+    // ── Compute pixel colour ────────────────────────────────────
+    vec3 color = vec3(0.0);
+
+    if (!inShadow) {
+
+        if (uColorMode == 0) {
+            // ── Blackbody thermal ─────────────────────────────
+            // Shakura-Sunyaev thin-disk T profile: T ∝ r^(-3/4)
+            // modulated by local density (mass loading)
+            float T_disk  = uTmax * pow(uEH / max(r_src, uEH * 0.5), 0.75);
+            float T_local = T_disk * (0.15 + clamp(dens, 0.0, 3.0) * 0.85);
+
+            // Gravitational redshift dims and reddens escaping photons
+            float z       = gravZFactor(r_src, rs);
+            T_local      *= z;
+
+            // Relativistic Doppler: shifts temperature + boosts intensity
+            float doppler = dopplerBoost(lensedPos, r_src, uGM, uIncl);
+            float T_obs   = T_local * pow(doppler, 0.333); // Wien: T_obs ∝ δ
+
+            // Blackbody spectrum → linear sRGB
+            color = blackbodyRGB(T_obs);
+
+            // Intensity: density × Doppler³ × gravitational dimming
+            float intensity = clamp(dens * 1.4, 0.0, 5.0) * doppler * z * z;
+            color *= intensity;
+
+        } else if (uColorMode == 1) {
+            // ── Density field ─────────────────────────────────
+            float d = clamp(dens * 1.5, 0.0, 1.0);
+            color = vec3(d*0.9, d*0.65, d*0.25) * 2.0;
+
+        } else if (uColorMode == 2) {
+            // ── Velocity magnitude ────────────────────────────
+            float sp = length(vel);
+            float sv = clamp(sp * 10.0, 0.0, 1.0);
+            // Colour: dark blue → cyan → yellow → white
+            color = mix(vec3(0.0,0.1,0.4), vec3(0.0,0.8,0.9), sv);
+            color = mix(color, vec3(1.0,1.0,0.2), clamp(sv*2.0-1.0, 0.0, 1.0));
+            color *= clamp(dens * 3.0 + 0.3, 0.0, 2.0);
+
+        } else {
+            // ── Pressure map ──────────────────────────────────
+            float pv = clamp(pres * 30.0, -1.0, 1.0);
+            if (pv > 0.0) color = vec3(pv*0.9, pv*0.2, 0.05);
+            else          color = vec3(0.05, 0.1, -pv*0.8);
+            color *= clamp(dens * 2.0 + 0.2, 0.0, 2.0);
+        }
+    }
+
+    // ── Photon ring glow ────────────────────────────────────────
+    // Ring appears just outside the shadow edge — photons that
+    // orbited the BH once before escaping.
+    float dist_to_ring = abs(r_screen - bc);
+    if (dist_to_ring < ring_w * 2.0) {
+        float ring_I = exp(-dist_to_ring * dist_to_ring / (2.0 * ring_w * ring_w * 0.15));
+        // Slight Doppler tilt on the ring itself
+        float phi_ring   = atan(pos.y, pos.x);
+        float ring_doppl = 1.0 + 0.5 * sin(phi_ring) * sin(uIncl);
+        vec3 ring_color  = mix(vec3(1.0, 0.80, 0.35), vec3(0.6, 0.85, 1.0),
+                               clamp(sin(phi_ring) * sin(uIncl) * 0.5 + 0.5, 0.0, 1.0));
+        color += ring_color * ring_I * 4.0 * ring_doppl;
+    }
+
+    // ── Shadow region: absolute black ──────────────────────────
+    if (inShadow || r_screen < bc - ring_w * 1.2) {
+        color = vec3(0.0);
+    }
+
+    // ── Exposure + ACES tone mapping + sRGB gamma ───────────────
+    color *= uExposure;
+    color  = acesFilmic(color);
+    color  = pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+
+    fragColor = vec4(color, 1.0);
+}
+</script>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  2D BLACK HOLE ACCRETION FLUID SIMULATION
+//  Physics: Incompressible Navier-Stokes + central gravity (1/r²)
+//           + Keplerian angular momentum initialization
+//           + α-disk viscosity proxy
+//           + relativistic jet launch from polar region
+//           + event horizon density sink
+//
+//  Solver: Jos Stam (1999) semi-Lagrangian stable fluids
+//  Grid: N×N, cells indexed IX(i,j) = i + j*(N+2)
+//
+//  Renderer: WebGL2 fragment shader
+//    — Schwarzschild gravitational lensing (null geodesics)
+//    — Planck blackbody spectrum T → sRGB
+//    — Relativistic Doppler beaming (Keplerian disk)
+//    — Gravitational redshift z = sqrt(1 - Rs/r)
+//    — ACES filmic tone mapping
+// ═══════════════════════════════════════════════════════════════
+
+// ── Canvas setup ─────────────────────────────────────────────
+const glCanvas  = document.getElementById('glCanvas');
+const ovCanvas  = document.getElementById('overlayCanvas');
+const ovCtx     = ovCanvas.getContext('2d');
+const N = 128;
+const M = N + 2;
+let step = 0;
+
+function IX(i, j) { return i + j * M; }
+
+function resize() {
+    const area = document.getElementById('canvas-area');
+    const W = area.clientWidth, H = area.clientHeight;
+    const sz = Math.min(W, H);
+    // WebGL canvas: native resolution square
+    glCanvas.width  = sz;
+    glCanvas.height = sz;
+    // Overlay: same
+    ovCanvas.width  = sz;
+    ovCanvas.height = sz;
+    // Position both centred in the area
+    const offX = Math.floor((W - sz) / 2) + 'px';
+    const offY = Math.floor((H - sz) / 2) + 'px';
+    glCanvas.style.left  = offX; glCanvas.style.top = offY;
+    glCanvas.style.width = sz + 'px'; glCanvas.style.height = sz + 'px';
+    ovCanvas.style.left  = offX; ovCanvas.style.top = offY;
+    ovCanvas.style.width = sz + 'px'; ovCanvas.style.height = sz + 'px';
+    if (gl) {
+        gl.viewport(0, 0, sz, sz);
+        gl.uniform2f(uLoc.uRes, sz, sz);
+    }
+}
+window.addEventListener('resize', resize);
+
+// ── Grid state ───────────────────────────────────────────────
+let u, v, u0, v0, dens, dens0, pres, div2;
+function mkGrid() { return new Float32Array(M * M); }
+function resetGrids() {
+    u=mkGrid(); v=mkGrid(); u0=mkGrid(); v0=mkGrid();
+    dens=mkGrid(); dens0=mkGrid(); pres=mkGrid(); div2=mkGrid();
+}
+resetGrids();
+
+// ── Parameters ───────────────────────────────────────────────
+const state = {
+    GM:    0.08,   EH:    0.04,   jetR:  0.06,
+    diskR0:0.25,   diskR1:0.68,
+    accR:  0.35,   spin:  0.70,   visc:  0.0008,
+    jet:   0.40,   dt:    0.016,  iter:  18,
+    colormap: 0,   showGrid: false,
+    inclDeg: 17,   lensStr: 1.0,  tmax: 1e7,  exposure: 0.30,
+};
+
+const PRESETS = {
+    stellar: { name:'Stellar BH — 10 M☉',     GM:0.08, EH:0.04, jetR:0.06, diskR0:0.25, diskR1:0.68, tmax:1e7 },
+    agn:     { name:'AGN — 10⁶ M☉',           GM:0.18, EH:0.06, jetR:0.09, diskR0:0.20, diskR1:0.72, tmax:1e5 },
+    smbh:    { name:'SMBH — 10⁹ M☉',          GM:0.30, EH:0.08, jetR:0.12, diskR0:0.18, diskR1:0.75, tmax:5e4 },
+    ton618:  { name:'Ton 618 — 6.6×10¹⁰ M☉', GM:0.45, EH:0.10, jetR:0.16, diskR0:0.16, diskR1:0.80, tmax:3e4 },
+};
+
+// ═══════════════════════════════════════════════════════════════
+//  WebGL2 Initialisation
+// ═══════════════════════════════════════════════════════════════
+
+const gl = glCanvas.getContext('webgl2');
+if (!gl) { document.body.innerHTML = '<h1 style="color:#f44;padding:2em">WebGL2 is required but not supported by this browser.</h1>'; throw new Error('WebGL2 required'); }
+gl.getExtension('EXT_color_buffer_float');
+const floatLinear = gl.getExtension('OES_texture_float_linear');
+const floatFilter = floatLinear ? gl.LINEAR : gl.NEAREST;
+
+function compileShader(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(s));
+        gl.deleteShader(s);
+        return null;
+    }
+    return s;
+}
+
+const vsSrc = document.getElementById('vs').textContent;
+const fsSrc = document.getElementById('fs').textContent;
+const vsObj = compileShader(vsSrc, gl.VERTEX_SHADER);
+const fsObj = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+const prog  = gl.createProgram();
+gl.attachShader(prog, vsObj);
+gl.attachShader(prog, fsObj);
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error('Program link error:', gl.getProgramInfoLog(prog));
+}
+gl.useProgram(prog);
+
+// Fullscreen quad  (-1,-1)→(1,1)
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(prog, 'aPos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+// Uniform locations
+const uLoc = {};
+['uRes','uGM','uEH','uRs','uTmax','uIncl','uLensStr','uExposure','uColorMode',
+ 'uDens','uVel','uPres'].forEach(n => { uLoc[n] = gl.getUniformLocation(prog, n); });
+
+// Textures: density (R32F), velocity (RG32F), pressure (R32F)
+function createFloatTex(intFmt, fmt, w, h) {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, floatFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, floatFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, intFmt, w, h, 0, fmt, gl.FLOAT, null);
+    return tex;
+}
+const texDens = createFloatTex(gl.R32F,  gl.RED, M, M);
+const texVel  = createFloatTex(gl.RG32F, gl.RG,  M, M);
+const texPres = createFloatTex(gl.R32F,  gl.RED, M, M);
+
+gl.uniform1i(uLoc.uDens, 0);
+gl.uniform1i(uLoc.uVel,  1);
+gl.uniform1i(uLoc.uPres, 2);
+
+// Reusable buffer for packing velocity into RG32F
+const velPacked = new Float32Array(M * M * 2);
+
+function uploadTextures() {
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texDens);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, M, M, gl.RED, gl.FLOAT, dens);
+
+    for (let i = 0; i < M * M; i++) { velPacked[i * 2] = u[i]; velPacked[i * 2 + 1] = v[i]; }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, texVel);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, M, M, gl.RG, gl.FLOAT, velPacked);
+
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, texPres);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, M, M, gl.RED, gl.FLOAT, pres);
+}
+
+function pushUniforms() {
+    gl.uniform2f(uLoc.uRes, glCanvas.width, glCanvas.height);
+    gl.uniform1f(uLoc.uGM,      state.GM);
+    gl.uniform1f(uLoc.uEH,      state.EH);
+    gl.uniform1f(uLoc.uRs,      state.EH);
+    gl.uniform1f(uLoc.uTmax,    state.tmax);
+    gl.uniform1f(uLoc.uIncl,    state.inclDeg * Math.PI / 180);
+    gl.uniform1f(uLoc.uLensStr, state.lensStr);
+    gl.uniform1f(uLoc.uExposure, state.exposure);
+    gl.uniform1i(uLoc.uColorMode, state.colormap);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Stable Fluids Solver  (Stam 1999)
+// ═══════════════════════════════════════════════════════════════
+
+function addSource(x, s, dt) {
+    for (let i = 0, n = M * M; i < n; i++) x[i] += dt * s[i];
+}
+
+function setBnd(b, x) {
+    for (let i = 1; i <= N; i++) {
+        x[IX(0,   i)] = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+        x[IX(N+1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+        x[IX(i,   0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+        x[IX(i, N+1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+    }
+    x[IX(0,   0  )] = 0.5 * (x[IX(1, 0  )] + x[IX(0,   1)]);
+    x[IX(0,   N+1)] = 0.5 * (x[IX(1, N+1)] + x[IX(0,   N)]);
+    x[IX(N+1, 0  )] = 0.5 * (x[IX(N, 0  )] + x[IX(N+1, 1)]);
+    x[IX(N+1, N+1)] = 0.5 * (x[IX(N, N+1)] + x[IX(N+1, N)]);
+}
+
+function linSolve(b, x, x0, a, c) {
+    const cR = 1.0 / c;
+    for (let k = 0; k < state.iter; k++) {
+        for (let j = 1; j <= N; j++) {
+            for (let i = 1; i <= N; i++) {
+                x[IX(i,j)] = (x0[IX(i,j)] + a * (
+                    x[IX(i-1,j)] + x[IX(i+1,j)] +
+                    x[IX(i,j-1)] + x[IX(i,j+1)]
+                )) * cR;
+            }
+        }
+        setBnd(b, x);
+    }
+}
+
+function diffuse(b, x, x0, diff, dt) {
+    const a = dt * diff * N * N;
+    linSolve(b, x, x0, a, 1 + 4 * a);
+}
+
+function advect(b, d, d0, uu, vv, dt) {
+    const dt0 = dt * N;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            let x = i - dt0 * uu[IX(i,j)];
+            let y = j - dt0 * vv[IX(i,j)];
+            x = Math.max(0.5, Math.min(N + 0.5, x));
+            y = Math.max(0.5, Math.min(N + 0.5, y));
+            const i0 = Math.floor(x), i1 = i0 + 1;
+            const j0 = Math.floor(y), j1 = j0 + 1;
+            const s1 = x - i0, s0 = 1 - s1;
+            const t1 = y - j0, t0 = 1 - t1;
+            d[IX(i,j)] = s0 * (t0 * d0[IX(i0,j0)] + t1 * d0[IX(i0,j1)])
+                       + s1 * (t0 * d0[IX(i1,j0)] + t1 * d0[IX(i1,j1)]);
+        }
+    }
+    setBnd(b, d);
+}
+
+function project(uu, vv, p, dv) {
+    const h = 1.0 / N;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            dv[IX(i,j)] = -0.5 * h * (
+                uu[IX(i+1,j)] - uu[IX(i-1,j)] +
+                vv[IX(i,j+1)] - vv[IX(i,j-1)]
+            );
+            p[IX(i,j)] = 0;
+        }
+    }
+    setBnd(0, dv);
+    setBnd(0, p);
+    linSolve(0, p, dv, 1, 4);
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            uu[IX(i,j)] -= 0.5 * N * (p[IX(i+1,j)] - p[IX(i-1,j)]);
+            vv[IX(i,j)] -= 0.5 * N * (p[IX(i,j+1)] - p[IX(i,j-1)]);
+        }
+    }
+    setBnd(1, uu);
+    setBnd(2, vv);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Black Hole Physics Sources
+// ═══════════════════════════════════════════════════════════════
+
+const cx = (N + 1) * 0.5;          // grid-centre (cell coords)
+const cy = (N + 1) * 0.5;
+
+function applyGravity(dt) {
+    const GM = state.GM * 400;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = (i - cx) / N;
+            const dy = (j - cy) / N;
+            const r2 = dx * dx + dy * dy;
+            const r  = Math.sqrt(r2);
+            if (r < state.EH * 0.5) continue;
+            const r3 = r2 * r + 1e-4;
+            u[IX(i,j)] += -GM * dx / r3 * dt;
+            v[IX(i,j)] += -GM * dy / r3 * dt;
+        }
+    }
+}
+
+function applyAngularMomentum(dt) {
+    const spin = state.spin;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = (i - cx) / N;
+            const dy = (j - cy) / N;
+            const r  = Math.sqrt(dx * dx + dy * dy);
+            if (r < state.EH || r > state.diskR1 * 1.1) continue;
+            const vK = Math.sqrt(state.GM * 2 / (r + 0.01)) * spin;
+            const tx = -dy / r, ty = dx / r;
+            u[IX(i,j)] += (vK * tx - u[IX(i,j)]) * 0.02 * dt;
+            v[IX(i,j)] += (vK * ty - v[IX(i,j)]) * 0.02 * dt;
+        }
+    }
+}
+
+function applyEventHorizonSink() {
+    const ehR = state.EH * N * 0.5;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            if (Math.sqrt(dx * dx + dy * dy) < ehR) {
+                dens[IX(i,j)] *= 0.85;
+                u[IX(i,j)] *= 0.7;
+                v[IX(i,j)] *= 0.7;
+            }
+        }
+    }
+}
+
+function applyJets(dt) {
+    if (state.jet < 0.01) return;
+    const jetR = state.jetR * N * 0.5;
+    const jetV = state.jet * 0.8;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r = Math.sqrt(dx * dx + dy * dy);
+            if (r > jetR) continue;
+            const lateral = Math.abs(dx) / (r + 0.1);
+            if (lateral > 0.3) continue;
+            const f = Math.exp(-r * r / (jetR * jetR * 0.3));
+            if (dy > 0) { v[IX(i,j)] += jetV * f * dt * 10; dens[IX(i,j)] += 0.01 * f * dt; }
+            else         { v[IX(i,j)] -= jetV * f * dt * 10; dens[IX(i,j)] += 0.01 * f * dt; }
+        }
+    }
+}
+
+function applyAccretion(dt) {
+    const r1 = state.diskR1 * N * 0.5;
+    const rate = state.accR * 0.03 * dt;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r = Math.sqrt(dx * dx + dy * dy);
+            if (r > r1 * 0.9 && r < r1 * 1.1) {
+                dens[IX(i,j)] += rate * (1 + 0.3 * Math.sin(step * 0.02 + Math.atan2(dy, dx) * 3));
+                const rn = r + 0.01;
+                u[IX(i,j)] -= dx / rn * 0.003 * dt;
+                v[IX(i,j)] -= dy / rn * 0.003 * dt;
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Disk Initialisation
+// ═══════════════════════════════════════════════════════════════
+
+function initDisk() {
+    resetGrids();
+    step = 0;
+    const r0 = state.diskR0 * N * 0.5;
+    const r1 = state.diskR1 * N * 0.5;
+    for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+            const dx = i - cx, dy = j - cy;
+            const r  = Math.sqrt(dx * dx + dy * dy);
+            if (r < r0 || r > r1) continue;
+            const rNorm = (r - r0) / (r1 - r0);
+            const dProf = Math.sin(rNorm * Math.PI) * 0.8;
+            const phi   = Math.atan2(dy, dx);
+            const spiral = 0.15 * Math.sin(2 * phi + r * 0.1);
+            dens[IX(i,j)] = Math.max(0, dProf + spiral);
+            const vK = Math.sqrt(state.GM * 2 / (r / N + 0.01)) * state.spin;
+            u[IX(i,j)] = vK * (-dy / r);
+            v[IX(i,j)] = vK * ( dx / r);
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Simulation Step
+// ═══════════════════════════════════════════════════════════════
+
+function simStep() {
+    const dt   = state.dt;
+    const visc = state.visc;
+    const diff = visc * 0.5;
+
+    applyGravity(dt);
+    applyAngularMomentum(dt);
+    applyAccretion(dt);
+    applyJets(dt);
+
+    // ── Velocity step ──────────────────────────────
+    u0.set(u); v0.set(v);
+    diffuse(1, u, u0, visc, dt);
+    diffuse(2, v, v0, visc, dt);
+    project(u, v, pres, div2);
+    u0.set(u); v0.set(v);
+    advect(1, u, u0, u0, v0, dt);
+    advect(2, v, v0, u0, v0, dt);
+    project(u, v, pres, div2);
+
+    // ── Density step ───────────────────────────────
+    dens0.set(dens);
+    diffuse(0, dens, dens0, diff, dt);
+    dens0.set(dens);
+    advect(0, dens, dens0, u, v, dt);
+
+    applyEventHorizonSink();
+    step++;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Overlay Drawing  (velocity grid + jet cones)
+// ═══════════════════════════════════════════════════════════════
+
+function drawOverlay() {
+    ovCtx.clearRect(0, 0, ovCanvas.width, ovCanvas.height);
+    if (!state.showGrid) return;
+    const W = ovCanvas.width, H = ovCanvas.height;
+    const sp = 8, sc = 150;
+    ovCtx.strokeStyle = 'rgba(100,200,255,0.3)';
+    ovCtx.lineWidth = 1;
+    for (let j = 1; j <= N; j += sp) {
+        for (let i = 1; i <= N; i += sp) {
+            const px = (i / N) * W, py = (j / N) * H;
+            const vx = u[IX(i,j)] * sc, vy = v[IX(i,j)] * sc;
+            if (vx * vx + vy * vy < 0.5) continue;
+            ovCtx.beginPath();
+            ovCtx.moveTo(px, py);
+            ovCtx.lineTo(px + vx, py + vy);
+            ovCtx.stroke();
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Main Animation Loop
+// ═══════════════════════════════════════════════════════════════
+
+let lastTime = 0;
+function loop(t) {
+    const fps = lastTime ? (1000 / (t - lastTime)).toFixed(0) : '—';
+    lastTime = t;
+
+    simStep();
+    uploadTextures();
+    pushUniforms();
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    drawOverlay();
+
+    document.getElementById('oi-step').textContent = 'Step: ' + step;
+    document.getElementById('oi-fps').textContent  = 'FPS: ' + fps;
+    requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI Bindings  (sliders, presets, buttons)
+// ═══════════════════════════════════════════════════════════════
+
+function bindSlider(id, valId, key, transform, fmt) {
+    const el = document.getElementById(id), vEl = document.getElementById(valId);
+    el.addEventListener('input', () => {
+        const raw = parseFloat(el.value);
+        state[key] = transform ? transform(raw) : raw;
+        vEl.textContent = fmt(state[key]);
+        if (key === 'GM') state.EH = state.GM * 0.5;
+        pushUniforms();
+    });
+}
+bindSlider('s-gm',   'v-gm',   'GM',      v => v * 0.0032,  v => v.toFixed(2));
+bindSlider('s-acc',  'v-acc',  'accR',    v => v / 100,      v => v.toFixed(2));
+bindSlider('s-spin', 'v-spin', 'spin',    v => v / 100,      v => v.toFixed(2));
+bindSlider('s-visc', 'v-visc', 'visc',    v => v / 10000,    v => v.toFixed(4));
+bindSlider('s-jet',  'v-jet',  'jet',     v => v / 100,      v => v.toFixed(2));
+bindSlider('s-incl', 'v-incl', 'inclDeg', null,               v => v + '°');
+bindSlider('s-lens', 'v-lens', 'lensStr', v => v / 100,      v => v.toFixed(2) + '×');
+bindSlider('s-tmax', 'v-tmax', 'tmax',    v => Math.pow(10, v), v => '10' + String.fromCharCode(0x2070 + Math.round(Math.log10(v))) + ' K');
+bindSlider('s-expo', 'v-expo', 'exposure', v => v / 100,     v => v.toFixed(2));
+
+document.getElementById('colormap').addEventListener('change', e => {
+    state.colormap = parseInt(e.target.value);
+    pushUniforms();
+});
+document.getElementById('showGrid').addEventListener('change', e => { state.showGrid = e.target.checked; });
+
+document.getElementById('preset').addEventListener('change', e => {
+    const p = PRESETS[e.target.value];
+    if (!p) return;
+    Object.assign(state, { GM: p.GM, EH: p.EH, jetR: p.jetR, diskR0: p.diskR0, diskR1: p.diskR1, tmax: p.tmax });
+    document.getElementById('s-gm').value   = Math.round(p.GM / 0.0032);
+    document.getElementById('v-gm').textContent = p.GM.toFixed(2);
+    document.getElementById('s-tmax').value = Math.log10(p.tmax).toFixed(1);
+    document.getElementById('v-tmax').textContent = p.tmax.toExponential(0) + ' K';
+    document.getElementById('oi-preset').textContent = p.name;
+    document.getElementById('oi-mass').textContent   = 'GM = ' + p.GM.toFixed(2);
+    pushUniforms();
+    initDisk();
+});
+
+document.getElementById('btnReset').addEventListener('click', initDisk);
+document.getElementById('btnCME').addEventListener('click', () => {
+    const angle = Math.random() * Math.PI * 2;
+    const rr = (state.diskR0 + (state.diskR1 - state.diskR0) * 0.5) * N * 0.5;
+    const ci = Math.round(cx + Math.cos(angle) * rr);
+    const cj = Math.round(cy + Math.sin(angle) * rr);
+    for (let dj = -6; dj <= 6; dj++) for (let di = -6; di <= 6; di++) {
+        const ii = ci + di, jj = cj + dj;
+        if (ii >= 1 && ii <= N && jj >= 1 && jj <= N) {
+            const f = Math.exp(-(di * di + dj * dj) / 8);
+            dens[IX(ii, jj)] += 1.5 * f;
+        }
+    }
+});
+
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '\u2715' : '\u2630';
+        _navBurger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '\u2630';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
+document.getElementById('btnClear').addEventListener('click', () => { resetGrids(); step = 0; pushUniforms(); });
+
+// Mouse: inject matter on drag
+let mouseDown = false;
+ovCanvas.addEventListener('mousedown', e => { mouseDown = true; });
+ovCanvas.addEventListener('mouseup',   () => { mouseDown = false; });
+ovCanvas.addEventListener('mousemove', e => {
+    if (!mouseDown) return;
+    const rect = ovCanvas.getBoundingClientRect();
+    const x  = (e.clientX - rect.left)  / rect.width;
+    const y  = (e.clientY - rect.top)   / rect.height;
+    const ci = Math.round(x*N)+1;
+    const cj = Math.round(y*N)+1;
+    for (let dj=-3;dj<=3;dj++) for (let di=-3;di<=3;di++) {
+        const ii=ci+di, jj=cj+dj;
+        if (ii>=1&&ii<=N&&jj>=1&&jj<=N) {
+            const f = Math.exp(-(di*di+dj*dj)/4);
+            dens[IX(ii,jj)] += 0.5*f;
+        }
+    }
+});
+
+// ── Start ──────────────────────────────────────────────────────
+resize();
+pushUniforms();
+initDisk();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

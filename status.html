@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Status — Parker Physics</title>
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#03010e;color:#ccc;min-height:100vh;display:flex;flex-direction:column}
+main{flex:1;max-width:1100px;width:100%;margin:0 auto;padding:24px 20px 48px}
+h1{font-size:1.4rem;font-weight:800;background:linear-gradient(45deg,#ff6060,#ff8c00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.sub{color:#555;font-size:.82rem;margin:2px 0 18px}
+
+/* KPI strip */
+.kpi-strip{display:flex;gap:12px;margin-bottom:22px;flex-wrap:wrap}
+.kpi{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:14px 18px;text-align:center;min-width:120px;flex:1}
+.kpi-val{font-size:1.6rem;font-weight:800;line-height:1;margin-bottom:4px}
+.kpi-label{font-size:.68rem;color:#555;text-transform:uppercase;letter-spacing:.06em}
+.green{color:#4eff91} .red{color:#ff5555} .gold{color:#ffd700} .blue{color:#4fc3f7}
+
+/* Section */
+.section{margin-bottom:24px}
+.section h2{font-size:.85rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)}
+
+/* Status rows */
+.row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,.02);border-radius:6px;margin-bottom:3px;font-size:.84rem}
+.row:hover{background:rgba(255,255,255,.04)}
+.dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:#4eff91;box-shadow:0 0 6px rgba(78,255,145,.5)}
+.dot.fail{background:#ff5555;box-shadow:0 0 6px rgba(255,85,85,.5)}
+.dot.warn{background:#ffd700;box-shadow:0 0 6px rgba(255,215,0,.4)}
+.dot.pending{background:#444;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.row-name{flex:1;color:#bbb}
+.row-name a{color:#bbb;text-decoration:none}
+.row-name a:hover{color:#fff}
+.row-detail{color:#555;font-size:.75rem;font-family:monospace}
+.row-tag{font-size:.65rem;font-weight:600;padding:2px 7px;border-radius:3px;text-transform:uppercase;letter-spacing:.04em}
+.tag-sim{background:rgba(0,198,255,.1);color:#4fc3f7;border:1px solid rgba(0,198,255,.2)}
+.tag-tool{background:rgba(192,128,255,.1);color:#c080ff;border:1px solid rgba(192,128,255,.2)}
+.tag-page{background:rgba(255,255,255,.05);color:#777;border:1px solid rgba(255,255,255,.08)}
+.tag-api{background:rgba(255,140,0,.1);color:#ff8c00;border:1px solid rgba(255,140,0,.2)}
+.tag-js{background:rgba(78,255,145,.08);color:#4eff91;border:1px solid rgba(78,255,145,.2)}
+
+.deps{margin-top:2px;font-size:.72rem;color:#444;padding-left:20px}
+.deps .dep-miss{color:#ff5555}
+
+/* Runtime-health cards (pipelines + proxies). Rendered with table styling
+   so they match the pattern on admin.html — one view of truth across
+   both surfaces, plus these are the cards that actually tell you whether
+   the user-facing features are working (not just "the HTML file exists"). */
+.rt-card{background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:16px;margin-bottom:14px}
+.rt-card h3{font-size:.78rem;font-weight:700;color:#cde;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+.rt-card .rt-refresh{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#aab;font-size:.68rem;padding:3px 10px;border-radius:4px;cursor:pointer;font-family:inherit}
+.rt-card .rt-refresh:hover{background:rgba(255,255,255,.12);color:#fff}
+.rt-card table{width:100%;border-collapse:collapse;font-size:.78rem}
+.rt-card th{text-align:left;color:#556;font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.rt-card td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.03);vertical-align:top}
+.rt-card td:first-child{color:#cde}
+.rt-empty{color:#666;font-size:.74rem;padding:6px 2px}
+.rt-error{color:#ff8888;font-size:.74rem;padding:6px 2px}
+.rt-caveat{color:#777;font-size:.68rem;font-style:italic;margin:0 0 10px;padding-left:2px}
+
+.actions{margin-bottom:18px;display:flex;gap:8px}
+.btn{padding:7px 16px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:#ccc;font-family:inherit;font-size:.8rem;cursor:pointer;transition:background .15s}
+.btn:hover{background:rgba(255,255,255,.12);color:#fff}
+
+.timestamp{text-align:center;padding:20px;color:#333;font-size:.75rem;font-family:monospace}
+.auth-gate{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding:3rem}
+</style>
+</head>
+<body>
+<nav></nav>
+<script type="importmap">
+{"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("status");</script>
+
+<div class="auth-gate" id="auth-gate">
+  <div>
+    <h2 style="color:#ff6060;margin-bottom:.8rem">Superadmin Access Required</h2>
+    <p style="color:#888;margin-bottom:1.5rem">You must be signed in with a superadmin account to view this page.</p>
+    <a href="signin.html" style="display:inline-block;padding:10px 28px;border-radius:8px;background:linear-gradient(45deg,#8040ff,#4080ff);color:#fff;text-decoration:none;font-weight:600;font-size:.9rem">Sign In</a>
+  </div>
+</div>
+
+<main style="display:none" id="status-main">
+<h1>System Status</h1>
+<p class="sub" id="scan-time">Scanning...</p>
+
+<div class="kpi-strip">
+  <div class="kpi"><div class="kpi-val green" id="k-live">—</div><div class="kpi-label">Pages 2xx</div></div>
+  <div class="kpi"><div class="kpi-val red" id="k-404">—</div><div class="kpi-label">404 / Down</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-api">—</div><div class="kpi-label">APIs OK</div></div>
+  <div class="kpi"><div class="kpi-val gold" id="k-pipes">—</div><div class="kpi-label">Pipelines Healthy</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-gibs">—</div><div class="kpi-label">NASA GIBS</div></div>
+  <div class="kpi"><div class="kpi-val blue" id="k-js">—</div><div class="kpi-label">JS Modules</div></div>
+  <div class="kpi"><div class="kpi-val gold" id="k-deps">—</div><div class="kpi-label">Broken Deps</div></div>
+</div>
+
+<!-- ── RUNTIME HEALTH (superadmin) ────────────────────────────────────────────
+     These two cards are the real health signal. The KPI/section scan below
+     only verifies that static files serve 2xx — a page can return 200 while
+     its sim is crashing. These cards probe the pipelines + proxies the sims
+     actually depend on, so "all green" here matches "the product works." -->
+<div class="rt-card">
+  <h3>Pipeline Health · Supabase heartbeat
+    <button class="rt-refresh" id="rt-refresh-heartbeat">Refresh</button>
+  </h3>
+  <p class="rt-caveat">One row per pg_cron-fed pipeline. Reads pipeline_heartbeat directly — shows last success, failure streak, and the actual upstream error reason.</p>
+  <div id="rt-heartbeat"><div class="rt-empty">Loading…</div></div>
+</div>
+
+<div class="rt-card">
+  <h3>Proxy Freshness · CDN endpoints
+    <button class="rt-refresh" id="rt-refresh-proxies">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Pings the public /api/* endpoints the sims consume. Surfaces structured error codes (cache_empty, supabase_not_configured, …) inline so production breakage is diagnosable without DevTools.</p>
+  <div id="rt-proxies"><div class="rt-empty">Loading…</div></div>
+</div>
+
+<!-- ── NASA Earth Observations ─────────────────────────────────────────────────
+     Probes each GIBS layer the Earth sim renders. CORS-enabled, no key needed.
+     Drives whether the SST / AOD / fires / snow / precip overlays on earth.html
+     can fetch imagery — silent NASA breakage (layer rename, GIBS outage) shows
+     up here as a red row instead of an invisible empty overlay. -->
+<div class="rt-card">
+  <h3>NASA Earth Observations · GIBS layers
+    <button class="rt-refresh" id="rt-refresh-gibs">Refresh</button>
+  </h3>
+  <p class="rt-caveat">Probes the NASA GIBS Snapshot endpoint for each layer earth.html requests (precipitation, SST, AOD, cloud thickness, fires, snow). HEAD-only — no full-image download. Red rows usually mean GIBS retired the layer ID (see MODIS_Terra_Snow_Cover → MODIS_Terra_NDSI_Snow_Cover).</p>
+  <div id="rt-gibs"><div class="rt-empty">Loading…</div></div>
+</div>
+
+<div class="actions">
+  <button class="btn" id="btn-rescan">Re-scan Static Files</button>
+  <button class="btn" id="btn-filter" data-mode="all">Show: All</button>
+</div>
+<p class="rt-caveat" style="margin-bottom:12px">The sections below only check that static bytes serve 2xx — a page can be "live" here while its runtime is broken. Use the cards above for feature health.</p>
+
+<div id="results"></div>
+<div class="timestamp" id="footer-ts"></div>
+</main>
+
+<script type="module">
+// ── Auth gate: superadmin only ──────────────────────────────────────────────
+import { auth } from './js/auth.js';
+import { PIPELINES, CATEGORIES, pipelinesByCategory } from './js/pipeline-registry.js';
+// EARTH_OBS_LAYERS is the single source of truth for which NASA GIBS
+// products earth.html renders. Status page imports it directly so adding
+// a layer there auto-registers a probe row here.
+import { EARTH_OBS_LAYERS } from './js/earth-obs-feed.js';
+// Pipeline Health card queries pipeline_heartbeat directly; we go through
+// the shared supabase-config so RLS + anon-read policy applies normally.
+import { getSupabase, isConfigured } from './js/supabase-config.js';
+await auth.ready();
+
+if (!auth.isSignedIn()) {
+    document.getElementById('auth-gate').style.display = 'flex';
+    throw '';
+}
+const adminCheck = await auth.verifyAdminServerSide();
+if (!adminCheck.verified) {
+    await auth.fetchProfile();
+    if (auth.getRole() !== 'superadmin') {
+        const gate = document.getElementById('auth-gate');
+        gate.querySelector('h2').textContent = 'Insufficient Permissions';
+        gate.querySelector('p').textContent = `Access denied. Role: ${auth.getRole() || 'none'}. Superadmin required.`;
+        gate.style.display = 'flex';
+        throw '';
+    }
+} else if (adminCheck.role !== 'superadmin') {
+    const gate = document.getElementById('auth-gate');
+    gate.querySelector('h2').textContent = 'Insufficient Permissions';
+    gate.querySelector('p').textContent = `Access denied. Role: ${adminCheck.role}. Superadmin required.`;
+    gate.style.display = 'flex';
+    throw '';
+}
+document.getElementById('auth-gate').style.display = 'none';
+document.getElementById('status-main').style.display = 'block';
+
+// ── Page & module manifest ──────────────────────────────────────────────────
+// Every page and JS module the app should have.
+// deps = local JS imports the page needs (not CDN).
+const PAGES = [
+    // Simulations
+    { file: 'index.html',            label: 'Home / Sgr A* Hero',       tag: 'sim',  deps: ['js/nav.js','js/card-previews.js'] },
+    { file: 'space-weather.html',    label: 'Space Weather',            tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/soho-feed.js','js/heliosphere3d.js','js/horizons.js','js/solar-wind-state.js','js/wind-pipeline-feed.js','js/space-weather-globe.js','js/earth-orbit.js','js/solar-wind-magnetosphere.js','js/cme-propagation.js','js/alert-engine.js','js/impact-score.js','js/earth-forecast.js','js/model-validation.js'] },
+    { file: 'sun.html',              label: 'The Sun',                  tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/wind-pipeline-feed.js','js/soho-feed.js','js/solar-atmosphere.js','js/solar-weather-forecast.js'] },
+    { file: 'earth.html',            label: 'Earth',                    tag: 'sim',  deps: ['js/nav.js','js/swpc-feed.js','js/user-location.js','js/weather-feed.js','js/nws-alerts.js','js/isobar-engine.js','js/magnetosphere-engine.js','js/exosphere-engine.js','js/solar-wind-magnetosphere.js','js/solar-weather-history.js','js/solar-weather-forecast.js','js/satellite-feed.js','js/earth-obs-feed.js','js/scale-nav.js','js/earth-feeds.js','js/satellite-tracker.js','js/earth-skin.js','js/storm-feed.js'] },
+    { file: 'moon.html',             label: 'Moon',                     tag: 'sim',  deps: ['js/nav.js','js/moon-skin.js','js/swpc-feed.js','js/scale-nav.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
+    { file: 'threejs.html',          label: 'Solar System',             tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/horizons.js','js/jupiter-shader.js','js/planet-moons.js','js/swpc-feed.js'] },
+    { file: 'galactic-map.html',     label: 'Galaxy Map',               tag: 'sim',  deps: ['js/nav.js','js/scale-nav.js','js/live-status-bar.js','js/sstar-wasm/sstar_wasm.js'] },
+    { file: 'sagittarius.html',      label: 'Sagittarius A*',           tag: 'sim',  deps: ['js/nav.js','js/sgr-a-star.js','js/analytics.js','js/user-state.js','js/greeting.js'] },
+    { file: 'sirius.html',           label: 'Sirius Binary',            tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'betelgeuse.html',       label: 'Betelgeuse',               tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'vega.html',             label: 'Vega',                     tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'wr102.html',            label: 'WR-102',                   tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'star3d.html',           label: 'Sirius Planetary',         tag: 'sim',  deps: ['js/nav.js'] },
+    { file: 'satellites.html',       label: 'Satellites',               tag: 'sim',  deps: ['js/nav.js','js/satellite-tracker.js','js/orbital-analytics.js','js/user-location.js'] },
+    // Tools
+    { file: 'solar-fluid.html',      label: 'Solar Fluid',              tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'stellar-wind.html',     label: 'Stellar Wind',             tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'star2d.html',           label: '2D Stellar Modeler',       tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'star2d-advanced.html',  label: 'Advanced 2D Solar',        tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'black-hole-fluid.html', label: 'Black Hole Accretion',     tag: 'tool', deps: ['js/nav.js'] },
+    { file: 'rust.html',             label: 'Rust/WASM Engine',         tag: 'tool', deps: ['js/nav.js'] },
+    // App pages
+    { file: 'dashboard.html',        label: 'Dashboard',                tag: 'page', deps: ['js/auth.js','js/user-location.js','js/swpc-feed.js','js/alert-engine.js','js/impact-score.js','js/onboarding-tour.js','js/daily-summary.js'] },
+    { file: 'admin.html',            label: 'Admin',                    tag: 'page', deps: ['js/nav.js','js/supabase-config.js','js/admin-analytics.js','js/admin-invites.js'] },
+    { file: 'pricing.html',          label: 'Pricing',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'signin.html',           label: 'Sign In',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'signup.html',           label: 'Sign Up',                  tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'reset-password.html',   label: 'Reset Password',           tag: 'page', deps: ['js/nav.js','js/supabase-config.js'] },
+    { file: 'privacy.html',          label: 'Privacy Policy',           tag: 'page', deps: ['js/nav.js'] },
+    { file: 'eula.html',             label: 'Terms of Service',         tag: 'page', deps: ['js/nav.js'] },
+    { file: 'api-policy.html',       label: 'API Policy',               tag: 'page', deps: ['js/nav.js'] },
+    { file: 'status.html',           label: 'This Page',                tag: 'page', deps: ['js/nav.js'] },
+];
+
+// JS modules that should exist (core shared modules)
+const JS_MODULES = [
+    'js/nav.js','js/analytics.js','js/auth.js','js/config.js','js/supabase-config.js',
+    'js/swpc-feed.js','js/soho-feed.js','js/user-location.js','js/user-state.js','js/greeting.js',
+    'js/magnetosphere-engine.js','js/heliosphere3d.js','js/heliosphere.js','js/helio-physics.js',
+    'js/solar-wind-state.js','js/solar-wind-magnetosphere.js','js/wind-pipeline-feed.js',
+    'js/cme-propagation.js','js/solar-atmosphere.js','js/solar-weather-forecast.js',
+    'js/solar-weather-history.js','js/solar-live-canvas.js','js/solar-state.js',
+    'js/space-weather-globe.js','js/storm-feed.js',
+    'js/earth-skin.js','js/earth-orbit.js','js/earth-feeds.js','js/earth-obs-feed.js',
+    'js/earth-forecast.js','js/exosphere-engine.js',
+    'js/moon-skin.js','js/scale-nav.js','js/live-status-bar.js',
+    'js/horizons.js','js/horizons-extended.js','js/outer-planets.js',
+    'js/orbit-trails.js','js/orbital-analytics.js',
+    'js/jupiter-shader.js','js/jupiter-skin.js','js/planet-moons.js',
+    'js/satellite-feed.js','js/satellite-tracker.js',
+    'js/sun-shader.js','js/sun-skin.js','js/sun-features.js','js/sim-sun.js','js/sim-earth.js',
+    'js/flare-ring.js','js/neo-feed.js','js/nws-alerts.js','js/weather-feed.js',
+    'js/isobar-engine.js','js/temp-forecast.js',
+    'js/alert-engine.js','js/impact-score.js','js/conjunction-alert.js',
+    'js/model-validation.js','js/daily-summary.js',
+    'js/card-previews.js','js/hero-space-weather.js','js/onboarding-tour.js',
+    'js/admin-analytics.js','js/admin-invites.js',
+    'js/sgr-a-star.js','js/extended-feeds.js',
+    'js/sstar-wasm/sstar_wasm.js','js/sstar-wasm/sstar_wasm_bg.wasm',
+    'js/nav-styles.css',
+];
+
+// ── Scanner ─────────────────────────────────────────────────────────────────
+async function check(url) {
+    const t0 = performance.now();
+    try {
+        const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        return { status: r.status, ok: r.ok, ms: Math.round(performance.now() - t0) };
+    } catch (e) {
+        // HEAD might be blocked; try GET with range
+        try {
+            const r = await fetch(url, { cache: 'no-store', headers: { Range: 'bytes=0-0' } });
+            return { status: r.status, ok: r.status < 400, ms: Math.round(performance.now() - t0) };
+        } catch (_) {
+            return { status: 0, ok: false, ms: Math.round(performance.now() - t0), err: e.message };
+        }
+    }
+}
+
+// ── Runtime probes (pipelines + proxies) ─────────────────────────────────────
+// Intentionally inline rather than importing admin-analytics.js so status.html
+// keeps a narrow dependency surface. fetchPipelineHeartbeat() on admin.html
+// runs through the shared supabase-config client; here we do the same thing
+// directly so a bug in admin-analytics can't take the status page down too.
+
+// Cadence-aware staleness thresholds — matches admin.html Pipeline Health
+// card so both UIs agree on what "healthy" means.
+const PIPELINE_SPECS = [
+    { key: 'solar_wind',   label: 'Solar Wind',   warnMin:  5, critMin:  60 },
+    { key: 'weather_grid', label: 'Weather Grid', warnMin: 45, critMin: 180 },
+];
+
+function _rtFmtRel(iso) {
+    if (!iso) return 'never';
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+    if (m < 1)     return 'just now';
+    if (m < 60)    return `${m}m ago`;
+    if (m < 1440)  return `${Math.round(m / 60)}h ago`;
+    return `${Math.round(m / 1440)}d ago`;
+}
+
+function _rtHealth(row, spec) {
+    if (!row || !row.last_success_at) return { color:'#ff5555', label:'never succeeded' };
+    const ageMin = Math.round((Date.now() - new Date(row.last_success_at).getTime()) / 60_000);
+    const streak = Number(row.consecutive_fail || 0);
+    if (streak >= 3 || ageMin > spec.critMin) return { color:'#ff5555', label:'critical' };
+    if (streak >= 1 || ageMin > spec.warnMin) return { color:'#ffd700', label:'stale' };
+    return { color:'#4eff91', label:'healthy' };
+}
+
+function _rtEsc(s) {
+    return s == null ? '' : String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadPipelineHeartbeatCard() {
+    const el = document.getElementById('rt-heartbeat');
+    el.innerHTML = `<div class="rt-empty">Querying pipeline_heartbeat…</div>`;
+
+    if (!isConfigured()) {
+        el.innerHTML = `<div class="rt-error">Supabase not configured on this environment — pipeline_heartbeat unreachable.</div>`;
+        document.getElementById('k-pipes').textContent = '—';
+        return { healthy: 0, total: 0 };
+    }
+
+    let rows = [];
+    try {
+        const client = await getSupabase();
+        const { data, error } = await client
+            .from('pipeline_heartbeat')
+            .select('pipeline_name, last_success_at, last_failure_at, last_failure_reason, last_source, consecutive_fail')
+            .order('pipeline_name', { ascending: true });
+        if (error) throw error;
+        rows = data || [];
+    } catch (err) {
+        el.innerHTML = `<div class="rt-error">pipeline_heartbeat query failed: ${_rtEsc(err.message || err)}. Apply supabase-pipeline-heartbeat-migration.sql.</div>`;
+        document.getElementById('k-pipes').textContent = '—';
+        return { healthy: 0, total: 0 };
+    }
+
+    const byKey = Object.fromEntries(rows.map(r => [r.pipeline_name, r]));
+    const known = new Set(PIPELINE_SPECS.map(s => s.key));
+    const extras = rows.filter(r => !known.has(r.pipeline_name))
+                       .map(r => ({ key: r.pipeline_name, label: r.pipeline_name, warnMin: 15, critMin: 60 }));
+    const specs = [...PIPELINE_SPECS, ...extras];
+
+    let html = '<table><thead><tr>'
+             + '<th>Pipeline</th><th>Last success</th><th>Source</th>'
+             + '<th>Streak</th><th>Last failure</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    let healthy = 0;
+    for (const spec of specs) {
+        const row = byKey[spec.key];
+        const h = _rtHealth(row, spec);
+        if (h.label === 'healthy') healthy++;
+        const streak = Number(row?.consecutive_fail || 0);
+        const streakColor = streak >= 3 ? '#ff5555' : streak >= 1 ? '#ffd700' : '#667';
+        const tooltip = row?.last_failure_reason ? ` title="${_rtEsc(row.last_failure_reason)}"` : '';
+        const failCell = row?.last_failure_at
+            ? `<span${tooltip}>${_rtFmtRel(row.last_failure_at)}</span>`
+            : '<span style="color:#445">—</span>';
+
+        html += `<tr>`
+             +  `<td><strong>${_rtEsc(spec.label)}</strong>`
+             +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(spec.key)}</div></td>`
+             +  `<td style="color:#aab">${_rtFmtRel(row?.last_success_at)}</td>`
+             +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.7rem">${_rtEsc(row?.last_source ?? '—')}</td>`
+             +  `<td style="color:${streakColor};font-weight:${streak>0?700:400}">${streak}</td>`
+             +  `<td style="color:#aab">${failCell}</td>`
+             +  `<td style="color:${h.color};font-weight:600">● ${h.label}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+    document.getElementById('k-pipes').textContent = `${healthy}/${specs.length}`;
+    document.getElementById('k-pipes').className = 'kpi-val ' + (healthy === specs.length ? 'green' : 'red');
+    return { healthy, total: specs.length };
+}
+
+// Proxy probes — sourced from js/pipeline-registry.js so this list and
+// the cron pre-warm jobs share one definition. Adding a new endpoint
+// requires only a registry append; this card picks it up automatically.
+const PROXY_PROBES = PIPELINES.map(p => ({
+    key:       p.id,
+    label:     p.label,
+    endpoint:  p.endpoint,
+    category:  p.category,
+    upstream:  p.upstream,
+    warnAgeS:  p.warnAgeS,
+    critAgeS:  p.critAgeS,
+    prewarm:   p.prewarm,
+}));
+
+async function _probeProxy(spec) {
+    const t0 = performance.now();
+    let status = null, body = null, netErr = null;
+    try {
+        const res = await fetch(spec.endpoint, { signal: AbortSignal.timeout(8000), cache: 'no-store' });
+        status = res.status;
+        try { body = await res.json(); } catch { /* non-JSON */ }
+    } catch (e) {
+        netErr = e?.message || String(e);
+    }
+    const latencyMs = Math.round(performance.now() - t0);
+
+    let ageSec = null;
+    if (Number.isFinite(body?.age_seconds)) ageSec = body.age_seconds;
+    else if (body?.fetched_at)       { const t = Date.parse(body.fetched_at);       if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (body?.data?.updated)    { const t = Date.parse(body.data.updated);     if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000)); }
+    else if (Array.isArray(body)) {
+        // NOAA JSON feeds are arrays of samples; recency = most recent timestamp.
+        const last = body[body.length - 1];
+        const t = Date.parse(last?.time_tag ?? last?.timestamp ?? last?.observed ?? '');
+        if (Number.isFinite(t)) ageSec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+    }
+    return { spec, status, body, netErr, latencyMs, ageSec };
+}
+
+function _rtProxyHealth(p) {
+    if (p.netErr)            return { color:'#ff5555', label:`network error` };
+    if (p.status == null)    return { color:'#ff5555', label:'no response' };
+    if (p.status >= 500)     return { color:'#ff5555', label:`HTTP ${p.status} · ${p.body?.error ?? 'error'}` };
+    if (p.status >= 400)     return { color:'#ff5555', label:`HTTP ${p.status}` };
+    if (p.body?.error)       return { color:'#ff5555', label: String(p.body.error) };
+    if (p.ageSec == null)    return { color:'#ffd700', label:'no freshness info' };
+    if (p.ageSec > p.spec.critAgeS) return { color:'#ff5555', label:'critical (stale)' };
+    if (p.ageSec > p.spec.warnAgeS) return { color:'#ffd700', label:'warning (stale)' };
+    if (p.body?.freshness === 'expired') return { color:'#ff5555', label:`freshness=${p.body.freshness}` };
+    if (p.body?.freshness === 'stale')   return { color:'#ffd700', label:`freshness=${p.body.freshness}` };
+    return { color:'#4eff91', label:'healthy' };
+}
+
+function _rtFmtAgeSec(s) {
+    if (s == null) return '—';
+    if (s < 60)    return `${s}s ago`;
+    if (s < 3600)  return `${Math.round(s / 60)}m ago`;
+    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+    return `${Math.round(s / 86400)}d ago`;
+}
+
+function _prewarmBadge(tier) {
+    if (!tier) return '';
+    const colour =
+        tier === 'hot'    ? '#ff8a4c' :
+        tier === 'medium' ? '#ffcc66' :
+        tier === 'cold'   ? '#5cd9ff' : '#778';
+    return ` <span style="display:inline-block;padding:1px 6px;border-radius:8px;
+              background:rgba(255,255,255,.05);border:1px solid ${colour}55;
+              color:${colour};font-size:.58rem;letter-spacing:.04em;
+              font-weight:700;text-transform:uppercase">prewarm·${tier}</span>`;
+}
+
+function _renderProbeRow(p) {
+    const h = _rtProxyHealth(p);
+    const body = p.body || {};
+    const missingEnv = Array.isArray(body.missing) && body.missing.length
+        ? ` <span style="color:#ff5555;font-size:.62rem">missing env: ${_rtEsc(body.missing.join(', '))}</span>`
+        : '';
+    const source = body.source || body.heartbeat?.last_source || p.spec.upstream || '—';
+    const statusCell = p.status != null
+        ? `<span style="color:${p.status < 400 ? '#aab' : '#ff5555'};font-weight:${p.status < 400 ? 400 : 700}">${p.status}</span>`
+        : `<span style="color:#ff5555;font-weight:700">—</span>`;
+
+    return `<tr>`
+         +  `<td><strong>${_rtEsc(p.spec.label)}</strong>${_prewarmBadge(p.spec.prewarm)}`
+         +      `<div style="color:#556;font-size:.65rem;font-family:ui-monospace,monospace">${_rtEsc(p.spec.endpoint)}</div></td>`
+         +  `<td>${statusCell}</td>`
+         +  `<td style="color:#aab">${_rtFmtAgeSec(p.ageSec)}</td>`
+         +  `<td style="font-family:ui-monospace,monospace;font-size:.7rem;color:#9ad">${_rtEsc(String(source))}${missingEnv}</td>`
+         +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
+         +  `<td style="color:${h.color};font-weight:600">● ${_rtEsc(h.label)}</td>`
+         +  `</tr>`;
+}
+
+async function loadProxyFreshnessCard() {
+    const el = document.getElementById('rt-proxies');
+    el.innerHTML = `<div class="rt-empty">Probing ${PROXY_PROBES.length} endpoints…</div>`;
+
+    const probes = await Promise.all(PROXY_PROBES.map(_probeProxy));
+    const probeBySpec = new Map(probes.map(p => [p.spec.endpoint, p]));
+
+    // Per-category mini-tables — keeps the expanded probe list scannable.
+    let html = '';
+    let healthy = 0;
+    for (const cat of CATEGORIES) {
+        const catProbes = pipelinesByCategory(cat.id)
+            .map(spec => probeBySpec.get(spec.endpoint))
+            .filter(Boolean);
+        if (catProbes.length === 0) continue;
+
+        const catHealthy = catProbes.filter(p =>
+            _rtProxyHealth(p).label === 'healthy').length;
+        healthy += catHealthy;
+
+        html += `<div style="margin-top:14px;display:flex;align-items:baseline;
+                  gap:8px;border-bottom:1px solid rgba(255,255,255,.05);padding-bottom:4px">
+                  <h3 style="font-size:.78rem;color:#bcd;font-weight:700;
+                            letter-spacing:.04em;text-transform:uppercase;margin:0">
+                    ${_rtEsc(cat.label)}
+                  </h3>
+                  <span style="color:#556;font-size:.66rem">
+                    ${catHealthy}/${catProbes.length} healthy
+                  </span>
+                </div>`;
+        html += '<table style="margin-top:6px"><thead><tr>'
+              + '<th>Endpoint</th><th>HTTP</th><th>Age</th>'
+              + '<th>Source</th><th>Latency</th><th>Status</th>'
+              + '</tr></thead><tbody>';
+        for (const p of catProbes) html += _renderProbeRow(p);
+        html += '</tbody></table>';
+    }
+
+    el.innerHTML = html;
+
+    document.getElementById('k-api').textContent = `${healthy}/${probes.length}`;
+    document.getElementById('k-api').className = 'kpi-val ' + (healthy === probes.length ? 'green' : 'red');
+    return { healthy, total: probes.length };
+}
+
+// ── NASA GIBS probes ────────────────────────────────────────────────────────
+// HEAD-pings each GIBS Snapshot URL for the layers earth.html consumes.
+// GIBS is CORS-enabled with no API key; HEAD avoids downloading the full
+// imagery (each layer is ~500 KB-2 MB PNG). A 200 means the layer ID is
+// still live and date-aligned; 404 typically means NASA renamed/retired it.
+const GIBS_SNAPSHOT = 'https://wvs.earthdata.nasa.gov/api/v1/snapshot';
+const GIBS_BBOX     = '-90,-180,90,180';
+const GIBS_CRS      = 'EPSG:4326';
+
+function _gibsProbeUrl(layer) {
+    const target = new Date(Date.now() - layer.timeOffset * 86_400_000);
+    const time   = target.toISOString().replace(/\.\d+Z$/, 'Z');
+    // Probe at a tiny resolution so HEAD-equivalent cost stays trivial
+    // even if the upstream falls through to a GET — we only care about
+    // status code, not the bytes.
+    const params = new URLSearchParams({
+        REQUEST: 'GetSnapshot',
+        TIME:    time,
+        BBOX:    GIBS_BBOX,
+        CRS:     GIBS_CRS,
+        LAYERS:  layer.gibs,
+        FORMAT:  layer.format ?? 'image/png',
+        WIDTH:   '64',
+        HEIGHT:  '32',
+    });
+    return `${GIBS_SNAPSHOT}?${params}`;
+}
+
+async function _probeGibs(layer) {
+    const url = _gibsProbeUrl(layer);
+    const t0  = performance.now();
+    try {
+        // Try HEAD first; many CDNs short-circuit it. If it 405s or
+        // CORS rejects, fall through to GET — we still only read the
+        // status code, the image body is discarded.
+        let res = await fetch(url, { method: 'HEAD', cache: 'no-store',
+                                     signal: AbortSignal.timeout(8000) });
+        if (res.status === 405 || res.status === 0) {
+            res = await fetch(url, { cache: 'no-store',
+                                     signal: AbortSignal.timeout(8000) });
+        }
+        return {
+            layer,
+            url,
+            status:    res.status,
+            ok:        res.ok,
+            latencyMs: Math.round(performance.now() - t0),
+        };
+    } catch (e) {
+        return {
+            layer,
+            url,
+            status:    null,
+            ok:        false,
+            latencyMs: Math.round(performance.now() - t0),
+            netErr:    e?.message || String(e),
+        };
+    }
+}
+
+async function loadGibsCard() {
+    const el = document.getElementById('rt-gibs');
+    el.innerHTML = `<div class="rt-empty">Probing ${EARTH_OBS_LAYERS.length} GIBS layers…</div>`;
+
+    const probes  = await Promise.all(EARTH_OBS_LAYERS.map(_probeGibs));
+    const healthy = probes.filter(p => p.ok).length;
+
+    let html = '<table><thead><tr>'
+             + '<th>Layer</th><th>GIBS ID</th><th>HTTP</th>'
+             + '<th>Latency</th><th>Default</th><th>Status</th>'
+             + '</tr></thead><tbody>';
+
+    for (const p of probes) {
+        const colour =
+            p.ok                 ? '#4eff91' :
+            p.status === 404     ? '#ff5555' :
+            p.netErr             ? '#ffd700' :  // network/CORS — usually transient
+            p.status >= 500      ? '#ff5555' :
+                                   '#ffd700';
+        const label =
+            p.ok                 ? 'live' :
+            p.status === 404     ? 'retired/renamed (404)' :
+            p.netErr             ? `network: ${p.netErr}` :
+            p.status             ? `HTTP ${p.status}` :
+                                   'no response';
+        const statusCell = p.status != null
+            ? `<span style="color:${p.ok ? '#aab' : '#ff5555'};font-weight:${p.ok ? 400 : 700}">${p.status}</span>`
+            : `<span style="color:#ff5555;font-weight:700">—</span>`;
+        const defaultBadge = p.layer.defaultOn !== false
+            ? `<span style="color:#4fc3f7">on</span>`
+            : `<span style="color:#667">opt-in</span>`;
+
+        html += `<tr>`
+             +  `<td><strong>${_rtEsc(p.layer.name)}</strong>`
+             +      `<div style="color:#556;font-size:.65rem">${_rtEsc(p.layer.category)} · ${_rtEsc(p.layer.latency ?? '—')}</div></td>`
+             +  `<td style="color:#9ad;font-family:ui-monospace,monospace;font-size:.66rem">${_rtEsc(p.layer.gibs)}</td>`
+             +  `<td>${statusCell}</td>`
+             +  `<td style="color:#9ad;font-size:.7rem;font-family:ui-monospace,monospace">${p.netErr ? '—' : p.latencyMs + 'ms'}</td>`
+             +  `<td style="font-size:.7rem">${defaultBadge}</td>`
+             +  `<td style="color:${colour};font-weight:600">● ${_rtEsc(label)}</td>`
+             +  `</tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+
+    const k = document.getElementById('k-gibs');
+    k.textContent = `${healthy}/${probes.length}`;
+    k.className   = 'kpi-val ' + (healthy === probes.length ? 'green' : healthy === 0 ? 'red' : 'gold');
+    return { healthy, total: probes.length };
+}
+
+document.getElementById('rt-refresh-heartbeat').addEventListener('click', loadPipelineHeartbeatCard);
+document.getElementById('rt-refresh-proxies').addEventListener('click', loadProxyFreshnessCard);
+document.getElementById('rt-refresh-gibs').addEventListener('click', loadGibsCard);
+loadPipelineHeartbeatCard();
+loadProxyFreshnessCard();
+loadGibsCard();
+
+let filterMode = 'all';
+let lastResults = null;
+
+async function runScan() {
+    const resultsEl = document.getElementById('results');
+    resultsEl.innerHTML = '<div style="text-align:center;padding:40px;color:#555">Scanning all pages and modules...</div>';
+    document.getElementById('scan-time').textContent = 'Scanning...';
+
+    const t0 = performance.now();
+
+    // Check all pages
+    const pageResults = await Promise.all(PAGES.map(async p => {
+        const res = await check(p.file);
+        // Check deps
+        const depResults = await Promise.all(p.deps.map(async d => {
+            const dr = await check(d);
+            return { file: d, ...dr };
+        }));
+        return { ...p, ...res, depResults };
+    }));
+
+    // Check JS modules
+    const jsResults = await Promise.all(JS_MODULES.map(async m => {
+        const res = await check(m);
+        return { file: m, label: m.replace('js/',''), tag: 'js', ...res };
+    }));
+
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    lastResults = { pageResults, jsResults, elapsed };
+    render();
+}
+
+function render() {
+    if (!lastResults) return;
+    const { pageResults, jsResults, elapsed } = lastResults;
+
+    const pagesLive = pageResults.filter(p => p.ok).length;
+    const pages404  = pageResults.filter(p => !p.ok).length;
+    const jsLive    = jsResults.filter(j => j.ok).length;
+    const brokenDeps = pageResults.reduce((n, p) => n + p.depResults.filter(d => !d.ok).length, 0);
+
+    document.getElementById('k-live').textContent = pagesLive;
+    document.getElementById('k-404').textContent = pages404;
+    document.getElementById('k-404').className = 'kpi-val ' + (pages404 > 0 ? 'red' : 'green');
+    document.getElementById('k-js').textContent = jsLive + '/' + jsResults.length;
+    document.getElementById('k-deps').textContent = brokenDeps;
+    document.getElementById('k-deps').className = 'kpi-val ' + (brokenDeps > 0 ? 'red' : 'green');
+    document.getElementById('scan-time').textContent = `Scanned ${pageResults.length} pages + ${jsResults.length} modules in ${elapsed}s — ${new Date().toLocaleString()}`;
+    document.getElementById('footer-ts').textContent = `Last scan: ${new Date().toISOString()}`;
+
+    // Group pages by tag
+    const groups = [
+        { title: 'Simulations', items: pageResults.filter(p => p.tag === 'sim') },
+        { title: 'Tools', items: pageResults.filter(p => p.tag === 'tool') },
+        { title: 'App Pages', items: pageResults.filter(p => p.tag === 'page') },
+        { title: 'JS Modules', items: jsResults },
+    ];
+
+    let html = '';
+    for (const g of groups) {
+        let items = g.items;
+        if (filterMode === 'broken') items = items.filter(i => !i.ok || (i.depResults && i.depResults.some(d => !d.ok)));
+        if (items.length === 0 && filterMode === 'broken') continue;
+
+        html += `<div class="section"><h2>${g.title} (${items.filter(i=>i.ok).length}/${g.items.length} live)</h2>`;
+        for (const item of items) {
+            const dotCls = item.ok ? 'ok' : 'fail';
+            const tagCls = 'tag-' + item.tag;
+            const statusText = item.ok ? item.status : (item.status || 'ERR');
+            html += `<div class="row">
+                <span class="dot ${dotCls}"></span>
+                <span class="row-name"><a href="${item.file}" target="_blank">${item.label}</a></span>
+                <span class="row-tag ${tagCls}">${item.tag}</span>
+                <span class="row-detail">${item.file}</span>
+                <span class="row-detail">${statusText}</span>
+            </div>`;
+            // Show broken deps if any
+            if (item.depResults) {
+                const broken = item.depResults.filter(d => !d.ok);
+                if (broken.length > 0) {
+                    html += `<div class="deps">`;
+                    for (const d of broken) {
+                        html += `<span class="dep-miss">Missing: ${d.file} (${d.status || 'ERR'})</span><br>`;
+                    }
+                    html += `</div>`;
+                }
+            }
+        }
+        html += '</div>';
+    }
+    document.getElementById('results').innerHTML = html;
+}
+
+document.getElementById('btn-rescan').addEventListener('click', runScan);
+document.getElementById('btn-filter').addEventListener('click', () => {
+    const btn = document.getElementById('btn-filter');
+    if (filterMode === 'all') { filterMode = 'broken'; btn.textContent = 'Show: Broken Only'; }
+    else { filterMode = 'all'; btn.textContent = 'Show: All'; }
+    render();
+});
+
+runScan();
+</script>
+</body>
+</html>

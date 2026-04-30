@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust WASM Renderer - Coming Soon</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a1a2e 50%, #0f0f1e 100%);
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 60px 40px;
+            border-radius: 20px;
+            border: 2px solid rgba(255, 215, 0, 0.3);
+            box-shadow: 0 0 50px rgba(255, 215, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 3em;
+            background: linear-gradient(90deg, #ffd700, #ffed4e, #ffd700);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 20px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        .rust-logo {
+            font-size: 4em;
+            margin-bottom: 20px;
+            animation: rotate 10s linear infinite;
+        }
+
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
+            }
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        p {
+            font-size: 1.3em;
+            line-height: 1.8;
+            color: #c0c0c0;
+            margin-bottom: 30px;
+        }
+
+        .status {
+            background: rgba(255, 215, 0, 0.1);
+            border-left: 4px solid #ffd700;
+            padding: 20px;
+            margin: 30px 0;
+            border-radius: 8px;
+        }
+
+        .status h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+        }
+
+        .status ul {
+            list-style: none;
+            text-align: left;
+        }
+
+        .status li {
+            padding: 8px 0;
+            color: #ddd;
+        }
+
+        .status li:before {
+            content: "✓ ";
+            color: #4ade80;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .status li.pending:before {
+            content: "⏳ ";
+            color: #ffd700;
+        }
+
+        a {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 15px 30px;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            color: #000;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+
+        a:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(255, 215, 0, 0.4);
+        }
+
+        .tech-stack {
+            margin-top: 30px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .tech-badge {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 8px 16px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="rust-logo">🦀</div>
+        <h1>Rust/WASM Renderer</h1>
+        <p>High-performance 3D star simulation compiled to WebAssembly</p>
+
+        <div class="status">
+            <h3>Build Status</h3>
+            <ul>
+                <li>Infrastructure complete (build scripts, HTML, deployment configs)</li>
+                <li>Code complete for Bevy 0.12 (tested and working natively)</li>
+                <li>Deployment configured (Vercel auto-deploy enabled)</li>
+                <li class="pending">Upgrading to Bevy 0.17 for WASM compatibility</li>
+            </ul>
+        </div>
+
+        <p><strong>What's Happening:</strong></p>
+        <p>
+            The complete 3D star renderer is written and working perfectly on native platforms.
+            We're upgrading from Bevy 0.12 to 0.17 to fix WASM getrandom compatibility issues.
+            Bevy 0.17 has full WASM support out of the box and will deliver 60+ FPS with 2,000+ particles!
+        </p>
+
+        <div class="tech-stack">
+            <div class="tech-badge">🦀 Rust</div>
+            <div class="tech-badge">🕸️ WebAssembly</div>
+            <div class="tech-badge">🎮 Bevy Engine</div>
+            <div class="tech-badge">⚡ WebGL2</div>
+        </div>
+
+        <p style="margin-top: 30px; font-size: 0.9em; color: #888;">
+            Check back soon or visit the GitHub repo for updates!
+        </p>
+
+        <a href="https://github.com/etelford32/Clstl_Smltr/tree/main/rust" target="_blank">
+            View Source Code →
+        </a>
+    </div>
+</body>
+</html>

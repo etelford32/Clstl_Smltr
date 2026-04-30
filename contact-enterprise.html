@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise — Parker Physics</title>
+    <meta name="description" content="Enterprise plans for satellite operators, financial-services teams, and research labs. Custom data pipelines, anomaly correlation, GNSS scintillation forecasting, launch-window briefings.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        nav { position: sticky; top: 0; z-index: 600; height: 54px; background: rgba(4,2,16,.94); backdrop-filter: blur(14px); border-bottom: 1px solid rgba(255,200,0,.12); display: flex; align-items: center; padding: 0 16px; gap: 10px; }
+
+        main { flex: 1; max-width: 980px; margin: 0 auto; padding: 3rem 24px 4rem; width: 100%; }
+
+        .hero h1 {
+            font-size: 2.4rem; font-weight: 800;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+            margin-bottom: .6rem;
+        }
+        .hero p { color: #aab; font-size: 1.05rem; max-width: 640px; line-height: 1.65; }
+
+        .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 2.4rem; }
+        @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+
+        .panel {
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 24px 22px;
+        }
+        .panel h2 { font-size: 1.1rem; color: #ffd700; margin-bottom: 14px; font-weight: 700; }
+
+        .use-case-list { list-style: none; }
+        .use-case-list li {
+            font-size: .88rem; color: #cdd; padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,.05);
+        }
+        .use-case-list li:last-child { border: none; }
+        .use-case-list strong { color: #fff; display: block; margin-bottom: 2px; font-weight: 700; }
+
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+        @media (max-width: 540px) { .form-row { grid-template-columns: 1fr; } }
+        .form-group { margin-bottom: 14px; }
+        .form-group label {
+            display: block; font-size: .76rem; color: #888; font-weight: 600;
+            margin-bottom: 5px; letter-spacing: .04em; text-transform: uppercase;
+        }
+        .form-group input, .form-group textarea {
+            width: 100%; padding: 11px 14px;
+            background: rgba(255,255,255,.06);
+            border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+            color: #fff; font-family: inherit; font-size: .92rem;
+            transition: border-color .2s; outline: none;
+        }
+        .form-group input:focus, .form-group textarea:focus { border-color: rgba(255,215,0,.5); }
+        .form-group textarea { resize: vertical; min-height: 110px; }
+
+        .checkbox-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+            margin-bottom: 14px;
+        }
+        @media (max-width: 540px) { .checkbox-grid { grid-template-columns: 1fr; } }
+        .check {
+            display: flex; align-items: center; gap: 8px;
+            font-size: .82rem; color: #cdd; padding: 7px 10px;
+            background: rgba(255,255,255,.04);
+            border: 1px solid rgba(255,255,255,.08); border-radius: 6px;
+            cursor: pointer;
+        }
+        .check input { accent-color: #ffd700; }
+        .check input:checked + span { color: #ffd700; font-weight: 600; }
+
+        /* Honeypot — hidden from real users; bots fill it and trip the filter. */
+        .hp-field {
+            position: absolute; left: -10000px; width: 1px; height: 1px;
+            overflow: hidden; opacity: 0;
+        }
+
+        .submit-btn {
+            width: 100%; padding: 13px; border-radius: 8px; border: none;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            color: #0a0a1a; font-family: inherit; font-size: 1rem; font-weight: 700;
+            cursor: pointer; transition: opacity .2s, transform .15s;
+        }
+        .submit-btn:hover { opacity: .9; transform: translateY(-1px); }
+        .submit-btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+        .status-msg {
+            margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+            font-size: .88rem; display: none;
+        }
+        .status-msg.ok      { background: rgba(78,255,145,.08); border: 1px solid rgba(78,255,145,.3); color: #4eff91; display: block; }
+        .status-msg.err     { background: rgba(255,80,80,.08);  border: 1px solid rgba(255,80,80,.3);  color: #ff8080; display: block; }
+
+        footer { text-align: center; padding: 2rem; color: #444; font-size: .8rem; border-top: 1px solid rgba(255,255,255,.06); }
+        footer a { color: #666; text-decoration: none; }
+        footer a:hover { color: #ffd700; }
+    </style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("pricing");</script>
+
+<main>
+    <div class="hero">
+        <h1>Enterprise &amp; Custom Solutions</h1>
+        <p>Custom data pipelines, anomaly correlation, GNSS scintillation forecasting, launch-window briefings, and bring-your-own-data ingestion — for satellite operators, financial-services teams, and research labs that need contractual SLAs and named technical support.</p>
+    </div>
+
+    <div class="cards">
+        <div class="panel">
+            <h2>Built for teams who need…</h2>
+            <ul class="use-case-list">
+                <li><strong>Anomaly correlation</strong>Cross-reference satellite events with live + historical space-weather conditions.</li>
+                <li><strong>GNSS scintillation forecasting</strong>Per-region ionospheric scintillation outlooks for navigation-critical operations.</li>
+                <li><strong>Launch-window briefings</strong>Pre-launch space-weather risk reports and live go/no-go support.</li>
+                <li><strong>Custom data ingestion</strong>Bring your own telemetry; we'll fold it into the pipeline alongside ours.</li>
+                <li><strong>Compliance &amp; audit</strong>SOC 2 Type II, with a documented FedRAMP-readiness path.</li>
+                <li><strong>Named account manager</strong>Direct line, quarterly reviews, on-call escalations.</li>
+            </ul>
+        </div>
+
+        <div class="panel">
+            <h2>Tell us about your team</h2>
+            <form id="contact-form" novalidate>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="name">Your Name</label>
+                        <input type="text" id="name" name="name" required maxlength="120" autocomplete="name">
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Work Email</label>
+                        <input type="email" id="email" name="email" required maxlength="200" autocomplete="email">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="organization">Organization</label>
+                        <input type="text" id="organization" name="organization" maxlength="120" autocomplete="organization">
+                    </div>
+                    <div class="form-group">
+                        <label for="role_title">Your Role</label>
+                        <input type="text" id="role_title" name="role_title" maxlength="120" autocomplete="organization-title">
+                    </div>
+                </div>
+
+                <label style="display:block;font-size:.76rem;color:#888;font-weight:600;margin-bottom:8px;letter-spacing:.04em;text-transform:uppercase">What are you trying to do? <span style="font-weight:400;color:#778;text-transform:none">(check all that apply)</span></label>
+                <div class="checkbox-grid">
+                    <label class="check"><input type="checkbox" name="use_case" value="satellite_operations"><span>Satellite operations</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="anomaly_correlation"><span>Anomaly correlation</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="gnss_scintillation"><span>GNSS scintillation</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="launch_window"><span>Launch-window briefings</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="financial_services"><span>Financial services</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="university_research"><span>University research</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="public_outreach"><span>Public outreach</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="planetarium"><span>Planetarium / museum</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="k12_district"><span>K-12 district</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="media_broadcast"><span>Media / broadcast</span></label>
+                    <label class="check"><input type="checkbox" name="use_case" value="other"><span>Something else</span></label>
+                </div>
+
+                <div class="form-group">
+                    <label for="message">Tell us more (optional)</label>
+                    <textarea id="message" name="message" maxlength="4000" placeholder="What does success look like? Volumes, regions, integrations, target launch dates…"></textarea>
+                </div>
+
+                <!-- Honeypot — bots fill this; humans never see it -->
+                <div class="hp-field" aria-hidden="true">
+                    <label for="hp_field">Leave this field empty</label>
+                    <input type="text" id="hp_field" name="hp_field" tabindex="-1" autocomplete="off">
+                </div>
+
+                <button type="submit" class="submit-btn" id="submit-btn">Request a conversation →</button>
+                <div class="status-msg" id="status-msg"></div>
+            </form>
+        </div>
+    </div>
+</main>
+
+<footer>
+    <p>© 2026 Parker Physics App &nbsp;·&nbsp; <a href="pricing.html">Pricing</a> &nbsp;·&nbsp; <a href="index.html">Home</a></p>
+</footer>
+
+<script>
+    const form = document.getElementById('contact-form');
+    const btn = document.getElementById('submit-btn');
+    const status = document.getElementById('status-msg');
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        status.className = 'status-msg';
+        status.textContent = '';
+
+        const fd = new FormData(form);
+        const useCase = fd.getAll('use_case');
+        const payload = {
+            name:         fd.get('name')?.trim(),
+            email:        fd.get('email')?.trim().toLowerCase(),
+            organization: fd.get('organization')?.trim() || undefined,
+            role_title:   fd.get('role_title')?.trim()   || undefined,
+            message:      fd.get('message')?.trim()      || undefined,
+            use_case:     useCase,
+            hp_field:     fd.get('hp_field') || '',
+        };
+
+        if (!payload.name || !payload.email) {
+            status.className = 'status-msg err';
+            status.textContent = 'Name and email are required.';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+
+        try {
+            const res = await fetch('/api/contact/enterprise', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (res.ok && data.ok) {
+                form.reset();
+                status.className = 'status-msg ok';
+                status.textContent = 'Thanks — we\'ll be in touch within one business day.';
+                btn.textContent = 'Sent ✓';
+                btn.disabled = true;
+            } else {
+                status.className = 'status-msg err';
+                status.textContent = data.detail || data.error || 'Something went wrong. Please email sales@parkerphysics.com directly.';
+                btn.disabled = false;
+                btn.textContent = 'Request a conversation →';
+            }
+        } catch (err) {
+            status.className = 'status-msg err';
+            status.textContent = 'Network error. Please email sales@parkerphysics.com directly.';
+            btn.disabled = false;
+            btn.textContent = 'Request a conversation →';
+        }
+    });
+</script>
+</body>
+</html>

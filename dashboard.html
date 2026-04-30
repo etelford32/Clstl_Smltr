@@ -1,0 +1,3112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dashboard — Parker Physics</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06030f;--surface:#0d0820;--border:rgba(255,255,255,.07);
+  --text:#d0cce8;--muted:#6a6488;--accent:#ffb830;--accent2:#4fc3f7;
+  --green:#4fc97f;--card-bg:#0f0c21;
+}
+html{height:auto;overflow-y:auto}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+
+/* Local button helper used by the subscription card upgrade CTA. The
+   shared nav uses its own .nav-item class from nav-styles.css. */
+.btn-sm{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;cursor:pointer;text-decoration:none;border:none;line-height:1}
+
+/* ── LAYOUT ── */
+main{flex:1;max-width:1180px;width:100%;margin:0 auto;padding:36px 24px 60px}
+
+/* ── WELCOME ── */
+.welcome{margin-bottom:36px}
+.welcome h1{font-size:1.85rem;font-weight:800;background:linear-gradient(100deg,#fff 40%,#aaa9cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2;margin-bottom:6px}
+.welcome-sub{font-size:.9rem;color:var(--muted);display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.plan-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.plan-free{background:#1a3a1a;color:#6fcf6f}
+.plan-basic{background:#1a2a3a;color:#4fc3f7}
+.plan-educator{background:#1f2f1a;color:#9ad36f}
+.plan-advanced{background:#2a1a3a;color:#c77dff}
+.plan-institution{background:#3a1a2a;color:#ff8cc8}
+.plan-enterprise{background:#3a3a1a;color:#ffd700}
+
+/* ── SECTION LABELS ── */
+.section-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700;margin-bottom:14px}
+
+/* ── TOP ROW (location + space weather) ── */
+.top-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:36px}
+@media(max-width:860px){.top-row{grid-template-columns:1fr}}
+
+/* ── CARDS ── */
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;overflow:hidden}
+.card-head{padding:16px 18px 0;display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.card-link{font-size:.75rem;color:var(--accent2);text-decoration:none;opacity:.8;transition:opacity .2s}
+.card-link:hover{opacity:1}
+.card-body{padding:16px 18px 18px}
+
+/* ── ALERT PREFERENCES ── */
+.alert-pref-grid{display:flex;flex-direction:column;gap:4px}
+.alert-pref-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;transition:border-color .2s}
+.alert-pref-row:hover{border-color:rgba(255,255,255,.15)}
+.alert-pref-toggle{display:flex;align-items:center;gap:8px;cursor:pointer;font-size:.78rem;color:#cdd}
+.alert-pref-toggle input[type="checkbox"]{accent-color:#ff8c00;width:16px;height:16px;cursor:pointer}
+.alert-pref-name{user-select:none}
+.alert-pref-threshold{display:flex;align-items:center;gap:8px}
+.alert-pref-threshold input,.alert-pref-threshold select{background:var(--bg);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 6px;font-family:inherit;font-size:.72rem}
+.alert-pref-row.locked{opacity:.4;pointer-events:none}
+
+/* ── TRIP PLANNING ── */
+.tp-row{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;margin-bottom:10px}
+.tp-col{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tp-lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.tp-select{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:#cdd;padding:6px 9px;font-family:inherit;font-size:.8rem;width:100%;appearance:none;cursor:pointer}
+.tp-select:focus{border-color:var(--accent2);outline:none}
+.tp-swap{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;padding:6px 10px;font-size:.9rem;align-self:end;transition:border-color .15s,color .15s}
+.tp-swap:hover{border-color:var(--accent2);color:var(--text)}
+.tp-actions{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.tp-go-btn{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:6px;padding:7px 18px;cursor:pointer;font-family:inherit;font-size:.78rem;transition:filter .15s,transform .1s}
+.tp-go-btn:hover{filter:brightness(1.08)}
+.tp-go-btn:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(.4)}
+.tp-earth-btn{background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;padding:7px 14px;font-family:inherit;font-size:.72rem;text-decoration:none;transition:border-color .15s}
+.tp-earth-btn:hover{border-color:var(--accent2)}
+.tp-earth-btn.disabled{opacity:.4;pointer-events:none}
+.tp-summary{font-size:.7rem;color:var(--muted);margin-left:auto;text-align:right;font-variant-numeric:tabular-nums}
+.tp-summary strong{color:#cdd}
+.tp-err{color:#ff6666;font-size:.72rem;margin-top:6px;display:none}
+.tp-results{display:none;margin-top:12px}
+.tp-results.show{display:block}
+.tp-compare-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:620px){.tp-compare-grid{grid-template-columns:1fr}.tp-row{grid-template-columns:1fr}}
+.tp-card{background:#080518;border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0}
+.tp-card.from{border-color:rgba(79,195,247,.25)}
+.tp-card.to{border-color:rgba(255,184,48,.25)}
+.tp-card-hdr{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.tp-card-side{font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;font-weight:700}
+.tp-card.from .tp-card-side{color:var(--accent2)}
+.tp-card.to .tp-card-side{color:var(--accent)}
+.tp-card-title{font-size:.9rem;font-weight:700;color:#e8f4ff;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
+.tp-card-sub{font-size:.65rem;color:var(--muted);font-family:monospace;margin-top:1px}
+.tp-current{display:flex;align-items:baseline;gap:8px;margin:6px 0 2px}
+.tp-temp{font-size:1.7rem;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.tp-feels{font-size:.68rem;color:var(--muted)}
+.tp-cond{font-size:.8rem;color:#cdd;margin-bottom:6px}
+.tp-metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:.7rem;color:#99a;margin-top:6px}
+.tp-metric-grid .m-lbl{color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:.58rem}
+.tp-metric-grid .m-val{color:#cdd;font-weight:600;font-variant-numeric:tabular-nums}
+.tp-daily{margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:4px}
+.tp-day{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 6px;text-align:center;min-width:0}
+.tp-day-name{font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px;font-weight:700}
+.tp-day-hi{font-size:.82rem;font-weight:700;color:#e8f4ff}
+.tp-day-lo{font-size:.65rem;color:var(--muted)}
+.tp-day-precip{font-size:.55rem;color:var(--accent2);margin-top:1px}
+.tp-winner{color:#4fc97f !important}
+.tp-loser{color:#ff8888 !important}
+.tp-route{margin-top:12px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+.tp-route-hdr{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;font-weight:700}
+.tp-route-strip{display:flex;gap:4px;overflow-x:auto}
+.tp-stop{flex:0 0 auto;min-width:64px;background:#08051a;border:1px solid var(--border);border-radius:6px;padding:6px 7px;text-align:center}
+.tp-stop-t{font-size:.52rem;color:var(--muted);letter-spacing:.04em;margin-bottom:2px}
+.tp-stop-temp{font-size:.82rem;font-weight:700;color:#e8f4ff;font-variant-numeric:tabular-nums}
+.tp-stop-cond{font-size:.55rem;color:#99a;line-height:1.2;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:64px}
+
+/* ── SAVED LOCATIONS ── */
+.sl-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.sl-counter{font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.sl-counter strong{color:#cdd}
+.sl-add-row{display:flex;gap:6px;margin-bottom:12px}
+.sl-add-row input{flex:1;background:#08051a;border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:.82rem;outline:none;transition:border-color .2s}
+.sl-add-row input:focus{border-color:rgba(0,200,255,.45)}
+.sl-add-row input::placeholder{color:var(--muted)}
+.sl-add-row input:disabled{opacity:.45;cursor:not-allowed}
+.sl-add-row .loc-btn{padding:7px 11px}
+.sl-add-row .loc-btn:disabled{opacity:.45;cursor:not-allowed}
+.sl-list{display:flex;flex-direction:column;gap:8px}
+.sl-empty{text-align:center;padding:20px 8px;color:var(--muted);font-size:.78rem;background:var(--surface);border:1px dashed var(--border);border-radius:10px}
+.sl-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;transition:border-color .2s}
+.sl-item:hover{border-color:rgba(255,255,255,.15)}
+.sl-item.is-primary{border-color:rgba(255,184,48,.3)}
+.sl-item.disabled{opacity:.55}
+.sl-row{display:flex;align-items:center;gap:10px;padding:10px 12px;flex-wrap:wrap}
+.sl-star{font-size:.95rem;cursor:pointer;user-select:none;color:#556;transition:color .2s}
+.sl-star.on{color:#ffb830}
+.sl-star:hover{color:#ffd770}
+.sl-label-wrap{flex:1;min-width:120px;display:flex;flex-direction:column;gap:1px}
+.sl-label{font-size:.85rem;font-weight:700;color:#e8f4ff;background:transparent;border:1px solid transparent;border-radius:4px;padding:1px 4px;outline:none;transition:all .15s;min-width:60px;max-width:220px}
+.sl-label:focus,.sl-label:hover{border-color:var(--border);background:#08051a}
+.sl-city{font-size:.68rem;color:var(--muted);font-family:monospace;padding:0 4px}
+.sl-status{display:flex;align-items:center;gap:5px;font-size:.68rem}
+.sl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sl-dot.on{background:#44cc88;box-shadow:0 0 6px rgba(68,204,136,.5)}
+.sl-dot.off{background:#556}
+.sl-actions{display:flex;gap:4px;flex-wrap:wrap}
+.sl-btn{background:transparent;border:1px solid var(--border);border-radius:5px;color:#99a;cursor:pointer;font-family:inherit;font-size:.65rem;padding:3px 9px;transition:all .15s;white-space:nowrap}
+.sl-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+.sl-btn.danger:hover{border-color:#ff5555;color:#ff5555}
+.sl-btn.primary{border-color:var(--accent);color:var(--accent)}
+.sl-config{padding:0 12px 12px;border-top:1px solid var(--border);display:none}
+.sl-item.expanded .sl-config{display:block}
+/* Hourly forecast strip (Pro + Intro tiers only) */
+.sl-hourly{padding:8px 12px 10px;border-top:1px solid var(--border);overflow-x:auto;overflow-y:hidden;display:flex;gap:6px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.18) transparent}
+.sl-hourly::-webkit-scrollbar{height:6px}
+.sl-hourly::-webkit-scrollbar-thumb{background:rgba(255,255,255,.18);border-radius:3px}
+.sl-hourly-loading,.sl-hourly-err{font-size:.65rem;color:var(--muted);padding:6px 4px;font-style:italic}
+.sl-hourly-err{color:#ff8888}
+.sl-hr{flex:0 0 auto;min-width:54px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:5px 6px;background:#08051a;border:1px solid var(--border);border-radius:6px}
+.sl-hr.now{border-color:rgba(255,184,48,.45);box-shadow:0 0 6px rgba(255,184,48,.12)}
+.sl-hr-time{font-size:.58rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.sl-hr.now .sl-hr-time{color:var(--accent)}
+.sl-hr-icon{font-size:1rem;line-height:1.1}
+.sl-hr-temp{font-size:.78rem;font-weight:700;color:#e8f4ff;font-variant-numeric:tabular-nums}
+.sl-hr-pop{font-size:.55rem;color:#4fc3f7;line-height:1;min-height:.55rem}
+.sl-hr-wind{font-size:.55rem;color:#889;line-height:1}
+.sl-cfg-section{margin-top:10px}
+.sl-cfg-title{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:6px;font-weight:700}
+.sl-cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px}
+.sl-cfg-row{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 8px;background:#08051a;border:1px solid var(--border);border-radius:5px;font-size:.72rem;color:#cdd}
+.sl-cfg-row label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1}
+.sl-cfg-row input[type=checkbox]{accent-color:#ff8c00;width:14px;height:14px;cursor:pointer}
+.sl-cfg-row input[type=number],.sl-cfg-row select{background:var(--bg);border:1px solid var(--border);border-radius:3px;color:#cdd;padding:2px 5px;font-family:inherit;font-size:.68rem}
+.sl-cfg-row input[type=number]{width:54px}
+.sl-cfg-row select{max-width:68px}
+.sl-cfg-row.muted{opacity:.45}
+.sl-cfg-actions{display:flex;align-items:center;gap:8px;margin-top:10px}
+.sl-save-btn{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:5px;padding:5px 14px;cursor:pointer;font-family:inherit;font-size:.7rem}
+.sl-save-msg{font-size:.62rem;color:var(--green);display:none}
+.sl-reset-btn{background:transparent;border:1px solid var(--border);border-radius:5px;color:#889;cursor:pointer;font-family:inherit;font-size:.65rem;padding:4px 10px}
+.sl-reset-btn:hover{border-color:#aaa;color:#cdd}
+.sl-gate{text-align:center;padding:16px 8px;font-size:.78rem;color:var(--muted)}
+.sl-gate strong{color:var(--accent2)}
+.sl-gate a.btn{display:inline-block;margin-top:8px;padding:5px 16px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:5px;text-decoration:none;font-size:.72rem}
+.sl-err{color:#ff6666;font-size:.7rem;margin-top:6px;display:none}
+
+/* ── ALERT HISTORY ── */
+.ah-item{display:flex;gap:10px;padding:10px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);transition:border-color .2s;margin-bottom:6px}
+.ah-item:hover{border-color:rgba(255,255,255,.15)}
+.ah-item.unread{border-left:3px solid var(--accent2)}
+.ah-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.ah-content{flex:1;min-width:0}
+.ah-title{font-size:.78rem;font-weight:600;color:#cdd;line-height:1.3}
+.ah-body{font-size:.68rem;color:#889;line-height:1.5;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.ah-meta{display:flex;gap:10px;margin-top:4px;font-size:.62rem;color:#556}
+.ah-type{text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.ah-empty{text-align:center;padding:24px;color:var(--muted);font-size:.78rem}
+
+/* ── LOCATION CARD ── */
+#loc-map-canvas{display:block;width:100%;height:140px;border-radius:8px;margin-bottom:14px;background:#030612}
+.loc-info{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px;min-height:38px}
+.loc-pin{font-size:1.3rem;flex-shrink:0;margin-top:1px}
+.loc-city{font-size:1.05rem;font-weight:700;line-height:1.2}
+.loc-coords-txt{font-size:.73rem;color:var(--muted);margin-top:2px;font-family:monospace}
+.loc-time{font-size:.75rem;color:var(--accent2);margin-top:2px}
+.loc-none{color:var(--muted);font-size:.85rem;font-style:italic}
+
+.loc-search-row{display:flex;gap:6px}
+.loc-input{flex:1;background:#08051a;border:1px solid var(--border);border-radius:8px;padding:7px 11px;color:var(--text);font-size:.82rem;outline:none;transition:border-color .2s}
+.loc-input:focus{border-color:rgba(0,200,255,.45)}
+.loc-input::placeholder{color:var(--muted)}
+.loc-btn{background:rgba(0,180,255,.15);border:1px solid rgba(0,180,255,.25);border-radius:8px;color:var(--accent2);cursor:pointer;padding:7px 11px;font-size:.82rem;white-space:nowrap;transition:background .2s}
+.loc-btn:hover{background:rgba(0,180,255,.28)}
+.loc-err{color:#ff6666;font-size:.73rem;margin-top:5px;display:none}
+.loc-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.loc-action-btn{font-size:.75rem;padding:5px 12px;border-radius:14px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;text-decoration:none;transition:border-color .2s,color .2s}
+.loc-action-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+.loc-action-btn.danger{border-color:rgba(255,80,80,.3);color:#ff8888}
+.loc-action-btn.danger:hover{border-color:#ff5555;color:#ff5555}
+
+/* ── SPACE WEATHER CARD ── */
+.sw-row{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.sw-cell{flex:1;min-width:80px;background:#080518;border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.sw-lbl{font-size:.65rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);display:block;margin-bottom:3px}
+.sw-val{font-size:1.1rem;font-weight:700;font-family:monospace}
+.kp-cells{display:flex;gap:2px;margin:4px 0 2px}
+.kp-cell{flex:1;height:7px;border-radius:2px;opacity:.18;transition:opacity .4s,box-shadow .4s}
+.kp-cell.active{opacity:1}
+.storm-badge{display:inline-block;padding:3px 10px;border-radius:10px;font-size:.72rem;font-weight:700;border:1px solid;margin-bottom:10px}
+.aurora-row{background:#080518;border:1px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.aurora-icon{font-size:1.3rem;flex-shrink:0}
+.aurora-text{font-size:.8rem;line-height:1.4}
+.aurora-loc{font-size:.7rem;color:var(--muted)}
+.sw-footer{margin-top:12px;font-size:.74rem;color:var(--muted)}
+.sw-footer a{color:var(--accent2);text-decoration:none}
+.sw-footer a:hover{text-decoration:underline}
+
+/* ── SIM GRID ── */
+.sim-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(195px,1fr));gap:14px;margin-bottom:48px}
+.sim-card{background:var(--card-bg);border:1px solid var(--border);border-radius:14px;overflow:hidden;text-decoration:none;color:var(--text);transition:transform .2s,box-shadow .2s,border-color .2s}
+.sim-card:hover{transform:translateY(-3px);box-shadow:0 8px 32px rgba(0,0,0,.5);border-color:var(--accent)}
+.sim-thumb{height:105px;display:flex;align-items:center;justify-content:center;font-size:2.2rem;position:relative;overflow:hidden}
+.sim-thumb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,var(--card-bg))}
+.sim-info{padding:11px 14px 13px}
+.sim-name{font-size:.86rem;font-weight:700;margin-bottom:2px}
+.sim-desc{font-size:.72rem;color:var(--muted);line-height:1.4}
+.sim-badge{position:absolute;top:8px;right:8px;z-index:1;padding:2px 8px;border-radius:10px;font-size:.62rem;font-weight:700;text-transform:uppercase}
+.badge-live{background:#1a3030;color:#4fc3f7;border:1px solid #2a5050}
+.th-earth{background:linear-gradient(135deg,#0d2137,#1a4a6e,#0d3352)}
+.th-sun{background:linear-gradient(135deg,#2a1200,#b34700,#ff6a00)}
+.th-sw{background:linear-gradient(135deg,#050a1a,#0d1f3c,#1a3a6e)}
+.th-star{background:linear-gradient(135deg,#0a0014,#2a0050,#6600cc)}
+.th-galactic{background:linear-gradient(135deg,#000508,#001a2a,#002a1a)}
+
+/* ── FOOTER ── */
+footer{padding:22px;text-align:center;font-size:.74rem;color:var(--muted);border-top:1px solid var(--border)}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--text)}
+
+/* ── AUTH GATE ── */
+#auth-gate{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#auth-gate h2{font-size:1.55rem;font-weight:800;margin-bottom:10px}
+#auth-gate p{color:var(--muted);margin-bottom:26px;max-width:360px;font-size:.9rem}
+.gate-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.gate-actions a{padding:10px 24px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none}
+.gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.gate-signup{background:var(--accent);color:#0a0510}
+
+/* ── MOBILE / TOUCH RESPONSIVENESS ────────────────────────────────────────
+   Tuned against iPhone (375 / 390 / 430px wide) and the Safari address-bar
+   resize behavior. The shared nav (nav-styles.css) handles its own breakpoint
+   at 1024px; rules below target the dashboard chrome only. */
+
+/* Tablet & narrow desktop — tighten the welcome row before it wraps. */
+@media(max-width:760px){
+  .welcome h1{font-size:1.55rem}
+  .welcome-sub{font-size:.82rem;gap:6px}
+}
+
+/* Phone — give every interactive control at least a 36-44px tap target,
+   tighten card padding, and make horizontal scrollers explicit. */
+@media(max-width:600px){
+  main{padding:18px 12px 56px}
+  .welcome{margin-bottom:24px}
+  .welcome h1{font-size:1.3rem;line-height:1.25}
+  .welcome-sub{font-size:.78rem}
+  .section-label{margin-bottom:10px}
+
+  /* Cards — narrower padding so content gets the screen. */
+  .card{border-radius:13px}
+  .card-head{padding:13px 13px 0}
+  .card-body{padding:13px}
+
+  /* Bigger tap targets on the dense control rows. */
+  .sl-btn{font-size:.72rem;padding:7px 12px;min-height:32px}
+  .loc-action-btn{font-size:.78rem;padding:8px 14px;min-height:36px}
+  .loc-input,.sl-add-row input{font-size:.9rem;padding:10px 12px;min-height:40px}
+  .loc-btn{padding:10px 12px;min-height:40px;min-width:40px}
+  .tp-earth-btn,.tp-go-btn{font-size:.78rem;padding:9px 16px;min-height:36px}
+  .tp-select{font-size:.88rem;padding:9px 11px;min-height:38px}
+  .alert-pref-row{padding:8px 10px}
+  .alert-pref-toggle{font-size:.82rem}
+
+  /* Stacked saved-location row — let the action buttons fall onto their
+     own line below the name instead of compressing the label. */
+  .sl-row{padding:10px;gap:8px}
+  .sl-actions{width:100%;justify-content:flex-end}
+  .sl-label-wrap{flex-basis:100%;min-width:0}
+  .sl-status{flex:0 0 auto}
+
+  /* Condition grid in the alert card — min 120 keeps two columns at 320px. */
+  #alert-card-body > div[style*="grid-template-columns"]{
+    grid-template-columns:repeat(auto-fit,minmax(120px,1fr))!important;
+  }
+
+  /* Sim grid — one card per row at <380, two above. */
+  .sim-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:32px}
+  .sim-thumb{height:88px;font-size:1.9rem}
+  .sim-info{padding:9px 12px 11px}
+
+  /* Space-weather metric strip — wrap two-up instead of three-up so the
+     numbers don't truncate on a 320px iPhone SE. */
+  .sw-cell{flex:1 1 calc(50% - 4px);min-width:0}
+
+  /* Safe-area padding for notched iPhones. */
+  footer{padding-bottom:calc(22px + env(safe-area-inset-bottom))}
+  main{padding-bottom:calc(56px + env(safe-area-inset-bottom))}
+}
+
+/* Very narrow (iPhone SE) — drop one more notch. */
+@media(max-width:360px){
+  .welcome h1{font-size:1.18rem}
+  .card-head{padding:11px 10px 0}
+  .card-body{padding:11px 10px}
+  main{padding:14px 8px 56px}
+}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH GATE ── -->
+<div id="auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
+  <h2>Sign in to access your dashboard</h2>
+  <p>Your personal hub for live space weather, location data, and simulation access.</p>
+  <div class="gate-actions">
+    <a href="signin.html" class="gate-signin">Sign In</a>
+    <a href="signup.html" class="gate-signup">Create Free Account</a>
+  </div>
+</div>
+
+<!-- ── NAV (shared component, see js/nav.js) ── -->
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260429"; initNav("dashboard");</script>
+
+<!-- ── MAIN ── -->
+<main>
+
+  <div class="welcome">
+    <h1 id="welcome-heading">Good morning, Explorer</h1>
+    <p class="welcome-sub">
+      Your astrophysics command center.
+      <span class="plan-badge plan-free" id="plan-badge">Free</span>
+      <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
+      <a href="admin.html" id="dash-admin-btn" style="display:none;margin-left:10px;padding:4px 12px;background:rgba(255,50,50,.15);border:1px solid rgba(255,60,60,.35);border-radius:5px;color:#f55;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,50,50,.3)'" onmouseout="this.style.background='rgba(255,50,50,.15)'">SUPER ADMIN</a>
+      <a href="status.html" id="dash-status-btn" style="display:none;margin-left:6px;padding:4px 12px;background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:5px;color:#ff8c00;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,140,0,.25)'" onmouseout="this.style.background='rgba(255,140,0,.12)'">SYSTEM STATUS</a>
+    </p>
+  </div>
+
+  <!-- ── SUBSCRIPTION MANAGEMENT ── -->
+  <div class="card" id="subscription-card" style="margin-bottom:16px;display:none">
+    <div class="card-body" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 18px">
+      <div>
+        <div style="font-size:.82rem;font-weight:700;color:#e8f4ff" id="sub-status-text">Free Plan</div>
+        <div style="font-size:.68rem;color:var(--muted)" id="sub-detail-text">Upgrade to unlock all simulations and alerts</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a href="pricing.html" class="btn-sm" id="sub-upgrade-btn" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;padding:6px 16px;text-decoration:none;font-size:.75rem">Upgrade Plan</a>
+        <button id="sub-manage-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:#aab;cursor:pointer;padding:6px 16px;font-family:inherit;font-size:.75rem;display:none">Manage Billing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── CLASS ROSTER (educator/institution/enterprise) ── -->
+  <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
+  <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>
+
+  <!-- ── PIPELINE ANALYTICS (superadmin only) ── -->
+  <div class="card" id="pipeline-card" style="margin-bottom:16px;display:none">
+    <div class="card-head">
+      <span class="card-title">Pipeline Analytics · Superadmin</span>
+      <a href="admin.html" class="card-link">Open admin console →</a>
+    </div>
+    <div class="card-body">
+      <div id="pipeline-health"><div style="color:var(--muted);font-size:.78rem;padding:10px 0">Loading pipeline probes…</div></div>
+    </div>
+  </div>
+
+  <!-- ── TOP ROW ── -->
+  <div class="top-row">
+
+    <!-- Location card -->
+    <div class="card" id="location-card">
+      <div class="card-head">
+        <span class="card-title">Your Location</span>
+        <a href="earth.html" class="card-link" id="earth-link">View on Earth →</a>
+      </div>
+      <div class="card-body">
+        <canvas id="loc-map-canvas" aria-label="Mini world map showing your location"></canvas>
+
+        <div class="loc-info" id="loc-info">
+          <span class="loc-pin">📍</span>
+          <div>
+            <div class="loc-city" id="loc-city-name"><span class="loc-none">Set your location to unlock personalized forecasts</span></div>
+            <div class="loc-coords-txt" id="loc-coords-txt"></div>
+            <div class="loc-time" id="loc-time-txt"></div>
+          </div>
+        </div>
+
+        <div class="loc-search-row">
+          <input class="loc-input" id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off" aria-label="Search for a location">
+          <button class="loc-btn" id="loc-search-btn" aria-label="Search">↵</button>
+          <button class="loc-btn" id="loc-gps-btn" title="Detect my location" aria-label="Use GPS to detect location">⊕</button>
+        </div>
+        <div class="loc-err" id="loc-err" role="alert"></div>
+
+        <div class="loc-actions">
+          <a href="earth.html" class="loc-action-btn" id="loc-earth-btn" style="display:none">🌍 Open Earth Sim</a>
+          <button class="loc-action-btn danger" id="loc-clear-btn" style="display:none">✕ Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Space weather card -->
+    <div class="card" id="sw-card">
+      <div class="card-head">
+        <span class="card-title">Space Weather</span>
+        <a href="space-weather.html" class="card-link">Full Dashboard →</a>
+      </div>
+      <div class="card-body">
+
+        <div class="sw-row">
+          <div class="sw-cell">
+            <span class="sw-lbl">Kp Index</span>
+            <span class="sw-val" id="sw-kp" style="color:#4fc3f7">—</span>
+            <div class="kp-cells" id="kp-cells"></div>
+          </div>
+          <div class="sw-cell">
+            <span class="sw-lbl">Solar Wind</span>
+            <span class="sw-val" id="sw-speed" style="color:#ffd700">—</span>
+            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">km/s</div>
+          </div>
+          <div class="sw-cell">
+            <span class="sw-lbl">IMF Bz</span>
+            <span class="sw-val" id="sw-bz">—</span>
+            <div style="font-size:.67rem;color:var(--muted);margin-top:1px">nT</div>
+          </div>
+        </div>
+
+        <div class="storm-badge" id="storm-badge" style="color:#4fc3f7;border-color:#4fc3f722;background:#4fc3f708">Quiet</div>
+
+        <div class="aurora-row" id="aurora-row">
+          <span class="aurora-icon" id="aurora-icon">🔭</span>
+          <div>
+            <div class="aurora-text" id="aurora-text" style="color:var(--muted)">Set your location to check aurora visibility</div>
+            <div class="aurora-loc" id="aurora-loc"></div>
+          </div>
+        </div>
+
+        <div class="sw-footer" id="sw-footer" style="margin-top:12px">
+          <span id="sw-status">Connecting to NOAA SWPC…</span>
+          &nbsp;·&nbsp; <a href="space-weather.html">Full space weather dashboard →</a>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /top-row -->
+
+  <!-- ── DAILY BRIEFING ── -->
+  <div class="card" id="daily-briefing-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Daily Briefing</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="briefing-time" style="font-size:.62rem;color:var(--muted)"></span>
+        <button id="briefing-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Refresh">&#8635;</button>
+        <button id="briefing-share" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:2px 8px;font-family:inherit;font-size:.65rem" title="Copy to clipboard">Share</button>
+      </div>
+    </div>
+    <div class="card-body" id="briefing-body">
+
+      <!-- Solar Activity -->
+      <div style="display:flex;align-items:flex-start;gap:14px;margin-bottom:16px">
+        <div style="flex-shrink:0;width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.5rem;background:var(--surface);border:1px solid var(--border)" id="briefing-solar-icon">&#9788;</div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:.9rem;font-weight:700;color:#e8f4ff">Solar Activity</span>
+            <span id="briefing-solar-badge" style="padding:2px 8px;border-radius:4px;font-size:.65rem;font-weight:700;letter-spacing:.05em">QUIET</span>
+          </div>
+          <div id="briefing-solar-detail" style="font-size:.75rem;color:#8899aa;line-height:1.6">
+            Loading solar data...
+          </div>
+          <div id="briefing-storm-prob" style="display:none;margin-top:6px;font-size:.7rem;color:#889">
+            Storm (24h): <span id="bp-g1" style="color:#44cc88">0%</span> G1+ · <span id="bp-g2" style="color:#ffcc00">0%</span> G2+ · <span id="bp-g3" style="color:#ff4444">0%</span> G3+
+          </div>
+        </div>
+      </div>
+
+      <!-- 7-Day Temperature Forecast -->
+      <div id="briefing-forecast-section" style="display:none">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:6px">
+          7-Day Temperature Forecast
+          <span id="briefing-model-badge" style="font-size:.55rem;padding:1px 5px;border-radius:3px;background:rgba(0,200,200,.1);color:#0cc;font-weight:700"></span>
+        </div>
+        <div style="overflow-x:auto">
+          <div id="briefing-forecast-grid" style="display:flex;gap:6px;min-width:0;padding-bottom:4px">
+            <!-- Filled by JS -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── PERSONALIZED SPACE WEATHER REPORT ── -->
+  <div class="card" id="alert-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Your Space Weather Report</span>
+      <span class="card-link" id="alert-loc-name" style="font-size:.72rem;color:var(--muted)">Set location above</span>
+    </div>
+    <div class="card-body" id="alert-card-body">
+
+      <!-- Aurora forecast -->
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:14px">
+        <div id="alert-aurora-icon" style="font-size:2rem;line-height:1">🔭</div>
+        <div style="flex:1">
+          <div style="font-size:.82rem;font-weight:700;margin-bottom:2px" id="alert-aurora-title">Aurora Visibility</div>
+          <div style="font-size:.75rem;color:var(--muted);line-height:1.5" id="alert-aurora-desc">
+            Enter your city or zip code in the Location card above to see your personalized aurora forecast.
+          </div>
+          <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap" id="alert-aurora-tags"></div>
+        </div>
+      </div>
+
+      <!-- Condition grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:12px">
+        <!-- HF Radio -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">HF Radio</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-hf">Normal</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-hf-desc">No blackout</div>
+        </div>
+        <!-- GPS/GNSS -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">GPS Accuracy</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-gps">Nominal</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-gps-desc">Normal precision</div>
+        </div>
+        <!-- Power Grid -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Power Grid</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-grid">No Impact</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-grid-desc">GIC risk low</div>
+        </div>
+        <!-- Spacecraft -->
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          <div style="font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Spacecraft</div>
+          <div style="font-size:.88rem;font-weight:700" id="alert-craft">Low Risk</div>
+          <div style="font-size:.62rem;color:var(--muted);margin-top:2px" id="alert-craft-desc">Surface charging minimal</div>
+        </div>
+      </div>
+
+      <!-- Aurora viewing tip -->
+      <div id="alert-tip" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.72rem;color:var(--muted);line-height:1.5;display:none">
+        <strong style="color:var(--accent)">Viewing Tip:</strong> <span id="alert-tip-text"></span>
+      </div>
+
+      <!-- Shareable summary -->
+      <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+        <button id="alert-share-btn" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--accent2);cursor:pointer;font-family:inherit;font-size:.7rem;padding:5px 12px;transition:all .15s">
+          Share Report
+        </button>
+        <span id="alert-share-msg" style="font-size:.65rem;color:var(--green);display:none">Copied to clipboard!</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── IMPACT SCORE ── -->
+  <div class="card" id="impact-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Space Weather Impact Score</span>
+      <span class="card-link" id="impact-updated" style="font-size:.62rem;color:var(--muted)">Waiting for data...</span>
+    </div>
+    <div class="card-body">
+
+      <!-- Score ring + label -->
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:16px">
+        <div style="position:relative;width:90px;height:90px;flex-shrink:0">
+          <svg viewBox="0 0 36 36" style="width:90px;height:90px;transform:rotate(-90deg)">
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke="rgba(255,255,255,.06)" stroke-width="3"/>
+            <circle id="impact-ring" cx="18" cy="18" r="15.5" fill="none" stroke="#44cc88"
+                    stroke-width="3" stroke-dasharray="97.4" stroke-dashoffset="97.4"
+                    stroke-linecap="round" style="transition:stroke-dashoffset .8s,stroke .5s"/>
+          </svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <div id="impact-number" style="font-size:1.6rem;font-weight:800;color:#e8f4ff;line-height:1">0</div>
+            <div style="font-size:.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em">/ 100</div>
+          </div>
+        </div>
+        <div style="flex:1">
+          <div id="impact-label" style="font-size:1rem;font-weight:700;margin-bottom:4px">Quiet</div>
+          <div id="impact-desc" style="font-size:.72rem;color:var(--muted);line-height:1.5">
+            Conditions are calm. No significant space weather expected.
+          </div>
+        </div>
+      </div>
+
+      <!-- Component breakdown bars -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;margin-bottom:16px">
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Geomagnetic</span><span id="impact-geo-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-geo-bar" style="height:100%;width:0%;background:#4488ff;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Solar</span><span id="impact-sol-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-sol-bar" style="height:100%;width:0%;background:#ff8800;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">CME Threat</span><span id="impact-cme-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-cme-bar" style="height:100%;width:0%;background:#ff4444;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+        <div class="impact-bar-wrap">
+          <div style="display:flex;justify-content:space-between;font-size:.65rem;margin-bottom:2px"><span style="color:var(--muted)">Location Risk</span><span id="impact-loc-val" style="color:#aac">0</span></div>
+          <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden"><div id="impact-loc-bar" style="height:100%;width:0%;background:#cc44ff;border-radius:2px;transition:width .6s"></div></div>
+        </div>
+      </div>
+
+      <!-- Time-windowed forecast probabilities -->
+      <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">
+        Storm Probability Forecast
+      </div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:.72rem;font-variant-numeric:tabular-nums">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 8px;color:var(--muted);font-weight:600">Window</th>
+              <th style="text-align:right;padding:4px 8px;color:#44cc88;font-weight:600">G1+ (Kp5)</th>
+              <th style="text-align:right;padding:4px 8px;color:#ffcc00;font-weight:600">G2+ (Kp6)</th>
+              <th style="text-align:right;padding:4px 8px;color:#ff4444;font-weight:600">G3+ (Kp7)</th>
+              <th style="text-align:right;padding:4px 8px;color:var(--muted);font-weight:600">Confidence</th>
+            </tr>
+          </thead>
+          <tbody id="impact-forecast-tbody">
+            <tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Recurrence + cycle context -->
+      <div id="impact-context" style="margin-top:10px;font-size:.68rem;color:var(--muted);line-height:1.6;display:none">
+        <span id="impact-recurrence"></span> &middot; <span id="impact-cycle"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SAVED LOCATIONS ── -->
+  <div class="card" id="saved-locations-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Saved Locations</span>
+      <span class="card-link" id="sl-plan-badge" style="font-size:.68rem;color:var(--muted)"></span>
+    </div>
+    <div class="card-body">
+
+      <!-- Gate for free users -->
+      <div id="sl-gate" class="sl-gate" style="display:none">
+        <div style="font-size:1.3rem;margin-bottom:6px">&#128205;</div>
+        <div>Save up to <strong>5 locations</strong> with Basic, or <strong>25 locations</strong> with Advanced, and get dedicated alerts for each one.</div>
+        <a href="pricing.html" class="btn">Upgrade</a>
+      </div>
+
+      <div id="sl-content" style="display:none">
+        <div class="sl-header">
+          <div class="sl-counter"><strong id="sl-count">0</strong> of <strong id="sl-limit">5</strong> locations used</div>
+          <button class="sl-btn" id="sl-copy-defaults-btn" title="Create a location from your current primary location setting">Add current location</button>
+        </div>
+
+        <div class="sl-add-row">
+          <input id="sl-label-input" type="text" placeholder="Label (e.g. Home, Cabin)" maxlength="40" autocomplete="off">
+          <input id="sl-city-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+          <button class="loc-btn" id="sl-add-btn" title="Add this location">&#43;</button>
+          <button class="loc-btn" id="sl-add-gps-btn" title="Use my GPS location">&#8853;</button>
+        </div>
+        <div class="sl-err" id="sl-err" role="alert"></div>
+
+        <div class="sl-list" id="sl-list">
+          <div class="sl-empty">No saved locations yet. Add one above to start getting per-location alerts.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TRIP PLANNING ── -->
+  <div class="card" id="trip-planning-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Trip Planning</span>
+      <span class="card-link" id="tp-hint" style="font-size:.68rem;color:var(--muted)">Compare weather at two saved locations</span>
+    </div>
+    <div class="card-body">
+
+      <div id="tp-empty" class="sl-empty" style="display:none">
+        Save at least two locations above to plan a trip.
+      </div>
+
+      <div id="tp-wrap" style="display:none">
+        <div class="tp-row">
+          <div class="tp-col">
+            <span class="tp-lbl">From</span>
+            <select class="tp-select" id="tp-from"></select>
+          </div>
+          <button class="tp-swap" id="tp-swap" title="Swap From / To" aria-label="Swap from and to">⇄</button>
+          <div class="tp-col">
+            <span class="tp-lbl">To</span>
+            <select class="tp-select" id="tp-to"></select>
+          </div>
+        </div>
+
+        <div class="tp-actions">
+          <button class="tp-go-btn" id="tp-go">Compare weather</button>
+          <a class="tp-earth-btn disabled" id="tp-earth" href="#" target="_self">View route on Earth →</a>
+          <span class="tp-summary" id="tp-summary"></span>
+        </div>
+        <div class="tp-err" id="tp-err" role="alert"></div>
+
+        <div class="tp-results" id="tp-results">
+          <div class="tp-compare-grid">
+            <div class="tp-card from" id="tp-card-from"></div>
+            <div class="tp-card to"   id="tp-card-to"></div>
+          </div>
+
+          <div class="tp-route" id="tp-route-wrap" style="display:none">
+            <div class="tp-route-hdr">Along the route <span id="tp-route-note" style="color:#778;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+            <div class="tp-route-strip" id="tp-route-strip"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── ALERT PREFERENCES ── -->
+  <div class="card" id="alert-prefs-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Alert Preferences</span>
+      <span class="card-link" id="alert-prefs-plan" style="font-size:.68rem;color:var(--muted)"></span>
+    </div>
+    <div class="card-body" id="alert-prefs-body">
+
+      <!-- Gate: free users see upgrade prompt -->
+      <div id="alert-prefs-gate" style="text-align:center;padding:16px 0;display:none">
+        <div style="font-size:1.2rem;margin-bottom:6px">&#128276;</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:10px">
+          Alerts are available on <strong style="color:var(--accent2)">Basic</strong>, <strong style="color:#9ad36f">Educator</strong>, <strong style="color:var(--accent)">Advanced</strong>, <strong style="color:#ff8cc8">Institution</strong>, and <strong style="color:#ffd700">Enterprise</strong> plans.
+        </div>
+        <a href="pricing.html" style="display:inline-block;padding:6px 18px;background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border-radius:6px;text-decoration:none;font-size:.78rem">Upgrade</a>
+      </div>
+
+      <!-- Alert toggles (basic tier) -->
+      <div id="alert-prefs-content" style="display:none">
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px">Standard Alerts</div>
+        <div class="alert-pref-grid" id="alert-pref-grid-basic">
+          <!-- Temperature -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_temperature" data-key="notify_temperature">
+              <span class="alert-pref-name">Temperature</span>
+            </label>
+            <div class="alert-pref-threshold" id="pref-temp-thresholds">
+              <label style="font-size:.68rem;color:var(--muted)">High <input type="number" id="pref-temp_high_f" data-key="temp_high_f" style="width:48px" placeholder="95"> &deg;F</label>
+              <label style="font-size:.68rem;color:var(--muted)">Low <input type="number" id="pref-temp_low_f" data-key="temp_low_f" style="width:48px" placeholder="32"> &deg;F</label>
+            </div>
+          </div>
+          <!-- Aurora -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_aurora" data-key="notify_aurora">
+              <span class="alert-pref-name">Aurora Visibility</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Kp &ge;
+                <select id="pref-aurora_kp_threshold" data-key="aurora_kp_threshold" style="width:48px">
+                  <option value="3">3</option><option value="4">4</option><option value="5" selected>5</option>
+                  <option value="6">6</option><option value="7">7</option><option value="8">8</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Storm -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_storm" data-key="notify_storm">
+              <span class="alert-pref-name">Geomagnetic Storm</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
+                <select id="pref-storm_g_threshold" data-key="storm_g_threshold" style="width:48px">
+                  <option value="1" selected>G1</option><option value="2">G2</option><option value="3">G3</option>
+                  <option value="4">G4</option><option value="5">G5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Flare -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_flare" data-key="notify_flare">
+              <span class="alert-pref-name">Solar Flare</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Class &ge;
+                <select id="pref-flare_class_threshold" data-key="flare_class_threshold" style="width:48px">
+                  <option value="C">C</option><option value="M" selected>M</option><option value="X">X</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- CME -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_cme" data-key="notify_cme">
+              <span class="alert-pref-name">CME Earth-Directed</span>
+            </label>
+          </div>
+          <!-- Satellite Pass -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_sat_pass" data-key="notify_sat_pass">
+              <span class="alert-pref-name">Satellite Pass</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Advanced tier alerts -->
+        <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 0 8px;display:flex;align-items:center;gap:6px">
+          Advanced Alerts
+          <span style="background:rgba(0,200,200,.12);color:#0cc;font-size:.6rem;padding:1px 6px;border-radius:3px;font-weight:700">PRO</span>
+        </div>
+        <div class="alert-pref-grid" id="alert-pref-grid-advanced">
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_collision" data-key="notify_collision"><span class="alert-pref-name">Satellite Collision</span></label></div>
+          <!-- Radio Blackout with R-scale threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_radio_blackout" data-key="notify_radio_blackout">
+              <span class="alert-pref-name">Radio Blackout</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">R-scale &ge;
+                <select id="pref-radio_r_threshold" data-key="radio_r_threshold" style="width:48px">
+                  <option value="1">R1</option><option value="2" selected>R2</option><option value="3">R3</option>
+                  <option value="4">R4</option><option value="5">R5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- GPS Degradation with risk level threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_gps" data-key="notify_gps">
+              <span class="alert-pref-name">GNSS / GPS Degradation</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">Risk &ge;
+                <select id="pref-gnss_risk_threshold" data-key="gnss_risk_threshold" style="width:72px">
+                  <option value="1">Moderate</option><option value="2" selected>High</option><option value="3">Severe</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Power Grid Risk with G-scale threshold -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_power_grid" data-key="notify_power_grid">
+              <span class="alert-pref-name">Power Grid Risk</span>
+            </label>
+            <div class="alert-pref-threshold">
+              <label style="font-size:.68rem;color:var(--muted)">G-scale &ge;
+                <select id="pref-power_grid_g_threshold" data-key="power_grid_g_threshold" style="width:48px">
+                  <option value="2">G2</option><option value="3">G3</option><option value="4" selected>G4</option>
+                  <option value="5">G5</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <!-- Ionospheric Disturbance -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-notify_iono_disturbance" data-key="notify_iono_disturbance">
+              <span class="alert-pref-name">Ionospheric Disturbance</span>
+            </label>
+            <span style="font-size:.58rem;color:var(--muted)">D/E/F2-layer &amp; TEC anomalies</span>
+          </div>
+          <div class="alert-pref-row"><label class="alert-pref-toggle"><input type="checkbox" id="pref-notify_recurrence" data-key="notify_recurrence"><span class="alert-pref-name">27-Day Recurrence</span></label></div>
+        </div>
+
+        <!-- Delivery options -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px">
+            Email Delivery
+            <span style="background:rgba(79,195,247,.1);color:var(--accent2);font-size:.55rem;padding:1px 6px;border-radius:3px;font-weight:700">SENT TO <span id="email-delivery-addr">your inbox</span></span>
+          </div>
+
+          <!-- Master email toggle -->
+          <div class="alert-pref-row">
+            <label class="alert-pref-toggle">
+              <input type="checkbox" id="pref-email_alerts" data-key="email_alerts">
+              <span class="alert-pref-name">Email me when alerts fire</span>
+            </label>
+            <span style="font-size:.62rem;color:var(--muted)">Max 10 emails / hour</span>
+          </div>
+
+          <!-- Dependent email settings — hidden when email alerts off -->
+          <div id="email-delivery-dependents" style="display:none">
+
+            <div class="alert-pref-row" style="padding-left:28px">
+              <label style="font-size:.72rem;color:var(--muted);flex:1">Minimum severity</label>
+              <select id="pref-email_min_severity" data-key="email_min_severity" style="width:110px">
+                <option value="info">Info &amp; up</option>
+                <option value="warning" selected>Warning &amp; up</option>
+                <option value="critical">Critical only</option>
+              </select>
+            </div>
+
+            <div class="alert-pref-row" style="padding-left:28px">
+              <label style="font-size:.72rem;color:var(--muted);flex:1">Cooldown per alert type</label>
+              <select id="pref-alert_cooldown_min" data-key="alert_cooldown_min" style="width:96px">
+                <option value="15">15 min</option><option value="30">30 min</option>
+                <option value="60" selected>1 hour</option><option value="120">2 hours</option>
+                <option value="360">6 hours</option><option value="720">12 hours</option>
+              </select>
+            </div>
+
+            <div style="padding:8px 10px;margin-top:4px;background:rgba(79,195,247,.05);border:1px solid rgba(79,195,247,.15);border-radius:6px;font-size:.66rem;color:#99b;line-height:1.5">
+              <strong style="color:var(--accent2)">Tip:</strong>
+              Each <a href="#saved-locations-card" style="color:var(--accent2)">saved location</a>
+              can turn email delivery on/off independently, and override any of the thresholds above.
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Save -->
+        <div style="margin-top:14px;display:flex;align-items:center;gap:10px">
+          <button id="alert-prefs-save" style="background:linear-gradient(45deg,#ff8c00,#ffd700);color:#000;font-weight:700;border:none;border-radius:6px;padding:7px 20px;cursor:pointer;font-family:inherit;font-size:.78rem">Save Preferences</button>
+          <span id="alert-prefs-msg" style="font-size:.68rem;color:var(--green);display:none">Saved!</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── ALERT HISTORY ── -->
+  <div class="card" id="alert-history-card" style="margin-bottom:20px">
+    <div class="card-head">
+      <span class="card-title">Alert History</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <select id="alert-history-filter" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
+          <option value="all">All types</option>
+          <option value="storm">Storm</option>
+          <option value="flare">Flare</option>
+          <option value="aurora">Aurora</option>
+          <option value="conjunction">Conjunction</option>
+          <option value="pass">Pass</option>
+        </select>
+        <select id="alert-history-severity" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;padding:3px 8px;font-family:inherit;font-size:.68rem">
+          <option value="all">All severity</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </select>
+        <button id="alert-history-refresh" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--accent2);cursor:pointer;padding:3px 10px;font-family:inherit;font-size:.68rem" title="Refresh">&#8635;</button>
+      </div>
+    </div>
+    <div class="card-body" id="alert-history-body">
+
+      <!-- Gate: non-subscribers see upgrade prompt -->
+      <div id="alert-history-gate" style="text-align:center;padding:16px 0;display:none">
+        <div style="font-size:.82rem;color:var(--muted)">Alert history is available for subscribers.</div>
+      </div>
+
+      <!-- Alert list -->
+      <div id="alert-history-list">
+        <div style="text-align:center;padding:20px;color:var(--muted);font-size:.78rem">Loading alerts...</div>
+      </div>
+
+      <!-- Pagination -->
+      <div id="alert-history-pagination" style="display:flex;justify-content:center;gap:8px;margin-top:12px;display:none">
+        <button id="alert-history-prev" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">&larr; Newer</button>
+        <span id="alert-history-page" style="font-size:.68rem;color:var(--muted);padding:4px 8px">Page 1</span>
+        <button id="alert-history-next" style="background:var(--surface);border:1px solid var(--border);border-radius:4px;color:#cdd;cursor:pointer;padding:4px 12px;font-family:inherit;font-size:.68rem">Older &rarr;</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── SIMULATIONS ── -->
+  <p class="section-label">Simulations</p>
+  <div class="sim-grid">
+
+    <a href="earth.html" class="sim-card" aria-label="Launch Earth Magnetosphere simulation">
+      <div class="sim-thumb th-earth">
+        <span>🌍</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Earth Magnetosphere</p>
+        <p class="sim-desc">Real-time field lines, particle trapping &amp; Van Allen belts</p>
+      </div>
+    </a>
+
+    <a href="sun.html" class="sim-card" aria-label="Launch Solar Surface simulation">
+      <div class="sim-thumb th-sun">
+        <span>☀️</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Solar Surface</p>
+        <p class="sim-desc">Solar flares, CMEs, active regions from NOAA SWPC</p>
+      </div>
+    </a>
+
+    <a href="space-weather.html" class="sim-card" aria-label="Launch Space Weather dashboard">
+      <div class="sim-thumb th-sw">
+        <span>🌌</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Space Weather</p>
+        <p class="sim-desc">Kp index, solar wind speed, geomagnetic storm alerts</p>
+      </div>
+    </a>
+
+    <a href="star3d.html" class="sim-card" aria-label="Launch Stellar Physics simulation">
+      <div class="sim-thumb th-star">
+        <span>⭐</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Stellar Physics</p>
+        <p class="sim-desc">3D stellar evolution, HR diagram, spectral classification</p>
+      </div>
+    </a>
+
+    <a href="galactic-map.html" class="sim-card" aria-label="Launch Galactic Map simulation">
+      <div class="sim-thumb th-galactic">
+        <span>🌠</span>
+        <span class="sim-badge badge-live">Live</span>
+      </div>
+      <div class="sim-info">
+        <p class="sim-name">Galactic Map</p>
+        <p class="sim-desc">Milky Way structure, stellar populations &amp; arm dynamics</p>
+      </div>
+    </a>
+
+  </div>
+
+</main>
+
+<footer>
+  <a href="index.html">Parker Physics</a> &nbsp;·&nbsp;
+  <a href="pricing.html">Pricing</a> &nbsp;·&nbsp;
+  <a href="privacy.html">Privacy</a> &nbsp;·&nbsp;
+  <a href="eula.html">Terms</a>
+</footer>
+
+<!-- Import map — resolves the bare "three" specifier used transitively by
+     js/trip-planner.js → js/geo/coords.js (and anything else that reaches
+     for THREE.Vector3 scratch math). Without this, dashboard.html dies on
+     load with "The specifier 'three' was a bare specifier, but was not
+     remapped to anything." Same CDN + version as every other sim page. -->
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { geocodeQuery, saveUserLocation, loadUserLocation,
+         clearUserLocation, auroraVisibility } from './js/user-location.js';
+import { SpaceWeatherFeed } from './js/swpc-feed.js';
+import { AlertEngine } from './js/alert-engine.js';
+import { ImpactScoreEngine } from './js/impact-score.js';
+import { OnboardingTour } from './js/onboarding-tour.js';
+import { DailySummaryEngine } from './js/daily-summary.js';
+import {
+    listLocations, addLocation, updateLocation, removeLocation,
+    setPrimaryLocation, locationLimit, onLocationsChanged, PLAN_LIMITS,
+} from './js/saved-locations.js';
+import {
+    fetchTripWeather, encodeTripParam, weatherCodeLabel, compassLabel,
+    greatCircleDistanceKm,
+} from './js/trip-planner.js';
+import { mountClassRoster } from './js/class-roster.js';
+import { logActivation, EVENTS } from './js/activation.js';
+
+// Expose auth for the inline script sections
+window._ppAuth = { auth };
+
+/* ════════════════════════════════════════════════════════════
+   AUTH GATE — uses auth.js for consistent session management
+═════════════════════════════════════════════════════════════ */
+
+// Wait for auth to fully initialize (Supabase session restore is async).
+// Bound the wait so a dead Supabase call can never leave superusers stuck
+// on the full-screen auth gate with no way to sign in.
+await Promise.race([
+    auth.ready(),
+    new Promise(resolve => setTimeout(resolve, 8000)),
+]);
+
+let _authMod = auth;
+let _auth = null;
+if (_authMod.isSignedIn()) {
+    _auth = _authMod.getUser();
+} else {
+    // Legacy fallback — check both storages. Superusers who already have a
+    // persisted session should never be punted back to the sign-in gate just
+    // because Supabase's in-memory session state is cold on this page load.
+    try { _auth = JSON.parse(localStorage.getItem('pp_auth') || 'null'); } catch(_){}
+    if (!_auth) {
+        try { _auth = JSON.parse(sessionStorage.getItem('pp_auth') || 'null'); } catch(_){}
+    }
+}
+
+// Diagnostic log — visible in DevTools so a stuck superuser can tell whether
+// they landed here without a session vs. got past the gate but hit a later bug.
+console.info('[Dashboard] auth gate:', {
+    supabaseSignedIn: _authMod.isSignedIn?.(),
+    authLoaded:       !!_auth,
+    role:             _auth?.role,
+    plan:             _auth?.plan,
+});
+
+if (!_auth || !_auth.signedIn) {
+  // Nav stays visible so a stuck/unauthenticated visitor still has the
+  // sign-in / sign-up buttons rendered by nav.js. Only the protected
+  // dashboard chrome gets hidden behind the auth gate.
+  document.querySelector('main').style.visibility = 'hidden';
+  document.querySelector('footer').style.visibility = 'hidden';
+} else {
+  // Hide the full-screen sign-in overlay FIRST, before any downstream init can
+  // throw. A crash below used to leave the gate visible, which looked to
+  // superusers like "the sign-in is broken for me" when the real failure was
+  // something cosmetic further down the script.
+  document.getElementById('auth-gate').style.display = 'none';
+  try {
+
+  const name  = _auth.name || _auth.email || 'Explorer';
+  const first = name.split(' ')[0];
+  // Nav now owns the welcome / sign-out chrome (nav.js renders the
+  // dashboard + sign-out buttons), so we only need the greeting heading.
+
+  const hour = new Date().getHours();
+  const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('welcome-heading').textContent = `${greet}, ${first}`;
+
+  // Role/plan-aware UI renders — always sourced from the live auth module,
+  // never from a one-shot localStorage snapshot. fetchProfile() resolves the
+  // server-side role from user_profiles and fires auth-changed, so every
+  // renderer below re-runs on that event and converges to the real role
+  // even if user_metadata.role is stale (common when a superadmin was
+  // promoted via SQL against user_profiles only).
+  function _renderPlanBadge() {
+      const r = (_authMod.getRole?.() || 'user').toLowerCase();
+      const p = (_authMod.getPlan?.() || 'free').toLowerCase();
+      const badge = document.getElementById('plan-badge');
+      if (!badge) return;
+      if (r === 'superadmin' || r === 'admin') {
+          badge.textContent = r === 'superadmin' ? 'Superadmin' : 'Admin';
+          badge.className   = 'plan-badge plan-advanced';
+      } else {
+          // CSS class set per plan; unrecognized plans fall through to 'free'
+          // styling so a future tier added to the DB doesn't render with no
+          // background.
+          const KNOWN = new Set(['free','basic','educator','advanced','institution','enterprise']);
+          const cls   = KNOWN.has(p) ? p : 'free';
+          badge.textContent = p.charAt(0).toUpperCase() + p.slice(1);
+          badge.className   = 'plan-badge plan-' + cls;
+      }
+  }
+
+  function _renderAdminButtons() {
+      const btn       = document.getElementById('dash-admin-btn');
+      const statusBtn = document.getElementById('dash-status-btn');
+      const isAdmin   = _authMod.isAdmin?.()      ?? false;
+      const isSuper   = _authMod.isSuperAdmin?.() ?? false;
+      if (btn) {
+          btn.style.display = isAdmin ? 'inline-block' : 'none';
+          if (isAdmin) btn.textContent = isSuper ? 'SUPER ADMIN' : 'ADMIN';
+      }
+      if (statusBtn) {
+          statusBtn.style.display = isSuper ? 'inline-block' : 'none';
+      }
+  }
+
+  // Pipeline Analytics — superadmin only. Defer the module import until we
+  // know the user qualifies so regular users never pay the download cost.
+  async function _mountPipelineCard() {
+      const card = document.getElementById('pipeline-card');
+      if (!card) return;
+      const isSuper = _authMod.isSuperAdmin?.() ?? false;
+      if (!isSuper) {
+          card.style.display = 'none';
+          // Reset mount flag so a late-arriving superadmin role flip re-mounts.
+          card.dataset.mounted = '';
+          return;
+      }
+      if (card.dataset.mounted === '1') {
+          card.style.display = '';
+          return;
+      }
+      card.dataset.mounted = '1';
+      card.style.display = '';
+      try {
+          const mod = await import('./js/pipeline-analytics.js');
+          mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
+      } catch (err) {
+          console.error('[Dashboard] pipeline-analytics failed:', err);
+          document.getElementById('pipeline-health').innerHTML =
+              `<div style="color:#f88;font-size:.78rem">Pipeline analytics failed to load: ${err.message}</div>`;
+      }
+  }
+
+  _renderPlanBadge();
+  _renderAdminButtons();
+  _mountPipelineCard();
+  window.addEventListener('auth-changed', () => {
+      _renderPlanBadge();
+      _renderAdminButtons();
+      _mountPipelineCard();
+      _renderSubscriptionCard();
+  });
+
+  // Kick a profile re-fetch in the background so that if the cached user_metadata
+  // role is stale (superadmin promoted only in user_profiles), the UI converges.
+  // fetchProfile() dispatches auth-changed on success, which re-runs the
+  // renderers registered above.
+  if (_authMod.fetchProfile) {
+      _authMod.fetchProfile().catch(err => {
+          console.warn('[Dashboard] Background profile refresh failed:', err?.message || err);
+      });
+  }
+
+  // Sign-out is wired by nav.js (the shared #nav-signout-btn). The legacy
+  // dashboard-local sign-out button no longer exists in the DOM.
+
+  // ── Subscription card ─────────────────────────────────────────────────────
+  // Rendered as a function so auth-changed (e.g. PROFILE_FETCHED, post-checkout
+  // refresh) can re-run it without reloading the page. Admin/superadmin
+  // accounts are surfaced explicitly so they don't get a misleading
+  // "Free Plan · Upgrade to Basic" pitch.
+  let _subManageBound = false;
+  function _renderSubscriptionCard() {
+    const subCard = document.getElementById('subscription-card');
+    if (!subCard) return;
+    subCard.style.display = '';
+    const subStatus = document.getElementById('sub-status-text');
+    const subDetail = document.getElementById('sub-detail-text');
+    const upgradeBtn = document.getElementById('sub-upgrade-btn');
+    const manageBtn  = document.getElementById('sub-manage-btn');
+
+    const liveUser = _authMod.getUser?.() || _auth || {};
+    const r = (_authMod.getRole?.() || 'user').toLowerCase();
+    const p = (_authMod.getPlan?.() || 'free').toLowerCase();
+
+    if (r === 'superadmin' || r === 'admin') {
+      subStatus.textContent = r === 'superadmin' ? 'Superadmin Access' : 'Admin Access';
+      subStatus.style.color = r === 'superadmin' ? '#ff6b6b' : '#ff8c00';
+      subDetail.textContent = 'Full access — no plan restrictions';
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display  = 'none';
+      return;
+    }
+
+    // Class student? Show a "you're in a class" card without the upgrade
+    // pitch — their effective plan is the parent's, billing is the parent's.
+    if (liveUser.parent_account_id) {
+      const parentPlan = (liveUser.effective_plan || 'free').toLowerCase();
+      const TIER_COLOR = {
+        basic:       '#4488ff',
+        educator:    '#9ad36f',
+        advanced:    '#a080ff',
+        institution: '#ff8cc8',
+        enterprise:  '#ffd700',
+      };
+      subStatus.textContent = `Class member · ${parentPlan.charAt(0).toUpperCase() + parentPlan.slice(1)}`;
+      subStatus.style.color = TIER_COLOR[parentPlan] || '#9ad36f';
+      subDetail.textContent = 'Access provided by your instructor — no card on file.';
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display  = 'none';
+      return;
+    }
+
+    const PAID = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
+    if (PAID.has(p)) {
+      // Per-tier accent color matches the .plan-* CSS above.
+      const TIER_COLOR = {
+        basic:       '#4488ff',
+        educator:    '#9ad36f',
+        advanced:    '#a080ff',
+        institution: '#ff8cc8',
+        enterprise:  '#ffd700',
+      };
+      subStatus.textContent = p.charAt(0).toUpperCase() + p.slice(1) + ' Plan';
+      subStatus.style.color = TIER_COLOR[p] || '#4488ff';
+      const subState = liveUser.subscription_status ?? liveUser.alerts?.subscription_status ?? 'active';
+      const baseDetail = subState === 'active' ? 'Active subscription'
+        : subState === 'trialing' ? 'Free trial active'
+        : subState === 'past_due' ? 'Payment past due — please update your card'
+        : subState === 'canceled' ? 'Canceled — access until period end'
+        : 'Active subscription';
+      // Surface seat usage on tiers that have it.
+      const seats = liveUser.classroom_seats;
+      const used  = liveUser.seats_used ?? 0;
+      const seatsSuffix = (p === 'educator' || p === 'institution' || p === 'enterprise') && seats
+        ? ` · ${used} / ${seats} seats used`
+        : '';
+      subDetail.textContent = baseDetail + seatsSuffix;
+      upgradeBtn.style.display = 'none';
+      manageBtn.style.display  = p === 'enterprise' ? 'none' : '';  // Enterprise billing handled via account manager
+      if (!_subManageBound) {
+        _subManageBound = true;
+        manageBtn.addEventListener('click', async () => {
+          manageBtn.textContent = 'Opening...';
+          try {
+            const sb = await (await import('./js/supabase-config.js')).getSupabase();
+            const { data: { session } } = await sb.auth.getSession();
+            const res = await fetch('/api/stripe/portal', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+            });
+            const data = await res.json();
+            if (data.url) { window.location.href = data.url; return; }
+            alert(data.detail || 'Could not open billing portal');
+          } catch (e) { alert('Error: ' + e.message); }
+          manageBtn.textContent = 'Manage Billing';
+        });
+      }
+    } else {
+      subStatus.textContent = 'Free Plan';
+      subStatus.style.color = '';
+      subDetail.textContent = 'Upgrade to unlock all 17 simulations, custom alerts, and email delivery';
+      upgradeBtn.style.display = '';
+      manageBtn.style.display  = 'none';
+    }
+  }
+  _renderSubscriptionCard();
+
+  // Handle checkout success redirect
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.get('checkout') === 'success') {
+    const successPlan = urlParams.get('plan') || 'basic';
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,40,20,.95);border:1px solid rgba(0,200,100,.3);border-radius:10px;padding:14px 28px;color:#44cc88;font-size:.88rem;font-weight:600;z-index:999;box-shadow:0 4px 20px rgba(0,0,0,.5);text-align:center';
+    banner.innerHTML = `Welcome to ${successPlan.charAt(0).toUpperCase() + successPlan.slice(1)}! Your subscription is now active.`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner.remove(), 6000);
+    // Refresh profile to get updated plan from webhook, then clean URL.
+    // fetchProfile dispatches auth-changed which re-runs every role/plan
+    // renderer, so we don't need to poke DOM fields manually here.
+    auth.fetchProfile().then(() => {
+      history.replaceState(null, '', 'dashboard.html');
+    });
+  }
+  } catch (err) {
+    console.error('[Dashboard] Post-auth init failed:', err);
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   MINI WORLD MAP CANVAS
+   Equirectangular projection, lat/lon grid, glowing user pin.
+═════════════════════════════════════════════════════════════ */
+const _canvas = document.getElementById('loc-map-canvas');
+const _ctx    = _canvas.getContext('2d');
+let   _pinLat = null, _pinLon = null, _pulseT = 0, _mapRaf = null;
+
+function _resizeMap() {
+  _canvas.width  = _canvas.offsetWidth  * devicePixelRatio;
+  _canvas.height = _canvas.offsetHeight * devicePixelRatio;
+  _drawMap();
+}
+
+function _ll2xy(lat, lon) {
+  const W = _canvas.width, H = _canvas.height;
+  const x = ((lon + 180) / 360) * W;
+  const y = ((90 - lat) / 180) * H;
+  return { x, y };
+}
+
+function _drawMap() {
+  const W = _canvas.width, H = _canvas.height;
+  const ctx = _ctx;
+
+  // Background gradient
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0,   '#030818');
+  bg.addColorStop(1,   '#060c24');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines
+  ctx.lineWidth = 1;
+  for (let lon = -180; lon <= 180; lon += 30) {
+    const { x } = _ll2xy(0, lon);
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H);
+    const prime = lon === 0;
+    ctx.strokeStyle = prime ? 'rgba(255,215,0,.35)' : 'rgba(255,255,255,.08)';
+    ctx.stroke();
+  }
+  for (let lat = -90; lat <= 90; lat += 30) {
+    const { y } = _ll2xy(lat, 0);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y);
+    const equator  = lat === 0;
+    const tropics  = Math.abs(lat) === 30;
+    ctx.strokeStyle = equator  ? 'rgba(0,200,255,.4)'
+                    : tropics  ? 'rgba(255,140,0,.18)'
+                    :            'rgba(255,255,255,.07)';
+    ctx.stroke();
+  }
+
+  if (_pinLat !== null) {
+    // Pulse animation
+    const pulse = 0.4 + 0.3 * Math.sin(_pulseT * 3);
+    const { x, y } = _ll2xy(_pinLat, _pinLon);
+
+    // Outer glow ring
+    const ring = ctx.createRadialGradient(x, y, 0, x, y, 22 * devicePixelRatio);
+    ring.addColorStop(0,   `rgba(79,195,247,${0.18 + pulse * 0.12})`);
+    ring.addColorStop(1,   'transparent');
+    ctx.beginPath();
+    ctx.arc(x, y, 22 * devicePixelRatio, 0, Math.PI * 2);
+    ctx.fillStyle = ring;
+    ctx.fill();
+
+    // Inner dot
+    ctx.beginPath();
+    ctx.arc(x, y, 5 * devicePixelRatio, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(79,195,247,${0.75 + pulse * 0.25})`;
+    ctx.shadowBlur  = 10 * devicePixelRatio;
+    ctx.shadowColor = '#4fc3f7';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Coordinates label
+    const latStr = `${Math.abs(_pinLat).toFixed(2)}°${_pinLat >= 0 ? 'N' : 'S'}`;
+    const lonStr = `${Math.abs(_pinLon).toFixed(2)}°${_pinLon >= 0 ? 'E' : 'W'}`;
+    const label  = `${latStr} ${lonStr}`;
+    ctx.font      = `${10 * devicePixelRatio}px monospace`;
+    ctx.fillStyle = 'rgba(79,195,247,.8)';
+    const tx = Math.min(x + 8 * devicePixelRatio, W - 90 * devicePixelRatio);
+    const ty = Math.max(y - 8 * devicePixelRatio, 12 * devicePixelRatio);
+    ctx.fillText(label, tx, ty);
+  } else {
+    ctx.font      = `${11 * devicePixelRatio}px 'Segoe UI',sans-serif`;
+    ctx.fillStyle = 'rgba(100,90,136,.8)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Search a city or use GPS to set your location', W / 2, H / 2);
+    ctx.textAlign = 'left';
+  }
+}
+
+function _startMapAnimation() {
+  if (_mapRaf) return;
+  function tick() {
+    _pulseT += 0.04;
+    _drawMap();
+    _mapRaf = requestAnimationFrame(tick);
+  }
+  _mapRaf = requestAnimationFrame(tick);
+}
+
+function _stopMapAnimation() {
+  cancelAnimationFrame(_mapRaf);
+  _mapRaf = null;
+}
+
+/* ════════════════════════════════════════════════════════════
+   LOCATION DISPLAY
+═════════════════════════════════════════════════════════════ */
+function _fmtLatLon(lat, lon) {
+  return `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'},  `
+       + `${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`;
+}
+
+function _showLocation(loc) {
+  if (!loc) {
+    document.getElementById('loc-city-name').innerHTML = '<span class="loc-none">No location set</span>';
+    document.getElementById('loc-coords-txt').textContent = '';
+    document.getElementById('loc-time-txt').textContent   = '';
+    document.getElementById('loc-earth-btn').style.display  = 'none';
+    document.getElementById('loc-clear-btn').style.display  = 'none';
+    _pinLat = _pinLon = null;
+    _stopMapAnimation();
+    _drawMap();
+    _updateAuroraDisplay(null);
+    return;
+  }
+
+  document.getElementById('loc-city-name').textContent      = loc.city;
+  document.getElementById('loc-coords-txt').textContent     = _fmtLatLon(loc.lat, loc.lon);
+  document.getElementById('loc-earth-btn').style.display    = '';
+  document.getElementById('loc-clear-btn').style.display    = '';
+
+  _pinLat = loc.lat; _pinLon = loc.lon;
+  _startMapAnimation();
+  _updateLocalTime(loc.lon);
+  _updateAuroraDisplay(loc);
+}
+
+function _updateLocalTime(lon) {
+  // Approximate offset from meridian (±12h)
+  const offsetH = Math.round(lon / 15);
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const localD = new Date(utcMs + offsetH * 3600000);
+  const hh = String(localD.getHours()).padStart(2, '0');
+  const mm = String(localD.getMinutes()).padStart(2, '0');
+  const sign = offsetH >= 0 ? '+' : '';
+  document.getElementById('loc-time-txt').textContent = `Local time ~${hh}:${mm} (UTC${sign}${offsetH})`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   KP GAUGE COLORS
+═════════════════════════════════════════════════════════════ */
+const KP_COLORS = [
+  '#00e676','#69f0ae','#b2ff59','#fff176',
+  '#ffa726','#ff7043','#ef5350','#e040fb','#aa00ff','#7c00ff'
+];
+
+const STORM_LABELS = [
+  'Quiet','Quiet','Unsettled','Active',
+  'G1 Minor Storm','G2 Moderate Storm','G3 Strong Storm',
+  'G4 Severe Storm','G5 Extreme Storm','G5 Extreme Storm'
+];
+
+function _buildKpCells() {
+  const wrap = document.getElementById('kp-cells');
+  for (let i = 0; i < 10; i++) {
+    const c = document.createElement('div');
+    c.className = 'kp-cell';
+    c.style.background = KP_COLORS[i];
+    wrap.appendChild(c);
+  }
+}
+
+let _currentKp = 0;
+
+function _updateKpGauge(kp) {
+  _currentKp = kp ?? 0;
+  const idx   = Math.min(9, Math.floor(_currentKp));
+  const cells = document.getElementById('kp-cells').children;
+  for (let i = 0; i < cells.length; i++) {
+    cells[i].classList.toggle('active', i === idx);
+    cells[i].style.boxShadow = i === idx ? `0 0 5px ${KP_COLORS[i]}` : 'none';
+  }
+  document.getElementById('sw-kp').textContent = _currentKp.toFixed(1);
+  document.getElementById('sw-kp').style.color = KP_COLORS[idx];
+
+  // Storm badge
+  const badge = document.getElementById('storm-badge');
+  badge.textContent    = STORM_LABELS[idx];
+  badge.style.color    = KP_COLORS[idx];
+  badge.style.borderColor = KP_COLORS[idx] + '44';
+  badge.style.background  = KP_COLORS[idx] + '14';
+}
+
+/* ════════════════════════════════════════════════════════════
+   AURORA VISIBILITY
+═════════════════════════════════════════════════════════════ */
+function _updateAuroraDisplay(loc) {
+  const textEl = document.getElementById('aurora-text');
+  const locEl  = document.getElementById('aurora-loc');
+  const icon   = document.getElementById('aurora-icon');
+  if (!loc) {
+    textEl.textContent   = 'Set your location to check aurora visibility';
+    textEl.style.color   = 'var(--muted)';
+    locEl.textContent    = '';
+    icon.textContent     = '🔭';
+    return;
+  }
+  const vis = auroraVisibility(loc.lat, _currentKp);
+  icon.textContent   = vis.visible ? '🌌' : '🔭';
+  textEl.textContent = vis.visible
+    ? `Aurora likely visible from ${loc.city}!`
+    : `${vis.label} for aurora at ${loc.city}`;
+  textEl.style.color = vis.color;
+  locEl.textContent  = `Your latitude: ${Math.abs(loc.lat).toFixed(1)}° ${loc.lat >= 0 ? 'N' : 'S'} · Boundary: ${vis.boundaryDeg.toFixed(0)}°`;
+}
+
+/* ════════════════════════════════════════════════════════════
+   GEOCODING / GPS
+═════════════════════════════════════════════════════════════ */
+async function _doSearch() {
+  const q   = document.getElementById('loc-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('loc-search-btn');
+  const err = document.getElementById('loc-err');
+  err.style.display = 'none';
+  btn.textContent = '…'; btn.disabled = true;
+  try {
+    const loc = await geocodeQuery(q);
+    saveUserLocation(loc);
+    document.getElementById('loc-input').value = loc.city;
+  } catch(e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+  } finally {
+    btn.textContent = '↵'; btn.disabled = false;
+  }
+}
+
+function _doGPS() {
+  const btn = document.getElementById('loc-gps-btn');
+  const err = document.getElementById('loc-err');
+  err.style.display = 'none';
+  if (!navigator.geolocation) {
+    err.textContent   = 'Geolocation not supported by this browser';
+    err.style.display = 'block';
+    return;
+  }
+  btn.textContent = '…'; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    async pos => {
+      try {
+        const { latitude: lat, longitude: lon } = pos.coords;
+        // Reverse geocode via Nominatim
+        const res  = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+          { headers: { 'Accept-Language': 'en' } }
+        );
+        const data = res.ok ? await res.json() : {};
+        const adr  = data.address ?? {};
+        const city = adr.city || adr.town || adr.village || adr.county || adr.state || 'Your location';
+        const loc  = { lat, lon, city, displayName: data.display_name || city };
+        saveUserLocation(loc);
+        document.getElementById('loc-input').value = city;
+      } catch(e) {
+        // Save coords even if reverse geocode fails
+        const { latitude: lat, longitude: lon } = pos.coords;
+        const loc = { lat, lon, city: `${lat.toFixed(2)}, ${lon.toFixed(2)}`, displayName: '' };
+        saveUserLocation(loc);
+      } finally {
+        btn.textContent = '⊕'; btn.disabled = false;
+      }
+    },
+    geoErr => {
+      const msgs = {
+        1: 'Location access denied — please allow location in browser settings',
+        2: 'Location unavailable',
+        3: 'Location request timed out'
+      };
+      err.textContent   = msgs[geoErr.code] || 'GPS error';
+      err.style.display = 'block';
+      btn.textContent = '⊕'; btn.disabled = false;
+    },
+    { timeout: 10000 }
+  );
+}
+
+/* ════════════════════════════════════════════════════════════
+   SPACE WEATHER FEED
+═════════════════════════════════════════════════════════════ */
+function _initSpaceWeather() {
+  _buildKpCells();
+  const feed = new SpaceWeatherFeed();
+  feed.start();
+
+  window.addEventListener('swpc-update', e => {
+    const sw  = e.detail;
+    const kp  = sw.kp ?? 0;
+    const spd = sw.solar_wind?.speed ?? null;
+    const bz  = sw.solar_wind?.bz  ?? null;
+
+    _updateKpGauge(kp);
+
+    document.getElementById('sw-speed').textContent = spd != null ? Math.round(spd).toString() : '—';
+    const bzEl = document.getElementById('sw-bz');
+    bzEl.textContent = bz != null ? bz.toFixed(1) : '—';
+    bzEl.style.color = bz != null ? (bz < 0 ? '#ff6b6b' : '#4fc97f') : 'var(--text)';
+
+    // Re-run aurora with new Kp
+    const loc = loadUserLocation();
+    if (loc) _updateAuroraDisplay(loc);
+
+    const ts = sw.fetchedAt ? new Date(sw.fetchedAt) : new Date();
+    const hh = String(ts.getHours()).padStart(2,'0');
+    const mm = String(ts.getMinutes()).padStart(2,'0');
+    document.getElementById('sw-status').textContent = `Updated ${hh}:${mm}`;
+
+    // ── Update personalized alert card ──────────────────────────
+    _updateAlertCard(sw);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════
+   PERSONALIZED SPACE WEATHER REPORT
+═════════════════════════════════════════════════════════════ */
+let _lastAlertSw = null;
+
+function _updateAlertCard(sw) {
+  _lastAlertSw = sw;
+  const loc = loadUserLocation();
+  const kp = sw?.kp ?? 0;
+  const kpI = Math.floor(kp);
+  const xray = sw?.xray_flux ?? 1e-8;
+  const xInt = Math.min(1, Math.log10(Math.max(xray, 1e-9) / 1e-9) / 4);
+  const bz = sw?.solar_wind?.bz ?? 0;
+
+  // Location name
+  const locEl = document.getElementById('alert-loc-name');
+  if (locEl) {
+    locEl.textContent = loc ? loc.city : 'Set location above';
+  }
+
+  // ── Aurora section ──────────────────────────────────────────
+  const aIcon = document.getElementById('alert-aurora-icon');
+  const aTitle = document.getElementById('alert-aurora-title');
+  const aDesc = document.getElementById('alert-aurora-desc');
+  const aTags = document.getElementById('alert-aurora-tags');
+
+  if (loc) {
+    const vis = auroraVisibility(loc.lat, kp);
+    aIcon.textContent = vis.visible ? '🌌' : '🔭';
+
+    if (vis.visible) {
+      aTitle.textContent = 'Aurora Likely Visible Tonight!';
+      aTitle.style.color = '#00ff88';
+      aDesc.innerHTML = `The auroral oval extends to <strong style="color:#ddd">${vis.boundaryDeg.toFixed(0)}° latitude</strong>. `
+        + `Your location at <strong style="color:#ddd">${Math.abs(loc.lat).toFixed(1)}°${loc.lat >= 0 ? 'N' : 'S'}</strong> is within the viewing zone. `
+        + `Look north after dark for best results!`;
+    } else {
+      aTitle.textContent = 'Aurora Not Visible';
+      aTitle.style.color = vis.color;
+      aDesc.innerHTML = `Current auroral oval boundary: <strong style="color:#ddd">${vis.boundaryDeg.toFixed(0)}° latitude</strong>. `
+        + `Your location at <strong style="color:#ddd">${Math.abs(loc.lat).toFixed(1)}°${loc.lat >= 0 ? 'N' : 'S'}</strong> needs Kp ≥ ${vis.neededKp} `
+        + `(currently ${kp.toFixed(1)}).`;
+    }
+
+    // Tags
+    let tags = '';
+    if (vis.visible) tags += '<span style="background:#00ff8822;color:#00ff88;border:1px solid #00ff8844;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">AURORA ALERT</span>';
+    if (kpI >= 5) tags += `<span style="background:#ff880022;color:#ff8800;border:1px solid #ff880044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">G${Math.min(5,kpI-4)} STORM</span>`;
+    if (xInt > 0.3) tags += '<span style="background:#ff440022;color:#ff4444;border:1px solid #ff440044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">SOLAR FLARE</span>';
+    if (bz < -10) tags += '<span style="background:#ff660022;color:#ff6644;border:1px solid #ff660044;border-radius:10px;padding:2px 8px;font-size:.62rem;font-weight:600">Bz SOUTH</span>';
+    aTags.innerHTML = tags;
+  } else {
+    aIcon.textContent = '📍';
+    aTitle.textContent = 'Set Your Location';
+    aTitle.style.color = 'var(--text)';
+    aDesc.textContent = 'Enter your city or zip code in the Location card above to get your personalized aurora forecast, HF radio conditions, and GPS accuracy estimate.';
+    aTags.innerHTML = '';
+  }
+
+  // ── HF Radio ────────────────────────────────────────────────
+  const hfEl = document.getElementById('alert-hf');
+  const hfDesc = document.getElementById('alert-hf-desc');
+  if (xInt > 0.5) {
+    hfEl.textContent = 'Severe Blackout'; hfEl.style.color = '#ff2200';
+    hfDesc.textContent = 'HF radio unusable on sunlit side';
+  } else if (xInt > 0.3) {
+    hfEl.textContent = 'Moderate Blackout'; hfEl.style.color = '#ff6600';
+    hfDesc.textContent = 'HF degraded for 10-60 min';
+  } else if (xInt > 0.15) {
+    hfEl.textContent = 'Minor Degradation'; hfEl.style.color = '#ffaa00';
+    hfDesc.textContent = 'Brief HF fadeout possible';
+  } else {
+    hfEl.textContent = 'Normal'; hfEl.style.color = '#00cc88';
+    hfDesc.textContent = 'No blackout';
+  }
+
+  // ── GPS / GNSS ──────────────────────────────────────────────
+  const gpsEl = document.getElementById('alert-gps');
+  const gpsDesc = document.getElementById('alert-gps-desc');
+  if (kpI >= 8) {
+    gpsEl.textContent = 'Possible Outage'; gpsEl.style.color = '#ff2200';
+    gpsDesc.textContent = 'Ionospheric scintillation severe';
+  } else if (kpI >= 6) {
+    gpsEl.textContent = 'Degraded ~50m'; gpsEl.style.color = '#ff8800';
+    gpsDesc.textContent = 'Accuracy reduced by scintillation';
+  } else if (kpI >= 4) {
+    gpsEl.textContent = 'Minor Errors'; gpsEl.style.color = '#ffcc44';
+    gpsDesc.textContent = 'Occasional position jumps';
+  } else {
+    gpsEl.textContent = 'Nominal'; gpsEl.style.color = '#00cc88';
+    gpsDesc.textContent = 'Normal precision';
+  }
+
+  // ── Power Grid ──────────────────────────────────────────────
+  const gridEl = document.getElementById('alert-grid');
+  const gridDesc = document.getElementById('alert-grid-desc');
+  if (kpI >= 9) {
+    gridEl.textContent = 'Collapse Risk'; gridEl.style.color = '#ff2200';
+    gridDesc.textContent = 'Widespread GIC, transformer risk';
+  } else if (kpI >= 7) {
+    gridEl.textContent = 'Voltage Issues'; gridEl.style.color = '#ff6600';
+    gridDesc.textContent = 'Geomagnetically induced currents';
+  } else if (kpI >= 5) {
+    gridEl.textContent = 'Minor GIC'; gridEl.style.color = '#ffcc44';
+    gridDesc.textContent = 'Weak induced currents possible';
+  } else {
+    gridEl.textContent = 'No Impact'; gridEl.style.color = '#00cc88';
+    gridDesc.textContent = 'GIC risk low';
+  }
+
+  // ── Spacecraft ──────────────────────────────────────────────
+  const craftEl = document.getElementById('alert-craft');
+  const craftDesc = document.getElementById('alert-craft-desc');
+  if (kpI >= 7) {
+    craftEl.textContent = 'High Risk'; craftEl.style.color = '#ff2200';
+    craftDesc.textContent = 'Deep dielectric + surface charging';
+  } else if (kpI >= 5) {
+    craftEl.textContent = 'Elevated'; craftEl.style.color = '#ffaa00';
+    craftDesc.textContent = 'Surface charging events likely';
+  } else {
+    craftEl.textContent = 'Low Risk'; craftEl.style.color = '#00cc88';
+    craftDesc.textContent = 'Surface charging minimal';
+  }
+
+  // ── Viewing tip ─────────────────────────────────────────────
+  const tipEl = document.getElementById('alert-tip');
+  const tipText = document.getElementById('alert-tip-text');
+  if (loc) {
+    tipEl.style.display = '';
+    const vis = auroraVisibility(loc.lat, kp);
+    if (vis.visible) {
+      tipText.textContent = `Best viewing is 10 PM – 2 AM local time, away from city lights. Look toward the northern horizon (southern if in the Southern Hemisphere). The aurora may appear as a green/pink glow or dancing curtains.`;
+    } else if (vis.neededKp <= kp + 3) {
+      tipText.textContent = `Aurora is close to being visible at your latitude. A Kp increase of just ${vis.neededKp - Math.floor(kp)} points would bring it into view. Check back during active geomagnetic conditions.`;
+    } else {
+      tipText.textContent = `At your latitude (${Math.abs(loc.lat).toFixed(0)}°), aurora requires a major geomagnetic storm (Kp ≥ ${vis.neededKp}). These occur a few times per solar cycle — follow the Space Weather dashboard for alerts.`;
+    }
+  } else {
+    tipEl.style.display = 'none';
+  }
+}
+
+// ── Share button ────────────────────────────────────────────────────────────
+document.getElementById('alert-share-btn')?.addEventListener('click', () => {
+  const loc = loadUserLocation();
+  const sw = _lastAlertSw;
+  if (!sw) return;
+  const kp = sw.kp ?? 0;
+  const vis = loc ? auroraVisibility(loc.lat, kp) : null;
+  const city = loc?.city ?? 'Unknown';
+
+  let text = `Space Weather Report for ${city}\n`;
+  text += `Kp: ${kp.toFixed(1)} | Wind: ${sw.solar_wind?.speed ?? '?'} km/s | Bz: ${sw.solar_wind?.bz?.toFixed(1) ?? '?'} nT\n`;
+  if (vis) {
+    text += vis.visible
+      ? `Aurora: VISIBLE from ${city}! Look north tonight.\n`
+      : `Aurora: Needs Kp ≥ ${vis.neededKp} (current ${kp.toFixed(1)})\n`;
+  }
+  text += `\nLive at parkersphysics.com/dashboard.html`;
+
+  navigator.clipboard.writeText(text).then(() => {
+    const msg = document.getElementById('alert-share-msg');
+    if (msg) { msg.style.display = 'inline'; setTimeout(() => msg.style.display = 'none', 2000); }
+  }).catch(() => {});
+});
+
+// Re-update alert card when location changes
+window.addEventListener('user-location-changed', () => {
+  if (_lastAlertSw) _updateAlertCard(_lastAlertSw);
+});
+
+/* ════════════════════════════════════════════════════════════
+   INIT
+═════════════════════════════════════════════════════════════ */
+function initAll() {
+  // Map canvas
+  new ResizeObserver(_resizeMap).observe(_canvas);
+  _resizeMap();
+
+  // Location search events
+  document.getElementById('loc-search-btn').addEventListener('click', _doSearch);
+  document.getElementById('loc-input').addEventListener('keydown', e => { if (e.key === 'Enter') _doSearch(); });
+  document.getElementById('loc-gps-btn').addEventListener('click', _doGPS);
+  document.getElementById('loc-clear-btn').addEventListener('click', () => {
+    clearUserLocation();
+    document.getElementById('loc-input').value = '';
+    document.getElementById('loc-err').style.display = 'none';
+  });
+
+  // Sync location display whenever it changes (from this page or earth.html in same session)
+  window.addEventListener('user-location-changed', e => _showLocation(e.detail));
+
+  // Restore saved location
+  const saved = loadUserLocation();
+  if (saved) {
+    document.getElementById('loc-input').value = saved.city || '';
+    _showLocation(saved);
+  } else {
+    _showLocation(null);
+  }
+
+  // Space weather
+  _initSpaceWeather();
+
+  // Local time refresh every minute
+  setInterval(() => {
+    const loc = loadUserLocation();
+    if (loc) _updateLocalTime(loc.lon);
+  }, 60000);
+
+  // Pause map animation when tab hidden
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) _stopMapAnimation();
+    else if (_pinLat !== null) _startMapAnimation();
+  });
+}
+
+// All declarations complete — safe to call initAll now
+initAll();
+
+// ── Onboarding Tour ─────────────────────────────────────────────────────────
+{
+    const tour = new OnboardingTour();
+    // Auto-start for new users (first visit)
+    setTimeout(() => tour.start(), 1500);
+    // Re-trigger link
+    document.getElementById('retake-tour')?.addEventListener('click', () => tour.forceStart());
+}
+
+// ── Activation events ───────────────────────────────────────────────────────
+// First-X events the team can use to measure how many signups got value.
+// All idempotent at the DB layer (unique partial index on (user_id, event)),
+// so spamming is harmless.
+{
+    // Signup landmark — first dashboard load IS effectively the activated
+    // signup. The DB unique index dedupes so this firing on every load is fine.
+    logActivation(EVENTS.SIGNUP);
+
+    // First sim opened — fires once when the user clicks any sim card.
+    const onceSim = (e) => {
+        const a = e.target.closest('a.sim-card');
+        if (!a) return;
+        const dest = (a.getAttribute('href') || '').replace(/\.html$/, '').replace(/^\//, '');
+        logActivation(EVENTS.FIRST_SIM_OPENED, { sim: dest });
+    };
+    document.querySelector('.sim-grid')?.addEventListener('click', onceSim, { capture: true });
+
+    // Location saved — fires the first time the user successfully sets a location.
+    window.addEventListener('user-location-changed', (e) => {
+        if (e.detail) logActivation(EVENTS.LOCATION_SAVED, { source: 'dashboard' });
+    });
+}
+
+// ── Alert Engine + Preferences Wiring ────────────────────────────────────────
+{
+    const engine = new AlertEngine();
+
+    // Wire the "mark all read" event from nav bell
+    window.addEventListener('alert-mark-all-read', () => engine.markAllRead());
+
+    // ── Preferences panel logic ──────────────────────────────────────────────
+    const canAlert    = auth.canUseAlerts();
+    const isAdvanced  = auth.canUseAdvancedAlerts();
+    const gateEl      = document.getElementById('alert-prefs-gate');
+    const contentEl   = document.getElementById('alert-prefs-content');
+    const planLabel   = document.getElementById('alert-prefs-plan');
+
+    if (planLabel) planLabel.textContent = auth.getPlan().toUpperCase() + ' plan';
+
+    if (!canAlert) {
+        if (gateEl)    gateEl.style.display = '';
+        if (contentEl) contentEl.style.display = 'none';
+    } else {
+        if (gateEl)    gateEl.style.display = 'none';
+        if (contentEl) contentEl.style.display = '';
+
+        // Lock advanced alerts for basic users
+        if (!isAdvanced) {
+            document.querySelectorAll('#alert-pref-grid-advanced .alert-pref-row').forEach(row => {
+                row.classList.add('locked');
+                row.title = 'Available on Advanced plan';
+            });
+        }
+
+        // Load current prefs into UI
+        const prefs = auth.getAlertPrefs();
+        const _setCheckbox = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+        const _setSelect   = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = String(val); };
+        const _setInput    = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+
+        _setCheckbox('pref-notify_temperature',    prefs.notify_temperature);
+        _setCheckbox('pref-notify_aurora',         prefs.notify_aurora);
+        _setCheckbox('pref-notify_storm',          prefs.notify_storm);
+        _setCheckbox('pref-notify_flare',          prefs.notify_flare);
+        _setCheckbox('pref-notify_cme',            prefs.notify_cme);
+        _setCheckbox('pref-notify_sat_pass',       prefs.notify_sat_pass);
+        _setCheckbox('pref-notify_collision',         prefs.notify_collision);
+        _setCheckbox('pref-notify_power_grid',        prefs.notify_power_grid);
+        _setCheckbox('pref-notify_radio_blackout',    prefs.notify_radio_blackout);
+        _setCheckbox('pref-notify_gps',               prefs.notify_gps);
+        _setCheckbox('pref-notify_iono_disturbance',  prefs.notify_iono_disturbance);
+        _setCheckbox('pref-notify_recurrence',        prefs.notify_recurrence);
+        _setCheckbox('pref-email_alerts',             prefs.email_alerts);
+        _setSelect('pref-aurora_kp_threshold',        prefs.aurora_kp_threshold);
+        _setSelect('pref-storm_g_threshold',          prefs.storm_g_threshold);
+        _setSelect('pref-flare_class_threshold',      prefs.flare_class_threshold);
+        _setSelect('pref-radio_r_threshold',          prefs.radio_r_threshold);
+        _setSelect('pref-gnss_risk_threshold',        prefs.gnss_risk_threshold);
+        _setSelect('pref-power_grid_g_threshold',     prefs.power_grid_g_threshold);
+        _setSelect('pref-alert_cooldown_min',         prefs.alert_cooldown_min);
+        _setInput('pref-temp_high_f',                 prefs.temp_high_f);
+        _setInput('pref-temp_low_f',                  prefs.temp_low_f);
+
+        // Save button
+        document.getElementById('alert-prefs-save')?.addEventListener('click', async () => {
+            const updates = {};
+            document.querySelectorAll('#alert-prefs-body [data-key]').forEach(el => {
+                const key = el.dataset.key;
+                if (el.type === 'checkbox') updates[key] = el.checked;
+                else if (el.type === 'number') updates[key] = el.value ? parseFloat(el.value) : null;
+                else updates[key] = el.value;
+            });
+            // Convert numeric selects
+            if (updates.aurora_kp_threshold)    updates.aurora_kp_threshold    = parseInt(updates.aurora_kp_threshold, 10);
+            if (updates.storm_g_threshold)      updates.storm_g_threshold      = parseInt(updates.storm_g_threshold, 10);
+            if (updates.radio_r_threshold)      updates.radio_r_threshold      = parseInt(updates.radio_r_threshold, 10);
+            if (updates.gnss_risk_threshold)    updates.gnss_risk_threshold    = parseInt(updates.gnss_risk_threshold, 10);
+            if (updates.power_grid_g_threshold) updates.power_grid_g_threshold = parseInt(updates.power_grid_g_threshold, 10);
+            if (updates.alert_cooldown_min)     updates.alert_cooldown_min     = parseInt(updates.alert_cooldown_min, 10);
+
+            await auth.updateProfile(updates);
+            // Re-fetch to confirm
+            await auth.fetchProfile();
+
+            const msg = document.getElementById('alert-prefs-msg');
+            if (msg) { msg.style.display = ''; setTimeout(() => { msg.style.display = 'none'; }, 2500); }
+        });
+
+        // Start alert engine (only for subscribers)
+        engine.start();
+
+        // Show master email-delivery dependents only when toggled on
+        const _emailMasterCk = document.getElementById('pref-email_alerts');
+        const _emailDeps     = document.getElementById('email-delivery-dependents');
+        const _emailAddr     = document.getElementById('email-delivery-addr');
+        const _syncEmailDeps = () => {
+            if (_emailDeps) _emailDeps.style.display = _emailMasterCk?.checked ? '' : 'none';
+        };
+        _emailMasterCk?.addEventListener('change', _syncEmailDeps);
+        _syncEmailDeps();
+        if (_emailAddr) _emailAddr.textContent = (auth.getUser()?.email || 'your inbox');
+    }
+}
+
+// ── Saved Locations (multi-location alerts) ─────────────────────────────────
+(() => {
+    const $ = id => document.getElementById(id);
+    const gate        = $('sl-gate');
+    const content     = $('sl-content');
+    const cardTitle   = $('sl-plan-badge');
+    const countEl     = $('sl-count');
+    const limitEl     = $('sl-limit');
+    const listEl      = $('sl-list');
+    const errEl       = $('sl-err');
+    const labelInput  = $('sl-label-input');
+    const cityInput   = $('sl-city-input');
+    const addBtn      = $('sl-add-btn');
+    const gpsBtn      = $('sl-add-gps-btn');
+    const copyBtn     = $('sl-copy-defaults-btn');
+
+    const plan     = (auth.getPlan() || 'free').toLowerCase();
+    const isAdmin  = auth.isAdmin?.() || auth.isTester?.();
+    const cap      = locationLimit();
+    const planCap  = isAdmin ? '∞' : (PLAN_LIMITS[plan] ?? 0);
+    // Feature gates:
+    //   Hourly strip → any tier with alert access (basic + advanced).
+    //   Daily forecast digest (email):
+    //     basic plan    → up to 5 digest-enabled locations · tomorrow's forecast (1 day)
+    //     advanced plan → up to 10 digest-enabled locations · 7-day forecast
+    //   The cap is enforced both client-side (this file) and server-side
+    //   (api/cron/daily-forecast-digest.js orders by created_at and slices).
+    const canUseHourly   = isAdmin || auth.canUseAlerts?.();
+    // Digest tier mapping mirrors saved-locations cap groupings:
+    //   basic + educator   → 5 digest locations · 1-day forecast
+    //   advanced + inst+   → 10 digest locations · 7-day forecast
+    const _digestPaidLow  = new Set(['basic', 'educator']);
+    const _digestPaidHigh = new Set(['advanced', 'institution', 'enterprise']);
+    const canUseDigest   = isAdmin || _digestPaidLow.has(plan) || _digestPaidHigh.has(plan);
+    const digestCap      = isAdmin ? Infinity
+                          : _digestPaidHigh.has(plan) ? 10
+                          : _digestPaidLow.has(plan)  ? 5
+                          : 0;
+    const digestDays     = _digestPaidHigh.has(plan) ? 7 : 1;
+
+    if (cardTitle) {
+        cardTitle.textContent = isAdmin
+            ? `${plan.toUpperCase()} (admin override)`
+            : `${plan.toUpperCase()} · up to ${planCap}`;
+    }
+
+    // Plan-gate: free users see upgrade pitch
+    if (!isAdmin && cap <= 0) {
+        if (gate)    gate.style.display = '';
+        if (content) content.style.display = 'none';
+        return;
+    }
+    if (gate)    gate.style.display = 'none';
+    if (content) content.style.display = '';
+    if (limitEl) limitEl.textContent = String(planCap);
+
+    // ── Error helpers ────────────────────────────────────────────────────────
+    function showErr(msg) {
+        if (!errEl) return;
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+        clearTimeout(showErr._t);
+        showErr._t = setTimeout(() => { errEl.style.display = 'none'; }, 5000);
+    }
+    function clearErr() { if (errEl) errEl.style.display = 'none'; }
+
+    // ── Render list ──────────────────────────────────────────────────────────
+    async function render() {
+        const rows = await listLocations({ force: true });
+        if (countEl) countEl.textContent = String(rows.length);
+
+        const canAdd = isAdmin || rows.length < cap;
+        if (addBtn)  addBtn.disabled  = !canAdd;
+        if (gpsBtn)  gpsBtn.disabled  = !canAdd;
+        if (copyBtn) copyBtn.disabled = !canAdd;
+        if (labelInput) labelInput.disabled = !canAdd;
+        if (cityInput)  cityInput.disabled  = !canAdd;
+
+        if (!rows.length) {
+            listEl.innerHTML = '<div class="sl-empty">No saved locations yet. Add one above to get dedicated alerts for that spot.</div>';
+            return;
+        }
+
+        listEl.innerHTML = rows.map(row => renderItem(row)).join('');
+
+        // Wire per-row controls
+        for (const row of rows) wireItem(row);
+
+        // Fan out hourly-strip fetches once the DOM is in place. Edge proxy
+        // dedupes per (lat, lon) so concurrent calls collapse to one upstream
+        // hit when the same location appears for multiple users this minute.
+        if (canUseHourly) populateHourlyStrips(rows);
+    }
+
+    // ── Hourly forecast strip (Pro + Intro) ──────────────────────────────────
+    // Renders the next ~12 hours per saved location as a compact horizontal
+    // scroll. One /api/weather/forecast?type=hourly call per row, in parallel.
+    // Strips that 404 / fall back / time-out simply replace their placeholder
+    // text with a quiet error — the rest of the row stays usable.
+
+    const HOURLY_STRIP_HOURS = 12;
+    const HOURLY_FETCH_TIMEOUT_MS = 10_000;
+
+    /** Map an Open-Meteo weather_code + is_day flag → emoji glyph. */
+    function _wxIcon(code, isDay) {
+        // Codes per WMO 4677 (Open-Meteo passthrough). Coarsened buckets
+        // because we only have one tiny glyph slot.
+        if (code == null) return '·';
+        if (code === 0)  return isDay ? '☀️' : '🌙';
+        if (code <= 2)   return isDay ? '🌤' : '☁️';
+        if (code === 3)  return '☁️';
+        if (code <= 49)  return '🌫';
+        if (code <= 59)  return '🌦';
+        if (code <= 69)  return '🌧';
+        if (code <= 79)  return '🌨';
+        if (code <= 84)  return '🌧';
+        if (code <= 99)  return '⛈';
+        return '·';
+    }
+
+    function _findCurrentHourIdx(times) {
+        if (!Array.isArray(times) || !times.length) return 0;
+        const now = Date.now();
+        // Open-Meteo timeseries is local-time but ISO-8601 with no zone
+        // offset. Date.parse treats unzoned strings as local — exactly what
+        // we want for a "what's the user-local hour right now" pick.
+        for (let i = 0; i < times.length; i++) {
+            const t = Date.parse(times[i]);
+            if (Number.isFinite(t) && t >= now - 30 * 60_000) return i;
+        }
+        return 0;
+    }
+
+    function renderHourlyStrip(el, data) {
+        const hourly = data?.hourly;
+        if (!hourly?.time?.length) {
+            el.innerHTML = '<span class="sl-hourly-err">No hourly data available</span>';
+            return;
+        }
+        const startIdx = _findCurrentHourIdx(hourly.time);
+        const slots    = Math.min(HOURLY_STRIP_HOURS, hourly.time.length - startIdx);
+        if (slots <= 0) {
+            el.innerHTML = '<span class="sl-hourly-err">Hourly forecast caught up — try again shortly</span>';
+            return;
+        }
+
+        const cells = [];
+        for (let k = 0; k < slots; k++) {
+            const i      = startIdx + k;
+            const tStr   = hourly.time[i];
+            const tDate  = new Date(tStr);
+            const hourLbl = k === 0
+                ? 'Now'
+                : tDate.toLocaleTimeString([], { hour: 'numeric' });
+            const temp   = hourly.temperature_2m?.[i];
+            const code   = hourly.weather_code?.[i];
+            const isDay  = hourly.is_day?.[i] !== 0;
+            const pop    = hourly.precipitation_probability?.[i];
+            const wind   = hourly.wind_speed_10m?.[i];
+            const popLbl = (pop != null && pop >= 10) ? `${Math.round(pop)}%` : '';
+            const tempLbl = (temp != null) ? `${Math.round(temp)}°` : '–';
+            const windLbl = (wind != null) ? `${Math.round(wind)}mph` : '';
+            cells.push(
+                `<div class="sl-hr${k === 0 ? ' now' : ''}">`
+              +     `<span class="sl-hr-time">${escHtml(hourLbl)}</span>`
+              +     `<span class="sl-hr-icon">${_wxIcon(code, isDay)}</span>`
+              +     `<span class="sl-hr-temp">${tempLbl}</span>`
+              +     `<span class="sl-hr-pop">${popLbl}</span>`
+              +     `<span class="sl-hr-wind">${windLbl}</span>`
+              + `</div>`,
+            );
+        }
+        el.innerHTML = cells.join('');
+    }
+
+    async function fetchHourly(lat, lon) {
+        const url = `/api/weather/forecast?type=hourly&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+        const ctrl = new AbortController();
+        const to   = setTimeout(() => ctrl.abort(), HOURLY_FETCH_TIMEOUT_MS);
+        try {
+            const res = await fetch(url, { signal: ctrl.signal });
+            if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
+            const json = await res.json();
+            return { ok: true, data: json };
+        } catch (e) {
+            return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
+        } finally {
+            clearTimeout(to);
+        }
+    }
+
+    async function populateHourlyStrips(rows) {
+        const strips = listEl.querySelectorAll('.sl-hourly');
+        await Promise.all([...strips].map(async el => {
+            const lat = parseFloat(el.dataset.lat);
+            const lon = parseFloat(el.dataset.lon);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+                el.innerHTML = '<span class="sl-hourly-err">Missing coordinates</span>';
+                return;
+            }
+            const res = await fetchHourly(lat, lon);
+            if (!res.ok) {
+                el.innerHTML = `<span class="sl-hourly-err">Forecast unavailable (${escHtml(res.error)})</span>`;
+                return;
+            }
+            renderHourlyStrip(el, res.data);
+        }));
+    }
+
+    function renderItem(row) {
+        const cfg      = row.alert_config || {};
+        const primary  = row.is_primary   ? ' is-primary' : '';
+        const muted    = !row.notify_enabled ? ' disabled'  : '';
+        const dotClass = row.notify_enabled  ? 'on' : 'off';
+        const summary  = buildSummary(row, cfg);
+        // Hourly strip is a placeholder until populateHourlyStrips() hydrates
+        // it with real data. Free / no-alert tiers don't see the element at
+        // all — keeps the row compact and avoids dangling "loading…" text
+        // for users who can't use the feature.
+        const hourlyEl = canUseHourly
+            ? `<div class="sl-hourly" data-hourly-id="${row.id}" data-lat="${row.lat}" data-lon="${row.lon}"><span class="sl-hourly-loading">Loading hourly forecast…</span></div>`
+            : '';
+        return `
+<div class="sl-item${primary}${muted}" data-id="${row.id}">
+  <div class="sl-row">
+    <span class="sl-star ${row.is_primary ? 'on' : ''}" data-action="primary" title="${row.is_primary ? 'Primary location' : 'Set as primary'}">★</span>
+    <div class="sl-label-wrap">
+      <input class="sl-label" data-action="label" value="${escAttr(row.label)}" maxlength="40" aria-label="Location label">
+      <span class="sl-city">${escHtml(row.city ?? '')} &middot; ${row.lat.toFixed(2)}°${row.lat >= 0 ? 'N' : 'S'}, ${row.lon.toFixed(2)}°${row.lon >= 0 ? 'E' : 'W'}</span>
+    </div>
+    <div class="sl-status">
+      <span class="sl-dot ${dotClass}"></span>
+      <span style="color:var(--muted)">${summary}</span>
+    </div>
+    <div class="sl-actions">
+      <button class="sl-btn" data-action="toggle">${row.notify_enabled ? 'Mute' : 'Enable'}</button>
+      <button class="sl-btn" data-action="expand">Configure</button>
+      <button class="sl-btn danger" data-action="delete" title="Delete this location">&times;</button>
+    </div>
+  </div>
+  ${hourlyEl}
+  <div class="sl-config">
+    ${renderConfigPanel(row, cfg)}
+  </div>
+</div>`;
+    }
+
+    function buildSummary(row, cfg) {
+        if (!row.notify_enabled) return 'Muted';
+        const prefs = auth.getAlertPrefs() || {};
+        const types = ['notify_aurora','notify_storm','notify_flare','notify_cme','notify_temperature','notify_radio_blackout','notify_gps','notify_power_grid','notify_iono_disturbance'];
+        let n = 0;
+        for (const k of types) {
+            const v = cfg[k] !== undefined ? cfg[k] : prefs[k];
+            if (v) n++;
+        }
+        const emailWord = row.email_alerts_enabled && prefs.email_alerts ? 'email on' : 'email off';
+        return n ? `${n} alert${n === 1 ? '' : 's'} · ${emailWord}` : 'No alerts enabled';
+    }
+
+    function renderConfigPanel(row, cfg) {
+        const prefs = auth.getAlertPrefs() || {};
+        const isAdv = auth.canUseAdvancedAlerts();
+
+        const kpVal    = cfg.aurora_kp_threshold    ?? prefs.aurora_kp_threshold    ?? 5;
+        const gVal     = cfg.storm_g_threshold      ?? prefs.storm_g_threshold      ?? 1;
+        const fVal     = cfg.flare_class_threshold  ?? prefs.flare_class_threshold  ?? 'M';
+        const hiVal    = cfg.temp_high_f            ?? prefs.temp_high_f            ?? '';
+        const loVal    = cfg.temp_low_f             ?? prefs.temp_low_f             ?? '';
+        const rVal     = cfg.radio_r_threshold      ?? prefs.radio_r_threshold      ?? 2;
+        const gnssVal  = cfg.gnss_risk_threshold    ?? prefs.gnss_risk_threshold    ?? 2;
+        const pgVal    = cfg.power_grid_g_threshold ?? prefs.power_grid_g_threshold ?? 4;
+
+        const ck = (key) => (cfg[key] !== undefined ? !!cfg[key] : !!prefs[key]) ? 'checked' : '';
+
+        const advBlock = isAdv ? `
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Advanced alerts</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_radio_blackout" ${ck('notify_radio_blackout')}> Radio blackout</label>
+        <label>R&ge; <select data-cfg="radio_r_threshold">${[1,2,3,4,5].map(v => `<option value="${v}" ${rVal==v?'selected':''}>R${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_gps" ${ck('notify_gps')}> GPS/GNSS</label>
+        <label>Risk&ge; <select data-cfg="gnss_risk_threshold">${[[1,'Mod'],[2,'High'],[3,'Sev']].map(([v,l]) => `<option value="${v}" ${gnssVal==v?'selected':''}>${l}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_power_grid" ${ck('notify_power_grid')}> Power grid</label>
+        <label>G&ge; <select data-cfg="power_grid_g_threshold">${[2,3,4,5].map(v => `<option value="${v}" ${pgVal==v?'selected':''}>G${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_iono_disturbance" ${ck('notify_iono_disturbance')}> Ionospheric disturbance</label>
+      </div>
+    </div>
+  </div>` : '';
+
+        // Daily digest toggle.
+        // Capacity hint mirrors the per-tier cap so users see "X / N enabled"
+        // before they hit the limit. Cap enforcement on save: see the click
+        // handler at [data-action="save"].
+        const digestTitle = digestDays === 7
+            ? 'One email each morning with the next 7 days of forecast for this location (Pro)'
+            : "One email each morning with tomorrow's forecast for this location";
+        const digestRow = canUseDigest ? `
+      <div class="sl-cfg-row">
+        <label title="${digestTitle}"><input type="checkbox" data-cfg="daily_digest_enabled" ${row.daily_digest_enabled?'checked':''}> Daily forecast digest</label>
+      </div>` : '';
+
+        return `
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Delivery at this location</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_enabled" ${row.notify_enabled?'checked':''}> Alerts on</label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="email_alerts_enabled" ${row.email_alerts_enabled?'checked':''}> Email on</label>
+      </div>
+      ${digestRow}
+    </div>
+  </div>
+
+  <div class="sl-cfg-section">
+    <div class="sl-cfg-title">Alert types &amp; thresholds</div>
+    <div class="sl-cfg-grid">
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_temperature" ${ck('notify_temperature')}> Temperature</label>
+        <span style="display:flex;gap:4px">
+          <input type="number" data-cfg="temp_high_f" value="${hiVal}" placeholder="hi" title="High °F">
+          <input type="number" data-cfg="temp_low_f"  value="${loVal}" placeholder="lo" title="Low °F">
+        </span>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_aurora" ${ck('notify_aurora')}> Aurora</label>
+        <label>Kp&ge; <select data-cfg="aurora_kp_threshold">${[3,4,5,6,7,8].map(v => `<option value="${v}" ${kpVal==v?'selected':''}>${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_storm" ${ck('notify_storm')}> Geomag storm</label>
+        <label>G&ge; <select data-cfg="storm_g_threshold">${[1,2,3,4,5].map(v => `<option value="${v}" ${gVal==v?'selected':''}>G${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_flare" ${ck('notify_flare')}> Solar flare</label>
+        <label>Class&ge; <select data-cfg="flare_class_threshold">${['C','M','X'].map(v => `<option value="${v}" ${fVal===v?'selected':''}>${v}</option>`).join('')}</select></label>
+      </div>
+      <div class="sl-cfg-row">
+        <label><input type="checkbox" data-cfg="notify_cme" ${ck('notify_cme')}> CME Earth-directed</label>
+      </div>
+    </div>
+  </div>
+
+  ${advBlock}
+
+  <div class="sl-cfg-actions">
+    <button class="sl-save-btn" data-action="save">Save</button>
+    <button class="sl-reset-btn" data-action="reset" title="Clear overrides at this location — use account defaults">Reset to defaults</button>
+    <span class="sl-save-msg" data-role="save-msg">Saved!</span>
+  </div>`;
+    }
+
+    function wireItem(row) {
+        const el = listEl.querySelector(`[data-id="${row.id}"]`);
+        if (!el) return;
+
+        el.querySelector('[data-action="primary"]')?.addEventListener('click', async () => {
+            if (row.is_primary) return;
+            await setPrimaryLocation(row.id);
+            render();
+        });
+
+        el.querySelector('[data-action="expand"]')?.addEventListener('click', () => {
+            el.classList.toggle('expanded');
+        });
+
+        el.querySelector('[data-action="toggle"]')?.addEventListener('click', async () => {
+            await updateLocation(row.id, { notify_enabled: !row.notify_enabled });
+            render();
+        });
+
+        el.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+            if (!confirm(`Delete "${row.label}"? This cannot be undone.`)) return;
+            await removeLocation(row.id);
+            render();
+        });
+
+        const labelInp = el.querySelector('.sl-label');
+        labelInp?.addEventListener('change', async () => {
+            const v = labelInp.value.trim();
+            if (!v || v === row.label) return;
+            await updateLocation(row.id, { label: v });
+            render();
+        });
+
+        el.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
+            const patch = { alert_config: {} };
+            const cfg = patch.alert_config;
+            el.querySelectorAll('[data-cfg]').forEach(inp => {
+                const k = inp.dataset.cfg;
+                if (k === 'notify_enabled') {
+                    patch.notify_enabled = inp.checked;
+                } else if (k === 'email_alerts_enabled') {
+                    patch.email_alerts_enabled = inp.checked;
+                } else if (k === 'daily_digest_enabled') {
+                    patch.daily_digest_enabled = inp.checked;
+                } else if (inp.type === 'checkbox') {
+                    cfg[k] = inp.checked;
+                } else if (inp.type === 'number') {
+                    cfg[k] = inp.value === '' ? null : parseFloat(inp.value);
+                } else if (inp.tagName === 'SELECT') {
+                    const v = inp.value;
+                    cfg[k] = /^\d+$/.test(v) ? parseInt(v, 10) : v;
+                }
+            });
+            // Per-plan digest cap. Counted from the freshest list rather than
+            // `row` so quick toggles across multiple rows can't slip past the
+            // limit. (Cron also re-applies this server-side as defense in depth.)
+            if (patch.daily_digest_enabled === true && !row.daily_digest_enabled) {
+                const fresh = await listLocations({ force: true });
+                const enabled = fresh.filter(r => r.daily_digest_enabled).length;
+                if (enabled >= digestCap) {
+                    showErr(`Digest cap reached: ${digestCap} location${digestCap === 1 ? '' : 's'} on the ${plan.toUpperCase()} plan. Disable another or upgrade.`);
+                    return;
+                }
+            }
+            const res = await updateLocation(row.id, patch);
+            if (res.ok) {
+                const msg = el.querySelector('[data-role="save-msg"]');
+                if (msg) { msg.style.display = 'inline'; setTimeout(() => { msg.style.display = 'none'; }, 2200); }
+                render();
+            } else {
+                showErr('Failed to save: ' + (res.error || 'unknown'));
+            }
+        });
+
+        el.querySelector('[data-action="reset"]')?.addEventListener('click', async () => {
+            await updateLocation(row.id, { alert_config: {} });
+            render();
+        });
+    }
+
+    // ── Add flow ─────────────────────────────────────────────────────────────
+    async function submitAdd({ lat, lon, city, label }) {
+        clearErr();
+        const res = await addLocation({
+            label: label || city || 'New Location',
+            lat, lon, city,
+            is_primary: false,
+        });
+        if (!res.ok) {
+            if (res.limitReached) showErr(`You've hit the ${planCap}-location cap. Upgrade or remove one.`);
+            else showErr(res.error || 'Could not save location');
+            return;
+        }
+        if (labelInput) labelInput.value = '';
+        if (cityInput)  cityInput.value  = '';
+        render();
+    }
+
+    addBtn?.addEventListener('click', async () => {
+        const q = (cityInput?.value || '').trim();
+        if (!q) { showErr('Enter a city, zip, or address'); return; }
+        addBtn.disabled = true;
+        try {
+            const loc = await geocodeQuery(q);
+            await submitAdd({
+                lat: loc.lat, lon: loc.lon, city: loc.city,
+                label: (labelInput?.value || '').trim() || loc.city,
+            });
+        } catch (e) {
+            showErr(e.message || 'Geocoding failed');
+        } finally {
+            addBtn.disabled = false;
+        }
+    });
+
+    cityInput?.addEventListener('keydown', e => { if (e.key === 'Enter') addBtn?.click(); });
+
+    gpsBtn?.addEventListener('click', () => {
+        if (!navigator.geolocation) { showErr('Geolocation not supported'); return; }
+        gpsBtn.disabled = true;
+        navigator.geolocation.getCurrentPosition(async pos => {
+            try {
+                const { latitude: lat, longitude: lon } = pos.coords;
+                let city = `${lat.toFixed(2)}, ${lon.toFixed(2)}`;
+                try {
+                    const res = await fetch(
+                        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,
+                        { headers: { 'Accept-Language': 'en' } },
+                    );
+                    if (res.ok) {
+                        const data = await res.json();
+                        const adr = data.address ?? {};
+                        city = adr.city || adr.town || adr.village || adr.county || adr.state || city;
+                    }
+                } catch (_) {}
+                await submitAdd({
+                    lat, lon, city,
+                    label: (labelInput?.value || '').trim() || city,
+                });
+            } finally {
+                gpsBtn.disabled = false;
+            }
+        }, err => {
+            gpsBtn.disabled = false;
+            showErr({ 1: 'Location access denied', 2: 'Location unavailable', 3: 'Location timed out' }[err.code] || 'GPS error');
+        }, { timeout: 10000 });
+    });
+
+    // "Add current location" — pulls the single-location selector above
+    copyBtn?.addEventListener('click', async () => {
+        const loc = loadUserLocation();
+        if (!loc) { showErr('Set your primary location above first'); return; }
+        await submitAdd({
+            lat: loc.lat, lon: loc.lon, city: loc.city,
+            label: (labelInput?.value || '').trim() || loc.city,
+        });
+    });
+
+    // Helpers
+    function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function escAttr(s) { return escHtml(s).replace(/"/g, '&quot;'); }
+
+    // Re-render when anything external mutates (e.g. alert engine ack)
+    onLocationsChanged(() => render());
+
+    // Initial render
+    render();
+})();
+
+// ── Trip Planning (two-location weather comparison) ─────────────────────────
+(() => {
+    const $ = id => document.getElementById(id);
+    const empty     = $('tp-empty');
+    const wrap      = $('tp-wrap');
+    const fromSel   = $('tp-from');
+    const toSel     = $('tp-to');
+    const swapBtn   = $('tp-swap');
+    const goBtn     = $('tp-go');
+    const earthLink = $('tp-earth');
+    const summary   = $('tp-summary');
+    const errEl     = $('tp-err');
+    const results   = $('tp-results');
+    const cardFrom  = $('tp-card-from');
+    const cardTo    = $('tp-card-to');
+    const routeWrap = $('tp-route-wrap');
+    const routeStrip= $('tp-route-strip');
+    const routeNote = $('tp-route-note');
+
+    let _locs = [];
+
+    function showErr(msg) {
+        if (!errEl) return;
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+        clearTimeout(showErr._t);
+        showErr._t = setTimeout(() => { errEl.style.display = 'none'; }, 4500);
+    }
+    function clearErr() { if (errEl) errEl.style.display = 'none'; }
+
+    function escHtml(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    function populateSelects() {
+        const opts = _locs.map(l => `<option value="${l.id}">${escHtml(l.label)}${l.city && l.city !== l.label ? ' — ' + escHtml(l.city) : ''}</option>`).join('');
+        fromSel.innerHTML = opts;
+        toSel.innerHTML   = opts;
+
+        // Default: primary → the next non-primary location (or index 1)
+        const primaryIdx = _locs.findIndex(l => l.is_primary);
+        const fromIdx = Math.max(0, primaryIdx);
+        const toIdx   = _locs.length > 1 ? (fromIdx === 0 ? 1 : 0) : 0;
+        fromSel.value = _locs[fromIdx].id;
+        toSel.value   = _locs[toIdx].id;
+        updateSummary();
+    }
+
+    function pickFromById(id) { return _locs.find(l => l.id === id) ?? null; }
+
+    function updateSummary() {
+        const a = pickFromById(fromSel.value);
+        const b = pickFromById(toSel.value);
+        if (!a || !b) { summary.textContent = ''; earthLink.classList.add('disabled'); return; }
+        if (a.id === b.id) {
+            summary.textContent = 'Pick two different locations';
+            earthLink.classList.add('disabled');
+            return;
+        }
+        const km = greatCircleDistanceKm(a, b);
+        const mi = km * 0.621371;
+        summary.innerHTML = `<strong>${km < 100 ? km.toFixed(1) : Math.round(km)}</strong> km · <strong>${mi < 100 ? mi.toFixed(1) : Math.round(mi)}</strong> mi`;
+        earthLink.href = `earth.html?trip=${encodeURIComponent(encodeTripParam(a, b))}`;
+        earthLink.classList.remove('disabled');
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────
+    function renderCard(side, location, weather) {
+        if (!weather) {
+            return `<div class="tp-card-hdr"><span class="tp-card-side">${side}</span></div>
+                    <div class="tp-card-title">${escHtml(location.label)}</div>
+                    <div class="tp-card-sub">${location.lat.toFixed(2)}°, ${location.lon.toFixed(2)}°</div>
+                    <div class="tp-cond" style="color:#ff6666">Could not fetch weather</div>`;
+        }
+        const cond = weatherCodeLabel(weather.weather_code);
+        const dailyRows = (weather.daily.dates || []).slice(0, 3).map((iso, i) => {
+            const d = new Date(iso + 'T12:00:00');
+            const name = i === 0 ? 'Today' : i === 1 ? 'Tmrw'
+                : d.toLocaleDateString('en-US', { weekday: 'short' });
+            const hi = weather.daily.high_f[i];
+            const lo = weather.daily.low_f[i];
+            const pp = weather.daily.precip_prob_pct[i];
+            return `<div class="tp-day">
+                <div class="tp-day-name">${name}</div>
+                <div class="tp-day-hi">${hi != null ? Math.round(hi) + '°' : '—'}</div>
+                <div class="tp-day-lo">${lo != null ? Math.round(lo) + '°' : '—'}</div>
+                ${pp != null && pp > 5 ? `<div class="tp-day-precip">${Math.round(pp)}%</div>` : ''}
+            </div>`;
+        }).join('');
+
+        return `
+            <div class="tp-card-hdr">
+                <span class="tp-card-side">${side}</span>
+                <span class="tp-card-sub" title="Timezone">${escHtml(weather.timezone ?? '')}</span>
+            </div>
+            <div class="tp-card-title">${escHtml(location.label)}</div>
+            <div class="tp-card-sub">${location.lat.toFixed(2)}°, ${location.lon.toFixed(2)}°</div>
+
+            <div class="tp-current">
+                <span class="tp-temp">${Math.round(weather.temp_f)}°F</span>
+                <span class="tp-feels">feels ${Math.round(weather.feels_f)}°</span>
+            </div>
+            <div class="tp-cond">${escHtml(cond)} · ${weather.cloud_cover ?? 0}% cloud</div>
+
+            <div class="tp-metric-grid">
+                <span class="m-lbl">Wind</span>
+                <span class="m-val">${Math.round(weather.wind_mph ?? 0)} mph ${compassLabel(weather.wind_dir_deg)}</span>
+                <span class="m-lbl">Gust</span>
+                <span class="m-val">${Math.round(weather.wind_gust_mph ?? 0)} mph</span>
+                <span class="m-lbl">Humidity</span>
+                <span class="m-val">${weather.humidity ?? '—'}%</span>
+                <span class="m-lbl">Pressure</span>
+                <span class="m-val">${weather.pressure_hpa != null ? Math.round(weather.pressure_hpa) : '—'} hPa</span>
+            </div>
+
+            <div class="tp-daily">${dailyRows}</div>
+        `;
+    }
+
+    /** Highlight the warmer / wetter / windier side so the user can tell at a glance. */
+    function decorateDiffs(wa, wb) {
+        if (!wa || !wb) return;
+        const fromEls = cardFrom.querySelectorAll('.m-val, .tp-temp');
+        const toEls   = cardTo.querySelectorAll('.m-val, .tp-temp');
+
+        // Temp: warmer wins
+        if (wa.temp_f != null && wb.temp_f != null && Math.abs(wa.temp_f - wb.temp_f) > 1.5) {
+            const [warm, cold] = wa.temp_f > wb.temp_f ? [fromEls[0], toEls[0]] : [toEls[0], fromEls[0]];
+            warm?.classList.add('tp-winner');
+            cold?.classList.add('tp-loser');
+        }
+    }
+
+    function renderRoute(route, from, to) {
+        if (!route || !route.length) { routeWrap.style.display = 'none'; return; }
+        const anyOk = route.some(w => w);
+        if (!anyOk) { routeWrap.style.display = 'none'; return; }
+        routeWrap.style.display = '';
+        routeNote.textContent = ` · ${route.length} sample${route.length === 1 ? '' : 's'} along great-circle path`;
+        routeStrip.innerHTML = route.map((w, i) => {
+            const pct = Math.round(((i + 1) / (route.length + 1)) * 100);
+            if (!w) return `<div class="tp-stop"><div class="tp-stop-t">${pct}%</div><div class="tp-stop-temp">—</div></div>`;
+            return `<div class="tp-stop" title="${w.lat.toFixed(2)}°, ${w.lon.toFixed(2)}° · ${escHtml(weatherCodeLabel(w.weather_code))}">
+                <div class="tp-stop-t">${pct}%</div>
+                <div class="tp-stop-temp">${Math.round(w.temp_f)}°</div>
+                <div class="tp-stop-cond">${escHtml(weatherCodeLabel(w.weather_code))}</div>
+            </div>`;
+        }).join('');
+    }
+
+    // ── Compare handler ──────────────────────────────────────────────────
+    async function doCompare() {
+        clearErr();
+        const a = pickFromById(fromSel.value);
+        const b = pickFromById(toSel.value);
+        if (!a || !b) return;
+        if (a.id === b.id) { showErr('Pick two different locations'); return; }
+
+        goBtn.disabled    = true;
+        goBtn.textContent = 'Loading…';
+
+        // Scale route sample count with trip distance — pointless to query
+        // 5 waypoints for a 200 km trip. Free, unauthenticated Open-Meteo,
+        // but still a courtesy to cap at 4.
+        const km      = greatCircleDistanceKm(a, b);
+        const samples = km < 500 ? 0 : km < 2000 ? 2 : km < 6000 ? 3 : 4;
+
+        try {
+            const trip = await fetchTripWeather(a, b, { routeSamples: samples });
+            cardFrom.innerHTML = renderCard('From', a, trip.from.weather);
+            cardTo.innerHTML   = renderCard('To',   b, trip.to.weather);
+            decorateDiffs(trip.from.weather, trip.to.weather);
+            renderRoute(trip.route, a, b);
+            results.classList.add('show');
+        } catch (e) {
+            showErr('Weather fetch failed: ' + e.message);
+        } finally {
+            goBtn.disabled    = false;
+            goBtn.textContent = 'Compare weather';
+        }
+    }
+
+    // ── Wiring ────────────────────────────────────────────────────────────
+    async function refreshLocations() {
+        _locs = (await listLocations({ force: false })).filter(l => l.lat != null && l.lon != null);
+        const hasTwo = _locs.length >= 2;
+        empty.style.display = hasTwo ? 'none' : '';
+        wrap.style.display  = hasTwo ? '' : 'none';
+        if (!hasTwo) {
+            results.classList.remove('show');
+            return;
+        }
+        populateSelects();
+    }
+
+    fromSel?.addEventListener('change', updateSummary);
+    toSel?.addEventListener('change',   updateSummary);
+    swapBtn?.addEventListener('click', () => {
+        const a = fromSel.value;
+        fromSel.value = toSel.value;
+        toSel.value = a;
+        updateSummary();
+    });
+    goBtn?.addEventListener('click', doCompare);
+
+    onLocationsChanged(() => refreshLocations());
+    refreshLocations();
+})();
+
+// ── Impact Score Engine ──────────────────────────────────────────────────────
+{
+    const impactEngine = new ImpactScoreEngine().start();
+
+    const _el = id => document.getElementById(id);
+
+    function _pctColor(p) {
+        if (p >= 0.6) return '#ff4444';
+        if (p >= 0.3) return '#ffaa00';
+        return '#44cc88';
+    }
+
+    function _confBadge(c) {
+        const col = c === 'high' ? '#44cc88' : c === 'medium' ? '#ffcc00' : '#ff6666';
+        return `<span style="color:${col};font-weight:600">${c}</span>`;
+    }
+
+    window.addEventListener('impact-score-update', ev => {
+        const r = ev.detail;
+        if (!r) return;
+        const { now: n } = r;
+
+        // ── Score ring ──────────────────────────────────────────────────────
+        const ring   = _el('impact-ring');
+        const numEl  = _el('impact-number');
+        const lblEl  = _el('impact-label');
+        const descEl = _el('impact-desc');
+        const updEl  = _el('impact-updated');
+
+        if (ring) {
+            const circumference = 97.4;  // 2πr where r=15.5
+            ring.style.strokeDashoffset = circumference * (1 - n.score / 100);
+            ring.style.stroke = n.color;
+        }
+        if (numEl)  numEl.textContent = n.score;
+        if (lblEl)  { lblEl.textContent = n.label; lblEl.style.color = n.color; }
+        if (updEl)  updEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+        // Description based on score
+        if (descEl) {
+            if (n.score >= 80)      descEl.textContent = 'Extreme space weather. Multiple hazards active — aurora, radio blackouts, GPS disruption, power grid risk.';
+            else if (n.score >= 60) descEl.textContent = 'Severe conditions. Significant geomagnetic disturbance — aurora visible at lower latitudes, HF radio degraded.';
+            else if (n.score >= 40) descEl.textContent = 'Elevated activity. Storm conditions developing — aurora possible at your latitude, minor GPS effects.';
+            else if (n.score >= 20) descEl.textContent = 'Moderate activity. Some geomagnetic disturbance — aurora hunters should monitor conditions.';
+            else                    descEl.textContent = 'Conditions are calm. No significant space weather expected.';
+        }
+
+        // ── Component bars ──────────────────────────────────────────────────
+        const c = n.components;
+        const _bar = (prefix, val) => {
+            const barEl = _el(prefix + '-bar');
+            const valEl = _el(prefix + '-val');
+            if (barEl) barEl.style.width = Math.round(val) + '%';
+            if (valEl) valEl.textContent  = Math.round(val);
+        };
+        _bar('impact-geo', c.geomagnetic);
+        _bar('impact-sol', c.solar);
+        _bar('impact-cme', c.cme);
+        _bar('impact-loc', c.location);
+
+        // ── Forecast table ──────────────────────────────────────────────────
+        const tbody = _el('impact-forecast-tbody');
+        if (tbody && r.h24) {
+            const rows = [
+                { label: 'Next 24h', d: r.h24 },
+                { label: 'Next 3 days', d: r.d3 },
+                { label: 'Next 7 days', d: r.d7 },
+            ];
+            tbody.innerHTML = rows.map(({ label, d }) => {
+                if (!d) return '';
+                const cmeTag = d.cmeArrival ? ' <span style="color:#ff8800;font-size:.6rem">CME</span>' : '';
+                return `<tr style="border-bottom:1px solid rgba(255,255,255,.03)">
+                    <td style="padding:5px 8px;color:#cdd">${label}${cmeTag}</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG1)};font-weight:600">${Math.round(d.pG1 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG2)};font-weight:600">${Math.round(d.pG2 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px;color:${_pctColor(d.pG3)};font-weight:600">${Math.round(d.pG3 * 100)}%</td>
+                    <td style="text-align:right;padding:5px 8px">${_confBadge(d.confidence)}</td>
+                </tr>`;
+            }).join('');
+        } else if (tbody && r.insufficient_data) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:12px;color:var(--muted)">Accumulating Kp history for forecast model...</td></tr>';
+        }
+
+        // ── Recurrence + cycle context ──────────────────────────────────────
+        const ctxEl = _el('impact-context');
+        if (ctxEl && r.d7) {
+            ctxEl.style.display = '';
+            const rec = r.d7.recurrence;
+            const cyc = r.d7.cycle;
+            const recEl = _el('impact-recurrence');
+            const cycEl = _el('impact-cycle');
+            if (recEl) {
+                recEl.textContent = rec?.signal === 'none'
+                    ? 'No 27-day recurrence detected'
+                    : `27-day echo: ${rec.signal} (r=${rec.corr27})`;
+            }
+            if (cycEl && cyc) {
+                cycEl.textContent = cyc.phaseName === 'maximum'
+                    ? `SC${cyc.cycleNumber} near maximum (SSN≈${cyc.smoothedSSN})`
+                    : `SC${cyc.cycleNumber} ${cyc.phaseName} — ${Math.abs(cyc.yearsToMax).toFixed(1)}yr ${cyc.yearsToMax > 0 ? 'to' : 'past'} max`;
+            }
+        }
+    });
+}
+
+// ── Daily Briefing Engine ─────────────────────────────────────────────────────
+{
+    const summaryEngine = new DailySummaryEngine().start();
+    const _el = id => document.getElementById(id);
+
+    async function refreshBriefing() {
+        const result = await summaryEngine.generate();
+        if (!result) return;
+
+        // Update time
+        const timeEl = _el('briefing-time');
+        if (timeEl) timeEl.textContent = new Date().toLocaleTimeString();
+
+        // Solar activity section
+        const s = result.solar;
+        const badge = _el('briefing-solar-badge');
+        if (badge) {
+            badge.textContent = s.level.toUpperCase();
+            badge.style.background = s.levelColor + '20';
+            badge.style.color = s.levelColor;
+            badge.style.border = `1px solid ${s.levelColor}40`;
+        }
+        const detail = _el('briefing-solar-detail');
+        if (detail) {
+            const cmeStr = s.cme_active ? ` · CME at ${s.cme_speed} km/s` : '';
+            detail.innerHTML = `Kp <strong>${s.kp.toFixed(1)}</strong> (G${s.g_scale}) · X-ray <strong>${s.xray_class}</strong>-class · Wind <strong>${s.wind_speed}</strong> km/s · Bz <strong>${s.bz}</strong> nT${cmeStr}<br>SC25 ${s.cycle_phase} phase · SSN ≈ ${s.cycle_ssn}${s.impact_score != null ? ` · Impact Score: <strong>${s.impact_score}</strong>/100` : ''}`;
+        }
+        if (s.storm_prob_24h) {
+            const probEl = _el('briefing-storm-prob');
+            if (probEl) {
+                probEl.style.display = '';
+                _el('bp-g1').textContent = s.storm_prob_24h.g1 + '%';
+                _el('bp-g2').textContent = s.storm_prob_24h.g2 + '%';
+                _el('bp-g3').textContent = s.storm_prob_24h.g3 + '%';
+            }
+        }
+
+        // 7-day forecast
+        const fc = result.forecast;
+        const fcSection = _el('briefing-forecast-section');
+        const fcGrid    = _el('briefing-forecast-grid');
+        if (fc?.length && fcSection && fcGrid) {
+            fcSection.style.display = '';
+            const modelBadge = _el('briefing-model-badge');
+            if (modelBadge && result.model) {
+                modelBadge.textContent = `ML ±${result.model.high_rmse}°F`;
+            } else if (modelBadge) {
+                modelBadge.textContent = 'GFS';
+            }
+
+            fcGrid.innerHTML = fc.map((d, i) => {
+                const dayName = i === 0 ? 'Today' : i === 1 ? 'Tomorrow'
+                    : new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' });
+                const isToday = i === 0;
+                const borderCol = isToday ? 'rgba(255,200,0,.25)' : 'var(--border)';
+                const precipIcon = d.precip_mm > 5 ? '&#127783;' : d.precip_mm > 0.5 ? '&#127782;' : d.cloud > 70 ? '&#9729;' : '&#9728;';
+                return `<div style="flex:0 0 auto;min-width:72px;background:var(--surface);border:1px solid ${borderCol};border-radius:8px;padding:8px 10px;text-align:center${isToday ? ';box-shadow:0 0 8px rgba(255,200,0,.06)' : ''}">
+                    <div style="font-size:.65rem;font-weight:700;color:${isToday ? '#ffd700' : '#889'};margin-bottom:4px">${dayName}</div>
+                    <div style="font-size:1.1rem;margin-bottom:2px">${precipIcon}</div>
+                    <div style="font-size:.85rem;font-weight:700;color:#e8f4ff">${d.high}°</div>
+                    <div style="font-size:.7rem;color:#667">${d.low}°</div>
+                    <div style="font-size:.55rem;color:#445;margin-top:2px">±${d.high_ci}°</div>
+                </div>`;
+            }).join('');
+        }
+
+        // Share button
+        _el('briefing-share')?.addEventListener('click', () => {
+            if (result.text) {
+                navigator.clipboard?.writeText(result.text).then(() => {
+                    _el('briefing-share').textContent = 'Copied!';
+                    setTimeout(() => { _el('briefing-share').textContent = 'Share'; }, 2000);
+                });
+            }
+        });
+    }
+
+    // Initial load (delayed to let SWPC data arrive)
+    setTimeout(refreshBriefing, 3000);
+    // Refresh button
+    _el('briefing-refresh')?.addEventListener('click', refreshBriefing);
+    // Auto-refresh when SWPC data updates (but throttle to once per 5 min)
+    let _lastBriefingRefresh = 0;
+    window.addEventListener('swpc-update', () => {
+        const now = Date.now();
+        if (now - _lastBriefingRefresh > 300_000) {
+            _lastBriefingRefresh = now;
+            refreshBriefing();
+        }
+    });
+}
+
+// ── Alert History Panel ──────────────────────────────────────────────────────
+{
+    const PAGE_SIZE = 15;
+    let _histPage = 0;
+    let _histType = 'all';
+    let _histSev  = 'all';
+
+    const _el = id => document.getElementById(id);
+
+    const sevColors = { critical: '#ff3344', warning: '#ffaa00', info: '#44cc88' };
+    const typeIcons = { storm: '&#9889;', flare: '&#9788;', aurora: '&#127756;', conjunction: '&#128752;', pass: '&#128640;' };
+
+    function _relTime(iso) {
+        const ms = Date.now() - new Date(iso).getTime();
+        if (ms < 60_000) return 'Just now';
+        if (ms < 3600_000) return `${Math.floor(ms / 60_000)}m ago`;
+        if (ms < 86400_000) return `${Math.floor(ms / 3600_000)}h ago`;
+        if (ms < 604800_000) return `${Math.floor(ms / 86400_000)}d ago`;
+        return new Date(iso).toLocaleDateString();
+    }
+
+    function _escH(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    async function loadHistory() {
+        const canAlert = auth.canUseAlerts();
+        const gateEl   = _el('alert-history-gate');
+        const listEl   = _el('alert-history-list');
+        const pagEl    = _el('alert-history-pagination');
+
+        if (!canAlert) {
+            if (gateEl) gateEl.style.display = '';
+            if (listEl) listEl.innerHTML = '';
+            return;
+        }
+        if (gateEl) gateEl.style.display = 'none';
+
+        // Fetch from Supabase
+        let data = [];
+        try {
+            const { getSupabase, isConfigured } = await import('./js/supabase-config.js');
+            if (isConfigured()) {
+                const sb = await getSupabase();
+                const userId = auth.getUser()?.id;
+                if (userId) {
+                    let query = sb
+                        .from('alert_history')
+                        .select('id, alert_type, severity, title, body, metadata, read, created_at')
+                        .eq('user_id', userId)
+                        .order('created_at', { ascending: false })
+                        .range(_histPage * PAGE_SIZE, (_histPage + 1) * PAGE_SIZE - 1);
+
+                    if (_histType !== 'all') query = query.eq('alert_type', _histType);
+                    if (_histSev !== 'all') query = query.eq('severity', _histSev);
+
+                    const result = await query;
+                    data = result.data ?? [];
+                }
+            }
+        } catch (e) {
+            console.warn('[AlertHistory] DB load failed:', e.message);
+        }
+
+        // Render
+        if (!data.length) {
+            listEl.innerHTML = `<div class="ah-empty">${_histPage > 0 ? 'No more alerts.' : 'No alerts yet. Enable alerts above to start receiving notifications.'}</div>`;
+            if (pagEl) pagEl.style.display = 'none';
+            return;
+        }
+
+        listEl.innerHTML = data.map(a => {
+            const sevCol = sevColors[a.severity] ?? '#556';
+            const icon = typeIcons[a.alert_type] ?? '&#128276;';
+            const readCls = a.read ? '' : ' unread';
+            return `<div class="ah-item${readCls}">
+                <div class="ah-dot" style="background:${sevCol}"></div>
+                <div class="ah-content">
+                    <div class="ah-title">${icon} ${_escH(a.title)}</div>
+                    <div class="ah-body">${_escH(a.body)}</div>
+                    <div class="ah-meta">
+                        <span class="ah-type" style="color:${sevCol}">${_escH(a.severity)}</span>
+                        <span>${_escH(a.alert_type)}</span>
+                        <span>${_relTime(a.created_at)}</span>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        // Pagination
+        if (pagEl) {
+            pagEl.style.display = (data.length === PAGE_SIZE || _histPage > 0) ? 'flex' : 'none';
+            _el('alert-history-page').textContent = `Page ${_histPage + 1}`;
+            _el('alert-history-prev').disabled = _histPage === 0;
+            _el('alert-history-next').disabled = data.length < PAGE_SIZE;
+        }
+    }
+
+    // Wire controls
+    _el('alert-history-filter')?.addEventListener('change', e => { _histType = e.target.value; _histPage = 0; loadHistory(); });
+    _el('alert-history-severity')?.addEventListener('change', e => { _histSev = e.target.value; _histPage = 0; loadHistory(); });
+    _el('alert-history-refresh')?.addEventListener('click', () => loadHistory());
+    _el('alert-history-prev')?.addEventListener('click', () => { if (_histPage > 0) { _histPage--; loadHistory(); } });
+    _el('alert-history-next')?.addEventListener('click', () => { _histPage++; loadHistory(); });
+
+    // Also refresh when new alerts arrive
+    window.addEventListener('user-alert', () => { if (_histPage === 0) loadHistory(); });
+
+    // Initial load
+    loadHistory();
+}
+</script>
+<script type="module">import './js/analytics.js';</script>
+</body>
+</html>

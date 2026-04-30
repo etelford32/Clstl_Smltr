@@ -1,0 +1,1382 @@
+/**
+ * launch-planner.js — Upcoming orbital launches + weather Go/No-Go analysis.
+ *
+ * Target users: commercial launch operators (SpaceX, Blue Origin, ULA,
+ * Rocket Lab) who want a quick weather read on pad conditions for scheduled
+ * missions.
+ *
+ * Pipeline:
+ *   1. GET /api/launches/upcoming  (Launch Library 2, cached 1 hr).
+ *   2. Render left-panel filters + center roster of launch cards sorted by T-.
+ *   3. On card select, fetchLaunchForecast(pad.lat, pad.lon) — pulls current
+ *      + 7-day hourly + daily in one Open-Meteo call so we can score weather
+ *      at the actual NET, not "right now."
+ *   4. Score a time-aligned snapshot against public launch commit criteria
+ *      (wind, precip, cloud, thunderstorm, temperature). Worst rule wins.
+ *      scoreWeather() takes an optional ruleset so per-vehicle thresholds
+ *      (Falcon 9 vs. Electron vs. crewed Dragon) plug in without refactors.
+ *   5. Per-second countdown updates T-minus on every visible card.
+ *
+ * No Supabase writes. No auth required beyond nav tier gating.
+ */
+
+import {
+    fetchLaunchForecast,
+    fetchMarineForecast,
+    weatherCodeLabel,
+    compassLabel,
+} from './trip-planner.js';
+import { resolveRuleset, recoveryZoneForLaunch } from './launch-rulesets.js';
+import { convectiveAlertsNearPad } from './nws-proximity.js';
+
+// ── Rulesets ────────────────────────────────────────────────────────────────
+// Default ruleset is a conservative blend of publicly-documented launch
+// commit criteria (SpaceX Falcon 9 user's guide + 45 WS Flight Commit
+// Criteria for Cape Canaveral / KSC). Vehicle-specific rulesets will override
+// any subset of these in v3.
+
+export const DEFAULT_RULESET = Object.freeze({
+    id: 'default',
+    label: 'Generic orbital launch',
+    wind:        { green: 20, yellow: 30 },   // mph, sustained at pad
+    gust:        { green: 25, yellow: 35 },   // mph, peak at pad
+    // Upper-level winds and vector shear across the max-Q band (≈9–12 km).
+    // Conservative generic thresholds; per-vehicle overrides in
+    // js/launch-rulesets.js tune these to each rocket's published FCC.
+    upper_wind:  { green: 90, yellow: 140 },  // mph at 200 hPa (~12 km)
+    upper_shear: { green: 55, yellow: 90 },   // mph vector diff, 300→200 hPa
+    precip:      { green: 25, yellow: 50 },   // %, hourly probability at T-0
+    cloud:       { green: 50, yellow: 75 },   // %, total cover
+    tempLo:      { red: 35, yellow: 40 },     // °F
+    tempHi:      { yellow: 95, red: 100 },    // °F
+    // Convective-instability bands — feed the bandConvective() scorer that
+    // replaced the old binary weather_code lightning check. These numbers
+    // are the SPC-style forecaster consensus for "marginal" vs "strong"
+    // thunderstorm environments:
+    //   CAPE    — 0–500 weak · 500–1500 moderate · >1500 strong
+    //   LI      — >−2 stable · −2 to −4 moderate · <−4 strongly unstable
+    //   CIN     — more negative = stronger cap. At or below cin_floor we
+    //             treat the airmass as capped even with high CAPE/LI.
+    //   pop_bump_pct — if PoP is this high AND instability is yellow, bump
+    //             to red (storms already lit in the model).
+    // Per-vehicle tightening happens in js/launch-rulesets.js.
+    convective: {
+        cape:        { green: 500, yellow: 1500 }, // J/kg (below green = clean)
+        lifted:      { green: -2,  yellow: -4   }, // °C  (above green = clean)
+        cin_floor:   -100,                         // J/kg (below = capped)
+        pop_bump_pct: 60,                          // %
+    },
+    // Cloud-layer bands — forecast proxies for 45 WS LLCC rules 3/4 (anvil
+    // clouds) and rule 6 (thick cloud layer through the 0° → -20°C band).
+    // Open-Meteo's 3-band decomposition isn't a direct stand-in for the
+    // polygon-based LLCC tests (which care about specific distances to
+    // specific clouds), but the "% cover in each altitude band" signal
+    // catches the obvious cases — scattered cirrus vs. overcast anvil deck,
+    // thin mid layer vs. a thick one straddling the freezing line.
+    //
+    //   anvil.high_pct     — % high cloud ( > 8 km ) triggering anvil caution
+    //   thick.mid_pct      — % mid cloud ( 3–8 km ) triggering thick-layer
+    //                        caution, ONLY when the freezing level sits in
+    //                        or below the mid-cloud band
+    //   thick.fl_max_m     — freezing level max altitude for the thick-layer
+    //                        rule to fire. If 0°C is above ~5 km the 0→-20°C
+    //                        band sits in the high-cloud zone, not mid.
+    // Two-threshold convention (matches wind/cape/lifted bands above):
+    //   < green  → clean   (green)
+    //   < yellow → watch   (yellow)
+    //   ≥ yellow → over    (red)
+    clouds: {
+        anvil: { green: 50, yellow: 85 },  // % high-cloud cover (>8 km)
+        thick: { green: 65, yellow: 90, fl_max_m: 5000 }, // % mid-cloud + freezing-level gate
+    },
+});
+
+const THUNDERSTORM_CODES = new Set([95, 96, 99]);
+
+const VERDICT_RANK = { green: 0, yellow: 1, red: 2 };
+
+function worst(a, b) {
+    return VERDICT_RANK[b] > VERDICT_RANK[a] ? b : a;
+}
+
+function bandSustainedWind(mph, T) {
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'unknown' };
+    if (mph < T.wind.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
+    if (mph < T.wind.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — marginal` };
+    return { v: 'red', note: `${mph.toFixed(0)} mph — over ${T.wind.yellow} mph ground wind` };
+}
+
+function bandGust(mph, T) {
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'unknown' };
+    if (mph < T.gust.green)  return { v: 'green',  note: `${mph.toFixed(0)} mph` };
+    if (mph < T.gust.yellow) return { v: 'yellow', note: `${mph.toFixed(0)} mph — watch gusts` };
+    return { v: 'red', note: `${mph.toFixed(0)} mph — gusts over ${T.gust.yellow} mph` };
+}
+
+function bandPrecip(pct, T) {
+    if (pct == null || !Number.isFinite(pct)) return { v: 'green', note: 'no precip forecast' };
+    if (pct < T.precip.green)  return { v: 'green',  note: `${pct}% chance` };
+    if (pct < T.precip.yellow) return { v: 'yellow', note: `${pct}% — possible scrub` };
+    return { v: 'red', note: `${pct}% — wet weather expected` };
+}
+
+function bandCloud(pct, T) {
+    if (pct == null || !Number.isFinite(pct)) return { v: 'yellow', note: 'unknown' };
+    if (pct < T.cloud.green)  return { v: 'green',  note: `${pct}% cover` };
+    if (pct < T.cloud.yellow) return { v: 'yellow', note: `${pct}% — watch ceiling` };
+    return { v: 'red', note: `${pct}% — overcast` };
+}
+
+// LLCC cloud-layer proxies — anvil (Rules 3/4) + thick layer (Rule 6).
+//
+// Total cloud cover (bandCloud above) answers "can we see the rocket?" —
+// useful but it doesn't distinguish the LLCC concern. A clear ceiling with
+// 70% cirrus at 10 km is visible but could be anvil debris; an 80% mid-
+// level deck crossing the freezing line is a classic triggered-lightning
+// environment. This scorer reads both.
+//
+// This is explicitly a proxy, NOT the LLCC itself. The formal LLCC rules
+// test specific polygon distances to clouds of specific types / thicknesses,
+// which need field-mill + radar-inferred cloud-top temperatures we don't
+// have from public forecast APIs. The % cover + freezing-level check
+// catches the obvious red-flag cases and is transparent about its limits.
+function bandCloudLayers(snap, T) {
+    const low  = snap?.cloud_cover_low;
+    const mid  = snap?.cloud_cover_mid;
+    const high = snap?.cloud_cover_high;
+    const fl_m = snap?.freezing_level_m;
+
+    const haveAny = Number.isFinite(low) || Number.isFinite(mid) || Number.isFinite(high);
+    if (!haveAny) return { v: 'green', note: 'no layer data' };
+
+    const A = T.clouds.anvil;
+    const K = T.clouds.thick;
+    let band = 'green';
+    const bits = [];
+
+    // Anvil proxy — high cloud (>8 km) is the altitude band where
+    // thunderstorm anvils detach and drift. We don't know WHETHER it's an
+    // anvil here (vs. frontal cirrus), so the thresholds are generous:
+    // above green = "possibly anvil, watch"; above yellow = "probably
+    // anvil-class cover, LLCC scrub likely."
+    if (Number.isFinite(high)) {
+        const sub =
+            high >= A.yellow ? 'red'    :
+            high >= A.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`anvil risk: ${high}% high cloud`);
+        }
+    }
+
+    // Thick-layer proxy — mid cloud (3–8 km) only matters when the freezing
+    // level sits in or below the mid band (fl_m ≤ fl_max_m, typically 5 km).
+    // Above that, 0°→-20°C lives in the high-cloud zone and the thick-
+    // layer rule would apply to cirrus, not mid-deck altocumulus.
+    if (Number.isFinite(mid) && Number.isFinite(fl_m) && fl_m <= K.fl_max_m) {
+        const sub =
+            mid >= K.yellow ? 'red'    :
+            mid >= K.green  ? 'yellow' : 'green';
+        if (sub !== 'green') {
+            band = worst(band, sub);
+            bits.push(`thick layer at 0°C (${mid}% mid · 0°C at ${(fl_m / 1000).toFixed(1)} km)`);
+        }
+    }
+
+    // Low-cloud info only — LLCC Rule 1 (cumulus) really needs cloud-top
+    // temperature, which isn't in the forecast. We list the low-cover
+    // number as context so operators can eyeball it; we don't score it.
+    if (Number.isFinite(low) && low >= 75 && band === 'green') {
+        bits.push(`${low}% low cloud (ceiling check)`);
+    }
+
+    const detail = bits.length ? bits.join(' · ') : 'layers within proxies';
+    const headline =
+        band === 'red'    ? 'cloud layers over LLCC proxies'  :
+        band === 'yellow' ? 'cloud layers marginal for LLCC'  :
+                            'cloud layers clear';
+    return { v: band, note: `${headline} (${detail})` };
+}
+
+function bandTemp(f, T) {
+    if (f == null || !Number.isFinite(f)) return { v: 'yellow', note: 'unknown' };
+    if (f < T.tempLo.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — below ${T.tempLo.red}°F cutoff` };
+    if (f < T.tempLo.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — cold` };
+    if (f > T.tempHi.red)    return { v: 'red',    note: `${f.toFixed(0)}°F — heat extreme` };
+    if (f > T.tempHi.yellow) return { v: 'yellow', note: `${f.toFixed(0)}°F — hot` };
+    return { v: 'green', note: `${f.toFixed(0)}°F` };
+}
+
+// Rank of NWS convective events by severity. Higher index = worse.
+// Used to pick the "driving" alert when multiple polygons are near the pad.
+const ALERT_EVENT_RANK = {
+    'Severe Thunderstorm Watch':   1,
+    'Tornado Watch':               2,
+    'Severe Thunderstorm Warning': 3,
+    'Tornado Warning':             4,
+};
+
+/** Return the worst (highest-rank) alert from a list, or null if empty. */
+function _worstAlert(alerts) {
+    if (!alerts || !alerts.length) return null;
+    let worst = alerts[0];
+    let worstRank = ALERT_EVENT_RANK[worst.event] ?? 0;
+    for (let i = 1; i < alerts.length; i++) {
+        const r = ALERT_EVENT_RANK[alerts[i].event] ?? 0;
+        if (r > worstRank) { worstRank = r; worst = alerts[i]; }
+    }
+    return worst;
+}
+
+// Convective/lightning band. Fuses four forecast signals plus live NWS
+// alerts so a developing or already-firing storm shows up in the verdict
+// hours before the WMO weather_code trips.
+//   weather_code  — ground truth: is a thunderstorm already firing?
+//   CAPE          — fuel: how much energy is available for updrafts?
+//   lifted index  — ignition: will a surface parcel actually rise? (< 0 unstable)
+//   CIN           — cap: is there a warm layer holding convection back?
+//   PoP           — model confidence that something will precipitate
+//   NWS alerts    — ground-truth: is a human forecaster calling lightning
+//                   RIGHT NOW near the pad? (proxies LLCC Rule 9.)
+//
+// A convention note on signs:
+//   lifted index is a temperature difference in °C. Negative = unstable.
+//   CIN is an energy deficit in J/kg. Open-Meteo publishes it as a NEGATIVE
+//   number (more negative = stronger cap). Our threshold `cin_floor` is also
+//   negative; we check `cin <= cin_floor` to mean "cap at least this strong."
+function bandConvective(snap, T, alerts) {
+    const code = snap?.weather_code;
+    const cape = snap?.cape_j_per_kg;
+    const li   = snap?.lifted_index;
+    const cin  = snap?.cin_j_per_kg;
+    const pop  = snap?.precip_prob_pct;
+    const leadH = Number.isFinite(snap?.lead_hours) ? snap.lead_hours : 0;
+
+    // Pre-compute the worst nearby NWS alert (if any). Used in two places:
+    // to force the band upward, and to add a rationale string. Pulled once
+    // so we don't do the ranking scan twice.
+    const wa = _worstAlert(alerts);
+
+    // 1. Compute the base forecast band from CAPE/LI/CIN/PoP/code as before.
+    let band, bits = [];
+
+    if (code != null && THUNDERSTORM_CODES.has(code)) {
+        band = 'red';
+        bits.push(`active TS code (${weatherCodeLabel(code)})`);
+    } else {
+        const capeBand =
+            !Number.isFinite(cape) ? null :
+            cape >= T.convective.cape.yellow ? 'red'    :
+            cape >= T.convective.cape.green  ? 'yellow' : 'green';
+        const liBand =
+            !Number.isFinite(li) ? null :
+            li <= T.convective.lifted.yellow ? 'red'    :
+            li <= T.convective.lifted.green  ? 'yellow' : 'green';
+
+        if (capeBand == null && liBand == null && !wa) {
+            // No forecast data AND no alert — we can't say anything. Don't
+            // flip every launch to yellow just because the feed was quiet.
+            return { v: 'green', note: 'no convective data' };
+        }
+
+        band = worst(capeBand ?? 'green', liBand ?? 'green');
+
+        // CIN cap downgrade — yellow→green when a strong warm layer pins
+        // convection down ("loaded gun with no trigger"). Never applied to
+        // red-level instability; never applied when an NWS alert is active
+        // near the pad (human forecaster beats our cap heuristic).
+        if (band === 'yellow' && !wa && Number.isFinite(cin) && cin <= T.convective.cin_floor) {
+            band = 'green';
+            bits.push('strong cap');
+        }
+
+        // PoP bump — if precip is likely and we're already marginal, call
+        // it red; precip in an unstable airmass is convective by default.
+        if (Number.isFinite(pop) && pop >= T.convective.pop_bump_pct && band === 'yellow') {
+            band = 'red';
+        }
+
+        if (Number.isFinite(cape)) bits.push(`CAPE ${Math.round(cape)} J/kg`);
+        if (Number.isFinite(li))   bits.push(`LI ${li.toFixed(1)}`);
+    }
+
+    // 2. Fold in any nearby NWS convective alert. Behavior depends on how
+    //    far away T-0 is:
+    //
+    //    • lead ≤ 12 h  — active NWS warning is directly relevant. Force
+    //                     red. Even a Watch bumps the verdict to red here
+    //                     because the human forecaster has already issued
+    //                     it for the current timeframe.
+    //    • lead > 12 h  — current alerts will almost certainly have
+    //                     expired before launch (NWS warnings run ~30–60
+    //                     minutes). Show as yellow — informational — but
+    //                     don't override a red base band downward.
+    if (wa) {
+        const dist = Number.isFinite(wa.distanceKm) ? Math.round(wa.distanceKm) : null;
+        const inside = wa.inside;
+        const alertLabel = inside
+            ? `${wa.event} covers the pad`
+            : `${wa.event} ${dist != null ? `${dist} km` : 'nearby'}`;
+
+        if (leadH <= 12) {
+            band = 'red';
+        } else if (band === 'green') {
+            band = 'yellow';
+        }
+        bits.unshift(alertLabel);
+    }
+
+    const detail = bits.length ? bits.join(' · ') : 'convective signals clear';
+    const headline =
+        band === 'red'    ? 'thunderstorm potential'                  :
+        band === 'yellow' ? 'instability — watch for development'     :
+                            'no thunderstorms';
+    return { v: band, note: `${headline} (${detail})`, alert: wa || null };
+}
+
+function bandUpperWind(mph, T) {
+    // Forecast-based proxy for balloon-release peak wind at max-Q.
+    // A day-of launch would refine this with an actual jimsphere/balloon
+    // profile; the forecast catches the "clearly over" and "clearly under"
+    // cases, which are the majority of scrubs.
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'pressure-level wind unavailable' };
+    if (mph < T.upper_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph at ~12 km` };
+    if (mph < T.upper_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph at ~12 km — watch jet stream` };
+    return { v: 'red', note: `${Math.round(mph)} mph at ~12 km — jet stream over limit` };
+}
+
+function bandUpperShear(mph, T) {
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'shear unavailable' };
+    if (mph < T.upper_shear.green)  return { v: 'green',  note: `${Math.round(mph)} mph across max-Q band` };
+    if (mph < T.upper_shear.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — elevated shear` };
+    return { v: 'red', note: `${Math.round(mph)} mph — severe wind shear` };
+}
+
+// ── Recovery-zone band scorers ──────────────────────────────────────────────
+// Used only when a launch has a recovery operation (ASDS, RTLS, or tower
+// catch). Each reads its threshold from the vehicle's recovery_ruleset —
+// absent ruleset means the rule isn't evaluated.
+
+function bandRecoveryWind(mph, R) {
+    if (!R?.zone_wind) return null;
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'recovery wind unavailable' };
+    if (mph < R.zone_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph at recovery zone` };
+    if (mph < R.zone_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — recovery wind marginal` };
+    return { v: 'red', note: `${Math.round(mph)} mph — over recovery wind limit` };
+}
+
+function bandWaveHeight(m, R) {
+    if (!R?.wave_height_m) return null;
+    if (m == null || !Number.isFinite(m)) return { v: 'yellow', note: 'no marine data (inland proxy?)' };
+    if (m < R.wave_height_m.green)  return { v: 'green',  note: `${m.toFixed(1)} m sig wave height` };
+    if (m < R.wave_height_m.yellow) return { v: 'yellow', note: `${m.toFixed(1)} m — rough seas` };
+    return { v: 'red', note: `${m.toFixed(1)} m — over ASDS limit` };
+}
+
+function bandSwellPeriod(s, R) {
+    // Shorter swell period = steeper, choppier seas — BAD for ASDS stability.
+    // Thresholds are MINIMUMS: period must be at least .green to be green.
+    if (!R?.swell_period_s) return null;
+    if (s == null || !Number.isFinite(s)) return { v: 'yellow', note: 'swell period unavailable' };
+    if (s >= R.swell_period_s.green)  return { v: 'green',  note: `${s.toFixed(1)} s swell period` };
+    if (s >= R.swell_period_s.yellow) return { v: 'yellow', note: `${s.toFixed(1)} s — short-period chop` };
+    return { v: 'red', note: `${s.toFixed(1)} s — severe short-period chop` };
+}
+
+// Starship-specific: tower catch and tanking both read the LAUNCH pad's
+// ground wind, but apply different thresholds than the launch-wind rule.
+
+function bandTowerCatchWind(mph, gustMph, R) {
+    if (!R?.tower_catch_wind) return null;
+    // Catch feasibility considers both sustained and gust — take the worst.
+    const sustained = mph != null && Number.isFinite(mph) ? mph : null;
+    const gust      = gustMph != null && Number.isFinite(gustMph) ? gustMph : null;
+    if (sustained == null && gust == null) return { v: 'yellow', note: 'catch wind unavailable' };
+
+    const verdictFor = (val, band) => {
+        if (val == null) return 'yellow';
+        if (val < band.green)  return 'green';
+        if (val < band.yellow) return 'yellow';
+        return 'red';
+    };
+    const sV = sustained != null ? verdictFor(sustained, R.tower_catch_wind) : 'green';
+    const gV = (gust != null && R.tower_catch_gust) ? verdictFor(gust, R.tower_catch_gust) : 'green';
+    const worstV = VERDICT_RANK[gV] > VERDICT_RANK[sV] ? gV : sV;
+    const s = sustained != null ? `${Math.round(sustained)} mph` : '—';
+    const g = gust      != null ? `${Math.round(gust)} mph gust` : '';
+    return { v: worstV, note: `${s}${g ? ' / ' + g : ''} at tower` };
+}
+
+function bandTankingWind(mph, R) {
+    if (!R?.tanking_wind) return null;
+    if (mph == null || !Number.isFinite(mph)) return { v: 'yellow', note: 'tanking wind unavailable' };
+    if (mph < R.tanking_wind.green)  return { v: 'green',  note: `${Math.round(mph)} mph during load` };
+    if (mph < R.tanking_wind.yellow) return { v: 'yellow', note: `${Math.round(mph)} mph — watch plume` };
+    return { v: 'red', note: `${Math.round(mph)} mph — over cryo tanking limit` };
+}
+
+// ── Snapshot helpers ────────────────────────────────────────────────────────
+// Forecast data is laid out as parallel hourly arrays. A snapshot is the
+// projection of those arrays at one hour index — the shape scoreWeather()
+// operates on. Lets us score any point in the forecast horizon, not just
+// "right now."
+
+/**
+ * Build a snapshot (the shape scoreWeather consumes) from an hourly index.
+ * Returns null if the forecast doesn't extend to this hour.
+ */
+export function snapshotAt(fc, targetIso) {
+    if (!fc?.hourly?.time?.length || !targetIso) return null;
+    const target = Date.parse(targetIso);
+    if (!Number.isFinite(target)) return null;
+
+    const times = fc.hourly.time;
+    const lastIdx = times.length - 1;
+    const lastMs = Date.parse(times[lastIdx]);
+    if (Number.isFinite(lastMs) && target > lastMs + 3600_000) {
+        // Target is beyond the forecast horizon — let the caller fall back.
+        return null;
+    }
+
+    // Nearest-hour lookup. Open-Meteo timestamps are on the hour in local
+    // tz; binary search would be overkill for 168 slots.
+    let best = 0;
+    let bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+        const t = Date.parse(times[i]);
+        const diff = Math.abs(t - target);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    const i = best;
+    const h = fc.hourly;
+
+    // Upper-level winds and vector shear across the max-Q band. Meteorological
+    // wind direction is the direction wind is blowing FROM, in degrees; we
+    // convert each pressure level to (u, v) components, take the vector
+    // difference 300→200 hPa, and return the magnitude. This is the "shear
+    // across max-Q" signal operators care about: a rocket passing through a
+    // strongly sheared layer experiences rapid lateral loads the TVC has
+    // only milliseconds to null out.
+    const w200 = h.wind_200_mph?.[i];
+    const d200 = h.wind_200_dir_deg?.[i];
+    const w300 = h.wind_300_mph?.[i];
+    const d300 = h.wind_300_dir_deg?.[i];
+    const shearMag = _vectorShear(w300, d300, w200, d200);
+
+    return {
+        time:             times[i],
+        target_iso:       targetIso,
+        lead_hours:       (target - Date.now()) / 3600_000,
+        slot_offset_min:  Math.round((Date.parse(times[i]) - target) / 60_000),
+        temp_f:           h.temp_f?.[i]           ?? null,
+        wind_mph:         h.wind_mph?.[i]         ?? null,
+        wind_gust_mph:    h.wind_gust_mph?.[i]    ?? null,
+        wind_dir_deg:     h.wind_dir_deg?.[i]     ?? null,
+        precip_prob_pct:  h.precip_prob_pct?.[i]  ?? null,
+        precip_in:        h.precip_in?.[i]        ?? null,
+        cloud_cover:      h.cloud_cover?.[i]      ?? null,
+        weather_code:     h.weather_code?.[i]     ?? null,
+        humidity:         h.humidity?.[i]         ?? null,
+        visibility_m:     h.visibility_m?.[i]     ?? null,
+        cape_j_per_kg:    h.cape_j_per_kg?.[i]    ?? null,
+        lifted_index:     h.lifted_index?.[i]     ?? null,
+        cin_j_per_kg:     h.cin_j_per_kg?.[i]     ?? null,
+        cloud_cover_low:  h.cloud_cover_low?.[i]  ?? null,
+        cloud_cover_mid:  h.cloud_cover_mid?.[i]  ?? null,
+        cloud_cover_high: h.cloud_cover_high?.[i] ?? null,
+        freezing_level_m: h.freezing_level_m?.[i] ?? null,
+        upper_wind_mph:       Number.isFinite(w200) ? w200 : null,
+        upper_wind_dir_deg:   Number.isFinite(d200) ? d200 : null,
+        upper_wind_500_mph:   Number.isFinite(h.wind_500_mph?.[i]) ? h.wind_500_mph[i] : null,
+        upper_wind_300_mph:   Number.isFinite(w300) ? w300 : null,
+        upper_shear_mph:      Number.isFinite(shearMag) ? shearMag : null,
+    };
+}
+
+/**
+ * Snapshot the marine forecast at the hour nearest targetIso. Parallel to
+ * snapshotAt but over the marine hourly arrays.
+ */
+function _marineSnapshotAt(marine, targetIso) {
+    if (!marine || marine.inland) return null;
+    const times = marine.hourly?.time || [];
+    if (!times.length) return null;
+    const target = Date.parse(targetIso);
+    if (!Number.isFinite(target)) return null;
+
+    let best = 0, bestDiff = Infinity;
+    for (let i = 0; i < times.length; i++) {
+        const diff = Math.abs(Date.parse(times[i]) - target);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+    }
+    const h = marine.hourly;
+    const i = best;
+    return {
+        time:                times[i],
+        wave_height_m:       h.wave_height_m?.[i]     ?? null,
+        wave_period_s:       h.wave_period_s?.[i]     ?? null,
+        wave_dir_deg:        h.wave_dir_deg?.[i]      ?? null,
+        wind_wave_h_m:       h.wind_wave_h_m?.[i]     ?? null,
+        wind_wave_period_s:  h.wind_wave_period_s?.[i]?? null,
+        swell_h_m:           h.swell_h_m?.[i]         ?? null,
+        swell_period_s:      h.swell_period_s?.[i]    ?? null,
+        swell_dir_deg:       h.swell_dir_deg?.[i]     ?? null,
+    };
+}
+
+/**
+ * Compose recovery-specific rule rows. Returns null when neither the
+ * vehicle\'s recovery_ruleset nor Starship-only rulesets are configured.
+ *
+ * Inputs (all optional):
+ *   padSnap       — launch-pad atmospheric snapshot at T-0 (for tower catch
+ *                   and tanking winds, which are evaluated at the pad)
+ *   recoverySnap  — atmospheric snapshot at the ASDS / recovery zone
+ *                   (for zone wind — a different place from the pad)
+ *   marineSnap    — marine snapshot at the recovery zone (waves, swell)
+ */
+function _scoreRecovery(padSnap, recoverySnap, marineSnap, opts = {}) {
+    const R = opts.recovery_ruleset;
+    const vehicleLabel = opts.vehicle_label || 'recovery';
+    if (!R) return null;
+
+    const rules = [];
+
+    // Starship-specific rules — evaluated at the launch pad because catch
+    // and tanking both happen there.
+    if (R.tower_catch_wind) {
+        const row = bandTowerCatchWind(padSnap?.wind_mph, padSnap?.wind_gust_mph, R);
+        if (row) rules.push({ key: 'tower_catch', label: 'Tower catch wind', ...row });
+    }
+    if (R.tanking_wind) {
+        const row = bandTankingWind(padSnap?.wind_mph, R);
+        if (row) rules.push({ key: 'tanking', label: 'Methalox tanking wind', ...row });
+    }
+
+    // ASDS / droneship rules — evaluated at the downrange recovery zone.
+    if (R.zone_wind) {
+        const row = bandRecoveryWind(recoverySnap?.wind_mph, R);
+        if (row) rules.push({ key: 'recovery_wind', label: 'Recovery-zone wind', ...row });
+    }
+    if (R.wave_height_m) {
+        const row = bandWaveHeight(marineSnap?.wave_height_m, R);
+        if (row) rules.push({ key: 'wave_height', label: 'Wave height (ASDS)', ...row });
+    }
+    if (R.swell_period_s) {
+        const row = bandSwellPeriod(marineSnap?.swell_period_s, R);
+        if (row) rules.push({ key: 'swell_period', label: 'Swell period',      ...row });
+    }
+
+    if (!rules.length) return null;
+    const verdict = rules.reduce((a, r) => worst(a, r.v), 'green');
+    return { verdict, rules, ruleset_id: R.id || 'recovery', vehicle_label: vehicleLabel };
+}
+
+/**
+ * Magnitude of the vector difference between two winds given as
+ * (speed, meteorological-direction). Returns null if either side is missing.
+ * Output units match the inputs (mph in this module).
+ */
+function _vectorShear(speedA, dirDegA, speedB, dirDegB) {
+    if (!Number.isFinite(speedA) || !Number.isFinite(speedB) ||
+        !Number.isFinite(dirDegA) || !Number.isFinite(dirDegB)) return null;
+    // Meteorological dir is "from"; convert to math radians ("to" vector).
+    const aRad = ((dirDegA + 180) % 360) * Math.PI / 180;
+    const bRad = ((dirDegB + 180) % 360) * Math.PI / 180;
+    const uA = speedA * Math.sin(aRad), vA = speedA * Math.cos(aRad);
+    const uB = speedB * Math.sin(bRad), vB = speedB * Math.cos(bRad);
+    return Math.hypot(uA - uB, vA - vB);
+}
+
+/**
+ * Project the `current` block into the same snapshot shape as snapshotAt()
+ * so the scorer can consume either interchangeably.
+ */
+function snapshotFromCurrent(fc) {
+    const c = fc?.current;
+    if (!c) return null;
+    return {
+        time:             c.time,
+        target_iso:       c.time,
+        lead_hours:       0,
+        slot_offset_min:  0,
+        temp_f:           c.temp_f ?? null,
+        wind_mph:         c.wind_mph ?? null,
+        wind_gust_mph:    c.wind_gust_mph ?? null,
+        wind_dir_deg:     c.wind_dir_deg ?? null,
+        precip_prob_pct:  null,                 // current block has no prob
+        precip_in:        c.precip_in ?? null,
+        cloud_cover:      c.cloud_cover ?? null,
+        weather_code:     c.weather_code ?? null,
+        humidity:         c.humidity ?? null,
+        visibility_m:     null,
+        cape_j_per_kg:    null,
+        lifted_index:     null,
+        cin_j_per_kg:     null,
+        cloud_cover_low:  null,
+        cloud_cover_mid:  null,
+        cloud_cover_high: null,
+        freezing_level_m: null,
+    };
+}
+
+/**
+ * Score a snapshot against launch commit criteria.
+ * @param {object} snap     — shape returned by snapshotAt() or snapshotFromCurrent()
+ * @param {object} [opts]
+ * @param {object}  [opts.ruleset]       — override any subset of DEFAULT_RULESET
+ * @param {Array}   [opts.nearbyAlerts]  — NWS convective alerts within the pad
+ *                                         proximity buffer (see nws-proximity.js).
+ *                                         Used by the convection/lightning band.
+ * @returns {{ verdict: 'green'|'yellow'|'red', rules: Array, ruleset_id: string }}
+ */
+export function scoreWeather(snap, opts = {}) {
+    const T = { ...DEFAULT_RULESET, ...(opts.ruleset || {}) };
+    if (!snap) {
+        return {
+            verdict:    'yellow',
+            rules:      [{ key: 'data', label: 'Forecast', v: 'yellow', note: 'No forecast available' }],
+            ruleset_id: T.id,
+        };
+    }
+    const alerts = opts.nearbyAlerts || null;
+    const rules = [
+        { key: 'wind',        label: 'Ground wind',      ...bandSustainedWind(snap.wind_mph, T) },
+        { key: 'gust',        label: 'Wind gusts',       ...bandGust(snap.wind_gust_mph, T) },
+        { key: 'upper_wind',  label: 'Upper winds (max-Q)', ...bandUpperWind(snap.upper_wind_mph, T) },
+        { key: 'upper_shear', label: 'Wind shear',       ...bandUpperShear(snap.upper_shear_mph, T) },
+        { key: 'precip',      label: 'Precipitation',    ...bandPrecip(snap.precip_prob_pct, T) },
+        { key: 'cloud',        label: 'Cloud cover',             ...bandCloud(snap.cloud_cover, T) },
+        { key: 'cloud_layers', label: 'Cloud layers (LLCC)',     ...bandCloudLayers(snap, T) },
+        { key: 'lightning',    label: 'Convection / lightning',  ...bandConvective(snap, T, alerts) },
+        { key: 'temp',         label: 'Temperature',             ...bandTemp(snap.temp_f, T) },
+    ];
+    const verdict = rules.reduce((acc, r) => worst(acc, r.v), 'green');
+    return { verdict, rules, ruleset_id: T.id, snapshot: snap };
+}
+
+/**
+ * Compute the full scoring bundle for a launch: primary T-0 score plus a
+ * lead-time arc (T-6h, T-1h, T-0, T+1h, T+3h) so the UI can show whether
+ * the verdict is improving, holding, or deteriorating across the window.
+ */
+export function scoreLaunch(fc, netIso, opts = {}) {
+    if (!fc) {
+        return {
+            verdict:   'yellow',
+            primary:   scoreWeather(null, opts),
+            arc:       [],
+            recovery:  null,
+            source:    'none',
+            target_iso: netIso,
+        };
+    }
+    // If NET is missing or beyond the forecast horizon, fall back to `current`
+    // so new launches still show *something* — just flag the source.
+    const hasHourly = !!fc.hourly?.time?.length;
+    const targetMs  = netIso ? Date.parse(netIso) : NaN;
+    const horizonOk = Number.isFinite(targetMs)
+        && hasHourly
+        && targetMs <= (fc.horizon_end_ms || (Date.parse(fc.hourly.time[fc.hourly.time.length - 1]) + 3600_000));
+
+    if (!horizonOk) {
+        const snap = snapshotFromCurrent(fc);
+        const primary = scoreWeather(snap, opts);
+        const rec = _scoreRecovery(snap, null, null, opts);
+        if (rec) primary.rules.push(...rec.rules);
+        const verdictWithRec = primary.rules.reduce((a, r) => worst(a, r.v), 'green');
+        return {
+            verdict:    verdictWithRec,
+            primary,
+            arc:        [],
+            recovery:   rec,
+            source:     hasHourly && Number.isFinite(targetMs) ? 'beyond-horizon' : (netIso ? 'current' : 'no-net'),
+            target_iso: netIso,
+        };
+    }
+
+    const primarySnap = snapshotAt(fc, netIso);
+    const primary     = scoreWeather(primarySnap, opts);
+
+    // Recovery scoring — uses the pad snapshot for Starship (tower catch /
+    // tanking wind) plus optional recovery-zone atmospheric + marine
+    // snapshots for ASDS-class vehicles.
+    const recoveryFc  = opts.recovery_fc  || null;
+    const marineFc    = opts.marine_fc    || null;
+    const recoverySnap = (recoveryFc && Number.isFinite(targetMs))
+        ? snapshotAt(recoveryFc, netIso) : null;
+    const marineSnap   = (marineFc && Number.isFinite(targetMs))
+        ? _marineSnapshotAt(marineFc, netIso) : null;
+    const rec = _scoreRecovery(primarySnap, recoverySnap, marineSnap, opts);
+    if (rec) primary.rules.push(...rec.rules);
+
+    // Re-compute top-level verdict including appended recovery rows.
+    const verdictWithRec = primary.rules.reduce((a, r) => worst(a, r.v), 'green');
+    primary.verdict = verdictWithRec;
+
+    // Arc offsets in hours from NET — picked to bracket the most common
+    // scrub windows and recovery ops. Arc uses launch-only snapshots; the
+    // recovery overlay is evaluated at T-0 and surfaced in the UI separately.
+    const ARC_OFFSETS_H = [-6, -1, 0, 1, 3];
+    const arc = ARC_OFFSETS_H.map(dh => {
+        const iso = new Date(targetMs + dh * 3600_000).toISOString();
+        const s   = snapshotAt(fc, iso);
+        const sc  = scoreWeather(s, opts);
+        return {
+            offset_h: dh,
+            label:    dh === 0 ? 'T-0' : dh < 0 ? `T${dh}h` : `T+${dh}h`,
+            verdict:  sc.verdict,
+            snapshot: s,
+        };
+    });
+
+    return {
+        verdict:    verdictWithRec,
+        primary,
+        arc,
+        recovery:   rec,
+        source:     'hourly',
+        target_iso: netIso,
+    };
+}
+
+// ── Countdown formatting ────────────────────────────────────────────────────
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+
+export function formatCountdown(targetIso, now = Date.now()) {
+    if (!targetIso) return 'TBD';
+    const t = Date.parse(targetIso);
+    if (!Number.isFinite(t)) return 'TBD';
+    const diff = t - now;
+    const abs = Math.abs(diff);
+    const d = Math.floor(abs / 86400000);
+    const h = Math.floor((abs % 86400000) / 3600000);
+    const m = Math.floor((abs % 3600000) / 60000);
+    const s = Math.floor((abs % 60000) / 1000);
+    const sign = diff >= 0 ? 'T-' : 'T+';
+    if (d > 0) return `${sign}${d}d ${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+    return `${sign}${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+// ── Launch feed fetching ────────────────────────────────────────────────────
+
+async function fetchLaunches(windowDays = 90, limit = 50) {
+    const params = new URLSearchParams({ limit: String(limit), window_days: String(windowDays) });
+    try {
+        const res = await fetch(`/api/launches/upcoming?${params}`, { signal: AbortSignal.timeout(15000) });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        return data;
+    } catch (e) {
+        console.warn('[LaunchPlanner] feed fetch failed:', e.message);
+        return { launches: [], error: e.message };
+    }
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+
+const $ = (id) => document.getElementById(id);
+
+function escHtml(s) {
+    return s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function formatLocalTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d)) return '—';
+    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function verdictColor(v) {
+    return v === 'red' ? '#ff4444' : v === 'yellow' ? '#ffaa00' : '#44cc88';
+}
+
+function verdictLabel(v) {
+    return v === 'red' ? 'NO-GO' : v === 'yellow' ? 'HOLD' : 'GO';
+}
+
+function confidenceTooltip(c) {
+    if (c === 'high')            return 'Thresholds from the vehicle\'s primary public user\'s guide or 45 WS Flight Commit Criteria.';
+    if (c === 'medium')          return 'Thresholds derived from FAA EIS, press statements, or historical scrub behavior.';
+    if (c === 'public-estimate') return 'No primary public source; conservative analog from a similar-class vehicle.';
+    if (c === 'generic')         return 'Vehicle not in catalog; using generic default thresholds.';
+    return '';
+}
+
+// Render a two-letter ISO country code to its flag emoji (skipped if not exactly 2 letters).
+function countryFlag(cc) {
+    if (!cc || typeof cc !== 'string' || cc.length !== 2) return '';
+    const base = 0x1F1E6;
+    const a = cc.toUpperCase().charCodeAt(0) - 65;
+    const b = cc.toUpperCase().charCodeAt(1) - 65;
+    if (a < 0 || a > 25 || b < 0 || b > 25) return '';
+    return String.fromCodePoint(base + a) + String.fromCodePoint(base + b);
+}
+
+function renderCard(l) {
+    const verdict = l._score?.verdict || 'unknown';
+    const color   = verdictColor(verdict);
+    const label   = l._score ? verdictLabel(verdict) : '—';
+    const net     = formatLocalTime(l.net_iso);
+    const flag    = countryFlag(l.pad?.country_code);
+    return `
+        <button type="button" class="lp-card${verdict === 'red' ? ' lp-card--red' : verdict === 'yellow' ? ' lp-card--yellow' : verdict === 'green' ? ' lp-card--green' : ''}" data-launch-id="${escHtml(l.id)}">
+            <div class="lp-card-hd">
+                <span class="lp-card-provider">${escHtml(l.provider)}</span>
+                <span class="lp-badge" style="background:${color}22;border-color:${color}55;color:${color}">${label}</span>
+            </div>
+            <div class="lp-card-name">${escHtml(l.name)}</div>
+            <div class="lp-card-meta">
+                <span class="lp-card-vehicle">${escHtml(l.vehicle)}</span>
+                <span class="lp-card-dot">·</span>
+                <span class="lp-card-pad">${flag ? flag + ' ' : ''}${escHtml(l.pad?.location || '—')}</span>
+            </div>
+            <div class="lp-card-footer">
+                <span class="lp-card-net">${escHtml(net)}</span>
+                <span class="lp-countdown" data-net="${escHtml(l.net_iso || '')}">${formatCountdown(l.net_iso)}</span>
+            </div>
+        </button>
+    `;
+}
+
+function renderRuleRow(r) {
+    const color = verdictColor(r.v);
+    return `
+        <div class="lp-rule">
+            <span class="lp-rule-dot" style="background:${color}"></span>
+            <span class="lp-rule-k">${escHtml(r.label)}</span>
+            <span class="lp-rule-v">${escHtml(r.note)}</span>
+        </div>
+    `;
+}
+
+// Starship-specific focus panel. Surfaces mission context (IFT number,
+// booster/ship serials if we can parse them), the catch + tanking verdicts
+// as prominent headline tiles, and the evolving-LCC caveat. Called only
+// when the resolved vehicle id === 'starship'.
+function renderStarshipFocus(l, score) {
+    const allRules = score?.primary?.rules || [];
+    const catchRow   = allRules.find(r => r.key === 'tower_catch');
+    const tankingRow = allRules.find(r => r.key === 'tanking');
+    const name = l.name || '';
+    // Heuristic IFT number parse — LL2 mission names often read
+    // "Starship | IFT-5" or "Integrated Flight Test 7". Surface if found.
+    const iftMatch = name.match(/IFT[- ]?(\d+)|Flight Test\s*(\d+)|Starship Flight\s*(\d+)/i);
+    const iftNum   = iftMatch ? (iftMatch[1] || iftMatch[2] || iftMatch[3]) : null;
+
+    const tile = (row, headline) => {
+        if (!row) return '';
+        const color = verdictColor(row.v);
+        return `
+            <div class="lp-ss-tile" style="border-color:${color}40;background:${color}10">
+                <div class="lp-ss-tile-k">${escHtml(headline)}</div>
+                <div class="lp-ss-tile-v" style="color:${color}">${escHtml(verdictLabel(row.v))}</div>
+                <div class="lp-ss-tile-sub">${escHtml(row.note)}</div>
+            </div>
+        `;
+    };
+
+    return `
+        <div class="lp-starship">
+            <div class="lp-label lp-ss-label">Starship Focus ${iftNum ? `<span class="lp-rule-src">· IFT-${escHtml(iftNum)}</span>` : ''}</div>
+            <div class="lp-ss-grid">
+                ${tile(catchRow, 'Tower catch (Mechazilla)')}
+                ${tile(tankingRow, 'Methalox tanking')}
+                <div class="lp-ss-tile lp-ss-tile--info">
+                    <div class="lp-ss-tile-k">Aspect ratio</div>
+                    <div class="lp-ss-tile-v" style="color:#0cc">120 m</div>
+                    <div class="lp-ss-tile-sub">Tallest stack in the catalog — ground wind bites early</div>
+                </div>
+                <div class="lp-ss-tile lp-ss-tile--info">
+                    <div class="lp-ss-tile-k">Max-Q</div>
+                    <div class="lp-ss-tile-v" style="color:#0cc">8 km · T+55 s</div>
+                    <div class="lp-ss-tile-sub">Lower than F9 despite greater vehicle — mass-limited acceleration</div>
+                </div>
+            </div>
+            <div class="lp-ss-note">
+                Starship is still in test phase. Thresholds here are drawn from FAA EIS
+                filings, SpaceX public statements, and IFT-1–6 observed scrubs. Formal
+                launch commit criteria will tighten or relax as the vehicle matures.
+                Ship splashdown-zone marine data is mission-dependent and not yet
+                geolocated — v5 will parse trajectory hints from mission metadata.
+            </div>
+        </div>
+    `;
+}
+
+function renderDetail(l, fc, score) {
+    if (!l) {
+        return `<div class="lp-empty">Select a launch on the left to see weather Go/No-Go analysis.</div>`;
+    }
+
+    const verdict = score?.verdict || 'unknown';
+    const color   = verdictColor(verdict);
+    const label   = score ? verdictLabel(verdict) : '…analyzing';
+
+    const lat = l.pad?.lat;
+    const lon = l.pad?.lon;
+    const hasPad = Number.isFinite(lat) && Number.isFinite(lon);
+
+    // The T-0 snapshot is what the verdict is actually computed from. If we
+    // fell back to `current` (no NET, or NET beyond forecast horizon) the
+    // snapshot still exists — we just label it differently.
+    const snap = score?.primary?.snapshot;
+    const src  = score?.source || 'none';
+    const srcLabel =
+        src === 'hourly'         ? `Forecast at T-0 (${formatLocalTime(snap?.target_iso)})` :
+        src === 'current'        ? 'Current conditions at pad (no NET set)' :
+        src === 'beyond-horizon' ? 'Current conditions (NET beyond 7-day forecast)' :
+        'Current conditions';
+    const srcNote =
+        src === 'beyond-horizon' ? 'Hourly forecast re-evaluates as T-0 moves inside the 7-day window.' :
+        src === 'current'        ? 'Set a NET to time-align the forecast.' : '';
+
+    const weatherBlock = !hasPad
+        ? `<div class="lp-wx-loading">Pad coordinates are not published yet — weather analysis unavailable.</div>`
+        : snap ? `
+            <div class="lp-wx-sub">${escHtml(srcLabel)}${srcNote ? ` — <span style="color:#667">${escHtml(srcNote)}</span>` : ''}</div>
+            <div class="lp-wx-grid">
+                <div class="lp-wx-cell"><div class="lp-wx-k">Conditions</div><div class="lp-wx-v">${escHtml(weatherCodeLabel(snap.weather_code))}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Temp</div><div class="lp-wx-v">${snap.temp_f != null ? `${snap.temp_f.toFixed(0)}°F` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Wind</div><div class="lp-wx-v">${snap.wind_mph != null ? `${snap.wind_mph.toFixed(0)} mph ${compassLabel(snap.wind_dir_deg)}` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Gusts</div><div class="lp-wx-v">${snap.wind_gust_mph != null ? `${snap.wind_gust_mph.toFixed(0)} mph` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud</div><div class="lp-wx-v">${snap.cloud_cover != null ? `${snap.cloud_cover}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Precip prob</div><div class="lp-wx-v">${snap.precip_prob_pct != null ? `${snap.precip_prob_pct}%` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">CAPE</div><div class="lp-wx-v">${snap.cape_j_per_kg != null ? `${Math.round(snap.cape_j_per_kg)} J/kg` : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Lifted idx</div><div class="lp-wx-v">${Number.isFinite(snap.lifted_index) ? snap.lifted_index.toFixed(1) : '—'}</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Cloud L / M / H</div><div class="lp-wx-v">${
+                    [snap.cloud_cover_low, snap.cloud_cover_mid, snap.cloud_cover_high]
+                        .map(x => Number.isFinite(x) ? `${x}` : '—').join(' / ')
+                }</div></div>
+                <div class="lp-wx-cell"><div class="lp-wx-k">Freezing lvl</div><div class="lp-wx-v">${Number.isFinite(snap.freezing_level_m) ? `${(snap.freezing_level_m / 1000).toFixed(1)} km` : '—'}</div></div>
+            </div>
+        ` : `<div class="lp-wx-loading">Fetching pad weather…</div>`;
+
+    const arcBlock = (score?.arc?.length) ? `
+        <div class="lp-label">Launch-window arc</div>
+        <div class="lp-arc">
+            ${score.arc.map(stop => {
+                const s  = stop.snapshot;
+                const c  = verdictColor(stop.verdict);
+                const wind = s?.wind_mph != null ? `${Math.round(s.wind_mph)} mph` : '—';
+                const prec = s?.precip_prob_pct != null ? `${s.precip_prob_pct}%` : '—';
+                return `
+                    <div class="lp-arc-stop" title="${escHtml(weatherCodeLabel(s?.weather_code))}">
+                        <div class="lp-arc-name">${escHtml(stop.label)}</div>
+                        <div class="lp-arc-dot" style="background:${c}"></div>
+                        <div class="lp-arc-v">${verdictLabel(stop.verdict)}</div>
+                        <div class="lp-arc-metric">${wind}</div>
+                        <div class="lp-arc-metric lp-arc-precip">${prec}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    ` : '';
+
+    const forecastBlock = fc?.daily?.dates?.length ? `
+        <div class="lp-label">7-Day Daily Outlook</div>
+        <div class="lp-forecast">
+            ${fc.daily.dates.map((d, i) => {
+                const dt = new Date(d);
+                const name = dt.toLocaleDateString([], { weekday: 'short' });
+                const hi = fc.daily.high_f?.[i];
+                const lo = fc.daily.low_f?.[i];
+                const pp = fc.daily.precip_prob_pct?.[i];
+                return `
+                    <div class="lp-fc-day">
+                        <div class="lp-fc-name">${escHtml(name)}</div>
+                        <div class="lp-fc-temp"><span class="lp-fc-hi">${hi != null ? Math.round(hi) : '—'}°</span><span class="lp-fc-lo">${lo != null ? Math.round(lo) : '—'}°</span></div>
+                        <div class="lp-fc-precip">${pp != null ? pp : 0}%</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    ` : '';
+
+    const allRules   = score?.primary?.rules || score?.rules || [];
+    // Split launch-commit rows from recovery rows so they can render under
+    // separate headers — an ops team looking at "is the booster going to
+    // make it back to JRTI?" wants recovery constraints grouped, not mixed
+    // with ascent LCC.
+    const RECOVERY_KEYS = new Set(['tower_catch', 'tanking', 'recovery_wind', 'wave_height', 'swell_period']);
+    const launchRules    = allRules.filter(r => !RECOVERY_KEYS.has(r.key));
+    const recoveryRules  = allRules.filter(r =>  RECOVERY_KEYS.has(r.key));
+
+    const veh = l._vehicle;
+    const confBadge = veh ? `<span class="lp-conf lp-conf--${escHtml(veh.confidence)}" title="${escHtml(confidenceTooltip(veh.confidence))}">${escHtml(veh.confidence)}</span>` : '';
+    const sourceTxt = veh?.sources?.length ? `<div class="lp-rule-sources">Sources: ${veh.sources.map(escHtml).join(' · ')}</div>` : '';
+    const notes     = veh?.notes ? `<div class="lp-rule-note">${escHtml(veh.notes)}</div>` : '';
+
+    const ruleBlock = launchRules.length ? `
+        <div class="lp-label">Launch Commit Criteria${veh ? ` <span class="lp-rule-src">· ${escHtml(veh.label)} ruleset ${confBadge}</span>` : ''}</div>
+        <div class="lp-rules">${launchRules.map(renderRuleRow).join('')}</div>
+        ${sourceTxt}${notes}
+    ` : '';
+
+    // Active NWS convective alerts (Severe Thunderstorm / Tornado
+    // Warning+Watch) whose polygon is within 50 km of the pad. Rendered only
+    // for US pads, only when the fetch produced matches — silent otherwise.
+    // NET-relative behavior lives in bandConvective(); here we just surface
+    // the triggering alert(s) as context.
+    const nearbyAlerts = l._nearby_alerts || [];
+    const alertBlock = nearbyAlerts.length ? `
+        <div class="lp-label" style="color:#fb0">Active NWS Alerts · within 50 km of pad</div>
+        <div class="lp-alerts">
+            ${nearbyAlerts.map(a => {
+                const isWarning = /Warning/i.test(a.event);
+                const c = isWarning ? '#ff4444' : '#ffaa00';
+                const dist = a.inside
+                    ? 'covers the pad'
+                    : `${Math.round(a.distanceKm)} km away`;
+                const exp = a.expires ? new Date(a.expires) : null;
+                const expTxt = exp && !isNaN(exp)
+                    ? exp.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : '';
+                return `
+                    <div class="lp-alert" style="border-color:${c}55;background:${c}10">
+                        <div class="lp-alert-hd">
+                            <span class="lp-alert-ev" style="color:${c}">${escHtml(a.event)}</span>
+                            <span class="lp-alert-dist">${escHtml(dist)}</span>
+                        </div>
+                        ${a.area ? `<div class="lp-alert-area">${escHtml(a.area)}</div>` : ''}
+                        ${expTxt ? `<div class="lp-alert-exp">expires ${escHtml(expTxt)}</div>` : ''}
+                    </div>
+                `;
+            }).join('')}
+            <div class="lp-alert-note">Source: api.weather.gov (CONUS + US territories). LLCC Rule 9 uses a 10 nmi lightning halo; this check extends to 50 km to allow for forecast uncertainty and polygon-edge granularity.</div>
+        </div>
+    ` : '';
+
+    const zone = l._recovery_zone;
+    const recoveryBlock = recoveryRules.length ? `
+        <div class="lp-label">Recovery Criteria${zone ? ` <span class="lp-rule-src">· ${escHtml(zone.label)}${zone.offset_km ? ` (${zone.offset_km} km downrange)` : ''}</span>` : ''}</div>
+        <div class="lp-rules lp-rules--recovery">${recoveryRules.map(renderRuleRow).join('')}</div>
+    ` : '';
+
+    // Starship gets its own mission-context panel layered on top of the
+    // generic detail view. Rendered inline here (not a separate file) to
+    // keep the selected-launch view in one place.
+    const starshipBlock = (veh?.vehicle?.id === 'starship') ? renderStarshipFocus(l, score) : '';
+
+    return `
+        <div class="lp-detail">
+            <div class="lp-detail-hd">
+                <div>
+                    <div class="lp-detail-provider">${escHtml(l.provider)}</div>
+                    <h2 class="lp-detail-name">${escHtml(l.name)}</h2>
+                    <div class="lp-detail-sub">${escHtml(l.vehicle)} · ${escHtml(l.pad?.name || '')} · ${escHtml(l.pad?.location || '')}</div>
+                </div>
+                <span class="lp-verdict" style="background:${color}22;border-color:${color};color:${color}">${label}</span>
+            </div>
+
+            <div class="lp-detail-row">
+                <div class="lp-clock">
+                    <div class="lp-label">T-minus</div>
+                    <div class="lp-countdown-big" data-net="${escHtml(l.net_iso || '')}">${formatCountdown(l.net_iso)}</div>
+                    <div class="lp-net">NET ${formatLocalTime(l.net_iso)} local</div>
+                </div>
+                <div class="lp-pad">
+                    <div class="lp-label">Pad</div>
+                    <div class="lp-pad-name">${escHtml(l.pad?.name || '—')}</div>
+                    <div class="lp-pad-coords">${hasPad ? `${lat.toFixed(3)}°, ${lon.toFixed(3)}°` : 'Coordinates unavailable'}</div>
+                    ${l.pad?.wiki ? `<a href="${escHtml(l.pad.wiki)}" target="_blank" rel="noopener" class="lp-link">Pad info ↗</a>` : ''}
+                </div>
+            </div>
+
+            ${l.mission ? `<div class="lp-mission"><div class="lp-label">Mission</div><p>${escHtml(l.mission)}</p></div>` : ''}
+
+            <div class="lp-label">Current Weather</div>
+            ${weatherBlock}
+
+            ${forecastBlock}
+
+            ${alertBlock}
+
+            ${ruleBlock}
+
+            ${recoveryBlock}
+
+            ${starshipBlock}
+
+            <div class="lp-footnote">
+                Weather source: Open-Meteo (hourly forecast, time-aligned to NET) — surface
+                wind, upper-level winds at 200/300/500 hPa, CAPE, lifted index, CIN,
+                cloud cover decomposed by altitude (low/mid/high), and freezing-level
+                height. Alert source: api.weather.gov (CONUS + US territories).
+                Launch data: Launch Library 2 (TheSpaceDevs). Go/No-Go proxies 45 WS
+                LLCC rules 3/4 (anvil), 6 (thick layer across 0°→-20°C), and 9
+                (triggered lightning) — the LLCC itself tests specific polygon
+                distances, cloud-top temperatures, and surface-electric-field data
+                that public forecast APIs don't expose, so treat this as a triage
+                tool, not a flight-readiness determination.
+            </div>
+        </div>
+    `;
+}
+
+// ── App state ───────────────────────────────────────────────────────────────
+
+const state = {
+    launches:       [],
+    filtered:       [],
+    providers:      new Set(),
+    activeProviders: new Set(),     // empty = all
+    verdictFilter:  'all',          // 'all' | 'green' | 'yellow' | 'red'
+    windowDays:     90,
+    selectedId:     null,
+    weatherCache:   new Map(),      // launchId → forecast
+    scoreCache:     new Map(),      // launchId → score
+};
+
+function applyFilters() {
+    state.filtered = state.launches.filter(l => {
+        if (state.activeProviders.size > 0 && !state.activeProviders.has(l.provider)) return false;
+        if (state.verdictFilter !== 'all' && l._score?.verdict !== state.verdictFilter) return false;
+        return true;
+    });
+}
+
+function renderRoster() {
+    const host = $('lp-roster');
+    if (!host) return;
+    if (state.filtered.length === 0) {
+        host.innerHTML = `<div class="lp-empty">No launches match these filters.</div>`;
+        return;
+    }
+    host.innerHTML = state.filtered.map(renderCard).join('');
+    host.querySelectorAll('.lp-card').forEach(btn => {
+        btn.addEventListener('click', () => selectLaunch(btn.dataset.launchId));
+    });
+    if (state.selectedId) {
+        host.querySelector(`[data-launch-id="${CSS.escape(state.selectedId)}"]`)?.classList.add('lp-card--active');
+    }
+}
+
+function renderDetailPane() {
+    const host = $('lp-detail');
+    if (!host) return;
+    const l  = state.launches.find(x => x.id == state.selectedId);
+    const fc = l ? state.weatherCache.get(l.id) : null;
+    const sc = l ? state.scoreCache.get(l.id)   : null;
+    host.innerHTML = renderDetail(l, fc, sc);
+}
+
+function renderProviderFilters() {
+    const host = $('lp-providers');
+    if (!host) return;
+    const sorted = [...state.providers].sort();
+    host.innerHTML = sorted.map(p => {
+        const active = state.activeProviders.has(p);
+        return `<button type="button" class="lp-chip${active ? ' lp-chip--on' : ''}" data-provider="${escHtml(p)}">${escHtml(p)}</button>`;
+    }).join('');
+    host.querySelectorAll('.lp-chip').forEach(ch => {
+        ch.addEventListener('click', () => {
+            const p = ch.dataset.provider;
+            if (state.activeProviders.has(p)) state.activeProviders.delete(p);
+            else state.activeProviders.add(p);
+            applyFilters();
+            renderProviderFilters();
+            renderRoster();
+        });
+    });
+}
+
+function renderStatus(text, isError = false) {
+    const el = $('lp-status');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? '#ff6b6b' : '#8ab';
+}
+
+function renderCountdowns() {
+    const now = Date.now();
+    document.querySelectorAll('[data-net]').forEach(el => {
+        const iso = el.getAttribute('data-net');
+        if (iso) el.textContent = formatCountdown(iso, now);
+    });
+}
+
+// ── Selection + weather join ────────────────────────────────────────────────
+
+async function ensureWeather(l) {
+    if (state.weatherCache.has(l.id)) return state.weatherCache.get(l.id);
+    if (!Number.isFinite(l.pad?.lat) || !Number.isFinite(l.pad?.lon)) {
+        state.weatherCache.set(l.id, null);
+        state.scoreCache.set(l.id, scoreLaunch(null, l.net_iso));
+        l._score = state.scoreCache.get(l.id);
+        return null;
+    }
+
+    const rr = resolveRuleset(l);
+    l._vehicle = rr;
+
+    // Recovery zone (ASDS offset / tower catch / null for expendable) and
+    // the vehicle's recovery_ruleset — both optional. We fetch marine +
+    // recovery-zone atmospheric forecasts in parallel with the pad forecast
+    // so a reusable vehicle's full picture loads in one round-trip worth
+    // of waiting rather than three serial hops.
+    const recoveryZone    = recoveryZoneForLaunch(l);
+    const recoveryRuleset = rr.vehicle?.recovery_ruleset;
+    l._recovery_zone      = recoveryZone;
+
+    const needsMarine       = recoveryZone && recoveryZone.type === 'ASDS';
+    const needsRecoveryWind = needsMarine;   // ASDS-zone wind differs from pad
+
+    // US pads get an NWS active-alert proximity check at the same time as
+    // the Open-Meteo fetches. Non-US pads (Kourou, Wenchang, Baikonur…) get
+    // an empty result because api.weather.gov's coverage is CONUS + US
+    // territories only; the helper returns [] silently in that case.
+    // The 50 km buffer mirrors the launch-commit lightning halo at CCAFS
+    // (LLCC Rule 9 uses 10 nmi ≈ 18.5 km; we double-and-round for forecast
+    // uncertainty + polygon-edge coarseness).
+    const [fc, recoveryFc, marineFc, nearbyAlerts] = await Promise.all([
+        fetchLaunchForecast(l.pad.lat, l.pad.lon),
+        needsRecoveryWind ? fetchLaunchForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
+        needsMarine       ? fetchMarineForecast(recoveryZone.lat, recoveryZone.lon) : Promise.resolve(null),
+        convectiveAlertsNearPad(l.pad.lat, l.pad.lon, { radiusKm: 50 })
+            .catch(() => []),
+    ]);
+    state.weatherCache.set(l.id, fc);
+    l._marine_fc = marineFc;     // retained for the Starship focus panel
+    l._nearby_alerts = nearbyAlerts;
+
+    const score = scoreLaunch(fc, l.net_iso, {
+        ruleset:           rr.ruleset,
+        recovery_ruleset:  recoveryRuleset,
+        recovery_fc:       recoveryFc,
+        marine_fc:         marineFc,
+        vehicle_label:     rr.label,
+        nearbyAlerts,
+    });
+    state.scoreCache.set(l.id, score);
+    l._score = score;
+    return fc;
+}
+
+async function selectLaunch(id) {
+    state.selectedId = id;
+    renderRoster();
+    renderDetailPane();
+    const l = state.launches.find(x => x.id == id);
+    if (!l) return;
+    await ensureWeather(l);
+    applyFilters();
+    renderRoster();
+    renderDetailPane();
+    updateUrl();
+}
+
+function updateUrl() {
+    const url = new URL(window.location.href);
+    if (state.selectedId) url.searchParams.set('launch', state.selectedId);
+    else                  url.searchParams.delete('launch');
+    if (state.verdictFilter !== 'all') url.searchParams.set('verdict', state.verdictFilter);
+    else                                url.searchParams.delete('verdict');
+    window.history.replaceState(null, '', url.toString());
+}
+
+// ── Bootstrap ───────────────────────────────────────────────────────────────
+
+async function init() {
+    renderStatus('Loading upcoming launches…');
+
+    const data = await fetchLaunches(state.windowDays, 50);
+    if (data.error) {
+        renderStatus(`Upstream error: ${data.error}`, true);
+        return;
+    }
+    state.launches = data.launches || [];
+    state.providers = new Set(state.launches.map(l => l.provider).filter(Boolean));
+
+    renderStatus(`${state.launches.length} launches · updated ${new Date(data.fetched_at).toLocaleTimeString()}`);
+
+    // Kick off weather prefetch for the first 8 launches so initial sort reflects verdicts.
+    const soon = state.launches.slice(0, 8);
+    await Promise.all(soon.map(l => ensureWeather(l).catch(() => null)));
+
+    applyFilters();
+    renderProviderFilters();
+    renderRoster();
+
+    // Honor ?launch=<id> deep link
+    const urlParams = new URLSearchParams(window.location.search);
+    const preselect = urlParams.get('launch');
+    const verdictParam = urlParams.get('verdict');
+    if (verdictParam && ['green', 'yellow', 'red'].includes(verdictParam)) {
+        state.verdictFilter = verdictParam;
+        document.querySelectorAll('[data-verdict-filter]').forEach(b => b.classList.remove('lp-chip--on'));
+        document.querySelector(`[data-verdict-filter="${verdictParam}"]`)?.classList.add('lp-chip--on');
+        applyFilters();
+    }
+    if (preselect && state.launches.some(l => String(l.id) === String(preselect))) {
+        await selectLaunch(preselect);
+    } else if (state.launches[0]) {
+        await selectLaunch(state.launches[0].id);
+    } else {
+        renderDetailPane();
+    }
+
+    // Countdown tick (single interval; pause when tab hidden to save CPU)
+    let tick = setInterval(renderCountdowns, 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            clearInterval(tick);
+            tick = null;
+        } else if (!tick) {
+            renderCountdowns();
+            tick = setInterval(renderCountdowns, 1000);
+        }
+    });
+
+    // Lazy-load weather for the rest so all cards show verdicts eventually
+    const remaining = state.launches.slice(8);
+    for (const l of remaining) {
+        ensureWeather(l).then(() => {
+            applyFilters();
+            renderRoster();
+        }).catch(() => null);
+        await new Promise(r => setTimeout(r, 150));  // throttle Open-Meteo
+    }
+}
+
+function wireControls() {
+    document.querySelectorAll('[data-window-days]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            document.querySelectorAll('[data-window-days]').forEach(b => b.classList.remove('lp-chip--on'));
+            btn.classList.add('lp-chip--on');
+            state.windowDays = parseInt(btn.dataset.windowDays, 10) || 90;
+            const data = await fetchLaunches(state.windowDays, 50);
+            state.launches = data.launches || [];
+            state.providers = new Set(state.launches.map(l => l.provider).filter(Boolean));
+            state.weatherCache.clear();
+            state.scoreCache.clear();
+            state.selectedId = null;
+            applyFilters();
+            renderProviderFilters();
+            renderRoster();
+            renderDetailPane();
+            if (state.launches[0]) selectLaunch(state.launches[0].id);
+        });
+    });
+
+    document.querySelectorAll('[data-verdict-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-verdict-filter]').forEach(b => b.classList.remove('lp-chip--on'));
+            btn.classList.add('lp-chip--on');
+            state.verdictFilter = btn.dataset.verdictFilter;
+            applyFilters();
+            renderRoster();
+            updateUrl();
+        });
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { wireControls(); init(); });
+} else {
+    wireControls();
+    init();
+}

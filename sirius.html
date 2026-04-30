@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Sirius System — A1V + White Dwarf · Parker Physics App</title>
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; background:#000; color:#ddd;
+    font-family:'Segoe UI',system-ui,sans-serif; }
+
+/* ─── Nav ────────────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
+}
+.nav-brand {
+    display:flex; align-items:center; gap:8px;
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    margin-right:2px;
+}
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+/* nav-menu stretches to fill all remaining space */
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.nav-item {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0;
+}
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop { position:relative; flex-shrink:0; }
+.nav-drop-btn {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s, border-color .2s; white-space:nowrap;
+}
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+/* Rich dropdown panel */
+.nav-drop-menu {
+    display:block; position:absolute; top:calc(100% + 5px); left:0;
+    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.11); border-radius:9px;
+    padding:6px 0 8px; min-width:268px; z-index:800;
+    box-shadow:0 14px 44px rgba(0,0,0,.80);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:translateY(-4px);
+    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
+}
+/* Each item in the dropdown */
+.nav-drop-link {
+    display:flex; align-items:center; gap:11px;
+    padding:7px 16px; text-decoration:none; transition:background .15s;
+}
+.nav-drop-link:hover { background:rgba(255,255,255,.07); }
+.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+.nav-drop-link.active .ndl-icon  { opacity:1; }
+.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
+.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
+.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.nav-drop-link:hover .ndl-title { color:#fff; }
+.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
+/* Section label inside dropdown */
+.nav-drop-section {
+    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
+    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
+}
+.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+/* Spacer that pushes auth buttons to the far right */
+.nav-spacer { flex:1; }
+/* Auth */
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
+.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
+.nav-signup:hover { filter:brightness(1.12) !important; }
+/* Burger */
+.nav-burger {
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1; transition:background .2s;
+}
+.nav-burger:hover { background:rgba(255,255,255,.18); }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:50px; left:0; right:0;
+        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 14px; gap:3px; z-index:700;
+        max-height:calc(100vh - 50px); overflow-y:auto;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; border-radius:5px; min-width:0;
+        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
+        display:none; opacity:1; visibility:visible; transform:none;
+        transition:none; pointer-events:auto; padding:2px 0 6px;
+    }
+    .nav-drop-link { padding:8px 14px 8px 22px; }
+    .ndl-sub { display:none; }
+    .nav-drop-section { padding:5px 14px 2px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none !important; }
+    .nav-drop.open  .nav-drop-menu { display:block !important; }
+    .nav-spacer { display:none; }
+    .nav-auth-sep { display:none; }
+}
+
+#app { position: relative; width: 100%; height: calc(100vh - 48px); overflow: hidden; }
+#canvas-wrap {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 40% 50%, #010210 0%, #000408 60%, #000 100%);
+}
+#canvas-wrap canvas { display: block; width: 100% !important; height: 100% !important; }
+
+#hud {
+    position: absolute; top: 12px; left: 12px; z-index: 50;
+    background: rgba(0,0,0,.68); backdrop-filter: blur(8px);
+    border: 1px solid rgba(80,140,255,.22); border-radius: 8px;
+    padding: 10px 14px; font-size: 11px; line-height: 1.7;
+    pointer-events: none; min-width: 195px;
+}
+#hud h3 { font-size: 13px; color:#88aaff; margin-bottom:4px; letter-spacing:.5px; }
+#hud .val { color:#aaccff; font-weight:600; }
+#hud .valb { color:#ffffff; font-weight:600; }
+#hud .dim { color:#555; font-size:10px; }
+#hud .sep { border-top:1px solid rgba(80,140,255,.18); margin:5px 0; }
+#fps-display { color:#40ff80; font-weight:600; }
+#hud .sub { font-size:10px; color:#888; font-weight:600; margin-top:2px; }
+
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(2,4,16,.80); backdrop-filter: blur(8px);
+    border: 1px solid rgba(80,140,255,.30); border-radius: 7px;
+    color: #88aaff; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation;
+}
+.cv-btn:hover { background: rgba(60,100,200,.20); border-color:#4080dd; }
+#btn-panel-open { top:12px; right:12px; }
+#btn-center     { bottom:16px; right:12px; }
+#btn-sw      { top:12px; right:105px; }
+
+#backdrop { display:none; position:absolute; inset:0; z-index:400; background:rgba(0,0,0,.45); cursor:pointer; }
+#backdrop.show { display:block; }
+
+#panel {
+    position: absolute; top:0; right:0; bottom:0; width: min(296px, 88vw);
+    background: rgba(2,4,18,.97); backdrop-filter: blur(16px);
+    border-left: 1px solid rgba(80,140,255,.18); z-index: 450;
+    display: flex; flex-direction: column; overflow: hidden;
+    transform: translateX(100%); transition: transform .3s cubic-bezier(.4,0,.2,1);
+}
+#panel.open { transform: translateX(0); }
+#panel-header { flex-shrink:0; display:flex; align-items:flex-start; justify-content:space-between;
+    padding:12px 14px 8px; border-bottom:1px solid rgba(80,140,255,.15); }
+.panel-star  { font-size:15px; font-weight:700; color:#88aaff; letter-spacing:.8px; }
+.panel-sub   { font-size:10px; color:#555; margin-top:2px; }
+.panel-badge { display:inline-block; margin-top:5px; padding:2px 8px; font-size:9px; letter-spacing:.4px;
+    background:rgba(80,140,255,.14); border:1px solid rgba(80,140,255,.32); border-radius:10px; color:#aabbff; }
+#btn-panel-close { flex-shrink:0; margin-left:8px; margin-top:2px;
+    background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#888; cursor:pointer; font-size:13px; padding:4px 8px; line-height:1; transition:all .2s; }
+#btn-panel-close:hover { background:rgba(255,80,80,.15); border-color:rgba(255,80,80,.4); color:#ff6060; }
+#panel-body { flex:1; overflow-y:auto; overflow-x:hidden; padding:8px; }
+#panel-body::-webkit-scrollbar { width:4px; }
+#panel-body::-webkit-scrollbar-thumb { background:rgba(80,140,255,.35); border-radius:2px; }
+
+.sec { margin-bottom:8px; border:1px solid rgba(80,140,255,.14); border-radius:7px; overflow:hidden; background:rgba(80,140,255,.02); }
+.sec-hd { display:flex; justify-content:space-between; align-items:center;
+    padding:8px 11px; background:rgba(80,140,255,.07); color:#88aaff; font-weight:600;
+    font-size:10px; cursor:pointer; user-select:none; text-transform:uppercase; letter-spacing:.7px; }
+.sec-hd:hover { background:rgba(80,140,255,.14); }
+.sec-hd .arrow { transition:transform .25s; }
+.sec.closed .sec-hd .arrow { transform:rotate(-90deg); }
+.sec-bd { padding:10px 11px; }
+.sec.closed .sec-bd { display:none; }
+.ctrl { display:flex; align-items:center; margin:8px 0; gap:7px; }
+.ctrl label { flex:0 0 64px; font-size:11px; color:#888; }
+.ctrl input[type=range] { flex:1; cursor:pointer; height:28px; padding:10px 0; -webkit-appearance:none; background:transparent; }
+.ctrl input[type=range]::-webkit-slider-runnable-track { height:3px; background:rgba(80,140,255,.28); border-radius:2px; }
+.ctrl input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px; margin-top:-7.5px; border-radius:50%; background:#4080cc; cursor:pointer; box-shadow:0 0 6px rgba(80,140,255,.5); }
+.ctrl input[type=range]::-moz-range-thumb { width:16px; height:16px; border-radius:50%; background:#4080cc; border:none; }
+.vdisp { flex:0 0 68px; text-align:right; color:#aaccff; font-size:10px; font-weight:600; }
+.dtbl { width:100%; border-collapse:collapse; font-size:11px; }
+.dtbl td { padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.04); vertical-align:top; }
+.dtbl td:first-child { color:#777; width:48%; }
+.dtbl td:last-child  { color:#aaccff; text-align:right; font-weight:600; }
+.dtbl .hdr { background:rgba(80,140,255,.08); color:#88aaff !important; font-weight:700 !important; text-align:left !important; }
+.btn-row { display:flex; gap:5px; margin:8px 0; flex-wrap:wrap; }
+.btn-row button { flex:1; padding:8px 6px; min-width:56px;
+    background:rgba(80,140,255,.10); border:1px solid rgba(80,140,255,.26);
+    border-radius:5px; color:#88aaff; cursor:pointer; font-family:inherit; font-size:10px; transition:all .15s; }
+.btn-row button:hover { background:rgba(80,140,255,.22); }
+.btn-row button.active { background:rgba(80,140,255,.32); border-color:#4080cc; color:#c0d8ff; }
+.toggle-row { display:flex; align-items:center; margin:6px 0; gap:8px; font-size:11px; }
+.toggle-row label { color:#888; flex:1; cursor:pointer; }
+.toggle-row input[type=checkbox] { width:14px; height:14px; cursor:pointer; accent-color:#4080cc; }
+.note-text { font-size:10px; color:#555; line-height:1.6; }
+.note-text strong { color:#4060aa; }
+.note-text ul { margin:6px 0 0 14px; list-style:disc; }
+.note-text li { margin:2px 0; }
+</style>
+</head>
+<body>
+
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("sirius");</script>
+
+<div id="app">
+    <div id="canvas-wrap">
+        <div id="hud">
+            <h3>Sirius System — α CMa</h3>
+            <div class="sub">Sirius A (A1V)</div>
+            <div>T<sub>eff</sub>: <span class="val" id="hud-ta">9 940</span> <span class="dim">K</span></div>
+            <div>Sep.: <span class="val" id="hud-sep">8.6</span> <span class="dim">AU</span></div>
+            <div class="sep"></div>
+            <div class="sub">Sirius B (DA2 WD)</div>
+            <div>T<sub>eff</sub>: <span class="valb" id="hud-tb">25 200</span> <span class="dim">K</span></div>
+            <div>R: <span class="valb">0.0084</span> <span class="dim">R☉</span></div>
+            <div class="sep"></div>
+            <div>Orbital phase: <span class="val" id="hud-phase">0°</span></div>
+            <div>FPS: <span id="fps-display">--</span></div>
+            <div class="dim" style="margin-top:3px">Drag · Pinch · Scroll</div>
+        </div>
+        <button class="cv-btn" id="btn-panel-open">☰ Controls</button>
+        <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data">⚡ Weather</a>
+        <button class="cv-btn" id="btn-center" title="Reset camera">⊙ Center</button>
+        <div id="backdrop"></div>
+    </div>
+
+    <aside id="panel">
+        <div id="panel-header">
+            <div>
+                <div class="panel-star">Sirius System</div>
+                <div class="panel-sub">α Canis Majoris · 2.64 pc from Earth</div>
+                <div class="panel-badge">Binary · A1V + DA2 White Dwarf</div>
+            </div>
+            <button id="btn-panel-close">✕</button>
+        </div>
+        <div id="panel-body">
+
+            <div class="sec">
+                <div class="sec-hd"><span>Orbital Parameters</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>Orbit speed</label>
+                        <input type="range" id="sl-speed" min="0.1" max="5.0" step="0.1" value="1.0">
+                        <span class="vdisp" id="disp-speed">1.0×</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>View incl.</label>
+                        <input type="range" id="sl-incl" min="0" max="90" step="1" value="43">
+                        <span class="vdisp" id="disp-incl">43°</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Separation</label>
+                        <input type="range" id="sl-sep" min="2" max="15" step="0.5" value="8.6">
+                        <span class="vdisp" id="disp-sep">8.6 AU</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Sirius A Parameters</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="ctrl">
+                        <label>T<sub>eff</sub></label>
+                        <input type="range" id="sl-ta" min="7000" max="14000" step="100" value="9940">
+                        <span class="vdisp" id="disp-ta">9940 K</span>
+                    </div>
+                    <div class="ctrl">
+                        <label>Oblateness</label>
+                        <input type="range" id="sl-oblate" min="0" max="0.2" step="0.01" value="0.03">
+                        <span class="vdisp" id="disp-oblate">0.03</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Layers</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-orbit" checked>
+                        <label for="tog-orbit">Orbit trail</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-acca" checked>
+                        <label for="tog-acca">Sirius A corona</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-accb" checked>
+                        <label for="tog-accb">Sirius B hot halo</label>
+                    </div>
+                    <div class="toggle-row">
+                        <input type="checkbox" id="tog-labels" checked>
+                        <label for="tog-labels">Labels (use HUD)</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec">
+                <div class="sec-hd"><span>Camera</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="btn-row">
+                        <button id="cam-default" class="active">System</button>
+                        <button id="cam-a">Sirius A</button>
+                        <button id="cam-b">Sirius B</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Reference Data</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <table class="dtbl">
+                        <tr><td colspan="2" class="hdr">Sirius A</td></tr>
+                        <tr><td>Type</td><td>A1V</td></tr>
+                        <tr><td>T<sub>eff</sub></td><td>9 940 K</td></tr>
+                        <tr><td>Luminosity</td><td>25.4 L☉</td></tr>
+                        <tr><td>Mass</td><td>2.063 M☉</td></tr>
+                        <tr><td>Radius</td><td>1.711 R☉</td></tr>
+                        <tr><td colspan="2" class="hdr" style="margin-top:6px">Sirius B</td></tr>
+                        <tr><td>Type</td><td>DA2 (WD)</td></tr>
+                        <tr><td>T<sub>eff</sub></td><td>25 200 K</td></tr>
+                        <tr><td>Luminosity</td><td>0.056 L☉</td></tr>
+                        <tr><td>Mass</td><td>1.018 M☉</td></tr>
+                        <tr><td>Radius</td><td>0.0084 R☉</td></tr>
+                        <tr><td colspan="2" class="hdr">System</td></tr>
+                        <tr><td>Distance</td><td>2.64 pc</td></tr>
+                        <tr><td>Orbital period</td><td>50.13 yr</td></tr>
+                        <tr><td>Semi-major axis</td><td>7.5 AU</td></tr>
+                        <tr><td>Eccentricity</td><td>0.591</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="sec closed">
+                <div class="sec-hd"><span>Physics Notes</span><span class="arrow">▼</span></div>
+                <div class="sec-bd">
+                    <div class="note-text">
+                        <p><strong>Sirius A</strong> is an A1V main-sequence star, 25× more luminous than the Sun. Its blue-white light makes it appear the brightest star in the sky (apparent magnitude −1.46) despite being only 2.64 pc away.</p>
+                        <p style="margin-top:5px"><strong>Sirius B</strong> is a DA2 white dwarf — the collapsed remnant of a star that was once ~5 M☉. At 25,200 K it glows hot blue-white, but with only 0.0084 R☉ radius it appears tiny. It was discovered in 1862 by Alvan Clark.</p>
+                        <p style="margin-top:5px"><strong>Gravity:</strong> Surface gravity of Sirius B is ~330,000× Earth's. A teaspoon of white dwarf material would weigh ~15 tonnes.</p>
+                        <p style="margin-top:5px"><strong>Eccentric orbit:</strong> The two stars orbit a common barycentre with eccentricity 0.591 — separation varies from ~8.2 AU (periapsis) to ~31.5 AU (apoapsis).</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+</div>
+
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// Nav handled by shared nav.js module
+
+// PANEL
+const panel = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+document.getElementById('btn-panel-open').addEventListener('click', () => { panel.classList.add('open'); backdrop.classList.add('show'); });
+document.getElementById('btn-panel-close').addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+backdrop.addEventListener('click', () => { panel.classList.remove('open'); backdrop.classList.remove('show'); });
+
+// STATE
+const state = {
+    orbitSpeed: 1.0,
+    inclination: 43.0,
+    separation: 8.6,   // AU (in scene units: 1 unit = 1.5 "scale-AU")
+    teffA: 9940,
+    oblateA: 0.03,
+    orbitAngle: 0,     // radians
+};
+
+// SCENE
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, 1, 0.001, 2000);
+camera.position.set(0, 5, 14);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+
+const canvasWrap = document.getElementById('canvas-wrap');
+canvasWrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.07;
+controls.minDistance = 2; controls.maxDistance = 80;
+controls.target.set(0, 0, 0);
+
+// BACKGROUND STARS — lots of them (Canis Major region is rich)
+{
+    const n = 5000, pos = new Float32Array(n*3), col = new Float32Array(n*3);
+    for (let i = 0; i < n; i++) {
+        const r=300+Math.random()*500, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+        pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph);
+        // Slightly blue-tinted star field
+        const c = 0.7 + Math.random() * 0.3;
+        col[i*3]=c*0.90; col[i*3+1]=c*0.95; col[i*3+2]=c;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    scene.add(new THREE.Points(geo, new THREE.PointsMaterial({ vertexColors:true, size:0.45, sizeAttenuation:false })));
+}
+
+// ─── SHARED GLSL HELPERS ──────────────────────────────────────────────────────
+const NOISE_GLSL = /* glsl */`
+    float h3(vec3 p){p=fract(p*vec3(127.1,311.7,74.7));p+=dot(p,p+19.19);return fract(p.x*p.y*p.z);}
+    float vn(vec3 p){
+        vec3 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h3(i),h3(i+vec3(1,0,0)),u.x),mix(h3(i+vec3(0,1,0)),h3(i+vec3(1,1,0)),u.x),u.y),
+                   mix(mix(h3(i+vec3(0,0,1)),h3(i+vec3(1,0,1)),u.x),mix(h3(i+vec3(0,1,1)),h3(i+vec3(1,1,1)),u.x),u.y),u.z);}
+    float fbm4(vec3 p){float v=0.0,a=0.5;for(int i=0;i<4;i++){v+=a*vn(p);p=p*2.1+vec3(31.41,17.35,53.17);a*=0.5;}return v;}
+`;
+
+// ─── SIRIUS A — A1V blue-white main sequence ───────────────────────────────────
+const unifA = {
+    u_time:    { value: 0.0 },
+    u_teff:    { value: 9940.0 },
+    u_oblate:  { value: 0.03 },
+};
+
+const siriusAVS = /* glsl */`
+    uniform float u_oblate;
+    varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
+    void main() {
+        float c = 1.0 - u_oblate;
+        // Apply slight oblateness (Sirius A rotates ~16 km/s, much slower than Vega)
+        vec3 oblPos = vec3(position.x, position.y * c, position.z);
+        // Analytical normal for oblate ellipsoid
+        vec3 ellNorm = normalize(vec3(position.x, position.y / (c*c), position.z));
+        vNormal   = normalize(normalMatrix * ellNorm);
+        vPosition = position;
+        vec4 mv   = modelViewMatrix * vec4(oblPos, 1.0);
+        vViewDir  = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+
+const siriusAFS = /* glsl */`
+    uniform float u_time; uniform float u_teff;
+    varying vec3 vNormal; varying vec3 vPosition; varying vec3 vViewDir;
+    ${NOISE_GLSL}
+
+    // A1V blackbody: blue-white
+    vec3 a1Color(float T) {
+        float f;
+        if (T < 8000.0) {
+            f = (T - 6000.0) / 2000.0;
+            return mix(vec3(0.90, 0.88, 0.78), vec3(0.94, 0.94, 1.0), clamp(f,0.0,1.0));
+        } else if (T < 10000.0) {
+            f = (T - 8000.0) / 2000.0;
+            return mix(vec3(0.94, 0.94, 1.0), vec3(0.88, 0.92, 1.0), clamp(f,0.0,1.0));
+        } else if (T < 12000.0) {
+            f = (T - 10000.0) / 2000.0;
+            return mix(vec3(0.88, 0.92, 1.0), vec3(0.82, 0.88, 1.0), clamp(f,0.0,1.0));
+        } else {
+            f = clamp((T - 12000.0) / 4000.0, 0.0, 1.0);
+            return mix(vec3(0.82, 0.88, 1.0), vec3(0.72, 0.82, 1.0), f);
+        }
+    }
+
+    void main() {
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
+        float mu  = max(dot(nrm, vDir), 0.0);
+
+        // A-star: mild surface features (shallow convection zone)
+        float grain1 = fbm4(vPosition * 2.5 + vec3(u_time * 0.006, u_time * 0.004, u_time * 0.008));
+        float grain2 = vn(vPosition * 8.0 + vec3(u_time * 0.015));
+        float bmod = 0.88 + grain1 * 0.10 + grain2 * 0.05;
+
+        // Limb darkening: moderate for A-star
+        float limb = 0.38 + 0.62 * mu;
+
+        vec3 base = a1Color(u_teff);
+        vec3 col  = base * bmod * limb;
+        col *= 1.85;
+
+        // Blue-white corona rim
+        float fr = pow(1.0 - mu, 3.0);
+        col += vec3(0.60, 0.80, 1.0) * fr * 0.50;
+
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+
+const siriusAMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1.0, 96, 96),
+    new THREE.ShaderMaterial({ vertexShader:siriusAVS, fragmentShader:siriusAFS, uniforms:unifA })
+);
+scene.add(siriusAMesh);
+
+// Sirius A corona glow
+const glowVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        vNormal=normalize(normalMatrix*normal);
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        vViewDir=normalize(-mv.xyz);
+        gl_Position=projectionMatrix*mv;
+    }
+`;
+const siriusACorFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float pulse = 0.9 + 0.1 * sin(u_time * 1.5);
+        float alpha = pow(rim, 2.0) * 0.45 * pulse;
+        gl_FragColor = vec4(0.70, 0.85, 1.0, alpha);
+    }
+`;
+const siriusACorona = new THREE.Mesh(new THREE.SphereGeometry(1.30, 32, 32),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:siriusACorFS, uniforms:unifA,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
+scene.add(siriusACorona);
+
+// ─── SIRIUS B — DA2 White Dwarf ───────────────────────────────────────────────
+// Very compact: R=0.0084 R☉ ≈ Earth-sized. In scene: ~0.06 units (relative to Sirius A = 1.0)
+// We'll exaggerate to ~0.10 units so it's visible but clearly tiny
+const unifB = {
+    u_time:  { value: 0.0 },
+};
+
+const siriusBFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    ${NOISE_GLSL}
+    void main() {
+        vec3 nrm  = normalize(vNormal);
+        vec3 vDir = normalize(vViewDir);
+        float mu  = max(dot(nrm, vDir), 0.0);
+        // White dwarf: very hot (25,200 K), appears blue-white
+        // Nearly uniform — degenerate matter has no convection
+        float fine  = vn(normalize(vNormal) * 15.0 + vec3(u_time * 0.05)) * 0.05;
+        float bmod  = 0.97 + fine;
+        float limb  = 0.45 + 0.55 * mu;  // moderate limb darkening
+        // DA2 color: 25,200 K → bright white with blue tinge
+        vec3 col = vec3(0.80, 0.88, 1.0) * bmod * limb;
+        col *= 2.2;  // very hot, very bright per unit area
+        float fr = pow(1.0 - mu, 2.5);
+        col += vec3(0.60, 0.75, 1.0) * fr * 0.6;
+        gl_FragColor = vec4(col, 1.0);
+    }
+`;
+const siriusBVS = /* glsl */`
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vViewDir = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+    }
+`;
+const siriusBMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 48, 48),
+    new THREE.ShaderMaterial({ vertexShader:siriusBVS, fragmentShader:siriusBFS, uniforms:unifB })
+);
+scene.add(siriusBMesh);
+
+// Sirius B hot halo (ionized atmosphere + gravitational lensing glow)
+const siriusBHaloFS = /* glsl */`
+    uniform float u_time;
+    varying vec3 vNormal; varying vec3 vViewDir;
+    void main() {
+        float rim   = 1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0);
+        float alpha = pow(rim, 1.8) * 0.65;
+        gl_FragColor = vec4(0.55, 0.75, 1.0, alpha);
+    }
+`;
+const siriusBHalo = new THREE.Mesh(new THREE.SphereGeometry(0.22, 24, 24),
+    new THREE.ShaderMaterial({ vertexShader:glowVS, fragmentShader:siriusBHaloFS, uniforms:unifB,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.BackSide }));
+scene.add(siriusBHalo);
+
+// ─── ORBIT TRAIL ──────────────────────────────────────────────────────────────
+// Elliptical orbit of Sirius B around the barycentre
+// Real orbit: semi-major = 7.5 AU, eccentricity = 0.591
+// We scale: separation slider = semi-major axis in "scene AU" (1 scene unit ~ 1 AU / scale)
+let orbitTrail, orbitTrailGeo;
+
+function buildOrbitTrail(semiMajor, ecc, inclDeg) {
+    const N = 256;
+    const pts = [];
+    const scale = semiMajor / 8.0;  // normalize scene scale
+    const inclRad = inclDeg * Math.PI / 180;
+
+    for (let i = 0; i <= N; i++) {
+        const anomaly = (i / N) * Math.PI * 2;
+        // Ellipse in orbit plane
+        const r = semiMajor * scale * (1 - ecc * ecc) / (1 + ecc * Math.cos(anomaly));
+        const xOrb = r * Math.cos(anomaly);
+        const yOrb = r * Math.sin(anomaly);
+        // Incline the orbit
+        pts.push(xOrb, yOrb * Math.sin(inclRad), yOrb * Math.cos(inclRad));
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(pts), 3));
+    return geo;
+}
+
+orbitTrailGeo = buildOrbitTrail(state.separation, 0.591, state.inclination);
+const orbitMat = new THREE.LineBasicMaterial({ color: 0x334466, transparent:true, opacity:0.4 });
+orbitTrail = new THREE.LineLoop(orbitTrailGeo, orbitMat);
+scene.add(orbitTrail);
+
+// Barycentre marker
+const baryDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0x445566 })
+);
+scene.add(baryDot);
+
+// ─── LIGHTS ───────────────────────────────────────────────────────────────────
+const lightA = new THREE.PointLight(0x88aaff, 5, 80);
+scene.add(lightA);
+const lightB = new THREE.PointLight(0xaabbff, 1, 20);
+scene.add(lightB);
+scene.add(new THREE.AmbientLight(0x040810, 0.4));
+
+// ─── RESIZE ───────────────────────────────────────────────────────────────────
+function resize() {
+    const w = canvasWrap.clientWidth, h = canvasWrap.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h, false); camera.aspect = w/h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvasWrap); resize();
+
+// FPS
+let fpsF=0, fpsT=performance.now();
+const fpsEl = document.getElementById('fps-display');
+
+// ─── ORBITAL POSITION CALCULATION ────────────────────────────────────────────
+function getOrbitalPos(angle, semiMajor, ecc, inclDeg) {
+    const scale = semiMajor / 8.0;
+    // Use angle as true anomaly
+    const r = semiMajor * scale * (1 - ecc * ecc) / (1 + ecc * Math.cos(angle));
+    const xOrb = r * Math.cos(angle);
+    const yOrb = r * Math.sin(angle);
+    const inclRad = inclDeg * Math.PI / 180;
+    return new THREE.Vector3(xOrb, yOrb * Math.sin(inclRad), yOrb * Math.cos(inclRad));
+}
+
+// ─── ANIMATE ──────────────────────────────────────────────────────────────────
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = 0.010;
+    unifA.u_time.value += dt;
+    unifB.u_time.value += dt;
+
+    // Advance orbit
+    state.orbitAngle += dt * 0.010 * state.orbitSpeed;
+
+    // Get positions (B orbits around A in simplified model)
+    // Center of mass: ~1.5 AU from A (since mA=2.06, mB=1.02, ratio ~2:1)
+    const massRatio = 1.018 / (2.063 + 1.018);  // ~0.33
+    const posB = getOrbitalPos(state.orbitAngle, state.separation, 0.591, state.inclination);
+    const posA = posB.clone().multiplyScalar(-massRatio / (1 - massRatio));
+
+    siriusAMesh.position.copy(posA);
+    siriusACorona.position.copy(posA);
+    lightA.position.copy(posA);
+
+    siriusBMesh.position.copy(posB);
+    siriusBHalo.position.copy(posB);
+    lightB.position.copy(posB);
+
+    controls.update();
+    renderer.render(scene, camera);
+
+    fpsF++;
+    const now = performance.now();
+    if (now - fpsT >= 500) {
+        fpsEl.textContent = Math.round(fpsF * 1000 / (now - fpsT));
+        fpsF = 0; fpsT = now;
+    }
+
+    // Update HUD
+    const sep = posB.distanceTo(posA);
+    document.getElementById('hud-sep').textContent = state.separation.toFixed(1);
+    document.getElementById('hud-phase').textContent = Math.round((state.orbitAngle % (Math.PI*2)) * 180 / Math.PI) + '°';
+}
+animate();
+
+// ACCORDION
+document.querySelectorAll('.sec-hd').forEach(hd => {
+    hd.addEventListener('click', () => hd.closest('.sec').classList.toggle('closed'));
+});
+
+// CAMERA PRESETS
+function setCam(k) {
+    document.querySelectorAll('.btn-row button[id^=cam]').forEach(b => b.classList.remove('active'));
+    document.getElementById('cam-'+k)?.classList.add('active');
+    if (k === 'default') { camera.position.set(0, 5, 14); controls.target.set(0,0,0); }
+    else if (k === 'a')  { camera.position.copy(siriusAMesh.position).add(new THREE.Vector3(0,0.5,2.5)); controls.target.copy(siriusAMesh.position); }
+    else if (k === 'b')  { camera.position.copy(siriusBMesh.position).add(new THREE.Vector3(0,0.2,0.8)); controls.target.copy(siriusBMesh.position); }
+    controls.update();
+}
+document.getElementById('cam-default').addEventListener('click', ()=>setCam('default'));
+document.getElementById('cam-a').addEventListener('click',       ()=>setCam('a'));
+document.getElementById('cam-b').addEventListener('click',       ()=>setCam('b'));
+document.getElementById('btn-center').addEventListener('click',  ()=>setCam('default'));
+
+// TOGGLES
+document.getElementById('tog-orbit').addEventListener('change',  e => { orbitTrail.visible = e.target.checked; });
+document.getElementById('tog-acca').addEventListener('change',   e => { siriusACorona.visible = e.target.checked; });
+document.getElementById('tog-accb').addEventListener('change',   e => { siriusBHalo.visible = e.target.checked; });
+document.getElementById('tog-labels').addEventListener('change', e => { document.getElementById('hud').style.display = e.target.checked ? '' : 'none'; });
+
+// SLIDERS
+document.getElementById('sl-speed').addEventListener('input', function() {
+    state.orbitSpeed = +this.value;
+    document.getElementById('disp-speed').textContent = (+this.value).toFixed(1) + '×';
+});
+document.getElementById('sl-incl').addEventListener('input', function() {
+    state.inclination = +this.value;
+    document.getElementById('disp-incl').textContent = this.value + '°';
+    // Rebuild orbit trail
+    scene.remove(orbitTrail);
+    orbitTrailGeo = buildOrbitTrail(state.separation, 0.591, state.inclination);
+    orbitTrail.geometry.dispose();
+    orbitTrail.geometry = orbitTrailGeo;
+    scene.add(orbitTrail);
+});
+document.getElementById('sl-sep').addEventListener('input', function() {
+    state.separation = +this.value;
+    document.getElementById('disp-sep').textContent = (+this.value).toFixed(1) + ' AU';
+    document.getElementById('hud-sep').textContent  = (+this.value).toFixed(1);
+    // Rebuild orbit trail
+    orbitTrail.geometry.dispose();
+    orbitTrail.geometry = buildOrbitTrail(state.separation, 0.591, state.inclination);
+});
+document.getElementById('sl-ta').addEventListener('input', function() {
+    unifA.u_teff.value = +this.value;
+    document.getElementById('disp-ta').textContent = (+this.value).toFixed(0) + ' K';
+    document.getElementById('hud-ta').textContent  = (+this.value).toLocaleString();
+});
+document.getElementById('sl-oblate').addEventListener('input', function() {
+    unifA.u_oblate.value = +this.value;
+    document.getElementById('disp-oblate').textContent = (+this.value).toFixed(2);
+});
+
+console.log('%c[Sirius System · A1V + DA2 Binary]', 'color:#88aaff;font-weight:bold;font-size:13px');
+</script>
+</body>
+</html>

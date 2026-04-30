@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="required-tier" content="advanced">
+<title>Launch Planner — Orbital Launch Weather Go/No-Go · Parker Physics</title>
+<meta name="description" content="Track upcoming SpaceX, Blue Origin, ULA, and Rocket Lab launches with automated weather Go/No-Go analysis — wind, gusts, precipitation, cloud cover, and 3-day forecasts for every pad worldwide.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif; }
+
+/* ─── App layout ─────────────────────────────────────── */
+#lp-app {
+    display:grid;
+    grid-template-columns:280px 1fr 420px;
+    gap:14px;
+    padding:14px;
+    min-height:calc(100vh - 50px);
+}
+@media (max-width:1180px) {
+    #lp-app { grid-template-columns:240px 1fr; }
+    #lp-detail-wrap { grid-column:1 / -1; }
+}
+@media (max-width:720px) {
+    #lp-app { grid-template-columns:1fr; padding:10px; gap:10px; }
+}
+
+.lp-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    padding:14px 16px;
+}
+
+/* ─── Hero ───────────────────────────────────────────── */
+#lp-hero {
+    padding:18px 20px 12px;
+    margin-bottom:0;
+}
+#lp-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 40%,#9cc);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:4px;
+}
+#lp-hero p { font-size:.82rem; color:#8ab; line-height:1.5; }
+#lp-status { display:block; font-size:.72rem; color:#8ab; margin-top:6px; font-family:monospace; }
+
+/* ─── Filters (left panel) ───────────────────────────── */
+.lp-label {
+    font-size:.66rem; color:#556; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700; margin-bottom:8px; margin-top:14px;
+}
+.lp-label:first-child { margin-top:0; }
+
+.lp-chip-row { display:flex; flex-wrap:wrap; gap:6px; }
+.lp-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 11px;
+    font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+}
+.lp-chip:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.lp-chip--on {
+    background:rgba(0,200,200,.2);
+    border-color:#0cc;
+    color:#0ff;
+}
+.lp-chip--green.lp-chip--on { background:rgba(68,204,136,.22); border-color:#4c8; color:#8fc; }
+.lp-chip--yellow.lp-chip--on { background:rgba(255,170,0,.22); border-color:#fa0; color:#fd8; }
+.lp-chip--red.lp-chip--on { background:rgba(255,68,68,.22); border-color:#f44; color:#fcc; }
+
+/* ─── Roster (center) ────────────────────────────────── */
+#lp-roster-wrap { display:flex; flex-direction:column; min-height:0; }
+#lp-roster {
+    display:flex; flex-direction:column; gap:10px;
+    max-height:calc(100vh - 140px);
+    overflow-y:auto;
+    padding-right:4px;
+}
+#lp-roster::-webkit-scrollbar { width:5px; }
+#lp-roster::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+
+.lp-card {
+    display:block; width:100%; text-align:left;
+    background:rgba(15,10,35,.78);
+    border:1px solid rgba(255,255,255,.08);
+    border-left:3px solid rgba(255,255,255,.1);
+    border-radius:10px;
+    padding:12px 14px;
+    cursor:pointer;
+    transition:border-color .15s, transform .1s;
+    font-family:inherit;
+    color:inherit;
+}
+.lp-card:hover { border-color:rgba(0,200,200,.35); transform:translateX(2px); }
+.lp-card--active {
+    border-color:#0cc; border-left-color:#0cc;
+    background:rgba(0,200,200,.05);
+    box-shadow:0 0 0 1px rgba(0,200,200,.2);
+}
+.lp-card--green  { border-left-color:#4c8; }
+.lp-card--yellow { border-left-color:#fa0; }
+.lp-card--red    { border-left-color:#f44; }
+
+.lp-card-hd { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.lp-card-provider { font-size:.66rem; color:#9ab; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+.lp-badge {
+    font-size:.62rem; font-weight:800;
+    padding:2px 8px; border-radius:4px;
+    border:1px solid; letter-spacing:.06em;
+    font-family:monospace;
+}
+.lp-card-name { font-size:.95rem; font-weight:700; color:#eef; margin-bottom:4px; line-height:1.2; }
+.lp-card-meta { font-size:.74rem; color:#8ab; display:flex; gap:6px; align-items:center; margin-bottom:4px; }
+.lp-card-dot { color:#556; }
+.lp-card-footer { display:flex; justify-content:space-between; align-items:center; margin-top:4px; }
+.lp-card-net { font-size:.72rem; color:#778; }
+.lp-countdown { font-size:.78rem; font-family:monospace; font-weight:700; color:#0cc; }
+
+/* ─── Detail (right panel) ───────────────────────────── */
+#lp-detail-wrap { min-height:0; }
+#lp-detail { max-height:calc(100vh - 80px); overflow-y:auto; padding-right:4px; }
+#lp-detail::-webkit-scrollbar { width:5px; }
+#lp-detail::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+
+.lp-detail {}
+.lp-detail-hd {
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; padding-bottom:14px; margin-bottom:14px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+}
+.lp-detail-provider { font-size:.7rem; color:#8ab; text-transform:uppercase; letter-spacing:.08em; font-weight:700; margin-bottom:4px; }
+.lp-detail-name { font-size:1.15rem; font-weight:800; color:#eef; line-height:1.2; margin-bottom:4px; }
+.lp-detail-sub { font-size:.76rem; color:#889; line-height:1.4; }
+
+.lp-verdict {
+    font-size:.78rem; font-weight:800;
+    padding:8px 14px; border-radius:8px;
+    border:2px solid; letter-spacing:.08em;
+    font-family:monospace;
+    white-space:nowrap;
+    flex-shrink:0;
+}
+
+.lp-detail-row {
+    display:grid; grid-template-columns:1fr 1fr;
+    gap:12px; margin-bottom:16px;
+}
+@media (max-width:520px) {
+    .lp-detail-row { grid-template-columns:1fr; }
+}
+.lp-clock, .lp-pad {
+    background:rgba(0,200,200,.04);
+    border:1px solid rgba(0,200,200,.1);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.lp-countdown-big {
+    font-family:monospace; font-size:1.25rem; font-weight:800;
+    color:#0ee; letter-spacing:.02em;
+}
+.lp-net { font-size:.68rem; color:#667; margin-top:4px; }
+.lp-pad-name { font-size:.92rem; font-weight:700; color:#ccd; line-height:1.2; }
+.lp-pad-coords { font-size:.72rem; color:#889; font-family:monospace; margin-top:2px; }
+.lp-link { font-size:.7rem; color:#0cc; text-decoration:none; display:inline-block; margin-top:6px; }
+.lp-link:hover { color:#0ff; text-decoration:underline; }
+
+.lp-mission { margin-bottom:16px; }
+.lp-mission p { font-size:.82rem; line-height:1.55; color:#ccd; }
+
+/* Weather grid */
+.lp-wx-grid {
+    display:grid; grid-template-columns:repeat(3, 1fr);
+    gap:8px; margin-bottom:16px;
+}
+@media (max-width:520px) { .lp-wx-grid { grid-template-columns:repeat(2, 1fr); } }
+.lp-wx-cell {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;
+    padding:8px 10px;
+}
+.lp-wx-k { font-size:.62rem; color:#556; text-transform:uppercase; letter-spacing:.06em; font-weight:700; margin-bottom:3px; }
+.lp-wx-v { font-size:.85rem; font-weight:700; color:#eef; font-family:monospace; }
+.lp-wx-loading { color:#667; font-size:.78rem; padding:16px 0; font-style:italic; }
+.lp-wx-sub { font-size:.7rem; color:#8ab; margin-bottom:8px; font-family:monospace; }
+
+/* Launch-window arc — visualizes how the verdict evolves around T-0 */
+.lp-arc {
+    display:grid; grid-template-columns:repeat(5, 1fr);
+    gap:6px; margin-bottom:16px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    padding:10px 8px;
+}
+.lp-arc-stop {
+    display:flex; flex-direction:column; align-items:center;
+    padding:4px; border-right:1px solid rgba(255,255,255,.04);
+}
+.lp-arc-stop:last-child { border-right:none; }
+.lp-arc-name { font-size:.64rem; color:#8ab; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+.lp-arc-dot { width:10px; height:10px; border-radius:50%; margin-bottom:4px; box-shadow:0 0 6px currentColor; }
+.lp-arc-v { font-size:.62rem; font-family:monospace; font-weight:800; color:#ccd; margin-bottom:4px; letter-spacing:.04em; }
+.lp-arc-metric { font-size:.64rem; font-family:monospace; color:#9ab; line-height:1.3; }
+.lp-arc-precip { color:#6af; }
+
+/* Forecast */
+.lp-forecast {
+    display:grid; grid-template-columns:repeat(7, 1fr);
+    gap:6px; margin-bottom:16px;
+}
+@media (max-width:600px) { .lp-forecast { grid-template-columns:repeat(4, 1fr); } }
+.lp-fc-day {
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:6px;
+    padding:8px; text-align:center;
+}
+.lp-fc-name { font-size:.68rem; color:#8ab; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+.lp-fc-temp { font-size:.82rem; font-family:monospace; font-weight:700; }
+.lp-fc-hi { color:#fdb; margin-right:4px; }
+.lp-fc-lo { color:#9bd; }
+.lp-fc-precip { font-size:.66rem; color:#6af; margin-top:3px; font-family:monospace; }
+
+/* Rules */
+.lp-rules {
+    display:flex; flex-direction:column; gap:4px; margin-bottom:16px;
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.lp-rule { display:grid; grid-template-columns:12px max-content 1fr; align-items:center; gap:10px; padding:4px 0; font-size:.76rem; }
+.lp-rule-dot { width:10px; height:10px; border-radius:50%; display:block; }
+.lp-rule-k { color:#889; font-weight:600; }
+.lp-rule-v { color:#ccd; font-family:monospace; font-size:.72rem; }
+.lp-rule-src { font-size:.6rem; color:#667; font-family:monospace; text-transform:none; letter-spacing:0; font-weight:500; }
+.lp-rule-sources, .lp-rule-note {
+    font-size:.62rem; color:#667; margin-top:6px; line-height:1.5; font-style:italic;
+}
+.lp-rule-note { color:#8ab; font-style:normal; }
+.lp-conf {
+    display:inline-block; padding:1px 6px; margin-left:6px;
+    border-radius:3px; font-size:.58rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:.06em;
+    font-family:monospace;
+    border:1px solid currentColor;
+}
+.lp-conf--high             { color:#4c8;   background:rgba(68,204,136,.12); }
+.lp-conf--medium           { color:#fa0;   background:rgba(255,170,0,.12); }
+.lp-conf--public-estimate  { color:#f86;   background:rgba(255,120,80,.12); }
+.lp-conf--generic          { color:#99a;   background:rgba(200,200,220,.08); }
+
+/* Recovery rules visually nested under their own header */
+.lp-rules--recovery { background:rgba(0,200,255,.04); border-color:rgba(0,200,255,.1); }
+
+/* NWS active-alert stack — rendered when a convective warning/watch polygon
+   is within 50 km of the pad. Color-coded per alert at render-time based on
+   event severity (Warning = red, Watch = amber). */
+.lp-alerts {
+    display:flex; flex-direction:column; gap:6px;
+    margin-bottom:16px;
+}
+.lp-alert {
+    border:1px solid;
+    border-radius:8px;
+    padding:8px 12px;
+}
+.lp-alert-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    gap:8px; margin-bottom:3px;
+}
+.lp-alert-ev   { font-size:.82rem; font-weight:800; letter-spacing:.02em; }
+.lp-alert-dist { font-size:.68rem; color:#ccd; font-family:monospace; }
+.lp-alert-area { font-size:.7rem; color:#aab; line-height:1.4; }
+.lp-alert-exp  { font-size:.64rem; color:#889; font-family:monospace; margin-top:3px; }
+.lp-alert-note { font-size:.64rem; color:#889; margin-top:4px; font-style:italic; }
+
+/* ─── Starship Focus panel ────────────────────────────── */
+.lp-starship {
+    margin-top:18px; padding:14px 16px;
+    background:linear-gradient(180deg, rgba(255,140,0,.06), rgba(255,140,0,.02));
+    border:1px solid rgba(255,140,0,.22);
+    border-radius:10px;
+}
+.lp-ss-label { color:#fb0 !important; margin-top:0 !important; }
+.lp-ss-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:8px;
+    margin:6px 0 12px;
+}
+@media (max-width:720px) { .lp-ss-grid { grid-template-columns:repeat(2, 1fr); } }
+.lp-ss-tile {
+    background:rgba(0,0,0,.3);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:10px 12px;
+}
+.lp-ss-tile--info { border-color:rgba(0,200,200,.15); background:rgba(0,200,200,.04); }
+.lp-ss-tile-k   { font-size:.62rem; color:#8ab; font-weight:700; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; }
+.lp-ss-tile-v   { font-size:.95rem; font-weight:800; font-family:monospace; letter-spacing:.02em; }
+.lp-ss-tile-sub { font-size:.64rem; color:#99a; margin-top:4px; line-height:1.4; }
+.lp-ss-note {
+    font-size:.66rem; color:#aab; line-height:1.55;
+    padding-top:10px; border-top:1px solid rgba(255,140,0,.15);
+    font-style:italic;
+}
+
+.lp-footnote {
+    font-size:.66rem; color:#556; line-height:1.5;
+    border-top:1px solid rgba(255,255,255,.06);
+    padding-top:10px; margin-top:8px;
+}
+
+.lp-empty {
+    padding:40px 20px; text-align:center;
+    color:#667; font-size:.82rem; line-height:1.5;
+}
+
+/* ─── Mobile tweaks ──────────────────────────────────── */
+@media (max-width:720px) {
+    #lp-roster { max-height:none; }
+    #lp-detail { max-height:none; }
+    .lp-detail-name { font-size:1rem; }
+    .lp-countdown-big { font-size:1rem; }
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("launch-planner");</script>
+<script type="module">import "./js/page-tier-gate.js?v=20260428";</script>
+
+<div id="lp-hero" class="lp-panel">
+    <h1>Launch Planner</h1>
+    <p>Upcoming orbital launches with automated weather Go/No-Go analysis — wind, gusts, precipitation, cloud cover, and 3-day forecasts for every pad worldwide.</p>
+    <span id="lp-status">Initializing…</span>
+</div>
+
+<div id="lp-app">
+
+    <!-- Left: Filters -->
+    <aside class="lp-panel" id="lp-filters">
+        <div class="lp-label">Window</div>
+        <div class="lp-chip-row">
+            <button type="button" class="lp-chip" data-window-days="7">7 days</button>
+            <button type="button" class="lp-chip" data-window-days="30">30 days</button>
+            <button type="button" class="lp-chip lp-chip--on" data-window-days="90">90 days</button>
+        </div>
+
+        <div class="lp-label">Weather Verdict</div>
+        <div class="lp-chip-row">
+            <button type="button" class="lp-chip lp-chip--on" data-verdict-filter="all">All</button>
+            <button type="button" class="lp-chip lp-chip--green" data-verdict-filter="green">GO</button>
+            <button type="button" class="lp-chip lp-chip--yellow" data-verdict-filter="yellow">HOLD</button>
+            <button type="button" class="lp-chip lp-chip--red" data-verdict-filter="red">NO-GO</button>
+        </div>
+
+        <div class="lp-label">Launch Provider</div>
+        <div class="lp-chip-row" id="lp-providers">
+            <span style="font-size:.72rem;color:#556;font-style:italic">Loading…</span>
+        </div>
+    </aside>
+
+    <!-- Center: Roster -->
+    <section id="lp-roster-wrap">
+        <div id="lp-roster">
+            <div class="lp-empty">Loading upcoming launches…</div>
+        </div>
+    </section>
+
+    <!-- Right: Detail -->
+    <section class="lp-panel" id="lp-detail-wrap">
+        <div id="lp-detail">
+            <div class="lp-empty">Select a launch on the left to see weather Go/No-Go analysis.</div>
+        </div>
+    </section>
+
+</div>
+
+<script type="module" src="./js/launch-planner.js"></script>
+
+</body>
+</html>

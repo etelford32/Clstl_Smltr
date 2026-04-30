@@ -1,0 +1,1745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operations — Fleet & Debris Console · Parker Physics</title>
+<meta name="description" content="Decision-grade satellite operations console. Fleet drag and decay analysis, pairwise conjunction screening against the public debris catalog, deterministic time scrub, and full provenance on every number. PRO Preview — open beta.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ─── Layout ───────────────────────────────────────────── */
+#op-app {
+    display:grid;
+    grid-template-columns:300px 1fr 420px;
+    grid-template-rows:auto 1fr auto;
+    grid-template-areas:
+        "hero  hero   hero"
+        "left  globe  right"
+        "scrub scrub  scrub";
+    gap:14px;
+    padding:14px;
+    min-height:calc(100vh - 50px);
+}
+#op-hero    { grid-area:hero; }
+#op-left    { grid-area:left; }
+#op-globe-wrap { grid-area:globe; }
+#op-right   { grid-area:right; }
+#op-scrub   { grid-area:scrub; }
+
+@media (max-width:1280px) {
+    #op-app {
+        grid-template-columns:280px 1fr;
+        grid-template-areas:
+            "hero  hero"
+            "left  globe"
+            "right right"
+            "scrub scrub";
+    }
+}
+@media (max-width:900px) {
+    #op-app {
+        grid-template-columns:1fr;
+        grid-template-areas:
+            "hero"
+            "globe"
+            "left"
+            "right"
+            "scrub";
+        padding:10px; gap:10px;
+    }
+}
+
+.op-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    padding:14px 16px;
+}
+.op-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#8ab; font-weight:700; margin-bottom:10px;
+}
+.op-panel + .op-panel { margin-top:14px; }
+
+/* ─── Hero ─────────────────────────────────────────────── */
+#op-hero { padding:18px 20px 14px; }
+#op-hero-row {
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+}
+#op-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 40%,#9cc);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin:0;
+}
+#op-hero-sub {
+    font-size:.82rem; color:#8ab; line-height:1.5; margin-top:4px;
+    max-width:780px;
+}
+.op-badge-preview {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background:rgba(0,200,200,.12); color:#0cc;
+    border:1px solid rgba(0,200,200,.28);
+}
+
+/* ─── Persona switch ───────────────────────────────────── */
+#op-personas {
+    display:flex; gap:4px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:3px;
+    margin-top:10px;
+    flex-wrap:wrap;
+}
+.op-persona-btn {
+    background:transparent; border:0; color:#aab;
+    font:inherit; font-size:.74rem; font-weight:600;
+    padding:6px 12px; border-radius:5px;
+    cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+    transition:all .15s;
+}
+.op-persona-btn:hover:not(:disabled) { color:#fff; background:rgba(255,255,255,.05); }
+.op-persona-btn.op-persona-on {
+    background:rgba(0,200,200,.18); color:#0ff;
+}
+.op-persona-btn:disabled {
+    opacity:.45; cursor:not-allowed;
+}
+.op-persona-btn .op-persona-soon {
+    font-size:.55rem; letter-spacing:.08em; text-transform:uppercase;
+    color:#667; font-weight:700;
+}
+
+/* ─── Scenario chips (hash, model, source) ─────────────── */
+#op-scenario-row {
+    display:flex; flex-wrap:wrap; gap:6px;
+    margin-top:10px;
+    align-items:center;
+}
+.op-chip {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family:monospace;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.18);
+    color:#bcd;
+    cursor:default;
+}
+.op-chip-button { cursor:pointer; transition:all .15s; }
+.op-chip-button:hover { border-color:rgba(255,255,255,.35); color:#fff; }
+.op-chip-dot {
+    width:7px; height:7px; border-radius:50%;
+    background:currentColor; box-shadow:0 0 6px currentColor;
+}
+.op-chip--live { color:#0fa; border-color:rgba(0,255,170,.3); }
+.op-chip--scrub { color:#fc6; border-color:rgba(255,200,100,.3); }
+.op-chip--replay { color:#6cf; border-color:rgba(110,200,255,.3); }
+.op-chip--hash { color:#aac; }
+.op-chip--model { color:#9bd; }
+
+/* ─── Globe placeholder ────────────────────────────────── */
+#op-globe-wrap {
+    position:relative;
+    background:radial-gradient(circle at 50% 40%, #0a0622 0%, #020008 90%);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    overflow:hidden;
+    min-height:560px;
+}
+#op-globe { width:100%; height:100%; display:block; }
+#op-globe-stub {
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    color:#556; font-size:.78rem; line-height:1.6; text-align:center;
+    padding:20px;
+}
+#op-globe-stub .op-stub-title {
+    color:#8ab; font-size:.86rem; font-weight:700;
+    text-transform:uppercase; letter-spacing:.14em;
+    margin-bottom:8px;
+}
+#op-globe-stub code {
+    color:#0cc; font-family:monospace;
+    background:rgba(0,200,200,.06); padding:1px 6px; border-radius:3px;
+}
+
+/* ─── B-plane inset (bottom-right of globe) ────────────── */
+#op-bplane {
+    position: absolute;
+    bottom: 12px; right: 12px;
+    width: 220px;
+    background: rgba(8,4,22,.88);
+    border: 1px solid rgba(0,200,200,.28);
+    border-radius: 8px;
+    padding: 8px 10px 6px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45);
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .68rem;
+    z-index: 30;
+    user-select: none;
+    transition: opacity .15s;
+}
+#op-bplane.op-bplane-empty { opacity: 0.62; }
+#op-bplane .op-bplane-head {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-bottom: 4px;
+}
+#op-bplane .op-bplane-title {
+    color: #8ab; font-size: .58rem;
+    text-transform: uppercase; letter-spacing: .14em;
+    font-weight: 700;
+}
+#op-bplane .op-bplane-name {
+    color: #cef; font-size: .66rem;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1;
+}
+#op-bplane svg {
+    display: block;
+    width: 100%; height: auto;
+}
+#op-bplane .op-bplane-bg { fill: rgba(0,0,0,.25); }
+#op-bplane .op-bplane-axis {
+    stroke: rgba(255,255,255,.12);
+    stroke-width: 1;
+}
+#op-bplane .op-bplane-sigma-ring {
+    fill: none;
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+}
+#op-bplane .op-bplane-sigma-1 { stroke: rgba(0,255,200,.6); }
+#op-bplane .op-bplane-sigma-2 { stroke: rgba(0,255,200,.35); }
+#op-bplane .op-bplane-sigma-3 { stroke: rgba(0,255,200,.18); }
+#op-bplane .op-bplane-sigma-label {
+    fill: rgba(0,255,200,.7);
+    font-family: monospace;
+    font-size: 9px;
+}
+#op-bplane .op-bplane-miss-vec {
+    stroke: rgba(255,140,200,.55);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+#op-bplane .op-bplane-miss-dot {
+    fill: #ff7099;
+    stroke: rgba(255,160,200,.9);
+    stroke-width: 1;
+    filter: drop-shadow(0 0 4px rgba(255,80,140,.55));
+}
+#op-bplane .op-bplane-foot {
+    display: flex; justify-content: space-between;
+    margin-top: 4px;
+    font-family: monospace;
+    color: #9bd;
+    font-size: .64rem;
+}
+#op-bplane .op-bplane-miss { color: #fb8; }
+
+/* ─── Density heatmap (top-right of globe) ─────────────── */
+#op-density {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 380px;
+    background: rgba(8,4,22,.92);
+    border: 1px solid rgba(255,140,200,.25);
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .68rem;
+    z-index: 30;
+    user-select: none;
+    transition: opacity .15s, transform .15s;
+}
+#op-density.op-density-hidden {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-4px);
+}
+#op-density .op-density-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
+}
+#op-density .op-density-title {
+    color: #fbf; font-size: .68rem; font-weight: 700;
+}
+#op-density .op-density-sub {
+    color: #889; font-size: .58rem;
+    flex: 1;
+}
+#op-density .op-density-close {
+    background: transparent; border: 0;
+    color: #9bd; font-size: 1rem; line-height: 1;
+    cursor: pointer; padding: 2px 6px; border-radius: 3px;
+}
+#op-density .op-density-close:hover { color: #fff; background: rgba(255,255,255,.08); }
+#op-density svg {
+    display: block;
+    width: 100%; height: auto;
+}
+#op-density .op-density-bg { fill: rgba(0,0,0,.25); }
+#op-density .op-density-tick { stroke: rgba(255,255,255,.15); }
+#op-density .op-density-tick-label {
+    fill: rgba(190,210,250,.6);
+    font-family: monospace; font-size: 8.5px;
+}
+#op-density .op-density-axis {
+    fill: rgba(190,210,250,.7);
+    font-size: 9.5px;
+    font-weight: 600;
+}
+#op-density .op-density-cell { stroke: none; }
+#op-density .op-density-legend {
+    display: flex; justify-content: space-between;
+    margin-top: 4px;
+    font-family: monospace;
+    color: #aac;
+    font-size: .62rem;
+}
+#op-density .op-density-empty { color: #788; font-style: italic; }
+#op-density .op-density-max { color: #fbf; }
+
+@media (max-width: 720px) {
+    #op-bplane, #op-density { width: 92vw; right: 4vw; }
+    #op-density { top: auto; bottom: 200px; }
+}
+
+/* ─── Coming next placeholders ─────────────────────────── */
+.op-coming {
+    color:#556; font-size:.72rem; line-height:1.5;
+    border:1px dashed rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:10px 12px;
+    background:rgba(255,255,255,.02);
+}
+.op-coming b { color:#8ab; font-weight:700; }
+.op-coming code {
+    color:#0cc; font-family:monospace; font-size:.68rem;
+    background:rgba(0,200,200,.06); padding:1px 5px; border-radius:3px;
+}
+
+/* ─── Layer toggle rows ────────────────────────────────── */
+.op-layer-section {
+    font-size:.58rem;
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    color:#556;
+    font-weight:700;
+    margin:8px 0 4px;
+    padding-top:6px;
+    border-top:1px solid rgba(255,255,255,.04);
+}
+.op-layer-section:first-child { border-top:0; padding-top:0; margin-top:0; }
+.op-layer-row {
+    display:flex; align-items:center; gap:8px;
+    padding:4px 6px;
+    border-radius:5px;
+    cursor:pointer;
+    font-size:.74rem;
+    color:#bcd;
+    transition:background .12s;
+}
+.op-layer-row:hover { background:rgba(255,255,255,.04); }
+.op-layer-row input[type=checkbox] {
+    width:13px; height:13px;
+    accent-color:#0cc;
+    cursor:pointer;
+    flex-shrink:0;
+}
+.op-layer-dot {
+    width:8px; height:8px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+    flex-shrink:0;
+}
+.op-layer-name { flex:1; min-width:0; }
+.op-layer-count {
+    color:#778; font-family:monospace; font-size:.68rem;
+    min-width:40px; text-align:right;
+}
+.op-layer-count.op-layer-loading {
+    color:#fc6;
+}
+
+/* ─── Scrub strip ──────────────────────────────────────── */
+#op-scrub { padding:10px 14px; }
+#op-scrub-row {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+}
+.op-scrub-btn {
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.12);
+    color:#aab; font:inherit; font-size:.7rem; font-weight:600;
+    padding:5px 10px; border-radius:5px; cursor:pointer;
+    transition:all .15s;
+}
+.op-scrub-btn:hover:not(:disabled) { color:#fff; border-color:rgba(255,255,255,.25); }
+.op-scrub-btn:disabled { opacity:.4; cursor:not-allowed; }
+.op-scrub-btn--on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+.op-scrub-speed {
+    min-width:38px;
+    font-family:monospace;
+}
+#op-scrub-speeds {
+    display:inline-flex; gap:3px;
+    border-left:1px solid rgba(255,255,255,.08);
+    padding-left:10px; margin-left:4px;
+}
+#op-scrub-track {
+    flex:1; min-width:200px;
+    height:6px;
+    background:rgba(255,255,255,.06);
+    border-radius:3px;
+    position:relative;
+    cursor:pointer;
+    outline:none;
+}
+#op-scrub-track:hover    { background:rgba(255,255,255,.10); }
+#op-scrub-track:focus    { box-shadow:0 0 0 2px rgba(0,200,200,.35); }
+#op-scrub-now {
+    position:absolute;
+    top:-3px; bottom:-3px;
+    left:50%;
+    width:1px;
+    background:rgba(0,255,170,.55);
+    pointer-events:none;
+}
+#op-scrub-cursor {
+    position:absolute;
+    top:-5px;
+    left:50%;
+    width:14px; height:14px;
+    border-radius:50%;
+    background:#0cc;
+    border:2px solid #033;
+    transform:translateX(-50%);
+    pointer-events:none;
+    box-shadow:0 0 6px rgba(0,200,200,.4);
+}
+#op-tc-readout {
+    font-family:monospace;
+    font-size:.7rem;
+    color:#9bd;
+    margin-left:auto;
+    white-space:nowrap;
+}
+
+/* ─── PRO PREVIEW ribbon ───────────────────────────────── */
+#op-ribbon {
+    position:fixed;
+    top:60px; right:14px;
+    z-index:200;
+    max-width:360px;
+    background:linear-gradient(135deg, rgba(0,200,200,.18), rgba(0,80,200,.10));
+    border:1px solid rgba(0,200,200,.4);
+    border-radius:10px;
+    padding:10px 36px 10px 14px;
+    box-shadow:0 8px 28px rgba(0,0,0,.4);
+    backdrop-filter:blur(10px);
+    font-size:.74rem; line-height:1.5;
+    color:#cef;
+    transform:translateY(-8px);
+    opacity:0;
+    pointer-events:none;
+    transition:transform .25s ease, opacity .25s ease;
+}
+#op-ribbon.op-ribbon-on {
+    transform:translateY(0);
+    opacity:1;
+    pointer-events:auto;
+}
+#op-ribbon strong { color:#0ff; font-weight:800; letter-spacing:.04em; }
+#op-ribbon a {
+    color:#0ff; text-decoration:none; font-weight:700;
+    border-bottom:1px solid rgba(0,255,255,.4);
+}
+#op-ribbon a:hover { border-bottom-color:#0ff; }
+#op-ribbon-close {
+    position:absolute; top:6px; right:8px;
+    background:transparent; border:0; color:#9bd;
+    font:inherit; font-size:1.1rem; line-height:1;
+    cursor:pointer; padding:2px 6px;
+    border-radius:4px;
+}
+#op-ribbon-close:hover { color:#fff; background:rgba(255,255,255,.08); }
+@media (max-width:640px) {
+    #op-ribbon {
+        left:10px; right:10px; max-width:none;
+    }
+}
+
+/* ─── My Fleet panel ───────────────────────────────────── */
+.op-fleet-add {
+    display: flex; gap: 6px; margin-bottom: 6px;
+}
+.op-fleet-add input {
+    flex: 1; min-width: 0;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 5px;
+    color: #cef;
+    font: inherit; font-size: .76rem;
+    padding: 5px 9px;
+    outline: none;
+    transition: border-color .12s, background .12s;
+}
+.op-fleet-add input:focus {
+    border-color: rgba(0,200,200,.5);
+    background: rgba(0,200,200,.04);
+}
+.op-fleet-add button {
+    background: rgba(0,200,200,.16);
+    border: 1px solid rgba(0,200,200,.4);
+    color: #0ff;
+    font: inherit; font-size: .72rem; font-weight: 700;
+    padding: 5px 12px;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.op-fleet-add button:hover { background: rgba(0,200,200,.28); }
+.op-fleet-presets {
+    display: flex; gap: 4px; flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+.op-fleet-preset {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.1);
+    color: #aab;
+    font: inherit; font-size: .65rem; font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .12s;
+}
+.op-fleet-preset:hover {
+    background: rgba(0,200,200,.12);
+    border-color: rgba(0,200,200,.4);
+    color: #0ff;
+}
+.op-fleet-msg {
+    font-size: .66rem;
+    color: #788;
+    min-height: 14px;
+    margin-bottom: 4px;
+}
+.op-fleet-msg-err { color: #f88; }
+.op-fleet-empty {
+    font-size: .68rem; color: #556;
+    font-style: italic;
+    padding: 4px 0;
+}
+.op-fleet-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+    gap: 2px;
+}
+.op-fleet-row {
+    display: grid;
+    grid-template-columns: 1fr 50px 70px 22px;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 4px;
+    border-radius: 4px;
+    font-size: .72rem;
+    border-bottom: 1px dotted rgba(255,255,255,.05);
+}
+.op-fleet-row { cursor: pointer; transition: background .12s, border-color .12s; }
+.op-fleet-row:hover { background: rgba(0,200,200,.06); }
+.op-fleet-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
+.op-fleet-row-pending { opacity: .6; }
+.op-fleet-row-error   { opacity: .55; }
+.op-fleet-row-selected {
+    background: rgba(0,255,200,.08);
+    border-bottom-color: rgba(0,255,200,.3);
+    box-shadow: inset 3px 0 0 rgba(0,255,200,.7);
+}
+.op-fleet-row-selected .op-fleet-name { color: #0ff; }
+.op-fleet-name {
+    color: #cef;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-fleet-norad {
+    color: #788; font-family: monospace; font-size: .68rem;
+    text-align: right;
+}
+.op-fleet-alt {
+    color: #9bd; font-family: monospace;
+    text-align: right;
+}
+.op-fleet-alt-pending { color: #667; font-style: italic; font-size: .65rem; }
+.op-fleet-remove {
+    background: transparent;
+    border: 0;
+    color: #667;
+    font: inherit; font-size: .9rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+.op-fleet-remove:hover { color: #f88; }
+
+/* ─── Deck shared ──────────────────────────────────────── */
+.op-deck-btn {
+    margin-left: auto;
+    background: rgba(0,200,200,.12);
+    border: 1px solid rgba(0,200,200,.35);
+    color: #0ff;
+    font: inherit; font-size: .62rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    padding: 3px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background .12s;
+}
+.op-deck-btn:hover { background: rgba(0,200,200,.24); }
+
+/* ─── Decay Watch ──────────────────────────────────────── */
+.op-decay-list-ul {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+}
+.op-decay-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 6px 2px;
+    border-bottom: 1px dotted rgba(255,255,255,.06);
+    font-size: .76rem;
+    gap: 8px;
+}
+.op-decay-row:last-child { border-bottom: 0; }
+.op-decay-name {
+    color: #cef;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; min-width: 0;
+}
+.op-decay-life-cell {
+    display: flex; align-items: baseline; gap: 4px;
+    font-family: monospace;
+    flex-shrink: 0;
+}
+.op-decay-life {
+    color: #fff;
+    cursor: help;
+    text-decoration: underline dotted rgba(0,255,200,.22);
+    text-underline-offset: 2px;
+}
+
+/* ─── Conjunctions ─────────────────────────────────────── */
+.op-conj-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column;
+    gap: 2px;
+}
+.op-conj-row {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: .72rem;
+    border-left: 3px solid transparent;
+}
+.op-conj-row-clear  { border-left-color: rgba(0,255,170,.4); color: #aac; }
+.op-conj-row-low    { border-left-color: rgba(0,200,200,.4); }
+.op-conj-row-med    { border-left-color: rgba(255,200,80,.55); background: rgba(255,200,80,.04); }
+.op-conj-row-high   { border-left-color: rgba(255,80,120,.7);  background: rgba(255,80,120,.05); color: #fda; }
+.op-conj-row-err    { color: #f88; font-style: italic; }
+.op-conj-row[data-tca-ms] { cursor: pointer; transition: background .12s; }
+.op-conj-row[data-tca-ms]:hover { background: rgba(0,200,200,.08); }
+.op-conj-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
+.op-conj-name { color: #cef; }
+.op-conj-count {
+    font-family: monospace;
+    font-weight: 700; color: #0ff;
+}
+.op-conj-row-clear .op-conj-count { color: #0fa; }
+.op-conj-row-high  .op-conj-count { color: #f8a; }
+.op-conj-closest {
+    font-family: monospace; color: #9bd; font-size: .68rem;
+    text-align: right;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ─── Prop Budget ──────────────────────────────────────── */
+.op-prop-headline {
+    display: flex; align-items: baseline; gap: 10px;
+    margin-bottom: 4px;
+}
+.op-prop-pct {
+    font-family: monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+.op-prop-pct.has-storm { color: #fc6; }
+.op-prop-label {
+    color: #88a; font-size: .66rem;
+    text-transform: uppercase; letter-spacing: .08em;
+    font-weight: 700;
+}
+.op-prop-detail {
+    color: #788; font-size: .68rem;
+    line-height: 1.5;
+    margin-top: 4px;
+}
+
+/* ─── Decision deck list rows ──────────────────────────── */
+.op-deck-empty {
+    color:#667; font-size:.72rem; line-height:1.5;
+    font-style:italic;
+}
+
+/* ─── Confidence bands ──────────────────────────────────── */
+.op-band-v {
+    font-family: monospace;
+    color: #fff;
+    font-weight: 600;
+}
+.op-band-sigma {
+    color: #9bd;
+    font-family: monospace;
+    font-size: .92em;
+    font-weight: 500;
+    margin-left: 4px;
+    letter-spacing: 0;
+}
+.op-band-u {
+    color: #88a;
+    font-size: .9em;
+}
+.op-band-range {
+    color: #788;
+    font-family: monospace;
+    font-size: .85em;
+    margin-left: 6px;
+    font-weight: 500;
+}
+.op-band-whisker {
+    display: inline-block;
+    vertical-align: middle;
+    overflow: visible;
+}
+.op-band-whisker .op-band-whisker-track   { fill: rgba(255,255,255,.12); }
+.op-band-whisker .op-band-whisker-range   { fill: rgba(0,200,200,.28); }
+.op-band-whisker .op-band-whisker-tick    { stroke: rgba(0,255,200,.55); stroke-width: 1; }
+.op-band-whisker .op-band-whisker-dot     {
+    fill: #0ff;
+    stroke: #022;
+    stroke-width: 1;
+    filter: drop-shadow(0 0 3px rgba(0,255,255,.35));
+}
+
+/* ─── Δ icon ────────────────────────────────────────────── */
+.op-delta {
+    display: inline-block;
+    margin: 0 0 0 5px;
+    font-size: .68em;
+    line-height: 1;
+    color: rgba(120,128,150,.5);
+    cursor: help;
+    user-select: none;
+    transform-origin: center;
+    transition:
+        color 220ms ease,
+        opacity 220ms ease,
+        transform 220ms ease;
+}
+.op-delta:hover { color: #fff; opacity: 1; }
+.op-delta.op-delta-up { color: rgba(0,255,200,.55); }
+.op-delta.op-delta-down { color: rgba(255,140,200,.65); }
+.op-delta.op-delta-recent.op-delta-up { color: rgba(0,255,200,.85); }
+.op-delta.op-delta-recent.op-delta-down { color: rgba(255,140,200,.85); }
+.op-delta.op-delta-fresh {
+    animation: op-delta-pulse 1400ms cubic-bezier(.2,.7,.3,1) 1;
+}
+@keyframes op-delta-pulse {
+    0% {
+        transform: scale(1.6);
+        filter: drop-shadow(0 0 8px currentColor);
+    }
+    60% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 0 3px currentColor);
+    }
+    100% {
+        transform: scale(1);
+        filter: none;
+    }
+}
+
+/* ─── Δ tooltip ────────────────────────────────────────── */
+#op-delta-tooltip {
+    position: fixed; left: -9999px; top: -9999px;
+    z-index: 5500; pointer-events: none;
+    max-width: 320px;
+    background: rgba(8,4,22,.97);
+    border: 1px solid rgba(0,255,200,.32);
+    border-radius: 7px;
+    padding: 9px 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.55), 0 0 0 1px rgba(0,255,200,.06) inset;
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .72rem;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(-3px) scale(.985);
+    transition:
+        opacity 80ms ease,
+        transform 80ms cubic-bezier(.2,.7,.3,1);
+}
+#op-delta-tooltip.op-delta-tooltip-prepaint {
+    visibility: hidden;
+}
+#op-delta-tooltip.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+#op-delta-tooltip:not(.open) {
+    transition-duration: 60ms;
+}
+#op-delta-tooltip .op-delta-tip-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    font-family: monospace;
+    font-size: .76rem;
+    color: #fff;
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+#op-delta-tooltip .op-delta-tip-up { border-left: 3px solid rgba(0,255,200,.5); padding-left: 8px; margin-left: -8px; }
+#op-delta-tooltip .op-delta-tip-down { border-left: 3px solid rgba(255,140,200,.6); padding-left: 8px; margin-left: -8px; }
+#op-delta-tooltip .op-delta-tip-mag {
+    font-family: monospace;
+    color: #0ff;
+    font-weight: 700;
+    font-size: .82rem;
+    white-space: nowrap;
+}
+#op-delta-tooltip .op-delta-tip-down .op-delta-tip-mag { color: #f9b; }
+#op-delta-tooltip .op-delta-tip-was {
+    color: #aac;
+    font-size: .68rem;
+}
+#op-delta-tooltip .op-delta-tip-was strong {
+    color: #fff;
+    font-family: monospace;
+    font-weight: 600;
+}
+#op-delta-tooltip .op-delta-tip-driver {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,.06);
+    display: grid;
+    grid-template-columns: 60px 1fr;
+    gap: 6px;
+    font-size: .66rem;
+    color: #cef;
+}
+#op-delta-tooltip .op-delta-tip-driver code {
+    color: #0cc;
+    font-family: monospace;
+    background: rgba(0,200,200,.06);
+    padding: 0 4px; border-radius: 2px;
+}
+#op-delta-tooltip .op-delta-tip-driver em {
+    color: #0ff;
+    font-style: normal;
+    font-weight: 600;
+}
+#op-delta-tooltip .op-delta-tip-label {
+    color: #88a; font-size: .58rem; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    padding-top: 1px;
+}
+#op-delta-tooltip .op-delta-tip-source {
+    color: #788; font-size: .62rem;
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(255,255,255,.04);
+}
+
+/* ─── Indices panel rows ────────────────────────────────── */
+.op-indices {
+    display: flex; flex-direction: column;
+    gap: 7px;
+}
+.op-index-row {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    border-bottom: 1px dotted rgba(255,255,255,.05);
+}
+.op-index-row:last-child { border-bottom: 0; }
+.op-index-k {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #8ab;
+    font-weight: 700;
+}
+.op-index-v {
+    font-size: .82rem;
+    line-height: 1.1;
+}
+.op-index-w {
+    flex-shrink: 0;
+}
+
+/* ─── Provenance affordance ─────────────────────────────── */
+[data-prov-key] {
+    text-decoration: underline dotted rgba(0,255,200,.22);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    cursor: help;
+    transition: text-decoration-color .12s ease, color .12s ease;
+}
+[data-prov-key]:hover {
+    text-decoration-color: rgba(0,255,200,.85);
+}
+
+/* ─── Provenance tooltip ───────────────────────────────── */
+#op-prov-tooltip {
+    position: fixed; left: -9999px; top: -9999px;
+    z-index: 5000; pointer-events: none;
+    max-width: 300px;
+    background: rgba(8,4,22,.96);
+    border: 1px solid rgba(0,200,200,.4);
+    border-radius: 7px;
+    padding: 8px 11px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.55), 0 0 0 1px rgba(0,200,200,.08) inset;
+    backdrop-filter: blur(8px);
+    color: #cef;
+    font-size: .72rem;
+    line-height: 1.45;
+    opacity: 0;
+    transform: translateY(-3px) scale(.985);
+    transition:
+        opacity 80ms ease,
+        transform 80ms cubic-bezier(.2,.7,.3,1);
+}
+#op-prov-tooltip.op-prov-tooltip-prepaint {
+    visibility: hidden;
+}
+#op-prov-tooltip.open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition-duration: 80ms;
+}
+#op-prov-tooltip.open + .never-matches { transition-duration: 60ms; } /* anchor for out timing */
+#op-prov-tooltip:not(.open) {
+    transition-duration: 60ms;
+}
+#op-prov-tooltip .op-tip-head {
+    display: flex; align-items: baseline; gap: 8px;
+    margin-bottom: 4px;
+}
+#op-prov-tooltip .op-tip-value {
+    font-family: monospace;
+    font-size: .92rem;
+    color: #fff;
+    font-weight: 700;
+}
+#op-prov-tooltip .op-tip-sigma {
+    color: #9bd; font-weight: 500;
+    margin-left: 3px;
+}
+#op-prov-tooltip .op-tip-cache {
+    margin-left: auto;
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+#op-prov-tooltip .op-tip-source {
+    color: #9bd; font-weight: 600;
+    font-size: .7rem;
+}
+#op-prov-tooltip .op-tip-meta {
+    color: #88a; font-size: .66rem;
+}
+#op-prov-tooltip .op-tip-meta code {
+    color: #0cc; font-family: monospace;
+    background: rgba(0,200,200,.06);
+    padding: 0 4px; border-radius: 2px;
+}
+#op-prov-tooltip .op-tip-desc {
+    color: #aac; font-size: .66rem;
+    margin-top: 4px; padding-top: 4px;
+    border-top: 1px solid rgba(255,255,255,.06);
+    line-height: 1.4;
+}
+#op-prov-tooltip .op-tip-hint {
+    color: #556; font-size: .6rem;
+    margin-top: 5px; font-style: italic;
+}
+
+/* ─── Provenance drawer ─────────────────────────────────── */
+#op-prov-drawer {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 380px; max-width: 92vw;
+    z-index: 6000;
+    background: rgba(6,3,18,.95);
+    border-left: 1px solid rgba(0,200,200,.3);
+    backdrop-filter: blur(14px);
+    color: #cef;
+    font-size: .76rem; line-height: 1.5;
+    transform: translateX(100%);
+    transition: transform 180ms cubic-bezier(.2,.75,.25,1);
+    overflow-y: auto;
+    padding: 16px 20px 32px;
+    box-shadow: -16px 0 40px rgba(0,0,0,.45);
+}
+#op-prov-drawer.open { transform: translateX(0); }
+#op-prov-drawer .op-drawer-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 10px;
+}
+#op-prov-drawer .op-drawer-back,
+#op-prov-drawer .op-drawer-close {
+    background: transparent; border: 0; color: #9bd;
+    font: inherit; font-size: .76rem;
+    cursor: pointer; padding: 4px 8px; border-radius: 4px;
+}
+#op-prov-drawer .op-drawer-back:hover,
+#op-prov-drawer .op-drawer-close:hover { background: rgba(255,255,255,.06); color: #fff; }
+#op-prov-drawer .op-drawer-close { font-size: 1.1rem; line-height: 1; }
+#op-prov-drawer .op-drawer-key {
+    font-family: monospace; font-size: .68rem;
+    color: #778; letter-spacing: .04em;
+    margin-bottom: 4px;
+}
+#op-prov-drawer .op-drawer-value {
+    font-family: monospace; font-size: 1.7rem;
+    font-weight: 700; color: #fff;
+    line-height: 1.1;
+}
+#op-prov-drawer .op-drawer-sigma {
+    color: #9bd; font-family: monospace; font-size: .82rem;
+    margin-top: 2px;
+}
+#op-prov-drawer .op-drawer-cache {
+    margin-top: 6px; font-size: .66rem; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase;
+}
+#op-prov-drawer .op-drawer-meta {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: 4px 10px;
+    font-size: .7rem;
+}
+#op-prov-drawer .op-drawer-meta dt {
+    color: #88a; font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    font-size: .62rem;
+    padding-top: 1px;
+}
+#op-prov-drawer .op-drawer-meta dd {
+    margin: 0; color: #cef;
+    word-break: break-word;
+}
+#op-prov-drawer .op-drawer-meta code {
+    color: #0cc; font-family: monospace;
+    background: rgba(0,200,200,.06);
+    padding: 1px 5px; border-radius: 2px;
+}
+#op-prov-drawer .op-drawer-rel { color: #778; }
+#op-prov-drawer .op-drawer-desc {
+    margin-top: 14px;
+    color: #aac; font-size: .72rem;
+    padding: 10px 12px;
+    background: rgba(0,200,200,.04);
+    border: 1px solid rgba(0,200,200,.1);
+    border-radius: 6px;
+}
+#op-prov-drawer .op-drawer-h {
+    margin-top: 18px; margin-bottom: 6px;
+    font-size: .62rem; font-weight: 700;
+    color: #8ab; text-transform: uppercase;
+    letter-spacing: .14em;
+}
+#op-prov-drawer .op-drawer-inputs {
+    list-style: none; padding: 0; margin: 0;
+}
+#op-prov-drawer .op-drawer-input {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 1px 8px;
+    padding: 8px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background .12s, border-color .12s;
+}
+#op-prov-drawer .op-drawer-input:hover {
+    background: rgba(0,200,200,.06);
+    border-color: rgba(0,200,200,.2);
+}
+#op-prov-drawer .op-drawer-input-key {
+    font-family: monospace; font-size: .7rem; color: #cef;
+}
+#op-prov-drawer .op-drawer-input-val {
+    font-family: monospace; font-size: .72rem; color: #fff;
+    font-weight: 700; text-align: right;
+}
+#op-prov-drawer .op-drawer-input-src {
+    grid-column: 1 / -1;
+    color: #788; font-size: .64rem;
+}
+#op-prov-drawer .op-drawer-input-missing {
+    color: #c66; font-size: .68rem;
+    font-style: italic;
+    padding: 6px 10px;
+}
+#op-prov-drawer .op-drawer-actions {
+    margin-top: 18px;
+    display: flex; gap: 8px;
+}
+#op-prov-drawer .op-drawer-cite {
+    background: rgba(0,200,200,.12);
+    border: 1px solid rgba(0,200,200,.4);
+    color: #0ff;
+    font: inherit; font-size: .7rem; font-weight: 700;
+    padding: 6px 12px; border-radius: 5px;
+    cursor: pointer;
+    transition: all .12s;
+}
+#op-prov-drawer .op-drawer-cite:hover {
+    background: rgba(0,200,200,.22);
+}
+#op-prov-drawer .op-drawer-cite-ok {
+    background: rgba(0,255,170,.22);
+    border-color: rgba(0,255,170,.6);
+    color: #0fa;
+}
+@media (max-width: 640px) {
+    #op-prov-drawer { width: 100vw; }
+}
+</style>
+</head>
+<body>
+
+<!-- Three.js + addons via CDN. Same versions as satellites.html / upper-atmosphere.html. -->
+<script type="importmap">
+{
+  "imports": {
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("operations");</script>
+
+<!-- ─── PRO PREVIEW ribbon ──────────────────────────────────── -->
+<div id="op-ribbon" role="status" aria-live="polite">
+    <button id="op-ribbon-close" aria-label="Dismiss">×</button>
+    <div id="op-ribbon-body">
+        <strong>PRO Preview</strong> — Operations is normally on the
+        <a href="/pricing#advanced">Advanced</a> plan.
+        Free during open beta.
+    </div>
+</div>
+
+<!-- ─── App ──────────────────────────────────────────────────── -->
+<div id="op-app">
+
+    <!-- Hero -->
+    <div id="op-hero" class="op-panel">
+        <div id="op-hero-row">
+            <h1>Operations</h1>
+            <span class="op-badge-preview">PRO PREVIEW</span>
+        </div>
+        <p id="op-hero-sub">
+            Decision-grade fleet and debris analysis. Deterministic time
+            scrub, confidence bands, and full provenance on every number.
+            Open beta — no sign-in required.
+        </p>
+
+        <div id="op-personas" role="tablist" aria-label="Operator persona">
+            <button type="button" class="op-persona-btn op-persona-on"
+                    role="tab" aria-selected="true"
+                    data-op-persona="sat-ops">
+                <span>🛰️ Sat Ops</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="aviation" disabled
+                    title="Pilot / avionics persona — coming next">
+                <span>✈️ Aviation</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="astronaut" disabled
+                    title="Crewed-mission persona — coming next">
+                <span>👩‍🚀 Astronaut</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+            <button type="button" class="op-persona-btn"
+                    role="tab" aria-selected="false"
+                    data-op-persona="adventurer" disabled
+                    title="Mountain weather + 30-day forecast — coming next">
+                <span>🏔️ Adventurer</span>
+                <span class="op-persona-soon">soon</span>
+            </button>
+        </div>
+
+        <div id="op-scenario-row">
+            <span class="op-chip op-chip--live" id="op-mode-chip"
+                  title="Live mode — auto-advancing real-time state.">
+                <span class="op-chip-dot"></span>
+                <span id="op-mode-label">Live</span>
+            </span>
+            <span class="op-chip op-chip--hash op-chip-button" id="op-hash-chip"
+                  title="Scenario hash. Click to copy a permalink that reproduces this exact view.">
+                <span>scenario</span>
+                <span id="op-hash-val">—</span>
+            </span>
+            <span class="op-chip op-chip--model op-chip-button" id="op-model-chip"
+                  title="Pinned model versions. Click to see the model card.">
+                <span>models</span>
+                <span id="op-model-val">SGP4 · NRLMSISE-00</span>
+            </span>
+            <button class="op-chip op-chip-button" id="op-dict-btn" type="button"
+                    style="font-family:inherit;font-weight:700;border-style:solid;color:#9bd"
+                    title="Download every number on the page with full provenance — JSON.">
+                <span>↓</span>
+                <span>data dictionary</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Left rail: Fleet + Layers (placeholders) -->
+    <aside id="op-left">
+        <div class="op-panel" id="op-fleet-panel">
+            <h2>My Fleet</h2>
+            <div id="op-fleet-panel-body"></div>
+        </div>
+        <div class="op-panel">
+            <h2>Layers</h2>
+            <div id="op-layers-list">
+                <div class="op-deck-empty">Loading catalogs…</div>
+            </div>
+            <div class="op-layer-section" style="margin-top:10px">Overlays</div>
+            <label class="op-layer-row">
+                <input type="checkbox" id="op-toggle-density">
+                <span class="op-layer-dot" style="color:#f9a;background:#f9a"></span>
+                <span class="op-layer-name">Debris density map</span>
+            </label>
+        </div>
+        <div class="op-panel">
+            <h2>Indices</h2>
+            <div class="op-indices">
+                <div class="op-index-row">
+                    <span class="op-index-k">F10.7</span>
+                    <span class="op-index-v" id="op-idx-f107"></span>
+                    <span class="op-index-w" id="op-idx-f107-w"></span>
+                </div>
+                <div class="op-index-row">
+                    <span class="op-index-k">Ap</span>
+                    <span class="op-index-v" id="op-idx-ap"></span>
+                    <span class="op-index-w" id="op-idx-ap-w"></span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Center: Globe -->
+    <section id="op-globe-wrap">
+        <canvas id="op-globe"></canvas>
+    </section>
+
+    <!-- Right rail: Decision deck (placeholders) -->
+    <section id="op-right">
+        <div class="op-panel">
+            <h2>Decay Watch</h2>
+            <div id="op-decay-list">
+                <div class="op-deck-empty">Add fleet assets to see decay estimates.</div>
+            </div>
+        </div>
+        <div class="op-panel">
+            <h2 style="display:flex;align-items:baseline;gap:8px">
+                Conjunctions · 7 days
+                <button id="op-conj-btn" class="op-deck-btn" type="button"
+                        title="Run a 7-day SGP4 conjunction screen against the loaded debris catalog (50 km threshold).">
+                    Screen 7 d
+                </button>
+            </h2>
+            <div id="op-conj-body">
+                <div class="op-deck-empty">Add assets and toggle <b>Tracked Debris</b>, then click <b>Screen 7 d</b>.</div>
+            </div>
+        </div>
+        <div class="op-panel">
+            <h2>Prop Budget</h2>
+            <div id="op-prop-body"></div>
+        </div>
+        <div class="op-panel">
+            <h2>Export</h2>
+            <div class="op-coming">
+                <b>Coming next.</b> JSON + CSV open to all. CDM export is
+                <a href="/pricing#advanced" style="color:#0cc">PRO-gated</a> —
+                the button doubles as the upsell point.
+            </div>
+        </div>
+    </section>
+
+    <!-- Bottom: scrub strip -->
+    <div id="op-scrub" class="op-panel">
+        <div id="op-scrub-row">
+            <button class="op-scrub-btn" id="op-tc-home" title="Jump to −7 days">⏮</button>
+            <button class="op-scrub-btn" id="op-tc-back" title="Step back 1 hour (←)">⏪</button>
+            <button class="op-scrub-btn" id="op-tc-play" title="Play replay (Space)">▶︎</button>
+            <button class="op-scrub-btn" id="op-tc-fwd"  title="Step forward 1 hour (→)">⏩</button>
+            <button class="op-scrub-btn" id="op-tc-end"  title="Jump to +7 days">⏭</button>
+            <div id="op-scrub-track">
+                <div id="op-scrub-now"></div>
+                <div id="op-scrub-cursor"></div>
+            </div>
+            <button class="op-scrub-btn" id="op-tc-now" title="Jump to real time (N)">Now</button>
+            <span id="op-scrub-speeds">
+                <button class="op-scrub-btn op-scrub-speed" data-speed="1"    title="Replay at real time (1×)">1×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="60"   title="Replay at 60× — 1 minute per second">60×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="600"  title="Replay at 600× — 10 minutes per second">600×</button>
+                <button class="op-scrub-btn op-scrub-speed" data-speed="3600" title="Replay at 3600× — 1 hour per second">3600×</button>
+            </span>
+            <span id="op-tc-readout">—</span>
+        </div>
+    </div>
+
+</div>
+
+<!-- ─── Boot ──────────────────────────────────────────────────── -->
+<script type="module">
+/**
+ * operations.html boot — steps 1 + 3.
+ *
+ * Wires:
+ *   - PRO PREVIEW ribbon (open beta copy + dismiss + state-aware copy
+ *     for signed-in non-PRO users).
+ *   - Persona switch (Sat Ops live; Aviation / Astronaut / Adventurer
+ *     are stubs).
+ *   - Hash + model pills with placeholder values pending the determinism
+ *     foundations (step 5).
+ *   - Time bus + transport strip + hero mode chip (step 3): Live / Scrub
+ *     / Replay over a moving ±7 day window. Drag the cursor or press
+ *     Space / N / ←→ to drive simTimeMs. Subsequent steps wire
+ *     constellation propagation and the decision deck to the same bus.
+ */
+
+import { timeBus }            from './js/operations/time-bus.js';
+import { mountTimeStrip }     from './js/operations/time-strip.js';
+import { OperationsGlobe }    from './js/operations/globe.js';
+import { OperationsFleet }    from './js/operations/fleet.js';
+import { scenario }           from './js/operations/scenario.js';
+import { provStore }          from './js/operations/provenance.js';
+import { bindBand }           from './js/operations/bands.js';
+import { delta, attachDelta } from './js/operations/delta.js';
+import { startSwpcBridge }    from './js/operations/swpc-bridge.js';
+import { MyFleet }            from './js/operations/my-fleet.js';
+import {
+    mountMyFleet, mountDecayWatch, mountConjunctions, mountPropBudget,
+} from './js/operations/decision-deck.js';
+import { OperationsVisuals }  from './js/operations/visuals.js';
+import * as bPlane            from './js/operations/b-plane.js';
+import * as densityMap        from './js/operations/density-map.js';
+import { getGroupColorHex }   from './js/satellite-tracker.js';
+
+// Mount tooltip delegations up front so anything that binds later
+// (layer counts, future decision-deck values) is hover-ready without
+// per-binding setup. Provenance and Δ have separate tooltips with
+// shared timing constants — one for "where", one for "why."
+provStore.mount();
+delta.mount();
+
+const AUTH_KEY = 'pp_auth';
+const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
+
+function readAuth() {
+    let a = null;
+    try { a = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {}
+    if (!a) { try { a = JSON.parse(sessionStorage.getItem(AUTH_KEY) || 'null'); } catch (_) {} }
+    return a?.signedIn ? a : null;
+}
+
+function isProPlan(plan) {
+    return plan === 'advanced' || plan === 'institution' || plan === 'enterprise';
+}
+
+/* ─── Ribbon ────────────────────────────────────────────── */
+function mountRibbon() {
+    const el = document.getElementById('op-ribbon');
+    const body = document.getElementById('op-ribbon-body');
+    const close = document.getElementById('op-ribbon-close');
+    if (!el || !body || !close) return;
+
+    if (sessionStorage.getItem(RIBBON_DISMISS_KEY) === '1') return;
+
+    const auth = readAuth();
+    const plan = auth?.plan || null;
+    const role = auth?.role || null;
+    const adminish = role === 'admin' || role === 'superadmin' || role === 'tester';
+
+    if (!auth) {
+        body.innerHTML =
+            '<strong>PRO Preview</strong> — Operations is normally on the ' +
+            '<a href="/pricing#advanced">Advanced</a> plan. ' +
+            'Free during open beta. ' +
+            '<a href="/signup">Sign up</a> to save fleets and get alerts.';
+    } else if (adminish || isProPlan(plan)) {
+        // Skip the ribbon for users who already have full access.
+        return;
+    } else {
+        body.innerHTML =
+            '<strong>PRO Preview</strong> — Operations is included in your ' +
+            '<a href="/pricing#advanced">Advanced</a> upgrade. ' +
+            'You’re previewing it free during open beta.';
+    }
+
+    requestAnimationFrame(() => el.classList.add('op-ribbon-on'));
+    close.addEventListener('click', () => {
+        el.classList.remove('op-ribbon-on');
+        sessionStorage.setItem(RIBBON_DISMISS_KEY, '1');
+    });
+}
+
+/* ─── Persona switch ────────────────────────────────────── */
+function mountPersonas() {
+    const btns = document.querySelectorAll('#op-personas .op-persona-btn');
+    btns.forEach(btn => {
+        if (btn.disabled) return;
+        btn.addEventListener('click', () => {
+            btns.forEach(b => {
+                const on = b === btn;
+                b.classList.toggle('op-persona-on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            scenario.setPersona(btn.dataset.opPersona);
+        });
+    });
+}
+
+/* ─── Hash + model pills (scenario-driven) ─────────────── */
+function mountChips() {
+    const hashVal  = document.getElementById('op-hash-val');
+    const hashChip = document.getElementById('op-hash-chip');
+    const modelVal = document.getElementById('op-model-val');
+    const modelChip = document.getElementById('op-model-chip');
+
+    if (modelVal) modelVal.textContent = scenario.modelLabel;
+    if (modelChip) {
+        const m = scenario.MODEL_VERSIONS;
+        modelChip.title = [
+            'Pinned model versions',
+            `· orbit:        ${m.sgp4}`,
+            `· atmosphere:   ${m.atmosphere}`,
+            `· magnetopause: ${m.magnetopause}`,
+            `· covariance:   ${m.covariance}`,
+            '',
+            'Synthetic covariance (Vallado age-map). Real Space-Track / commercial covariance is an Enterprise upgrade.',
+        ].join('\n');
+    }
+
+    // Live hash binding. The scenario module only fires this when the
+    // hash actually moves (live-mode emits collapse to the same value).
+    scenario.subscribe(() => {
+        if (hashVal) hashVal.textContent = scenario.getHash();
+    });
+
+    // Click-to-copy permalink. Briefly flashes "copied" on the chip,
+    // then restores the hash. URL roundtrips on next load via
+    // scenario.parseUrl() in the boot block below.
+    if (hashChip) {
+        hashChip.addEventListener('click', async () => {
+            const link = scenario.getPermalink();
+            try { await navigator.clipboard.writeText(link); } catch (_) {}
+            if (!hashVal) return;
+            const prev = hashVal.textContent;
+            hashVal.textContent = 'copied';
+            setTimeout(() => {
+                hashVal.textContent = scenario.getHash();
+                if (prev) {/* prev is captured for closure paranoia, not used */}
+            }, 900);
+        });
+    }
+}
+
+mountRibbon();
+mountPersonas();
+mountChips();
+
+/* ─── Time bus + transport strip ───────────────────────── */
+mountTimeStrip({
+    track:     document.getElementById('op-scrub-track'),
+    cursor:    document.getElementById('op-scrub-cursor'),
+    nowTick:   document.getElementById('op-scrub-now'),
+    modeChip:  document.getElementById('op-mode-chip'),
+    modeLabel: document.getElementById('op-mode-label'),
+    btnHome:   document.getElementById('op-tc-home'),
+    btnBack:   document.getElementById('op-tc-back'),
+    btnPlay:   document.getElementById('op-tc-play'),
+    btnFwd:    document.getElementById('op-tc-fwd'),
+    btnEnd:    document.getElementById('op-tc-end'),
+    btnNow:    document.getElementById('op-tc-now'),
+    speedBtns: document.querySelectorAll('#op-scrub-speeds .op-scrub-speed'),
+    readout:   document.getElementById('op-tc-readout'),
+});
+timeBus.start();
+
+/* ─── Globe + fleet ─────────────────────────────────────── */
+const globe = new OperationsGlobe(document.getElementById('op-globe'));
+const fleet = new OperationsFleet(globe);
+globe.start();
+
+mountLayerPanel(fleet);
+
+// Keep scenario in sync with what the fleet is actually rendering so
+// the hash binds to the user's view, not their intent. Loading state
+// also flips here — when a fetch completes, the hash advances.
+fleet.onChange(() => scenario.setLayers(fleet.activeLayerIds()));
+
+// Permalink load. If `?l=…` is present we honour the URL exactly and
+// skip the default-on bootstrap; otherwise we load the standard subset.
+// `?t` / `?m` / `?sp` push directly into the time bus before any
+// rendering work so the very first frame paints at the requested
+// instant — no Live → Scrub flicker.
+const requested = scenario.parseUrl();
+
+if (requested.persona) scenario.setPersona(requested.persona);
+if (requested.time != null && requested.mode) {
+    timeBus.setSimTime(requested.time, { mode: requested.mode });
+    if (requested.mode === 'replay' && requested.speed) {
+        timeBus.setSpeed(requested.speed);
+    }
+}
+
+const layerLoad = requested.layers
+    ? Promise.all(requested.layers.map(id => fleet.setLayerOn(id, true)))
+    : fleet.bootstrap();
+
+layerLoad
+    .then(() => {
+        if (requested.hash) {
+            const got = scenario.getHash();
+            if (got !== requested.hash) {
+                console.warn(
+                    `[operations] permalink hash mismatch (url=${requested.hash}, computed=${got}). ` +
+                    'TLE catalog may have rolled forward since the link was issued.',
+                );
+            }
+        }
+    })
+    .catch(err => console.warn('[operations] layer load failed:', err));
+
+/* ─── Live SWPC indices (overrides synthetic from mountIndices) ─ */
+// Synthetic F10.7/Ap stand-ins from mountIndices() stay in place
+// until the first swpc-update event lands; the bridge then
+// overwrites those records with cacheState='live' and the Δ icons
+// activate naturally on the value transition.
+const stopSwpcBridge = startSwpcBridge();
+
+/* ─── My Fleet + decision deck + visuals ───────────────── */
+const myFleet = new MyFleet(fleet.tracker);
+const visuals = new OperationsVisuals({
+    globe,
+    fleet,
+    myFleet,
+    tracker: fleet.tracker,
+});
+visuals.start();
+
+mountMyFleet(myFleet, {
+    onSelect:       (id) => visuals.setSelectedAsset(id),
+    getSelectedId:  ()   => visuals.getSelectedAsset(),
+    onSelectChange: (fn) => visuals.onSelectionChange(fn),
+});
+mountDecayWatch(myFleet);
+mountConjunctions(myFleet, fleet.tracker, {
+    onSelect:      (id)   => visuals.setSelectedAsset(id),
+    onConjunction: (conj) => {
+        bPlane.showConjunction(conj);
+        visuals.showConjunction(conj);
+    },
+});
+
+bPlane.mountBPlane();
+densityMap.mountDensityMap(fleet.tracker);
+
+document.getElementById('op-toggle-density')?.addEventListener('change', (e) => {
+    densityMap.setVisible(e.target.checked);
+});
+mountPropBudget(myFleet);
+
+/* ─── Layer panel ───────────────────────────────────────── */
+function mountLayerPanel(fleet) {
+    const root = document.getElementById('op-layers-list');
+    if (!root) return;
+
+    const layers   = fleet.layers();
+    const sections = [...new Set(layers.map(l => l.section))];
+
+    let html = '';
+    for (const section of sections) {
+        html += `<div class="op-layer-section">${section}</div>`;
+        for (const l of layers.filter(x => x.section === section)) {
+            const color = getGroupColorHex(l.group);
+            html += `
+                <label class="op-layer-row" data-layer-row="${l.id}">
+                    <input type="checkbox" class="op-layer-cb" data-layer="${l.id}"${l.on ? ' checked' : ''}>
+                    <span class="op-layer-dot" style="color:${color};background:${color}"></span>
+                    <span class="op-layer-name">${l.label}</span>
+                    <span class="op-layer-count" data-layer-count="${l.id}">—</span>
+                </label>`;
+        }
+    }
+    root.innerHTML = html;
+
+    root.querySelectorAll('.op-layer-cb').forEach(cb => {
+        cb.addEventListener('change', () => {
+            fleet.setLayerOn(cb.dataset.layer, cb.checked);
+        });
+    });
+
+    fleet.onChange(() => {
+        const counts = fleet.counts();
+        root.querySelectorAll('[data-layer-count]').forEach(el => {
+            const id = el.dataset.layerCount;
+            const layer = layers.find(l => l.id === id);
+            if (!layer) return;
+            const isLoading = fleet.isLoading(id);
+            el.classList.toggle('op-layer-loading', isLoading);
+
+            const n = counts[layer.group];
+            if (n != null && fleet.isLoaded(id)) {
+                // Record the count's provenance the moment a group lands.
+                // We attribute the catalog to CelesTrak GP via our edge
+                // proxy (api/celestrak/tle.js), and the propagator is the
+                // pinned SGP4 version from MODEL_VERSIONS.
+                const provKey = `fleet.count.${id}`;
+                if (provStore.get(provKey)?.value !== n) {
+                    provStore.set(provKey, {
+                        value: n, unit: 'objects',
+                        source: 'CelesTrak GP (18th SDS) via /api/celestrak/tle',
+                        model:  scenario.MODEL_VERSIONS.sgp4,
+                        validAt: new Date().toISOString(),
+                        cacheState: 'live',
+                        description: `Live count of objects in the "${layer.label}" group. TLEs propagate through SGP4 to the current sim time on every render frame.`,
+                    });
+                }
+                provStore.bind(el, provKey, { format: '{value}' });
+            } else if (isLoading) {
+                el.textContent = '…';
+            } else {
+                el.textContent = '—';
+            }
+        });
+    });
+}
+
+/* ─── Indices (synthetic stand-ins; step 9 wires real SWPC) ── */
+function mountIndices() {
+    // The cacheState 'synthetic' makes the tooltip pill say "Synthetic"
+    // so operators see immediately that these are placeholders, not
+    // live SWPC numbers. The σ values mirror NOAA's published
+    // 27-day forecast spread for F10.7 and the typical short-horizon
+    // Ap forecast residual.
+    provStore.set('idx.f107', {
+        value: 142, unit: 'SFU', sigma: 12,
+        source: 'NOAA SWPC RTSW (synthetic stand-in)',
+        model:  'NOAA 27-day ensemble',
+        cacheState: 'synthetic',
+        description: 'Solar 10.7 cm radio flux. Direct driver of thermospheric heating: higher F10.7 → denser air at LEO altitudes → more drag on every satellite.',
+    });
+    provStore.set('idx.ap', {
+        value: 18, unit: '', sigma: 6,
+        source: 'NOAA SWPC RTSW (synthetic stand-in)',
+        model:  'NOAA 3-day forecast spread',
+        cacheState: 'synthetic',
+        description: 'Daily geomagnetic Ap. Above 27 = G1+ storm; above 50 = G2+; storm activity puffs the thermosphere outward and cleanly steps the drag floor up by 20–40%.',
+    });
+
+    const f107Node = document.getElementById('op-idx-f107');
+    const apNode   = document.getElementById('op-idx-ap');
+
+    bindBand(f107Node, 'idx.f107', { style: 'sigma' });
+    bindBand(document.getElementById('op-idx-f107-w'), 'idx.f107', {
+        style: 'whiskers',
+        range: { min: 60, max: 300 },     // calm-min → solar-max
+    });
+    bindBand(apNode,   'idx.ap', { style: 'sigma' });
+    bindBand(document.getElementById('op-idx-ap-w'),   'idx.ap', {
+        style: 'whiskers',
+        range: { min: 0, max: 80 },       // calm → severe storm
+    });
+
+    // Δ icons stay quiet until SWPC actually moves these values
+    // (step 9). On first set there's no prior snapshot so the
+    // glyph is a neutral '·'; subsequent updates flip it to ▲ / ▼,
+    // pulse fresh for ~10 s, hold a coloured tint for ~5 min, then
+    // decay to neutral via the periodic refresh.
+    attachDelta(f107Node, 'idx.f107');
+    attachDelta(apNode,   'idx.ap');
+}
+mountIndices();
+
+/* ─── Data dictionary export ───────────────────────────── */
+function mountDataDictionary() {
+    const btn = document.getElementById('op-dict-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const flash = btn.querySelector('span:last-child');
+        const prev = flash?.textContent;
+        provStore.download();
+        if (flash) {
+            flash.textContent = 'downloaded ✓';
+            setTimeout(() => { if (flash && prev) flash.textContent = prev; }, 1100);
+        }
+    });
+}
+mountDataDictionary();
+
+// Devtools handle.
+window.__op = {
+    readAuth, isProPlan, timeBus, globe, fleet, scenario,
+    provStore, delta, myFleet, visuals, stopSwpcBridge,
+    bPlane, densityMap,
+};
+</script>
+
+</body>
+</html>

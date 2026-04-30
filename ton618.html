@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TON 618 Research Observatory — Parker Physics App</title>
+<meta name="description" content="Research-grade Kerr geodesic observatory for TON 618, the most massive known black hole. Phase 0.5: Schwarzschild baseline with RK45 null-geodesic ray tracing and a 3D god-mode camera.">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Courier New',monospace; background:#000; color:#ccc; display:flex; flex-direction:column; min-height:100vh; overflow:hidden; }
+
+#app { display:flex; height:calc(100vh - 48px); }
+#canvas-area { flex:1; position:relative; background:#000; overflow:hidden; }
+#glCanvas { position:absolute; top:0; left:0; width:100%; height:100%; display:block; image-rendering:auto; }
+
+/* HUD */
+#hud {
+    position:absolute; top:10px; left:10px; z-index:10; pointer-events:none;
+    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.55;
+    background:rgba(0,0,0,.55); backdrop-filter:blur(4px);
+    border:1px solid rgba(255,140,0,.18); border-radius:6px;
+    padding:10px 14px; min-width:380px; color:#cca266; white-space:pre;
+}
+#hud-title {
+    position:absolute; top:10px; left:10px; transform:translateY(-18px);
+    font-size:9px; letter-spacing:.2em; color:#ff8800; text-transform:uppercase;
+    pointer-events:none;
+}
+#minimap-wrap {
+    position:absolute; top:10px; right:10px; z-index:10;
+    width:300px; height:140px;
+    background:rgba(0,0,0,.45); border:1px solid rgba(255,140,0,.18);
+    border-radius:6px; padding:4px;
+}
+#minimap-wrap > .mm-label {
+    position:absolute; top:-14px; left:6px; font-size:9px; letter-spacing:.2em;
+    color:#ff8800; text-transform:uppercase;
+}
+#minimap { width:100%; height:100%; display:block; }
+#validation {
+    position:absolute; bottom:14px; left:14px; z-index:10;
+    font-size:10px; line-height:1.6; color:#8fd7ff;
+    background:rgba(0,0,0,.6); border:1px solid rgba(143,215,255,.25);
+    border-radius:6px; padding:10px 14px; white-space:pre; display:none;
+}
+#controls-hint {
+    position:absolute; bottom:14px; right:14px; z-index:10;
+    font-size:9.5px; color:#888; background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.07); border-radius:5px; padding:8px 10px;
+    line-height:1.55; max-width:330px;
+}
+#controls-hint b { color:#ffaa44; letter-spacing:.05em; }
+#fly-pill {
+    position:absolute; top:160px; right:10px; z-index:10;
+    font-size:10px; letter-spacing:.18em; text-transform:uppercase;
+    color:#000; background:#ff8800; padding:3px 9px; border-radius:11px;
+    display:none;
+}
+#fly-pill.on { display:inline-block; }
+
+#inspector {
+    position:absolute; bottom:50px; left:14px; z-index:10;
+    font-family:'Courier New',monospace; font-size:10.5px; line-height:1.6;
+    color:#9eecff; background:rgba(0,12,28,.78);
+    border:1px solid rgba(120,200,255,.30); border-radius:6px;
+    padding:9px 12px; white-space:pre; min-width:300px; display:none;
+    backdrop-filter:blur(4px);
+}
+#inspector .ic-title {
+    font-size:9px; letter-spacing:.18em; color:#7adcff; text-transform:uppercase;
+    margin-bottom:4px;
+}
+#inspector .ic-close {
+    position:absolute; top:4px; right:7px; cursor:pointer; color:#5e9bbf;
+    font-size:11px; pointer-events:auto;
+}
+#inspector .ic-close:hover { color:#fff; }
+
+/* Right panel */
+#panel {
+    width:290px; min-width:290px; background:rgba(8,4,20,.95);
+    border-left:1px solid rgba(255,120,0,.2);
+    display:flex; flex-direction:column; overflow-y:auto;
+    padding:12px; gap:10px;
+}
+#panel::-webkit-scrollbar { width:4px; }
+#panel::-webkit-scrollbar-thumb { background:rgba(255,140,0,.3); border-radius:2px; }
+.sec-title {
+    font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#ff8800;
+    border-bottom:1px solid rgba(255,136,0,.25); padding-bottom:4px; margin-bottom:6px;
+}
+.ctrl { display:flex; flex-direction:column; gap:3px; margin-bottom:7px; }
+.ctrl label { font-size:10px; color:#aaa; }
+.ctrl input[type=range] { width:100%; accent-color:#ff8800; }
+.ctrl .val { font-size:10.5px; color:#ff9933; text-align:right; }
+select {
+    background:#0d0806; border:1px solid rgba(255,136,0,.3); color:#ccc;
+    padding:4px 6px; border-radius:4px; font-family:inherit; font-size:11px; width:100%;
+}
+.toggle-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.toggle-row input { accent-color:#ff8800; }
+.toggle-row label { font-size:10px; color:#aaa; cursor:pointer; }
+.btn {
+    background:rgba(255,100,0,.15); border:1px solid rgba(255,120,0,.4);
+    color:#ff9933; padding:6px 10px; border-radius:5px; cursor:pointer;
+    font-family:inherit; font-size:11px; width:100%; transition:background .2s;
+}
+.btn:hover { background:rgba(255,100,0,.3); }
+.btn-row {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px;
+}
+.btn-sm {
+    background:rgba(120,60,180,.15); border:1px solid rgba(160,100,220,.35);
+    color:#cda8ff; padding:5px 8px; border-radius:4px; cursor:pointer;
+    font-family:inherit; font-size:10.5px; transition:background .2s;
+}
+.btn-sm:hover { background:rgba(160,100,220,.3); }
+.shader-badge {
+    display:inline-block; background:linear-gradient(45deg,#6040ff,#ff4080);
+    color:#fff; font-size:9px; padding:2px 6px; border-radius:3px;
+    letter-spacing:.08em; margin-bottom:6px;
+}
+.info-box {
+    font-size:10px; color:#888; line-height:1.6;
+    border:1px solid rgba(255,255,255,.06); border-radius:4px;
+    padding:8px; background:rgba(255,255,255,.02);
+}
+.info-box b { color:#ffaa44; }
+.sep { border-top:1px solid rgba(255,255,255,.07); margin:4px 0; }
+.note { font-size:9.5px; color:#777; line-height:1.5; margin-top:4px; }
+.phase-pill {
+    display:inline-block; font-size:9px; letter-spacing:.15em; text-transform:uppercase;
+    color:#000; background:#ff8800; padding:1px 6px; border-radius:10px; margin-right:4px;
+}
+</style>
+</head>
+<body>
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("ton618");</script>
+
+<div id="app">
+    <div id="canvas-area">
+        <canvas id="glCanvas"></canvas>
+        <div id="hud-title">Phase 0.5 · Schwarzschild · RK45 · 3D God-mode Camera</div>
+        <div id="hud">booting…</div>
+        <div id="minimap-wrap">
+            <div class="mm-label">god-view · top / side</div>
+            <canvas id="minimap"></canvas>
+        </div>
+        <div id="fly-pill">⊙ free-fly</div>
+        <div id="inspector">
+            <div class="ic-title">▸ Geodesic inspector</div>
+            <span class="ic-close" id="ic-close">✕</span>
+            <div id="inspector-body">click anywhere on the render</div>
+        </div>
+        <div id="validation"></div>
+        <div id="controls-hint">
+            <b>orbit:</b> drag · shift+drag pan · mid-drag roll · wheel dolly<br>
+            <b>fly (F):</b> WASD strafe · Q/E forward/back · space/ctrl up/down<br>
+            <b>both:</b> arrows yaw/pitch · Z/X roll · shift = boost · R reset<br>
+            <b>click:</b> inspect that pixel's geodesic (b, r_min, term…)
+        </div>
+    </div>
+
+    <aside id="panel">
+        <div>
+            <div class="shader-badge">▸ WebGL2 · RK45 · Tetrad-3DOF</div>
+            <div class="sec-title"><span class="phase-pill">Phase 0.5</span> Observatory</div>
+            <div class="note">Research-grade Kerr geodesic observatory for TON 618
+                (M ≈ 6.6×10¹⁰ M☉). Schwarzschild baseline with a 3D god-mode camera
+                that can sit in any of three physical observer frames. Spin remains
+                <i>a = 0</i> until Phase 1 lands.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Observer (geometrized, M = 1)</div>
+            <div class="ctrl">
+                <label>Frame</label>
+                <select id="observer">
+                    <option value="static" selected>Static stationary (r &gt; 2M)</option>
+                    <option value="freefall">Painlevé-Gullstrand (free-fall)</option>
+                    <option value="keplerian">Circular Keplerian (eq., r &gt; 3M)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Radial distance r [M]</label>
+                <input type="range" id="s-r" min="2.5" max="200" step="0.5" value="30">
+                <div class="val" id="v-r">30 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Polar angle θ</label>
+                <input type="range" id="s-theta" min="2" max="178" step="1" value="80">
+                <div class="val" id="v-theta">80°</div>
+            </div>
+            <div class="ctrl">
+                <label>Azimuth φ</label>
+                <input type="range" id="s-phi" min="0" max="360" step="1" value="0">
+                <div class="val" id="v-phi">0°</div>
+            </div>
+            <div class="ctrl">
+                <label>Field of view</label>
+                <input type="range" id="s-fov" min="15" max="120" step="1" value="60">
+                <div class="val" id="v-fov">60°</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="flyMode">
+                <label for="flyMode">Free-fly (FPS) mode — press F</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Camera presets</div>
+            <div class="btn-row">
+                <button class="btn-sm" data-preset="far-equator">far · equator</button>
+                <button class="btn-sm" data-preset="iconic">iconic Interstellar</button>
+                <button class="btn-sm" data-preset="pole-down">pole-down</button>
+                <button class="btn-sm" data-preset="photon-graze">photon graze</button>
+                <button class="btn-sm" data-preset="horizon-skim">horizon skim</button>
+                <button class="btn-sm" data-preset="isco-orbit">ISCO orbit</button>
+                <button class="btn-sm" data-preset="wide-survey">wide survey</button>
+            </div>
+            <div class="note">Smooth cinematic transitions (~1.4 s, log-r interp).</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Accretion disk (3D scene)</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showDisk" checked>
+                <label for="showDisk">Render disk (ISCO → outer)</label>
+            </div>
+            <div class="ctrl">
+                <label>Optical regime</label>
+                <select id="diskMode">
+                    <option value="opaque" selected>Opaque thin disk</option>
+                    <option value="translucent">Translucent (RIAF / multi-image)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>r_inner [M]</label>
+                <input type="range" id="s-disk-in" min="2.5" max="20" step="0.1" value="6">
+                <div class="val" id="v-disk-in">6.0 M (ISCO)</div>
+            </div>
+            <div class="ctrl">
+                <label>r_outer [M]</label>
+                <input type="range" id="s-disk-out" min="8" max="80" step="0.5" value="24">
+                <div class="val" id="v-disk-out">24 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Inner-edge T (Shakura-Sunyaev peak)</label>
+                <input type="range" id="s-disk-T" min="1500" max="40000" step="100" value="12000">
+                <div class="val" id="v-disk-T">12000 K (white-hot)</div>
+            </div>
+            <div class="ctrl">
+                <label>Brightness</label>
+                <input type="range" id="s-disk-bright" min="0" max="4" step="0.05" value="1">
+                <div class="val" id="v-disk-bright">1.00×</div>
+            </div>
+            <div class="note">Color is a Tanner-Helland blackbody fit to T(r) =
+                T<sub>in</sub>(r<sub>in</sub>/r)<sup>3/4</sup>(1−√(r<sub>in</sub>/r))<sup>1/4</sup>,
+                Doppler-shifted by the photon's g-factor against the local
+                prograde-Keplerian emitter. I<sub>obs</sub> = g⁴ I<sub>emit</sub>.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Animation</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="anim" checked>
+                <label for="anim">Animate (Keplerian shear + hot-spot)</label>
+            </div>
+            <div class="ctrl">
+                <label>Speed (× Ω<sub>K</sub>(r))</label>
+                <input type="range" id="s-anim" min="0" max="20" step="0.5" value="1">
+                <div class="val" id="v-anim">1.0×</div>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showHotspot" checked>
+                <label for="showHotspot">Orbiting hot-spot</label>
+            </div>
+            <div class="ctrl">
+                <label>Hot-spot r [M]</label>
+                <input type="range" id="s-hot-r" min="3.5" max="40" step="0.1" value="6.5">
+                <div class="val" id="v-hot-r">6.5 M</div>
+            </div>
+            <div class="note">The disk pattern shears at the local Ω(r) ∝ r<sup>−3/2</sup>,
+                so inner orbits visibly out-pace outer ones — the same physics
+                that drives MRI turbulence.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Radiation &amp; particle emissions</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showJets" checked>
+                <label for="showJets">Bipolar synchrotron jets (Doppler δ<sup>2+α</sup>)</label>
+            </div>
+            <div class="ctrl">
+                <label>Jet β = v/c</label>
+                <input type="range" id="s-jet-v" min="0" max="0.999" step="0.005" value="0.95">
+                <div class="val" id="v-jet-v">0.950 c   (γ ≈ 3.20)</div>
+            </div>
+            <div class="ctrl">
+                <label>Spectral index α (I<sub>ν</sub> ∝ ν<sup>−α</sup>)</label>
+                <input type="range" id="s-jet-a" min="0" max="2" step="0.05" value="0.7">
+                <div class="val" id="v-jet-a">0.70</div>
+            </div>
+            <div class="ctrl">
+                <label>Half-opening angle</label>
+                <input type="range" id="s-jet-o" min="2" max="35" step="1" value="10">
+                <div class="val" id="v-jet-o">10°</div>
+            </div>
+            <div class="ctrl">
+                <label>Jet intensity</label>
+                <input type="range" id="s-jet-i" min="0" max="0.4" step="0.005" value="0.06">
+                <div class="val" id="v-jet-i">0.060</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showCorona">
+                <label for="showCorona">Hot Compton corona (X-ray scatter)</label>
+            </div>
+            <div class="ctrl">
+                <label>Corona peak r [M]</label>
+                <input type="range" id="s-cor-r" min="3" max="40" step="0.5" value="10">
+                <div class="val" id="v-cor-r">10 M</div>
+            </div>
+            <div class="ctrl">
+                <label>Corona intensity</label>
+                <input type="range" id="s-cor-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-cor-i">0.040</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showWind">
+                <label for="showWind">Radiation-driven disk wind (UV cone)</label>
+            </div>
+            <div class="ctrl">
+                <label>Wind intensity</label>
+                <input type="range" id="s-wind-i" min="0" max="0.2" step="0.002" value="0.04">
+                <div class="val" id="v-wind-i">0.040</div>
+            </div>
+
+            <div class="toggle-row" style="margin-top:8px;">
+                <input type="checkbox" id="showFeLine">
+                <label for="showFeLine">Fe K-α line emission (6.4 keV)</label>
+            </div>
+            <div class="ctrl">
+                <label>Fe-line intensity</label>
+                <input type="range" id="s-fe-i" min="0" max="3" step="0.05" value="0.6">
+                <div class="val" id="v-fe-i">0.60</div>
+            </div>
+
+            <div class="ctrl" style="margin-top:8px;">
+                <label>ṁ / ṁ_Edd  (drives HUD luminosity)</label>
+                <input type="range" id="s-mdot" min="0.001" max="2" step="0.005" value="0.10">
+                <div class="val" id="v-mdot">0.100  (typical AGN)</div>
+            </div>
+            <div class="note">Jets use a co-moving radial 4-velocity at β; their
+                g-factor against the photon's k<sup>μ</sup> gives I<sub>obs</sub>
+                = δ<sup>2+α</sup> I<sub>emit</sub> — the iconic M87-style
+                approaching/receding asymmetry.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Overlays</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showGrid">
+                <label for="showGrid">3-D coordinate grid shells (10M, 30M)</label>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showPhotonSphere">
+                <label for="showPhotonSphere">Photon-sphere shell glow (r = 3M)</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Performance</div>
+            <div class="toggle-row">
+                <input type="checkbox" id="autoLOD" checked>
+                <label for="autoLOD">Auto-LOD (drop res while moving)</label>
+            </div>
+            <div class="ctrl">
+                <label>Far-field shortcut r [M] (0 = off)</label>
+                <input type="range" id="s-far" min="0" max="500" step="10" value="120">
+                <div class="val" id="v-far">120 M</div>
+            </div>
+            <div class="note">Geodesics that pass r and are heading outward
+                quit integration early — saves 30–50 % of step budget on wide
+                views without altering the celestial-sphere result.</div>
+        </div>
+
+        <div>
+            <div class="sec-title">Integrator</div>
+            <div class="ctrl">
+                <label>Quality preset</label>
+                <select id="quality">
+                    <option value="mobile">Mobile (0.5× · 400 steps)</option>
+                    <option value="standard" selected>Standard (0.75× · 900 steps)</option>
+                    <option value="cinema">Cinema (1.0× · 1600 steps)</option>
+                    <option value="research">Research (1.0× · 3000 steps)</option>
+                </select>
+            </div>
+            <div class="toggle-row">
+                <input type="checkbox" id="showRing" checked>
+                <label for="showRing">Highlight photon ring</label>
+            </div>
+        </div>
+
+        <div>
+            <div class="sec-title">Validation</div>
+            <button class="btn" id="btnValidate">⊙ Measure photon ring</button>
+            <div class="note">Expected apparent ring radius at infinity:
+                <b>b_crit = 3√3 M ≈ 5.196 M</b> = <b>2.598 r_s</b>
+                (Bardeen-Press-Teukolsky, Schwarzschild).</div>
+        </div>
+
+        <div class="sep"></div>
+        <div class="info-box">
+            <b>Phase 0.5 physics</b><br>
+            <span style="color:#ffaa44">① Tetrads:</span> three physically distinct
+            local Lorentz frames — static, Painlevé-Gullstrand free-faller, prograde
+            Keplerian. Each gives a different aberration / Doppler response.<br>
+            <span style="color:#ffaa44">② Ray construction:</span> pixel → local
+            3-direction → null 4-momentum k^μ via the active tetrad.<br>
+            <span style="color:#ffaa44">③ Integration:</span> Cash-Karp RK4(5)
+            adaptive on 8-D phase space (t, r, θ, φ, k^t, k^r, k^θ, k^φ).<br>
+            <span style="color:#ffaa44">④ Termination:</span> horizon capture at
+            r ≲ 2M, or escape past r_far = 1200 M onto the celestial sphere.<br>
+            <span style="color:#ffaa44">⑤ HUD/mini-map:</span> live γ_static,
+            tidal Δa/L, free-fall &amp; orbital v/c, proper distance / light-time
+            to horizon, ISCO &amp; photon-sphere overlays.
+        </div>
+        <div class="note">
+            UI note: TON 618 mass is <i>measured</i> (virial/SED);
+            spin <i>a = 0.95</i> (Phase 1 default) is <i>inferred</i>;
+            super-Eddington phases are <i>hypothetical</i>.
+        </div>
+    </aside>
+</div>
+
+<script type="module">
+    import { boot } from './js/ton618/main.js';
+
+    const canvas        = document.getElementById('glCanvas');
+    const hud           = document.getElementById('hud');
+    const minimapCanvas = document.getElementById('minimap');
+
+    const app = await boot({ canvas, hud, minimapCanvas });
+
+    const $ = (id) => document.getElementById(id);
+
+    function bindRange(id, valId, fmt, onChange) {
+        const el  = $(id);
+        const val = $(valId);
+        el.addEventListener('input', () => {
+            val.textContent = fmt(+el.value);
+            onChange(+el.value);
+        });
+    }
+
+    bindRange('s-r',     'v-r',     (v) => `${v.toFixed(1)} M`,
+        (v) => { app.state.cam.r = v;             app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-theta', 'v-theta', (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.theta = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-phi',   'v-phi',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.state.cam.phi   = (v * Math.PI) / 180; app.state.cam.transition = null; app.forceRender(); });
+    bindRange('s-fov',   'v-fov',   (v) => `${v.toFixed(0)}°`,
+        (v) => { app.setFov(v); });
+
+    $('observer').addEventListener('change', (e) => app.setObserverType(e.target.value));
+    $('quality').addEventListener('change', (e) => app.setQuality(e.target.value));
+    $('showRing').addEventListener('change', () => app.toggleRing());
+
+    // Disk + grid controls
+    $('showDisk').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showDisk) app.toggleDisk();
+    });
+    $('showGrid').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showGrid) app.toggleGrid();
+    });
+    $('showPhotonSphere').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showPhotonSphere) app.togglePhotonSphere();
+    });
+    $('showHotspot').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showHotspot) app.toggleHotspot();
+    });
+    $('anim').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.animate) app.toggleAnim();
+    });
+    $('diskMode').addEventListener('change', (e) => app.setDiskMode(e.target.value));
+
+    bindRange('s-disk-in', 'v-disk-in',
+        (v) => `${v.toFixed(1)} M${Math.abs(v - 6) < 0.05 ? ' (ISCO)' : ''}`,
+        (v) => app.setDiskInner(v));
+    bindRange('s-disk-out', 'v-disk-out',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setDiskOuter(v));
+    bindRange('s-disk-bright', 'v-disk-bright',
+        (v) => `${v.toFixed(2)}×`, (v) => app.setDiskBrightness(v));
+    bindRange('s-disk-T', 'v-disk-T',
+        (v) => {
+            let label;
+            if (v < 3500) label = 'red-hot';
+            else if (v < 6500) label = 'sun-like';
+            else if (v < 10000) label = 'white-hot';
+            else if (v < 20000) label = 'blue-hot';
+            else label = 'UV';
+            return `${(v|0)} K (${label})`;
+        },
+        (v) => app.setDiskTInner(v));
+    bindRange('s-anim', 'v-anim',
+        (v) => `${v.toFixed(1)}×`, (v) => app.setAnimSpeed(v));
+    bindRange('s-hot-r', 'v-hot-r',
+        (v) => `${v.toFixed(1)} M`, (v) => app.setHotspotRadius(v));
+
+    // ── Multi-component radiation controls ─────────────────────────
+    $('showJets').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showJets) app.toggleJets();
+    });
+    $('showCorona').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showCorona) app.toggleCorona();
+    });
+    $('showWind').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showWind) app.toggleWind();
+    });
+    $('showFeLine').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.showFeLine) app.toggleFeLine();
+    });
+    bindRange('s-jet-v', 'v-jet-v',
+        (v) => {
+            const gamma = 1 / Math.sqrt(Math.max(1 - v * v, 1e-9));
+            return `${v.toFixed(3)} c   (γ ≈ ${gamma.toFixed(2)})`;
+        }, (v) => app.setJetVelocity(v));
+    bindRange('s-jet-a', 'v-jet-a', (v) => v.toFixed(2), (v) => app.setJetAlpha(v));
+    bindRange('s-jet-o', 'v-jet-o', (v) => `${v.toFixed(0)}°`,
+        (v) => app.setJetOpen((v * Math.PI) / 180));
+    bindRange('s-jet-i', 'v-jet-i', (v) => v.toFixed(3), (v) => app.setJetIntensity(v));
+    bindRange('s-cor-r', 'v-cor-r', (v) => `${v.toFixed(1)} M`, (v) => app.setCoronaRadius(v));
+    bindRange('s-cor-i', 'v-cor-i', (v) => v.toFixed(3), (v) => app.setCoronaIntensity(v));
+    bindRange('s-wind-i', 'v-wind-i', (v) => v.toFixed(3), (v) => app.setWindIntensity(v));
+    bindRange('s-fe-i', 'v-fe-i', (v) => v.toFixed(2), (v) => app.setFeIntensity(v));
+    bindRange('s-mdot', 'v-mdot',
+        (v) => {
+            let label;
+            if (v < 0.005) label = 'RIAF (LLAGN)';
+            else if (v < 0.05) label = 'sub-Eddington';
+            else if (v < 0.3) label = 'typical AGN';
+            else if (v < 1.0) label = 'near-Eddington';
+            else label = 'super-Eddington';
+            return `${v.toFixed(3)}  (${label})`;
+        }, (v) => app.setMdotRel(v));
+
+    // ── Performance ────────────────────────────────────────────────
+    $('autoLOD').addEventListener('change', (e) => {
+        if (e.target.checked !== app.state.autoLOD) app.toggleAutoLOD();
+    });
+    bindRange('s-far', 'v-far',
+        (v) => v == 0 ? 'off' : `${(v|0)} M`, (v) => app.setFarShortcutR(v));
+
+    // ── Pixel inspector ────────────────────────────────────────────
+    const inspector = $('inspector');
+    const inspBody  = $('inspector-body');
+    $('ic-close').addEventListener('click', () => { inspector.style.display = 'none'; });
+    app.onInspect((r) => {
+        inspector.style.display = 'block';
+        const bRel = r.b_impact / r.b_crit;
+        const fmtPct = (x) => Math.abs(x) < 1e-6 ? '0.000 %' : x.toExponential(3) + ' %';
+        inspBody.textContent = [
+            `pixel (${r._click_x}, ${r._click_y})`,
+            `term       : ${r.term.toUpperCase()}`,
+            `verdict    : ${r.verdict}`,
+            `impact b   : ${r.b_impact.toFixed(4)} M  (b/b_crit = ${bRel.toFixed(4)})`,
+            `b_crit     : ${r.b_crit.toFixed(4)} M`,
+            `r_min      : ${r.r_min.toFixed(3)} M   (horizon = 2M, photon sphere = 3M)`,
+            `r_max      : ${r.r_max.toFixed(3)} M`,
+            `Δφ total   : ${(r.deflection_total).toFixed(3)} rad   (${(r.deflection_total*180/Math.PI).toFixed(1)}°)`,
+            `eq. crossings: ${r.equator_crossings}`,
+            `steps      : ${r.steps}`,
+            `─── conservation drift (RK4 fixed-step) ───`,
+            `E drift    : ${fmtPct(r.E_drift_pct)}`,
+            `L_z drift  : ${fmtPct(r.L_drift_pct)}`,
+        ].join('\n');
+    });
+
+    const flyToggle = $('flyMode');
+    const flyPill   = $('fly-pill');
+    flyToggle.addEventListener('change', () => {
+        if (flyToggle.checked !== app.state.cam.flyMode) {
+            app.toggleFlyMode();
+        }
+        flyPill.classList.toggle('on', app.state.cam.flyMode);
+    });
+    // Sync the pill if the user presses F instead of clicking the checkbox.
+    setInterval(() => {
+        const on = app.state.cam.flyMode;
+        flyToggle.checked = on;
+        flyPill.classList.toggle('on', on);
+    }, 250);
+
+    document.querySelectorAll('[data-preset]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const name = btn.getAttribute('data-preset');
+            app.applyPreset(name);
+            // Sync the sliders to the preset target after the transition begins;
+            // since the cam state lerps, watch a frame later.
+            setTimeout(() => {
+                $('s-r').value     = app.state.cam.r.toFixed(1);
+                $('v-r').textContent = `${app.state.cam.r.toFixed(1)} M`;
+                $('s-theta').value = (app.state.cam.theta * 180 / Math.PI).toFixed(0);
+                $('v-theta').textContent = `${(app.state.cam.theta * 180 / Math.PI).toFixed(0)}°`;
+                $('s-phi').value   = ((app.state.cam.phi * 180 / Math.PI) + 360) % 360;
+                $('v-phi').textContent = `${(((app.state.cam.phi * 180 / Math.PI) + 360) % 360).toFixed(0)}°`;
+                $('s-fov').value   = (app.state.cam.fovY * 180 / Math.PI).toFixed(0);
+                $('v-fov').textContent = `${(app.state.cam.fovY * 180 / Math.PI).toFixed(0)}°`;
+            }, 1500);
+        });
+    });
+
+    $('btnValidate').addEventListener('click', () => {
+        const v = $('validation');
+        v.style.display = 'block';
+        v.textContent = 'measuring…';
+        setTimeout(() => {
+            const result = app.runPhotonRingValidation();
+            if (!result) {
+                v.textContent = 'validation failed: no shadow detected';
+                return;
+            }
+            const pass = Math.abs(result.error_pct) < 1.0;
+            v.textContent = [
+                `PHOTON RING VALIDATION`,
+                `  measured b  = ${result.b_measured.toFixed(4)} M`,
+                `  expected b  = ${result.b_expected.toFixed(4)} M`,
+                `  measured    = ${result.ring_rs.toFixed(4)} r_s`,
+                `  expected    = ${result.ring_rs_expected.toFixed(4)} r_s`,
+                `  error       = ${result.error_pct.toFixed(3)} %`,
+                `  status      = ${pass ? 'PASS (< 1%)' : 'ATTN (> 1%)'}`,
+            ].join('\n');
+        }, 50);
+    });
+</script>
+</body>
+</html>

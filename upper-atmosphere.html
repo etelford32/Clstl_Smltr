@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="required-tier" content="advanced">
+<title>Upper Atmosphere Simulator — Thermosphere & Exosphere · Parker Physics</title>
+<meta name="description" content="Interactive Parker Physics thermosphere + exosphere simulator. Explore density, temperature, and per-species composition from 80 to 2000 km under any F10.7 / Ap state, with historical storm presets (Starlink Feb 2022, Gannon May 2024, AR3842). PRO access.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body {
+    width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif;
+}
+
+/* ─── Layout ───────────────────────────────────────────── */
+#ua-app {
+    display:grid;
+    grid-template-columns:320px 1fr 420px;
+    gap:14px;
+    padding:14px;
+    min-height:calc(100vh - 50px);
+}
+@media (max-width:1280px) {
+    #ua-app { grid-template-columns:280px 1fr; }
+    #ua-right { grid-column:1 / -1; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+}
+@media (max-width:900px) {
+    #ua-app { grid-template-columns:1fr; padding:10px; gap:10px; }
+    #ua-right { grid-template-columns:1fr; }
+}
+
+.ua-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    padding:14px 16px;
+}
+.ua-panel h2 {
+    font-size:.68rem; text-transform:uppercase; letter-spacing:.14em;
+    color:#8ab; font-weight:700; margin-bottom:10px;
+}
+
+/* ─── Hero ─────────────────────────────────────────────── */
+#ua-hero { padding:18px 20px 14px; grid-column:1 / -1; }
+#ua-hero-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+#ua-hero h1 {
+    font-size:1.35rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 40%,#9cc);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin:0;
+}
+#ua-hero p { font-size:.82rem; color:#8ab; line-height:1.5; margin-top:4px; }
+.ua-badge-pro {
+    display:inline-block; padding:3px 9px; border-radius:4px;
+    font-size:.62rem; font-weight:800; letter-spacing:.08em;
+    background:rgba(0,200,200,.12); color:#0cc;
+    border:1px solid rgba(0,200,200,.28);
+}
+
+/* ─── Data-source pill ─────────────────────────────────── */
+.ua-source-pill {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 10px; border-radius:999px;
+    font-size:.66rem; font-weight:700; letter-spacing:.04em;
+    font-family:monospace;
+    cursor:pointer;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.18);
+    color:#bcd;
+    transition:all .15s;
+}
+.ua-source-pill:hover { border-color:rgba(255,255,255,.35); color:#fff; }
+.ua-source-dot {
+    width:8px; height:8px; border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 8px currentColor;
+}
+.ua-source--client   { color:#889; }
+.ua-source--fallback { color:#c86; }
+.ua-source--backend  { color:#0cc; border-color:rgba(0,200,200,.4); }
+.ua-source--sparta   { color:#fd6; border-color:rgba(255,215,96,.5);
+    background:rgba(255,215,96,.08); }
+.ua-source--bootstrap{ color:#f9a; border-color:rgba(255,160,200,.5);
+    background:rgba(255,160,200,.06); }
+.ua-source--forced   { outline:1px dashed rgba(255,255,255,.3);
+    outline-offset:2px; }
+
+/* ─── Chips ────────────────────────────────────────────── */
+.ua-chip-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.ua-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd;
+    border-radius:999px;
+    padding:5px 11px;
+    font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    font-family:inherit;
+}
+.ua-chip:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.ua-chip--on {
+    background:rgba(0,200,200,.2); border-color:#0cc; color:#0ff;
+}
+.ua-chip--live {
+    background:rgba(255,200,0,.10);
+    border-color:rgba(255,200,0,.35);
+    color:#ffcc66;
+}
+.ua-chip--live:hover {
+    background:rgba(255,200,0,.22);
+    border-color:#fc6; color:#ffe;
+}
+
+/* ─── Sliders ──────────────────────────────────────────── */
+.ua-slider-row {
+    margin-bottom:14px;
+}
+.ua-slider-row:last-child { margin-bottom:0; }
+.ua-slider-hd {
+    display:flex; justify-content:space-between; align-items:baseline;
+    margin-bottom:4px;
+}
+.ua-slider-hd label {
+    font-size:.72rem; text-transform:uppercase;
+    letter-spacing:.08em; color:#9ab; font-weight:700;
+}
+.ua-slider-hd .ua-val {
+    font-size:.86rem; color:#0ff; font-family:monospace; font-weight:600;
+}
+.ua-slider-hd .ua-note {
+    font-size:.64rem; color:#556; margin-left:8px;
+}
+input[type=range] {
+    width:100%;
+    -webkit-appearance:none; appearance:none;
+    height:4px; background:rgba(255,255,255,.08);
+    border-radius:2px; outline:none; cursor:pointer;
+    margin:8px 0 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:14px; height:14px; border-radius:50%;
+    background:#0cc; border:2px solid #033;
+    cursor:pointer; transition:background .15s;
+}
+input[type=range]:hover::-webkit-slider-thumb { background:#0ff; }
+input[type=range]::-moz-range-thumb {
+    width:14px; height:14px; border-radius:50%;
+    background:#0cc; border:2px solid #033; cursor:pointer;
+}
+
+.ua-range-legend {
+    display:flex; justify-content:space-between;
+    font-size:.6rem; color:#667; margin-top:2px;
+}
+
+/* ─── Stats ────────────────────────────────────────────── */
+#ua-stats {
+    display:grid; grid-template-columns:1fr 1fr; gap:6px 12px;
+}
+.ua-stat {
+    display:flex; align-items:baseline; gap:6px;
+    font-size:.74rem;
+    border-bottom:1px dotted rgba(255,255,255,.06);
+    padding:3px 0;
+}
+.ua-stat-k { color:#8ab; font-weight:600; min-width:58px; }
+.ua-stat-v { color:#fff; font-family:monospace; flex:1; }
+.ua-stat-u { color:#556; font-size:.66rem; }
+
+/* ─── Preset summary ───────────────────────────────────── */
+#ua-summary {
+    font-size:.72rem; color:#aac;
+    line-height:1.5;
+    padding:10px 12px;
+    background:rgba(0,200,200,.04);
+    border:1px solid rgba(0,200,200,.12);
+    border-radius:8px;
+    margin-top:10px;
+}
+.ua-dim { color:#667; }
+
+/* ─── Globe ────────────────────────────────────────────── */
+#ua-globe-wrap {
+    position:relative;
+    background:radial-gradient(circle at 50% 40%, #0a0622 0%, #020008 90%);
+    border:1px solid rgba(0,200,200,.14);
+    border-radius:12px;
+    overflow:hidden;
+    height:500px;
+    min-height:500px;
+    max-height:500px;
+    display:flex;
+    align-self:start;
+    position:sticky;
+    top:14px;
+}
+@media (max-width:1280px) {
+    #ua-globe-wrap { position:relative; top:auto; }
+}
+#ua-globe { width:100%; height:100%; display:block; }
+#ua-globe-legend {
+    position:absolute; left:14px; bottom:14px;
+    background:rgba(0,0,0,.55);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px; padding:8px 10px;
+    font-size:.66rem; color:#9cc;
+    pointer-events:none;
+    line-height:1.5;
+    font-family:monospace;
+}
+#ua-globe-legend b { color:#0ff; font-weight:600; }
+
+/* ─── Camera HUD (top-right of globe) ──────────────────── */
+#ua-camera-hud {
+    position:absolute; right:14px; top:14px;
+    display:flex; flex-direction:column; gap:8px;
+    align-items:flex-end;
+    pointer-events:none;          /* children re-enable */
+    z-index:5;
+}
+#ua-camera-hud .ua-cam-controls {
+    display:flex; gap:6px;
+    pointer-events:auto;
+}
+#ua-camera-hud button {
+    background:rgba(8,4,22,.78);
+    border:1px solid rgba(0,200,200,.28);
+    color:#bcd;
+    border-radius:6px; padding:5px 10px;
+    font:11px/1 system-ui, sans-serif; font-weight:600;
+    cursor:pointer; letter-spacing:.04em;
+    transition:all .12s;
+}
+#ua-camera-hud button:hover {
+    border-color:rgba(0,255,230,.55);
+    color:#0ff;
+}
+#ua-camera-hud button.ua-cam-on {
+    background:rgba(0,200,200,.18);
+    border-color:#0cc;
+    color:#0ff;
+}
+#ua-cam-readout {
+    background:rgba(8,4,22,.82);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:8px;
+    padding:8px 11px;
+    font:11px monospace;
+    line-height:1.45;
+    color:#cde;
+    min-width:170px;
+    pointer-events:auto;
+    box-shadow:0 2px 10px rgba(0,0,0,.4);
+}
+#ua-cam-readout .ua-cam-row {
+    display:flex; justify-content:space-between; gap:10px;
+}
+#ua-cam-readout .ua-cam-k    { color:#789; }
+#ua-cam-readout .ua-cam-v    { color:#fff; }
+#ua-cam-readout .ua-cam-mode {
+    margin-top:5px; padding-top:5px;
+    border-top:1px dotted rgba(255,255,255,.08);
+    color:#0cc; font-weight:600;
+    text-align:center;
+}
+#ua-cam-readout .ua-cam-hint {
+    color:#556; font-size:10px;
+    text-align:center; margin-top:2px;
+}
+#ua-cam-readout .ua-cam-layer-tag {
+    display:inline-block; padding:1px 5px; border-radius:3px;
+    font-size:10px; font-weight:700; letter-spacing:.04em;
+    background:rgba(0,200,200,.14);
+    color:#9ff; border:1px solid rgba(0,200,200,.3);
+}
+
+/* ─── Plots ────────────────────────────────────────────── */
+#ua-right { display:flex; flex-direction:column; gap:14px; }
+.ua-plot-panel { padding:0; overflow:hidden; }
+.ua-plot-panel canvas {
+    width:100%; display:block;
+    height:320px;
+}
+@media (max-width:1280px) {
+    .ua-plot-panel canvas { height:280px; }
+}
+
+/* ─── Layer legend ─────────────────────────────────────── */
+#ua-layer-legend { display:flex; flex-direction:column; gap:5px; }
+.ua-layer-row {
+    display:flex; align-items:center; gap:8px;
+    font-size:.72rem; padding:3px 0;
+    border-bottom:1px dotted rgba(255,255,255,.05);
+    cursor:help;
+}
+.ua-layer-row:last-child { border-bottom:none; }
+.ua-layer-dot {
+    width:10px; height:10px; border-radius:50%;
+    flex-shrink:0;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-layer-name { color:#cde; font-weight:600; }
+.ua-layer-range {
+    margin-left:auto; font-family:monospace;
+    color:#667; font-size:.66rem;
+}
+
+/* ─── Layer-particle controls (per-layer toggle + live stats) ──────── */
+#ua-layer-controls { display:flex; flex-direction:column; gap:6px; }
+.ua-lc-row {
+    display:flex; flex-direction:column; gap:3px;
+    padding:7px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    transition:opacity .15s, border-color .15s;
+}
+.ua-lc-row:hover { border-color:rgba(0,200,200,.25); }
+.ua-lc-row--off { opacity:.45; }
+.ua-lc-head {
+    display:flex; align-items:center; gap:8px;
+    cursor:pointer; user-select:none;
+    font-size:.74rem;
+}
+.ua-lc-toggle { accent-color:#0cc; cursor:pointer; flex-shrink:0; }
+.ua-lc-swatch {
+    width:14px; height:14px; border-radius:3px;
+    flex-shrink:0;
+    border:1px solid rgba(255,255,255,.12);
+}
+.ua-lc-title { display:flex; flex-direction:column; flex:1; line-height:1.2; }
+.ua-lc-name  { color:#dde; font-weight:600; }
+.ua-lc-band  { color:#667; font-size:.62rem; font-family:monospace; }
+.ua-lc-pulse {
+    color:#445; font-size:.7rem;
+    margin-left:auto;
+    transition:color .25s, text-shadow .25s;
+}
+.ua-lc-pulse--fire {
+    animation:ua-lc-pulse-anim 1.0s ease-out;
+}
+@keyframes ua-lc-pulse-anim {
+    0%   { color:#0cc; text-shadow:0 0 8px #0cc; transform:scale(1.15); }
+    100% { color:#445; text-shadow:0 0 0 transparent; transform:scale(1); }
+}
+.ua-lc-stats {
+    display:flex; flex-wrap:wrap; gap:6px 10px;
+    font-size:.64rem; color:#aab;
+    padding-left:30px;
+}
+.ua-lc-stat { display:inline-flex; gap:3px; align-items:baseline; font-family:monospace; }
+.ua-lc-k    { color:#667; font-weight:600; }
+.ua-lc-v    { color:#cde; }
+.ua-lc-regime {
+    margin-left:auto;
+    padding:1px 6px; border-radius:3px;
+    font-size:.58rem; font-weight:700;
+    letter-spacing:.05em; text-transform:uppercase;
+    border:1px solid currentColor;
+}
+.ua-lc-regime--continuum      { color:#88e08c; }
+.ua-lc-regime--slip           { color:#bcd86c; }
+.ua-lc-regime--transition     { color:#ffcc66; }
+.ua-lc-regime--free-molecular { color:#ff9060; }
+.ua-lc-regime--unknown        { color:#778; }
+
+/* ─── Satellite drag analysis ──────────────────────────── */
+.ua-tle-pill {
+    display:inline-flex; align-items:center; gap:5px;
+    padding:2px 8px; border-radius:999px;
+    font-size:.6rem; font-weight:700;
+    letter-spacing:.04em;
+    font-family:monospace;
+    border:1px solid rgba(255,255,255,.15);
+    background:rgba(255,255,255,.04);
+    color:#9ab;
+    transition:all .2s;
+}
+.ua-tle-pill--pending { color:#9ab; }
+.ua-tle-pill--live    { color:#0cc; border-color:rgba(0,200,200,.45);
+                        background:rgba(0,200,200,.08); }
+.ua-tle-pill--partial { color:#ffcc66; border-color:rgba(255,204,102,.45);
+                        background:rgba(255,204,102,.06); }
+.ua-tle-pill--fallback{ color:#c87; border-color:rgba(200,130,90,.4);
+                        background:rgba(200,130,90,.05); }
+.ua-tle-dot {
+    width:6px; height:6px; border-radius:50%;
+    background:currentColor;
+    box-shadow:0 0 5px currentColor;
+}
+.ua-tle-pill--pending .ua-tle-dot {
+    animation: ua-tle-pulse 1.2s ease-in-out infinite;
+}
+@keyframes ua-tle-pulse {
+    0%, 100% { opacity: .35; }
+    50%      { opacity: 1.0; }
+}
+
+#ua-sat-drag { display:flex; flex-direction:column; gap:5px; }
+.ua-sat-row {
+    display:grid;
+    grid-template-columns: 14px 1fr auto auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 8px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .12s;
+    font-size:.72rem;
+}
+.ua-sat-row:hover {
+    border-color:rgba(0,200,200,.35);
+    background:rgba(0,200,200,.06);
+}
+.ua-sat-dot {
+    width:10px; height:10px; border-radius:50%;
+    box-shadow:0 0 6px currentColor;
+}
+.ua-sat-name {
+    display:flex; flex-direction:column; gap:1px;
+    line-height:1.2;
+}
+.ua-sat-name .ua-sat-title {
+    color:#cde; font-weight:600;
+}
+.ua-sat-name .ua-sat-meta {
+    color:#667; font-size:.6rem; font-family:monospace;
+}
+.ua-sat-alt {
+    color:#9cf; font-family:monospace; font-size:.7rem;
+}
+.ua-sat-q {
+    font-family:monospace; font-weight:700;
+    text-align:right; min-width:84px;
+}
+.ua-sat-q-bar {
+    grid-column:1 / -1;
+    height:3px;
+    background:rgba(255,255,255,.06);
+    border-radius:2px;
+    overflow:hidden;
+    margin-top:3px;
+}
+.ua-sat-q-fill {
+    height:100%;
+    transition:width .25s;
+}
+
+/* ─── Conjunction watch ────────────────────────────────── */
+#ua-conjunction { display:flex; flex-direction:column; gap:5px; }
+.ua-conj-row {
+    display:grid;
+    grid-template-columns: auto 1fr auto;
+    gap:8px;
+    align-items:center;
+    padding:6px 9px;
+    background:rgba(255,255,255,.025);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:7px;
+    font-size:.7rem;
+}
+.ua-conj-row--watch { border-color: rgba(255,204,96,.4); background: rgba(255,204,96,.05); }
+.ua-conj-row--alert { border-color: rgba(255,138,58,.55); background: rgba(255,138,58,.07); }
+.ua-conj-row--crit  { border-color: rgba(255,48,96,.65);  background: rgba(255,48,96,.08); }
+.ua-conj-pair {
+    display:flex; align-items:center; gap:5px;
+    color:#cde; font-weight:600;
+}
+.ua-conj-pair .ua-conj-dot {
+    width:8px; height:8px; border-radius:50%;
+    box-shadow:0 0 5px currentColor;
+}
+.ua-conj-pair .ua-conj-link {
+    color:#556; font-weight:400;
+    margin: 0 1px;
+}
+.ua-conj-meta {
+    display:flex; flex-direction:column; gap:1px;
+    font-family:monospace; font-size:.62rem; line-height:1.25;
+    color:#aab;
+}
+.ua-conj-tca {
+    font-family:monospace; font-weight:700;
+    text-align:right; min-width:78px;
+}
+.ua-conj-tca .ua-conj-eta {
+    display:block; color:#778; font-weight:400; font-size:.58rem;
+}
+
+/* ─── Field-overlay radio row ──────────────────────────── */
+.ua-field-mode-row {
+    display:flex; flex-wrap:wrap; gap:6px;
+    font-size:.72rem;
+}
+.ua-field-mode-opt {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:5px 10px; border-radius:999px;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#bcd; cursor:pointer;
+    transition:background .15s, border-color .15s;
+}
+.ua-field-mode-opt:hover { border-color:rgba(0,200,200,.4); color:#fff; }
+.ua-field-mode-opt input[type=radio] { accent-color:#0cc; }
+.ua-field-mode-opt:has(input:checked) {
+    background:rgba(0,200,200,.10);
+    border-color:rgba(0,200,200,.45);
+    color:#fff;
+}
+.ua-fm-temperature { color:#ffaa20; }
+.ua-fm-radiation   { color:#ff4dff; }
+
+/* ─── Side-aside tabs (Controls / Analysis) ────────────── */
+#ua-aside-tabs {
+    display:flex; gap:4px;
+    background:rgba(10,6,28,.72);
+    border:1px solid rgba(0,200,200,.18);
+    border-radius:10px;
+    padding:4px;
+    margin-bottom:14px;
+    backdrop-filter:blur(14px);
+    position:sticky; top:14px; z-index:3;
+}
+.ua-tab-btn {
+    flex:1;
+    background:transparent;
+    border:none;
+    color:#9ab;
+    font:700 .7rem 'Segoe UI', system-ui, sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    padding:8px 10px;
+    border-radius:7px;
+    cursor:pointer;
+    transition:all .15s;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+}
+.ua-tab-btn:hover { color:#cde; background:rgba(255,255,255,.04); }
+.ua-tab-btn.ua-tab-on {
+    background:rgba(0,200,200,.18);
+    color:#0ff;
+    box-shadow:inset 0 0 0 1px rgba(0,200,200,.4);
+}
+.ua-tab-btn .ua-tab-count {
+    font-size:.6rem; font-weight:700;
+    padding:1px 6px; border-radius:999px;
+    background:rgba(255,255,255,.08);
+    color:#aab;
+}
+.ua-tab-btn.ua-tab-on .ua-tab-count {
+    background:rgba(0,255,230,.2); color:#9ff;
+}
+.ua-tab-pane { display:none; flex-direction:column; gap:0; }
+.ua-tab-pane.ua-tab-pane-on { display:flex; }
+
+/* ─── Scrollbar polish ─────────────────────────────────── */
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-thumb { background:rgba(0,200,200,.3); border-radius:3px; }
+::-webkit-scrollbar-track { background:transparent; }
+</style>
+</head>
+<body>
+
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<!-- ─── Nav (shared via nav.js) ──────────────────────────────── -->
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("upper-atmosphere");</script>
+<script type="module">import "./js/page-tier-gate.js?v=20260428";</script>
+
+<!-- ─── Hero ─────────────────────────────────────────────────── -->
+<div id="ua-hero" class="ua-panel">
+    <div id="ua-hero-row">
+        <h1>Upper Atmosphere Simulator</h1>
+        <span class="ua-badge-pro">PRO</span>
+        <button type="button" id="ua-source-pill" class="ua-source-pill ua-source--client"
+                title="Click to cycle data source: Auto → Client-only → Auto.&#10;Shows which model answered the last profile query.">
+            <span class="ua-source-dot"></span>
+            <span class="ua-source-label">Client</span>
+        </button>
+    </div>
+    <p>
+        Interactive thermosphere + exosphere (80–2000 km). Jacchia-style
+        surrogate mirroring the Parker Physics DSMC pipeline; switches to
+        SPARTA-refined tables once the offline grid ships. Inputs are live
+        indices — F10.7 cm flux and Ap.
+    </p>
+    <div class="ua-chip-row" id="ua-presets"></div>
+</div>
+
+<!-- ─── App ──────────────────────────────────────────────────── -->
+<div id="ua-app">
+
+    <!-- Left: Controls + stats -->
+    <aside>
+        <div id="ua-aside-tabs" role="tablist" aria-label="Aside view">
+            <button type="button" class="ua-tab-btn ua-tab-on" role="tab"
+                    data-ua-tab="controls" aria-selected="true" aria-controls="ua-pane-controls">
+                <span>Controls</span>
+                <span class="ua-tab-count">UI</span>
+            </button>
+            <button type="button" class="ua-tab-btn" role="tab"
+                    data-ua-tab="analysis" aria-selected="false" aria-controls="ua-pane-analysis">
+                <span>Analysis</span>
+                <span class="ua-tab-count">live</span>
+            </button>
+        </div>
+
+        <div id="ua-pane-controls" class="ua-tab-pane ua-tab-pane-on" role="tabpanel"
+             aria-labelledby="ua-aside-tabs" data-ua-pane="controls">
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>State</h2>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-alt">Altitude</label>
+                    <span class="ua-val" id="ua-alt-val">400 km</span>
+                </div>
+                <input id="ua-alt" type="range" min="80" max="2000" step="1" value="400">
+                <div class="ua-range-legend"><span>80</span><span>1040</span><span>2000 km</span></div>
+            </div>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-f107">F10.7</label>
+                    <span class="ua-val" id="ua-f107-val">150 SFU</span>
+                    <span class="ua-note">solar radio flux</span>
+                </div>
+                <input id="ua-f107" type="range" min="60" max="300" step="1" value="150">
+                <div class="ua-range-legend"><span>60 (quiet)</span><span>300 (solar max)</span></div>
+            </div>
+
+            <div class="ua-slider-row">
+                <div class="ua-slider-hd">
+                    <label for="ua-ap">Ap</label>
+                    <span class="ua-val" id="ua-ap-val">15</span>
+                    <span class="ua-note">geomagnetic</span>
+                </div>
+                <input id="ua-ap" type="range" min="0" max="400" step="1" value="15">
+                <div class="ua-range-legend"><span>0 (calm)</span><span>400 (severe storm)</span></div>
+            </div>
+
+            <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
+                <button id="ua-live-btn" type="button" class="ua-chip ua-chip--live"
+                        title="Fetch current F10.7 and Kp from NOAA SWPC and apply to the sliders">
+                    ⚡ Use live NOAA
+                </button>
+                <span id="ua-live-status" class="ua-dim" style="font-size:.64rem;align-self:center;font-style:italic"></span>
+            </div>
+
+            <div id="ua-summary"><span class="ua-dim">Pick a preset above to load archived storm indices, or sweep the sliders.</span></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Layer particles · live</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
+                Each row toggles a layer's gradient shell + particle system.
+                Particles jitter at the layer's thermal speed; flow regime
+                shifts with density; storms (Ap ≥ 27) puff thermosphere &amp;
+                exosphere outward. Pulse fires on every refresh.
+            </p>
+            <div id="ua-layer-controls"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Field overlay</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Vectorised fields rendered as instanced cones across each
+                layer. <strong>Temperature</strong> shows ∇T (radial + dayside
+                tilt, magnitude ∝ layer T). <strong>Radiation</strong> shows
+                EUV + energetic-particle flux flowing inward (magnitude ∝
+                F10.7 + Ap, with cusp boost on the polar field lines).
+            </p>
+            <div id="ua-field-mode" class="ua-field-mode-row">
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="off" checked>
+                    <span>Off</span>
+                </label>
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="temperature">
+                    <span class="ua-fm-temperature">Temperature ∇T</span>
+                </label>
+                <label class="ua-field-mode-opt">
+                    <input type="radio" name="ua-field-mode" value="radiation">
+                    <span class="ua-fm-radiation">Radiation Φ</span>
+                </label>
+            </div>
+        </div>
+        </div><!-- /#ua-pane-controls -->
+
+        <div id="ua-pane-analysis" class="ua-tab-pane" role="tabpanel"
+             aria-labelledby="ua-aside-tabs" data-ua-pane="analysis">
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>At current altitude</h2>
+            <div id="ua-stats"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Atmospheric layers</h2>
+            <div id="ua-layer-legend"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">Satellite drag analysis</h2>
+                <span id="ua-tle-freshness" class="ua-tle-pill ua-tle-pill--pending"
+                      title="TLE fetch status from /api/celestrak/tle">
+                    <span class="ua-tle-dot"></span>
+                    <span id="ua-tle-label">fetching TLEs…</span>
+                </span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Live drag pressure q = ½ρv² for each tracked object, using
+                the current state's local ρ and circular orbital speed
+                v = √(μ/(R+h)). Click any row to fly the camera there.
+                Orbital elements from <a href="https://celestrak.org" target="_blank" rel="noopener" style="color:#0cc">CelesTrak</a>.
+            </p>
+            <div id="ua-sat-drag"></div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:6px">
+                <h2 style="margin:0">Conjunction watch</h2>
+                <span id="ua-debris-pill" class="ua-tle-pill ua-tle-pill--pending"
+                      title="LEO debris sample from CelesTrak (350–900 km altitude band)">
+                    <span class="ua-tle-dot"></span>
+                    <span id="ua-debris-label">no debris yet</span>
+                </span>
+            </div>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Pairwise predicted closest-approach over the next 90
+                minutes of physical orbital evolution. Distances are
+                3-D centre-to-centre (not in-track). Chord lines on
+                the globe light up when a pair is predicted within
+                200 km. <span style="color:#ff7099">●</span> = debris,
+                <span style="color:#0cc">●</span> = asset.
+            </p>
+            <div id="ua-conjunction"></div>
+        </div>
+
+        <div class="ua-panel">
+            <h2>Solar wind &amp; magnetosphere</h2>
+            <div id="ua-sw-stats"></div>
+            <div id="ua-sw-legend">
+                <div class="ua-layer-row" title="Boundary where Earth's magnetic pressure balances solar-wind dynamic pressure (Shue-1998).">
+                    <span class="ua-layer-dot" style="background:#60d8ff"></span>
+                    <span class="ua-layer-name">Magnetopause</span>
+                    <span class="ua-layer-range">~10 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Where supersonic solar wind decelerates to subsonic on impact with the magnetosphere (Farris–Russell).">
+                    <span class="ua-layer-dot" style="background:#ffc070"></span>
+                    <span class="ua-layer-name">Bow shock</span>
+                    <span class="ua-layer-range">~14 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Compressed, heated solar-wind plasma between the bow shock and the magnetopause.">
+                    <span class="ua-layer-dot" style="background:#ff9944"></span>
+                    <span class="ua-layer-name">Magnetosheath</span>
+                    <span class="ua-layer-range">10–14 R⊕</span>
+                </div>
+                <div class="ua-layer-row" title="Bulk plasma flow from the Sun. Brightness scales with dynamic pressure.">
+                    <span class="ua-layer-dot" style="background:#6cc8ff"></span>
+                    <span class="ua-layer-name">Flux streamers</span>
+                    <span class="ua-layer-range">∝ ρv²</span>
+                </div>
+            </div>
+            <div class="ua-dim" style="font-size:.66rem;margin-top:8px;line-height:1.4">
+                Zoom out to see the magnetopause + bow shock at full Shue scale.
+                Live values arrive via the <code>swpc-update</code> bus when a
+                Space-Weather feed is running on the same origin.
+            </div>
+        </div>
+        </div><!-- /#ua-pane-analysis -->
+    </aside>
+
+    <!-- Center: 3D globe -->
+    <section id="ua-globe-wrap">
+        <canvas id="ua-globe"></canvas>
+
+        <!-- Camera HUD: mode toggle + Visit ISS + live altitude readout -->
+        <div id="ua-camera-hud">
+            <div class="ua-cam-controls">
+                <button type="button" id="ua-cam-orbit" class="ua-cam-on"
+                        title="Orbit the planet (drag to rotate, scroll to zoom)">Orbit</button>
+                <button type="button" id="ua-cam-fly"
+                        title="Free-fly · WASD to move, Q/E down/up, Shift faster, drag to look">Fly</button>
+                <button type="button" id="ua-cam-iss"
+                        title="Fly to the live ISS probe at 420 km · 51.6° inclination">↥ Visit ISS</button>
+            </div>
+            <div id="ua-cam-readout">
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">camera alt</span>
+                    <span class="ua-cam-v" id="ua-cam-alt">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">layer</span>
+                    <span class="ua-cam-v" id="ua-cam-layer">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">ρ</span>
+                    <span class="ua-cam-v" id="ua-cam-rho">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">T</span>
+                    <span class="ua-cam-v" id="ua-cam-T">—</span>
+                </div>
+                <div class="ua-cam-row">
+                    <span class="ua-cam-k">Kn</span>
+                    <span class="ua-cam-v" id="ua-cam-Kn">—</span>
+                </div>
+                <div class="ua-cam-mode" id="ua-cam-mode">orbit</div>
+                <div class="ua-cam-hint" id="ua-cam-hint">drag to rotate · scroll to zoom</div>
+            </div>
+        </div>
+
+        <div id="ua-globe-legend">
+            <b>gradient shells</b> · mesosphere → outer exosphere<br>
+            colour = layer · brightness ∝ log ρ · warmth ∝ Ap<br>
+            cyan ring = current altitude · cyan dot = ISS probe<br>
+            <span style="color:#60d8ff">·</span> magnetopause · <span style="color:#ffc070">·</span> bow shock<br>
+            <span style="color:#aac">switch to Fly mode to enter the layers</span>
+        </div>
+    </section>
+
+    <!-- Right: Plots -->
+    <section id="ua-right">
+        <div class="ua-panel ua-plot-panel">
+            <canvas id="ua-density-plot"></canvas>
+        </div>
+        <div class="ua-panel ua-plot-panel">
+            <canvas id="ua-comp-plot"></canvas>
+        </div>
+    </section>
+
+</div>
+
+<!-- ─── Engine boot ──────────────────────────────────────────── -->
+<script type="module">
+    import * as engine from './js/upper-atmosphere-engine.js';
+    import { AtmosphereGlobe } from './js/upper-atmosphere-globe.js';
+    import { UpperAtmosphereUI } from './js/upper-atmosphere-ui.js';
+
+    const canvas = document.getElementById('ua-globe');
+    const globe = new AtmosphereGlobe(canvas, { cameraDistance: 3.2 });
+
+    const ui = new UpperAtmosphereUI({
+        engine,
+        globe,
+        elements: {
+            altInput:       document.getElementById('ua-alt'),
+            f107Input:      document.getElementById('ua-f107'),
+            apInput:        document.getElementById('ua-ap'),
+            altVal:         document.getElementById('ua-alt-val'),
+            f107Val:        document.getElementById('ua-f107-val'),
+            apVal:          document.getElementById('ua-ap-val'),
+            presetRow:      document.getElementById('ua-presets'),
+            densityCanvas:  document.getElementById('ua-density-plot'),
+            compCanvas:     document.getElementById('ua-comp-plot'),
+            stats:          document.getElementById('ua-stats'),
+            summary:        document.getElementById('ua-summary'),
+            layerLegend:    document.getElementById('ua-layer-legend'),
+            layerControls:  document.getElementById('ua-layer-controls'),
+            liveBtn:        document.getElementById('ua-live-btn'),
+            liveStatus:     document.getElementById('ua-live-status'),
+            sourcePill:     document.getElementById('ua-source-pill'),
+            solarWindStats: document.getElementById('ua-sw-stats'),
+            satDrag:        document.getElementById('ua-sat-drag'),
+            tleFreshness:   document.getElementById('ua-tle-freshness'),
+            tleLabel:       document.getElementById('ua-tle-label'),
+            conjunctionBox: document.getElementById('ua-conjunction'),
+            debrisPill:     document.getElementById('ua-debris-pill'),
+            debrisLabel:    document.getElementById('ua-debris-label'),
+            // Camera HUD
+            camOrbitBtn:    document.getElementById('ua-cam-orbit'),
+            camFlyBtn:      document.getElementById('ua-cam-fly'),
+            camIssBtn:      document.getElementById('ua-cam-iss'),
+            camAlt:         document.getElementById('ua-cam-alt'),
+            camLayer:       document.getElementById('ua-cam-layer'),
+            camRho:         document.getElementById('ua-cam-rho'),
+            camT:           document.getElementById('ua-cam-T'),
+            camKn:          document.getElementById('ua-cam-Kn'),
+            camMode:        document.getElementById('ua-cam-mode'),
+            camHint:        document.getElementById('ua-cam-hint'),
+        },
+        // Tries GET {PARKER_DSMC_API}/v1/atmosphere/profile when the
+        // host window declares PARKER_DSMC_API; silently falls back to
+        // the client-side surrogate otherwise.
+        useBackend: true,
+    });
+
+    // Expose for devtools poking.
+    window.__ua = { engine, globe, ui };
+
+    /* ─── Aside tabs (Controls / Analysis) ──────────────────── */
+    const tabBtns  = document.querySelectorAll('#ua-aside-tabs .ua-tab-btn');
+    const tabPanes = document.querySelectorAll('.ua-tab-pane');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const target = btn.dataset.uaTab;
+            tabBtns.forEach(b => {
+                const on = b.dataset.uaTab === target;
+                b.classList.toggle('ua-tab-on', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            tabPanes.forEach(p => {
+                p.classList.toggle('ua-tab-pane-on', p.dataset.uaPane === target);
+            });
+            // Nudge the globe canvas to repaint at the new column height.
+            window.dispatchEvent(new Event('resize'));
+        });
+    });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Wind — Parker Physics App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #0f0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        /* ─── Nav ────────────────────────────────────────────────────── */
+nav {
+    position:relative; z-index:600;
+    height:50px; min-height:50px;
+    background:rgba(4,2,16,.93); backdrop-filter:blur(16px);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    display:flex; align-items:center; padding:0 16px; gap:6px;
+}
+.nav-brand {
+    display:flex; align-items:center; gap:8px;
+    font-size:.95rem; font-weight:700; text-decoration:none; white-space:nowrap;
+    background:linear-gradient(45deg,#ffd700,#ff8c00);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    margin-right:2px;
+}
+.nav-logo-img { height:30px; width:auto; border-radius:50%; flex-shrink:0; }
+/* nav-menu stretches to fill all remaining space */
+.nav-menu { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.nav-item {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; text-decoration:none; font-size:.8rem; white-space:nowrap;
+    transition:background .2s, border-color .2s; flex-shrink:0;
+}
+.nav-item:hover { background:rgba(255,255,255,.16); border-color:rgba(255,200,0,.4); color:#fff; }
+.nav-item.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+.nav-drop { position:relative; flex-shrink:0; }
+.nav-drop-btn {
+    padding:5px 10px; background:rgba(255,255,255,.07);
+    border:1px solid rgba(255,255,255,.12); border-radius:5px;
+    color:#ccc; font-size:.8rem; cursor:pointer; font-family:inherit;
+    transition:background .2s, border-color .2s; white-space:nowrap;
+}
+.nav-drop-btn:hover { background:rgba(255,255,255,.16); color:#fff; }
+.nav-drop-btn.active { background:linear-gradient(45deg,#ff8c00,#ffd700); border-color:#ff8c00; color:#000; font-weight:600; }
+/* Rich dropdown panel */
+.nav-drop-menu {
+    display:block; position:absolute; top:calc(100% + 5px); left:0;
+    background:rgba(5,2,18,.97); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,.11); border-radius:9px;
+    padding:6px 0 8px; min-width:268px; z-index:800;
+    box-shadow:0 14px 44px rgba(0,0,0,.80);
+    opacity:0; visibility:hidden; pointer-events:none;
+    transform:translateY(-4px);
+    transition:opacity .18s ease, visibility .18s ease, transform .18s ease;
+}
+.nav-drop:hover .nav-drop-menu, .nav-drop.open .nav-drop-menu {
+    opacity:1; visibility:visible; pointer-events:auto; transform:translateY(0);
+}
+/* Each item in the dropdown */
+.nav-drop-link {
+    display:flex; align-items:center; gap:11px;
+    padding:7px 16px; text-decoration:none; transition:background .15s;
+}
+.nav-drop-link:hover { background:rgba(255,255,255,.07); }
+.nav-drop-link.active .ndl-title { color:#ffd700 !important; font-weight:600; }
+.nav-drop-link.active .ndl-icon  { opacity:1; }
+.ndl-icon  { font-size:1.05rem; width:20px; text-align:center; flex-shrink:0; opacity:.72; }
+.ndl-body  { display:flex; flex-direction:column; gap:1px; }
+.ndl-title { color:#c8c8c8; font-size:.82rem; font-weight:500; line-height:1.25; }
+.ndl-sub   { color:#484e60; font-size:.70rem; line-height:1.2; }
+.nav-drop-link:hover .ndl-title { color:#fff; }
+.nav-drop-link:hover .ndl-sub   { color:#7a8090; }
+/* Section label inside dropdown */
+.nav-drop-section {
+    padding:7px 16px 3px; font-size:.63rem; font-weight:700;
+    letter-spacing:.09em; color:#3d4255; text-transform:uppercase;
+    border-top:1px solid rgba(255,255,255,.06); margin-top:3px;
+}
+.nav-drop-section:first-child { border-top:none; margin-top:0; padding-top:4px; }
+/* Spacer that pushes auth buttons to the far right */
+.nav-spacer { flex:1; }
+/* Auth */
+.nav-auth-sep { width:1px; height:22px; background:rgba(255,255,255,.15); margin:0 3px; flex-shrink:0; }
+.nav-login  { background:transparent !important; border-color:rgba(255,255,255,.22) !important; color:#bbb !important; }
+.nav-login:hover  { background:rgba(255,255,255,.1) !important; color:#fff !important; border-color:rgba(255,255,255,.4) !important; }
+.nav-signup { background:linear-gradient(45deg,#ff8c00,#ffd700) !important; border-color:#ff8c00 !important; color:#000 !important; font-weight:700 !important; letter-spacing:.01em; }
+.nav-signup:hover { filter:brightness(1.12) !important; }
+/* Burger */
+.nav-burger {
+    display:none; margin-left:auto;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);
+    border-radius:5px; color:#fff; padding:5px 10px; font-size:1.1rem;
+    cursor:pointer; line-height:1; transition:background .2s;
+}
+.nav-burger:hover { background:rgba(255,255,255,.18); }
+@media (max-width:1024px) {
+    .nav-burger { display:block; }
+    .nav-menu {
+        display:none; flex-direction:column; align-items:stretch;
+        position:absolute; top:50px; left:0; right:0;
+        background:rgba(3,1,14,.98); backdrop-filter:blur(18px);
+        border-bottom:1px solid rgba(255,255,255,.1);
+        padding:8px 12px 14px; gap:3px; z-index:700;
+        max-height:calc(100vh - 50px); overflow-y:auto;
+    }
+    .nav-menu.open { display:flex; }
+    .nav-item, .nav-drop-btn { padding:11px 14px; font-size:.9rem; }
+    .nav-drop-menu {
+        position:static; box-shadow:none; border-radius:5px; min-width:0;
+        background:rgba(255,255,255,.04); border-color:rgba(255,255,255,.07);
+        display:none; opacity:1; visibility:visible; transform:none;
+        transition:none; pointer-events:auto; padding:2px 0 6px;
+    }
+    .nav-drop-link { padding:8px 14px 8px 22px; }
+    .ndl-sub { display:none; }
+    .nav-drop-section { padding:5px 14px 2px 22px; }
+    .nav-drop:hover .nav-drop-menu { display:none !important; }
+    .nav-drop.open  .nav-drop-menu { display:block !important; }
+    .nav-spacer { display:none; }
+    .nav-auth-sep { display:none; }
+}
+
+        /* ─── Layout ──────────────────────────────────────────────── */
+        .page-content { flex: 1; display: flex; flex-direction: column; }
+        #container { display: flex; height: calc(100vh - 48px); }
+        #canvas-area { flex: 1; position: relative; overflow: hidden; background: #000; }
+        #simCanvas {
+            display: block; width: 100%; height: 100%;
+            image-rendering: crisp-edges;
+        }
+
+        /* ─── HUD ──────────────────────────────────────────────────── */
+        #hud {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(0,0,0,.82); border: 1px solid #0a0;
+            padding: 8px 10px; font-size: 11px; line-height: 1.45;
+            pointer-events: none; min-width: 190px;
+        }
+        #hud .lbl { color: #0f0; }
+        #hud .val { color: #ff0; }
+        #hud .hi  { color: #0ff; }
+
+        /* ─── Overlay legend ───────────────────────────────────────── */
+        #legend {
+            position: absolute; bottom: 12px; left: 10px;
+            background: rgba(0,0,0,.75); border: 1px solid #040;
+            padding: 6px 10px; font-size: 10px; line-height: 1.7;
+            pointer-events: none;
+        }
+        .leg-row { display: flex; align-items: center; gap: 6px; }
+        .leg-swatch { width: 22px; height: 3px; display: inline-block; }
+
+        /* ─── Controls ─────────────────────────────────────────────── */
+        #controls {
+            width: 280px;
+            background: #000;
+            border-left: 1px solid #0f0;
+            overflow-y: auto;
+            padding: 10px;
+            font-size: 11px;
+        }
+        .section { margin-bottom: 10px; border: 1px solid #0a0; padding: 6px; }
+        .section-title {
+            color: #ff0; font-weight: bold; margin-bottom: 5px;
+            font-size: 12px; cursor: pointer; user-select: none;
+        }
+        .section-title:hover { color: #0ff; }
+        .section.collapsed .section-content { display: none; }
+        .control { margin: 3px 0; display: flex; align-items: center; gap: 5px; }
+        .control label { flex: 0 0 96px; color: #8f8; font-size: 10.5px; }
+        .control input[type=range] { flex: 1; height: 14px; accent-color: #0f0; }
+        .control .val-lbl { flex: 0 0 46px; text-align: right; color: #ff0; font-size: 10px; }
+        .btn-row { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px; }
+        button {
+            padding: 5px 9px; background: rgba(0,60,0,.5);
+            border: 1px solid #0a0; color: #0f0; font-size: 10.5px;
+            cursor: pointer; font-family: 'Courier New', monospace;
+            border-radius: 3px; transition: background .15s;
+        }
+        button:hover { background: rgba(0,120,0,.6); color:#fff; }
+        button.active, button.preset-btn.active {
+            background: linear-gradient(45deg,#004080,#008060);
+            border-color: #00f0a0; color:#fff;
+        }
+        .preset-btn { flex: 1; font-size: 10px; text-align: center; }
+        select {
+            background: #001a00; border: 1px solid #0a0; color: #0f0;
+            font-size: 10.5px; padding: 3px 5px; font-family: 'Courier New', monospace;
+            flex: 1;
+        }
+        .info-box {
+            background: rgba(0,40,0,.4); border: 1px solid #040;
+            padding: 5px; font-size: 10px; line-height: 1.5; color: #8f8; margin-top: 4px;
+        }
+        .info-box .row { display: flex; justify-content: space-between; }
+        .info-box .row span:last-child { color: #ff0; }
+        hr.sep { border: none; border-top: 1px solid #030; margin: 6px 0; }
+    
+/* ─── Space Weather link button ─────────────────────────────────── */
+.cv-btn {
+    position: absolute; z-index: 60;
+    background: rgba(4,2,0,.80); backdrop-filter: blur(8px);
+    border: 1px solid #60d8ff; border-radius: 7px;
+    color: #60d8ff; cursor: pointer; font-family: inherit;
+    font-size: 12px; padding: 6px 11px; transition: all .2s;
+    touch-action: manipulation; text-decoration: none; display: inline-block;
+}
+.cv-btn:hover { background: rgba(255,140,0,.15); border-color:#ff8c00; color:#ffb830; }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("stellar-wind");</script>
+
+<div class="page-content">
+<div id="container">
+
+        <div id="canvas-area">
+        <a href="space-weather.html" class="cv-btn" id="btn-sw" title="Live Space Weather Data" style="top:12px; right:12px;">⚡ Weather</a>
+    <canvas id="simCanvas"></canvas>
+
+    <div id="hud">
+        <div><span class="lbl">Star:</span> <span class="val" id="hud-star">Sun</span></div>
+        <div><span class="lbl">v_wind:</span> <span class="val" id="hud-vw">400</span> <span class="hi">km/s</span></div>
+        <div><span class="lbl">Ṁ:</span> <span class="val" id="hud-mdot">2e-14</span> <span class="hi">M☉/yr</span></div>
+        <div><span class="lbl">B_surf:</span> <span class="val" id="hud-b">1.0</span> <span class="hi">G</span></div>
+        <div><span class="lbl">R_Alfvén:</span> <span class="val" id="hud-ra">20</span> <span class="hi">R★</span></div>
+        <div><span class="lbl">R_TS:</span> <span class="val" id="hud-rts">90</span> <span class="hi">AU</span></div>
+        <div><span class="lbl">Ω_star:</span> <span class="val" id="hud-omega">2.87</span> <span class="hi">μrad/s</span></div>
+        <div><span class="lbl">ISM flow:</span> <span class="val" id="hud-ism">26</span> <span class="hi">km/s</span></div>
+        <div><span class="lbl">Particles:</span> <span class="val" id="hud-np">0</span></div>
+        <div><span class="lbl">Frame:</span> <span class="val" id="hud-frame">0</span></div>
+    </div>
+
+    <div id="legend">
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff8800;"></span>Parker field lines</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#0088ff;height:2px;border-top:1px dashed #0088ff;"></span>Alfvén surface</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff4400;height:2px;border-top:1px dashed #ff4400;"></span>Termination shock</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#8844ff;height:2px;border-top:1px dashed #8844ff;"></span>Heliopause</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#00ff80;"></span>Fast wind particles</div>
+        <div class="leg-row"><span class="leg-swatch" style="background:#ff8040;"></span>Slow wind particles</div>
+    </div>
+</div>
+
+<div id="controls">
+    <!-- Star Presets -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">★ STAR PRESETS</div>
+        <div class="section-content">
+            <div class="btn-row">
+                <button class="preset-btn active" onclick="applyPreset('sun')">☀ Sun</button>
+                <button class="preset-btn" onclick="applyPreset('wr102')">🔵 WR 102</button>
+                <button class="preset-btn" onclick="applyPreset('betelgeuse')">🔴 Betelgeuse</button>
+                <button class="preset-btn" onclick="applyPreset('pulsar')">⚡ Pulsar</button>
+            </div>
+            <div class="info-box" id="star-info">
+                <div class="row"><span>Type:</span><span>G2V Main Seq</span></div>
+                <div class="row"><span>Mass:</span><span>1.0 M☉</span></div>
+                <div class="row"><span>Radius:</span><span>1.0 R☉</span></div>
+                <div class="row"><span>Luminosity:</span><span>1.0 L☉</span></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Wind Parameters -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">💨 WIND PARAMETERS</div>
+        <div class="section-content">
+            <div class="control">
+                <label>v_wind</label>
+                <input type="range" id="sl-vwind" min="5" max="6000" step="5" value="400">
+                <span class="val-lbl" id="lbl-vwind">400 km/s</span>
+            </div>
+            <div class="control">
+                <label>Ṁ (log)</label>
+                <input type="range" id="sl-mdot" min="-18" max="-3" step="0.5" value="-14">
+                <span class="val-lbl" id="lbl-mdot">-14</span>
+            </div>
+            <div class="control">
+                <label>B surface</label>
+                <input type="range" id="sl-bsurf" min="0.1" max="10000" step="0.1" value="1">
+                <span class="val-lbl" id="lbl-bsurf">1.0 G</span>
+            </div>
+            <div class="control">
+                <label>Rotation P</label>
+                <input type="range" id="sl-omega" min="0.1" max="1000" step="0.1" value="25">
+                <span class="val-lbl" id="lbl-omega">25 d</span>
+            </div>
+            <div class="control">
+                <label>Fast/Slow</label>
+                <input type="range" id="sl-frac" min="0" max="1" step="0.05" value="0.5">
+                <span class="val-lbl" id="lbl-frac">50%</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ISM & Heliosphere -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">🌌 ISM & HELIOSPHERE</div>
+        <div class="section-content">
+            <div class="control">
+                <label>ISM velocity</label>
+                <input type="range" id="sl-ism" min="0" max="100" step="1" value="26">
+                <span class="val-lbl" id="lbl-ism">26 km/s</span>
+            </div>
+            <div class="control">
+                <label>ISM density</label>
+                <input type="range" id="sl-ismd" min="0.001" max="10" step="0.001" value="0.3">
+                <span class="val-lbl" id="lbl-ismd">0.30</span>
+            </div>
+            <div class="control">
+                <label>TS pressure</label>
+                <input type="range" id="sl-tspres" min="0.1" max="5" step="0.05" value="1">
+                <span class="val-lbl" id="lbl-tspres">1.0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Display Options -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">🖥 DISPLAY</div>
+        <div class="section-content">
+            <div class="control">
+                <label>Zoom</label>
+                <input type="range" id="sl-zoom" min="0.3" max="8" step="0.05" value="1">
+                <span class="val-lbl" id="lbl-zoom">1.0×</span>
+            </div>
+            <div class="btn-row">
+                <button id="btn-field" class="active" onclick="toggleLayer('field',this)">Field Lines</button>
+                <button id="btn-particles" class="active" onclick="toggleLayer('particles',this)">Particles</button>
+            </div>
+            <div class="btn-row">
+                <button id="btn-alfven" class="active" onclick="toggleLayer('alfven',this)">Alfvén R</button>
+                <button id="btn-ts" class="active" onclick="toggleLayer('ts',this)">Term. Shock</button>
+            </div>
+            <div class="btn-row">
+                <button id="btn-hp" class="active" onclick="toggleLayer('hp',this)">Heliopause</button>
+                <button id="btn-bow" class="active" onclick="toggleLayer('bow',this)">Bow Shock</button>
+            </div>
+            <div class="btn-row">
+                <button id="btn-vectors" onclick="toggleLayer('vectors',this)">Vectors</button>
+                <button id="btn-density" onclick="toggleLayer('density',this)">Density Map</button>
+            </div>
+            <div class="control" style="margin-top:4px;">
+                <label>Color mode</label>
+                <select id="sel-colormode" onchange="state.colorMode=this.value">
+                    <option value="speed">Speed</option>
+                    <option value="temp">Temperature</option>
+                    <option value="pressure">Pressure</option>
+                    <option value="origin">Origin</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Events -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">⚡ EVENTS</div>
+        <div class="section-content">
+            <div class="btn-row">
+                <button onclick="triggerCME()">💥 CME Burst</button>
+                <button onclick="triggerFlare()">🔆 Flare</button>
+            </div>
+            <div class="btn-row">
+                <button onclick="triggerStreamSector()">🌀 Stream Sector</button>
+                <button onclick="triggerCoronalHole()">🕳 Coronal Hole</button>
+            </div>
+            <div class="btn-row">
+                <button onclick="resetParticles()">↺ Reset</button>
+                <button onclick="clearParticles()">✕ Clear</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Physics Reference -->
+    <div class="section">
+        <div class="section-title" onclick="toggleSection(this)">📐 PHYSICS</div>
+        <div class="section-content">
+            <div class="info-box" style="font-size:9.5px; line-height:1.6;">
+                <div><span style="color:#ff0">Parker spiral angle:</span></div>
+                <div style="color:#0ff">tan ψ = Ω r / v_w</div>
+                <div style="color:#888; margin-top:3px;"><span style="color:#ff0">Alfvén radius:</span></div>
+                <div style="color:#0ff">r_A² ≈ B₀²R★² / (4π ρ v_w²)</div>
+                <div style="color:#888; margin-top:3px;"><span style="color:#ff0">Termination shock:</span></div>
+                <div style="color:#0ff">Ṁ v_w / (4π r²) = P_ISM</div>
+                <div style="color:#888; margin-top:3px;"><span style="color:#ff0">Magnetic torque:</span></div>
+                <div style="color:#0ff">L̇ = Ṁ Ω r_A²</div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="sep">
+    <div style="font-size:9px; color:#040; text-align:center; padding:4px 0;">
+        Parker (1958) · Weber &amp; Davis (1967)<br>
+        Cranmer &amp; van Ballegooijen (2005)
+    </div>
+</div>
+
+</div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// STELLAR WIND SIMULATION — Parker Spiral + Alfvén Physics
+// Parker (1958), Weber & Davis (1967)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('simCanvas');
+const ctx = canvas.getContext('2d');
+
+// ── State ────────────────────────────────────────────────────────────────────
+const state = {
+    // Star params
+    vWind:     400,      // km/s
+    mdotLog:   -14,      // log10(M☉/yr)
+    bSurf:     1.0,      // Gauss
+    rotPeriod: 25,       // days (solar rotation)
+    fastFrac:  0.5,      // fraction of fast vs slow wind
+    // Derived
+    omega:     0,        // rad/s angular velocity
+    rAlfven:   20,       // in R★ units
+    rTS:       90,       // in AU
+    rHP:       120,      // in AU
+    // ISM
+    ismVel:    26,       // km/s
+    ismDens:   0.3,      // cm^-3
+    tsPres:    1.0,      // relative
+    // View
+    zoom:      1.0,
+    colorMode: 'speed',
+    // Layers
+    showField:     true,
+    showParticles: true,
+    showAlfven:    true,
+    showTS:        true,
+    showHP:        true,
+    showBow:       true,
+    showVectors:   false,
+    showDensity:   false,
+    // Sim
+    frame:    0,
+    paused:   false,
+    preset:   'sun',
+};
+
+// ── Presets ──────────────────────────────────────────────────────────────────
+const PRESETS = {
+    sun: {
+        name:      'Sun',
+        vWind:     400,
+        mdotLog:   -14,
+        bSurf:     1.0,
+        rotPeriod: 25,
+        fastFrac:  0.5,
+        ismVel:    26,
+        starColor: '#ffe080',
+        starRadius: 1.0,
+        info: {
+            type: 'G2V Main Seq', mass: '1.0 M☉',
+            radius: '1.0 R☉', lum: '1.0 L☉'
+        }
+    },
+    wr102: {
+        name:      'WR 102',
+        vWind:     5000,
+        mdotLog:   -5,
+        bSurf:     200,
+        rotPeriod: 0.65,
+        fastFrac:  0.95,
+        ismVel:    26,
+        starColor: '#80c0ff',
+        starRadius: 2.5,
+        info: {
+            type: 'WO2 Wolf-Rayet', mass: '19 M☉',
+            radius: '0.75 R☉', lum: '3.8e5 L☉'
+        }
+    },
+    betelgeuse: {
+        name:      'Betelgeuse',
+        vWind:     15,
+        mdotLog:   -6,
+        bSurf:     0.5,
+        rotPeriod: 500,
+        fastFrac:  0.1,
+        ismVel:    26,
+        starColor: '#ff4400',
+        starRadius: 8.0,
+        info: {
+            type: 'M2Ia Supergiant', mass: '18 M☉',
+            radius: '764 R☉', lum: '1.2e5 L☉'
+        }
+    },
+    pulsar: {
+        name:      'Pulsar',
+        vWind:     30000,
+        mdotLog:   -10,
+        bSurf:     1e12,
+        rotPeriod: 0.000033,
+        fastFrac:  1.0,
+        ismVel:    200,
+        starColor: '#c0ffff',
+        starRadius: 0.00001,
+        info: {
+            type: 'Neutron Star / PSR', mass: '1.4 M☉',
+            radius: '10 km', lum: '~1e38 erg/s'
+        }
+    }
+};
+
+// ── Particles ─────────────────────────────────────────────────────────────────
+const MAX_PARTICLES = 3000;
+const particles = [];
+
+function Particle(angle, fast, cmeFlag) {
+    const speed = fast ? state.vWind * (1 + 0.2 * Math.random())
+                       : state.vWind * (0.4 + 0.2 * Math.random());
+    this.r     = getStarSceneRadius() + 2;  // start at star surface
+    this.phi   = angle;
+    this.speed = speed;
+    this.fast  = fast;
+    this.cme   = cmeFlag || false;
+    this.age   = 0;
+    this.maxAge = 800 + Math.random() * 600;
+    this.temp  = fast ? 2e6 : 8e5;         // Kelvin (rough)
+    this.x = 0; this.y = 0;                // screen coords, set each frame
+}
+
+// ── Geometry helpers ──────────────────────────────────────────────────────────
+let W, H, CX, CY, AU_PX; // AU_PX = pixels per AU at zoom=1
+
+function resize() {
+    W = canvas.width  = canvas.offsetWidth;
+    H = canvas.height = canvas.offsetHeight;
+    CX = W / 2; CY = H / 2;
+    // scale so termination shock (90 AU) fits nicely
+    AU_PX = Math.min(W, H) / 220;
+}
+window.addEventListener('resize', resize);
+
+function getScale() { return AU_PX * state.zoom; }
+function auToScene(au) { return au * getScale(); }
+
+// Star visual radius in px
+function getStarSceneRadius() {
+    const pr = PRESETS[state.preset];
+    // Sun ~ 0.00465 AU; scale to be visible (min 4px)
+    const r_au = pr.starRadius * 0.00465;
+    return Math.max(4, auToScene(r_au) * 12);
+}
+
+// Parker spiral: angle phi(r) for a field line launched at phi0
+// dφ/dr = -Ω / v_w  (for outward wind, clockwise co-rotation)
+// φ(r) = φ₀ - (Ω/v_w) * (r - r0)    in "flat" approximation (2D equatorial plane)
+function parkerPhi(r_au, phi0_rad) {
+    const omega_rad_s = state.omega;
+    const v_ms = state.vWind * 1000; // m/s
+    const AU_m = 1.496e11;
+    // Ω / v_w in 1/m → convert r to m
+    const wrap = (omega_rad_s / v_ms) * (r_au - 0.1) * AU_m;
+    return phi0_rad - wrap;
+}
+
+// Convert polar (r in AU, phi rad) → canvas xy
+function polarToCanvas(r_au, phi_rad) {
+    const s = getScale();
+    return [CX + r_au * s * Math.cos(phi_rad),
+            CY - r_au * s * Math.sin(phi_rad)];
+}
+
+// ── Derived physics ────────────────────────────────────────────────────────────
+function updateDerived() {
+    // Angular velocity rad/s
+    const T_s = state.rotPeriod * 86400;
+    state.omega = (2 * Math.PI) / T_s;
+
+    // Alfvén radius (simplified: ṙ_A = r★ where rho v² = B²/4π)
+    // r_A = r★ (B★² / (rho0 v_w²))^(1/4)   (mass flux conservation)
+    // We use dimensionless: RA_RS = (bSurf² / mdot_factor)^0.25 * 20ish
+    const mdot = Math.pow(10, state.mdotLog); // M☉/yr
+    // Simplified empirical: r_A ≈ K * B^0.5 / (Ṁ v_w)^0.25
+    const K = 2.0;
+    state.rAlfven = Math.max(2, K * Math.pow(state.bSurf, 0.5) /
+                    Math.pow(mdot * state.vWind, 0.1));
+
+    // Termination shock: balance ram pressure = ISM dynamic pressure
+    // Ṁ v_w / (4π r²) = ½ ρ_ISM v_ISM²
+    // r_TS ∝ sqrt(Ṁ v_w) / v_ISM  (relative units)
+    const mdot_cgs = mdot * 2e30 / 3.15e7; // g/s
+    const v_w_cgs  = state.vWind * 1e5;    // cm/s
+    const rho_ism  = state.ismDens * 1.67e-24; // g/cm³
+    const v_ism    = state.ismVel * 1e5;
+    // r_TS in AU: balance Ṁ v_w / (4π r_TS²) = ½ ρ_ISM v_ISM²
+    const r_ts_cm  = Math.sqrt(mdot_cgs * v_w_cgs / (2 * Math.PI * rho_ism * v_ism * v_ism));
+    state.rTS = Math.max(5, Math.min(500, r_ts_cm / 1.496e13)); // cm to AU
+
+    // Heliopause ~20% beyond TS nose, ~3× further in tail
+    state.rHP = state.rTS * 1.35;
+}
+
+// ── Spawn helpers ─────────────────────────────────────────────────────────────
+let spawnTimer = 0;
+function spawnParticles() {
+    spawnTimer++;
+    if (spawnTimer % 3 !== 0) return;
+
+    const nNew = Math.min(8, MAX_PARTICLES - particles.length);
+    for (let i = 0; i < nNew; i++) {
+        const angle = Math.random() * 2 * Math.PI;
+        const fast = Math.random() < state.fastFrac;
+        particles.push(new Particle(angle, fast, false));
+    }
+}
+
+function triggerCME() {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * 0.4; // roughly sunward (up)
+    for (let i = 0; i < 60; i++) {
+        const a = angle + (Math.random() - 0.5) * 0.5;
+        const p = new Particle(a, true, true);
+        p.speed *= 3 + Math.random() * 2;
+        p.temp  = 1e8;
+        particles.push(p);
+    }
+}
+
+function triggerFlare() {
+    for (let i = 0; i < 40; i++) {
+        const a = -Math.PI / 4 + (Math.random() - 0.5) * 0.8;
+        const p = new Particle(a, true, false);
+        p.speed *= 1.5 + Math.random();
+        p.temp = 5e7;
+        p.fast = true;
+        particles.push(p);
+    }
+}
+
+function triggerStreamSector() {
+    // Co-rotating interaction region: two adjacent streams
+    const phi0 = Math.random() * 2 * Math.PI;
+    for (let i = 0; i < 80; i++) {
+        const inSector = Math.random() < 0.5;
+        const a = phi0 + (inSector ? 0 : Math.PI) + (Math.random() - 0.5) * 0.3;
+        const p = new Particle(a, inSector, false);
+        if (!inSector) p.speed *= 0.4;
+        particles.push(p);
+    }
+}
+
+function triggerCoronalHole() {
+    for (let i = 0; i < 100; i++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 0.6;
+        const p = new Particle(a, true, false);
+        p.speed *= 1.8;
+        particles.push(p);
+    }
+}
+
+function resetParticles() {
+    particles.length = 0;
+    for (let i = 0; i < 300; i++) {
+        const a = Math.random() * 2 * Math.PI;
+        const r0 = getStarSceneRadius() / getScale() + 0.02;
+        const p  = new Particle(a, Math.random() < state.fastFrac, false);
+        // Spread them out
+        p.r = r0 + Math.random() * state.rTS * 0.8;
+        p.phi = parkerPhi(p.r, a);
+        p.age = Math.floor(Math.random() * p.maxAge);
+        particles.push(p);
+    }
+}
+
+function clearParticles() { particles.length = 0; }
+
+// ── Update particles ──────────────────────────────────────────────────────────
+function updateParticles() {
+    const dt  = 0.012; // simulation time step (arbitrary units)
+    const AU_m = 1.496e11;
+    const v_ms = state.vWind * 1000;
+    const omega = state.omega;
+
+    // ISM flow direction (relative to upward on screen = heliospheric nose)
+    const ismAngle = Math.PI / 2; // coming from top
+
+    for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.age++;
+
+        if (p.age > p.maxAge || p.r > state.rHP * 1.1) {
+            particles.splice(i, 1);
+            continue;
+        }
+
+        // Radial acceleration (wind acceleration + gravity falloff)
+        // Inside Alfvén radius: slow acceleration; outside: free streaming
+        const r_au = p.r;
+        const rA   = state.rAlfven * 0.00465 * 215; // in AU (rA is in R★, 1 R☉ = 0.00465 AU)
+        let   dvr  = 0;
+        if (r_au < rA) {
+            // Accelerating region: dv/dr ~ v_w/rA (linear ramp-up)
+            dvr = 0.0008 * p.speed / Math.max(1, rA);
+        }
+
+        // Magnetic braking inside Alfvén sphere (angular momentum transfer)
+        // phi evolves following Parker spiral
+        const dphi_parker = -(omega / (v_ms / AU_m)) * dt * 0.001;
+
+        p.r   += (p.speed / (state.vWind * (r_au < rA ? 0.3 : 1.0))) * dt * 0.15 + dvr;
+        p.phi += dphi_parker;
+
+        // ISM deflection near and beyond termination shock
+        if (r_au > state.rTS) {
+            const px = Math.cos(p.phi), py = Math.sin(p.phi);
+            const ismX = 0, ismY = 1; // ISM flows from +Y in canvas coords
+            const drift = 0.002 * (1 - Math.min(1, state.rTS / r_au));
+            // deflect phi toward ISM downstream direction
+            const newPhiX = px - ismX * drift;
+            const newPhiY = py - ismY * drift;
+            p.phi = Math.atan2(newPhiY, newPhiX);
+        }
+
+        // Compute screen position
+        const [sx, sy] = polarToCanvas(p.r, p.phi);
+        p.x = sx; p.y = sy;
+    }
+}
+
+// ── Draw field lines ──────────────────────────────────────────────────────────
+function drawParkerFieldLines() {
+    const nLines = 12;
+    const r_star_au = PRESETS[state.preset].starRadius * 0.00465;
+    const r0 = Math.max(r_star_au, 0.01);
+    const rMax = state.rHP * 1.1;
+    const steps = 280;
+    const dr = rMax / steps;
+
+    for (let li = 0; li < nLines; li++) {
+        const phi0 = (li / nLines) * 2 * Math.PI;
+
+        ctx.beginPath();
+        let first = true;
+        for (let si = 0; si <= steps; si++) {
+            const r = r0 + si * dr;
+            const phi = parkerPhi(r, phi0);
+            const [sx, sy] = polarToCanvas(r, phi);
+            if (first) { ctx.moveTo(sx, sy); first = false; }
+            else ctx.lineTo(sx, sy);
+        }
+        // Color: inner = bright orange, outer = dim red
+        const grad = ctx.createLinearGradient(CX, CY, CX + auToScene(rMax), CY);
+        grad.addColorStop(0, 'rgba(255,160,40,0.75)');
+        grad.addColorStop(0.3, 'rgba(255,100,20,0.45)');
+        grad.addColorStop(1, 'rgba(180,40,0,0.1)');
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
+    }
+}
+
+// ── Draw velocity vectors (optional) ─────────────────────────────────────────
+function drawVelocityVectors() {
+    const grid = 40;
+    const rMax = state.rTS * 0.85;
+    const r0   = 0.05;
+    const v_ms = state.vWind * 1000;
+    const AU_m = 1.496e11;
+    const omega = state.omega;
+
+    for (let gx = -grid; gx <= grid; gx += 8) {
+        for (let gy = -grid; gy <= grid; gy += 8) {
+            const r_au = Math.sqrt(gx * gx + gy * gy) * (rMax / grid);
+            if (r_au < 0.02 || r_au > rMax) continue;
+            const phi = Math.atan2(gy, gx);
+            const parkerAngle = -(omega / (v_ms / AU_m)) * r_au * AU_m;
+            // Radial + phi components
+            const vr_norm = Math.cos(parkerAngle - phi + phi);
+            const vp_norm = -Math.sin(parkerAngle - phi + phi);
+            const [sx, sy] = polarToCanvas(r_au, phi);
+            const scale = 10;
+            const ex = sx + vr_norm * scale;
+            const ey = sy - vp_norm * scale;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(ex, ey);
+            ctx.strokeStyle = 'rgba(0,200,200,0.35)';
+            ctx.lineWidth = 0.7;
+            ctx.stroke();
+            // arrowhead
+            ctx.beginPath();
+            ctx.arc(ex, ey, 1.2, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0,200,200,0.5)';
+            ctx.fill();
+        }
+    }
+}
+
+// ── Draw density heatmap ──────────────────────────────────────────────────────
+function drawDensityMap() {
+    const R = Math.min(W, H) * 0.45;
+    // Use off-screen approach: sample on coarse grid
+    const gsize = 80;
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = offCanvas.height = gsize;
+    const oct = offCanvas.getContext('2d');
+    const imgData = oct.createImageData(gsize, gsize);
+    const rMax = state.rHP;
+    const rMin = 0.01;
+    const scale = getScale();
+
+    for (let py = 0; py < gsize; py++) {
+        for (let px = 0; px < gsize; px++) {
+            const wx = (px / gsize - 0.5) * 2 * rMax;
+            const wy = (py / gsize - 0.5) * 2 * rMax;
+            const r  = Math.sqrt(wx * wx + wy * wy);
+            if (r < rMin) {
+                const idx = (py * gsize + px) * 4;
+                imgData.data[idx]   = 255;
+                imgData.data[idx+1] = 255;
+                imgData.data[idx+2] = 255;
+                imgData.data[idx+3] = 200;
+                continue;
+            }
+            // Wind density ∝ Ṁ / (4π r²  v(r))
+            // v(r) ≈ v_w for r > r_A, else ramps up
+            const rA_au = state.rAlfven * 0.00465 * 215;
+            const v_r   = r < rA_au ? state.vWind * (r / rA_au) : state.vWind;
+            const dens  = 1.0 / (r * r * Math.max(0.01, v_r / state.vWind));
+            // Clamp + colorize
+            const d = Math.min(1, Math.max(0, Math.log10(dens * 10 + 1) / 3));
+            const idx = (py * gsize + px) * 4;
+            imgData.data[idx]   = Math.floor(d * 180);
+            imgData.data[idx+1] = Math.floor(d * 40);
+            imgData.data[idx+2] = Math.floor(d * 255);
+            imgData.data[idx+3] = Math.floor(d * 90);
+        }
+    }
+    oct.putImageData(imgData, 0, 0);
+    const s = rMax * 2 * getScale();
+    ctx.drawImage(offCanvas, CX - s / 2, CY - s / 2, s, s);
+}
+
+// ── Draw boundaries ───────────────────────────────────────────────────────────
+function drawBoundaries() {
+    const scale = getScale();
+
+    // Alfvén surface
+    if (state.showAlfven) {
+        const rA_au = state.rAlfven * 0.00465 * 215; // R★ → AU
+        ctx.beginPath();
+        ctx.arc(CX, CY, rA_au * scale, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(0,136,255,0.55)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(0,136,255,0.6)';
+        ctx.font = '10px Courier New';
+        ctx.fillText('r_A', CX + rA_au * scale + 3, CY - 3);
+    }
+
+    // Termination shock (slightly elongated nose-tail due to ISM)
+    if (state.showTS) {
+        const rTS = state.rTS * scale;
+        const rTail = rTS * 1.7; // elongated tail (downwind)
+        ctx.save();
+        ctx.translate(CX, CY);
+        ctx.beginPath();
+        // Approximate heliopause as ellipse (nose = rTS, tail = rTail)
+        ctx.ellipse(0, rTS * 0.1, rTS, rTS, 0, 0, 2 * Math.PI); // simplified circle for TS
+        ctx.restore();
+        // Actually draw proper nose-squished shape:
+        ctx.beginPath();
+        const nSegments = 120;
+        for (let i = 0; i <= nSegments; i++) {
+            const t = (i / nSegments) * 2 * Math.PI;
+            // ISM from +Y → nose at -Y (downward in canvas = heliospheric nose)
+            // Modified radius: squished on nose side, extended on tail
+            const cosT = Math.cos(t - Math.PI / 2);
+            const r_scaled = state.rTS * scale * (1 - 0.22 * cosT);
+            const px = CX + r_scaled * Math.cos(t);
+            const py = CY - r_scaled * Math.sin(t);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(255,68,0,0.55)';
+        ctx.lineWidth = 1.4;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(255,68,0,0.6)';
+        ctx.font = '10px Courier New';
+        ctx.fillText('TS', CX + state.rTS * scale * 0.72, CY + state.rTS * scale * 0.72);
+    }
+
+    // Heliopause
+    if (state.showHP) {
+        ctx.beginPath();
+        const nSegments = 120;
+        for (let i = 0; i <= nSegments; i++) {
+            const t = (i / nSegments) * 2 * Math.PI;
+            const cosT = Math.cos(t - Math.PI / 2);
+            const r_scaled = state.rHP * scale * (1 - 0.28 * cosT);
+            const px = CX + r_scaled * Math.cos(t);
+            const py = CY - r_scaled * Math.sin(t);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(136,68,255,0.45)';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(136,68,255,0.55)';
+        ctx.font = '10px Courier New';
+        ctx.fillText('HP', CX + state.rHP * scale * 0.70, CY - state.rHP * scale * 0.70);
+    }
+
+    // Bow shock
+    if (state.showBow && state.ismVel > 5) {
+        const rBow = state.rHP * 1.2 * scale;
+        ctx.beginPath();
+        // Bow shock: parabola opening downward (ISM from +Y)
+        const focus_y = CY - rBow;
+        for (let px = CX - rBow; px <= CX + rBow; px += 2) {
+            const dx = px - CX;
+            const dy = dx * dx / (2 * rBow * 0.7) - rBow * 0.5;
+            if (Math.abs(dx) < rBow) {
+                if (px === CX - rBow) ctx.moveTo(px, CY + dy);
+                else ctx.lineTo(px, CY + dy);
+            }
+        }
+        ctx.strokeStyle = 'rgba(200,200,80,0.35)';
+        ctx.lineWidth = 1.0;
+        ctx.setLineDash([3, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(200,200,80,0.4)';
+        ctx.font = '9px Courier New';
+        ctx.fillText('bow', CX + 4, CY - rBow * 0.5);
+    }
+}
+
+// ── Draw ISM flow arrows ──────────────────────────────────────────────────────
+function drawISMFlow() {
+    if (state.ismVel <= 0) return;
+    const scale = getScale();
+    const rHP = state.rHP * scale;
+    const arrowLen = 20 + state.ismVel * 0.3;
+
+    ctx.strokeStyle = 'rgba(200,200,80,0.25)';
+    ctx.lineWidth = 0.8;
+    for (let xOff = -rHP * 1.4; xOff <= rHP * 1.4; xOff += rHP * 0.25) {
+        const startX = CX + xOff;
+        const startY = CY + rHP * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(startX, startY - arrowLen);
+        ctx.stroke();
+        // arrowhead
+        ctx.beginPath();
+        ctx.moveTo(startX, startY - arrowLen);
+        ctx.lineTo(startX - 4, startY - arrowLen + 7);
+        ctx.lineTo(startX + 4, startY - arrowLen + 7);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(200,200,80,0.25)';
+        ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(200,200,80,0.4)';
+    ctx.font = '9px Courier New';
+    ctx.fillText('ISM flow', CX - 22, CY + rHP * 1.55);
+}
+
+// ── Draw star ─────────────────────────────────────────────────────────────────
+function drawStar() {
+    const preset = PRESETS[state.preset];
+    const rPx = getStarSceneRadius();
+
+    // Corona glow
+    const glow = ctx.createRadialGradient(CX, CY, rPx * 0.5, CX, CY, rPx * 3.5);
+    glow.addColorStop(0, preset.starColor + 'aa');
+    glow.addColorStop(0.4, preset.starColor + '33');
+    glow.addColorStop(1, 'transparent');
+    ctx.beginPath();
+    ctx.arc(CX, CY, rPx * 3.5, 0, 2 * Math.PI);
+    ctx.fillStyle = glow;
+    ctx.fill();
+
+    // Star disk
+    const disk = ctx.createRadialGradient(CX - rPx * 0.3, CY - rPx * 0.3, 0, CX, CY, rPx);
+    disk.addColorStop(0, '#ffffff');
+    disk.addColorStop(0.3, preset.starColor);
+    disk.addColorStop(1, preset.starColor + '88');
+    ctx.beginPath();
+    ctx.arc(CX, CY, rPx, 0, 2 * Math.PI);
+    ctx.fillStyle = disk;
+    ctx.fill();
+
+    // Pulsar jets
+    if (state.preset === 'pulsar') {
+        const jLen = rPx * 8;
+        const grad = ctx.createLinearGradient(CX, CY - jLen, CX, CY + jLen);
+        grad.addColorStop(0, 'rgba(0,220,255,0)');
+        grad.addColorStop(0.3, 'rgba(0,220,255,0.8)');
+        grad.addColorStop(0.5, 'rgba(255,255,255,0.95)');
+        grad.addColorStop(0.7, 'rgba(0,220,255,0.8)');
+        grad.addColorStop(1, 'rgba(0,220,255,0)');
+        ctx.beginPath();
+        ctx.rect(CX - rPx * 0.4, CY - jLen, rPx * 0.8, jLen * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+    }
+
+    // Star name label
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.font = '11px Courier New';
+    ctx.fillText(preset.name, CX + rPx + 4, CY + 4);
+}
+
+// ── Draw particles ────────────────────────────────────────────────────────────
+function drawParticles() {
+    const vMax = state.vWind * 3.5;
+    const rHP  = state.rHP;
+
+    for (const p of particles) {
+        const frac = Math.min(1, p.age / p.maxAge);
+        let alpha = (1 - frac * 0.7) * 0.85;
+        if (p.r > state.rTS) alpha *= 0.6; // fade outside TS
+
+        let color;
+        switch (state.colorMode) {
+            case 'speed': {
+                // Blue (slow) → green → yellow → orange → red (fast)
+                const t = Math.min(1, p.speed / vMax);
+                if (p.cme) {
+                    color = `rgba(255,${Math.floor(200*(1-t))},255,${alpha})`;
+                } else if (p.fast) {
+                    const r = Math.floor(40 + 215 * t);
+                    const g = Math.floor(255 * (1 - t * 0.6));
+                    color = `rgba(${r},${g},60,${alpha})`;
+                } else {
+                    const r = Math.floor(180 * t + 20);
+                    color = `rgba(${r},${Math.floor(80*t+40)},${Math.floor(255*(1-t))},${alpha})`;
+                }
+                break;
+            }
+            case 'temp': {
+                const t = Math.min(1, Math.log10(p.temp / 1e5) / 4);
+                const r = Math.floor(255 * Math.min(1, t * 2));
+                const g = Math.floor(255 * Math.min(1, Math.max(0, t * 2 - 0.5)));
+                color = `rgba(${r},${g},${Math.floor(255 * (1 - t))},${alpha})`;
+                break;
+            }
+            case 'pressure': {
+                const rho = 1 / Math.max(0.01, p.r * p.r);
+                const t = Math.min(1, rho * state.rTS * state.rTS * 0.5);
+                color = `rgba(${Math.floor(255*t)},0,${Math.floor(255*(1-t))},${alpha})`;
+                break;
+            }
+            case 'origin':
+                color = p.cme ? `rgba(255,100,255,${alpha})`
+                      : p.fast ? `rgba(0,255,128,${alpha})`
+                      : `rgba(255,128,64,${alpha})`;
+                break;
+            default:
+                color = `rgba(0,255,100,${alpha})`;
+        }
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.cme ? 2.2 : 1.5, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+    }
+}
+
+// ── Draw distance scale ───────────────────────────────────────────────────────
+function drawScale() {
+    const scale = getScale();
+    const tenAU = 10 * scale;
+    const sx = W - 10, sy = H - 22;
+    ctx.beginPath();
+    ctx.moveTo(sx - tenAU, sy); ctx.lineTo(sx, sy);
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '9px Courier New';
+    ctx.textAlign = 'right';
+    ctx.fillText('10 AU', sx, sy + 11);
+    ctx.textAlign = 'left';
+}
+
+// ── Background stars ──────────────────────────────────────────────────────────
+const bgStars = [];
+function initBgStars() {
+    bgStars.length = 0;
+    for (let i = 0; i < 200; i++) {
+        bgStars.push({
+            x: Math.random() * W, y: Math.random() * H,
+            r: Math.random() < 0.9 ? 0.5 : 1.0,
+            a: 0.2 + Math.random() * 0.6
+        });
+    }
+}
+
+function drawBgStars() {
+    for (const s of bgStars) {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, 2 * Math.PI);
+        ctx.fillStyle = `rgba(255,255,255,${s.a})`;
+        ctx.fill();
+    }
+}
+
+// ── HUD update ────────────────────────────────────────────────────────────────
+function updateHUD() {
+    const pr = PRESETS[state.preset];
+    document.getElementById('hud-star').textContent   = pr.name;
+    document.getElementById('hud-vw').textContent     = state.vWind.toFixed(0);
+    document.getElementById('hud-mdot').textContent   = '1e' + state.mdotLog.toFixed(1);
+    document.getElementById('hud-b').textContent      = state.bSurf.toFixed(1);
+    document.getElementById('hud-ra').textContent     = state.rAlfven.toFixed(1);
+    document.getElementById('hud-rts').textContent    = state.rTS.toFixed(1);
+    document.getElementById('hud-omega').textContent  = (state.omega * 1e6).toFixed(3);
+    document.getElementById('hud-ism').textContent    = state.ismVel.toFixed(0);
+    document.getElementById('hud-np').textContent     = particles.length;
+    document.getElementById('hud-frame').textContent  = state.frame;
+}
+
+// ── Main render loop ──────────────────────────────────────────────────────────
+function render() {
+    state.frame++;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Background
+    ctx.fillStyle = '#000008';
+    ctx.fillRect(0, 0, W, H);
+    drawBgStars();
+
+    if (state.showDensity) drawDensityMap();
+    if (state.showField)   drawParkerFieldLines();
+
+    drawISMFlow();
+    drawBoundaries();
+
+    if (state.showVectors) drawVelocityVectors();
+
+    // Update + draw particles
+    spawnParticles();
+    updateParticles();
+    if (state.showParticles) drawParticles();
+
+    drawStar();
+    drawScale();
+
+    updateHUD();
+    requestAnimationFrame(render);
+}
+
+// ── Controls wiring ───────────────────────────────────────────────────────────
+function wireSlider(id, lblId, key, fmt) {
+    const el = document.getElementById(id);
+    el.addEventListener('input', () => {
+        state[key] = parseFloat(el.value);
+        document.getElementById(lblId).textContent = fmt(state[key]);
+        updateDerived();
+    });
+}
+
+wireSlider('sl-vwind',  'lbl-vwind',  'vWind',     v => v.toFixed(0) + ' km/s');
+wireSlider('sl-mdot',   'lbl-mdot',   'mdotLog',   v => v.toFixed(1));
+wireSlider('sl-bsurf',  'lbl-bsurf',  'bSurf',     v => v.toFixed(1) + ' G');
+wireSlider('sl-omega',  'lbl-omega',  'rotPeriod', v => v.toFixed(2) + ' d');
+wireSlider('sl-frac',   'lbl-frac',   'fastFrac',  v => (v * 100).toFixed(0) + '%');
+wireSlider('sl-ism',    'lbl-ism',    'ismVel',    v => v.toFixed(0) + ' km/s');
+wireSlider('sl-ismd',   'lbl-ismd',  'ismDens',   v => v.toFixed(3));
+wireSlider('sl-tspres', 'lbl-tspres','tsPres',    v => v.toFixed(2));
+wireSlider('sl-zoom',   'lbl-zoom',   'zoom',      v => v.toFixed(2) + '×');
+
+function toggleLayer(name, btn) {
+    const key = 'show' + name.charAt(0).toUpperCase() + name.slice(1);
+    state[key] = !state[key];
+    btn.classList.toggle('active', state[key]);
+}
+
+function toggleSection(titleEl) {
+    titleEl.parentElement.classList.toggle('collapsed');
+}
+
+function applyPreset(name) {
+    state.preset = name;
+    const pr = PRESETS[name];
+    state.vWind     = pr.vWind;
+    state.mdotLog   = pr.mdotLog;
+    state.bSurf     = pr.bSurf;
+    state.rotPeriod = pr.rotPeriod;
+    state.fastFrac  = pr.fastFrac;
+    state.ismVel    = pr.ismVel;
+
+    // Update sliders
+    document.getElementById('sl-vwind').value  = pr.vWind;
+    document.getElementById('sl-mdot').value   = pr.mdotLog;
+    document.getElementById('sl-bsurf').value  = pr.bSurf;
+    document.getElementById('sl-omega').value  = pr.rotPeriod;
+    document.getElementById('sl-frac').value   = pr.fastFrac;
+    document.getElementById('sl-ism').value    = pr.ismVel;
+
+    document.getElementById('lbl-vwind').textContent  = pr.vWind.toFixed(0) + ' km/s';
+    document.getElementById('lbl-mdot').textContent   = pr.mdotLog.toFixed(1);
+    document.getElementById('lbl-bsurf').textContent  = pr.bSurf.toFixed(1) + ' G';
+    document.getElementById('lbl-omega').textContent  = pr.rotPeriod.toFixed(2) + ' d';
+    document.getElementById('lbl-frac').textContent   = (pr.fastFrac * 100).toFixed(0) + '%';
+    document.getElementById('lbl-ism').textContent    = pr.ismVel.toFixed(0) + ' km/s';
+
+    // Info box
+    const infoKeys = ['Type:', 'Mass:', 'Radius:', 'Luminosity:'];
+    const infoVals = Object.values(pr.info);
+    const box = document.getElementById('star-info');
+    box.innerHTML = infoKeys.map((k, i) =>
+        `<div class="row"><span>${k}</span><span>${infoVals[i]}</span></div>`
+    ).join('');
+
+    // Preset buttons
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.preset-btn').forEach(b => {
+        if (b.textContent.toLowerCase().includes(name.replace('wr102','wr').replace('betelgeuse','bete').replace('pulsar','puls').replace('sun','sun'))) {
+            b.classList.add('active');
+        }
+    });
+
+    updateDerived();
+    clearParticles();
+    setTimeout(resetParticles, 50);
+}
+
+// Highlight active preset button properly
+function setActivePresetBtn(name) {
+    const map = { sun: 0, wr102: 1, betelgeuse: 2, pulsar: 3 };
+    document.querySelectorAll('.preset-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === map[name]);
+    });
+}
+
+// Override applyPreset to also set active button
+const _origApply = applyPreset;
+// (already calling setActivePresetBtn inline below)
+
+document.querySelectorAll('.preset-btn').forEach((btn, i) => {
+    const names = ['sun', 'wr102', 'betelgeuse', 'pulsar'];
+    btn.onclick = () => {
+        applyPreset(names[i]);
+        document.querySelectorAll('.preset-btn').forEach((b, j) => {
+            b.classList.toggle('active', j === i);
+        });
+    };
+});
+
+// ─── Nav ─────────────────────────────────────────────────────────────────────
+const _navBurger = document.getElementById('nav-burger');
+const _navMenu   = document.getElementById('nav-menu');
+if (_navBurger && _navMenu) {
+    _navBurger.addEventListener('click', () => {
+        const open = _navMenu.classList.toggle('open');
+        _navBurger.textContent = open ? '✕' : '☰';
+        _navBurger.setAttribute('aria-expanded', open);
+    });
+    document.addEventListener('click', e => {
+        if (!e.target.closest('nav')) {
+            _navMenu.classList.remove('open');
+            _navBurger.textContent = '☰';
+            _navBurger.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+            if (window.innerWidth > 1024) return;
+            e.stopPropagation();
+            const drop    = btn.closest('.nav-drop');
+            const opening = !drop.classList.contains('open');
+            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
+            if (opening) drop.classList.add('open');
+        });
+    });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+resize();
+initBgStars();
+updateDerived();
+resetParticles();
+render();
+</script>
+</body>
+</html>
