@@ -2371,6 +2371,7 @@ document.getElementById('lyr-weather').addEventListener('change', e => {
 });
 document.getElementById('lyr-wind').addEventListener('change', e => {
     windParticles.setVisible(e.target.checked);
+    windArrows.setVisible(e.target.checked);
 });
 document.getElementById('lyr-rotate').addEventListener('change', e => {
     controls.autoRotate = e.target.checked;
@@ -2631,6 +2632,18 @@ const WIND_TRAIL_LEN   = 20;
 const WIND_TRAIL_STEP_S = 1 / 60;   // one history push per ~16 ms of simulated time
 const WIND_DT_MAX_S     = 0.05;     // clamp against backgrounded-tab spikes
 
+// LOD tuning — tied to OrbitControls (minDistance=1.06, maxDistance=10).
+// zoom01: 0 at WIND_LOD_FAR or beyond, 1 at WIND_LOD_NEAR or closer. Used by
+// _reset() to bias spawns toward the sub-camera point and by update() to
+// dim/slow advection when the eye is far. Picked so that "the camera is
+// clearly framing a region" (≈1.5 R⊕, half-globe in view) lands around 0.7.
+const WIND_LOD_NEAR = 1.10;
+const WIND_LOD_FAR  = 2.50;
+
+// Reused scratch vector for camera→local-space conversions. Avoids one
+// allocation per frame inside the wind LOD path.
+const _windFocusV = new THREE.Vector3();
+
 class WindParticles {
     constructor(parent, N = 6000) {
         this.N       = N;
@@ -2640,6 +2653,14 @@ class WindParticles {
         this.spd     = new Float32Array(N);
         this.age     = new Float32Array(N);
         this.maxAge  = new Float32Array(N);
+
+        // Camera-derived focus (set per-frame by update()). focusLat/Lon is
+        // the sub-camera geographic point in earthMesh-local coordinates;
+        // zoom01 ramps 0→1 as the camera dollies in. Both default to a
+        // "globe in view" state so spawns stay uniform until update() runs.
+        this.focusLat = 0;
+        this.focusLon = 0;
+        this.zoom01   = 0;
 
         // Trail history: TRAIL_LEN past (lat, lon, speed) samples per particle.
         // `head` is the index of the newest sample in each ring buffer.
@@ -2684,8 +2705,37 @@ class WindParticles {
         // near the poles 1° lon cells shrink faster than particles can
         // handle and they streak wildly. A tighter lat clamp than the
         // old ±84° keeps polar trails clean without noticeable loss.
-        this.lat[i]    = (Math.random() - 0.5) * 152;
-        this.lon[i]    = (Math.random() - 0.5) * 360;
+        //
+        // LOD: when zoomed in, route a fraction of respawns into a tangent-
+        // plane disc around (focusLat, focusLon). Disc radius shrinks with
+        // zoom (60° hemisphere → 18° regional) and the biased fraction
+        // grows. Net effect: same particle budget, dense flow in the
+        // visible cap, sparse outside — so detail emerges where you look.
+        const z       = this.zoom01;
+        const biasP   = 0.85 * z;                 // P(spawn in cap) ∈ [0, 0.85]
+        const capDeg  = 60 - 42 * z;              // cap angular radius in °
+        let lat, lon;
+        if (z > 0 && Math.random() < biasP) {
+            // Uniform-area sample in a tangent-plane disc of radius capDeg
+            // centred on (focusLat, focusLon). Polar singularity is handled
+            // by the advection step's cos(lat) clamp; near the equator the
+            // tangent disc is a near-perfect spherical-cap approximation.
+            const ang = Math.random() * Math.PI * 2;
+            const rad = Math.sqrt(Math.random()) * capDeg;
+            const dlat = rad * Math.cos(ang);
+            const dlon = rad * Math.sin(ang) /
+                         Math.max(0.15, Math.cos((this.focusLat + dlat * 0.5) * DEG));
+            lat = this.focusLat + dlat;
+            lon = this.focusLon + dlon;
+            // Wrap longitude into (-180, 180].
+            if (lon >  180) lon -= 360;
+            if (lon < -180) lon += 360;
+        } else {
+            lat = (Math.random() - 0.5) * 152;
+            lon = (Math.random() - 0.5) * 360;
+        }
+        this.lat[i]    = Math.max(-76, Math.min(76, lat));
+        this.lon[i]    = lon;
         this.age[i]    = randomAge ? Math.random() * 20 : 0;
         this.maxAge[i] = 20 + Math.random() * 20;    // 20–40 s lifetime
         this.spd[i]    = 0;
@@ -2777,17 +2827,53 @@ class WindParticles {
         }
     }
 
-    update(dt) {
+    /**
+     * Refresh focus/zoom state from the camera. Called at the top of update().
+     * Camera lives in world space; earthMesh rotates, so we have to convert
+     * into the parent's local frame before deriving lat/lon — otherwise the
+     * focus would slide as the planet spins under a stationary observer.
+     */
+    _setFocusFromCamera(camera, parent) {
+        if (!camera || !parent) return;
+        const dist = camera.position.length();
+        // Map dist → zoom01 with a smoothstep-shaped easing: 0 at WIND_LOD_FAR,
+        // 1 at WIND_LOD_NEAR, smoothly easing in between so the visual change
+        // doesn't pop as the user dollies.
+        const t  = (WIND_LOD_FAR - dist) / (WIND_LOD_FAR - WIND_LOD_NEAR);
+        const tc = Math.max(0, Math.min(1, t));
+        this.zoom01 = tc * tc * (3 - 2 * tc);
+
+        // Camera position in earthMesh-local space. parent.matrixWorld is
+        // kept up-to-date by Three's render pipeline, so worldToLocal is safe.
+        _windFocusV.copy(camera.position);
+        parent.worldToLocal(_windFocusV);
+        const r = _windFocusV.length();
+        if (r < 1e-6) return;
+        // Inverse of the (cos(phi)cos(lam), sin(phi), -cos(phi)sin(lam))
+        // mapping used everywhere in this file (geoToXYZ + the trail builder).
+        this.focusLat = Math.asin(Math.max(-1, Math.min(1, _windFocusV.y / r))) / DEG;
+        this.focusLon = Math.atan2(-_windFocusV.z, _windFocusV.x) / DEG;
+    }
+
+    update(dt, camera = null, parent = null) {
         if (!isFinite(dt) || dt <= 0) return;
         // Clamp frame time so a backgrounded-tab resume or GC pause doesn't
         // teleport every particle across the globe in one step.
         if (dt > WIND_DT_MAX_S) dt = WIND_DT_MAX_S;
 
+        this._setFocusFromCamera(camera, parent);
+
         // Visual speed: degrees traversed per second at full wind (scaled
         // so a jet stream reading sails roughly 1/3 of a continent in a
         // 20-frame trail — the nullschool "streaks" aesthetic).
-        const VIS    = 42;
+        // Slow advection slightly when zoomed in so streaks read as
+        // deliberate flow lines rather than blur across the visible cap.
+        const VIS    = 42 * (1 - 0.35 * this.zoom01);
         const LAT_MAX = 80;   // tighter than the old ±84° to quiet polar streaks
+        // Trail brightness amplification at close zoom — same particle count,
+        // richer apparent density. Held below 2× so additive blending doesn't
+        // saturate the white midpoint of the speed ramp.
+        const trailBoost = 1.0 + 0.7 * this.zoom01;
 
         const tmp = { u: 0, v: 0, s: 0 };
 
@@ -2878,7 +2964,7 @@ class WindParticles {
                 const tailU  = (j + 1) / (WIND_TRAIL_LEN - 1);
                 const tailF  = tailU * tailU;         // ease-in
                 // Wrap segments output zero color so they're invisible under additive blending
-                const strength = wrapped ? 0 : tailF * envelope;
+                const strength = wrapped ? 0 : tailF * envelope * trailBoost;
                 this._speedColor(spdMid, rgb);
                 col[p0]     = rgb[0] * strength;
                 col[p0 + 1] = rgb[1] * strength;
@@ -2896,7 +2982,271 @@ class WindParticles {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  WIND ARROWS  (adaptive direction glyphs)
+//
+//  At close zoom the streamline particles answer "where is the air
+//  going" beautifully but they don't pin down direction at any one
+//  spot. WindArrows fills that gap: a sparse grid of short arrows
+//  with chevron heads, sampled from the same WeatherFeed buffer that
+//  drives the trails. Tail = grid cell, head = downwind, chevron
+//  span = cosmetic. Speed-coded with the same ramp as the trails.
+//
+//  Why a grid (not a fixed lat/lon graticule): re-centring on the
+//  sub-camera point keeps the visible cap full of arrows while the
+//  un-seen hemisphere costs zero geometry. Spacing tightens with
+//  zoom so the read goes from "synoptic" (continental flow) to
+//  "regional" (shore/lake breezes) without ever drawing more than
+//  MAX_ARROWS glyphs.
+//
+//  Hidden when zoom01 < 0.18 (panel-wide globe view) so the trails
+//  read clean, and when the wind layer toggle is off.
+// ═══════════════════════════════════════════════════════════════
+const WIND_ARROW_MAX        = 512;
+const WIND_ARROW_VERTS_EACH = 6;     // shaft (2) + 2 chevrons (2 each)
+const WIND_ARROW_FADE_IN    = 0.18;  // zoom01 below this → arrows hidden
+
+class WindArrows {
+    constructor(parent, lookupFn) {
+        this.parent   = parent;
+        this.lookupFn = lookupFn;     // (lat, lon, out{u,v,s}) — uses windParticles' bilinear sampler
+        this.visible  = true;          // gated by user wind-layer toggle
+        this._lastBuildKey = '';       // memoise grid rebuilds when nothing changed
+
+        const vertCount = WIND_ARROW_MAX * WIND_ARROW_VERTS_EACH;
+        this._pos = new Float32Array(vertCount * 3);
+        this._col = new Float32Array(vertCount * 3);
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(this._pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(this._col, 3));
+        geo.attributes.position.setUsage(THREE.DynamicDrawUsage);
+        geo.attributes.color.setUsage(THREE.DynamicDrawUsage);
+
+        const mat = new THREE.LineBasicMaterial({
+            vertexColors: true, transparent: true,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        this.mesh = new THREE.LineSegments(geo, mat);
+        this.mesh.renderOrder = 3;     // above trails so heads aren't masked
+        this.mesh.visible = false;
+        parent.add(this.mesh);
+    }
+
+    setVisible(v) { this.visible = v; if (!v) this.mesh.visible = false; }
+
+    /**
+     * Build the arrow field for the current zoom + focus state. Skips
+     * entirely outside the fade-in zone (cheap early-out) and otherwise
+     * fills only as many slots as the visible cap demands, zeroing the
+     * rest so unused vertices collapse to a point.
+     */
+    update(zoom01, focusLat, focusLon, hasData) {
+        if (!this.visible || !hasData || zoom01 < WIND_ARROW_FADE_IN) {
+            this.mesh.visible = false;
+            return;
+        }
+
+        // Step (cell spacing) and extent (half-width of grid) are zoom-driven.
+        // step:    16° at fade-in → 3° fully zoomed (≈ 330 km at equator)
+        // extent:  64° at fade-in → 18° fully zoomed (regional cap)
+        const z = zoom01;
+        const step   = 16 * Math.pow(0.20, z);          // smooth exp falloff to ~3°
+        const extent = 64 - 46 * z;
+        const arrowLen = step * 0.55;                    // glyph length in degrees
+
+        // Coarse rebuild key — when zoom + focus haven't moved past one
+        // grid cell, we can skip the rebuild. Quantise focus to the cell
+        // step to avoid jitter as the camera drifts inside one cell.
+        const keyLat = Math.round(focusLat / step) * step;
+        const keyLon = Math.round(focusLon / step) * step;
+        const key = `${keyLat.toFixed(2)}|${keyLon.toFixed(2)}|${step.toFixed(3)}`;
+        // Strength is the appearance-only fade; recomputed every call so
+        // the field smoothly fades in as the user zooms past the threshold.
+        const strength = Math.min(1, (z - WIND_ARROW_FADE_IN) / 0.20);
+
+        if (key === this._lastBuildKey) {
+            // Geometry unchanged — only restripe alpha and bail.
+            this._restripeStrength(strength);
+            this.mesh.visible = true;
+            return;
+        }
+        this._lastBuildKey = key;
+
+        const pos = this._pos, col = this._col;
+        const R   = R_EARTH * 1.006;                     // hover slightly above clouds
+        const tmp = { u: 0, v: 0, s: 0 };
+        const rgb = [0, 0, 0];
+        let slot = 0;
+
+        // March a centred grid: rounding focus to nearest cell keeps arrows
+        // anchored to the same lat/lon lattice from frame to frame so they
+        // don't shimmer as the camera nudges around.
+        const latLo = Math.max(-78, keyLat - extent);
+        const latHi = Math.min( 78, keyLat + extent);
+
+        for (let lat = latLo; lat <= latHi && slot < WIND_ARROW_MAX; lat += step) {
+            // Longitude extent stretches with cos(lat) so the arrow density
+            // stays uniform on the visible globe surface — without this the
+            // grid bunches near the poles and looks sparse near the equator.
+            const lonHalf = Math.min(180, extent / Math.max(0.15, Math.cos(lat * DEG)));
+            const lonLo = keyLon - lonHalf;
+            const lonHi = keyLon + lonHalf;
+            for (let lon = lonLo; lon <= lonHi && slot < WIND_ARROW_MAX; lon += step) {
+                // Wrap longitude for the lookup but keep the unwrapped value
+                // for the "is this on the camera-facing hemisphere?" cull.
+                let lonW = lon;
+                if (lonW >  180) lonW -= 360;
+                if (lonW < -180) lonW += 360;
+
+                this.lookupFn(lat, lonW, tmp);
+                if (tmp.s < 0.04) continue;              // skip near-calm cells
+
+                // Tail in 3D
+                const phiT = lat * DEG, lamT = lonW * DEG;
+                const tx =  R * Math.cos(phiT) * Math.cos(lamT);
+                const ty =  R * Math.sin(phiT);
+                const tz = -R * Math.cos(phiT) * Math.sin(lamT);
+
+                // Camera-facing hemisphere cull: arrows on the back side of
+                // the globe never get seen but cost a draw. dot(tail_dir, focus_dir)
+                // > -0.05 keeps grazing limb arrows but drops the back hemisphere.
+                if (this._dotFocus(tx, ty, tz, focusLat, focusLon) < -0.05) continue;
+
+                // Head: small great-circle step in (u, v) direction. For the
+                // arrowLen scales we use (≤ a few degrees), the linear
+                // tangent-plane offset is indistinguishable from a true geodesic.
+                const len   = arrowLen * (0.55 + 0.55 * Math.min(1, tmp.s));
+                const dlat  = tmp.v * len;
+                const dlon  = tmp.u * len / Math.max(0.15, Math.cos(lat * DEG));
+                const phiH  = (lat + dlat) * DEG;
+                const lamH  = (lonW + dlon) * DEG;
+                const hx =  R * Math.cos(phiH) * Math.cos(lamH);
+                const hy =  R * Math.sin(phiH);
+                const hz = -R * Math.cos(phiH) * Math.sin(lamH);
+
+                // Chevron arms: back off from the head by ~35% of the shaft
+                // length and offset perpendicular to the shaft along the
+                // surface. perp = normalise(cross(headNormal, shaftDir)) — gives
+                // a tangent-to-sphere "right" vector that survives any orientation.
+                let dx = hx - tx, dy = hy - ty, dz = hz - tz;
+                const dlen = Math.hypot(dx, dy, dz) || 1;
+                dx /= dlen; dy /= dlen; dz /= dlen;
+                const nl = Math.hypot(hx, hy, hz) || 1;
+                const nx = hx / nl, ny = hy / nl, nz = hz / nl;
+                let px = ny * dz - nz * dy;
+                let py = nz * dx - nx * dz;
+                let pz = nx * dy - ny * dx;
+                const plen = Math.hypot(px, py, pz) || 1;
+                px /= plen; py /= plen; pz /= plen;
+
+                const back   = dlen * 0.35;
+                const spread = dlen * 0.22;
+                const bx = hx - dx * back;
+                const by = hy - dy * back;
+                const bz = hz - dz * back;
+                const lx = bx + px * spread, ly = by + py * spread, lz = bz + pz * spread;
+                const rx = bx - px * spread, ry = by - py * spread, rz = bz - pz * spread;
+
+                // Speed-coded color, mirroring WindParticles._speedColor()
+                this._speedColor(tmp.s, rgb);
+                const mr = rgb[0] * strength;
+                const mg = rgb[1] * strength;
+                const mb = rgb[2] * strength;
+
+                // Write 3 segments (shaft + 2 chevrons) = 6 vertices into slot.
+                let p = slot * WIND_ARROW_VERTS_EACH * 3;
+                // Shaft: tail → head
+                pos[p   ] = tx; pos[p+1 ] = ty; pos[p+2 ] = tz;
+                pos[p+3 ] = hx; pos[p+4 ] = hy; pos[p+5 ] = hz;
+                // Left chevron: head → left arm
+                pos[p+6 ] = hx; pos[p+7 ] = hy; pos[p+8 ] = hz;
+                pos[p+9 ] = lx; pos[p+10] = ly; pos[p+11] = lz;
+                // Right chevron: head → right arm
+                pos[p+12] = hx; pos[p+13] = hy; pos[p+14] = hz;
+                pos[p+15] = rx; pos[p+16] = ry; pos[p+17] = rz;
+
+                for (let v = 0; v < 6; v++) {
+                    col[p + v*3    ] = mr;
+                    col[p + v*3 + 1] = mg;
+                    col[p + v*3 + 2] = mb;
+                }
+                slot++;
+            }
+        }
+
+        // Zero out unused slots so leftover geometry from a previous denser
+        // build doesn't smear across the screen.
+        for (let s = slot; s < WIND_ARROW_MAX; s++) {
+            const p = s * WIND_ARROW_VERTS_EACH * 3;
+            for (let v = 0; v < WIND_ARROW_VERTS_EACH * 3; v++) {
+                pos[p + v] = 0;
+                col[p + v] = 0;
+            }
+        }
+
+        this._lastSlotCount = slot;
+        // Strength is baked into vertex colours on a rebuild — reset the
+        // material opacity in case _restripeStrength dragged it down on a
+        // previous frame inside the fade-in band.
+        this.mesh.material.opacity = 1;
+        this.mesh.geometry.attributes.position.needsUpdate = true;
+        this.mesh.geometry.attributes.color.needsUpdate    = true;
+        this.mesh.visible = true;
+    }
+
+    /**
+     * Cheap restripe of the colour buffer when only `strength` has changed
+     * (i.e. the camera is zooming through the fade-in band but not yet
+     * crossing a grid-cell boundary). Avoids redoing the lookup loop.
+     */
+    _restripeStrength(strength) {
+        const col = this._col;
+        const slot = this._lastSlotCount || 0;
+        if (slot === 0) return;
+        // Each slot has 6 verts already coloured; we know the per-slot RGB
+        // is uniform so we can rescale by strength / prevStrength. To avoid
+        // tracking prevStrength, just rebuild from speed using the cached
+        // shaft direction → too fiddly. Skip the restripe optimisation here:
+        // when only strength changes we live with it; the LineBasicMaterial
+        // doesn't expose an opacity multiplier we can tweak per frame
+        // independent of vertex colours, but the parent material's opacity
+        // does. Use that as the cheap path.
+        this.mesh.material.opacity = strength;
+        this.mesh.material.needsUpdate = false;   // opacity alone doesn't need it
+    }
+
+    /** Mirror of WindParticles._speedColor(). Kept inline to avoid a method
+     *  pointer chase inside the hot rebuild loop. */
+    _speedColor(s, out) {
+        const sc = Math.max(0, Math.min(1, s));
+        if (sc < 0.5) {
+            const t = sc / 0.5;
+            out[0] = 0.35 + 0.65 * t;
+            out[1] = 0.55 + 0.45 * t;
+            out[2] = 1.0;
+        } else {
+            const t = (sc - 0.5) / 0.5;
+            out[0] = 1.0;
+            out[1] = 1.0 - 0.72 * t;
+            out[2] = 1.0 - 0.05 * t;
+        }
+    }
+
+    /** Dot of (x,y,z) with the focus direction unit vector. > 0 = camera-facing. */
+    _dotFocus(x, y, z, fLat, fLon) {
+        const phi = fLat * DEG, lam = fLon * DEG;
+        const fx =  Math.cos(phi) * Math.cos(lam);
+        const fy =  Math.sin(phi);
+        const fz = -Math.cos(phi) * Math.sin(lam);
+        const r  = Math.hypot(x, y, z) || 1;
+        return (x * fx + y * fy + z * fz) / r;
+    }
+}
+
 const windParticles    = new WindParticles(earthMesh, 6000);
+const windArrows       = new WindArrows(earthMesh, (lat, lon, out) =>
+    windParticles._lookupWind(lat, lon, out));
 const solarWindParticles = new SolarWindParticles(scene, 3000, SUN_EQ);
 
 // ── Wind-scale legend ──────────────────────────────────────────────────
@@ -5773,8 +6123,19 @@ function animate() {
         tipEl.classList.remove('show');
     }
 
-    // ── Wind particle advection (tropospheric weather)
-    windParticles.update(dt);
+    // ── Wind particle advection (tropospheric weather). Camera + parent
+    // are passed so the LOD path can derive sub-camera lat/lon and zoom01.
+    windParticles.update(dt, camera, earthMesh);
+
+    // ── Adaptive wind-direction arrows (visible only at close zoom). Reads
+    // focus state straight from the particle system so the two layers stay
+    // perfectly co-aligned without re-deriving the camera transform here.
+    windArrows.update(
+        windParticles.zoom01,
+        windParticles.focusLat,
+        windParticles.focusLon,
+        windParticles.windBuf != null,
+    );
 
     // ── Solar wind particle stream (interplanetary → magnetopause)
     solarWindParticles.tick(dt, earthU.u_sun_dir.value);
