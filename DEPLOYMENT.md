@@ -76,6 +76,9 @@ supabase-plan-lockdown-migration.sql      # blocks self-grant of paid plans (CRI
 
 # Educator wedge (April 2026)
 supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_events table
+
+# Linter follow-up (April 2026)
+supabase-analytics-views-rls-fix.sql      # security_invoker on analytics_daily / user_analytics
 ```
 
 > **Prerequisites for `supabase-class-seats-migration.sql`** — the migration
