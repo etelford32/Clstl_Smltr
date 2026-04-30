@@ -892,6 +892,56 @@ input[type=range]::-moz-range-thumb {
         </div>
 
         <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Substorm injection · animation</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:10px">
+                Walk through the canonical magnetospheric substorm:
+                <strong>growth</strong> (oval drifts equatorward, tail
+                lobes inflate) → <strong>expansion</strong> (onset arc
+                breakup at ~22 MLT, westward traveling surge, poleward
+                bulge, bursty bulk flows from the tail) →
+                <strong>recovery</strong>. Auto-fires when the
+                substorm-index proxy crosses 0.6.
+            </p>
+            <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+                <button id="ua-substorm-trigger" type="button" class="ua-chip ua-chip--live"
+                        title="Force-trigger a demo substorm (~30 s end-to-end)">
+                    ⚡ Trigger substorm
+                </button>
+                <button id="ua-substorm-reset" type="button" class="ua-chip"
+                        title="Force-end any active substorm">
+                    ⏹ Reset
+                </button>
+                <label class="ua-chip" style="cursor:pointer"
+                       title="Compressed timing for demo (~30s end-to-end) vs literal real-time minutes">
+                    <input type="checkbox" id="ua-substorm-realtime"
+                           style="vertical-align:middle;margin-right:5px;accent-color:#0cc">
+                    realtime
+                </label>
+                <label class="ua-chip" style="cursor:pointer"
+                       title="Auto-fire when cumulative southward-Bz drive crosses 0.6">
+                    <input type="checkbox" id="ua-substorm-auto" checked
+                           style="vertical-align:middle;margin-right:5px;accent-color:#0cc">
+                    auto
+                </label>
+            </div>
+            <div id="ua-substorm-state" style="font-size:.74rem;font-family:monospace;color:#cde">
+                <div style="color:#9ab">phase</div>
+                <div id="ua-sub-phase-bar" style="position:relative;height:16px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:4px;margin:3px 0 8px;overflow:hidden">
+                    <div id="ua-sub-phase-fill" style="height:100%;width:0;background:linear-gradient(90deg,#0cc,#fc6,#f7c);transition:width .15s"></div>
+                    <div id="ua-sub-phase-label" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.66rem;font-weight:700;letter-spacing:.06em;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7)">IDLE</div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px">
+                    <div style="color:#9ab">onset MLT</div>      <div id="ua-sub-onset-mlt"  style="color:#fff">—</div>
+                    <div style="color:#9ab">WTS head MLT</div>   <div id="ua-sub-wts"         style="color:#f8a">—</div>
+                    <div style="color:#9ab">bulge mag</div>      <div id="ua-sub-bulge"       style="color:#fc6">—</div>
+                    <div style="color:#9ab">oval shift</div>     <div id="ua-sub-shift"       style="color:#9cf">—</div>
+                    <div style="color:#9ab">BBF activity</div>   <div id="ua-sub-bbf"         style="color:#fe8">—</div>
+                    <div style="color:#9ab">AE proxy</div>       <div id="ua-sub-ae"          style="color:#0fc">— nT</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ua-panel" style="margin-bottom:14px;">
             <h2>Magnetosphere state · live</h2>
             <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
                 Operator-grade headlines computed from the current
@@ -1133,6 +1183,71 @@ input[type=range]::-moz-range-thumb {
         const s = window.__ua?.globe?._cascade?.getState?.();
         if (s) renderMagState(s);
     }, 200);
+
+    /* ─── Substorm panel + controls ─────────────────────────────────────
+       Wires the trigger / reset / mode-toggle buttons to the globe's
+       substorm controller, and renders the live state from the
+       'ua-substorm-tick' window event the per-frame loop dispatches.
+       Phase bar fills 0..1 within the active phase; colour cycles
+       cyan (growth) → gold (expansion) → magenta (recovery) via the
+       gradient + a phase-aware label.  */
+    const subPhaseFill  = document.getElementById('ua-sub-phase-fill');
+    const subPhaseLabel = document.getElementById('ua-sub-phase-label');
+    const subOnsetMlt   = document.getElementById('ua-sub-onset-mlt');
+    const subWts        = document.getElementById('ua-sub-wts');
+    const subBulge      = document.getElementById('ua-sub-bulge');
+    const subShift      = document.getElementById('ua-sub-shift');
+    const subBbf        = document.getElementById('ua-sub-bbf');
+    const subAe         = document.getElementById('ua-sub-ae');
+    function renderSubstorm(t) {
+        if (!t || !subPhaseFill) return;
+        const phase = t.phase || 'idle';
+        const prog  = Math.max(0, Math.min(1, t.progress || 0));
+        subPhaseFill.style.width = (phase === 'idle' ? 0 : prog * 100) + '%';
+        const labelMap = {
+            idle:      'IDLE',
+            growth:    'GROWTH · flux loading',
+            expansion: 'EXPANSION · onset + WTS',
+            recovery:  'RECOVERY · ring-current decay',
+        };
+        subPhaseLabel.textContent = labelMap[phase] || phase.toUpperCase();
+        // Phase-tinted bar background — accent the active phase by
+        // shifting the colour gradient origin.
+        const bgMap = {
+            idle:      'rgba(255,255,255,.04)',
+            growth:    'linear-gradient(90deg, rgba(0,200,200,.18), rgba(0,200,200,.04))',
+            expansion: 'linear-gradient(90deg, rgba(255,200,90,.25), rgba(255,90,140,.10))',
+            recovery:  'linear-gradient(90deg, rgba(180,90,255,.20), rgba(60,30,80,.05))',
+        };
+        subPhaseFill.parentElement.style.background = bgMap[phase] || bgMap.idle;
+        const fmtMlt = v => Number.isFinite(v) ? v.toFixed(1) : '—';
+        subOnsetMlt.textContent = fmtMlt(t.onsetMlt);
+        subWts.textContent      = Number.isFinite(t.wtsMlt) ? t.wtsMlt.toFixed(1) : '—';
+        subBulge.textContent    = (t.bulgeMag || 0).toFixed(2);
+        subShift.textContent    = (t.ovalShiftDeg || 0).toFixed(1) + '°';
+        subBbf.textContent      = (t.bbfActivity || 0).toFixed(2);
+        subAe.textContent       = (t.aeProxy || 0).toFixed(0) + ' nT';
+    }
+    window.addEventListener('ua-substorm-tick', e => renderSubstorm(e.detail));
+
+    document.getElementById('ua-substorm-trigger')?.addEventListener('click', () => {
+        const ok = window.__ua?.globe?.triggerSubstorm?.();
+        if (!ok) {
+            // Already running — flash the label so the user knows.
+            const orig = subPhaseLabel.textContent;
+            subPhaseLabel.textContent = 'already in progress';
+            setTimeout(() => { subPhaseLabel.textContent = orig; }, 900);
+        }
+    });
+    document.getElementById('ua-substorm-reset')?.addEventListener('click', () => {
+        window.__ua?.globe?.resetSubstorm?.();
+    });
+    document.getElementById('ua-substorm-realtime')?.addEventListener('change', (e) => {
+        window.__ua?.globe?.setSubstormMode?.(e.target.checked ? 'realtime' : 'demo');
+    });
+    document.getElementById('ua-substorm-auto')?.addEventListener('change', (e) => {
+        window.__ua?.globe?.setSubstormAuto?.(e.target.checked);
+    });
 </script>
 
 </body>

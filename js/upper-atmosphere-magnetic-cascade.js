@@ -48,6 +48,9 @@ import {
     auroralOvalProfile, cuspLatitude, lShellRegime,
     magnetosphericState, magLatMLTToUnit,
 } from './upper-atmosphere-aurora-physics.js';
+import {
+    BBF_SOURCE_R, BBF_TARGET_R, SubstormController,
+} from './upper-atmosphere-substorm.js';
 
 const R_EARTH_KM = 6371;
 const DEG = Math.PI / 180;
@@ -239,11 +242,31 @@ export class MagneticCascade {
         this._facGroup.name = 'birkeland-currents';
         this._magGroup.add(this._facGroup);
 
+        // Substorm overlays — onset arc + BBF arrows. Hidden when
+        // substorm phase is 'idle'. Mounted in their own subgroup so
+        // visibility toggles cheaply.
+        this._substormGroup = new THREE.Group();
+        this._substormGroup.name = 'substorm';
+        this._substormGroup.visible = false;
+        this._magGroup.add(this._substormGroup);
+
+        // Latest substorm tick — populated by setSubstormState. Cached
+        // here so _refreshAuroralOval / _refreshFACRings can include
+        // the substorm-driven distortions when they're called from
+        // the unrelated Kp / Pdyn paths.
+        this._subTick = {
+            phase: 'idle', progress: 0,
+            onsetMlt: 22.5, onsetLatDeg: 65,
+            wtsMlt: NaN, bulgeMag: 0, ovalShiftDeg: 0,
+            bbfActivity: 0, aeProxy: 50,
+        };
+
         this._buildFieldLines();
         this._buildAuroralOval();
         this._buildPolarCusps();
         this._buildMLTMarkers();
         this._buildFACRings();
+        this._buildSubstormOverlays();
 
         parent.add(this.group);
     }
@@ -336,6 +359,14 @@ export class MagneticCascade {
             uniforms: {
                 uTime:      { value: 0 },
                 uIntensity: { value: 0.4 },
+                // ── Substorm uniforms ─────────────────────────────────
+                // 0 idle · 1 growth · 2 expansion · 3 recovery
+                uSubPhase:    { value: 0 },
+                uSubProgress: { value: 0 },
+                uOnsetMlt:    { value: 22.5 },
+                // WTS head MLT — < 0 means disabled (only valid in expansion)
+                uWtsMlt:      { value: -1 },
+                uBulgeMag:    { value: 0 },
             },
             vertexShader: /* glsl */`
                 attribute float aMlt;       // 0..24
@@ -352,27 +383,77 @@ export class MagneticCascade {
                 precision highp float;
                 uniform float uTime;
                 uniform float uIntensity;
+                uniform float uSubPhase;
+                uniform float uSubProgress;
+                uniform float uOnsetMlt;
+                uniform float uWtsMlt;
+                uniform float uBulgeMag;
                 varying float vMlt;
                 varying float vBand;
+
+                // Wrap-around angular distance (in MLT hours) between
+                // two MLT values — handles the 24/0 seam.
+                float mltDist(float a, float b) {
+                    float d = abs(a - b);
+                    return min(d, 24.0 - d);
+                }
+
                 void main() {
-                    // Discrete-aurora curtain texture: high-frequency
-                    // azimuthal stripes drifting westward (negative MLT
-                    // direction in the auroral electrojet).
                     float curtain = 0.5 + 0.5 * sin(vMlt * 18.0 - uTime * 1.3);
                     curtain = pow(curtain, 4.0);
-                    // Diffuse-aurora background — broad envelope across
-                    // the band, brighter on the nightside (auroral
-                    // electrojet midnight enhancement).
-                    float mltRad = (vMlt - 12.0) * 0.2618;   // π/12
+
+                    // Diffuse-aurora background.
+                    float mltRad = (vMlt - 12.0) * 0.2618;
                     float midnightBoost = 0.7 - 0.35 * cos(mltRad);
-                    // Edge palette: equatorward edge red (low-energy
-                    // sub-auroral red arcs), poleward edge green
-                    // (high-energy 557.7 nm OI emission).
+
+                    // Onset arc: a sharp localised brightening at
+                    // |vMlt − uOnsetMlt| < ~1 hr during growth +
+                    // expansion phases. Brightens through growth
+                    // (pre-onset arc), explodes at expansion start,
+                    // then decays.
+                    float dOns  = mltDist(vMlt, uOnsetMlt);
+                    float onsetEnv = exp(-dOns * dOns * 1.6);   // 1-hr σ
+                    float onsetW = 0.0;
+                    if (uSubPhase > 0.5 && uSubPhase < 1.5) {
+                        // Growth: gentle ramp.
+                        onsetW = 0.20 * uSubProgress;
+                    } else if (uSubPhase > 1.5 && uSubPhase < 2.5) {
+                        // Expansion: peak then exponential decay.
+                        float earlyPeak = exp(-pow(uSubProgress - 0.05, 2.0) / 0.005);
+                        onsetW = 0.30 + 1.2 * earlyPeak;
+                    } else if (uSubPhase > 2.5) {
+                        onsetW = 0.20 * (1.0 - uSubProgress);
+                    }
+                    float onset = onsetEnv * onsetW;
+
+                    // WTS pulse: bright moving spot at uWtsMlt during
+                    // expansion phase. Sharp Gaussian (~0.3 hr σ) so it
+                    // reads as a discrete travelling surge, not a
+                    // smear.
+                    float wts = 0.0;
+                    if (uWtsMlt >= 0.0) {
+                        float dW = mltDist(vMlt, uWtsMlt);
+                        wts = exp(-dW * dW / 0.18) * 1.6;
+                    }
+
+                    // Substorm bulge: poleward edge (vBand=1) brightens
+                    // sharply within ~3 MLT hr of onset during the
+                    // poleward leap. Equatorward edge dims slightly.
+                    float bulgeEnv = exp(-dOns * dOns * 0.20);     // 3-hr σ
+                    float bulgePw  = uBulgeMag * bulgeEnv * vBand * 0.9;
+                    float bulgeEq  = -uBulgeMag * bulgeEnv * (1.0 - vBand) * 0.15;
+
+                    // Edge palette: equatorward = red SAR-arc,
+                    // poleward = green 557.7 nm. Onset & WTS push
+                    // toward white-hot (mixed-energy precipitation).
                     vec3 cEq = vec3(1.0, 0.32, 0.55);
                     vec3 cPw = vec3(0.45, 1.0, 0.65);
                     vec3 col = mix(cEq, cPw, vBand);
-                    float a = uIntensity * (0.18 + 0.55 * curtain) * midnightBoost;
-                    gl_FragColor = vec4(col, clamp(a, 0.0, 0.85));
+                    col = mix(col, vec3(1.0, 0.95, 0.80), clamp(onset + wts, 0.0, 1.0) * 0.8);
+
+                    float a = uIntensity * (0.18 + 0.55 * curtain) * midnightBoost
+                            + onset + wts + bulgePw + bulgeEq;
+                    gl_FragColor = vec4(col, clamp(a, 0.0, 0.95));
                 }
             `,
             transparent:    true,
@@ -415,15 +496,54 @@ export class MagneticCascade {
     }
 
     /**
-     * Rewrite the auroral-oval band positions for the new Kp. Cheap;
-     * 4 loops × 64 vertices.
+     * Rewrite the auroral-oval band positions for the current Kp +
+     * substorm state.
+     *
+     * Substorm modifications:
+     *   • Equatorward shift (`ovalShiftDeg`, both edges): the whole
+     *     oval slides toward lower latitudes during growth + early
+     *     expansion. Both edges shift by the same amount (rigid body).
+     *   • Poleward bulge: during expansion the poleward edge near the
+     *     onset MLT is pushed *poleward* by up to ~10° (the auroral
+     *     leap). The equatorward edge near onset shifts a smaller
+     *     amount equatorward — net effect: the oval doubles in width
+     *     locally around onset, the classical "auroral bulge".
+     *
+     * Cheap — 4 loops × 64 vertices, in-place writes to existing
+     * BufferAttributes.
+     *
+     * @param {number} kp                    geomagnetic Kp
+     * @param {object} [sub]                 SubstormController tick
+     * @param {number} [sub.ovalShiftDeg=0]  equatorward shift (deg)
+     * @param {number} [sub.bulgeMag=0]      poleward leap magnitude 0..1
+     * @param {number} [sub.onsetMlt=22.5]   centre of the local bulge
      */
-    _refreshAuroralOval(kp) {
+    _refreshAuroralOval(kp, sub = {}) {
         const profile = auroralOvalProfile(kp, 64);
+        const shiftDeg  = Number.isFinite(sub.ovalShiftDeg) ? sub.ovalShiftDeg : 0;
+        const bulgeMag  = Number.isFinite(sub.bulgeMag)     ? sub.bulgeMag     : 0;
+        const onsetMlt  = Number.isFinite(sub.onsetMlt)     ? sub.onsetMlt     : 22.5;
+
         for (const entry of this._ovalLoops) {
             const arr = entry.positions;
             for (let i = 0; i < entry.mlts.length; i++) {
-                const lat = entry.band === 0 ? profile.eqLat[i] : profile.pwLat[i];
+                let lat = entry.band === 0 ? profile.eqLat[i] : profile.pwLat[i];
+
+                // Rigid equatorward shift (both edges).
+                lat -= shiftDeg;
+
+                // Local substorm bulge near onset MLT. ±3-hr Gaussian
+                // envelope centred on onset; poleward edge gets pushed
+                // poleward by up to 10°, equatorward edge nudged
+                // equatorward by ~2° (the bulge widens both ways but
+                // the poleward face dominates).
+                if (bulgeMag > 0) {
+                    const d = _mltDist(entry.mlts[i], onsetMlt);
+                    const env = Math.exp(-(d * d) / 4.5);   // 3-hr σ
+                    if (entry.band === 1) lat += 10 * bulgeMag * env;   // poleward edge → poleward
+                    else                  lat -=  2 * bulgeMag * env;   // equatorward edge → equatorward
+                }
+
                 const u = magLatMLTToUnit(entry.hemi * lat, profile.mltHours[i]);
                 arr[i * 3 + 0] = u.x * entry.r;
                 arr[i * 3 + 1] = u.y * entry.r;
@@ -594,13 +714,28 @@ export class MagneticCascade {
      */
     _refreshFACRings(kp, facMA) {
         const profile = auroralOvalProfile(kp, this._facRings[0].N);
+        const sub = this._subTick;
+        const wedgeMag = sub?.bulgeMag || 0;       // 0..1, peak during expansion
+        const onsetMlt = sub?.onsetMlt ?? 22.5;
+        const shiftDeg = sub?.ovalShiftDeg || 0;
         for (const entry of this._facRings) {
             for (let i = 0; i < entry.N; i++) {
                 const mlt = profile.mltHours[i];
                 // Lat: R1 = poleward edge + 1°, R2 = equatorward edge − 1°
-                const lat = entry.region === 1
+                let lat = entry.region === 1
                     ? profile.pwLat[i] + 1
                     : profile.eqLat[i] - 1;
+                // Track the substorm-driven oval position so the FAC
+                // rings stay attached to the oval as it shifts /
+                // bulges. Same envelope as the oval edge motion.
+                lat -= shiftDeg;
+                if (wedgeMag > 0) {
+                    const d = _mltDist(mlt, onsetMlt);
+                    const env = Math.exp(-(d * d) / 4.5);
+                    if (entry.region === 1) lat += 10 * wedgeMag * env;
+                    else                    lat -=  2 * wedgeMag * env;
+                }
+
                 const u = magLatMLTToUnit(entry.hemi * lat, mlt);
                 entry.positions[i * 3 + 0] = u.x * entry.r;
                 entry.positions[i * 3 + 1] = u.y * entry.r;
@@ -611,16 +746,278 @@ export class MagneticCascade {
                 // sin(MLT - 06) so transitions are continuous.
                 const dirPhase = Math.sin(((mlt - 6) / 24) * 2 * Math.PI);
                 const sign = entry.region === 1 ? dirPhase : -dirPhase;
-                // sign ∈ [-1, 1]: -1 → blue (down), +1 → red (up)
                 const t = (sign + 1) * 0.5;
-                // Mix blue → red, brighten with FAC magnitude.
-                const intensity = Math.min(1, 0.35 + facMA * 0.25);
-                entry.colors[i * 3 + 0] = (0.30 + 0.65 * t) * intensity;        // R
-                entry.colors[i * 3 + 1] = 0.20 * intensity;                      // G
-                entry.colors[i * 3 + 2] = (0.95 - 0.65 * t) * intensity;        // B
+                let intensity = Math.min(1, 0.35 + facMA * 0.25);
+
+                // Substorm current wedge: sharp local boost on R1
+                // ring around the onset MLT during expansion. The
+                // wedge is a strong westward electrojet at the onset
+                // closure of the field-aligned currents — visually
+                // we just brighten the R1 ring there.
+                if (wedgeMag > 0 && entry.region === 1) {
+                    const dW = _mltDist(mlt, onsetMlt);
+                    const wedgeBoost = wedgeMag * Math.exp(-(dW * dW) / 1.5);
+                    intensity = Math.min(1.4, intensity + wedgeBoost * 0.9);
+                }
+
+                entry.colors[i * 3 + 0] = (0.30 + 0.65 * t) * intensity;
+                entry.colors[i * 3 + 1] = 0.20 * intensity;
+                entry.colors[i * 3 + 2] = (0.95 - 0.65 * t) * intensity;
             }
             entry.loop.geometry.attributes.position.needsUpdate = true;
             entry.loop.geometry.attributes.color.needsUpdate    = true;
+        }
+    }
+
+    // ── Substorm overlays: onset arc + BBF arrows ─────────────────────────────
+    //
+    // The onset arc is a separate, brighter aurora segment localised
+    // at the onset MLT inside the auroral oval. It's visible during
+    // growth (faint pre-onset arc) → expansion (peak) → recovery
+    // (decaying). Drawn as a single 32-segment polyline that we
+    // re-position in place each frame.
+    //
+    // BBFs (Bursty Bulk Flows) are earthward plasma jets in the
+    // magnetotail, modelled as ~16 instanced cone arrows pointing
+    // from BBF_SOURCE_R toward Earth, only visible during expansion
+    // and early recovery. Per-instance opacity is modulated so the
+    // arrows pulse — mimicking the "burst" character of real BBFs.
+
+    _buildSubstormOverlays() {
+        // ── Onset arc ──────────────────────────────────────────────────
+        const altKm = 110;
+        const r = 1 + altKm / R_EARTH_KM;
+        const N_ARC = 32;
+        const arcPos = new Float32Array(N_ARC * 3);
+        const arcGeom = new THREE.BufferGeometry();
+        arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+        // Single bright magenta material — additive for punch.
+        this._onsetArcMat = new THREE.LineBasicMaterial({
+            color:       0xff60d0,
+            transparent: true,
+            opacity:     0,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+            linewidth:   2,
+        });
+        this._onsetArc = {
+            line: new THREE.Line(arcGeom, this._onsetArcMat),
+            positions: arcPos,
+            n: N_ARC,
+            r,
+        };
+        this._onsetArc.line.frustumCulled = false;
+        this._onsetArc.line.userData = {
+            kind:    'substorm-onset-arc',
+            tooltip: 'Substorm onset arc — bright auroral feature near 22 MLT '
+                   + 'that brightens during growth and breaks up at expansion onset. '
+                   + 'Triggers the auroral bulge + westward traveling surge.',
+        };
+        this._substormGroup.add(this._onsetArc.line);
+
+        // ── BBF arrows ─────────────────────────────────────────────────
+        // Cone geometry pointing along +Y; we orient each instance via
+        // a quaternion so the arrow points from its source toward
+        // Earth. 16 instances scattered in MLT around the magnetotail
+        // axis, with random per-instance phase so the burst pattern
+        // doesn't synchronize.
+        const N_BBF = 16;
+        const coneH = 0.45, coneR = 0.10;
+        const coneGeom = new THREE.ConeGeometry(coneR, coneH, 6, 1, false);
+        coneGeom.translate(0, coneH / 2, 0);
+        const bbfMat = new THREE.MeshBasicMaterial({
+            color:       0xffe060,
+            transparent: true,
+            opacity:     0.0,
+            depthWrite:  false,
+            blending:    THREE.AdditiveBlending,
+        });
+        const bbf = new THREE.InstancedMesh(coneGeom, bbfMat, N_BBF);
+        bbf.frustumCulled = false;
+        bbf.userData = {
+            kind:    'bursty-bulk-flow',
+            tooltip: 'Bursty Bulk Flows — earthward plasma jets from the near-Earth '
+                   + 'neutral line (~12 R⊕ in this view) carrying 10–100 keV '
+                   + 'particles to the inner magnetosphere. Drives ring-current '
+                   + 'injection during the expansion phase.',
+        };
+        // Per-instance phase + random MLT (azimuthal scatter around
+        // antisunward axis). Build once; the per-frame update only
+        // touches matrix scale + opacity.
+        this._bbfArrows = {
+            mesh:      bbf,
+            mat:       bbfMat,
+            n:         N_BBF,
+            phaseOff:  new Float32Array(N_BBF),
+            posCache:  new Array(N_BBF),     // {sourceVec, dirVec} per arrow
+        };
+        const _M = new THREE.Matrix4();
+        const _Q = new THREE.Quaternion();
+        const _U = new THREE.Vector3(0, 1, 0);
+        const _S = new THREE.Vector3(1, 1, 1);
+        for (let i = 0; i < N_BBF; i++) {
+            this._bbfArrows.phaseOff[i] = Math.random();
+            // Source position: scatter around the antisunward (-X)
+            // axis at BBF_SOURCE_R, with ±2 R⊕ jitter in Y (lobe
+            // distinction) and ±3 R⊕ in Z (azimuth around the tail).
+            const sourceX = -BBF_SOURCE_R + (Math.random() - 0.5) * 1.5;
+            const sourceY = (Math.random() - 0.5) * 4;
+            const sourceZ = (Math.random() - 0.5) * 6;
+            // Target: roughly Earthward, at BBF_TARGET_R, with the
+            // same Y/Z to give each arrow a clean "toward Earth"
+            // direction without bunching.
+            const targetX = -BBF_TARGET_R + (Math.random() - 0.5) * 0.5;
+            const targetY = sourceY * 0.4;
+            const targetZ = sourceZ * 0.4;
+            const sourceVec = new THREE.Vector3(sourceX, sourceY, sourceZ);
+            const dirVec = new THREE.Vector3(
+                targetX - sourceX, targetY - sourceY, targetZ - sourceZ
+            ).normalize();
+            this._bbfArrows.posCache[i] = { sourceVec, dirVec };
+            _Q.setFromUnitVectors(_U, dirVec);
+            _M.compose(sourceVec, _Q, _S);
+            bbf.setMatrixAt(i, _M);
+        }
+        bbf.instanceMatrix.needsUpdate = true;
+        this._substormGroup.add(bbf);
+    }
+
+    /**
+     * Per-frame BBF animation: pulse opacity + scale on each arrow
+     * with an offset phase so the cluster reads as a bursty cluster
+     * of injections, not a synchronized blink.
+     *
+     * Cheap: 16 instances × one Matrix4 compose, called only when
+     * substorm phase != idle.
+     */
+    _animateBBF(time, activity) {
+        if (!this._bbfArrows) return;
+        const { mesh, mat, n, phaseOff, posCache } = this._bbfArrows;
+        if (activity <= 0.002) {
+            mat.opacity = 0;
+            return;
+        }
+        mat.opacity = Math.min(0.85, activity);
+        const _M = new THREE.Matrix4();
+        const _Q = new THREE.Quaternion();
+        const _U = new THREE.Vector3(0, 1, 0);
+        const _S = new THREE.Vector3();
+        const _P = new THREE.Vector3();
+        for (let i = 0; i < n; i++) {
+            // Each arrow pulses with period ~2 s plus its phase
+            // offset. The pulse contracts the arrow toward Earth (its
+            // travel distance per burst) so the visual reads as a
+            // jet, not a static cone.
+            const ph = phaseOff[i];
+            const t  = (time * 0.7 + ph) % 1.0;
+            const len = 0.4 + 0.6 * Math.sin(Math.PI * t);   // 0.4..1.0
+            const cache = posCache[i];
+            // Inch the arrow Earthward by t × 1 R⊕ so the cluster
+            // appears to flow into the inner magnetosphere.
+            const travel = t * 1.0;
+            _P.copy(cache.sourceVec).addScaledVector(cache.dirVec, travel);
+            _Q.setFromUnitVectors(_U, cache.dirVec);
+            _S.set(0.6 + len * 0.4, len, 0.6 + len * 0.4);
+            _M.compose(_P, _Q, _S);
+            mesh.setMatrixAt(i, _M);
+        }
+        mesh.instanceMatrix.needsUpdate = true;
+    }
+
+    /**
+     * Position + brighten the onset arc according to substorm state.
+     * The arc is anchored at the onset MLT and spans ±1.2 hr in MLT
+     * (about the typical scale of a discrete onset arc). Latitude
+     * tracks the equatorward edge of the oval.
+     *
+     * Brightness:
+     *   • idle      : 0
+     *   • growth    : ramps 0 → 0.4 (the pre-onset quiet arc)
+     *   • expansion : explodes 1.0 in first 5% of phase, decays
+     *   • recovery  : decays from 0.3 to 0
+     */
+    _refreshOnsetArc(kp, sub) {
+        if (!this._onsetArc) return;
+        const phase = sub?.phase || 'idle';
+        let opacity = 0;
+        if (phase === 'growth')        opacity = 0.10 + 0.30 * sub.progress;
+        else if (phase === 'expansion'){
+            const peak = Math.exp(-((sub.progress - 0.05) ** 2) / 0.005);
+            opacity = Math.min(1.0, 0.30 + 1.1 * peak);
+        }
+        else if (phase === 'recovery') opacity = 0.30 * (1 - sub.progress);
+        this._onsetArcMat.opacity = opacity;
+        this._onsetArc.line.visible = opacity > 0.005;
+        if (opacity <= 0.005) return;
+
+        // Sample the equatorward-edge oval lat at onset MLT — that's
+        // the latitude line our discrete arc rides. During expansion
+        // we lift it slightly poleward (the breakup phase brightens
+        // an arc *just inside* the bulge).
+        const profile = auroralOvalProfile(kp, 64);
+        const onsetMlt = sub.onsetMlt;
+        // Find the nearest MLT sample. profile.mltHours is monotone
+        // 0..24 in steps of 24/64 = 0.375.
+        const idx = Math.round(onsetMlt / (24 / 64)) % 64;
+        let baseLat = profile.eqLat[idx] - (sub.ovalShiftDeg || 0);
+        if (phase === 'expansion') {
+            const earlyPeak = Math.exp(-((sub.progress - 0.05) ** 2) / 0.005);
+            baseLat += 4 * earlyPeak;       // arc lifts a few ° poleward at onset
+        }
+
+        // Sweep the arc across ±1.2 MLT hr around onset.
+        const N = this._onsetArc.n;
+        const arr = this._onsetArc.positions;
+        const r = this._onsetArc.r;
+        // Render the arc in the *northern* hemisphere only — onset
+        // arcs are usually most visible in the data feed (DMSP, AE)
+        // there. (Southern shows up in mirrored Antarctic stations.)
+        const hemi = +1;
+        for (let i = 0; i < N; i++) {
+            const tParam = i / (N - 1);                       // 0..1
+            const dMlt = (tParam - 0.5) * 2.4;               // ±1.2 hr
+            const mlt = onsetMlt + dMlt;
+            // Slight latitude undulation along the arc — real onset
+            // arcs are wavy at ~2° amplitude (KH-type instability).
+            const wave = Math.sin(tParam * Math.PI * 4) * 0.4;
+            const u = magLatMLTToUnit(hemi * (baseLat + wave), mlt);
+            arr[i * 3 + 0] = u.x * r;
+            arr[i * 3 + 1] = u.y * r;
+            arr[i * 3 + 2] = u.z * r;
+        }
+        this._onsetArc.line.geometry.attributes.position.needsUpdate = true;
+    }
+
+    /**
+     * Push a SubstormController tick. Cheap; just stores + refreshes
+     * geometries that depend on substorm state. Called from the
+     * globe's per-frame loop.
+     *
+     * @param {object} sub  output of SubstormController.update()
+     * @param {number} kp   current Kp (so we can refresh oval against
+     *                      both Kp + sub state in one pass)
+     */
+    setSubstormState(sub, kp) {
+        this._subTick = sub || this._subTick;
+        const phase = this._subTick.phase || 'idle';
+        const isActive = phase !== 'idle';
+        this._substormGroup.visible = isActive;
+
+        // Shader uniforms for the oval — single uniform writes.
+        const u = this._ovalMat.uniforms;
+        u.uSubPhase.value    = _phaseToFloat(phase);
+        u.uSubProgress.value = this._subTick.progress || 0;
+        u.uOnsetMlt.value    = this._subTick.onsetMlt ?? 22.5;
+        u.uWtsMlt.value      = Number.isFinite(this._subTick.wtsMlt)
+            ? this._subTick.wtsMlt : -1;
+        u.uBulgeMag.value    = this._subTick.bulgeMag || 0;
+
+        // Oval position rebuild — equatorward shift + bulge.
+        if (Number.isFinite(kp)) {
+            this._refreshAuroralOval(kp, this._subTick);
+            const facMA = this._lastFacMA ?? 0.5;
+            this._refreshFACRings(kp, facMA);
+            this._refreshOnsetArc(kp, this._subTick);
         }
     }
 
@@ -690,16 +1087,23 @@ export class MagneticCascade {
 
         // Refresh research-grade objects.
         this._ovalMat && (this._ovalMat.uniforms.uIntensity.value = Math.min(1.0, 0.30 + stormNorm * 0.85 + 0.20 * reconnect));
-        this._refreshAuroralOval(kp);
+        this._refreshAuroralOval(kp, this._subTick);
         this._refreshPolarCusps(kp);
 
         // FAC magnitude — use solar-wind state when available, else
         // derive a proxy from Ap so storm presets still light up the
-        // current rings.
+        // current rings. Cached so substorm-state refreshes can reuse
+        // the same magnitude without re-deriving.
         const facMA = (Number.isFinite(speed) && Number.isFinite(density))
             ? _facFromSW(speed, bz ?? 0, density)
             : (0.10 + 1.0 * stormNorm);
+        this._lastFacMA = facMA;
         this._refreshFACRings(kp, facMA);
+        this._refreshOnsetArc(kp, this._subTick);
+
+        // Cache Kp for the substorm refresh path (which also
+        // re-renders the oval + FAC rings + onset arc).
+        this._lastKpCached = kp;
 
         // Headline operator state — broadcast for the UI panel.
         const swForState = {
@@ -747,9 +1151,22 @@ export class MagneticCascade {
     /** Last computed state payload — useful for unit tests / UI seeding. */
     getState() { return this._lastPayload || null; }
 
-    /** Per-frame: advance the dash phase. Cheap (one uniform write). */
+    /**
+     * Per-frame: advance the dash phase + animate substorm overlays.
+     *
+     * Cheap budget:
+     *   • 1 uniform write to the field-line shader (uTime)
+     *   • 1 uniform write to the oval shader (uTime)
+     *   • If substorm is active: 16 InstancedMesh matrix writes for
+     *     BBF arrows. Skipped entirely when phase=idle.
+     */
     update(elapsedSec) {
         this._mat.uniforms.uTime.value = elapsedSec;
+        if (this._ovalMat) this._ovalMat.uniforms.uTime.value = elapsedSec;
+        // BBF animation only runs while substorm phase is active.
+        if (this._subTick && this._subTick.phase !== 'idle') {
+            this._animateBBF(elapsedSec, this._subTick.bbfActivity || 0);
+        }
     }
 
     setVisible(v) { this.group.visible = !!v; }
@@ -794,6 +1211,32 @@ export class MagneticCascade {
  * as in solar-wind-magnetosphere.js, kept local so the cascade has no
  * cross-dependency on that module.
  */
+/**
+ * Wrap-around angular distance between two MLT values in hours.
+ * Both inputs are normalised to [0, 24); returns the shorter
+ * arc on the 24-hour MLT circle.
+ */
+function _mltDist(a, b) {
+    const A = ((a % 24) + 24) % 24;
+    const B = ((b % 24) + 24) % 24;
+    const d = Math.abs(A - B);
+    return Math.min(d, 24 - d);
+}
+
+/**
+ * Map the substorm phase string to a float for shader uniforms.
+ * Kept as a discrete encoding (0/1/2/3) rather than a continuous
+ * progress so the fragment shader can hard-branch on phase.
+ */
+function _phaseToFloat(phase) {
+    switch (phase) {
+        case 'growth':    return 1;
+        case 'expansion': return 2;
+        case 'recovery':  return 3;
+        default:          return 0;   // 'idle'
+    }
+}
+
 function _facFromSW(v_sw, bz, n) {
     const vNorm = Math.pow(Math.max(200, v_sw) / 400, 0.72);
     const nNorm = Math.pow(Math.max(0.5, n), 0.23);
