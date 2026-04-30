@@ -17,7 +17,13 @@
  *       weather         — Weather satellites (GOES, JPSS, Meteosat)
  *       resource        — Earth resources (Landsat, Sentinel)
  *       science         — Science missions (Hubble, JWST, Chandra)
- *       debris          — Tracked debris (large catalog!)
+ *       debris          — Tracked debris from major fragmentation events.
+ *                         Composite of cosmos-1408-debris, fengyun-1c-debris,
+ *                         iridium-33-debris, cosmos-2251-debris (≈8 k objects).
+ *                         The monolithic CelesTrak SPECIAL=debris response
+ *                         (~9 MB) exceeds the edge cap, so we fan out per-event.
+ *       cosmos-1408-debris,  fengyun-1c-debris,
+ *       iridium-33-debris,   cosmos-2251-debris  — individual events
  *       last-30-days    — Recently launched
  *
  *   ?norad=<id>       Single satellite by NORAD catalog ID
@@ -49,7 +55,6 @@ const GROUP_MAP = {
     'weather':      'GROUP=weather',
     'resource':     'GROUP=resource',
     'science':      'GROUP=science',
-    'debris':       'SPECIAL=debris',
     'last-30-days': 'GROUP=last-30-days',
     'geo':          'GROUP=geo',
     'iridium':      'GROUP=iridium',
@@ -59,6 +64,28 @@ const GROUP_MAP = {
     'beidou':       'GROUP=beidou',
     'glonass':      'GROUP=glonass',
     'planet':       'GROUP=planet',
+    // Per-event debris groups (each is <2 MB; CelesTrak's monolithic
+    // SPECIAL=debris is ~9 MB and exceeds the edge response cap).
+    'cosmos-1408-debris': 'GROUP=cosmos-1408-debris',
+    'fengyun-1c-debris':  'GROUP=fengyun-1c-debris',
+    'iridium-33-debris':  'GROUP=iridium-33-debris',
+    'cosmos-2251-debris': 'GROUP=cosmos-2251-debris',
+};
+
+// ── Composite groups ─────────────────────────────────────────────────────────
+// `debris` is the union of the four major fragmentation events that the
+// 18 SDS catalog maintains as named groups. We fan out in parallel and
+// merge so the client gets a single response. Total ≈ 8 k objects, well
+// under the 4 MB edge limit because per-event groups are tighter than
+// SPECIAL=debris (which also includes paint flecks and unattributed
+// fragments we don't classify in the family taxonomy anyway).
+const COMPOSITE_GROUPS = {
+    'debris': [
+        'cosmos-1408-debris',
+        'fengyun-1c-debris',
+        'iridium-33-debris',
+        'cosmos-2251-debris',
+    ],
 };
 
 const RE = 6378.135;  // WGS-72 Earth radius (km)
@@ -148,6 +175,27 @@ function parseSingleTle(name, line1, line2) {
     };
 }
 
+/** Fetch one CelesTrak group, return raw TLE text. Throws on failure. */
+async function fetchGroupText(groupParam) {
+    const url = `${CELESTRAK_BASE}?${groupParam}&FORMAT=TLE`;
+    const res = await fetchWithTimeout(url, {
+        headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
+    });
+    if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status} (${groupParam})`);
+    const text = await res.text();
+    if (!text || text.trim().length === 0) {
+        throw new Error(`CelesTrak empty response (${groupParam})`);
+    }
+    // CelesTrak occasionally returns "No GP data found" as a 200 body when
+    // a group name has rolled over to a new designator. Treat that as a
+    // composable failure so the merged response still succeeds with the
+    // remaining groups.
+    if (/^no gp data found/i.test(text.trim())) {
+        throw new Error(`CelesTrak no-data (${groupParam})`);
+    }
+    return text;
+}
+
 export default async function handler(request) {
     const url = new URL(request.url);
     const group = url.searchParams.get('group') || 'stations';
@@ -155,41 +203,122 @@ export default async function handler(request) {
     const search = url.searchParams.get('search');
     const fmt = url.searchParams.get('format') || 'json';
 
-    let celestrakUrl;
-    if (norad) {
-        celestrakUrl = `${CELESTRAK_BASE}?CATNR=${norad}&FORMAT=TLE`;
-    } else if (search) {
-        celestrakUrl = `${CELESTRAK_BASE}?NAME=${encodeURIComponent(search)}&FORMAT=TLE`;
-    } else {
-        const groupParam = GROUP_MAP[group];
-        if (!groupParam) {
-            // 400 with a brief cache — bad group is a client bug, not an
-            // upstream problem, so no point hammering our own edge.
-            return jsonError('unknown_group', `Available: ${Object.keys(GROUP_MAP).join(', ')}`, {
-                status: 400, maxAge: 300,
+    // ── Single-shot lookups (NORAD or name search) ──────────────────────────
+    if (norad || search) {
+        const celestrakUrl = norad
+            ? `${CELESTRAK_BASE}?CATNR=${norad}&FORMAT=TLE`
+            : `${CELESTRAK_BASE}?NAME=${encodeURIComponent(search)}&FORMAT=TLE`;
+        let text;
+        try {
+            const res = await fetchWithTimeout(celestrakUrl, {
+                headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
+            });
+            if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
+            text = await res.text();
+        } catch (e) {
+            return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
+        }
+        if (!text || text.trim().length === 0) {
+            return jsonError('empty_response', 'CelesTrak returned no TLEs', { source: 'CelesTrak' });
+        }
+        if (fmt === 'tle') {
+            return new Response(text, {
+                status: 200,
+                headers: {
+                    'Content-Type':  'text/plain',
+                    'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=${CACHE_SWR}`,
+                    ...CORS_HEADERS,
+                },
             });
         }
-        celestrakUrl = `${CELESTRAK_BASE}?${groupParam}&FORMAT=TLE`;
+        const satellites = parseTleText(text);
+        return jsonOk({
+            source: 'CelesTrak',
+            group: norad ? `NORAD ${norad}` : `search:${search}`,
+            count: satellites.length,
+            fetched: new Date().toISOString(),
+            satellites,
+        }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+    }
+
+    // ── Composite groups (fan-out + merge) ──────────────────────────────────
+    if (COMPOSITE_GROUPS[group]) {
+        const subgroups = COMPOSITE_GROUPS[group];
+        const settled = await Promise.allSettled(
+            subgroups.map(sg => fetchGroupText(GROUP_MAP[sg]).then(text => ({ sg, text })))
+        );
+
+        const subResults = [];      // per-sub status for the response envelope
+        const tleChunks  = [];
+        for (let i = 0; i < settled.length; i++) {
+            const r = settled[i];
+            if (r.status === 'fulfilled') {
+                tleChunks.push(r.value.text);
+                subResults.push({ group: subgroups[i], status: 'ok' });
+            } else {
+                subResults.push({
+                    group: subgroups[i],
+                    status: 'error',
+                    error: r.reason?.message ?? 'unknown',
+                });
+            }
+        }
+
+        if (tleChunks.length === 0) {
+            // Every subgroup failed — return a 503 with the per-sub
+            // breakdown so the client can show useful diagnostics.
+            return jsonError('upstream_unavailable',
+                `All ${subgroups.length} subgroups failed`,
+                { source: 'CelesTrak', detail: subResults });
+        }
+
+        if (fmt === 'tle') {
+            return new Response(tleChunks.join('\n'), {
+                status: 200,
+                headers: {
+                    'Content-Type':  'text/plain',
+                    'Cache-Control': `public, s-maxage=${CACHE_TTL}, stale-while-revalidate=${CACHE_SWR}`,
+                    ...CORS_HEADERS,
+                },
+            });
+        }
+
+        // Parse + dedupe by NORAD ID. Per-event groups don't overlap in
+        // practice, but a defensive dedupe makes the count truthful if
+        // CelesTrak ever rolls fragments between groups.
+        const merged = new Map();
+        for (const text of tleChunks) {
+            for (const sat of parseTleText(text)) {
+                if (!merged.has(sat.norad_id)) merged.set(sat.norad_id, sat);
+            }
+        }
+
+        return jsonOk({
+            source: 'CelesTrak',
+            group,
+            composite: true,
+            subgroups: subResults,
+            count: merged.size,
+            fetched: new Date().toISOString(),
+            satellites: [...merged.values()],
+        }, { maxAge: CACHE_TTL, swr: CACHE_SWR });
+    }
+
+    // ── Plain group ─────────────────────────────────────────────────────────
+    const groupParam = GROUP_MAP[group];
+    if (!groupParam) {
+        return jsonError('unknown_group',
+            `Available: ${[...Object.keys(GROUP_MAP), ...Object.keys(COMPOSITE_GROUPS)].join(', ')}`,
+            { status: 400, maxAge: 300 });
     }
 
     let text;
     try {
-        const res = await fetchWithTimeout(celestrakUrl, {
-            headers: { 'User-Agent': 'ParkerPhysics/1.0 (satellite-tracker)' },
-        });
-        if (!res.ok) throw new Error(`CelesTrak HTTP ${res.status}`);
-        text = await res.text();
+        text = await fetchGroupText(groupParam);
     } catch (e) {
         return jsonError('upstream_unavailable', e.message, { source: 'CelesTrak' });
     }
 
-    if (!text || text.trim().length === 0) {
-        return jsonError('empty_response', 'CelesTrak returned no TLEs', { source: 'CelesTrak' });
-    }
-
-    // Raw TLE format requested — return text/plain with the same cache
-    // policy. Can't use jsonOk because the caller wants the original TLE
-    // text, not a JSON wrapper.
     if (fmt === 'tle') {
         return new Response(text, {
             status: 200,
@@ -201,12 +330,10 @@ export default async function handler(request) {
         });
     }
 
-    // Parse to JSON
     const satellites = parseTleText(text);
-
     return jsonOk({
         source: 'CelesTrak',
-        group: norad ? `NORAD ${norad}` : group,
+        group,
         count: satellites.length,
         fetched: new Date().toISOString(),
         satellites,

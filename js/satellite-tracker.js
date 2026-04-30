@@ -457,9 +457,13 @@ export class SatelliteTracker {
         if (this._groups.has(group)) return this._groups.get(group).count;
         try {
             const res = await fetch(`/api/celestrak/tle?group=${group}`);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || data.error) {
+                const reason = data.error
+                    ? `${data.error}${data.detail ? `: ${data.detail}` : ''}`
+                    : `HTTP ${res.status}`;
+                throw new Error(reason);
+            }
 
             const tles = data.satellites ?? [];
             const added = this._addSatellites(tles, group);
@@ -467,8 +471,18 @@ export class SatelliteTracker {
                 visible: true,
                 count: added,
                 color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: null,
+                composite: data.composite ?? false,
+                subgroups: data.subgroups ?? null,
+                fetched: data.fetched ?? new Date().toISOString(),
             });
 
+            // Composite groups can succeed-with-partial. Keep that visible.
+            const partial = (data.subgroups ?? []).filter(s => s.status === 'error');
+            if (partial.length > 0) {
+                console.warn(`[SatTracker] ${group}: ${partial.length}/${data.subgroups.length} subgroups failed:`,
+                    partial.map(p => `${p.group} (${p.error})`).join(', '));
+            }
             console.info(`[SatTracker] +${added} satellites (${group}) — total: ${this._satellites.length}`);
 
             window.dispatchEvent(new CustomEvent('satellites-loaded', {
@@ -478,8 +492,36 @@ export class SatelliteTracker {
             return added;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load ${group}:`, err.message);
+            // Record the failure so the UI can render a "failed (retry)"
+            // state instead of an indeterminate "—". A subsequent
+            // loadGroup() call will short-circuit on hasGroup(); callers
+            // wanting a retry should remove the group first.
+            this._groups.set(group, {
+                visible: false,
+                count: 0,
+                color: GROUP_COLORS[group] ?? GROUP_COLORS._default,
+                error: err.message || 'unknown',
+                fetched: new Date().toISOString(),
+            });
+            window.dispatchEvent(new CustomEvent('satellites-load-failed', {
+                detail: { group, error: err.message },
+            }));
             return 0;
         }
+    }
+
+    /**
+     * Forget a group entry so a subsequent loadGroup() will refetch.
+     * Used by the layer panel's retry-on-failed-load button. Does not
+     * remove already-rendered satellites for the group (call
+     * unloadGroup() for that).
+     */
+    forgetGroup(group) {
+        if (!this._groups.has(group)) return;
+        const entry = this._groups.get(group);
+        // Only forget failed entries — a successful load keeps its
+        // satellites in _satellites so a forget+reload would dupe them.
+        if (entry.error) this._groups.delete(group);
     }
 
     /**
