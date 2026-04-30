@@ -831,10 +831,20 @@ export class AtmosphereGlobe {
 
         // Drive the magnetic-field cascade — solar EUV + precipitation
         // packets flowing down dipole L-shells into the auroral oval.
+        // Pass the live solar-wind state too so the cascade can:
+        //   • compress dayside / stretch nightside lines from Pdyn
+        //   • compute Φ_PC, FAC magnitude, HPI
+        //   • dispatch a 'ua-magnetic-state' event with operator-grade
+        //     headlines (HPI, Φ_PC, Lpp, FAC, oval edges, implications)
         // Uses live IMF Bz when available; falls back to an Ap-derived
         // proxy so storm presets still light up the reconnection cue.
         if (this._cascade) {
-            this._cascade.setState({ f107, ap, bz });
+            this._cascade.setState({
+                f107, ap, bz,
+                speed:   this._swState?.speed,
+                density: this._swState?.density,
+                by:      this._swState?.by,
+            });
         }
     }
 
@@ -873,7 +883,15 @@ export class AtmosphereGlobe {
         const speed   = Number.isFinite(sw.speed)   ? sw.speed   : SW_DEFAULTS.speed;
         const density = Number.isFinite(sw.density) ? sw.density : SW_DEFAULTS.density;
         const bz      = Number.isFinite(sw.bz)      ? sw.bz      : SW_DEFAULTS.bz;
-        this._swState = { speed, density, bz };
+        const by      = Number.isFinite(sw.by)      ? sw.by      : 0;
+        this._swState = { speed, density, bz, by };
+
+        // Cascade geometry compresses dayside / stretches nightside
+        // lines under Pdyn — push the live state so the visual tracks
+        // the boundary motion the magnetopause is showing in parallel.
+        if (this._cascade) {
+            this._cascade.setSolarWindState({ speed, density, bz, by });
+        }
 
         const mp = computeShue(density, speed, bz);
         const bs = computeBowShock(mp.r0, mp.alpha);
@@ -2597,6 +2615,11 @@ export class AtmosphereGlobe {
             // raycaster returns a per-point .index we use to resolve
             // which dot was hovered. See _findTaggedUserData below.
             ...(this._debrisCloud ? [this._debrisCloud] : []),
+            // Magnetic-cascade artefacts — every line, oval band,
+            // cusp dot, MLT marker, and FAC ring carries a tagged
+            // userData; the recursive=true raycast finds them via
+            // their parent groups.
+            ...(this._cascade ? [this._cascade.group] : []),
         ];
 
         // Recursive: the ISS sprite carries a child halo mesh; if we
@@ -3530,6 +3553,37 @@ function _tipHTML(userData, profile, swState) {
             }
             lines.push(`<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip}</div>`);
             dataLines = lines.join('');
+            break;
+        }
+        case 'magnetic-cascade-line': {
+            const L = userData.L?.toFixed(1) ?? '—';
+            const labelColor = userData.color || '#9cf';
+            detail = `L = ${L} · <span style="color:${labelColor}">${userData.label || ''}</span>`;
+            dataLines = `
+                <div style="color:#9ab;font-size:10px;margin-top:2px">${userData.population || ''}</div>
+                <div style="color:#666;font-size:10px;margin-top:1px">family: ${userData.family || ''}</div>`;
+            break;
+        }
+        case 'auroral-oval': {
+            detail = `${userData.band === 'equatorward' ? 'Equatorward' : 'Poleward'} edge · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'polar-cusp': {
+            detail = `Polar cusp · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'mlt-marker': {
+            detail = `MLT ${userData.mlt.toString().padStart(2, '0')} · ${userData.label}`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
+            break;
+        }
+        case 'fac-region-1':
+        case 'fac-region-2': {
+            const region = userData.region;
+            detail = `Region ${region} Birkeland · ${userData.hemisphere} · ~${userData.altKm} km`;
+            dataLines = `<div style="color:#666;font-size:10px;margin-top:2px">${userData.tooltip || ''}</div>`;
             break;
         }
         default:
