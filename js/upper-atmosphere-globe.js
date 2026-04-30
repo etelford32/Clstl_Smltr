@@ -55,6 +55,7 @@ import { ATMOSPHERIC_LAYER_SCHEMA, layerForAltitude }
 import { LayerParticleSystem } from './upper-atmosphere-particles.js';
 import { layerPhysics, pointPhysics } from './upper-atmosphere-physics.js';
 import { LayerVectorField } from './upper-atmosphere-vector-fields.js';
+import { MagneticCascade } from './upper-atmosphere-magnetic-cascade.js';
 import { CameraController } from './upper-atmosphere-camera.js';
 import { subSolarPoint } from './sun-altitude.js';
 
@@ -558,6 +559,7 @@ export class AtmosphereGlobe {
         });
         this._buildAltitudeRing();
         this._buildSolarWind();
+        this._buildMagneticCascade();
         if (this.opts.stars) this._initStars();
         this._initControls();
         this._initResize();
@@ -826,17 +828,26 @@ export class AtmosphereGlobe {
         // Drive the sun's emission visuals from F10.7 — corona glow,
         // streamer brightness/length, core temperature.
         this.setF107(f107);
+
+        // Drive the magnetic-field cascade — solar EUV + precipitation
+        // packets flowing down dipole L-shells into the auroral oval.
+        // Uses live IMF Bz when available; falls back to an Ap-derived
+        // proxy so storm presets still light up the reconnection cue.
+        if (this._cascade) {
+            this._cascade.setState({ f107, ap, bz });
+        }
     }
 
     /**
      * Toggle overlay groups.
      */
     setVisibility({ satellites = true, shells = true, solarWind = true,
-                    particles = true, vectorFields } = {}) {
+                    particles = true, vectorFields, cascade = true } = {}) {
         if (this._satGroup)      this._satGroup.visible      = satellites;
         if (this._shellGroup)    this._shellGroup.visible    = shells;
         if (this._swGroup)       this._swGroup.visible       = solarWind;
         if (this._particleGroup) this._particleGroup.visible = particles;
+        if (this._cascade)       this._cascade.setVisible(cascade);
         // vectorFields visibility is driven by the field MODE — passing
         // false explicitly here forces the whole group off without
         // changing the mode (a user-friendly "hide" without losing
@@ -2148,6 +2159,24 @@ export class AtmosphereGlobe {
     }
 
     /**
+     * Build the dipole magnetic-field cascade — a set of L-shell field
+     * lines carrying an animated EUV/precipitation packet train from
+     * the magnetopause down to the auroral oval and the polar cusps.
+     * Drives intensity from the live (F10.7, Ap, Bz) state via
+     * setState(), which is called from setState() on the globe.
+     */
+    _buildMagneticCascade() {
+        this._cascade = new MagneticCascade({
+            parent:    this._scene,
+            intensity: 0.45,
+            sunDir:    this._sunDir,
+        });
+        // Apply the climatology so first paint shows a baseline cascade
+        // even before setState() arrives.
+        this._cascade.setState({ f107: 150, ap: 15 });
+    }
+
+    /**
      * Build the sun: a hot inner core + a soft halo + 24 outgoing
      * radial streamers that read as photon emission. F10.7 modulates
      * the corona brightness + streamer length so users see "active
@@ -2404,6 +2433,10 @@ export class AtmosphereGlobe {
                 this._fields[id].setSunDir?.(this._sunDir);
             }
         }
+        // Magnetic-field cascade: sun direction biases the dayside-vs-
+        // nightside packet weighting (cusp packets brighten on the
+        // dayside where reconnection is active).
+        this._cascade?.setSunDir?.(this._sunDir);
         // Solar-wind group is oriented so its local +Y points at the
         // Sun; update the quaternion so the Shue magnetopause + bow
         // shock + Sun marker all rotate to the new sub-solar direction.
@@ -2736,6 +2769,10 @@ export class AtmosphereGlobe {
         if (this._sunHaloMat)   this._sunHaloMat.uniforms.uTime.value   = t;
         if (this._sunOuterMat)  this._sunOuterMat.uniforms.uTime.value  = t;
         if (this._sunStreamMat) this._sunStreamMat.uniforms.uTime.value = t;
+
+        // Magnetic-field cascade: advance the packet-dash phase. One
+        // uniform write feeds every L-shell field line.
+        if (this._cascade) this._cascade.update(t);
 
         this._controls.update(dt);
 
