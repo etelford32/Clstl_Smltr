@@ -307,6 +307,22 @@
 
     <!-- ═══════════════════ ACTIVATION TAB ═══════════════════ -->
     <div class="tab-panel" id="panel-activation">
+        <!-- ── Overview KPI strip ─────────────────────────────────── -->
+        <!-- Quick read across the whole activation funnel. Window
+             follows #activation-window so changing it re-renders
+             everything in this tab. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Activation Overview <span style="font-size:.72rem;color:#666;font-weight:400" id="activation-overview-window">last 30 days</span></h3>
+            <div class="kpi-grid" style="grid-template-columns:repeat(6,1fr)">
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-signups"   style="color:#9ad36f">--</div><div class="kpi-label">Signups</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-activated" style="color:#4eff91">--</div><div class="kpi-label">Activated</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-rate"      style="color:#4fc3f7">--</div><div class="kpi-label">Activation rate</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-median"    style="color:#ffd700">--</div><div class="kpi-label">Median to 1st sim</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-newsubs"   style="color:#c080ff">--</div><div class="kpi-label">New subscribers</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="kpi-act-cancels"   style="color:#ff8c00">--</div><div class="kpi-label">Cancellations</div></div>
+            </div>
+        </div>
+
         <!-- ── Activation funnel ──────────────────────────────────── -->
         <div class="card" style="margin-bottom:18px">
             <h3>
@@ -595,7 +611,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1082,6 +1098,34 @@ const EVENT_LABEL = {
     subscription_canceled:  'Subscription canceled',
 };
 
+async function loadActivationOverview() {
+    const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
+    const winLabel = document.getElementById('activation-overview-window');
+    if (winLabel) winLabel.textContent = `last ${days} days`;
+    const res = await fetchActivationOverview(days);
+    const set = (id, val, opts = {}) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('kpi-loading');
+        el.textContent = val;
+        if (opts.color) el.style.color = opts.color;
+    };
+    if (!res.ok) {
+        // Soft-fail: if the migration hasn't been applied or an admin
+        // RPC is missing, keep the strip readable instead of red-flagging.
+        ['kpi-act-signups','kpi-act-activated','kpi-act-rate','kpi-act-median','kpi-act-newsubs','kpi-act-cancels']
+            .forEach(id => set(id, '—'));
+        return;
+    }
+    const d = res.data;
+    set('kpi-act-signups',   d.signups.toLocaleString());
+    set('kpi-act-activated', d.activated.toLocaleString());
+    set('kpi-act-rate',      d.signups > 0 ? `${Math.round(d.activationRate * 100)}%` : '—');
+    set('kpi-act-median',    d.medianTimeToSimHours != null ? `${d.medianTimeToSimHours}h` : '—');
+    set('kpi-act-newsubs',   d.newSubscriptions.toLocaleString());
+    set('kpi-act-cancels',   d.canceledSubscriptions.toLocaleString());
+}
+
 async function loadActivationFunnel() {
     const days = parseInt(document.getElementById('activation-window').value, 10) || 30;
     const el = document.getElementById('activation-funnel-container');
@@ -1308,6 +1352,7 @@ async function loadAtRisk() {
 let _activationLoaded = false;
 async function loadActivationAll() {
     await Promise.all([
+        loadActivationOverview(),
         loadActivationFunnel(),
         loadActivationChart(),
         loadConversion(),
@@ -1323,6 +1368,7 @@ document.querySelector('.tab[data-tab="activation"]')?.addEventListener('click',
 });
 document.getElementById('btn-refresh-activation')?.addEventListener('click', loadActivationAll);
 document.getElementById('activation-window')?.addEventListener('change', () => {
+    loadActivationOverview();
     loadActivationFunnel();
     loadActivationChart();
 });
