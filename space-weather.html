@@ -2402,34 +2402,6 @@ import { ForecastValidator } from './js/forecast-validation.js';
 import { ForecastTimeline } from './js/forecast-timeline.js';
 import { ModelValidator } from './js/model-validation.js';
 
-// ─── Nav ─────────────────────────────────────────────────────────────────────
-const _navBurger = document.getElementById('nav-burger');
-const _navMenu   = document.getElementById('nav-menu');
-if (_navBurger && _navMenu) {
-    _navBurger.addEventListener('click', () => {
-        const open = _navMenu.classList.toggle('open');
-        _navBurger.textContent = open ? '\u2715' : '\u2630';
-        _navBurger.setAttribute('aria-expanded', open);
-    });
-    document.addEventListener('click', e => {
-        if (!e.target.closest('nav')) {
-            _navMenu.classList.remove('open');
-            _navBurger.textContent = '\u2630';
-            _navBurger.setAttribute('aria-expanded', 'false');
-        }
-    });
-    document.querySelectorAll('.nav-drop-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            if (window.innerWidth > 1024) return;
-            e.stopPropagation();
-            const drop    = btn.closest('.nav-drop');
-            const opening = !drop.classList.contains('open');
-            document.querySelectorAll('.nav-drop').forEach(d => d.classList.remove('open'));
-            if (opening) drop.classList.add('open');
-        });
-    });
-}
-
 // ── Helpers ────────────────────────────────────────────────────────────────────
 const el = id => document.getElementById(id);
 
