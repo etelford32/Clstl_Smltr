@@ -891,6 +891,22 @@ input[type=range]::-moz-range-thumb {
             <div id="ua-constellation-toggles"></div>
         </div>
 
+        <div class="ua-panel" style="margin-bottom:14px;">
+            <h2>Magnetosphere state · live</h2>
+            <p class="ua-dim" style="font-size:.7rem;line-height:1.5;margin-bottom:8px">
+                Operator-grade headlines computed from the current
+                (F10.7, Ap, IMF) state and dispatched by the
+                <code>magnetic-cascade</code> module. Hemispheric Power
+                (Newell-Liou 2011), cross-polar-cap potential
+                (Hill-1984 / Siscoe-2002), plasmapause Lpp
+                (Carpenter-Anderson 1992), Region-1+2 Birkeland current
+                (Iijima-Potemra 1976), and Feldstein-Starkov auroral
+                oval edges.
+            </p>
+            <div id="ua-mag-state" style="display:flex;flex-direction:column;gap:4px;font-size:.74rem"></div>
+            <div id="ua-mag-implications" style="margin-top:8px;display:flex;flex-direction:column;gap:3px"></div>
+        </div>
+
         <div class="ua-panel">
             <h2>Solar wind &amp; magnetosphere</h2>
             <div id="ua-sw-stats"></div>
@@ -975,7 +991,15 @@ input[type=range]::-moz-range-thumb {
             <span style="color:#ff7040">IR-33/C-2251</span>
             <span style="color:#ff5070">C1408</span>
             <span style="color:#60d8a0">R/B</span><br>
-            <span style="color:#aac">switch to Fly mode + Visit ISS to see satellite shapes up close</span>
+            <span style="color:#aac">switch to Fly mode + Visit ISS to see satellite shapes up close</span><br>
+            <span style="color:#9ff">magnetic cascade:</span>
+            <span style="color:#ff8060">L=4 inner-belt</span> ·
+            <span style="color:#ff60a0">L=6 outer-belt</span> ·
+            <span style="color:#80ff80">L=8 oval</span> ·
+            <span style="color:#a0a0ff">L=20 lobe</span><br>
+            <span style="color:#ff60c0">●</span> auroral oval ·
+            <span style="color:#ffe066">●</span> polar cusps ·
+            <span style="color:#9cf">R1/R2 currents</span> (blue=down, red=up)
         </div>
     </section>
 
@@ -1071,6 +1095,44 @@ input[type=range]::-moz-range-thumb {
             window.dispatchEvent(new Event('resize'));
         });
     });
+
+    /* ─── Magnetosphere state listener ───────────────────────────────────
+       The MagneticCascade module dispatches 'ua-magnetic-state' on
+       every state push. Render an operator-grade readout: HPI, Φ_PC,
+       Lpp, FAC, oval edges (eq/pw at noon/dusk/midn/dawn), cusp lat,
+       plus the implication bullets. */
+    const magBox      = document.getElementById('ua-mag-state');
+    const magImplBox  = document.getElementById('ua-mag-implications');
+    const fmt = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d) : '—';
+    function renderMagState(s) {
+        if (!magBox || !s) return;
+        const o = s.oval || {};
+        magBox.innerHTML = `
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 12px;font-family:monospace">
+                <div style="color:#9ab">Kp</div>            <div style="color:#fff">${fmt(s.kp, 1)}</div>
+                <div style="color:#9ab">HPI (one hemi)</div><div style="color:#0fc">${fmt(s.hpi_GW, 1)} GW</div>
+                <div style="color:#9ab">Φ<sub>PC</sub></div>      <div style="color:#0ff">${fmt(s.phi_pc_kV, 0)} kV</div>
+                <div style="color:#9ab">L<sub>pp</sub> (plasmapause)</div><div style="color:#fc6">${fmt(s.plasmapauseL, 2)}</div>
+                <div style="color:#9ab">|I<sub>FAC</sub>|</div>     <div style="color:#fa6">${fmt(s.fac_MA, 2)} MA</div>
+                <div style="color:#9ab">cusp λ</div>         <div style="color:#fe8">${fmt(s.cuspLatDeg, 1)}°</div>
+                <div style="color:#9ab">oval eq @midn</div>  <div style="color:#f8a">${fmt(o.midnight?.eq, 1)}°</div>
+                <div style="color:#9ab">oval eq @noon</div>  <div style="color:#f8a">${fmt(o.noon?.eq, 1)}°</div>
+                <div style="color:#9ab">oval pw @midn</div>  <div style="color:#8fa">${fmt(o.midnight?.pw, 1)}°</div>
+                <div style="color:#9ab">oval pw @noon</div>  <div style="color:#8fa">${fmt(o.noon?.pw, 1)}°</div>
+            </div>`;
+        if (magImplBox) {
+            const lis = (s.implications || []).map(t =>
+                `<div style="font-size:.66rem;color:#cde;padding:3px 8px;background:rgba(255,200,90,.05);border-left:2px solid rgba(255,200,90,.45);border-radius:3px">${t}</div>`
+            ).join('');
+            magImplBox.innerHTML = lis;
+        }
+    }
+    window.addEventListener('ua-magnetic-state', e => renderMagState(e.detail));
+    // Seed once if cascade already has computed state by now.
+    setTimeout(() => {
+        const s = window.__ua?.globe?._cascade?.getState?.();
+        if (s) renderMagState(s);
+    }, 200);
 </script>
 
 </body>

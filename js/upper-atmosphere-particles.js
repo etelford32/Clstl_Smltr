@@ -35,8 +35,11 @@
  */
 
 import * as THREE from 'three';
+import { parkerVisualSpeedRunit, parkerRegime } from './upper-atmosphere-parker-wind.js';
+import { batesTemperature, exosphereTempK, SPECIES_MASS_KG } from './upper-atmosphere-engine.js';
 
 const R_EARTH_KM = 6371;
+const KB         = 1.380_649e-23;
 
 // Visualisation-time scaling — converts the SI thermal speed (m/s)
 // into a per-frame world-units jitter step. At true scale a 1500 K H
@@ -85,6 +88,23 @@ const WIND_STORM_GAIN_M_S = 200;         // adds proportional to storm factor
 // linearly above the threshold.
 const STORM_AP_THRESHOLD = 27;       // ≈ Kp 4
 const STORM_DRIFT_RUNIT_PER_S = 0.012;   // peak outward drift @ Ap 200
+
+// Layers where Parker hydrodynamic exospheric escape contributes a
+// coherent radially-outward drift in addition to the storm-driven
+// puff. H/He become Parker-hydrodynamic when T∞ pushes the species'
+// critical point inside (or near) the simulation ceiling — typically
+// from the inner exosphere upward.
+const PARKER_LAYERS = new Set(['inner-exosphere', 'outer-exosphere']);
+
+// Which species drives the Parker wind in each Parker-layer. Inner
+// exosphere is He-dominant at quiet sun (so He carries most of the
+// outflow proxy); outer exosphere is H-dominant. We pick the lighter
+// species for the wind speed because it has the smaller critical
+// radius and therefore a measurable Parker speed inside our band.
+const PARKER_SPECIES_BY_LAYER = {
+    'inner-exosphere': 'He',
+    'outer-exosphere': 'H',
+};
 
 const MIN_PARTICLES = 18;
 const REGIME_DECORRELATION_HZ = {
@@ -199,6 +219,14 @@ export class LayerParticleSystem {
         // Thermospheric wind drift speed in R⊕/s — applied per-frame
         // along the local tangent direction away from the sun.
         this._windRunitPerS = 0;
+        // Parker-transonic exospheric wind drift in R⊕/s. Computed at
+        // the layer's mid-altitude using the Bates-corrected local T
+        // for the dominant escape species (H or He). Drives a radially
+        // *outward* coherent advection that reads as hydrodynamic
+        // escape — distinct from the storm puff (which is Joule
+        // heating) and from thermal jitter (random per-collision).
+        this._parkerRunitPerS = 0;
+        this._parkerRegime    = 'jeans';
         // Direction-decorrelation accumulator (s remaining).
         this._decorrAcc = new Float32Array(cap);
     }
@@ -303,6 +331,30 @@ export class LayerParticleSystem {
         } else {
             this._windRunitPerS = 0;
         }
+
+        // ── Parker transonic exospheric wind ──────────────────────────
+        // Above the inner-exosphere base, the lightest species (H/He)
+        // are in the hydrodynamic-escape regime when T∞ rises high
+        // enough that the Parker critical point sits inside our 2000-km
+        // ceiling. We model that as a coherent *radially outward*
+        // drift on top of thermal jitter — physically the bulk Parker
+        // outflow, visually a steady "particles streaming away from
+        // Earth" cue that grows during high-EUV (high T∞) periods.
+        if (PARKER_LAYERS.has(this.layer.id)) {
+            const f107 = state?.f107 ?? 150;
+            const ap2  = state?.ap   ?? 15;
+            const Tinf = exosphereTempK(f107, ap2);
+            const sp   = PARKER_SPECIES_BY_LAYER[this.layer.id];
+            // Sample at the layer's *outer* boundary — that's where
+            // the Parker wind is fastest because we're closer to the
+            // critical radius for the chosen species.
+            const sampleAlt = this.layer.maxKm;
+            this._parkerRunitPerS = parkerVisualSpeedRunit(sampleAlt, sp, Tinf);
+            this._parkerRegime    = parkerRegime(Tinf);
+        } else {
+            this._parkerRunitPerS = 0;
+            this._parkerRegime    = 'jeans';
+        }
     }
 
     /**
@@ -316,6 +368,7 @@ export class LayerParticleSystem {
         const drift   = this._driftRunitPerS;
         const decorrHz = this._decorrHz;
         const wind    = this._windRunitPerS;     // R⊕/s, 0 if not a wind layer
+        const parker  = this._parkerRunitPerS;   // R⊕/s, 0 outside Parker layers
         const sx = this._sun.x, sy = this._sun.y, sz = this._sun.z;
         const innerR  = 1 + this.layer.minKm / R_EARTH_KM;
         const outerR  = Math.min(this._maxRunitR,
@@ -349,6 +402,24 @@ export class LayerParticleSystem {
                 vel[j]   += pos[j]   * inv * dt;
                 vel[j+1] += pos[j+1] * inv * dt;
                 vel[j+2] += pos[j+2] * inv * dt;
+            }
+
+            // Parker transonic exospheric outflow: coherent radial
+            // advection — *not* a velocity kick. We translate the
+            // particle directly along its radial unit vector by
+            // (parker · dt) world units. Combined with the boundary
+            // reflection below, this reads as a steady stream of
+            // light-species (H/He) lifting toward the simulation
+            // ceiling under hydrodynamic forcing. Independent of the
+            // thermal velocity vector so the bulk drift doesn't
+            // bias the Maxwell-Boltzmann distribution.
+            if (parker > 0) {
+                const r = Math.hypot(pos[j], pos[j+1], pos[j+2]) || 1;
+                const adv = parker * dt;          // R⊕ this frame
+                const k = adv / r;
+                pos[j]   += pos[j]   * k;
+                pos[j+1] += pos[j+1] * k;
+                pos[j+2] += pos[j+2] * k;
             }
 
             // Integrate thermal velocity.
