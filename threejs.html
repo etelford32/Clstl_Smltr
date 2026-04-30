@@ -366,7 +366,7 @@ nav {
                 <span class="dim">Ephemeris</span>
                 <span id="hud-ephem" style="font-size:9px;color:#445566;letter-spacing:.2px">Meeus</span>
             </div>
-            <div>Speed: <span class="val" id="hud-speed">1.0×</span></div>
+            <div>Speed: <span class="val" id="hud-speed">1 s/s</span></div>
             <div class="sep"></div>
             <div>FPS: <span id="fps-display">--</span></div>
             <div class="sep"></div>
@@ -437,6 +437,8 @@ nav {
             <button class="tc-btn" data-spd="20">20×</button>
             <button class="tc-btn" data-spd="50">50×</button>
             <div class="tc-sep"></div>
+            <button class="tc-btn" id="tc-unit" title="Toggle slider unit: sim seconds per real second ↔ sim days per real second">1S/s</button>
+            <div class="tc-sep"></div>
             <span id="tc-epoch" class="live">LIVE</span>
         </div>
 
@@ -444,7 +446,7 @@ nav {
         <div class="cv-btn" id="speed-ctrl">
             <label>Speed</label>
             <input type="range" id="sl-speed" min="0" max="50" step="0.5" value="1">
-            <span id="disp-speed">1×</span>
+            <span id="disp-speed">1 s/s</span>
         </div>
 
         <!-- Space Weather live ribbon -->
@@ -1863,7 +1865,9 @@ function updateCME() {
     const spiralK_cme = 0.06;   // CME propagates more radially than solar wind
 
     for (let i = 0; i < N_CME; i++) {
-        cmePhaseArr[i] += cmeSpeedArr[i] * simSpeed;
+        // Cap CME phase advance — visual rate is decoupled from sim time so
+        // particles stay legible whether simSpeed is 1× real-time or 86400×.
+        cmePhaseArr[i] += cmeSpeedArr[i] * Math.min(simSpeed, 50);
         if (cmePhaseArr[i] > 1.0) cmePhaseArr[i] -= 1.0;
 
         const r      = WIND_MIN_R + cmePhaseArr[i] * WIND_MAX_R;
@@ -1990,13 +1994,16 @@ document.getElementById('tog-wind').addEventListener('change', function () {
     windVisible = this.checked;
     windPoints.visible = this.checked;
 });
-// Reuse speed slider to also influence the visible wind speed label
+// Reuse speed slider to also influence the visible wind speed label.
+// Wind-particle phase speed is decoupled from simSpeed magnitude — it only
+// scales gently with the slider so the visualization stays legible whether
+// the sim is real-time or in 1D/s mode.
 document.getElementById('sl-speed').addEventListener('input', function () {
-    const s = +this.value;
-    // Show wind speed in km/s: base 400 km/s scaled by simulation speed
+    const s = Math.max(+this.value, 0.2);
+    const visScale = Math.min(50, s);   // cap visual coupling
     document.getElementById('wind-speed-lbl').textContent =
-        Math.round(400 * Math.max(s, 0.2)).toLocaleString() + ' km/s';
-    windPhaseSpeed = 0.0006 * Math.max(s, 0.2);
+        Math.round(400 * visScale).toLocaleString() + ' km/s';
+    windPhaseSpeed = 0.0006 * visScale;
 });
 
 // ═══════════════════════════════════════════════════════
@@ -2637,8 +2644,23 @@ const _e0   = earthHeliocentric(_jd0);   // { lon_rad, dist_AU }
 const _m0   = moonGeocentric(_jd0);      // { lon_rad, lat_rad, dist_km }
 
 let simTime  = _e0.lon_rad / (Math.PI * 2);   // Earth at real ecliptic longitude
-let simSpeed = 1.0;   // multiplier
-const FRAMES_PER_YEAR = 1800; // 1 Earth orbit = 30 s at 60 fps, speed=1
+
+// Time scaling: simSpeed is a real-time multiplier.
+//   simSpeed = 1   → 1 sim-second per real-second (true real-time)
+//   simSpeed = 86400 → 1 sim-day  per real-second
+//   simSpeed = 0   → paused
+// The slider ("sl-speed") shows a value in the currently selected unit
+// (timeUnit). 'sec' → slider value × 1; 'day' → slider value × 86400.
+const SECONDS_PER_YEAR = 365.25 * 86400;
+let simSpeed   = 1.0;       // real-time multiplier
+let timeUnit   = 'sec';     // 'sec' or 'day'
+const UNIT_FACTOR = { sec: 1, day: 86400 };
+function _fmtSimSpeed(spd) {
+    if (spd === 0) return '⏸';
+    const v = spd / UNIT_FACTOR[timeUnit];
+    const unit = timeUnit === 'sec' ? 's/s' : 'd/s';
+    return `${(+v.toFixed(2))} ${unit}`;
+}
 
 // ── Locate Luna and set her initial phase from real Moon position ────────────
 const _earthPlanet = PLANETS.find(p => p.name === 'Earth');
@@ -2696,9 +2718,10 @@ window.addEventListener('ephemeris-ready', ev => {
 });
 
 document.getElementById('sl-speed').addEventListener('input', function(){
-    simSpeed = +this.value;
-    document.getElementById('disp-speed').textContent = simSpeed.toFixed(1) + '×';
-    document.getElementById('hud-speed').textContent  = simSpeed.toFixed(1) + '×';
+    simSpeed = (+this.value) * UNIT_FACTOR[timeUnit];
+    const txt = _fmtSimSpeed(simSpeed);
+    document.getElementById('disp-speed').textContent = txt;
+    document.getElementById('hud-speed').textContent  = txt;
 });
 
 // ═══════════════════════════════════════════════════════
@@ -2761,10 +2784,12 @@ function _goLive() {
     const e0 = earthHeliocentric(jdNow());
     simTime = e0.lon_rad / (Math.PI * 2);
     _ephemEpoch = { simTime, date: new Date() };
-    simSpeed = 1;
+    // 1× in current unit (1 sec/sec or 1 day/sec)
+    simSpeed = UNIT_FACTOR[timeUnit];
+    const txt = _fmtSimSpeed(simSpeed);
     document.getElementById('sl-speed').value = 1;
-    document.getElementById('disp-speed').textContent = '1×';
-    document.getElementById('hud-speed').textContent = '1×';
+    document.getElementById('disp-speed').textContent = txt;
+    document.getElementById('hud-speed').textContent = txt;
 }
 
 // Navigation buttons
@@ -2783,18 +2808,34 @@ document.getElementById('tc-date-picker')?.addEventListener('change', function()
     if (this.value) _jumpToDate(new Date(this.value));
 });
 
-// Speed preset buttons
+// Speed preset buttons — value is "N units per real second" in current unit
 document.querySelectorAll('#time-controls [data-spd]').forEach(btn => {
     btn.addEventListener('click', () => {
-        const spd = parseFloat(btn.dataset.spd);
-        simSpeed = spd;
-        document.getElementById('sl-speed').value = spd;
-        document.getElementById('disp-speed').textContent = spd === 0 ? '⏸' : spd + '×';
-        document.getElementById('hud-speed').textContent = spd === 0 ? '⏸' : spd + '×';
+        const sliderVal = parseFloat(btn.dataset.spd);
+        simSpeed = sliderVal * UNIT_FACTOR[timeUnit];
+        const txt = _fmtSimSpeed(simSpeed);
+        document.getElementById('sl-speed').value = sliderVal;
+        document.getElementById('disp-speed').textContent = txt;
+        document.getElementById('hud-speed').textContent  = txt;
         // Highlight active
         document.querySelectorAll('#time-controls [data-spd]').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
     });
+});
+
+// 1S/1D unit toggle — switches the slider between sim-seconds-per-real-second
+// and sim-days-per-real-second.  The slider value is preserved (e.g. 5 in
+// seconds → 5 s/s, then toggling to days → 5 d/s).
+document.getElementById('tc-unit')?.addEventListener('click', () => {
+    timeUnit = (timeUnit === 'sec') ? 'day' : 'sec';
+    const slider   = document.getElementById('sl-speed');
+    const sliderVal = +slider.value;
+    simSpeed = sliderVal * UNIT_FACTOR[timeUnit];
+    const txt = _fmtSimSpeed(simSpeed);
+    document.getElementById('disp-speed').textContent = txt;
+    document.getElementById('hud-speed').textContent  = txt;
+    document.getElementById('tc-unit').textContent =
+        timeUnit === 'sec' ? '1S/s' : '1D/s';
 });
 
 // Seed date picker with current time
@@ -2925,8 +2966,11 @@ function animate() {
     sunUniforms.u_time.value += 0.01;
     const t = sunUniforms.u_time.value;
 
-    // Advance simulation time
-    simTime += simSpeed / FRAMES_PER_YEAR;
+    // Advance simulation time.  simTime is in units of Earth orbital periods
+    // (years).  simSpeed is a real-time multiplier: 1 means 1 sim-second per
+    // real-second (true real-time), so 1 real year of wall-clock at 1× = 1
+    // sim year.  _frameDt is the actual frame interval in real seconds.
+    simTime += (simSpeed * _frameDt) / SECONDS_PER_YEAR;
 
     // Update HUD date — real calendar date derived from ephemeris epoch + elapsed sim-years
     if (_ephemEpoch) {
