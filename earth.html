@@ -630,7 +630,10 @@ nav {
    across a stationary globe.  UI speed presets: 1× (real), 60×
    (1 min/s), 600×, 3600× (1 hr/s). */
 #time-controls {
-    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    /* 10 px floor above the viewport edge so the bar is never flush with
+       the bottom of #app on any breakpoint — keeps it visually anchored
+       even when window heights are awkward. */
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     z-index: 60;
     background: rgba(0,0,0,.82); backdrop-filter: blur(12px);
     border: 1px solid rgba(0,200,255,.2); border-radius: 9px;
@@ -674,10 +677,31 @@ nav {
     min-width: 26px; user-select: none;
 }
 .tc-scrub-edge.right { text-align: right; color: #0ee; }
+/* Slider domain is [-10080, +4320] minutes (= -7d .. +3d). The "now"
+   mark sits at (10080 / 14400) = 70% across the track. CSS gradient
+   below paints the past side (left of 70%) cyan and the future side
+   (right of 70%) amber-dashed-ish so users can read at a glance which
+   half of the timeline they're scrubbing. */
 #tc-scrub {
     flex: 1; min-width: 240px;
     -webkit-appearance: none; appearance: none;
-    height: 4px; background: linear-gradient(to right, rgba(0,200,200,.10), rgba(0,200,200,.26));
+    height: 4px;
+    background: linear-gradient(to right,
+        rgba(0,200,200,.10) 0%,
+        rgba(0,200,200,.26) 70%,
+        rgba(255,170,60,.10) 70.01%,
+        rgba(255,170,60,.30) 100%);
+    /* Vertical "now" tick painted on top of the track. */
+    background-image:
+        linear-gradient(to right,
+            rgba(0,200,200,.10) 0%,
+            rgba(0,200,200,.26) 70%,
+            rgba(255,170,60,.10) 70.01%,
+            rgba(255,170,60,.30) 100%),
+        linear-gradient(rgba(255,255,255,.55), rgba(255,255,255,.55));
+    background-size: 100% 100%, 1px 10px;
+    background-position: 0 0, 70% center;
+    background-repeat: no-repeat, no-repeat;
     border-radius: 2px; outline: none; margin: 0;
     cursor: pointer;
 }
@@ -699,7 +723,8 @@ nav {
    scrub bar rides 8 px above it.  On desktop the toolbar is hidden so
    bottom:12px is fine. */
 @media (max-width:1024px) {
-    #time-controls { bottom: 64px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
+    /* 56-px mobile toolbar + 10 px floor = 66 px above the viewport bottom. */
+    #time-controls { bottom: 66px; padding: 4px 6px; font-size: 10px; min-width: 280px; }
     .tc-btn        { min-width: 26px; padding: 3px 6px; font-size: 9px; }
     .tc-display    { min-width: 128px; }
     .tc-time       { font-size: 10px; }
@@ -1413,13 +1438,18 @@ nav {
              resolver listens via animate()'s tick; the input handler
              writes simTimeMs so satellites + sun + weather all replay
              together. -->
+        <!-- Range covers -10080..+4320 minutes (= -7d past .. +3d future).
+             "Now" sits at value=0, which the CSS paints at 70 % across the
+             track. Past frames are real observations; future frames are
+             forecast (currently a persistence stand-in until the
+             weather-forecast pipeline lands). -->
         <div id="tc-scrub-row">
-            <span class="tc-scrub-edge">−24h</span>
+            <span class="tc-scrub-edge">−1w</span>
             <input type="range" id="tc-scrub"
-                   min="-1440" max="0" step="1" value="0"
-                   aria-label="Time scrub — drag to replay last 24 hours"
-                   title="Drag to replay the last 24 h of wind, temperature, and cloud data">
-            <span class="tc-scrub-edge right">now</span>
+                   min="-10080" max="4320" step="1" value="0"
+                   aria-label="Time scrub — drag left for up to 1 week of history, right for up to 3 days of forecast"
+                   title="Drag left to replay (up to 1 week back) or right to preview (up to 3 days ahead)">
+            <span class="tc-scrub-edge right">+3d</span>
         </div>
         <div id="tc-buttons-row">
             <button class="tc-btn" id="tc-play" title="Pause">⏸</button>
@@ -5998,16 +6028,14 @@ _setSimPaused(false);
 const _scrubEl = document.getElementById('tc-scrub');
 if (_scrubEl) {
     _scrubEl.addEventListener('input', () => {
-        const minutesAgo = Number(_scrubEl.value);
-        // value is "minutes from now" in [-1440, 0]. Negative = past.
-        simTimeMs = Date.now() + minutesAgo * 60_000;
-        // Auto-pause when scrubbing into the past so the user's view
-        // doesn't drift forward under them at simSpeed×; releasing
-        // back to 0 leaves them paused, but Now/N or the play button
-        // resumes. This matches how every video scrubber on the web
-        // behaves and keeps the analysis use-case (parking on a
-        // moment to inspect it) the default.
-        if (minutesAgo < 0 && !simPaused) _setSimPaused(true);
+        const minutesFromNow = Number(_scrubEl.value);
+        // value is "minutes from now" in [-10080, +4320]. Negative = past
+        // (replay observations); positive = future (forecast preview).
+        simTimeMs = Date.now() + minutesFromNow * 60_000;
+        // Auto-pause whenever the user parks anywhere off "now" so the
+        // view doesn't drift under them at simSpeed×. Now/N or the
+        // play button resumes natural advance.
+        if (minutesFromNow !== 0 && !simPaused) _setSimPaused(true);
     });
     // Resume playback on release if the user dragged back to "now" —
     // otherwise leave them paused at the historical moment they chose.
@@ -6055,10 +6083,12 @@ function animate() {
     // out from under the user mid-drag.
     if (_scrubEl && document.activeElement !== _scrubEl) {
         const minutesAgo = (simTimeMs - Date.now()) / 60_000;
-        // Clamp to the slider's [-1440, 0] domain. Future-time scrub
-        // (already shown by satellites/sun) clamps to 0 here because
-        // weather replay doesn't cover the future yet.
-        const clamped = Math.max(-1440, Math.min(0, minutesAgo));
+        // Slider domain is [-10080, +4320] minutes (= -7d .. +3d).
+        // Sun + satellites are deterministic in both directions; the
+        // weather resolver clamps anything outside its bracket window to
+        // the nearest available frame, so future scrub is visually a
+        // persistence forecast until the predictive pipeline lands.
+        const clamped = Math.max(-10080, Math.min(4320, minutesAgo));
         // Only write if it actually changed by at least a step (1 min)
         // — avoids triggering UA-side restyles every frame on idle.
         if (Math.abs(clamped - Number(_scrubEl.value)) >= 1) {
