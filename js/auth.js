@@ -27,6 +27,13 @@
  */
 
 import { getSupabase, isConfigured } from './supabase-config.js';
+import {
+    canUseAlerts as _cfgCanUseAlerts,
+    canUseAdvancedAlerts as _cfgCanUseAdvancedAlerts,
+    canUseEmbed as _cfgCanUseEmbed,
+    hasCustomBranding as _cfgHasCustomBranding,
+    isPro as _cfgIsPro,
+} from './tier-config.js';
 
 const AUTH_KEY = 'pp_auth';
 
@@ -162,34 +169,22 @@ class AuthManager {
 
     /** Tiers that get any kind of alert (everything except free). */
     canUseAlerts() {
-        const PAID = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
-        return PAID.has(this.getPlan()) || this.isAdmin() || this.isTester();
+        return _cfgCanUseAlerts(this.getPlan(), this.getRole());
     }
 
     /** Tiers that get the full advanced alert set (advanced data feeds). */
     canUseAdvancedAlerts() {
-        const plan = this.getPlan();
-        return plan === 'advanced'
-            || plan === 'institution'
-            || plan === 'enterprise'
-            || this.isAdmin()
-            || this.isTester();
+        return _cfgCanUseAdvancedAlerts(this.getPlan(), this.getRole());
     }
 
     /** Tiers that may embed the simulator in third-party pages. */
     canUseEmbed() {
-        const plan = this.getPlan();
-        return plan === 'educator'
-            || plan === 'institution'
-            || plan === 'enterprise'
-            || this.isAdmin()
-            || this.isTester();
+        return _cfgCanUseEmbed(this.getPlan(), this.getRole());
     }
 
     /** Tiers that may replace the Parker Physics branding with their own. */
     hasCustomBranding() {
-        const plan = this.getPlan();
-        return plan === 'institution' || plan === 'enterprise';
+        return _cfgHasCustomBranding(this.getPlan());
     }
 
     /**
@@ -206,11 +201,7 @@ class AuthManager {
      * config.js (planToTier()).
      */
     isPro() {
-        if (this.isAdmin() || this.isTester()) return true;
-        const plan = this.getPlan();
-        return plan === 'advanced'
-            || plan === 'institution'
-            || plan === 'enterprise';
+        return _cfgIsPro(this.getPlan(), this.getRole());
     }
 
     /**

@@ -573,6 +573,19 @@
             </h3>
             <div id="proxy-freshness-container"><div class="empty">Loading...</div></div>
         </div>
+        <!-- ── Pipeline Analytics (live edge-proxy probe) ──────────── -->
+        <!-- Client-side latency + payload-freshness probe of every Edge
+             proxy the app consumes. Complementary to Pipeline Health
+             (which reads heartbeat rows) and Proxy Freshness (which is
+             a one-shot cache check) — Pipeline Analytics measures what
+             a real browser actually experiences from this POP.
+             Moved here from dashboard.html so the user dashboard stays
+             user-only; the module is lazy-imported when the System tab
+             is opened. -->
+        <div class="card" id="pipeline-analytics-card" style="margin-bottom:18px">
+            <h3>Pipeline Analytics · Live Probe</h3>
+            <div id="pipeline-health"><div class="empty">Loading pipeline probes…</div></div>
+        </div>
         <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
         <!-- Surfaces the most-recent run + 24h failure counts for every
              pg_cron job so silent cron failures are visible BEFORE
@@ -2018,6 +2031,30 @@ async function runHealthCheck() {
 }
 runHealthCheck();
 document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
+
+// Pipeline Analytics live probe — lazy-import the module the first time
+// the System tab is opened so the admin landing tab stays light.
+let _pipelineAnalyticsMounted = false;
+async function _mountPipelineAnalytics() {
+    if (_pipelineAnalyticsMounted) return;
+    _pipelineAnalyticsMounted = true;
+    try {
+        const mod = await import('./js/pipeline-analytics.js');
+        mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
+    } catch (err) {
+        console.error('[Admin] pipeline-analytics failed:', err);
+        const el = document.getElementById('pipeline-health');
+        if (el) el.innerHTML = `<div class="empty" style="color:#ff8080">Pipeline analytics failed to load: ${_esc(err.message || String(err))}</div>`;
+        _pipelineAnalyticsMounted = false; // allow retry on next tab open
+    }
+}
+document.querySelector('.tab[data-tab="system"]')?.addEventListener('click', _mountPipelineAnalytics);
+// If the page deep-links into #system or the System tab is already active,
+// fire once on load so the card isn't blank until the user clicks away and
+// back.
+if (document.getElementById('panel-system')?.classList.contains('active')) {
+    _mountPipelineAnalytics();
+}
 document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
 document.getElementById('btn-export').addEventListener('click', async () => {
     const r = await testConnection();
