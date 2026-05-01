@@ -36,12 +36,24 @@ import './class-roster.js';
 await auth.ready();
 
 // ── Auth gate ───────────────────────────────────────────────────────────
+// The gate is visible by default (CSS). Once we know the user IS signed in
+// we hide it and run the rest of this module. If they are NOT signed in we
+// silently bail — no console error, no half-mounted state. Throwing here
+// would surface as an uncaught module rejection, which is noisy on a page
+// people legitimately reach without a session (e.g. a shared link).
 const gate = document.getElementById('auth-gate');
 if (!auth.isSignedIn()) {
-    // Stay on the gate. No further mounting.
-    throw new Error('account: not signed in (gate displayed)');
+    // Bail cleanly: top-level `await import()` semantics let us return from
+    // the module by exporting nothing further. Wrapping the rest of the
+    // file in a function would force a 300-line indent shift — same effect,
+    // worse diff.
+    console.info('[Account] Not signed in — gate displayed.');
+} else {
+    gate?.classList.add('hidden');
+    await main();
 }
-gate?.classList.add('hidden');
+
+async function main() {
 
 // ── Header ──────────────────────────────────────────────────────────────
 const planBadge = document.getElementById('acc-plan-badge');
@@ -171,11 +183,21 @@ profSave?.addEventListener('click', async () => {
 
 // ── Notifications section ───────────────────────────────────────────────
 const NOTIF_PREFS = [
+    // Toggles
     'notify_aurora','notify_storm','notify_flare','notify_cme',
     'notify_temperature','notify_sat_pass',
     'notify_radio_blackout','notify_gps','notify_power_grid',
     'notify_collision','notify_iono_disturbance',
+    // Delivery
     'email_alerts','email_min_severity','alert_cooldown_min',
+    // Thresholds (basic-tier accessible)
+    'aurora_kp_threshold','storm_g_threshold','flare_class_threshold',
+    'temp_high_f','temp_low_f',
+    // Thresholds (PRO-only — server still accepts them but the alert
+    // engine ignores them for non-PRO accounts; we visually disable
+    // the inputs so users don't think they took effect)
+    'conjunction_threshold_km','radio_r_threshold','gnss_risk_threshold',
+    'power_grid_g_threshold',
 ];
 const notifSave   = document.getElementById('notif-save');
 const notifStatus = document.getElementById('notif-status');
@@ -186,11 +208,15 @@ function renderNotifGate() {
     const canPro    = auth.isPro?.() ?? isPro(auth.getPlan(), auth.getRole());
     if (notifGate) notifGate.style.display = canAlert ? 'none' : '';
 
-    // Disable PRO-only toggles on non-PRO accounts. They can flip the
-    // boolean in the DB freely, but we make it visually explicit that
-    // the alert engine won't fire them.
-    document.querySelectorAll('.toggle-row[data-pro="1"] input[type=checkbox]').forEach(el => {
-        el.disabled = !canPro;
+    // Disable PRO-only toggles AND PRO-only threshold inputs on
+    // non-PRO accounts. The DB will accept any value the user types,
+    // but the alert engine won't fire on it — making the field visually
+    // disabled keeps that fact honest.
+    document.querySelectorAll('[data-pro="1"]').forEach(el => {
+        // Walk up to the toggle-row if we're on the row itself; for
+        // threshold inputs the data-pro lives on the input.
+        const inputs = el.matches('input,select') ? [el] : el.querySelectorAll('input,select');
+        inputs.forEach(input => { input.disabled = !canPro; });
     });
 }
 
@@ -512,3 +538,5 @@ document.getElementById('danger-signout')?.addEventListener('click', async () =>
     catch (e) { console.warn('[Account] signOut error:', e); }
     location.href = '/';
 });
+
+} // end main()

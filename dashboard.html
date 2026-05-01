@@ -368,6 +368,7 @@ footer a:hover{color:var(--text)}
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
       <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
+      <a href="account.html" style="color:rgba(79,195,247,.85);font-size:.72rem;margin-left:8px;text-decoration:none;font-weight:600" title="Profile, alerts, API keys, billing">Account &rarr;</a>
       <!-- Admin/superadmin shortcuts intentionally live in the shared nav
            (js/nav.js renders the ADMIN/SUPER pill for elevated roles). The
            user dashboard is now strictly user-scoped — operator content
@@ -674,10 +675,12 @@ footer a:hover{color:var(--text)}
     </div>
     <div class="card-body">
 
-      <!-- Gate for free users -->
+      <!-- Gate for free users. Copy is rendered dynamically from
+           js/tier-config.js so adding a tier doesn't require a string
+           edit here too. See _renderSavedLocsGate() below. -->
       <div id="sl-gate" class="sl-gate" style="display:none">
         <div style="font-size:1.3rem;margin-bottom:6px">&#128205;</div>
-        <div>Save up to <strong>5 locations</strong> with Basic, or <strong>25 locations</strong> with Advanced, and get dedicated alerts for each one.</div>
+        <div id="sl-gate-copy">Save locations and get dedicated alerts for each one.</div>
         <a href="pricing.html" class="btn">Upgrade</a>
       </div>
 
@@ -2063,9 +2066,26 @@ initAll();
             : `${plan.toUpperCase()} · up to ${planCap}`;
     }
 
-    // Plan-gate: free users see upgrade pitch
+    // Plan-gate: free users see upgrade pitch. Build the copy from
+    // PLAN_LIMITS (sourced from tier-config.js) so adding a tier doesn't
+    // require touching this string.
     if (!isAdmin && cap <= 0) {
-        if (gate)    gate.style.display = '';
+        if (gate) {
+            const copyEl = $('sl-gate-copy');
+            if (copyEl) {
+                const pairs = [
+                    ['Basic',       PLAN_LIMITS.basic],
+                    ['Advanced',    PLAN_LIMITS.advanced],
+                    ['Institution', PLAN_LIMITS.institution],
+                    ['Enterprise',  PLAN_LIMITS.enterprise],
+                ].filter(([, n]) => n > 0);
+                const phrase = pairs.map(([label, n]) =>
+                    `<strong>${n} location${n === 1 ? '' : 's'}</strong> on ${label}`
+                ).join(', ');
+                copyEl.innerHTML = `Save ${phrase}, and get dedicated alerts for each one.`;
+            }
+            gate.style.display = '';
+        }
         if (content) content.style.display = 'none';
         return;
     }
