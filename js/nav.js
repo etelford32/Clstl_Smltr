@@ -15,6 +15,7 @@
 // Side-effect import: cross-page guided tour controller. Hooks the hero CTA
 // on the home page and renders a progress banner on each tour stop.
 import './explore-tour.js';
+import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
 
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 
@@ -76,6 +77,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
+            { href: 'account.html',           label: 'Account',              sub: 'Profile, alerts, API keys, billing', tier: 'free', icon: '⚙️', id: 'account' },
             { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Basic, Educator, Advanced, Institution, Enterprise', tier: 'public', icon: '💰' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
@@ -96,17 +98,11 @@ function _getAuth() {
 // Tier level determines which menu items + features a user can see.
 // Educator sits alongside Basic (level 2) — same data feeds, plus embed
 // permission. Institution + Enterprise are Advanced-equivalent (level 3).
+// The mapping itself lives in js/tier-config.js (single source of truth);
+// this wrapper keeps the existing 0 fallback for blank-plan accounts.
 function _tierLevel(plan, role) {
-    if (role === 'admin' || role === 'superadmin') return 99;
-    if (role === 'tester') return 98;   // legacy: role='tester' grants full access
-    if (plan === 'tester') return 98;   // tester comp plan unlocks every menu item
-    if (plan === 'enterprise')  return 3;
-    if (plan === 'institution') return 3;
-    if (plan === 'advanced')    return 3;
-    if (plan === 'educator')    return 2;
-    if (plan === 'basic' || plan === 'intro') return 2;
-    if (plan === 'free') return 1;
-    return 0;
+    const lvl = _cfgTierLevel(plan, role);
+    return lvl > 0 ? lvl : 0;
 }
 
 function _tierRequired(tier) {
@@ -250,9 +246,9 @@ export function initNav(activeId = '') {
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
-        // Notification bell (any paid tier or admin)
-        const PAID_PLANS = new Set(['basic', 'educator', 'advanced', 'institution', 'enterprise']);
-        const canAlert = PAID_PLANS.has(auth?.plan) || isAdmin;
+        // Notification bell (any paid tier or admin). PAID_PLAN_IDS is the
+        // canonical set from js/tier-config.js.
+        const canAlert = PAID_PLAN_IDS.has(auth?.plan) || isAdmin;
         if (canAlert) {
             html += `<div class="nav-bell-wrap" id="nav-bell-wrap">
                 <button class="nav-bell" id="nav-bell-btn" title="Alerts" aria-label="Notifications">

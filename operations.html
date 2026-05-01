@@ -475,48 +475,108 @@ body {
     white-space:nowrap;
 }
 
-/* ─── PRO PREVIEW ribbon ───────────────────────────────── */
-#op-ribbon {
+/* ─── PRO Upgrade gate (modal) ────────────────────────────
+   Replaces the legacy soft ribbon. Renders a full-screen overlay
+   the first time a non-PRO user lands here; primary CTA is the
+   Advanced upgrade, secondary is "Continue Preview" (open beta —
+   dismissed for the session). PRO+, admins, and testers never see
+   it. */
+#op-gate {
     position:fixed;
-    top:60px; right:14px;
-    z-index:200;
-    max-width:360px;
-    background:linear-gradient(135deg, rgba(0,200,200,.18), rgba(0,80,200,.10));
-    border:1px solid rgba(0,200,200,.4);
-    border-radius:10px;
-    padding:10px 36px 10px 14px;
-    box-shadow:0 8px 28px rgba(0,0,0,.4);
-    backdrop-filter:blur(10px);
-    font-size:.74rem; line-height:1.5;
+    inset:0;
+    z-index:5000;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    background:rgba(2,4,12,.72);
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+    padding:18px;
+}
+#op-gate.op-gate-on { display:flex; }
+.op-gate-card {
+    width:min(520px, 94vw);
+    background:linear-gradient(135deg, rgba(10,18,32,.96), rgba(4,10,22,.96));
+    border:1px solid rgba(0,200,200,.45);
+    border-radius:14px;
+    box-shadow:0 24px 64px rgba(0,0,0,.6);
     color:#cef;
-    transform:translateY(-8px);
-    opacity:0;
-    pointer-events:none;
-    transition:transform .25s ease, opacity .25s ease;
+    padding:22px 22px 18px;
+    font-size:.84rem;
+    line-height:1.5;
 }
-#op-ribbon.op-ribbon-on {
-    transform:translateY(0);
-    opacity:1;
-    pointer-events:auto;
+.op-gate-eyebrow {
+    display:inline-block;
+    font-size:.62rem;
+    letter-spacing:.18em;
+    font-weight:800;
+    color:#0ff;
+    background:rgba(0,200,200,.12);
+    border:1px solid rgba(0,200,200,.4);
+    border-radius:999px;
+    padding:3px 10px;
+    margin-bottom:10px;
+    text-transform:uppercase;
 }
-#op-ribbon strong { color:#0ff; font-weight:800; letter-spacing:.04em; }
-#op-ribbon a {
-    color:#0ff; text-decoration:none; font-weight:700;
-    border-bottom:1px solid rgba(0,255,255,.4);
+.op-gate-card h2 {
+    margin:0 0 8px;
+    font-size:1.2rem;
+    color:#fff;
+    letter-spacing:.02em;
 }
-#op-ribbon a:hover { border-bottom-color:#0ff; }
-#op-ribbon-close {
-    position:absolute; top:6px; right:8px;
-    background:transparent; border:0; color:#9bd;
-    font:inherit; font-size:1.1rem; line-height:1;
-    cursor:pointer; padding:2px 6px;
-    border-radius:4px;
+.op-gate-card p {
+    margin:0 0 12px;
+    color:#cdd;
 }
-#op-ribbon-close:hover { color:#fff; background:rgba(255,255,255,.08); }
-@media (max-width:640px) {
-    #op-ribbon {
-        left:10px; right:10px; max-width:none;
-    }
+.op-gate-card strong { color:#0ff; font-weight:800; letter-spacing:.03em; }
+.op-gate-actions {
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-top:14px;
+}
+.op-gate-btn {
+    font:inherit;
+    font-size:.78rem;
+    font-weight:700;
+    letter-spacing:.04em;
+    padding:9px 16px;
+    border-radius:8px;
+    cursor:pointer;
+    text-decoration:none;
+    border:1px solid rgba(255,255,255,.16);
+    background:rgba(255,255,255,.04);
+    color:#cef;
+    transition:background .12s, border-color .12s, color .12s;
+}
+.op-gate-btn:hover {
+    background:rgba(255,255,255,.09);
+    border-color:rgba(255,255,255,.3);
+    color:#fff;
+}
+.op-gate-btn--primary {
+    background:linear-gradient(45deg,#ff8c00,#ffd700);
+    color:#0a1422;
+    border-color:transparent;
+}
+.op-gate-btn--primary:hover {
+    color:#000;
+    filter:brightness(1.06);
+}
+.op-gate-btn--ghost {
+    background:transparent;
+    color:#9bd;
+    border-color:rgba(0,200,200,.35);
+}
+.op-gate-btn--ghost:hover {
+    color:#0ff;
+    border-color:rgba(0,200,200,.6);
+    background:rgba(0,200,200,.08);
+}
+.op-gate-foot {
+    margin-top:12px;
+    font-size:.68rem;
+    color:#788;
 }
 
 /* ─── My Fleet panel ───────────────────────────────────── */
@@ -1196,13 +1256,26 @@ body {
 <nav></nav>
 <script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("operations");</script>
 
-<!-- ─── PRO PREVIEW ribbon ──────────────────────────────────── -->
-<div id="op-ribbon" role="status" aria-live="polite">
-    <button id="op-ribbon-close" aria-label="Dismiss">×</button>
-    <div id="op-ribbon-body">
-        <strong>PRO Preview</strong> — Operations is normally on the
-        <a href="/pricing#advanced">Advanced</a> plan.
-        Free during open beta.
+<!-- ─── PRO Upgrade gate ───────────────────────────────────────
+     Hard modal that requires acknowledgment before previewing
+     Operations as a non-PRO user. PRO+, admins, and testers bypass
+     it entirely. Persists "Continue Preview" for the session so
+     repeat navigation isn't friction-heavy. -->
+<div id="op-gate" role="dialog" aria-modal="true" aria-labelledby="op-gate-title" aria-hidden="true">
+    <div class="op-gate-card">
+        <span class="op-gate-eyebrow">Advanced plan feature</span>
+        <h2 id="op-gate-title">Operations Console</h2>
+        <p id="op-gate-body">
+            Decision-grade fleet and debris analysis is included with the
+            <strong>Advanced</strong> plan ($100/mo). It's free during open
+            beta — you're previewing it now.
+        </p>
+        <div class="op-gate-actions">
+            <a class="op-gate-btn op-gate-btn--primary" href="/pricing#advanced">Upgrade to Advanced</a>
+            <a class="op-gate-btn" id="op-gate-signup" href="/signup" style="display:none">Sign Up Free</a>
+            <button class="op-gate-btn op-gate-btn--ghost" id="op-gate-continue" type="button">Continue Preview</button>
+        </div>
+        <div class="op-gate-foot">Open beta — dismiss persists for this session.</div>
     </div>
 </div>
 
@@ -1428,7 +1501,7 @@ provStore.mount();
 delta.mount();
 
 const AUTH_KEY = 'pp_auth';
-const RIBBON_DISMISS_KEY = 'op-ribbon-dismissed-v1';
+const GATE_DISMISS_KEY = 'op-gate-dismissed-v1';
 
 function readAuth() {
     let a = null;
@@ -1441,41 +1514,66 @@ function isProPlan(plan) {
     return plan === 'advanced' || plan === 'institution' || plan === 'enterprise';
 }
 
-/* ─── Ribbon ────────────────────────────────────────────── */
-function mountRibbon() {
-    const el = document.getElementById('op-ribbon');
-    const body = document.getElementById('op-ribbon-body');
-    const close = document.getElementById('op-ribbon-close');
-    if (!el || !body || !close) return;
-
-    if (sessionStorage.getItem(RIBBON_DISMISS_KEY) === '1') return;
+/* ─── Upgrade gate (modal) ──────────────────────────────────
+   Replaces the old soft ribbon. Shows a modal overlay the first
+   time a non-PRO user lands here. PRO+, admins, and testers see
+   nothing. Dismiss persists for the session so a user who just
+   acknowledged the upsell isn't re-prompted on page nav. */
+function mountUpgradeGate() {
+    const el       = document.getElementById('op-gate');
+    const body     = document.getElementById('op-gate-body');
+    const continueBtn = document.getElementById('op-gate-continue');
+    const signupBtn   = document.getElementById('op-gate-signup');
+    if (!el || !body || !continueBtn) return;
 
     const auth = readAuth();
     const plan = auth?.plan || null;
     const role = auth?.role || null;
     const adminish = role === 'admin' || role === 'superadmin' || role === 'tester';
 
+    // PRO+, admins, and testers always bypass the gate. The modal stays
+    // hidden in the DOM (display:none from CSS) and never interactive.
+    if (adminish || isProPlan(plan)) return;
+
+    // Already acknowledged this session? Stay quiet — open beta semantics.
+    if (sessionStorage.getItem(GATE_DISMISS_KEY) === '1') return;
+
+    // Tailor copy + actions to whether the visitor is signed in.
     if (!auth) {
         body.innerHTML =
-            '<strong>PRO Preview</strong> — Operations is normally on the ' +
-            '<a href="/pricing#advanced">Advanced</a> plan. ' +
-            'Free during open beta. ' +
-            '<a href="/signup">Sign up</a> to save fleets and get alerts.';
-    } else if (adminish || isProPlan(plan)) {
-        // Skip the ribbon for users who already have full access.
-        return;
+            'Decision-grade fleet and debris analysis is included with the ' +
+            '<strong>Advanced</strong> plan ($100/mo). It\'s free during open ' +
+            'beta — sign up to save fleets and receive alerts, or continue ' +
+            'previewing without an account.';
+        if (signupBtn) signupBtn.style.display = '';
     } else {
         body.innerHTML =
-            '<strong>PRO Preview</strong> — Operations is included in your ' +
-            '<a href="/pricing#advanced">Advanced</a> upgrade. ' +
-            'You’re previewing it free during open beta.';
+            'Operations is normally on the <strong>Advanced</strong> plan ' +
+            '($100/mo). You\'re previewing it free during open beta. Upgrade ' +
+            'to keep access when the beta ends and unlock saved fleets, ' +
+            'alerts, and full conjunction history.';
+        if (signupBtn) signupBtn.style.display = 'none';
     }
 
-    requestAnimationFrame(() => el.classList.add('op-ribbon-on'));
-    close.addEventListener('click', () => {
-        el.classList.remove('op-ribbon-on');
-        sessionStorage.setItem(RIBBON_DISMISS_KEY, '1');
-    });
+    el.classList.add('op-gate-on');
+    el.setAttribute('aria-hidden', 'false');
+
+    const dismiss = () => {
+        el.classList.remove('op-gate-on');
+        el.setAttribute('aria-hidden', 'true');
+        sessionStorage.setItem(GATE_DISMISS_KEY, '1');
+    };
+    continueBtn.addEventListener('click', dismiss);
+
+    // Esc to dismiss is acceptable — primary CTA is the upgrade link, not
+    // a destructive action.
+    const onKey = (ev) => {
+        if (ev.key === 'Escape' && el.classList.contains('op-gate-on')) {
+            dismiss();
+            window.removeEventListener('keydown', onKey);
+        }
+    };
+    window.addEventListener('keydown', onKey);
 }
 
 /* ─── Persona switch ────────────────────────────────────── */
@@ -1539,7 +1637,7 @@ function mountChips() {
     }
 }
 
-mountRibbon();
+mountUpgradeGate();
 mountPersonas();
 mountChips();
 

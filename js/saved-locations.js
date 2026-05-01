@@ -24,17 +24,16 @@
 
 import { auth } from './auth.js';
 import { getSupabase, isConfigured } from './supabase-config.js';
+import { TIERS, locationLimit as _cfgLocationLimit } from './tier-config.js';
 
 const EVT = 'saved-locations-changed';
 
-export const PLAN_LIMITS = Object.freeze({
-    free:        0,
-    basic:       5,
-    educator:    5,
-    advanced:    25,
-    institution: 25,
-    enterprise:  100,
-});
+// Built from js/tier-config.js so the cap table is defined in exactly one
+// place. Kept as a frozen { plan: limit } map for backward compatibility
+// with the dashboard's existing PLAN_LIMITS import.
+export const PLAN_LIMITS = Object.freeze(
+    Object.fromEntries(TIERS.map(t => [t.id, t.locationLimit]))
+);
 
 /** Columns fetched from user_locations. */
 const COLS = 'id, label, lat, lon, city, is_primary, notify_enabled, email_alerts_enabled, daily_digest_enabled, alert_config, timezone, created_at, updated_at';
@@ -55,8 +54,7 @@ function _invalidate() {
 /** Return the numeric cap for the signed-in user's plan (admins/testers: Infinity). */
 export function locationLimit() {
     if (auth.isAdmin?.() || auth.isTester?.()) return Infinity;
-    const plan = (auth.getPlan?.() || 'free').toLowerCase();
-    return PLAN_LIMITS[plan] ?? 0;
+    return _cfgLocationLimit(auth.getPlan?.() || 'free');
 }
 
 /** True if the user has room for another saved location. */
