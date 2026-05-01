@@ -157,20 +157,39 @@ export class SunSkin {
         this.sunU.u_teff.value      = teff;
     }
 
-    /** Set active regions (max 8). */
+    /**
+     * Set active regions (max 8).
+     *
+     * Each region: { lat_rad, lon_rad, intensity, complex? }
+     *   intensity — 0..1 magnitude (area_norm × spot factor)
+     *   complex   — boolean (β-γ-δ magnetic class) → flips intensity sign so the
+     *               shader paints 304-Å red plage instead of 171-Å yellow plage.
+     *
+     * @returns {Array<{x:number,y:number,z:number,intensity:number,complex:boolean}>}
+     *   The unit-sphere positions of the placed regions (for emission anchors).
+     */
     setRegions(regions = []) {
         const arr = this.sunU.u_regions.value;
         const n = Math.min(regions.length, 8);
+        const placed = [];
         for (let i = 0; i < n; i++) {
             const r = regions[i];
             const x = Math.cos(r.lat_rad) * Math.cos(r.lon_rad);
             const y = Math.sin(r.lat_rad);
             const z = Math.cos(r.lat_rad) * Math.sin(r.lon_rad);
-            arr[i].set(x, y, z, r.intensity ?? 0.5);
+            const mag = Math.max(0.05, Math.min(1.0, r.intensity ?? 0.5));
+            const signed = r.complex ? -mag : mag;
+            arr[i].set(x, y, z, signed);
+            placed.push({ x, y, z, intensity: mag, complex: !!r.complex });
         }
         for (let i = n; i < 8; i++) arr[i].set(0, 1, 0, 0);
         this.sunU.u_nRegions.value = n;
+        this._regionAnchors = placed;
+        return placed;
     }
+
+    /** Get last-placed region anchors (unit-sphere xyz + intensity + complex). */
+    get regionAnchors() { return this._regionAnchors ?? []; }
 
     /** Trigger a flare animation. */
     triggerFlare(cls, { lat_rad = 0, lon_rad = 0 } = {}) {
