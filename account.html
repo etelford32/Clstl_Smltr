@@ -300,6 +300,68 @@ footer a:hover{color:var(--text)}
           <span class="field-hint">Minimum minutes between alerts of the same type.</span>
         </div>
       </div>
+
+      <h4 style="font-size:.78rem;letter-spacing:.06em;color:var(--muted);font-weight:700;text-transform:uppercase;margin:20px 0 4px">Thresholds</h4>
+      <p style="font-size:.72rem;color:var(--muted);margin-bottom:10px">Tune how aggressive each alert is. Per-location overrides on the dashboard win when set.</p>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="thr-aurora">Aurora · minimum Kp</label>
+          <input id="thr-aurora" type="number" min="1" max="9" step="1" data-pref="aurora_kp_threshold">
+          <span class="field-hint">Fires when forecast Kp ≥ this. Default 5 (mid-latitudes).</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="thr-storm">Geomagnetic storm · minimum G-scale</label>
+          <input id="thr-storm" type="number" min="1" max="5" step="1" data-pref="storm_g_threshold">
+          <span class="field-hint">G1 (minor) → G5 (extreme). Default G1.</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="thr-flare">Solar flare · minimum class</label>
+          <select id="thr-flare" data-pref="flare_class_threshold">
+            <option value="C">C — quiet-day flares</option>
+            <option value="M">M — moderate (default)</option>
+            <option value="X">X — major only</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="thr-conjunction">Conjunction · minimum miss distance (km) <span class="toggle-pro-tag">PRO</span></label>
+          <input id="thr-conjunction" type="number" min="0.1" max="500" step="0.1" data-pref="conjunction_threshold_km" data-pro="1">
+          <span class="field-hint">Closer-than-this approaches alert. Default 25 km.</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="thr-temp-hi">Temperature · high alert (°F)</label>
+          <input id="thr-temp-hi" type="number" min="-50" max="150" step="1" data-pref="temp_high_f" placeholder="e.g. 95">
+          <span class="field-hint">Leave blank to disable. Per-location overrides allowed on the dashboard.</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="thr-temp-lo">Temperature · low alert (°F)</label>
+          <input id="thr-temp-lo" type="number" min="-100" max="100" step="1" data-pref="temp_low_f" placeholder="e.g. 20">
+          <span class="field-hint">Leave blank to disable.</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="thr-radio">Radio blackout · min R-scale <span class="toggle-pro-tag">PRO</span></label>
+          <input id="thr-radio" type="number" min="1" max="5" step="1" data-pref="radio_r_threshold" data-pro="1">
+          <span class="field-hint">R1 (minor) → R5 (extreme).</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="thr-gnss">GPS / GNSS · risk level <span class="toggle-pro-tag">PRO</span></label>
+          <input id="thr-gnss" type="number" min="1" max="5" step="1" data-pref="gnss_risk_threshold" data-pro="1">
+          <span class="field-hint">1 (occasional) → 5 (severe).</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="thr-grid">Power grid · min G-scale <span class="toggle-pro-tag">PRO</span></label>
+          <input id="thr-grid" type="number" min="1" max="5" step="1" data-pref="power_grid_g_threshold" data-pro="1">
+          <span class="field-hint">G4+ is the bulk-power-system risk threshold.</span>
+        </div>
+        <div class="field"></div>
+      </div>
     </div>
     <div class="card-foot">
       <span id="notif-status" class="status" style="display:none"></span>
