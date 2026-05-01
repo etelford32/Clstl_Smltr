@@ -345,6 +345,11 @@ footer a:hover{color:var(--text)}
 <body>
 
 <!-- ── AUTH GATE ── -->
+<!-- Lets unauthenticated visitors preview the live dashboard with sample
+     data (everything except saved locations, billing, and the class
+     roster — those need a real account). Choosing "Continue as Guest"
+     stamps a sessionStorage flag the rest of dashboard.js reads to
+     hide gated cards and show a sticky banner. -->
 <div id="auth-gate" aria-live="polite">
   <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
   <h2>Sign in to access your dashboard</h2>
@@ -353,6 +358,20 @@ footer a:hover{color:var(--text)}
     <a href="signin.html" class="gate-signin">Sign In</a>
     <a href="signup.html" class="gate-signup">Create Free Account</a>
   </div>
+  <button id="gate-demo" type="button" style="margin-top:18px;background:none;border:none;color:rgba(160,128,255,.85);cursor:pointer;font:inherit;font-size:.82rem;text-decoration:underline;text-underline-offset:3px">
+    or preview the dashboard as a guest
+  </button>
+</div>
+
+<!-- Demo-mode banner (rendered when sessionStorage.pp_demo_mode === '1').
+     Sticky at the top of the page so the upgrade pitch is always visible
+     even after the user scrolls. -->
+<div id="demo-banner" style="display:none;position:sticky;top:0;z-index:200;background:linear-gradient(90deg,rgba(192,128,255,.18),rgba(79,195,247,.18));border-bottom:1px solid rgba(160,128,255,.3);padding:10px 16px;text-align:center;font-size:.82rem;color:#e8e0ff">
+  <strong style="color:#c77dff;letter-spacing:.04em">DEMO MODE</strong>
+  · You're previewing with sample data.
+  <a href="signup.html" style="color:#ffd700;font-weight:700;text-decoration:none;margin:0 6px">Sign up free</a>
+  to save locations and get personalised alerts.
+  <button id="demo-exit" type="button" style="margin-left:10px;background:transparent;border:1px solid rgba(255,255,255,.2);color:#cef;font:inherit;font-size:.72rem;padding:3px 10px;border-radius:4px;cursor:pointer">Exit demo</button>
 </div>
 
 <!-- ── NAV (shared component, see js/nav.js) ── -->
@@ -1109,6 +1128,10 @@ import {
 import { mountClassRoster } from './js/class-roster.js';
 import { logActivation, EVENTS } from './js/activation.js';
 import { tierLabel, tierBadgeClass } from './js/tier-config.js';
+// Auto-mounts a welcome wizard on first signed-in load (post-signup or
+// when ?welcome=1 is in the URL). No-ops on subsequent loads. See
+// js/welcome-wizard.js for trigger logic + dismissal flag.
+import './js/welcome-wizard.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1148,12 +1171,53 @@ console.info('[Dashboard] auth gate:', {
     plan:             _auth?.plan,
 });
 
+// ── Anonymous demo mode ─────────────────────────────────────────────────
+// Lets a visitor preview the dashboard without an account. Cards that
+// require Supabase reads (saved locations, billing, class roster) are
+// hidden; everything that's pulled from public NOAA proxies (snapshot,
+// briefing, impact ring, alert history) renders normally. Flag lives
+// in sessionStorage so closing the tab exits demo mode.
+const DEMO_KEY = 'pp_demo_mode';
+let _demoMode = false;
+try { _demoMode = sessionStorage.getItem(DEMO_KEY) === '1'; } catch {}
+
+const gateDemoBtn = document.getElementById('gate-demo');
+gateDemoBtn?.addEventListener('click', () => {
+    try { sessionStorage.setItem(DEMO_KEY, '1'); } catch {}
+    location.reload();
+});
+
+document.getElementById('demo-exit')?.addEventListener('click', () => {
+    try { sessionStorage.removeItem(DEMO_KEY); } catch {}
+    location.reload();
+});
+
+function _enterDemoMode() {
+    document.getElementById('auth-gate').style.display = 'none';
+    document.querySelector('main').style.visibility = '';
+    document.querySelector('footer').style.visibility = '';
+    const banner = document.getElementById('demo-banner');
+    if (banner) banner.style.display = 'block';
+    // Hide cards that have nothing useful to show without a session.
+    ['subscription-card','class-roster-card','saved-locations-card']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    // Recolor the welcome line.
+    const heading = document.getElementById('welcome-heading');
+    if (heading) heading.textContent = 'Sample dashboard';
+    const badge = document.getElementById('plan-badge');
+    if (badge) { badge.textContent = 'Demo'; badge.className = 'plan-badge plan-free'; }
+}
+
 if (!_auth || !_auth.signedIn) {
-  // Nav stays visible so a stuck/unauthenticated visitor still has the
-  // sign-in / sign-up buttons rendered by nav.js. Only the protected
-  // dashboard chrome gets hidden behind the auth gate.
-  document.querySelector('main').style.visibility = 'hidden';
-  document.querySelector('footer').style.visibility = 'hidden';
+  if (_demoMode) {
+      _enterDemoMode();
+  } else {
+      // Nav stays visible so a stuck/unauthenticated visitor still has the
+      // sign-in / sign-up buttons rendered by nav.js. Only the protected
+      // dashboard chrome gets hidden behind the auth gate.
+      document.querySelector('main').style.visibility = 'hidden';
+      document.querySelector('footer').style.visibility = 'hidden';
+  }
 } else {
   // Hide the full-screen sign-in overlay FIRST, before any downstream init can
   // throw. A crash below used to leave the gate visible, which looked to
