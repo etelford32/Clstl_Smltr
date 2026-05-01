@@ -206,6 +206,8 @@ export class SpaceWeatherGlobe {
         this._buildScene();
         this._buildSun();
         this._buildSolarMagnetosphere();
+        this._buildParkerStreamlines();
+        this._buildFluxRopes();
         this._buildEarth();
         this._buildMoon();
         this._buildAtmosphere();
@@ -638,6 +640,277 @@ export class SpaceWeatherGlobe {
         this._magEngine = new MagnetosphereEngine(this._scene);
     }
 
+    // ── Parker streamlines (deterministic) ──────────────────────────────────
+    /**
+     * Build dashed Parker-spiral streamline curves from the sun out to 1 AU.
+     *
+     * For three heliographic latitudes (−15°, 0°, +15°) we draw a dashed
+     * curve traced by:
+     *
+     *   φ(r) = φ_foot − Ω cos λ (r − r₀) / v_sw
+     *
+     * where φ_foot is chosen so the equatorial curve passes through Earth
+     * (Earth's heliographic longitude ≡ π in our scene with sun at +x and
+     * Earth at the origin).  The curve deforms as v_sw changes — slow wind
+     * tightens the spiral, fast wind unwinds it.
+     *
+     * Off-equator curves are anchored at the same φ_foot so they visualise
+     * the spiral *cone* of the IMF rather than each individually connecting
+     * to Earth.
+     */
+    _buildParkerStreamlines() {
+        const grp = new THREE.Group();
+        grp.name = 'parker_streamlines';
+        // Local origin at the sun's centre — easier to update curves
+        grp.position.copy(this._sunGroup.position);
+        this._scene.add(grp);
+        this._parkerGroup = grp;
+
+        const N = 120;                    // samples per streamline
+        const lats = [
+            { latDeg:   0, color: 0xffd070, opacity: 0.85 },  // equatorial — connects Earth
+            { latDeg: +15, color: 0xff9b3a, opacity: 0.40 },
+            { latDeg: -15, color: 0xff9b3a, opacity: 0.40 },
+        ];
+        this._parkerLines = [];
+        for (const cfg of lats) {
+            const positions = new Float32Array(3 * N);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.LineDashedMaterial({
+                color:     cfg.color,
+                dashSize:  0.55,
+                gapSize:   0.45,
+                transparent: true,
+                opacity:   cfg.opacity,
+                depthWrite: false,
+                linewidth: 1.5,        // honoured only on platforms with WebGL line-width support
+            });
+            const line = new THREE.Line(geo, mat);
+            grp.add(line);
+            this._parkerLines.push({
+                line,
+                latRad: cfg.latDeg * Math.PI / 180,
+                isMain: cfg.latDeg === 0,
+            });
+        }
+
+        // Earth-foot marker — the photospheric base of the connected streamline
+        const footGeo = new THREE.SphereGeometry(0.35, 16, 12);
+        const footMat = new THREE.MeshBasicMaterial({
+            color: 0xfff0a0,
+            transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        this._parkerFoot = new THREE.Mesh(footGeo, footMat);
+        grp.add(this._parkerFoot);
+
+        // Initial fill using the default 400 km/s baseline
+        this._updateParkerStreamlines(this._windSpeedKms || 400);
+    }
+
+    /**
+     * Recompute streamline geometry for a new ambient wind speed.
+     * Must be called whenever `_windSpeedKms` changes meaningfully.
+     */
+    _updateParkerStreamlines(v_sw_kms) {
+        if (!this._parkerLines) return;
+        const v = Math.max(150, v_sw_kms);
+        const N = 120;
+        const r_sun_scene = 8.0;
+        const r_E_scene  = this._sceneSunEarth;
+        const SCENE_TO_KM = this._kmPerAU / r_E_scene;
+        const OMEGA = 2 * Math.PI / (25.38 * 86400);
+        const r_E_km = r_E_scene * SCENE_TO_KM;
+
+        // Earth's heliographic longitude in our inertial scene = π
+        // (sun at +x_world, Earth at origin → Earth-relative-to-sun = −x).
+        const phi_E = Math.PI;
+
+        for (const { line, latRad } of this._parkerLines) {
+            const arr = line.geometry.attributes.position.array;
+            const cosLat = Math.cos(latRad);
+            const sinLat = Math.sin(latRad);
+            // φ_foot chosen so the equatorial streamline passes through Earth.
+            // Off-equator streamlines share the same foot longitude (same
+            // current sheet), so they trail through (φ=π, lat=±15°) at 1 AU
+            // not through Earth — they trace the spiral cone, not the line.
+            const phiFoot = phi_E + (OMEGA * r_E_km * cosLat) / v;
+
+            for (let i = 0; i < N; i++) {
+                const t = i / (N - 1);
+                const r_scene = r_sun_scene + (r_E_scene - r_sun_scene) * t;
+                const r_km    = r_scene * SCENE_TO_KM;
+                const phi     = phiFoot - (OMEGA * r_km * cosLat) / v;
+                arr[i*3]   = r_scene * cosLat * Math.cos(phi);
+                arr[i*3+1] = r_scene * sinLat;
+                arr[i*3+2] = r_scene * cosLat * Math.sin(phi);
+            }
+            line.geometry.attributes.position.needsUpdate = true;
+            line.geometry.computeBoundingSphere();
+            line.computeLineDistances();   // required for LineDashedMaterial
+        }
+
+        // Move the photospheric foot marker for the equatorial line
+        if (this._parkerFoot) {
+            const cosLat = 1, sinLat = 0;
+            const phiFoot = phi_E + (OMEGA * r_E_km) / v;
+            // Sample the streamline at r = r_sun_scene to place the foot
+            const r_km = r_sun_scene * SCENE_TO_KM;
+            const phi  = phiFoot - (OMEGA * r_km) / v;
+            this._parkerFoot.position.set(
+                r_sun_scene * cosLat * Math.cos(phi),
+                r_sun_scene * sinLat,
+                r_sun_scene * cosLat * Math.sin(phi),
+            );
+        }
+        this._parkerSpeedSnapshot = v;
+    }
+
+    // ── Flux ropes (Gold-Hoyle helical strands above complex ARs) ───────────
+    /**
+     * Build a parent group that will hold one flux-rope arch per complex AR.
+     * Geometry is rebuilt by `_rebuildFluxRopes(regions)` whenever the AR
+     * list changes (called from `update()`).
+     *
+     * Physics: Gold-Hoyle uniform-twist solution (∇×B = αB with α(r)).
+     *   B_z = B₀ / (1 + b² r²)
+     *   B_φ = B₀ b r / (1 + b² r²)
+     * The total twist along a loop of length L is Φ = b L (radians).  Hood-
+     * Priest stability gives Φ_crit ≈ 2.5 π for line-tied loops; we map
+     * mag class to twist:  β → π,  βγ → 3π,  βγδ → 5π (kink-prone).
+     *
+     * Visualisation: N strands wound around a half-circle axis arch sitting
+     * on the AR's local tangent plane.  Strand colour reflects the rope
+     * "energy state" — golden when twist < kink threshold, red when above.
+     */
+    _buildFluxRopes() {
+        const grp = new THREE.Group();
+        grp.name = 'flux_ropes';
+        grp.position.copy(this._sunGroup.position);
+        this._scene.add(grp);
+        this._fluxRopeGroup = grp;
+        this._fluxRopeKey   = '';
+    }
+
+    /**
+     * @param {Array<{lat_rad,lon_rad,is_complex,mag_class,area_norm,num_spots}>} regions
+     */
+    _rebuildFluxRopes(regions) {
+        if (!this._fluxRopeGroup) return;
+
+        // Cheap rebuild key — regenerate only when the contributing set changes
+        const key = regions
+            .filter(r => r.is_complex)
+            .map(r => `${r.region}:${(r.mag_class||'').slice(0,8)}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${(r.area_norm||0).toFixed(2)}`)
+            .join('|');
+        if (key === this._fluxRopeKey) return;
+        this._fluxRopeKey = key;
+
+        // Dispose previous geometry
+        const grp = this._fluxRopeGroup;
+        for (let i = grp.children.length - 1; i >= 0; i--) {
+            const c = grp.children[i];
+            c.geometry?.dispose();
+            c.material?.dispose();
+            grp.remove(c);
+        }
+
+        const SUN_R = 8.0;
+        for (const r of regions) {
+            if (!r.is_complex) continue;
+
+            // Local tangent frame at the AR position on the sun
+            const lat = r.lat_rad, lon = r.lon_rad;
+            const cosL = Math.cos(lat), sinL = Math.sin(lat);
+            const p = new THREE.Vector3(cosL * Math.cos(lon), sinL, cosL * Math.sin(lon)); // unit normal
+            // East: ∂p/∂lon, normalised (always tangent to surface, |east| = cos(lat))
+            const east  = new THREE.Vector3(-Math.sin(lon), 0, Math.cos(lon));   // already unit length
+            // North: ∂p/∂lat
+            const north = new THREE.Vector3(-sinL * Math.cos(lon), cosL, -sinL * Math.sin(lon));
+
+            // Loop scale from AR area + spot count
+            const aNorm = Math.max(0.15, Math.min(1.0, r.area_norm ?? 0.25));
+            const arch_r = SUN_R * (0.18 + 0.40 * aNorm);   // half-separation = arch radius
+
+            // Twist mapping from Hale magnetic class
+            const cls = String(r.mag_class || '').toLowerCase();
+            let twist = Math.PI;                                 // β
+            if (cls.includes('delta'))      twist = 5 * Math.PI; // βγδ
+            else if (cls.includes('gamma')) twist = 3 * Math.PI; // βγ
+            const TWIST_KINK = 2.5 * Math.PI;
+            const erupting = twist >= TWIST_KINK;
+
+            // Number of helical strands and rope cross-section radius
+            const nStrands = 6;
+            const ropeRho  = arch_r * 0.10;       // ~10 % of arch radius
+
+            // Strand colour: golden for stable, hot red if past kink threshold
+            const strandColor = erupting ? 0xff4830 : 0xffc060;
+            const strandOp    = erupting ? 0.85    : 0.55;
+
+            const strandMat = new THREE.LineBasicMaterial({
+                color: strandColor,
+                transparent: true,
+                opacity: strandOp,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+
+            // Generate helical strands as Line objects
+            const SAMPLES = 80;
+            for (let k = 0; k < nStrands; k++) {
+                const phase0 = (k / nStrands) * Math.PI * 2;
+                const pts = new Array(SAMPLES);
+                for (let i = 0; i < SAMPLES; i++) {
+                    const s = (i / (SAMPLES - 1)) * Math.PI;          // arc parameter 0..π
+                    // Axis point: half-circle in the (east, p) plane
+                    // axis(s) = SUN_R · p̂ + arch_r · ( −cos s · east + sin s · p̂ )
+                    const ax = p.clone().multiplyScalar(SUN_R)
+                                .addScaledVector(east, -arch_r * Math.cos(s))
+                                .addScaledVector(p,     arch_r * Math.sin(s));
+                    // In-plane normal to axis (rotate axis tangent 90° in arch plane)
+                    //   n(s) = cos s · east − ( − sin s ) · p̂   (already unit)
+                    //   Actually n = derivative of axis w.r.t. (−s). Compute directly:
+                    const nx = east.x * Math.cos(s) + p.x * Math.sin(s);
+                    const ny = east.y * Math.cos(s) + p.y * Math.sin(s);
+                    const nz = east.z * Math.cos(s) + p.z * Math.sin(s);
+                    // Helical winding angle along arc length
+                    const wind = phase0 + twist * (s / Math.PI);
+                    const cw = Math.cos(wind), sw = Math.sin(wind);
+                    pts[i] = new THREE.Vector3(
+                        ax.x + ropeRho * (cw * nx + sw * north.x),
+                        ax.y + ropeRho * (cw * ny + sw * north.y),
+                        ax.z + ropeRho * (cw * nz + sw * north.z),
+                    );
+                }
+                const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+                grp.add(new THREE.Line(geo, strandMat.clone()));
+            }
+
+            // Add a faint axis spine (the loop axis itself) as a guide
+            const spinePts = new Array(SAMPLES);
+            for (let i = 0; i < SAMPLES; i++) {
+                const s = (i / (SAMPLES - 1)) * Math.PI;
+                spinePts[i] = p.clone().multiplyScalar(SUN_R)
+                               .addScaledVector(east, -arch_r * Math.cos(s))
+                               .addScaledVector(p,     arch_r * Math.sin(s));
+            }
+            const spineGeo = new THREE.BufferGeometry().setFromPoints(spinePts);
+            const spineMat = new THREE.LineDashedMaterial({
+                color: erupting ? 0xff8060 : 0xfff0a0,
+                dashSize: 0.25, gapSize: 0.18,
+                transparent: true, opacity: 0.30,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+            const spine = new THREE.Line(spineGeo, spineMat);
+            spine.computeLineDistances();
+            grp.add(spine);
+        }
+    }
+
     _buildCamera() {
         this._camera = new THREE.PerspectiveCamera(50, 2, 0.1, 600);
         this._camera.position.set(20, 14, 38);
@@ -672,6 +945,13 @@ export class SpaceWeatherGlobe {
 
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
+
+        // Recompute Parker streamline geometry when v_sw shifts ≥ 25 km/s.
+        // (Spiral angle ψ = atan(Ω r / v) is sensitive to v in the typical
+        // 300-800 km/s range; 25 km/s is roughly a 5-pixel change at 1 AU.)
+        if (Math.abs((this._parkerSpeedSnapshot ?? 0) - this._windSpeedKms) > 25) {
+            this._updateParkerStreamlines(this._windSpeedKms);
+        }
 
         // Earth shader uniforms (shared earth-skin.js format)
         this._earthU.u_kp.value       = kp;
@@ -737,6 +1017,9 @@ export class SpaceWeatherGlobe {
                     arIndex:   i,
                 };
             });
+
+            // Rebuild flux-rope arches for the complex ARs in this set
+            this._rebuildFluxRopes(regions);
         }
 
         // Flare trigger from state — anchor on the matching active region
@@ -764,6 +1047,14 @@ export class SpaceWeatherGlobe {
         }
         if (name === 'solarField') {
             if (this._solarMagGroup) this._solarMagGroup.visible = visible;
+            return;
+        }
+        if (name === 'parker') {
+            if (this._parkerGroup) this._parkerGroup.visible = visible;
+            return;
+        }
+        if (name === 'fluxRopes') {
+            if (this._fluxRopeGroup) this._fluxRopeGroup.visible = visible;
             return;
         }
         if (name === 'wind') {
