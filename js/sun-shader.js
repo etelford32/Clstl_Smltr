@@ -212,21 +212,44 @@ export const SUN_FRAG = /* glsl */`
         actCol.b += u_xray_norm * 0.15;
 
         // ── Active region hotspots ──
+        // u_regions[k].w encodes signed intensity:
+        //   positive  → simple AR (β / α)
+        //   negative  → magnetically complex (β-γ-δ) — drive flare-prone EUV
         float totalUmbra = 0.0;
         float totalPenumbra = 0.0;
+        vec3  totalEuv   = vec3(0.0);
         for (int k = 0; k < 8; k++) {
             if (k >= u_nRegions) break;
-            vec3  arPos  = normalize(u_regions[k].xyz);
-            float arInt  = u_regions[k].w;
-            float cosAng = clamp(dot(vLocalPos, arPos), -1.0, 1.0);
-            float ang    = acos(cosAng);
+            vec3  arPos     = normalize(u_regions[k].xyz);
+            float arSigned  = u_regions[k].w;
+            float arInt     = abs(arSigned);
+            float complex   = arSigned < 0.0 ? 1.0 : 0.0;
+            float cosAng    = clamp(dot(vLocalPos, arPos), -1.0, 1.0);
+            float ang       = acos(cosAng);
+            // Earth-facing test: only render on the visible hemisphere
+            float facing    = step(0.0, cosAng);
+
             // Umbra: dark core (T ~3470 K → ~60% of photosphere)
-            float umbra  = exp(-ang * ang / (0.008 * arInt + 0.004)) * arInt;
+            float umbra     = exp(-ang * ang / (0.008 * arInt + 0.004)) * arInt * facing;
             // Penumbra: warm ring (T ~4200 K → facula brightening)
-            float penumb = smoothstep(0.28, 0.08, ang)
-                         * (1.0 - smoothstep(0.08, 0.0, ang)) * arInt;
+            float penumb    = smoothstep(0.28, 0.08, ang)
+                            * (1.0 - smoothstep(0.08, 0.0, ang)) * arInt * facing;
+            // EUV plage halo — bright extended emission visible across face
+            //   wide kernel for AIA-like coronal loop signature
+            float plage     = exp(-ang * ang / (0.040 + 0.020 * arInt)) * arInt * facing;
+            //   compact bright knot (171 Å loops above the AR)
+            float knot      = exp(-ang * ang / (0.012 + 0.004 * arInt)) * arInt * facing;
+            // Time-varying flicker for active loops (~10 s lifetime)
+            float flicker   = 0.85 + 0.15 * sin(u_time * 1.6 + float(k) * 2.3);
+
             totalUmbra    += umbra;
             totalPenumbra += penumb;
+
+            // EUV colour: simple AR → 171 Å yellow-green; complex AR → 304 Å red-pink
+            vec3 euvSimple  = vec3(1.00, 0.78, 0.42);   // 171 Å Fe IX/X (yellow-warm)
+            vec3 euvComplex = vec3(1.00, 0.32, 0.42);   // 304 Å He II (red-pink, flare-prone)
+            vec3 euvCol     = mix(euvSimple, euvComplex, complex);
+            totalEuv += euvCol * (plage * 0.45 + knot * 1.20) * flicker;
         }
         totalUmbra    = clamp(totalUmbra,    0.0, 1.0);
         totalPenumbra = clamp(totalPenumbra, 0.0, 1.0);
@@ -237,6 +260,9 @@ export const SUN_FRAG = /* glsl */`
         // Penumbra / facular brightening at limb
         float facLimb = 1.0 + (1.0 - mu) * 0.6;  // limb-brightened faculae
         actCol += blackbodyRGB(u_teff * 1.05) * totalPenumbra * 0.30 * facLimb;
+
+        // EUV plage emission — additive, brighter near disc centre, attenuated at limb
+        actCol += totalEuv * (0.65 + 0.35 * mu) * max(0.6, u_bloom);
 
         // ── Post-flare UV arc glow ──
         if (u_flare_arc > 0.005) {

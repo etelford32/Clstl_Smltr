@@ -173,7 +173,29 @@ export class SpaceWeatherGlobe {
         this._rafId         = null;
         this._auroraKp      = 2;
         this._windSpeedNorm = 0.23;
+        this._windSpeedKms  = 400;
         this._sunDir = new THREE.Vector3(1, 0, 0);
+
+        // ── Sun ↔ Earth scene geometry ──────────────────────────────────────
+        // Earth at origin; Sun at +X (this._sunSceneX scene units away).
+        // 1 scene unit = 1 R_earth ≈ 6371 km.  Sun separation 55 R_earth is an
+        // artistic compression of 1 AU (real ≈ 23,455 R_earth) so both bodies
+        // fit on one screen.  We keep this artistic distance but derive wind
+        // particle velocity from the *real* propagation time scaled by
+        // _timeCompression so a 400 km/s stream takes ~2 minutes of viewing
+        // (matching ~4-day real Sun→Earth transit at 3000× compression).
+        this._sunSceneX     = 55;
+        this._earthSceneX   = 0;
+        this._sceneSunEarth = this._sunSceneX - this._earthSceneX; // 55 units
+        this._kmPerAU       = 1.496e8;
+        this._timeCompression = 3000; // 1 s of viewing ≈ 50 min of real time
+
+        // Per-AR emission streams (built once per setRegions update)
+        this._arStreams      = [];   // [{ origin:Vector3, dirBase, intensity, complex }]
+        this._lastRegionsKey = '';
+
+        // Bow shock impact pulses (transient sprite list)
+        this._impactPulses = []; // [{ sprite, life, life0 }]
 
         // CME propagation
         this._cmePropagator = opts.cmePropagator ?? new CmePropagator();
@@ -183,6 +205,7 @@ export class SpaceWeatherGlobe {
         this._buildRenderer(canvas);
         this._buildScene();
         this._buildSun();
+        this._buildSolarMagnetosphere();
         this._buildEarth();
         this._buildMoon();
         this._buildAtmosphere();
@@ -192,6 +215,15 @@ export class SpaceWeatherGlobe {
         this._buildCamera();
         this._buildControls(canvas);
         this._buildComposer();
+    }
+
+    /** Compute per-frame scene-unit displacement for a wind speed (km/s). */
+    _windSceneSpeed(v_kms) {
+        // travel time at v: T_real = AU / v   (seconds)
+        // viewing time:    T_view = T_real / compression
+        // displacement / second of viewing = sceneSunEarth / T_view
+        //                                 = sceneSunEarth · v · compression / AU
+        return (this._sceneSunEarth * v_kms * this._timeCompression) / this._kmPerAU;
     }
 
     // ── Construction ──────────────────────────────────────────────────────────
@@ -425,31 +457,181 @@ export class SpaceWeatherGlobe {
     }
 
     _buildWindParticles() {
-        const N   = 1400;
+        const N   = 2000;
         const pos = new Float32Array(N * 3);
-        const vel = new Float32Array(N);
+        const col = new Float32Array(N * 3);
+        const vel = new Float32Array(N);          // km/s assigned to this packet
+        const src = new Int16Array(N);            // -1 = ambient stream, ≥0 = AR index
+        const age = new Float32Array(N);          // viewing-seconds since spawn
         for (let i = 0; i < N; i++) {
-            vel[i] = 0.35 + Math.random() * 0.65;
-            this._spawnWind(pos, i);
+            vel[i] = 350 + Math.random() * 250;   // ambient slow stream
+            src[i] = -1;
+            this._spawnAmbientWind(pos, col, i);
         }
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
         const mat = new THREE.PointsMaterial({
-            color: 0x88d8ff, size: 0.055, sizeAttenuation: true,
-            transparent: true, opacity: 0.48,
+            size: 0.07, sizeAttenuation: true,
+            vertexColors: true,
+            transparent: true, opacity: 0.62,
             blending: THREE.AdditiveBlending, depthWrite: false,
         });
         this._windPts = new THREE.Points(geo, mat);
         this._windVel = vel;
+        this._windSrc = src;
+        this._windAge = age;
         this._scene.add(this._windPts);
     }
 
-    _spawnWind(arr, i) {
-        const spread = Math.random() * 9;
-        const angle  = Math.random() * Math.PI * 2;
-        arr[i*3]   =  38 + Math.random() * 22;  // spawn from near sun (at x=55)
-        arr[i*3+1] = Math.sin(angle) * spread;
-        arr[i*3+2] = Math.cos(angle) * spread;
+    /** Ambient slow-stream particle: scattered shell launching from sun surface. */
+    _spawnAmbientWind(pos, col, i) {
+        // Launch from anywhere on the Earth-facing hemisphere (cos > -0.2)
+        const u = Math.random();
+        const v = Math.random();
+        const theta = 2 * Math.PI * u;
+        const phi   = Math.acos(2 * v - 1);
+        // Point on unit sphere
+        let nx = Math.sin(phi) * Math.cos(theta);
+        let ny = Math.cos(phi);
+        let nz = Math.sin(phi) * Math.sin(theta);
+        // Bias toward Earth-facing hemisphere (-X from sun is toward Earth at origin)
+        if (nx > 0.2) nx = -nx * 0.6;
+        const sunR = 8.0;
+        pos[i*3]   = this._sunSceneX + nx * sunR;
+        pos[i*3+1] = ny * sunR;
+        pos[i*3+2] = nz * sunR;
+        // Pale blue ambient slow-stream colour
+        col[i*3]   = 0.38;
+        col[i*3+1] = 0.74;
+        col[i*3+2] = 1.00;
+    }
+
+    /** AR-anchored wind packet: launches from active-region surface point. */
+    _spawnArWind(pos, col, i, stream) {
+        const sunR = 8.0;
+        // Small jitter around the AR anchor point (footpoint cone)
+        const jitter = 0.04;
+        const ox = stream.origin.x + (Math.random() - 0.5) * jitter * sunR;
+        const oy = stream.origin.y + (Math.random() - 0.5) * jitter * sunR;
+        const oz = stream.origin.z + (Math.random() - 0.5) * jitter * sunR;
+        pos[i*3]   = ox;
+        pos[i*3+1] = oy;
+        pos[i*3+2] = oz;
+        // Complex ARs eject hotter / faster plasma → orange-red
+        if (stream.complex) {
+            col[i*3]   = 1.00;
+            col[i*3+1] = 0.55;
+            col[i*3+2] = 0.18;
+        } else {
+            col[i*3]   = 1.00;
+            col[i*3+1] = 0.85;
+            col[i*3+2] = 0.45;
+        }
+    }
+
+    // ── Solar magnetosphere (heliospheric current sheet + dipole field) ──────
+    _buildSolarMagnetosphere() {
+        const grp = new THREE.Group();
+        grp.position.copy(this._sunGroup?.position ?? new THREE.Vector3(this._sunSceneX, 0, 0));
+        // (sunGroup is built in _buildSun which runs before this; defensive copy.)
+        this._scene.add(grp);
+        this._solarMagGroup = grp;
+
+        // ── Heliospheric current sheet (HCS — "ballerina skirt") ────────────
+        // Wavy disk around the sun representing the warped neutral sheet.
+        const HCS_R_INNER =  9.5;
+        const HCS_R_OUTER = 28.0;
+        const HCS_RADIAL  = 24;
+        const HCS_AZIM    = 96;
+        const verts = [];
+        const idx   = [];
+        const cols  = [];
+        for (let i = 0; i <= HCS_RADIAL; i++) {
+            const r = HCS_R_INNER + (HCS_R_OUTER - HCS_R_INNER) * (i / HCS_RADIAL);
+            for (let j = 0; j <= HCS_AZIM; j++) {
+                const a = (j / HCS_AZIM) * Math.PI * 2;
+                // Tilt ~7° (solar dipole) + 2-wave warp
+                const warp = 1.6 * Math.sin(2 * a) * (r / HCS_R_OUTER);
+                verts.push(r * Math.cos(a), warp, r * Math.sin(a));
+                const fall = 1 - i / HCS_RADIAL;
+                cols.push(0.95 * fall, 0.55 * fall, 0.20 * fall);
+            }
+        }
+        const stride = HCS_AZIM + 1;
+        for (let i = 0; i < HCS_RADIAL; i++) {
+            for (let j = 0; j < HCS_AZIM; j++) {
+                const a = i * stride + j;
+                const b = a + 1;
+                const c = a + stride;
+                const d = c + 1;
+                idx.push(a, c, b,  b, c, d);
+            }
+        }
+        const hcsGeo = new THREE.BufferGeometry();
+        hcsGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        hcsGeo.setAttribute('color',    new THREE.Float32BufferAttribute(cols, 3));
+        hcsGeo.setIndex(idx);
+        hcsGeo.computeVertexNormals();
+        const hcsMat = new THREE.MeshBasicMaterial({
+            vertexColors: true,
+            transparent: true, opacity: 0.18,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        this._hcsMesh = new THREE.Mesh(hcsGeo, hcsMat);
+        grp.add(this._hcsMesh);
+
+        // ── Solar dipole field lines (open at poles, closed near equator) ───
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0xffaa55, transparent: true, opacity: 0.32,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        // Closed loops on the limb (equatorial helmet streamers)
+        for (let k = 0; k < 14; k++) {
+            const phase = (k / 14) * Math.PI * 2;
+            const pts = [];
+            for (let s = 0; s <= 48; s++) {
+                const t = s / 48;            // 0..1 along loop
+                const arc = Math.sin(t * Math.PI);   // peaks at apex
+                const r = 8.0 + arc * 7.0;
+                const lat = (t - 0.5) * Math.PI * 0.9; // -π/2 .. π/2
+                pts.push(new THREE.Vector3(
+                    r * Math.cos(lat) * Math.cos(phase),
+                    r * Math.sin(lat),
+                    r * Math.cos(lat) * Math.sin(phase),
+                ));
+            }
+            const g = new THREE.BufferGeometry().setFromPoints(pts);
+            grp.add(new THREE.Line(g, lineMat.clone()));
+        }
+        // Open polar field lines (radial, fading outward)
+        const polarMat = new THREE.LineBasicMaterial({
+            color: 0xaaccff, transparent: true, opacity: 0.28,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        for (let pole = -1; pole <= 1; pole += 2) {
+            for (let k = 0; k < 10; k++) {
+                const phase = (k / 10) * Math.PI * 2;
+                const pts = [];
+                for (let s = 0; s <= 32; s++) {
+                    const r = 8.0 + s * 0.8;
+                    // Curl with Parker spiral as it leaves the sun
+                    const spiral = (r - 8.0) * 0.05;
+                    const az = phase + spiral;
+                    // Cone opens away from pole (lat goes from ±90° toward equator slightly)
+                    const lat = pole * (Math.PI / 2 - s * 0.012);
+                    pts.push(new THREE.Vector3(
+                        r * Math.cos(lat) * Math.cos(az),
+                        r * Math.sin(lat),
+                        r * Math.cos(lat) * Math.sin(az),
+                    ));
+                }
+                const g = new THREE.BufferGeometry().setFromPoints(pts);
+                grp.add(new THREE.Line(g, polarMat.clone()));
+            }
+        }
     }
 
     _buildMagnetosphere() {
@@ -486,6 +668,7 @@ export class SpaceWeatherGlobe {
         const spd = sw.speed ?? 400;
 
         this._windSpeedNorm = Math.max(0, Math.min(1, (spd - 250) / 650));
+        this._windSpeedKms  = Math.max(200, Math.min(1200, spd));
 
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
@@ -495,10 +678,10 @@ export class SpaceWeatherGlobe {
         this._earthU.u_bz_south.value = Math.max(0, Math.min(1, -bz / 30));
         this._earthU.u_aurora_power.value = Math.min(1, kp / 9);
 
-        // Wind particle colour: blue -> cyan -> orange at high speeds
+        // Wind particle base opacity scales with speed (per-particle colour set
+        // by spawn function — ambient blue, AR yellow/orange).
         const wMat = this._windPts.material;
-        wMat.color.setHSL(0.58 - this._windSpeedNorm * 0.20, 1.0, 0.68);
-        wMat.opacity = 0.30 + this._windSpeedNorm * 0.40;
+        wMat.opacity = 0.45 + this._windSpeedNorm * 0.35;
 
         // Magnetosphere geometry update
         this._magEngine.update(state);
@@ -515,25 +698,94 @@ export class SpaceWeatherGlobe {
             activity: state.derived?.activity  ?? 0.5,
         });
 
-        // Flare trigger from state
+        // ── Active regions — paint patches on photosphere & build wind streams ──
+        const regions = Array.isArray(state.active_regions) ? state.active_regions : [];
+        // Cheap key for change detection (avoid rebuilding streams every tick)
+        const key = regions.map(r => `${r.region}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${r.is_complex?1:0}:${(r.area_norm??0).toFixed(2)}`).join('|');
+        if (key !== this._lastRegionsKey) {
+            this._lastRegionsKey = key;
+            // Convert area + spot count → 0..1 emission intensity.
+            //   Area is already normalised to ~0..1 via swpc-feed (μH / 400).
+            //   Sunspot multiplicity adds a small bump (saturating).
+            const arForShader = regions.slice(0, 8).map(r => ({
+                lat_rad: r.lat_rad,
+                lon_rad: r.lon_rad,
+                intensity: Math.max(0.20, Math.min(1.0,
+                    (r.area_norm ?? 0.2) * 0.85 + Math.min(r.num_spots ?? 1, 30) / 60)),
+                complex: !!r.is_complex,
+            }));
+            const placed = this._sunSkin.setRegions(arForShader);
+            // Build wind-stream descriptors anchored at each placed AR.
+            const sunPos = this._sunGroup.position;
+            const sunR   = 8.0;
+            this._arStreams = placed.map((p, i) => {
+                // World-space launch point on photosphere
+                const origin = new THREE.Vector3(
+                    sunPos.x + p.x * sunR,
+                    sunPos.y + p.y * sunR,
+                    sunPos.z + p.z * sunR,
+                );
+                // Earth-facing flag: sunPos.x = +55, Earth at 0 → Earth-facing
+                // hemisphere has world-x of origin < sunPos.x, i.e. p.x < 0.
+                // We let *all* ARs emit but bias the launch direction toward
+                // Earth so back-side regions still feed the spiral.
+                return {
+                    origin,
+                    intensity: p.intensity,
+                    complex:   p.complex,
+                    earthFacing: p.x < 0.15,
+                    arIndex:   i,
+                };
+            });
+        }
+
+        // Flare trigger from state — anchor on the matching active region
+        // (so the flare appears at the AR's actual lat/lon rather than the
+        // event-time location string).
         const flare = state.flare ?? state.derived?.latest_flare;
         if (flare && flare.class && !this._lastFlareId) {
-            this._sunSkin.triggerFlare(flare.class, {
-                lat_rad: (flare.lat ?? 0) * Math.PI / 180,
-                lon_rad: (flare.lon ?? 0) * Math.PI / 180,
-            });
+            let lat = (flare.lat ?? 0) * Math.PI / 180;
+            let lon = (flare.lon ?? 0) * Math.PI / 180;
+            if (flare.region) {
+                const ar = regions.find(r => r.region === flare.region);
+                if (ar) { lat = ar.lat_rad; lon = ar.lon_rad; }
+            }
+            this._sunSkin.triggerFlare(flare.class, { lat_rad: lat, lon_rad: lon });
             this._lastFlareId = flare.id || flare.class;
         }
         if (!flare) this._lastFlareId = null;
     }
 
-    /** Toggle MagnetosphereEngine layers. */
+    /** Toggle MagnetosphereEngine layers (and globe-owned overlays). */
     setLayerVisible(name, visible) {
         if (name === 'cme') {
             this._cmeShells.forEach(s => { s.group.visible = visible; });
             return;
         }
+        if (name === 'solarField') {
+            if (this._solarMagGroup) this._solarMagGroup.visible = visible;
+            return;
+        }
+        if (name === 'wind') {
+            if (this._windPts) this._windPts.visible = visible;
+            return;
+        }
         this._magEngine.setLayerVisible(name, visible);
+    }
+
+    /**
+     * Set the wind time-compression factor (default 3000×).
+     *   1     = real-time (4-day Sun→Earth transit)
+     *   3000  = ~2 min viewing transit at 400 km/s
+     *  10000  = ~36 s viewing transit at 400 km/s
+     */
+    setTimeCompression(factor) {
+        this._timeCompression = Math.max(1, Math.min(50000, factor));
+    }
+
+    /** Estimated Sun→Earth transit time at the current wind speed (seconds). */
+    transitTimeReal() {
+        return this._kmPerAU / Math.max(50, this._windSpeedKms);
     }
 
     /** Access the CME propagator (for wiring event cards from outside). */
@@ -710,10 +962,202 @@ export class SpaceWeatherGlobe {
         }
     }
 
+    // ── Wind & coupling per-frame ────────────────────────────────────────────
+
+    /**
+     * Advance every wind packet by dt (viewing-seconds).
+     *
+     * Packets respawn either as ambient (slow, blue) launched isotropically
+     * from the sun or as AR-anchored (yellow / orange) launched from the
+     * footpoint of an active region with a velocity vector aimed at Earth's
+     * bow shock.  When a packet crosses the bow-shock standoff radius around
+     * Earth we emit a brief impact pulse at the impact point.
+     */
+    _stepWind(dt) {
+        if (!this._windPts) return;
+        const pos  = this._windPts.geometry.attributes.position.array;
+        const col  = this._windPts.geometry.attributes.color.array;
+        const vel  = this._windVel;
+        const src  = this._windSrc;
+        const age  = this._windAge;
+        const N    = vel.length;
+
+        const sunX = this._sunSceneX;
+        const earthX = this._earthSceneX;
+        // Bow-shock standoff (R_earth) — read from MagnetosphereEngine analysis
+        const bs = this._magEngine?.analysis?.bowShockR0 ?? 14.0;
+        const bsSq = bs * bs;
+
+        // AR streams may have changed; clamp src tag if AR list shrank
+        const arN = this._arStreams.length;
+
+        // Spawn budget per frame (limit churn)
+        let spawnsLeft = Math.ceil(N * 0.02 * Math.max(dt, 1/60) * 60);
+
+        for (let i = 0; i < N; i++) {
+            // Ageing
+            age[i] += dt;
+
+            // Per-particle scene velocity (units/s) from km/s
+            const sceneSpd = this._windSceneSpeed(vel[i]);
+
+            // Direction depends on source.  Ambient particles flow purely -X
+            // (radial outward from sun toward Earth, with a small spread).
+            // AR particles aim at Earth from their AR footpoint; we cache a
+            // unit vector along origin→Earth, with a tiny Parker-spiral curl.
+            const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
+            let dx, dy, dz;
+            if (src[i] >= 0 && src[i] < arN) {
+                const stream = this._arStreams[src[i]];
+                // Aim from current position toward Earth (re-aim each frame
+                // so the trail bends as the particle approaches).
+                dx = earthX - x;
+                dy = 0       - y;
+                dz = 0       - z;
+                const len = Math.hypot(dx, dy, dz) || 1;
+                dx /= len; dy /= len; dz /= len;
+                // Parker-spiral curl in the orbital plane (rotate around y by
+                // a small angle that grows with distance from sun)
+                const r  = Math.hypot(sunX - x, z);
+                const curl = -0.12 * Math.min(1, r / 30);
+                const cs = Math.cos(curl), sn = Math.sin(curl);
+                const dx2 = dx * cs - dz * sn;
+                const dz2 = dx * sn + dz * cs;
+                dx = dx2; dz = dz2;
+                // Complex / energetic ARs travel ~25% faster (visual cue)
+                const boost = stream.complex ? 1.25 : 1.0;
+                pos[i*3]   = x + dx * sceneSpd * boost * dt;
+                pos[i*3+1] = y + dy * sceneSpd * boost * dt;
+                pos[i*3+2] = z + dz * sceneSpd * boost * dt;
+            } else {
+                // Ambient stream: mostly -X with mild lateral drift
+                pos[i*3]   = x - sceneSpd * dt;
+                pos[i*3+1] = y + Math.sin(this._lastT * 0.4 + i) * 0.02 * dt;
+            }
+
+            // ── Coupling test: did we just enter Earth's bow shock? ─────────
+            const ex = pos[i*3] - earthX;
+            const ey = pos[i*3+1];
+            const ez = pos[i*3+2];
+            const distSq = ex*ex + ey*ey + ez*ez;
+            const wasOutside = age[i] > 0.05;  // not a fresh spawn
+            if (wasOutside && distSq < bsSq && distSq > 1.5) {
+                // Crossed the bow shock — emit a pulse and respawn
+                this._emitImpactPulse(pos[i*3], pos[i*3+1], pos[i*3+2],
+                                      src[i] >= 0 ? this._arStreams[src[i]]?.complex : false);
+                this._respawnWind(pos, col, i, vel, src, age, spawnsLeft);
+                spawnsLeft--;
+                continue;
+            }
+
+            // Recycle when far past Earth or way off-axis
+            if (pos[i*3] < earthX - 18 || Math.abs(pos[i*3+1]) > 22 || Math.abs(pos[i*3+2]) > 22) {
+                this._respawnWind(pos, col, i, vel, src, age, spawnsLeft);
+                spawnsLeft--;
+            }
+        }
+
+        this._windPts.geometry.attributes.position.needsUpdate = true;
+        this._windPts.geometry.attributes.color.needsUpdate    = true;
+    }
+
+    /** Decide whether to respawn as ambient or AR-anchored, then spawn. */
+    _respawnWind(pos, col, i, vel, src, age, spawnsLeft) {
+        age[i] = 0;
+        const arN = this._arStreams.length;
+        // Probability that a new packet is AR-anchored: scales with total AR
+        // intensity and budget.  Otherwise ambient.
+        const arWeight = arN === 0 ? 0
+            : Math.min(0.75, 0.18 + 0.12 * arN);
+        if (arN > 0 && Math.random() < arWeight && spawnsLeft > 0) {
+            // Pick AR weighted by intensity
+            let total = 0;
+            for (let k = 0; k < arN; k++) total += this._arStreams[k].intensity;
+            let r = Math.random() * total;
+            let pick = 0;
+            for (let k = 0; k < arN; k++) {
+                r -= this._arStreams[k].intensity;
+                if (r <= 0) { pick = k; break; }
+            }
+            const stream = this._arStreams[pick];
+            src[i] = pick;
+            // Velocity: complex ARs eject 600–900 km/s (CME-like fast streams);
+            // simple ARs match the bulk wind speed ±15%.
+            if (stream.complex) {
+                vel[i] = 600 + Math.random() * 300;
+            } else {
+                vel[i] = this._windSpeedKms * (0.85 + Math.random() * 0.30);
+            }
+            this._spawnArWind(pos, col, i, stream);
+        } else {
+            src[i] = -1;
+            // Slow ambient stream: 300–500 km/s
+            vel[i] = 300 + Math.random() * 200;
+            this._spawnAmbientWind(pos, col, i);
+        }
+    }
+
+    /**
+     * Brief sprite flash where a wind packet crossed the bow shock.
+     * Colour depends on whether the packet came from a complex AR (orange)
+     * or quiet stream (cyan).
+     */
+    _emitImpactPulse(x, y, z, complex) {
+        if (!this._impactSpriteTex) {
+            // Lazily build a soft circular sprite texture
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const g = c.getContext('2d');
+            const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0,   'rgba(255,255,255,0.95)');
+            grad.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+            grad.addColorStop(1,   'rgba(255,255,255,0)');
+            g.fillStyle = grad;
+            g.fillRect(0, 0, 64, 64);
+            this._impactSpriteTex = new THREE.CanvasTexture(c);
+        }
+        const mat = new THREE.SpriteMaterial({
+            map: this._impactSpriteTex,
+            color: complex ? 0xff8040 : 0x88ddff,
+            transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        });
+        const sp = new THREE.Sprite(mat);
+        sp.position.set(x, y, z);
+        sp.scale.setScalar(complex ? 1.6 : 1.1);
+        this._scene.add(sp);
+        this._impactPulses.push({ sprite: sp, life: 0.9, life0: 0.9, complex });
+
+        // When the impact comes from a complex AR, briefly bump the substorm
+        // index in the magnetosphere engine (visible as a shock flash on the
+        // magnetopause + aurora intensification).
+        if (complex && typeof this._magEngine?.setSubstorm === 'function') {
+            this._magEngine.setSubstorm(0.6);
+        }
+    }
+
+    _stepImpactPulses(dt) {
+        for (let i = this._impactPulses.length - 1; i >= 0; i--) {
+            const p = this._impactPulses[i];
+            p.life -= dt;
+            if (p.life <= 0) {
+                this._scene.remove(p.sprite);
+                p.sprite.material.dispose();
+                this._impactPulses.splice(i, 1);
+                continue;
+            }
+            const k = p.life / p.life0;            // 1 → 0
+            p.sprite.material.opacity = 0.85 * k;
+            p.sprite.scale.setScalar((p.complex ? 1.6 : 1.1) * (1 + (1 - k) * 2.5));
+        }
+    }
+
     // ── Per-frame ─────────────────────────────────────────────────────────────
 
     _animate(t) {
-        const dt = t - this._lastT;
+        // Cap dt so a backgrounded tab doesn't teleport every wind packet
+        // through Earth on the next frame.
+        const dt = Math.min(0.1, Math.max(0, t - this._lastT));
         this._lastT = t;
 
         // Earth slow spin
@@ -730,15 +1174,19 @@ export class SpaceWeatherGlobe {
             m.material.opacity = a0 * (0.60 + 0.40 * Math.sin(t * 2.6 + i * 1.4));
         });
 
-        // Solar wind particles flow -X toward Earth
-        const posAttr = this._windPts.geometry.attributes.position;
-        const spd     = 0.055 + this._windSpeedNorm * 0.10;
-        const vel     = this._windVel;
-        for (let i = 0, n = vel.length; i < n; i++) {
-            posAttr.array[i*3] -= spd * vel[i];
-            if (posAttr.array[i*3] < -16) this._spawnWind(posAttr.array, i);
-        }
-        posAttr.needsUpdate = true;
+        // ── Solar wind particles ────────────────────────────────────────────
+        // Each packet carries its own velocity (km/s) and source tag.  Its
+        // per-frame displacement is derived from real km/s, the scene-distance
+        // compression (Sun-Earth fits in 55 units) and _timeCompression
+        // (3000× by default) so a 400 km/s ambient stream takes ~2 minutes
+        // of viewing to cross — analogous to ~4 days of real propagation.
+        this._stepWind(dt);
+
+        // Bow-shock impact pulses (decay in viewing-time)
+        this._stepImpactPulses(dt);
+
+        // HCS gentle rotation (Carrington ~25 d → highly compressed visually)
+        if (this._hcsMesh) this._hcsMesh.rotation.y += dt * 0.02;
 
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
