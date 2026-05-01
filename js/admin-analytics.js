@@ -130,12 +130,20 @@ export async function fetchKPIs() {
             minutesUsed = Math.round(totalSecs / 60);
         }
 
-        // Plan/role breakdown
-        let introSubs = 0, proSubs = 0, adminUsers = 0;
+        // Plan/role breakdown.
+        //
+        // basicSubs counts plan='basic' — the tier formerly labelled "Intro"
+        // in early KPI dashboards. The two names are synonymous in this
+        // app: 'intro' is a legacy alias for 'basic' (no plan='intro' rows
+        // ever land in the DB; the CHECK constraint forbids it). The
+        // `introSubs` field on the returned payload is preserved as an
+        // alias for one release window so existing admin templates keep
+        // working — prefer `basicSubs` going forward.
+        let basicSubs = 0, proSubs = 0, adminUsers = 0;
         let educatorSubs = 0, institutionSubs = 0, enterpriseSubs = 0;
         if (plansRes.status === 'fulfilled' && !plansRes.value.error) {
             for (const u of plansRes.value.data || []) {
-                if (u.plan === 'basic')       introSubs++;
+                if (u.plan === 'basic')       basicSubs++;
                 if (u.plan === 'educator')    educatorSubs++;
                 if (u.plan === 'advanced')    proSubs++;
                 if (u.plan === 'institution') institutionSubs++;
@@ -159,7 +167,8 @@ export async function fetchKPIs() {
                 signIns: signInsRes.status === 'fulfilled' ? (signInsRes.value.count || 0) : 0,
                 minutesUsed,
                 signUps: signUpsRes.status === 'fulfilled' ? (signUpsRes.value.count || 0) : 0,
-                introSubs,
+                basicSubs,
+                introSubs: basicSubs, // legacy alias — same number as basicSubs
                 educatorSubs,
                 proSubs,
                 institutionSubs,

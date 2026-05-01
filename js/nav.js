@@ -77,6 +77,7 @@ const NAV_DROPDOWNS = [
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
+            { href: 'account.html',           label: 'Account',              sub: 'Profile, alerts, API keys, billing', tier: 'free', icon: '⚙️', id: 'account' },
             { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Basic, Educator, Advanced, Institution, Enterprise', tier: 'public', icon: '💰' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
