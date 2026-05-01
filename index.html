@@ -86,23 +86,36 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   text-decoration:none;z-index:0;
   transition:transform .25s ease;
 }
-.btn-radioactive::before{
-  /* heavy multi-blob drip oozing off the bottom */
-  content:'';position:absolute;left:-4%;right:-4%;bottom:-32px;height:54px;
-  background:
-    radial-gradient(circle at 8% 14%,#9cff3a 0 11px,transparent 12px),
-    radial-gradient(circle at 19% 0%,#1eff00 0 9px,transparent 10px),
-    radial-gradient(circle at 30% 26%,#cdff6e 0 14px,transparent 15px),
-    radial-gradient(circle at 42% 6%,#1eff00 0 8px,transparent 9px),
-    radial-gradient(circle at 53% 30%,#9cff3a 0 13px,transparent 14px),
-    radial-gradient(circle at 64% 4%,#76ee18 0 10px,transparent 11px),
-    radial-gradient(circle at 76% 22%,#cdff6e 0 12px,transparent 13px),
-    radial-gradient(circle at 88% 8%,#1eff00 0 9px,transparent 10px),
-    radial-gradient(ellipse at 50% -40%,#1eff00 0%,#0fa820 60%,transparent 75%);
-  filter:drop-shadow(0 6px 8px rgba(40,255,40,.75)) blur(.6px) contrast(1.05);
-  animation:radiodrip 3.2s ease-in-out infinite;
-  pointer-events:none;z-index:-1;
+.btn-radioactive .radio-label{position:relative;z-index:2;display:inline-block}
+.btn-radioactive .ooze{
+  position:absolute;left:-6%;right:-6%;
+  top:calc(100% - 14px);height:110px;
+  filter:url(#radio-goo);
+  pointer-events:none;z-index:1;
 }
+.btn-radioactive .ooze::before{
+  /* molten lip clinging to the bottom of the button */
+  content:'';position:absolute;left:0;right:0;top:0;height:34px;
+  background:
+    radial-gradient(ellipse at 50% 0%,#9cff3a 0%,#1eff00 55%,#0a8a18 100%);
+  border-radius:50% 50% 60% 60% / 0 0 100% 100%;
+  filter:blur(.3px);
+}
+.btn-radioactive .ooze i{
+  position:absolute;display:block;top:14px;
+  background:radial-gradient(circle at 30% 25%,#e6ff8a 0%,#9cff3a 35%,#1eff00 70%,#0a8a18 100%);
+  border-radius:50%;
+  box-shadow:inset 0 -4px 6px rgba(0,80,20,.4);
+  transform-origin:50% 0;
+}
+.btn-radioactive .ooze i:nth-child(1){left:6%; width:30px;height:30px;animation:ooze-fall 4.6s ease-in -0.4s infinite}
+.btn-radioactive .ooze i:nth-child(2){left:18%;width:22px;height:22px;animation:ooze-fall 6.2s ease-in -2.1s infinite}
+.btn-radioactive .ooze i:nth-child(3){left:30%;width:34px;height:34px;animation:ooze-fall 5.0s ease-in -0.9s infinite}
+.btn-radioactive .ooze i:nth-child(4){left:44%;width:24px;height:24px;animation:ooze-fall 7.4s ease-in -3.3s infinite}
+.btn-radioactive .ooze i:nth-child(5){left:56%;width:30px;height:30px;animation:ooze-fall 4.2s ease-in -1.6s infinite}
+.btn-radioactive .ooze i:nth-child(6){left:68%;width:22px;height:22px;animation:ooze-fall 6.8s ease-in -0.2s infinite}
+.btn-radioactive .ooze i:nth-child(7){left:80%;width:32px;height:32px;animation:ooze-fall 5.4s ease-in -2.7s infinite}
+.btn-radioactive .ooze i:nth-child(8){left:90%;width:20px;height:20px;animation:ooze-fall 4.8s ease-in -1.2s infinite}
 .btn-radioactive::after{
   /* radiation glow halo + decay particles backdrop */
   content:'';position:absolute;inset:-14px;border-radius:24px;
@@ -125,7 +138,7 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
     inset 0 -6px 14px rgba(0,80,20,.6),
     inset 0 2px 6px rgba(255,255,200,.65);
 }
-.btn-radioactive:hover::before{animation-duration:1.6s}
+.btn-radioactive:hover .ooze i{animation-duration:2.6s !important}
 @keyframes radiopulse{
   0%,100%{filter:saturate(1)}
   50%{filter:saturate(1.15) brightness(1.05)}
@@ -135,9 +148,13 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   33%{border-radius:22px 16px 44px 28px / 16px 14px 52px 36px}
   66%{border-radius:16px 24px 30px 40px / 12px 20px 40px 48px}
 }
-@keyframes radiodrip{
-  0%,100%{transform:translateY(0) scaleY(1);filter:drop-shadow(0 6px 8px rgba(40,255,40,.75)) blur(.6px)}
-  50%{transform:translateY(8px) scaleY(1.28);filter:drop-shadow(0 10px 12px rgba(40,255,40,.85)) blur(.9px)}
+@keyframes ooze-fall{
+  0%  {transform:translateY(-2px) scaleX(1.1)  scaleY(.5); opacity:.9}
+  18% {transform:translateY(8px)  scaleX(.85) scaleY(2.0); opacity:1}
+  45% {transform:translateY(28px) scaleX(.7)  scaleY(2.8); opacity:1}
+  72% {transform:translateY(58px) scaleX(.55) scaleY(1.4); opacity:.85}
+  92% {transform:translateY(86px) scaleX(.4)  scaleY(.55); opacity:.35}
+  100%{transform:translateY(98px) scaleX(.3)  scaleY(.3);  opacity:0}
 }
 @keyframes radioflicker{
   0%,100%{opacity:.85}
@@ -149,81 +166,85 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   100%{background-position:0 -40px,0 -55px,0 -48px,0 -60px,0 0}
 }
 @media (prefers-reduced-motion: reduce){
-  .btn-radioactive,.btn-radioactive::before,.btn-radioactive::after{animation:none}
+  .btn-radioactive,.btn-radioactive::after,.btn-radioactive .ooze i{animation:none}
 }
 
 /* ── PORTAL CTA (pulls user into space weather) ──────────────────────────── */
 .btn-portal{
   position:relative;display:inline-block;padding:18px 38px;
   font-weight:700;font-size:1rem;letter-spacing:.04em;color:#f0e8ff;
-  text-decoration:none;cursor:pointer;overflow:visible;
+  text-decoration:none;cursor:pointer;overflow:hidden;
   background:
-    radial-gradient(ellipse at center,rgba(8,2,20,.95) 0%,rgba(40,10,80,.9) 35%,rgba(120,60,200,.55) 70%,rgba(180,120,255,.25) 100%);
-  border:1px solid rgba(192,128,255,.45);border-radius:999px;
+    radial-gradient(ellipse at center,#000 0%,rgba(20,5,50,.96) 22%,rgba(60,20,120,.9) 55%,rgba(140,80,220,.55) 85%,rgba(190,130,255,.35) 100%);
+  border:1px solid rgba(192,128,255,.5);border-radius:999px;
   box-shadow:
     0 0 24px rgba(160,90,255,.55),
     0 0 60px rgba(110,60,220,.35),
-    inset 0 0 24px rgba(120,60,220,.55),
-    inset 0 0 50px rgba(40,10,80,.85);
-  text-shadow:0 0 8px rgba(200,150,255,.85),0 0 18px rgba(150,80,255,.55);
-  transition:transform .35s cubic-bezier(.4,0,.2,1),letter-spacing .35s,color .25s,box-shadow .35s;
+    inset 0 0 24px rgba(120,60,220,.6),
+    inset 0 0 50px rgba(20,5,50,.95);
+  text-shadow:0 0 8px rgba(200,150,255,.9),0 0 18px rgba(150,80,255,.6);
+  transition:transform .35s cubic-bezier(.4,0,.2,1),letter-spacing .35s,color .25s,box-shadow .35s,padding .35s;
   z-index:0;
 }
-.btn-portal::before{
-  /* swirling conic vortex pulled inward */
-  content:'';position:absolute;inset:-2px;border-radius:999px;
-  background:conic-gradient(from 0deg,
-    rgba(192,128,255,0) 0deg,
-    rgba(192,128,255,.85) 40deg,
-    rgba(120,60,220,.4) 90deg,
-    rgba(255,200,255,.9) 140deg,
-    rgba(80,30,160,.3) 200deg,
-    rgba(192,128,255,.7) 260deg,
-    rgba(40,10,80,.2) 320deg,
-    rgba(192,128,255,0) 360deg);
-  filter:blur(6px);
-  -webkit-mask:radial-gradient(circle at center,transparent 35%,#000 55%,#000 92%,transparent 100%);
-          mask:radial-gradient(circle at center,transparent 35%,#000 55%,#000 92%,transparent 100%);
-  animation:portal-spin 4.5s linear infinite;
-  pointer-events:none;z-index:-1;
+.btn-portal .portal-depth{
+  position:absolute;inset:0;border-radius:inherit;
+  pointer-events:none;overflow:hidden;z-index:0;
 }
-.btn-portal::after{
-  /* concentric pulled-in rings + central event horizon */
-  content:'';position:absolute;inset:-18px;border-radius:999px;
-  background:
-    radial-gradient(circle at center,transparent 40%,rgba(192,128,255,.35) 41%,transparent 43%),
-    radial-gradient(circle at center,transparent 50%,rgba(160,90,255,.28) 51%,transparent 54%),
-    radial-gradient(circle at center,transparent 62%,rgba(120,60,220,.2) 63%,transparent 66%),
-    radial-gradient(ellipse at center,rgba(140,70,240,.45) 0%,transparent 55%);
-  animation:portal-suck 3.2s ease-in-out infinite,portal-flicker 2.4s ease-in-out infinite;
-  pointer-events:none;z-index:-2;filter:blur(.5px);
-}
-.btn-portal:hover{
-  color:#fff;letter-spacing:.08em;
-  transform:translateY(-2px) scale(1.04);
+.btn-portal .portal-depth i{
+  position:absolute;inset:0;border-radius:inherit;
+  border:1.5px solid rgba(220,180,255,.85);
   box-shadow:
-    0 0 40px rgba(192,128,255,.85),
-    0 0 100px rgba(140,70,240,.55),
-    inset 0 0 36px rgba(160,90,255,.7),
-    inset 0 0 70px rgba(20,5,50,.95);
+    0 0 18px rgba(180,120,255,.55),
+    inset 0 0 18px rgba(180,120,255,.45);
+  transform:scale(1.5);opacity:0;
+  animation:portal-recede 4.8s cubic-bezier(.55,0,.85,.4) infinite;
 }
-.btn-portal:hover::before{animation-duration:1.6s}
-.btn-portal:hover::after{animation-duration:1.4s}
-.btn-portal:active{transform:translateY(-1px) scale(.98)}
-@keyframes portal-spin{
-  to{transform:rotate(360deg)}
+.btn-portal .portal-depth i:nth-child(1){animation-delay:0s}
+.btn-portal .portal-depth i:nth-child(2){animation-delay:-.8s}
+.btn-portal .portal-depth i:nth-child(3){animation-delay:-1.6s}
+.btn-portal .portal-depth i:nth-child(4){animation-delay:-2.4s}
+.btn-portal .portal-depth i:nth-child(5){animation-delay:-3.2s}
+.btn-portal .portal-depth i:nth-child(6){animation-delay:-4.0s}
+.btn-portal .portal-depth::after{
+  /* event horizon pupil at the vanishing point */
+  content:'';position:absolute;left:50%;top:50%;
+  width:14px;height:14px;border-radius:50%;
+  transform:translate(-50%,-50%);
+  background:radial-gradient(circle,#000 0%,rgba(20,5,50,.95) 55%,transparent 100%);
+  box-shadow:0 0 14px rgba(0,0,0,.95),0 0 32px rgba(80,30,160,.5);
+  animation:portal-pupil 3.2s ease-in-out infinite;
 }
-@keyframes portal-suck{
-  0%,100%{transform:scale(1);opacity:.85}
-  50%{transform:scale(.78);opacity:1}
+.btn-portal .portal-label{position:relative;z-index:2;display:inline-block;
+  transition:transform .35s cubic-bezier(.4,0,.2,1),filter .35s}
+.btn-portal:hover{
+  color:#fff;letter-spacing:.09em;padding:18px 44px;
+  transform:translateY(-2px) scale(1.05);
+  box-shadow:
+    0 0 44px rgba(192,128,255,.9),
+    0 0 110px rgba(140,70,240,.6),
+    inset 0 0 40px rgba(160,90,255,.75),
+    inset 0 0 80px rgba(0,0,0,.95);
 }
-@keyframes portal-flicker{
-  0%,100%{filter:blur(.5px) brightness(1)}
-  45%{filter:blur(.8px) brightness(1.18)}
-  70%{filter:blur(.4px) brightness(.92)}
+.btn-portal:hover .portal-label{transform:scale(.94);filter:drop-shadow(0 0 6px rgba(220,180,255,.95))}
+.btn-portal:hover .portal-depth i{animation-duration:2.4s}
+.btn-portal:hover .portal-depth::after{
+  width:18px;height:18px;
+  box-shadow:0 0 22px rgba(0,0,0,1),0 0 50px rgba(120,50,220,.7);
+}
+.btn-portal:active{transform:translateY(0) scale(.99)}
+@keyframes portal-recede{
+  0%  {transform:scale(1.55);opacity:0;border-width:2.4px;filter:blur(0) brightness(1.4)}
+  10% {opacity:.95}
+  45% {transform:scale(.55); opacity:.85;border-width:1.2px;filter:blur(.3px) brightness(1.05)}
+  80% {transform:scale(.14); opacity:.45;border-width:.6px;filter:blur(.7px) brightness(.7)}
+  100%{transform:scale(.04); opacity:0;  border-width:.4px;filter:blur(1.2px) brightness(.45)}
+}
+@keyframes portal-pupil{
+  0%,100%{transform:translate(-50%,-50%) scale(1);   opacity:.95}
+  50%    {transform:translate(-50%,-50%) scale(1.35);opacity:1}
 }
 @media (prefers-reduced-motion: reduce){
-  .btn-portal::before,.btn-portal::after{animation:none}
+  .btn-portal .portal-depth i,.btn-portal .portal-depth::after{animation:none}
 }
 .btn-secondary{padding:14px 32px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:1rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
 .btn-secondary:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.5);color:#fff;transform:translateY(-2px)}
@@ -342,6 +363,16 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 </head>
 <body>
 
+<svg aria-hidden="true" focusable="false" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <filter id="radio-goo">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10" result="goo"/>
+      <feBlend in="SourceGraphic" in2="goo"/>
+    </filter>
+  </defs>
+</svg>
+
 <script type="importmap">
 {"imports":{
     "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -364,8 +395,8 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <h1 class="hero-h1">Real-time astrophysics<br>at your fingertips</h1>
     <p class="hero-sub">Explore the Sun's corona, Earth's magnetosphere, space weather events, and deep stellar systems — powered by live satellite feeds and physically accurate WebGL simulations. Built for researchers, educators, and anyone who wants to understand the cosmos that shapes our world.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
-      <a href="earth.html" class="btn-radioactive" id="hero-cta-primary" data-explore-tour-start aria-label="Start the guided tour of Parker Physics">Explore the App</a>
-      <a href="space-weather.html" class="btn-portal" aria-label="Explore the live space weather dashboard">Explore Live Demo <span aria-hidden="true">→</span></a>
+      <a href="earth.html" class="btn-radioactive" id="hero-cta-primary" data-explore-tour-start aria-label="Start the guided tour of Parker Physics"><span class="radio-label">Explore the App</span><span class="ooze" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></a>
+      <a href="space-weather.html" class="btn-portal" aria-label="Explore the live space weather dashboard"><span class="portal-depth" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="portal-label">Explore Live Demo <span aria-hidden="true">→</span></span></a>
     </div>
     <div class="hero-stats" role="list" aria-label="App statistics">
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">17+</span><span class="hero-stat-label">Simulations</span></div>
