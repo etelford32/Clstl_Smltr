@@ -368,6 +368,38 @@ export function predictImpact(v_arr, n_arr, B_arr, Bz = null) {
     return { kp_max: Math.round(kp_max * 10) / 10, dst_min, g_scale, aurora_lat, severity };
 }
 
+// ── Solar rotation & Parker spiral ───────────────────────────────────────────
+
+/**
+ * Sidereal solar rotation rate at the equator (rad/s).
+ *   2π / (25.38 d × 86 400 s)
+ * Used to compute the Parker (1958) magnetic-field / streamline spiral.
+ */
+export const OMEGA_SUN = 2 * Math.PI / (25.38 * 86400);
+
+/**
+ * Parker-spiral angle ψ between the local IMF / streamline tangent and the
+ * radial direction, at heliocentric distance r_km in a wind of speed v_sw.
+ *
+ *   tan ψ(r, λ) = Ω_⊙ (r − r₀) cos λ  /  v_sw
+ *
+ *   r₀ ≈ 21.5 R_⊙ (super-Alfvénic source-surface; the spiral is undefined
+ *        below this — the wind is still being accelerated, frozen-in radial).
+ *
+ * Reference: Parker (1958) ApJ 128, 664 — "Dynamics of the Interplanetary
+ * Gas and Magnetic Fields."  At 1 AU, v_sw = 400 km/s, λ = 0 → ψ ≈ 45°.
+ *
+ * @param {number} r_km     heliocentric distance (km)
+ * @param {number} v_sw_kms wind speed at that distance (km/s)
+ * @param {number} [lat_rad=0] heliographic latitude (radians)
+ * @returns {number} ψ in radians, ≥ 0
+ */
+export function parkerSpiralAngle(r_km, v_sw_kms, lat_rad = 0) {
+    const r = Math.max(0, r_km - R_21_5);
+    const v = Math.max(50, v_sw_kms);
+    return Math.atan2(OMEGA_SUN * r * Math.cos(lat_rad), v);
+}
+
 // ── CmeEvent: single CME instance ────────────────────────────────────────────
 
 /**
@@ -419,14 +451,25 @@ export class CmeEvent {
      */
     stateAt(now_ms = Date.now()) {
         const elapsed_s = Math.max(0, (now_ms - this.departure_ms) / 1000);
-        const { r_km, v_kms } = dbmAnalytical(elapsed_s, this.v0, this.r0_km, this.v_sw, this.gamma);
+        return this.stateAtElapsed(elapsed_s);
+    }
+
+    /**
+     * Get propagation state at a specific real-elapsed-seconds offset since
+     * departure.  Used by the visualisation layer to drive a compressed
+     * "playback" of the DBM trajectory at the page's time-compression rate
+     * rather than locking onto wall-clock seconds (so a 4-day Sun→Earth
+     * transit can be watched in ≈ 2 minutes of viewing).
+     *
+     * @param {number} elapsed_s real seconds since the CME left r₀ (21.5 Rs)
+     */
+    stateAtElapsed(elapsed_s) {
+        const t = Math.max(0, elapsed_s);
+        const { r_km, v_kms } = dbmAnalytical(t, this.v0, this.r0_km, this.v_sw, this.gamma);
         const r_AU = r_km / AU_KM;
-
-        // Progress: 0 = at Sun (21.5 Rs), 1 = at Earth (1 AU)
         const progress = Math.min(1, Math.max(0, (r_km - this.r0_km) / (AU_KM - this.r0_km)));
-
         return {
-            elapsed_s,
+            elapsed_s: t,
             r_km,
             r_AU,
             v_kms,
