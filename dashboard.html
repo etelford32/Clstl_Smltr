@@ -1189,8 +1189,22 @@ gateDemoBtn?.addEventListener('click', () => {
 
 document.getElementById('demo-exit')?.addEventListener('click', () => {
     try { sessionStorage.removeItem(DEMO_KEY); } catch {}
+    // Clear the seeded sample location on exit so a subsequent real
+    // session starts blank instead of inheriting "Boulder, CO (sample)".
+    try {
+        const cur = loadUserLocation();
+        if (cur && cur.city === DEMO_LOCATION.city) clearUserLocation();
+    } catch {}
     location.reload();
 });
+
+// Curated sample location for demo mode. Boulder, CO is at 40°N — high
+// enough that aurora alerts fire on G3+ storms (so the demo isn't dead
+// during quiet sun) and low enough that summer ISS passes are common.
+// Keeping this server-agnostic (just a localStorage write) means the
+// space-weather snapshot, sun card, and ISS pass card all populate
+// from public NOAA proxies without needing a real account.
+const DEMO_LOCATION = { lat: 40.0150, lon: -105.2705, city: 'Boulder, CO (sample)' };
 
 function _enterDemoMode() {
     document.getElementById('auth-gate').style.display = 'none';
@@ -1198,12 +1212,43 @@ function _enterDemoMode() {
     document.querySelector('footer').style.visibility = '';
     const banner = document.getElementById('demo-banner');
     if (banner) banner.style.display = 'block';
+    // Telemetry — anonymous, so this goes through analytics.event()
+    // (event_log table) rather than activation_events (which requires
+    // auth.uid()). Admin Onboarding card pulls demo metrics from there.
+    try {
+        import('./js/analytics.js').then(({ analytics }) => {
+            analytics?.event?.('demo_entered', { source: 'auth_gate' });
+        }).catch(() => {});
+    } catch {}
+    // Wire the banner's "Sign up free" link to fire a conversion event
+    // before navigating.
+    const signupLink = document.querySelector('#demo-banner a[href="signup.html"]');
+    signupLink?.addEventListener('click', () => {
+        try {
+            import('./js/analytics.js').then(({ analytics }) => {
+                analytics?.event?.('demo_signup_clicked');
+            }).catch(() => {});
+        } catch {}
+    });
     // Hide cards that have nothing useful to show without a session.
+    // (Saved-locations stays hidden because the gate-card upsell is the
+    // wrong message in demo mode — we want users evaluating the dashboard
+    // to focus on the public-data cards, not the sales pitch.)
     ['subscription-card','class-roster-card','saved-locations-card']
         .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+    // Seed a sample location so the live cards (sun, aurora visibility,
+    // impact ring at-your-location, location-anchored briefing) render
+    // with realistic data instead of empty dashes. We DO NOT overwrite
+    // an existing location — a returning visitor in demo mode keeps
+    // whatever they had set previously.
+    try {
+        if (!loadUserLocation()) {
+            saveUserLocation(DEMO_LOCATION);
+        }
+    } catch {}
     // Recolor the welcome line.
     const heading = document.getElementById('welcome-heading');
-    if (heading) heading.textContent = 'Sample dashboard';
+    if (heading) heading.textContent = 'Sample dashboard · Boulder, CO';
     const badge = document.getElementById('plan-badge');
     if (badge) { badge.textContent = 'Demo'; badge.className = 'plan-badge plan-free'; }
 }
@@ -1224,6 +1269,24 @@ if (!_auth || !_auth.signedIn) {
   // superusers like "the sign-in is broken for me" when the real failure was
   // something cosmetic further down the script.
   document.getElementById('auth-gate').style.display = 'none';
+
+  // Returning-user telemetry: fires once per session for any signed-in
+  // user whose previous dashboard visit was > 24 h ago. The DB-side
+  // RPC counts these to compute returning-user rates without needing
+  // a heavyweight session table. Guarded by a localStorage key so
+  // a 5-tab marathon doesn't fire it 5 times.
+  try {
+      const KEY = 'pp_last_dash_visit';
+      const last = +(localStorage.getItem(KEY) || 0);
+      const now  = Date.now();
+      if (last && (now - last) > 24 * 60 * 60 * 1000) {
+          import('./js/activation.js').then(({ logActivation }) => {
+              logActivation('returning_user_session', { gap_hours: Math.round((now - last) / 3600_000) });
+          }).catch(() => {});
+      }
+      localStorage.setItem(KEY, String(now));
+  } catch {}
+
   try {
 
   const name  = _auth.name || _auth.email || 'Explorer';

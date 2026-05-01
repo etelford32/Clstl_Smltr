@@ -28,6 +28,14 @@ import { geocodeQuery, saveUserLocation } from './user-location.js';
 import { addLocation } from './saved-locations.js';
 import { getSupabase } from './supabase-config.js';
 import { tierLabel } from './tier-config.js';
+import { logActivation } from './activation.js';
+
+// Thin wrapper. activation.js silently drops unknown events so a fresh
+// project that hasn't applied the onboarding-events migration just sees
+// a single console warning per event type, not a thrown error.
+function logEvent(name, metadata) {
+    try { logActivation(name, metadata); } catch {}
+}
 
 const DONE_KEY    = 'pp_welcome_done';
 const PENDING_KEY = 'pp_welcome_pending';
@@ -310,6 +318,7 @@ function render() {
         actions = `
             <span class="pp-wiz-spacer"></span>
             <a class="pp-wiz-btn" href="/account.html">Customise more</a>
+            <button class="pp-wiz-btn" data-act="tour">Take the tour</button>
             <button class="pp-wiz-btn pp-wiz-btn--primary" data-act="close">Open dashboard →</button>
         `;
     }
@@ -360,16 +369,38 @@ function bindActions() {
 }
 
 async function handleAction(act) {
-    if (act === 'skip')   { return finish({ skipped: true }); }
+    if (act === 'skip')   { logEvent('wizard_skipped', { at_step: _state.step }); return finish({ skipped: true }); }
     if (act === 'close')  { return close(); }
     if (act === 'next')   { return advance(); }
     if (act === 'back')   { _state.step = Math.max(0, _state.step - 1); return render(); }
     if (act === 'geo')    { return geolocate(); }
     if (act === 'finish') { return savePrefsAndFinish(); }
+    if (act === 'tour')   { return startTour(); }
+}
+
+// Hand-off to the existing OnboardingTour (js/onboarding-tour.js).
+// Closes the wizard first so the tour's spotlight + scrim render on
+// the bare dashboard, then dynamically imports the tour module — saves
+// every fresh-signup user from paying the tour bundle download cost
+// when they choose "Open dashboard →" instead.
+async function startTour() {
+    logEvent('tour_started', { source: 'wizard' });
+    close();
+    try {
+        const mod = await import('./onboarding-tour.js');
+        const tour = new mod.OnboardingTour();
+        // forceStart bypasses the "tour-dismissed" localStorage flag — the
+        // user explicitly asked for it from the wizard, so respect that
+        // even if a previous session marked the tour as done.
+        tour.forceStart?.() || tour.start?.();
+    } catch (e) {
+        console.warn('[Wizard] tour launch failed:', e);
+    }
 }
 
 async function advance() {
     if (_state.step === 1 && !_state.location) return;
+    logEvent('wizard_step_completed', { step: _state.step });
     _state.step = Math.min(3, _state.step + 1);
     render();
 }
@@ -497,11 +528,13 @@ async function savePrefsAndFinish() {
 function finish({ skipped }) {
     _state.step = 3;
     markDone();
-    render();
-    if (skipped) {
-        // Nothing else to do — the Done step renders a friendly skip
-        // message based on whether _state.location was set.
+    if (!skipped) {
+        logEvent('wizard_completed', {
+            location_set: !!_state.location,
+            alerts: _state.prefs,
+        });
     }
+    render();
 }
 
 function close() {
@@ -535,6 +568,9 @@ export function showWizard() {
         location: null,
         prefs: { notify_aurora: true, notify_storm: true, notify_flare: false },
     };
+    logEvent('wizard_shown', {
+        plan: (auth.getPlan?.() || 'free').toLowerCase(),
+    });
     render();
 
     // Esc to close at any step (also stamps DONE so refresh doesn't repeat).
