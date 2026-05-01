@@ -916,9 +916,28 @@ export class SpaceWeatherGlobe {
     }
 
     /** Per-frame CME shell update: position, scale, fade. */
+    /**
+     * Per-frame CME shell update — drives every active shell from the
+     * deterministic DBM trajectory at the page's compressed viewing rate.
+     *
+     * For each shell we record `viewBornAt`: the viewing-time-second at which
+     * the shell first appeared in the scene.  The viewing-elapsed time
+     * (`t − viewBornAt`) is multiplied by `_timeCompression` to produce a
+     * synthetic *real-elapsed-since-departure* that we feed into
+     * `event.stateAtElapsed(...)`.  This means:
+     *
+     *  - The shell's r(t), v(t) are the analytical Vršnak (2013) DBM solution
+     *    —  same physics, same drag γ, same ambient v_sw — just replayed at
+     *    `_timeCompression`× wall-clock so the user can watch it travel.
+     *  - The trajectory is identical from any starting time (fully
+     *    reproducible from event id + γ + v₀ + v_sw).
+     *  - Shell scale, opacity, and sheath pulse all key off the same DBM
+     *    state, so visuals stay in lock-step with the displayed transit time.
+     */
     _updateCmeShells(t) {
-        const nowMs = Date.now();
-        const sunX  = 55;  // Sun position X
+        const sunX  = this._sunSceneX;
+
+        if (!this._cmeViewBornAt) this._cmeViewBornAt = new Map();
 
         for (const [id, s] of this._cmeShells) {
             // Handle fade-out and removal
@@ -928,30 +947,43 @@ export class SpaceWeatherGlobe {
                     s.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
                     this._scene.remove(s.group);
                     this._cmeShells.delete(id);
+                    this._cmeViewBornAt.delete(id);
                     continue;
                 }
                 s.shell.material.opacity = 0.35 * s.fadeOut;
                 continue;
             }
 
-            const state = s.event.stateAt(nowMs);
-            const progress = state.progress;  // 0=Sun, 1=Earth
+            // Latch the viewing-time the shell entered the scene
+            if (!this._cmeViewBornAt.has(id)) this._cmeViewBornAt.set(id, t);
+            const viewBornAt   = this._cmeViewBornAt.get(id);
+            const view_dt_s    = Math.max(0, t - viewBornAt);
+            const realElapsed  = view_dt_s * this._timeCompression;
 
-            // Position: Sun at x=55, Earth at x=0. CME travels along -X.
-            const x = sunX * (1 - progress);
-            s.group.position.set(x, 0, 0);
+            // DBM position + velocity at this synthetic real elapsed time
+            const state = s.event.stateAtElapsed(realElapsed);
+            const progress = state.progress;          // 0 = at 21.5 Rs, 1 = at 1 AU
+            const v_kms    = state.v_kms;             // current DBM velocity
 
-            // Scale: CME expands as it travels (half-angle → scene units)
-            const baseScale = 1.5 + progress * 4;
+            // Map progress to scene x — Sun at sunX, Earth at 0
+            s.group.position.set(sunX * (1 - progress), 0, 0);
+
+            // Scale: CME expands self-similarly with r (half-angle preserved
+            // → linear in r).  Cap so a slow CME doesn't dwarf the scene.
+            const baseScale = 1.5 + Math.min(progress, 1.0) * 4.0;
             s.group.scale.setScalar(baseScale);
 
-            // Shell opacity: brighter when fresh, fades near arrival
-            const arrivalFade = progress > 0.9 ? (1 - progress) * 10 : 1;
+            // Shell opacity decays once it's at Earth, then enters fade-out
+            const arrivalFade = progress >= 1.0 ? 0
+                              : progress > 0.9 ? (1 - progress) * 10
+                              : 1;
             s.shell.material.opacity = 0.35 * arrivalFade;
 
-            // Sheath pulsation
+            // Sheath pulsation rate scaled by current DBM velocity (faster
+            // CME → faster shock pulse).  Reference: 1000 km/s at 3 Hz visual.
             if (s.sheath) {
-                const pulse = 0.5 + 0.5 * Math.sin(t * 3 + progress * 6);
+                const rate  = 3.0 * v_kms / 1000;
+                const pulse = 0.5 + 0.5 * Math.sin(t * rate + progress * 6);
                 s.sheath.material.opacity = (0.10 + pulse * 0.08) * arrivalFade;
             }
 
@@ -959,6 +991,9 @@ export class SpaceWeatherGlobe {
             if (s.core) {
                 s.core.material.opacity = (0.4 + 0.3 * Math.sin(t * 4)) * arrivalFade;
             }
+
+            // Auto-fade once the synthetic playback has overshot 1 AU
+            if (progress >= 1.0 && s.fadeOut === 0) s.fadeOut = 1;
         }
     }
 
@@ -994,6 +1029,18 @@ export class SpaceWeatherGlobe {
         // Spawn budget per frame (limit churn)
         let spawnsLeft = Math.ceil(N * 0.02 * Math.max(dt, 1/60) * 60);
 
+        // Pre-compute scaling: scene-distance (1 unit = 1 R_⊕) → real km
+        // We treat the 55-unit Sun-Earth scene span as 1 AU for the purposes
+        // of computing the Parker spiral angle ψ(r) = atan(Ω r cos λ / v_sw).
+        // Without this scaling our scene would yield ψ ≈ 0 everywhere because
+        // 55 R_⊕ × Ω_⊙ ≈ 1 km/s, far below any wind speed.
+        const SCENE_TO_KM = this._kmPerAU / this._sceneSunEarth;     // ≈ 2.72e6 km / scene-unit
+        const OMEGA_SUN   = 2 * Math.PI / (25.38 * 86400);            // rad/s
+        // Convert "viewing-time" advected position into real time: a packet
+        // moving sceneSpd units / viewing-second corresponds to real km/s
+        // already (sceneSpd × SCENE_TO_KM ÷ _timeCompression = vel[i] km/s),
+        // so for the spiral we just need ψ(r_real, v_real_kms).
+
         for (let i = 0; i < N; i++) {
             // Ageing
             age[i] += dt;
@@ -1001,39 +1048,61 @@ export class SpaceWeatherGlobe {
             // Per-particle scene velocity (units/s) from km/s
             const sceneSpd = this._windSceneSpeed(vel[i]);
 
-            // Direction depends on source.  Ambient particles flow purely -X
-            // (radial outward from sun toward Earth, with a small spread).
-            // AR particles aim at Earth from their AR footpoint; we cache a
-            // unit vector along origin→Earth, with a tiny Parker-spiral curl.
             const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
-            let dx, dy, dz;
+
+            // ── Heliocentric radial vector (sun → particle) ─────────────────
+            const rxs = x - sunX;
+            const rys = y;
+            const rzs = z;
+            const r_scene = Math.hypot(rxs, rys, rzs);
+            if (r_scene < 0.05) {
+                // Skip ill-defined direction at the source itself
+                continue;
+            }
+            // Unit radial direction (outward from sun)
+            const r_inv = 1 / r_scene;
+            const rxh = rxs * r_inv;
+            const ryh = rys * r_inv;
+            const rzh = rzs * r_inv;
+
+            // ── Parker spiral angle ψ at this point ─────────────────────────
+            // Real heliocentric distance, scaled from scene: r_km = r_scene · SCENE_TO_KM
+            // Heliographic latitude estimated from y-component of the radial.
+            const r_km   = r_scene * SCENE_TO_KM;
+            const lat    = Math.asin(Math.max(-1, Math.min(1, ryh)));
+            // Parker (1958): tan ψ = Ω (r − r₀) cos λ / v_sw
+            // Use real wind speed (km/s); below the Alfvén / source surface
+            // (~21.5 R_⊙) the spiral collapses to radial — clamp r₀.
+            const r_km_eff = Math.max(0, r_km - 1.5e7);   // 21.5 R_⊙ ≈ 1.495e7 km
+            const psi = Math.atan2(OMEGA_SUN * r_km_eff * Math.cos(lat), Math.max(50, vel[i]));
+
+            // ── Local IMF / streamline tangent ──────────────────────────────
+            // Rotate the radial unit vector about +y by −ψ (sun rotates +y;
+            // streamlines lag rotation by ψ).  Y-component is preserved.
+            const cs = Math.cos(-psi), sn = Math.sin(-psi);
+            let tx = rxh * cs - rzh * sn;
+            let ty = ryh;
+            let tz = rxh * sn + rzh * cs;
+
+            // Re-normalise (rotation should preserve length; small FP drift)
+            const tLen = Math.hypot(tx, ty, tz) || 1;
+            tx /= tLen; ty /= tLen; tz /= tLen;
+
+            // Source-specific tweaks (no longer "aim at Earth" — particles
+            // follow the spiral, so AR-Earth connection is determined by
+            // longitudes and ψ, just like in the real heliosphere).
+            let speedFactor = 1.0;
             if (src[i] >= 0 && src[i] < arN) {
                 const stream = this._arStreams[src[i]];
-                // Aim from current position toward Earth (re-aim each frame
-                // so the trail bends as the particle approaches).
-                dx = earthX - x;
-                dy = 0       - y;
-                dz = 0       - z;
-                const len = Math.hypot(dx, dy, dz) || 1;
-                dx /= len; dy /= len; dz /= len;
-                // Parker-spiral curl in the orbital plane (rotate around y by
-                // a small angle that grows with distance from sun)
-                const r  = Math.hypot(sunX - x, z);
-                const curl = -0.12 * Math.min(1, r / 30);
-                const cs = Math.cos(curl), sn = Math.sin(curl);
-                const dx2 = dx * cs - dz * sn;
-                const dz2 = dx * sn + dz * cs;
-                dx = dx2; dz = dz2;
-                // Complex / energetic ARs travel ~25% faster (visual cue)
-                const boost = stream.complex ? 1.25 : 1.0;
-                pos[i*3]   = x + dx * sceneSpd * boost * dt;
-                pos[i*3+1] = y + dy * sceneSpd * boost * dt;
-                pos[i*3+2] = z + dz * sceneSpd * boost * dt;
-            } else {
-                // Ambient stream: mostly -X with mild lateral drift
-                pos[i*3]   = x - sceneSpd * dt;
-                pos[i*3+1] = y + Math.sin(this._lastT * 0.4 + i) * 0.02 * dt;
+                // Complex ARs eject ~25% faster CME-like ejecta (kinematic only —
+                // proper DBM is run on the dedicated CME shells, not on these
+                // tracer packets, which represent the ambient + slow streams).
+                if (stream.complex) speedFactor = 1.25;
             }
+
+            pos[i*3]   = x + tx * sceneSpd * speedFactor * dt;
+            pos[i*3+1] = y + ty * sceneSpd * speedFactor * dt;
+            pos[i*3+2] = z + tz * sceneSpd * speedFactor * dt;
 
             // ── Coupling test: did we just enter Earth's bow shock? ─────────
             const ex = pos[i*3] - earthX;
@@ -1050,8 +1119,12 @@ export class SpaceWeatherGlobe {
                 continue;
             }
 
-            // Recycle when far past Earth or way off-axis
-            if (pos[i*3] < earthX - 18 || Math.abs(pos[i*3+1]) > 22 || Math.abs(pos[i*3+2]) > 22) {
+            // Recycle when the packet has wandered beyond ~1.1 AU from the sun
+            // (Parker spirals can sweep far in z without ever crossing Earth)
+            const px = pos[i*3], py = pos[i*3+1], pz = pos[i*3+2];
+            const r2 = (px - sunX)*(px - sunX) + py*py + pz*pz;
+            const rMax = (this._sceneSunEarth * 1.15);
+            if (r2 > rMax * rMax) {
                 this._respawnWind(pos, col, i, vel, src, age, spawnsLeft);
                 spawnsLeft--;
             }
