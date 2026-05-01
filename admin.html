@@ -111,7 +111,10 @@
         .b-user { background: rgba(255,255,255,.06); color: #777; border: 1px solid rgba(255,255,255,.08); }
         .b-free { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
         .b-tester { background: rgba(255,140,0,.1); color: #ffb74d; border: 1px solid rgba(255,140,0,.28); }
-        .b-basic { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        /* .b-basic ≡ .b-intro — Intro is a legacy label for the Basic tier.
+           The two are synonymous; keep both classes so older templates / admin
+           snapshots that still emit b-intro keep rendering. */
+        .b-basic, .b-intro { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
         .b-educator { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
         .b-advanced { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
         .b-institution { background: rgba(255,140,200,.1); color: #ff8cc8; border: 1px solid rgba(255,140,200,.25); }
@@ -573,6 +576,19 @@
             </h3>
             <div id="proxy-freshness-container"><div class="empty">Loading...</div></div>
         </div>
+        <!-- ── Pipeline Analytics (live edge-proxy probe) ──────────── -->
+        <!-- Client-side latency + payload-freshness probe of every Edge
+             proxy the app consumes. Complementary to Pipeline Health
+             (which reads heartbeat rows) and Proxy Freshness (which is
+             a one-shot cache check) — Pipeline Analytics measures what
+             a real browser actually experiences from this POP.
+             Moved here from dashboard.html so the user dashboard stays
+             user-only; the module is lazy-imported when the System tab
+             is opened. -->
+        <div class="card" id="pipeline-analytics-card" style="margin-bottom:18px">
+            <h3>Pipeline Analytics · Live Probe</h3>
+            <div id="pipeline-health"><div class="empty">Loading pipeline probes…</div></div>
+        </div>
         <!-- ── Scheduled jobs (pg_cron) ────────────────────────────── -->
         <!-- Surfaces the most-recent run + 24h failure counts for every
              pg_cron job so silent cron failures are visible BEFORE
@@ -749,7 +765,9 @@ async function loadKPIs() {
     set('kpi-signins', d.signIns, 'blue');
     set('kpi-minutes', d.minutesUsed, 'blue');
     set('kpi-signups', d.signUps, 'green');
-    set('kpi-intro', d.introSubs, 'purple');
+    // d.basicSubs is the canonical name; d.introSubs is a legacy alias for
+    // the same number (intro ≡ basic). Prefer basicSubs going forward.
+    set('kpi-intro', d.basicSubs ?? d.introSubs, 'purple');
     set('kpi-educator', d.educatorSubs ?? 0, 'green');
     set('kpi-pro', d.proSubs, 'gold');
     set('kpi-institution', d.institutionSubs ?? 0, 'purple');
@@ -1385,7 +1403,8 @@ async function loadUsers() {
     let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
     for (const u of res.data) {
         const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
-        const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
+        // intro is a legacy alias for basic — both render with the b-basic class.
+        const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', intro:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
         html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
     }
@@ -1480,7 +1499,7 @@ async function loadInvites() {
         const full    = c.used_count >= c.max_uses;
         const status  = !c.active ? 'Deactivated' : expired ? 'Expired' : full ? 'Fully used' : 'Active';
         const sClass  = !c.active || expired || full ? 'color:#555' : 'color:#4eff91';
-        const pc      = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
+        const pc      = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', intro:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[c.plan] || 'b-free');
         const exp     = c.expires_at ? new Date(c.expires_at).toLocaleDateString() : 'Never';
         const created = c.created_at ? new Date(c.created_at).toLocaleDateString() : '--';
         html += `<tr>
@@ -2018,6 +2037,30 @@ async function runHealthCheck() {
 }
 runHealthCheck();
 document.getElementById('btn-recheck').addEventListener('click', runHealthCheck);
+
+// Pipeline Analytics live probe — lazy-import the module the first time
+// the System tab is opened so the admin landing tab stays light.
+let _pipelineAnalyticsMounted = false;
+async function _mountPipelineAnalytics() {
+    if (_pipelineAnalyticsMounted) return;
+    _pipelineAnalyticsMounted = true;
+    try {
+        const mod = await import('./js/pipeline-analytics.js');
+        mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
+    } catch (err) {
+        console.error('[Admin] pipeline-analytics failed:', err);
+        const el = document.getElementById('pipeline-health');
+        if (el) el.innerHTML = `<div class="empty" style="color:#ff8080">Pipeline analytics failed to load: ${_esc(err.message || String(err))}</div>`;
+        _pipelineAnalyticsMounted = false; // allow retry on next tab open
+    }
+}
+document.querySelector('.tab[data-tab="system"]')?.addEventListener('click', _mountPipelineAnalytics);
+// If the page deep-links into #system or the System tab is already active,
+// fire once on load so the card isn't blank until the user clicks away and
+// back.
+if (document.getElementById('panel-system')?.classList.contains('active')) {
+    _mountPipelineAnalytics();
+}
 document.getElementById('btn-schema').addEventListener('click', () => window.open('supabase-schema.sql', '_blank'));
 document.getElementById('btn-export').addEventListener('click', async () => {
     const r = await testConnection();

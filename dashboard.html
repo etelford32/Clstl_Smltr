@@ -368,8 +368,10 @@ footer a:hover{color:var(--text)}
       Your astrophysics command center.
       <span class="plan-badge plan-free" id="plan-badge">Free</span>
       <button id="retake-tour" style="background:none;border:none;color:rgba(160,128,255,.7);cursor:pointer;font-family:inherit;font-size:.72rem;margin-left:8px;padding:0" title="Guided tour of features">Take the tour &rarr;</button>
-      <a href="admin.html" id="dash-admin-btn" style="display:none;margin-left:10px;padding:4px 12px;background:rgba(255,50,50,.15);border:1px solid rgba(255,60,60,.35);border-radius:5px;color:#f55;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,50,50,.3)'" onmouseout="this.style.background='rgba(255,50,50,.15)'">SUPER ADMIN</a>
-      <a href="status.html" id="dash-status-btn" style="display:none;margin-left:6px;padding:4px 12px;background:rgba(255,140,0,.12);border:1px solid rgba(255,140,0,.3);border-radius:5px;color:#ff8c00;font-size:.72rem;font-weight:700;text-decoration:none;letter-spacing:.04em;transition:background .2s" onmouseover="this.style.background='rgba(255,140,0,.25)'" onmouseout="this.style.background='rgba(255,140,0,.12)'">SYSTEM STATUS</a>
+      <!-- Admin/superadmin shortcuts intentionally live in the shared nav
+           (js/nav.js renders the ADMIN/SUPER pill for elevated roles). The
+           user dashboard is now strictly user-scoped — operator content
+           lives on admin.html. -->
     </p>
   </div>
 
@@ -391,16 +393,10 @@ footer a:hover{color:var(--text)}
   <!-- Mounted by js/class-roster.js when the user holds a seated plan. -->
   <div class="card" id="class-roster-card" style="margin-bottom:16px;display:none"></div>
 
-  <!-- ── PIPELINE ANALYTICS (superadmin only) ── -->
-  <div class="card" id="pipeline-card" style="margin-bottom:16px;display:none">
-    <div class="card-head">
-      <span class="card-title">Pipeline Analytics · Superadmin</span>
-      <a href="admin.html" class="card-link">Open admin console →</a>
-    </div>
-    <div class="card-body">
-      <div id="pipeline-health"><div style="color:var(--muted);font-size:.78rem;padding:10px 0">Loading pipeline probes…</div></div>
-    </div>
-  </div>
+  <!-- Pipeline Analytics has moved to admin.html → System tab.
+       The user dashboard is strictly user-scoped; superadmin operator
+       content (live edge-proxy probes, heartbeat freshness, cron status)
+       all lives on the admin console now. -->
 
   <!-- ── TOP ROW ── -->
   <div class="top-row">
@@ -1109,6 +1105,7 @@ import {
 } from './js/trip-planner.js';
 import { mountClassRoster } from './js/class-roster.js';
 import { logActivation, EVENTS } from './js/activation.js';
+import { tierLabel, tierBadgeClass } from './js/tier-config.js';
 
 // Expose auth for the inline script sections
 window._ppAuth = { auth };
@@ -1186,65 +1183,21 @@ if (!_auth || !_auth.signedIn) {
           badge.textContent = r === 'superadmin' ? 'Superadmin' : 'Admin';
           badge.className   = 'plan-badge plan-advanced';
       } else {
-          // CSS class set per plan; unrecognized plans fall through to 'free'
-          // styling so a future tier added to the DB doesn't render with no
-          // background.
-          const KNOWN = new Set(['free','basic','educator','advanced','institution','enterprise']);
-          const cls   = KNOWN.has(p) ? p : 'free';
-          badge.textContent = p.charAt(0).toUpperCase() + p.slice(1);
-          badge.className   = 'plan-badge plan-' + cls;
+          // Labels + CSS class come from js/tier-config.js so an unknown
+          // plan id falls through to the Free Trial styling instead of
+          // rendering a blank badge.
+          badge.textContent = tierLabel(p);
+          badge.className   = 'plan-badge ' + tierBadgeClass(p);
       }
   }
 
-  function _renderAdminButtons() {
-      const btn       = document.getElementById('dash-admin-btn');
-      const statusBtn = document.getElementById('dash-status-btn');
-      const isAdmin   = _authMod.isAdmin?.()      ?? false;
-      const isSuper   = _authMod.isSuperAdmin?.() ?? false;
-      if (btn) {
-          btn.style.display = isAdmin ? 'inline-block' : 'none';
-          if (isAdmin) btn.textContent = isSuper ? 'SUPER ADMIN' : 'ADMIN';
-      }
-      if (statusBtn) {
-          statusBtn.style.display = isSuper ? 'inline-block' : 'none';
-      }
-  }
-
-  // Pipeline Analytics — superadmin only. Defer the module import until we
-  // know the user qualifies so regular users never pay the download cost.
-  async function _mountPipelineCard() {
-      const card = document.getElementById('pipeline-card');
-      if (!card) return;
-      const isSuper = _authMod.isSuperAdmin?.() ?? false;
-      if (!isSuper) {
-          card.style.display = 'none';
-          // Reset mount flag so a late-arriving superadmin role flip re-mounts.
-          card.dataset.mounted = '';
-          return;
-      }
-      if (card.dataset.mounted === '1') {
-          card.style.display = '';
-          return;
-      }
-      card.dataset.mounted = '1';
-      card.style.display = '';
-      try {
-          const mod = await import('./js/pipeline-analytics.js');
-          mod.renderPipelineAnalytics(document.getElementById('pipeline-health'));
-      } catch (err) {
-          console.error('[Dashboard] pipeline-analytics failed:', err);
-          document.getElementById('pipeline-health').innerHTML =
-              `<div style="color:#f88;font-size:.78rem">Pipeline analytics failed to load: ${err.message}</div>`;
-      }
-  }
+  // Admin / superadmin shortcuts and Pipeline Analytics moved to nav.js
+  // and admin.html respectively — the user dashboard no longer renders
+  // operator UI inline.
 
   _renderPlanBadge();
-  _renderAdminButtons();
-  _mountPipelineCard();
   window.addEventListener('auth-changed', () => {
       _renderPlanBadge();
-      _renderAdminButtons();
-      _mountPipelineCard();
       _renderSubscriptionCard();
   });
 

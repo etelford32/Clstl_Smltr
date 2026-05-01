@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Account — Parker Physics</title>
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="js/nav-styles.css">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#06030f;--surface:#0d0820;--border:rgba(255,255,255,.07);
+  --text:#d0cce8;--muted:#6a6488;--accent:#ffb830;--accent2:#4fc3f7;
+  --green:#4fc97f;--card-bg:#0f0c21;--danger:#ff6b6b;
+}
+html{height:auto;overflow-y:auto}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
+
+main{flex:1;max-width:980px;width:100%;margin:0 auto;padding:32px 24px 60px}
+
+.page-header{margin-bottom:28px}
+.page-header h1{font-size:1.75rem;font-weight:800;background:linear-gradient(100deg,#fff 40%,#aaa9cc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.page-header p{color:var(--muted);font-size:.92rem;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+.plan-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.plan-free{background:#1a3a1a;color:#6fcf6f}
+.plan-tester{background:#3a2a1a;color:#ffb74d}
+.plan-basic{background:#1a2a3a;color:#4fc3f7}
+.plan-educator{background:#1f2f1a;color:#9ad36f}
+.plan-advanced{background:#2a1a3a;color:#c77dff}
+.plan-institution{background:#3a1a2a;color:#ff8cc8}
+.plan-enterprise{background:#3a3a1a;color:#ffd700}
+
+/* Section nav (sticky pill row) */
+.section-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:22px;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.sec-link{font:inherit;font-size:.78rem;font-weight:700;letter-spacing:.04em;color:var(--muted);background:transparent;border:none;cursor:pointer;padding:8px 14px;border-radius:6px;text-decoration:none;transition:background .15s,color .15s}
+.sec-link:hover{color:#fff;background:rgba(255,255,255,.04)}
+.sec-link.active{background:rgba(255,184,48,.12);color:var(--accent)}
+
+/* Cards */
+.card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;margin-bottom:18px;overflow:hidden}
+.card-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.card-title{font-size:.92rem;font-weight:700;color:#e8f4ff}
+.card-sub{font-size:.74rem;color:var(--muted);font-weight:400}
+.card-body{padding:18px 20px}
+.card-foot{padding:12px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;background:rgba(255,255,255,.015)}
+
+/* Form controls */
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:640px){.field-row{grid-template-columns:1fr}}
+.field-label{font-size:.74rem;font-weight:700;letter-spacing:.04em;color:var(--muted);text-transform:uppercase}
+.field input[type=text],.field input[type=email],.field input[type=number],.field select{
+  font:inherit;font-size:.9rem;color:var(--text);
+  background:rgba(0,0,0,.25);border:1px solid var(--border);
+  border-radius:8px;padding:10px 12px;outline:none;transition:border-color .15s
+}
+.field input:focus,.field select:focus{border-color:var(--accent)}
+.field input[disabled]{opacity:.6;cursor:not-allowed}
+.field-hint{font-size:.7rem;color:var(--muted)}
+
+/* Toggle row */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);gap:10px}
+.toggle-row:last-child{border-bottom:0}
+.toggle-info{flex:1;min-width:0}
+.toggle-name{font-size:.86rem;font-weight:600;color:#e8f4ff}
+.toggle-desc{font-size:.72rem;color:var(--muted);margin-top:2px;line-height:1.4}
+.toggle-pro-tag{display:inline-block;font-size:.6rem;font-weight:800;letter-spacing:.08em;color:#c77dff;background:rgba(192,128,255,.12);border:1px solid rgba(192,128,255,.3);border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:middle}
+
+/* iOS-style switch */
+.switch{position:relative;display:inline-block;width:42px;height:24px;flex:0 0 auto}
+.switch input{opacity:0;width:0;height:0}
+.switch .slider{position:absolute;cursor:pointer;inset:0;background:#2a2440;border-radius:24px;transition:background .2s}
+.switch .slider::before{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;background:#999;border-radius:50%;transition:transform .2s,background .2s}
+.switch input:checked+.slider{background:rgba(78,201,127,.4)}
+.switch input:checked+.slider::before{transform:translateX(18px);background:var(--green)}
+.switch input:disabled+.slider{cursor:not-allowed;opacity:.5}
+
+/* Buttons */
+.btn{font:inherit;font-size:.82rem;font-weight:700;letter-spacing:.03em;padding:9px 16px;border-radius:8px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text);transition:background .15s,border-color .15s,color .15s}
+.btn:hover{background:rgba(255,255,255,.09);border-color:rgba(255,255,255,.25);color:#fff}
+.btn-primary{background:linear-gradient(45deg,#ff8c00,#ffd700);color:#0a0510;border-color:transparent}
+.btn-primary:hover{filter:brightness(1.06);color:#000}
+.btn-ghost{background:transparent}
+.btn-danger{background:rgba(255,80,80,.08);border-color:rgba(255,100,100,.3);color:#ff8888}
+.btn-danger:hover{background:rgba(255,80,80,.16);color:#ffaaaa}
+.btn-sm{font-size:.72rem;padding:6px 12px}
+
+/* Status banner */
+.status{font-size:.78rem;padding:8px 12px;border-radius:6px;margin-top:12px;min-height:0}
+.status.ok{background:rgba(78,201,127,.08);border:1px solid rgba(78,201,127,.3);color:var(--green)}
+.status.err{background:rgba(255,107,107,.08);border:1px solid rgba(255,107,107,.3);color:#ff8b8b}
+
+/* Usage meter */
+.meter{margin-bottom:16px}
+.meter:last-child{margin-bottom:0}
+.meter-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;gap:8px}
+.meter-label{font-size:.82rem;font-weight:600;color:#e8f4ff}
+.meter-val{font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.meter-bar{height:8px;background:rgba(255,255,255,.05);border-radius:4px;overflow:hidden}
+.meter-fill{height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));transition:width .25s}
+.meter-fill.warn{background:linear-gradient(90deg,#ffb74d,#ff8c00)}
+.meter-fill.danger{background:linear-gradient(90deg,#ff6b6b,#ff3030)}
+
+/* API key list */
+.key-list{margin-top:8px}
+.key-row{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;flex-wrap:wrap}
+.key-row.revoked{opacity:.5}
+.key-info{flex:1;min-width:140px}
+.key-label-text{font-size:.86rem;font-weight:600;color:#e8f4ff}
+.key-meta{font-size:.7rem;color:var(--muted);font-family:'SFMono-Regular',monospace;margin-top:3px}
+.key-secret{display:block;background:#000;border:1px solid rgba(255,184,48,.4);border-radius:6px;padding:10px 12px;font-family:'SFMono-Regular',monospace;font-size:.78rem;color:#ffd700;word-break:break-all;margin-top:10px}
+.key-warning{font-size:.7rem;color:#ff8b8b;margin-top:4px}
+
+.empty-row{font-size:.78rem;color:var(--muted);font-style:italic;padding:16px 0;text-align:center}
+.coming-soon{display:inline-block;background:rgba(255,184,48,.1);border:1px solid rgba(255,184,48,.3);color:var(--accent);font-size:.62rem;font-weight:800;letter-spacing:.1em;padding:2px 8px;border-radius:999px;margin-left:6px;text-transform:uppercase;vertical-align:middle}
+
+/* Auth gate (matches dashboard) */
+#auth-gate{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#auth-gate.hidden{display:none}
+#auth-gate h2{font-size:1.55rem;font-weight:800;margin-bottom:10px}
+#auth-gate p{color:var(--muted);margin-bottom:26px;max-width:360px;font-size:.9rem}
+.gate-actions{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.gate-actions a{display:inline-flex;align-items:center;justify-content:center;padding:12px 24px;min-height:44px;border-radius:24px;font-weight:700;font-size:.88rem;text-decoration:none}
+.gate-signin{background:transparent;border:1px solid var(--accent);color:var(--accent)}
+.gate-signup{background:var(--accent);color:#0a0510}
+
+footer{padding:22px;text-align:center;font-size:.74rem;color:var(--muted);border-top:1px solid var(--border)}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--text)}
+
+@media(max-width:600px){
+  main{padding:18px 12px 56px}
+  .card-head{padding:13px 14px}
+  .card-body{padding:14px}
+  .card-foot{padding:11px 14px}
+  .page-header h1{font-size:1.35rem}
+}
+</style>
+</head>
+<body>
+
+<!-- ── AUTH GATE ── -->
+<div id="auth-gate" aria-live="polite">
+  <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" style="height:52px;width:52px;border-radius:50%;object-fit:cover;margin-bottom:18px">
+  <h2>Sign in to manage your account</h2>
+  <p>Profile, notifications, API keys, and team seats live here.</p>
+  <div class="gate-actions">
+    <a href="signin.html" class="gate-signin">Sign In</a>
+    <a href="signup.html" class="gate-signup">Create Free Account</a>
+  </div>
+</div>
+
+<!-- ── NAV (shared) ── -->
+<nav aria-label="Primary navigation"></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260501"; initNav("account");</script>
+
+<main>
+
+  <header class="page-header">
+    <h1>Account Settings</h1>
+    <p>
+      <span id="acc-email">—</span>
+      <span class="plan-badge plan-free" id="acc-plan-badge">Free</span>
+    </p>
+  </header>
+
+  <!-- Section nav -->
+  <nav class="section-nav" aria-label="Account sections">
+    <a class="sec-link active" href="#profile">Profile</a>
+    <a class="sec-link" href="#notifications">Notifications</a>
+    <a class="sec-link" href="#usage">Usage</a>
+    <a class="sec-link" id="link-team" href="#team" style="display:none">Team</a>
+    <a class="sec-link" href="#api-keys">API Keys</a>
+    <a class="sec-link" href="#billing">Billing</a>
+    <a class="sec-link" href="#danger">Danger Zone</a>
+  </nav>
+
+  <!-- ── Profile ── -->
+  <section id="profile" class="card">
+    <div class="card-head">
+      <span class="card-title">Profile</span>
+      <span class="card-sub">Visible to admins; used in greetings and email alerts.</span>
+    </div>
+    <div class="card-body">
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="prof-name">Display name</label>
+          <input id="prof-name" type="text" maxlength="60" placeholder="Your name" autocomplete="name">
+          <span class="field-hint">Shown in alert emails and the dashboard greeting.</span>
+        </div>
+        <div class="field">
+          <label class="field-label" for="prof-email">Email</label>
+          <input id="prof-email" type="email" disabled>
+          <span class="field-hint">Locked. Contact support to change your sign-in email.</span>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label" for="prof-tz">Timezone (display)</label>
+          <select id="prof-tz">
+            <option value="">Use device timezone</option>
+          </select>
+          <span class="field-hint">Used to format alert times. Browser default if blank.</span>
+        </div>
+        <div class="field">
+          <label class="field-label">Member since</label>
+          <input id="prof-created" type="text" disabled value="—">
+        </div>
+      </div>
+    </div>
+    <div class="card-foot">
+      <span id="prof-status" class="status" style="display:none"></span>
+      <button class="btn btn-primary" id="prof-save" type="button">Save Profile</button>
+    </div>
+  </section>
+
+  <!-- ── Notifications ── -->
+  <section id="notifications" class="card">
+    <div class="card-head">
+      <span class="card-title">Notifications</span>
+      <span class="card-sub">Account-level defaults. Per-location overrides live on the dashboard.</span>
+    </div>
+    <div class="card-body">
+      <div id="notif-gate-msg" style="display:none;padding:12px 14px;background:rgba(255,184,48,.06);border:1px solid rgba(255,184,48,.25);border-radius:8px;color:var(--accent);font-size:.82rem;margin-bottom:14px">
+        Notifications require a paid plan.
+        <a href="pricing.html" style="color:var(--accent);font-weight:700">Upgrade to Basic</a>
+        to receive aurora, storm, and flare alerts.
+      </div>
+
+      <h4 style="font-size:.78rem;letter-spacing:.06em;color:var(--muted);font-weight:700;text-transform:uppercase;margin-bottom:8px">Space weather</h4>
+      <div class="toggle-row" data-key="notify_aurora">
+        <div class="toggle-info"><div class="toggle-name">Aurora visibility</div><div class="toggle-desc">Alert when Kp meets your visibility threshold for any saved location.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_aurora"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_storm">
+        <div class="toggle-info"><div class="toggle-name">Geomagnetic storm</div><div class="toggle-desc">G-scale storm watches and warnings.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_storm"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_flare">
+        <div class="toggle-info"><div class="toggle-name">Solar flare</div><div class="toggle-desc">M-class and above (configurable threshold).</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_flare"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_cme">
+        <div class="toggle-info"><div class="toggle-name">CME forecast</div><div class="toggle-desc">Earth-directed coronal mass ejections.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_cme"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_temperature">
+        <div class="toggle-info"><div class="toggle-name">Temperature</div><div class="toggle-desc">High/low forecast crosses your saved-location thresholds.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_temperature"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_sat_pass">
+        <div class="toggle-info"><div class="toggle-name">Satellite pass</div><div class="toggle-desc">ISS / Hubble / Starlink overhead at your primary location.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_sat_pass"><span class="slider"></span></label>
+      </div>
+
+      <h4 style="font-size:.78rem;letter-spacing:.06em;color:var(--muted);font-weight:700;text-transform:uppercase;margin:18px 0 8px">Operations <span class="toggle-pro-tag">PRO</span></h4>
+      <div class="toggle-row" data-key="notify_radio_blackout" data-pro="1">
+        <div class="toggle-info"><div class="toggle-name">Radio blackout</div><div class="toggle-desc">HF radio degradation forecasts (R-scale).</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_radio_blackout"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_gps" data-pro="1">
+        <div class="toggle-info"><div class="toggle-name">GPS / GNSS</div><div class="toggle-desc">Ionospheric scintillation risk for navigation.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_gps"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_power_grid" data-pro="1">
+        <div class="toggle-info"><div class="toggle-name">Power grid</div><div class="toggle-desc">G4+ event risk to bulk power transmission.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_power_grid"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_collision" data-pro="1">
+        <div class="toggle-info"><div class="toggle-name">Conjunction warning</div><div class="toggle-desc">Close-approach alerts for satellites in your fleet.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_collision"><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row" data-key="notify_iono_disturbance" data-pro="1">
+        <div class="toggle-info"><div class="toggle-name">Ionosphere disturbance</div><div class="toggle-desc">Sudden ionospheric disturbance (SID) events.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="notify_iono_disturbance"><span class="slider"></span></label>
+      </div>
+
+      <h4 style="font-size:.78rem;letter-spacing:.06em;color:var(--muted);font-weight:700;text-transform:uppercase;margin:18px 0 8px">Delivery</h4>
+      <div class="toggle-row" data-key="email_alerts">
+        <div class="toggle-info"><div class="toggle-name">Email alerts</div><div class="toggle-desc">Send matching alerts to your email. SMS / push are coming later.</div></div>
+        <label class="switch"><input type="checkbox" data-pref="email_alerts"><span class="slider"></span></label>
+      </div>
+      <div class="field-row" style="margin-top:14px">
+        <div class="field">
+          <label class="field-label" for="pref-min-sev">Minimum severity (email)</label>
+          <select id="pref-min-sev" data-pref="email_min_severity">
+            <option value="info">Info — every match</option>
+            <option value="warning">Warning — moderate and above</option>
+            <option value="critical">Critical — only major events</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="pref-cooldown">Cooldown (minutes)</label>
+          <input id="pref-cooldown" type="number" min="5" max="1440" step="5" data-pref="alert_cooldown_min">
+          <span class="field-hint">Minimum minutes between alerts of the same type.</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-foot">
+      <span id="notif-status" class="status" style="display:none"></span>
+      <button class="btn btn-primary" id="notif-save" type="button">Save Preferences</button>
+    </div>
+  </section>
+
+  <!-- ── Usage ── -->
+  <section id="usage" class="card">
+    <div class="card-head">
+      <span class="card-title">Usage</span>
+      <span class="card-sub">What your plan allows and what you've used.</span>
+    </div>
+    <div class="card-body" id="usage-body">
+      <div class="meter">
+        <div class="meter-row">
+          <span class="meter-label">Saved locations</span>
+          <span class="meter-val" id="usage-locs-val">—</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill" id="usage-locs-fill" style="width:0%"></div></div>
+      </div>
+      <div class="meter" id="usage-seats-meter" style="display:none">
+        <div class="meter-row">
+          <span class="meter-label">Team seats</span>
+          <span class="meter-val" id="usage-seats-val">—</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill" id="usage-seats-fill" style="width:0%"></div></div>
+      </div>
+      <div class="meter">
+        <div class="meter-row">
+          <span class="meter-label">API calls today</span>
+          <span class="meter-val" id="usage-api-val">—</span>
+        </div>
+        <div class="meter-bar"><div class="meter-fill" id="usage-api-fill" style="width:0%"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Team (educator/institution/enterprise) ── -->
+  <section id="team" class="card" style="display:none">
+    <div class="card-head">
+      <span class="card-title">Team</span>
+      <span class="card-sub">Invite teammates / students. Each redemption uses one seat.</span>
+    </div>
+    <div class="card-body">
+      <!-- class-roster.js mounts the existing roster panel here so we don't
+           duplicate that UI. The dashboard's #class-roster-card stays the
+           canonical render target — the same module is mounted to either
+           one. -->
+      <div id="class-roster-card"></div>
+    </div>
+  </section>
+
+  <!-- ── API Keys ── -->
+  <section id="api-keys" class="card">
+    <div class="card-head">
+      <span class="card-title">API Keys <span class="coming-soon">Beta</span></span>
+      <span class="card-sub">Programmatic access to your fleets, alerts, and saved locations.</span>
+    </div>
+    <div class="card-body">
+      <div id="keys-gate-msg" style="display:none;padding:12px 14px;background:rgba(255,184,48,.06);border:1px solid rgba(255,184,48,.25);border-radius:8px;color:var(--accent);font-size:.82rem;margin-bottom:14px">
+        API keys are available on the
+        <a href="pricing.html#advanced" style="color:var(--accent);font-weight:700">Advanced</a>
+        plan and above.
+      </div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:14px">
+        Keys are shown once at creation, then stored hashed. Treat them like
+        passwords. Endpoints documented in
+        <a href="api-policy.html" style="color:var(--accent2)">API Policy</a>.
+      </p>
+      <div class="field-row" id="key-create-row">
+        <div class="field">
+          <label class="field-label" for="key-label">New key label</label>
+          <input id="key-label" type="text" maxlength="60" placeholder="e.g. CI server, mobile-app, dashboard-readonly">
+        </div>
+        <div class="field" style="justify-content:flex-end">
+          <button class="btn btn-primary" id="key-create-btn" type="button" style="height:40px">Generate Key</button>
+        </div>
+      </div>
+      <div id="key-secret-out" style="display:none"></div>
+      <div class="key-list" id="key-list"><div class="empty-row">Loading keys…</div></div>
+    </div>
+  </section>
+
+  <!-- ── Billing ── -->
+  <section id="billing" class="card">
+    <div class="card-head">
+      <span class="card-title">Billing</span>
+      <span class="card-sub">Manage subscription, payment method, invoices.</span>
+    </div>
+    <div class="card-body">
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Current plan</label>
+          <input id="bill-plan" type="text" disabled value="—">
+        </div>
+        <div class="field">
+          <label class="field-label">Status</label>
+          <input id="bill-status" type="text" disabled value="—">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Next renewal</label>
+          <input id="bill-renewal" type="text" disabled value="—">
+        </div>
+        <div class="field">
+          <label class="field-label">Customer ID</label>
+          <input id="bill-cust" type="text" disabled value="—">
+        </div>
+      </div>
+    </div>
+    <div class="card-foot">
+      <a class="btn" href="pricing.html" id="bill-upgrade">View Plans</a>
+      <button class="btn btn-primary" id="bill-portal" type="button" style="display:none">Manage Billing</button>
+    </div>
+  </section>
+
+  <!-- ── Danger Zone ── -->
+  <section id="danger" class="card" style="border-color:rgba(255,107,107,.25)">
+    <div class="card-head" style="border-color:rgba(255,107,107,.18)">
+      <span class="card-title" style="color:#ff8b8b">Danger Zone</span>
+      <span class="card-sub">Irreversible account-level actions.</span>
+    </div>
+    <div class="card-body">
+      <div class="toggle-row" style="border:0">
+        <div class="toggle-info">
+          <div class="toggle-name">Sign out everywhere</div>
+          <div class="toggle-desc">Revoke this device's session. You'll need to sign back in.</div>
+        </div>
+        <button class="btn btn-danger btn-sm" id="danger-signout" type="button">Sign Out</button>
+      </div>
+      <div class="toggle-row" style="border:0">
+        <div class="toggle-info">
+          <div class="toggle-name">Delete account</div>
+          <div class="toggle-desc">Permanently remove your profile, saved locations, and API keys. Email <a href="mailto:support@parkerphysics.com" style="color:var(--accent2)">support</a> to confirm — there is no automated path so this can't happen by accident.</div>
+        </div>
+        <a class="btn btn-danger btn-sm" href="mailto:support@parkerphysics.com?subject=Account%20deletion%20request">Request Deletion</a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <p>&copy; 2026 Parker Physics &middot;
+    <a href="dashboard.html">Dashboard</a> &middot;
+    <a href="index.html">Home</a> &middot;
+    <a href="privacy.html">Privacy</a> &middot;
+    <a href="api-policy.html">API Policy</a>
+  </p>
+</footer>
+
+<script type="module" src="./js/account.js"></script>
+</body>
+</html>
