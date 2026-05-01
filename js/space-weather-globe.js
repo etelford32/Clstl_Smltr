@@ -194,6 +194,22 @@ export class SpaceWeatherGlobe {
         this._arStreams      = [];   // [{ origin:Vector3, dirBase, intensity, complex }]
         this._lastRegionsKey = '';
 
+        // ── AR twist accumulator ────────────────────────────────────────────
+        // Each NOAA active region carries an integrating twist Φ(t) that grows
+        // with time-on-disk at a rate set by complexity & area:
+        //
+        //     dΦ/dt = κ · c(class) · A_norm           [rad / real day]
+        //
+        // When Φ ≥ Φ_crit (Hood-Priest kink threshold ≈ 2.5π) the rope is
+        // unstable → trigger an internal eruption (synthetic CME injection).
+        // This gives us a *predictive* eruption signal independent of NOAA's
+        // event list, while remaining deterministic from the ingested AR set.
+        this._arTwist        = new Map();    // arId → { phi, baseTwist, cls, areaNorm, lat_rad, lon_rad, eruptedAt }
+        this._twistKappa     = 1.5;          // rad / real-day at unit drive
+        this._kinkThreshold  = 2.5 * Math.PI;
+        this._eruptionCooldownS = 8;         // viewing-seconds before AR can re-erupt
+        this._arEruptionLog  = [];           // ring buffer of recent internal eruptions
+
         // Bow shock impact pulses (transient sprite list)
         this._impactPulses = []; // [{ sprite, life, life0 }]
 
@@ -790,14 +806,19 @@ export class SpaceWeatherGlobe {
         grp.name = 'flux_ropes';
         grp.position.copy(this._sunGroup.position);
         this._scene.add(grp);
-        this._fluxRopeGroup = grp;
-        this._fluxRopeKey   = '';
+        this._fluxRopeGroup   = grp;
+        this._fluxRopeKey     = '';
+        // Per-AR records of strand & spine materials so twist accumulation
+        // (live colour update) and internal eruptions (geometry rebuild)
+        // can find their meshes without traversing the scene each frame.
+        this._fluxRopeRecords = new Map();   // arId → { strandMat, spineMat, strandLines, spineLine }
     }
 
     /**
-     * @param {Array<{lat_rad,lon_rad,is_complex,mag_class,area_norm,num_spots}>} regions
+     * @param {Array<{lat_rad,lon_rad,is_complex,mag_class,area_norm,num_spots,region}>} regions
+     * @param {boolean} [forceRebuild=false]  rebuild even if the AR set key hasn't changed
      */
-    _rebuildFluxRopes(regions) {
+    _rebuildFluxRopes(regions, forceRebuild = false) {
         if (!this._fluxRopeGroup) return;
 
         // Cheap rebuild key — regenerate only when the contributing set changes
@@ -805,7 +826,7 @@ export class SpaceWeatherGlobe {
             .filter(r => r.is_complex)
             .map(r => `${r.region}:${(r.mag_class||'').slice(0,8)}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${(r.area_norm||0).toFixed(2)}`)
             .join('|');
-        if (key === this._fluxRopeKey) return;
+        if (!forceRebuild && key === this._fluxRopeKey) return;
         this._fluxRopeKey = key;
 
         // Dispose previous geometry
@@ -816,67 +837,63 @@ export class SpaceWeatherGlobe {
             c.material?.dispose();
             grp.remove(c);
         }
+        this._fluxRopeRecords.clear();
 
         const SUN_R = 8.0;
+        const TWIST_KINK = this._kinkThreshold;
+
         for (const r of regions) {
             if (!r.is_complex) continue;
+            const arId = r.region;
+            if (arId == null) continue;
 
             // Local tangent frame at the AR position on the sun
             const lat = r.lat_rad, lon = r.lon_rad;
             const cosL = Math.cos(lat), sinL = Math.sin(lat);
-            const p = new THREE.Vector3(cosL * Math.cos(lon), sinL, cosL * Math.sin(lon)); // unit normal
-            // East: ∂p/∂lon, normalised (always tangent to surface, |east| = cos(lat))
-            const east  = new THREE.Vector3(-Math.sin(lon), 0, Math.cos(lon));   // already unit length
-            // North: ∂p/∂lat
+            const p = new THREE.Vector3(cosL * Math.cos(lon), sinL, cosL * Math.sin(lon));
+            const east  = new THREE.Vector3(-Math.sin(lon), 0, Math.cos(lon));
             const north = new THREE.Vector3(-sinL * Math.cos(lon), cosL, -sinL * Math.sin(lon));
 
-            // Loop scale from AR area + spot count
             const aNorm = Math.max(0.15, Math.min(1.0, r.area_norm ?? 0.25));
-            const arch_r = SUN_R * (0.18 + 0.40 * aNorm);   // half-separation = arch radius
+            const arch_r = SUN_R * (0.18 + 0.40 * aNorm);
 
-            // Twist mapping from Hale magnetic class
-            const cls = String(r.mag_class || '').toLowerCase();
-            let twist = Math.PI;                                 // β
-            if (cls.includes('delta'))      twist = 5 * Math.PI; // βγδ
-            else if (cls.includes('gamma')) twist = 3 * Math.PI; // βγ
-            const TWIST_KINK = 2.5 * Math.PI;
+            // Live twist from the accumulator (falls back to mag-class baseline
+            // for ARs we just received this update tick).
+            const slot = this._arTwist?.get(arId);
+            const twist = slot ? slot.phi : this._baselineTwist(r.mag_class);
             const erupting = twist >= TWIST_KINK;
 
-            // Number of helical strands and rope cross-section radius
             const nStrands = 6;
-            const ropeRho  = arch_r * 0.10;       // ~10 % of arch radius
-
-            // Strand colour: golden for stable, hot red if past kink threshold
-            const strandColor = erupting ? 0xff4830 : 0xffc060;
-            const strandOp    = erupting ? 0.85    : 0.55;
+            const ropeRho  = arch_r * 0.10;
 
             const strandMat = new THREE.LineBasicMaterial({
-                color: strandColor,
+                color: erupting ? 0xff4830 : 0xffc060,
                 transparent: true,
-                opacity: strandOp,
+                opacity:  erupting ? 0.85 : 0.55,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+            const spineMat = new THREE.LineDashedMaterial({
+                color: erupting ? 0xff8060 : 0xfff0a0,
+                dashSize: 0.25, gapSize: 0.18,
+                transparent: true, opacity: 0.30,
                 blending: THREE.AdditiveBlending,
                 depthWrite: false,
             });
 
-            // Generate helical strands as Line objects
             const SAMPLES = 80;
+            const strandLines = [];
             for (let k = 0; k < nStrands; k++) {
                 const phase0 = (k / nStrands) * Math.PI * 2;
                 const pts = new Array(SAMPLES);
                 for (let i = 0; i < SAMPLES; i++) {
-                    const s = (i / (SAMPLES - 1)) * Math.PI;          // arc parameter 0..π
-                    // Axis point: half-circle in the (east, p) plane
-                    // axis(s) = SUN_R · p̂ + arch_r · ( −cos s · east + sin s · p̂ )
+                    const s = (i / (SAMPLES - 1)) * Math.PI;
                     const ax = p.clone().multiplyScalar(SUN_R)
                                 .addScaledVector(east, -arch_r * Math.cos(s))
                                 .addScaledVector(p,     arch_r * Math.sin(s));
-                    // In-plane normal to axis (rotate axis tangent 90° in arch plane)
-                    //   n(s) = cos s · east − ( − sin s ) · p̂   (already unit)
-                    //   Actually n = derivative of axis w.r.t. (−s). Compute directly:
                     const nx = east.x * Math.cos(s) + p.x * Math.sin(s);
                     const ny = east.y * Math.cos(s) + p.y * Math.sin(s);
                     const nz = east.z * Math.cos(s) + p.z * Math.sin(s);
-                    // Helical winding angle along arc length
                     const wind = phase0 + twist * (s / Math.PI);
                     const cw = Math.cos(wind), sw = Math.sin(wind);
                     pts[i] = new THREE.Vector3(
@@ -886,10 +903,12 @@ export class SpaceWeatherGlobe {
                     );
                 }
                 const geo  = new THREE.BufferGeometry().setFromPoints(pts);
-                grp.add(new THREE.Line(geo, strandMat.clone()));
+                const line = new THREE.Line(geo, strandMat);   // shared material
+                grp.add(line);
+                strandLines.push(line);
             }
 
-            // Add a faint axis spine (the loop axis itself) as a guide
+            // Faint dashed axis spine
             const spinePts = new Array(SAMPLES);
             for (let i = 0; i < SAMPLES; i++) {
                 const s = (i / (SAMPLES - 1)) * Math.PI;
@@ -898,18 +917,216 @@ export class SpaceWeatherGlobe {
                                .addScaledVector(p,     arch_r * Math.sin(s));
             }
             const spineGeo = new THREE.BufferGeometry().setFromPoints(spinePts);
-            const spineMat = new THREE.LineDashedMaterial({
-                color: erupting ? 0xff8060 : 0xfff0a0,
-                dashSize: 0.25, gapSize: 0.18,
-                transparent: true, opacity: 0.30,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
+            const spineLine = new THREE.Line(spineGeo, spineMat);
+            spineLine.computeLineDistances();
+            grp.add(spineLine);
+
+            this._fluxRopeRecords.set(arId, {
+                strandMat, spineMat, strandLines, spineLine,
+                arch_r, lat_rad: lat, lon_rad: lon, p,
             });
-            const spine = new THREE.Line(spineGeo, spineMat);
-            spine.computeLineDistances();
-            grp.add(spine);
         }
     }
+
+    /**
+     * Baseline twist for a freshly-emerged AR with the given Hale class.
+     *
+     * All baselines sit *below* the Hood-Priest kink threshold (2.5π) so a
+     * just-arrived AR doesn't erupt the moment it's tracked.  The complexity
+     * gradient (β-γ-δ closer to threshold) means complex regions need very
+     * little additional accumulation to fire, while simple β regions almost
+     * never reach kink within a 14-day disk passage — matching observed
+     * flare statistics.
+     */
+    _baselineTwist(mag_class) {
+        const cls = String(mag_class || '').toLowerCase();
+        if (cls.includes('delta')) return 1.8 * Math.PI;
+        if (cls.includes('gamma')) return 1.0 * Math.PI;
+        if (cls.includes('beta'))  return 0.5 * Math.PI;
+        return 0.2 * Math.PI;
+    }
+
+    /** Complexity multiplier on dΦ/dt, by Hale class. */
+    _twistDriveFactor(mag_class) {
+        const cls = String(mag_class || '').toLowerCase();
+        if (cls.includes('delta')) return 2.0;
+        if (cls.includes('gamma')) return 1.0;
+        if (cls.includes('beta'))  return 0.30;
+        return 0.05;
+    }
+
+    /**
+     * Reconcile `_arTwist` Map with the latest NOAA region list.
+     * Existing AR entries keep their accumulated phi; new ARs are seeded at
+     * the baseline twist for their Hale class; vanished ARs are deleted.
+     */
+    _syncArTwist(regions) {
+        const present = new Set();
+        for (const r of regions) {
+            if (r.region == null) continue;
+            present.add(r.region);
+            const slot = this._arTwist.get(r.region);
+            if (!slot) {
+                this._arTwist.set(r.region, {
+                    phi:        this._baselineTwist(r.mag_class),
+                    cls:        String(r.mag_class || '').toLowerCase(),
+                    areaNorm:   r.area_norm ?? 0.25,
+                    lat_rad:    r.lat_rad,
+                    lon_rad:    r.lon_rad,
+                    isComplex:  !!r.is_complex,
+                    eruptedAt:  -Infinity,
+                });
+            } else {
+                // Region evolved on disk — refresh metadata, keep phi.
+                slot.cls       = String(r.mag_class || '').toLowerCase();
+                slot.areaNorm  = r.area_norm ?? slot.areaNorm;
+                slot.lat_rad   = r.lat_rad;
+                slot.lon_rad   = r.lon_rad;
+                slot.isComplex = !!r.is_complex;
+            }
+        }
+        for (const id of [...this._arTwist.keys()]) {
+            if (!present.has(id)) this._arTwist.delete(id);
+        }
+    }
+
+    /**
+     * Per-frame step of the AR twist accumulator.  dt is viewing-seconds;
+     * we convert to real-days using `_timeCompression` so dΦ/dt is in
+     * physical rad/day rather than a magic per-frame number.
+     *
+     * Returns the list of AR ids that crossed the kink threshold this frame
+     * (so the caller can trigger eruptions in deterministic order).
+     */
+    _stepArTwist(dt, t) {
+        if (!this._arTwist || this._arTwist.size === 0) return [];
+        // dt_real_days = dt_view_s · _timeCompression / 86400
+        const dDays = dt * this._timeCompression / 86400;
+        const fired = [];
+        for (const [id, slot] of this._arTwist) {
+            // Cooldown after a recent eruption — the rope re-forms over a
+            // refractory time before twist can rebuild past the threshold.
+            if (t - slot.eruptedAt < this._eruptionCooldownS) continue;
+            const drive = this._twistKappa * this._twistDriveFactor(slot.cls)
+                        * Math.max(0.05, slot.areaNorm);
+            slot.phi += drive * dDays;
+            if (slot.phi >= this._kinkThreshold) fired.push(id);
+        }
+        return fired;
+    }
+
+    /**
+     * Refresh flux-rope strand colour & opacity from current Φ for each AR
+     * (cheap — just material tints, no geometry rebuild).  Tints linearly
+     * interpolate from golden (Φ ≪ Φ_crit) to red (Φ ≥ Φ_crit).
+     */
+    _updateFluxRopeColors() {
+        if (!this._fluxRopeRecords || this._fluxRopeRecords.size === 0) return;
+        for (const [arId, rec] of this._fluxRopeRecords) {
+            const slot = this._arTwist.get(arId);
+            if (!slot) continue;
+            const k = Math.min(1, slot.phi / this._kinkThreshold);
+            // Golden → red interpolation
+            const r = 1.00;
+            const g = 0.75 * (1 - k) + 0.28 * k;
+            const b = 0.38 * (1 - k) + 0.19 * k;
+            rec.strandMat.color.setRGB(r, g, b);
+            // Pulse opacity slightly faster as we approach kink — visual urgency
+            const baseOp = 0.55 + 0.30 * k;
+            const pulse  = 1 + (k > 0.85 ? 0.20 * Math.sin(this._lastT * 6) : 0);
+            rec.strandMat.opacity = Math.min(0.95, baseOp * pulse);
+
+            const sg = 0.94 * (1 - k) + 0.50 * k;
+            const sb = 0.63 * (1 - k) + 0.38 * k;
+            rec.spineMat.color.setRGB(1.0, sg, sb);
+            rec.spineMat.opacity = 0.25 + 0.15 * k;
+        }
+    }
+
+    /**
+     * Trigger an internal "kink eruption" for one AR.  This:
+     *   1. Estimates a CME initial speed from the AR's free-energy proxy
+     *      (B² · V ∝ A_norm^{3/2} · complexity_factor).  Capped to the
+     *      observed Yashiro 200–2500 km/s envelope.
+     *   2. Injects a synthetic CmeEvent into the existing CmePropagator,
+     *      which auto-spawns a 3-D shell in the scene.
+     *   3. Flashes the photosphere via SunSkin.triggerFlare.
+     *   4. Resets the AR's twist to a residual π (post-eruption relaxation).
+     *
+     * @param {number} arId  NOAA region number
+     * @param {number} t     current viewing-time second
+     */
+    _triggerInternalEruption(arId, t) {
+        const slot = this._arTwist.get(arId);
+        if (!slot) return;
+        // Eruption energy proxy: complexity × area^1.5
+        const cFactor = this._twistDriveFactor(slot.cls);
+        const energyProxy = cFactor * Math.pow(slot.areaNorm + 0.05, 1.5);
+        // Map proxy → CME speed (Yashiro-ish: free energy → kinetic budget)
+        const v0 = Math.max(350, Math.min(2400, 400 + 1500 * energyProxy));
+        const halfAngle = 25 + 18 * Math.min(1, slot.areaNorm);
+
+        // Earth-directed test: the AR must be on the Earth-facing hemisphere
+        // (heliographic longitude near π in our scene's inertial frame).
+        const lat = slot.lat_rad, lon = slot.lon_rad;
+        const earthFacing =
+            Math.cos(lat) * Math.cos(lon - Math.PI) > 0.30;
+
+        // Inject into the propagator — it'll build a shell on the next sync
+        const flareLetter = energyProxy > 0.8 ? 'X' : energyProxy > 0.3 ? 'M' : 'C';
+        const flareNum    = (Math.min(9.9, 1 + 9 * Math.min(1, energyProxy))).toFixed(1);
+        const cmeData = {
+            time:          new Date().toISOString(),
+            speed:         Math.round(v0),
+            latitude:      lat * 180 / Math.PI,
+            longitude:     lon * 180 / Math.PI,
+            halfAngle:     Math.round(halfAngle),
+            type:          'internal',
+            earthDirected: earthFacing,
+            note:          `Internal kink eruption AR${arId} (Φ=${(slot.phi/Math.PI).toFixed(2)}π, ${slot.cls})`,
+        };
+        try { this._cmePropagator?.inject(cmeData); }
+        catch (e) { console.warn('[SpaceWeatherGlobe] internal eruption inject failed', e); }
+
+        // Photosphere flash co-located with the AR
+        try {
+            this._sunSkin?.triggerFlare(`${flareLetter}${flareNum}`, {
+                lat_rad: lat, lon_rad: lon,
+            });
+        } catch (e) { /* shader may not be ready on first frame */ }
+
+        // Reset twist to residual π and stamp eruption time
+        slot.phi       = Math.PI;
+        slot.eruptedAt = t;
+
+        // Log for diagnostics / hover panels
+        this._arEruptionLog.unshift({
+            arId, t, v0, flareLetter, flareNum, earthFacing,
+            phi: slot.phi, note: cmeData.note,
+        });
+        if (this._arEruptionLog.length > 16) this._arEruptionLog.length = 16;
+
+        // Force flux-rope geometry rebuild on this AR so strands "unwind"
+        // — easiest path is to flag the next swpc-update to rebuild via key
+        // mismatch.  Cheap immediate version: clear key, the next update()
+        // cycle will rebuild even if regions are unchanged.
+        this._fluxRopeKey = '__post_eruption_' + arId + '_' + t.toFixed(2);
+    }
+
+    /** Read-only snapshot of current AR twist state — exposed for HUD/hover. */
+    get arTwistState() {
+        return Array.from(this._arTwist.entries()).map(([id, s]) => ({
+            arId: id,
+            phi:  s.phi,
+            phiPi: s.phi / Math.PI,
+            kinkRatio: s.phi / this._kinkThreshold,
+            cls:  s.cls,
+            areaNorm: s.areaNorm,
+        }));
+    }
+
+    /** Read-only snapshot of recent internal eruptions. */
+    get internalEruptions() { return this._arEruptionLog.slice(); }
 
     _buildCamera() {
         this._camera = new THREE.PerspectiveCamera(50, 2, 0.1, 600);
@@ -984,6 +1201,10 @@ export class SpaceWeatherGlobe {
         const key = regions.map(r => `${r.region}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${r.is_complex?1:0}:${(r.area_norm??0).toFixed(2)}`).join('|');
         if (key !== this._lastRegionsKey) {
             this._lastRegionsKey = key;
+            // Sync per-AR twist accumulator with the new region set.  Existing
+            // entries keep their accumulated Φ; fresh ARs initialise from the
+            // baseline tied to their Hale class; missing ARs are dropped.
+            this._syncArTwist(regions);
             // Convert area + spot count → 0..1 emission intensity.
             //   Area is already normalised to ~0..1 via swpc-feed (μH / 400).
             //   Sunspot multiplicity adds a small bump (saturating).
@@ -1551,6 +1772,37 @@ export class SpaceWeatherGlobe {
 
         // HCS gentle rotation (Carrington ~25 d → highly compressed visually)
         if (this._hcsMesh) this._hcsMesh.rotation.y += dt * 0.02;
+
+        // ── AR twist accumulator + internal eruption injection ──────────────
+        // Integrate dΦ/dt for every tracked AR; any rope crossing the Hood-
+        // Priest kink threshold (2.5π) erupts: synthetic CME injected into
+        // the propagator, photosphere flares at the AR site, twist resets.
+        // Also live-tints flux-rope strands with current Φ/Φ_crit ratio.
+        if (this._arTwist && this._arTwist.size > 0) {
+            const fired = this._stepArTwist(dt, t);
+            for (const arId of fired) {
+                this._triggerInternalEruption(arId, t);
+            }
+            this._updateFluxRopeColors();
+            // Rope geometry rebuild (post-eruption strand "unwinding").  We
+            // detect this via the key marker set in _triggerInternalEruption.
+            if (this._fluxRopeKey.startsWith('__post_eruption_')) {
+                // Build a synthetic regions array from the live twist map so
+                // the rebuild uses the post-eruption Φ values.
+                const synth = [];
+                for (const [id, s] of this._arTwist) {
+                    synth.push({
+                        region: id,
+                        is_complex: s.isComplex,
+                        mag_class:  s.cls,
+                        lat_rad:    s.lat_rad,
+                        lon_rad:    s.lon_rad,
+                        area_norm:  s.areaNorm,
+                    });
+                }
+                this._rebuildFluxRopes(synth, /* forceRebuild */ true);
+            }
+        }
 
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
