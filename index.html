@@ -64,65 +64,166 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
 .btn-primary{padding:14px 32px;background:linear-gradient(135deg,#ff8c00,#ffd700);border-radius:8px;color:#000;font-weight:700;font-size:1rem;letter-spacing:.01em;transition:filter .2s,transform .15s;border:none;cursor:pointer}
 .btn-primary:hover{filter:brightness(1.12);transform:translateY(-2px)}
 
-/* ── RADIOACTIVE GREEN "MELTING" CTA ─────────────────────────────────────── */
+/* ── RADIOACTIVE OOZING / MELTING CTA ────────────────────────────────────── */
 .btn-radioactive{
-  position:relative;display:inline-block;padding:18px 40px 22px;
+  position:relative;display:inline-block;padding:20px 42px 26px;
   font-weight:800;font-size:1.05rem;letter-spacing:.02em;color:#021004;
-  text-shadow:0 0 6px rgba(180,255,140,.8);
-  background:radial-gradient(ellipse at 30% 30%,#d6ff66 0%,#7cff2a 35%,#1eff00 70%,#0fa820 100%);
-  border:1px solid rgba(180,255,90,.55);border-radius:14px 14px 22px 26px;
+  text-shadow:0 0 6px rgba(220,255,180,.95),0 1px 0 rgba(255,255,200,.5);
+  background:
+    radial-gradient(ellipse at 28% 22%,rgba(255,255,210,.55) 0%,transparent 40%),
+    radial-gradient(ellipse at 70% 80%,#0fa820 0%,transparent 55%),
+    radial-gradient(ellipse at 30% 35%,#e6ff8a 0%,#9cff3a 30%,#1eff00 65%,#0a8a18 100%);
+  border:1px solid rgba(200,255,120,.6);
+  border-radius:18px 22px 38px 32px / 14px 18px 46px 40px;
   box-shadow:
     0 0 22px rgba(80,255,40,.65),
     0 0 60px rgba(40,255,80,.35),
-    inset 0 -4px 12px rgba(0,80,20,.45),
-    inset 0 2px 6px rgba(255,255,200,.45);
+    0 14px 28px -8px rgba(40,255,80,.55),
+    inset 0 -6px 14px rgba(0,80,20,.55),
+    inset 0 2px 6px rgba(255,255,200,.5);
   cursor:pointer;overflow:visible;
-  animation:radiopulse 2.6s ease-in-out infinite;
-  text-decoration:none;
+  animation:radiomorph 5.5s ease-in-out infinite,radiopulse 2.6s ease-in-out infinite;
+  text-decoration:none;z-index:0;
+  transition:transform .25s ease;
 }
 .btn-radioactive::before{
-  /* drips down the bottom of the button */
-  content:'';position:absolute;left:8%;right:8%;bottom:-14px;height:24px;
+  /* heavy multi-blob drip oozing off the bottom */
+  content:'';position:absolute;left:-4%;right:-4%;bottom:-32px;height:54px;
   background:
-    radial-gradient(circle at 12% 0%,#7cff2a 0 8px,transparent 9px),
-    radial-gradient(circle at 28% 0%,#1eff00 0 6px,transparent 7px),
-    radial-gradient(circle at 46% 0%,#9bff44 0 10px,transparent 11px),
-    radial-gradient(circle at 64% 0%,#1eff00 0 7px,transparent 8px),
-    radial-gradient(circle at 82% 0%,#7cff2a 0 9px,transparent 10px);
-  filter:drop-shadow(0 4px 6px rgba(40,255,40,.7)) blur(.4px);
+    radial-gradient(circle at 8% 14%,#9cff3a 0 11px,transparent 12px),
+    radial-gradient(circle at 19% 0%,#1eff00 0 9px,transparent 10px),
+    radial-gradient(circle at 30% 26%,#cdff6e 0 14px,transparent 15px),
+    radial-gradient(circle at 42% 6%,#1eff00 0 8px,transparent 9px),
+    radial-gradient(circle at 53% 30%,#9cff3a 0 13px,transparent 14px),
+    radial-gradient(circle at 64% 4%,#76ee18 0 10px,transparent 11px),
+    radial-gradient(circle at 76% 22%,#cdff6e 0 12px,transparent 13px),
+    radial-gradient(circle at 88% 8%,#1eff00 0 9px,transparent 10px),
+    radial-gradient(ellipse at 50% -40%,#1eff00 0%,#0fa820 60%,transparent 75%);
+  filter:drop-shadow(0 6px 8px rgba(40,255,40,.75)) blur(.6px) contrast(1.05);
   animation:radiodrip 3.2s ease-in-out infinite;
-  pointer-events:none;
+  pointer-events:none;z-index:-1;
 }
 .btn-radioactive::after{
-  /* radiation glow halo */
-  content:'';position:absolute;inset:-10px;border-radius:18px;
-  background:radial-gradient(ellipse at center,rgba(120,255,60,.35) 0%,transparent 65%);
-  z-index:-1;animation:radioflicker 1.8s ease-in-out infinite;pointer-events:none;
+  /* radiation glow halo + decay particles backdrop */
+  content:'';position:absolute;inset:-14px;border-radius:24px;
+  background:
+    radial-gradient(circle at 18% 110%,rgba(160,255,100,.55) 0 3px,transparent 4px),
+    radial-gradient(circle at 42% 130%,rgba(200,255,140,.5) 0 2px,transparent 3px),
+    radial-gradient(circle at 72% 120%,rgba(160,255,100,.55) 0 2.5px,transparent 3.5px),
+    radial-gradient(circle at 88% 105%,rgba(220,255,160,.45) 0 2px,transparent 3px),
+    radial-gradient(ellipse at center,rgba(120,255,60,.42) 0%,transparent 65%);
+  z-index:-2;animation:radioflicker 1.8s ease-in-out infinite,radiodecay 4.2s linear infinite;
+  pointer-events:none;
 }
 .btn-radioactive:hover{
-  filter:brightness(1.15) saturate(1.1);
+  filter:brightness(1.15) saturate(1.15);
   transform:translateY(-2px);
   box-shadow:
-    0 0 30px rgba(120,255,60,.85),
-    0 0 80px rgba(60,255,80,.5),
-    inset 0 -4px 12px rgba(0,80,20,.55),
-    inset 0 2px 6px rgba(255,255,200,.6);
+    0 0 36px rgba(120,255,60,.9),
+    0 0 90px rgba(60,255,80,.55),
+    0 18px 34px -10px rgba(40,255,80,.65),
+    inset 0 -6px 14px rgba(0,80,20,.6),
+    inset 0 2px 6px rgba(255,255,200,.65);
 }
+.btn-radioactive:hover::before{animation-duration:1.6s}
 @keyframes radiopulse{
-  0%,100%{box-shadow:0 0 22px rgba(80,255,40,.65),0 0 60px rgba(40,255,80,.35),inset 0 -4px 12px rgba(0,80,20,.45),inset 0 2px 6px rgba(255,255,200,.45)}
-  50%{box-shadow:0 0 34px rgba(120,255,60,.85),0 0 90px rgba(60,255,80,.55),inset 0 -4px 14px rgba(0,80,20,.5),inset 0 2px 6px rgba(255,255,200,.5)}
+  0%,100%{filter:saturate(1)}
+  50%{filter:saturate(1.15) brightness(1.05)}
+}
+@keyframes radiomorph{
+  0%,100%{border-radius:18px 22px 38px 32px / 14px 18px 46px 40px}
+  33%{border-radius:22px 16px 44px 28px / 16px 14px 52px 36px}
+  66%{border-radius:16px 24px 30px 40px / 12px 20px 40px 48px}
 }
 @keyframes radiodrip{
-  0%,100%{transform:translateY(0) scaleY(1)}
-  50%{transform:translateY(4px) scaleY(1.18)}
+  0%,100%{transform:translateY(0) scaleY(1);filter:drop-shadow(0 6px 8px rgba(40,255,40,.75)) blur(.6px)}
+  50%{transform:translateY(8px) scaleY(1.28);filter:drop-shadow(0 10px 12px rgba(40,255,40,.85)) blur(.9px)}
 }
 @keyframes radioflicker{
   0%,100%{opacity:.85}
   40%{opacity:1}
   72%{opacity:.7}
 }
+@keyframes radiodecay{
+  0%{background-position:0 0,0 0,0 0,0 0,0 0}
+  100%{background-position:0 -40px,0 -55px,0 -48px,0 -60px,0 0}
+}
 @media (prefers-reduced-motion: reduce){
   .btn-radioactive,.btn-radioactive::before,.btn-radioactive::after{animation:none}
+}
+
+/* ── PORTAL CTA (pulls user into space weather) ──────────────────────────── */
+.btn-portal{
+  position:relative;display:inline-block;padding:18px 38px;
+  font-weight:700;font-size:1rem;letter-spacing:.04em;color:#f0e8ff;
+  text-decoration:none;cursor:pointer;overflow:visible;
+  background:
+    radial-gradient(ellipse at center,rgba(8,2,20,.95) 0%,rgba(40,10,80,.9) 35%,rgba(120,60,200,.55) 70%,rgba(180,120,255,.25) 100%);
+  border:1px solid rgba(192,128,255,.45);border-radius:999px;
+  box-shadow:
+    0 0 24px rgba(160,90,255,.55),
+    0 0 60px rgba(110,60,220,.35),
+    inset 0 0 24px rgba(120,60,220,.55),
+    inset 0 0 50px rgba(40,10,80,.85);
+  text-shadow:0 0 8px rgba(200,150,255,.85),0 0 18px rgba(150,80,255,.55);
+  transition:transform .35s cubic-bezier(.4,0,.2,1),letter-spacing .35s,color .25s,box-shadow .35s;
+  z-index:0;
+}
+.btn-portal::before{
+  /* swirling conic vortex pulled inward */
+  content:'';position:absolute;inset:-2px;border-radius:999px;
+  background:conic-gradient(from 0deg,
+    rgba(192,128,255,0) 0deg,
+    rgba(192,128,255,.85) 40deg,
+    rgba(120,60,220,.4) 90deg,
+    rgba(255,200,255,.9) 140deg,
+    rgba(80,30,160,.3) 200deg,
+    rgba(192,128,255,.7) 260deg,
+    rgba(40,10,80,.2) 320deg,
+    rgba(192,128,255,0) 360deg);
+  filter:blur(6px);
+  -webkit-mask:radial-gradient(circle at center,transparent 35%,#000 55%,#000 92%,transparent 100%);
+          mask:radial-gradient(circle at center,transparent 35%,#000 55%,#000 92%,transparent 100%);
+  animation:portal-spin 4.5s linear infinite;
+  pointer-events:none;z-index:-1;
+}
+.btn-portal::after{
+  /* concentric pulled-in rings + central event horizon */
+  content:'';position:absolute;inset:-18px;border-radius:999px;
+  background:
+    radial-gradient(circle at center,transparent 40%,rgba(192,128,255,.35) 41%,transparent 43%),
+    radial-gradient(circle at center,transparent 50%,rgba(160,90,255,.28) 51%,transparent 54%),
+    radial-gradient(circle at center,transparent 62%,rgba(120,60,220,.2) 63%,transparent 66%),
+    radial-gradient(ellipse at center,rgba(140,70,240,.45) 0%,transparent 55%);
+  animation:portal-suck 3.2s ease-in-out infinite,portal-flicker 2.4s ease-in-out infinite;
+  pointer-events:none;z-index:-2;filter:blur(.5px);
+}
+.btn-portal:hover{
+  color:#fff;letter-spacing:.08em;
+  transform:translateY(-2px) scale(1.04);
+  box-shadow:
+    0 0 40px rgba(192,128,255,.85),
+    0 0 100px rgba(140,70,240,.55),
+    inset 0 0 36px rgba(160,90,255,.7),
+    inset 0 0 70px rgba(20,5,50,.95);
+}
+.btn-portal:hover::before{animation-duration:1.6s}
+.btn-portal:hover::after{animation-duration:1.4s}
+.btn-portal:active{transform:translateY(-1px) scale(.98)}
+@keyframes portal-spin{
+  to{transform:rotate(360deg)}
+}
+@keyframes portal-suck{
+  0%,100%{transform:scale(1);opacity:.85}
+  50%{transform:scale(.78);opacity:1}
+}
+@keyframes portal-flicker{
+  0%,100%{filter:blur(.5px) brightness(1)}
+  45%{filter:blur(.8px) brightness(1.18)}
+  70%{filter:blur(.4px) brightness(.92)}
+}
+@media (prefers-reduced-motion: reduce){
+  .btn-portal::before,.btn-portal::after{animation:none}
 }
 .btn-secondary{padding:14px 32px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.25);border-radius:8px;color:#ddd;font-size:1rem;font-weight:600;transition:background .2s,border-color .2s,transform .15s}
 .btn-secondary:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.5);color:#fff;transform:translateY(-2px)}
@@ -234,7 +335,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
 
 @media(max-width:640px){
   .hero-cta{flex-direction:column;align-items:center}
-  .btn-primary,.btn-secondary{width:100%;max-width:320px;text-align:center}
+  .btn-primary,.btn-secondary,.btn-radioactive,.btn-portal{width:100%;max-width:320px;text-align:center}
   .section{padding:60px 16px}
 }
 </style>
@@ -264,7 +365,7 @@ footer{background:#020108;border-top:1px solid rgba(255,255,255,.06);padding:60p
     <p class="hero-sub">Explore the Sun's corona, Earth's magnetosphere, space weather events, and deep stellar systems — powered by live satellite feeds and physically accurate WebGL simulations. Built for researchers, educators, and anyone who wants to understand the cosmos that shapes our world.</p>
     <div class="hero-cta" role="group" aria-label="Primary actions">
       <a href="earth.html" class="btn-radioactive" id="hero-cta-primary" data-explore-tour-start aria-label="Start the guided tour of Parker Physics">Explore the App</a>
-      <a href="space-weather.html" class="btn-secondary" aria-label="Explore the live space weather dashboard">Explore Live Demo <span aria-hidden="true">→</span></a>
+      <a href="space-weather.html" class="btn-portal" aria-label="Explore the live space weather dashboard">Explore Live Demo <span aria-hidden="true">→</span></a>
     </div>
     <div class="hero-stats" role="list" aria-label="App statistics">
       <div class="hero-stat" role="listitem"><span class="hero-stat-num">17+</span><span class="hero-stat-label">Simulations</span></div>
