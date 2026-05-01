@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 — Lost in space · Parker Physics App</title>
+<meta name="robots" content="noindex">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+    width:100%; height:100%; background:#000; color:#ddd;
+    font-family:'Segoe UI', system-ui, sans-serif; overflow:hidden;
+}
+
+#stars-bg {
+    position:fixed; inset:0; z-index:0;
+    background:
+        radial-gradient(ellipse at 30% 20%, rgba(60,30,120,.18) 0%, transparent 55%),
+        radial-gradient(ellipse at 75% 75%, rgba(20,60,140,.14) 0%, transparent 55%),
+        radial-gradient(ellipse at 50% 50%, #050214 0%, #02010a 60%, #000 100%);
+}
+#stars-bg canvas { display:block; width:100%; height:100%; }
+
+main {
+    position:relative; z-index:5;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:calc(100vh - 50px); padding: 36px 18px;
+    text-align:center;
+}
+
+.code {
+    font-size: clamp(96px, 22vw, 220px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    background: linear-gradient(45deg, #ffd700 0%, #ff8c00 35%, #ff4080 70%, #c060ff 100%);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 6px 20px rgba(255,140,0,.18));
+    margin-bottom: 6px;
+}
+
+.tagline {
+    font-size: clamp(18px, 3.4vw, 26px);
+    color: #d8c0ff; letter-spacing: 1px; text-transform: uppercase;
+    margin-bottom: 14px;
+}
+
+.message {
+    max-width: 560px;
+    font-size: 14px; line-height: 1.7; color: #889;
+    margin-bottom: 26px;
+}
+.message code {
+    font-family: ui-monospace, 'SF Mono', monospace;
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.10);
+    padding: 1px 6px; border-radius: 4px;
+    color: #ffd080; font-size: 12px;
+    word-break: break-all;
+}
+
+.actions { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+.btn {
+    display:inline-flex; align-items:center; gap:8px;
+    padding: 10px 18px; border-radius: 7px;
+    font-size: 13px; font-weight: 600;
+    text-decoration:none; transition: all .2s; cursor:pointer;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.06); color:#ddd;
+    font-family:inherit;
+}
+.btn:hover { background: rgba(255,255,255,.14); border-color:rgba(255,200,0,.4); color:#fff; }
+.btn.primary {
+    background: linear-gradient(45deg,#ff8c00,#ffd700);
+    border-color: #ff8c00; color:#000; font-weight:700;
+}
+.btn.primary:hover { filter: brightness(1.1); }
+
+.suggestions {
+    margin-top: 36px; max-width: 560px; width:100%;
+    border-top: 1px solid rgba(255,255,255,.08);
+    padding-top: 18px;
+}
+.suggestions h3 {
+    font-size: 11px; letter-spacing: 1.2px;
+    color: #777; text-transform: uppercase;
+    margin-bottom: 10px;
+}
+.sug-grid {
+    display:grid; gap:8px;
+    grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+}
+.sug-grid a {
+    display:flex; align-items:center; gap:9px;
+    padding: 9px 11px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 6px;
+    color: #c0c0d8; text-decoration:none;
+    font-size: 12px; transition: all .15s;
+}
+.sug-grid a:hover { background: rgba(255,255,255,.10); border-color:rgba(255,200,0,.3); color:#fff; }
+.sug-grid a .ico { font-size: 14px; opacity:.85; }
+.sug-grid a .lbl { font-weight:600; }
+.sug-grid a .sub { font-size: 10px; color:#666; margin-left: auto; }
+</style>
+</head>
+<body>
+
+<link rel="stylesheet" href="js/nav-styles.css">
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("404");</script>
+
+<div id="stars-bg"><canvas id="stars-canvas"></canvas></div>
+
+<main>
+    <div class="code">404</div>
+    <div class="tagline">Lost in space</div>
+    <p class="message">
+        That page slipped past the event horizon. The link
+        <code id="bad-url">—</code>
+        doesn&rsquo;t exist on Parker Physics — maybe a typo, an old bookmark, or
+        a deprecated tool URL.
+    </p>
+
+    <div class="actions">
+        <a href="/" class="btn primary">⌂ Home</a>
+        <a href="space-weather.html" class="btn">⚡ Space Weather</a>
+        <a href="dashboard.html" class="btn">📋 Dashboard</a>
+        <button class="btn" onclick="history.back()">← Back</button>
+    </div>
+
+    <div class="suggestions">
+        <h3>Popular destinations</h3>
+        <div class="sug-grid">
+            <a href="threejs.html"><span class="ico">🪐</span><span class="lbl">Solar System</span><span class="sub">3D orrery</span></a>
+            <a href="sun.html"><span class="ico">☀️</span><span class="lbl">The Sun</span><span class="sub">Live</span></a>
+            <a href="earth.html"><span class="ico">🌍</span><span class="lbl">Earth</span><span class="sub">Live data</span></a>
+            <a href="achernar.html"><span class="ico">🌀</span><span class="lbl">Achernar</span><span class="sub">Be star</span></a>
+            <a href="vega.html"><span class="ico">💫</span><span class="lbl">Vega</span><span class="sub">A0V</span></a>
+            <a href="ton618.html"><span class="ico">🕳️</span><span class="lbl">TON 618</span><span class="sub">Black hole</span></a>
+            <a href="galactic-map.html"><span class="ico">🌌</span><span class="lbl">Galaxy</span><span class="sub">3D map</span></a>
+            <a href="pricing.html"><span class="ico">💰</span><span class="lbl">Pricing</span><span class="sub">Plans</span></a>
+        </div>
+    </div>
+</main>
+
+<script>
+// Show the bad path users actually requested.
+(() => {
+    const el = document.getElementById('bad-url');
+    if (!el) return;
+    let p = window.location.pathname || '/';
+    if (window.location.search) p += window.location.search;
+    if (p.length > 80) p = p.slice(0, 78) + '…';
+    el.textContent = p;
+})();
+
+// Tiny twinkling-stars canvas — purely decorative, no Three.js needed.
+(() => {
+    const cv = document.getElementById('stars-canvas');
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    const DPR = Math.min(devicePixelRatio || 1, 2);
+    let w, h, stars;
+
+    function resize() {
+        w = cv.width  = innerWidth  * DPR;
+        h = cv.height = innerHeight * DPR;
+        cv.style.width  = innerWidth  + 'px';
+        cv.style.height = innerHeight + 'px';
+        // Density scales with viewport area
+        const n = Math.min(360, Math.round(innerWidth * innerHeight / 6000));
+        stars = new Array(n).fill(0).map(() => ({
+            x: Math.random()*w, y: Math.random()*h,
+            r: (0.3 + Math.random()*1.2) * DPR,
+            phase: Math.random()*Math.PI*2,
+            speed: 0.5 + Math.random()*1.4,
+            tint: Math.random() < 0.18 ? 'tint' : 'plain',
+        }));
+    }
+    resize();
+    addEventListener('resize', resize);
+
+    let t0 = performance.now();
+    function draw() {
+        const t = (performance.now() - t0) * 0.001;
+        ctx.clearRect(0, 0, w, h);
+        for (const s of stars) {
+            const a = 0.45 + 0.55 * Math.sin(s.phase + t * s.speed);
+            ctx.globalAlpha = a;
+            ctx.fillStyle = s.tint === 'tint'
+                ? `rgba(200,170,255,${a})`
+                : `rgba(240,240,255,${a})`;
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+</body>
+</html>
