@@ -648,6 +648,12 @@
             document.getElementById('form-view').style.display = 'none';
             document.getElementById('success-view').classList.add('show');
 
+            // Stamp a localStorage flag so the dashboard's welcome wizard
+            // fires on the next page load. Stripe checkout redirect (paid
+            // tiers) lands BACK on the dashboard with success=true via
+            // the Stripe portal — the flag survives that round-trip.
+            try { localStorage.setItem('pp_welcome_pending', '1'); } catch {}
+
             // Skip Stripe checkout when:
             //   - the invite already comped a paid tier (admin granted), OR
             //   - this was a class-seat invite (student rides parent's plan).

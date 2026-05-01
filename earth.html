@@ -323,6 +323,25 @@ nav {
 #alert-tip .at-area  { color:#7ab; font-size:10px; }
 #alert-tip .at-exp   { color:#555; font-size:10px; margin-top:4px; }
 
+/* ─── My Location panel ──────────────────────────────────────────
+   Promoted to its own top-left panel so a first-time visitor sees the
+   primary actionable affordance (set your location → personalised
+   alerts + sun + ISS data) before any of the secondary weather/SST
+   readouts. Previously buried as the last section of #wx-panel; the
+   relocation is documented in CHANGELOG entry "Phase 3 onboarding". */
+#loc-panel {
+    position:absolute; top:10px; left:10px; z-index:51;
+    background:rgba(0,0,0,.78); backdrop-filter:blur(10px);
+    border:1px solid rgba(0,220,180,.32); border-radius:10px;
+    padding:12px 14px; width:230px; font-size:11px;
+    box-shadow:0 4px 24px rgba(0,180,140,.12);
+}
+#loc-panel .panel-header h3 { color:#5fffd0; }
+#loc-panel:not(:has(#loc-result[style*="block"])) #loc-result-empty { display:block; }
+#loc-empty-hint {
+    font-size:10px; color:#88a098; margin-top:4px; line-height:1.5;
+}
+
 /* ─── Weather analysis panel ─────────────────────────────────── */
 #wx-panel {
     position:absolute; bottom:52px; left:10px; z-index:50;
@@ -790,7 +809,7 @@ nav {
     .hud-title { grid-column: 1 / -1; margin-bottom: 2px; }
 
     /* All side panels: slide up from bottom as sheets */
-    #layer-panel, #info-panel, #wx-panel {
+    #layer-panel, #info-panel, #wx-panel, #loc-panel {
         position: absolute; z-index: 75;
         left: 0; right: 0; bottom: 56px; top: auto;
         width: 100%; max-height: 72vh; overflow-y: auto;
@@ -801,7 +820,11 @@ nav {
     }
     #layer-panel.panel-open,
     #info-panel.panel-open,
-    #wx-panel.panel-open { transform: translateY(0); }
+    #wx-panel.panel-open,
+    #loc-panel.panel-open { transform: translateY(0); }
+    /* On mobile the dock button drives panel-open; until tapped, the
+       loc-panel stays off-screen so the globe is unobstructed. */
+    #loc-panel:not(.panel-open) { transform: translateY(110%); }
 
     /* Show close button on mobile */
     .panel-close { display: block; }
@@ -1308,6 +1331,76 @@ nav {
     </div><!-- /panel-body -->
     </div><!-- /info-panel -->
 
+    <!-- ── My Location panel ──────────────────────────────────────────
+         Promoted to a dedicated top-left panel (was the last section of
+         #wx-panel before the Phase-3 onboarding work). The IDs inside
+         (loc-input, loc-search, loc-result, loc-city, loc-card etc.)
+         are unchanged so user-location.js + the on-globe marker code
+         continue to work without modification. -->
+    <div id="loc-panel">
+        <div class="panel-header" data-minimize="loc-panel">
+            <h3>📍 My Location</h3>
+            <div class="panel-actions">
+                <button class="panel-btn" data-minimize-btn="loc-panel" title="Minimise">▾</button>
+                <button class="panel-btn panel-close" data-close="loc-panel" title="Close">✕</button>
+            </div>
+        </div>
+        <div class="panel-body">
+            <div class="loc-row">
+                <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
+                <button id="loc-search" title="Search location">↵</button>
+            </div>
+            <div id="loc-empty-hint">Set a location to see local sun + ISS passes, aurora visibility, and personalised alerts.</div>
+            <div id="loc-error"></div>
+            <div id="loc-result">
+                <div class="loc-header">
+                    <div class="loc-city"      id="loc-city"></div>
+                    <div class="loc-localtime" id="loc-localtime">—</div>
+                </div>
+                <div class="loc-coords" id="loc-coords"></div>
+
+                <!-- Sun card: sunrise, solar noon (= max solar altitude), sunset,
+                     current altitude + azimuth, day length. Refreshes at 1 Hz. -->
+                <div class="loc-card" id="loc-sun-card">
+                    <div class="loc-card-hdr">
+                        <span>☀️ Sun</span>
+                        <span class="loc-card-meta" id="loc-sun-altaz">—</span>
+                    </div>
+                    <div class="loc-card-row"><span class="loc-k">Rises</span>      <span class="loc-v" id="loc-sunrise">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Solar max</span>  <span class="loc-v" id="loc-solar-noon">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Sets</span>       <span class="loc-v" id="loc-sunset">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Day length</span> <span class="loc-v" id="loc-daylength">—</span></div>
+                </div>
+
+                <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
+                     next 24 h. Computed once when the user's location is set (or
+                     restored on load); cached in a module var and refreshed when
+                     the location or tracker TLE changes.  Visibility badge uses
+                     pass-predictor's sunlit + observer-darkness flags: 🌟 naked-
+                     eye, ☀️ daylight (both lit), ⚫ eclipsed (sat in Earth shadow). -->
+                <div class="loc-card empty" id="loc-iss-card">
+                    <div class="loc-card-hdr">
+                        <span>🛰️ ISS next pass</span>
+                        <span class="loc-card-meta">
+                            <span id="loc-iss-vis" style="margin-right:4px"></span><span id="loc-iss-when">—</span>
+                        </span>
+                    </div>
+                    <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Direction</span> <span class="loc-v" id="loc-iss-dir">—</span></div>
+                    <div class="loc-card-row"><span class="loc-k">Duration</span>  <span class="loc-v" id="loc-iss-dur">—</span></div>
+                </div>
+
+                <div class="loc-aurora" id="loc-aurora"></div>
+
+                <div class="loc-btns">
+                    <button class="loc-btn" id="loc-fly">📍 Fly here</button>
+                    <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
+                </div>
+            </div>
+        </div><!-- /panel-body -->
+    </div><!-- /loc-panel -->
+
     <!-- Weather analysis panel -->
     <div id="wx-panel">
         <div class="panel-header" data-minimize="wx-panel">
@@ -1417,61 +1510,7 @@ nav {
         <div style="font-size:.62rem;color:#556;font-weight:600;letter-spacing:.08em;margin-bottom:4px">NASA EARTH OBSERVATIONS</div>
         <div id="obs-status-list" style="font-size:10px;color:#778;line-height:1.7"></div>
 
-        <hr class="ir-sep">
-
-        <!-- My Location -->
-        <div class="loc-section-hdr">📍 My Location</div>
-        <div class="loc-row">
-            <input id="loc-input" type="text" placeholder="City, zip, or address…" maxlength="80" autocomplete="off">
-            <button id="loc-search" title="Search location">↵</button>
-        </div>
-        <div id="loc-error"></div>
-        <div id="loc-result">
-            <div class="loc-header">
-                <div class="loc-city"      id="loc-city"></div>
-                <div class="loc-localtime" id="loc-localtime">—</div>
-            </div>
-            <div class="loc-coords" id="loc-coords"></div>
-
-            <!-- Sun card: sunrise, solar noon (= max solar altitude), sunset,
-                 current altitude + azimuth, day length. Refreshes at 1 Hz. -->
-            <div class="loc-card" id="loc-sun-card">
-                <div class="loc-card-hdr">
-                    <span>☀️ Sun</span>
-                    <span class="loc-card-meta" id="loc-sun-altaz">—</span>
-                </div>
-                <div class="loc-card-row"><span class="loc-k">Rises</span>      <span class="loc-v" id="loc-sunrise">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Solar max</span>  <span class="loc-v" id="loc-solar-noon">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Sets</span>       <span class="loc-v" id="loc-sunset">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Day length</span> <span class="loc-v" id="loc-daylength">—</span></div>
-            </div>
-
-            <!-- ISS next pass: first pass whose peak elevation ≥ 10° in the
-                 next 24 h. Computed once when the user's location is set (or
-                 restored on load); cached in a module var and refreshed when
-                 the location or tracker TLE changes.  Visibility badge uses
-                 pass-predictor's sunlit + observer-darkness flags: 🌟 naked-
-                 eye, ☀️ daylight (both lit), ⚫ eclipsed (sat in Earth shadow). -->
-            <div class="loc-card empty" id="loc-iss-card">
-                <div class="loc-card-hdr">
-                    <span>🛰️ ISS next pass</span>
-                    <span class="loc-card-meta">
-                        <span id="loc-iss-vis" style="margin-right:4px"></span><span id="loc-iss-when">—</span>
-                    </span>
-                </div>
-                <div class="loc-card-row"><span class="loc-k">Rises</span>     <span class="loc-v" id="loc-iss-rise">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Peak</span>      <span class="loc-v" id="loc-iss-peak">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Direction</span> <span class="loc-v" id="loc-iss-dir">—</span></div>
-                <div class="loc-card-row"><span class="loc-k">Duration</span>  <span class="loc-v" id="loc-iss-dur">—</span></div>
-            </div>
-
-            <div class="loc-aurora" id="loc-aurora"></div>
-
-            <div class="loc-btns">
-                <button class="loc-btn" id="loc-fly">📍 Fly here</button>
-                <button class="loc-btn danger" id="loc-clear">✕ Clear</button>
-            </div>
-        </div>
+        <!-- My Location section relocated to its own #loc-panel above. -->
     </div><!-- /panel-body -->
     </div><!-- /wx-panel -->
 
@@ -1519,6 +1558,9 @@ nav {
 
     <!-- Mobile bottom toolbar -->
     <div id="mobile-toolbar">
+        <button class="mtb-btn" data-panel="loc-panel">
+            <span class="mtb-icon">📍</span>Location
+        </button>
         <button class="mtb-btn" data-panel="info-panel">
             <span class="mtb-icon">🌍</span>Space Wx
         </button>
@@ -6407,12 +6449,35 @@ function animate() {
     // ── Exosphere: orient to sun + solar-wind shader uniforms + mesh animation
     exosphere.tick(t, earthU.u_sun_dir.value, _lastSwState);
 
-    // ── User location pin pulse
-    if (_userPinRing) {
-        const pulse = Math.sin(t * 2.2) * 0.5 + 0.5;
-        const s = 1 + pulse * 2.4;
-        _userPinRing.scale.set(s, s, 1);
-        _userPinRing.material.opacity = 0.75 * (1 - pulse * 0.87);
+    // ── User location pin: multi-ring radar ping + sky beam
+    // Three rings on staggered phases (0, ⅓, ⅔ of a 2.4s period) so the
+    // marker reads as a continuous outward radar pulse instead of a
+    // single ring expanding and snapping back. Halo and beam track the
+    // brightest ring's phase so the whole stack breathes together.
+    if (_userPinRings?.length) {
+        const period = 2.4;
+        const phase  = (t % period) / period;     // 0..1
+        for (let i = 0; i < _userPinRings.length; i++) {
+            const ring = _userPinRings[i];
+            const local = (phase + i / _userPinRings.length) % 1;
+            // Quadratic ease-out scale; rings start near the core and expand
+            // to ~3.6× outer radius before fading to zero opacity.
+            const s = 1 + local * local * 3.2;
+            ring.scale.set(s, s, 1);
+            // Opacity fades faster at the start so the leading ring is the
+            // brightest and trailing rings are progressively softer.
+            ring.material.opacity = 0.85 * (1 - local) * (1 - local);
+        }
+    }
+    if (_userPinHalo) {
+        const breathe = (Math.sin(t * 2.2) * 0.5 + 0.5);
+        _userPinHalo.material.opacity = 0.18 + breathe * 0.18;
+        const hs = 1 + breathe * 0.18;
+        _userPinHalo.scale.set(hs, hs, hs);
+    }
+    if (_userPinBeam) {
+        const beat = Math.sin(t * 1.8) * 0.5 + 0.5;
+        _userPinBeam.material.opacity = 0.32 + beat * 0.34;
     }
 
     // ── Fly-to animation
@@ -6446,7 +6511,11 @@ function animate() {
 //  USER LOCATION PIN  (must be declared before animate() runs)
 // ═══════════════════════════════════════════════════════════════
 let _userPinGroup = null;
-let _userPinRing  = null;
+let _userPinRing  = null;     // legacy single-ring handle (kept for any
+                              // external code that might still poke it).
+let _userPinRings = [];       // array of expanding radar rings
+let _userPinHalo  = null;     // soft glowing sphere wrapping the core
+let _userPinBeam  = null;     // radial cylinder pointing outward from surface
 let _userLat = null, _userLon = null;
 let _currentKp = 2;
 
@@ -6529,32 +6598,93 @@ function _setUserPin(lat, lon) {
         _userPinGroup.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); });
         _userPinGroup = null;
         _userPinRing  = null;
+        _userPinRings = [];
+        _userPinHalo  = null;
+        _userPinBeam  = null;
     }
     if (lat == null || lon == null) return;
     _userLat = lat; _userLon = lon;
 
-    // Position on unit sphere surface (earthMesh is R=1)
-    const pos = geoToXYZ(lat, lon).multiplyScalar(1.003);
+    // Position on unit sphere surface (earthMesh is R=1). Outward normal
+    // is the same vector — used for the sky beam orientation below.
+    const surface = geoToXYZ(lat, lon).multiplyScalar(1.003);
+    const normal  = surface.clone().normalize();
 
     _userPinGroup = new THREE.Group();
+    _userPinRings = [];
 
-    // Core dot — bright teal
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-    const dot    = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 10), dotMat);
-    dot.position.copy(pos);
-    _userPinGroup.add(dot);
+    // Palette: warm gold core fading through a teal corona. Two colors
+    // produce a stronger silhouette against both day-side blue and the
+    // night-side dark than a single-hue marker did.
+    const COLOR_CORE  = 0xfff0a8;   // bright warm core
+    const COLOR_HALO  = 0x6effe0;   // teal corona
+    const COLOR_RING  = 0x88ffe6;   // pulse rings
+    const COLOR_BEAM  = 0xffd766;   // sky beam — sun-warm
 
-    // Pulse ring — tangent to sphere surface
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x00ffcc, transparent: true, opacity: 0.7,
+    // 1. Core dot — small, fully opaque, sits on the surface. Brighter
+    //    than the surrounding glow so the marker has a hard centre even
+    //    when the halo + rings dim below the day-side terminator.
+    const coreGeo = new THREE.SphereGeometry(0.014, 16, 16);
+    const coreMat = new THREE.MeshBasicMaterial({ color: COLOR_CORE });
+    const core    = new THREE.Mesh(coreGeo, coreMat);
+    core.position.copy(surface);
+    _userPinGroup.add(core);
+
+    // 2. Halo sphere — larger, additive-blended, breathes in/out. Reads
+    //    as a soft glow around the core dot from any camera angle (a
+    //    flat ring would vanish edge-on; a sphere never does).
+    const haloGeo = new THREE.SphereGeometry(0.030, 18, 18);
+    const haloMat = new THREE.MeshBasicMaterial({
+        color: COLOR_HALO, transparent: true, opacity: 0.32,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    _userPinHalo = new THREE.Mesh(haloGeo, haloMat);
+    _userPinHalo.position.copy(surface);
+    _userPinGroup.add(_userPinHalo);
+
+    // 3. Radar rings — three tangent rings on staggered phases. The
+    //    per-frame tick at line ~6453 expands each one through its own
+    //    portion of a shared period so the marker reads as a continuous
+    //    outward sweep instead of a single oscillation.
+    const ringGeo = new THREE.RingGeometry(0.022, 0.030, 48);
+    for (let i = 0; i < 3; i++) {
+        const mat = new THREE.MeshBasicMaterial({
+            color: COLOR_RING, transparent: true, opacity: 0.7,
+            side: THREE.DoubleSide, depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const ring = new THREE.Mesh(ringGeo, mat);
+        ring.position.copy(surface);
+        ring.lookAt(new THREE.Vector3(0, 0, 0));     // tangent to sphere
+        _userPinGroup.add(ring);
+        _userPinRings.push(ring);
+    }
+    // Preserve legacy handle in case other code dereferences it.
+    _userPinRing = _userPinRings[0];
+
+    // 4. Sky beam — a thin radial cylinder pointing OUT of the sphere.
+    //    Stretched to ~0.20 Earth radii (~1270 km) so it's visible from
+    //    typical orbital camera distances but doesn't punch through the
+    //    info panels at zoomed-out POVs. Additive blending makes the
+    //    beam transparent against both day and night sides without any
+    //    z-fight against the atmosphere shader.
+    const beamLen = 0.22;
+    const beamGeo = new THREE.CylinderGeometry(0.006, 0.014, beamLen, 16, 1, true);
+    // Cylinder default axis is +Y; translate so its base sits AT the
+    // surface and the body extends outward along +Y in local space.
+    beamGeo.translate(0, beamLen / 2, 0);
+    const beamMat = new THREE.MeshBasicMaterial({
+        color: COLOR_BEAM, transparent: true, opacity: 0.5,
         side: THREE.DoubleSide, depthWrite: false,
         blending: THREE.AdditiveBlending,
     });
-    _userPinRing = new THREE.Mesh(new THREE.RingGeometry(0.024, 0.042, 32), ringMat);
-    _userPinRing.position.copy(pos);
-    _userPinRing.lookAt(new THREE.Vector3(0, 0, 0));   // tangent to sphere
-    _userPinGroup.add(_userPinRing);
+    _userPinBeam = new THREE.Mesh(beamGeo, beamMat);
+    _userPinBeam.position.copy(surface);
+    // Orient local +Y to the outward surface normal at this lat/lon.
+    _userPinBeam.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
+    _userPinGroup.add(_userPinBeam);
 
+    _userPinGroup.renderOrder = 12;
     earthMesh.add(_userPinGroup);
 }
 
