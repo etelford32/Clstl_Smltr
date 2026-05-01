@@ -171,6 +171,10 @@
       "destination": "/vega.html"
     },
     {
+      "source": "/achernar",
+      "destination": "/achernar.html"
+    },
+    {
       "source": "/pricing",
       "destination": "/pricing.html"
     },
