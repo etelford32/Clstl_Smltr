@@ -67,20 +67,20 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
 /* ── RADIOACTIVE OOZING / MELTING CTA ────────────────────────────────────── */
 .btn-radioactive{
   position:relative;display:inline-block;padding:20px 42px 26px;
-  font-weight:800;font-size:1.05rem;letter-spacing:.02em;color:#021004;
-  text-shadow:0 0 6px rgba(220,255,180,.95),0 1px 0 rgba(255,255,200,.5);
+  font-weight:800;font-size:1.05rem;letter-spacing:.02em;color:#1a0500;
+  text-shadow:0 0 6px rgba(255,220,140,.95),0 1px 0 rgba(255,240,180,.6);
   background:
-    radial-gradient(ellipse at 28% 22%,rgba(255,255,210,.55) 0%,transparent 40%),
-    radial-gradient(ellipse at 70% 80%,#0fa820 0%,transparent 55%),
-    radial-gradient(ellipse at 30% 35%,#e6ff8a 0%,#9cff3a 30%,#1eff00 65%,#0a8a18 100%);
-  border:1px solid rgba(200,255,120,.6);
+    radial-gradient(ellipse at 30% 25%,rgba(255,250,210,.85) 0%,transparent 38%),
+    radial-gradient(ellipse at 72% 78%,#7a1500 0%,transparent 60%),
+    radial-gradient(ellipse at 32% 38%,#fff4b0 0%,#ffd24a 22%,#ff8a00 52%,#ff4400 78%,#a01a00 100%);
+  border:1px solid rgba(255,180,80,.7);
   border-radius:18px 22px 38px 32px / 14px 18px 46px 40px;
   box-shadow:
-    0 0 22px rgba(80,255,40,.65),
-    0 0 60px rgba(40,255,80,.35),
-    0 14px 28px -8px rgba(40,255,80,.55),
-    inset 0 -6px 14px rgba(0,80,20,.55),
-    inset 0 2px 6px rgba(255,255,200,.5);
+    0 0 22px rgba(255,140,40,.7),
+    0 0 60px rgba(255,90,0,.4),
+    0 14px 28px -8px rgba(255,90,0,.55),
+    inset 0 -6px 14px rgba(120,30,0,.6),
+    inset 0 2px 6px rgba(255,240,180,.6);
   cursor:pointer;overflow:visible;
   animation:radiomorph 5.5s ease-in-out infinite,radiopulse 2.6s ease-in-out infinite;
   text-decoration:none;z-index:0;
@@ -88,43 +88,46 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
 }
 .btn-radioactive .radio-label{position:relative;z-index:2;display:inline-block}
 .btn-radioactive .ooze{
-  position:absolute;left:-6%;right:-6%;
-  top:calc(100% - 14px);height:110px;
+  position:absolute;left:-4%;right:-4%;
+  top:calc(100% - 12px);height:88px;
   filter:url(#radio-goo);
   pointer-events:none;z-index:1;
 }
 .btn-radioactive .ooze::before{
   /* molten lip clinging to the bottom of the button */
-  content:'';position:absolute;left:0;right:0;top:0;height:34px;
+  content:'';position:absolute;left:2%;right:2%;top:0;height:24px;
   background:
-    radial-gradient(ellipse at 50% 0%,#9cff3a 0%,#1eff00 55%,#0a8a18 100%);
+    radial-gradient(ellipse at 50% 0%,#ffe080 0%,#ff9e1c 35%,#ff4500 75%,#7a1500 100%);
   border-radius:50% 50% 60% 60% / 0 0 100% 100%;
   filter:blur(.3px);
 }
 .btn-radioactive .ooze i{
-  position:absolute;display:block;top:14px;
-  background:radial-gradient(circle at 30% 25%,#e6ff8a 0%,#9cff3a 35%,#1eff00 70%,#0a8a18 100%);
+  position:absolute;display:block;top:10px;
+  background:radial-gradient(circle at 32% 28%,#fff4b0 0%,#ffd24a 25%,#ff8a00 55%,#ff3a00 85%,#7a1500 100%);
   border-radius:50%;
-  box-shadow:inset 0 -4px 6px rgba(0,80,20,.4);
+  box-shadow:inset 0 -3px 5px rgba(120,30,0,.55),inset 0 1px 2px rgba(255,240,180,.45);
   transform-origin:50% 0;
 }
-.btn-radioactive .ooze i:nth-child(1){left:6%; width:30px;height:30px;animation:ooze-fall 4.6s ease-in -0.4s infinite}
-.btn-radioactive .ooze i:nth-child(2){left:18%;width:22px;height:22px;animation:ooze-fall 6.2s ease-in -2.1s infinite}
-.btn-radioactive .ooze i:nth-child(3){left:30%;width:34px;height:34px;animation:ooze-fall 5.0s ease-in -0.9s infinite}
-.btn-radioactive .ooze i:nth-child(4){left:44%;width:24px;height:24px;animation:ooze-fall 7.4s ease-in -3.3s infinite}
-.btn-radioactive .ooze i:nth-child(5){left:56%;width:30px;height:30px;animation:ooze-fall 4.2s ease-in -1.6s infinite}
-.btn-radioactive .ooze i:nth-child(6){left:68%;width:22px;height:22px;animation:ooze-fall 6.8s ease-in -0.2s infinite}
-.btn-radioactive .ooze i:nth-child(7){left:80%;width:32px;height:32px;animation:ooze-fall 5.4s ease-in -2.7s infinite}
-.btn-radioactive .ooze i:nth-child(8){left:90%;width:20px;height:20px;animation:ooze-fall 4.8s ease-in -1.2s infinite}
+.btn-radioactive .ooze i:nth-child(1){left:7%; width:18px;height:18px;animation:ooze-fall 4.6s ease-in -0.4s infinite}
+.btn-radioactive .ooze i:nth-child(2){left:18%;width:13px;height:13px;animation:ooze-fall 6.2s ease-in -2.1s infinite}
+.btn-radioactive .ooze i:nth-child(3){left:30%;width:20px;height:20px;animation:ooze-fall 5.0s ease-in -0.9s infinite}
+.btn-radioactive .ooze i:nth-child(4){left:44%;width:14px;height:14px;animation:ooze-fall 7.4s ease-in -3.3s infinite}
+.btn-radioactive .ooze i:nth-child(5){left:56%;width:18px;height:18px;animation:ooze-fall 4.2s ease-in -1.6s infinite}
+.btn-radioactive .ooze i:nth-child(6){left:68%;width:13px;height:13px;animation:ooze-fall 6.8s ease-in -0.2s infinite}
+.btn-radioactive .ooze i:nth-child(7){left:80%;width:19px;height:19px;animation:ooze-fall 5.4s ease-in -2.7s infinite}
+.btn-radioactive .ooze i:nth-child(8){left:91%;width:12px;height:12px;animation:ooze-fall 4.8s ease-in -1.2s infinite}
 .btn-radioactive::after{
-  /* radiation glow halo + decay particles backdrop */
+  /* radiation glow halo + tiny decay beads drifting upward */
   content:'';position:absolute;inset:-14px;border-radius:24px;
   background:
-    radial-gradient(circle at 18% 110%,rgba(160,255,100,.55) 0 3px,transparent 4px),
-    radial-gradient(circle at 42% 130%,rgba(200,255,140,.5) 0 2px,transparent 3px),
-    radial-gradient(circle at 72% 120%,rgba(160,255,100,.55) 0 2.5px,transparent 3.5px),
-    radial-gradient(circle at 88% 105%,rgba(220,255,160,.45) 0 2px,transparent 3px),
-    radial-gradient(ellipse at center,rgba(120,255,60,.42) 0%,transparent 65%);
+    radial-gradient(circle at 14% 108%,rgba(255,200,80,.7) 0 1.5px,transparent 2.5px),
+    radial-gradient(circle at 26% 122%,rgba(255,160,40,.6) 0 1px,transparent 2px),
+    radial-gradient(circle at 40% 132%,rgba(255,220,120,.7) 0 1.5px,transparent 2.5px),
+    radial-gradient(circle at 56% 118%,rgba(255,140,30,.65) 0 1.2px,transparent 2.2px),
+    radial-gradient(circle at 70% 128%,rgba(255,180,60,.6) 0 1.4px,transparent 2.4px),
+    radial-gradient(circle at 84% 114%,rgba(255,210,100,.7) 0 1.2px,transparent 2.2px),
+    radial-gradient(circle at 92% 124%,rgba(255,160,40,.6) 0 1px,transparent 2px),
+    radial-gradient(ellipse at center,rgba(255,140,40,.42) 0%,transparent 65%);
   z-index:-2;animation:radioflicker 1.8s ease-in-out infinite,radiodecay 4.2s linear infinite;
   pointer-events:none;
 }
@@ -132,11 +135,11 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   filter:brightness(1.15) saturate(1.15);
   transform:translateY(-2px);
   box-shadow:
-    0 0 36px rgba(120,255,60,.9),
-    0 0 90px rgba(60,255,80,.55),
-    0 18px 34px -10px rgba(40,255,80,.65),
-    inset 0 -6px 14px rgba(0,80,20,.6),
-    inset 0 2px 6px rgba(255,255,200,.65);
+    0 0 38px rgba(255,160,50,.9),
+    0 0 90px rgba(255,90,0,.55),
+    0 18px 34px -10px rgba(255,90,0,.65),
+    inset 0 -6px 14px rgba(120,30,0,.65),
+    inset 0 2px 6px rgba(255,240,180,.7);
 }
 .btn-radioactive:hover .ooze i{animation-duration:2.6s !important}
 @keyframes radiopulse{
@@ -149,12 +152,12 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   66%{border-radius:16px 24px 30px 40px / 12px 20px 40px 48px}
 }
 @keyframes ooze-fall{
-  0%  {transform:translateY(-2px) scaleX(1.1)  scaleY(.5); opacity:.9}
-  18% {transform:translateY(8px)  scaleX(.85) scaleY(2.0); opacity:1}
-  45% {transform:translateY(28px) scaleX(.7)  scaleY(2.8); opacity:1}
-  72% {transform:translateY(58px) scaleX(.55) scaleY(1.4); opacity:.85}
-  92% {transform:translateY(86px) scaleX(.4)  scaleY(.55); opacity:.35}
-  100%{transform:translateY(98px) scaleX(.3)  scaleY(.3);  opacity:0}
+  0%  {transform:translateY(-2px) scaleX(1.15) scaleY(.55); opacity:.9}
+  16% {transform:translateY(6px)  scaleX(.9)  scaleY(1.7);  opacity:1}
+  42% {transform:translateY(22px) scaleX(.78) scaleY(2.2);  opacity:1}
+  62% {transform:translateY(40px) scaleX(.7)  scaleY(1.05); opacity:.95}
+  82% {transform:translateY(58px) scaleX(.55) scaleY(.7);   opacity:.55}
+  100%{transform:translateY(74px) scaleX(.32) scaleY(.32);  opacity:0}
 }
 @keyframes radioflicker{
   0%,100%{opacity:.85}
@@ -162,8 +165,8 @@ nav{position:sticky;top:0;z-index:600;height:50px;min-height:50px;background:rgb
   72%{opacity:.7}
 }
 @keyframes radiodecay{
-  0%{background-position:0 0,0 0,0 0,0 0,0 0}
-  100%{background-position:0 -40px,0 -55px,0 -48px,0 -60px,0 0}
+  0%  {background-position:0 0,0 0,0 0,0 0,0 0,0 0,0 0,0 0}
+  100%{background-position:0 -42px,2px -58px,-1px -50px,1px -64px,-2px -46px,2px -54px,-1px -60px,0 0}
 }
 @media (prefers-reduced-motion: reduce){
   .btn-radioactive,.btn-radioactive::after,.btn-radioactive .ooze i{animation:none}
