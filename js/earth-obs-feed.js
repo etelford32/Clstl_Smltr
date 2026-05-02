@@ -360,10 +360,11 @@ export class EarthObsFeed {
             this._enabled.delete(layerId);
             clearInterval(this._timers[layerId]);
             delete this._timers[layerId];
-            if (this._textures[layerId]) {
-                this._textures[layerId].dispose();
-                delete this._textures[layerId];
-            }
+            // Keep the cached texture and meta so the user can re-enable
+            // the layer instantly without waiting for another GIBS round
+            // trip. Polling is paused; the texture stays addressable via
+            // getTexture(layerId). Disposal happens only when the page
+            // unloads (or the consumer explicitly drops the feed).
         }
     }
 
