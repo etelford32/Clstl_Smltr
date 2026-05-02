@@ -6,11 +6,20 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
 ## Inventory
 
 ### Sign in (`signin.html`, ~446 lines)
-- **Method**: email + password only. Supabase Auth via `auth.signIn()` in
-  `js/auth.js`.
+- **Method**: email + password (primary) plus **Google OAuth** via
+  `auth.signInWithProvider('google')`. The `Continue with Google`
+  button renders below the divider when `js/config.js`
+  `SOCIAL_PROVIDERS` includes `'google'`. Apple is staged behind the
+  same flag — code paths are provider-agnostic; flipping the flag
+  after configuring Apple in the Supabase dashboard turns it on.
+- **OAuth callback**: Supabase redirects to `/auth-callback.html`
+  (which must be on the project's Redirect URLs allow-list). The
+  callback page hydrates the session, distinguishes new vs returning
+  users, fires `signup` + welcome-email POST for new users (with the
+  same idempotency guarantees the password flow uses), and bounces
+  to `/dashboard.html`.
 - **Reset path**: separate form on the same page, calls
   `supabase.auth.resetPasswordForEmail()`.
-- **Social auth**: placeholder comment at line ~297 — *not implemented*.
 - **Telemetry** *(new this PR)*:
   - `signin_succeeded` activation event with `metadata.retry_count`
     (sessionStorage counter incremented on each failure).
@@ -53,11 +62,12 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
 ## Gaps + automation candidates
 
 ### Auth method gaps
-1. **No social signin (Google / Apple / GitHub).**
-   Supabase Auth supports OAuth providers natively — wiring a third
-   provider is a config change + button. Recommended next move: Google,
-   then Apple if there's iOS demand. The signin.html placeholder comment
-   already anticipates this.
+1. ~~No social signin~~ — **Google SHIPPED**, Apple staged. The
+   `Continue with Google` button renders on signin + signup behind
+   the `SOCIAL_PROVIDERS` flag in `js/config.js`; flipping the flag
+   to include `'apple'` after configuring the provider in the
+   Supabase dashboard turns Apple on in the same UI surface.
+   Operator runbook: `OAUTH_SETUP.md`.
 2. **No magic-link / passwordless** option. Supabase Auth supports it
    (`signInWithOtp`); useful for users who lose passwords. ~1 day of
    work including the reset-flow merge.
@@ -139,13 +149,19 @@ stores it; the RPC just needs to expose a top-N).
 for a couple weeks the nudge-rate column on the admin card will tell
 us whether the wizard friction is meaningful or marginal.
 
-**4.** Social signin (Google, then Apple). Cuts password-related
-support tickets and shrinks the signup form to one click. Mostly a
-config + UI sprint.
+**4.** ~~Google OAuth~~ — **shipped**. Apple is staged behind the same
+`SOCIAL_PROVIDERS` flag; bringing it online needs the developer-
+account setup steps in `OAUTH_SETUP.md` plus a single-line config
+change.
 
 **5.** Top-N reasons histogram for `auth_failures.reason` so an admin
 can spot a sudden spike in (e.g.) "Email not confirmed" without
 opening Supabase logs.
 
-Everything else can wait until (4)–(5) are deployed and we have data
-on which gap actually moves the activation needle.
+**6.** Magic-link / passwordless (`signInWithOtp`) — useful for users
+who lose passwords; reduces support tickets but rarely the headline
+issue.
+
+Everything else can wait until we have data on which gap actually
+moves the activation needle. The OAuth + email-automation triad is
+the headline activation work; the items above are polish.

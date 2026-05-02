@@ -27,6 +27,22 @@
 // ── NASA API key (local dev only; replaced by env var in production) ─────────
 export const NASA_KEY = 'DEMO_KEY';   // ← replace with your key for local dev
 
+// ── Social auth providers ────────────────────────────────────────────────────
+//
+// Allow-list for the "Continue with X" buttons rendered on
+// signin.html + signup.html via js/oauth-buttons.js. The button only
+// renders for providers in this array, so a partially-configured
+// provider (Supabase dashboard side not yet finished) stays hidden.
+//
+// Adding a new provider takes three steps:
+//   1. Configure the provider in the Supabase dashboard
+//      (Authentication → Providers).
+//   2. Add a metadata entry to js/oauth-buttons.js OAUTH_PROVIDERS.
+//   3. Add the provider id to this array.
+//
+// See OAUTH_SETUP.md for the full operator runbook.
+export const SOCIAL_PROVIDERS = Object.freeze(['google']);
+
 // ── Plan tier constants ───────────────────────────────────────────────────────
 export const TIER = Object.freeze({
     FREE: 'free',
