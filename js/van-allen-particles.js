@@ -140,6 +140,28 @@ function gaussian() {
     return s - 6;
 }
 
+// ── Radial diffusion coefficient (Brautigam & Albert 2000) ──────────────────
+//
+// D_LL is the third-invariant-violating transport rate between L-shells,
+// driven by ULF Pc5 waves and substorm-injected E-fields.  The empirical
+// magnetic-component fit from B&A (calibrated against CRRES at L = 3.5–7):
+//
+//     log₁₀ D_LL [day⁻¹] = 0.506 · Kp − 9.325 + 10 · log₁₀(L)
+//
+// The L¹⁰ scaling makes inner-belt protons (L ≈ 2) effectively immune to
+// radial diffusion (D_LL ≪ 10⁻⁶ /day) while outer-belt electrons (L ≈ 6)
+// at storm-time Kp ≥ 6 see D_LL of order 10–1000 /day — large enough that
+// inward transport refills the outer belt within a day after the main
+// phase, the canonical "storm recovery" relativistic-electron acceleration.
+//
+// We return /s for direct use in the random-walk integrator.
+const _LN10 = Math.log(10);
+function radialDiffusionDLL(L, kp) {
+    const logD_day = 0.506 * Math.max(0, Math.min(9, kp)) - 9.325
+                   + 10 * Math.log10(Math.max(1.05, L));
+    return Math.exp(logD_day * _LN10) / 86400;     // /s
+}
+
 export class VanAllenParticles {
     /**
      * @param {THREE.Scene} scene
@@ -201,25 +223,45 @@ export class VanAllenParticles {
      * spawned particle is bounce-trapped; pitch-angle diffusion (added in
      * `update`) is what knocks them into the loss cone over storm time.
      */
-    _initParticleSlot(idx) {
-        const r = Math.random();
+    /**
+     * (Re)initialise particle slot `idx`.
+     *
+     * @param {string} [source='equilibrium']
+     *   'equilibrium' — full population draw (used at startup)
+     *   'plasmasheet' — outer-edge low-energy seed electron (used during storm
+     *                   recovery: high Kp + Bz northward → enhanced injection
+     *                   from the plasma sheet that subsequently radially
+     *                   diffuses inward and adiabatically energises).
+     */
+    _initParticleSlot(idx, source = 'equilibrium') {
         let region, L, energyMeV, charge;
 
-        if (r < 0.22) {
-            region    = 'inner';
-            L         = 1.5 + Math.random() * 1.0;
-            energyMeV = 1 + Math.random() * 9;
-            charge    = +1;
-        } else if (r < 0.30) {
-            region    = 'slot';
-            L         = 2.5 + Math.random() * 0.5;
-            energyMeV = 0.4 + Math.random() * 0.8;
+        if (source === 'plasmasheet') {
+            // Plasma-sheet seed: sub-relativistic electron at the outer trap
+            // edge.  Its inward radial diffusion + μ-conserving acceleration
+            // is the canonical recovery-phase outer-belt refill mechanism.
+            region    = 'outer';
+            L         = 6.5 + Math.random() * 1.0;
+            energyMeV = 0.05 + Math.random() * 0.20;
             charge    = -1;
         } else {
-            region    = 'outer';
-            L         = 3.2 + Math.random() * 3.5;
-            energyMeV = 0.3 + Math.random() * 4.0;
-            charge    = -1;
+            const r = Math.random();
+            if (r < 0.22) {
+                region    = 'inner';
+                L         = 1.5 + Math.random() * 1.0;
+                energyMeV = 1 + Math.random() * 9;
+                charge    = +1;
+            } else if (r < 0.30) {
+                region    = 'slot';
+                L         = 2.5 + Math.random() * 0.5;
+                energyMeV = 0.4 + Math.random() * 0.8;
+                charge    = -1;
+            } else {
+                region    = 'outer';
+                L         = 3.2 + Math.random() * 3.5;
+                energyMeV = 0.3 + Math.random() * 4.0;
+                charge    = -1;
+            }
         }
 
         const alpha_lc = lossConeAlpha(L);
@@ -262,25 +304,30 @@ export class VanAllenParticles {
         p.precipTimer    = 0;             // viewing-seconds remaining in fade
         p.respawnDelay   = 0;             // viewing-seconds until eligible to respawn
 
-        // Write colour into both the live buffer and the original-cache
-        // so the dimming logic in `update` can restore on respawn.
+        // Write colour into the original-cache so the dimming logic in
+        // `update` can restore it on respawn.  Outer-belt colour is derived
+        // from energy via _refreshOuterColor (so radial-diffusion-driven
+        // acceleration visibly brightens those particles); inner / slot
+        // particles get fixed region-tagged colours.
         if (this._color && this._colorOriginal) {
-            const r0 = region === 'inner' ? 1.00
-                     : region === 'outer' ? 0.40
-                                          : 0.85;
-            const g0 = region === 'inner' ? 0.45 + 0.25 * Math.random()
-                     : region === 'outer' ? 0.85
-                                          : 0.85;
-            const b0 = region === 'inner' ? 0.20
-                     : region === 'outer' ? 1.00
-                                          : 0.55;
             const o = idx * 3;
-            this._colorOriginal[o]   = r0;
-            this._colorOriginal[o+1] = g0;
-            this._colorOriginal[o+2] = b0;
-            this._color[o]   = r0;
-            this._color[o+1] = g0;
-            this._color[o+2] = b0;
+            if (region === 'outer') {
+                this._refreshOuterColor(idx, energyMeV);
+            } else if (region === 'inner') {
+                this._colorOriginal[o]   = 1.00;
+                this._colorOriginal[o+1] = 0.45 + 0.25 * Math.random();
+                this._colorOriginal[o+2] = 0.20;
+            } else {
+                // Slot
+                this._colorOriginal[o]   = 0.85;
+                this._colorOriginal[o+1] = 0.85;
+                this._colorOriginal[o+2] = 0.55;
+            }
+            // Mirror into the live buffer so the first frame shows the spawn
+            // colour correctly (otherwise it would be (0,0,0) for one tick).
+            this._color[o]   = this._colorOriginal[o];
+            this._color[o+1] = this._colorOriginal[o+1];
+            this._color[o+2] = this._colorOriginal[o+2];
         }
     }
 
@@ -393,6 +440,7 @@ export class VanAllenParticles {
         if (!this._points) return;
         const tc        = this._timeCompression;
         const stormIdx  = this._stormIdx ?? 0;
+        const kp        = this._kp;
 
         // ── Pitch-angle diffusion coefficient ──────────────────────────────
         //
@@ -407,7 +455,23 @@ export class VanAllenParticles {
         const D_eff   = D_QUIET + D_STORM * stormIdx;
         const sigmaBase = Math.sqrt(2 * D_eff * dt);
 
+        // ── Recovery-phase detection ───────────────────────────────────────
+        // Recovery = high-ish Kp but Bz no longer strongly southward.  This
+        // is when ULF Pc5 power is high (energising radial diffusion) yet
+        // pitch-angle scattering losses are subsiding — the canonical
+        // outer-belt rebuild interval.  We use it to (a) bias respawns to
+        // outer-edge plasma-sheet seeds, and (b) gently boost D_LL above
+        // the Brautigam-Albert baseline.
+        const recoveryFactor = (kp > 4 && stormIdx < 0.30)
+            ? Math.min(1, (kp - 4) / 5)     // 0..1 across Kp 4 → 9
+            : 0;
+
         const respawnDuringStormScale = 1 - 0.85 * stormIdx;
+        const respawnFromPlasmaSheet  = 0.70 * recoveryFactor;
+
+        // Real-seconds-per-viewing-second multiplier for *physical* random
+        // walks (D_LL is in /real-second; the viewing-time variance ∝ tc).
+        const viewSToRealS = tc;
 
         for (let i = 0, n = this._particles.length; i < n; i++) {
             const p = this._particles[i];
@@ -421,39 +485,97 @@ export class VanAllenParticles {
                     // visible population *visibly drains*.
                     const respawnRatePerS = 1.2 * respawnDuringStormScale;
                     if (Math.random() < respawnRatePerS * dt) {
-                        this._initParticleSlot(i);
+                        // During recovery, a fraction of respawns enter as
+                        // low-energy seed electrons at the outer trap edge.
+                        const source = (Math.random() < respawnFromPlasmaSheet)
+                            ? 'plasmasheet' : 'equilibrium';
+                        this._initParticleSlot(i, source);
                         this._respawnEvents++;
                     }
                 }
-                // Always advance phases (so when respawned the bounce/drift
-                // motion isn't visibly frozen during the gap).
                 p.drift_lon    += p.drift_omega_real  * tc * dt;
                 p.bounce_phase += p.bounce_omega_view * dt;
                 continue;
             }
 
-            // ── Trapped: pitch-angle scatter, then check loss cone ─────────
-            // Region weight applies (outer ≫ slot ≫ inner — chorus / hiss
-            // selectivity from wave-particle resonance).  Scaled by √w so
-            // the variance scales linearly with weight.
+            // ── Pitch-angle scatter, then loss-cone check ──────────────────
             const sigma = sigmaBase * Math.sqrt(p.scatterWeight);
-            const dAlpha = sigma * gaussian();
-            p.alpha0 += dAlpha;
+            p.alpha0 += sigma * gaussian();
 
-            // Reflect the random walk off the equator (α₀ = π/2) and the
-            // loss cone (α₀ = α_lc).  Below α_lc → precipitate.
             if (p.alpha0 > Math.PI / 2) p.alpha0 = Math.PI - p.alpha0;
             if (p.alpha0 < p.alpha_lc) {
-                // Precipitation: the next bounce buries the particle in the
-                // atmosphere.  Mark and start a 1.0–1.5 s viewing fade.
+                p.state       = 'precipitating';
+                p.precipTimer = 1.0 + Math.random() * 0.5;
+                this._lossEvents++;
+                continue;
+            }
+            p.lambda_m = lookupLambdaM(p.alpha0);
+
+            // ── Radial diffusion (third-invariant violation) ───────────────
+            // Random walk in L driven by ULF Pc5 power scaled with Kp.
+            // Inner-belt protons see D_LL ≪ 10⁻¹² /s thanks to the L¹⁰
+            // scaling, so they're effectively immune.  Outer-belt electrons
+            // at storm Kp see D_LL ≫ 10⁻³ /s — meaningful inward transport.
+            const dll = radialDiffusionDLL(p.L, kp)
+                      * (1 + 1.5 * recoveryFactor);          // recovery boost
+            // sigma_L over a viewing-second corresponds to a real-time
+            // random walk of √(2 D_LL · dt · tc) since dt is viewing-time
+            // and D_LL is /real-s.
+            const sigmaL = Math.sqrt(2 * dll * dt * viewSToRealS);
+            // Cap any single step to a fraction of an L-shell to prevent
+            // teleport at extreme Kp + outer L combinations.
+            const dL = Math.max(-0.30, Math.min(0.30, sigmaL * gaussian()));
+            const newL = p.L + dL;
+
+            // ── Boundary conditions ────────────────────────────────────────
+            // L < 1.3 → particle's mirror points are inside the atmosphere
+            //          → loss to upper atmosphere (precipitation)
+            // L > 8.0 → outside trapped region → loss to magnetopause /
+            //          magnetosheath (effectively the same outcome)
+            if (newL < 1.3 || newL > 8.0) {
                 p.state       = 'precipitating';
                 p.precipTimer = 1.0 + Math.random() * 0.5;
                 this._lossEvents++;
                 continue;
             }
 
-            // Update mirror latitude from the new α₀ (cheap O(1) lookup).
-            p.lambda_m = lookupLambdaM(p.alpha0);
+            // ── μ-conserving energy scaling ────────────────────────────────
+            //   B_eq(L) ∝ 1/L³  (dipole)
+            //   μ = m v_⊥²/(2B) = const   →   v_⊥² ∝ B ∝ 1/L³
+            // For the v_⊥-dominated population (most particles at α₀ near
+            // 90°), kinetic energy ∝ v_⊥² ∝ 1/L³.  Inward transport
+            // therefore *energises* a seed electron: a 0.1 MeV particle
+            // moving from L = 7 to L = 4 gains a factor (7/4)³ ≈ 5.4 in
+            // energy → ~0.54 MeV.  Multiple inward steps over storm
+            // recovery accumulate to MeV-class "killer electrons".
+            if (newL !== p.L) {
+                const energyRatio = Math.pow(p.L / newL, 3);
+                p.energyMeV = Math.max(0.05, Math.min(50, p.energyMeV * energyRatio));
+                p.L = newL;
+                p.alpha_lc = lossConeAlpha(newL);
+
+                // Drift period depends on energy and L — recompute
+                const T_d = driftPeriodSec(p.energyMeV, p.L, p.alpha0);
+                const minVisualPeriodS = 0.20 * tc;
+                const T_d_effective = Math.max(T_d, minVisualPeriodS);
+                p.drift_omega_real = (-2 * Math.PI / T_d_effective) * p.charge;
+
+                // For outer-belt particles, refresh cached colour from new
+                // energy — high-energy electrons render whiter / brighter,
+                // visibly demonstrating the radial-diffusion acceleration.
+                if (p.region === 'outer') {
+                    this._refreshOuterColor(i, p.energyMeV);
+                }
+
+                // After diffusion-driven L change the particle may be in the
+                // (new) loss cone (loss cone widens as L decreases).
+                if (p.alpha0 < p.alpha_lc) {
+                    p.state       = 'precipitating';
+                    p.precipTimer = 1.0 + Math.random() * 0.5;
+                    this._lossEvents++;
+                    continue;
+                }
+            }
 
             // Drift + bounce phase advance
             p.drift_lon    += p.drift_omega_real  * tc * dt;
@@ -464,6 +586,25 @@ export class VanAllenParticles {
         this._writeColors();
         this._points.geometry.attributes.position.needsUpdate = true;
         this._points.geometry.attributes.color.needsUpdate    = true;
+    }
+
+    /**
+     * Recompute the cached "rest" colour for an outer-belt particle from its
+     * current energy.  Low-energy seeds are dim grey-cyan; relativistic
+     * (~MeV) electrons are bright cyan; ≥ 5 MeV "killer electrons" are
+     * white-blue.  Inner-belt protons and slot stragglers retain the
+     * region-specific colour set at spawn (their energy barely changes).
+     */
+    _refreshOuterColor(idx, energyMeV) {
+        const o = idx * 3;
+        // Map E [0.05, 5] MeV → t [0, 1] with a soft log curve (so a
+        // factor-10 energy gain produces ~0.5 of the colour shift, matching
+        // perceptual brightness scaling).
+        const t = Math.max(0, Math.min(1, Math.log10(Math.max(0.05, energyMeV) / 0.05) / Math.log10(5 / 0.05)));
+        // Dim seed → bright cyan → white-blue
+        this._colorOriginal[o]   = 0.20 + 0.55 * t;
+        this._colorOriginal[o+1] = 0.45 + 0.50 * t;
+        this._colorOriginal[o+2] = 0.65 + 0.35 * t;
     }
 
     /**
