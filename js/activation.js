@@ -17,9 +17,11 @@
 import { getSupabase } from './supabase-config.js';
 
 // Mirror of the SQL CHECK constraint. Keep in lockstep with:
-//   - supabase-class-seats-migration.sql       (original event set)
-//   - supabase-onboarding-events-migration.sql (wizard / tour / demo /
-//                                                auth-flow events)
+//   - supabase-class-seats-migration.sql        (original event set)
+//   - supabase-onboarding-events-migration.sql  (wizard / tour / demo /
+//                                                 auth-flow events)
+//   - supabase-welcome-email-migration.sql      (welcome_email_sent)
+//   - supabase-onboarding-nudge-migration.sql   (nudge_sent)
 export const EVENTS = Object.freeze({
     SIGNUP:                  'signup',
     PROFILE_COMPLETED:       'profile_completed',
@@ -47,6 +49,9 @@ export const EVENTS = Object.freeze({
     SIGNIN_SUCCEEDED:        'signin_succeeded',
     SIGNIN_FAILED:           'signin_failed',
     RETURNING_USER_SESSION:  'returning_user_session',
+    // Lifecycle email automation
+    WELCOME_EMAIL_SENT:      'welcome_email_sent',
+    NUDGE_SENT:              'nudge_sent',
 });
 
 const VALID = new Set(Object.values(EVENTS));
@@ -70,6 +75,8 @@ const SINGLE_FIRE = new Set([
     EVENTS.TOUR_COMPLETED,
     EVENTS.DEMO_ENTERED,
     EVENTS.RETURNING_USER_SESSION,
+    EVENTS.WELCOME_EMAIL_SENT,
+    EVENTS.NUDGE_SENT,
 ]);
 const _firedThisSession = new Set();
 

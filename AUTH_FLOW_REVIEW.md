@@ -67,13 +67,15 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
    60s.
 
 ### Telemetry gaps
-1. **`signin_failed` is a fake event right now.** RLS on
-   `activation_events` blocks unauth writes. To actually log failed
-   signins we need either (a) a server-side edge endpoint that wraps
-   Supabase's `signInWithPassword` and logs the failure with the
-   service-role key, or (b) a separate `auth_failures` table with
-   permissive insert RLS (gated on rate-limit). Option (a) is cleaner
-   because the rate limit is automatic via Supabase's own auth flow.
+1. ~~`signin_failed` is a fake event right now.~~ **SHIPPED**. New
+   `auth_failures` table fed by the SECURITY DEFINER `log_auth_failure`
+   RPC, called fire-and-forget by `signin.html` via the
+   `/api/auth/log-failure` edge function. Plaintext email is HMAC-SHA-
+   256-hashed with a server-side pepper before persisting, so we can
+   count distinct failing emails without storing PII. Rate-limited at
+   10/hour/email_hash to keep abuse out. The admin Onboarding > Auth
+   flow card now shows the real failure count and per-user failure
+   rate alongside the existing retry-count proxy.
 2. **No tracking of email-confirm completion.** When email-confirm is
    required, we don't know whether the user ever clicked the link. A
    `profile_completed` trigger on confirm would close the loop — Supabase
@@ -84,15 +86,27 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
 
 ### Automation candidates
 The drumbeat below is what we'd realistically build with the existing
-edge-function + Resend infrastructure. None of these are wired today.
+edge-function + Resend infrastructure.
 
-1. **Welcome email** (T+0 minutes after signup).
-   `auth.users` insert webhook → edge function → Resend send. The
-   email reinforces the wizard's CTAs.
-2. **Onboarding nudge** (T+24h if `wizard_completed` not fired).
-   Cron job (pg_cron) reads `activation_events` for users who have
-   `signup` but not `wizard_completed`; fires a "finish setup" email
-   with a deep link `/dashboard?welcome=1`.
+1. **Welcome email** (T+0 minutes after signup) — **SHIPPED**.
+   `signup.html` success branch fires a fire-and-forget POST to
+   `/api/welcome/send`. The edge function verifies the JWT, checks for
+   an existing `welcome_email_sent` activation event (idempotency
+   pre-check; the unique partial index in
+   `supabase-welcome-email-migration.sql` is the authoritative gate),
+   builds the welcome HTML with the user's display name + plan label,
+   sends via Resend, and logs the activation event. Send rate +
+   per-signup ratio surface on the admin Onboarding → Auth flow card.
+2. **Onboarding nudge** (T+24h if `wizard_completed` not fired) — **SHIPPED**.
+   Vercel cron at `/api/cron/onboarding-nudge` runs daily at 16:30 UTC,
+   calls `pending_onboarding_nudges(24, 7, 200)` to fetch users whose
+   signup is 24h–7d old without a `wizard_completed` row, and emails
+   each one a friendly "finish setting up" message with a deep link
+   `/dashboard?welcome=1` that re-opens the wizard. Idempotent at
+   three layers: cron schedule, RPC pre-filter, unique partial index
+   on `nudge_sent`. Send count + per-signup ratio surface on the
+   admin Onboarding > Auth flow card. Manual ops invocations:
+   `?dry=1` (no Resend, masked emails) and `?max=N` (canary cap).
 3. **Inactivity re-engagement** (T+14d / T+30d after last session).
    Joins `user_profiles.updated_at` against `activation_events`; emails
    users who've gone quiet with a "what's new" digest. Suppress for
@@ -111,21 +125,27 @@ edge-function + Resend infrastructure. None of these are wired today.
    if `< 3` students joined). Reminds the educator that they have
    capacity left and can invite more students from `/account#team`.
 
-### What I'd build first
-**1.** Wire the welcome email (item 1) — small change, proves the
-plumbing, sets up everything downstream.
+### What's next
+**1.** ~~Welcome email~~ — **shipped**. The plumbing is now proven; the
+remaining items can reuse the same `/api/welcome/send` shape (JWT
+verify → idempotency check → Resend send → activation log).
 
-**2.** Add a server-side `signin_failed` endpoint (item 1 in telemetry
-gaps) — the current retry_count proxy is fine for headline metrics, but
-debugging a real auth regression needs the actual error reasons.
+**2.** ~~`signin_failed` edge endpoint~~ — **shipped**. The admin card
+now shows real failure counts; the next signal-quality improvement is
+slicing the `reason` string into a small histogram (the table already
+stores it; the RPC just needs to expose a top-N).
 
-**3.** Onboarding nudge (item 2 in automation) — biggest potential
-activation-rate lift; the wizard is already wired, the cron just has to
-ping users who didn't finish.
+**3.** ~~Onboarding nudge cron~~ — **shipped**. Once the cron has run
+for a couple weeks the nudge-rate column on the admin card will tell
+us whether the wizard friction is meaningful or marginal.
 
 **4.** Social signin (Google, then Apple). Cuts password-related
 support tickets and shrinks the signup form to one click. Mostly a
 config + UI sprint.
 
-Everything else can wait until (1)–(4) are deployed and we have data
+**5.** Top-N reasons histogram for `auth_failures.reason` so an admin
+can spot a sudden spike in (e.g.) "Email not confirmed" without
+opening Supabase logs.
+
+Everything else can wait until (4)–(5) are deployed and we have data
 on which gap actually moves the activation needle.
