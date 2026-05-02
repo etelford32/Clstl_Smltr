@@ -67,13 +67,15 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
    60s.
 
 ### Telemetry gaps
-1. **`signin_failed` is a fake event right now.** RLS on
-   `activation_events` blocks unauth writes. To actually log failed
-   signins we need either (a) a server-side edge endpoint that wraps
-   Supabase's `signInWithPassword` and logs the failure with the
-   service-role key, or (b) a separate `auth_failures` table with
-   permissive insert RLS (gated on rate-limit). Option (a) is cleaner
-   because the rate limit is automatic via Supabase's own auth flow.
+1. ~~`signin_failed` is a fake event right now.~~ **SHIPPED**. New
+   `auth_failures` table fed by the SECURITY DEFINER `log_auth_failure`
+   RPC, called fire-and-forget by `signin.html` via the
+   `/api/auth/log-failure` edge function. Plaintext email is HMAC-SHA-
+   256-hashed with a server-side pepper before persisting, so we can
+   count distinct failing emails without storing PII. Rate-limited at
+   10/hour/email_hash to keep abuse out. The admin Onboarding > Auth
+   flow card now shows the real failure count and per-user failure
+   rate alongside the existing retry-count proxy.
 2. **No tracking of email-confirm completion.** When email-confirm is
    required, we don't know whether the user ever clicked the link. A
    `profile_completed` trigger on confirm would close the loop — Supabase
@@ -122,9 +124,10 @@ edge-function + Resend infrastructure.
 remaining items can reuse the same `/api/welcome/send` shape (JWT
 verify → idempotency check → Resend send → activation log).
 
-**2.** Add a server-side `signin_failed` endpoint (item 1 in telemetry
-gaps) — the current retry_count proxy is fine for headline metrics, but
-debugging a real auth regression needs the actual error reasons.
+**2.** ~~`signin_failed` edge endpoint~~ — **shipped**. The admin card
+now shows real failure counts; the next signal-quality improvement is
+slicing the `reason` string into a small histogram (the table already
+stores it; the RPC just needs to expose a top-N).
 
 **3.** Onboarding nudge (item 2 in automation) — biggest potential
 activation-rate lift; the wizard is already wired, the cron just has to
@@ -135,5 +138,5 @@ window query (`signup` ∧ ¬`wizard_completed` ∧ created > 24h ago).
 support tickets and shrinks the signup form to one click. Mostly a
 config + UI sprint.
 
-Everything else can wait until (2)–(4) are deployed and we have data
+Everything else can wait until (3)–(4) are deployed and we have data
 on which gap actually moves the activation needle.

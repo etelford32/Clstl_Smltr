@@ -1223,12 +1223,20 @@ export async function fetchAuthFlowMetrics(days = 30) {
         const succUsers = byEvent.signin_succeeded?.users || 0;
         const signups   = byEvent.signup?.users || 0;
         const welcomes  = byEvent.welcome_email_sent?.users || 0;
+        const failUsers   = byEvent.signin_failed?.users  || 0;
+        const failEvents  = byEvent.signin_failed?.events || 0;
         return {
             ok: true,
             data: {
                 signups,
                 signinSuccesses:   succUsers,
-                signinFailures:    byEvent.signin_failed?.users || 0,
+                signinFailures:    failUsers,
+                signinFailEvents:  failEvents,
+                // Distinct emails that failed ÷ (failed + succeeded).
+                // Approximation: an attacker hammering one email skews
+                // failEvents but not failUsers, so this is the user-
+                // impact rate, not the raw error rate.
+                signinFailureRate: (failUsers + succUsers) ? +(failUsers / (failUsers + succUsers)).toFixed(3) : 0,
                 returningSessions: byEvent.returning_user_session?.users || 0,
                 welcomeEmails:     welcomes,
                 // Send rate = welcome emails / signups in the same window.
