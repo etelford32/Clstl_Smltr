@@ -28,6 +28,7 @@ import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
+import { VanAllenParticles } from './van-allen-particles.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -160,6 +161,44 @@ void main() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Bessel helpers — used to build Lundquist (1950) constant-α force-free
+//  flux ropes for the CME ejecta core.
+//
+//   J₀(x) = Σ ((-1)^k / k!²) · (x/2)^(2k)
+//   J₁(x) = Σ ((-1)^k / (k! (k+1)!)) · (x/2)^(2k+1)
+//
+//  We use a 12-term series, which is well under FP-precision noise for
+//  x ∈ [0, 2.405] (the first zero of J₀ — the natural outer boundary of a
+//  Lundquist flux rope).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function besselJ0(x) {
+    const x2 = -(x * x) / 4;
+    let term = 1, sum = 1;
+    for (let k = 1; k < 14; k++) {
+        term *= x2 / (k * k);
+        sum  += term;
+        if (Math.abs(term) < 1e-9) break;
+    }
+    return sum;
+}
+
+function besselJ1(x) {
+    const x2 = -(x * x) / 4;
+    let term = x / 2, sum = term;
+    for (let k = 1; k < 14; k++) {
+        term *= x2 / (k * (k + 1));
+        sum  += term;
+        if (Math.abs(term) < 1e-9) break;
+    }
+    return sum;
+}
+
+// First zero of J₀ — defines the natural outer radius of a Lundquist rope
+// where B_z vanishes (field becomes purely azimuthal at the boundary).
+const LUNDQUIST_J0_ZERO = 2.4048256;
+
+// ─────────────────────────────────────────────────────────────────────────────
 export class SpaceWeatherGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -194,6 +233,22 @@ export class SpaceWeatherGlobe {
         this._arStreams      = [];   // [{ origin:Vector3, dirBase, intensity, complex }]
         this._lastRegionsKey = '';
 
+        // ── AR twist accumulator ────────────────────────────────────────────
+        // Each NOAA active region carries an integrating twist Φ(t) that grows
+        // with time-on-disk at a rate set by complexity & area:
+        //
+        //     dΦ/dt = κ · c(class) · A_norm           [rad / real day]
+        //
+        // When Φ ≥ Φ_crit (Hood-Priest kink threshold ≈ 2.5π) the rope is
+        // unstable → trigger an internal eruption (synthetic CME injection).
+        // This gives us a *predictive* eruption signal independent of NOAA's
+        // event list, while remaining deterministic from the ingested AR set.
+        this._arTwist        = new Map();    // arId → { phi, baseTwist, cls, areaNorm, lat_rad, lon_rad, eruptedAt }
+        this._twistKappa     = 1.5;          // rad / real-day at unit drive
+        this._kinkThreshold  = 2.5 * Math.PI;
+        this._eruptionCooldownS = 8;         // viewing-seconds before AR can re-erupt
+        this._arEruptionLog  = [];           // ring buffer of recent internal eruptions
+
         // Bow shock impact pulses (transient sprite list)
         this._impactPulses = []; // [{ sprite, life, life0 }]
 
@@ -206,6 +261,8 @@ export class SpaceWeatherGlobe {
         this._buildScene();
         this._buildSun();
         this._buildSolarMagnetosphere();
+        this._buildParkerStreamlines();
+        this._buildFluxRopes();
         this._buildEarth();
         this._buildMoon();
         this._buildAtmosphere();
@@ -636,7 +693,486 @@ export class SpaceWeatherGlobe {
 
     _buildMagnetosphere() {
         this._magEngine = new MagnetosphereEngine(this._scene);
+        // μ-conserving Van Allen tracer particles drifting through the belts.
+        // Built after the engine so the volumetric belts render *behind* the
+        // particles (Points use additive blending, no depth write).
+        this._beltParticles = new VanAllenParticles(this._scene, {
+            count: 700,
+            timeCompression: this._timeCompression,
+        });
     }
+
+    // ── Parker streamlines (deterministic) ──────────────────────────────────
+    /**
+     * Build dashed Parker-spiral streamline curves from the sun out to 1 AU.
+     *
+     * For three heliographic latitudes (−15°, 0°, +15°) we draw a dashed
+     * curve traced by:
+     *
+     *   φ(r) = φ_foot − Ω cos λ (r − r₀) / v_sw
+     *
+     * where φ_foot is chosen so the equatorial curve passes through Earth
+     * (Earth's heliographic longitude ≡ π in our scene with sun at +x and
+     * Earth at the origin).  The curve deforms as v_sw changes — slow wind
+     * tightens the spiral, fast wind unwinds it.
+     *
+     * Off-equator curves are anchored at the same φ_foot so they visualise
+     * the spiral *cone* of the IMF rather than each individually connecting
+     * to Earth.
+     */
+    _buildParkerStreamlines() {
+        const grp = new THREE.Group();
+        grp.name = 'parker_streamlines';
+        // Local origin at the sun's centre — easier to update curves
+        grp.position.copy(this._sunGroup.position);
+        this._scene.add(grp);
+        this._parkerGroup = grp;
+
+        const N = 120;                    // samples per streamline
+        const lats = [
+            { latDeg:   0, color: 0xffd070, opacity: 0.85 },  // equatorial — connects Earth
+            { latDeg: +15, color: 0xff9b3a, opacity: 0.40 },
+            { latDeg: -15, color: 0xff9b3a, opacity: 0.40 },
+        ];
+        this._parkerLines = [];
+        for (const cfg of lats) {
+            const positions = new Float32Array(3 * N);
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.LineDashedMaterial({
+                color:     cfg.color,
+                dashSize:  0.55,
+                gapSize:   0.45,
+                transparent: true,
+                opacity:   cfg.opacity,
+                depthWrite: false,
+                linewidth: 1.5,        // honoured only on platforms with WebGL line-width support
+            });
+            const line = new THREE.Line(geo, mat);
+            grp.add(line);
+            this._parkerLines.push({
+                line,
+                latRad: cfg.latDeg * Math.PI / 180,
+                isMain: cfg.latDeg === 0,
+            });
+        }
+
+        // Earth-foot marker — the photospheric base of the connected streamline
+        const footGeo = new THREE.SphereGeometry(0.35, 16, 12);
+        const footMat = new THREE.MeshBasicMaterial({
+            color: 0xfff0a0,
+            transparent: true, opacity: 0.85,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        });
+        this._parkerFoot = new THREE.Mesh(footGeo, footMat);
+        grp.add(this._parkerFoot);
+
+        // Initial fill using the default 400 km/s baseline
+        this._updateParkerStreamlines(this._windSpeedKms || 400);
+    }
+
+    /**
+     * Recompute streamline geometry for a new ambient wind speed.
+     * Must be called whenever `_windSpeedKms` changes meaningfully.
+     */
+    _updateParkerStreamlines(v_sw_kms) {
+        if (!this._parkerLines) return;
+        const v = Math.max(150, v_sw_kms);
+        const N = 120;
+        const r_sun_scene = 8.0;
+        const r_E_scene  = this._sceneSunEarth;
+        const SCENE_TO_KM = this._kmPerAU / r_E_scene;
+        const OMEGA = 2 * Math.PI / (25.38 * 86400);
+        const r_E_km = r_E_scene * SCENE_TO_KM;
+
+        // Earth's heliographic longitude in our inertial scene = π
+        // (sun at +x_world, Earth at origin → Earth-relative-to-sun = −x).
+        const phi_E = Math.PI;
+
+        for (const { line, latRad } of this._parkerLines) {
+            const arr = line.geometry.attributes.position.array;
+            const cosLat = Math.cos(latRad);
+            const sinLat = Math.sin(latRad);
+            // φ_foot chosen so the equatorial streamline passes through Earth.
+            // Off-equator streamlines share the same foot longitude (same
+            // current sheet), so they trail through (φ=π, lat=±15°) at 1 AU
+            // not through Earth — they trace the spiral cone, not the line.
+            const phiFoot = phi_E + (OMEGA * r_E_km * cosLat) / v;
+
+            for (let i = 0; i < N; i++) {
+                const t = i / (N - 1);
+                const r_scene = r_sun_scene + (r_E_scene - r_sun_scene) * t;
+                const r_km    = r_scene * SCENE_TO_KM;
+                const phi     = phiFoot - (OMEGA * r_km * cosLat) / v;
+                arr[i*3]   = r_scene * cosLat * Math.cos(phi);
+                arr[i*3+1] = r_scene * sinLat;
+                arr[i*3+2] = r_scene * cosLat * Math.sin(phi);
+            }
+            line.geometry.attributes.position.needsUpdate = true;
+            line.geometry.computeBoundingSphere();
+            line.computeLineDistances();   // required for LineDashedMaterial
+        }
+
+        // Move the photospheric foot marker for the equatorial line
+        if (this._parkerFoot) {
+            const cosLat = 1, sinLat = 0;
+            const phiFoot = phi_E + (OMEGA * r_E_km) / v;
+            // Sample the streamline at r = r_sun_scene to place the foot
+            const r_km = r_sun_scene * SCENE_TO_KM;
+            const phi  = phiFoot - (OMEGA * r_km) / v;
+            this._parkerFoot.position.set(
+                r_sun_scene * cosLat * Math.cos(phi),
+                r_sun_scene * sinLat,
+                r_sun_scene * cosLat * Math.sin(phi),
+            );
+        }
+        this._parkerSpeedSnapshot = v;
+    }
+
+    // ── Flux ropes (Gold-Hoyle helical strands above complex ARs) ───────────
+    /**
+     * Build a parent group that will hold one flux-rope arch per complex AR.
+     * Geometry is rebuilt by `_rebuildFluxRopes(regions)` whenever the AR
+     * list changes (called from `update()`).
+     *
+     * Physics: Gold-Hoyle uniform-twist solution (∇×B = αB with α(r)).
+     *   B_z = B₀ / (1 + b² r²)
+     *   B_φ = B₀ b r / (1 + b² r²)
+     * The total twist along a loop of length L is Φ = b L (radians).  Hood-
+     * Priest stability gives Φ_crit ≈ 2.5 π for line-tied loops; we map
+     * mag class to twist:  β → π,  βγ → 3π,  βγδ → 5π (kink-prone).
+     *
+     * Visualisation: N strands wound around a half-circle axis arch sitting
+     * on the AR's local tangent plane.  Strand colour reflects the rope
+     * "energy state" — golden when twist < kink threshold, red when above.
+     */
+    _buildFluxRopes() {
+        const grp = new THREE.Group();
+        grp.name = 'flux_ropes';
+        grp.position.copy(this._sunGroup.position);
+        this._scene.add(grp);
+        this._fluxRopeGroup   = grp;
+        this._fluxRopeKey     = '';
+        // Per-AR records of strand & spine materials so twist accumulation
+        // (live colour update) and internal eruptions (geometry rebuild)
+        // can find their meshes without traversing the scene each frame.
+        this._fluxRopeRecords = new Map();   // arId → { strandMat, spineMat, strandLines, spineLine }
+    }
+
+    /**
+     * @param {Array<{lat_rad,lon_rad,is_complex,mag_class,area_norm,num_spots,region}>} regions
+     * @param {boolean} [forceRebuild=false]  rebuild even if the AR set key hasn't changed
+     */
+    _rebuildFluxRopes(regions, forceRebuild = false) {
+        if (!this._fluxRopeGroup) return;
+
+        // Cheap rebuild key — regenerate only when the contributing set changes
+        const key = regions
+            .filter(r => r.is_complex)
+            .map(r => `${r.region}:${(r.mag_class||'').slice(0,8)}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${(r.area_norm||0).toFixed(2)}`)
+            .join('|');
+        if (!forceRebuild && key === this._fluxRopeKey) return;
+        this._fluxRopeKey = key;
+
+        // Dispose previous geometry
+        const grp = this._fluxRopeGroup;
+        for (let i = grp.children.length - 1; i >= 0; i--) {
+            const c = grp.children[i];
+            c.geometry?.dispose();
+            c.material?.dispose();
+            grp.remove(c);
+        }
+        this._fluxRopeRecords.clear();
+
+        const SUN_R = 8.0;
+        const TWIST_KINK = this._kinkThreshold;
+
+        for (const r of regions) {
+            if (!r.is_complex) continue;
+            const arId = r.region;
+            if (arId == null) continue;
+
+            // Local tangent frame at the AR position on the sun
+            const lat = r.lat_rad, lon = r.lon_rad;
+            const cosL = Math.cos(lat), sinL = Math.sin(lat);
+            const p = new THREE.Vector3(cosL * Math.cos(lon), sinL, cosL * Math.sin(lon));
+            const east  = new THREE.Vector3(-Math.sin(lon), 0, Math.cos(lon));
+            const north = new THREE.Vector3(-sinL * Math.cos(lon), cosL, -sinL * Math.sin(lon));
+
+            const aNorm = Math.max(0.15, Math.min(1.0, r.area_norm ?? 0.25));
+            const arch_r = SUN_R * (0.18 + 0.40 * aNorm);
+
+            // Live twist from the accumulator (falls back to mag-class baseline
+            // for ARs we just received this update tick).
+            const slot = this._arTwist?.get(arId);
+            const twist = slot ? slot.phi : this._baselineTwist(r.mag_class);
+            const erupting = twist >= TWIST_KINK;
+
+            const nStrands = 6;
+            const ropeRho  = arch_r * 0.10;
+
+            const strandMat = new THREE.LineBasicMaterial({
+                color: erupting ? 0xff4830 : 0xffc060,
+                transparent: true,
+                opacity:  erupting ? 0.85 : 0.55,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+            const spineMat = new THREE.LineDashedMaterial({
+                color: erupting ? 0xff8060 : 0xfff0a0,
+                dashSize: 0.25, gapSize: 0.18,
+                transparent: true, opacity: 0.30,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+            });
+
+            const SAMPLES = 80;
+            const strandLines = [];
+            for (let k = 0; k < nStrands; k++) {
+                const phase0 = (k / nStrands) * Math.PI * 2;
+                const pts = new Array(SAMPLES);
+                for (let i = 0; i < SAMPLES; i++) {
+                    const s = (i / (SAMPLES - 1)) * Math.PI;
+                    const ax = p.clone().multiplyScalar(SUN_R)
+                                .addScaledVector(east, -arch_r * Math.cos(s))
+                                .addScaledVector(p,     arch_r * Math.sin(s));
+                    const nx = east.x * Math.cos(s) + p.x * Math.sin(s);
+                    const ny = east.y * Math.cos(s) + p.y * Math.sin(s);
+                    const nz = east.z * Math.cos(s) + p.z * Math.sin(s);
+                    const wind = phase0 + twist * (s / Math.PI);
+                    const cw = Math.cos(wind), sw = Math.sin(wind);
+                    pts[i] = new THREE.Vector3(
+                        ax.x + ropeRho * (cw * nx + sw * north.x),
+                        ax.y + ropeRho * (cw * ny + sw * north.y),
+                        ax.z + ropeRho * (cw * nz + sw * north.z),
+                    );
+                }
+                const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+                const line = new THREE.Line(geo, strandMat);   // shared material
+                grp.add(line);
+                strandLines.push(line);
+            }
+
+            // Faint dashed axis spine
+            const spinePts = new Array(SAMPLES);
+            for (let i = 0; i < SAMPLES; i++) {
+                const s = (i / (SAMPLES - 1)) * Math.PI;
+                spinePts[i] = p.clone().multiplyScalar(SUN_R)
+                               .addScaledVector(east, -arch_r * Math.cos(s))
+                               .addScaledVector(p,     arch_r * Math.sin(s));
+            }
+            const spineGeo = new THREE.BufferGeometry().setFromPoints(spinePts);
+            const spineLine = new THREE.Line(spineGeo, spineMat);
+            spineLine.computeLineDistances();
+            grp.add(spineLine);
+
+            this._fluxRopeRecords.set(arId, {
+                strandMat, spineMat, strandLines, spineLine,
+                arch_r, lat_rad: lat, lon_rad: lon, p,
+            });
+        }
+    }
+
+    /**
+     * Baseline twist for a freshly-emerged AR with the given Hale class.
+     *
+     * All baselines sit *below* the Hood-Priest kink threshold (2.5π) so a
+     * just-arrived AR doesn't erupt the moment it's tracked.  The complexity
+     * gradient (β-γ-δ closer to threshold) means complex regions need very
+     * little additional accumulation to fire, while simple β regions almost
+     * never reach kink within a 14-day disk passage — matching observed
+     * flare statistics.
+     */
+    _baselineTwist(mag_class) {
+        const cls = String(mag_class || '').toLowerCase();
+        if (cls.includes('delta')) return 1.8 * Math.PI;
+        if (cls.includes('gamma')) return 1.0 * Math.PI;
+        if (cls.includes('beta'))  return 0.5 * Math.PI;
+        return 0.2 * Math.PI;
+    }
+
+    /** Complexity multiplier on dΦ/dt, by Hale class. */
+    _twistDriveFactor(mag_class) {
+        const cls = String(mag_class || '').toLowerCase();
+        if (cls.includes('delta')) return 2.0;
+        if (cls.includes('gamma')) return 1.0;
+        if (cls.includes('beta'))  return 0.30;
+        return 0.05;
+    }
+
+    /**
+     * Reconcile `_arTwist` Map with the latest NOAA region list.
+     * Existing AR entries keep their accumulated phi; new ARs are seeded at
+     * the baseline twist for their Hale class; vanished ARs are deleted.
+     */
+    _syncArTwist(regions) {
+        const present = new Set();
+        for (const r of regions) {
+            if (r.region == null) continue;
+            present.add(r.region);
+            const slot = this._arTwist.get(r.region);
+            if (!slot) {
+                this._arTwist.set(r.region, {
+                    phi:        this._baselineTwist(r.mag_class),
+                    cls:        String(r.mag_class || '').toLowerCase(),
+                    areaNorm:   r.area_norm ?? 0.25,
+                    lat_rad:    r.lat_rad,
+                    lon_rad:    r.lon_rad,
+                    isComplex:  !!r.is_complex,
+                    eruptedAt:  -Infinity,
+                });
+            } else {
+                // Region evolved on disk — refresh metadata, keep phi.
+                slot.cls       = String(r.mag_class || '').toLowerCase();
+                slot.areaNorm  = r.area_norm ?? slot.areaNorm;
+                slot.lat_rad   = r.lat_rad;
+                slot.lon_rad   = r.lon_rad;
+                slot.isComplex = !!r.is_complex;
+            }
+        }
+        for (const id of [...this._arTwist.keys()]) {
+            if (!present.has(id)) this._arTwist.delete(id);
+        }
+    }
+
+    /**
+     * Per-frame step of the AR twist accumulator.  dt is viewing-seconds;
+     * we convert to real-days using `_timeCompression` so dΦ/dt is in
+     * physical rad/day rather than a magic per-frame number.
+     *
+     * Returns the list of AR ids that crossed the kink threshold this frame
+     * (so the caller can trigger eruptions in deterministic order).
+     */
+    _stepArTwist(dt, t) {
+        if (!this._arTwist || this._arTwist.size === 0) return [];
+        // dt_real_days = dt_view_s · _timeCompression / 86400
+        const dDays = dt * this._timeCompression / 86400;
+        const fired = [];
+        for (const [id, slot] of this._arTwist) {
+            // Cooldown after a recent eruption — the rope re-forms over a
+            // refractory time before twist can rebuild past the threshold.
+            if (t - slot.eruptedAt < this._eruptionCooldownS) continue;
+            const drive = this._twistKappa * this._twistDriveFactor(slot.cls)
+                        * Math.max(0.05, slot.areaNorm);
+            slot.phi += drive * dDays;
+            if (slot.phi >= this._kinkThreshold) fired.push(id);
+        }
+        return fired;
+    }
+
+    /**
+     * Refresh flux-rope strand colour & opacity from current Φ for each AR
+     * (cheap — just material tints, no geometry rebuild).  Tints linearly
+     * interpolate from golden (Φ ≪ Φ_crit) to red (Φ ≥ Φ_crit).
+     */
+    _updateFluxRopeColors() {
+        if (!this._fluxRopeRecords || this._fluxRopeRecords.size === 0) return;
+        for (const [arId, rec] of this._fluxRopeRecords) {
+            const slot = this._arTwist.get(arId);
+            if (!slot) continue;
+            const k = Math.min(1, slot.phi / this._kinkThreshold);
+            // Golden → red interpolation
+            const r = 1.00;
+            const g = 0.75 * (1 - k) + 0.28 * k;
+            const b = 0.38 * (1 - k) + 0.19 * k;
+            rec.strandMat.color.setRGB(r, g, b);
+            // Pulse opacity slightly faster as we approach kink — visual urgency
+            const baseOp = 0.55 + 0.30 * k;
+            const pulse  = 1 + (k > 0.85 ? 0.20 * Math.sin(this._lastT * 6) : 0);
+            rec.strandMat.opacity = Math.min(0.95, baseOp * pulse);
+
+            const sg = 0.94 * (1 - k) + 0.50 * k;
+            const sb = 0.63 * (1 - k) + 0.38 * k;
+            rec.spineMat.color.setRGB(1.0, sg, sb);
+            rec.spineMat.opacity = 0.25 + 0.15 * k;
+        }
+    }
+
+    /**
+     * Trigger an internal "kink eruption" for one AR.  This:
+     *   1. Estimates a CME initial speed from the AR's free-energy proxy
+     *      (B² · V ∝ A_norm^{3/2} · complexity_factor).  Capped to the
+     *      observed Yashiro 200–2500 km/s envelope.
+     *   2. Injects a synthetic CmeEvent into the existing CmePropagator,
+     *      which auto-spawns a 3-D shell in the scene.
+     *   3. Flashes the photosphere via SunSkin.triggerFlare.
+     *   4. Resets the AR's twist to a residual π (post-eruption relaxation).
+     *
+     * @param {number} arId  NOAA region number
+     * @param {number} t     current viewing-time second
+     */
+    _triggerInternalEruption(arId, t) {
+        const slot = this._arTwist.get(arId);
+        if (!slot) return;
+        // Eruption energy proxy: complexity × area^1.5
+        const cFactor = this._twistDriveFactor(slot.cls);
+        const energyProxy = cFactor * Math.pow(slot.areaNorm + 0.05, 1.5);
+        // Map proxy → CME speed (Yashiro-ish: free energy → kinetic budget)
+        const v0 = Math.max(350, Math.min(2400, 400 + 1500 * energyProxy));
+        const halfAngle = 25 + 18 * Math.min(1, slot.areaNorm);
+
+        // Earth-directed test: the AR must be on the Earth-facing hemisphere
+        // (heliographic longitude near π in our scene's inertial frame).
+        const lat = slot.lat_rad, lon = slot.lon_rad;
+        const earthFacing =
+            Math.cos(lat) * Math.cos(lon - Math.PI) > 0.30;
+
+        // Inject into the propagator — it'll build a shell on the next sync
+        const flareLetter = energyProxy > 0.8 ? 'X' : energyProxy > 0.3 ? 'M' : 'C';
+        const flareNum    = (Math.min(9.9, 1 + 9 * Math.min(1, energyProxy))).toFixed(1);
+        const cmeData = {
+            time:          new Date().toISOString(),
+            speed:         Math.round(v0),
+            latitude:      lat * 180 / Math.PI,
+            longitude:     lon * 180 / Math.PI,
+            halfAngle:     Math.round(halfAngle),
+            type:          'internal',
+            earthDirected: earthFacing,
+            note:          `Internal kink eruption AR${arId} (Φ=${(slot.phi/Math.PI).toFixed(2)}π, ${slot.cls})`,
+        };
+        try { this._cmePropagator?.inject(cmeData); }
+        catch (e) { console.warn('[SpaceWeatherGlobe] internal eruption inject failed', e); }
+
+        // Photosphere flash co-located with the AR
+        try {
+            this._sunSkin?.triggerFlare(`${flareLetter}${flareNum}`, {
+                lat_rad: lat, lon_rad: lon,
+            });
+        } catch (e) { /* shader may not be ready on first frame */ }
+
+        // Reset twist to residual π and stamp eruption time
+        slot.phi       = Math.PI;
+        slot.eruptedAt = t;
+
+        // Log for diagnostics / hover panels
+        this._arEruptionLog.unshift({
+            arId, t, v0, flareLetter, flareNum, earthFacing,
+            phi: slot.phi, note: cmeData.note,
+        });
+        if (this._arEruptionLog.length > 16) this._arEruptionLog.length = 16;
+
+        // Force flux-rope geometry rebuild on this AR so strands "unwind"
+        // — easiest path is to flag the next swpc-update to rebuild via key
+        // mismatch.  Cheap immediate version: clear key, the next update()
+        // cycle will rebuild even if regions are unchanged.
+        this._fluxRopeKey = '__post_eruption_' + arId + '_' + t.toFixed(2);
+    }
+
+    /** Read-only snapshot of current AR twist state — exposed for HUD/hover. */
+    get arTwistState() {
+        return Array.from(this._arTwist.entries()).map(([id, s]) => ({
+            arId: id,
+            phi:  s.phi,
+            phiPi: s.phi / Math.PI,
+            kinkRatio: s.phi / this._kinkThreshold,
+            cls:  s.cls,
+            areaNorm: s.areaNorm,
+        }));
+    }
+
+    /** Read-only snapshot of recent internal eruptions. */
+    get internalEruptions() { return this._arEruptionLog.slice(); }
 
     _buildCamera() {
         this._camera = new THREE.PerspectiveCamera(50, 2, 0.1, 600);
@@ -673,6 +1209,13 @@ export class SpaceWeatherGlobe {
         // Rebuild aurora tori when Kp shifts meaningfully
         if (Math.abs(kp - this._auroraKp) > 0.4) this._buildAurora(kp);
 
+        // Recompute Parker streamline geometry when v_sw shifts ≥ 25 km/s.
+        // (Spiral angle ψ = atan(Ω r / v) is sensitive to v in the typical
+        // 300-800 km/s range; 25 km/s is roughly a 5-pixel change at 1 AU.)
+        if (Math.abs((this._parkerSpeedSnapshot ?? 0) - this._windSpeedKms) > 25) {
+            this._updateParkerStreamlines(this._windSpeedKms);
+        }
+
         // Earth shader uniforms (shared earth-skin.js format)
         this._earthU.u_kp.value       = kp;
         this._earthU.u_bz_south.value = Math.max(0, Math.min(1, -bz / 30));
@@ -685,6 +1228,13 @@ export class SpaceWeatherGlobe {
 
         // Magnetosphere geometry update
         this._magEngine.update(state);
+
+        // Van Allen tracer brightness scales with Kp (storm-time energisation)
+        // and pitch-angle diffusion is driven by southward-Bz × Kp coupling
+        // — the population visibly drains during severe storms as particles
+        // scatter into the loss cone.
+        this._beltParticles?.setKp(kp);
+        this._beltParticles?.setStorm({ bz, kp });
 
         // Sun — push live SWPC data
         const xInt = state.derived?.xray_intensity ?? 0;
@@ -704,6 +1254,10 @@ export class SpaceWeatherGlobe {
         const key = regions.map(r => `${r.region}:${r.lat_rad.toFixed(2)}:${r.lon_rad.toFixed(2)}:${r.is_complex?1:0}:${(r.area_norm??0).toFixed(2)}`).join('|');
         if (key !== this._lastRegionsKey) {
             this._lastRegionsKey = key;
+            // Sync per-AR twist accumulator with the new region set.  Existing
+            // entries keep their accumulated Φ; fresh ARs initialise from the
+            // baseline tied to their Hale class; missing ARs are dropped.
+            this._syncArTwist(regions);
             // Convert area + spot count → 0..1 emission intensity.
             //   Area is already normalised to ~0..1 via swpc-feed (μH / 400).
             //   Sunspot multiplicity adds a small bump (saturating).
@@ -737,6 +1291,9 @@ export class SpaceWeatherGlobe {
                     arIndex:   i,
                 };
             });
+
+            // Rebuild flux-rope arches for the complex ARs in this set
+            this._rebuildFluxRopes(regions);
         }
 
         // Flare trigger from state — anchor on the matching active region
@@ -766,8 +1323,20 @@ export class SpaceWeatherGlobe {
             if (this._solarMagGroup) this._solarMagGroup.visible = visible;
             return;
         }
+        if (name === 'parker') {
+            if (this._parkerGroup) this._parkerGroup.visible = visible;
+            return;
+        }
+        if (name === 'fluxRopes') {
+            if (this._fluxRopeGroup) this._fluxRopeGroup.visible = visible;
+            return;
+        }
         if (name === 'wind') {
             if (this._windPts) this._windPts.visible = visible;
+            return;
+        }
+        if (name === 'beltParticles') {
+            this._beltParticles?.setVisible(visible);
             return;
         }
         this._magEngine.setLayerVisible(name, visible);
@@ -781,6 +1350,9 @@ export class SpaceWeatherGlobe {
      */
     setTimeCompression(factor) {
         this._timeCompression = Math.max(1, Math.min(50000, factor));
+        // Re-cap the belt-particle drift rates so a high compression factor
+        // doesn't streak protons into a solid ring.
+        this._beltParticles?.setTimeCompression(this._timeCompression);
     }
 
     /** Estimated Sun→Earth transit time at the current wind speed (seconds). */
@@ -821,6 +1393,7 @@ export class SpaceWeatherGlobe {
         if (this._rafId) cancelAnimationFrame(this._rafId);
         this._ro?.disconnect();
         this._magEngine.dispose();
+        this._beltParticles?.dispose();
         this._renderer.dispose();
     }
 
@@ -848,7 +1421,8 @@ export class SpaceWeatherGlobe {
         const shellMat = new THREE.MeshBasicMaterial({
             color: shellColor,
             transparent: true,
-            opacity: 0.35,
+            opacity: 0.22,                    // slightly translucent so the
+                                              // flux-rope core is visible
             side: THREE.DoubleSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
@@ -878,14 +1452,24 @@ export class SpaceWeatherGlobe {
             group.add(sheath);
         }
 
-        // Core bright point
-        const coreGeo = new THREE.SphereGeometry(0.15, 8, 8);
-        const coreMat = new THREE.MeshBasicMaterial({
-            color: 0xffffff, transparent: true, opacity: 0.6,
-            blending: THREE.AdditiveBlending, depthWrite: false,
-        });
-        const core = new THREE.Mesh(coreGeo, coreMat);
-        core.renderOrder = 17;
+        // ── Lundquist flux-rope core ─────────────────────────────────────────
+        // Replace the bright sphere with a half-toroidal flux rope sampled
+        // from the constant-α Lundquist solution (∇×B = αB):
+        //
+        //     B_z(r) = B₀ J₀(α r)
+        //     B_φ(r) = B₀ J₁(α r)
+        //
+        // Field-line pitch dψ/d(arc) = J₁(α r)/[r · J₀(α r)] gives differential
+        // twist: inner field lines are nearly axial (J₀ ≈ 1 at small r), outer
+        // lines wrap tightly as J₀ → 0 near α r = 2.405 (the rope edge).
+        //
+        // Geometry: half-torus with major-circle plane = local (X,Y).  The
+        // group rotation.z = π/2 maps the apex (t = π/2 → local +Y) to world
+        // -X (toward Earth) and the two feet (t = 0, π → local ±X) to world
+        // ±Y (north/south of orbital plane) — i.e. the rope's apex leads the
+        // CME and its legs trail back toward the sun, just like the canonical
+        // three-part CME observation (front + cavity + flux-rope core).
+        const core = this._buildLundquistRope(cmeEvent, shellColor);
         group.add(core);
 
         // Orient: shell opens toward -X (toward Earth)
@@ -893,6 +1477,153 @@ export class SpaceWeatherGlobe {
 
         this._scene.add(group);
         return { group, shell, sheath, core, event: cmeEvent, fadeOut: 0 };
+    }
+
+    /**
+     * Construct the Lundquist half-torus flux rope as a Group of Line objects.
+     * Returned in *local* group coordinates (the parent group applies the
+     * world-space rotation/scaling).
+     *
+     * @param {CmeEvent} cmeEvent
+     * @param {number}   shellColor — used to tint the rope core to match
+     */
+    _buildLundquistRope(cmeEvent, shellColor) {
+        const grp = new THREE.Group();
+        grp.name = 'cme_flux_rope';
+
+        // Major / minor scales in *local* units (shell radius = 1).
+        const R_MAJ   = 0.55;
+        const R_MIN   = 0.20;
+        const ALPHA   = LUNDQUIST_J0_ZERO * 0.93;   // α R_MIN < first zero
+                                                    // (avoid singularity at edge)
+
+        // Sampling: 4 minor radii × 3 phase offsets = 12 helical strands
+        const r_fracs = [0.30, 0.55, 0.78, 0.92];
+        const PHASE_N = 3;
+        const SAMPLES = 96;
+        const ARC_RANGE = Math.PI;                  // half-torus
+
+        // Severity-driven tint: stronger CMEs glow hotter (whiter).  We blend
+        // a base "rope yellow" toward the shell colour for severe events.
+        const sev = cmeEvent.impact?.severity ?? 'MINOR';
+        const heatMix =
+            sev === 'EXTREME'  ? 0.85 :
+            sev === 'SEVERE'   ? 0.70 :
+            sev === 'STRONG'   ? 0.55 :
+            sev === 'MODERATE' ? 0.35 : 0.18;
+
+        const baseInner = new THREE.Color(0xffe8a0);   // hot yellow-white core
+        const baseOuter = new THREE.Color(0xff7a30);   // hot amber rim
+        const tint      = new THREE.Color(shellColor);
+
+        const rope = this;  // for internal access (shouldn't be needed here)
+
+        for (let ri = 0; ri < r_fracs.length; ri++) {
+            const rFrac = r_fracs[ri];
+            const r0    = R_MIN * rFrac;
+            const ar    = ALPHA * rFrac;             // = α · r₀ since α=2.236/R_MIN
+            const j0    = besselJ0(ar);
+            const j1    = besselJ1(ar);
+
+            // dψ/d(arc) = J₁(α r₀) / (r₀ · J₀(α r₀))   [Lundquist field-line pitch]
+            // Cap to a sensible upper bound so a near-edge strand doesn't
+            // blow up visually if the chosen α drifts toward the J₀ zero.
+            const pitchPerArc = Math.min(
+                14.0,
+                Math.abs(j1) / (Math.max(0.04, Math.abs(j0)) * r0),
+            );
+            // Total ψ wound across the half-torus arc length R_MAJ · π
+            // dψ_total = pitchPerArc · R_MAJ · π
+            // We integrate per-sample: ψ(t) = ψ₀ + pitchPerArc · R_MAJ · t
+
+            // Strand colour: hot yellow at axis, fading to amber near edge.
+            const innerness = 1 - rFrac;      // 1 at axis, 0 at edge
+            const col = baseInner.clone().lerp(baseOuter, 1 - innerness)
+                                  .lerp(tint, heatMix * 0.4);
+            const mat = new THREE.LineBasicMaterial({
+                color:       col,
+                transparent: true,
+                opacity:     0.55 + 0.30 * innerness,
+                blending:    THREE.AdditiveBlending,
+                depthWrite:  false,
+            });
+
+            for (let k = 0; k < PHASE_N; k++) {
+                const phase0 = (k / PHASE_N) * Math.PI * 2;
+                const pts    = new Array(SAMPLES);
+                for (let i = 0; i < SAMPLES; i++) {
+                    const t   = (i / (SAMPLES - 1)) * ARC_RANGE;        // 0..π
+                    const psi = phase0 + pitchPerArc * R_MAJ * t;
+                    const c_t = Math.cos(t),  s_t = Math.sin(t);
+                    const c_p = Math.cos(psi), s_p = Math.sin(psi);
+                    const rad = R_MAJ + r0 * c_p;
+                    // Local frame: major circle in (X,Y), out-of-plane = Z.
+                    pts[i] = new THREE.Vector3(rad * c_t, rad * s_t, r0 * s_p);
+                }
+                const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+                const line = new THREE.Line(geo, mat);
+                line.renderOrder = 17;
+                grp.add(line);
+            }
+        }
+
+        // Faint axis spine (the major-circle curve itself) — guides the eye
+        // through the rope's centre even at high winding density.
+        const spinePts = new Array(SAMPLES);
+        for (let i = 0; i < SAMPLES; i++) {
+            const t = (i / (SAMPLES - 1)) * ARC_RANGE;
+            spinePts[i] = new THREE.Vector3(
+                R_MAJ * Math.cos(t),
+                R_MAJ * Math.sin(t),
+                0,
+            );
+        }
+        const spineGeo = new THREE.BufferGeometry().setFromPoints(spinePts);
+        const spineMat = new THREE.LineDashedMaterial({
+            color:       0xfff0c0,
+            dashSize:    0.07, gapSize: 0.05,
+            transparent: true, opacity: 0.35,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        const spine = new THREE.Line(spineGeo, spineMat);
+        spine.computeLineDistances();
+        spine.renderOrder = 17;
+        grp.add(spine);
+
+        // A small bright "fuzz ball" at each foot — represents the still-
+        // anchored footpoint plasma at the loop's base.  The two feet sit at
+        // the major-circle endpoints (t = 0, t = π).
+        const footMat = new THREE.SpriteMaterial({
+            map:         this._impactSpriteTex ?? null,
+            color:       0xffd070,
+            transparent: true, opacity: 0.55,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        // Lazy-build sprite texture if missing
+        if (!footMat.map) {
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const g = c.getContext('2d');
+            const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0,   'rgba(255,255,255,0.95)');
+            grad.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+            grad.addColorStop(1,   'rgba(255,255,255,0)');
+            g.fillStyle = grad;
+            g.fillRect(0, 0, 64, 64);
+            this._impactSpriteTex = new THREE.CanvasTexture(c);
+            footMat.map = this._impactSpriteTex;
+        }
+        for (const tFoot of [0, Math.PI]) {
+            const sp = new THREE.Sprite(footMat);
+            sp.position.set(R_MAJ * Math.cos(tFoot), R_MAJ * Math.sin(tFoot), 0);
+            sp.scale.setScalar(0.18);
+            sp.renderOrder = 18;
+            grp.add(sp);
+        }
+
+        return grp;
     }
 
     /** Sync active CME events: add new shells, retire old ones. */
@@ -916,9 +1647,28 @@ export class SpaceWeatherGlobe {
     }
 
     /** Per-frame CME shell update: position, scale, fade. */
+    /**
+     * Per-frame CME shell update — drives every active shell from the
+     * deterministic DBM trajectory at the page's compressed viewing rate.
+     *
+     * For each shell we record `viewBornAt`: the viewing-time-second at which
+     * the shell first appeared in the scene.  The viewing-elapsed time
+     * (`t − viewBornAt`) is multiplied by `_timeCompression` to produce a
+     * synthetic *real-elapsed-since-departure* that we feed into
+     * `event.stateAtElapsed(...)`.  This means:
+     *
+     *  - The shell's r(t), v(t) are the analytical Vršnak (2013) DBM solution
+     *    —  same physics, same drag γ, same ambient v_sw — just replayed at
+     *    `_timeCompression`× wall-clock so the user can watch it travel.
+     *  - The trajectory is identical from any starting time (fully
+     *    reproducible from event id + γ + v₀ + v_sw).
+     *  - Shell scale, opacity, and sheath pulse all key off the same DBM
+     *    state, so visuals stay in lock-step with the displayed transit time.
+     */
     _updateCmeShells(t) {
-        const nowMs = Date.now();
-        const sunX  = 55;  // Sun position X
+        const sunX  = this._sunSceneX;
+
+        if (!this._cmeViewBornAt) this._cmeViewBornAt = new Map();
 
         for (const [id, s] of this._cmeShells) {
             // Handle fade-out and removal
@@ -928,37 +1678,67 @@ export class SpaceWeatherGlobe {
                     s.group.traverse(o => { o.geometry?.dispose(); o.material?.dispose(); });
                     this._scene.remove(s.group);
                     this._cmeShells.delete(id);
+                    this._cmeViewBornAt.delete(id);
                     continue;
                 }
                 s.shell.material.opacity = 0.35 * s.fadeOut;
                 continue;
             }
 
-            const state = s.event.stateAt(nowMs);
-            const progress = state.progress;  // 0=Sun, 1=Earth
+            // Latch the viewing-time the shell entered the scene
+            if (!this._cmeViewBornAt.has(id)) this._cmeViewBornAt.set(id, t);
+            const viewBornAt   = this._cmeViewBornAt.get(id);
+            const view_dt_s    = Math.max(0, t - viewBornAt);
+            const realElapsed  = view_dt_s * this._timeCompression;
 
-            // Position: Sun at x=55, Earth at x=0. CME travels along -X.
-            const x = sunX * (1 - progress);
-            s.group.position.set(x, 0, 0);
+            // DBM position + velocity at this synthetic real elapsed time
+            const state = s.event.stateAtElapsed(realElapsed);
+            const progress = state.progress;          // 0 = at 21.5 Rs, 1 = at 1 AU
+            const v_kms    = state.v_kms;             // current DBM velocity
 
-            // Scale: CME expands as it travels (half-angle → scene units)
-            const baseScale = 1.5 + progress * 4;
+            // Map progress to scene x — Sun at sunX, Earth at 0
+            s.group.position.set(sunX * (1 - progress), 0, 0);
+
+            // Scale: CME expands self-similarly with r (half-angle preserved
+            // → linear in r).  Cap so a slow CME doesn't dwarf the scene.
+            const baseScale = 1.5 + Math.min(progress, 1.0) * 4.0;
             s.group.scale.setScalar(baseScale);
 
-            // Shell opacity: brighter when fresh, fades near arrival
-            const arrivalFade = progress > 0.9 ? (1 - progress) * 10 : 1;
+            // Shell opacity decays once it's at Earth, then enters fade-out
+            const arrivalFade = progress >= 1.0 ? 0
+                              : progress > 0.9 ? (1 - progress) * 10
+                              : 1;
             s.shell.material.opacity = 0.35 * arrivalFade;
 
-            // Sheath pulsation
+            // Sheath pulsation rate scaled by current DBM velocity (faster
+            // CME → faster shock pulse).  Reference: 1000 km/s at 3 Hz visual.
             if (s.sheath) {
-                const pulse = 0.5 + 0.5 * Math.sin(t * 3 + progress * 6);
+                const rate  = 3.0 * v_kms / 1000;
+                const pulse = 0.5 + 0.5 * Math.sin(t * rate + progress * 6);
                 s.sheath.material.opacity = (0.10 + pulse * 0.08) * arrivalFade;
             }
 
-            // Core brightness pulsation
+            // Flux-rope core brightness pulsation — sweep opacity across the
+            // bundled strand materials.  Strands within the same minor-radius
+            // shell share a Material instance, so we cache the baseline on
+            // material.userData (not on the Line) to avoid the shared-write
+            // feedback that would otherwise drive opacity to zero each frame.
             if (s.core) {
-                s.core.material.opacity = (0.4 + 0.3 * Math.sin(t * 4)) * arrivalFade;
+                const pulse = 0.85 + 0.15 * Math.sin(t * 4);
+                const seen = new Set();
+                s.core.traverse(o => {
+                    const m = o.material;
+                    if (!m || !('opacity' in m) || seen.has(m)) return;
+                    seen.add(m);
+                    if (m.userData._opacityBase === undefined) {
+                        m.userData._opacityBase = m.opacity;
+                    }
+                    m.opacity = m.userData._opacityBase * pulse * arrivalFade;
+                });
             }
+
+            // Auto-fade once the synthetic playback has overshot 1 AU
+            if (progress >= 1.0 && s.fadeOut === 0) s.fadeOut = 1;
         }
     }
 
@@ -994,6 +1774,18 @@ export class SpaceWeatherGlobe {
         // Spawn budget per frame (limit churn)
         let spawnsLeft = Math.ceil(N * 0.02 * Math.max(dt, 1/60) * 60);
 
+        // Pre-compute scaling: scene-distance (1 unit = 1 R_⊕) → real km
+        // We treat the 55-unit Sun-Earth scene span as 1 AU for the purposes
+        // of computing the Parker spiral angle ψ(r) = atan(Ω r cos λ / v_sw).
+        // Without this scaling our scene would yield ψ ≈ 0 everywhere because
+        // 55 R_⊕ × Ω_⊙ ≈ 1 km/s, far below any wind speed.
+        const SCENE_TO_KM = this._kmPerAU / this._sceneSunEarth;     // ≈ 2.72e6 km / scene-unit
+        const OMEGA_SUN   = 2 * Math.PI / (25.38 * 86400);            // rad/s
+        // Convert "viewing-time" advected position into real time: a packet
+        // moving sceneSpd units / viewing-second corresponds to real km/s
+        // already (sceneSpd × SCENE_TO_KM ÷ _timeCompression = vel[i] km/s),
+        // so for the spiral we just need ψ(r_real, v_real_kms).
+
         for (let i = 0; i < N; i++) {
             // Ageing
             age[i] += dt;
@@ -1001,39 +1793,61 @@ export class SpaceWeatherGlobe {
             // Per-particle scene velocity (units/s) from km/s
             const sceneSpd = this._windSceneSpeed(vel[i]);
 
-            // Direction depends on source.  Ambient particles flow purely -X
-            // (radial outward from sun toward Earth, with a small spread).
-            // AR particles aim at Earth from their AR footpoint; we cache a
-            // unit vector along origin→Earth, with a tiny Parker-spiral curl.
             const x = pos[i*3], y = pos[i*3+1], z = pos[i*3+2];
-            let dx, dy, dz;
+
+            // ── Heliocentric radial vector (sun → particle) ─────────────────
+            const rxs = x - sunX;
+            const rys = y;
+            const rzs = z;
+            const r_scene = Math.hypot(rxs, rys, rzs);
+            if (r_scene < 0.05) {
+                // Skip ill-defined direction at the source itself
+                continue;
+            }
+            // Unit radial direction (outward from sun)
+            const r_inv = 1 / r_scene;
+            const rxh = rxs * r_inv;
+            const ryh = rys * r_inv;
+            const rzh = rzs * r_inv;
+
+            // ── Parker spiral angle ψ at this point ─────────────────────────
+            // Real heliocentric distance, scaled from scene: r_km = r_scene · SCENE_TO_KM
+            // Heliographic latitude estimated from y-component of the radial.
+            const r_km   = r_scene * SCENE_TO_KM;
+            const lat    = Math.asin(Math.max(-1, Math.min(1, ryh)));
+            // Parker (1958): tan ψ = Ω (r − r₀) cos λ / v_sw
+            // Use real wind speed (km/s); below the Alfvén / source surface
+            // (~21.5 R_⊙) the spiral collapses to radial — clamp r₀.
+            const r_km_eff = Math.max(0, r_km - 1.5e7);   // 21.5 R_⊙ ≈ 1.495e7 km
+            const psi = Math.atan2(OMEGA_SUN * r_km_eff * Math.cos(lat), Math.max(50, vel[i]));
+
+            // ── Local IMF / streamline tangent ──────────────────────────────
+            // Rotate the radial unit vector about +y by −ψ (sun rotates +y;
+            // streamlines lag rotation by ψ).  Y-component is preserved.
+            const cs = Math.cos(-psi), sn = Math.sin(-psi);
+            let tx = rxh * cs - rzh * sn;
+            let ty = ryh;
+            let tz = rxh * sn + rzh * cs;
+
+            // Re-normalise (rotation should preserve length; small FP drift)
+            const tLen = Math.hypot(tx, ty, tz) || 1;
+            tx /= tLen; ty /= tLen; tz /= tLen;
+
+            // Source-specific tweaks (no longer "aim at Earth" — particles
+            // follow the spiral, so AR-Earth connection is determined by
+            // longitudes and ψ, just like in the real heliosphere).
+            let speedFactor = 1.0;
             if (src[i] >= 0 && src[i] < arN) {
                 const stream = this._arStreams[src[i]];
-                // Aim from current position toward Earth (re-aim each frame
-                // so the trail bends as the particle approaches).
-                dx = earthX - x;
-                dy = 0       - y;
-                dz = 0       - z;
-                const len = Math.hypot(dx, dy, dz) || 1;
-                dx /= len; dy /= len; dz /= len;
-                // Parker-spiral curl in the orbital plane (rotate around y by
-                // a small angle that grows with distance from sun)
-                const r  = Math.hypot(sunX - x, z);
-                const curl = -0.12 * Math.min(1, r / 30);
-                const cs = Math.cos(curl), sn = Math.sin(curl);
-                const dx2 = dx * cs - dz * sn;
-                const dz2 = dx * sn + dz * cs;
-                dx = dx2; dz = dz2;
-                // Complex / energetic ARs travel ~25% faster (visual cue)
-                const boost = stream.complex ? 1.25 : 1.0;
-                pos[i*3]   = x + dx * sceneSpd * boost * dt;
-                pos[i*3+1] = y + dy * sceneSpd * boost * dt;
-                pos[i*3+2] = z + dz * sceneSpd * boost * dt;
-            } else {
-                // Ambient stream: mostly -X with mild lateral drift
-                pos[i*3]   = x - sceneSpd * dt;
-                pos[i*3+1] = y + Math.sin(this._lastT * 0.4 + i) * 0.02 * dt;
+                // Complex ARs eject ~25% faster CME-like ejecta (kinematic only —
+                // proper DBM is run on the dedicated CME shells, not on these
+                // tracer packets, which represent the ambient + slow streams).
+                if (stream.complex) speedFactor = 1.25;
             }
+
+            pos[i*3]   = x + tx * sceneSpd * speedFactor * dt;
+            pos[i*3+1] = y + ty * sceneSpd * speedFactor * dt;
+            pos[i*3+2] = z + tz * sceneSpd * speedFactor * dt;
 
             // ── Coupling test: did we just enter Earth's bow shock? ─────────
             const ex = pos[i*3] - earthX;
@@ -1050,8 +1864,12 @@ export class SpaceWeatherGlobe {
                 continue;
             }
 
-            // Recycle when far past Earth or way off-axis
-            if (pos[i*3] < earthX - 18 || Math.abs(pos[i*3+1]) > 22 || Math.abs(pos[i*3+2]) > 22) {
+            // Recycle when the packet has wandered beyond ~1.1 AU from the sun
+            // (Parker spirals can sweep far in z without ever crossing Earth)
+            const px = pos[i*3], py = pos[i*3+1], pz = pos[i*3+2];
+            const r2 = (px - sunX)*(px - sunX) + py*py + pz*pz;
+            const rMax = (this._sceneSunEarth * 1.15);
+            if (r2 > rMax * rMax) {
                 this._respawnWind(pos, col, i, vel, src, age, spawnsLeft);
                 spawnsLeft--;
             }
@@ -1188,6 +2006,37 @@ export class SpaceWeatherGlobe {
         // HCS gentle rotation (Carrington ~25 d → highly compressed visually)
         if (this._hcsMesh) this._hcsMesh.rotation.y += dt * 0.02;
 
+        // ── AR twist accumulator + internal eruption injection ──────────────
+        // Integrate dΦ/dt for every tracked AR; any rope crossing the Hood-
+        // Priest kink threshold (2.5π) erupts: synthetic CME injected into
+        // the propagator, photosphere flares at the AR site, twist resets.
+        // Also live-tints flux-rope strands with current Φ/Φ_crit ratio.
+        if (this._arTwist && this._arTwist.size > 0) {
+            const fired = this._stepArTwist(dt, t);
+            for (const arId of fired) {
+                this._triggerInternalEruption(arId, t);
+            }
+            this._updateFluxRopeColors();
+            // Rope geometry rebuild (post-eruption strand "unwinding").  We
+            // detect this via the key marker set in _triggerInternalEruption.
+            if (this._fluxRopeKey.startsWith('__post_eruption_')) {
+                // Build a synthetic regions array from the live twist map so
+                // the rebuild uses the post-eruption Φ values.
+                const synth = [];
+                for (const [id, s] of this._arTwist) {
+                    synth.push({
+                        region: id,
+                        is_complex: s.isComplex,
+                        mag_class:  s.cls,
+                        lat_rad:    s.lat_rad,
+                        lon_rad:    s.lon_rad,
+                        area_norm:  s.areaNorm,
+                    });
+                }
+                this._rebuildFluxRopes(synth, /* forceRebuild */ true);
+            }
+        }
+
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
         if (dt > 0 && dt < 1) this._sunSkin.decayFlare(dt);
@@ -1205,6 +2054,11 @@ export class SpaceWeatherGlobe {
 
         // Magnetosphere geometry tick
         this._magEngine.tick(t, this._sunDir);
+
+        // μ-conserving Van Allen particle drift + bounce.  Drift advances at
+        // compressed real time (electrons east, protons west); bounce at a
+        // viewing-time-decoupled rate so the µs-period swings are visible.
+        this._beltParticles?.update(dt);
 
         // CME shells
         this._updateCmeShells(t);

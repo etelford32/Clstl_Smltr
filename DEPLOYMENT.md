@@ -52,13 +52,15 @@ supabase-admin.sql                        # admin RPCs, is_admin() helper
 supabase-multi-location-migration.sql     # per-plan saved-location caps
 
 # Weather pipeline
-supabase-weather-cache-migration.sql      # weather_grid_cache table
-supabase-weather-pgcron-migration.sql     # original pg_cron Open-Meteo refresh
-supabase-weather-pgcron-fix-migration.sql # SSL/timeout fix for above
-supabase-weather-unschedule-migration.sql # un-schedule pg_cron once Vercel cron took over
+supabase-weather-cache-migration.sql              # weather_grid_cache table
+supabase-weather-pgcron-migration.sql             # original pg_cron Open-Meteo refresh
+supabase-weather-pgcron-fix-migration.sql         # SSL/timeout fix for above
+supabase-weather-unschedule-migration.sql         # un-schedule pg_cron once Vercel cron took over
+supabase-weather-pgcron-secondary-migration.sql   # pg_cron 72×36 secondary writer at *:30
 
 # Pipeline observability + supplementary feeds
 supabase-pipeline-heartbeat-migration.sql # admin "Pipeline Health" backing tables
+supabase-pipeline-alerts-migration.sql    # last_alert_at column + alert RPC
 supabase-solar-wind-migration.sql         # solar-wind ring buffer
 supabase-solar-wind-freshness-fix.sql     # freshness gate fix for above
 supabase-polar-vortex-migration.sql       # polar_vortex_snapshots schema
@@ -130,6 +132,7 @@ Environment Variables, scope = Production):
 > reminders alongside trial → paid conversions.
 | `CRON_SECRET` | `/api/cron/*` Bearer token (recommended over `x-vercel-cron` fallback) | **yes** |
 | `METNO_USER_AGENT` | optional; identifies us to MET Norway | no |
+| `ALERT_OPS_EMAIL` | required for `/api/cron/pipeline-watchdog` to actually send (without it the watchdog logs candidates but skips email) | **yes** |
 
 **3. Promote the first admin** — after you've signed up your own
 account through `/signup`, run this in the Supabase SQL Editor (one
@@ -270,7 +273,7 @@ The two onboarding-blocker migrations at the end (`supabase-daily-digest-migrati
 ### Cron health — admin dashboard
 
 - [ ] `/admin` → Pipeline Health: zero red rows in the last 24h
-- [ ] All 6 crons registered in `vercel.json` are firing on schedule:
+- [ ] All 7 crons registered in `vercel.json` are firing on schedule:
       ```
       0 * * * *      /api/cron/refresh-weather-grid
       */5 * * * *    /api/cron/prewarm-hot
@@ -278,7 +281,12 @@ The two onboarding-blocker migrations at the end (`supabase-daily-digest-migrati
       0 */6 * * *    /api/cron/prewarm-cold
       0 11 * * *     /api/cron/daily-forecast-digest
       */30 * * * *   /api/cron/refresh-saved-locations
+      15,45 * * * *  /api/cron/pipeline-watchdog
       ```
+- [ ] `pipeline-watchdog` reports `candidates: 0` while pipelines are healthy.
+      Force-trigger by leaving `consecutive_fail` artificially high in
+      `pipeline_heartbeat` and verifying an email lands at `ALERT_OPS_EMAIL`,
+      then confirm `last_alert_at` was stamped (so subsequent ticks skip).
 - [ ] `/api/cron/daily-forecast-digest` real run (not dry-run) reports
       `sent > 0` once at least one user has `daily_digest_enabled = true`
 

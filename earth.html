@@ -3858,13 +3858,21 @@ function _createObsOverlay(layerId) {
     return _obsOverlays[layerId];
 }
 
-// Layer toggle handlers — visibility only, feed keeps running.
+// Layer toggle handlers — drive both mesh visibility AND the feed's
+// per-layer poll. Layers with `defaultOn:false` (AOD, cloud-thickness,
+// AMSR2 precip) aren't autoloaded by EarthObsFeed.start(); without the
+// setEnabled() call the user could flip the checkbox on, the mesh would
+// become "visible", but the fragment shader's `if (u_has_tex < 0.5)
+// discard;` branch keeps every fragment culled — so the toggle looked
+// dead. setEnabled(true) on the first ON also kicks the status pill from
+// "waiting" → "fetching" so the user gets feedback.
 for (const layer of EARTH_OBS_LAYERS) {
     const checkbox = document.getElementById(`lyr-obs-${layer.id}`);
     if (!checkbox) continue;
     checkbox.addEventListener('change', e => {
         const overlay = _obsOverlays[layer.id] ?? _createObsOverlay(layer.id);
         overlay.mesh.visible = e.target.checked;
+        earthObsFeed.setEnabled(layer.id, e.target.checked);
     });
 }
 
@@ -5174,7 +5182,12 @@ for (const [checkboxId, group] of Object.entries(_satGroups)) {
             _loadedGroups.add(group);
             if (statusEl) statusEl.textContent = `Tracking ${satTracker.getSatellites().length} satellites`;
         }
-        // Toggle visibility handled by the tracker internally
+        // The previous handler relied on a comment ("handled internally")
+        // that wasn't true — the tracker has no view of the checkbox, so
+        // toggling OFF left the dots painted at full colour. Drive group
+        // visibility explicitly via the tracker's vertex-colour path so
+        // unchecking actually hides the constellation.
+        satTracker.setGroupVisible(group, e.target.checked);
     });
 }
 

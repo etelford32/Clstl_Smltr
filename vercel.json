@@ -30,8 +30,8 @@
       "schedule": "*/30 * * * *"
     },
     {
-      "path": "/api/cron/onboarding-nudge",
-      "schedule": "30 16 * * *"
+      "path": "/api/cron/pipeline-watchdog",
+      "schedule": "15,45 * * * *"
     }
   ],
   "headers": [
