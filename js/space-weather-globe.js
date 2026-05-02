@@ -1230,7 +1230,11 @@ export class SpaceWeatherGlobe {
         this._magEngine.update(state);
 
         // Van Allen tracer brightness scales with Kp (storm-time energisation)
+        // and pitch-angle diffusion is driven by southward-Bz × Kp coupling
+        // — the population visibly drains during severe storms as particles
+        // scatter into the loss cone.
         this._beltParticles?.setKp(kp);
+        this._beltParticles?.setStorm({ bz, kp });
 
         // Sun — push live SWPC data
         const xInt = state.derived?.xray_intensity ?? 0;
