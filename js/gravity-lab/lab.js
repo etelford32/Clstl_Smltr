@@ -44,6 +44,9 @@ const state = {
     L0_mag:         1,
     framesSinceTrail: 0,
     accumDt:        0,
+    // Camera focus state — null = free orbit; integer = index into bodies[].
+    focusIdx:       null,
+    focusOffset:    new THREE.Vector3(),  // camera position relative to focus target
 };
 
 // Three.js singletons — initialised once in init().
@@ -77,6 +80,10 @@ const hud = {
     resetBtn:  null,
     warpSlider: null,
     tabs:       null,
+    // Camera UI
+    bodyChips:  null,    // container for body focus chips
+    fitBtn:     null,    // reset camera to system overview
+    focusLabel: null,    // small status text for current focus
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -115,6 +122,69 @@ export function initScene(canvasEl) {
     scene.add(_makeStarfield());
 
     window.addEventListener('resize', _resize);
+
+    // Click-to-focus on bodies. Tap-distinguishing logic: only treat the
+    // event as a body pick if pointerdown and pointerup happen at almost
+    // the same screen position (i.e. not a drag).
+    const downAt = { x: 0, y: 0, t: 0, valid: false };
+    canvasEl.addEventListener('pointerdown', e => {
+        downAt.x = e.clientX; downAt.y = e.clientY; downAt.t = e.timeStamp;
+        downAt.valid = true;
+    });
+    canvasEl.addEventListener('pointerup', e => {
+        if (!downAt.valid) return;
+        const dx = e.clientX - downAt.x;
+        const dy = e.clientY - downAt.y;
+        const dt = e.timeStamp - downAt.t;
+        downAt.valid = false;
+        if (Math.hypot(dx, dy) > 5 || dt > 400) return;
+        _pickAtScreen(e.clientX, e.clientY);
+    });
+}
+
+const _ray = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+
+function _pickAtScreen(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    _ndc.x =  ((clientX - rect.left) / rect.width)  * 2 - 1;
+    _ndc.y = -((clientY - rect.top)  / rect.height) * 2 + 1;
+    _ray.setFromCamera(_ndc, camera);
+    // Only consider the body meshes (not halos / trails).
+    const hits = _ray.intersectObjects(state.meshes, false);
+    if (hits.length > 0) {
+        const idx = state.meshes.indexOf(hits[0].object);
+        if (idx >= 0) setFocus(idx);
+    } else {
+        setFocus(null);
+    }
+}
+
+export function setFocus(idx) {
+    state.focusIdx = idx;
+    if (idx == null) {
+        controls.target.set(0, 0, 0);
+        if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
+    } else {
+        const mesh = state.meshes[idx];
+        if (!mesh) return;
+        // Move target onto the body, but preserve the camera's current offset
+        // so the view doesn't jump catastrophically.
+        controls.target.copy(mesh.position);
+        // If the camera is far from the body, dolly in to a sensible distance.
+        const r = mesh.geometry.parameters?.radius ?? 0.1;
+        const dist = camera.position.distanceTo(mesh.position);
+        const want = Math.max(r * 8, 1.0);
+        if (dist > want * 4) {
+            const dir = camera.position.clone().sub(mesh.position).normalize();
+            camera.position.copy(mesh.position).addScaledVector(dir, want);
+        }
+        if (hud.focusLabel) {
+            const name = state.bodies[idx]?.name ?? '?';
+            hud.focusLabel.textContent = `Following: ${_capitalize(name)}`;
+        }
+    }
+    _renderBodyChips();
 }
 
 function _aspect() {
@@ -257,9 +327,12 @@ export function loadSystem(systemId) {
         }
     }
 
+    state.focusIdx = null;
     _frameSystem();
     _updateMeshes();
     _renderHUDChrome();
+    _renderBodyChips();
+    if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
 }
 
 function _frameSystem() {
@@ -367,6 +440,19 @@ function _tick(t) {
         _updateMeshes();
         _appendTrails();
         _renderHUDLive();
+    }
+
+    // Camera follow: keep target locked to focused body. The OrbitControls
+    // user input continues to work — the user orbits around the moving body.
+    if (state.focusIdx != null) {
+        const m = state.meshes[state.focusIdx];
+        if (m) {
+            // Translate camera by the body's frame-to-frame motion so the
+            // viewer stays at the same relative offset.
+            const delta = m.position.clone().sub(controls.target);
+            camera.position.add(delta);
+            controls.target.copy(m.position);
+        }
     }
 
     controls.update();
@@ -581,6 +667,35 @@ export function attachUI(refs) {
 
     if (hud.resonanceCanvas) {
         hud.resonanceCtx = hud.resonanceCanvas.getContext('2d');
+    }
+
+    if (hud.fitBtn) {
+        hud.fitBtn.addEventListener('click', () => {
+            setFocus(null);
+            _frameSystem();
+        });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Body chip picker — one button per body, click to focus the camera.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _renderBodyChips() {
+    if (!hud.bodyChips) return;
+    const html = state.bodies.map((b, idx) => {
+        const colorHex = '#' + (b.color ?? 0xaaaaaa).toString(16).padStart(6, '0');
+        const on = state.focusIdx === idx;
+        return `<button type="button" class="gl-chip${on ? ' on' : ''}" data-focus="${idx}">
+            <span class="gl-dot" style="background:${colorHex}"></span>${_capitalize(b.name)}
+        </button>`;
+    }).join('');
+    hud.bodyChips.innerHTML = html;
+    for (const btn of hud.bodyChips.querySelectorAll('[data-focus]')) {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.focus, 10);
+            setFocus(state.focusIdx === idx ? null : idx);
+        });
     }
 }
 

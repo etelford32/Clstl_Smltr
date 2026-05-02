@@ -233,7 +233,11 @@ export function initNav(activeId = '') {
                 html += `<a href="${item.href}" class="nav-drop-link${_isAct ? ' active' : ''}" role="menuitem">
                     <span class="ndl-icon">${item.icon || ''}</span>
                     <span class="ndl-body">
-                        <span class="ndl-title">${item.label}${item.badge ? ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>` : ''}</span>
+                        <span class="ndl-title">${item.label}${item.badge ? (
+                            item.badge === 'NEW'
+                                ? ` <sup class="nav-badge-new">${item.badge}</sup>`
+                                : ` <span class="nav-badge-pro" style="background:rgba(0,200,200,.12);color:#0cc;border-color:rgba(0,200,200,.25)">${item.badge}</span>`
+                        ) : ''}</span>
                         <span class="ndl-sub">${item.sub}</span>
                     </span>
                 </a>`;

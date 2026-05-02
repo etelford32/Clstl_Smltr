@@ -151,6 +151,43 @@ body {
 }
 .gl-warp-mini { font-size:.62rem; color:#778; margin-top:4px; font-family:monospace; }
 
+/* ─── Camera focus block ─────────────────────────────────────── */
+.gl-camera { display:grid; gap:8px; }
+.gl-focus-label {
+    font-family:monospace; font-size:.72rem; color:#cba9ff;
+    background:rgba(180,140,255,.08);
+    border:1px solid rgba(180,140,255,.20);
+    border-radius:6px; padding:7px 10px;
+    line-height:1.3;
+}
+.gl-chips {
+    display:flex; flex-wrap:wrap; gap:5px;
+}
+.gl-chip {
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.10);
+    border-radius:999px;
+    color:#bcb;
+    padding:5px 11px;
+    font-family:inherit; font-size:.72rem; font-weight:600;
+    cursor:pointer;
+    transition:all .15s;
+    display:inline-flex; align-items:center;
+}
+.gl-chip:hover { border-color:rgba(180,140,255,.45); color:#fff; }
+.gl-chip.on {
+    background:rgba(180,140,255,.20);
+    border-color:#b78cff;
+    color:#fff;
+}
+.gl-chip .gl-dot {
+    display:inline-block; width:8px; height:8px; border-radius:50%;
+    margin-right:6px; vertical-align:middle;
+}
+.gl-camera-hint {
+    font-size:.66rem; color:#778; line-height:1.5; margin-top:2px;
+}
+
 /* ─── Showcase block ────────────────────────────────────────── */
 .gl-showcase {
     background:linear-gradient(150deg, rgba(180,140,255,.10), rgba(10,6,28,.5) 70%);
@@ -303,6 +340,14 @@ canvas.gl-resonance-canvas {
                 <div class="gl-tab-name">Jupiter + the Galileans</div>
                 <div class="gl-tab-sub">Io · Europa · Ganymede · Callisto — 4 : 2 : 1 resonance</div>
             </button>
+            <button type="button" class="gl-tab" data-system="saturn-major">
+                <div class="gl-tab-name">Saturn + Major Moons</div>
+                <div class="gl-tab-sub">Mimas → Iapetus · 7 worlds · cascade of resonances</div>
+            </button>
+            <button type="button" class="gl-tab" data-system="saturn-coorbitals">
+                <div class="gl-tab-name">Saturn — Janus &amp; Epimetheus</div>
+                <div class="gl-tab-sub">co-orbital swap every ~4 yr · the showpiece</div>
+            </button>
         </div>
 
         <div class="gl-label">Showcase</div>
@@ -326,6 +371,14 @@ canvas.gl-resonance-canvas {
                 <button type="button" class="gl-btn" id="gl-rev">↻ Reverse Time</button>
             </div>
             <button type="button" class="gl-btn" id="gl-reset">Reset to J2000.0</button>
+        </div>
+
+        <div class="gl-label">Camera</div>
+        <div class="gl-camera">
+            <div class="gl-focus-label" id="gl-focus-label">Free orbit · click a body to focus</div>
+            <div class="gl-chips" id="gl-chips"></div>
+            <button type="button" class="gl-btn" id="gl-fit">⌖ Fit System View</button>
+            <p class="gl-camera-hint">Click any body — in the scene or below — to follow it. Click again or the fit button to return.</p>
         </div>
     </aside>
 
@@ -377,7 +430,7 @@ canvas.gl-resonance-canvas {
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260502';
+import { boot } from './js/gravity-lab/lab.js?v=20260502c';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -404,6 +457,11 @@ const ui = {
     resetBtn:   document.getElementById('gl-reset'),
     warpSlider: document.getElementById('gl-warp'),
     tabs:       Array.from(document.querySelectorAll('#gl-tabs .gl-tab')),
+
+    // Camera UI
+    bodyChips:  document.getElementById('gl-chips'),
+    fitBtn:     document.getElementById('gl-fit'),
+    focusLabel: document.getElementById('gl-focus-label'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });
