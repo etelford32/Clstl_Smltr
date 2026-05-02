@@ -75,6 +75,7 @@ const NAV_DROPDOWNS = [
             { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
+            { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
             { section: 'Utilities' },
             { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
             { href: 'account.html',           label: 'Account',              sub: 'Profile, alerts, API keys, billing', tier: 'free', icon: '⚙️', id: 'account' },
