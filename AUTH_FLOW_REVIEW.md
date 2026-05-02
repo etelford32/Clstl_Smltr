@@ -97,10 +97,16 @@ edge-function + Resend infrastructure.
    builds the welcome HTML with the user's display name + plan label,
    sends via Resend, and logs the activation event. Send rate +
    per-signup ratio surface on the admin Onboarding → Auth flow card.
-2. **Onboarding nudge** (T+24h if `wizard_completed` not fired).
-   Cron job (pg_cron) reads `activation_events` for users who have
-   `signup` but not `wizard_completed`; fires a "finish setup" email
-   with a deep link `/dashboard?welcome=1`.
+2. **Onboarding nudge** (T+24h if `wizard_completed` not fired) — **SHIPPED**.
+   Vercel cron at `/api/cron/onboarding-nudge` runs daily at 16:30 UTC,
+   calls `pending_onboarding_nudges(24, 7, 200)` to fetch users whose
+   signup is 24h–7d old without a `wizard_completed` row, and emails
+   each one a friendly "finish setting up" message with a deep link
+   `/dashboard?welcome=1` that re-opens the wizard. Idempotent at
+   three layers: cron schedule, RPC pre-filter, unique partial index
+   on `nudge_sent`. Send count + per-signup ratio surface on the
+   admin Onboarding > Auth flow card. Manual ops invocations:
+   `?dry=1` (no Resend, masked emails) and `?max=N` (canary cap).
 3. **Inactivity re-engagement** (T+14d / T+30d after last session).
    Joins `user_profiles.updated_at` against `activation_events`; emails
    users who've gone quiet with a "what's new" digest. Suppress for
@@ -129,14 +135,17 @@ now shows real failure counts; the next signal-quality improvement is
 slicing the `reason` string into a small histogram (the table already
 stores it; the RPC just needs to expose a top-N).
 
-**3.** Onboarding nudge (item 2 in automation) — biggest potential
-activation-rate lift; the wizard is already wired, the cron just has to
-ping users who didn't finish. Reuses the welcome-email pattern with a
-window query (`signup` ∧ ¬`wizard_completed` ∧ created > 24h ago).
+**3.** ~~Onboarding nudge cron~~ — **shipped**. Once the cron has run
+for a couple weeks the nudge-rate column on the admin card will tell
+us whether the wizard friction is meaningful or marginal.
 
 **4.** Social signin (Google, then Apple). Cuts password-related
 support tickets and shrinks the signup form to one click. Mostly a
 config + UI sprint.
 
-Everything else can wait until (3)–(4) are deployed and we have data
+**5.** Top-N reasons histogram for `auth_failures.reason` so an admin
+can spot a sudden spike in (e.g.) "Email not confirmed" without
+opening Supabase logs.
+
+Everything else can wait until (4)–(5) are deployed and we have data
 on which gap actually moves the activation needle.

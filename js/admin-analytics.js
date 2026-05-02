@@ -1223,6 +1223,7 @@ export async function fetchAuthFlowMetrics(days = 30) {
         const succUsers = byEvent.signin_succeeded?.users || 0;
         const signups   = byEvent.signup?.users || 0;
         const welcomes  = byEvent.welcome_email_sent?.users || 0;
+        const nudges    = byEvent.nudge_sent?.users || 0;
         const failUsers   = byEvent.signin_failed?.users  || 0;
         const failEvents  = byEvent.signin_failed?.events || 0;
         return {
@@ -1244,6 +1245,13 @@ export async function fetchAuthFlowMetrics(days = 30) {
                 // window opened (catch-up automation, future cron); < 1.0
                 // means the edge endpoint is dropping sends — investigate.
                 welcomeSendRate:   signups ? +(welcomes / signups).toFixed(3) : 0,
+                nudgesSent:        nudges,
+                // Nudge rate is the share of signups in the window that
+                // got nudged (i.e. didn't finish the wizard within 24h).
+                // High nudge-rate = wizard friction; investigate the
+                // funnel card. Low nudge-rate AND low completion-rate
+                // means the cron isn't firing (env var, RPC missing).
+                nudgeRate:         signups ? +(nudges / signups).toFixed(3) : 0,
                 avgRetries:        succUsers ? +(totalRetries / succUsers).toFixed(2) : 0,
                 pctNeedingRetry:   succUsers ? +(withRetry / succUsers).toFixed(3) : 0,
             },

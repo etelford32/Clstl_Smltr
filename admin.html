@@ -1480,6 +1480,7 @@ async function loadAuthFlowMetrics() {
     el.innerHTML =
         _onboardingMetricRow('Signups',                  d.signups) +
         _onboardingMetricRow('Welcome emails sent',      d.welcomeEmails, _pct(d.welcomeSendRate) + ' of signups') +
+        _onboardingMetricRow('T+24h nudges sent',        d.nudgesSent, _pct(d.nudgeRate) + ' of signups') +
         _onboardingMetricRow('Successful sign-ins',      d.signinSuccesses) +
         _onboardingMetricRow('Failed sign-ins',          d.signinFailures, `${d.signinFailEvents} attempts · ${_pct(d.signinFailureRate)} of users`) +
         _onboardingMetricRow('Returning sessions (>24h)', d.returningSessions) +
