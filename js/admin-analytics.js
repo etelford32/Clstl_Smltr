@@ -1221,13 +1221,21 @@ export async function fetchAuthFlowMetrics(days = 30) {
             if (n > 0) withRetry++;
         }
         const succUsers = byEvent.signin_succeeded?.users || 0;
+        const signups   = byEvent.signup?.users || 0;
+        const welcomes  = byEvent.welcome_email_sent?.users || 0;
         return {
             ok: true,
             data: {
-                signups:           byEvent.signup?.users || 0,
+                signups,
                 signinSuccesses:   succUsers,
                 signinFailures:    byEvent.signin_failed?.users || 0,
                 returningSessions: byEvent.returning_user_session?.users || 0,
+                welcomeEmails:     welcomes,
+                // Send rate = welcome emails / signups in the same window.
+                // > 1.0 means we welcomed users who signed up before the
+                // window opened (catch-up automation, future cron); < 1.0
+                // means the edge endpoint is dropping sends — investigate.
+                welcomeSendRate:   signups ? +(welcomes / signups).toFixed(3) : 0,
                 avgRetries:        succUsers ? +(totalRetries / succUsers).toFixed(2) : 0,
                 pctNeedingRetry:   succUsers ? +(withRetry / succUsers).toFixed(3) : 0,
             },

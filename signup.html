@@ -663,6 +663,32 @@
                 logActivation('signup', { plan, source: invite ? 'invite' : 'organic' });
             } catch {}
 
+            // Welcome email — fire-and-forget. The edge function is
+            // idempotent (unique partial index on activation_events
+            // welcome_email_sent), so a double-fire from page reload or
+            // the Stripe checkout round-trip is harmless. We don't await
+            // it because we don't want the success view to wait on
+            // Resend latency. Skipped silently when the backend isn't
+            // configured (501) — the user still gets a working dashboard.
+            try {
+                const sb = await (await import('./js/supabase-config.js')).getSupabase();
+                const { data: { session } } = await sb.auth.getSession();
+                if (session?.access_token) {
+                    fetch('/api/welcome/send', {
+                        method:  'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization:  `Bearer ${session.access_token}`,
+                        },
+                        body: '{}',
+                    }).catch(err => {
+                        console.warn('[Signup] welcome email send failed:', err?.message || err);
+                    });
+                }
+            } catch (e) {
+                console.warn('[Signup] welcome email dispatch skipped:', e?.message || e);
+            }
+
             // Skip Stripe checkout when:
             //   - the invite already comped a paid tier (admin granted), OR
             //   - this was a class-seat invite (student rides parent's plan).

@@ -1479,6 +1479,7 @@ async function loadAuthFlowMetrics() {
     const d = r.data;
     el.innerHTML =
         _onboardingMetricRow('Signups',                  d.signups) +
+        _onboardingMetricRow('Welcome emails sent',      d.welcomeEmails, _pct(d.welcomeSendRate) + ' of signups') +
         _onboardingMetricRow('Successful sign-ins',      d.signinSuccesses) +
         _onboardingMetricRow('Returning sessions (>24h)', d.returningSessions) +
         _onboardingMetricRow('Avg retries to success',   d.avgRetries.toFixed(2), _pct(d.pctNeedingRetry) + ' needed ≥1');

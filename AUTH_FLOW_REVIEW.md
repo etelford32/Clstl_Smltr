@@ -84,11 +84,17 @@ post-signup journey. Snapshot taken alongside the Phase-3 onboarding work.
 
 ### Automation candidates
 The drumbeat below is what we'd realistically build with the existing
-edge-function + Resend infrastructure. None of these are wired today.
+edge-function + Resend infrastructure.
 
-1. **Welcome email** (T+0 minutes after signup).
-   `auth.users` insert webhook → edge function → Resend send. The
-   email reinforces the wizard's CTAs.
+1. **Welcome email** (T+0 minutes after signup) — **SHIPPED**.
+   `signup.html` success branch fires a fire-and-forget POST to
+   `/api/welcome/send`. The edge function verifies the JWT, checks for
+   an existing `welcome_email_sent` activation event (idempotency
+   pre-check; the unique partial index in
+   `supabase-welcome-email-migration.sql` is the authoritative gate),
+   builds the welcome HTML with the user's display name + plan label,
+   sends via Resend, and logs the activation event. Send rate +
+   per-signup ratio surface on the admin Onboarding → Auth flow card.
 2. **Onboarding nudge** (T+24h if `wizard_completed` not fired).
    Cron job (pg_cron) reads `activation_events` for users who have
    `signup` but not `wizard_completed`; fires a "finish setup" email
@@ -111,9 +117,10 @@ edge-function + Resend infrastructure. None of these are wired today.
    if `< 3` students joined). Reminds the educator that they have
    capacity left and can invite more students from `/account#team`.
 
-### What I'd build first
-**1.** Wire the welcome email (item 1) — small change, proves the
-plumbing, sets up everything downstream.
+### What's next
+**1.** ~~Welcome email~~ — **shipped**. The plumbing is now proven; the
+remaining items can reuse the same `/api/welcome/send` shape (JWT
+verify → idempotency check → Resend send → activation log).
 
 **2.** Add a server-side `signin_failed` endpoint (item 1 in telemetry
 gaps) — the current retry_count proxy is fine for headline metrics, but
@@ -121,11 +128,12 @@ debugging a real auth regression needs the actual error reasons.
 
 **3.** Onboarding nudge (item 2 in automation) — biggest potential
 activation-rate lift; the wizard is already wired, the cron just has to
-ping users who didn't finish.
+ping users who didn't finish. Reuses the welcome-email pattern with a
+window query (`signup` ∧ ¬`wizard_completed` ∧ created > 24h ago).
 
 **4.** Social signin (Google, then Apple). Cuts password-related
 support tickets and shrinks the signup form to one click. Mostly a
 config + UI sprint.
 
-Everything else can wait until (1)–(4) are deployed and we have data
+Everything else can wait until (2)–(4) are deployed and we have data
 on which gap actually moves the activation needle.
