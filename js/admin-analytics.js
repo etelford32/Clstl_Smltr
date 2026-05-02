@@ -1059,3 +1059,210 @@ export async function fetchAtRiskSubscriptions() {
         return { ok: false, error: err.message };
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ── ONBOARDING ANALYTICS ────────────────────────────────────────────────────
+//
+// New surface added in the Phase-3 onboarding work. Fetches lean wrappers
+// around four RPCs created in supabase-onboarding-events-migration.sql:
+//
+//   onboarding_funnel(p_days)   → wizard step funnel + drop-off
+//   tour_metrics(p_days)        → guided-tour start/complete/skip
+//   auth_flow_metrics(p_days)   → signup / signin success counts
+//   new_vs_returning(p_days)    → bucketed user counts
+//
+// Plus one event_log query for anonymous demo telemetry (demo_entered
+// and demo_signup_clicked land in event_log because the visitor isn't
+// signed in and RLS on activation_events forbids unauth writes).
+//
+// All fetchers degrade gracefully if the migration hasn't been applied —
+// the admin UI surfaces the migration filename in the empty state so an
+// operator knows what to do.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Wizard funnel: shown → step1 done → step2 done → step3 done → completed.
+ * Returns a flat object keyed by event name with user-counts as values
+ * plus three derived ratios (step-1, step-2, step-3 completion).
+ */
+export async function fetchWizardFunnel(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('onboarding_funnel', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.event, Number(r.user_count) || 0]));
+        // Note: step_completed is fired multiple times per user (one per
+        // advance), but the RPC counts DISTINCT users — so the value is
+        // "users who completed at least one step", not total step events.
+        // For per-step drop-off we'd need a separate query that filters
+        // metadata->>'step'. Keeping this lean for now; the four-bucket
+        // funnel below is good enough for headline conversion.
+        const shown   = counts.wizard_shown || 0;
+        const stepped = counts.wizard_step_completed || 0;
+        const done    = counts.wizard_completed || 0;
+        const skipped = counts.wizard_skipped || 0;
+        return {
+            ok: true,
+            data: {
+                shown, stepped, completed: done, skipped,
+                completionRate: shown ? +(done / shown).toFixed(3) : 0,
+                skipRate:       shown ? +(skipped / shown).toFixed(3) : 0,
+                anyProgress:    shown ? +(stepped / shown).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'onboarding_funnel RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/** Tour metrics: started/completed/skipped + completion ratio. */
+export async function fetchTourMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('tour_metrics', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.event, Number(r.user_count) || 0]));
+        const started   = counts.tour_started || 0;
+        const completed = counts.tour_completed || 0;
+        const skipped   = counts.tour_skipped || 0;
+        return {
+            ok: true,
+            data: {
+                started, completed, skipped,
+                completionRate: started ? +(completed / started).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'tour_metrics RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/**
+ * Demo-mode metrics. Anonymous events live in event_log (analytics.event)
+ * because the visitor isn't signed in, so this fetcher hits that table
+ * directly instead of the activation RPCs.
+ *
+ * Conversion = demo_signup_clicked / demo_entered. Not perfect (a click
+ * doesn't guarantee signup completion) but close enough to spot a
+ * step-funnel regression.
+ */
+export async function fetchDemoMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const since = new Date(Date.now() - days * 86400_000).toISOString();
+        const { data, error } = await client
+            .from('event_log')
+            .select('event_name')
+            .in('event_name', ['demo_entered', 'demo_signup_clicked'])
+            .gte('created_at', since);
+        if (error) throw error;
+        let entered = 0, clicked = 0;
+        for (const r of data || []) {
+            if (r.event_name === 'demo_entered')        entered++;
+            else if (r.event_name === 'demo_signup_clicked') clicked++;
+        }
+        return {
+            ok: true,
+            data: {
+                entered, clicked,
+                clickRate: entered ? +(clicked / entered).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Auth flow metrics: signups / signin success / signin retries.
+ *
+ * Failed signins can't be logged client-side (RLS forbids unauth writes
+ * to activation_events), so we surface "retries to first success" via
+ * the metadata.retry_count attached to signin_succeeded rows. A high
+ * average retry count is the same actionable signal as a high failure
+ * rate.
+ */
+export async function fetchAuthFlowMetrics(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('auth_flow_metrics', { p_days: days });
+        if (error) throw error;
+        const byEvent = Object.fromEntries(
+            (data || []).map(r => [r.event, { users: Number(r.user_count) || 0, events: Number(r.event_count) || 0 }])
+        );
+        // Retry-count average: pull metadata for signin_succeeded events
+        // separately (the RPC aggregates by event only). Cheap query;
+        // bounded to the same window.
+        const since = new Date(Date.now() - days * 86400_000).toISOString();
+        const { data: succRows } = await client
+            .from('activation_events')
+            .select('metadata')
+            .eq('event', 'signin_succeeded')
+            .gte('created_at', since)
+            .limit(5000);
+        let totalRetries = 0, withRetry = 0;
+        for (const r of succRows || []) {
+            const n = +((r.metadata || {}).retry_count || 0);
+            totalRetries += n;
+            if (n > 0) withRetry++;
+        }
+        const succUsers = byEvent.signin_succeeded?.users || 0;
+        return {
+            ok: true,
+            data: {
+                signups:           byEvent.signup?.users || 0,
+                signinSuccesses:   succUsers,
+                signinFailures:    byEvent.signin_failed?.users || 0,
+                returningSessions: byEvent.returning_user_session?.users || 0,
+                avgRetries:        succUsers ? +(totalRetries / succUsers).toFixed(2) : 0,
+                pctNeedingRetry:   succUsers ? +(withRetry / succUsers).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'auth_flow_metrics RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}
+
+/** New vs returning users in the window. */
+export async function fetchNewVsReturning(days = 30) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client.rpc('new_vs_returning', { p_days: days });
+        if (error) throw error;
+        const counts = Object.fromEntries((data || []).map(r => [r.bucket, Number(r.user_count) || 0]));
+        const newU = counts.new || 0;
+        const ret  = counts.returning || 0;
+        const total = newU + ret;
+        return {
+            ok: true,
+            data: {
+                new: newU, returning: ret, total,
+                returningShare: total ? +(ret / total).toFixed(3) : 0,
+            },
+        };
+    } catch (err) {
+        const hint = /function .* does not exist/i.test(err.message || '')
+            ? 'new_vs_returning RPC missing — apply supabase-onboarding-events-migration.sql'
+            : err.message;
+        return { ok: false, error: hint };
+    }
+}

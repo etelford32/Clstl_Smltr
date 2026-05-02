@@ -6975,6 +6975,63 @@ window.addEventListener('user-location-changed', e => {
     }
 })();
 
+// First-visit hint — dismissable toast that points at the new top-left
+// #loc-panel. Fires only when (a) the visitor has never dismissed it,
+// and (b) no location is currently saved. The hint disappears
+// automatically once the user sets a location, so an in-flight setup
+// flow doesn't get nagged. Stamping a localStorage flag prevents
+// re-display on subsequent visits.
+(function() {
+    const HINT_KEY = 'pp-earth-loc-hint-dismissed';
+    try { if (localStorage.getItem(HINT_KEY) === '1') return; } catch {}
+    if (loadUserLocation()) return;
+    // Don't render on phones — the loc-panel is in the slide-up sheet
+    // there and a toast pointing at an off-screen element is confusing.
+    if (window.matchMedia?.('(max-width: 768px)').matches) return;
+
+    const t = document.createElement('div');
+    t.id = 'pp-loc-hint';
+    t.setAttribute('role', 'status');
+    t.style.cssText = `
+        position:fixed; top:60px; left:250px; z-index:200;
+        max-width:320px; padding:11px 32px 11px 14px;
+        background:linear-gradient(135deg, rgba(95,255,208,.18), rgba(0,180,140,.10));
+        border:1px solid rgba(95,255,208,.45);
+        border-radius:10px; color:#cef;
+        font-size:.78rem; line-height:1.5;
+        box-shadow:0 8px 28px rgba(0,40,30,.5);
+        backdrop-filter:blur(10px);
+        cursor:default;
+        animation:pp-loc-hint-in .35s ease;
+    `;
+    t.innerHTML = `
+        <strong style="color:#5fffd0;font-weight:800;letter-spacing:.04em">Set your location ←</strong>
+        Pin a city in the panel on the left to unlock local sun + ISS pass times, aurora visibility, and personalised alerts.
+        <button id="pp-loc-hint-x" aria-label="Dismiss"
+            style="position:absolute;top:5px;right:7px;background:transparent;border:0;color:#9bd;font:inherit;font-size:1rem;line-height:1;cursor:pointer;padding:3px 6px;border-radius:4px">×</button>
+    `;
+    const css = document.createElement('style');
+    css.textContent = `
+        @keyframes pp-loc-hint-in { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
+        #pp-loc-hint-x:hover { color:#fff; background:rgba(255,255,255,.08) }
+    `;
+    document.head.appendChild(css);
+    document.body.appendChild(t);
+
+    function dismiss() {
+        try { localStorage.setItem(HINT_KEY, '1'); } catch {}
+        t.style.transition = 'opacity .25s';
+        t.style.opacity = '0';
+        setTimeout(() => t.remove(), 260);
+    }
+    document.getElementById('pp-loc-hint-x')?.addEventListener('click', dismiss);
+    // Auto-dismiss the moment a location is set — the user just did the
+    // thing the hint was nagging about.
+    window.addEventListener('user-location-changed', (e) => {
+        if (e.detail) dismiss();
+    }, { once: true });
+})();
+
 // ═══════════════════════════════════════════════════════════════
 //  MOBILE PANEL TOGGLES
 // ═══════════════════════════════════════════════════════════════

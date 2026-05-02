@@ -404,12 +404,32 @@
                     errEl.classList.add('visible');
                     pw.classList.add('error');
                 }
+                // Failed-signin counter — survives the page lifetime so the
+                // eventual successful signin can stamp how many retries it
+                // took. RLS on activation_events forbids unauth writes, so
+                // we can't log signin_failed directly; tracking attempts
+                // here and reporting them on success captures the same
+                // "auth friction" signal without an edge function.
+                try {
+                    const cur = +(sessionStorage.getItem('pp_signin_attempts') || 0);
+                    sessionStorage.setItem('pp_signin_attempts', String(cur + 1));
+                } catch {}
                 return;
             }
 
             // Show success state
             document.getElementById('signin-form').style.display = 'none';
             document.getElementById('login-success').style.display = 'block';
+            // Telemetry: successful signin. Pass the retry count so the
+            // admin auth-flow card can highlight users who had to fight
+            // the form. Reset the counter for a clean next session.
+            try {
+                let retries = 0;
+                try { retries = +(sessionStorage.getItem('pp_signin_attempts') || 0); } catch {}
+                try { sessionStorage.removeItem('pp_signin_attempts'); } catch {}
+                const { logActivation } = await import('./js/activation.js');
+                logActivation('signin_succeeded', { retry_count: retries });
+            } catch {}
 
             // Redirect: check for post-login redirect, else go to dashboard
             const redirect = auth.getPostLoginRedirect() || 'dashboard.html';
