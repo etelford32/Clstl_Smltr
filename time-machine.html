@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orbital Time Machine — Deep-Time N-Body Propagation · Parker Physics</title>
+<meta name="description" content="Long-horizon orbital mechanics workbench: ±10 kyr Yoshida-4 propagation and ±1 Myr Wisdom-Holman mapping for the major bodies of the solar system.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif; }
+
+#tm-hero {
+    padding:32px 24px 22px;
+    background:linear-gradient(180deg, rgba(120,80,255,.10), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(180,140,255,.14);
+}
+#tm-hero h1 {
+    font-size:1.7rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 30%,#b78cff);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:8px;
+}
+#tm-hero p { font-size:.92rem; color:#aa9; line-height:1.6; max-width:820px; }
+#tm-hero .tm-tag {
+    display:inline-block; font-family:monospace; font-size:.7rem; letter-spacing:.1em;
+    color:#cba9ff; background:rgba(120,80,255,.12);
+    border:1px solid rgba(180,140,255,.35); border-radius:4px;
+    padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
+}
+
+#tm-app {
+    max-width:1100px; margin:0 auto;
+    padding:24px 24px 64px;
+    display:grid; gap:18px;
+}
+@media (max-width:780px) { #tm-app { padding:16px; } }
+
+.tm-panel {
+    background:rgba(12,8,30,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    padding:18px 20px;
+}
+.tm-panel h2 {
+    font-size:.78rem; color:#b78cff; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:800; margin-bottom:12px;
+}
+.tm-panel p { font-size:.86rem; color:#bcb; line-height:1.6; margin-bottom:8px; }
+.tm-panel p:last-child { margin-bottom:0; }
+.tm-panel code {
+    font-family:monospace; font-size:.78rem;
+    background:rgba(255,255,255,.05); color:#fc7;
+    padding:1px 6px; border-radius:3px;
+}
+
+.tm-construct {
+    background:linear-gradient(150deg, rgba(255,184,48,.10), rgba(12,8,30,.72) 70%);
+    border-color:rgba(255,184,48,.25);
+}
+.tm-construct .tm-status {
+    display:inline-flex; align-items:center; gap:8px;
+    font-family:monospace; font-size:.7rem; letter-spacing:.08em;
+    color:#fc7; text-transform:uppercase;
+    margin-bottom:10px;
+}
+.tm-construct .tm-status::before {
+    content:""; width:8px; height:8px; border-radius:50%;
+    background:#fc7; box-shadow:0 0 8px #fc7;
+    animation:tm-pulse 1.6s ease-in-out infinite;
+}
+@keyframes tm-pulse {
+    0%,100% { opacity:1; }
+    50%     { opacity:.35; }
+}
+
+.tm-roadmap { display:grid; gap:12px; }
+.tm-stage {
+    display:grid; grid-template-columns:120px 1fr; gap:14px;
+    padding:12px 14px;
+    border:1px solid rgba(255,255,255,.06);
+    border-left:3px solid rgba(180,140,255,.4);
+    border-radius:8px;
+    background:rgba(255,255,255,.02);
+}
+.tm-stage--now      { border-left-color:#4fc97f; }
+.tm-stage--planned  { border-left-color:#b78cff; }
+.tm-stage--future   { border-left-color:#fc7; }
+.tm-stage-horizon {
+    font-family:monospace; font-size:.78rem; font-weight:800;
+    color:#eef; letter-spacing:.04em;
+}
+.tm-stage-method {
+    font-size:.68rem; color:#778; font-family:monospace; margin-top:3px;
+}
+.tm-stage-name { font-size:.94rem; font-weight:700; color:#eef; margin-bottom:4px; }
+.tm-stage-desc { font-size:.8rem; color:#aa9; line-height:1.55; }
+@media (max-width:600px) {
+    .tm-stage { grid-template-columns:1fr; gap:6px; }
+}
+
+.tm-warn {
+    font-size:.74rem; color:#998; font-style:italic;
+    border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260502"; initNav("time-machine");</script>
+
+<div id="tm-hero">
+    <span class="tm-tag">In Development</span>
+    <h1>Orbital Time Machine</h1>
+    <p>A deep-time workbench for solar-system orbital mechanics. Wind the planets thousands of years forward or millions of years back, watch perihelia precess, and study chaos in the inner system. This page is a placeholder while the underlying N-body engine is built — the live ±2,000 yr propagator on the <a href="threejs.html" style="color:#b78cff;">Solar System</a> and <a href="space-weather.html" style="color:#b78cff;">Space Weather</a> pages comes first.</p>
+</div>
+
+<div id="tm-app">
+
+    <section class="tm-panel tm-construct">
+        <div class="tm-status">Under Construction</div>
+        <p>The orbital time machine will sit on top of the unified ephemeris engine being built for the Earth and Solar-System pages. Phase 1 ships a live ±2,000 yr Yoshida-4 symplectic integrator validated against VSOP87D and JPL Horizons. Once that baseline is stable and instrumented for collision search, this page becomes the long-horizon harness on top of it.</p>
+        <p class="tm-warn">Predictions over kyr–Myr scales are inherently uncertain — the inner solar system is chaotic with a Lyapunov time of ~5 Myr (Laskar 1989). Anything past ~60 Myr is statistical, not deterministic.</p>
+    </section>
+
+    <section class="tm-panel">
+        <h2>Roadmap</h2>
+        <div class="tm-roadmap">
+
+            <div class="tm-stage tm-stage--now">
+                <div>
+                    <div class="tm-stage-horizon">±2,000 yr</div>
+                    <div class="tm-stage-method">VSOP87D + Yoshida-4</div>
+                </div>
+                <div>
+                    <div class="tm-stage-name">Live propagation (current focus)</div>
+                    <div class="tm-stage-desc">Symplectic integrator seeded from VSOP87D state vectors at J2000. Sub-arcminute residuals across the working window. Powers the 3D orrery, collision search, and the Earth orbit panel. Lives in the existing <code>js/ephemeris/</code> module — not on this page yet.</div>
+                </div>
+            </div>
+
+            <div class="tm-stage tm-stage--planned">
+                <div>
+                    <div class="tm-stage-horizon">±10,000 yr</div>
+                    <div class="tm-stage-method">Yoshida-4 / Yoshida-8 N-body</div>
+                </div>
+                <div>
+                    <div class="tm-stage-name">Holocene & near-future</div>
+                    <div class="tm-stage-desc">Same integrator as Phase 1 with a longer step and the major asteroids (Ceres, Vesta, Pallas, Hygiea) added as perturbers. Visualises Earth's apsidal precession (≈21,000 yr cycle) and the Jupiter-Saturn great inequality (~883 yr beat).</div>
+                </div>
+            </div>
+
+            <div class="tm-stage tm-stage--future">
+                <div>
+                    <div class="tm-stage-horizon">±1,000,000 yr</div>
+                    <div class="tm-stage-method">Wisdom-Holman map</div>
+                </div>
+                <div>
+                    <div class="tm-stage-name">Milankovitch &amp; chaos</div>
+                    <div class="tm-stage-desc">Mixed-variable symplectic mapping for million-year integrations. Runs Earth-orbit eccentricity and obliquity cycles tied to climate forcing. Beyond the Lyapunov horizon results are presented as ensembles, not single trajectories.</div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <section class="tm-panel">
+        <h2>What Will Live Here</h2>
+        <p>A single workspace with a JD slider, a body picker, and three views — orbital-element plots over time, instantaneous 3D state, and close-approach tables. All three time horizons share the same backend; switching tier just changes integrator and step size.</p>
+        <p>The page will surface integrator diagnostics directly: energy drift, angular-momentum drift, residuals against VSOP87D inside its validity band, and Lyapunov estimates for chaos-bound runs.</p>
+    </section>
+
+    <section class="tm-panel">
+        <h2>References</h2>
+        <p style="font-family:monospace; font-size:.74rem; line-height:1.7; color:#998;">
+            Bretagnon &amp; Francou (1988) — VSOP87 planetary theory.<br>
+            Yoshida (1990) — Construction of higher-order symplectic integrators.<br>
+            Wisdom &amp; Holman (1991) — Symplectic maps for the N-body problem.<br>
+            Laskar (1989, 2009) — Long-term chaos in the inner solar system.<br>
+            Standish (1992) — Keplerian elements for approximate planetary positions.<br>
+            JPL Horizons On-Line Ephemeris System.
+        </p>
+    </section>
+
+</div>
+
+</body>
+</html>
