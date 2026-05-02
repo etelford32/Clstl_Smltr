@@ -28,6 +28,7 @@ import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
+import { VanAllenParticles } from './van-allen-particles.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -692,6 +693,13 @@ export class SpaceWeatherGlobe {
 
     _buildMagnetosphere() {
         this._magEngine = new MagnetosphereEngine(this._scene);
+        // μ-conserving Van Allen tracer particles drifting through the belts.
+        // Built after the engine so the volumetric belts render *behind* the
+        // particles (Points use additive blending, no depth write).
+        this._beltParticles = new VanAllenParticles(this._scene, {
+            count: 700,
+            timeCompression: this._timeCompression,
+        });
     }
 
     // ── Parker streamlines (deterministic) ──────────────────────────────────
@@ -1221,6 +1229,9 @@ export class SpaceWeatherGlobe {
         // Magnetosphere geometry update
         this._magEngine.update(state);
 
+        // Van Allen tracer brightness scales with Kp (storm-time energisation)
+        this._beltParticles?.setKp(kp);
+
         // Sun — push live SWPC data
         const xInt = state.derived?.xray_intensity ?? 0;
         const xrayNorm = Math.max(0, Math.min(1, xInt > 0
@@ -1320,6 +1331,10 @@ export class SpaceWeatherGlobe {
             if (this._windPts) this._windPts.visible = visible;
             return;
         }
+        if (name === 'beltParticles') {
+            this._beltParticles?.setVisible(visible);
+            return;
+        }
         this._magEngine.setLayerVisible(name, visible);
     }
 
@@ -1331,6 +1346,9 @@ export class SpaceWeatherGlobe {
      */
     setTimeCompression(factor) {
         this._timeCompression = Math.max(1, Math.min(50000, factor));
+        // Re-cap the belt-particle drift rates so a high compression factor
+        // doesn't streak protons into a solid ring.
+        this._beltParticles?.setTimeCompression(this._timeCompression);
     }
 
     /** Estimated Sun→Earth transit time at the current wind speed (seconds). */
@@ -1371,6 +1389,7 @@ export class SpaceWeatherGlobe {
         if (this._rafId) cancelAnimationFrame(this._rafId);
         this._ro?.disconnect();
         this._magEngine.dispose();
+        this._beltParticles?.dispose();
         this._renderer.dispose();
     }
 
@@ -2031,6 +2050,11 @@ export class SpaceWeatherGlobe {
 
         // Magnetosphere geometry tick
         this._magEngine.tick(t, this._sunDir);
+
+        // μ-conserving Van Allen particle drift + bounce.  Drift advances at
+        // compressed real time (electrons east, protons west); bounce at a
+        // viewing-time-decoupled rate so the µs-period swings are visible.
+        this._beltParticles?.update(dt);
 
         // CME shells
         this._updateCmeShells(t);
