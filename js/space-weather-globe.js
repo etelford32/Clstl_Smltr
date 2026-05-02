@@ -160,6 +160,44 @@ void main() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Bessel helpers — used to build Lundquist (1950) constant-α force-free
+//  flux ropes for the CME ejecta core.
+//
+//   J₀(x) = Σ ((-1)^k / k!²) · (x/2)^(2k)
+//   J₁(x) = Σ ((-1)^k / (k! (k+1)!)) · (x/2)^(2k+1)
+//
+//  We use a 12-term series, which is well under FP-precision noise for
+//  x ∈ [0, 2.405] (the first zero of J₀ — the natural outer boundary of a
+//  Lundquist flux rope).
+// ─────────────────────────────────────────────────────────────────────────────
+
+function besselJ0(x) {
+    const x2 = -(x * x) / 4;
+    let term = 1, sum = 1;
+    for (let k = 1; k < 14; k++) {
+        term *= x2 / (k * k);
+        sum  += term;
+        if (Math.abs(term) < 1e-9) break;
+    }
+    return sum;
+}
+
+function besselJ1(x) {
+    const x2 = -(x * x) / 4;
+    let term = x / 2, sum = term;
+    for (let k = 1; k < 14; k++) {
+        term *= x2 / (k * (k + 1));
+        sum  += term;
+        if (Math.abs(term) < 1e-9) break;
+    }
+    return sum;
+}
+
+// First zero of J₀ — defines the natural outer radius of a Lundquist rope
+// where B_z vanishes (field becomes purely azimuthal at the boundary).
+const LUNDQUIST_J0_ZERO = 2.4048256;
+
+// ─────────────────────────────────────────────────────────────────────────────
 export class SpaceWeatherGlobe {
     /**
      * @param {HTMLCanvasElement} canvas
@@ -1360,7 +1398,8 @@ export class SpaceWeatherGlobe {
         const shellMat = new THREE.MeshBasicMaterial({
             color: shellColor,
             transparent: true,
-            opacity: 0.35,
+            opacity: 0.22,                    // slightly translucent so the
+                                              // flux-rope core is visible
             side: THREE.DoubleSide,
             depthWrite: false,
             blending: THREE.AdditiveBlending,
@@ -1390,14 +1429,24 @@ export class SpaceWeatherGlobe {
             group.add(sheath);
         }
 
-        // Core bright point
-        const coreGeo = new THREE.SphereGeometry(0.15, 8, 8);
-        const coreMat = new THREE.MeshBasicMaterial({
-            color: 0xffffff, transparent: true, opacity: 0.6,
-            blending: THREE.AdditiveBlending, depthWrite: false,
-        });
-        const core = new THREE.Mesh(coreGeo, coreMat);
-        core.renderOrder = 17;
+        // ── Lundquist flux-rope core ─────────────────────────────────────────
+        // Replace the bright sphere with a half-toroidal flux rope sampled
+        // from the constant-α Lundquist solution (∇×B = αB):
+        //
+        //     B_z(r) = B₀ J₀(α r)
+        //     B_φ(r) = B₀ J₁(α r)
+        //
+        // Field-line pitch dψ/d(arc) = J₁(α r)/[r · J₀(α r)] gives differential
+        // twist: inner field lines are nearly axial (J₀ ≈ 1 at small r), outer
+        // lines wrap tightly as J₀ → 0 near α r = 2.405 (the rope edge).
+        //
+        // Geometry: half-torus with major-circle plane = local (X,Y).  The
+        // group rotation.z = π/2 maps the apex (t = π/2 → local +Y) to world
+        // -X (toward Earth) and the two feet (t = 0, π → local ±X) to world
+        // ±Y (north/south of orbital plane) — i.e. the rope's apex leads the
+        // CME and its legs trail back toward the sun, just like the canonical
+        // three-part CME observation (front + cavity + flux-rope core).
+        const core = this._buildLundquistRope(cmeEvent, shellColor);
         group.add(core);
 
         // Orient: shell opens toward -X (toward Earth)
@@ -1405,6 +1454,153 @@ export class SpaceWeatherGlobe {
 
         this._scene.add(group);
         return { group, shell, sheath, core, event: cmeEvent, fadeOut: 0 };
+    }
+
+    /**
+     * Construct the Lundquist half-torus flux rope as a Group of Line objects.
+     * Returned in *local* group coordinates (the parent group applies the
+     * world-space rotation/scaling).
+     *
+     * @param {CmeEvent} cmeEvent
+     * @param {number}   shellColor — used to tint the rope core to match
+     */
+    _buildLundquistRope(cmeEvent, shellColor) {
+        const grp = new THREE.Group();
+        grp.name = 'cme_flux_rope';
+
+        // Major / minor scales in *local* units (shell radius = 1).
+        const R_MAJ   = 0.55;
+        const R_MIN   = 0.20;
+        const ALPHA   = LUNDQUIST_J0_ZERO * 0.93;   // α R_MIN < first zero
+                                                    // (avoid singularity at edge)
+
+        // Sampling: 4 minor radii × 3 phase offsets = 12 helical strands
+        const r_fracs = [0.30, 0.55, 0.78, 0.92];
+        const PHASE_N = 3;
+        const SAMPLES = 96;
+        const ARC_RANGE = Math.PI;                  // half-torus
+
+        // Severity-driven tint: stronger CMEs glow hotter (whiter).  We blend
+        // a base "rope yellow" toward the shell colour for severe events.
+        const sev = cmeEvent.impact?.severity ?? 'MINOR';
+        const heatMix =
+            sev === 'EXTREME'  ? 0.85 :
+            sev === 'SEVERE'   ? 0.70 :
+            sev === 'STRONG'   ? 0.55 :
+            sev === 'MODERATE' ? 0.35 : 0.18;
+
+        const baseInner = new THREE.Color(0xffe8a0);   // hot yellow-white core
+        const baseOuter = new THREE.Color(0xff7a30);   // hot amber rim
+        const tint      = new THREE.Color(shellColor);
+
+        const rope = this;  // for internal access (shouldn't be needed here)
+
+        for (let ri = 0; ri < r_fracs.length; ri++) {
+            const rFrac = r_fracs[ri];
+            const r0    = R_MIN * rFrac;
+            const ar    = ALPHA * rFrac;             // = α · r₀ since α=2.236/R_MIN
+            const j0    = besselJ0(ar);
+            const j1    = besselJ1(ar);
+
+            // dψ/d(arc) = J₁(α r₀) / (r₀ · J₀(α r₀))   [Lundquist field-line pitch]
+            // Cap to a sensible upper bound so a near-edge strand doesn't
+            // blow up visually if the chosen α drifts toward the J₀ zero.
+            const pitchPerArc = Math.min(
+                14.0,
+                Math.abs(j1) / (Math.max(0.04, Math.abs(j0)) * r0),
+            );
+            // Total ψ wound across the half-torus arc length R_MAJ · π
+            // dψ_total = pitchPerArc · R_MAJ · π
+            // We integrate per-sample: ψ(t) = ψ₀ + pitchPerArc · R_MAJ · t
+
+            // Strand colour: hot yellow at axis, fading to amber near edge.
+            const innerness = 1 - rFrac;      // 1 at axis, 0 at edge
+            const col = baseInner.clone().lerp(baseOuter, 1 - innerness)
+                                  .lerp(tint, heatMix * 0.4);
+            const mat = new THREE.LineBasicMaterial({
+                color:       col,
+                transparent: true,
+                opacity:     0.55 + 0.30 * innerness,
+                blending:    THREE.AdditiveBlending,
+                depthWrite:  false,
+            });
+
+            for (let k = 0; k < PHASE_N; k++) {
+                const phase0 = (k / PHASE_N) * Math.PI * 2;
+                const pts    = new Array(SAMPLES);
+                for (let i = 0; i < SAMPLES; i++) {
+                    const t   = (i / (SAMPLES - 1)) * ARC_RANGE;        // 0..π
+                    const psi = phase0 + pitchPerArc * R_MAJ * t;
+                    const c_t = Math.cos(t),  s_t = Math.sin(t);
+                    const c_p = Math.cos(psi), s_p = Math.sin(psi);
+                    const rad = R_MAJ + r0 * c_p;
+                    // Local frame: major circle in (X,Y), out-of-plane = Z.
+                    pts[i] = new THREE.Vector3(rad * c_t, rad * s_t, r0 * s_p);
+                }
+                const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+                const line = new THREE.Line(geo, mat);
+                line.renderOrder = 17;
+                grp.add(line);
+            }
+        }
+
+        // Faint axis spine (the major-circle curve itself) — guides the eye
+        // through the rope's centre even at high winding density.
+        const spinePts = new Array(SAMPLES);
+        for (let i = 0; i < SAMPLES; i++) {
+            const t = (i / (SAMPLES - 1)) * ARC_RANGE;
+            spinePts[i] = new THREE.Vector3(
+                R_MAJ * Math.cos(t),
+                R_MAJ * Math.sin(t),
+                0,
+            );
+        }
+        const spineGeo = new THREE.BufferGeometry().setFromPoints(spinePts);
+        const spineMat = new THREE.LineDashedMaterial({
+            color:       0xfff0c0,
+            dashSize:    0.07, gapSize: 0.05,
+            transparent: true, opacity: 0.35,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        const spine = new THREE.Line(spineGeo, spineMat);
+        spine.computeLineDistances();
+        spine.renderOrder = 17;
+        grp.add(spine);
+
+        // A small bright "fuzz ball" at each foot — represents the still-
+        // anchored footpoint plasma at the loop's base.  The two feet sit at
+        // the major-circle endpoints (t = 0, t = π).
+        const footMat = new THREE.SpriteMaterial({
+            map:         this._impactSpriteTex ?? null,
+            color:       0xffd070,
+            transparent: true, opacity: 0.55,
+            blending:    THREE.AdditiveBlending,
+            depthWrite:  false,
+        });
+        // Lazy-build sprite texture if missing
+        if (!footMat.map) {
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const g = c.getContext('2d');
+            const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0,   'rgba(255,255,255,0.95)');
+            grad.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+            grad.addColorStop(1,   'rgba(255,255,255,0)');
+            g.fillStyle = grad;
+            g.fillRect(0, 0, 64, 64);
+            this._impactSpriteTex = new THREE.CanvasTexture(c);
+            footMat.map = this._impactSpriteTex;
+        }
+        for (const tFoot of [0, Math.PI]) {
+            const sp = new THREE.Sprite(footMat);
+            sp.position.set(R_MAJ * Math.cos(tFoot), R_MAJ * Math.sin(tFoot), 0);
+            sp.scale.setScalar(0.18);
+            sp.renderOrder = 18;
+            grp.add(sp);
+        }
+
+        return grp;
     }
 
     /** Sync active CME events: add new shells, retire old ones. */
@@ -1499,9 +1695,23 @@ export class SpaceWeatherGlobe {
                 s.sheath.material.opacity = (0.10 + pulse * 0.08) * arrivalFade;
             }
 
-            // Core brightness pulsation
+            // Flux-rope core brightness pulsation — sweep opacity across the
+            // bundled strand materials.  Strands within the same minor-radius
+            // shell share a Material instance, so we cache the baseline on
+            // material.userData (not on the Line) to avoid the shared-write
+            // feedback that would otherwise drive opacity to zero each frame.
             if (s.core) {
-                s.core.material.opacity = (0.4 + 0.3 * Math.sin(t * 4)) * arrivalFade;
+                const pulse = 0.85 + 0.15 * Math.sin(t * 4);
+                const seen = new Set();
+                s.core.traverse(o => {
+                    const m = o.material;
+                    if (!m || !('opacity' in m) || seen.has(m)) return;
+                    seen.add(m);
+                    if (m.userData._opacityBase === undefined) {
+                        m.userData._opacityBase = m.opacity;
+                    }
+                    m.opacity = m.userData._opacityBase * pulse * arrivalFade;
+                });
             }
 
             // Auto-fade once the synthetic playback has overshot 1 AU
