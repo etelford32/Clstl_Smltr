@@ -326,6 +326,43 @@
             </div>
         </div>
 
+        <!-- ── Onboarding (wizard / tour / demo / auth) ───────────── -->
+        <!-- New surface added in the Phase-3 onboarding work. Reads the
+             onboarding_funnel / tour_metrics / auth_flow_metrics /
+             new_vs_returning RPCs (supabase-onboarding-events-migration
+             .sql) plus a direct event_log query for demo telemetry. -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>
+                Onboarding
+                <span style="font-size:.7rem;color:#778;font-weight:400;margin-left:6px">last 30 days</span>
+                <button class="btn btn-sm" id="btn-refresh-onboarding" style="float:right">Refresh</button>
+            </h3>
+            <div class="row2" style="margin-bottom:14px">
+                <div class="card" style="margin:0">
+                    <h3 style="font-size:.82rem;margin-bottom:10px">Welcome wizard funnel</h3>
+                    <div id="wizard-funnel-container"><div class="empty">Loading…</div></div>
+                </div>
+                <div class="card" style="margin:0">
+                    <h3 style="font-size:.82rem;margin-bottom:10px">Guided tour</h3>
+                    <div id="tour-metrics-container"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+            <div class="row2" style="margin-bottom:0">
+                <div class="card" style="margin:0">
+                    <h3 style="font-size:.82rem;margin-bottom:10px">Anonymous demo path</h3>
+                    <div id="demo-metrics-container"><div class="empty">Loading…</div></div>
+                </div>
+                <div class="card" style="margin:0">
+                    <h3 style="font-size:.82rem;margin-bottom:10px">Auth flow</h3>
+                    <div id="auth-flow-container"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+            <div class="card" style="margin:14px 0 0">
+                <h3 style="font-size:.82rem;margin-bottom:10px">New vs returning users</h3>
+                <div id="new-returning-container"><div class="empty">Loading…</div></div>
+            </div>
+        </div>
+
         <!-- ── Activation funnel ──────────────────────────────────── -->
         <div class="card" style="margin-bottom:18px">
             <h3>
@@ -627,7 +664,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -1390,6 +1427,100 @@ document.getElementById('activation-window')?.addEventListener('change', () => {
     loadActivationFunnel();
     loadActivationChart();
 });
+
+// ── Onboarding section (wizard / tour / demo / auth flow) ──────────────────
+// Renders five mini-cards inside the Activation tab. Each fetcher
+// degrades gracefully when the migration is missing — the empty state
+// surfaces the migration filename for the operator.
+function _onboardingMetricRow(label, value, sub) {
+    return `
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:.82rem">
+            <span style="color:#aab">${_esc(label)}</span>
+            <span style="color:#fff;font-weight:700">${_esc(value)}${sub ? `<span style="color:#778;font-weight:400;font-size:.72rem;margin-left:6px">${_esc(sub)}</span>` : ''}</span>
+        </div>`;
+}
+function _pct(n) { return (n * 100).toFixed(1) + '%'; }
+
+async function loadWizardFunnel() {
+    const el = document.getElementById('wizard-funnel-container');
+    const r = await fetchWizardFunnel(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    el.innerHTML =
+        _onboardingMetricRow('Wizard shown',           d.shown,   'unique users') +
+        _onboardingMetricRow('Made any progress',      d.stepped, _pct(d.anyProgress)) +
+        _onboardingMetricRow('Reached final step',     d.completed, _pct(d.completionRate) + ' completion') +
+        _onboardingMetricRow('Skipped',                d.skipped, _pct(d.skipRate));
+}
+async function loadTourMetrics() {
+    const el = document.getElementById('tour-metrics-container');
+    const r = await fetchTourMetrics(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    el.innerHTML =
+        _onboardingMetricRow('Tour started',   d.started) +
+        _onboardingMetricRow('Tour completed', d.completed, _pct(d.completionRate)) +
+        _onboardingMetricRow('Tour skipped',   d.skipped);
+}
+async function loadDemoMetrics() {
+    const el = document.getElementById('demo-metrics-container');
+    const r = await fetchDemoMetrics(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    el.innerHTML =
+        _onboardingMetricRow('Demo entered',          d.entered) +
+        _onboardingMetricRow('Signup-link clicks',    d.clicked, _pct(d.clickRate) + ' click-through') +
+        `<div style="font-size:.7rem;color:#667;margin-top:8px;line-height:1.4">Anonymous events live in <code>event_log</code> — RLS forbids unauth writes to <code>activation_events</code>. Click-through ≠ completed signup; cross-reference with the Signups KPI above.</div>`;
+}
+async function loadAuthFlowMetrics() {
+    const el = document.getElementById('auth-flow-container');
+    const r = await fetchAuthFlowMetrics(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    el.innerHTML =
+        _onboardingMetricRow('Signups',                  d.signups) +
+        _onboardingMetricRow('Successful sign-ins',      d.signinSuccesses) +
+        _onboardingMetricRow('Returning sessions (>24h)', d.returningSessions) +
+        _onboardingMetricRow('Avg retries to success',   d.avgRetries.toFixed(2), _pct(d.pctNeedingRetry) + ' needed ≥1');
+}
+async function loadNewVsReturning() {
+    const el = document.getElementById('new-returning-container');
+    const r = await fetchNewVsReturning(30);
+    if (!r.ok) { el.innerHTML = `<div class="empty" style="color:#ff8080">${_esc(r.error)}</div>`; return; }
+    const d = r.data;
+    if (!d.total) { el.innerHTML = '<div class="empty">No activity in the last 30 days.</div>'; return; }
+    const newPct = d.total ? (d.new / d.total) * 100 : 0;
+    const retPct = 100 - newPct;
+    el.innerHTML = `
+        <div style="display:flex;gap:10px;margin-bottom:6px;font-size:.82rem">
+            <div style="flex:1"><strong style="color:#9ad36f">New</strong> ${d.new} (${newPct.toFixed(1)}%)</div>
+            <div style="flex:1;text-align:right"><strong style="color:#4fc3f7">Returning</strong> ${d.returning} (${retPct.toFixed(1)}%)</div>
+        </div>
+        <div style="height:10px;background:rgba(255,255,255,.06);border-radius:5px;overflow:hidden;display:flex">
+            <div style="background:#9ad36f;width:${newPct}%"></div>
+            <div style="background:#4fc3f7;width:${retPct}%"></div>
+        </div>`;
+}
+async function loadOnboardingAll() {
+    await Promise.all([
+        loadWizardFunnel(),
+        loadTourMetrics(),
+        loadDemoMetrics(),
+        loadAuthFlowMetrics(),
+        loadNewVsReturning(),
+    ]);
+}
+document.getElementById('btn-refresh-onboarding')?.addEventListener('click', loadOnboardingAll);
+
+// Piggy-back onto the existing activation-tab triggers so the
+// onboarding cards load whenever the rest of the Activation tab does.
+// Reassigning the named function declaration would silently break the
+// listeners already bound above (they captured the original reference),
+// so we attach parallel listeners instead.
+document.querySelector('.tab[data-tab="activation"]')?.addEventListener('click', () => {
+    loadOnboardingAll();
+});
+document.getElementById('btn-refresh-activation')?.addEventListener('click', loadOnboardingAll);
 
 // ── Users Tab ────────────────────────────────────────────────────────────────
 async function loadUsers() {

@@ -539,6 +539,16 @@ export class OnboardingTour {
         document.removeEventListener('keydown', this._onKey);
         try { localStorage.setItem(LS_KEY, '1'); } catch {}
 
+        // Activation telemetry: a close that arrives ON the final step is
+        // a completion; anything earlier is a skip. Fire-and-forget — the
+        // soft import keeps activation logging from being a hard
+        // dependency of the tour module.
+        const isFinal = !!this._steps?.[this._step]?.final;
+        import('./activation.js').then(({ logActivation }) => {
+            logActivation(isFinal ? 'tour_completed' : 'tour_skipped',
+                          { step_reached: this._step, persona: this._persona });
+        }).catch(() => {});
+
         this._scrim?.classList.remove('visible');
         this._spotlight?.classList.remove('visible');
         this._card?.classList.remove('visible');
