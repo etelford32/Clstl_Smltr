@@ -49,13 +49,30 @@ let _wasmLoading = false;
 async function _loadWasmSgp4() {
     if (_wasmSgp4 || _wasmLoading) return _wasmSgp4;
     _wasmLoading = true;
+    const t0 = performance.now();
     try {
         const mod = await import('./sgp4-wasm/sgp4_wasm.js');
         await mod.default();  // init WASM
         _wasmSgp4 = mod;
         console.info('[SatTracker] Rust SGP4 WASM loaded — high-performance propagation active');
+        // Telemetry: how long did the WASM cold-start take? Big swings
+        // in p95 here are usually network / CDN edge problems, not
+        // wasm-bindgen instantiation. Lazy import so satellite-tracker
+        // doesn't pull telemetry into pages that don't need it.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init', performance.now() - t0);
+        } catch {}
     } catch (err) {
         console.debug('[SatTracker] WASM SGP4 not available, using JS fallback:', err.message);
+        // Telemetry: don't burn an `error` row on this — WASM-unavailable
+        // is an expected fallback for older browsers. Log as a tagged
+        // app_perf with a -1 value so we can count occurrence rates
+        // without polluting the error top-N.
+        try {
+            const { telemetry } = await import('./telemetry.js');
+            telemetry.recordPerf('wasm_sgp4_init_failed', -1);
+        } catch {}
     }
     _wasmLoading = false;
     return _wasmSgp4;

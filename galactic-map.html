@@ -457,14 +457,23 @@ sstarOrbitGroup.visible = false;  // toggled by camera distance
 
 // Load WASM asynchronously — non-blocking, page works without it
 (async () => {
+    const t0 = performance.now();
     try {
         const mod = await import('./js/sstar-wasm/sstar_wasm.js');
         await mod.default();
         sstarWasm = mod;
         console.log('S-star WASM loaded — ' + sstarWasm.get_star_count() + ' stars');
         buildSstarOrbits();   // draw orbital ellipses once WASM is ready
+        try {
+            const { telemetry } = await import('./js/telemetry.js');
+            telemetry.recordPerf('wasm_sstar_init', performance.now() - t0);
+        } catch {}
     } catch (e) {
         console.warn('S-star WASM not available — using static positions:', e.message);
+        try {
+            const { telemetry } = await import('./js/telemetry.js');
+            telemetry.recordPerf('wasm_sstar_init_failed', -1);
+        } catch {}
     }
 })();
 
