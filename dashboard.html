@@ -1270,6 +1270,20 @@ if (!_auth || !_auth.signedIn) {
   // something cosmetic further down the script.
   document.getElementById('auth-gate').style.display = 'none';
 
+  // Telemetry: time from navigation start (the moment the browser
+  // committed the dashboard URL) to the gate clearing. Captures the
+  // full critical path — Supabase session restore + auth.ready() race
+  // + module imports — which is the user-visible "is this app
+  // working?" latency, not just the resource-load timing the Web
+  // Vitals capture.
+  try {
+      const { telemetry } = await import('./js/telemetry.js');
+      const t0 = performance.timing?.navigationStart
+              || performance.timeOrigin
+              || 0;
+      if (t0) telemetry.recordPerf('dashboard_gate_clear', Date.now() - t0);
+  } catch {}
+
   // Returning-user telemetry: fires once per session for any signed-in
   // user whose previous dashboard visit was > 24 h ago. The DB-side
   // RPC counts these to compute returning-user rates without needing

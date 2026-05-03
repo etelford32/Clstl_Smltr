@@ -129,7 +129,14 @@ class Telemetry {
 
         this._installAutocapture();
         this._installFlushTriggers();
-        if (this._sendVitals) this._installVitalsObserver();
+        if (this._sendVitals) {
+            // Navigation timing has no PerformanceObserver dependency
+            // (just reads the navigation entry from `performance`), so
+            // it stays separate from the vitals observer wiring. Both
+            // are gated by the same 25% sample so they share volume.
+            this._installNavigationObserver();
+            this._installVitalsObserver();
+        }
     }
 
     /** Set the JWT once available so server-side rows attach to a user_id. */
@@ -292,6 +299,40 @@ class Telemetry {
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'hidden') this.flush();
         });
+    }
+
+    /**
+     * Per-route page-load timing from PerformanceNavigationTiming.
+     * Captures the breakdown of where each page-load second went:
+     *   * TTFB         — request → first byte (server + network)
+     *   * DOM_READY    — first byte → DOMContentLoaded fire
+     *   * PAGE_LOAD    — request → load event (full doc + subresources)
+     *
+     * The navigation entry is available immediately after the load
+     * event fires (it's buffered, so we read it on the next tick to
+     * avoid racing the entry list). One-shot per page load.
+     */
+    _installNavigationObserver() {
+        const capture = () => {
+            try {
+                const nav = performance.getEntriesByType('navigation')[0];
+                if (!nav) return;
+                const ttfb = nav.responseStart - nav.requestStart;
+                const dom  = nav.domContentLoadedEventEnd - nav.responseEnd;
+                const load = nav.loadEventEnd - nav.startTime;
+                if (ttfb > 0)  this.recordVital('TTFB',      ttfb);
+                if (dom  > 0)  this.recordVital('DOM_READY', dom);
+                if (load > 0)  this.recordVital('PAGE_LOAD', load);
+            } catch { /* not supported / partial entry */ }
+        };
+        if (document.readyState === 'complete') {
+            // Page already loaded by the time we got here (rare; happens on
+            // bfcache restore or very fast modules). Defer one tick so the
+            // entry's loadEventEnd is settled.
+            setTimeout(capture, 0);
+        } else {
+            window.addEventListener('load', () => setTimeout(capture, 0), { once: true });
+        }
     }
 
     _installVitalsObserver() {
