@@ -30,6 +30,9 @@ import { elementsToState, shiftToBarycenter, G_SI } from './physics.js';
 const MU = {
     earth:      3.986004418e14,
     moon:       4.9028000e12,
+    mars:       4.282837e13,
+    phobos:     7.087e5,
+    deimos:     9.615e4,
     jupiter:    1.26686534e17,
     io:         5.959916e12,
     europa:     3.202739e12,
@@ -47,6 +50,16 @@ const MU = {
     epimetheus: 3.515060e7,    // 5.266e17 kg * G
 };
 
+// Oblateness (J2) metadata.  When a system declares oblateness on its
+// parent, the integrator can apply the central-body J2 perturbation —
+// dramatic for Mars satellites and the Galilean inner moons.
+const OBLATENESS = {
+    mars:    { J2: 1.96045e-3, R_eq_m: 3_396_200 },     // Mars equatorial radius
+    earth:   { J2: 1.0826e-3,  R_eq_m: 6_378_137 },
+    jupiter: { J2: 1.4736e-2,  R_eq_m: 71_492_000 },
+    saturn:  { J2: 1.6298e-2,  R_eq_m: 60_268_000 },
+};
+
 // Masses (kg) derived from MU, used by the integrator.
 const M = Object.fromEntries(
     Object.entries(MU).map(([k, mu]) => [k, mu / G_SI])
@@ -57,7 +70,7 @@ const M = Object.fromEntries(
  * Keplerian elements relative to the parent.  Returns the full body list
  * with the system shifted into its own barycentric frame.
  */
-function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing }) {
+function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default }) {
     const bodies = [{
         name: parent.name,
         m: parent.m,
@@ -92,6 +105,8 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
         scale_km_per_unit,
         suggested_dt_s,
         suggested_warp,
+        oblateness:  oblateness || null,    // {J2, R_eq_m} or null
+        j2_default:  !!j2_default,          // start with J2 enabled?
     };
 }
 
@@ -136,6 +151,84 @@ const EARTH_MOON = _build({
     scale_km_per_unit: 6378.137,         // 1 scene unit = Earth radius
     suggested_dt_s:    600,              // 10-minute step
     suggested_warp:    86400,            // 1 day per real second
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mars + Phobos + Deimos
+// ─────────────────────────────────────────────────────────────────────────────
+// Elements at J2000.0 in Mars' mean equatorial plane (the natural frame
+// for Mars satellite ephemerides).  Source: MAR097 ephemeris (JPL).
+//
+// What J2 does here
+// ─────────────────
+// Mars J2 = 1.96e-3 — among the largest of the planets.  Phobos sits at
+// only 2.76 R_Mars, so the central-body oblateness drives extreme secular
+// rates that the integrator reproduces directly:
+//
+//   Phobos longitude of ascending node:  ~ -159 deg/yr  (Vallado §9)
+//   Phobos longitude of perihelion:      ~ +159 deg/yr
+//   Deimos node:                         ~ -6.4 deg/yr
+//
+// What J2 does NOT do
+// ───────────────────
+// Phobos is also tidally decaying inward at ~1.8 cm/yr — but that is a
+// dissipative effect from Mars' tidal bulge lagging Phobos's sub-Mars
+// point, not a J2 effect.  Tidal decay breaks symplectic conservation
+// and is queued for a future "non-conservative perturbations" toggle.
+
+const MARS_SYSTEM = _build({
+    id:    'mars-system',
+    name:  'Mars + Phobos & Deimos',
+    blurb: 'Two tiny moons whose orbits sweep around Mars at frantic rates because of the planet\'s strong oblateness.',
+    marketing: {
+        headline: 'Mars J₂ in action',
+        callout:  'Toggle J₂ off and Phobos\'s orbit holds steady. Toggle it on, crank the warp, and watch the line of nodes whip around Mars at 159° per year — completing a full retrograde loop every 2.3 simulation seconds at 1 yr/s.',
+        physics:  'Central-body oblateness (J₂ = 1.96 × 10⁻³ for Mars) drags the orbital plane around the spin axis. The integrator stays symplectic because J₂ is conservative. Tidal decay of Phobos (~1.8 cm/yr) is dissipative — coming in a future build.',
+    },
+    parent: {
+        name: 'mars',
+        m: M.mars,
+        radius_km: 3396.2,
+        color: 0xc25733,
+        glow:  0xff8c5a,
+    },
+    satellites: [
+        {
+            name: 'phobos',
+            m: M.phobos,
+            radius_km: 11.27,
+            color: 0x8b6f5a,
+            highlight: 'sub-areostationary · spiraling in tidally · J₂-driven precession',
+            elements: {
+                a:        9_376_000,
+                e:        0.0151,
+                i_deg:    1.093,
+                raan_deg: 164.93,
+                argp_deg: 132.16,
+                M_deg:     84.34,
+            },
+        },
+        {
+            name: 'deimos',
+            m: M.deimos,
+            radius_km: 6.2,
+            color: 0xa68872,
+            highlight: 'super-areostationary · slowly receding',
+            elements: {
+                a:        23_463_000,
+                e:        0.0002,
+                i_deg:    0.93,
+                raan_deg: 339.60,
+                argp_deg: 290.90,
+                M_deg:    325.32,
+            },
+        },
+    ],
+    scale_km_per_unit: 3396.2,           // 1 scene unit = Mars equatorial radius
+    suggested_dt_s:    60,               // 1-minute step (Phobos period 7.65 hr)
+    suggested_warp:    86400 * 100,      // 100 days per real second — J2 visible
+    oblateness:        OBLATENESS.mars,
+    j2_default:        true,
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -394,6 +487,7 @@ const SATURN_COORBITALS = _build({
 
 export const SYSTEMS = {
     'earth-moon':        EARTH_MOON,
+    'mars-system':       MARS_SYSTEM,
     'jupiter-galileans': JUPITER_GALILEANS,
     'saturn-major':      SATURN_MAJOR,
     'saturn-coorbitals': SATURN_COORBITALS,
@@ -401,6 +495,7 @@ export const SYSTEMS = {
 
 export const SYSTEM_ORDER = [
     'earth-moon',
+    'mars-system',
     'jupiter-galileans',
     'saturn-major',
     'saturn-coorbitals',

@@ -188,6 +188,50 @@ body {
     font-size:.66rem; color:#778; line-height:1.5; margin-top:2px;
 }
 
+/* ─── Perturbation toggle ───────────────────────────────────── */
+.gl-j2-row {
+    display:flex; align-items:center; gap:10px;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    padding:9px 12px;
+    cursor:pointer;
+    transition:border-color .15s;
+}
+.gl-j2-row:hover { border-color:rgba(180,140,255,.45); }
+.gl-j2-row input[type=checkbox] {
+    appearance:none; -webkit-appearance:none;
+    width:32px; height:18px; border-radius:999px;
+    background:rgba(255,255,255,.10);
+    border:1px solid rgba(255,255,255,.18);
+    cursor:pointer; position:relative;
+    transition:background .15s, border-color .15s;
+    flex-shrink:0;
+}
+.gl-j2-row input[type=checkbox]::after {
+    content:""; position:absolute;
+    width:12px; height:12px; border-radius:50%;
+    background:#fff; top:2px; left:2px;
+    transition:transform .15s;
+}
+.gl-j2-row input[type=checkbox]:checked {
+    background:rgba(180,140,255,.45);
+    border-color:#b78cff;
+}
+.gl-j2-row input[type=checkbox]:checked::after {
+    transform:translateX(14px);
+    background:#fff;
+}
+.gl-j2-name { font-size:.78rem; font-weight:700; color:#fff; }
+.gl-j2-note  {
+    font-size:.7rem; color:#cba9ff; line-height:1.5;
+    margin-top:8px; font-family:monospace;
+}
+.gl-j2-note strong { color:#fff; }
+.gl-j2-hint {
+    font-size:.64rem; color:#778; line-height:1.5; margin-top:6px; font-style:italic;
+}
+
 /* ─── Showcase block ────────────────────────────────────────── */
 .gl-showcase {
     background:linear-gradient(150deg, rgba(180,140,255,.10), rgba(10,6,28,.5) 70%);
@@ -336,6 +380,10 @@ canvas.gl-resonance-canvas {
                 <div class="gl-tab-name">Earth + Moon</div>
                 <div class="gl-tab-sub">5° inclined · 27.32 d period · true scale</div>
             </button>
+            <button type="button" class="gl-tab" data-system="mars-system">
+                <div class="gl-tab-name">Mars + Phobos &amp; Deimos</div>
+                <div class="gl-tab-sub">J₂ precession · 159°/yr nodal regression of Phobos</div>
+            </button>
             <button type="button" class="gl-tab" data-system="jupiter-galileans">
                 <div class="gl-tab-name">Jupiter + the Galileans</div>
                 <div class="gl-tab-sub">Io · Europa · Ganymede · Callisto — 4 : 2 : 1 resonance</div>
@@ -379,6 +427,16 @@ canvas.gl-resonance-canvas {
             <div class="gl-chips" id="gl-chips"></div>
             <button type="button" class="gl-btn" id="gl-fit">⌖ Fit System View</button>
             <p class="gl-camera-hint">Click any body — in the scene or below — to follow it. Click again or the fit button to return.</p>
+        </div>
+
+        <div id="gl-j2-wrap" style="display:none;">
+            <div class="gl-label">Perturbations</div>
+            <label class="gl-j2-row">
+                <input type="checkbox" id="gl-j2" />
+                <span class="gl-j2-name">Central-body J₂ (oblateness)</span>
+            </label>
+            <p class="gl-j2-note" id="gl-j2-note">—</p>
+            <p class="gl-j2-hint">J₂ is conservative — energy stays bounded. Tidal decay (dissipative) will arrive on a future "non-conservative" toggle.</p>
         </div>
     </aside>
 
@@ -430,7 +488,7 @@ canvas.gl-resonance-canvas {
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260502c';
+import { boot } from './js/gravity-lab/lab.js?v=20260503a';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -462,6 +520,11 @@ const ui = {
     bodyChips:  document.getElementById('gl-chips'),
     fitBtn:     document.getElementById('gl-fit'),
     focusLabel: document.getElementById('gl-focus-label'),
+
+    // Perturbation toggle
+    j2Toggle:   document.getElementById('gl-j2'),
+    j2Wrap:     document.getElementById('gl-j2-wrap'),
+    j2Note:     document.getElementById('gl-j2-note'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });

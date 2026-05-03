@@ -123,6 +123,39 @@ function _accelerations(bodies, opts) {
     return acc;
 }
 
+/**
+ * Central-body J2 potential energy summed over all satellites (J).
+ * Includes only the oblateness term — pairwise PE comes from totalEnergy().
+ *
+ *   PE_J2 = + mu_central * m_sat * J2 * R_eq^2 * (3 z^2 / r^2 - 1) / (2 r^3)
+ *
+ * Sign convention check: with acc = -grad(PE/m), the J2 acceleration here
+ *   acc_x = -(3/2) mu J2 R^2 x (1 - 5 z^2/r^2) / r^5
+ * is the negative gradient of  U(r) = +mu J2 R^2 (3z^2 - r^2) / (2 r^5)
+ * which equals  +mu J2 R^2 (3 z^2/r^2 - 1) / (2 r^3).
+ *
+ * The integrator's J2 acceleration is the gradient of this potential, so
+ * including this term in the diagnostic confirms the integrator preserves
+ * the full Hamiltonian — not just the two-body part.
+ */
+export function totalJ2PotentialEnergy(bodies, j2Opts) {
+    if (!j2Opts) return 0;
+    const { centerIdx, J2, R_eq, mu } = j2Opts;
+    const c = bodies[centerIdx];
+    let PE = 0;
+    for (let i = 0; i < bodies.length; i++) {
+        if (i === centerIdx) continue;
+        const dx = bodies[i].r[0] - c.r[0];
+        const dy = bodies[i].r[1] - c.r[1];
+        const dz = bodies[i].r[2] - c.r[2];
+        const r2 = dx*dx + dy*dy + dz*dz;
+        const r3 = r2 * Math.sqrt(r2);
+        const zr2 = (dz * dz) / r2;
+        PE += mu * bodies[i].m * J2 * R_eq * R_eq * (3 * zr2 - 1) / (2 * r3);
+    }
+    return PE;
+}
+
 /** Total kinetic + potential energy (J). For long-run integrator diagnostics. */
 export function totalEnergy(bodies) {
     let KE = 0;
