@@ -1202,6 +1202,9 @@ export class SpaceWeatherGlobe {
         const kp  = state.kp ?? 2;
         const bz  = sw.bz    ?? 0;
         const spd = sw.speed ?? 400;
+        // Cache for HUD timeline strip (poll-only readers)
+        this._lastKp = kp;
+        this._lastBz = bz;
 
         this._windSpeedNorm = Math.max(0, Math.min(1, (spd - 250) / 650));
         this._windSpeedKms  = Math.max(200, Math.min(1200, spd));
@@ -1365,6 +1368,12 @@ export class SpaceWeatherGlobe {
 
     /** Latest ambient solar-wind speed (km/s) — set by `update(state)`. */
     get currentWindSpeedKms() { return this._windSpeedKms; }
+
+    /** Latest geomagnetic Kp index (set by update(state); 0–9). */
+    get lastKp() { return this._lastKp ?? 2; }
+
+    /** Latest IMF Bz (nT, set by update(state); negative = southward). */
+    get lastBz() { return this._lastBz ?? 0; }
 
     /** Number of currently-tracked active regions in the twist accumulator. */
     get arCount() { return this._arTwist?.size ?? 0; }

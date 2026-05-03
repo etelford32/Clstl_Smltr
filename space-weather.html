@@ -1274,6 +1274,38 @@ nav {
 
 .space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
 
+/* 60-min timeline strip */
+.space-weather-hud .hud-tl-canvas {
+    width: 100%; height: 80px; display: block;
+    border-radius: 4px;
+    background: rgba(0, 4, 12, .85);
+    border: 1px solid rgba(255, 192, 96, .10);
+    margin-top: 2px;
+}
+.space-weather-hud .hud-tl-legend {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-top: 4px;
+}
+.space-weather-hud .hud-tl-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .58rem; color: #889;
+    padding: 1px 6px; border-radius: 8px;
+    background: rgba(255, 192, 96, .04);
+    border: 1px solid rgba(255, 192, 96, .10);
+}
+.space-weather-hud .hud-tl-chip::before {
+    content: ''; display: inline-block;
+    width: 8px; height: 2px;
+    background: var(--hud-tl-c, #fff);
+    border-radius: 1px;
+}
+.space-weather-hud .hud-tl-axis {
+    display: flex; justify-content: space-between;
+    margin-top: 2px;
+    color: #556; font-size: .56rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
 @media (max-width: 900px) {
     .space-weather-hud {
         position: static; width: auto; max-height: none;
