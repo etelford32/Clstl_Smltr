@@ -1156,6 +1156,58 @@ nav {
 .layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
     border-color: rgba(0,198,255,.45); }
 
+/* SDO live A/B panel — top-left of canvas, mirror of HUD glass-pane style */
+.sdo-cmp-panel {
+    position: absolute; top: 60px; left: 14px;
+    width: 200px;
+    background: rgba(2, 8, 16, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 192, 96, .18);
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #cfd8e2;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    z-index: 4;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.sdo-cmp-header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 6px; margin-bottom: 6px;
+}
+.sdo-cmp-title {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .08em;
+    color: #ffc060; font-weight: 600;
+}
+.sdo-cmp-mark {
+    font-size: .55rem; padding: 0 4px; border-radius: 4px;
+    background: rgba(255,180,40,.20); color: #ffd070;
+    letter-spacing: .04em;
+}
+.sdo-cmp-ch {
+    font-size: .58rem; color: #889;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    text-align: right;
+}
+.sdo-cmp-img {
+    width: 100%; height: auto; display: block;
+    border-radius: 6px;
+    background: #010812;
+    border: 1px solid rgba(255, 192, 96, .12);
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    image-rendering: -webkit-optimize-contrast;
+}
+.sdo-cmp-foot {
+    margin-top: 4px; font-size: .58rem; color: #667;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    text-align: center;
+}
+.sdo-cmp-foot.sdo-cmp-err { color: #ff6644; }
+@media (max-width: 900px) {
+    .sdo-cmp-panel { position: static; width: auto; margin-top: 10px; }
+}
+
 /* EUV channel selector — sits below the layer toggle row */
 .euv-row {
     margin-top: 6px; align-items: center;
@@ -1987,6 +2039,10 @@ nav {
         <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
         <div class="space-weather-hud" id="sw-hud"
              aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
+        <!-- Live SDO/AIA reference image, A/B alongside the synthetic-DEM
+             corona render. Populated by sdo-compare-panel.js -->
+        <div class="sdo-cmp-panel" id="sdo-cmp"
+             aria-label="Live SDO/AIA reference image at the currently-selected EUV channel"></div>
         <div class="globe-legend">
             <span><span class="leg-dot" style="background:#ffd700"></span>Sun (live SWPC photosphere + corona, flare response)</span>
             <span><span class="leg-dot" style="background:#888"></span>Moon (procedural surface, orbital motion)</span>
@@ -2596,6 +2652,7 @@ import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { SpaceWeatherHud }     from './js/space-weather-hud.js';
+import { SdoComparePanel }     from './js/sdo-compare-panel.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -3790,6 +3847,15 @@ let _globe = null;
         const hudEl = document.getElementById('sw-hud');
         if (hudEl) new SpaceWeatherHud(hudEl, _globe).start();
 
+        // Live SDO/AIA reference panel for A/B comparison with the
+        // synthetic-DEM corona render.  Mirrors the active EUV channel.
+        const sdoEl = document.getElementById('sdo-cmp');
+        let _sdoPanel = null;
+        if (sdoEl) {
+            _sdoPanel = new SdoComparePanel(sdoEl).start();
+            _sdoPanel.setChannel(_globe.euvMode ?? 'white');
+        }
+
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
             const btn = ev.target.closest('.layer-btn');
@@ -3798,7 +3864,9 @@ let _globe = null;
             _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
         });
 
-        // SDO/AIA EUV channel selector — radio-style (only one active at a time)
+        // SDO/AIA EUV channel selector — radio-style (only one active at a time).
+        // Drives both the synthetic-DEM corona shader (via _globe.setEuvMode)
+        // and the live SDO reference image panel for A/B comparison.
         document.getElementById('euv-channel-btns')?.addEventListener('click', ev => {
             const btn = ev.target.closest('.euv-btn');
             if (!btn) return;
@@ -3808,6 +3876,7 @@ let _globe = null;
                 sib.classList.toggle('active', sib === btn);
             }
             _globe.setEuvMode(channel);
+            _sdoPanel?.setChannel(channel);
         });
     }
 }
