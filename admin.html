@@ -1587,6 +1587,7 @@ async function loadAuthFlowMetrics() {
     const d = r.data;
     el.innerHTML =
         _onboardingMetricRow('Signups',                  d.signups) +
+        _onboardingMetricRow('Email confirmations',      d.signupsConfirmed ?? 0, _pct(d.confirmationRate ?? 0) + ' of signups') +
         _onboardingMetricRow('Welcome emails sent',      d.welcomeEmails, _pct(d.welcomeSendRate) + ' of signups') +
         _onboardingMetricRow('T+24h nudges sent',        d.nudgesSent, _pct(d.nudgeRate) + ' of signups') +
         _onboardingMetricRow('Successful sign-ins',      d.signinSuccesses) +

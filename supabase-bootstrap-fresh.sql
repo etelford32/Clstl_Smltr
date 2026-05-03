@@ -148,7 +148,14 @@ CREATE POLICY "Admins can view all alerts"
     ON public.alert_history FOR SELECT
     USING (auth.uid() = user_id OR public.is_admin());
 
--- Trigger: auto-create profile on signup
+-- Trigger: auto-create profile on signup.
+--
+-- This is the bootstrap copy. It's overridden later in this same file
+-- by the lockdown version (search for "Replace handle_new_user() to
+-- ignore client-supplied plan/role"). Both copies hard-code plan='free'
+-- and role='user' — the COALESCE-from-metadata pattern in earlier
+-- versions silently re-opened the signup-metadata injection that the
+-- plan-lockdown migration was meant to close.
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -157,8 +164,8 @@ BEGIN
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'name', split_part(NEW.email, '@', 1)),
-        COALESCE(NEW.raw_user_meta_data->>'plan', 'free'),
-        'user'
+        'free',   -- HARD-CODED. Stripe webhook is the only path to a paid plan.
+        'user'    -- HARD-CODED. Admin grants happen post-signup via SQL editor.
     );
     RETURN NEW;
 END;
