@@ -183,6 +183,20 @@
     <div class="sa-header">
         <h1>Superadmin</h1>
         <p id="sa-sub">Loading…</p>
+        <div id="sa-refresh-bar" style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:.74rem;color:#888;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+                <input type="checkbox" id="sa-autorefresh" checked style="cursor:pointer">
+                Auto-refresh
+            </label>
+            <select id="sa-refresh-interval" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem" title="How often to re-query the user list and audit log">
+                <option value="30000">every 30s</option>
+                <option value="60000" selected>every 1m</option>
+                <option value="120000">every 2m</option>
+                <option value="300000">every 5m</option>
+            </select>
+            <button class="btn btn-sm" id="sa-refresh-now">Refresh now</button>
+            <span id="sa-refresh-stamp" style="color:#666"></span>
+        </div>
     </div>
 
     <div class="sa-warning">
@@ -588,6 +602,58 @@
 
     // Initial load
     loadUsers();
+
+    // ── Auto-refresh loop ────────────────────────────────────────────
+    // Reruns the visible tab's loader on a configurable interval. Pauses
+    // when the tab is hidden and flushes one fresh fetch when it returns.
+    // Preserves the active search term so re-queries don't blow away
+    // what the operator is filtering for.
+    let _saRefreshTimer    = null;
+    let _saRefreshInFlight = false;
+
+    async function refreshSuperadminNow() {
+        if (_saRefreshInFlight) return;
+        _saRefreshInFlight = true;
+        const stamp = document.getElementById('sa-refresh-stamp');
+        if (stamp) stamp.textContent = 'Refreshing…';
+        try {
+            const tab = document.querySelector('.tab.active')?.dataset.tab || 'users';
+            if (tab === 'users') {
+                const search = document.getElementById('user-search').value.trim() || null;
+                await loadUsers(search);
+            } else if (tab === 'audit') {
+                await loadAudit();
+            }
+            if (stamp) stamp.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
+        } catch (err) {
+            console.warn('[Superadmin] auto-refresh failed:', err);
+            if (stamp) stamp.textContent = `Last refresh failed (${new Date().toLocaleTimeString()})`;
+        } finally {
+            _saRefreshInFlight = false;
+        }
+    }
+
+    function _setSaAuto(on) {
+        if (_saRefreshTimer) { clearInterval(_saRefreshTimer); _saRefreshTimer = null; }
+        if (!on) return;
+        const ms = parseInt(document.getElementById('sa-refresh-interval').value, 10) || 60_000;
+        _saRefreshTimer = setInterval(() => {
+            if (!document.hidden) refreshSuperadminNow();
+        }, ms);
+    }
+
+    document.getElementById('sa-refresh-now').addEventListener('click', refreshSuperadminNow);
+    document.getElementById('sa-autorefresh').addEventListener('change', e => _setSaAuto(e.target.checked));
+    document.getElementById('sa-refresh-interval').addEventListener('change', () => {
+        if (document.getElementById('sa-autorefresh').checked) _setSaAuto(true);
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && document.getElementById('sa-autorefresh')?.checked) {
+            refreshSuperadminNow();
+        }
+    });
+
+    _setSaAuto(true);
 </script>
 </body>
 </html>

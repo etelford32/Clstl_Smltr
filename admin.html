@@ -182,6 +182,20 @@
                 ★ Superadmin tools (audit log, plan overrides) →
             </a>
         </p>
+        <div id="analytics-refresh-bar" style="display:flex;align-items:center;gap:10px;margin-top:10px;font-size:.74rem;color:#888;flex-wrap:wrap">
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+                <input type="checkbox" id="analytics-autorefresh" checked style="cursor:pointer">
+                Auto-refresh
+            </label>
+            <select id="analytics-refresh-interval" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem" title="How often to re-query Supabase for KPIs and the visible tab">
+                <option value="30000">every 30s</option>
+                <option value="60000" selected>every 1m</option>
+                <option value="120000">every 2m</option>
+                <option value="300000">every 5m</option>
+            </select>
+            <button class="btn btn-sm" id="analytics-refresh-now">Refresh now</button>
+            <span id="analytics-refresh-stamp" style="color:#666"></span>
+        </div>
     </div>
 
     <div class="tabs" id="tabs">
@@ -2293,6 +2307,75 @@ document.getElementById('btn-export').addEventListener('click', async () => {
     const blob = new Blob([JSON.stringify({ timestamp: new Date().toISOString(), supabase_url: SUPABASE_URL, ok: r.ok, checks: r.checks, user: { email: auth.getUser()?.email, role: auth.getRole() } }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'health-report.json'; a.click();
 });
+
+// ── Analytics auto-refresh loop ─────────────────────────────────────────────
+// Every load*() function above runs once at page load and never again, so
+// admins reported KPIs going stale within minutes. This loop reruns the
+// header KPIs plus whichever tab is currently visible. The Live Event Feed
+// has its own faster 10s cadence (see _setFeedAuto) and is excluded here
+// to avoid double-loading. Pauses when the tab is hidden; flushes one
+// fresh fetch on visibility-restore so the user doesn't stare at numbers
+// from when they switched away.
+const _refreshLoaders = {
+    overview:   () => Promise.allSettled([loadTrend(), loadTopPages()]),
+    users:      () => Promise.allSettled([loadUsers(), loadSessions()]),
+    activation: () => Promise.allSettled([loadActivationAll(), loadOnboardingAll()]),
+    analytics:  () => Promise.resolve(),
+    invites:    () => Promise.allSettled([loadInvites(), loadEmailActivity()]),
+    system:     () => Promise.allSettled([loadPipelineHeartbeat(), loadProxyFreshness(), loadCronStatus()]),
+};
+
+let _refreshTimer    = null;
+let _refreshInFlight = false;
+
+function _activeTab() {
+    return document.querySelector('.tab.active')?.dataset.tab || 'overview';
+}
+
+async function refreshAnalyticsNow() {
+    if (_refreshInFlight) return;
+    _refreshInFlight = true;
+    const stamp = document.getElementById('analytics-refresh-stamp');
+    if (stamp) stamp.textContent = 'Refreshing…';
+    try {
+        // Header KPIs/revenue cards live above the tab strip so they're
+        // always visible — refresh them on every tick regardless of tab.
+        const tabLoad = _refreshLoaders[_activeTab()] || (() => Promise.resolve());
+        await Promise.allSettled([
+            loadKPIs(),
+            loadRevenueKPIs(),
+            tabLoad(),
+        ]);
+        if (stamp) stamp.textContent = `Last refresh: ${new Date().toLocaleTimeString()}`;
+    } catch (err) {
+        console.warn('[Admin] auto-refresh failed:', err);
+        if (stamp) stamp.textContent = `Last refresh failed (${new Date().toLocaleTimeString()})`;
+    } finally {
+        _refreshInFlight = false;
+    }
+}
+
+function _setAnalyticsAuto(on) {
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+    if (!on) return;
+    const ms = parseInt(document.getElementById('analytics-refresh-interval').value, 10) || 60_000;
+    _refreshTimer = setInterval(() => {
+        if (!document.hidden) refreshAnalyticsNow();
+    }, ms);
+}
+
+document.getElementById('analytics-refresh-now')?.addEventListener('click', refreshAnalyticsNow);
+document.getElementById('analytics-autorefresh')?.addEventListener('change', e => _setAnalyticsAuto(e.target.checked));
+document.getElementById('analytics-refresh-interval')?.addEventListener('change', () => {
+    if (document.getElementById('analytics-autorefresh').checked) _setAnalyticsAuto(true);
+});
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && document.getElementById('analytics-autorefresh')?.checked) {
+        refreshAnalyticsNow();
+    }
+});
+
+_setAnalyticsAuto(true);
 </script>
 </body>
 </html>
