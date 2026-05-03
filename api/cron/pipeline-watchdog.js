@@ -52,6 +52,20 @@ const CRON_SECRET  = process.env.CRON_SECRET || '';
 const RESEND_KEY   = process.env.RESEND_API_KEY || '';
 const FROM_EMAIL   = process.env.ALERT_FROM_EMAIL || 'Parker Physics Alerts <alerts@parkersphysics.com>';
 const OPS_EMAIL    = process.env.ALERT_OPS_EMAIL  || '';
+// Slack webhook URL (incoming-webhook integration). When set the
+// watchdog mirrors heartbeat alerts to Slack and uses Slack as the
+// preferred channel for perf alerts. Without it, perf alerts still
+// fire via email if RESEND_KEY + OPS_EMAIL are configured.
+const SLACK_URL    = process.env.SLACK_WEBHOOK_URL || '';
+
+// Perf-alert tuning. Defaults match the original ticket: LCP p95
+// > 4 s. Override via env without redeploying SQL.
+const PERF_METRIC          = process.env.PERF_ALERT_METRIC          || 'LCP';
+const PERF_THRESHOLD_MS    = Number(process.env.PERF_ALERT_THRESHOLD_MS    || 4000);
+const PERF_WINDOW_HOURS    = Number(process.env.PERF_ALERT_WINDOW_HOURS    || 6);
+const PERF_MIN_SAMPLES     = Number(process.env.PERF_ALERT_MIN_SAMPLES     || 30);
+const PERF_COOLDOWN_HOURS  = Number(process.env.PERF_ALERT_COOLDOWN_HOURS  || 6);
+const PERF_RESOLVE_STREAK  = Number(process.env.PERF_ALERT_RESOLVE_STREAK  || 3);
 
 const RESEND_API   = 'https://api.resend.com/emails';
 
@@ -98,6 +112,185 @@ async function recordAlertSent(pipelineName) {
         // duplicate alert, but better that than silently swallowing the
         // primary failure signal.
     }
+}
+
+// ── Slack helper ────────────────────────────────────────────────────
+// Posts a single message to the configured incoming-webhook URL. The
+// payload is the simplest Slack format (text only) plus an optional
+// "blocks" rich layout for perf alerts that benefit from a table.
+// Network failures bubble up so the caller can choose to fall back
+// to email or surface the error in the response.
+async function sendSlack({ text, blocks = null }) {
+    if (!SLACK_URL) throw new Error('SLACK_WEBHOOK_URL not configured');
+    const body = blocks ? { text, blocks } : { text };
+    const res = await fetchWithTimeout(SLACK_URL, {
+        method:    'POST',
+        timeoutMs: 8000,
+        headers:   { 'Content-Type': 'application/json' },
+        body:      JSON.stringify(body),
+    });
+    if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Slack ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    // Slack returns "ok" as plain text body, not JSON.
+    return await res.text().catch(() => 'ok');
+}
+
+// ── Perf alert RPC helpers ──────────────────────────────────────────
+async function fetchPerfCandidates() {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/telemetry_perf_alert_candidates`;
+    const res = await fetchWithTimeout(url, {
+        method:    'POST',
+        timeoutMs: 8000,
+        headers: {
+            apikey:         SUPABASE_KEY,
+            Authorization:  `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            p_metric:         PERF_METRIC,
+            p_threshold_ms:   PERF_THRESHOLD_MS,
+            p_window_hours:   PERF_WINDOW_HOURS,
+            p_min_samples:    PERF_MIN_SAMPLES,
+            p_cooldown_hours: PERF_COOLDOWN_HOURS,
+            p_route_limit:    20,
+        }),
+    });
+    if (!res.ok) {
+        throw new Error(`perf_candidates RPC ${res.status}: ${await res.text().catch(() => '').slice(0, 200)}`);
+    }
+    return await res.json();
+}
+
+async function fetchPerfResolved() {
+    const url = `${SUPABASE_URL}/rest/v1/rpc/telemetry_perf_alert_resolved`;
+    const res = await fetchWithTimeout(url, {
+        method:    'POST',
+        timeoutMs: 8000,
+        headers: {
+            apikey:         SUPABASE_KEY,
+            Authorization:  `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ p_resolve_streak: PERF_RESOLVE_STREAK }),
+    });
+    if (!res.ok) return [];
+    return await res.json();
+}
+
+async function recordPerfAlertSent(metric, route, p95) {
+    try {
+        await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/record_perf_alert_sent`, {
+            method:    'POST',
+            timeoutMs: 5000,
+            headers: {
+                apikey:         SUPABASE_KEY,
+                Authorization:  `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                p_metric_name: metric,
+                p_route:       route,
+                p_p95:         p95,
+            }),
+        });
+    } catch { /* non-fatal */ }
+}
+
+async function recordPerfAlertResolved(metric, route) {
+    try {
+        await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/record_perf_alert_resolved`, {
+            method:    'POST',
+            timeoutMs: 5000,
+            headers: {
+                apikey:         SUPABASE_KEY,
+                Authorization:  `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ p_metric_name: metric, p_route: route }),
+        });
+    } catch { /* non-fatal */ }
+}
+
+async function tickPerfAlertHealth(offending) {
+    try {
+        await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/rpc/tick_perf_alert_health`, {
+            method:    'POST',
+            timeoutMs: 5000,
+            headers: {
+                apikey:         SUPABASE_KEY,
+                Authorization:  `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ p_offending: offending }),
+        });
+    } catch { /* non-fatal */ }
+}
+
+// Perf alert message-building helpers. Slack gets a rich blocks
+// layout; email reuses the existing template style.
+function buildPerfSlackBlocks(rows) {
+    return [
+        {
+            type: 'header',
+            text: { type: 'plain_text', text: `🐢 ${PERF_METRIC} regression on ${rows.length} route${rows.length === 1 ? '' : 's'}` },
+        },
+        {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text:
+                    `*Window:* last ${PERF_WINDOW_HOURS}h · *Threshold:* ${PERF_THRESHOLD_MS} ms · *Min samples:* ${PERF_MIN_SAMPLES}\n` +
+                    rows.map(r => `• \`${r.route}\` — p95 *${Math.round(r.p95)} ms* (${r.samples} samples)`).join('\n'),
+            },
+        },
+        {
+            type: 'context',
+            elements: [{ type: 'mrkdwn', text: `Cooldown: ${PERF_COOLDOWN_HOURS}h · resolves after ${PERF_RESOLVE_STREAK} healthy ticks` }],
+        },
+    ];
+}
+
+function buildPerfResolvedSlackBlocks(rows) {
+    return [
+        {
+            type: 'header',
+            text: { type: 'plain_text', text: `✅ ${PERF_METRIC} recovered on ${rows.length} route${rows.length === 1 ? '' : 's'}` },
+        },
+        {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: rows.map(r => `• \`${r.route}\` — back below ${PERF_THRESHOLD_MS} ms (was p95 ${r.last_p95 ? Math.round(r.last_p95) : '?'} ms)`).join('\n'),
+            },
+        },
+    ];
+}
+
+async function sendPerfEmailFallback(rows, isResolved = false) {
+    if (!RESEND_KEY || !OPS_EMAIL) return null;
+    const subject = isResolved
+        ? `[Parker Physics] ${PERF_METRIC} recovered on ${rows.length} route${rows.length === 1 ? '' : 's'}`
+        : `[Parker Physics] ${PERF_METRIC} regression on ${rows.length} route${rows.length === 1 ? '' : 's'}`;
+    const lines = isResolved
+        ? rows.map(r => `  ${r.route}  (was p95 ${r.last_p95 ? Math.round(r.last_p95) : '?'} ms)`)
+        : rows.map(r => `  ${r.route}  p95 ${Math.round(r.p95)} ms  (${r.samples} samples)`);
+    const text = `${subject}\n\n${lines.join('\n')}\n\nWindow: last ${PERF_WINDOW_HOURS}h · Threshold: ${PERF_THRESHOLD_MS} ms`;
+    const res = await fetchWithTimeout(RESEND_API, {
+        method:    'POST',
+        timeoutMs: 10_000,
+        headers: {
+            Authorization:  `Bearer ${RESEND_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ from: FROM_EMAIL, to: OPS_EMAIL, subject, text }),
+    });
+    if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`Resend ${res.status}: ${detail.slice(0, 300)}`);
+    }
+    return await res.json().catch(() => ({}));
 }
 
 function buildAlertEmail(row) {
@@ -257,6 +450,76 @@ export default async function handler(request) {
         }
     }
 
+    // ── Perf-regression alerts ──────────────────────────────────────
+    // Runs alongside the heartbeat loop above. Pulls offending routes
+    // from telemetry_perf_alert_candidates, fans out a single
+    // consolidated Slack/email message, then ticks the health table so
+    // resolved routes close the loop on subsequent runs.
+    const perf = { offending: [], resolved: [], alertSent: false, resolveSent: false, errors: [] };
+    try {
+        const offending = await fetchPerfCandidates();
+        perf.offending = Array.isArray(offending) ? offending : [];
+        const resolved = await fetchPerfResolved();
+        perf.resolved  = Array.isArray(resolved) ? resolved : [];
+
+        // Send the breach alert (if any). Prefer Slack; fall back to
+        // email; both is fine if both are configured but for now we
+        // pick one channel to avoid duplicate noise.
+        if (perf.offending.length) {
+            try {
+                if (SLACK_URL) {
+                    await sendSlack({
+                        text: `${PERF_METRIC} regression on ${perf.offending.length} route(s)`,
+                        blocks: buildPerfSlackBlocks(perf.offending),
+                    });
+                    perf.alertSent = true;
+                } else if (RESEND_KEY && OPS_EMAIL) {
+                    await sendPerfEmailFallback(perf.offending, false);
+                    perf.alertSent = true;
+                }
+            } catch (e) {
+                perf.errors.push({ stage: 'breach_send', detail: e.message });
+            }
+            // Stamp last_alerted_at regardless of channel success — a
+            // failed Slack call shouldn't trigger an immediate retry on
+            // the next minute's tick. The cooldown will let the next
+            // window pass naturally.
+            for (const r of perf.offending) {
+                await recordPerfAlertSent(r.metric_name, r.route, r.p95);
+            }
+        }
+
+        // Send the resolved alert (if any). Same channel preference.
+        if (perf.resolved.length) {
+            try {
+                if (SLACK_URL) {
+                    await sendSlack({
+                        text: `${PERF_METRIC} recovered on ${perf.resolved.length} route(s)`,
+                        blocks: buildPerfResolvedSlackBlocks(perf.resolved),
+                    });
+                    perf.resolveSent = true;
+                } else if (RESEND_KEY && OPS_EMAIL) {
+                    await sendPerfEmailFallback(perf.resolved, true);
+                    perf.resolveSent = true;
+                }
+            } catch (e) {
+                perf.errors.push({ stage: 'resolve_send', detail: e.message });
+            }
+            for (const r of perf.resolved) {
+                await recordPerfAlertResolved(r.metric_name, r.route);
+            }
+        }
+
+        // Tick health for everything currently being tracked. Always
+        // run, even if no breaches/resolutions this tick — that's how
+        // healthy_streak builds up across consecutive ticks.
+        await tickPerfAlertHealth(
+            perf.offending.map(r => ({ metric: r.metric_name, route: r.route }))
+        );
+    } catch (e) {
+        perf.errors.push({ stage: 'fetch', detail: e.message });
+    }
+
     return Response.json({
         ok:         true,
         candidates,
@@ -264,10 +527,21 @@ export default async function handler(request) {
         skipped:    skipped.length,
         errors:     errors.length,
         details:    { alerted, skipped, errors },
+        perf:       {
+            metric:      PERF_METRIC,
+            threshold_ms: PERF_THRESHOLD_MS,
+            window_h:    PERF_WINDOW_HOURS,
+            offending:   perf.offending.length,
+            resolved:    perf.resolved.length,
+            alertSent:   perf.alertSent,
+            resolveSent: perf.resolveSent,
+            channel:     SLACK_URL ? 'slack' : (RESEND_KEY && OPS_EMAIL ? 'email' : 'none'),
+            errors:      perf.errors,
+        },
         dur_ms:     Date.now() - t0,
         as_of:      new Date().toISOString(),
     }, {
-        status: errors.length > 0 ? 207 : 200,
+        status: (errors.length + perf.errors.length) > 0 ? 207 : 200,
         headers: { 'Cache-Control': 'no-store' },
     });
 }

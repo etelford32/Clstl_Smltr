@@ -2357,10 +2357,21 @@ initAll();
         const url = `/api/weather/forecast?type=hourly&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
         const ctrl = new AbortController();
         const to   = setTimeout(() => ctrl.abort(), HOURLY_FETCH_TIMEOUT_MS);
+        const _t0  = performance.now();
         try {
             const res = await fetch(url, { signal: ctrl.signal });
             if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
             const json = await res.json();
+            // Telemetry: record per-call latency. The dashboard fans out
+            // one call per saved location on every render, so this metric
+            // is N×-amplified vs. a single-page metric like LCP. Sampled
+            // at the same 25% rate so volume stays bounded; the table
+            // values are still representative because each user's calls
+            // share a session and hit the same Vercel region.
+            try {
+                const { telemetry } = await import('./js/telemetry.js');
+                telemetry.recordPerf('weather_grid_hourly', performance.now() - _t0);
+            } catch {}
             return { ok: true, data: json };
         } catch (e) {
             return { ok: false, error: e.name === 'AbortError' ? 'timeout' : e.message };
