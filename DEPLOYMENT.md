@@ -69,6 +69,8 @@ supabase-polar-vortex-migration.sql       # polar_vortex_snapshots schema
 supabase-security-tighten-migration.sql   # analytics + session RLS hardening
 supabase-invites-email-migration.sql      # email-targeted invites + RPCs
 supabase-email-rate-limit-migration.sql   # DB-backed email rate limit + audit
+supabase-auth-failures-migration.sql      # auth_failures table + log_auth_failure RPC;
+                                          # source for the admin "signin_failed" metric
 supabase-schema-hardening-migration.sql   # role/endpoint CHECKs + delete_user_data RPC
 supabase-retention-cron-migration.sql     # analytics/alert retention + cron-status RPC
 
