@@ -34,6 +34,11 @@ import {
     hasCustomBranding as _cfgHasCustomBranding,
     isPro as _cfgIsPro,
 } from './tier-config.js';
+// Telemetry is fire-and-forget. Importing it auto-installs error
+// autocapture and Web-Vitals observers; we additionally pipe the
+// JWT into it on session restore so server-side rows attach to the
+// correct user_id.
+import { telemetry } from './telemetry.js';
 
 const AUTH_KEY = 'pp_auth';
 
@@ -77,6 +82,15 @@ class AuthManager {
                 //     token refresh / sign-in so the server stays the source
                 //     of truth.
                 this._supabase.auth.onAuthStateChange(async (event, session) => {
+                    // Pipe (or clear) the JWT into telemetry so subsequent
+                    // batches attach to the correct user_id server-side.
+                    try { telemetry.setUserToken(session?.access_token || null); } catch {}
+                    // TOKEN_REFRESHED with a missing access_token = silent
+                    // refresh failure. Supabase doesn't surface a dedicated
+                    // failure event, so we infer it here.
+                    if (event === 'TOKEN_REFRESHED' && !session?.access_token) {
+                        try { telemetry.recordAuthFailure('token_refresh_failed', { source: 'onAuthStateChange' }); } catch {}
+                    }
                     if (event === 'SIGNED_OUT' || !session?.user) {
                         this._user = null;
                     } else {
@@ -676,6 +690,53 @@ class AuthManager {
     }
 
     /**
+     * Superadmin-only: top-N JS error fingerprints in the window.
+     * Backed by telemetry_top_errors RPC.
+     */
+    async getTopErrors(days = 30, limit = 25) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_errors',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: top-N auth failure reasons (UNIONs auth_failures + client_telemetry). */
+    async getTopAuthFailures(days = 30, limit = 15) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_auth_failures',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: top-N 404 paths in the window. */
+    async getTop404s(days = 30, limit = 25) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_top_404s',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: Web Vitals + app perf summary (p50/p95 per metric per route). */
+    async getPerfSummary(days = 7, limit = 50) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_perf_summary',
+                { p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /**
      * Admin/superadmin: list users for the management table.
      * @param {{ limit?: number, offset?: number, search?: string }} [opts]
      */
@@ -705,6 +766,12 @@ class AuthManager {
     requireAuth(redirectUrl = 'signin.html') {
         if (!this.isSignedIn()) {
             try { sessionStorage.setItem('pp_auth_redirect', window.location.href); } catch (_) {}
+            // Telemetry: track which gated routes anonymous users tried
+            // to reach. Helps identify where to add public marketing
+            // pages vs where the gate is correct.
+            try {
+                telemetry.recordRedirect(window.location.href, redirectUrl, 'unauthenticated');
+            } catch {}
             window.location.href = redirectUrl;
             return false;
         }

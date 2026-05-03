@@ -115,7 +115,14 @@ main {
 
 <link rel="stylesheet" href="js/nav-styles.css">
 <nav></nav>
-<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("404");</script>
+<script type="module">
+import { initNav } from "./js/nav.js?v=20260424"; initNav("404");
+// Telemetry: every 404 fires a not_found event so the superadmin
+// Telemetry tab can surface a top-N of broken paths. Auto-init on
+// import; the recorder uses the current location.pathname.
+import { telemetry } from "./js/telemetry.js";
+telemetry.record404();
+</script>
 
 <div id="stars-bg"><canvas id="stars-canvas"></canvas></div>
 
