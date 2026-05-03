@@ -55,7 +55,13 @@ class AuthManager {
                     // Fetch server-side profile (role, plan) on session restore
                     // so admin status is available immediately, not just from stale user_metadata
                     await this.fetchProfile();
-                    console.info('[Auth] Supabase session restored:', this._user.email, 'role:', this._user.role);
+                    // Session-restore is hot path on every page load — log at
+                    // debug level so the email + role don't sit in the prod
+                    // console (visible to anyone screen-sharing or extension-
+                    // scraping). Bump back to .info if you need to diagnose
+                    // restore issues; users in DevTools can flip Console
+                    // verbosity to "Verbose" to see it.
+                    console.debug('[Auth] Supabase session restored');
                 }
 
                 // Listen for auth state changes (login, logout, token refresh)
