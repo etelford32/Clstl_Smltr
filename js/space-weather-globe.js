@@ -32,6 +32,7 @@ import { VanAllenParticles } from './van-allen-particles.js';
 import {
     carringtonToSceneLon,
     subEarthCarringtonLongitude,
+    carringtonRotationNumber,
 } from './sun-rotation.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
@@ -1303,13 +1304,54 @@ export class SpaceWeatherGlobe {
                     lon_deg_carrington: lon_carr_deg,   // preserve original
                 };
             });
-            const arForShader = regionsApparent.slice(0, 8).map(r => ({
-                lat_rad: r.lat_rad,
-                lon_rad: r.lon_rad,
-                intensity: Math.max(0.20, Math.min(1.0,
-                    (r.area_norm ?? 0.2) * 0.85 + Math.min(r.num_spots ?? 1, 30) / 60)),
-                complex: !!r.is_complex,
-            }));
+
+            // ── Per-AR flare-recency boost ──────────────────────────────
+            // Real EUV emissions track recent flare activity: an AR that
+            // popped an X-class flare 30 min ago glows much brighter in
+            // 94/131/193/211 Å than its sunspot area alone would predict
+            // (post-flare loops sustain hot plasma for hours).  We mix
+            // recent NOAA flare reports into the shader's per-AR intensity
+            // so the synthetic emission tracks reality, not just
+            // morphology.  Decay timescale 1.5 h matches typical post-
+            // flare loop cooling; class scaling X→1.0, M→0.5, C→0.2,
+            // B→0.05 follows the GOES log-amplitude convention.
+            const recentFlares = state.recent_flares ?? [];
+            const nowMs        = nowDate.getTime();
+            const arFlareBoost = new Map();
+            const flareBoostList = [];
+            for (const f of recentFlares) {
+                if (!f.region || !f.time) continue;
+                const t = f.time instanceof Date ? f.time.getTime() : new Date(f.time).getTime();
+                if (!isFinite(t)) continue;
+                const dt_hr = (nowMs - t) / 3.6e6;
+                if (dt_hr < 0 || dt_hr > 6) continue;
+                const cls       = String(f.cls ?? '?').charAt(0).toUpperCase();
+                const classScale = ({ X: 1.0, M: 0.5, C: 0.2, B: 0.05 })[cls] ?? 0.05;
+                const decay     = Math.exp(-dt_hr / 1.5);
+                const boost     = decay * classScale;
+                const prev = arFlareBoost.get(f.region) ?? 0;
+                if (boost > prev) arFlareBoost.set(f.region, boost);
+                flareBoostList.push({ region: f.region, cls: f.cls, t, dt_hr, boost });
+            }
+            this._recentFlares = flareBoostList
+                .sort((a, b) => b.boost - a.boost)
+                .slice(0, 12);
+
+            const arForShader = regionsApparent.slice(0, 8).map(r => {
+                const base = (r.area_norm ?? 0.2) * 0.85
+                           + Math.min(r.num_spots ?? 1, 30) / 60;
+                const fboost = arFlareBoost.get(r.region) ?? 0;
+                // Multiplicative boost: 100 % brighter for fresh X-class,
+                // 25 % brighter for fresh M-class, etc.  Capped at 1.0
+                // intensity (saturation, since u_regions.w is normalised).
+                const intensity = Math.max(0.20, Math.min(1.0, base * (1 + fboost * 1.0)));
+                return {
+                    lat_rad: r.lat_rad,
+                    lon_rad: r.lon_rad,
+                    intensity,
+                    complex: !!r.is_complex,
+                };
+            });
             const placed = this._sunSkin.setRegions(arForShader);
             // Build wind-stream descriptors anchored at each placed AR.
             const sunPos = this._sunGroup.position;
@@ -1433,6 +1475,21 @@ export class SpaceWeatherGlobe {
     /** Live sub-Earth Carrington longitude (degrees) — for HUD readouts. */
     get subEarthCarrington() {
         return subEarthCarringtonLongitude();
+    }
+
+    /** Current Carrington rotation number (CR# at the live wall-clock instant). */
+    get carringtonRotation() { return carringtonRotationNumber(); }
+
+    /**
+     * Live snapshot of recent NOAA flares with per-AR-region boost weights
+     * (used for HUD ticker + emission-realism gate).  Each entry surfaces
+     * the same fields swpc-feed produces, plus a `boost` scalar in [0, 1]
+     * that decays exponentially over ~1.5 h since flare peak — the same
+     * factor the corona shader's AR intensity multiplier uses to brighten
+     * recently-active regions in EUV channels.
+     */
+    get recentFlares() {
+        return (this._recentFlares ?? []).slice();
     }
 
     /** Currently-active sun-rendering mode. */

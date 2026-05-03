@@ -102,6 +102,10 @@ export class SpaceWeatherHud {
                 <div class="hud-row"><span class="hud-k">time × </span><span id="hud-tc" class="hud-v">—</span></div>
                 <div class="hud-row"><span class="hud-k">v<sub>sw</sub></span><span id="hud-vsw" class="hud-v">—</span></div>
                 <div class="hud-row"><span class="hud-k">transit</span><span id="hud-transit" class="hud-v">—</span></div>
+                <div class="hud-row" title="Sub-Earth Carrington longitude L₀ (decreases ≈13.2°/day) and current Carrington Rotation Number">
+                    <span class="hud-k">L<sub>0</sub> · CR</span>
+                    <span id="hud-l0" class="hud-v">—</span>
+                </div>
                 <div class="hud-row hud-storm">
                     <span class="hud-k">storm idx</span>
                     <div class="hud-bar"><div class="hud-bar-fill" id="hud-storm-bar"></div></div>
@@ -147,6 +151,13 @@ export class SpaceWeatherHud {
                 </div>
             </div>
 
+            <div class="hud-block hud-noaa-flares">
+                <div class="hud-section-title" title="NOAA-reported flares — drives EUV emission boost on the matching AR (decay τ = 1.5 h)">NOAA flares · last 6 h</div>
+                <div id="hud-flare-list" class="hud-eruption-list">
+                    <div class="hud-empty">— quiet —</div>
+                </div>
+            </div>
+
             <div class="hud-block hud-timeline">
                 <div class="hud-section-title">Last 60 min</div>
                 <canvas id="hud-tl-canvas" class="hud-tl-canvas"
@@ -169,6 +180,8 @@ export class SpaceWeatherHud {
             tc:           this._root.querySelector('#hud-tc'),
             vsw:          this._root.querySelector('#hud-vsw'),
             transit:      this._root.querySelector('#hud-transit'),
+            l0:           this._root.querySelector('#hud-l0'),
+            flareList:    this._root.querySelector('#hud-flare-list'),
             stormBar:     this._root.querySelector('#hud-storm-bar'),
             stormVal:     this._root.querySelector('#hud-storm-val'),
             trapped:      this._root.querySelector('#hud-trapped'),
@@ -221,6 +234,16 @@ export class SpaceWeatherHud {
         e.transit.textContent = transitS != null
             ? `${(transitS / 86400).toFixed(2)} d`
             : '—';
+
+        // Carrington bookkeeping: L₀ ticks down ~13.2°/day, CR# climbs by 1
+        // every 27.27 d.  Useful as a sanity check when comparing the
+        // synthetic disk against the SDO 193 Å reference panel — features
+        // at the same Carrington longitude should appear at the same
+        // apparent disk position whether you're looking at our render or
+        // SDO's image at any given instant.
+        const L0 = g.subEarthCarrington ?? 0;
+        const CR = g.carringtonRotation ?? 0;
+        if (e.l0) e.l0.textContent = `${L0.toFixed(1)}° · CR ${CR.toFixed(0)}`;
 
         const storm = g.beltStormIndex ?? 0;
         const stormPct = Math.min(100, storm * 100);
@@ -288,6 +311,10 @@ export class SpaceWeatherHud {
         // ── Internal eruption ticker ────────────────────────────────────────
         const eruptions = g.internalEruptions ?? [];
         this._renderEruptionList(eruptions);
+
+        // ── NOAA flare ticker (drives EUV emission boost on matching AR) ──
+        const flares = g.recentFlares ?? [];
+        this._renderNoaaFlareList(flares);
 
         // ── 60-minute timeline ──────────────────────────────────────────────
         // Sample at 1 Hz regardless of HUD tick rate so the trace doesn't
@@ -499,6 +526,44 @@ export class SpaceWeatherHud {
                     <span class="hud-erupt-ar">AR${ev.arId}</span>
                     <span class="hud-erupt-spd">${Math.round(ev.v0)} km/s</span>
                     <span class="${dirCls}">${dirSym}</span>
+                    <span class="hud-erupt-age">${ageStr}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * NOAA-flare ticker — parallel to internal eruptions but for *real*
+     * GOES-reported flares from the swpc-feed.  Each row shows the class,
+     * affected AR, time-since-peak, and a small bar reflecting the live
+     * EUV-boost amplitude that the flare is contributing to the synthetic
+     * corona emission.  This makes the synth-vs-SDO link obvious — when
+     * NOAA reports an X-class flare on AR 13800, the same AR brightens in
+     * the rendered corona at the same moment.
+     */
+    _renderNoaaFlareList(flares) {
+        const list = this._el.flareList;
+        if (!list) return;
+        if (!flares || flares.length === 0) {
+            if (!list.querySelector('.hud-empty')) {
+                list.innerHTML = '<div class="hud-empty">— quiet —</div>';
+            }
+            return;
+        }
+        const top = flares.slice(0, 6);
+        list.innerHTML = top.map(f => {
+            const cls    = String(f.cls ?? '?');
+            const letter = cls.charAt(0).toUpperCase();
+            const dt_hr  = f.dt_hr ?? 0;
+            const ageStr = dt_hr < 1
+                ? `${(dt_hr * 60).toFixed(0)}m ago`
+                : `${dt_hr.toFixed(1)}h ago`;
+            const boostPct = Math.round((f.boost ?? 0) * 100);
+            return `
+                <div class="hud-erupt-row hud-noaa-flare-row">
+                    <span class="hud-erupt-cls cls-${letter}">${cls}</span>
+                    <span class="hud-erupt-ar">AR${f.region}</span>
+                    <span class="hud-erupt-spd">+${boostPct}%</span>
                     <span class="hud-erupt-age">${ageStr}</span>
                 </div>
             `;
