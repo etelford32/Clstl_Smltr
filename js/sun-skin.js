@@ -210,6 +210,11 @@ export class SunSkin {
         this.sunU.u_channel_color.value.set(cfg.color[0], cfg.color[1], cfg.color[2]);
         this.sunU.u_channel_intensity.value = isWhite ? 0 : 1;
         this.sunU.u_channel_phot_dim.value  = cfg.photDim;
+        // Filament / prominence absorption coefficient — high in deep
+        // coronal channels (171/193/211 → dark filaments on disk), low in
+        // 304 (cool plasma self-emits → bright limb prominences), zero in
+        // white-light (the volumetric corona is hidden anyway).
+        this.sunU.u_filament_opacity.value  = cfg.filOpacity ?? 0;
     }
 
     /** Get the currently-selected EUV channel ('white' | '94' | …). */
