@@ -149,165 +149,17 @@ export const CORONA_VOL_FRAG = /* glsl */`
         return exp(-0.5 * d * d);
     }
 
-    // ── Cool-plasma filament / prominence density ──────────────────────────
-    //
-    // Each NOAA active region anchors a filament thread sitting just above
-    // the photosphere along its (synthetic) polarity inversion line.
-    // Geometry: a cigar-shaped tube oriented east-west on the AR's local
-    // tangent frame, with a Gaussian density profile across north-south
-    // and a smoothed box profile along east-west.
-    //
-    // Real filaments follow the K-S sech² support solution; we use a
-    // Gaussian (very close in shape) for slightly cheaper math.  Vertical
-    // peak at ~0.025 R_sun ≈ 17 Mm above the photosphere matches typical
-    // observed prominence heights (Engvold 1976, Mackay 2010).
-    //
-    // During a flare (u_flare_t > 0) the filament near the flare site is
-    // suppressed — the canonical "filament eruption" cinematography that
-    // accompanies impulsive coronal mass ejections.
-    float filamentDensity(vec3 p_local, float h, vec3 phat) {
-        // Filaments live in a narrow band 0.005 → 0.080 R_sun above
-        // photosphere; outside that band the contribution is zero
-        // regardless of which AR we test against.
-        if (h < 0.005 || h > 0.080) return 0.0;
-
-        const float h_fil   = 0.025;     // peak altitude (R_sun units)
-        const float h_sigma = 0.018;     // vertical FWHM
-        float h_mask = exp(-(h - h_fil) * (h - h_fil) / (2.0 * h_sigma * h_sigma));
-
-        float total = 0.0;
-        for (int k = 0; k < ${N_AR_SLOTS}; k++) {
-            if (k >= u_nRegions) break;
-            vec3  arPos    = normalize(u_regions[k].xyz);
-            float arSigned = u_regions[k].w;
-            float arInt    = abs(arSigned);
-            float complex  = arSigned < 0.0 ? 1.0 : 0.0;
-            if (arInt < 0.05) continue;
-
-            // Local tangent frame at the AR (defined w.r.t. y = rotation axis)
-            vec3 east  = normalize(vec3(-arPos.z, 0.0, arPos.x));
-            vec3 north = normalize(cross(arPos, east));
-
-            // Surface offset of the sample point from the AR centre on the
-            // unit sphere — small-angle decomposition into east / north.
-            vec3 d = phat - arPos;
-            float along  = dot(d, east);
-            float across = dot(d, north);
-
-            // Filament length scales with AR area; βγδ regions tend to host
-            // longer / fatter filaments along their polarity-inversion line.
-            float fil_half_len = (0.04 + 0.10 * arInt) * (1.0 + 0.30 * complex);
-            float fil_edge     = 0.020;
-            float fil_width    = 0.012 + 0.005 * arInt;
-
-            // Soft-edge box along the length, Gaussian across the width
-            float along_mask = smoothstep(-fil_half_len - fil_edge, -fil_half_len, along)
-                             - smoothstep( fil_half_len,  fil_half_len + fil_edge, along);
-            float across_mask = exp(-(across * across) / (2.0 * fil_width * fil_width));
-
-            float density = arInt * along_mask * across_mask * h_mask;
-            // Complex regions carry denser filaments (more sheared field)
-            density *= mix(1.0, 1.40, complex);
-
-            total += density;
-        }
-
-        // Flare-driven filament eruption: suppress filament near the active
-        // flare site as long as u_flare_t > 0.
-        if (u_flare_t > 0.005) {
-            vec3 flareSrc = vec3(
-                cos(u_flare_lon.x) * cos(u_flare_lon.y),
-                sin(u_flare_lon.x),
-                cos(u_flare_lon.x) * sin(u_flare_lon.y)
-            );
-            float flareDist = acos(clamp(dot(phat, flareSrc), -1.0, 1.0));
-            float erupt_mask = exp(-flareDist * flareDist / 0.030) * u_flare_t;
-            total *= max(0.0, 1.0 - erupt_mask);
-        }
-
-        return clamp(total, 0.0, 4.0);
-    }
-
-    // ── AR loop-arcade emission ────────────────────────────────────────────
-    //
-    // Each bipolar active region's corona above the photosphere is filled
-    // with a fan of magnetic field lines connecting opposite-polarity
-    // footpoints — an "arcade" of loops in the plane perpendicular to the
-    // polarity inversion line.  In EUV imagery these loops are the visually
-    // dominant structures: bright threads in 171 / 193 / 211 Å, near-
-    // invisible in chromospheric 304 Å.
-    //
-    // Without explicit magnetogram data we synthesise the arcade as a
-    // half-toroidal density field: cross-section in the (east, up) plane
-    // is a Gaussian shell around a semicircle of radius R_loop, and the
-    // density extends along the local north (PIL direction) over a soft-
-    // edge box of half-width L_pil.  Visually this yields the canonical
-    // arcade shape — bright "rope" connecting two footpoints, multiple
-    // parallel rows along the inversion line.
-    //
-    // Two loop temperature populations contribute additively:
-    //   cool loops  log T ≈ 5.90 (~0.8 MK)   dominant in 171 Å
-    //   hot loops   log T ≈ 6.30 (~2 MK)     dominant in 211 Å
-    // βγδ regions weight the hot population more heavily (more sheared
-    // field → hotter loops, matching observed temperature distributions).
-    float loopArcadeEmission(vec3 p_local, float h, vec3 phat) {
-        // Loops above 0.005 R_sun (just above photosphere) up to 0.20 R_sun
-        // (rare large helmet streamers extend higher but we cap)
-        if (h < 0.005 || h > 0.20) return 0.0;
-
-        float total_em = 0.0;
-        for (int k = 0; k < ${N_AR_SLOTS}; k++) {
-            if (k >= u_nRegions) break;
-            vec3  arPos    = normalize(u_regions[k].xyz);
-            float arSigned = u_regions[k].w;
-            float arInt    = abs(arSigned);
-            float complex  = arSigned < 0.0 ? 1.0 : 0.0;
-            if (arInt < 0.05) continue;
-
-            // Local tangent frame at the AR
-            vec3 east  = normalize(vec3(-arPos.z, 0.0, arPos.x));
-            vec3 north = normalize(cross(arPos, east));
-
-            // Decompose the sample point into the AR's local frame
-            vec3 d = phat - arPos;
-            float s_east  = dot(d, east);
-            float s_north = dot(d, north);
-            float s_up    = h;                  // altitude in R_sun units
-
-            // Arcade scale: bigger ARs build longer / taller loops
-            float R_loop  = (0.06 + 0.10 * arInt) * (1.0 + 0.20 * complex);
-            float L_pil   = (0.03 + 0.07 * arInt);
-            float r_min   = 0.018 + 0.005 * arInt;
-            float pil_edge = 0.020;
-
-            // Soft-edge box along the polarity inversion line (north-south)
-            float pil_mask = smoothstep(-L_pil - pil_edge, -L_pil, s_north)
-                           - smoothstep( L_pil,  L_pil + pil_edge, s_north);
-
-            // Loop curve in (east, up) plane: semicircle of radius R_loop.
-            // Distance from any sample point to the curve:
-            //     dist = | √(s_east² + s_up²) − R_loop |   (s_up > 0 only)
-            float r_in_plane   = sqrt(s_east * s_east + s_up * s_up);
-            float dist_to_loop = abs(r_in_plane - R_loop);
-            // Gaussian falloff perpendicular to the curve → "rope" cross-section
-            float rope = exp(-dist_to_loop * dist_to_loop / (2.0 * r_min * r_min));
-
-            // Total density for this AR's arcade
-            float dens = arInt * pil_mask * rope * step(0.001, s_up);
-            if (dens < 1e-4) continue;
-
-            // Two-population temperature distribution (cool & hot loops).
-            // Emission ∝ n² × R(T); βγδ regions weight hot population more.
-            float cool_wt = mix(1.0, 0.4, complex);
-            float hot_wt  = mix(0.5, 1.5, complex);
-            total_em += dens * dens * channelResponse(5.90) * 4.0 * cool_wt;
-            total_em += dens * dens * channelResponse(6.30) * 4.0 * hot_wt;
-        }
-
-        return total_em;
-    }
-
     // ── Synthetic DEM at a point in sun-local space ────────────────────────
+    //
+    // Single combined per-AR pass that produces the diffuse AR cell, the
+    // bipolar loop arcade (with Joy's-law tilt), the cool-plasma filament
+    // density, and the moss-pattern footpoint emission — all sharing one
+    // tangent-frame computation per AR per ray step.  This collapses what
+    // were three separate N_AR-iteration loops into one, cuts shader cost
+    // ~3× in the AR-bound region of the volume, and lets per-AR hash
+    // scatter give every region a different bipolar axis tilt and loop
+    // brightness modulation (no more uniform-looking blobs).
+    //
     // p_local: position relative to sun centre (units: scene units = R_sun).
     // Writes integrated emission for the active channel into the first out
     // parameter and the cool-filament density into the second, so the caller
@@ -323,43 +175,138 @@ export const CORONA_VOL_FRAG = /* glsl */`
         float h = (r - u_sun_radius) / u_sun_radius;
         vec3  phat = p_local / r;
 
-        // ── Quiet corona: log T ≈ 6.0 (1 MK) ──────────────────────────────
-        // Hydrostatic-ish exponential scale height; subtle large-scale
-        // longitude-dependent variation via low-frequency noise.
-        float quiet_h_scale = 0.55;                                   // R_sun
+        // ── Quiet corona ── multi-octave noise for richer texture ─────────
+        // Two octaves of value noise with different phases & temporal speeds
+        // break the previously-uniform diffuse glow into the supergranular-
+        // -scale variation visible in real EUV quiet-Sun imagery.
+        float quiet_h_scale = 0.55;
+        float n1 = vnoise(phat *  4.0 + vec3(u_time * 0.005));
+        float n2 = vnoise(phat * 11.0 + vec3(-u_time * 0.011, u_time * 0.008, 0.0));
         float quiet_density = exp(-h / quiet_h_scale)
-                            * (0.5 + 0.5 * vnoise(phat * 4.0 + vec3(u_time * 0.005)));
+                            * (0.30 + 0.45 * n1 + 0.25 * n2);
         float quiet_logT = 6.00 + 0.10 * (u_activity - 0.5);
         emission += quiet_density * channelResponse(quiet_logT) * 0.40;
 
-        // ── Active-region hot-loop cells ──────────────────────────────────
-        // Each AR contributes a localised Gaussian in angular separation,
-        // higher density (∝ B², proxied by intensity), and higher T for
-        // complex (β-γ-δ) regions (encoded as negative w).
-        float ar_h_scale = 0.30;
+        // ── Combined per-AR contribution ─────────────────────────────────
         for (int k = 0; k < ${N_AR_SLOTS}; k++) {
             if (k >= u_nRegions) break;
             vec3  arPos    = normalize(u_regions[k].xyz);
             float arSigned = u_regions[k].w;
             float arInt    = abs(arSigned);
+            if (arInt < 0.05) continue;
             float complex  = arSigned < 0.0 ? 1.0 : 0.0;
-            float cosAng   = clamp(dot(phat, arPos), -1.0, 1.0);
-            float ang      = acos(cosAng);
-            // AR loops only on the half-sphere facing the AR (cosAng > 0)
-            float facing   = step(0.0, cosAng);
-            float ar_dens  = arInt * exp(-h / ar_h_scale)
-                           * exp(-ang * ang / 0.040) * facing;
-            // T_AR_simple ≈ 2 MK, T_AR_complex ≈ 4 MK
-            float ar_logT  = mix(6.30, 6.55, complex);
-            // Emission-measure goes as n²; we approximate by squaring density
-            emission += ar_dens * ar_dens * channelResponse(ar_logT) * 8.0;
-        }
 
-        // ── AR loop-arcade structure ─────────────────────────────────────
-        // Discrete bright threads connecting opposite-polarity footpoints
-        // — the visually dominant feature of an active region in 171/193/
-        // 211 Å.  Adds onto the diffuse AR-cell emission above.
-        emission += loopArcadeEmission(p_local, h, phat);
+            // Angular distance early-out — skip ARs more than ~32° from this
+            // sample.  All AR features (cell ≤ 17°, arcade ≤ 10°, filament ≤
+            // 10°) decay to <1 % by 32°, so this is conservative and saves a
+            // huge amount of work in off-AR pixels (most of the volume).
+            float cosAng = clamp(dot(phat, arPos), -1.0, 1.0);
+            if (cosAng < 0.85) continue;
+            float ang     = acos(cosAng);
+            float facing  = step(0.0, cosAng);
+
+            // ── Local tangent frame with Joy's-law tilt ──────────────────
+            // Hale 1919 / Howard 1991: the bipolar axis of a hemispherically
+            // tilted AR pair has  tan γ = 0.5 sin |latitude|, with the
+            // leading polarity tilted *toward the equator*.  We rotate the
+            // local east tangent by that angle in the (east, north) plane.
+            // A small per-AR random scatter (±10°, hashed off the slot
+            // index) breaks the textbook-perfect alignment so a population
+            // of ARs shows the natural Joy's-law spread.
+            vec3 east_pure  = normalize(vec3(-arPos.z, 0.0, arPos.x));
+            vec3 north_pure = normalize(cross(arPos, east_pure));
+            float arLat   = asin(arPos.y);
+            float gamma0  = atan(0.5 * abs(sin(arLat)));
+            float arHash  = fract(sin(float(k) * 12.9898) * 43758.5453);
+            float gamma   = gamma0 + (arHash - 0.5) * 0.18;          // ±5° scatter
+            float cosG    = cos(gamma);
+            float sinG    = sin(gamma) * (arLat > 0.0 ? -1.0 : 1.0);  // toward equator
+            vec3  east    = cosG * east_pure + sinG * north_pure;
+            vec3  north   = normalize(cross(arPos, east));
+
+            // Sample-point in the AR's local frame
+            vec3 d        = phat - arPos;
+            float s_east  = dot(d, east);
+            float s_north = dot(d, north);
+            float s_up    = h;
+
+            // ── Diffuse AR-cell envelope (slightly toned-down vs. v1) ────
+            // The arcade now carries the structural emission, so the cell
+            // here is just the diffuse hot-plasma background.
+            float ar_dens  = arInt * exp(-h / 0.30) * exp(-ang * ang / 0.040) * facing;
+            float ar_logT  = mix(6.30, 6.55, complex);
+            emission += ar_dens * ar_dens * channelResponse(ar_logT) * 5.0;
+
+            // ── Loop arcade ──────────────────────────────────────────────
+            // Half-toroidal density field tilted with the AR's bipolar axis;
+            // per-loop noise modulation gives the natural arcade-thread look.
+            if (h > 0.005 && h < 0.20 && s_up > 0.001) {
+                float R_loop  = (0.06 + 0.10 * arInt) * (1.0 + 0.20 * complex);
+                float L_pil   = (0.03 + 0.07 * arInt);
+                float r_min   = 0.018 + 0.005 * arInt;
+                float pil_edge = 0.020;
+
+                float pil_mask = smoothstep(-L_pil - pil_edge, -L_pil, s_north)
+                               - smoothstep( L_pil,  L_pil + pil_edge, s_north);
+                float r_in_plane   = sqrt(s_east * s_east + s_up * s_up);
+                float dist_to_loop = abs(r_in_plane - R_loop);
+                float rope         = exp(-dist_to_loop * dist_to_loop / (2.0 * r_min * r_min));
+
+                // Per-loop variance: real arcades show different brightness
+                // per thread (heated unevenly, evolving on minute timescales).
+                float loop_var = 0.55 + 0.45 * vnoise(vec3(
+                    s_north * 28.0,
+                    s_east  * 22.0,
+                    arHash * 7.0 + u_time * 0.04));
+
+                float dens = arInt * pil_mask * rope * loop_var;
+                if (dens > 1e-4) {
+                    float cool_wt = mix(1.0, 0.4, complex);
+                    float hot_wt  = mix(0.5, 1.5, complex);
+                    emission += dens * dens * channelResponse(5.90) * 4.0 * cool_wt;
+                    emission += dens * dens * channelResponse(6.30) * 4.0 * hot_wt;
+                }
+
+                // ── Moss / fine-scale footpoint emission ──────────────────
+                // Bright stippled pattern at AR loop footpoints — the dotted
+                // chromospheric "moss" visible in 171/193 just above the
+                // photosphere.  Restricted to h < 0.025 R_sun and to the
+                // outer half of the arcade footprint where loops descend.
+                if (h < 0.025) {
+                    float moss_n   = vnoise(phat * 95.0 + vec3(arHash * 3.0));
+                    float moss_pat = pil_mask
+                                   * smoothstep(0.5 * R_loop, 0.95 * R_loop, abs(s_east))
+                                   * (moss_n - 0.45);
+                    moss_pat = max(0.0, moss_pat) * arInt
+                             * (1.0 - smoothstep(0.012, 0.025, h));
+                    emission += moss_pat * channelResponse(6.10) * 8.0;
+                }
+            }
+
+            // ── Filament density along PIL (post-Joy-tilt orientation) ──
+            // Filament is anchored along the *tilted* east axis so it tracks
+            // Joy's-law orientation alongside the loops — visually consistent.
+            if (h > 0.005 && h < 0.080) {
+                const float h_fil   = 0.025;
+                const float h_sigma = 0.018;
+                float h_mask = exp(-(h - h_fil) * (h - h_fil) / (2.0 * h_sigma * h_sigma));
+                float fil_half_len = (0.04 + 0.10 * arInt) * (1.0 + 0.30 * complex);
+                float fil_edge     = 0.020;
+                float fil_width    = 0.012 + 0.005 * arInt;
+                float along_mask = smoothstep(-fil_half_len - fil_edge, -fil_half_len, s_east)
+                                 - smoothstep( fil_half_len,  fil_half_len + fil_edge, s_east);
+                float across_mask = exp(-(s_north * s_north) / (2.0 * fil_width * fil_width));
+                float density = arInt * along_mask * across_mask * h_mask
+                              * mix(1.0, 1.40, complex);
+                if (density > 0.0) {
+                    fil_density += density;
+                    emission    += density * channelResponse(4.50) * 1.20;
+                    if (u_channel_logT > 4.5 && u_channel_logT < 5.0) {
+                        emission += density * 0.30;
+                    }
+                }
+            }
+        }
 
         // ── Flare-hot component ──────────────────────────────────────────
         // Scaled by GOES X-ray flux + impulsive flare flash decay; localised
@@ -376,46 +323,24 @@ export const CORONA_VOL_FRAG = /* glsl */`
             float facingF = step(0.0, cosFA);
             float flareCore = exp(-h / 0.20) * exp(-angF * angF / 0.030) * facingF;
             float flareAmp  = u_xray_norm * 0.6 + u_flare_t * 0.8;
-            float flare_logT = 7.05;
-            emission += flareCore * flareAmp * channelResponse(flare_logT) * 30.0;
+            emission += flareCore * flareAmp * channelResponse(7.05) * 30.0;
+            // Suppress filament near the flare site (filament eruption)
+            float erupt_mask = exp(-angF * angF / 0.030) * u_flare_t;
+            fil_density *= max(0.0, 1.0 - erupt_mask);
         }
 
         // ── Coronal-hole subtraction ─────────────────────────────────────
-        // Open-field-line regions are evacuated → multiplicative dimming
-        // of the local emission.  Holes have angular width ~30°.
         float holeMask = 0.0;
         for (int k = 0; k < ${N_HOLE_SLOTS}; k++) {
             if (k >= u_nHoles) break;
             vec3  hp     = normalize(u_holes[k].xyz);
             float hDepth = u_holes[k].w;
-            float cosAng = clamp(dot(phat, hp), -1.0, 1.0);
-            float ang    = acos(cosAng);
-            holeMask = max(holeMask, hDepth * exp(-ang * ang / 0.18));
+            float cosA   = clamp(dot(phat, hp), -1.0, 1.0);
+            float angH   = acos(cosA);
+            holeMask = max(holeMask, hDepth * exp(-angH * angH / 0.18));
         }
         emission *= (1.0 - holeMask);
-
-        // ── Filament / prominence density + emission ─────────────────────
-        // Cool dense plasma anchored above each AR's polarity inversion
-        // line.  Independent of coronal holes (real polar-crown filaments
-        // overlap polar holes).  Filament's own thermal emission peaks at
-        // logT ≈ 4.5 (transition-region envelope) — strong response in
-        // 304 Å, near zero in deep coronal channels.  In those coronal
-        // channels the filament instead *absorbs* via H I / He I edges,
-        // handled by the caller via fil_density × u_filament_opacity.
-        fil_density = filamentDensity(p_local, h, phat);
-        if (fil_density > 0.0) {
-            float fil_logT = 4.50;
-            // Slight upward weighting because real prominence envelopes
-            // span 4.4–4.8 in log T; gives 304 a bit more lift.
-            emission += fil_density * channelResponse(fil_logT) * 1.20;
-            // 304 limb prominence boost — at the limb (low h *and* far from
-            // disk centre on the line of sight) the prominence is seen in
-            // emission against dark space, not absorption against the disk.
-            // We give 304 a small extra kick when the channel matches.
-            if (u_channel_logT > 4.5 && u_channel_logT < 5.0) {
-                emission += fil_density * 0.30;
-            }
-        }
+        fil_density = clamp(fil_density, 0.0, 4.0);
     }
 
     // ── Ray-sphere intersection (returns t for nearest forward hit) ───────
@@ -460,7 +385,11 @@ export const CORONA_VOL_FRAG = /* glsl */`
         // attenuated, exactly producing the dark-on-disk filament look in
         // 171 / 193 / 211, while in 304 the low extinction lets the
         // filament's own emission shine through (bright limb prominence).
-        const int N_STEPS = 16;
+        // 12 steps balances coverage vs. cost — at 16 steps the volumetric
+        // shader was the dominant frame-time consumer; the early-out below
+        // (transmission < 0.01) typically terminates the loop in 6-8 steps
+        // for AR-rich pixels anyway.
+        const int N_STEPS = 12;
         float step_size = t_exit / float(N_STEPS);
         float emission = 0.0;
         float transmission = 1.0;
