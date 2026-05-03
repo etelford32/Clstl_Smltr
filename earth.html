@@ -324,22 +324,53 @@ nav {
 #alert-tip .at-exp   { color:#555; font-size:10px; margin-top:4px; }
 
 /* ─── My Location panel ──────────────────────────────────────────
-   Promoted to its own top-left panel so a first-time visitor sees the
-   primary actionable affordance (set your location → personalised
-   alerts + sun + ISS data) before any of the secondary weather/SST
-   readouts. Previously buried as the last section of #wx-panel; the
-   relocation is documented in CHANGELOG entry "Phase 3 onboarding". */
+   Top-left primary affordance (set your location → personalised
+   alerts + sun + ISS data). Offset 60px from top so it clears the
+   shared site nav and the layer-panel header doesn't crowd it.
+   "Spacey" treatment: layered nebula gradient + aurora-tinted glow
+   ring + soft inner highlight, so the panel reads as part of the
+   simulation rather than a flat overlay. */
 #loc-panel {
-    position:absolute; top:10px; left:10px; z-index:51;
-    background:rgba(0,0,0,.78); backdrop-filter:blur(10px);
-    border:1px solid rgba(0,220,180,.32); border-radius:10px;
-    padding:12px 14px; width:230px; font-size:11px;
-    box-shadow:0 4px 24px rgba(0,180,140,.12);
+    position:absolute; top:60px; left:10px; z-index:51;
+    background:
+        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.16), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.18), transparent 65%),
+        linear-gradient(180deg, rgba(6,10,28,.92), rgba(2,4,14,.96));
+    backdrop-filter:blur(14px) saturate(1.15);
+    -webkit-backdrop-filter:blur(14px) saturate(1.15);
+    border:1px solid rgba(95,255,208,.28); border-radius:14px;
+    padding:14px 16px; width:248px; font-size:11px;
+    color:#e6f6ff;
+    box-shadow:
+        0 18px 44px rgba(0,40,30,.55),
+        0 0 0 1px rgba(127,90,255,.10),
+        inset 0 1px 0 rgba(255,255,255,.06),
+        inset 0 0 32px rgba(95,255,208,.05);
+    overflow:hidden;
 }
-#loc-panel .panel-header h3 { color:#5fffd0; }
+/* Subtle starfield speckle inside the panel, painted by an SVG noise
+   gradient so we don't need an asset. Pointer-events: none so it never
+   eats clicks on the search input. */
+#loc-panel::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:
+        radial-gradient(1px 1px at 18% 22%, rgba(255,255,255,.55), transparent 60%),
+        radial-gradient(1px 1px at 72% 14%, rgba(180,230,255,.45), transparent 60%),
+        radial-gradient(1.5px 1.5px at 42% 78%, rgba(95,255,208,.5), transparent 60%),
+        radial-gradient(1px 1px at 88% 64%, rgba(220,200,255,.4), transparent 60%),
+        radial-gradient(1px 1px at 30% 56%, rgba(255,255,255,.35), transparent 60%);
+    opacity:.55;
+    mix-blend-mode:screen;
+}
+#loc-panel > * { position:relative; z-index:1; }
+#loc-panel .panel-header h3 {
+    color:#5fffd0; font-size:11px; text-transform:uppercase;
+    letter-spacing:.12em; font-weight:700;
+    text-shadow:0 0 12px rgba(95,255,208,.35);
+}
 #loc-panel:not(:has(#loc-result[style*="block"])) #loc-result-empty { display:block; }
 #loc-empty-hint {
-    font-size:10px; color:#88a098; margin-top:4px; line-height:1.5;
+    font-size:10px; color:#9ec0c4; margin-top:6px; line-height:1.55;
 }
 
 /* ─── Weather analysis panel ─────────────────────────────────── */
@@ -380,6 +411,30 @@ nav {
 .wx-skill-grid .skill-cell      { text-align: right; color: #aac; }
 .wx-k { color:#4a6a80; }
 .wx-v { color:#a0d8f0; font-weight:600; }
+
+/* Storm-alerts row keeps the count and the Get Alerts CTA together. */
+.wx-row.alerts-row { align-items:center; }
+.alerts-row-right { display:inline-flex; align-items:center; gap:6px; }
+.wx-cta-alerts {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:3px 8px; border-radius:999px;
+    background:linear-gradient(135deg, #ffb830 0%, #ff7a18 100%);
+    color:#1a0c00; font-size:9.5px; font-weight:800;
+    letter-spacing:.04em; text-transform:uppercase;
+    text-decoration:none; line-height:1.1;
+    border:1px solid rgba(255,200,80,.55);
+    box-shadow:0 2px 8px rgba(255,140,0,.28),
+               inset 0 1px 0 rgba(255,255,255,.4);
+    transition:transform .12s, filter .15s, box-shadow .18s;
+    white-space:nowrap;
+}
+.wx-cta-alerts:hover {
+    filter:brightness(1.08);
+    box-shadow:0 4px 14px rgba(255,140,0,.45),
+               inset 0 1px 0 rgba(255,255,255,.5);
+}
+.wx-cta-alerts:active { transform:translateY(1px); }
+.wx-cta-icon { font-size:11px; line-height:1; }
 #wx-refresh {
     margin-top:9px; width:100%; padding:5px; cursor:pointer;
     background:rgba(0,200,255,.1); border:1px solid rgba(0,200,255,.3);
@@ -593,22 +648,38 @@ nav {
     font-size: 9px; color: #336a8a; letter-spacing: .07em;
     text-transform: uppercase; margin: 8px 0 6px;
 }
-.loc-row { display: flex; gap: 5px; margin-bottom: 4px; }
+.loc-row { display: flex; gap: 6px; margin-bottom: 6px; }
 #loc-input {
-    flex: 1; background: rgba(0,150,200,.10);
-    border: 1px solid rgba(0,200,255,.2); border-radius: 4px;
-    color: #ddf; padding: 5px 7px; font-size: 10px;
+    flex: 1;
+    background: linear-gradient(180deg, rgba(8,16,40,.85), rgba(4,8,22,.92));
+    border: 1px solid rgba(95,255,208,.28); border-radius: 8px;
+    color: #e8fdff; padding: 8px 11px; font-size: 11px;
     font-family: inherit; outline: none; min-width: 0;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.04),
+                inset 0 0 14px rgba(0,80,120,.18);
+    transition: border-color .18s, box-shadow .18s;
 }
-#loc-input:focus { border-color: rgba(0,200,255,.55); }
+#loc-input::placeholder { color: rgba(155,200,210,.55); }
+#loc-input:focus {
+    border-color: rgba(95,255,208,.7);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05),
+                0 0 0 3px rgba(95,255,208,.15),
+                0 0 18px rgba(95,255,208,.25);
+}
 #loc-search {
-    background: rgba(0,180,255,.15); border: 1px solid rgba(0,200,255,.3);
-    border-radius: 4px; color: #00ccff; padding: 5px 9px;
-    font-size: 11px; cursor: pointer; flex-shrink: 0;
-    touch-action: manipulation; min-height: 32px;
+    background: linear-gradient(135deg, rgba(95,255,208,.32), rgba(0,180,140,.18));
+    border: 1px solid rgba(95,255,208,.55); border-radius: 8px;
+    color: #001b18; padding: 6px 12px; font-weight: 800;
+    font-size: 13px; cursor: pointer; flex-shrink: 0;
+    touch-action: manipulation; min-height: 34px;
+    text-shadow: 0 1px 0 rgba(255,255,255,.25);
+    box-shadow: 0 4px 12px rgba(95,255,208,.18),
+                inset 0 1px 0 rgba(255,255,255,.35);
+    transition: transform .12s, box-shadow .18s, filter .12s;
 }
-#loc-search:hover { background: rgba(0,180,255,.28); }
-#loc-result { display: none; margin-top: 5px; }
+#loc-search:hover { filter: brightness(1.08); box-shadow: 0 6px 18px rgba(95,255,208,.32), inset 0 1px 0 rgba(255,255,255,.4); }
+#loc-search:active { transform: translateY(1px); }
+#loc-result { display: none; margin-top: 6px; }
 .loc-header {
     display: flex; justify-content: space-between; align-items: baseline;
     gap: 6px; margin-bottom: 1px;
@@ -858,6 +929,107 @@ nav {
     .mtb-btn .mtb-icon { font-size: 16px; }
 }
 
+/* ── Saved-location summary card (sits between #app and .sim-info) ───── */
+#saved-loc-summary {
+    background:#010812;
+    padding:18px 20px 6px;
+    border-top:1px solid rgba(0,198,255,.10);
+}
+#saved-loc-summary .sls-inner {
+    max-width:1100px; margin:0 auto;
+    /* upper-left alignment per the brief */
+    display:flex; justify-content:flex-start;
+}
+#saved-loc-summary .sls-card {
+    width:100%; max-width:560px;
+    background:
+        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.10), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.12), transparent 65%),
+        linear-gradient(180deg, rgba(6,12,30,.92), rgba(2,6,18,.96));
+    border:1px solid rgba(95,255,208,.22);
+    border-radius:14px;
+    padding:14px 18px 16px;
+    box-shadow:
+        0 14px 36px rgba(0,30,50,.45),
+        inset 0 1px 0 rgba(255,255,255,.05);
+    color:#cfeefb;
+    position:relative;
+    overflow:hidden;
+}
+#saved-loc-summary .sls-card::before {
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background-image:
+        radial-gradient(1px 1px at 12% 28%, rgba(255,255,255,.45), transparent 60%),
+        radial-gradient(1px 1px at 78% 22%, rgba(180,230,255,.38), transparent 60%),
+        radial-gradient(1.4px 1.4px at 60% 70%, rgba(95,255,208,.4), transparent 60%);
+    opacity:.45; mix-blend-mode:screen;
+}
+#saved-loc-summary .sls-header {
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:10px; position:relative; z-index:1;
+}
+#saved-loc-summary .sls-title {
+    font-size:.78rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+    background:linear-gradient(135deg, #5fffd0 0%, #7b9cff 90%);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    background-clip:text;
+}
+#saved-loc-summary .sls-meta {
+    font-size:.7rem; color:#79a3b8; font-variant-numeric:tabular-nums;
+}
+#saved-loc-summary .sls-hint {
+    font-size:.72rem; color:#5d839a; line-height:1.55;
+    position:relative; z-index:1;
+}
+#saved-loc-summary .sls-grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
+    gap:8px; position:relative; z-index:1;
+}
+.sls-item {
+    background:rgba(0,40,60,.35);
+    border:1px solid rgba(95,255,208,.12);
+    border-radius:9px;
+    padding:8px 10px 9px;
+    font-size:.72rem; line-height:1.45;
+    transition:border-color .18s, background .18s, transform .12s;
+    position:relative;
+}
+.sls-item:hover {
+    background:rgba(0,60,80,.45);
+    border-color:rgba(95,255,208,.32);
+}
+.sls-item .sls-i-row {
+    display:flex; justify-content:space-between; align-items:baseline; gap:6px;
+}
+.sls-item .sls-i-name {
+    color:#dff5ff; font-weight:700; font-size:.78rem;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;
+}
+.sls-item .sls-i-badge {
+    font-size:.62rem; padding:1px 6px; border-radius:999px;
+    background:rgba(0,0,0,.35); color:var(--bdg, #9bd);
+    border:1px solid currentColor; font-weight:700; line-height:1.4;
+    flex-shrink:0;
+}
+.sls-item .sls-i-clock {
+    color:#7fc7e0; font-variant-numeric:tabular-nums; font-size:.7rem; margin-top:3px;
+}
+.sls-item .sls-i-coords {
+    color:#3d6a80; font-size:.62rem; font-variant-numeric:tabular-nums; margin-top:1px;
+}
+.sls-item .sls-i-actions {
+    display:flex; gap:4px; margin-top:6px;
+}
+.sls-item .sls-i-btn {
+    flex:1; background:rgba(0,150,200,.1); color:#9bd;
+    border:1px solid rgba(95,255,208,.15); border-radius:5px;
+    padding:3px 6px; font-size:.62rem; cursor:pointer;
+    font-family:inherit; transition:background .15s, color .15s;
+}
+.sls-item .sls-i-btn:hover { background:rgba(95,255,208,.2); color:#fff; }
+.sls-item .sls-i-btn.danger { color:#ff8a8a; border-color:rgba(255,80,80,.2); }
+.sls-item .sls-i-btn.danger:hover { background:rgba(255,80,80,.18); }
+
 /* ── Simulation description section ────────────────────────────────────── */
 .sim-info {
     background: #010812;
@@ -1007,11 +1179,11 @@ nav {
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-clouds" checked><span class="lyr-status" data-layer="clouds" title="waiting"></span><label for="lyr-clouds">Cloud Cover</label></label>
                 <label class="lyr" title="Disable procedural fill — show only measured cloud cover, with hatched no-data regions where the satellite mosaic didn't see (poles, between-disc gaps)."><input type="checkbox" id="lyr-research-mode"><label for="lyr-research-mode">Research Mode (measured-only)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-atm"    checked><label for="lyr-atm">Atmosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-aurora" checked><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-lights" checked><label for="lyr-lights">City Lights</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-grid"   checked><label for="lyr-grid">Lat/Lon Grid</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-tropic"  checked><label for="lyr-tropic">Tropics</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-atm"><label for="lyr-atm">Atmosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-aurora"><span class="lyr-status" data-layer="aurora" title="waiting for SWPC"></span><label for="lyr-aurora">Aurora</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-lights"><label for="lyr-lights">City Lights</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-grid"><label for="lyr-grid">Lat/Lon Grid</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-tropic"><label for="lyr-tropic">Tropics</label></label>
                 <label class="lyr" title="Debug: marker at the sub-solar point"><input type="checkbox" id="lyr-subsolar"><label for="lyr-subsolar">Subsolar pt</label></label>
             </div></div>
         </div>
@@ -1026,49 +1198,49 @@ nav {
                     <input type="checkbox" id="lyr-jet"><span class="lyr-status" data-layer="jet" title="waiting"></span><label for="lyr-jet">Jet Stream</label>
                 </label>
                 <label class="lyr"><input type="checkbox" id="lyr-isobars" checked><span class="lyr-status" data-layer="isobars" title="waiting"></span><label for="lyr-isobars">Isobars</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-alerts"  checked><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-earthquakes" checked><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-alerts"><span class="lyr-status" data-layer="alerts" title="waiting"></span><label for="lyr-alerts">Storm Alerts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-earthquakes"><span class="lyr-status" data-layer="earthquakes" title="waiting"></span><label for="lyr-earthquakes">Earthquakes</label></label>
             </div></div>
         </div>
 
         <!-- ── Magnetosphere ── -->
-        <div class="lyr-section" data-lyr-section="magneto">
+        <div class="lyr-section collapsed" data-lyr-section="magneto">
             <div class="lyr-section-hdr"><span>MAGNETOSPHERE</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-bowshock"      checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath" checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-reconnection"  checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cusps"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-belts"         checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-plasma"        checked><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-exosphere"     checked><label for="lyr-exosphere">Exosphere</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-geocorona"     checked><label for="lyr-geocorona">Geocorona</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-chex"          checked><label for="lyr-chex">Charge Exchange</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-cme"           checked><label for="lyr-cme">CME Shockfront</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetopause"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetopause">Magnetopause</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-bowshock"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-bowshock">Bow Shock</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-magnetosheath"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-magnetosheath">Magnetosheath</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-reconnection"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-reconnection">X-line Reconnect</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cusps"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-cusps">Polar Cusps</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-belts"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-belts">Rad. Belts</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-plasma"><span class="lyr-status" data-layer="swpc" title="waiting for SWPC"></span><label for="lyr-plasma">Plasmasphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-exosphere"><label for="lyr-exosphere">Exosphere</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-geocorona"><label for="lyr-geocorona">Geocorona</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-chex"><label for="lyr-chex">Charge Exchange</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-cme"><label for="lyr-cme">CME Shockfront</label></label>
             </div></div>
         </div>
 
         <!-- ── NASA Earth Observations ── -->
-        <div class="lyr-section" data-lyr-section="nasa-obs">
+        <div class="lyr-section collapsed" data-lyr-section="nasa-obs">
             <div class="lyr-section-hdr"><span>NASA EARTH OBSERVATIONS</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate" checked><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"         checked><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-ocean-currents" checked><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"               ><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-precip-rate"><span class="lyr-status" data-layer="precip-rate"     title="waiting"></span><label for="lyr-obs-precip-rate">Precipitation (IMERG)</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-sst"><span class="lyr-status" data-layer="sst"             title="waiting"></span><label for="lyr-obs-sst">Sea Surface Temp</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-ocean-currents"><span class="lyr-status" data-layer="ocean-currents" title="climatological surface currents"></span><label for="lyr-ocean-currents">Ocean Currents</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-aod"><span class="lyr-status" data-layer="aod"             title="waiting"></span><label for="lyr-obs-aod">Aerosol Depth (AOD, off by default — chunky 1° L3 grid)</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-obs-cloud-thickness"><span class="lyr-status" data-layer="cloud-thickness" title="waiting"></span><label for="lyr-obs-cloud-thickness">Cloud Thickness (analytic, off by default)</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"       checked><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"        checked><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-fires"><span class="lyr-status" data-layer="fires"           title="waiting"></span><label for="lyr-obs-fires">Active Fires</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-obs-snow"><span class="lyr-status" data-layer="snow"            title="waiting"></span><label for="lyr-obs-snow">Snow Cover</label></label>
             </div></div>
         </div>
 
         <!-- ── Satellite Tracking ── -->
-        <div class="lyr-section" data-lyr-section="satellites">
+        <div class="lyr-section collapsed" data-lyr-section="satellites">
             <div class="lyr-section-hdr"><span>SATELLITE TRACKING</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body">
             <div class="lyr-grid">
-                <label class="lyr"><input type="checkbox" id="lyr-sat-stations" checked><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-sat-stations"><span class="lyr-status" data-layer="sat-stations" title="waiting"></span><label for="lyr-sat-stations">Space Stations</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-starlink"><span class="lyr-status" data-layer="sat-starlink" title="waiting"></span><label for="lyr-sat-starlink">Starlink</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-weather"><span class="lyr-status" data-layer="sat-weather" title="waiting"></span><label for="lyr-sat-weather">Weather Sats</label></label>
                 <label class="lyr"><input type="checkbox" id="lyr-sat-gps"><span class="lyr-status" data-layer="sat-gps" title="waiting"></span><label for="lyr-sat-gps">GPS/GNSS</label></label>
@@ -1088,19 +1260,22 @@ nav {
             <div class="lyr-section-hdr"><span>DISPLAY</span><span class="lyr-chevron">▾</span></div>
             <div class="lyr-section-body"><div class="lyr-grid">
                 <label class="lyr"><input type="checkbox" id="lyr-rotate"  checked><label for="lyr-rotate">Auto-rotate</label></label>
-                <label class="lyr"><input type="checkbox" id="lyr-iss"         checked><label for="lyr-iss">ISS Tracker</label></label>
+                <label class="lyr"><input type="checkbox" id="lyr-iss"><label for="lyr-iss">ISS Tracker</label></label>
             </div></div>
         </div>
     </div>
     </div>
 
-    <!-- Info panel — Space Weather HUD -->
-    <div id="info-panel">
+    <!-- Info panel — Space Weather HUD. Ships minimised so the globe is
+         the first thing a visitor sees; the restore logic in the JS at the
+         bottom of the file honours an explicit user toggle in either
+         direction via 'earth-panel-min-info-panel'. -->
+    <div id="info-panel" class="panel-minimized">
         <div class="panel-header" data-minimize="info-panel">
             <h3>Space Weather</h3>
             <div class="panel-actions">
                 <span class="g-badge" id="ip-g-badge" style="margin-right:2px;">Quiet</span>
-                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▾</button>
+                <button class="panel-btn" data-minimize-btn="info-panel" title="Minimise">▸</button>
                 <button class="panel-btn panel-close" data-close="info-panel" title="Close">✕</button>
             </div>
         </div>
@@ -1474,13 +1649,22 @@ nav {
         </div>
         <div id="wx-skill-grid" class="wx-skill-grid">awaiting first forecast…</div>
         <hr class="ir-sep">
-        <!-- NWS alert summary -->
-        <div class="wx-row">
+        <!-- NWS alert summary. The 🔔 Get Alerts CTA is intentionally
+             promoted into the Storm Alerts row (instead of being buried
+             below the chrome) so a visitor noticing a live alert can
+             subscribe in one tap. Routes to /signup with a hint param so
+             the onboarding flow can pre-select alert prefs. -->
+        <div class="wx-row alerts-row">
             <span class="wx-k" style="display:flex;align-items:center;gap:4px;">
                 <span id="nws-dot" style="width:7px;height:7px;border-radius:50%;background:#555;display:inline-block;flex-shrink:0"></span>
                 Storm Alerts
             </span>
-            <span class="wx-v" id="wx-alert-count">—</span>
+            <span class="alerts-row-right">
+                <span class="wx-v" id="wx-alert-count">—</span>
+                <a href="signup.html?intent=alerts" id="wx-get-alerts" class="wx-cta-alerts" title="Get severe-weather + space-weather alerts for your saved locations">
+                    <span class="wx-cta-icon">🔔</span><span>Get Alerts</span>
+                </a>
+            </span>
         </div>
         <div id="wx-alert-badges" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;min-height:16px;"></div>
         <button id="wx-refresh">↺ Refresh Data</button>
@@ -1628,6 +1812,25 @@ nav {
     </div>
 </div>
 
+<!-- Saved-locations summary — sits below the simulation viewport in the
+     upper-left so a returning visitor sees their pinned places at a glance.
+     Driven by js/earth-saved-locations.js, which auto-saves every location
+     the visitor sets in the loc-panel. -->
+<section id="saved-loc-summary" hidden aria-label="Saved locations">
+    <div class="sls-inner">
+        <div class="sls-card">
+            <div class="sls-header">
+                <div class="sls-title">📍 Saved Locations</div>
+                <div class="sls-meta"><span id="sls-count">0</span>&nbsp;pinned · <button id="sls-clear" class="sls-i-btn danger" type="button" style="padding:2px 8px;font-size:.62rem">Clear all</button></div>
+            </div>
+            <div class="sls-hint" id="sls-hint">
+                Search a city in the panel above to pin it here. We'll keep up to 12.
+            </div>
+            <div class="sls-grid" id="sls-grid"></div>
+        </div>
+    </div>
+</section>
+
 
 <script type="module">
 import './js/live-status-bar.js';
@@ -1638,6 +1841,10 @@ import {
     geocodeQuery, saveUserLocation, loadUserLocation,
     clearUserLocation, auroraVisibility,
 } from './js/user-location.js';
+import {
+    listSavedLocations, addSavedLocation, removeSavedLocation,
+    clearSavedLocations, formatLocalClock, dayNightBadge,
+} from './js/earth-saved-locations.js';
 import { WeatherFeed, TEX_W, TEX_H, MAX_WIND_MS } from './js/weather-feed.js';
 import { WeatherHistory }       from './js/weather-history.js';
 import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
@@ -6961,6 +7168,10 @@ window.addEventListener('user-location-changed', e => {
     if (loc) {
         document.getElementById('loc-input').value = loc.city || '';
         _showLocResult(loc);
+        // Auto-pin every set location to the persisted summary list. The
+        // dedup rule inside addSavedLocation keeps the list clean if the
+        // user re-searches the same city.
+        addSavedLocation(loc);
     } else {
         _showLocResult(null);
     }
@@ -6972,6 +7183,109 @@ window.addEventListener('user-location-changed', e => {
     if (saved) {
         document.getElementById('loc-input').value = saved.city || '';
         _showLocResult(saved);
+    }
+})();
+
+// ── Saved-locations summary card ─────────────────────────────────────
+// Renders the persistent list below the globe. Auto-saves whenever the
+// active user-location changes; also updates clock fields every minute so
+// the per-location local time stays current without a full re-render.
+(function initSavedLocSummary() {
+    const root  = document.getElementById('saved-loc-summary');
+    const grid  = document.getElementById('sls-grid');
+    const count = document.getElementById('sls-count');
+    const hint  = document.getElementById('sls-hint');
+    const clearBtn = document.getElementById('sls-clear');
+    if (!root || !grid) return;
+
+    function _escape(s) {
+        return String(s ?? '').replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+
+    function _render() {
+        const list = listSavedLocations();
+        count.textContent = list.length;
+        if (list.length === 0) {
+            root.hidden = false;   // still show the empty state so the
+                                   // affordance is discoverable; collapses
+                                   // to just the hint copy.
+            hint.style.display = 'block';
+            grid.innerHTML = '';
+            clearBtn.style.display = 'none';
+            return;
+        }
+        hint.style.display = 'none';
+        clearBtn.style.display = '';
+        root.hidden = false;
+
+        grid.innerHTML = list.map(r => {
+            const clock = formatLocalClock(r.lat, r.lon);
+            const dn    = dayNightBadge(r.lat, r.lon);
+            return `
+                <div class="sls-item" data-id="${_escape(r.id)}">
+                  <div class="sls-i-row">
+                    <span class="sls-i-name" title="${_escape(r.displayName || r.city)}">${_escape(r.city)}</span>
+                    <span class="sls-i-badge" style="--bdg:${dn.color}">${dn.icon} ${dn.label}</span>
+                  </div>
+                  <div class="sls-i-clock">${_escape(clock)}</div>
+                  <div class="sls-i-coords">${r.lat.toFixed(2)}°, ${r.lon.toFixed(2)}°</div>
+                  <div class="sls-i-actions">
+                    <button class="sls-i-btn" data-act="fly" type="button">Fly here</button>
+                    <button class="sls-i-btn danger" data-act="del" type="button">Remove</button>
+                  </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    // Single delegated click handler for the grid's per-item buttons.
+    grid.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const item = btn.closest('.sls-item');
+        if (!item) return;
+        const id   = item.dataset.id;
+        const list = listSavedLocations();
+        const row  = list.find(r => r.id === id);
+        if (!row) return;
+        if (btn.dataset.act === 'del') {
+            removeSavedLocation(id);
+        } else if (btn.dataset.act === 'fly') {
+            // Re-route through saveUserLocation so the existing fly-to /
+            // sun / ISS pipeline picks it up — same path as a fresh search.
+            saveUserLocation({
+                lat: row.lat, lon: row.lon,
+                city: row.city, displayName: row.displayName || row.city,
+            });
+            // Scroll back up to the globe and trigger the existing camera
+            // fly button so the user actually swoops to the pinned spot.
+            document.getElementById('app')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => document.getElementById('loc-fly')?.click(), 250);
+        }
+    });
+
+    clearBtn?.addEventListener('click', () => {
+        if (confirm('Clear all pinned locations?')) clearSavedLocations();
+    });
+
+    window.addEventListener('pp-saved-locations-changed', _render);
+
+    // Refresh local clocks once a minute so each card stays current. Cheap
+    // because the row count is capped at 12.
+    setInterval(_render, 60_000);
+
+    // First paint — also auto-import the existing single-location pin so a
+    // returning visitor immediately sees their place in the new card.
+    const existing = loadUserLocation();
+    if (existing && !listSavedLocations().some(r =>
+        Math.abs(r.lat - existing.lat) < 0.02 &&
+        Math.abs(r.lon - existing.lon) < 0.02
+    )) {
+        addSavedLocation(existing);   // triggers _render via event
+    } else {
+        _render();
     }
 })();
 
@@ -7102,16 +7416,22 @@ document.querySelectorAll('[data-minimize-btn]').forEach(btn => {
     });
 });
 
-// Restore minimized states on load
-['layer-panel', 'info-panel', 'wx-panel'].forEach(id => {
+// Restore minimized states on load. Each panel can have an HTML default
+// (e.g. info-panel ships minimized so first-time visitors see the globe);
+// localStorage overrides the default in either direction once the user
+// explicitly toggles the panel.
+['layer-panel', 'info-panel', 'wx-panel', 'loc-panel'].forEach(id => {
     try {
-        if (localStorage.getItem('earth-panel-min-' + id) === '1') {
-            const panel = document.getElementById(id);
-            if (!panel) return;
-            panel.classList.add('panel-minimized');
-            const btn = panel.querySelector('[data-minimize-btn]');
-            if (btn) btn.textContent = '▸';
-        }
+        const panel = document.getElementById(id);
+        if (!panel) return;
+        const stored = localStorage.getItem('earth-panel-min-' + id);
+        let minimized;
+        if (stored === '1')      minimized = true;
+        else if (stored === '0') minimized = false;
+        else                     minimized = panel.classList.contains('panel-minimized');
+        panel.classList.toggle('panel-minimized', minimized);
+        const btn = panel.querySelector('[data-minimize-btn]');
+        if (btn) btn.textContent = minimized ? '▸' : '▾';
     } catch {}
 });
 
@@ -7126,12 +7446,14 @@ document.querySelectorAll('.lyr-section-hdr').forEach(hdr => {
         try { localStorage.setItem('earth-lyr-sec-' + key, collapsed ? '1' : '0'); } catch {}
     });
 });
-// Restore collapsed states on load
+// Restore collapsed states on load. HTML defaults can mark a section
+// 'collapsed'; localStorage overrides that default once the user toggles
+// the section in either direction.
 document.querySelectorAll('.lyr-section[data-lyr-section]').forEach(sec => {
     try {
-        if (localStorage.getItem('earth-lyr-sec-' + sec.dataset.lyrSection) === '1') {
-            sec.classList.add('collapsed');
-        }
+        const stored = localStorage.getItem('earth-lyr-sec-' + sec.dataset.lyrSection);
+        if (stored === '1')      sec.classList.add('collapsed');
+        else if (stored === '0') sec.classList.remove('collapsed');
     } catch {}
 });
 
