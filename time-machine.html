@@ -455,6 +455,39 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 }
 .tm-nbody-info .ok { color:#4fc97f; }
 .tm-nbody-info .warn { color:#fc7; }
+
+/* ── Residual table ─────────────────────────────────────────────────── */
+.tm-resid-empty {
+    color:#665; font-style:italic; font-size:.82rem;
+}
+.tm-resid-table {
+    width:100%;
+    border-collapse:collapse;
+    font-family:monospace; font-size:.78rem;
+    font-variant-numeric:tabular-nums;
+}
+.tm-resid-table th,
+.tm-resid-table td {
+    padding:6px 10px;
+    text-align:right;
+    border-bottom:1px solid rgba(180,140,255,.10);
+}
+.tm-resid-table th {
+    color:#b78cff;
+    font-weight:700;
+    text-transform:uppercase;
+    font-size:.68rem;
+    letter-spacing:.06em;
+    background:rgba(120,80,255,.06);
+    border-bottom:1px solid rgba(180,140,255,.25);
+}
+.tm-resid-table th:first-child,
+.tm-resid-table td:first-child { text-align:left; color:#aa9; }
+.tm-resid-table tr.now td { background:rgba(79,201,127,.06); color:#cfd; }
+.tm-resid-table tr.now td:first-child { color:#7fdb9a; font-weight:700; }
+.tm-resid-magn-low  { color:#7fdb9a; }
+.tm-resid-magn-mid  { color:#cba9ff; }
+.tm-resid-magn-high { color:#fc7; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -577,7 +610,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
     <section class="tm-panel">
         <div class="tm-plot-head">
-            <h2 style="flex:0 0 auto">Earth Apsidal Precession <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— ±10,000 yr</span></h2>
+            <h2 style="flex:0 0 auto"><span id="tm-plot-title">Earth</span> Apsidal Precession <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— ±10,000 yr · selected body</span></h2>
             <div class="tm-plot-legend">
                 <span class="lg"><span class="swatch" style="background:#b78cff"></span>e — linear secular</span>
                 <span class="lg"><span class="swatch" style="background:#fc7"></span>ω̄ — linear secular</span>
@@ -611,6 +644,22 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         climatic-precession period when combined with axial precession), but does not capture
         the ~100-kyr Milankovitch eccentricity cycle, which arises from second-order
         gravitational coupling with Venus and Jupiter and requires the full Wisdom-Holman tier.</p>
+    </section>
+
+    <section class="tm-panel">
+        <h2><span id="tm-resid-title">Earth</span> N-body − Linear-Secular Residuals
+            <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— follows body picker</span></h2>
+        <div id="tm-resid-table-wrap">
+            <p class="tm-resid-empty">Run the N-body validation above, then pick a planet from
+            the body picker beside the orrery to populate this table.</p>
+        </div>
+        <p class="tm-warn">Residuals are computed at fixed sample epochs as Δ = (full N-body
+        osculating element) − (Standish linear-secular value). Initial state is seeded from
+        Standish at the centre epoch so all residuals start at zero — values then evolve as
+        Yoshida-4 captures higher-order perturbative coupling that the linear model omits.
+        Mercury and Neptune residuals are inflated by integrator phase error at dt = 1 d
+        (Mercury's 88-day period is under-resolved; Neptune's near-circular orbit amplifies
+        element noise).</p>
     </section>
 
     <section class="tm-panel tm-construct">
@@ -898,6 +947,8 @@ function selectBody(key) {
     elSelName.textContent = selected.name;
     elSelPer.textContent  = `${formatPeriod(PERIOD_D[selected.key])}`;
     updateSidePanel();
+    if (typeof refreshPlot === 'function') refreshPlot();
+    if (typeof renderResidualTable === 'function') renderResidualTable();
 }
 
 function formatPeriod(days) {
@@ -928,19 +979,20 @@ const elPlDw = document.getElementById('pl-dw');
 
 // Sample buffers — recomputed when center JD shifts > 100 yr
 const PLOT_N = 240;
-let plotCenterJd = -1e12;
+let plotCenterJd  = -1e12;
+let plotBodyKey   = 'earth';                 // body the linear-secular curves represent
 const plotJds = new Float64Array(PLOT_N);
 const plotEs  = new Float64Array(PLOT_N);
 const plotWs  = new Float64Array(PLOT_N);   // ω̄ in degrees (unwrapped)
 const PLOT_HALF_DAYS = 10000 * 365.25;     // ±10 kyr
 
-function rebuildPlotSamples(centerJd) {
+function rebuildPlotSamples(centerJd, key) {
     let prev = null;
     let unwrapOff = 0;
     for (let i = 0; i < PLOT_N; i++) {
         const f  = i / (PLOT_N - 1) * 2 - 1;       // [-1, +1]
         const jd = centerJd + f * PLOT_HALF_DAYS;
-        const el = planetElementsAt('earth', jd);
+        const el = planetElementsAt(key, jd);
         plotJds[i] = jd;
         plotEs[i]  = el.e;
         let w = normDeg(el.omegaBar);
@@ -953,6 +1005,7 @@ function rebuildPlotSamples(centerJd) {
         plotWs[i] = w + unwrapOff;
     }
     plotCenterJd = centerJd;
+    plotBodyKey  = key;
 }
 
 function resizePlot() {
@@ -974,7 +1027,7 @@ function drawPlot() {
     const padL = 56, padR = 56, padT = 14, padB = 28;
     const pw = W - padL - padR, ph = H - padT - padB;
 
-    // y-axis ranges — include N-body samples if loaded so axes auto-fit both
+    // y-axis ranges — include N-body samples for the selected body if loaded
     let eMin = Infinity, eMax = -Infinity, wMin = Infinity, wMax = -Infinity;
     for (let i = 0; i < PLOT_N; i++) {
         if (plotEs[i] < eMin) eMin = plotEs[i];
@@ -982,14 +1035,15 @@ function drawPlot() {
         if (plotWs[i] < wMin) wMin = plotWs[i];
         if (plotWs[i] > wMax) wMax = plotWs[i];
     }
-    if (nbody.samples) {
-        for (let i = 0; i < nbody.samples.length; i++) {
-            const e = nbody.samples[i].e;
-            const w = nbody.wsUnwrap[i];
-            if (e < eMin) eMin = e;
-            if (e > eMax) eMax = e;
-            if (w < wMin) wMin = w;
-            if (w > wMax) wMax = w;
+    const nbBody  = nbody.bodyKey === plotBodyKey ? plotBodyKey : null;
+    const nbEs    = nbody.samples && nbBody && nbody.bodyTraces ? nbody.bodyTraces[plotBodyKey].e : null;
+    const nbWs    = nbody.samples && nbBody && nbody.bodyTraces ? nbody.bodyTraces[plotBodyKey].w : null;
+    if (nbEs && nbWs) {
+        for (let i = 0; i < nbEs.length; i++) {
+            if (nbEs[i] < eMin) eMin = nbEs[i];
+            if (nbEs[i] > eMax) eMax = nbEs[i];
+            if (nbWs[i] < wMin) wMin = nbWs[i];
+            if (nbWs[i] > wMax) wMax = nbWs[i];
         }
     }
     // Pad ranges 8%
@@ -1081,54 +1135,51 @@ function drawPlot() {
     }
     pctx.stroke();
 
-    // ── N-body overlay (dashed traces + dots) ────────────────────────
-    if (nbody.samples && nbody.samples.length > 1) {
+    // ── N-body overlay for the selected body (dashed traces + dots) ──
+    if (nbEs && nbWs && nbody.samples.length > 1) {
         const jdL = plotJds[0], jdR = plotJds[PLOT_N - 1];
         const xOfJd = jd => padL + ((jd - jdL) / (jdR - jdL)) * pw;
         pctx.lineWidth = 1.6;
         pctx.setLineDash([5, 4]);
 
-        // e overlay
         pctx.strokeStyle = '#b78cff';
         pctx.beginPath();
         let started = false;
         for (let i = 0; i < nbody.samples.length; i++) {
             const s = nbody.samples[i];
             if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
-            const x = xOfJd(s.jd), y = yE(s.e);
+            const x = xOfJd(s.jd), y = yE(nbEs[i]);
             if (!started) { pctx.moveTo(x, y); started = true; }
             else          pctx.lineTo(x, y);
         }
         pctx.stroke();
 
-        // ω̄ overlay
         pctx.strokeStyle = '#fc7';
         pctx.beginPath();
         started = false;
         for (let i = 0; i < nbody.samples.length; i++) {
             const s = nbody.samples[i];
             if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
-            const x = xOfJd(s.jd), y = yW(nbody.wsUnwrap[i]);
+            const x = xOfJd(s.jd), y = yW(nbWs[i]);
             if (!started) { pctx.moveTo(x, y); started = true; }
             else          pctx.lineTo(x, y);
         }
         pctx.stroke();
         pctx.setLineDash([]);
 
-        // Light sample dots
         pctx.fillStyle = 'rgba(180,140,255,.35)';
         for (let i = 0; i < nbody.samples.length; i++) {
             const s = nbody.samples[i];
             if (s.jd < jdL || s.jd > jdR) continue;
             const x = xOfJd(s.jd);
-            pctx.beginPath(); pctx.arc(x, yE(s.e), 1.6, 0, Math.PI * 2); pctx.fill();
+            pctx.beginPath(); pctx.arc(x, yE(nbEs[i]), 1.6, 0, Math.PI * 2); pctx.fill();
         }
         pctx.fillStyle = 'rgba(255,184,48,.35)';
         for (let i = 0; i < nbody.samples.length; i++) {
             const s = nbody.samples[i];
             if (s.jd < jdL || s.jd > jdR) continue;
             const x = xOfJd(s.jd);
-            pctx.beginPath(); pctx.arc(x, yW(nbody.wsUnwrap[i]), 1.6, 0, Math.PI * 2); pctx.fill();
+            pctx.beginPath(); pctx.arc(x, yW(nbWs[i]), 1.6, 0, Math.PI * 2); pctx.fill();
         }
     }
 
@@ -1144,9 +1195,7 @@ function drawPlot() {
         pctx.stroke();
         pctx.setLineDash([]);
 
-        const elNow = planetElementsAt('earth', state.jd);
-        const wNow  = elNow.omegaBar;   // raw, before unwrap — but for marker just use normDeg
-        // Find unwrapped ω̄ at current JD by interpolating samples
+        const elNow = planetElementsAt(plotBodyKey, state.jd);
         const idxF = f0 * (PLOT_N - 1);
         const i0 = Math.floor(idxF), i1 = Math.min(PLOT_N - 1, i0 + 1);
         const tt = idxF - i0;
@@ -1159,31 +1208,133 @@ function drawPlot() {
     }
 }
 
+const elPlotTitle  = document.getElementById('tm-plot-title');
+const elResidTitle = document.getElementById('tm-resid-title');
+const elResidWrap  = document.getElementById('tm-resid-table-wrap');
+
 function refreshPlot() {
-    if (Math.abs(state.jd - plotCenterJd) > 100 * 365.25 || plotCenterJd < -1e10) {
-        rebuildPlotSamples(state.jd);
-    }
+    const key = (selected && selected.key) || 'earth';
+    const needRebuild =
+        plotBodyKey !== key ||
+        plotCenterJd < -1e10 ||
+        Math.abs(state.jd - plotCenterJd) > 100 * 365.25;
+    if (needRebuild) rebuildPlotSamples(state.jd, key);
     drawPlot();
-    // Readouts
-    const el = planetElementsAt('earth', state.jd);
+
+    // Title + readouts follow selected body
+    const cap = key.charAt(0).toUpperCase() + key.slice(1);
+    if (elPlotTitle)  elPlotTitle.textContent  = cap;
+    if (elResidTitle) elResidTitle.textContent = cap;
+
+    const el = planetElementsAt(key, state.jd);
     elPlE.textContent  = el.e.toFixed(7);
     elPlW.textContent  = normDeg(el.omegaBar).toFixed(4) + '°';
-    // edot, ωdot per century
-    const E = PLANET_ELEMENTS.earth;
-    elPlDe.textContent = (E.edot * 100).toFixed(6) + ' /10kyr';
-    elPlDw.textContent = (E.omegadot * 100).toFixed(3) + '°/10kyr';
+    const EL = PLANET_ELEMENTS[key];
+    elPlDe.textContent = ((EL.edot     ?? 0) * 100).toFixed(6) + ' /10kyr';
+    elPlDw.textContent = ((EL.omegadot ?? 0) * 100).toFixed(3) + '°/10kyr';
+}
+
+// ── Residual table renderer ──────────────────────────────────────────
+function renderResidualTable() {
+    const key = (selected && selected.key) || 'earth';
+    if (!nbody.samples) {
+        elResidWrap.innerHTML =
+            '<p class="tm-resid-empty">Run the N-body validation above, then pick a planet from ' +
+            'the body picker beside the orrery to populate this table.</p>';
+        return;
+    }
+
+    // Pick samples nearest to fixed offsets from the integration centre.
+    const center  = nbody.centerJd;
+    const targets = [-2000, -1000, -500, -100, 0, 100, 500, 1000, 2000]
+        .map(yr => ({ yr, jd: center + yr * 365.25 }));
+
+    const wrapAng = d => { let x = ((d + 180) % 360 + 360) % 360 - 180; return x; };
+    const fmtSig  = (v, k) => {
+        const a = Math.abs(v);
+        if (a < 1e-12) return '0';
+        if (a >= 100)   return v.toFixed(2);
+        if (a >= 1)     return v.toFixed(4);
+        if (a >= 1e-3)  return v.toFixed(5);
+        return v.toExponential(2);
+    };
+    const magClass = (v, low, high) => {
+        const a = Math.abs(v);
+        if (a < low) return 'tm-resid-magn-low';
+        if (a < high) return 'tm-resid-magn-mid';
+        return 'tm-resid-magn-high';
+    };
+
+    let rows = '';
+    for (const { yr, jd } of targets) {
+        // Find nearest N-body sample to jd
+        let best = null, bestD = Infinity;
+        for (const s of nbody.samples) {
+            const d = Math.abs(s.jd - jd);
+            if (d < bestD) { bestD = d; best = s; }
+        }
+        if (!best || !best.bodies || !best.bodies[key]) continue;
+        const std  = planetElementsAt(key, best.jd);
+        const nb   = best.bodies[key];
+        const dA   = nb.a - std.a;
+        const dE   = nb.e - std.e;
+        const dI   = nb.i - std.i;
+        const dW   = wrapAng(nb.omegaBar - ((std.omegaBar % 360 + 360) % 360));
+
+        const isNow = Math.abs(yr) < 1;
+        const yrLbl = yr === 0 ? 'centre' : (yr > 0 ? `+${yr} yr` : `${yr} yr`);
+        rows += '<tr' + (isNow ? ' class="now"' : '') + '>'
+              + '<td>' + yrLbl + '</td>'
+              + '<td class="' + magClass(dA, 1e-4, 1e-2)   + '">' + fmtSig(dA) + ' AU</td>'
+              + '<td class="' + magClass(dE, 1e-5, 1e-3)   + '">' + fmtSig(dE) + '</td>'
+              + '<td class="' + magClass(dI, 1e-3, 1e-1)   + '">' + fmtSig(dI) + '°</td>'
+              + '<td class="' + magClass(dW, 0.5, 5)       + '">' + fmtSig(dW) + '°</td>'
+              + '</tr>';
+    }
+
+    elResidWrap.innerHTML =
+        '<table class="tm-resid-table">' +
+            '<thead><tr><th>Epoch</th><th>Δa</th><th>Δe</th><th>Δi</th><th>Δω̄</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+        '</table>';
 }
 
 // ── N-body validation worker ─────────────────────────────────────────
-// Stores integrated Earth samples and overlays them on the plot.
+// Stores per-planet integrated samples and overlays the selected body's
+// e, ω̄ traces on the plot + the residual table.
 const nbody = {
-    worker:   null,
-    running:  false,
-    samples:  null,        // Array<{ jd, e, omegaBar, residualAU }>
-    centerJd: null,
-    info:     null,        // { maxResidualAU, energyDriftRel, runtimeMs, nBodies, dtDays }
-    wsUnwrap: null,        // unwrapped ω̄ array, parallel to samples, in deg
+    worker:     null,
+    running:    false,
+    samples:    null,    // Array<{ jd, residualAU, bodies:{ key:{a,e,i,node,omegaBar} } }>
+    centerJd:   null,
+    info:       null,
+    bodyKey:    null,    // last body for which traces were built
+    bodyTraces: null,    // { key: { e:Float64Array, w:Float64Array (unwrapped deg) } }
 };
+
+function buildBodyTraces(samples, planetKeys) {
+    const traces = {};
+    for (const key of planetKeys) {
+        const N = samples.length;
+        const e = new Float64Array(N);
+        const w = new Float64Array(N);
+        let prev = null, off = 0;
+        for (let i = 0; i < N; i++) {
+            const b = samples[i].bodies[key];
+            e[i] = b.e;
+            const v = ((b.omegaBar % 360) + 360) % 360;
+            if (prev !== null) {
+                const d = v - prev;
+                if (d >  180) off -= 360;
+                else if (d < -180) off += 360;
+            }
+            prev = v;
+            w[i] = v + off;
+        }
+        traces[key] = { e, w };
+    }
+    return traces;
+}
 
 const elRunNbody = document.getElementById('tm-run-nbody');
 const elProgBar  = document.getElementById('tm-prog-bar');
@@ -1260,10 +1411,10 @@ function onWorkerMessage(ev) {
             // streamed sample — we'll collect them all in 'done', no per-sample redraw
             break;
         case 'done':
-            nbody.samples = m.samples;
-            nbody.info    = m;
-            // Build unwrapped ω̄ array for plotting
-            nbody.wsUnwrap = unwrapDeg(nbody.samples.map(s => s.omegaBar));
+            nbody.samples    = m.samples;
+            nbody.info       = m;
+            nbody.bodyKey    = (selected && selected.key) || 'earth';
+            nbody.bodyTraces = buildBodyTraces(m.samples, m.planetKeys);
             elProgBar.style.width = '100%';
             elProgLbl.textContent = `done — ${m.samples.length} samples in ${(m.runtimeMs/1000).toFixed(2)} s`;
             const driftCls = m.energyDriftRel < 1e-6 ? 'ok' : 'warn';
@@ -1276,6 +1427,7 @@ function onWorkerMessage(ev) {
             elRunNbody.textContent = '▶ Re-run at current epoch';
             nbody.running = false;
             refreshPlot();
+            renderResidualTable();
             break;
         case 'error':
             elProgLbl.textContent = 'error';

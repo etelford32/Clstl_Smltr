@@ -20,21 +20,27 @@
  *
  * Mass ratios are IAU 2015 / DE440 nominal values.
  *
- * Planet heliocentric positions come from the existing horizons.js helpers
- * (VSOP87D for Earth + outer planets, Meeus 3-term Kepler for the inner
- * three).  Velocities are obtained by central finite difference at ±0.5 d.
+ * Seeding strategy
+ * ────────────────
+ * Planets are seeded from the Standish (1992) MEAN Keplerian elements at
+ * the requested epoch via two-body Kepler propagation.  This gives
+ * initial osculating elements that exactly equal the linear-secular
+ * reference at t=0, so the residual table starts at zero and the N-body
+ * trajectory shows the higher-order perturbative drift on top of the
+ * secular trend.  At J2000 the Standish-Kepler position matches VSOP87D
+ * to <1 mAU for the inner planets and to the mean-vs-osculating offset
+ * (≲ 0.3 AU) for Jupiter–Neptune.
  *
- * Asteroid initial states are generated from MPC J2000-osculating
- * elements via two-body Kepler propagation in elementsToState().
+ * Asteroids are seeded from JPL Small-Body DB osculating elements at
+ * their published epoch, then Kepler-propagated to the simulation
+ * epoch.  They contribute mostly as gravitational perturbers.
  *
- * Final step: shift the entire system into the barycentric frame so that
- * Yoshida-4 sees an inertial Cartesian frame with conserved linear
- * momentum.
+ * Final step: shift the entire system into the barycentric frame so
+ * Yoshida-4 sees an inertial Cartesian frame with conserved net momentum.
  */
 
 import {
-    mercuryHeliocentric, venusHeliocentric, earthHeliocentric, marsHeliocentric,
-    jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
+    PLANET_ELEMENTS, planetElementsAt,
 } from '../horizons.js';
 import { GM_SUN, elementsToState } from './yoshida4.js';
 
@@ -67,29 +73,6 @@ export const N_BODIES = BODY_KEYS.length;
 export const EARTH_INDEX = BODY_KEYS.indexOf('earth');
 export const SUN_INDEX   = 0;
 
-// ── Planet heliocentric position helpers ─────────────────────────────
-const PLANET_FN = {
-    mercury: mercuryHeliocentric, venus:   venusHeliocentric,
-    earth:   earthHeliocentric,   mars:    marsHeliocentric,
-    jupiter: jupiterHeliocentric, saturn:  saturnHeliocentric,
-    uranus:  uranusHeliocentric,  neptune: neptuneHeliocentric,
-};
-
-function planetHelio(key, jd) {
-    const p = PLANET_FN[key](jd);
-    return { x: p.x_AU, y: p.y_AU, z: p.z_AU };
-}
-
-function planetVelHelio(key, jd, h = 0.5) {
-    const a = planetHelio(key, jd + h);
-    const b = planetHelio(key, jd - h);
-    return {
-        vx: (a.x - b.x) / (2 * h),
-        vy: (a.y - b.y) / (2 * h),
-        vz: (a.z - b.z) / (2 * h),
-    };
-}
-
 // ── Asteroid Keplerian elements at MPC epoch JD 2459600.5 (2022-01-21) ─
 // Source: JPL SBDB osculating elements.  argp is ω (NOT ω̄ = Ω + ω).
 const ASTEROID_EL = {
@@ -108,10 +91,10 @@ const ASTEROID_EL = {
  *
  * Steps:
  *   1. Place the Sun at heliocentric origin with zero velocity.
- *   2. For each planet, sample heliocentric position from VSOP87D / Meeus
- *      and velocity by central finite difference.
- *   3. For each asteroid, propagate its Keplerian elements from epoch
- *      to `jd0` via solveKepler() and evaluate position + velocity.
+ *   2. For each planet, evaluate the Standish secular elements at jd0
+ *      and convert to a heliocentric state vector via two-body Kepler.
+ *   3. For each asteroid, propagate its Keplerian elements from the
+ *      MPC epoch to jd0 via solveKepler() and evaluate position+velocity.
  *   4. Shift the whole system so the centre of mass is at the origin
  *      with zero net momentum.
  *
@@ -128,32 +111,35 @@ export function buildInitialState(jd0) {
     // Sun
     gm[SUN_INDEX] = GM_SUN;
 
-    // Planets
+    // Planets — seed from Standish secular elements at jd0
     for (let i = 1; i <= 8; i++) {
-        const key = BODY_KEYS[i];
+        const key   = BODY_KEYS[i];
         const ratio = MASS_RATIO[key];
-        gm[i] = GM_SUN * ratio;
-        const p  = planetHelio(key, jd0);
-        const vv = planetVelHelio(key, jd0);
-        r[i*3]   = p.x;  r[i*3+1] = p.y;  r[i*3+2] = p.z;
-        v[i*3]   = vv.vx; v[i*3+1] = vv.vy; v[i*3+2] = vv.vz;
+        gm[i]       = GM_SUN * ratio;
+        const std   = planetElementsAt(key, jd0);
+        const mu    = GM_SUN + gm[i];
+        const argp  = std.omegaBar - std.node;
+        const st    = elementsToState({
+            a: std.a, e: std.e, i: std.i, node: std.node,
+            argp, M0: std.M, epochJd: jd0, mu_eff: mu,
+        }, jd0);
+        r[i*3] = st.rx; r[i*3+1] = st.ry; r[i*3+2] = st.rz;
+        v[i*3] = st.vx; v[i*3+1] = st.vy; v[i*3+2] = st.vz;
     }
 
-    // Asteroids
+    // Asteroids — propagate published osculating elements from MPC epoch
     for (let i = 9; i < N; i++) {
         const key   = BODY_KEYS[i];
         const ratio = MASS_RATIO[key];
-        gm[i] = GM_SUN * ratio;
-        const el  = ASTEROID_EL[key];
-        const mu  = GM_SUN + gm[i];
-        const st  = elementsToState({ ...el, mu_eff: mu }, jd0);
+        gm[i]       = GM_SUN * ratio;
+        const el    = ASTEROID_EL[key];
+        const mu    = GM_SUN + gm[i];
+        const st    = elementsToState({ ...el, mu_eff: mu }, jd0);
         r[i*3] = st.rx; r[i*3+1] = st.ry; r[i*3+2] = st.rz;
         v[i*3] = st.vx; v[i*3+1] = st.vy; v[i*3+2] = st.vz;
     }
 
     // ── Shift to barycentric frame ────────────────────────────────────
-    // R_bary = Σ (m_i r_i) / Σ m_i  ; subtract from every position/velocity.
-    // Using gm as the mass proxy (cancels common G factor).
     let M = 0, Rx = 0, Ry = 0, Rz = 0, Vx = 0, Vy = 0, Vz = 0;
     for (let i = 0; i < N; i++) {
         M  += gm[i];
@@ -199,3 +185,4 @@ export function bodyHelioVel(state, idx) {
         vz: v[idx*3+2] - v[SUN_INDEX*3+2],
     };
 }
+

@@ -1,33 +1,40 @@
 /**
  * nbody-worker.js — Web Worker entry: runs the Yoshida-4 N-body
- * integration forward and backward from J2000 and streams Earth's
- * osculating elements + VSOP87D residual back to the main thread.
+ * integration forward and backward from a chosen epoch and streams the
+ * osculating elements of every planet (plus a VSOP87D Earth residual)
+ * back to the main thread.
  *
  * Protocol
  * ────────
- *   main → worker  { type:'run', startYear, endYear, dtDays, sampleYears }
+ *   main → worker  { type:'run', centerJd, startYear, endYear, dtDays,
+ *                    sampleYears }
  *   worker → main  { type:'progress', frac, samplesSoFar }
- *                  { type:'sample',   jd, e, omegaBar, residualAU }
+ *                  { type:'sample',   jd, residualAU,
+ *                                      bodies:{key:{a,e,i,node,omegaBar}} }
  *                  { type:'done',     samples:[...], maxResidualAU,
- *                                     energyDriftRel, runtimeMs }
+ *                                      energyDriftRel, runtimeMs }
  *                  { type:'error',    message }
  *
- * The residual is the heliocentric position difference between the N-body
- * Earth and the VSOP87D reference Earth at the same JD.  Inside the
- * ±2 kyr validated window this should stay below ~1e-3 AU (roughly a
- * lunar distance) for Earth — most of which is Earth's intra-orbital
- * phase angle drift, not a real orbital error.
+ * The Earth residual is the heliocentric position difference between the
+ * N-body Earth and the VSOP87D reference Earth.  Most of it is mean-
+ * longitude phase drift seeded by the finite-difference velocity, not
+ * orbital-shape error.  Element evolution is the meaningful comparison.
  */
 
 import {
     yoshida4Step, makeAccelBuffer, totalEnergy, stateToElements, GM_SUN,
 } from './yoshida4.js';
 import {
-    buildInitialState, bodyHelio, bodyHelioVel, EARTH_INDEX,
+    buildInitialState, bodyHelio, bodyHelioVel,
+    BODY_KEYS, EARTH_INDEX,
 } from './nbody-init.js';
 import { earthHeliocentric } from '../horizons.js';
 
 const J2000 = 2451545.0;
+
+// Planets only — asteroids in the model are perturbers, not measured here.
+const PLANET_KEYS = BODY_KEYS.filter(k => k !== 'sun' &&
+    !['ceres','vesta','pallas','hygiea'].includes(k));
 
 self.onmessage = ev => {
     const m = ev.data;
@@ -46,17 +53,22 @@ function runIntegration({
     dtDays      = 1,
     sampleYears = 25,
 }) {
-    const t0       = performance.now();
+    const t0        = performance.now();
     const baseState = buildInitialState(centerJd);
-    const muEarth  = GM_SUN + baseState.gm[EARTH_INDEX];
-    const E0       = totalEnergy(baseState);
+    const E0        = totalEnergy(baseState);
+
+    // Pre-cache μ_eff = GM_sun + GM_body for each measured planet.
+    const muMap = {};
+    for (const key of PLANET_KEYS) {
+        const idx = BODY_KEYS.indexOf(key);
+        muMap[key] = GM_SUN + baseState.gm[idx];
+    }
 
     const samples = [];
 
     // Sample the centre epoch itself.
-    samples.push(measure(baseState, centerJd, muEarth));
+    samples.push(measure(baseState, centerJd, muMap));
 
-    // ── Forward + backward legs ────────────────────────────────────
     const fwd  = cloneState(baseState);
     const back = cloneState(baseState);
 
@@ -71,7 +83,7 @@ function runIntegration({
 
     propagate(fwd, +dtDays, yearsForward * 365.25, sampleStepDays, centerJd,
         (state, jd) => {
-            const s = measure(state, jd, muEarth);
+            const s = measure(state, jd, muMap);
             samples.push(s);
             totalSamples++;
             postProgress(totalSamples, expectedSamples);
@@ -79,16 +91,14 @@ function runIntegration({
 
     propagate(back, -dtDays, yearsBackward * 365.25, sampleStepDays, centerJd,
         (state, jd) => {
-            const s = measure(state, jd, muEarth);
+            const s = measure(state, jd, muMap);
             samples.push(s);
             totalSamples++;
             postProgress(totalSamples, expectedSamples);
         });
 
-    // Sort by JD ascending so the plot can stream them in order.
     samples.sort((a, b) => a.jd - b.jd);
 
-    // Energy diagnostics — compare the two endpoint states.
     const Eend1 = totalEnergy(fwd);
     const Eend2 = totalEnergy(back);
     const driftRel = Math.max(
@@ -107,6 +117,7 @@ function runIntegration({
         runtimeMs:      performance.now() - t0,
         nBodies:        baseState.gm.length,
         dtDays,
+        planetKeys:     PLANET_KEYS,
     });
 }
 
@@ -127,24 +138,37 @@ function propagate(state, dt, totalDuration, sampleStep, jdStart, onSample) {
     }
 }
 
-function measure(state, jd, muEarth) {
-    const helio  = bodyHelio(state, EARTH_INDEX);
-    const helioV = bodyHelioVel(state, EARTH_INDEX);
-    const el = stateToElements(
-        helio.x, helio.y, helio.z,
-        helioV.vx, helioV.vy, helioV.vz,
-        muEarth,
-    );
+function measure(state, jd, muMap) {
+    const bodies = {};
+    for (const key of PLANET_KEYS) {
+        const idx = BODY_KEYS.indexOf(key);
+        const h = bodyHelio   (state, idx);
+        const v = bodyHelioVel(state, idx);
+        const el = stateToElements(
+            h.x, h.y, h.z,
+            v.vx, v.vy, v.vz,
+            muMap[key],
+        );
+        bodies[key] = {
+            a:        el.a,
+            e:        el.e,
+            i:        el.i,
+            node:     el.node,
+            omegaBar: el.omegaBar,
+        };
+    }
 
-    // Residual against VSOP87D — heliocentric position difference (AU).
+    // Earth-only diagnostic: position residual vs VSOP87D
+    const eh  = bodyHelio(state, EARTH_INDEX);
     const ref = earthHeliocentric(jd);
-    const dx  = helio.x - ref.x_AU;
-    const dy  = helio.y - ref.y_AU;
-    const dz  = helio.z - ref.z_AU;
+    const dx  = eh.x - ref.x_AU;
+    const dy  = eh.y - ref.y_AU;
+    const dz  = eh.z - ref.z_AU;
     const residualAU = Math.sqrt(dx*dx + dy*dy + dz*dz);
 
-    self.postMessage({ type:'sample', jd, e: el.e, omegaBar: el.omegaBar, residualAU });
-    return { jd, e: el.e, omegaBar: el.omegaBar, residualAU };
+    const out = { jd, residualAU, bodies };
+    self.postMessage({ type:'sample', ...out });
+    return out;
 }
 
 function postProgress(samplesSoFar, total) {
