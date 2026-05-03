@@ -48,6 +48,8 @@ const MU = {
     iapetus:    1.205075e11,
     janus:      1.265765e8,    // 1.8975e18 kg * G
     epimetheus: 3.515060e7,    // 5.266e17 kg * G
+    pluto:      8.696e11,      // 1.303e22 kg * G
+    charon:     1.058e11,      // 1.586e21 kg * G  (mass ratio ~0.122 of Pluto)
 };
 
 // Oblateness (J2) metadata.  When a system declares oblateness on its
@@ -522,12 +524,72 @@ const SATURN_COORBITALS = _build({
     },
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pluto + Charon — the canonical "true binary"
+// ─────────────────────────────────────────────────────────────────────────────
+// Mass ratio M_Charon / M_Pluto = 0.1216 — by far the largest moon-to-planet
+// ratio in the solar system. Consequence: the system barycenter sits
+//
+//   r_bary = a · M_Charon / (M_Pluto + M_Charon)
+//          = 19,591 km × 0.1216 / 1.1216
+//          ≈ 2,124 km from Pluto's centre,
+//
+// which is ~937 km outside Pluto's surface (R_Pluto = 1,188 km).  In every
+// other planet+moon system the barycenter sits inside the primary; here it
+// floats in empty space, and Pluto traces a visible mini-orbit around it.
+//
+// Both bodies are tidally locked to each other (a so-called "double tidal
+// lock") — a configuration unique among the major known systems.
+//
+// IC: mean orbital elements at J2000.0 referenced to Pluto's invariable
+// plane.  Source: JPL PLU055 ephemeris.
+
+const PLUTO_CHARON = _build({
+    id:    'pluto-charon',
+    name:  'Pluto + Charon',
+    blurb: 'A true binary. The barycenter sits in empty space outside Pluto\'s surface, and both worlds orbit it.',
+    marketing: {
+        headline: 'A barycenter you can see',
+        callout:  'Mass ratio 0.122 — large enough that the center of mass floats ~937 km above Pluto\'s surface. Pluto traces a small loop while Charon traces a large one. The white reticle in the scene marks the actual barycenter.',
+        physics:  'Pure two-body Newton in the inertial frame. The integrator runs in barycentric coordinates so the COM is exactly at the scene origin — drift would be a numerical bug, not physics.',
+    },
+    parent: {
+        name: 'pluto',
+        m: M.pluto,
+        radius_km: 1188.3,
+        color: 0xd6b88a,
+        glow:  0xffe0b8,
+    },
+    satellites: [
+        {
+            name: 'charon',
+            m: M.charon,
+            radius_km: 606.0,
+            color: 0x9c8b78,
+            highlight: 'tidally locked binary partner',
+            elements: {
+                a:        19_591_000,    // mean Pluto-Charon separation
+                e:        0.000220,
+                i_deg:    0.080,
+                raan_deg: 223.046,
+                argp_deg: 0.0,
+                M_deg:    0.0,
+            },
+        },
+    ],
+    scale_km_per_unit: 1188.3,           // 1 scene unit = Pluto radius
+    suggested_dt_s:    1800,             // 30-minute step
+    suggested_warp:    86400 * 1.5,      // 1.5 d / s — orbit completes in ~4 s
+    show_barycenter:   true,
+});
+
 export const SYSTEMS = {
     'earth-moon':        EARTH_MOON,
     'mars-system':       MARS_SYSTEM,
     'jupiter-galileans': JUPITER_GALILEANS,
     'saturn-major':      SATURN_MAJOR,
     'saturn-coorbitals': SATURN_COORBITALS,
+    'pluto-charon':      PLUTO_CHARON,
 };
 
 export const SYSTEM_ORDER = [
@@ -536,6 +598,7 @@ export const SYSTEM_ORDER = [
     'jupiter-galileans',
     'saturn-major',
     'saturn-coorbitals',
+    'pluto-charon',
 ];
 
 // J2000.0 epoch (TT ~= TDB) as Julian Date.
