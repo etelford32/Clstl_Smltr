@@ -350,8 +350,18 @@
                     <button type="submit" class="btn-submit" id="btn-submit">Create Account →</button>
                 </form>
 
-                <!-- Social auth will be added when OAuth providers are configured -->
+                <!-- Social auth — see signin.html for the same wiring. -->
+                <div class="divider" id="oauth-divider" style="display:none">or</div>
+                <div id="oauth-mount"></div>
             </div>
+            <script type="module">
+                import { mountOAuthButtons } from './js/oauth-buttons.js';
+                import { SOCIAL_PROVIDERS } from './js/config.js';
+                if (SOCIAL_PROVIDERS?.length) {
+                    document.getElementById('oauth-divider').style.display = '';
+                    mountOAuthButtons('#oauth-mount', { source: 'signup' });
+                }
+            </script>
 
             <!-- Success state -->
             <div class="success-overlay" id="success-view">

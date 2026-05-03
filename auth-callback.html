@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signing you in… — Parker Physics</title>
+<meta name="robots" content="noindex,nofollow">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+body {
+    background: #06030f;
+    color: #d0cce8;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px;
+    text-align: center;
+}
+.cb-card {
+    max-width: 420px;
+    background: linear-gradient(135deg, #0f0c21, #08061a);
+    border: 1px solid rgba(160,128,255,.32);
+    border-radius: 12px;
+    padding: 28px 28px 24px;
+    box-shadow: 0 24px 64px rgba(0,0,0,.55);
+}
+.cb-logo {
+    height: 56px; width: 56px; border-radius: 50%;
+    object-fit: cover; margin-bottom: 20px;
+}
+.cb-card h1 {
+    font-size: 1.2rem; font-weight: 700; color: #fff;
+    margin-bottom: 8px; letter-spacing: .01em;
+}
+.cb-card p {
+    font-size: .9rem; color: #aab;
+    line-height: 1.5; margin-bottom: 16px;
+}
+.cb-spinner {
+    display: inline-block; width: 22px; height: 22px;
+    border: 2px solid rgba(160,128,255,.3);
+    border-top-color: #c77dff;
+    border-radius: 50%;
+    animation: cb-spin .7s linear infinite;
+    margin: 6px auto 14px;
+}
+@keyframes cb-spin { to { transform: rotate(360deg); } }
+.cb-err {
+    background: rgba(255,107,107,.08);
+    border: 1px solid rgba(255,107,107,.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: .82rem;
+    color: #ff8b8b;
+    margin: 10px 0 16px;
+    text-align: left;
+}
+.cb-actions {
+    display: flex; gap: 10px;
+    justify-content: center; flex-wrap: wrap;
+    margin-top: 6px;
+}
+.cb-btn {
+    font: inherit; font-size: .85rem; font-weight: 700;
+    padding: 9px 18px; border-radius: 8px;
+    cursor: pointer; text-decoration: none;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.04); color: #cef;
+    transition: background .15s, border-color .15s;
+}
+.cb-btn:hover { background: rgba(255,255,255,.09); color: #fff }
+.cb-btn--primary {
+    background: linear-gradient(45deg, #ff8c00, #ffd700);
+    color: #0a0510; border-color: transparent;
+}
+.cb-btn--primary:hover { filter: brightness(1.06); color: #000 }
+</style>
+</head>
+<body>
+
+<!--
+  OAuth callback landing.
+
+  Flow:
+    1. Supabase redirects here after the user authorises the provider.
+       The hash fragment carries access_token + refresh_token, OR an
+       ?error=… query param on failure.
+    2. supabase-js's auto-detect picks up the hash and hydrates the
+       session — we just await getSession() to see the result.
+    3. New users (created_at within the last ~60s) get a 'signup'
+       activation event + a welcome-email POST + the wizard flag
+       stamped so the dashboard auto-opens the wizard.
+    4. Returning users get a 'signin_succeeded' activation event.
+    5. Either way: bounce to /dashboard.html (or the post-login
+       redirect if one was queued).
+
+  We deliberately don't surface anything more than a spinner on the
+  happy path. The page exists to be invisible — users reading "Signing
+  you in…" for half a second is fine; users reading a feature pitch is
+  unwelcome friction.
+-->
+
+<div class="cb-card">
+    <img src="ParkersPhysics_logo2.jpg" alt="Parker Physics" class="cb-logo">
+    <div id="cb-spinner-row">
+        <div class="cb-spinner"></div>
+        <h1 id="cb-title">Signing you in…</h1>
+        <p id="cb-sub">Hold on — finalising your session.</p>
+    </div>
+    <div id="cb-error-row" style="display:none">
+        <h1>Sign-in didn't complete</h1>
+        <div class="cb-err" id="cb-error-msg">—</div>
+        <p>Try again, or sign in with your email and password instead.</p>
+        <div class="cb-actions">
+            <a class="cb-btn" href="/signin.html">← Back to sign in</a>
+            <a class="cb-btn cb-btn--primary" href="/">Home</a>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { auth } from './js/auth.js';
+import { getSupabase, isConfigured } from './js/supabase-config.js';
+import { logActivation } from './js/activation.js';
+
+const titleEl  = document.getElementById('cb-title');
+const subEl    = document.getElementById('cb-sub');
+const spinRow  = document.getElementById('cb-spinner-row');
+const errRow   = document.getElementById('cb-error-row');
+const errMsg   = document.getElementById('cb-error-msg');
+
+function showError(msg) {
+    if (spinRow) spinRow.style.display = 'none';
+    if (errRow)  errRow.style.display = '';
+    if (errMsg)  errMsg.textContent = msg || 'An unknown error occurred.';
+}
+
+// Provider failures come back as ?error=<code>&error_description=<text>
+// in the URL. Surface the description (or fall back to the code) so the
+// user has a readable hint instead of a silent broken page.
+const params = new URLSearchParams(window.location.search);
+const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
+const errCode = params.get('error') || hashParams.get('error');
+if (errCode) {
+    const desc = params.get('error_description')
+              || hashParams.get('error_description')
+              || errCode;
+    showError(desc.replace(/\+/g, ' '));
+} else {
+    boot();
+}
+
+async function boot() {
+    if (!isConfigured()) {
+        showError('Backend is not configured (missing Supabase env vars).');
+        return;
+    }
+    try {
+        const sb = await getSupabase();
+        // The Supabase client's onAuthStateChange / detectSessionInUrl
+        // is racey across tabs and reload timing. Poll getSession()
+        // briefly so a slow hydration doesn't immediately bounce us
+        // back to the sign-in page.
+        let session = null;
+        for (let i = 0; i < 12; i++) {
+            const { data } = await sb.auth.getSession();
+            if (data?.session) { session = data.session; break; }
+            await new Promise(r => setTimeout(r, 250));
+        }
+        if (!session) {
+            showError("We didn't receive a session from the provider. Try signing in again.");
+            return;
+        }
+
+        // Hydrate the in-memory auth module so any post-callback code
+        // that calls auth.isSignedIn() / auth.getUser() sees the user
+        // immediately. fetchProfile() pulls plan + role from
+        // user_profiles (the handle_new_user trigger created the row).
+        await auth.fetchProfile?.();
+
+        const user = session.user;
+        // Brand-new account heuristic: created_at within the last
+        // 60 seconds of the session being established. Picks up the
+        // OAuth signup path without false-positives for returning users.
+        const createdMs = user?.created_at ? Date.parse(user.created_at) : 0;
+        const isNew = createdMs && (Date.now() - createdMs) < 60_000;
+
+        if (isNew) {
+            // Wizard auto-fires on first dashboard load.
+            try { localStorage.setItem('pp_welcome_pending', '1'); } catch {}
+
+            // Activation event. The DB unique partial index on
+            // (user_id, 'signup') makes this idempotent at the
+            // schema level — a refresh that lands back here cannot
+            // produce a second row.
+            try {
+                await logActivation('signup', { plan: 'free', source: 'oauth' });
+            } catch {}
+
+            // Welcome email — fire-and-forget. The edge function
+            // does its own idempotency pre-check against
+            // welcome_email_sent so a refresh is also safe.
+            try {
+                await fetch('/api/welcome/send', {
+                    method:  'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization:  `Bearer ${session.access_token}`,
+                    },
+                    body: '{}',
+                }).catch(() => {});
+            } catch {}
+
+            titleEl.textContent = 'Welcome aboard!';
+            subEl.textContent   = 'Setting up your account…';
+        } else {
+            // Returning OAuth user. Mirror what signin.html does for
+            // the password flow so the auth-flow card on admin counts
+            // these too. retry_count is 0 by definition for OAuth —
+            // the provider either succeeds or kicks the user back
+            // here with an error.
+            try {
+                await logActivation('signin_succeeded', { retry_count: 0, source: 'oauth' });
+            } catch {}
+
+            titleEl.textContent = 'Welcome back.';
+            subEl.textContent   = 'Loading your dashboard…';
+        }
+
+        // Honour any post-login redirect a sign-in-required page may
+        // have stashed in sessionStorage; default to dashboard.
+        let dest;
+        try { dest = auth.getPostLoginRedirect?.(); } catch {}
+        if (!dest) dest = 'dashboard.html';
+
+        // Clean the hash so a refresh on the dashboard doesn't try to
+        // re-process the OAuth tokens. window.location.replace also
+        // keeps the callback URL out of the browser back-button history.
+        window.location.replace(dest);
+    } catch (e) {
+        console.error('[auth-callback] boot failed:', e);
+        showError(e?.message || 'Something went wrong while signing you in.');
+    }
+}
+</script>
+
+</body>
+</html>
