@@ -294,8 +294,23 @@
                     <button type="submit" class="btn-submit" id="btn-submit">Sign In →</button>
                 </form>
 
-                <!-- Social auth will be added when OAuth providers are configured -->
+                <!-- Social auth — buttons render only for providers in
+                     js/config.js SOCIAL_PROVIDERS, so an unconfigured
+                     provider stays hidden instead of throwing. The
+                     divider above sits ABOVE the mount point so we
+                     don't render an orphan "or" line when the array
+                     is empty. -->
+                <div class="divider" id="oauth-divider" style="display:none">or</div>
+                <div id="oauth-mount"></div>
             </div>
+            <script type="module">
+                import { mountOAuthButtons } from './js/oauth-buttons.js';
+                import { SOCIAL_PROVIDERS } from './js/config.js';
+                if (SOCIAL_PROVIDERS?.length) {
+                    document.getElementById('oauth-divider').style.display = '';
+                    mountOAuthButtons('#oauth-mount', { source: 'signin' });
+                }
+            </script>
 
             <!-- ── Forgot password view ── -->
             <div class="reset-view" id="reset-view">

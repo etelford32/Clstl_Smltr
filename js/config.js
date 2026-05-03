@@ -27,6 +27,32 @@
 // ── NASA API key (local dev only; replaced by env var in production) ─────────
 export const NASA_KEY = 'DEMO_KEY';   // ← replace with your key for local dev
 
+// ── Social auth providers ────────────────────────────────────────────────────
+//
+// Allow-list for the "Continue with X" buttons rendered on
+// signin.html + signup.html via js/oauth-buttons.js. The button only
+// renders for providers in this array, so a partially-configured
+// provider (Supabase dashboard side not yet finished) stays hidden.
+//
+// Adding a new provider takes three steps:
+//   1. Configure the provider in the Supabase dashboard
+//      (Authentication → Providers).
+//   2. Add a metadata entry to js/oauth-buttons.js OAUTH_PROVIDERS.
+//   3. Add the provider id to this array.
+//
+// Apple is staged: its metadata + brand button live in
+// js/oauth-buttons.js OAUTH_PROVIDERS already, and the auth-callback
+// page handles its return URL the same way it handles Google's. To
+// turn it on, follow OAUTH_SETUP.md → Apple steps 1–4 (Apple Developer
+// console + Supabase dashboard) THEN change the array to:
+//   Object.freeze(['google', 'apple'])
+// Don't flip it before completing the dashboard work — the button
+// would render but every click would surface a Supabase
+// "provider not enabled" error.
+//
+// See OAUTH_SETUP.md for the full operator runbook.
+export const SOCIAL_PROVIDERS = Object.freeze(['google']);
+
 // ── Plan tier constants ───────────────────────────────────────────────────────
 export const TIER = Object.freeze({
     FREE: 'free',
