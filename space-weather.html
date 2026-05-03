@@ -1156,6 +1156,26 @@ nav {
 .layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
     border-color: rgba(0,198,255,.45); }
 
+/* EUV channel selector — sits below the layer toggle row */
+.euv-row {
+    margin-top: 6px; align-items: center;
+    border-top: 1px solid rgba(255,180,40,.10);
+    padding-top: 6px;
+}
+.euv-label {
+    font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #ffc060; padding-right: 4px; align-self: center;
+}
+.euv-btn {
+    border-color: rgba(255,180,40,.25);
+    color: #c8a060;
+    background: rgba(255,180,40,.05);
+}
+.euv-btn:hover  { border-color: rgba(255,180,40,.55); color: #ffd070; }
+.euv-btn.active { background: rgba(255,180,40,.20); color: #ffe090;
+    border-color: rgba(255,180,40,.55);
+    box-shadow: 0 0 8px rgba(255,180,40,.35); }
+
 /* Legend below the globe */
 .globe-legend {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
@@ -1943,6 +1963,22 @@ nav {
                 <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
                 <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
                 <button class="layer-btn active" data-layer="wind">Wind Streams</button>
+            </div>
+            <!-- AIA-style EUV channel selector — switches the sun rendering
+                 between white-light and one of six SDO/AIA passbands. Each
+                 channel raymarches a synthetic DEM through the corona using
+                 the channel's Gaussian temperature response, so the same
+                 active-region / coronal-hole / X-ray data drives a real
+                 multi-wavelength instrument view. -->
+            <div class="globe-layer-btns euv-row" id="euv-channel-btns">
+                <span class="euv-label">EUV channel:</span>
+                <button class="layer-btn euv-btn active" data-euv="white" title="White-light photosphere (default)">White</button>
+                <button class="layer-btn euv-btn" data-euv="171" title="171 Å — Fe IX, 0.7 MK · quiet plage / coronal loops">171</button>
+                <button class="layer-btn euv-btn" data-euv="193" title="193 Å — Fe XII, 1.6 MK · ARs + coronal holes (dark)">193</button>
+                <button class="layer-btn euv-btn" data-euv="211" title="211 Å — Fe XIV, 2 MK · AR loops">211</button>
+                <button class="layer-btn euv-btn" data-euv="304" title="304 Å — He II, 50 kK · chromosphere + prominences">304</button>
+                <button class="layer-btn euv-btn" data-euv="131" title="131 Å — Fe XXI, 10 MK · flare hot">131</button>
+                <button class="layer-btn euv-btn" data-euv="94"  title="94 Å — Fe XVIII, 7 MK · flare core">94</button>
             </div>
         </div>
         <canvas id="sw-globe-canvas"
@@ -3760,6 +3796,18 @@ let _globe = null;
             if (!btn) return;
             btn.classList.toggle('active');
             _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+
+        // SDO/AIA EUV channel selector — radio-style (only one active at a time)
+        document.getElementById('euv-channel-btns')?.addEventListener('click', ev => {
+            const btn = ev.target.closest('.euv-btn');
+            if (!btn) return;
+            const channel = btn.dataset.euv;
+            // Mark this button active, deactivate siblings
+            for (const sib of btn.parentElement.querySelectorAll('.euv-btn')) {
+                sib.classList.toggle('active', sib === btn);
+            }
+            _globe.setEuvMode(channel);
         });
     }
 }

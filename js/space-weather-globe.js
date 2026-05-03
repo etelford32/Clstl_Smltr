@@ -1251,6 +1251,16 @@ export class SpaceWeatherGlobe {
             activity: state.derived?.activity  ?? 0.5,
         });
 
+        // ── Synthesise coronal holes from solar-wind speed ──────────────────
+        // Two near-permanent polar holes (always present, scaled by activity
+        // — deeper / wider during solar minimum) plus one Earth-facing
+        // equatorial hole when the 1-AU wind is fast enough to suggest an
+        // open-field stream is currently rooted in the Earth-facing
+        // hemisphere.  Real coronal-hole maps come from EUV imagery (193 Å
+        // dark patches), which we don't ingest yet — this is a kinematic
+        // proxy that captures the right gross structure.
+        this._sunSkin.setHoles(this._synthesizeHoles(spd, state));
+
         // ── Active regions — paint patches on photosphere & build wind streams ──
         const regions = Array.isArray(state.active_regions) ? state.active_regions : [];
         // Cheap key for change detection (avoid rebuilding streams every tick)
@@ -1356,6 +1366,49 @@ export class SpaceWeatherGlobe {
         // Re-cap the belt-particle drift rates so a high compression factor
         // doesn't streak protons into a solid ring.
         this._beltParticles?.setTimeCompression(this._timeCompression);
+    }
+
+    /**
+     * Switch the sun rendering between white-light and one of six SDO/AIA
+     * passbands (94, 131, 171, 193, 211, 304 Å).  Forwards to SunSkin which
+     * toggles the volumetric raymarched corona on, hides the four stylised
+     * shells, and dims the photosphere appropriately.
+     */
+    setEuvMode(channel) {
+        this._sunSkin?.setEuvMode(channel);
+    }
+
+    /** Currently-active sun-rendering mode. */
+    get euvMode() { return this._sunSkin?.euvMode ?? 'white'; }
+
+    /**
+     * Build a list of synthetic coronal-hole anchors from the live solar-wind
+     * speed.  Two polar holes are always present; an Earth-facing equatorial
+     * hole appears when v_sw > 500 km/s (the kinematic proxy for an open
+     * field-line stream rooted in the Earth-facing hemisphere).
+     *
+     * In our scene the sub-Earth Carrington longitude is fixed at π
+     * (sun at +x, Earth at origin), so the equatorial hole sits at lat = 0,
+     * lon = π.  Polar holes always sit at lat = ±π/2 (lon irrelevant).
+     */
+    _synthesizeHoles(v_sw_kms, state) {
+        const activity = state?.derived?.activity ?? 0.5;
+        // Polar holes deeper at solar minimum (low activity), shallower max
+        const polarDepth = 0.45 + 0.30 * (1 - activity);
+        const holes = [
+            { lat_rad: +Math.PI / 2, lon_rad: 0, depth: polarDepth },
+            { lat_rad: -Math.PI / 2, lon_rad: 0, depth: polarDepth },
+        ];
+        if (v_sw_kms >= 500) {
+            // Map 500-800 km/s onto an equatorial-hole depth 0.30-0.85
+            const eqDepth = Math.min(0.85, 0.30 + (v_sw_kms - 500) / 600);
+            holes.push({
+                lat_rad: 0,
+                lon_rad: Math.PI,
+                depth:   eqDepth,
+            });
+        }
+        return holes;
     }
 
     /** Estimated Sun→Earth transit time at the current wind speed (seconds). */
