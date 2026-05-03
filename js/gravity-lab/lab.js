@@ -55,9 +55,10 @@ const state = {
 
 // Three.js singletons — initialised once in init().
 let scene, camera, renderer, controls;
-const sceneRoot   = new THREE.Group();   // contains current system
-const trailRoot   = new THREE.Group();   // contains current system trails
-const overlayRoot = new THREE.Group();   // labels / accents
+const sceneRoot      = new THREE.Group();  // contains current system bodies
+const trailRoot      = new THREE.Group();  // contains current system trails
+const overlayRoot    = new THREE.Group();  // labels / accents (e.g. barycenter)
+let barycenterGroup  = null;               // marker for visible binaries
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HUD references (filled in by attachUI())
@@ -353,12 +354,59 @@ export function loadSystem(systemId) {
     }
 
     state.focusIdx = null;
+    _buildBarycenterMarker(src.show_barycenter);
     _frameSystem();
     _updateMeshes();
     _renderHUDChrome();
     _renderBodyChips();
     _renderJ2Widget();
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
+}
+
+/**
+ * Build a subtle reticle (ring + cross) at the scene origin to mark the
+ * barycenter for true-binary systems. The integrator runs in barycentric
+ * coordinates so the COM is exactly at (0,0,0) — this is just the visual
+ * affordance.
+ */
+function _buildBarycenterMarker(show) {
+    if (barycenterGroup) {
+        overlayRoot.remove(barycenterGroup);
+        barycenterGroup.traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+        });
+        barycenterGroup = null;
+    }
+    if (!show) return;
+
+    const g = new THREE.Group();
+    g.name = 'barycenter';
+
+    // Inner reticle ring lying in the XZ plane (matches our ecliptic).
+    const ringGeo = new THREE.RingGeometry(0.10, 0.14, 48);
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    g.add(ring);
+
+    // Tiny cross of two perpendicular lines.
+    const crossPos = new Float32Array([
+        -0.28, 0, 0,   0.28, 0, 0,
+         0, 0, -0.28,  0, 0,  0.28,
+    ]);
+    const crossGeo = new THREE.BufferGeometry();
+    crossGeo.setAttribute('position', new THREE.BufferAttribute(crossPos, 3));
+    const crossMat = new THREE.LineBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false,
+    });
+    g.add(new THREE.LineSegments(crossGeo, crossMat));
+
+    overlayRoot.add(g);
+    barycenterGroup = g;
 }
 
 // Energy diagnostic that includes the J2 contribution when active so the
