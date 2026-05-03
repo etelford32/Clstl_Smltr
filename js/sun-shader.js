@@ -87,6 +87,7 @@ export const SUN_FRAG = /* glsl */`
     uniform vec4  u_regions[8];
     uniform int   u_nRegions;
     uniform float u_rot_phase;
+    uniform float u_channel_phot_dim;   // 1.0 white-light, ~0.05 in EUV channels
 
     varying vec3 vNormalView;
     varying vec3 vLocalPos;
@@ -284,7 +285,12 @@ export const SUN_FRAG = /* glsl */`
         actCol = mix(actCol, vec3(1.0, 0.97, 0.85), flash * 0.80);
 
         // ── Final ──
-        vec3 finalCol = actCol * limb;
+        // Multi-wavelength photosphere brightness: deep-coronal AIA channels
+        // (94/131/171/193/211 Å) see almost nothing from the photosphere, so
+        // when the corona shader is in those modes we dim the disk strongly.
+        // 304 Å sees the chromosphere (moderate dimming); white light keeps
+        // u_channel_phot_dim = 1 and the disk renders normally.
+        vec3 finalCol = actCol * limb * u_channel_phot_dim;
         gl_FragColor = vec4(finalCol, 1.0);
     }
 `;
@@ -364,12 +370,25 @@ export const CORONA_FRAG = /* glsl */`
 
 /**
  * Create the uniform block for the sun ShaderMaterial.
+ *
+ * Includes the full set used by both the photosphere and the volumetric-EUV
+ * corona shaders (corona-volumetric.js): per-AR positions and intensities,
+ * up to four coronal-hole anchors, the active AIA-style channel parameters,
+ * and the live sun-world position so the corona shader can build view rays
+ * relative to the sun's centre.
+ *
+ * The photosphere shader reads `u_channel_phot_dim` to scale its output
+ * down when an EUV channel is active (the disk is ~5 % of white-light in
+ * 94/131/171/193/211 Å, ~35 % in 304 Å).
+ *
  * @param {object} THREE  three.js namespace
  * @returns {object}      uniform descriptor object
  */
 export function createSunUniforms(THREE) {
     const regions = [];
     for (let i = 0; i < 8; i++) regions.push(new THREE.Vector4(0, 1, 0, 0));
+    const holes = [];
+    for (let i = 0; i < 4; i++) holes.push(new THREE.Vector4(0, 1, 0, 0));
     return {
         u_time:      { value: 0.0 },
         u_teff:      { value: 5778.0 },
@@ -387,5 +406,17 @@ export function createSunUniforms(THREE) {
         u_regions:      { value: regions },
         u_nRegions:     { value: 0 },
         u_rot_phase:    { value: 0.0 },
+
+        // ── Volumetric-EUV corona uniforms ─────────────────────────────
+        u_holes:           { value: holes },
+        u_nHoles:          { value: 0 },
+        u_sun_world:       { value: new THREE.Vector3(0, 0, 0) },
+        u_sun_radius:      { value: 1.0 },
+        u_corona_radius:   { value: 3.0 },
+        u_channel_logT:    { value: 0.0 },
+        u_channel_sigT:    { value: 0.0 },
+        u_channel_color:   { value: new THREE.Vector3(1, 0.95, 0.80) },
+        u_channel_intensity: { value: 1.0 },
+        u_channel_phot_dim:  { value: 1.0 },   // photosphere brightness multiplier
     };
 }

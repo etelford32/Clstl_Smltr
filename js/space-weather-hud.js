@@ -54,6 +54,28 @@ export class SpaceWeatherHud {
         // Last seen eruption count (so we only animate "new" entries)
         this._lastEruptionId = null;
 
+        // ── 60-minute timeline buffers (1 Hz sampling) ───────────────────────
+        // Circular buffers of 3600 entries — at 1 Hz that's exactly 60 minutes
+        // of viewing-time history.  We sample once per viewing-second (driven
+        // off performance.now), independent of the 4 Hz HUD tick rate, so the
+        // timeline looks smooth regardless of how the user interacts.
+        const TL_N = 3600;
+        this._tl = {
+            N:           TL_N,
+            // count: number of valid samples written so far (capped at N)
+            count:       0,
+            // head: index where the *next* sample will land (oldest→newest order
+            // when (head − count + N) % N → … → (head − 1 + N) % N)
+            head:        0,
+            t:           new Float32Array(TL_N),
+            storm:       new Float32Array(TL_N),
+            trapped:     new Float32Array(TL_N),
+            bz:          new Float32Array(TL_N),
+            kp:          new Float32Array(TL_N),
+        };
+        this._lastSampleT = 0;
+        this._tlDirty     = true;
+
         this._render();          // initial scaffold
     }
 
@@ -124,6 +146,22 @@ export class SpaceWeatherHud {
                     <div class="hud-empty">— none yet —</div>
                 </div>
             </div>
+
+            <div class="hud-block hud-timeline">
+                <div class="hud-section-title">Last 60 min</div>
+                <canvas id="hud-tl-canvas" class="hud-tl-canvas"
+                    width="512" height="140"
+                    aria-label="Timeline of storm index, trapped fraction, Kp, and Bz over the last 60 minutes"></canvas>
+                <div class="hud-tl-legend">
+                    <span class="hud-tl-chip" style="--hud-tl-c:#ff4830">storm</span>
+                    <span class="hud-tl-chip" style="--hud-tl-c:#5fd0ff">trapped</span>
+                    <span class="hud-tl-chip" style="--hud-tl-c:#ffc060">Kp</span>
+                    <span class="hud-tl-chip" style="--hud-tl-c:#fff">Bz</span>
+                </div>
+                <div class="hud-tl-axis">
+                    <span>−60 m</span><span>−45</span><span>−30</span><span>−15</span><span>now</span>
+                </div>
+            </div>
         `;
 
         // Cache element references for the tick path (avoid repeated lookups)
@@ -145,7 +183,24 @@ export class SpaceWeatherHud {
             emicElectrons: this._root.querySelector('#hud-emic-electrons'),
             twistList:    this._root.querySelector('#hud-twist-list'),
             eruptList:    this._root.querySelector('#hud-eruption-list'),
+            tlCanvas:     this._root.querySelector('#hud-tl-canvas'),
         };
+
+        // Resize the timeline canvas backing buffer for crisp lines on HiDPI
+        // displays.  CSS sets the displayed size; we set the pixel buffer to
+        // dpr × CSS size and store the dpr scale so the draw routine can
+        // compensate.
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const c   = this._el.tlCanvas;
+        if (c) {
+            const cssW = c.clientWidth  || 256;
+            const cssH = c.clientHeight || 70;
+            c.width  = Math.round(cssW * dpr);
+            c.height = Math.round(cssH * dpr);
+            this._tlDpr  = dpr;
+            this._tlCssW = cssW;
+            this._tlCssH = cssH;
+        }
     }
 
     // ── Per-tick refresh (4 Hz) ──────────────────────────────────────────────
@@ -233,6 +288,120 @@ export class SpaceWeatherHud {
         // ── Internal eruption ticker ────────────────────────────────────────
         const eruptions = g.internalEruptions ?? [];
         this._renderEruptionList(eruptions);
+
+        // ── 60-minute timeline ──────────────────────────────────────────────
+        // Sample at 1 Hz regardless of HUD tick rate so the trace doesn't
+        // alias with the 4 Hz update; redraw the canvas every time we add a
+        // sample (fresh pixels at 1 Hz is enough for human perception).
+        if (t - this._lastSampleT >= 1.0) {
+            this._sampleTimeline(t, storm, trapped, total, g.lastBz ?? 0, g.lastKp ?? 2);
+            this._renderTimeline();
+            this._lastSampleT = t;
+        }
+    }
+
+    /**
+     * Push one row of telemetry into the circular timeline buffer.
+     */
+    _sampleTimeline(t, stormIdx, trapped, total, bz, kp) {
+        const tl = this._tl;
+        const i  = tl.head;
+        tl.t      [i] = t;
+        tl.storm  [i] = stormIdx;
+        tl.trapped[i] = total > 0 ? trapped / total : 0;
+        tl.bz     [i] = bz;
+        tl.kp     [i] = kp;
+        tl.head  = (i + 1) % tl.N;
+        tl.count = Math.min(tl.N, tl.count + 1);
+    }
+
+    /**
+     * Redraw the timeline strip.  Iterates the buffer in chronological order
+     * (oldest → newest), maps each sample's age in seconds onto an x-pixel
+     * (60 min wide), and stitches a polyline per trace.
+     *
+     * Coordinate system: 0 px = "−60 min ago", w = "now".  Each trace has its
+     * own y-mapping (storm 0–1 across full height, Kp 0–9, Bz centred at the
+     * mid-line with ±30 nT range, trapped 0–1 across full height).
+     */
+    _renderTimeline() {
+        const c = this._el.tlCanvas;
+        if (!c) return;
+        const ctx = c.getContext('2d');
+        const dpr = this._tlDpr || 1;
+        const w   = (this._tlCssW || c.width  / dpr);
+        const h   = (this._tlCssH || c.height / dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Background + grid
+        ctx.fillStyle = 'rgba(0, 4, 12, 0.92)';
+        ctx.fillRect(0, 0, w, h);
+
+        ctx.strokeStyle = 'rgba(255, 192, 96, 0.10)';
+        ctx.lineWidth = 1;
+        // 4 vertical 15-min ticks
+        for (let k = 1; k < 4; k++) {
+            const x = (k / 4) * w + 0.5;
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        }
+        // Bz mid-line (Bz = 0)
+        const bzMid = h * 0.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+        ctx.beginPath(); ctx.moveTo(0, bzMid); ctx.lineTo(w, bzMid); ctx.stroke();
+
+        const tl  = this._tl;
+        if (tl.count < 2) {
+            ctx.fillStyle = 'rgba(120, 132, 142, .55)';
+            ctx.font = '10px ui-sans-serif, system-ui';
+            ctx.textAlign = 'center';
+            ctx.fillText('— accumulating samples —', w/2, h/2 + 4);
+            return;
+        }
+
+        const tNow      = tl.t[(tl.head - 1 + tl.N) % tl.N];
+        const oldestIdx = (tl.head - tl.count + tl.N) % tl.N;
+        const WINDOW_S  = 3600;
+
+        // Helper: draw one trace as a polyline through all samples currently
+        // within the 60-minute window.
+        const drawTrace = (yMap, color, lineWidth = 1.5) => {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.beginPath();
+            let first = true;
+            for (let k = 0; k < tl.count; k++) {
+                const i  = (oldestIdx + k) % tl.N;
+                const ageS = tNow - tl.t[i];
+                if (ageS > WINDOW_S || ageS < 0) continue;
+                const x  = w * (1 - ageS / WINDOW_S);
+                const y  = yMap(i);
+                if (first) { ctx.moveTo(x, y); first = false; }
+                else       { ctx.lineTo(x, y); }
+            }
+            ctx.stroke();
+        };
+
+        // Trapped fraction (cyan) — under everything else for layering
+        drawTrace(i => h - 4 - tl.trapped[i] * (h - 8),
+                  'rgba(95, 208, 255, 0.85)');
+
+        // Kp (gold) — 0..9 mapped across full height
+        drawTrace(i => h - 4 - (Math.max(0, Math.min(9, tl.kp[i])) / 9) * (h - 8),
+                  'rgba(255, 200, 96, 0.85)');
+
+        // Bz (white) — centred at mid-line, ±30 nT range
+        const bzScale = (h * 0.45);
+        drawTrace(i => bzMid - Math.max(-30, Math.min(30, tl.bz[i])) / 30 * bzScale,
+                  'rgba(255, 255, 255, 0.80)');
+
+        // Storm index (red) — drawn last so the storm signal is on top
+        drawTrace(i => h - 4 - tl.storm[i] * (h - 8),
+                  'rgba(255, 72, 48, 0.95)', 1.8);
+
+        // Right-edge "now" highlighting tick
+        ctx.strokeStyle = 'rgba(255, 192, 96, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(w - 0.5, 0); ctx.lineTo(w - 0.5, h); ctx.stroke();
     }
 
     /**
