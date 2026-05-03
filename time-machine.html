@@ -737,8 +737,9 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <button class="tm-btn" id="tm-field-toggle">Field grid: OFF</button>
             <span class="tm-label" style="width:auto">Mode</span>
             <span class="tm-toggle-pill" role="group">
-                <button class="on" id="tm-field-noSun">Planetary only</button>
-                <button id="tm-field-total">Total |g|</button>
+                <button class="on" id="tm-field-noSun">Planetary</button>
+                <button id="tm-field-total">Total</button>
+                <button id="tm-field-jacobi">Jacobi (rot)</button>
             </span>
             <span class="tm-label" style="width:auto">Resolution</span>
             <select class="tm-select" id="tm-field-res">
@@ -1332,6 +1333,10 @@ function selectBody(key) {
     updateSidePanel();
     if (typeof refreshPlot === 'function') refreshPlot();
     if (typeof renderResidualTable === 'function') renderResidualTable();
+    // Jacobi secondary follows the body picker — re-fire the field.
+    if (typeof field !== 'undefined' && field.enabled && field.mode === 'jacobi') {
+        postFieldRequest(state.jd);
+    }
 }
 
 function formatPeriod(days) {
@@ -2280,6 +2285,7 @@ const field = {
 const elFieldToggle = document.getElementById('tm-field-toggle');
 const elFieldNoSun  = document.getElementById('tm-field-noSun');
 const elFieldTotal  = document.getElementById('tm-field-total');
+const elFieldJacobi = document.getElementById('tm-field-jacobi');
 const elFieldRes    = document.getElementById('tm-field-res');
 const elFieldStats  = document.getElementById('tm-field-stats');
 const elFieldBar    = document.getElementById('tm-fieldbar');
@@ -2395,6 +2401,24 @@ function postFieldRequest(jd) {
     field.lastSentJd = jd;
     field.lastSentMs = performance.now();
     field.inFlight   = true;
+
+    // Jacobi extras: pick the currently selected planet as secondary,
+    // compute n² from its instantaneous heliocentric distance.
+    let secondaryIndex = -1, meanMotion2 = 0, jacobiSecondaryKey = null;
+    if (field.mode === 'jacobi' && selected && selected.key) {
+        const planetIdx = BODIES.findIndex(b => b.key === selected.key);
+        if (planetIdx >= 0) {
+            secondaryIndex = planetIdx + 1;   // worker layout: 0=sun, 1..8=planets
+            const p = BODIES[planetIdx].fn(jd);
+            const r_p = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+            const muTotal = GM_SUN_AU * (1 + PLANET_MR[selected.key]);
+            // n² = GM_total / r_p³  (instantaneous circular-orbit mean motion)
+            meanMotion2 = muTotal / (r_p * r_p * r_p);
+            jacobiSecondaryKey = selected.key;
+        }
+    }
+    field.lastJacobiSecondary = jacobiSecondaryKey;
+
     field.worker.postMessage(
         {
             type:           'compute',
@@ -2403,6 +2427,7 @@ function postFieldRequest(jd) {
             RADIAL_K, RADIAL_P,
             mode:           field.mode,
             sunIndex:       0,
+            secondaryIndex, meanMotion2,
             bodies,
         },
         [bodies.buffer],
@@ -2428,9 +2453,15 @@ function onFieldMessage(ev) {
     // Update HUD bar
     elFbMin.textContent = fmtSiAccel(m.gMin);
     elFbMax.textContent = fmtSiAccel(m.gMax);
-    elFbTitle.textContent = field.mode === 'noSun'
-        ? 'Planetary |g| · Sun excluded'
-        : 'Total |g| (Sun + planets + asteroids)';
+    if (field.mode === 'noSun') {
+        elFbTitle.textContent = 'Planetary |g| · Sun excluded';
+    } else if (field.mode === 'jacobi') {
+        const sec = field.lastJacobiSecondary || 'earth';
+        const cap = sec.charAt(0).toUpperCase() + sec.slice(1);
+        elFbTitle.textContent = `Rotating-frame |g_eff| · Sun + ${cap}`;
+    } else {
+        elFbTitle.textContent = 'Total |g| (Sun + planets + asteroids)';
+    }
     elFbInfo.innerHTML =
         `<b>median</b> ${fmtSiAccel(m.gMean)} · <b>Δt</b> ${m.runtimeMs.toFixed(0)} ms · ` +
         `<b>${R}×${R}</b> · jd ${m.jd.toFixed(1)}`;
@@ -2447,12 +2478,14 @@ elFieldToggle.addEventListener('click', () => {
 
 function setFieldMode(mode) {
     field.mode = mode;
-    elFieldNoSun.classList.toggle('on', mode === 'noSun');
-    elFieldTotal.classList.toggle('on', mode === 'total');
+    elFieldNoSun .classList.toggle('on', mode === 'noSun');
+    elFieldTotal .classList.toggle('on', mode === 'total');
+    elFieldJacobi.classList.toggle('on', mode === 'jacobi');
     if (field.enabled) postFieldRequest(state.jd);
 }
-elFieldNoSun.addEventListener('click', () => setFieldMode('noSun'));
-elFieldTotal.addEventListener('click', () => setFieldMode('total'));
+elFieldNoSun .addEventListener('click', () => setFieldMode('noSun'));
+elFieldTotal .addEventListener('click', () => setFieldMode('total'));
+elFieldJacobi.addEventListener('click', () => setFieldMode('jacobi'));
 
 elFieldRes.addEventListener('change', () => {
     field.resolution = parseInt(elFieldRes.value, 10) || 128;
