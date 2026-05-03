@@ -141,6 +141,15 @@ supabase-user-timeline-migration.sql      # telemetry_user_timeline + _summary
                                           # only; superadmin-gated.
                                           # MUST be applied AFTER
                                           # supabase-client-telemetry-migration.sql.
+
+# Magic-link signin (May 2026)
+supabase-magic-link-migration.sql         # signin_magic_link_requested event
+                                          # added to activation_events CHECK +
+                                          # auth_flow_metrics refreshed to
+                                          # expose it on the admin Auth flow
+                                          # card. Operator runbook (with
+                                          # branded email template) lives in
+                                          # MAGIC_LINK_SETUP.md.
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER

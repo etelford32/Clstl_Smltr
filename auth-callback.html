@@ -150,11 +150,23 @@ function showError(msg, source = 'oauth_callback') {
 const params = new URLSearchParams(window.location.search);
 const hashParams = new URLSearchParams((window.location.hash || '').replace(/^#/, ''));
 const errCode = params.get('error') || hashParams.get('error');
+
+// Distinguish magic-link callbacks from OAuth callbacks for telemetry.
+// Two signals: the ?from=magic_link query param we set in
+// signInWithMagicLink, and the type=magiclink fragment Supabase
+// emits on its own. Either confirms this was an OTP flow.
+const callbackSource = (
+    params.get('from') === 'magic_link' ||
+    hashParams.get('type') === 'magiclink' ||
+    hashParams.get('type') === 'otp'
+) ? 'magic_link' : 'oauth';
 if (errCode) {
     const desc = params.get('error_description')
               || hashParams.get('error_description')
               || errCode;
-    showError(desc.replace(/\+/g, ' '));
+    // Pass the callback source through so telemetry can distinguish
+    // expired magic links (otp_expired) from OAuth-provider failures.
+    showError(desc.replace(/\+/g, ' '), `${callbackSource}_callback`);
 } else {
     boot();
 }
@@ -203,7 +215,7 @@ async function boot() {
             // schema level — a refresh that lands back here cannot
             // produce a second row.
             try {
-                await logActivation('signup', { plan: 'free', source: 'oauth' });
+                await logActivation('signup', { plan: 'free', source: callbackSource });
             } catch {}
 
             // Welcome email — fire-and-forget. The edge function
@@ -229,7 +241,7 @@ async function boot() {
             // the provider either succeeds or kicks the user back
             // here with an error.
             try {
-                await logActivation('signin_succeeded', { retry_count: 0, source: 'oauth' });
+                await logActivation('signin_succeeded', { retry_count: 0, source: callbackSource });
             } catch {}
 
             titleEl.textContent = 'Welcome back.';
