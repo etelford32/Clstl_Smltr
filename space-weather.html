@@ -1235,6 +1235,30 @@ nav {
 }
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
 
+/* ── Simulation description / release notes ─────────────────────────── */
+.sim-about {
+    margin-top: 10px;
+    padding: 10px 14px;
+    background: rgba(0, 4, 12, .55);
+    border: 1px solid rgba(0, 198, 255, .10);
+    border-left: 2px solid rgba(255, 192, 96, .55);
+    border-radius: 6px;
+    color: #8a98a6;
+    font-size: .72rem;
+    line-height: 1.55;
+}
+.sim-about strong { color: #cfd8e2; font-weight: 600; }
+.sim-about .sim-about-tag {
+    display: inline-block; padding: 0 6px; margin-right: 4px;
+    background: rgba(255,180,40,.12); color: #ffc060;
+    border-radius: 4px; font-size: .60rem; letter-spacing: .06em;
+    text-transform: uppercase; vertical-align: 1px;
+}
+.sim-about ul {
+    margin: 6px 0 0 0; padding-left: 18px; color: #778492;
+}
+.sim-about li { margin: 1px 0; }
+
 /* ── HUD overlay (diagnostic glass-pane) ─────────────────────────────────── */
 .globe-section { position: relative; }
 .space-weather-hud {
@@ -2064,6 +2088,28 @@ nav {
             <span><span class="leg-dot" style="background:#ffe8a0"></span>CME ejecta core · Lundquist rope (J₀/J₁ field lines, αR ≈ 2.24)</span>
             <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system · transit time-compression 3000× (≈ 2 min viewing per 4-day Sun→Earth crossing at 400 km/s)</span>
         </div>
+
+        <!-- ── About / release notes ─────────────────────────────────── -->
+        <div class="sim-about">
+            <span class="sim-about-tag">Live</span>
+            <strong>Sun → Earth space-weather sandbox.</strong>
+            Real-time NOAA SWPC / GOES / DONKI / HEK feeds drive a synthetic
+            corona that ray-marches a temperature-weighted DEM into one of
+            six SDO/AIA passbands; live SDO image inset for A/B comparison.
+            Active regions follow Carrington rotation and Joy's-law tilt;
+            recent flares brighten their AR within 1.5 h.
+            CMEs propagate via Vršnak (2013) DBM with Lundquist J₀/J₁ field
+            lines in the ejecta core.
+            μ-conserving Van Allen tracers respond to chorus, EMIC (ions and
+            ≥ 2 MeV electrons), and Brautigam-Albert radial diffusion — full
+            storm-cycle drain → recovery refill plays out from per-particle
+            physics, no hard-coded animations.
+            <ul>
+                <li>Click the <em>EUV channel</em> buttons to switch wavelengths</li>
+                <li>HUD top-right tracks storm index, twist accumulators, kink eruptions, and a 60-min timeline</li>
+                <li>SDO panel top-left mirrors the channel for live cross-check</li>
+            </ul>
+        </div>
     </section>
 
     <!-- ── DATA GRID ────────────────────────────────────────────────────────── -->
@@ -2653,6 +2699,7 @@ import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { SpaceWeatherHud }     from './js/space-weather-hud.js';
 import { SdoComparePanel }     from './js/sdo-compare-panel.js';
+import { HekFeed }             from './js/hek-feed.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -3855,6 +3902,15 @@ let _globe = null;
             _sdoPanel = new SdoComparePanel(sdoEl).start();
             _sdoPanel.setChannel(_globe.euvMode ?? 'white');
         }
+
+        // HEK coronal-hole catalog → real-data hole positions (193 Å match).
+        // Updates every 30 min on success, retries every 5 min on failure.
+        // Falls back gracefully to the synthetic polar + wind-driven holes
+        // if HEK is unreachable.
+        const _hekFeed = new HekFeed().start();
+        window.addEventListener('hek-update', ev => {
+            _globe?.setRealHoles(ev.detail?.holes ?? []);
+        });
 
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
