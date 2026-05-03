@@ -158,6 +158,13 @@ export class SpaceWeatherHud {
                 </div>
             </div>
 
+            <div class="hud-block hud-typeiii">
+                <div class="hud-section-title" title="Synthetic Type-III bursts — fast electron beams escaping along open field lines from each impulsive flare. dν/dt is the characteristic negative drift on the dynamic spectrum.">Type-III radio bursts</div>
+                <div id="hud-typeiii-list" class="hud-eruption-list">
+                    <div class="hud-empty">— quiet —</div>
+                </div>
+            </div>
+
             <div class="hud-block hud-perf" id="hud-perf">
                 <div class="hud-section-title" title="Per-section frame-time profiler — informs optimisation priorities">Performance</div>
                 <div class="hud-row"><span class="hud-k">fps</span><span id="hud-fps" class="hud-v">—</span></div>
@@ -208,6 +215,7 @@ export class SpaceWeatherHud {
             emicElectrons: this._root.querySelector('#hud-emic-electrons'),
             twistList:    this._root.querySelector('#hud-twist-list'),
             eruptList:    this._root.querySelector('#hud-eruption-list'),
+            typeIIIList:  this._root.querySelector('#hud-typeiii-list'),
             tlCanvas:     this._root.querySelector('#hud-tl-canvas'),
         };
 
@@ -327,6 +335,10 @@ export class SpaceWeatherHud {
         // ── NOAA flare ticker (drives EUV emission boost on matching AR) ──
         const flares = g.recentFlares ?? [];
         this._renderNoaaFlareList(flares);
+
+        // ── Type-III radio burst ticker (synthetic, from impulsive flares) ─
+        const typeIII = g.recentTypeIII ?? [];
+        this._renderTypeIIIList(typeIII);
 
         // ── Performance snapshot (top-N hot sections, fps, draws/tris) ─────
         if (g.profiler && e.fps) {
@@ -591,6 +603,78 @@ export class SpaceWeatherHud {
      * NOAA reports an X-class flare on AR 13800, the same AR brightens in
      * the rendered corona at the same moment.
      */
+    /**
+     * Render the rolling list of recent synthetic Type-III bursts.  Each row
+     * shows: class chip, AR id, frequency-time mini sparkline (the canonical
+     * negative-drift backslash on a log frequency axis from ~1 GHz down to a
+     * few MHz), drift rate dν/dt, and time-since-burst.  Rows tagged
+     * Earth-facing get a chevron flag — those bursts have open field lines
+     * connected toward Earth, so the emitted electrons (and accompanying
+     * SEP risk) reach our magnetosphere directly.
+     */
+    _renderTypeIIIList(bursts) {
+        const list = this._el.typeIIIList;
+        if (!list) return;
+        if (!bursts || bursts.length === 0) {
+            if (!list.querySelector('.hud-empty')) {
+                list.innerHTML = '<div class="hud-empty">— quiet —</div>';
+            }
+            return;
+        }
+        const now = Date.now();
+        const top = bursts.slice(0, 6);
+        list.innerHTML = top.map(b => {
+            const tMs   = (b.time instanceof Date ? b.time : new Date(b.time)).getTime();
+            const ageS  = Math.max(0, (now - tMs) / 1000);
+            const ageStr = ageS < 60 ? `${ageS.toFixed(0)}s ago`
+                         : ageS < 3600 ? `${(ageS/60).toFixed(0)}m ago`
+                         : `${(ageS/3600).toFixed(1)}h ago`;
+            const cls    = String(b.cls ?? '?');
+            const letter = cls.charAt(0).toUpperCase();
+            const arStr  = b.arId ? `AR${b.arId}` : '–';
+            const dirCls = b.earthFacing ? 'hud-erupt-earth' : 'hud-erupt-limb';
+            const dirSym = b.earthFacing ? '⇒ Earth' : 'limb';
+
+            // Mini frequency-time SVG sparkline.  Log frequency on Y, time on
+            // X; characteristic negative slope (frequency drifts downward as
+            // the beam travels outward into less-dense plasma).
+            const f0 = Math.log10(Math.max(0.1, b.fStartMHz));
+            const f1 = Math.log10(Math.max(0.05, b.fEndMHz));
+            const W = 70, H = 16;
+            // Curve sample points — exponential-ish decay
+            const pts = [];
+            for (let i = 0; i <= 12; i++) {
+                const u = i / 12;
+                const x = u * W;
+                // Beam intensity envelope along time — fades through the burst
+                const fLog = f0 + (f1 - f0) * (1 - Math.exp(-3 * u)) / (1 - Math.exp(-3));
+                // Map log-frequency to Y (top = high freq)
+                const yNorm = (fLog - Math.min(f0, f1)) / Math.max(0.01, Math.abs(f0 - f1));
+                const y = H - yNorm * (H - 2) - 1;
+                pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+            }
+            const stroke = letter === 'X' ? '#ff5050'
+                        : letter === 'M' ? '#ffa040'
+                        : '#ffd060';
+            const sparkline = `
+              <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="hud-typeiii-spark"
+                   aria-label="Type-III dynamic spectrum: log frequency vs time, negative drift">
+                <polyline points="${pts.join(' ')}" fill="none" stroke="${stroke}" stroke-width="1.4" stroke-linejoin="round"/>
+              </svg>`;
+
+            return `
+                <div class="hud-erupt-row hud-typeiii-row" title="${b.fStartMHz} MHz → ${b.fEndMHz} MHz over ${b.durS}s · dν/dt = ${b.driftRate} MHz/s">
+                    <span class="hud-erupt-cls cls-${letter}">${cls}</span>
+                    <span class="hud-erupt-ar">${arStr}</span>
+                    ${sparkline}
+                    <span class="hud-typeiii-drift">${b.driftRate} <span class="hud-tiny" style="color:#557">MHz/s</span></span>
+                    <span class="${dirCls} hud-tiny">${dirSym}</span>
+                    <span class="hud-erupt-age">${ageStr}</span>
+                </div>
+            `;
+        }).join('');
+    }
+
     _renderNoaaFlareList(flares) {
         const list = this._el.flareList;
         if (!list) return;

@@ -257,6 +257,14 @@ export class SpaceWeatherGlobe {
         this._eruptionCooldownS = 8;         // viewing-seconds before AR can re-erupt
         this._arEruptionLog  = [];           // ring buffer of recent internal eruptions
 
+        // Synthetic Type-III radio burst log — populated by `_logTypeIII()`
+        // from the impulsive phase of internal eruptions and NOAA-reported
+        // M/X flares.  Each entry carries:
+        //   { id, time, arId, cls, fStartMHz, fEndMHz, durS, driftRate, earthFacing }
+        // and is exposed via `globe.recentTypeIII` for the HUD ticker.
+        this._typeIIILog = [];   // newest-first
+        this._typeIIIId  = 0;
+
         // Bow shock impact pulses (transient sprite list)
         this._impactPulses = []; // [{ sprite, life, life0 }]
 
@@ -1263,6 +1271,13 @@ export class SpaceWeatherGlobe {
 
         // Type-II shock ribbons (expanding torus rings).  Pool for reuse.
         this._shockRibbons = [];   // [{ mesh, life, life0, axis: Vector3, color }]
+
+        // Filament/prominence eruption arcs — parented to a single group so
+        // the AR-Filaments layer toggle can hide them with one call.
+        this._filamentGroup = new THREE.Group();
+        this._filamentGroup.name = 'ar_filaments';
+        this._scene.add(this._filamentGroup);
+        this._filaments = [];
     }
 
     /** Spawn a Type-II shock ribbon — an EUV/Moreton wave expanding outward
@@ -1319,6 +1334,148 @@ export class SpaceWeatherGlobe {
         }
     }
 
+    // ── Filament / prominence eruption arc ──────────────────────────────────
+    /**
+     * Spawn an erupting filament arc at an active region.  Real eruptions
+     * begin with a cool (~10⁴ K) chromospheric filament suspended in the
+     * AR's flux-rope, which loses equilibrium as Φ crosses kink and lifts
+     * off radially over a few minutes.  Visually it shows up on Hα and
+     * 304 Å as a dark band that brightens, distorts, and stretches outward.
+     *
+     * Geometry: a parametric tube traced along a half-loop above the AR,
+     * with the apex height scaling rapidly with time (ballistic lift-off).
+     * The tube is rebuilt each frame from a small set of control points so
+     * the arc can stretch outward without tearing.  Renders in red-magenta
+     * for the cool plasma signature, distinct from the gold/orange hot
+     * coronal loops underneath.
+     *
+     * @param {THREE.Vector3} axisLocal      Unit-sphere AR position
+     * @param {number}        cFactor        Complexity factor (0.05 simple → 2.0 δ)
+     * @param {number}        v0             Initial CME speed proxy (km/s)
+     * @param {boolean}       earthDirected  Earth-facing flag (alters tilt)
+     */
+    _spawnFilament(axisLocal, cFactor, v0, earthDirected = false) {
+        const T     = THREE;
+        const SUN_R = 8.0;
+        // Local tangent frame at AR
+        const helper = Math.abs(axisLocal.y) > 0.95 ? new T.Vector3(1, 0, 0) : new T.Vector3(0, 1, 0);
+        const tang   = new T.Vector3().crossVectors(axisLocal, helper).normalize();
+        const orth   = new T.Vector3().crossVectors(axisLocal, tang).normalize();
+        // Anchor footpoints on opposite sides of the polarity inversion line.
+        // PIL spans `tang`; the loop apex rises along `axisLocal`.
+        const arc = {
+            anchorA:  new T.Vector3(),         // updated each step (in local)
+            anchorB:  new T.Vector3(),
+            tang:     tang.clone(),
+            orth:     orth.clone(),
+            axis:     axisLocal.clone(),
+            life:     0,
+            life0:    3.5,                     // ~3.5 s of viewing
+            apexBoost: 0.6 + 0.9 * Math.min(1, cFactor / 2.0),   // taller for δ
+            twistDeg: 360 + Math.random() * 180,                 // helical writhe
+            v0,
+        };
+
+        // Tube geometry — rebuilt each frame.  CatmullRom over 16 segments.
+        const initPath = new T.CatmullRomCurve3([
+            axisLocal.clone().multiplyScalar(SUN_R),
+            axisLocal.clone().multiplyScalar(SUN_R * 1.05),
+            axisLocal.clone().multiplyScalar(SUN_R * 1.10),
+            axisLocal.clone().multiplyScalar(SUN_R * 1.15),
+        ]);
+        const geo = new T.TubeGeometry(initPath, 28, 0.06, 8, false);
+        const mat = new T.MeshBasicMaterial({
+            color:       earthDirected ? 0xff58a8 : 0xff4060,
+            transparent: true,
+            opacity:     0.95,
+            blending:    T.AdditiveBlending,
+            depthWrite:  false,
+            side:        T.DoubleSide,
+        });
+        const mesh = new T.Mesh(geo, mat);
+        mesh.renderOrder = 19;
+        const sunPos = this._sunGroup.position;
+        mesh.position.copy(sunPos);
+        this._filamentGroup.add(mesh);
+
+        arc.mesh = mesh;
+        this._filaments.push(arc);
+    }
+
+    /** Step the filament arc — ballistic apex lift, helical writhe, fade. */
+    _stepFilaments(dt) {
+        if (!this._filaments || this._filaments.length === 0) return;
+        const T     = THREE;
+        const SUN_R = 8.0;
+
+        for (let i = this._filaments.length - 1; i >= 0; i--) {
+            const f = this._filaments[i];
+            f.life += dt;
+            const k = f.life / f.life0;       // 0 → 1
+            if (k >= 1) {
+                this._filamentGroup.remove(f.mesh);
+                f.mesh.geometry.dispose();
+                f.mesh.material.dispose();
+                this._filaments.splice(i, 1);
+                continue;
+            }
+
+            // Footpoint separation grows slowly (PIL stretches as the rope
+            // unzips).  Use cubic to slow start, fast finish.
+            const sep   = 0.10 + 0.18 * k;                     // unit-sphere fraction
+            const apex  = (0.06 + f.apexBoost * Math.pow(k, 0.7) * 1.6); // grows from 0.06 R to ~1.5 R
+            const anchorA = f.axis.clone().multiplyScalar(SUN_R)
+                .add(f.tang.clone().multiplyScalar( sep * SUN_R));
+            const anchorB = f.axis.clone().multiplyScalar(SUN_R)
+                .add(f.tang.clone().multiplyScalar(-sep * SUN_R));
+            const apexPos = f.axis.clone().multiplyScalar(SUN_R * (1 + apex));
+
+            // Build a half-loop: anchor A → quarter A → apex → quarter B → anchor B
+            const qA = new T.Vector3().lerpVectors(anchorA, apexPos, 0.5)
+                .add(f.orth.clone().multiplyScalar(0.20 * SUN_R * (1 + k * 0.5)));
+            const qB = new T.Vector3().lerpVectors(apexPos, anchorB, 0.5)
+                .add(f.orth.clone().multiplyScalar(-0.20 * SUN_R * (1 + k * 0.5)));
+
+            // Add a small helical writhe — rotates around the axis between
+            // anchors as a function of arc-length, modelling the kink writhe.
+            const writhe = (p, frac) => {
+                const w = (f.twistDeg * Math.PI / 180) * frac * (1 - frac);
+                const ax = new T.Vector3().subVectors(apexPos, f.axis.clone().multiplyScalar(SUN_R)).normalize();
+                const off = new T.Vector3().crossVectors(ax, f.orth).multiplyScalar(0.04 * SUN_R * Math.sin(w + k * 6));
+                return p.clone().add(off);
+            };
+
+            const pts = [
+                anchorA,
+                writhe(qA, 0.25),
+                writhe(apexPos, 0.5),
+                writhe(qB, 0.75),
+                anchorB,
+            ];
+            const curve = new T.CatmullRomCurve3(pts);
+
+            // Tube radius shrinks slightly as the filament stretches (mass
+            // conservation along the rope).  Higher resolution near the apex.
+            const radius = 0.07 * (1 - 0.5 * k);
+            const newGeo = new T.TubeGeometry(curve, 32, radius, 8, false);
+            f.mesh.geometry.dispose();
+            f.mesh.geometry = newGeo;
+
+            // Opacity: bright early, fade out — but show a brief flash at k≈0.1
+            // (filament brightening before lift) by overshooting to ≥1.
+            let op;
+            if (k < 0.12)       op = 0.55 + 4.0 * k;        // ramp-up
+            else if (k < 0.50)  op = 1.0 - (k - 0.12) * 0.6; // peak then ease down
+            else                op = Math.max(0, 0.78 * (1 - (k - 0.5) * 2.0)); // fade to 0
+            f.mesh.material.opacity = Math.min(1.0, op);
+
+            // Colour shift: deep red → magenta-pink as it expands and heats
+            // by reconnection drag.  HSL hue drifts from 0.95 → 0.88.
+            const hue = 0.95 - 0.07 * k;
+            f.mesh.material.color.setHSL(hue, 0.95, 0.55 + 0.10 * (1 - k));
+        }
+    }
+
     /**
      * @param {Array} regions  region objects (Carrington-rotated, as fed to
      *                         the corona shader / setRegions / fluxRopes)
@@ -1340,6 +1497,11 @@ export class SpaceWeatherGlobe {
             c.material?.dispose();
             grp.remove(c);
         }
+        // Per-AR field-line bookkeeping for the per-frame brightening pulse.
+        // Each entry holds the array of THREE.Line objects belonging to one
+        // active region so `_pulseArFieldLines` can modulate opacity / colour
+        // as that AR's twist Φ approaches the Hood-Priest kink threshold.
+        this._arLineRecords = new Map();   // arId → { lines: [], baseColor: THREE.Color, hotColor: THREE.Color, isComplex }
 
         const SUN_R = 8.0;        // matches the sun mesh radius
 
@@ -1368,16 +1530,74 @@ export class SpaceWeatherGlobe {
             const b = ((colHot      ) & 0xff) * t + ((colCool      ) & 0xff) * (1 - t);
             const color = (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
 
+            const baseOp = 0.45 + 0.25 * (L.intensity ?? 0.5);
             const mat = new THREE.LineBasicMaterial({
                 color,
                 transparent: true,
-                opacity:     0.45 + 0.25 * (L.intensity ?? 0.5),
+                opacity:     baseOp,
                 blending:    THREE.AdditiveBlending,
                 depthWrite:  false,
             });
             const line = new THREE.Line(geo, mat);
             line.renderOrder = 14;     // under the corona shells / above photosphere
+            const arId = L.ar?.region ?? null;
+            line.userData.arId      = arId;
+            line.userData.baseOp    = baseOp;
+            line.userData.baseColor = new THREE.Color(color);
+            line.userData.isComplex = !!L.isComplex;
             grp.add(line);
+
+            // Group by AR for the per-frame brightening pulse
+            if (arId != null) {
+                let rec = this._arLineRecords.get(arId);
+                if (!rec) {
+                    rec = {
+                        lines:     [],
+                        baseColor: new THREE.Color(color),
+                        // Hot colour the loops migrate toward as Φ → kink:
+                        // white-orange (matches the EUV "hot loops glow"
+                        // signature seen on SDO 131/94 Å a few minutes
+                        // before a major eruption).
+                        hotColor:  new THREE.Color(0xfff0c8),
+                        isComplex: !!L.isComplex,
+                    };
+                    this._arLineRecords.set(arId, rec);
+                }
+                rec.lines.push(line);
+            }
+        }
+    }
+
+    /** Modulate AR field-line brightness as Φ → kink threshold.  Provides
+     *  visual lead-in to internal eruptions: lines warm white-orange and
+     *  pulse faster as the rope nears critical twist, then briefly flash
+     *  during the kink event itself.  Cheap (only material tints, no
+     *  geometry rebuild). */
+    _pulseArFieldLines(t) {
+        if (!this._arLineRecords || this._arLineRecords.size === 0) return;
+        const KINK = this._kinkThreshold;
+        for (const [arId, rec] of this._arLineRecords) {
+            const slot = this._arTwist?.get(arId);
+            if (!slot) continue;
+            const k = Math.min(1.2, slot.phi / KINK);   // can briefly exceed 1.0 right before reset
+            // Pulse frequency ramps from 0.6 Hz (calm) to 4 Hz (near kink)
+            const f = 0.6 + 3.4 * Math.min(1, k);
+            // Pulse depth ramps similarly — barely perceptible when calm
+            const depth = 0.10 + 0.45 * Math.min(1, k);
+            const pulse = 1 + depth * Math.sin(t * f * 2 * Math.PI + arId * 0.31);
+            // Post-eruption flash: 0.5 s window after eruptedAt, brighten 2x
+            const sinceErupt = t - (slot.eruptedAt ?? -1e9);
+            const flash = (sinceErupt > 0 && sinceErupt < 0.5)
+                ? (1 + 1.4 * (1 - sinceErupt / 0.5))
+                : 1;
+            for (const line of rec.lines) {
+                const m = line.material;
+                const baseOp = line.userData.baseOp ?? 0.55;
+                m.opacity = Math.min(1.0, baseOp * pulse * flash * (1 + 0.55 * Math.min(1, k)));
+                // Colour interpolation cool→hot
+                const cMix = Math.min(1, k * 0.85);
+                m.color.copy(rec.baseColor).lerp(rec.hotColor, cMix);
+            }
         }
     }
 
@@ -1541,9 +1761,39 @@ export class SpaceWeatherGlobe {
         try { this._cmePropagator?.inject(cmeData); }
         catch (e) { console.warn('[SpaceWeatherGlobe] internal eruption inject failed', e); }
 
-        // Coordinated emission: photosphere flash + 3-D burst + shock ribbon
-        try { this._fireFlareVisual(`${flareLetter}${flareNum}`, lat, lon); }
+        // Coordinated emission: photosphere flash + 3-D burst + shock ribbon.
+        // We spawn the filament + Type-III ourselves below with the eruption's
+        // own free-energy proxy, so suppress the auto-spawn inside the helper.
+        try {
+            this._fireFlareVisual(`${flareLetter}${flareNum}`, lat, lon, {
+                skipFilament: true, skipTypeIII: true,
+                arId, earthDirected: earthFacing,
+            });
+        }
         catch (e) { /* shader may not be ready on first frame */ }
+
+        // Filament/prominence eruption arc — characteristic kink-instability
+        // signature.  The rope's cool plasma loses equilibrium and lifts off
+        // ballistically, so we spawn the parametric arc here at the AR.
+        try {
+            const ax = new THREE.Vector3(
+                Math.cos(lat) * Math.cos(lon),
+                Math.sin(lat),
+                Math.cos(lat) * Math.sin(lon),
+            );
+            this._spawnFilament(ax, cFactor, v0, earthFacing);
+        } catch (e) { /* defensive — keep eruption path resilient */ }
+
+        // Synthetic Type-III radio burst log — fast electron beam escaping
+        // along open field lines from the impulsive phase.  The HUD ticker
+        // pulls from `recentTypeIII` and renders a frequency-time sparkline.
+        this._logTypeIII({
+            time:        new Date(),
+            arId,
+            cls:         `${flareLetter}${flareNum}`,
+            energyProxy,
+            earthFacing,
+        });
 
         // Reset twist to residual π and stamp eruption time
         slot.phi       = Math.PI;
@@ -1562,6 +1812,64 @@ export class SpaceWeatherGlobe {
         // cycle will rebuild even if regions are unchanged.
         this._fluxRopeKey = '__post_eruption_' + arId + '_' + t.toFixed(2);
     }
+
+    /**
+     * Log a synthetic Type-III radio burst.  Type-III bursts are the
+     * radio signature of fast (~ 0.1–0.3 c) electron beams escaping along
+     * open field lines from an impulsive flare's loop-top reconnection
+     * site; in dynamic spectra they appear as sharp negative-slope
+     * streaks drifting from ~1 GHz down to a few hundred kHz on a
+     * timescale of seconds (the beam encounters progressively lower
+     * plasma frequencies — and therefore lower coronal densities — as
+     * it propagates outward into the heliosphere).
+     *
+     * We synthesise plausible parameters from the event class:
+     *   • Class X  → fStart ≈ 800 MHz, fEnd ≈ 0.5 MHz, dur ≈ 4–6 s
+     *   • Class M  → fStart ≈ 300 MHz, fEnd ≈ 1 MHz,   dur ≈ 2.5–4 s
+     *   • Else     → fStart ≈ 80 MHz,  fEnd ≈ 5 MHz,   dur ≈ 1.5–2 s
+     *
+     * The drift rate dν/dt = (fEnd − fStart) / dur (negative — frequency
+     * decreasing in time) is exposed for the HUD's mini frequency-time
+     * sparkline so the user can see the canonical Type-III "backslash"
+     * morphology even though we aren't ingesting Wind/Waves data.
+     */
+    _logTypeIII({ time, arId, cls, energyProxy = 0.5, earthFacing = false }) {
+        const letter = String(cls ?? '?')[0]?.toUpperCase() ?? '?';
+        let fStart, fEnd, dur;
+        if (letter === 'X') {
+            fStart = 700 + Math.random() * 300;     // 700–1000 MHz
+            fEnd   = 0.3 + Math.random() * 0.7;     // 0.3–1 MHz
+            dur    = 4.0 + Math.random() * 2.2;
+        } else if (letter === 'M') {
+            fStart = 200 + Math.random() * 200;
+            fEnd   = 1   + Math.random() * 2;
+            dur    = 2.5 + Math.random() * 1.5;
+        } else {
+            fStart = 50 + Math.random() * 60;
+            fEnd   = 3  + Math.random() * 6;
+            dur    = 1.4 + Math.random() * 0.8;
+        }
+        // Beam intensity proxy — drives the HUD's intensity bar
+        const intensity = Math.min(1, 0.25 + 1.2 * energyProxy);
+        const drift = (fEnd - fStart) / dur;        // MHz / s, negative
+        const entry = {
+            id:        ++this._typeIIIId,
+            time:      time instanceof Date ? time : new Date(time ?? Date.now()),
+            arId:      arId ?? null,
+            cls:       cls ?? letter,
+            fStartMHz: +fStart.toFixed(1),
+            fEndMHz:   +fEnd.toFixed(2),
+            durS:      +dur.toFixed(2),
+            driftRate: +drift.toFixed(2),
+            intensity: +intensity.toFixed(2),
+            earthFacing: !!earthFacing,
+        };
+        this._typeIIILog.unshift(entry);
+        if (this._typeIIILog.length > 20) this._typeIIILog.length = 20;
+    }
+
+    /** Read-only snapshot of recent Type-III radio bursts (newest first). */
+    get recentTypeIII() { return this._typeIIILog.slice(); }
 
     /** Read-only snapshot of current AR twist state — exposed for HUD/hover. */
     get arTwistState() {
@@ -1803,8 +2111,11 @@ export class SpaceWeatherGlobe {
     /** Coordinated flare emission visual.  Triggers the photosphere shader
      *  flash via SunSkin and the multi-phase 3-D burst via FlareRing3D
      *  (impulsive flash + EUV ring + post-flare arcade glow + X-class
-     *  shock halo).  M/X events also spawn a Type-II shock ribbon. */
-    _fireFlareVisual(cls, lat_rad, lon_rad) {
+     *  shock halo).  M/X events also spawn a Type-II shock ribbon and a
+     *  Type-III HUD log entry; the internal-eruption path passes
+     *  `{ skipFilament: true, skipTypeIII: true }` because it spawns those
+     *  itself with eruption-specific energetics. */
+    _fireFlareVisual(cls, lat_rad, lon_rad, opts = {}) {
         const letter = (String(cls)?.[0] ?? 'C').toUpperCase();
         // Photosphere flash (existing shader path)
         try { this._sunSkin?.triggerFlare(cls, { lat_rad, lon_rad }); } catch {}
@@ -1825,8 +2136,26 @@ export class SpaceWeatherGlobe {
         // M/X also spawn a Type-II shock ribbon
         if (letter === 'M' || letter === 'X') {
             const colHex = FLARE_HEX[letter] ?? 0xff8030;
-            this._spawnShockRibbon(ax, colHex,
-                extreme ? 1500 : 1000);
+            this._spawnShockRibbon(ax, colHex, extreme ? 1500 : 1000);
+        }
+
+        // M/X NOAA-reported flares: spawn filament + Type-III ticker entry
+        // (skipped when called from the internal-eruption path, which spawns
+        // its own with eruption-specific kinematics).
+        if (!opts.skipFilament && (letter === 'M' || letter === 'X')) {
+            const cFactor = extreme ? 1.6 : 0.9;
+            const v0      = extreme ? 1400 : 800;
+            try { this._spawnFilament(ax, cFactor, v0, opts.earthDirected ?? false); }
+            catch (e) { /* defensive */ }
+        }
+        if (!opts.skipTypeIII && (letter === 'M' || letter === 'X')) {
+            this._logTypeIII({
+                time:        new Date(),
+                arId:        opts.arId ?? null,
+                cls:         cls,
+                energyProxy: extreme ? 0.85 : 0.45,
+                earthFacing: opts.earthDirected ?? false,
+            });
         }
     }
 
@@ -1854,6 +2183,10 @@ export class SpaceWeatherGlobe {
         }
         if (name === 'arMarkers') {
             if (this._arMarkerGroup) this._arMarkerGroup.visible = visible;
+            return;
+        }
+        if (name === 'filaments') {
+            if (this._filamentGroup) this._filamentGroup.visible = visible;
             return;
         }
         if (name === 'wind') {
@@ -2698,7 +3031,11 @@ export class SpaceWeatherGlobe {
         // 3-D flare burst stack (impulsive flash → EUV ring → arcade glow)
         if (dt > 0 && dt < 1) this._flareRing3D?.tick(dt);
         // Type-II Moreton-wave shock ribbons
-        prof.measure('shockRibbons', () => this._stepShockRibbons(dt));
+        prof.measure('shockRibbons',  () => this._stepShockRibbons(dt));
+        // Filament/prominence eruption arcs (lifts off then fades)
+        prof.measure('filaments',     () => this._stepFilaments(dt));
+        // Pre-flare loop brightening (Φ → Φ_kink ramp)
+        prof.measure('arLinePulse',   () => this._pulseArFieldLines(t));
 
         // AR marker subtle pulse — complex / recently flared regions throb
         if (this._arMarkers?.length) {

@@ -1400,6 +1400,25 @@ nav {
 
 .space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
 
+/* Type-III radio burst rows — wider grid to fit the dν/dt sparkline */
+.space-weather-hud .hud-typeiii-row {
+    grid-template-columns: 32px 50px 70px 64px auto;
+    align-items: center;
+}
+.space-weather-hud .hud-typeiii-spark {
+    background: rgba(255,180,80,.04);
+    border: 1px solid rgba(255,180,80,.15);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.space-weather-hud .hud-typeiii-drift {
+    color: #ff9b50; font-family: 'JetBrains Mono', monospace;
+    font-size: .58rem; text-align: right;
+}
+.space-weather-hud .hud-typeiii .hud-section-title {
+    color: #ff9b50;
+}
+
 /* Performance block — per-section frame-time bars */
 .space-weather-hud .hud-perf-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .space-weather-hud .hud-perf-row {
@@ -2089,6 +2108,7 @@ nav {
                 <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
                 <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
                 <button class="layer-btn active" data-layer="arMarkers" title="Click an AR pin (or table row below) to focus the camera and read its current twist Φ / Hale class / area">AR Pins</button>
+                <button class="layer-btn active" data-layer="filaments" title="Cool filament/prominence arcs lifting off during M/X flares and internal kink eruptions — Hα / 304 Å signature, distinct from the gold/orange hot loops underneath">Filaments</button>
                 <button class="layer-btn active" data-layer="wind">Wind Streams</button>
             </div>
             <!-- AIA-style EUV channel selector — switches the sun rendering
@@ -2139,6 +2159,8 @@ nav {
             <span><span class="leg-dot" style="background:#ffc060"></span>AR flux rope · stable (twist Φ < 2.5π kink threshold)</span>
             <span><span class="leg-dot" style="background:#ff4830"></span>AR flux rope · kink-prone (β-γ-δ AR, twist ≥ 2.5π)</span>
             <span><span class="leg-dot" style="background:#ffe8a0"></span>CME ejecta core · Lundquist rope (J₀/J₁ field lines, αR ≈ 2.24)</span>
+            <span><span class="leg-dot" style="background:#ff4060"></span>Filament/prominence eruption arc (cool ~10⁴ K Hα/304 Å plasma lifting off during M/X flares and kink eruptions)</span>
+            <span><span class="leg-dot" style="background:#ff9b50"></span>AR loop pre-flare brightening (Φ → 2.5π · loops warm white-hot and pulse faster as kink approaches)</span>
             <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system · transit time-compression 3000× (≈ 2 min viewing per 4-day Sun→Earth crossing at 400 km/s)</span>
         </div>
 
