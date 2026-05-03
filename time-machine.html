@@ -555,6 +555,47 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     background:rgba(120,80,255,.22); color:#fff;
 }
 .tm-toggle-pill button:hover:not(.on) { background:rgba(180,140,255,.08); color:#eef; }
+
+/* ── Field-grid colorbar overlay ────────────────────────────────────── */
+#tm-fieldbar {
+    position:absolute;
+    right:14px; bottom:14px;
+    width:180px;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(180,140,255,.24);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.62rem;
+    color:#cba9ff;
+    backdrop-filter:blur(8px);
+    z-index:5;
+    transition:opacity .2s;
+    opacity:0;
+    pointer-events:none;
+}
+#tm-fieldbar.show { opacity:1; }
+#tm-fieldbar .fb-title {
+    font-weight:700; color:#cba9ff;
+    text-transform:uppercase; letter-spacing:.04em;
+    font-size:.62rem; margin-bottom:5px;
+}
+#tm-fieldbar .fb-bar {
+    height:10px; border-radius:2px; margin:4px 0 3px;
+    background:linear-gradient(90deg,
+        #440154 0%, #482878 12%, #3e4a89 25%, #31688e 37%,
+        #26828e 50%, #1f9d8a 62%, #6cce5a 75%, #b6de2b 87%, #fde725 100%);
+    border:1px solid rgba(0,0,0,.4);
+}
+#tm-fieldbar .fb-tags {
+    display:flex; justify-content:space-between;
+    color:#776; font-size:.58rem;
+}
+#tm-fieldbar .fb-info {
+    color:#665; font-size:.58rem; margin-top:4px;
+    line-height:1.4;
+}
+#tm-fieldbar .fb-info b { color:#998; font-weight:600; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -596,6 +637,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div id="tm-mode-pill">● Live</div>
         <div id="tm-legend"></div>
         <div id="tm-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="tm-fieldbar">
+            <div class="fb-title" id="fb-title">Planetary |g| (Sun excluded)</div>
+            <div class="fb-bar"></div>
+            <div class="fb-tags"><span id="fb-min">—</span><span id="fb-max">—</span></div>
+            <div class="fb-info" id="fb-info">—</div>
+        </div>
     </div>
 
     <aside id="tm-side">
@@ -683,6 +730,24 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             </span>
             <span style="flex:1"></span>
             <button class="tm-btn" id="tm-grav-toggle">Hover gravity: ON</button>
+        </div>
+
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Field grid</span>
+            <button class="tm-btn" id="tm-field-toggle">Field grid: OFF</button>
+            <span class="tm-label" style="width:auto">Mode</span>
+            <span class="tm-toggle-pill" role="group">
+                <button class="on" id="tm-field-noSun">Planetary only</button>
+                <button id="tm-field-total">Total |g|</button>
+            </span>
+            <span class="tm-label" style="width:auto">Resolution</span>
+            <select class="tm-select" id="tm-field-res">
+                <option value="64">64 × 64 (fast)</option>
+                <option value="128" selected>128 × 128 (default)</option>
+                <option value="256">256 × 256 (heavy)</option>
+            </select>
+            <span style="flex:1"></span>
+            <span class="tm-grav-val" id="tm-field-stats">—</span>
         </div>
 
     </div>
@@ -2166,6 +2231,234 @@ function updateHoverGravity() {
     elTooltip.classList.add('show');
 }
 
+// ── Field-grid colormap (off-thread compute) ────────────────────────
+// 2-D grid of |g| over the visible ecliptic, evaluated in a Web Worker
+// so the main thread stays smooth while the field updates in real time.
+//
+// The plane sits at scene-Y = 0 with renderOrder = -1 + transparent
+// material, so orbits and bodies render on top. Texture is a DataTexture
+// generated each worker reply via a viridis lookup with log-stretched
+// auto-fit bounds.
+
+const FIELD_GRID_HALF = 42;        // covers Neptune (~38.9 in render space) + margin
+const VIRIDIS_STOPS = [
+    [ 68,   1,  84], [ 71,  19,  97], [ 72,  35, 116], [ 64,  67, 135],
+    [ 52,  94, 141], [ 41, 120, 142], [ 32, 144, 140], [ 34, 167, 132],
+    [ 68, 190, 112], [121, 209,  81], [189, 222,  38], [253, 231,  37],
+];
+function viridis(t) {
+    if (!isFinite(t) || t <= 0) return VIRIDIS_STOPS[0];
+    if (t >= 1) return VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1];
+    const f  = t * (VIRIDIS_STOPS.length - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(i0 + 1, VIRIDIS_STOPS.length - 1);
+    const w  = f - i0;
+    const a = VIRIDIS_STOPS[i0], b = VIRIDIS_STOPS[i1];
+    return [
+        a[0] + (b[0] - a[0]) * w,
+        a[1] + (b[1] - a[1]) * w,
+        a[2] + (b[2] - a[2]) * w,
+    ];
+}
+
+const field = {
+    enabled:      false,
+    mode:         'noSun',          // 'noSun' | 'total'
+    resolution:   128,
+    worker:       null,
+    inFlight:     false,
+    pendingJd:    null,             // latest jd we want to compute, queued
+    lastSentJd:   -1e12,
+    lastSentMs:   0,
+    minIntervalMs: 90,              // throttle worker requests
+    texture:      null,             // THREE.DataTexture
+    plane:        null,             // THREE.Mesh
+    rgba:         null,             // Uint8Array(R*R*4) reused
+    last: { gMin:0, gMax:0, gMean:0, runtimeMs:0, jd:0 },
+};
+
+const elFieldToggle = document.getElementById('tm-field-toggle');
+const elFieldNoSun  = document.getElementById('tm-field-noSun');
+const elFieldTotal  = document.getElementById('tm-field-total');
+const elFieldRes    = document.getElementById('tm-field-res');
+const elFieldStats  = document.getElementById('tm-field-stats');
+const elFieldBar    = document.getElementById('tm-fieldbar');
+const elFbMin       = document.getElementById('fb-min');
+const elFbMax       = document.getElementById('fb-max');
+const elFbTitle     = document.getElementById('fb-title');
+const elFbInfo      = document.getElementById('fb-info');
+
+function ensureFieldPlane(R) {
+    if (!field.plane) {
+        const geom = new THREE.PlaneGeometry(FIELD_GRID_HALF * 2, FIELD_GRID_HALF * 2, 1, 1);
+        const mat  = new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity:     0.65,
+            depthWrite:  false,
+            depthTest:   true,
+            side:        THREE.DoubleSide,
+        });
+        field.plane = new THREE.Mesh(geom, mat);
+        field.plane.rotation.x = -Math.PI / 2;
+        field.plane.position.y = -0.02;       // just below the orbit rings
+        field.plane.renderOrder = -10;
+        field.plane.visible = false;
+        scene.add(field.plane);
+    }
+    if (!field.texture || field.texture.image.width !== R) {
+        if (field.texture) field.texture.dispose();
+        field.rgba    = new Uint8Array(R * R * 4);
+        field.texture = new THREE.DataTexture(field.rgba, R, R, THREE.RGBAFormat);
+        field.texture.minFilter = THREE.LinearFilter;
+        field.texture.magFilter = THREE.LinearFilter;
+        field.texture.needsUpdate = true;
+        field.plane.material.map = field.texture;
+        field.plane.material.needsUpdate = true;
+    }
+}
+
+function fmtSiAccel(g) {
+    const si = g * ACCEL_AUday2_TO_mps2;
+    if (!isFinite(si) || si <= 0) return '0';
+    return si.toExponential(2) + ' m/s²';
+}
+
+function bakeColormap(gMag, R, gMin, gMax) {
+    // Log-stretch: t = (log(g) - log(min)) / (log(max) - log(min))
+    const logMin = Math.log(Math.max(gMin, 1e-30));
+    const logMax = Math.log(Math.max(gMax, gMin * 1.001));
+    const span   = logMax - logMin;
+    const rgba   = field.rgba;
+    for (let i = 0; i < gMag.length; i++) {
+        const g = gMag[i];
+        let t;
+        if (g <= 0)  t = 0;
+        else         t = Math.max(0, Math.min(1, (Math.log(g) - logMin) / span));
+        const c = viridis(t);
+        const j = i * 4;
+        rgba[j  ] = c[0] | 0;
+        rgba[j+1] = c[1] | 0;
+        rgba[j+2] = c[2] | 0;
+        // Lower alpha at the very-faint extreme so empty regions fade out
+        rgba[j+3] = (130 + 90 * t) | 0;
+    }
+    field.texture.needsUpdate = true;
+}
+
+function maybePostFieldRequest(now) {
+    if (!field.enabled || field.inFlight) return;
+    const jd = state.jd;
+    const dueByTime = (now - field.lastSentMs) > field.minIntervalMs;
+    const dueByJd   = Math.abs(jd - field.lastSentJd) > 1e-6;
+    if (!dueByTime || !dueByJd) return;
+    postFieldRequest(jd);
+}
+
+function postFieldRequest(jd) {
+    if (!field.worker) {
+        try {
+            field.worker = new Worker('./js/orbital-mechanics/field-worker.js', { type:'module' });
+        } catch (err) {
+            elFieldStats.textContent = 'worker error';
+            console.error('[field-worker] spawn failed:', err);
+            return;
+        }
+        field.worker.onmessage = onFieldMessage;
+        field.worker.onerror = ev => {
+            elFieldStats.textContent = 'worker crash';
+            console.error('[field-worker]', ev);
+            field.inFlight = false;
+        };
+    }
+
+    // Pack body table: [ x, y, z, gm ] per body. Layout:
+    //   index 0 sun, 1..8 planets, 9..12 asteroids
+    const bodyKeys = [
+        ['sun', 0, 0, 0, GM_SUN_AU],
+    ];
+    for (const b of BODIES) {
+        const p = b.fn(jd);
+        bodyKeys.push([b.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * PLANET_MR[b.key]]);
+    }
+    for (const a of ASTEROIDS) {
+        const p = asteroidHelio(a.key, jd);
+        bodyKeys.push([a.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * ASTEROID_MR[a.key]]);
+    }
+    const bodies = new Float32Array(bodyKeys.length * 4);
+    for (let i = 0; i < bodyKeys.length; i++) {
+        bodies[i*4 + 0] = bodyKeys[i][1];
+        bodies[i*4 + 1] = bodyKeys[i][2];
+        bodies[i*4 + 2] = bodyKeys[i][3];
+        bodies[i*4 + 3] = bodyKeys[i][4];
+    }
+
+    field.lastSentJd = jd;
+    field.lastSentMs = performance.now();
+    field.inFlight   = true;
+    field.worker.postMessage(
+        {
+            type:           'compute',
+            jd, resolution: field.resolution,
+            gridHalfRender: FIELD_GRID_HALF,
+            RADIAL_K, RADIAL_P,
+            mode:           field.mode,
+            sunIndex:       0,
+            bodies,
+        },
+        [bodies.buffer],
+    );
+}
+
+function onFieldMessage(ev) {
+    const m = ev.data;
+    if (m.type === 'error') {
+        elFieldStats.textContent = 'error: ' + m.message;
+        field.inFlight = false;
+        return;
+    }
+    if (m.type !== 'field') return;
+    const R = m.resolution;
+    ensureFieldPlane(R);
+
+    bakeColormap(m.gMag, R, m.gMin, m.gMax);
+    field.last = { gMin:m.gMin, gMax:m.gMax, gMean:m.gMean,
+                   runtimeMs:m.runtimeMs, jd:m.jd };
+    field.inFlight = false;
+
+    // Update HUD bar
+    elFbMin.textContent = fmtSiAccel(m.gMin);
+    elFbMax.textContent = fmtSiAccel(m.gMax);
+    elFbTitle.textContent = field.mode === 'noSun'
+        ? 'Planetary |g| · Sun excluded'
+        : 'Total |g| (Sun + planets + asteroids)';
+    elFbInfo.innerHTML =
+        `<b>median</b> ${fmtSiAccel(m.gMean)} · <b>Δt</b> ${m.runtimeMs.toFixed(0)} ms · ` +
+        `<b>${R}×${R}</b> · jd ${m.jd.toFixed(1)}`;
+    elFieldStats.textContent = `${R}×${R} · ${m.runtimeMs.toFixed(0)} ms`;
+}
+
+elFieldToggle.addEventListener('click', () => {
+    field.enabled = !field.enabled;
+    elFieldToggle.textContent = 'Field grid: ' + (field.enabled ? 'ON' : 'OFF');
+    if (field.plane) field.plane.visible = field.enabled;
+    elFieldBar.classList.toggle('show', field.enabled);
+    if (field.enabled) postFieldRequest(state.jd);
+});
+
+function setFieldMode(mode) {
+    field.mode = mode;
+    elFieldNoSun.classList.toggle('on', mode === 'noSun');
+    elFieldTotal.classList.toggle('on', mode === 'total');
+    if (field.enabled) postFieldRequest(state.jd);
+}
+elFieldNoSun.addEventListener('click', () => setFieldMode('noSun'));
+elFieldTotal.addEventListener('click', () => setFieldMode('total'));
+
+elFieldRes.addEventListener('change', () => {
+    field.resolution = parseInt(elFieldRes.value, 10) || 128;
+    if (field.enabled) postFieldRequest(state.jd);
+});
+
 let lastT = performance.now();
 function tick(now) {
     const dt = (now - lastT) / 1000;
@@ -2182,6 +2475,7 @@ function tick(now) {
         setJd(newJd);
     }
     updateHoverGravity();
+    maybePostFieldRequest(now);
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
