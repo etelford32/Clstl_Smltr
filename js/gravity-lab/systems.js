@@ -70,7 +70,7 @@ const M = Object.fromEntries(
  * Keplerian elements relative to the parent.  Returns the full body list
  * with the system shifted into its own barycentric frame.
  */
-function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default }) {
+function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, suggested_dt_s, suggested_warp, marketing, oblateness, j2_default, rings }) {
     const bodies = [{
         name: parent.name,
         m: parent.m,
@@ -80,6 +80,8 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
         color: parent.color,
         is_parent: true,
         glow: parent.glow,
+        skin: parent.skin || null,
+        surface: parent.surface || null,
     }];
     const mu_p = G_SI * parent.m;
     for (const s of satellites) {
@@ -94,6 +96,8 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
             color: s.color,
             elements_j2000: s.elements,
             highlight: s.highlight || null,
+            skin: s.skin || null,
+            surface: s.surface || null,
         });
     }
     shiftToBarycenter(bodies);
@@ -107,6 +111,7 @@ function _build({ id, name, blurb, parent, satellites, scale_km_per_unit, sugges
         suggested_warp,
         oblateness:  oblateness || null,    // {J2, R_eq_m} or null
         j2_default:  !!j2_default,          // start with J2 enabled?
+        rings:       rings || null,          // {inner_R, outer_R, tilt_deg, color, opacity, gaps?}
     };
 }
 
@@ -131,6 +136,7 @@ const EARTH_MOON = _build({
         radius_km: 6378.137,
         color: 0x2c6ad8,
         glow:  0x6a9cff,
+        skin:  'earth',
     },
     satellites: [
         {
@@ -138,6 +144,7 @@ const EARTH_MOON = _build({
             m: M.moon,
             radius_km: 1737.4,
             color: 0xc8c6c0,
+            skin:  'moon',
             elements: {
                 a:        384_399_000,   // m, mean Earth-Moon distance
                 e:        0.0549,
@@ -191,6 +198,8 @@ const MARS_SYSTEM = _build({
         radius_km: 3396.2,
         color: 0xc25733,
         glow:  0xff8c5a,
+        skin:  'mars',
+        surface: 'rocky-warm',
     },
     satellites: [
         {
@@ -198,6 +207,7 @@ const MARS_SYSTEM = _build({
             m: M.phobos,
             radius_km: 11.27,
             color: 0x8b6f5a,
+            surface: 'asteroid',
             highlight: 'sub-areostationary · spiraling in tidally · J₂-driven precession',
             elements: {
                 a:        9_376_000,
@@ -213,6 +223,7 @@ const MARS_SYSTEM = _build({
             m: M.deimos,
             radius_km: 6.2,
             color: 0xa68872,
+            surface: 'asteroid',
             highlight: 'super-areostationary · slowly receding',
             elements: {
                 a:        23_463_000,
@@ -253,6 +264,7 @@ const JUPITER_GALILEANS = _build({
         radius_km: 71_492,
         color: 0xd5a76b,
         glow:  0xffd089,
+        skin:  'jupiter',
     },
     satellites: [
         {
@@ -260,6 +272,7 @@ const JUPITER_GALILEANS = _build({
             m: M.io,
             radius_km: 1821.6,
             color: 0xf2d24c,
+            surface: 'volcanic',
             highlight: 'volcanic; tidally heated',
             // M_deg is shifted by +171.718 deg from published J2000 mean
             // anomaly (171.016) so that the resonant angle phi_L starts at
@@ -279,6 +292,7 @@ const JUPITER_GALILEANS = _build({
             m: M.europa,
             radius_km: 1560.8,
             color: 0xd9bea0,
+            surface: 'icy',
             highlight: 'ice shell · subsurface ocean',
             elements: {
                 a:        671_100_000,
@@ -294,6 +308,7 @@ const JUPITER_GALILEANS = _build({
             m: M.ganymede,
             radius_km: 2634.1,
             color: 0xa89580,
+            surface: 'rocky-cool',
             highlight: 'largest moon in the solar system',
             elements: {
                 a:        1_070_400_000,
@@ -309,6 +324,7 @@ const JUPITER_GALILEANS = _build({
             m: M.callisto,
             radius_km: 2410.3,
             color: 0x6f5e4b,
+            surface: 'cratered',
             highlight: 'most heavily cratered body in the solar system',
             elements: {
                 a:        1_882_700_000,
@@ -348,6 +364,7 @@ const SATURN_MAJOR = _build({
         radius_km: 60_268,
         color: 0xe4c98a,
         glow:  0xfff1bb,
+        skin:  'saturn',
     },
     satellites: [
         {
@@ -417,6 +434,17 @@ const SATURN_MAJOR = _build({
     scale_km_per_unit: 60_268,           // 1 scene unit = Saturn radius
     suggested_dt_s:    1200,             // 20-minute step
     suggested_warp:    86400 * 0.7,
+    // Iconic ring system — radii in units of Saturn equatorial radius.
+    // C ring (inner edge 1.24 R) → A ring (outer edge 2.27 R), with the
+    // Cassini gap (1.95–2.03 R) cut out as a darker stripe.
+    rings: {
+        inner_R:  1.24,
+        outer_R:  2.27,
+        tilt_deg: 26.73,
+        color:    0xe9d6a8,
+        opacity:  0.72,
+        gaps: [{ r: 1.99, half_w: 0.04, opacity: 0.10 }],   // Cassini Division
+    },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -447,6 +475,7 @@ const SATURN_COORBITALS = _build({
         radius_km: 60_268,
         color: 0xe4c98a,
         glow:  0xfff1bb,
+        skin:  'saturn',
     },
     satellites: [
         {
@@ -483,6 +512,14 @@ const SATURN_COORBITALS = _build({
     scale_km_per_unit: 60_268,
     suggested_dt_s:    300,              // 5-minute step (close-encounter dynamics)
     suggested_warp:    86400 * 30,       // 30 days per real second — swap visible
+    rings: {
+        inner_R:  1.24,
+        outer_R:  2.27,
+        tilt_deg: 26.73,
+        color:    0xe9d6a8,
+        opacity:  0.72,
+        gaps: [{ r: 1.99, half_w: 0.04, opacity: 0.10 }],
+    },
 });
 
 export const SYSTEMS = {
