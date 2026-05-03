@@ -205,35 +205,73 @@ CREATE TRIGGER on_auth_user_confirmed
 
 
 -- ── 5. Refresh auth_flow_metrics() to expose signup_confirmed ───────
--- Keeps the existing UNION-with-auth_failures shape and just widens
--- the event allow-list so the admin Auth flow card can compute a
--- confirmation rate alongside signup / signin counts.
-CREATE OR REPLACE FUNCTION public.auth_flow_metrics(p_days INT DEFAULT 30)
-RETURNS TABLE(
-    event       TEXT,
-    user_count  BIGINT,
-    event_count BIGINT
-) AS $$
-    SELECT event,
-           COUNT(DISTINCT user_id)  AS user_count,
-           COUNT(*)                 AS event_count
-      FROM public.activation_events
-     WHERE event IN ('signup',
-                     'signup_confirmed',
-                     'signin_succeeded',
-                     'returning_user_session',
-                     'welcome_email_sent',
-                     'nudge_sent')
-       AND created_at > now() - (p_days || ' days')::interval
-     GROUP BY event
-    UNION ALL
-    SELECT 'signin_failed'                  AS event,
-           COUNT(DISTINCT email_hash)       AS user_count,
-           COUNT(*)                         AS event_count
-      FROM public.auth_failures
-     WHERE created_at > now() - (p_days || ' days')::interval
-    ORDER BY event;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+-- Widens the event allow-list so the admin Auth flow card can compute
+-- a confirmation rate alongside signup / signin counts.
+--
+-- The UNION-with-auth_failures branch is conditional on the
+-- auth_failures table existing — if you haven't applied
+-- supabase-auth-failures-migration.sql yet, this migration still
+-- succeeds and the function returns activation_events rows only.
+-- The signin_failed metric on the admin card will read 0 until
+-- auth-failures is applied; re-run THIS migration after that to
+-- pull in the UNION branch.
+DO $do$
+BEGIN
+    IF to_regclass('public.auth_failures') IS NOT NULL THEN
+        EXECUTE $sql$
+            CREATE OR REPLACE FUNCTION public.auth_flow_metrics(p_days INT DEFAULT 30)
+            RETURNS TABLE(
+                event       TEXT,
+                user_count  BIGINT,
+                event_count BIGINT
+            ) AS $body$
+                SELECT event,
+                       COUNT(DISTINCT user_id)  AS user_count,
+                       COUNT(*)                 AS event_count
+                  FROM public.activation_events
+                 WHERE event IN ('signup',
+                                 'signup_confirmed',
+                                 'signin_succeeded',
+                                 'returning_user_session',
+                                 'welcome_email_sent',
+                                 'nudge_sent')
+                   AND created_at > now() - (p_days || ' days')::interval
+                 GROUP BY event
+                UNION ALL
+                SELECT 'signin_failed'                  AS event,
+                       COUNT(DISTINCT email_hash)       AS user_count,
+                       COUNT(*)                         AS event_count
+                  FROM public.auth_failures
+                 WHERE created_at > now() - (p_days || ' days')::interval
+                ORDER BY event;
+            $body$ LANGUAGE sql SECURITY DEFINER STABLE;
+        $sql$;
+    ELSE
+        RAISE NOTICE 'auth_failures table missing — defining auth_flow_metrics WITHOUT the signin_failed UNION. Apply supabase-auth-failures-migration.sql then re-run this migration to enable it.';
+        EXECUTE $sql$
+            CREATE OR REPLACE FUNCTION public.auth_flow_metrics(p_days INT DEFAULT 30)
+            RETURNS TABLE(
+                event       TEXT,
+                user_count  BIGINT,
+                event_count BIGINT
+            ) AS $body$
+                SELECT event,
+                       COUNT(DISTINCT user_id)  AS user_count,
+                       COUNT(*)                 AS event_count
+                  FROM public.activation_events
+                 WHERE event IN ('signup',
+                                 'signup_confirmed',
+                                 'signin_succeeded',
+                                 'returning_user_session',
+                                 'welcome_email_sent',
+                                 'nudge_sent')
+                   AND created_at > now() - (p_days || ' days')::interval
+                 GROUP BY event
+                 ORDER BY event;
+            $body$ LANGUAGE sql SECURITY DEFINER STABLE;
+        $sql$;
+    END IF;
+END $do$;
 
 GRANT EXECUTE ON FUNCTION public.auth_flow_metrics(INT) TO authenticated;
 
