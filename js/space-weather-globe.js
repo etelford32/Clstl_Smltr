@@ -36,6 +36,7 @@ import {
 } from './sun-rotation.js';
 import { PerfProfiler } from './perf-profiler.js';
 import { buildArFieldLoops } from './sun-field.js';
+import { FlareRing3D, FLARE_HEX } from './flare-ring.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -284,6 +285,8 @@ export class SpaceWeatherGlobe {
         this._buildParkerStreamlines();
         this._buildFluxRopes();
         this._buildArFieldLines();
+        this._buildArMarkers();
+        this._buildEmissionLayer();
         this._buildEarth();
         this._buildMoon();
         this._buildAtmosphere();
@@ -1016,6 +1019,306 @@ export class SpaceWeatherGlobe {
         this._arFieldKey   = '';
     }
 
+    // ── AR markers (clickable / hoverable region pins) ───────────────────────
+    /**
+     * Build a parent group for per-AR billboard markers.  Each NOAA active
+     * region gets a sprite pin (region label) anchored just above the
+     * photosphere.  Markers are recreated by `_rebuildArMarkers(regions)` on
+     * every AR-set change.  The host page hooks pointermove + click on the
+     * canvas for raycast-based hover/select; results are exposed via
+     * `arMarkers` and `focusRegion()` for the AR table to drive the camera.
+     */
+    _buildArMarkers() {
+        const grp = new THREE.Group();
+        grp.name = 'ar_markers';
+        this._scene.add(grp);
+        this._arMarkerGroup = grp;
+        this._arMarkers     = [];   // [{ region, sprite, world: Vector3, complex, intensity }]
+        this._activeArId    = null; // currently selected / focused AR region #
+        this._hoveredArId   = null;
+        this._raycaster     = new THREE.Raycaster();
+        this._raycaster.params.Sprite = { threshold: 0.05 };
+    }
+
+    /**
+     * Generate a label sprite texture for an active region pin.
+     * Glow ring around the centre + region number text underneath.
+     */
+    _createArMarkerCanvas(label, complex = false, active = false) {
+        const W = 192, H = 96;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+
+        // halo dot
+        const cx = W / 2, cy = 30;
+        const ringCol = active ? '255,255,255'
+                              : complex ? '255,90,50' : '255,210,120';
+        const haloR = active ? 22 : 15;
+        const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+        halo.addColorStop(0,    `rgba(${ringCol},0.95)`);
+        halo.addColorStop(0.45, `rgba(${ringCol},0.45)`);
+        halo.addColorStop(1,    `rgba(${ringCol},0)`);
+        ctx.fillStyle = halo;
+        ctx.beginPath(); ctx.arc(cx, cy, haloR, 0, Math.PI * 2); ctx.fill();
+
+        ctx.strokeStyle = active ? '#ffffff' : (complex ? '#ff5034' : '#ffd078');
+        ctx.lineWidth   = active ? 2.4 : 1.6;
+        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.stroke();
+
+        // label box
+        ctx.font = active
+            ? 'bold 22px system-ui, -apple-system, sans-serif'
+            : 'bold 18px system-ui, -apple-system, sans-serif';
+        const tw = ctx.measureText(label).width;
+        const bx = cx - tw / 2 - 6, by = 56, bw = tw + 12, bh = 26;
+        ctx.fillStyle = `rgba(8, 14, 22, ${active ? 0.92 : 0.78})`;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = active ? '#ffffff' : (complex ? '#ff5034' : '#ffc068');
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+        ctx.fillStyle = active ? '#ffffff' : (complex ? '#ffe2cc' : '#fff0c4');
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, cx - tw / 2, by + bh / 2 + 1);
+        return c;
+    }
+
+    /** Rebuild the AR marker sprites.  `regionsApparent` is the same array
+     *  the corona shader / flux ropes consume (Carrington-rotated, with
+     *  `region`, `lat_rad`, `lon_rad`, `is_complex`, `intensity` set). */
+    _rebuildArMarkers(regions, intensities = []) {
+        if (!this._arMarkerGroup) return;
+        const grp = this._arMarkerGroup;
+        // Dispose old
+        for (let i = grp.children.length - 1; i >= 0; i--) {
+            const c = grp.children[i];
+            c.material?.map?.dispose();
+            c.material?.dispose();
+            grp.remove(c);
+        }
+        this._arMarkers = [];
+
+        const SUN_R = 8.0;
+        const sunPos = this._sunGroup.position;
+
+        regions.slice(0, 8).forEach((r, i) => {
+            const x = Math.cos(r.lat_rad) * Math.cos(r.lon_rad);
+            const y = Math.sin(r.lat_rad);
+            const z = Math.cos(r.lat_rad) * Math.sin(r.lon_rad);
+            const world = new THREE.Vector3(
+                sunPos.x + x * SUN_R * 1.04,
+                sunPos.y + y * SUN_R * 1.04,
+                sunPos.z + z * SUN_R * 1.04,
+            );
+            const isActive = r.region === this._activeArId;
+            const tex = new THREE.CanvasTexture(
+                this._createArMarkerCanvas(`AR${r.region}`, !!r.is_complex, isActive),
+            );
+            tex.colorSpace = THREE.SRGBColorSpace;
+            const mat = new THREE.SpriteMaterial({
+                map: tex, transparent: true, depthWrite: false, depthTest: true,
+                blending: THREE.NormalBlending, opacity: 0.95,
+            });
+            const sp = new THREE.Sprite(mat);
+            sp.position.copy(world);
+            sp.scale.set(2.4, 1.2, 1);   // wider than tall (label below dot)
+            sp.userData.arId    = r.region;
+            sp.userData.complex = !!r.is_complex;
+            sp.renderOrder = 18;
+            grp.add(sp);
+            this._arMarkers.push({
+                region:     r.region,
+                sprite:     sp,
+                world,
+                complex:    !!r.is_complex,
+                intensity:  intensities[i] ?? r.intensity ?? 0.5,
+                lat_rad:    r.lat_rad,
+                lon_rad:    r.lon_rad,
+                cls:        r.mag_class,
+            });
+        });
+    }
+
+    /** Snapshot of current AR marker positions (for HUD / table picking). */
+    get arMarkers() {
+        return this._arMarkers.map(m => ({
+            region:    m.region,
+            world:     m.world.clone(),
+            complex:   m.complex,
+            intensity: m.intensity,
+            lat_rad:   m.lat_rad,
+            lon_rad:   m.lon_rad,
+            cls:       m.cls,
+        }));
+    }
+
+    /** Currently selected AR id (or null). */
+    get activeArId() { return this._activeArId; }
+
+    /** Mark one AR as visually selected (refresh its sprite texture).
+     *  Pass null to clear selection. */
+    setActiveAr(regionId) {
+        if (this._activeArId === regionId) return;
+        const prev = this._activeArId;
+        this._activeArId = regionId ?? null;
+        for (const m of this._arMarkers) {
+            if (m.region !== prev && m.region !== this._activeArId) continue;
+            const isActive = m.region === this._activeArId;
+            const newTex = new THREE.CanvasTexture(
+                this._createArMarkerCanvas(`AR${m.region}`, m.complex, isActive),
+            );
+            newTex.colorSpace = THREE.SRGBColorSpace;
+            const mat = m.sprite.material;
+            mat.map?.dispose();
+            mat.map = newTex;
+            mat.needsUpdate = true;
+            m.sprite.scale.set(isActive ? 2.9 : 2.4, isActive ? 1.45 : 1.2, 1);
+            m.sprite.renderOrder = isActive ? 22 : 18;
+        }
+    }
+
+    /** Focus the camera on an AR by region number — animates orbit target +
+     *  pulls the camera toward the AR's world position over ~0.6 s.
+     *  Returns true if the AR was found, false otherwise. */
+    focusRegion(regionId) {
+        const m = this._arMarkers.find(x => x.region === regionId);
+        if (!m) return false;
+        this.setActiveAr(regionId);
+
+        // Animation target: orbit pivot at AR, camera pulled close along the
+        // current camera→AR direction (so we keep the user's framing).
+        const cam     = this._camera;
+        const tgt     = m.world.clone();
+        const camDir  = new THREE.Vector3().subVectors(cam.position, this._controls.target).normalize();
+        const camDest = tgt.clone().add(camDir.multiplyScalar(18));
+
+        // Cancel any prior anim
+        this._cameraAnim = {
+            t:        0,
+            duration: 0.65,
+            srcTgt:   this._controls.target.clone(),
+            dstTgt:   tgt,
+            srcCam:   cam.position.clone(),
+            dstCam:   camDest,
+        };
+        return true;
+    }
+
+    /** Step the focus-camera animation one frame. */
+    _stepCameraAnim(dt) {
+        const a = this._cameraAnim;
+        if (!a) return;
+        a.t = Math.min(a.duration, a.t + dt);
+        const k = a.t / a.duration;
+        // ease-out cubic
+        const e = 1 - Math.pow(1 - k, 3);
+        this._controls.target.lerpVectors(a.srcTgt, a.dstTgt, e);
+        this._camera.position.lerpVectors(a.srcCam, a.dstCam, e);
+        if (k >= 1) this._cameraAnim = null;
+    }
+
+    /** Raycast pointer (clientX/Y) → AR region under cursor, or null.
+     *  Used by the host page to drive hover tooltip + click selection. */
+    pickArAt(clientX, clientY) {
+        if (!this._arMarkers.length) return null;
+        const rect = this._canvas.getBoundingClientRect();
+        const ndc  = new THREE.Vector2(
+            ((clientX - rect.left) / rect.width)  * 2 - 1,
+            -((clientY - rect.top) / rect.height) * 2 + 1,
+        );
+        this._raycaster.setFromCamera(ndc, this._camera);
+        const sprites = this._arMarkers.map(m => m.sprite);
+        const hits = this._raycaster.intersectObjects(sprites, false);
+        if (!hits.length) return null;
+        const id = hits[0].object.userData.arId;
+        const m  = this._arMarkers.find(x => x.region === id);
+        return m ? {
+            region: m.region, world: m.world.clone(), complex: m.complex,
+            intensity: m.intensity, cls: m.cls,
+        } : null;
+    }
+
+    // ── Emission layer (flare bursts + CME shock ribbons) ───────────────────
+    /**
+     * Build the flare/CME emission visual layer.  Wraps:
+     *   - FlareRing3D — multi-phase flare (impulsive flash, EUV ring,
+     *     post-flare arcade glow, X-class shock halo).  Already exists in
+     *     `flare-ring.js`; we just instantiate it parented at the sun.
+     *   - Type-II shock ribbons — expanding chromospheric wave fronts that
+     *     trace AR longitude on internal eruptions.  Lightweight torus
+     *     geometry centred at the AR.
+     */
+    _buildEmissionLayer() {
+        // FlareRing3D wants a scene + Three namespace + sunR.  We attach the
+        // bursts to a group at the sun position so they translate with it.
+        // The optional `center` is the world-space sun centre, used by the
+        // EUV ring's lookAt to face radially outward.
+        this._flareGroup = new THREE.Group();
+        this._flareGroup.position.copy(this._sunGroup.position);
+        this._scene.add(this._flareGroup);
+        this._flareRing3D = new FlareRing3D(
+            this._flareGroup, THREE, 8.0,
+            this._sunGroup.position.clone(),
+        );
+
+        // Type-II shock ribbons (expanding torus rings).  Pool for reuse.
+        this._shockRibbons = [];   // [{ mesh, life, life0, axis: Vector3, color }]
+    }
+
+    /** Spawn a Type-II shock ribbon — an EUV/Moreton wave expanding outward
+     *  from an AR.  axisLocal is the AR's unit-sphere position; the ribbon
+     *  is a thin torus tangent to the photosphere at that point. */
+    _spawnShockRibbon(axisLocal, color = 0xff8030, vKms = 800) {
+        const SUN_R = 8.0;
+        const T = THREE;
+        const tangent = new T.Vector3(0, 1, 0);
+        if (Math.abs(axisLocal.dot(tangent)) > 0.95) tangent.set(1, 0, 0);
+        const u = new T.Vector3().crossVectors(axisLocal, tangent).normalize();
+        const v = new T.Vector3().crossVectors(axisLocal, u).normalize();
+
+        const geo = new T.RingGeometry(0.02, 0.06, 64, 1);
+        const mat = new T.MeshBasicMaterial({
+            color, transparent: true, opacity: 0.95,
+            blending: T.AdditiveBlending, depthWrite: false, side: T.DoubleSide,
+        });
+        const ring = new T.Mesh(geo, mat);
+        // Orient ring plane perpendicular to axisLocal at AR position
+        const m4 = new T.Matrix4().makeBasis(u, v, axisLocal);
+        ring.quaternion.setFromRotationMatrix(m4);
+        const sunPos = this._sunGroup.position;
+        ring.position.set(
+            sunPos.x + axisLocal.x * SUN_R,
+            sunPos.y + axisLocal.y * SUN_R,
+            sunPos.z + axisLocal.z * SUN_R,
+        );
+        ring.renderOrder = 17;
+        this._scene.add(ring);
+
+        const life0 = 1200 / Math.max(400, vKms) * 4.0;  // 1.5 s for 800 km/s, longer for slow events
+        this._shockRibbons.push({ mesh: ring, life: 0, life0, color });
+    }
+
+    /** Step shock ribbon expansion + fade. */
+    _stepShockRibbons(dt) {
+        if (!this._shockRibbons.length) return;
+        for (let i = this._shockRibbons.length - 1; i >= 0; i--) {
+            const r = this._shockRibbons[i];
+            r.life += dt;
+            const k = r.life / r.life0;
+            if (k >= 1) {
+                this._scene.remove(r.mesh);
+                r.mesh.geometry.dispose();
+                r.mesh.material.dispose();
+                this._shockRibbons.splice(i, 1);
+                continue;
+            }
+            // Expand from R to ~3R, fade as it grows
+            const s = 1 + k * 22;
+            r.mesh.scale.set(s, s, 1);
+            r.mesh.material.opacity = Math.max(0, 0.85 * (1 - k * 1.05));
+        }
+    }
+
     /**
      * @param {Array} regions  region objects (Carrington-rotated, as fed to
      *                         the corona shader / setRegions / fluxRopes)
@@ -1238,12 +1541,9 @@ export class SpaceWeatherGlobe {
         try { this._cmePropagator?.inject(cmeData); }
         catch (e) { console.warn('[SpaceWeatherGlobe] internal eruption inject failed', e); }
 
-        // Photosphere flash co-located with the AR
-        try {
-            this._sunSkin?.triggerFlare(`${flareLetter}${flareNum}`, {
-                lat_rad: lat, lon_rad: lon,
-            });
-        } catch (e) { /* shader may not be ready on first frame */ }
+        // Coordinated emission: photosphere flash + 3-D burst + shock ribbon
+        try { this._fireFlareVisual(`${flareLetter}${flareNum}`, lat, lon); }
+        catch (e) { /* shader may not be ready on first frame */ }
 
         // Reset twist to residual π and stamp eruption time
         slot.phi       = Math.PI;
@@ -1475,6 +1775,12 @@ export class SpaceWeatherGlobe {
                 ...r,
                 intensity: arForShader[i]?.intensity ?? 0.5,
             })));
+            // Rebuild billboard region pins (clickable from the AR table /
+            // raycast pickable for hover tooltips).
+            this._rebuildArMarkers(
+                regionsApparent.slice(0, 8),
+                arForShader.map(r => r.intensity),
+            );
         }
 
         // Flare trigger from state — anchor on the matching active region
@@ -1488,10 +1794,40 @@ export class SpaceWeatherGlobe {
                 const ar = regions.find(r => r.region === flare.region);
                 if (ar) { lat = ar.lat_rad; lon = ar.lon_rad; }
             }
-            this._sunSkin.triggerFlare(flare.class, { lat_rad: lat, lon_rad: lon });
+            this._fireFlareVisual(flare.class, lat, lon);
             this._lastFlareId = flare.id || flare.class;
         }
         if (!flare) this._lastFlareId = null;
+    }
+
+    /** Coordinated flare emission visual.  Triggers the photosphere shader
+     *  flash via SunSkin and the multi-phase 3-D burst via FlareRing3D
+     *  (impulsive flash + EUV ring + post-flare arcade glow + X-class
+     *  shock halo).  M/X events also spawn a Type-II shock ribbon. */
+    _fireFlareVisual(cls, lat_rad, lon_rad) {
+        const letter = (String(cls)?.[0] ?? 'C').toUpperCase();
+        // Photosphere flash (existing shader path)
+        try { this._sunSkin?.triggerFlare(cls, { lat_rad, lon_rad }); } catch {}
+
+        // 3-D multi-phase burst — needs world-space AR position
+        const SUN_R = 8.0;
+        const ax = new THREE.Vector3(
+            Math.cos(lat_rad) * Math.cos(lon_rad),
+            Math.sin(lat_rad),
+            Math.cos(lat_rad) * Math.sin(lon_rad),
+        );
+        const arWorld = new THREE.Vector3(
+            ax.x * SUN_R, ax.y * SUN_R, ax.z * SUN_R,   // local to flareGroup
+        );
+        const extreme = (letter === 'X');
+        try { this._flareRing3D?.trigger(extreme, arWorld); } catch {}
+
+        // M/X also spawn a Type-II shock ribbon
+        if (letter === 'M' || letter === 'X') {
+            const colHex = FLARE_HEX[letter] ?? 0xff8030;
+            this._spawnShockRibbon(ax, colHex,
+                extreme ? 1500 : 1000);
+        }
     }
 
     /** Toggle MagnetosphereEngine layers (and globe-owned overlays). */
@@ -1514,6 +1850,10 @@ export class SpaceWeatherGlobe {
         }
         if (name === 'fieldLines') {
             if (this._arFieldGroup) this._arFieldGroup.visible = visible;
+            return;
+        }
+        if (name === 'arMarkers') {
+            if (this._arMarkerGroup) this._arMarkerGroup.visible = visible;
             return;
         }
         if (name === 'wind') {
@@ -2354,6 +2694,26 @@ export class SpaceWeatherGlobe {
         // Sun update — shader time + flare decay
         this._sunSkin.update(t);
         if (dt > 0 && dt < 1) this._sunSkin.decayFlare(dt);
+
+        // 3-D flare burst stack (impulsive flash → EUV ring → arcade glow)
+        if (dt > 0 && dt < 1) this._flareRing3D?.tick(dt);
+        // Type-II Moreton-wave shock ribbons
+        prof.measure('shockRibbons', () => this._stepShockRibbons(dt));
+
+        // AR marker subtle pulse — complex / recently flared regions throb
+        if (this._arMarkers?.length) {
+            for (const m of this._arMarkers) {
+                const isActive = m.region === this._activeArId;
+                const base   = m.complex ? 0.85 : 0.78;
+                const pulseA = m.complex ? 0.18 : 0.10;
+                const f      = m.complex ? 3.4 : 1.8;
+                m.sprite.material.opacity = base + pulseA * Math.sin(t * f + (m.region || 0) * 0.8);
+                if (isActive) m.sprite.material.opacity = 1.0;
+            }
+        }
+
+        // Camera focus animation (driven by focusRegion())
+        this._stepCameraAnim(dt);
 
         // Moon orbit (compressed sidereal month for visual interest)
         const moonAngle = t * 0.052;
