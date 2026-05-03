@@ -228,6 +228,85 @@ export const CORONA_VOL_FRAG = /* glsl */`
         return clamp(total, 0.0, 4.0);
     }
 
+    // ── AR loop-arcade emission ────────────────────────────────────────────
+    //
+    // Each bipolar active region's corona above the photosphere is filled
+    // with a fan of magnetic field lines connecting opposite-polarity
+    // footpoints — an "arcade" of loops in the plane perpendicular to the
+    // polarity inversion line.  In EUV imagery these loops are the visually
+    // dominant structures: bright threads in 171 / 193 / 211 Å, near-
+    // invisible in chromospheric 304 Å.
+    //
+    // Without explicit magnetogram data we synthesise the arcade as a
+    // half-toroidal density field: cross-section in the (east, up) plane
+    // is a Gaussian shell around a semicircle of radius R_loop, and the
+    // density extends along the local north (PIL direction) over a soft-
+    // edge box of half-width L_pil.  Visually this yields the canonical
+    // arcade shape — bright "rope" connecting two footpoints, multiple
+    // parallel rows along the inversion line.
+    //
+    // Two loop temperature populations contribute additively:
+    //   cool loops  log T ≈ 5.90 (~0.8 MK)   dominant in 171 Å
+    //   hot loops   log T ≈ 6.30 (~2 MK)     dominant in 211 Å
+    // βγδ regions weight the hot population more heavily (more sheared
+    // field → hotter loops, matching observed temperature distributions).
+    float loopArcadeEmission(vec3 p_local, float h, vec3 phat) {
+        // Loops above 0.005 R_sun (just above photosphere) up to 0.20 R_sun
+        // (rare large helmet streamers extend higher but we cap)
+        if (h < 0.005 || h > 0.20) return 0.0;
+
+        float total_em = 0.0;
+        for (int k = 0; k < ${N_AR_SLOTS}; k++) {
+            if (k >= u_nRegions) break;
+            vec3  arPos    = normalize(u_regions[k].xyz);
+            float arSigned = u_regions[k].w;
+            float arInt    = abs(arSigned);
+            float complex  = arSigned < 0.0 ? 1.0 : 0.0;
+            if (arInt < 0.05) continue;
+
+            // Local tangent frame at the AR
+            vec3 east  = normalize(vec3(-arPos.z, 0.0, arPos.x));
+            vec3 north = normalize(cross(arPos, east));
+
+            // Decompose the sample point into the AR's local frame
+            vec3 d = phat - arPos;
+            float s_east  = dot(d, east);
+            float s_north = dot(d, north);
+            float s_up    = h;                  // altitude in R_sun units
+
+            // Arcade scale: bigger ARs build longer / taller loops
+            float R_loop  = (0.06 + 0.10 * arInt) * (1.0 + 0.20 * complex);
+            float L_pil   = (0.03 + 0.07 * arInt);
+            float r_min   = 0.018 + 0.005 * arInt;
+            float pil_edge = 0.020;
+
+            // Soft-edge box along the polarity inversion line (north-south)
+            float pil_mask = smoothstep(-L_pil - pil_edge, -L_pil, s_north)
+                           - smoothstep( L_pil,  L_pil + pil_edge, s_north);
+
+            // Loop curve in (east, up) plane: semicircle of radius R_loop.
+            // Distance from any sample point to the curve:
+            //     dist = | √(s_east² + s_up²) − R_loop |   (s_up > 0 only)
+            float r_in_plane   = sqrt(s_east * s_east + s_up * s_up);
+            float dist_to_loop = abs(r_in_plane - R_loop);
+            // Gaussian falloff perpendicular to the curve → "rope" cross-section
+            float rope = exp(-dist_to_loop * dist_to_loop / (2.0 * r_min * r_min));
+
+            // Total density for this AR's arcade
+            float dens = arInt * pil_mask * rope * step(0.001, s_up);
+            if (dens < 1e-4) continue;
+
+            // Two-population temperature distribution (cool & hot loops).
+            // Emission ∝ n² × R(T); βγδ regions weight hot population more.
+            float cool_wt = mix(1.0, 0.4, complex);
+            float hot_wt  = mix(0.5, 1.5, complex);
+            total_em += dens * dens * channelResponse(5.90) * 4.0 * cool_wt;
+            total_em += dens * dens * channelResponse(6.30) * 4.0 * hot_wt;
+        }
+
+        return total_em;
+    }
+
     // ── Synthetic DEM at a point in sun-local space ────────────────────────
     // p_local: position relative to sun centre (units: scene units = R_sun).
     // Writes integrated emission for the active channel into the first out
@@ -275,6 +354,12 @@ export const CORONA_VOL_FRAG = /* glsl */`
             // Emission-measure goes as n²; we approximate by squaring density
             emission += ar_dens * ar_dens * channelResponse(ar_logT) * 8.0;
         }
+
+        // ── AR loop-arcade structure ─────────────────────────────────────
+        // Discrete bright threads connecting opposite-polarity footpoints
+        // — the visually dominant feature of an active region in 171/193/
+        // 211 Å.  Adds onto the diffuse AR-cell emission above.
+        emission += loopArcadeEmission(p_local, h, phat);
 
         // ── Flare-hot component ──────────────────────────────────────────
         // Scaled by GOES X-ray flux + impulsive flare flash decay; localised
