@@ -488,6 +488,73 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 .tm-resid-magn-low  { color:#7fdb9a; }
 .tm-resid-magn-mid  { color:#cba9ff; }
 .tm-resid-magn-high { color:#fc7; }
+
+/* ── Gravity tooltip overlay ─────────────────────────────────────────── */
+#tm-tooltip {
+    position:absolute;
+    pointer-events:none;
+    background:rgba(8,4,24,.92);
+    border:1px solid rgba(180,140,255,.35);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.66rem;
+    color:#cfd;
+    backdrop-filter:blur(8px);
+    box-shadow:0 4px 14px rgba(0,0,0,.5);
+    z-index:30;
+    line-height:1.45;
+    transform:translate(12px, 14px);
+    min-width:212px;
+    transition:opacity .12s;
+    opacity:0;
+}
+#tm-tooltip.show { opacity:1; }
+#tm-tooltip .tt-row { display:flex; justify-content:space-between; gap:10px; }
+#tm-tooltip .tt-k { color:#998; }
+#tm-tooltip .tt-v { color:#fff; font-weight:700; font-variant-numeric:tabular-nums; }
+#tm-tooltip .tt-hdr {
+    display:flex; align-items:center; gap:6px;
+    color:#b78cff; font-weight:700; font-size:.7rem;
+    margin-bottom:4px;
+    text-transform:uppercase; letter-spacing:.04em;
+}
+#tm-tooltip .tt-hdr .dot { width:8px; height:8px; border-radius:50%; box-shadow:0 0 5px currentColor; }
+#tm-tooltip .tt-sep {
+    border-top:1px dashed rgba(180,140,255,.18);
+    margin:5px 0; height:0;
+}
+#tm-tooltip .tt-arrow {
+    color:#fc7; font-weight:700;
+}
+
+/* Z slider + units toggle row inside tm-time card */
+.tm-grav-row {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding-top:10px;
+    border-top:1px dashed rgba(180,140,255,.16);
+    margin-top:6px;
+}
+.tm-grav-row .tm-label { width:auto; }
+.tm-grav-row .tm-grav-val {
+    font-family:monospace; font-size:.72rem; color:#cba9ff;
+    min-width:80px;
+}
+.tm-toggle-pill {
+    display:inline-flex; gap:0;
+    border:1px solid rgba(180,140,255,.30);
+    border-radius:6px; overflow:hidden;
+}
+.tm-toggle-pill button {
+    background:transparent; color:#998;
+    border:none; padding:6px 11px;
+    font-family:inherit; font-size:.72rem; font-weight:600;
+    cursor:pointer; transition:background .15s, color .15s;
+}
+.tm-toggle-pill button.on {
+    background:rgba(120,80,255,.22); color:#fff;
+}
+.tm-toggle-pill button:hover:not(.on) { background:rgba(180,140,255,.08); color:#eef; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -528,6 +595,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         </div>
         <div id="tm-mode-pill">● Live</div>
         <div id="tm-legend"></div>
+        <div id="tm-tooltip" role="tooltip" aria-hidden="true"></div>
     </div>
 
     <aside id="tm-side">
@@ -601,6 +669,20 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div class="tm-row" style="margin-top:6px">
             <span class="tm-label" style="width:64px">Jump to</span>
             <div class="tm-bookmarks" id="tm-bookmarks"></div>
+        </div>
+
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Gravity</span>
+            <span class="tm-label" style="width:auto">Z slice (au_z)</span>
+            <input class="tm-slider" type="range" id="tm-grav-z" min="-2" max="2" step="0.01" value="0" style="min-width:140px; flex:0 1 200px;">
+            <span class="tm-grav-val" id="tm-grav-z-val">0.00 AU</span>
+            <span class="tm-label" style="width:auto">Units</span>
+            <span class="tm-toggle-pill" role="group">
+                <button class="on" id="tm-units-si">SI</button>
+                <button id="tm-units-cgs">Gaussian</button>
+            </span>
+            <span style="flex:1"></span>
+            <button class="tm-btn" id="tm-grav-toggle">Hover gravity: ON</button>
         </div>
 
     </div>
@@ -762,6 +844,96 @@ const auToScene = (auX, auY, auZ) => {
     const k  = r2 / r;
     return [auX * k, auZ * k, -auY * k];   // ecliptic (XY) -> three.js (XZ), invert Y for handedness
 };
+// Inverse of auToScene: scene (X,Y,Z) -> ecliptic AU (au_x, au_y, au_z).
+//   r_render = |scene|;  r_AU = (r_render/RADIAL_K)^(1/RADIAL_P)
+//   k = r_render / r_AU;  invert componentwise.
+const sceneToAu = (sX, sY, sZ) => {
+    const rr = Math.hypot(sX, sY, sZ);
+    if (rr < 1e-9) return { x:0, y:0, z:0, r_AU:0, r_render:0 };
+    const r_AU = Math.pow(rr / RADIAL_K, 1 / RADIAL_P);
+    const k    = rr / r_AU;
+    return {
+        x:  sX / k,
+        y: -sZ / k,
+        z:  sY / k,
+        r_AU,
+        r_render: rr,
+    };
+};
+
+// ── Gravity field math ──────────────────────────────────────────────
+// Units: AU, days, M_sun (Gaussian). GM_sun = k² where k is the Gaussian
+// gravitational constant 0.01720209895 rad/day.
+//   GM_sun = 2.9591220828559115e-4  AU³/day²
+// Planet GM = GM_sun × (m_planet / M_sun).
+//
+// Field strength |g| in AU/day² → m/s² × 20.04117
+// Potential   Φ in AU²/day²    → m²/s² × 2.99765e12     (= J/kg)
+const GM_SUN_AU = 2.9591220828559115e-4;
+const PLANET_MR = {
+    mercury: 1/6023600,    venus:   1/408523.71,
+    earth:   1/328900.55,  mars:    1/3098703.59,
+    jupiter: 1/1047.348644, saturn: 1/3497.9018,
+    uranus:  1/22902.98,   neptune: 1/19412.26,
+};
+const ACCEL_AUday2_TO_mps2 = 1.495978707e11 / (86400 * 86400);   // 20.0412
+const POT_AU2day2_TO_J_KG  = (1.495978707e11 * 1.495978707e11) / (86400 * 86400);  // 2.998e12
+
+/**
+ * Compute gravitational potential and field at a heliocentric ecliptic
+ * point P = (au_x, au_y, au_z) at time `jd`, summed over Sun + 8 planets.
+ *
+ * @returns {{
+ *   Phi: number,       // potential          (AU²/day²)
+ *   gx,gy,gz: number,  // field components   (AU/day²)
+ *   gMag: number,      // |g|                (AU/day²)
+ *   dominant: string,  // body whose |g_i| is largest at P
+ *   contributions: { key:string, gMag:number, share:number }[]
+ * }}
+ */
+function computeGravity(au_x, au_y, au_z, jd) {
+    let Phi = 0, gx = 0, gy = 0, gz = 0;
+    const contribs = [];
+    let domKey = 'sun', domMag = 0;
+
+    // Sun at heliocentric origin
+    {
+        const dx = -au_x, dy = -au_y, dz = -au_z;
+        const r2 = dx*dx + dy*dy + dz*dz;
+        const r1 = Math.sqrt(r2);
+        const inv_r3 = 1 / (r2 * r1);
+        Phi -= GM_SUN_AU / r1;
+        const ax = GM_SUN_AU * dx * inv_r3;
+        const ay = GM_SUN_AU * dy * inv_r3;
+        const az = GM_SUN_AU * dz * inv_r3;
+        gx += ax; gy += ay; gz += az;
+        const mag = Math.sqrt(ax*ax + ay*ay + az*az);
+        contribs.push({ key:'sun', gMag:mag });
+        if (mag > domMag) { domMag = mag; domKey = 'sun'; }
+    }
+
+    for (const b of BODIES) {
+        const p   = b.fn(jd);
+        const dx  = p.x_AU - au_x, dy = p.y_AU - au_y, dz = p.z_AU - au_z;
+        const r2  = dx*dx + dy*dy + dz*dz;
+        const r1  = Math.sqrt(r2);
+        const inv_r3 = 1 / (r2 * r1);
+        const gm  = GM_SUN_AU * PLANET_MR[b.key];
+        Phi -= gm / r1;
+        const ax = gm * dx * inv_r3;
+        const ay = gm * dy * inv_r3;
+        const az = gm * dz * inv_r3;
+        gx += ax; gy += ay; gz += az;
+        const mag = Math.sqrt(ax*ax + ay*ay + az*az);
+        contribs.push({ key:b.key, gMag:mag });
+        if (mag > domMag) { domMag = mag; domKey = b.key; }
+    }
+
+    const gMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
+    contribs.sort((a,b) => b.gMag - a.gMag);
+    for (const c of contribs) c.share = c.gMag / (domMag || 1);
+    return { Phi, gx, gy, gz, gMag, dominant: domKey, contributions: contribs };
+}
 
 // ── Three.js setup ───────────────────────────────────────────────────
 const wrap = document.getElementById('tm-canvas-wrap');
@@ -1560,6 +1732,193 @@ function setJd(jd, { fromLive = false } = {}) {
 }
 
 // ── Play loop ────────────────────────────────────────────────────────
+// ── Hover-gravity system ─────────────────────────────────────────────
+// Mouse → ray → intersects horizontal plane at scene Y = grav.zSlider × 6
+// (one earth orbit visual height per 1 AU of Z). Computes Φ, g, dominant
+// body live each frame so values evolve as planets sweep past.
+const grav = {
+    enabled:    true,
+    hovering:   false,
+    screenX:    0, screenY: 0,
+    rayHit:     null,           // { x, y, z (scene), au:{x,y,z,r_AU,r_render} }
+    zSlider:    0,              // au_z target (AU above ecliptic)
+    units:      'si',           // 'si' | 'cgs'  (cgs = Gaussian AU/day units)
+};
+const HOVER_PLANE_Y_PER_AU = 6;   // visual Y per 1 AU of intended au_z
+
+const elTooltip   = document.getElementById('tm-tooltip');
+const elGravZ     = document.getElementById('tm-grav-z');
+const elGravZVal  = document.getElementById('tm-grav-z-val');
+const elGravTog   = document.getElementById('tm-grav-toggle');
+const elUnitsSi   = document.getElementById('tm-units-si');
+const elUnitsCgs  = document.getElementById('tm-units-cgs');
+
+const raycaster   = new THREE.Raycaster();
+const mouseNDC    = new THREE.Vector2();
+const hoverPlane  = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const hoverHitTmp = new THREE.Vector3();
+
+// Cursor marker + g-arrow
+const cursorMarker = new THREE.Mesh(
+    new THREE.SphereGeometry(0.12, 16, 16),
+    new THREE.MeshBasicMaterial({ color:0x4fc97f, transparent:true, opacity:0.9 }),
+);
+cursorMarker.visible = false;
+scene.add(cursorMarker);
+
+// Arrow: thin line from marker towards g direction
+const arrowMat  = new THREE.LineBasicMaterial({ color:0xffc070, transparent:true, opacity:0.85 });
+const arrowGeo  = new THREE.BufferGeometry();
+arrowGeo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(6), 3));
+const arrowLine = new THREE.Line(arrowGeo, arrowMat);
+arrowLine.visible = false;
+scene.add(arrowLine);
+// Arrow head (small cone)
+const arrowHead = new THREE.Mesh(
+    new THREE.ConeGeometry(0.10, 0.32, 10),
+    new THREE.MeshBasicMaterial({ color:0xffc070 }),
+);
+arrowHead.visible = false;
+scene.add(arrowHead);
+
+renderer.domElement.addEventListener('mousemove', ev => {
+    if (!grav.enabled) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    grav.screenX = ev.clientX - rect.left;
+    grav.screenY = ev.clientY - rect.top;
+    grav.hovering = true;
+});
+renderer.domElement.addEventListener('mouseleave', () => {
+    grav.hovering = false;
+    cursorMarker.visible = false;
+    arrowLine.visible    = false;
+    arrowHead.visible    = false;
+    elTooltip.classList.remove('show');
+});
+
+elGravZ.addEventListener('input', () => {
+    grav.zSlider = parseFloat(elGravZ.value);
+    elGravZVal.textContent = grav.zSlider.toFixed(2) + ' AU';
+    hoverPlane.constant = -grav.zSlider * HOVER_PLANE_Y_PER_AU;   // plane: y = c (sign flipped)
+});
+elGravZVal.textContent = grav.zSlider.toFixed(2) + ' AU';
+
+function setUnits(u) {
+    grav.units = u;
+    elUnitsSi .classList.toggle('on', u === 'si');
+    elUnitsCgs.classList.toggle('on', u === 'cgs');
+}
+elUnitsSi .addEventListener('click', () => setUnits('si'));
+elUnitsCgs.addEventListener('click', () => setUnits('cgs'));
+
+elGravTog.addEventListener('click', () => {
+    grav.enabled = !grav.enabled;
+    elGravTog.textContent = 'Hover gravity: ' + (grav.enabled ? 'ON' : 'OFF');
+    if (!grav.enabled) {
+        grav.hovering = false;
+        cursorMarker.visible = false;
+        arrowLine.visible    = false;
+        arrowHead.visible    = false;
+        elTooltip.classList.remove('show');
+    }
+});
+
+const BODY_COLOR = Object.fromEntries(BODIES.map(b => [b.key, '#' + b.color.toString(16).padStart(6,'0')]));
+BODY_COLOR.sun = '#ffd27a';
+const BODY_LABEL = Object.fromEntries(BODIES.map(b => [b.key, b.name]));
+BODY_LABEL.sun = 'Sun';
+
+function fmtSci(x, sig = 3) {
+    if (!isFinite(x)) return '—';
+    if (x === 0)      return '0';
+    return x.toExponential(sig);
+}
+
+function updateHoverGravity() {
+    if (!grav.enabled || !grav.hovering) return;
+
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouseNDC.x =  (grav.screenX / rect.width)  * 2 - 1;
+    mouseNDC.y = -(grav.screenY / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouseNDC, camera);
+    const hit = raycaster.ray.intersectPlane(hoverPlane, hoverHitTmp);
+    if (!hit) {
+        cursorMarker.visible = false;
+        arrowLine.visible    = false;
+        arrowHead.visible    = false;
+        elTooltip.classList.remove('show');
+        return;
+    }
+
+    const au = sceneToAu(hit.x, hit.y, hit.z);
+    grav.rayHit = { x:hit.x, y:hit.y, z:hit.z, au };
+
+    const G = computeGravity(au.x, au.y, au.z, state.jd);
+
+    // ── Marker
+    cursorMarker.position.copy(hit);
+    cursorMarker.visible = true;
+
+    // ── Arrow (g direction in scene space — approximate by isotropic scale at hit point)
+    const k_at = (au.r_render / Math.max(au.r_AU, 1e-9));
+    // Map (gx_au, gy_au, gz_au) → scene direction using same axis swap as auToScene
+    let dx = G.gx * k_at, dy = G.gz * k_at, dz = -G.gy * k_at;
+    const dn = Math.hypot(dx, dy, dz) || 1;
+    dx /= dn; dy /= dn; dz /= dn;
+    const armLen = 1.6;
+    const tipX = hit.x + dx * armLen;
+    const tipY = hit.y + dy * armLen;
+    const tipZ = hit.z + dz * armLen;
+    const ap = arrowGeo.attributes.position.array;
+    ap[0] = hit.x; ap[1] = hit.y; ap[2] = hit.z;
+    ap[3] = tipX;  ap[4] = tipY;  ap[5] = tipZ;
+    arrowGeo.attributes.position.needsUpdate = true;
+    arrowLine.visible = true;
+    // Arrow head — orient cone (default Y-up) along (dx,dy,dz)
+    arrowHead.position.set(tipX, tipY, tipZ);
+    arrowHead.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(dx, dy, dz),
+    );
+    arrowHead.visible = true;
+
+    // ── Tooltip content
+    const useSi   = grav.units === 'si';
+    const gSi     = G.gMag * ACCEL_AUday2_TO_mps2;
+    const PhiSi   = G.Phi  * POT_AU2day2_TO_J_KG;
+    const vEscSi  = Math.sqrt(2 * Math.abs(PhiSi));     // m/s
+    const domHex  = BODY_COLOR[G.dominant] || '#fff';
+    const domNm   = BODY_LABEL[G.dominant] || G.dominant;
+    const second  = G.contributions[1];
+    const secondLine = second
+        ? `<div class="tt-row"><span class="tt-k">2nd contrib.</span><span class="tt-v">${BODY_LABEL[second.key]} (${(second.share*100).toFixed(1)}%)</span></div>`
+        : '';
+
+    let html = `<div class="tt-hdr"><span class="dot" style="background:${domHex};color:${domHex}"></span>${domNm}-dominated</div>`;
+    if (useSi) {
+        html += `<div class="tt-row"><span class="tt-k">|g|</span><span class="tt-v">${fmtSci(gSi)} m/s²</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">Φ</span><span class="tt-v">${fmtSci(PhiSi)} J/kg</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v_esc</span><span class="tt-v">${(vEscSi/1000).toFixed(2)} km/s</span></div>`;
+    } else {
+        html += `<div class="tt-row"><span class="tt-k">|g|</span><span class="tt-v">${fmtSci(G.gMag)} AU/d²</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">Φ</span><span class="tt-v">${fmtSci(G.Phi)} AU²/d²</span></div>`;
+        html += `<div class="tt-row"><span class="tt-k">v_esc</span><span class="tt-v">${fmtSci(Math.sqrt(2 * Math.abs(G.Phi)))} AU/d</span></div>`;
+    }
+    html += `<div class="tt-sep"></div>`;
+    html += `<div class="tt-row"><span class="tt-k">r heliocentric</span><span class="tt-v">${au.r_AU.toFixed(3)} AU</span></div>`;
+    html += `<div class="tt-row"><span class="tt-k">au_z (slice)</span><span class="tt-v">${au.z.toFixed(3)} AU</span></div>`;
+    html += `<div class="tt-row"><span class="tt-k">render-space r</span><span class="tt-v">${au.r_render.toFixed(2)}</span></div>`;
+    html += `<div class="tt-row"><span class="tt-k">au_x, au_y</span><span class="tt-v">${au.x.toFixed(3)}, ${au.y.toFixed(3)}</span></div>`;
+    html += secondLine;
+    html += `<div class="tt-sep"></div>`;
+    html += `<div class="tt-row"><span class="tt-k">epoch</span><span class="tt-v">JD ${state.jd.toFixed(3)}</span></div>`;
+
+    elTooltip.innerHTML = html;
+    elTooltip.style.left = grav.screenX + 'px';
+    elTooltip.style.top  = grav.screenY + 'px';
+    elTooltip.classList.add('show');
+}
+
 let lastT = performance.now();
 function tick(now) {
     const dt = (now - lastT) / 1000;
@@ -1575,6 +1934,7 @@ function tick(now) {
         const newJd = state.jd + (state.speedSec * dt) / 86400;
         setJd(newJd);
     }
+    updateHoverGravity();
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
