@@ -1370,6 +1370,25 @@ nav {
 
 .space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
 
+/* Performance block — per-section frame-time bars */
+.space-weather-hud .hud-perf-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.space-weather-hud .hud-perf-row {
+    display: grid; grid-template-columns: 70px 1fr 52px;
+    align-items: center; gap: 6px;
+    font-size: .58rem;
+}
+.space-weather-hud .hud-perf-name {
+    color: #889;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.space-weather-hud .hud-perf-bar { height: 4px; }
+.space-weather-hud .hud-perf-ms {
+    color: #cfd8e2; text-align: right;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: .60rem;
+}
+
 /* 60-min timeline strip */
 .space-weather-hud .hud-tl-canvas {
     width: 100%; height: 80px; display: block;
@@ -2038,6 +2057,7 @@ nav {
                 <button class="layer-btn active" data-layer="solarField">Solar Field / HCS</button>
                 <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
                 <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
+                <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
                 <button class="layer-btn active" data-layer="wind">Wind Streams</button>
             </div>
             <!-- AIA-style EUV channel selector — switches the sun rendering
