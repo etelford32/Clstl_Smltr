@@ -1162,6 +1162,124 @@ nav {
     font-size: .70rem; color: #889; margin-top: 12px;
 }
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
+
+/* ── HUD overlay (diagnostic glass-pane) ─────────────────────────────────── */
+.globe-section { position: relative; }
+.space-weather-hud {
+    position: absolute; top: 60px; right: 22px;
+    width: 280px; max-height: calc(100% - 96px);
+    overflow-y: auto;
+    background: rgba(2, 8, 16, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 192, 96, .18);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #cfd8e2;
+    font-size: .68rem;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    z-index: 4;
+    pointer-events: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.space-weather-hud::-webkit-scrollbar       { width: 6px; }
+.space-weather-hud::-webkit-scrollbar-thumb { background: rgba(255,192,96,.3); border-radius: 3px; }
+.space-weather-hud .hud-block {
+    border-bottom: 1px solid rgba(255, 192, 96, .07);
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+.space-weather-hud .hud-block:last-child { border: 0; margin-bottom: 0; }
+.space-weather-hud .hud-section-title {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .10em;
+    color: #ffc060; margin-bottom: 6px; font-weight: 600;
+}
+.space-weather-hud .hud-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; line-height: 1.55;
+}
+.space-weather-hud .hud-k { color: #7d8a98; font-size: .66rem; }
+.space-weather-hud .hud-v {
+    color: #fff8e8; font-feature-settings: "tnum" 1;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: .70rem;
+}
+.space-weather-hud .hud-tiny { font-size: .60rem; }
+.space-weather-hud .hud-bar {
+    flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+    background: rgba(255, 192, 96, .08);
+}
+.space-weather-hud .hud-bar-fill {
+    height: 100%; width: 0%; transition: width .25s ease, background .25s ease;
+    background: hsl(120, 60%, 55%);
+}
+.space-weather-hud .hud-cumulative { color: #557; font-size: .60rem; }
+.space-weather-hud .hud-storm .hud-bar { margin: 0 6px; }
+
+/* EMIC ion-channel indicator */
+.space-weather-hud .hud-emic-status { color: #667; font-size: .64rem; }
+.space-weather-hud .hud-emic.hud-emic-on .hud-emic-status { color: #ff7e3a; }
+.space-weather-hud .hud-emic.hud-emic-oplus .hud-emic-status {
+    color: #ff4830;
+    text-shadow: 0 0 4px rgba(255, 72, 48, .55);
+    animation: hud-emic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes hud-emic-pulse {
+    0%, 100% { opacity: 0.9; }
+    50%      { opacity: 0.55; }
+}
+
+/* AR flux-rope twist rows */
+.space-weather-hud .hud-twist-list { display: flex; flex-direction: column; gap: 4px; }
+.space-weather-hud .hud-twist-row {
+    display: grid; grid-template-columns: 56px 28px 1fr 38px;
+    align-items: center; gap: 6px;
+    padding: 2px 0;
+    transition: background .25s;
+}
+.space-weather-hud .hud-twist-row.hud-twist-erupting {
+    background: rgba(255, 72, 48, .12); border-radius: 4px;
+}
+.space-weather-hud .hud-twist-id  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; font-size: .65rem; }
+.space-weather-hud .hud-twist-cls { color: #ffc060; font-size: .68rem; text-align: center; }
+.space-weather-hud .hud-twist-bar { height: 5px; }
+.space-weather-hud .hud-twist-phi { color: #ffd070; font-family: 'JetBrains Mono', monospace; font-size: .62rem; text-align: right; }
+
+/* Eruption ticker */
+.space-weather-hud .hud-eruption-list { display: flex; flex-direction: column; gap: 3px; }
+.space-weather-hud .hud-erupt-row {
+    display: grid; grid-template-columns: 36px 56px 1fr auto;
+    align-items: baseline; gap: 6px;
+    font-size: .62rem;
+    padding: 2px 0;
+}
+.space-weather-hud .hud-erupt-cls {
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+}
+.space-weather-hud .hud-erupt-cls.cls-X { color: #ff4830; }
+.space-weather-hud .hud-erupt-cls.cls-M { color: #ffa040; }
+.space-weather-hud .hud-erupt-cls.cls-C { color: #ffd070; }
+.space-weather-hud .hud-erupt-ar  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-spd { color: #88ccff; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-earth { color: #5fd0ff; font-weight: 600; }
+.space-weather-hud .hud-erupt-limb  { color: #667; }
+.space-weather-hud .hud-erupt-age   { color: #556; grid-column: 1 / -1; font-size: .58rem; padding-left: 4px; }
+.space-weather-hud .hud-erupt-row.hud-erupt-new {
+    animation: hud-erupt-flash 1.4s ease-out;
+}
+@keyframes hud-erupt-flash {
+    0%   { background: rgba(255, 72, 48, .35); }
+    100% { background: transparent; }
+}
+
+.space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
+
+@media (max-width: 900px) {
+    .space-weather-hud {
+        position: static; width: auto; max-height: none;
+        margin-top: 10px;
+    }
+}
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 @media (max-width: 700px) { #sw-globe-canvas { height: 460px; } }
@@ -1798,6 +1916,9 @@ nav {
         <canvas id="sw-globe-canvas"
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
+        <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
+        <div class="space-weather-hud" id="sw-hud"
+             aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
         <div class="globe-legend">
             <span><span class="leg-dot" style="background:#ffd700"></span>Sun (live SWPC photosphere + corona, flare response)</span>
             <span><span class="leg-dot" style="background:#888"></span>Moon (procedural surface, orbital motion)</span>
@@ -2406,6 +2527,7 @@ import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
+import { SpaceWeatherHud }     from './js/space-weather-hud.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -3595,6 +3717,10 @@ let _globe = null;
     const globeCanvas = el('sw-globe-canvas');
     if (globeCanvas) {
         _globe = new SpaceWeatherGlobe(globeCanvas).start();
+
+        // Diagnostic HUD overlay — updates at 4 Hz from globe internal state
+        const hudEl = document.getElementById('sw-hud');
+        if (hudEl) new SpaceWeatherHud(hudEl, _globe).start();
 
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {

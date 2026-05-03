@@ -1360,6 +1360,25 @@ export class SpaceWeatherGlobe {
         return this._kmPerAU / Math.max(50, this._windSpeedKms);
     }
 
+    /** Current viewing-time compression factor (real-seconds per viewing-second). */
+    get timeCompression() { return this._timeCompression; }
+
+    /** Latest ambient solar-wind speed (km/s) — set by `update(state)`. */
+    get currentWindSpeedKms() { return this._windSpeedKms; }
+
+    /** Number of currently-tracked active regions in the twist accumulator. */
+    get arCount() { return this._arTwist?.size ?? 0; }
+
+    /** Forward live Van-Allen diagnostic getters from the inner module. */
+    get beltStormIndex()   { return this._beltParticles?.stormIndex   ?? 0; }
+    get beltLossEvents()   { return this._beltParticles?.lossEvents   ?? 0; }
+    get beltRespawnEvents(){ return this._beltParticles?.respawnEvents?? 0; }
+    get beltTrappedCount() { return this._beltParticles?.trappedCount ?? 0; }
+    get beltTotalCount()   { return this._beltParticles?.count        ?? 0; }
+    get beltEmicActive()   { return this._beltParticles?.emicActive   ?? false; }
+    get beltEmicOplusBoost() { return this._beltParticles?.emicOplusBoost ?? false; }
+    get beltEmicLossEvents() { return this._beltParticles?.emicLossEvents ?? 0; }
+
     /** Access the CME propagator (for wiring event cards from outside). */
     get cmePropagator() { return this._cmePropagator; }
 
