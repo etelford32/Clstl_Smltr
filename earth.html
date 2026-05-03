@@ -325,28 +325,57 @@ nav {
 
 /* ─── My Location panel ──────────────────────────────────────────
    Top-left primary affordance (set your location → personalised
-   alerts + sun + ISS data). Offset 60px from top so it clears the
-   shared site nav and the layer-panel header doesn't crowd it.
+   alerts + sun + ISS data). Offset 110px from the top so it sits
+   well below the shared site nav AND below the live status bar
+   (#sw-bar). At top:60px the panel fought the status strip for
+   eyeballs; pushing it down makes the search input the obvious
+   first thing the visitor reaches for once the globe loads.
    "Spacey" treatment: layered nebula gradient + aurora-tinted glow
    ring + soft inner highlight, so the panel reads as part of the
    simulation rather than a flat overlay. */
 #loc-panel {
-    position:absolute; top:60px; left:10px; z-index:51;
+    position:absolute; top:110px; left:10px; z-index:51;
     background:
-        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.16), transparent 60%),
-        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.18), transparent 65%),
+        radial-gradient(120% 80% at 8% -10%, rgba(95,255,208,.18), transparent 60%),
+        radial-gradient(140% 100% at 110% 110%, rgba(127,90,255,.20), transparent 65%),
         linear-gradient(180deg, rgba(6,10,28,.92), rgba(2,4,14,.96));
     backdrop-filter:blur(14px) saturate(1.15);
     -webkit-backdrop-filter:blur(14px) saturate(1.15);
-    border:1px solid rgba(95,255,208,.28); border-radius:14px;
-    padding:14px 16px; width:248px; font-size:11px;
+    border:1px solid rgba(95,255,208,.45); border-radius:14px;
+    padding:14px 16px; width:264px; font-size:11px;
     color:#e6f6ff;
     box-shadow:
         0 18px 44px rgba(0,40,30,.55),
         0 0 0 1px rgba(127,90,255,.10),
+        0 0 26px rgba(95,255,208,.18),
         inset 0 1px 0 rgba(255,255,255,.06),
         inset 0 0 32px rgba(95,255,208,.05);
     overflow:hidden;
+    /* When the visitor has no saved location, pulse the border softly so
+       the eye is drawn to the search input before anything else. The
+       :has(#loc-result[style*="block"]) check turns the pulse off as soon
+       as a location is set, so we're not nagging an active user. */
+    animation: loc-panel-pulse 2.6s ease-in-out infinite;
+}
+#loc-panel:has(#loc-result[style*="block"]) { animation: none; }
+
+@keyframes loc-panel-pulse {
+    0%, 100% {
+        box-shadow:
+            0 18px 44px rgba(0,40,30,.55),
+            0 0 0 1px rgba(127,90,255,.10),
+            0 0 22px rgba(95,255,208,.18),
+            inset 0 1px 0 rgba(255,255,255,.06),
+            inset 0 0 32px rgba(95,255,208,.05);
+    }
+    50% {
+        box-shadow:
+            0 18px 50px rgba(0,40,30,.55),
+            0 0 0 1px rgba(127,90,255,.18),
+            0 0 36px rgba(95,255,208,.45),
+            inset 0 1px 0 rgba(255,255,255,.08),
+            inset 0 0 36px rgba(95,255,208,.10);
+    }
 }
 /* Subtle starfield speckle inside the panel, painted by an SVG noise
    gradient so we don't need an asset. Pointer-events: none so it never
@@ -364,13 +393,31 @@ nav {
 }
 #loc-panel > * { position:relative; z-index:1; }
 #loc-panel .panel-header h3 {
-    color:#5fffd0; font-size:11px; text-transform:uppercase;
-    letter-spacing:.12em; font-weight:700;
-    text-shadow:0 0 12px rgba(95,255,208,.35);
+    color:#5fffd0; font-size:12px; text-transform:uppercase;
+    letter-spacing:.14em; font-weight:800;
+    text-shadow:0 0 14px rgba(95,255,208,.45);
 }
 #loc-panel:not(:has(#loc-result[style*="block"])) #loc-result-empty { display:block; }
+/* Empty-state hint: louder, friendlier copy with a bouncing arrow so a
+   first-time visitor reads it as a call to action, not a footnote. */
 #loc-empty-hint {
-    font-size:10px; color:#9ec0c4; margin-top:6px; line-height:1.55;
+    margin-top:8px;
+    padding:8px 10px;
+    background:linear-gradient(135deg, rgba(95,255,208,.10), rgba(127,90,255,.08));
+    border:1px dashed rgba(95,255,208,.35);
+    border-radius:8px;
+    font-size:10.5px; color:#cfeefb; line-height:1.55;
+}
+#loc-empty-hint::before {
+    content:'↑ Enter a city above';
+    display:block;
+    font-size:10px; font-weight:800; letter-spacing:.06em;
+    color:#5fffd0; margin-bottom:3px;
+    animation: loc-hint-bounce 1.6s ease-in-out infinite;
+}
+@keyframes loc-hint-bounce {
+    0%, 100% { transform:translateY(0);   opacity:.95; }
+    50%      { transform:translateY(-2px); opacity:1; }
 }
 
 /* ─── Weather analysis panel ─────────────────────────────────── */
@@ -1626,7 +1673,7 @@ nav {
             <span class="wx-k">Geo wind</span>
             <span class="wx-v" id="wx-geo">—</span>
         </div>
-        <div class="wx-row" title="Peak sampled wind &gt; 30 m/s (operational jet-stream threshold). Dash when no jet found in the current field.">
+        <div class="wx-row" title="Peak sampled 10 m wind &gt; 18 m/s (gale-force floor used for surface-data jet proxy). Dash when nothing in the current field clears the threshold.">
             <span class="wx-k">Jet peak</span>
             <span class="wx-v" id="wx-jet">—</span>
         </div>
@@ -7306,9 +7353,12 @@ window.addEventListener('user-location-changed', e => {
     const t = document.createElement('div');
     t.id = 'pp-loc-hint';
     t.setAttribute('role', 'status');
+    // Anchor the hint just to the right of #loc-panel (which now sits at
+     //   top:110px / left:10px / width:264px → the hint starts at left:290px
+     // so it points cleanly at the search input's row, not the title).
     t.style.cssText = `
-        position:fixed; top:60px; left:250px; z-index:200;
-        max-width:320px; padding:11px 32px 11px 14px;
+        position:fixed; top:150px; left:290px; z-index:200;
+        max-width:300px; padding:10px 30px 10px 14px;
         background:linear-gradient(135deg, rgba(95,255,208,.18), rgba(0,180,140,.10));
         border:1px solid rgba(95,255,208,.45);
         border-radius:10px; color:#cef;
@@ -7319,8 +7369,8 @@ window.addEventListener('user-location-changed', e => {
         animation:pp-loc-hint-in .35s ease;
     `;
     t.innerHTML = `
-        <strong style="color:#5fffd0;font-weight:800;letter-spacing:.04em">Set your location ←</strong>
-        Pin a city in the panel on the left to unlock local sun + ISS pass times, aurora visibility, and personalised alerts.
+        <strong style="color:#5fffd0;font-weight:800;letter-spacing:.04em">← Pin your city</strong>
+        Unlocks local sun + ISS pass times, aurora visibility, and personalised alerts.
         <button id="pp-loc-hint-x" aria-label="Dismiss"
             style="position:absolute;top:5px;right:7px;background:transparent;border:0;color:#9bd;font:inherit;font-size:1rem;line-height:1;cursor:pointer;padding:3px 6px;border-radius:4px">×</button>
     `;
@@ -7400,6 +7450,31 @@ document.querySelectorAll('.panel-close[data-close]').forEach(btn => {
 
 // Backdrop tap → close
 _backdrop.addEventListener('click', _closeMobilePanel);
+
+// ═══════════════════════════════════════════════════════════════
+//  SYNC LAYER VISIBILITY WITH HTML DEFAULTS
+// ═══════════════════════════════════════════════════════════════
+// Several layer constructors (EarthquakeMarkers, gridGroup, tropicGroup,
+// the aurora/city-lights shader uniforms, the atmosphere shell, etc.)
+// initialise to "visible" because that was the historical default. We
+// flipped most checkboxes off in the HTML for the leaner first-load
+// experience, but the change handlers wired earlier only fire on user
+// interaction — so without this synthetic dispatch the meshes would
+// stay on screen even though the checkbox is unchecked.
+//
+// Dispatching a one-shot 'change' event drives each handler's logic
+// against the current checkbox state, keeping the authoring surface in
+// one place (the HTML `checked` attribute). Runs once after every layer
+// constructor has executed (we're past line 5400-ish at this point).
+[
+    'lyr-clouds', 'lyr-atm', 'lyr-aurora', 'lyr-lights', 'lyr-grid',
+    'lyr-tropic', 'lyr-subsolar', 'lyr-weather', 'lyr-wind', 'lyr-jet',
+    'lyr-isobars', 'lyr-alerts', 'lyr-earthquakes', 'lyr-iss',
+    'lyr-rotate',
+].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.dispatchEvent(new Event('change'));
+});
 
 // ═══════════════════════════════════════════════════════════════
 //  PANEL MINIMIZE
