@@ -751,6 +751,24 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <span class="tm-grav-val" id="tm-field-stats">—</span>
         </div>
 
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Vectors</span>
+            <button class="tm-btn" id="tm-arrows-toggle">Arrows: OFF</button>
+            <span class="tm-label" style="width:auto">Density</span>
+            <select class="tm-select" id="tm-arrows-res">
+                <option value="16">16 × 16</option>
+                <option value="24" selected>24 × 24</option>
+                <option value="36">36 × 36</option>
+            </select>
+            <span class="tm-label" style="width:auto">Style</span>
+            <select class="tm-select" id="tm-arrows-style">
+                <option value="logmag" selected>length ∝ log|g|</option>
+                <option value="uniform">uniform length</option>
+            </select>
+            <span style="flex:1"></span>
+            <span class="tm-grav-val" id="tm-arrows-stats">—</span>
+        </div>
+
     </div>
 </div>
 
@@ -2492,6 +2510,242 @@ elFieldRes.addEventListener('change', () => {
     if (field.enabled) postFieldRequest(state.jd);
 });
 
+// ── g-vector glyphs (InstancedMesh of small cones) ──────────────────
+// Sparse direction field on top of the colormap: each cone points along
+// g_eff at its grid cell, scaled by log|g|. Same mode as the colormap
+// pill (Total / Planetary / Jacobi). Computed on the main thread —
+// 24×24 = 576 cells × ≤13 force evals per frame is negligible.
+//
+// In Jacobi mode, arrows visualise the rotating-frame net force, so
+// L4/L5/L1/L2/L3 appear as zero-length arrows (cones vanish to dots)
+// and the Hill sphere of the chosen secondary shows up as a clean
+// flip in arrow direction (toward Sun outside, toward planet inside).
+const arrowsState = {
+    enabled:  false,
+    mesh:     null,
+    res:      24,
+    style:    'logmag',     // 'logmag' | 'uniform'
+    dummy:    new THREE.Object3D(),
+    upY:      new THREE.Vector3(0, 1, 0),
+    dirVec:   new THREE.Vector3(),
+    quat:     new THREE.Quaternion(),
+    lastT:    -1,
+    minMs:    32,            // ~30 fps update throttle
+};
+
+const elArrowsToggle = document.getElementById('tm-arrows-toggle');
+const elArrowsRes    = document.getElementById('tm-arrows-res');
+const elArrowsStyle  = document.getElementById('tm-arrows-style');
+const elArrowsStats  = document.getElementById('tm-arrows-stats');
+
+const ARROWS_MAX = 36 * 36;              // upper bound for instance allocation
+const ARROW_GEOM = (() => {
+    // cone of unit length along +Y, base at origin
+    const g = new THREE.ConeGeometry(0.07, 1.0, 7);
+    g.translate(0, 0.5, 0);
+    return g;
+})();
+
+function ensureArrowsMesh() {
+    if (arrowsState.mesh) return;
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0xffe070, transparent: true, opacity: 0.85,
+    });
+    arrowsState.mesh = new THREE.InstancedMesh(ARROW_GEOM, mat, ARROWS_MAX);
+    arrowsState.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    arrowsState.mesh.frustumCulled = false;
+    arrowsState.mesh.visible = false;
+    arrowsState.mesh.count   = 0;
+    scene.add(arrowsState.mesh);
+}
+
+/**
+ * Compute the heliocentric ecliptic g vector at a point — picks the
+ * field mode (matches the colormap mode) so arrows always agree with
+ * the colour underneath them. Returns AU/day² components.
+ */
+function gVectorAt(au_x, au_y, jd, mode, jacobiCtx) {
+    let gx = 0, gy = 0;
+    if (mode === 'jacobi' && jacobiCtx) {
+        const { sx, sy, sgm, n2 } = jacobiCtx;
+        // Sun at origin
+        {
+            const dx = -au_x, dy = -au_y;
+            const r2 = dx*dx + dy*dy;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            gx += GM_SUN_AU * dx * inv;
+            gy += GM_SUN_AU * dy * inv;
+        }
+        // Secondary
+        {
+            const dx = sx - au_x, dy = sy - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 > 1e-12) {
+                const r1 = Math.sqrt(r2);
+                const inv = 1 / (r2 * r1);
+                gx += sgm * dx * inv;
+                gy += sgm * dy * inv;
+            }
+        }
+        // Centrifugal
+        gx += n2 * au_x;
+        gy += n2 * au_y;
+    } else {
+        const skipSun = mode === 'noSun';
+        if (!skipSun) {
+            const dx = -au_x, dy = -au_y;
+            const r2 = dx*dx + dy*dy;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            gx += GM_SUN_AU * dx * inv;
+            gy += GM_SUN_AU * dy * inv;
+        }
+        for (const b of BODIES) {
+            const p = b.fn(jd);
+            const dx = p.x_AU - au_x, dy = p.y_AU - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 < 1e-10) continue;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            const gm = GM_SUN_AU * PLANET_MR[b.key];
+            gx += gm * dx * inv;
+            gy += gm * dy * inv;
+        }
+        for (const a of ASTEROIDS) {
+            const p = asteroidHelio(a.key, jd);
+            const dx = p.x_AU - au_x, dy = p.y_AU - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 < 1e-10) continue;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            const gm = GM_SUN_AU * ASTEROID_MR[a.key];
+            gx += gm * dx * inv;
+            gy += gm * dy * inv;
+        }
+    }
+    return { gx, gy };
+}
+
+function updateArrows(now) {
+    if (!arrowsState.enabled || !arrowsState.mesh) return;
+    if (now - arrowsState.lastT < arrowsState.minMs) return;
+    arrowsState.lastT = now;
+
+    const R     = arrowsState.res;
+    const half  = FIELD_GRID_HALF;
+    const step  = (half * 2) / R;
+    const start = -half + step / 2;
+    const baseLen = step * 0.55;          // visual length ceiling per cell
+
+    const mode = field.mode || 'noSun';
+    let jacobiCtx = null;
+    if (mode === 'jacobi' && selected) {
+        const planetIdx = BODIES.findIndex(b => b.key === selected.key);
+        if (planetIdx >= 0) {
+            const p = BODIES[planetIdx].fn(state.jd);
+            const r_p = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+            const muTotal = GM_SUN_AU * (1 + PLANET_MR[selected.key]);
+            jacobiCtx = {
+                sx: p.x_AU, sy: p.y_AU,
+                sgm: GM_SUN_AU * PLANET_MR[selected.key],
+                n2: muTotal / (r_p * r_p * r_p),
+            };
+        }
+    }
+
+    const dummy = arrowsState.dummy;
+    const upY   = arrowsState.upY;
+    const dir   = arrowsState.dirVec;
+    let count = 0;
+    let gMin = Infinity, gMax = -Infinity;
+
+    for (let iy = 0; iy < R; iy++) {
+        const sZ = start + iy * step;
+        for (let ix = 0; ix < R; ix++) {
+            const sX = start + ix * step;
+            const rr2 = sX * sX + sZ * sZ;
+            if (rr2 < 0.7) continue;        // skip Sun-overlap
+            const rr   = Math.sqrt(rr2);
+            const r_AU = Math.pow(rr / RADIAL_K, 1 / RADIAL_P);
+            const k    = rr / r_AU;
+            const auX  =  sX / k;
+            const auY  = -sZ / k;
+
+            const { gx, gy } = gVectorAt(auX, auY, state.jd, mode, jacobiCtx);
+            const gMag = Math.sqrt(gx*gx + gy*gy);
+            if (gMag < 1e-14) continue;
+            if (gMag < gMin) gMin = gMag;
+            if (gMag > gMax) gMax = gMag;
+
+            // Map AU direction → scene direction (isotropic at this radius).
+            // auToScene swaps Y↔Z and flips Y; for direction we apply the
+            // same swap (no scale needed since we'll normalise).
+            dir.set(gx, 0, -gy);
+            const dn = Math.hypot(dir.x, dir.z);
+            if (dn < 1e-20) continue;
+            dir.x /= dn; dir.z /= dn;       // y already 0 (ecliptic)
+
+            // Length: log scale across ~6 decades, clamped to [0.15, 1.0]·baseLen
+            let lenFrac;
+            if (arrowsState.style === 'uniform') {
+                lenFrac = 0.7;
+            } else {
+                // log10(g_si) typically in [-9, -2] for our scenes
+                const gSi = gMag * ACCEL_AUday2_TO_mps2;
+                const t = Math.max(0, Math.min(1,
+                    (Math.log10(gSi) + 9) / 7));    // [-9 .. -2] → [0..1]
+                lenFrac = 0.18 + 0.82 * t;
+            }
+            const arrowLen = baseLen * lenFrac;
+
+            arrowsState.quat.setFromUnitVectors(upY, dir);
+            dummy.position.set(sX, 0.04, sZ);   // slightly above colormap plane
+            dummy.quaternion.copy(arrowsState.quat);
+            dummy.scale.set(0.18, arrowLen, 0.18);
+            dummy.updateMatrix();
+            arrowsState.mesh.setMatrixAt(count, dummy.matrix);
+            count++;
+            if (count >= ARROWS_MAX) break;
+        }
+        if (count >= ARROWS_MAX) break;
+    }
+
+    arrowsState.mesh.count = count;
+    arrowsState.mesh.instanceMatrix.needsUpdate = true;
+
+    if (count > 0) {
+        const gMinSi = gMin * ACCEL_AUday2_TO_mps2;
+        const gMaxSi = gMax * ACCEL_AUday2_TO_mps2;
+        elArrowsStats.textContent =
+            `${count} arrows · |g| ${gMinSi.toExponential(1)}…${gMaxSi.toExponential(1)} m/s²`;
+    } else {
+        elArrowsStats.textContent = '0 arrows';
+    }
+}
+
+elArrowsToggle.addEventListener('click', () => {
+    arrowsState.enabled = !arrowsState.enabled;
+    elArrowsToggle.textContent = 'Arrows: ' + (arrowsState.enabled ? 'ON' : 'OFF');
+    if (arrowsState.enabled) {
+        ensureArrowsMesh();
+        arrowsState.mesh.visible = true;
+        arrowsState.lastT = -1;        // force immediate update next tick
+    } else if (arrowsState.mesh) {
+        arrowsState.mesh.visible = false;
+    }
+});
+
+elArrowsRes.addEventListener('change', () => {
+    arrowsState.res = parseInt(elArrowsRes.value, 10) || 24;
+    arrowsState.lastT = -1;
+});
+
+elArrowsStyle.addEventListener('change', () => {
+    arrowsState.style = elArrowsStyle.value;
+    arrowsState.lastT = -1;
+});
+
 let lastT = performance.now();
 function tick(now) {
     const dt = (now - lastT) / 1000;
@@ -2509,6 +2763,7 @@ function tick(now) {
     }
     updateHoverGravity();
     maybePostFieldRequest(now);
+    updateArrows(now);
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
