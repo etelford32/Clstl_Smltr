@@ -480,6 +480,59 @@
 
     <!-- ═══════════════════ ANALYTICS TAB ═══════════════════ -->
     <div class="tab-panel" id="panel-analytics">
+        <!-- ── Visitor Flow ──────────────────────────────────────────── -->
+        <div class="card" style="margin-bottom:18px">
+            <h3>Visitor Flow
+                <span style="font-size:.72rem;color:#666;font-weight:400;margin-left:6px">how visitors move through the app — anon &amp; signed-in</span>
+                <span style="float:right;display:flex;gap:6px;align-items:center;font-size:.72rem;color:#888;font-weight:400">
+                    <select id="flow-window" class="btn btn-sm" style="padding:2px 8px;font-size:.7rem">
+                        <option value="1">last 24h</option>
+                        <option value="7" selected>last 7d</option>
+                        <option value="14">last 14d</option>
+                        <option value="30">last 30d</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-refresh-flow">Refresh</button>
+                </span>
+            </h3>
+            <div class="kpi-grid" id="flow-kpis" style="margin-bottom:18px">
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-sessions">--</div><div class="kpi-label">Sessions</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-pageviews">--</div><div class="kpi-label">Page Views</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-pps">--</div><div class="kpi-label">Pages / Session</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-bounce">--</div><div class="kpi-label">Bounce Rate</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-duration">--</div><div class="kpi-label">Avg Session</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-anon">--</div><div class="kpi-label">Anonymous</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-signed">--</div><div class="kpi-label">Signed-in</div></div>
+                <div class="kpi"><div class="kpi-val kpi-loading" id="flow-converted">--</div><div class="kpi-label">Anon → Identified</div></div>
+            </div>
+
+            <div class="row2" style="margin-bottom:14px">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Entry Pages <span style="color:#445;font-weight:400;text-transform:none">— first page of session</span></div>
+                    <div id="flow-entry-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Exit Pages <span style="color:#445;font-weight:400;text-transform:none">— last page before leaving</span></div>
+                    <div id="flow-exit-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:14px">
+                <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Page-to-Page Transitions <span style="color:#445;font-weight:400;text-transform:none">— most common next-step navigation</span></div>
+                <div id="flow-transitions-list"><div class="empty">Loading…</div></div>
+            </div>
+
+            <div class="row2">
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Top Referrers <span style="color:#445;font-weight:400;text-transform:none">— external traffic origins</span></div>
+                    <div id="flow-referrer-list"><div class="empty">Loading…</div></div>
+                </div>
+                <div>
+                    <div style="font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:#778;font-weight:700;margin-bottom:8px">Where Entries Go Next <span style="color:#445;font-weight:400;text-transform:none">— anon vs signed-in second-step</span></div>
+                    <div id="flow-entry-dest-list"><div class="empty">Loading…</div></div>
+                </div>
+            </div>
+        </div>
+
         <div class="row2" style="margin-bottom:18px">
             <div class="card">
                 <h3>Google Analytics (GA4)</h3>
@@ -712,7 +765,7 @@
 import { auth } from './js/auth.js';
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured, getSupabase, testConnection } from './js/supabase-config.js';
 import { GA_MEASUREMENT_ID } from './js/analytics.js';
-import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning } from './js/admin-analytics.js';
+import { fetchKPIs, fetchUsers, fetchTopPages, fetchRecentEvents, fetchActiveSessions, fetchDailyTrend, fetchEmailStats, fetchEmailActivity, fetchCronStatus, fetchPipelineHeartbeat, fetchActivationFunnel, fetchActivationDaily, fetchActivationOverview, fetchCohortRetention, fetchConversionRate, fetchTopSimsByPlan, fetchClassRosterStats, fetchAtRiskSubscriptions, fetchAvgTimeOnPage, fetchClickHeatmap, fetchWizardFunnel, fetchTourMetrics, fetchDemoMetrics, fetchAuthFlowMetrics, fetchNewVsReturning, fetchVisitorFlow, fetchEntryDestinations } from './js/admin-analytics.js';
 import { createInviteCode, fetchInviteCodes, deactivateInvite, sendInviteEmail } from './js/admin-invites.js';
 
 // ── Tabs (wired first so they always work) ──────────────────────────────────
@@ -2308,6 +2361,145 @@ document.getElementById('btn-export').addEventListener('click', async () => {
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'health-report.json'; a.click();
 });
 
+// ── Visitor Flow (Analytics tab) ────────────────────────────────────────────
+// Single Supabase round trip → derives entry/exit pages, transitions,
+// referrers, anon vs signed-in split, bounce rate, avg session duration.
+// All math is client-side from the existing analytics_events table.
+function _flowFmtDuration(s) {
+    if (!s) return '0s';
+    if (s < 60)   return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+    return Math.floor(s / 3600) + 'h ' + Math.round((s % 3600) / 60) + 'm';
+}
+function _flowPct(n) { return (n * 100).toFixed(1) + '%'; }
+
+function _flowBarRow(label, count, share, totalLabel) {
+    const pct = Math.max(3, share * 100);
+    return `<div style="margin-bottom:7px">
+        <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:3px">
+            <span style="color:#cdd;word-break:break-all">${_esc(label)}</span>
+            <span style="color:#778">${count.toLocaleString()} ${_esc(totalLabel || '')} &middot; ${_flowPct(share)}</span>
+        </div>
+        <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#4eff91,#00c6ff);border-radius:2px"></div>
+        </div>
+    </div>`;
+}
+
+async function loadVisitorFlow() {
+    const days = parseInt(document.getElementById('flow-window').value, 10) || 7;
+    const [flowRes, destRes] = await Promise.all([
+        fetchVisitorFlow(days),
+        fetchEntryDestinations(days, 5),
+    ]);
+
+    const setKpi = (id, val, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = typeof val === 'number' ? val.toLocaleString() : val;
+        el.className = 'kpi-val ' + (cls || 'white');
+    };
+
+    if (!flowRes.ok) {
+        const msg = `<div class="empty" style="color:#ff8080">${_esc(flowRes.error)}</div>`;
+        for (const id of ['flow-entry-list','flow-exit-list','flow-transitions-list','flow-referrer-list','flow-entry-dest-list']) {
+            const el = document.getElementById(id); if (el) el.innerHTML = msg;
+        }
+        return;
+    }
+
+    const d = flowRes.data;
+    setKpi('flow-sessions',  d.sessions, 'white');
+    setKpi('flow-pageviews', d.pageviews, 'blue');
+    setKpi('flow-pps',       d.avgPagesPerSession, 'blue');
+    // Bounce-rate color: green if < 40%, gold 40-65%, red > 65%
+    const bouncePct = (d.bounceRate * 100).toFixed(1) + '%';
+    setKpi('flow-bounce', bouncePct, d.bounceRate < 0.4 ? 'green' : d.bounceRate < 0.65 ? 'gold' : 'red');
+    setKpi('flow-duration',  _flowFmtDuration(d.avgSessionDurationSec), 'white');
+    setKpi('flow-anon',      d.anonSessions, 'purple');
+    setKpi('flow-signed',    d.signedSessions, 'green');
+    setKpi('flow-converted', d.anonConverted, d.anonConverted > 0 ? 'gold' : 'white');
+
+    // Entry / Exit lists
+    const entryEl = document.getElementById('flow-entry-list');
+    entryEl.innerHTML = d.entryPages.length
+        ? d.entryPages.map(p => _flowBarRow(p.name, p.count, p.share, 'sessions')).join('')
+        : '<div class="empty">No entry pages.</div>';
+
+    const exitEl = document.getElementById('flow-exit-list');
+    exitEl.innerHTML = d.exitPages.length
+        ? d.exitPages.map(p => _flowBarRow(p.name, p.count, p.share, 'sessions')).join('')
+        : '<div class="empty">No exit pages.</div>';
+
+    // Transitions: A → B with count + bar relative to top transition
+    const transEl = document.getElementById('flow-transitions-list');
+    if (!d.transitions.length) {
+        transEl.innerHTML = '<div class="empty">No multi-page sessions in this window. Bounce rate may be 100%.</div>';
+    } else {
+        const maxC = d.transitions[0].count;
+        transEl.innerHTML = d.transitions.map(t => {
+            const pct = Math.max(3, (t.count / maxC) * 100);
+            return `<div style="margin-bottom:7px">
+                <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:3px">
+                    <span style="color:#cdd"><span style="color:#9ad36f">${_esc(t.from)}</span> <span style="color:#556">→</span> <span style="color:#4fc3f7">${_esc(t.to)}</span></span>
+                    <span style="color:#778">${t.count.toLocaleString()} transitions</span>
+                </div>
+                <div style="height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#9ad36f,#4fc3f7);border-radius:2px"></div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // Referrers (origins). "(none)" or null = direct/typed-in.
+    const refEl = document.getElementById('flow-referrer-list');
+    refEl.innerHTML = d.referrers.length
+        ? d.referrers.map(r => _flowBarRow(r.origin || '(direct)', r.count, r.share, 'sessions')).join('')
+        : '<div class="empty">No external referrers — visitors are arriving direct.</div>';
+
+    if (d.truncated) {
+        transEl.insertAdjacentHTML('beforeend',
+            `<div style="font-size:.7rem;color:#a80;margin-top:8px">⚠ Result capped at 30k events — narrow the window for accurate totals.</div>`);
+    }
+
+    // Where entries go next: per top entry page, anon vs signed-in 2nd-step
+    const destEl = document.getElementById('flow-entry-dest-list');
+    if (!destRes.ok || !destRes.data.length) {
+        destEl.innerHTML = '<div class="empty">No data.</div>';
+    } else {
+        destEl.innerHTML = destRes.data.map(e => {
+            const fmtList = (arr) => arr.length
+                ? arr.map(x => `<span style="color:#cdd">${_esc(x.to)}</span> <span style="color:#778">${x.count}</span>`).join(' &middot; ')
+                : '<span style="color:#556">—</span>';
+            const bounceA = e.totalAnon   ? Math.round((e.bouncesAnon  / e.totalAnon)   * 100) : 0;
+            const bounceS = e.totalSigned ? Math.round((e.bouncesSigned/ e.totalSigned) * 100) : 0;
+            return `<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.04)">
+                <div style="font-size:.85rem;color:#fff;font-weight:600;margin-bottom:4px">${_esc(e.entry)}
+                    <span style="color:#556;font-weight:400;font-size:.74rem;margin-left:6px">${e.total} sessions</span>
+                </div>
+                <div style="font-size:.74rem;color:#aab;margin-bottom:3px">
+                    <span style="color:#c080ff">Anon (${e.totalAnon})</span> bounce ${bounceA}% &middot;
+                    next: ${fmtList(e.anonNext)}
+                </div>
+                <div style="font-size:.74rem;color:#aab">
+                    <span style="color:#4eff91">Signed (${e.totalSigned})</span> bounce ${bounceS}% &middot;
+                    next: ${fmtList(e.signedNext)}
+                </div>
+            </div>`;
+        }).join('');
+    }
+}
+
+// Wire change handlers
+document.getElementById('btn-refresh-flow')?.addEventListener('click', loadVisitorFlow);
+document.getElementById('flow-window')?.addEventListener('change', loadVisitorFlow);
+
+// Lazy-load on first analytics-tab open (so the Overview tab stays light).
+let _flowLoaded = false;
+document.querySelector('.tab[data-tab="analytics"]')?.addEventListener('click', () => {
+    if (!_flowLoaded) { _flowLoaded = true; loadVisitorFlow(); }
+});
+
 // ── Analytics auto-refresh loop ─────────────────────────────────────────────
 // Every load*() function above runs once at page load and never again, so
 // admins reported KPIs going stale within minutes. This loop reruns the
@@ -2318,9 +2510,9 @@ document.getElementById('btn-export').addEventListener('click', async () => {
 // from when they switched away.
 const _refreshLoaders = {
     overview:   () => Promise.allSettled([loadTrend(), loadTopPages()]),
-    users:      () => Promise.allSettled([loadUsers(), loadSessions()]),
+    users:      () => Promise.allSettled([loadUsers()]),
     activation: () => Promise.allSettled([loadActivationAll(), loadOnboardingAll()]),
-    analytics:  () => Promise.resolve(),
+    analytics:  () => Promise.allSettled([loadVisitorFlow(), loadSessions()]),
     invites:    () => Promise.allSettled([loadInvites(), loadEmailActivity()]),
     system:     () => Promise.allSettled([loadPipelineHeartbeat(), loadProxyFreshness(), loadCronStatus()]),
 };
