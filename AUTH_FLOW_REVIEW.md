@@ -149,10 +149,13 @@ stores it; the RPC just needs to expose a top-N).
 for a couple weeks the nudge-rate column on the admin card will tell
 us whether the wizard friction is meaningful or marginal.
 
-**4.** ~~Google OAuth~~ — **shipped**. Apple is staged behind the same
-`SOCIAL_PROVIDERS` flag; bringing it online needs the developer-
-account setup steps in `OAUTH_SETUP.md` plus a single-line config
-change.
+**4.** ~~Google OAuth~~ — **shipped**. Apple is **wired and waiting**:
+brand button + click handler are in `js/oauth-buttons.js`,
+`auth-callback.html` handles its return URL identically to Google's,
+and `OAUTH_SETUP.md` § Apple is now a complete step-by-step (App ID
+→ Services ID → .p8 key → Supabase paste → flag flip). One config
+change (`SOCIAL_PROVIDERS = ['google', 'apple']`) ships the button
+the moment the Apple developer + Supabase steps are done.
 
 **5.** Top-N reasons histogram for `auth_failures.reason` so an admin
 can spot a sudden spike in (e.g.) "Email not confirmed" without
