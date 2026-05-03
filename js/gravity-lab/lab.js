@@ -15,6 +15,7 @@ import {
     totalJ2PotentialEnergy,
     totalAngularMomentum,
     stateToElements,
+    elementsToState,
     G_SI,
 } from './physics.js';
 import { SYSTEMS, SYSTEM_ORDER, J2000_JD } from './systems.js';
@@ -63,6 +64,11 @@ const state = {
     // Sun direction for skin shaders — pulled from the directional light.
     sunDir:         new THREE.Vector3(1, 0, 0),
     labelScale:     1,       // per-system scaling for label sprites
+    // Test particles dropped by the user. Stores indices into bodies[].
+    testParticles:  [],
+    // Close-approach scanner. One record per pair of bodies.
+    approaches:     [],      // [{i, j, current_km, min_km, min_t_s}]
+    approachThresholdKm: 1e6,
 };
 
 // Three.js singletons — initialised once in init().
@@ -105,6 +111,11 @@ const hud = {
     j2Toggle:    null,    // checkbox / button for central-body J2
     j2Wrap:      null,    // wrapper that hides the toggle when system has no J2
     j2Note:      null,    // small descriptor of what J2 does for the active system
+    // Test particles + close-approach scanner
+    tpButtons:        null,   // NodeList of preset buttons (data-tp attr)
+    approachTable:    null,   // <table> for the live close-approach readout
+    approachThresh:   null,   // <input type=range> for threshold selector
+    approachThreshVal:null,   // text readout of the active threshold
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -308,92 +319,97 @@ export function loadSystem(systemId) {
     state.labelScale = Math.max(0.5, Math.min(3.0, systemExtentUnits / 30));
 
     for (let bi = 0; bi < state.bodies.length; bi++) {
-        const b = state.bodies[bi];
-        const radiusUnits = Math.max(
-            (b.radius_km || 100) / state.sceneScaleKm,
-            MIN_BODY_RADIUS_UNITS,
-        );
-
-        const visual = createBodyVisual(b, sceneRoot, {
-            radiusUnits,
-            sunDir:       state.sunDir,
-            renderer,
-            segmentsHigh: b.is_parent ? 64 : 40,
-            segmentsLow:  28,
-        });
-        visual.surfaceMesh.userData.bodyIdx = bi;
-        state.bodyGroups.push(visual.group);
-        state.meshes.push(visual.surfaceMesh);
-        state.skins.push(visual.skin || null);
-
-        // Saturn-style rings, attached to the parent body so they translate
-        // along with it. Tilt is intrinsic to the ring config.
-        if (b.is_parent && src.rings) {
-            const rings = createRingSystem(src.rings, radiusUnits);
-            visual.group.add(rings);
-        }
-
-        // Per-body label sprite — added to overlayRoot so it lives outside
-        // the body's translation, and we set its world position each frame.
-        const sprite = createLabelSprite(_capitalize(b.name));
-        const sx = state.labelScale * 1.8;
-        const sy = state.labelScale * 0.45;
-        sprite.scale.set(sx, sy, 1);
-        overlayRoot.add(sprite);
-        state.labels.push(sprite);
-
-        // Orbit trail + faint Keplerian guide (skip parent — it barely moves).
-        if (!b.is_parent) {
-            // Vertex-coloured trail so the head is bright and the tail fades.
-            const positions = new Float32Array(TRAIL_LEN * 3);
-            const colors    = new Float32Array(TRAIL_LEN * 3);
-            const tg = new THREE.BufferGeometry();
-            tg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            tg.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
-            tg.setDrawRange(0, 0);
-            const tm = new THREE.LineBasicMaterial({
-                vertexColors: true,
-                transparent:  true,
-                opacity:      0.95,
-                depthWrite:   false,
-                blending:     THREE.AdditiveBlending,
-            });
-            const line = new THREE.Line(tg, tm);
-            trailRoot.add(line);
-            const baseColor = new THREE.Color(b.color ?? 0xffffff);
-            state.trails.push({
-                line, geom: tg, positions, colors,
-                head: 0, count: 0,
-                baseColor,
-            });
-
-            // Faint orbit guide. Drawn from the satellite's J2000 osculating
-            // elements so users can see how perturbations / J2 / mutual
-            // gravity smear the path off the unperturbed Kepler ellipse.
-            if (b.elements_j2000) {
-                const guide = createOrbitGuide(
-                    b.elements_j2000,
-                    state.sceneScaleKm,
-                    b.color ?? 0xffffff,
-                    0.18,
-                );
-                // Anchor the guide at the parent body's group so it follows
-                // the parent's barycentric wobble.
-                state.bodyGroups[0].add(guide);
-            }
-        } else {
-            state.trails.push(null);
-        }
+        _addBodyMesh(state.bodies[bi], bi, src);
     }
 
     state.focusIdx = null;
+    state.testParticles = [];
+    state.approaches    = [];
+    state.approachThresholdKm = _autoThresholdKm();
     _buildBarycenterMarker(src.show_barycenter);
+    _initApproachLines();
     _frameSystem();
     _updateMeshes();
     _renderHUDChrome();
     _renderBodyChips();
     _renderJ2Widget();
+    _renderApproachThreshold();
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
+}
+
+/**
+ * Build (or rebuild) the Three.js group/mesh/skin/label/trail for a single
+ * body and append the new entries to the corresponding state arrays.
+ * Caller is responsible for index management. The active system descriptor
+ * is passed so we know whether to attach Saturn-style rings to the parent.
+ */
+function _addBodyMesh(b, bi, src) {
+    const radiusUnits = Math.max(
+        (b.radius_km || 100) / state.sceneScaleKm,
+        MIN_BODY_RADIUS_UNITS,
+    );
+
+    const visual = createBodyVisual(b, sceneRoot, {
+        radiusUnits,
+        sunDir:       state.sunDir,
+        renderer,
+        segmentsHigh: b.is_parent ? 64 : 40,
+        segmentsLow:  28,
+    });
+    visual.surfaceMesh.userData.bodyIdx = bi;
+    state.bodyGroups.push(visual.group);
+    state.meshes.push(visual.surfaceMesh);
+    state.skins.push(visual.skin || null);
+
+    // Saturn-style rings, attached to the parent body so they translate
+    // along with it. Tilt is intrinsic to the ring config.
+    if (b.is_parent && src && src.rings) {
+        const rings = createRingSystem(src.rings, radiusUnits);
+        visual.group.add(rings);
+    }
+
+    const sprite = createLabelSprite(_capitalize(b.name));
+    const sx = state.labelScale * 1.8;
+    const sy = state.labelScale * 0.45;
+    sprite.scale.set(sx, sy, 1);
+    overlayRoot.add(sprite);
+    state.labels.push(sprite);
+
+    if (!b.is_parent) {
+        const positions = new Float32Array(TRAIL_LEN * 3);
+        const colors    = new Float32Array(TRAIL_LEN * 3);
+        const tg = new THREE.BufferGeometry();
+        tg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        tg.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+        tg.setDrawRange(0, 0);
+        const tm = new THREE.LineBasicMaterial({
+            vertexColors: true,
+            transparent:  true,
+            opacity:      b.is_test ? 1.0 : 0.95,
+            depthWrite:   false,
+            blending:     THREE.AdditiveBlending,
+        });
+        const line = new THREE.Line(tg, tm);
+        trailRoot.add(line);
+        const baseColor = new THREE.Color(b.color ?? 0xffffff);
+        state.trails.push({
+            line, geom: tg, positions, colors,
+            head: 0, count: 0,
+            baseColor,
+        });
+
+        if (b.elements_j2000 && !b.is_test) {
+            const guide = createOrbitGuide(
+                b.elements_j2000,
+                state.sceneScaleKm,
+                b.color ?? 0xffffff,
+                0.18,
+            );
+            state.bodyGroups[0].add(guide);
+        }
+    } else {
+        state.trails.push(null);
+    }
 }
 
 function _systemExtentUnits() {
@@ -581,7 +597,10 @@ function _tick(t) {
         state.elapsedSec += dt_sim;
         _updateMeshes();
         _appendTrails();
+        _scanApproaches();
         _renderHUDLive();
+        _renderApproachLines();
+        _renderApproachTable();
     }
 
     // Drive skin shader uniforms each frame (animations / time-driven
@@ -833,6 +852,26 @@ export function attachUI(refs) {
             state.L0_mag = Math.hypot(L[0], L[1], L[2]) || 1;
         });
     }
+
+    if (hud.tpButtons) {
+        for (const btn of hud.tpButtons) {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.tp;
+                if (id === 'clear') clearTestParticles();
+                else dropTestParticle(id);
+            });
+        }
+    }
+
+    if (hud.approachThresh) {
+        const map = v => Math.exp(Math.log(100) + (v / 1000) * (Math.log(1e8) - Math.log(100)));
+        hud.approachThresh.addEventListener('input', () => {
+            state.approachThresholdKm = map(parseFloat(hud.approachThresh.value));
+            if (hud.approachThreshVal) {
+                hud.approachThreshVal.textContent = _humaniseKm(state.approachThresholdKm);
+            }
+        });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -886,6 +925,294 @@ function _humaniseWarp(w) {
     if (w < 86400) return `${(w / 3600).toFixed(1)} hr/s`;
     if (w < 86400 * 365) return `${(w / 86400).toFixed(2)} d/s`;
     return `${(w / (86400 * 365.25)).toFixed(2)} yr/s`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Test particles
+// ─────────────────────────────────────────────────────────────────────────────
+// Drop a body with arbitrary orbital elements into the running scene. The
+// integrator picks it up automatically (it iterates over state.bodies),
+// the visual + trail render via the same _addBodyMesh path as native
+// bodies, and the close-approach scanner notices it on the next pair
+// rebuild.
+
+const TP_COLORS = [0xffe070, 0x6dffe0, 0xff6da0, 0x9b6dff, 0x70d6ff, 0xffaa55];
+
+function _systemContext() {
+    const parent = state.bodies.find(b => b.is_parent);
+    if (!parent) return null;
+    const moons   = state.bodies.filter(b => !b.is_parent && !b.is_test);
+    const largest = moons.reduce((a, b) => (!a || b.m > a.m) ? b : a, null);
+    return { parent, mu_p: G_SI * parent.m, moons, largest };
+}
+
+/**
+ * Drop a test particle on a preset orbit. Mass is 1 kg by default —
+ * negligible perturbation on the host system, so the particle is a true
+ * test particle in the textbook sense.
+ */
+export function dropTestParticle(presetId) {
+    const ctx = _systemContext();
+    if (!ctx) return;
+
+    const ref = ctx.largest?.elements_j2000;
+    const fallback_a = (ctx.parent.radius_km || 1000) * 1000 * 30;
+    const a_ref = ref?.a ?? fallback_a;
+
+    const colorIdx = state.testParticles.length % TP_COLORS.length;
+    const color    = TP_COLORS[colorIdx];
+
+    let elements, label;
+    if (presetId === 'eccentric') {
+        elements = {
+            a: a_ref * 3, e: 0.7, i_deg: 30,
+            raan_deg: 60, argp_deg: 0, M_deg: 0,
+        };
+        label = `comet-${state.testParticles.length + 1}`;
+    } else if (presetId === 'polar') {
+        elements = {
+            a: a_ref, e: 0.0, i_deg: 90,
+            raan_deg: 0, argp_deg: 0, M_deg: 0,
+        };
+        label = `polar-${state.testParticles.length + 1}`;
+    } else if (presetId === 'coorbit') {
+        if (!ref) return;
+        elements = {
+            a: ref.a, e: ref.e, i_deg: ref.i_deg,
+            raan_deg: ref.raan_deg, argp_deg: ref.argp_deg,
+            M_deg:    (ref.M_deg + 60) % 360,
+        };
+        label = `${ctx.largest.name}-trojan-${state.testParticles.length + 1}`;
+    } else {
+        return;
+    }
+
+    const { r, v } = elementsToState({ ...elements, mu: ctx.mu_p });
+    const body = {
+        name: label,
+        m: 1,                    // kg — true test particle
+        r: [r[0] + ctx.parent.r[0], r[1] + ctx.parent.r[1], r[2] + ctx.parent.r[2]],
+        v: [v[0] + ctx.parent.v[0], v[1] + ctx.parent.v[1], v[2] + ctx.parent.v[2]],
+        radius_km: 60,           // visualisation only — gets caught by the
+                                 // MIN_BODY_RADIUS_UNITS floor for visibility
+        color,
+        elements_j2000: elements,
+        is_test: true,
+    };
+    const newIdx = state.bodies.length;
+    state.bodies.push(body);
+    state.testParticles.push(newIdx);
+    _addBodyMesh(body, newIdx, state.sys);
+
+    // Rebaseline diagnostics — the new body adds energy/momentum that
+    // would otherwise look like integrator drift.
+    state.energy0 = _currentTotalEnergy();
+    const L0 = totalAngularMomentum(state.bodies);
+    state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
+
+    // Force scanner rebuild on the next frame.
+    state.approaches = [];
+    _renderBodyChips();
+}
+
+/** Remove every dropped test particle, dispose meshes, rebaseline. */
+export function clearTestParticles() {
+    if (!state.testParticles.length) return;
+    const indices = [...state.testParticles].sort((a, b) => b - a);
+    for (const idx of indices) {
+        const grp = state.bodyGroups[idx];
+        if (grp) {
+            sceneRoot.remove(grp);
+            grp.traverse(o => {
+                if (o.geometry) o.geometry.dispose();
+                if (o.material) {
+                    if (Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+                    else o.material.dispose();
+                }
+            });
+        }
+        const tr = state.trails[idx];
+        if (tr) {
+            trailRoot.remove(tr.line);
+            tr.geom.dispose();
+            tr.line.material.dispose();
+        }
+        const lbl = state.labels[idx];
+        if (lbl) {
+            overlayRoot.remove(lbl);
+            lbl.material?.map?.dispose();
+            lbl.material?.dispose();
+        }
+        state.bodies.splice(idx, 1);
+        state.bodyGroups.splice(idx, 1);
+        state.meshes.splice(idx, 1);
+        state.skins.splice(idx, 1);
+        state.labels.splice(idx, 1);
+        state.trails.splice(idx, 1);
+        if (state.focusIdx === idx) state.focusIdx = null;
+        else if (state.focusIdx != null && state.focusIdx > idx) state.focusIdx--;
+    }
+    state.testParticles = [];
+
+    // Re-stamp body indices on the surface meshes so click-to-focus stays
+    // consistent after the splice.
+    for (let i = 0; i < state.meshes.length; i++) {
+        if (state.meshes[i]) state.meshes[i].userData.bodyIdx = i;
+    }
+
+    state.energy0 = _currentTotalEnergy();
+    const L0 = totalAngularMomentum(state.bodies);
+    state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
+
+    state.approaches = [];
+    _renderBodyChips();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Close-approach scanner
+// ─────────────────────────────────────────────────────────────────────────────
+// Each frame: scan every pair, update its current and minimum separation.
+// When current_km < threshold, paint a coloured line between the bodies in
+// the 3D scene; the colour ramps red → yellow → green from very close to
+// at-threshold.
+
+let approachLines     = null;
+let approachLinesGeom = null;
+const APPROACH_MAX_PAIRS = 200;
+
+function _initApproachLines() {
+    if (approachLines) {
+        overlayRoot.remove(approachLines);
+        approachLinesGeom?.dispose();
+        approachLines.material.dispose();
+    }
+    const positions = new Float32Array(APPROACH_MAX_PAIRS * 6);
+    const colors    = new Float32Array(APPROACH_MAX_PAIRS * 6);
+    approachLinesGeom = new THREE.BufferGeometry();
+    approachLinesGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    approachLinesGeom.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    approachLinesGeom.setDrawRange(0, 0);
+    const mat = new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent:  true,
+        opacity:      0.7,
+        depthWrite:   false,
+    });
+    approachLines = new THREE.LineSegments(approachLinesGeom, mat);
+    overlayRoot.add(approachLines);
+}
+
+function _autoThresholdKm() {
+    const ctx = _systemContext();
+    const a = ctx?.largest?.elements_j2000?.a;
+    if (a) return a / 1000 * 0.05;
+    return (ctx?.parent?.radius_km ?? 1000) * 50;
+}
+
+function _ensureApproachRecords() {
+    const N = state.bodies.length;
+    const expected = N * (N - 1) / 2;
+    if (state.approaches.length === expected) return;
+    state.approaches = [];
+    for (let i = 0; i < N; i++) {
+        for (let j = i + 1; j < N; j++) {
+            state.approaches.push({
+                i, j,
+                current_km: Infinity,
+                min_km:     Infinity,
+                min_t_s:    0,
+            });
+        }
+    }
+}
+
+function _scanApproaches() {
+    _ensureApproachRecords();
+    for (const ap of state.approaches) {
+        const a = state.bodies[ap.i], b = state.bodies[ap.j];
+        const dx = b.r[0] - a.r[0];
+        const dy = b.r[1] - a.r[1];
+        const dz = b.r[2] - a.r[2];
+        ap.current_km = Math.sqrt(dx*dx + dy*dy + dz*dz) / 1000;
+        if (ap.current_km < ap.min_km) {
+            ap.min_km   = ap.current_km;
+            ap.min_t_s  = state.elapsedSec;
+        }
+    }
+}
+
+function _renderApproachLines() {
+    if (!approachLinesGeom) return;
+    const positions = approachLinesGeom.attributes.position.array;
+    const colors    = approachLinesGeom.attributes.color.array;
+    const thresh = state.approachThresholdKm;
+    let n = 0;
+    for (const ap of state.approaches) {
+        if (n >= APPROACH_MAX_PAIRS) break;
+        if (ap.current_km > thresh) continue;
+        const a = state.bodies[ap.i], b = state.bodies[ap.j];
+        const off = n * 6;
+        positions[off    ] = _toScene(a.r[0]);
+        positions[off + 1] = _toScene(a.r[1]);
+        positions[off + 2] = _toScene(a.r[2]);
+        positions[off + 3] = _toScene(b.r[0]);
+        positions[off + 4] = _toScene(b.r[1]);
+        positions[off + 5] = _toScene(b.r[2]);
+        const t  = Math.max(0, Math.min(1, ap.current_km / thresh));
+        const r_ = t < 0.5 ? 1.0       : 1.0 - (t - 0.5) * 2;
+        const g_ = t < 0.5 ? t * 2     : 1.0;
+        for (let k = 0; k < 2; k++) {
+            colors[off + k*3 + 0] = r_;
+            colors[off + k*3 + 1] = g_;
+            colors[off + k*3 + 2] = 0.15;
+        }
+        n++;
+    }
+    approachLinesGeom.setDrawRange(0, n * 2);
+    approachLinesGeom.attributes.position.needsUpdate = true;
+    approachLinesGeom.attributes.color.needsUpdate    = true;
+}
+
+function _renderApproachTable() {
+    if (!hud.approachTable) return;
+    const tbody = hud.approachTable.querySelector('tbody');
+    if (!tbody) return;
+    if (!state.approaches.length) {
+        tbody.innerHTML = `<tr><td colspan="3" style="color:#778;">No data yet</td></tr>`;
+        return;
+    }
+    const sorted = [...state.approaches].sort((a, b) => a.current_km - b.current_km).slice(0, 6);
+    const thresh = state.approachThresholdKm;
+    tbody.innerHTML = sorted.map(ap => {
+        const a = state.bodies[ap.i], b = state.bodies[ap.j];
+        const cls = ap.current_km < thresh ? 'gl-ap-active' : '';
+        const dotA = '#' + (a.color ?? 0xaaaaaa).toString(16).padStart(6, '0');
+        const dotB = '#' + (b.color ?? 0xaaaaaa).toString(16).padStart(6, '0');
+        return `<tr class="${cls}">
+            <td><span class="gl-dot" style="background:${dotA}"></span>${_capitalize(a.name)}<span style="color:#778;"> ↔ </span><span class="gl-dot" style="background:${dotB}"></span>${_capitalize(b.name)}</td>
+            <td class="gl-mono">${_humaniseKm(ap.current_km)}</td>
+            <td class="gl-mono">${_humaniseKm(ap.min_km)}</td>
+        </tr>`;
+    }).join('');
+}
+
+function _renderApproachThreshold() {
+    if (hud.approachThreshVal) {
+        hud.approachThreshVal.textContent = _humaniseKm(state.approachThresholdKm);
+    }
+    if (hud.approachThresh) {
+        const inv = w => 1000 * (Math.log(w) - Math.log(100)) / (Math.log(1e8) - Math.log(100));
+        hud.approachThresh.value = Math.max(0, Math.min(1000, inv(state.approachThresholdKm)));
+    }
+}
+
+function _humaniseKm(km) {
+    if (!isFinite(km)) return '—';
+    if (km < 1)    return (km * 1000).toFixed(0) + ' m';
+    if (km < 100)  return km.toFixed(2) + ' km';
+    if (km < 1000) return km.toFixed(0) + ' km';
+    if (km < 1e6)  return (km / 1000).toFixed(2) + ' Mm';
+    return (km / 1e6).toFixed(2) + ' Gm';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

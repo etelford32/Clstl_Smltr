@@ -232,6 +232,49 @@ body {
     font-size:.64rem; color:#778; line-height:1.5; margin-top:6px; font-style:italic;
 }
 
+/* ─── Test-particle drop section ────────────────────────────── */
+.gl-tp-section { display:grid; gap:6px; }
+.gl-btn-danger {
+    background:rgba(255,80,80,.10);
+    border-color:rgba(255,120,120,.30);
+    color:#f99;
+}
+.gl-btn-danger:hover { border-color:#f88; color:#fbb; }
+.gl-tp-hint {
+    font-size:.66rem; color:#778; line-height:1.5; margin-top:4px; font-style:italic;
+}
+
+/* ─── Close-approach panel ──────────────────────────────────── */
+.gl-ap-thresh-row {
+    display:grid; grid-template-columns:auto 1fr auto; gap:8px;
+    align-items:center; margin-bottom:8px;
+}
+.gl-ap-thresh-lbl {
+    font-size:.62rem; color:#7a78a4; text-transform:uppercase;
+    letter-spacing:.08em; font-weight:800;
+}
+#gl-ap-thresh {
+    width:100%; -webkit-appearance:none; appearance:none;
+    height:3px; background:rgba(255,255,255,.10); border-radius:2px;
+    outline:none; cursor:pointer;
+}
+#gl-ap-thresh::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:12px; height:12px; border-radius:50%;
+    background:#ff8866; cursor:pointer;
+    box-shadow:0 0 6px rgba(255,140,100,.6);
+}
+#gl-ap-thresh::-moz-range-thumb {
+    width:12px; height:12px; border-radius:50%; border:none;
+    background:#ff8866; cursor:pointer;
+}
+.gl-ap-thresh-val {
+    font-family:monospace; font-size:.72rem; color:#fc7;
+    font-weight:700; min-width:60px; text-align:right;
+}
+tr.gl-ap-active td { background:rgba(255,140,80,.10); color:#fff; }
+tr.gl-ap-active td:nth-child(2) { color:#ff7a55; font-weight:700; }
+
 /* ─── Showcase block ────────────────────────────────────────── */
 .gl-showcase {
     background:linear-gradient(150deg, rgba(180,140,255,.10), rgba(10,6,28,.5) 70%);
@@ -442,6 +485,15 @@ canvas.gl-resonance-canvas {
             <p class="gl-j2-note" id="gl-j2-note">—</p>
             <p class="gl-j2-hint">J₂ is conservative — energy stays bounded. Tidal decay (dissipative) will arrive on a future "non-conservative" toggle.</p>
         </div>
+
+        <div class="gl-label">Test Particle</div>
+        <div class="gl-tp-section">
+            <button type="button" class="gl-btn" data-tp="eccentric">+ Comet (e=0.7, i=30°)</button>
+            <button type="button" class="gl-btn" data-tp="polar">+ Polar Circular</button>
+            <button type="button" class="gl-btn" data-tp="coorbit">+ Trojan of largest moon</button>
+            <button type="button" class="gl-btn gl-btn-danger" data-tp="clear">Clear all particles</button>
+            <p class="gl-tp-hint">Drops a 1 kg test particle into the running scene. Truly negligible mass, so it perturbs nothing — it just rides the field. The close-approach scanner picks it up automatically.</p>
+        </div>
     </aside>
 
     <!-- ─── 3D STAGE ────────────────────────────────────────────────── -->
@@ -487,12 +539,28 @@ canvas.gl-resonance-canvas {
             </p>
         </div>
 
+        <div class="gl-hud-section">
+            <div class="gl-hud-title">Close Approaches</div>
+            <div class="gl-ap-thresh-row">
+                <span class="gl-ap-thresh-lbl">threshold</span>
+                <input type="range" id="gl-ap-thresh" min="0" max="1000" step="1" value="500">
+                <span class="gl-ap-thresh-val" id="gl-ap-thresh-val">—</span>
+            </div>
+            <table class="gl-bodies" id="gl-ap-table">
+                <thead><tr><th>Pair</th><th>Now</th><th>All-time min</th></tr></thead>
+                <tbody><tr><td colspan="3" style="color:#778;">No data yet</td></tr></tbody>
+            </table>
+            <p style="font-size:.66rem; color:#778; margin-top:8px; line-height:1.5;">
+                Pairs below the threshold get a coloured line in the scene — red when very close, green at threshold. All-time minimum is remembered for the run; pause and reset to clear.
+            </p>
+        </div>
+
     </aside>
 
 </div>
 
 <script type="module">
-import { boot } from './js/gravity-lab/lab.js?v=20260503b';
+import { boot } from './js/gravity-lab/lab.js?v=20260503d';
 
 const canvas = document.getElementById('gl-canvas');
 const ui = {
@@ -529,6 +597,12 @@ const ui = {
     j2Toggle:   document.getElementById('gl-j2'),
     j2Wrap:     document.getElementById('gl-j2-wrap'),
     j2Note:     document.getElementById('gl-j2-note'),
+
+    // Test particles + close-approach scanner
+    tpButtons:         Array.from(document.querySelectorAll('[data-tp]')),
+    approachTable:     document.getElementById('gl-ap-table'),
+    approachThresh:    document.getElementById('gl-ap-thresh'),
+    approachThreshVal: document.getElementById('gl-ap-thresh-val'),
 };
 
 boot({ canvas, ui, defaultSystem: 'jupiter-galileans' });
