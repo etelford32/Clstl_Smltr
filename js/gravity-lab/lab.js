@@ -67,9 +67,10 @@ const state = {
 
 // Three.js singletons — initialised once in init().
 let scene, camera, renderer, controls;
-const sceneRoot   = new THREE.Group();   // contains current system
-const trailRoot   = new THREE.Group();   // contains current system trails
-const overlayRoot = new THREE.Group();   // labels / accents
+const sceneRoot      = new THREE.Group();  // contains current system bodies
+const trailRoot      = new THREE.Group();  // contains current system trails
+const overlayRoot    = new THREE.Group();  // labels / accents (e.g. barycenter)
+let barycenterGroup  = null;               // marker for visible binaries
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HUD references (filled in by attachUI())
@@ -386,6 +387,7 @@ export function loadSystem(systemId) {
     }
 
     state.focusIdx = null;
+    _buildBarycenterMarker(src.show_barycenter);
     _frameSystem();
     _updateMeshes();
     _renderHUDChrome();
