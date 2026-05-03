@@ -418,5 +418,6 @@ export function createSunUniforms(THREE) {
         u_channel_color:   { value: new THREE.Vector3(1, 0.95, 0.80) },
         u_channel_intensity: { value: 1.0 },
         u_channel_phot_dim:  { value: 1.0 },   // photosphere brightness multiplier
+        u_filament_opacity:  { value: 0.0 },   // per-channel filament extinction
     };
 }

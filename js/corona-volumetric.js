@@ -45,14 +45,22 @@
 // pseudocolor matches the conventional AIA palette (171=gold, 193=brown,
 // 211=purple, 304=red, 131=teal, 94=green) so a viewer familiar with
 // SDO data sees what they expect.
+//
+// `filOpacity` is the per-step extinction coefficient for cool dense
+// filament/prominence plasma in this channel.  At deep coronal lines
+// (171, 193, 211 Å) the He I edge at 504 Å + H I continuum makes the
+// filament strongly absorbing → filaments appear *dark* on disk.  In
+// the higher-energy channels (94, 131 Å) absorption is weaker.  In
+// 304 Å the cool plasma has its own emission so we use a low effective
+// opacity (it self-absorbs but the envelope still glows).
 export const EUV_CHANNELS = {
-    'white': { logT: 0,   sigma: 0,   color: [1.00, 0.95, 0.80], photDim: 1.00, label: 'White light' },
-    '94':    { logT: 6.85, sigma: 0.10, color: [0.30, 0.95, 0.40], photDim: 0.05, label: '94 Å · Fe XVIII · 7 MK · flare core' },
-    '131':   { logT: 7.00, sigma: 0.12, color: [0.35, 0.92, 0.92], photDim: 0.05, label: '131 Å · Fe XXI · 10 MK · flare hot' },
-    '171':   { logT: 5.85, sigma: 0.10, color: [1.00, 0.85, 0.45], photDim: 0.10, label: '171 Å · Fe IX · 0.7 MK · quiet plage' },
-    '193':   { logT: 6.20, sigma: 0.12, color: [0.92, 0.70, 0.35], photDim: 0.10, label: '193 Å · Fe XII · 1.6 MK · AR + holes' },
-    '211':   { logT: 6.30, sigma: 0.13, color: [0.92, 0.50, 0.92], photDim: 0.10, label: '211 Å · Fe XIV · 2 MK · AR loops' },
-    '304':   { logT: 4.70, sigma: 0.08, color: [1.00, 0.55, 0.30], photDim: 0.35, label: '304 Å · He II · 50 kK · chromo + prom' },
+    'white': { logT: 0,   sigma: 0,   color: [1.00, 0.95, 0.80], photDim: 1.00, filOpacity: 0.0, label: 'White light' },
+    '94':    { logT: 6.85, sigma: 0.10, color: [0.30, 0.95, 0.40], photDim: 0.05, filOpacity: 1.0, label: '94 Å · Fe XVIII · 7 MK · flare core' },
+    '131':   { logT: 7.00, sigma: 0.12, color: [0.35, 0.92, 0.92], photDim: 0.05, filOpacity: 1.5, label: '131 Å · Fe XXI · 10 MK · flare hot' },
+    '171':   { logT: 5.85, sigma: 0.10, color: [1.00, 0.85, 0.45], photDim: 0.10, filOpacity: 6.0, label: '171 Å · Fe IX · 0.7 MK · quiet plage' },
+    '193':   { logT: 6.20, sigma: 0.12, color: [0.92, 0.70, 0.35], photDim: 0.10, filOpacity: 5.0, label: '193 Å · Fe XII · 1.6 MK · AR + holes' },
+    '211':   { logT: 6.30, sigma: 0.13, color: [0.92, 0.50, 0.92], photDim: 0.10, filOpacity: 4.0, label: '211 Å · Fe XIV · 2 MK · AR loops' },
+    '304':   { logT: 4.70, sigma: 0.08, color: [1.00, 0.55, 0.30], photDim: 0.35, filOpacity: 0.5, label: '304 Å · He II · 50 kK · chromo + prom' },
 };
 
 // Number of slots reserved in the shader uniforms for active regions /
@@ -110,6 +118,7 @@ export const CORONA_VOL_FRAG = /* glsl */`
     uniform float u_channel_sigT;       // FWHM/√(8 ln 2) in log T
     uniform vec3  u_channel_color;      // pseudocolor (171=gold, 304=red, …)
     uniform float u_channel_intensity;  // overall brightness scaling
+    uniform float u_filament_opacity;   // per-channel cool-plasma extinction coeff
 
     uniform float u_time;
 
@@ -140,19 +149,100 @@ export const CORONA_VOL_FRAG = /* glsl */`
         return exp(-0.5 * d * d);
     }
 
+    // ── Cool-plasma filament / prominence density ──────────────────────────
+    //
+    // Each NOAA active region anchors a filament thread sitting just above
+    // the photosphere along its (synthetic) polarity inversion line.
+    // Geometry: a cigar-shaped tube oriented east-west on the AR's local
+    // tangent frame, with a Gaussian density profile across north-south
+    // and a smoothed box profile along east-west.
+    //
+    // Real filaments follow the K-S sech² support solution; we use a
+    // Gaussian (very close in shape) for slightly cheaper math.  Vertical
+    // peak at ~0.025 R_sun ≈ 17 Mm above the photosphere matches typical
+    // observed prominence heights (Engvold 1976, Mackay 2010).
+    //
+    // During a flare (u_flare_t > 0) the filament near the flare site is
+    // suppressed — the canonical "filament eruption" cinematography that
+    // accompanies impulsive coronal mass ejections.
+    float filamentDensity(vec3 p_local, float h, vec3 phat) {
+        // Filaments live in a narrow band 0.005 → 0.080 R_sun above
+        // photosphere; outside that band the contribution is zero
+        // regardless of which AR we test against.
+        if (h < 0.005 || h > 0.080) return 0.0;
+
+        const float h_fil   = 0.025;     // peak altitude (R_sun units)
+        const float h_sigma = 0.018;     // vertical FWHM
+        float h_mask = exp(-(h - h_fil) * (h - h_fil) / (2.0 * h_sigma * h_sigma));
+
+        float total = 0.0;
+        for (int k = 0; k < ${N_AR_SLOTS}; k++) {
+            if (k >= u_nRegions) break;
+            vec3  arPos    = normalize(u_regions[k].xyz);
+            float arSigned = u_regions[k].w;
+            float arInt    = abs(arSigned);
+            float complex  = arSigned < 0.0 ? 1.0 : 0.0;
+            if (arInt < 0.05) continue;
+
+            // Local tangent frame at the AR (defined w.r.t. y = rotation axis)
+            vec3 east  = normalize(vec3(-arPos.z, 0.0, arPos.x));
+            vec3 north = normalize(cross(arPos, east));
+
+            // Surface offset of the sample point from the AR centre on the
+            // unit sphere — small-angle decomposition into east / north.
+            vec3 d = phat - arPos;
+            float along  = dot(d, east);
+            float across = dot(d, north);
+
+            // Filament length scales with AR area; βγδ regions tend to host
+            // longer / fatter filaments along their polarity-inversion line.
+            float fil_half_len = (0.04 + 0.10 * arInt) * (1.0 + 0.30 * complex);
+            float fil_edge     = 0.020;
+            float fil_width    = 0.012 + 0.005 * arInt;
+
+            // Soft-edge box along the length, Gaussian across the width
+            float along_mask = smoothstep(-fil_half_len - fil_edge, -fil_half_len, along)
+                             - smoothstep( fil_half_len,  fil_half_len + fil_edge, along);
+            float across_mask = exp(-(across * across) / (2.0 * fil_width * fil_width));
+
+            float density = arInt * along_mask * across_mask * h_mask;
+            // Complex regions carry denser filaments (more sheared field)
+            density *= mix(1.0, 1.40, complex);
+
+            total += density;
+        }
+
+        // Flare-driven filament eruption: suppress filament near the active
+        // flare site as long as u_flare_t > 0.
+        if (u_flare_t > 0.005) {
+            vec3 flareSrc = vec3(
+                cos(u_flare_lon.x) * cos(u_flare_lon.y),
+                sin(u_flare_lon.x),
+                cos(u_flare_lon.x) * sin(u_flare_lon.y)
+            );
+            float flareDist = acos(clamp(dot(phat, flareSrc), -1.0, 1.0));
+            float erupt_mask = exp(-flareDist * flareDist / 0.030) * u_flare_t;
+            total *= max(0.0, 1.0 - erupt_mask);
+        }
+
+        return clamp(total, 0.0, 4.0);
+    }
+
     // ── Synthetic DEM at a point in sun-local space ────────────────────────
-    // p_local: position relative to sun centre (units: scene units = R_sun)
-    // Returns wavelength-integrated emission for the active channel.
-    float demEmission(vec3 p_local) {
+    // p_local: position relative to sun centre (units: scene units = R_sun).
+    // Writes integrated emission for the active channel into the first out
+    // parameter and the cool-filament density into the second, so the caller
+    // can update transmission for absorption-aware front-to-back compositing.
+    void demSample(vec3 p_local, out float emission, out float fil_density) {
+        emission = 0.0;
+        fil_density = 0.0;
         float r = length(p_local);
-        if (r < u_sun_radius * 1.001) return 0.0;
-        if (r > u_corona_radius)      return 0.0;
+        if (r < u_sun_radius * 1.001) return;
+        if (r > u_corona_radius)      return;
 
         // Altitude above photosphere, in R_sun units
         float h = (r - u_sun_radius) / u_sun_radius;
         vec3  phat = p_local / r;
-
-        float emission = 0.0;
 
         // ── Quiet corona: log T ≈ 6.0 (1 MK) ──────────────────────────────
         // Hydrostatic-ish exponential scale height; subtle large-scale
@@ -219,7 +309,28 @@ export const CORONA_VOL_FRAG = /* glsl */`
         }
         emission *= (1.0 - holeMask);
 
-        return emission;
+        // ── Filament / prominence density + emission ─────────────────────
+        // Cool dense plasma anchored above each AR's polarity inversion
+        // line.  Independent of coronal holes (real polar-crown filaments
+        // overlap polar holes).  Filament's own thermal emission peaks at
+        // logT ≈ 4.5 (transition-region envelope) — strong response in
+        // 304 Å, near zero in deep coronal channels.  In those coronal
+        // channels the filament instead *absorbs* via H I / He I edges,
+        // handled by the caller via fil_density × u_filament_opacity.
+        fil_density = filamentDensity(p_local, h, phat);
+        if (fil_density > 0.0) {
+            float fil_logT = 4.50;
+            // Slight upward weighting because real prominence envelopes
+            // span 4.4–4.8 in log T; gives 304 a bit more lift.
+            emission += fil_density * channelResponse(fil_logT) * 1.20;
+            // 304 limb prominence boost — at the limb (low h *and* far from
+            // disk centre on the line of sight) the prominence is seen in
+            // emission against dark space, not absorption against the disk.
+            // We give 304 a small extra kick when the channel matches.
+            if (u_channel_logT > 4.5 && u_channel_logT < 5.0) {
+                emission += fil_density * 0.30;
+            }
+        }
     }
 
     // ── Ray-sphere intersection (returns t for nearest forward hit) ───────
@@ -253,14 +364,36 @@ export const CORONA_VOL_FRAG = /* glsl */`
             t_exit = min(t_exit, hit_phot.x);
         }
 
+        // ── Front-to-back transmission integration ────────────────────────
+        // Standard volumetric compositing:
+        //   emission_total += transmission · sample_emission · ds
+        //   transmission   *= exp(−κ · ρ · ds)
+        // where κ is the per-channel filament extinction coefficient and ρ
+        // is the cool-plasma density at the sample.  A filament *in front*
+        // of an AR therefore reduces the transmission of all subsequent
+        // (deeper) emission samples → AR loops behind a filament are
+        // attenuated, exactly producing the dark-on-disk filament look in
+        // 171 / 193 / 211, while in 304 the low extinction lets the
+        // filament's own emission shine through (bright limb prominence).
         const int N_STEPS = 16;
         float step_size = t_exit / float(N_STEPS);
         float emission = 0.0;
+        float transmission = 1.0;
         for (int i = 0; i < N_STEPS; i++) {
             float t = step_size * (float(i) + 0.5);
             vec3 p_world = ro + rd * t;
             vec3 p_local = p_world - u_sun_world;
-            emission += demEmission(p_local) * step_size;
+
+            float em, fil;
+            demSample(p_local, em, fil);
+
+            emission += transmission * em * step_size;
+            float dtau = fil * step_size * u_filament_opacity;
+            transmission *= exp(-dtau);
+
+            // Cheap early-out: once the column is essentially opaque, no
+            // further depth contributes.
+            if (transmission < 0.01) break;
         }
 
         // White-light mode disables the volumetric corona entirely
