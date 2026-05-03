@@ -323,7 +323,7 @@ function mountIframe(entry, onReady) {
   iframe.style.cssText =
     'position:absolute;inset:0;width:100%;height:100%;' +
     'border:0;border-radius:inherit;pointer-events:none;' +
-    'opacity:0;transition:opacity .8s ease;background:transparent';
+    'opacity:0;transition:opacity .8s ease;background:#000';
   entry.thumb.appendChild(iframe);
   entry.iframe = iframe;
 
@@ -335,12 +335,23 @@ function mountIframe(entry, onReady) {
     if (entry.canvas) entry.canvas.style.opacity = '0';
     onReady?.();
   };
+
+  // Reveal on either the postMessage signal from preview-mode.js (best,
+  // fires after WebGL has painted) or — if that never arrives — the load
+  // event + small grace period. Hard cap at 12s so we never block the queue.
+  const onMsg = (ev) => {
+    if (ev.source !== iframe.contentWindow) return;
+    if (ev.data?.type === 'preview-ready') {
+      window.removeEventListener('message', onMsg);
+      setTimeout(reveal, 250);
+    }
+  };
+  window.addEventListener('message', onMsg);
+
   iframe.addEventListener('load', () => {
-    // Give the sim a beat to mount its canvas before the cross-fade.
-    setTimeout(reveal, 600);
+    setTimeout(reveal, 1500);  // sim needs time to spin up WebGL
   });
-  // Safety timeout — sims with heavy WASM may never fire load cleanly.
-  setTimeout(reveal, 8000);
+  setTimeout(reveal, 12000);
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -394,21 +405,37 @@ export function initCardPreviews() {
   }
   requestAnimationFrame(loop);
 
-  // Live iframe escalation — staggered, one card at a time.
+  // Live iframe escalation — staggered, one card at a time, capped.
   if (!shouldUseLiveIframes()) return;
 
+  // Cap concurrent live iframes — five heavy WebGL sims would melt the page.
+  const MAX_LIVE = 3;
   const pending = [...entries];
   const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 200));
+  let mounted = 0;
 
   function pumpNext() {
+    if (mounted >= MAX_LIVE) return;
     const next = pending.find(e => e.visible && !e.iframe);
     if (!next) {
       if (pending.some(e => !e.iframe)) setTimeout(pumpNext, 1200);
       return;
     }
     pending.splice(pending.indexOf(next), 1);
-    idle(() => mountIframe(next, () => setTimeout(pumpNext, 800)));
+    mounted++;
+    idle(() => mountIframe(next, () => setTimeout(pumpNext, 1200)));
   }
-  // First wave: wait briefly for above-the-fold cards to register as visible.
   setTimeout(pumpNext, 1500);
+
+  // Hover override — instantly upgrade the hovered card to a live preview
+  // even if the queue hasn't reached it yet.
+  for (const e of entries) {
+    e.thumb.addEventListener('pointerenter', () => {
+      if (e.iframe || mounted >= MAX_LIVE + 2) return;
+      const i = pending.indexOf(e);
+      if (i >= 0) pending.splice(i, 1);
+      mounted++;
+      mountIframe(e, () => setTimeout(pumpNext, 1200));
+    }, { once: true });
+  }
 }
