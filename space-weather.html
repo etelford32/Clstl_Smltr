@@ -484,6 +484,36 @@ nav {
     border:1px solid rgba(255,140,0,.3); font-size:.68rem;
 }
 
+/* AR rows are interactive — click to focus the 3-D view on that AR */
+.sw-table tr.ar-row { cursor:pointer; transition:background .15s ease; }
+.sw-table tr.ar-row:hover td,
+.sw-table tr.ar-row:focus td { background:rgba(255,200,80,.08); outline:none; }
+.sw-table tr.ar-row.ar-active td {
+    background:rgba(255,210,90,.14);
+    box-shadow: inset 3px 0 0 #ffd078;
+}
+.sw-table tr.ar-row.ar-active td:first-child { color:#fff8d8; }
+
+/* 3-D AR hover tooltip — anchored to the globe canvas, follows the pointer */
+.ar-tooltip {
+    position:absolute; pointer-events:none; z-index:60;
+    background:rgba(8,14,22,.92);
+    border:1px solid rgba(255,200,90,.35);
+    border-radius:6px; padding:7px 10px;
+    color:#ffe2b0; font-size:.72rem;
+    font-family: 'Courier New', monospace;
+    box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 12px rgba(255,180,60,.18);
+    white-space:nowrap; transition: opacity .12s ease;
+    max-width: 240px;
+}
+.ar-tooltip strong { color:#fff8d8; font-weight:700; }
+.ar-tooltip .tt-row { display:flex; justify-content:space-between; gap:14px; }
+.ar-tooltip .tt-row .k { color:#88a4b8; }
+.ar-tooltip .tt-row .v { color:#ffe2b0; font-weight:600; }
+.ar-tooltip.kink   { border-color:rgba(255,80,40,.55); box-shadow:0 4px 14px rgba(0,0,0,.5),0 0 14px rgba(255,80,40,.25); }
+.ar-tooltip.kink .tt-row .v.kink { color:#ff7038; }
+
+
 /* ── WIND ALERT LEVEL BADGE ──────────────────────────────────────────────── */
 .wind-alert-badge {
     display: inline-flex; align-items: center; gap: 4px;
@@ -1370,6 +1400,25 @@ nav {
 
 .space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
 
+/* Type-III radio burst rows — wider grid to fit the dν/dt sparkline */
+.space-weather-hud .hud-typeiii-row {
+    grid-template-columns: 32px 50px 70px 64px auto;
+    align-items: center;
+}
+.space-weather-hud .hud-typeiii-spark {
+    background: rgba(255,180,80,.04);
+    border: 1px solid rgba(255,180,80,.15);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.space-weather-hud .hud-typeiii-drift {
+    color: #ff9b50; font-family: 'JetBrains Mono', monospace;
+    font-size: .58rem; text-align: right;
+}
+.space-weather-hud .hud-typeiii .hud-section-title {
+    color: #ff9b50;
+}
+
 /* Performance block — per-section frame-time bars */
 .space-weather-hud .hud-perf-sections { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .space-weather-hud .hud-perf-row {
@@ -2058,6 +2107,8 @@ nav {
                 <button class="layer-btn active" data-layer="parker">Parker Streamline</button>
                 <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
                 <button class="layer-btn active" data-layer="fieldLines" title="RK4-traced field lines from a multipole B field — real bipolar AR loop topology, not parametric tori">AR Field Lines</button>
+                <button class="layer-btn active" data-layer="arMarkers" title="Click an AR pin (or table row below) to focus the camera and read its current twist Φ / Hale class / area">AR Pins</button>
+                <button class="layer-btn active" data-layer="filaments" title="Cool filament/prominence arcs lifting off during M/X flares and internal kink eruptions — Hα / 304 Å signature, distinct from the gold/orange hot loops underneath">Filaments</button>
                 <button class="layer-btn active" data-layer="wind">Wind Streams</button>
             </div>
             <!-- AIA-style EUV channel selector — switches the sun rendering
@@ -2080,6 +2131,8 @@ nav {
         <canvas id="sw-globe-canvas"
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
+        <!-- Hover tooltip for AR pins in 3D — populated by raycast handler -->
+        <div class="ar-tooltip" id="ar-tooltip" style="display:none" role="tooltip"></div>
         <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
         <div class="space-weather-hud" id="sw-hud"
              aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
@@ -2106,6 +2159,8 @@ nav {
             <span><span class="leg-dot" style="background:#ffc060"></span>AR flux rope · stable (twist Φ < 2.5π kink threshold)</span>
             <span><span class="leg-dot" style="background:#ff4830"></span>AR flux rope · kink-prone (β-γ-δ AR, twist ≥ 2.5π)</span>
             <span><span class="leg-dot" style="background:#ffe8a0"></span>CME ejecta core · Lundquist rope (J₀/J₁ field lines, αR ≈ 2.24)</span>
+            <span><span class="leg-dot" style="background:#ff4060"></span>Filament/prominence eruption arc (cool ~10⁴ K Hα/304 Å plasma lifting off during M/X flares and kink eruptions)</span>
+            <span><span class="leg-dot" style="background:#ff9b50"></span>AR loop pre-flare brightening (Φ → 2.5π · loops warm white-hot and pulse faster as kink approaches)</span>
             <span style="color:#445;font-size:.7rem;margin-top:4px">Drag to orbit · scroll to zoom · zoom out to see full Sun-Earth system · transit time-compression 3000× (≈ 2 min viewing per 4-day Sun→Earth crossing at 400 km/s)</span>
         </div>
 
@@ -3018,14 +3073,15 @@ window.addEventListener('swpc-update', e => {
     el('flare-time').textContent = d.flare_time ? fmtDate(d.flare_time) : '–';
     el('flare-loc').textContent  = d.flare_location || '';
 
-    // Active regions table
+    // Active regions table — rows are clickable: click to focus 3-D camera
+    // on the AR and highlight its marker pin.  Hover briefly highlights.
     if (d.active_regions && d.active_regions.length) {
         el('ar-tbody').innerHTML = d.active_regions.map(r => {
             const lat = (r.lat_rad * 180 / Math.PI).toFixed(0);
             const lon = (r.lon_rad * 180 / Math.PI).toFixed(0);
             const latStr = `${lat < 0 ? 'S' : 'N'}${Math.abs(lat)}° ${lon < 0 ? 'W' : 'E'}${Math.abs(lon)}°`;
             const area   = Math.round((r.area_norm || 0) * 1000);
-            return `<tr>
+            return `<tr class="ar-row" data-ar-id="${r.region}" tabindex="0" title="Click to focus AR${r.region} in the 3D view">
                 <td style="font-weight:600;color:#c8e0f0">AR${r.region}</td>
                 <td>${latStr}</td>
                 <td>${area > 0 ? area + ' μH' : '–'}</td>
@@ -3953,6 +4009,106 @@ let _globe = null;
             }
             _globe.setEuvMode(channel);
             _sdoPanel?.setChannel(channel);
+        });
+
+        // ── AR-pin interactivity ────────────────────────────────────────────
+        // Hover the canvas → raycast against AR billboard sprites; show
+        // tooltip with class / twist / kink-ratio / area when hit.
+        // Click a pin → focus the camera on the AR.
+        // Click an AR row in the table below → ditto + sync row highlight.
+        const _tooltip = document.getElementById('ar-tooltip');
+        let _hoverArId = null;
+
+        function _formatTooltip(arId) {
+            const twistList = _globe.arTwistState ?? [];
+            const twist     = twistList.find(t => t.arId === arId);
+            const marker    = (_globe.arMarkers ?? []).find(m => m.region === arId);
+            const recent    = (_globe.recentFlares ?? []).find(f => f.region === arId);
+            if (!marker) return '';
+            const cls       = (marker.cls || twist?.cls || '–').toString();
+            const phiPi     = twist ? twist.phiPi.toFixed(2) : '–';
+            const kink      = twist ? Math.round(twist.kinkRatio * 100) : 0;
+            const area      = twist ? Math.round(twist.areaNorm * 1000) : '–';
+            const recentTxt = recent
+                ? `<div class="tt-row"><span class="k">Recent</span><span class="v" style="color:#ff8e3a">${recent.cls} · ${recent.dt_hr.toFixed(1)} h</span></div>`
+                : '';
+            const kinkClass = (twist && twist.kinkRatio >= 0.85) ? 'v kink' : 'v';
+            return `
+              <div style="margin-bottom:4px"><strong>AR${arId}</strong>${marker.complex ? ' <span style="color:#ff6633">β-γ-δ</span>' : ''}</div>
+              <div class="tt-row"><span class="k">Hale class</span><span class="v">${cls}</span></div>
+              <div class="tt-row"><span class="k">Twist Φ</span><span class="${kinkClass}">${phiPi}π <span style="color:#88a">(${kink}% of kink)</span></span></div>
+              <div class="tt-row"><span class="k">Area</span><span class="v">${area} μH</span></div>
+              ${recentTxt}
+              <div style="margin-top:5px;color:#667;font-size:.65rem">Click to focus camera</div>`;
+        }
+
+        function _showTooltipAt(arId, clientX, clientY) {
+            const wrap = globeCanvas.parentElement;
+            const rect = wrap.getBoundingClientRect();
+            _tooltip.innerHTML = _formatTooltip(arId);
+            const twistList = _globe.arTwistState ?? [];
+            const t = twistList.find(x => x.arId === arId);
+            _tooltip.classList.toggle('kink', !!(t && t.kinkRatio >= 0.85));
+            _tooltip.style.display = '';
+            // Position tooltip near pointer but inside the wrapper
+            const ox = clientX - rect.left + 14;
+            const oy = clientY - rect.top  + 12;
+            const maxX = rect.width  - _tooltip.offsetWidth  - 8;
+            const maxY = rect.height - _tooltip.offsetHeight - 8;
+            _tooltip.style.left = Math.min(Math.max(8, ox), Math.max(8, maxX)) + 'px';
+            _tooltip.style.top  = Math.min(Math.max(8, oy), Math.max(8, maxY)) + 'px';
+        }
+
+        function _hideTooltip() {
+            _tooltip.style.display = 'none';
+            _hoverArId = null;
+            globeCanvas.style.cursor = '';
+        }
+
+        globeCanvas.addEventListener('pointermove', (ev) => {
+            const hit = _globe.pickArAt(ev.clientX, ev.clientY);
+            if (hit) {
+                _hoverArId = hit.region;
+                globeCanvas.style.cursor = 'pointer';
+                _showTooltipAt(hit.region, ev.clientX, ev.clientY);
+            } else if (_hoverArId !== null) {
+                _hideTooltip();
+            }
+        });
+        globeCanvas.addEventListener('pointerleave', _hideTooltip);
+        globeCanvas.addEventListener('click', (ev) => {
+            const hit = _globe.pickArAt(ev.clientX, ev.clientY);
+            if (!hit) return;
+            _globe.focusRegion(hit.region);
+            _highlightArRow(hit.region);
+        });
+
+        function _highlightArRow(arId) {
+            document.querySelectorAll('#ar-tbody tr.ar-row').forEach(r => {
+                r.classList.toggle('ar-active', String(r.dataset.arId) === String(arId));
+            });
+        }
+
+        // Delegate clicks on AR table rows → focus camera + highlight pin.
+        document.getElementById('ar-tbody')?.addEventListener('click', (ev) => {
+            const row = ev.target.closest('tr.ar-row');
+            if (!row) return;
+            const arId = parseInt(row.dataset.arId, 10);
+            if (!isFinite(arId)) return;
+            _globe.focusRegion(arId);
+            _highlightArRow(arId);
+        });
+
+        // Keyboard a11y: enter/space activates focused row
+        document.getElementById('ar-tbody')?.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            const row = ev.target.closest('tr.ar-row');
+            if (!row) return;
+            ev.preventDefault();
+            const arId = parseInt(row.dataset.arId, 10);
+            if (!isFinite(arId)) return;
+            _globe.focusRegion(arId);
+            _highlightArRow(arId);
         });
     }
 }
