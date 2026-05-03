@@ -101,8 +101,15 @@ export class SpaceWeatherHud {
                     <span id="hud-respawn-total" class="hud-v hud-tiny">0</span>
                 </div>
                 <div class="hud-row hud-emic" id="hud-emic-row">
-                    <span class="hud-k">EMIC ions</span>
+                    <span class="hud-k">EMIC</span>
                     <span id="hud-emic-status" class="hud-v hud-emic-status">— quiet —</span>
+                </div>
+                <div class="hud-row hud-emic-counts hud-cumulative" id="hud-emic-counts-row">
+                    <span class="hud-tiny" style="color:#445">H⁺</span>
+                    <span id="hud-emic-ions"      class="hud-v hud-tiny">0</span>
+                    <span class="hud-tiny" style="color:#445">·</span>
+                    <span class="hud-tiny" style="color:#445">e⁻ ≥ 2 MeV</span>
+                    <span id="hud-emic-electrons" class="hud-v hud-tiny">0</span>
                 </div>
             </div>
 
@@ -134,6 +141,8 @@ export class SpaceWeatherHud {
             respawnTotal: this._root.querySelector('#hud-respawn-total'),
             emicRow:      this._root.querySelector('#hud-emic-row'),
             emicStatus:   this._root.querySelector('#hud-emic-status'),
+            emicIons:     this._root.querySelector('#hud-emic-ions'),
+            emicElectrons: this._root.querySelector('#hud-emic-electrons'),
             twistList:    this._root.querySelector('#hud-twist-list'),
             eruptList:    this._root.querySelector('#hud-eruption-list'),
         };
@@ -194,23 +203,28 @@ export class SpaceWeatherHud {
         e.lossTotal   .textContent = lossN.toLocaleString();
         e.respawnTotal.textContent = respawnN.toLocaleString();
 
-        // EMIC ion-channel indicator: shows quiet, then "active" when storm
-        // index passes the activation threshold, with cumulative ion-loss
-        // count.  Pops to "+ O⁺" tag during exceptional storms (stormIdx
-        // > 0.85) when ionospheric oxygen outflow boosts the resonant rate.
+        // EMIC channel indicator: shows quiet, then "active" once storm
+        // index passes the activation threshold.  Pops to "+ O⁺" during
+        // exceptional storms (stormIdx > 0.85) when ionospheric oxygen
+        // outflow boosts the resonant rate.  Two counts are surfaced:
+        //   • H⁺  — ions scattered out via standard ion-cyclotron resonance
+        //   • e⁻ ≥ 2 MeV — relativistic electrons via *anomalous* resonance
+        //     (the canonical "EMIC dropout" of Van Allen Probes data — the
+        //     bright high-energy outer-belt electrons selectively vanish).
         const emicActive = !!g.beltEmicActive;
         const emicOplus  = !!g.beltEmicOplusBoost;
-        const emicLoss   = g.beltEmicLossEvents ?? 0;
+        const emicIons   = g.beltEmicIonLossEvents      ?? 0;
+        const emicEl     = g.beltEmicElectronLossEvents ?? 0;
         if (emicActive) {
-            e.emicStatus.textContent = emicOplus
-                ? `active + O⁺  ${emicLoss.toLocaleString()}`
-                : `active  ${emicLoss.toLocaleString()}`;
+            e.emicStatus.textContent = emicOplus ? 'active + O⁺' : 'active';
             e.emicRow.classList.add('hud-emic-on');
             e.emicRow.classList.toggle('hud-emic-oplus', emicOplus);
         } else {
-            e.emicStatus.textContent = `— quiet —  ${emicLoss.toLocaleString()}`;
+            e.emicStatus.textContent = '— quiet —';
             e.emicRow.classList.remove('hud-emic-on', 'hud-emic-oplus');
         }
+        e.emicIons     .textContent = emicIons.toLocaleString();
+        e.emicElectrons.textContent = emicEl  .toLocaleString();
 
         // ── AR flux-rope twist list ─────────────────────────────────────────
         const arState = g.arTwistState ?? [];

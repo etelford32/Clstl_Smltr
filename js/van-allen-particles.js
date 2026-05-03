@@ -188,6 +188,34 @@ const EMIC_D_PEAK               = 0.10;   // /s peak diffusion at stormIdx = 1
 const EMIC_OPLUS_THRESHOLD      = 0.85;   // stormIdx above which O+ outflow boosts
 const EMIC_OPLUS_MAX_BOOST      = 2.0;    // multiplier at stormIdx = 1
 
+// Anomalous-cyclotron-resonance threshold for EMIC scattering of relativistic
+// electrons.  Below ~2 MeV the resonance condition
+//
+//     ω + |k_∥| v_∥ = Ω_e / γ
+//
+// can't be satisfied by L-mode EMIC waves at typical magnetospheric k_∥ /
+// densities (Summers & Thorne 2003; Usanova et al. 2014 SAMPEX/RBSP).  Above
+// the threshold the rate ramps quickly: in storm dropouts the electron
+// component scatters faster than the ion one because the resonance favours
+// already-near-loss-cone electrons.  We model this with a piecewise-linear
+// weight that's 0 below 2 MeV and saturates at 0.6 by 5 MeV.
+const EMIC_E_ELECTRON_THRESHOLD = 2.0;    // MeV
+const EMIC_E_ELECTRON_SAT       = 5.0;    // MeV at which the weight saturates
+const EMIC_E_ELECTRON_W_MAX     = 0.60;
+
+/**
+ * Energy-dependent EMIC scatter weight for outer-belt relativistic electrons.
+ * @param {number} energyMeV
+ * @returns {number} weight ∈ [0, EMIC_E_ELECTRON_W_MAX]
+ */
+function emicElectronWeight(energyMeV) {
+    if (energyMeV < EMIC_E_ELECTRON_THRESHOLD) return 0;
+    const t = (energyMeV - EMIC_E_ELECTRON_THRESHOLD)
+            / (EMIC_E_ELECTRON_SAT - EMIC_E_ELECTRON_THRESHOLD);
+    return EMIC_E_ELECTRON_W_MAX * Math.min(1, t);
+}
+
+
 export class VanAllenParticles {
     /**
      * @param {THREE.Scene} scene
@@ -224,7 +252,8 @@ export class VanAllenParticles {
         // Rolling counters for diagnostics / HUD
         this._lossEvents = 0;   // total particles precipitated this session
         this._respawnEvents = 0;
-        this._emicLossEvents = 0;  // subset of lossEvents attributed to EMIC scattering
+        this._emicLossEvents = 0;          // total EMIC-attributed precipitations
+        this._emicElectronLossEvents = 0;  // subset of EMIC losses that were >2 MeV electrons
     }
 
     // ── Construction ─────────────────────────────────────────────────────────
@@ -314,17 +343,25 @@ export class VanAllenParticles {
             region === 'slot'  ? 0.55 :
                                  0.04;
 
-        // EMIC ion-cyclotron-resonance susceptibility.  Ring-current and
-        // inner-belt *protons* are the primary EMIC target; electrons are
-        // mostly unaffected in the energy range we render (>2 MeV electron
-        // EMIC scattering is real but a secondary effect we skip for v1).
-        // Inner-belt protons are harder to drive into resonance than ring-
-        // current protons but become important during exceptional storms
-        // when O+ outflow extends the resonant L-range inward.
+        // EMIC scattering susceptibility.  Two distinct populations resonate:
+        //
+        //   Ions (charge +1) — primary EMIC target via the standard
+        //     proton-cyclotron condition.  Inner-belt protons are harder to
+        //     drive into resonance than ring-current protons but become
+        //     important during exceptional storms when O⁺ outflow extends
+        //     the resonant L-range inward.
+        //
+        //   Relativistic electrons (charge −1, E ≥ 2 MeV) — secondary but
+        //     observed dropout via *anomalous* cyclotron resonance.  Energy
+        //     threshold is sharp (~2 MeV); the weight ramps to 0.6 by 5 MeV.
+        //     This is the mechanism that selectively wipes out the bright
+        //     "killer electron" population during severe storms while
+        //     leaving sub-MeV electrons intact.
         const emicWeight =
             charge === +1 && region === 'inner' ? 0.45 :
             charge === +1 && region === 'slot'  ? 1.00 :
             charge === +1 && region === 'outer' ? 0.20 :
+            charge === -1 && region === 'outer' ? emicElectronWeight(energyMeV) :
                                                    0.00;
 
         const p = this._particles[idx];
@@ -571,20 +608,23 @@ export class VanAllenParticles {
                 continue;
             }
 
-            // ── EMIC scatter (ion-only channel, strong-storm gated) ────────
+            // ── EMIC scatter (ions + relativistic electrons) ───────────────
+            // Two resonant populations, both gated on stormIdx > 0.50:
+            //   • Protons via the standard ion-cyclotron condition
+            //   • Electrons ≥ 2 MeV via anomalous cyclotron resonance
+            // p.emicWeight encodes both: 0 for sub-threshold electrons,
+            // ramping up for ≥ 2 MeV ones (refreshed when radial diffusion
+            // accelerates an electron past the threshold).
             if (emicActive && p.emicWeight > 0) {
                 const emicSigma = emicSigmaBase * Math.sqrt(p.emicWeight);
                 p.alpha0 += emicSigma * gaussian();
                 if (p.alpha0 > Math.PI / 2) p.alpha0 = Math.PI - p.alpha0;
                 if (p.alpha0 < p.alpha_lc) {
-                    // Tag this loss as EMIC-attributed.  The HUD surfaces
-                    // emicLossEvents alongside total lossEvents to make the
-                    // ion-channel drain visually distinguishable from the
-                    // chorus/hiss losses that already drain the outer belt.
                     p.state       = 'precipitating';
                     p.precipTimer = 1.0 + Math.random() * 0.5;
                     this._lossEvents++;
                     this._emicLossEvents++;
+                    if (p.charge === -1) this._emicElectronLossEvents++;
                     continue;
                 }
             }
@@ -642,8 +682,15 @@ export class VanAllenParticles {
                 // For outer-belt particles, refresh cached colour from new
                 // energy — high-energy electrons render whiter / brighter,
                 // visibly demonstrating the radial-diffusion acceleration.
+                // Also refresh the EMIC weight: electrons crossing the 2-MeV
+                // threshold via inward-diffusion-driven μ-conserving
+                // acceleration *become* susceptible to EMIC dropout — the
+                // closing of the storm-cycle loop.
                 if (p.region === 'outer') {
                     this._refreshOuterColor(i, p.energyMeV);
+                    if (p.charge === -1) {
+                        p.emicWeight = emicElectronWeight(p.energyMeV);
+                    }
                 }
 
                 // After diffusion-driven L change the particle may be in the
@@ -736,8 +783,14 @@ export class VanAllenParticles {
     get emicActive()  { return (this._stormIdx ?? 0) > EMIC_ACTIVATION_STORM_IDX; }
     /** True when stormIdx is high enough that O+ outflow boosts EMIC drive. */
     get emicOplusBoost() { return (this._stormIdx ?? 0) > EMIC_OPLUS_THRESHOLD; }
-    /** Cumulative ion losses attributed to EMIC scattering (subset of lossEvents). */
+    /** Cumulative EMIC-attributed precipitations (ions + electrons). */
     get emicLossEvents() { return this._emicLossEvents; }
+    /** Subset of emicLossEvents that were ≥ 2 MeV electrons (the dropout signal). */
+    get emicElectronLossEvents() { return this._emicElectronLossEvents; }
+    /** EMIC-attributed proton losses = total − electrons. */
+    get emicIonLossEvents() {
+        return this._emicLossEvents - this._emicElectronLossEvents;
+    }
     get stormIndex()  { return this._stormIdx ?? 0; }
     /** Diagnostic: total precipitation events since construction. */
     get lossEvents()  { return this._lossEvents; }
