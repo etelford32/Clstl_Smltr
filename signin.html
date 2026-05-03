@@ -473,6 +473,19 @@
                 const { logActivation } = await import('./js/activation.js');
                 logActivation('signin_succeeded', { retry_count: retries });
             } catch {}
+            // Perf: time from page-navigation start to a successful
+            // login. Captures the form-fill + supabase round-trip path
+            // end-to-end. Slow p95 here usually points at a sluggish
+            // Supabase region or a degraded auth endpoint.
+            try {
+                const t0 = performance.timing?.navigationStart
+                        || performance.timeOrigin
+                        || 0;
+                if (t0) {
+                    const { telemetry } = await import('./js/telemetry.js');
+                    telemetry.recordPerf('signin_success', Date.now() - t0);
+                }
+            } catch {}
 
             // Redirect: check for post-login redirect, else go to dashboard
             const redirect = auth.getPostLoginRedirect() || 'dashboard.html';
