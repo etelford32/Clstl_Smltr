@@ -30,6 +30,10 @@ import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
 import { VanAllenParticles } from './van-allen-particles.js';
 import {
+    carringtonToSceneLon,
+    subEarthCarringtonLongitude,
+} from './sun-rotation.js';
+import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
 } from './earth-skin.js';
@@ -251,6 +255,14 @@ export class SpaceWeatherGlobe {
 
         // Bow shock impact pulses (transient sprite list)
         this._impactPulses = []; // [{ sprite, life, life0 }]
+
+        // Real coronal-hole detections (HEK / NSO-style feed).  Each entry:
+        //   { lat_deg, lon_carrington_deg, depth?, frm_name? }
+        // Holes are Carrington-anchored — the live `_synthesizeHoles` call
+        // converts them to scene-longitude using the current sub-Earth angle
+        // every time it runs, so they drift west across the disk in step
+        // with the actual SDO 193 Å view as solar time advances.
+        this._realHoles = [];
 
         // CME propagation
         this._cmePropagator = opts.cmePropagator ?? new CmePropagator();
@@ -1274,7 +1286,24 @@ export class SpaceWeatherGlobe {
             // Convert area + spot count → 0..1 emission intensity.
             //   Area is already normalised to ~0..1 via swpc-feed (μH / 400).
             //   Sunspot multiplicity adds a small bump (saturating).
-            const arForShader = regions.slice(0, 8).map(r => ({
+            // Apply the live Carrington-rotation transform so AR longitudes
+            // track the actual sub-Earth angle at the moment of rendering —
+            // ARs now drift west across the disk at ≈13°/day, matching SDO.
+            // We build a derived `regionsApparent` array used by every
+            // visual consumer (sun shader, flux-rope arches, wind streams)
+            // so the rotation is applied once and consistently.
+            const nowDate = new Date();
+            const regionsApparent = regions.map(r => {
+                const lon_carr_deg = r.lon_deg != null
+                    ? r.lon_deg
+                    : (r.lon_rad ?? 0) * 180 / Math.PI;
+                return {
+                    ...r,
+                    lon_rad: carringtonToSceneLon(lon_carr_deg, nowDate),
+                    lon_deg_carrington: lon_carr_deg,   // preserve original
+                };
+            });
+            const arForShader = regionsApparent.slice(0, 8).map(r => ({
                 lat_rad: r.lat_rad,
                 lon_rad: r.lon_rad,
                 intensity: Math.max(0.20, Math.min(1.0,
@@ -1306,7 +1335,7 @@ export class SpaceWeatherGlobe {
             });
 
             // Rebuild flux-rope arches for the complex ARs in this set
-            this._rebuildFluxRopes(regions);
+            this._rebuildFluxRopes(regionsApparent);
         }
 
         // Flare trigger from state — anchor on the matching active region
@@ -1378,36 +1407,86 @@ export class SpaceWeatherGlobe {
         this._sunSkin?.setEuvMode(channel);
     }
 
+    /**
+     * Push a list of HEK-derived (or otherwise real) coronal-hole detections.
+     * Each entry: { lat_deg, lon_carrington_deg, depth?, frm_name? }.
+     * The hole list is rebuilt and pushed to the sun shader on the next
+     * `update(state)` cycle (or immediately if a state has already been
+     * received), with Carrington longitudes rotated into scene coordinates.
+     *
+     * Pass `[]` to clear and revert to pure synthesis.
+     */
+    setRealHoles(holes = []) {
+        this._realHoles = Array.isArray(holes) ? holes.slice(0, 8) : [];
+        // Re-emit to the sun immediately if we have a live wind/state context;
+        // otherwise it'll get picked up on the next swpc-update tick.
+        if (this._sunSkin) {
+            this._sunSkin.setHoles(
+                this._synthesizeHoles(this._windSpeedKms || 400, { derived: { activity: 0.5 } }),
+            );
+        }
+    }
+
+    /** Currently-tracked real coronal-hole detections (read-only). */
+    get realHoles() { return this._realHoles.slice(); }
+
+    /** Live sub-Earth Carrington longitude (degrees) — for HUD readouts. */
+    get subEarthCarrington() {
+        return subEarthCarringtonLongitude();
+    }
+
     /** Currently-active sun-rendering mode. */
     get euvMode() { return this._sunSkin?.euvMode ?? 'white'; }
 
     /**
-     * Build a list of synthetic coronal-hole anchors from the live solar-wind
-     * speed.  Two polar holes are always present; an Earth-facing equatorial
-     * hole appears when v_sw > 500 km/s (the kinematic proxy for an open
-     * field-line stream rooted in the Earth-facing hemisphere).
+     * Build the active coronal-hole anchor list for the live frame.
      *
-     * In our scene the sub-Earth Carrington longitude is fixed at π
-     * (sun at +x, Earth at origin), so the equatorial hole sits at lat = 0,
-     * lon = π.  Polar holes always sit at lat = ±π/2 (lon irrelevant).
+     * Always-present components (synthesised):
+     *   • Two polar holes at lat = ±π/2.  Depth scales inversely with the
+     *     state.derived.activity index — deeper at solar minimum.
+     *   • One Earth-facing equatorial hole when v_sw ≥ 500 km/s, at
+     *     scene lon = π (sub-Earth in the inertial frame).  Kinematic
+     *     proxy for an open-field stream rooted in our hemisphere.
+     *
+     * If `_realHoles` has been set by the HEK feed, those Carrington-tagged
+     * detections are folded in too — Carrington longitude → scene
+     * longitude via the live sub-Earth angle (sun-rotation.js).  Capped at
+     * 4 entries total (the shader's u_holes uniform array length).
      */
     _synthesizeHoles(v_sw_kms, state) {
         const activity = state?.derived?.activity ?? 0.5;
-        // Polar holes deeper at solar minimum (low activity), shallower max
         const polarDepth = 0.45 + 0.30 * (1 - activity);
         const holes = [
             { lat_rad: +Math.PI / 2, lon_rad: 0, depth: polarDepth },
             { lat_rad: -Math.PI / 2, lon_rad: 0, depth: polarDepth },
         ];
-        if (v_sw_kms >= 500) {
-            // Map 500-800 km/s onto an equatorial-hole depth 0.30-0.85
-            const eqDepth = Math.min(0.85, 0.30 + (v_sw_kms - 500) / 600);
-            holes.push({
-                lat_rad: 0,
-                lon_rad: Math.PI,
-                depth:   eqDepth,
-            });
+
+        // Real HEK-derived mid-latitude holes (Carrington-anchored)
+        if (this._realHoles && this._realHoles.length) {
+            const nowDate = new Date();
+            for (const h of this._realHoles) {
+                if (holes.length >= 4) break;
+                const lat = (h.lat_deg ?? 0) * Math.PI / 180;
+                // Skip near-polar entries (already covered by synthetic polar)
+                if (Math.abs(lat) > 70 * Math.PI / 180) continue;
+                const sceneLon = carringtonToSceneLon(h.lon_carrington_deg ?? 0, nowDate);
+                holes.push({ lat_rad: lat, lon_rad: sceneLon, depth: h.depth ?? 0.65 });
+            }
         }
+
+        // Wind-speed-driven equatorial hole only if we don't already have a
+        // close-to-sub-Earth hole from the real data
+        if (v_sw_kms >= 500 && holes.length < 4) {
+            const hasNearEquatorial = holes.some(h =>
+                Math.abs(h.lat_rad) < 0.5
+                && Math.abs(((h.lon_rad - Math.PI + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.6
+            );
+            if (!hasNearEquatorial) {
+                const eqDepth = Math.min(0.85, 0.30 + (v_sw_kms - 500) / 600);
+                holes.push({ lat_rad: 0, lon_rad: Math.PI, depth: eqDepth });
+            }
+        }
+
         return holes;
     }
 

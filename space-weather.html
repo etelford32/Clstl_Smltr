@@ -2653,6 +2653,7 @@ import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
 import { SpaceWeatherHud }     from './js/space-weather-hud.js';
 import { SdoComparePanel }     from './js/sdo-compare-panel.js';
+import { HekFeed }             from './js/hek-feed.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -3855,6 +3856,15 @@ let _globe = null;
             _sdoPanel = new SdoComparePanel(sdoEl).start();
             _sdoPanel.setChannel(_globe.euvMode ?? 'white');
         }
+
+        // HEK coronal-hole catalog → real-data hole positions (193 Å match).
+        // Updates every 30 min on success, retries every 5 min on failure.
+        // Falls back gracefully to the synthetic polar + wind-driven holes
+        // if HEK is unreachable.
+        const _hekFeed = new HekFeed().start();
+        window.addEventListener('hek-update', ev => {
+            _globe?.setRealHoles(ev.detail?.holes ?? []);
+        });
 
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
