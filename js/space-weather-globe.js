@@ -1375,6 +1375,9 @@ export class SpaceWeatherGlobe {
     get beltRespawnEvents(){ return this._beltParticles?.respawnEvents?? 0; }
     get beltTrappedCount() { return this._beltParticles?.trappedCount ?? 0; }
     get beltTotalCount()   { return this._beltParticles?.count        ?? 0; }
+    get beltEmicActive()   { return this._beltParticles?.emicActive   ?? false; }
+    get beltEmicOplusBoost() { return this._beltParticles?.emicOplusBoost ?? false; }
+    get beltEmicLossEvents() { return this._beltParticles?.emicLossEvents ?? 0; }
 
     /** Access the CME propagator (for wiring event cards from outside). */
     get cmePropagator() { return this._cmePropagator; }

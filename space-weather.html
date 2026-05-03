@@ -1216,6 +1216,19 @@ nav {
 .space-weather-hud .hud-cumulative { color: #557; font-size: .60rem; }
 .space-weather-hud .hud-storm .hud-bar { margin: 0 6px; }
 
+/* EMIC ion-channel indicator */
+.space-weather-hud .hud-emic-status { color: #667; font-size: .64rem; }
+.space-weather-hud .hud-emic.hud-emic-on .hud-emic-status { color: #ff7e3a; }
+.space-weather-hud .hud-emic.hud-emic-oplus .hud-emic-status {
+    color: #ff4830;
+    text-shadow: 0 0 4px rgba(255, 72, 48, .55);
+    animation: hud-emic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes hud-emic-pulse {
+    0%, 100% { opacity: 0.9; }
+    50%      { opacity: 0.55; }
+}
+
 /* AR flux-rope twist rows */
 .space-weather-hud .hud-twist-list { display: flex; flex-direction: column; gap: 4px; }
 .space-weather-hud .hud-twist-row {

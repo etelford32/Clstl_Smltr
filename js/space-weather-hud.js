@@ -100,6 +100,10 @@ export class SpaceWeatherHud {
                     <span class="hud-tiny" style="color:#445">precip · refill</span>
                     <span id="hud-respawn-total" class="hud-v hud-tiny">0</span>
                 </div>
+                <div class="hud-row hud-emic" id="hud-emic-row">
+                    <span class="hud-k">EMIC ions</span>
+                    <span id="hud-emic-status" class="hud-v hud-emic-status">— quiet —</span>
+                </div>
             </div>
 
             <div class="hud-block hud-twist">
@@ -128,6 +132,8 @@ export class SpaceWeatherHud {
             respawnRate:  this._root.querySelector('#hud-respawn-rate'),
             lossTotal:    this._root.querySelector('#hud-loss-total'),
             respawnTotal: this._root.querySelector('#hud-respawn-total'),
+            emicRow:      this._root.querySelector('#hud-emic-row'),
+            emicStatus:   this._root.querySelector('#hud-emic-status'),
             twistList:    this._root.querySelector('#hud-twist-list'),
             eruptList:    this._root.querySelector('#hud-eruption-list'),
         };
@@ -187,6 +193,24 @@ export class SpaceWeatherHud {
         e.respawnRate.textContent = (respawnSum / RATE_WINDOW_S).toFixed(1);
         e.lossTotal   .textContent = lossN.toLocaleString();
         e.respawnTotal.textContent = respawnN.toLocaleString();
+
+        // EMIC ion-channel indicator: shows quiet, then "active" when storm
+        // index passes the activation threshold, with cumulative ion-loss
+        // count.  Pops to "+ O⁺" tag during exceptional storms (stormIdx
+        // > 0.85) when ionospheric oxygen outflow boosts the resonant rate.
+        const emicActive = !!g.beltEmicActive;
+        const emicOplus  = !!g.beltEmicOplusBoost;
+        const emicLoss   = g.beltEmicLossEvents ?? 0;
+        if (emicActive) {
+            e.emicStatus.textContent = emicOplus
+                ? `active + O⁺  ${emicLoss.toLocaleString()}`
+                : `active  ${emicLoss.toLocaleString()}`;
+            e.emicRow.classList.add('hud-emic-on');
+            e.emicRow.classList.toggle('hud-emic-oplus', emicOplus);
+        } else {
+            e.emicStatus.textContent = `— quiet —  ${emicLoss.toLocaleString()}`;
+            e.emicRow.classList.remove('hud-emic-on', 'hud-emic-oplus');
+        }
 
         // ── AR flux-rope twist list ─────────────────────────────────────────
         const arState = g.arTwistState ?? [];
