@@ -606,6 +606,46 @@ class AuthManager {
     }
 
     /**
+     * Start an OAuth sign-in flow. Provider-agnostic — the only
+     * provider-specific work happens in the Supabase dashboard
+     * (see OAUTH_SETUP.md). Supabase performs the redirect itself
+     * via signInWithOAuth(); this method returns either an immediate
+     * `{ success:true }` (browser is leaving the page) or a
+     * `{ success:false, error }` if the call couldn't even start.
+     *
+     * The `redirectTo` URL must be on the Supabase project's allowed
+     * redirect list (Authentication → URL Configuration). We default
+     * to `<origin>/auth-callback.html`, which is where the provider-
+     * agnostic landing page lives; opting into a different
+     * redirectTo is allowed but generally only useful for tests.
+     *
+     * @param {'google'|'apple'|string} provider
+     * @param {{ redirectTo?: string, scopes?: string }} [options]
+     * @returns {Promise<{ success: boolean, error?: string }>}
+     */
+    async signInWithProvider(provider, options = {}) {
+        if (!this._supabase) {
+            return { success: false, error: 'Supabase client not configured' };
+        }
+        try {
+            const redirectTo = options.redirectTo
+                || `${window.location.origin}/auth-callback.html`;
+            const { error } = await this._supabase.auth.signInWithOAuth({
+                provider,
+                options: {
+                    redirectTo,
+                    scopes: options.scopes,   // undefined → provider defaults
+                    // queryParams default is fine; PKCE is auto for browsers.
+                },
+            });
+            if (error) return { success: false, error: error.message };
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
      * Request password reset email.
      * @returns {{ success: boolean, message: string }}
      */

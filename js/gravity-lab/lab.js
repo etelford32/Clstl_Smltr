@@ -18,6 +18,13 @@ import {
     G_SI,
 } from './physics.js';
 import { SYSTEMS, SYSTEM_ORDER, J2000_JD } from './systems.js';
+import {
+    createBodyVisual,
+    createRingSystem,
+    createOrbitGuide,
+    createLabelSprite,
+    createStarfield,
+} from './visuals.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants & state
@@ -32,9 +39,11 @@ const state = {
     systemId:       null,
     sys:            null,    // active system descriptor (clone of SYSTEMS[id])
     bodies:         [],      // mutable {m, r, v, …} array passed to integrator
-    meshes:         [],      // Three.js meshes paired by index
+    meshes:         [],      // pickable surface meshes paired by index
+    bodyGroups:     [],      // Three.Group per body — what we translate each frame
+    skins:          [],      // optional skin instance per body (or null)
+    labels:         [],      // sprite per body (or null)
     trails:         [],      // {line, geom, positions:Float32Array, head:int}
-    bodyAccents:    [],      // glow sprite per parent body
     sceneScaleKm:   1,
     elapsedSec:     0,       // simulated seconds since J2000 (signed)
     paused:         false,
@@ -51,6 +60,9 @@ const state = {
     // Central-body J2 perturbation. Toggleable per system.
     j2Enabled:      false,
     j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
+    // Sun direction for skin shaders — pulled from the directional light.
+    sunDir:         new THREE.Vector3(1, 0, 0),
+    labelScale:     1,       // per-system scaling for label sprites
 };
 
 // Three.js singletons — initialised once in init().
@@ -122,13 +134,25 @@ export function initScene(canvasEl) {
     controls.maxDistance = 600;
 
     // Lighting — soft fill + a directional "sun" so spheres show shading.
-    scene.add(new THREE.AmbientLight(0xffffff, 0.18));
-    const sunLight = new THREE.DirectionalLight(0xffffff, 1.05);
+    // The directional light direction is also fed into every skin's
+    // u_sun_dir uniform so procedural surfaces (Earth, Moon, Mars, Saturn,
+    // Jupiter haze) light from the same angle as the standard-material
+    // moons. Position chosen to give a striking long-shadow terminator on
+    // the central body.
+    scene.add(new THREE.AmbientLight(0xb8b0d4, 0.22));
+    const sunLight = new THREE.DirectionalLight(0xfff4e6, 1.35);
     sunLight.position.set(120, 60, 80);
     scene.add(sunLight);
+    state.sunDir.copy(sunLight.position).normalize();
 
-    // Distant starfield backdrop (cheap point cloud).
-    scene.add(_makeStarfield());
+    // Subtle warm fill from the opposite side so night hemispheres aren't
+    // pitch black on the standard-material moons.
+    const fill = new THREE.DirectionalLight(0x6a78b0, 0.18);
+    fill.position.set(-80, -30, -60);
+    scene.add(fill);
+
+    // Distant starfield backdrop with size/colour variation + Milky Way band.
+    scene.add(createStarfield());
 
     window.addEventListener('resize', _resize);
 
@@ -175,18 +199,18 @@ export function setFocus(idx) {
         controls.target.set(0, 0, 0);
         if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
     } else {
+        const grp = state.bodyGroups[idx];
         const mesh = state.meshes[idx];
-        if (!mesh) return;
-        // Move target onto the body, but preserve the camera's current offset
-        // so the view doesn't jump catastrophically.
-        controls.target.copy(mesh.position);
+        if (!grp || !mesh) return;
+        const target = grp.position;       // body groups are positioned each frame
+        controls.target.copy(target);
         // If the camera is far from the body, dolly in to a sensible distance.
-        const r = mesh.geometry.parameters?.radius ?? 0.1;
-        const dist = camera.position.distanceTo(mesh.position);
+        const r = mesh.geometry?.parameters?.radius ?? 0.1;
+        const dist = camera.position.distanceTo(target);
         const want = Math.max(r * 8, 1.0);
         if (dist > want * 4) {
-            const dir = camera.position.clone().sub(mesh.position).normalize();
-            camera.position.copy(mesh.position).addScaledVector(dir, want);
+            const dir = camera.position.clone().sub(target).normalize();
+            camera.position.copy(target).addScaledVector(dir, want);
         }
         if (hud.focusLabel) {
             const name = state.bodies[idx]?.name ?? '?';
@@ -211,31 +235,6 @@ function _resize() {
         camera.aspect = r.width / Math.max(r.height, 1);
         camera.updateProjectionMatrix();
     }
-}
-
-function _makeStarfield() {
-    const N = 1500;
-    const positions = new Float32Array(N * 3);
-    for (let i = 0; i < N; i++) {
-        // Uniform on a sphere of radius 1500.
-        const u = Math.random() * 2 - 1;
-        const t = Math.random() * Math.PI * 2;
-        const s = Math.sqrt(1 - u * u);
-        const R = 1500;
-        positions[i * 3]     = R * s * Math.cos(t);
-        positions[i * 3 + 1] = R * u;
-        positions[i * 3 + 2] = R * s * Math.sin(t);
-    }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({
-        color: 0xc8d6ff,
-        size:  0.65,
-        sizeAttenuation: false,
-        transparent: true,
-        opacity: 0.55,
-    });
-    return new THREE.Points(geom, mat);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,58 +295,92 @@ export function loadSystem(systemId) {
     const L0 = totalAngularMomentum(state.bodies);
     state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
 
-    state.meshes = [];
-    state.trails = [];
-    state.bodyAccents = [];
+    state.meshes      = [];
+    state.bodyGroups  = [];
+    state.skins       = [];
+    state.labels      = [];
+    state.trails      = [];
 
-    for (const b of state.bodies) {
+    // Pick an extent for the system so we can size labels and orbit guides
+    // proportionally — Earth-Moon (~60 R) needs different scaling than the
+    // Saturn major-moons system (~60 R but much busier).
+    const systemExtentUnits = _systemExtentUnits();
+    state.labelScale = Math.max(0.5, Math.min(3.0, systemExtentUnits / 30));
+
+    for (let bi = 0; bi < state.bodies.length; bi++) {
+        const b = state.bodies[bi];
         const radiusUnits = Math.max(
             (b.radius_km || 100) / state.sceneScaleKm,
             MIN_BODY_RADIUS_UNITS,
         );
-        const geom = new THREE.SphereGeometry(radiusUnits, 36, 24);
-        const mat  = new THREE.MeshStandardMaterial({
-            color:     b.color ?? 0xaaaaaa,
-            roughness: 0.85,
-            metalness: 0.0,
-            emissive:  b.is_parent ? (b.color ?? 0x000000) : 0x000000,
-            emissiveIntensity: b.is_parent ? 0.18 : 0.0,
-        });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.userData.bodyName = b.name;
-        sceneRoot.add(mesh);
-        state.meshes.push(mesh);
 
-        if (b.is_parent && b.glow !== undefined) {
-            const halo = new THREE.Mesh(
-                new THREE.SphereGeometry(radiusUnits * 1.15, 36, 24),
-                new THREE.MeshBasicMaterial({
-                    color: b.glow,
-                    transparent: true,
-                    opacity: 0.10,
-                    side: THREE.BackSide,
-                    depthWrite: false,
-                }),
-            );
-            mesh.add(halo);
-            state.bodyAccents.push(halo);
+        const visual = createBodyVisual(b, sceneRoot, {
+            radiusUnits,
+            sunDir:       state.sunDir,
+            renderer,
+            segmentsHigh: b.is_parent ? 64 : 40,
+            segmentsLow:  28,
+        });
+        visual.surfaceMesh.userData.bodyIdx = bi;
+        state.bodyGroups.push(visual.group);
+        state.meshes.push(visual.surfaceMesh);
+        state.skins.push(visual.skin || null);
+
+        // Saturn-style rings, attached to the parent body so they translate
+        // along with it. Tilt is intrinsic to the ring config.
+        if (b.is_parent && src.rings) {
+            const rings = createRingSystem(src.rings, radiusUnits);
+            visual.group.add(rings);
         }
 
-        // Orbit trail (skip parent — it barely moves).
+        // Per-body label sprite — added to overlayRoot so it lives outside
+        // the body's translation, and we set its world position each frame.
+        const sprite = createLabelSprite(_capitalize(b.name));
+        const sx = state.labelScale * 1.8;
+        const sy = state.labelScale * 0.45;
+        sprite.scale.set(sx, sy, 1);
+        overlayRoot.add(sprite);
+        state.labels.push(sprite);
+
+        // Orbit trail + faint Keplerian guide (skip parent — it barely moves).
         if (!b.is_parent) {
+            // Vertex-coloured trail so the head is bright and the tail fades.
             const positions = new Float32Array(TRAIL_LEN * 3);
+            const colors    = new Float32Array(TRAIL_LEN * 3);
             const tg = new THREE.BufferGeometry();
             tg.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            tg.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
             tg.setDrawRange(0, 0);
             const tm = new THREE.LineBasicMaterial({
-                color: b.color ?? 0xffffff,
-                transparent: true,
-                opacity: 0.55,
-                depthWrite: false,
+                vertexColors: true,
+                transparent:  true,
+                opacity:      0.95,
+                depthWrite:   false,
+                blending:     THREE.AdditiveBlending,
             });
             const line = new THREE.Line(tg, tm);
             trailRoot.add(line);
-            state.trails.push({ line, geom: tg, positions, head: 0, count: 0 });
+            const baseColor = new THREE.Color(b.color ?? 0xffffff);
+            state.trails.push({
+                line, geom: tg, positions, colors,
+                head: 0, count: 0,
+                baseColor,
+            });
+
+            // Faint orbit guide. Drawn from the satellite's J2000 osculating
+            // elements so users can see how perturbations / J2 / mutual
+            // gravity smear the path off the unperturbed Kepler ellipse.
+            if (b.elements_j2000) {
+                const guide = createOrbitGuide(
+                    b.elements_j2000,
+                    state.sceneScaleKm,
+                    b.color ?? 0xffffff,
+                    0.18,
+                );
+                // Anchor the guide at the parent body's group so it follows
+                // the parent's barycentric wobble.
+                state.bodyGroups[0].add(guide);
+            }
         } else {
             state.trails.push(null);
         }
@@ -363,50 +396,13 @@ export function loadSystem(systemId) {
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
 }
 
-/**
- * Build a subtle reticle (ring + cross) at the scene origin to mark the
- * barycenter for true-binary systems. The integrator runs in barycentric
- * coordinates so the COM is exactly at (0,0,0) — this is just the visual
- * affordance.
- */
-function _buildBarycenterMarker(show) {
-    if (barycenterGroup) {
-        overlayRoot.remove(barycenterGroup);
-        barycenterGroup.traverse(o => {
-            if (o.geometry) o.geometry.dispose();
-            if (o.material) o.material.dispose();
-        });
-        barycenterGroup = null;
+function _systemExtentUnits() {
+    let r = 0;
+    for (const b of state.bodies) {
+        const u = Math.hypot(b.r[0], b.r[1], b.r[2]) * KM_PER_M / state.sceneScaleKm;
+        if (u > r) r = u;
     }
-    if (!show) return;
-
-    const g = new THREE.Group();
-    g.name = 'barycenter';
-
-    // Inner reticle ring lying in the XZ plane (matches our ecliptic).
-    const ringGeo = new THREE.RingGeometry(0.10, 0.14, 48);
-    const ringMat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.55,
-        side: THREE.DoubleSide, depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = Math.PI / 2;
-    g.add(ring);
-
-    // Tiny cross of two perpendicular lines.
-    const crossPos = new Float32Array([
-        -0.28, 0, 0,   0.28, 0, 0,
-         0, 0, -0.28,  0, 0,  0.28,
-    ]);
-    const crossGeo = new THREE.BufferGeometry();
-    crossGeo.setAttribute('position', new THREE.BufferAttribute(crossPos, 3));
-    const crossMat = new THREE.LineBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false,
-    });
-    g.add(new THREE.LineSegments(crossGeo, crossMat));
-
-    overlayRoot.add(g);
-    barycenterGroup = g;
+    return r || 10;
 }
 
 // Energy diagnostic that includes the J2 contribution when active so the
@@ -459,10 +455,22 @@ function _toScene(rMeters) {
 }
 
 function _updateMeshes() {
+    const labelLift = 0.40 * state.labelScale;
     for (let i = 0; i < state.bodies.length; i++) {
         const b = state.bodies[i];
+        const x = _toScene(b.r[0]);
+        const y = _toScene(b.r[1]);
+        const z = _toScene(b.r[2]);
+        const g = state.bodyGroups[i];
+        if (g) g.position.set(x, y, z);
+        // Surface mesh kept in sync (raycaster uses world matrices, but
+        // belt-and-braces: also translate the standalone mesh in case a body
+        // ever has no group).
         const m = state.meshes[i];
-        m.position.set(_toScene(b.r[0]), _toScene(b.r[1]), _toScene(b.r[2]));
+        if (m && m.parent === sceneRoot) m.position.set(x, y, z);
+        // Label rides above the body in scene-space.
+        const lbl = state.labels[i];
+        if (lbl) lbl.position.set(x, y + labelLift, z);
     }
 }
 
@@ -485,27 +493,62 @@ function _appendTrails() {
         tr.head = (tr.head + 1) % TRAIL_LEN;
         if (tr.count < TRAIL_LEN) tr.count++;
 
-        // Draw the trail as a contiguous strip in chronological order.
+        const cR = tr.baseColor.r, cG = tr.baseColor.g, cB = tr.baseColor.b;
+
+        // Draw the trail as a contiguous strip in chronological order. The
+        // head sits at the end of the draw range with the newest point full
+        // brightness; older points fade quadratically toward zero so the
+        // tail dies off into the starfield instead of clipping.
         const arr = tr.positions;
+        const col = tr.colors;
         if (tr.count < TRAIL_LEN) {
+            // Fill colours for indices 0..head-1 (chronological).
+            for (let k = 0; k < tr.count; k++) {
+                const t = k / Math.max(1, tr.count - 1);    // 0 → 1 newest
+                const a = t * t;
+                const ci = k * 3;
+                col[ci]     = cR * a;
+                col[ci + 1] = cG * a;
+                col[ci + 2] = cB * a;
+            }
             tr.geom.setDrawRange(0, tr.count);
             tr.geom.attributes.position.needsUpdate = true;
+            tr.geom.attributes.color.needsUpdate    = true;
         } else {
             // Rotate buffer so newest point is at the end of the draw range.
-            // Cheap: rebuild a contiguous copy.
             const rotated = new Float32Array(TRAIL_LEN * 3);
-            const start = tr.head;
+            const start   = tr.head;
             for (let k = 0; k < TRAIL_LEN; k++) {
                 const src = ((start + k) % TRAIL_LEN) * 3;
                 const dst = k * 3;
                 rotated[dst]     = arr[src];
                 rotated[dst + 1] = arr[src + 1];
                 rotated[dst + 2] = arr[src + 2];
+                const t = k / (TRAIL_LEN - 1);
+                const a = t * t;
+                col[dst]     = cR * a;
+                col[dst + 1] = cG * a;
+                col[dst + 2] = cB * a;
             }
             tr.geom.attributes.position.array.set(rotated);
             tr.geom.setDrawRange(0, TRAIL_LEN);
             tr.geom.attributes.position.needsUpdate = true;
+            tr.geom.attributes.color.needsUpdate    = true;
         }
+    }
+}
+
+function _tickVisuals(tSec) {
+    for (const skin of state.skins) {
+        if (!skin) continue;
+        if (typeof skin.update === 'function')   skin.update(tSec);
+        if (typeof skin.setSunDir === 'function') skin.setSunDir(state.sunDir);
+    }
+    // Procedural Mars / Saturn shaders expose their uniforms on the mesh's
+    // userData so we can keep their lighting in sync without an envelope class.
+    for (const m of state.meshes) {
+        const u = m?.userData?.surfaceUniforms;
+        if (u?.u_sun_dir) u.u_sun_dir.value.copy(state.sunDir);
     }
 }
 
@@ -541,16 +584,20 @@ function _tick(t) {
         _renderHUDLive();
     }
 
+    // Drive skin shader uniforms each frame (animations / time-driven
+    // band drift / GRS rotation still tick when the integrator is paused).
+    _tickVisuals(t / 1000);
+
     // Camera follow: keep target locked to focused body. The OrbitControls
     // user input continues to work — the user orbits around the moving body.
     if (state.focusIdx != null) {
-        const m = state.meshes[state.focusIdx];
-        if (m) {
+        const g = state.bodyGroups[state.focusIdx];
+        if (g) {
             // Translate camera by the body's frame-to-frame motion so the
             // viewer stays at the same relative offset.
-            const delta = m.position.clone().sub(controls.target);
+            const delta = g.position.clone().sub(controls.target);
             camera.position.add(delta);
-            controls.target.copy(m.position);
+            controls.target.copy(g.position);
         }
     }
 

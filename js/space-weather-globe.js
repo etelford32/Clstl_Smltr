@@ -28,6 +28,7 @@ import { UnrealBloomPass }    from 'three/addons/postprocessing/UnrealBloomPass.
 import { MagnetosphereEngine } from './magnetosphere-engine.js';
 import { SunSkin }            from './sun-skin.js';
 import { CmePropagator }     from './cme-propagation.js';
+import { VanAllenParticles } from './van-allen-particles.js';
 import {
     EARTH_VERT, EARTH_FRAG, ATM_VERT, ATM_FRAG,
     createEarthUniforms, loadEarthTextures,
@@ -692,6 +693,13 @@ export class SpaceWeatherGlobe {
 
     _buildMagnetosphere() {
         this._magEngine = new MagnetosphereEngine(this._scene);
+        // μ-conserving Van Allen tracer particles drifting through the belts.
+        // Built after the engine so the volumetric belts render *behind* the
+        // particles (Points use additive blending, no depth write).
+        this._beltParticles = new VanAllenParticles(this._scene, {
+            count: 700,
+            timeCompression: this._timeCompression,
+        });
     }
 
     // ── Parker streamlines (deterministic) ──────────────────────────────────
@@ -1194,6 +1202,9 @@ export class SpaceWeatherGlobe {
         const kp  = state.kp ?? 2;
         const bz  = sw.bz    ?? 0;
         const spd = sw.speed ?? 400;
+        // Cache for HUD timeline strip (poll-only readers)
+        this._lastKp = kp;
+        this._lastBz = bz;
 
         this._windSpeedNorm = Math.max(0, Math.min(1, (spd - 250) / 650));
         this._windSpeedKms  = Math.max(200, Math.min(1200, spd));
@@ -1221,6 +1232,13 @@ export class SpaceWeatherGlobe {
         // Magnetosphere geometry update
         this._magEngine.update(state);
 
+        // Van Allen tracer brightness scales with Kp (storm-time energisation)
+        // and pitch-angle diffusion is driven by southward-Bz × Kp coupling
+        // — the population visibly drains during severe storms as particles
+        // scatter into the loss cone.
+        this._beltParticles?.setKp(kp);
+        this._beltParticles?.setStorm({ bz, kp });
+
         // Sun — push live SWPC data
         const xInt = state.derived?.xray_intensity ?? 0;
         const xrayNorm = Math.max(0, Math.min(1, xInt > 0
@@ -1232,6 +1250,16 @@ export class SpaceWeatherGlobe {
             f107Norm: state.derived?.f107_norm ?? 0.5,
             activity: state.derived?.activity  ?? 0.5,
         });
+
+        // ── Synthesise coronal holes from solar-wind speed ──────────────────
+        // Two near-permanent polar holes (always present, scaled by activity
+        // — deeper / wider during solar minimum) plus one Earth-facing
+        // equatorial hole when the 1-AU wind is fast enough to suggest an
+        // open-field stream is currently rooted in the Earth-facing
+        // hemisphere.  Real coronal-hole maps come from EUV imagery (193 Å
+        // dark patches), which we don't ingest yet — this is a kinematic
+        // proxy that captures the right gross structure.
+        this._sunSkin.setHoles(this._synthesizeHoles(spd, state));
 
         // ── Active regions — paint patches on photosphere & build wind streams ──
         const regions = Array.isArray(state.active_regions) ? state.active_regions : [];
@@ -1320,6 +1348,10 @@ export class SpaceWeatherGlobe {
             if (this._windPts) this._windPts.visible = visible;
             return;
         }
+        if (name === 'beltParticles') {
+            this._beltParticles?.setVisible(visible);
+            return;
+        }
         this._magEngine.setLayerVisible(name, visible);
     }
 
@@ -1331,12 +1363,85 @@ export class SpaceWeatherGlobe {
      */
     setTimeCompression(factor) {
         this._timeCompression = Math.max(1, Math.min(50000, factor));
+        // Re-cap the belt-particle drift rates so a high compression factor
+        // doesn't streak protons into a solid ring.
+        this._beltParticles?.setTimeCompression(this._timeCompression);
+    }
+
+    /**
+     * Switch the sun rendering between white-light and one of six SDO/AIA
+     * passbands (94, 131, 171, 193, 211, 304 Å).  Forwards to SunSkin which
+     * toggles the volumetric raymarched corona on, hides the four stylised
+     * shells, and dims the photosphere appropriately.
+     */
+    setEuvMode(channel) {
+        this._sunSkin?.setEuvMode(channel);
+    }
+
+    /** Currently-active sun-rendering mode. */
+    get euvMode() { return this._sunSkin?.euvMode ?? 'white'; }
+
+    /**
+     * Build a list of synthetic coronal-hole anchors from the live solar-wind
+     * speed.  Two polar holes are always present; an Earth-facing equatorial
+     * hole appears when v_sw > 500 km/s (the kinematic proxy for an open
+     * field-line stream rooted in the Earth-facing hemisphere).
+     *
+     * In our scene the sub-Earth Carrington longitude is fixed at π
+     * (sun at +x, Earth at origin), so the equatorial hole sits at lat = 0,
+     * lon = π.  Polar holes always sit at lat = ±π/2 (lon irrelevant).
+     */
+    _synthesizeHoles(v_sw_kms, state) {
+        const activity = state?.derived?.activity ?? 0.5;
+        // Polar holes deeper at solar minimum (low activity), shallower max
+        const polarDepth = 0.45 + 0.30 * (1 - activity);
+        const holes = [
+            { lat_rad: +Math.PI / 2, lon_rad: 0, depth: polarDepth },
+            { lat_rad: -Math.PI / 2, lon_rad: 0, depth: polarDepth },
+        ];
+        if (v_sw_kms >= 500) {
+            // Map 500-800 km/s onto an equatorial-hole depth 0.30-0.85
+            const eqDepth = Math.min(0.85, 0.30 + (v_sw_kms - 500) / 600);
+            holes.push({
+                lat_rad: 0,
+                lon_rad: Math.PI,
+                depth:   eqDepth,
+            });
+        }
+        return holes;
     }
 
     /** Estimated Sun→Earth transit time at the current wind speed (seconds). */
     transitTimeReal() {
         return this._kmPerAU / Math.max(50, this._windSpeedKms);
     }
+
+    /** Current viewing-time compression factor (real-seconds per viewing-second). */
+    get timeCompression() { return this._timeCompression; }
+
+    /** Latest ambient solar-wind speed (km/s) — set by `update(state)`. */
+    get currentWindSpeedKms() { return this._windSpeedKms; }
+
+    /** Latest geomagnetic Kp index (set by update(state); 0–9). */
+    get lastKp() { return this._lastKp ?? 2; }
+
+    /** Latest IMF Bz (nT, set by update(state); negative = southward). */
+    get lastBz() { return this._lastBz ?? 0; }
+
+    /** Number of currently-tracked active regions in the twist accumulator. */
+    get arCount() { return this._arTwist?.size ?? 0; }
+
+    /** Forward live Van-Allen diagnostic getters from the inner module. */
+    get beltStormIndex()   { return this._beltParticles?.stormIndex   ?? 0; }
+    get beltLossEvents()   { return this._beltParticles?.lossEvents   ?? 0; }
+    get beltRespawnEvents(){ return this._beltParticles?.respawnEvents?? 0; }
+    get beltTrappedCount() { return this._beltParticles?.trappedCount ?? 0; }
+    get beltTotalCount()   { return this._beltParticles?.count        ?? 0; }
+    get beltEmicActive()   { return this._beltParticles?.emicActive   ?? false; }
+    get beltEmicOplusBoost() { return this._beltParticles?.emicOplusBoost ?? false; }
+    get beltEmicLossEvents()         { return this._beltParticles?.emicLossEvents         ?? 0; }
+    get beltEmicElectronLossEvents() { return this._beltParticles?.emicElectronLossEvents ?? 0; }
+    get beltEmicIonLossEvents()      { return this._beltParticles?.emicIonLossEvents      ?? 0; }
 
     /** Access the CME propagator (for wiring event cards from outside). */
     get cmePropagator() { return this._cmePropagator; }
@@ -1371,6 +1476,7 @@ export class SpaceWeatherGlobe {
         if (this._rafId) cancelAnimationFrame(this._rafId);
         this._ro?.disconnect();
         this._magEngine.dispose();
+        this._beltParticles?.dispose();
         this._renderer.dispose();
     }
 
@@ -2031,6 +2137,11 @@ export class SpaceWeatherGlobe {
 
         // Magnetosphere geometry tick
         this._magEngine.tick(t, this._sunDir);
+
+        // μ-conserving Van Allen particle drift + bounce.  Drift advances at
+        // compressed real time (electrons east, protons west); bounce at a
+        // viewing-time-decoupled rate so the µs-period swings are visible.
+        this._beltParticles?.update(dt);
 
         // CME shells
         this._updateCmeShells(t);

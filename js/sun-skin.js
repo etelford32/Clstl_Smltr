@@ -55,6 +55,9 @@ import * as THREE from 'three';
 import {
     SUN_VERT, SUN_FRAG, CORONA_VERT, CORONA_FRAG, createSunUniforms,
 } from './sun-shader.js';
+import {
+    CORONA_VOL_VERT, CORONA_VOL_FRAG, EUV_CHANNELS,
+} from './corona-volumetric.js';
 
 const QUALITY_MAP = { low: 0, medium: 1, high: 2 };
 
@@ -63,6 +66,10 @@ const OMEGA_EQ = 2 * Math.PI / (25.38 * 86400);
 
 // Corona shell radii (multiples of photosphere radius)
 const CORONA_SHELLS = [1.15, 1.45, 2.00, 3.00];
+
+// Volumetric corona bounding sphere — same outer extent as the largest
+// stylised shell so swapping rendering modes keeps the apparent size stable.
+const VOL_CORONA_RADIUS = 3.00;
 
 export class SunSkin {
     /**
@@ -126,6 +133,36 @@ export class SunSkin {
                 this._coronaMeshes.push(mesh);
             }
         }
+
+        // ── Volumetric EUV corona (initially hidden) ────────────────────────
+        // A single sphere that the new shader raymarches through. Uses the
+        // shared sunU uniforms so changes to active regions / X-ray / flares
+        // / coronal holes propagate automatically.
+        this.sunU.u_sun_radius.value    = radius;
+        this.sunU.u_corona_radius.value = radius * VOL_CORONA_RADIUS;
+        const volMat = new THREE.ShaderMaterial({
+            vertexShader:   CORONA_VOL_VERT,
+            fragmentShader: CORONA_VOL_FRAG,
+            uniforms:       this.sunU,
+            transparent:    true,
+            depthWrite:     false,
+            side:           THREE.FrontSide,
+            blending:       THREE.AdditiveBlending,
+        });
+        this._volCoronaMesh = new THREE.Mesh(
+            new THREE.SphereGeometry(
+                radius * VOL_CORONA_RADIUS,
+                Math.round(segments * 0.8),
+                Math.round(segments * 0.8),
+            ),
+            volMat,
+        );
+        this._volCoronaMesh.visible = false;   // white-light by default
+        parent.add(this._volCoronaMesh);
+
+        // Default to white-light mode so existing pages keep their look
+        this._euvMode = 'white';
+        this.setEuvMode('white');
     }
 
     /** Call every frame with elapsed seconds. */
@@ -134,6 +171,69 @@ export class SunSkin {
         // Accumulate differential rotation phase
         this._rotPhase += OMEGA_EQ * (1 / 60);  // assume ~60fps
         this.sunU.u_rot_phase.value = this._rotPhase;
+        // Refresh sun-world position uniform so the volumetric corona ray
+        // shader has accurate world-space anchor (parent may have moved).
+        if (this._parent && this._parent.getWorldPosition) {
+            this._parent.getWorldPosition(this.sunU.u_sun_world.value);
+        }
+    }
+
+    /**
+     * Switch between rendering modes.
+     *
+     * @param {string} channel  one of:
+     *   'white'  white-light photosphere + stylised 4-shell corona (default)
+     *   '94'     SDO/AIA 94 Å — Fe XVIII, ~7 MK, lights up flare cores
+     *   '131'    SDO/AIA 131 Å — Fe XXI, ~10 MK, brightest in flares
+     *   '171'    SDO/AIA 171 Å — Fe IX, ~0.7 MK, quiet plage / coronal loops
+     *   '193'    SDO/AIA 193 Å — Fe XII, ~1.6 MK, ARs + coronal holes (dark)
+     *   '211'    SDO/AIA 211 Å — Fe XIV, ~2 MK, AR loops
+     *   '304'    SDO/AIA 304 Å — He II, ~50 kK, chromosphere + prominences
+     *
+     * In any non-white mode the four stylised corona shells are hidden, the
+     * volumetric raymarched corona is shown with the channel's Gaussian
+     * temperature response, and the photosphere brightness is dimmed
+     * appropriately (~5 % for the deep coronal channels, ~35 % for 304 Å).
+     */
+    setEuvMode(channel) {
+        const cfg = EUV_CHANNELS[channel] ?? EUV_CHANNELS['white'];
+        this._euvMode = channel in EUV_CHANNELS ? channel : 'white';
+        const isWhite = this._euvMode === 'white';
+
+        // Toggle corona-shell vs. volumetric-corona visibility
+        for (const m of this._coronaMeshes) m.visible = isWhite;
+        if (this._volCoronaMesh) this._volCoronaMesh.visible = !isWhite;
+
+        // Push channel parameters into the shared uniforms
+        this.sunU.u_channel_logT.value      = cfg.logT;
+        this.sunU.u_channel_sigT.value      = cfg.sigma;
+        this.sunU.u_channel_color.value.set(cfg.color[0], cfg.color[1], cfg.color[2]);
+        this.sunU.u_channel_intensity.value = isWhite ? 0 : 1;
+        this.sunU.u_channel_phot_dim.value  = cfg.photDim;
+    }
+
+    /** Get the currently-selected EUV channel ('white' | '94' | …). */
+    get euvMode() { return this._euvMode; }
+
+    /**
+     * Set the locations and depths of synthetic coronal holes.  Each hole is
+     * { lat_rad, lon_rad, depth } where depth ∈ [0, 1] controls how strongly
+     * the hole subtracts EUV emission (1 = fully dark, 0 = no effect).
+     *
+     * Maximum 4 holes; extras are dropped.  Pass [] to clear.
+     */
+    setHoles(holes = []) {
+        const arr = this.sunU.u_holes.value;
+        const n = Math.min(holes.length, 4);
+        for (let i = 0; i < n; i++) {
+            const h = holes[i];
+            const x = Math.cos(h.lat_rad) * Math.cos(h.lon_rad);
+            const y = Math.sin(h.lat_rad);
+            const z = Math.cos(h.lat_rad) * Math.sin(h.lon_rad);
+            arr[i].set(x, y, z, Math.max(0, Math.min(1, h.depth ?? 0.5)));
+        }
+        for (let i = n; i < 4; i++) arr[i].set(0, 1, 0, 0);
+        this.sunU.u_nHoles.value = n;
     }
 
     /** Set quality tier at runtime (e.g. based on zoom level). */

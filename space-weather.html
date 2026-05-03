@@ -1156,12 +1156,182 @@ nav {
 .layer-btn.active { background: rgba(0,198,255,.18); color: #00e5ff;
     border-color: rgba(0,198,255,.45); }
 
+/* EUV channel selector — sits below the layer toggle row */
+.euv-row {
+    margin-top: 6px; align-items: center;
+    border-top: 1px solid rgba(255,180,40,.10);
+    padding-top: 6px;
+}
+.euv-label {
+    font-size: .62rem; letter-spacing: .12em; text-transform: uppercase;
+    color: #ffc060; padding-right: 4px; align-self: center;
+}
+.euv-btn {
+    border-color: rgba(255,180,40,.25);
+    color: #c8a060;
+    background: rgba(255,180,40,.05);
+}
+.euv-btn:hover  { border-color: rgba(255,180,40,.55); color: #ffd070; }
+.euv-btn.active { background: rgba(255,180,40,.20); color: #ffe090;
+    border-color: rgba(255,180,40,.55);
+    box-shadow: 0 0 8px rgba(255,180,40,.35); }
+
 /* Legend below the globe */
 .globe-legend {
     display: flex; flex-wrap: wrap; gap: 8px 18px;
     font-size: .70rem; color: #889; margin-top: 12px;
 }
 .globe-legend span { display: flex; align-items: center; gap: 6px; }
+
+/* ── HUD overlay (diagnostic glass-pane) ─────────────────────────────────── */
+.globe-section { position: relative; }
+.space-weather-hud {
+    position: absolute; top: 60px; right: 22px;
+    width: 280px; max-height: calc(100% - 96px);
+    overflow-y: auto;
+    background: rgba(2, 8, 16, .82);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 192, 96, .18);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: #cfd8e2;
+    font-size: .68rem;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    z-index: 4;
+    pointer-events: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.space-weather-hud::-webkit-scrollbar       { width: 6px; }
+.space-weather-hud::-webkit-scrollbar-thumb { background: rgba(255,192,96,.3); border-radius: 3px; }
+.space-weather-hud .hud-block {
+    border-bottom: 1px solid rgba(255, 192, 96, .07);
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+}
+.space-weather-hud .hud-block:last-child { border: 0; margin-bottom: 0; }
+.space-weather-hud .hud-section-title {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .10em;
+    color: #ffc060; margin-bottom: 6px; font-weight: 600;
+}
+.space-weather-hud .hud-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; line-height: 1.55;
+}
+.space-weather-hud .hud-k { color: #7d8a98; font-size: .66rem; }
+.space-weather-hud .hud-v {
+    color: #fff8e8; font-feature-settings: "tnum" 1;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: .70rem;
+}
+.space-weather-hud .hud-tiny { font-size: .60rem; }
+.space-weather-hud .hud-bar {
+    flex: 1; height: 6px; border-radius: 3px; overflow: hidden;
+    background: rgba(255, 192, 96, .08);
+}
+.space-weather-hud .hud-bar-fill {
+    height: 100%; width: 0%; transition: width .25s ease, background .25s ease;
+    background: hsl(120, 60%, 55%);
+}
+.space-weather-hud .hud-cumulative { color: #557; font-size: .60rem; }
+.space-weather-hud .hud-storm .hud-bar { margin: 0 6px; }
+
+/* EMIC ion-channel indicator */
+.space-weather-hud .hud-emic-status { color: #667; font-size: .64rem; }
+.space-weather-hud .hud-emic.hud-emic-on .hud-emic-status { color: #ff7e3a; }
+.space-weather-hud .hud-emic.hud-emic-oplus .hud-emic-status {
+    color: #ff4830;
+    text-shadow: 0 0 4px rgba(255, 72, 48, .55);
+    animation: hud-emic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes hud-emic-pulse {
+    0%, 100% { opacity: 0.9; }
+    50%      { opacity: 0.55; }
+}
+
+/* AR flux-rope twist rows */
+.space-weather-hud .hud-twist-list { display: flex; flex-direction: column; gap: 4px; }
+.space-weather-hud .hud-twist-row {
+    display: grid; grid-template-columns: 56px 28px 1fr 38px;
+    align-items: center; gap: 6px;
+    padding: 2px 0;
+    transition: background .25s;
+}
+.space-weather-hud .hud-twist-row.hud-twist-erupting {
+    background: rgba(255, 72, 48, .12); border-radius: 4px;
+}
+.space-weather-hud .hud-twist-id  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; font-size: .65rem; }
+.space-weather-hud .hud-twist-cls { color: #ffc060; font-size: .68rem; text-align: center; }
+.space-weather-hud .hud-twist-bar { height: 5px; }
+.space-weather-hud .hud-twist-phi { color: #ffd070; font-family: 'JetBrains Mono', monospace; font-size: .62rem; text-align: right; }
+
+/* Eruption ticker */
+.space-weather-hud .hud-eruption-list { display: flex; flex-direction: column; gap: 3px; }
+.space-weather-hud .hud-erupt-row {
+    display: grid; grid-template-columns: 36px 56px 1fr auto;
+    align-items: baseline; gap: 6px;
+    font-size: .62rem;
+    padding: 2px 0;
+}
+.space-weather-hud .hud-erupt-cls {
+    font-weight: 700; font-family: 'JetBrains Mono', monospace;
+}
+.space-weather-hud .hud-erupt-cls.cls-X { color: #ff4830; }
+.space-weather-hud .hud-erupt-cls.cls-M { color: #ffa040; }
+.space-weather-hud .hud-erupt-cls.cls-C { color: #ffd070; }
+.space-weather-hud .hud-erupt-ar  { color: #cfd8e2; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-spd { color: #88ccff; font-family: 'JetBrains Mono', monospace; }
+.space-weather-hud .hud-erupt-earth { color: #5fd0ff; font-weight: 600; }
+.space-weather-hud .hud-erupt-limb  { color: #667; }
+.space-weather-hud .hud-erupt-age   { color: #556; grid-column: 1 / -1; font-size: .58rem; padding-left: 4px; }
+.space-weather-hud .hud-erupt-row.hud-erupt-new {
+    animation: hud-erupt-flash 1.4s ease-out;
+}
+@keyframes hud-erupt-flash {
+    0%   { background: rgba(255, 72, 48, .35); }
+    100% { background: transparent; }
+}
+
+.space-weather-hud .hud-empty { color: #445; font-size: .62rem; padding: 4px 0; }
+
+/* 60-min timeline strip */
+.space-weather-hud .hud-tl-canvas {
+    width: 100%; height: 80px; display: block;
+    border-radius: 4px;
+    background: rgba(0, 4, 12, .85);
+    border: 1px solid rgba(255, 192, 96, .10);
+    margin-top: 2px;
+}
+.space-weather-hud .hud-tl-legend {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-top: 4px;
+}
+.space-weather-hud .hud-tl-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: .58rem; color: #889;
+    padding: 1px 6px; border-radius: 8px;
+    background: rgba(255, 192, 96, .04);
+    border: 1px solid rgba(255, 192, 96, .10);
+}
+.space-weather-hud .hud-tl-chip::before {
+    content: ''; display: inline-block;
+    width: 8px; height: 2px;
+    background: var(--hud-tl-c, #fff);
+    border-radius: 1px;
+}
+.space-weather-hud .hud-tl-axis {
+    display: flex; justify-content: space-between;
+    margin-top: 2px;
+    color: #556; font-size: .56rem;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@media (max-width: 900px) {
+    .space-weather-hud {
+        position: static; width: auto; max-height: none;
+        margin-top: 10px;
+    }
+}
 .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 
 @media (max-width: 700px) { #sw-globe-canvas { height: 460px; } }
@@ -1786,6 +1956,7 @@ nav {
                 <button class="layer-btn active" data-layer="magnetopause">Magnetopause</button>
                 <button class="layer-btn active" data-layer="bowShock">Bow Shock</button>
                 <button class="layer-btn active" data-layer="belts">Van Allen Belts</button>
+                <button class="layer-btn active" data-layer="beltParticles">μ-Conserving Tracers</button>
                 <button class="layer-btn active" data-layer="plasmasphere">Plasmasphere</button>
                 <button class="layer-btn active" data-layer="cme">CME Shells</button>
                 <button class="layer-btn active" data-layer="solarField">Solar Field / HCS</button>
@@ -1793,10 +1964,29 @@ nav {
                 <button class="layer-btn active" data-layer="fluxRopes">AR Flux Ropes</button>
                 <button class="layer-btn active" data-layer="wind">Wind Streams</button>
             </div>
+            <!-- AIA-style EUV channel selector — switches the sun rendering
+                 between white-light and one of six SDO/AIA passbands. Each
+                 channel raymarches a synthetic DEM through the corona using
+                 the channel's Gaussian temperature response, so the same
+                 active-region / coronal-hole / X-ray data drives a real
+                 multi-wavelength instrument view. -->
+            <div class="globe-layer-btns euv-row" id="euv-channel-btns">
+                <span class="euv-label">EUV channel:</span>
+                <button class="layer-btn euv-btn active" data-euv="white" title="White-light photosphere (default)">White</button>
+                <button class="layer-btn euv-btn" data-euv="171" title="171 Å — Fe IX, 0.7 MK · quiet plage / coronal loops">171</button>
+                <button class="layer-btn euv-btn" data-euv="193" title="193 Å — Fe XII, 1.6 MK · ARs + coronal holes (dark)">193</button>
+                <button class="layer-btn euv-btn" data-euv="211" title="211 Å — Fe XIV, 2 MK · AR loops">211</button>
+                <button class="layer-btn euv-btn" data-euv="304" title="304 Å — He II, 50 kK · chromosphere + prominences">304</button>
+                <button class="layer-btn euv-btn" data-euv="131" title="131 Å — Fe XXI, 10 MK · flare hot">131</button>
+                <button class="layer-btn euv-btn" data-euv="94"  title="94 Å — Fe XVIII, 7 MK · flare core">94</button>
+            </div>
         </div>
         <canvas id="sw-globe-canvas"
             aria-label="Interactive 3D Earth showing live magnetosphere, Van Allen belts, auroral ovals and solar wind particles"
             role="img"></canvas>
+        <!-- Diagnostic HUD overlay — populated by space-weather-hud.js at 4 Hz -->
+        <div class="space-weather-hud" id="sw-hud"
+             aria-label="Live physics diagnostics: storm index, AR twist, internal eruptions, Van Allen tracer counts"></div>
         <div class="globe-legend">
             <span><span class="leg-dot" style="background:#ffd700"></span>Sun (live SWPC photosphere + corona, flare response)</span>
             <span><span class="leg-dot" style="background:#888"></span>Moon (procedural surface, orbital motion)</span>
@@ -1805,6 +1995,8 @@ nav {
             <span><span class="leg-dot" style="background:#66aaff"></span>Bow shock</span>
             <span><span class="leg-dot" style="background:#ffa040"></span>Van Allen inner belt (protons ~1-3 R_earth)</span>
             <span><span class="leg-dot" style="background:#ff6040"></span>Van Allen outer belt (electrons ~3-7 R_earth)</span>
+            <span><span class="leg-dot" style="background:#ff7330"></span>Trapped protons (inner belt, drift west, μ = mv⊥²/2B conserved)</span>
+            <span><span class="leg-dot" style="background:#5fd0ff"></span>Trapped electrons (outer belt, drift east, T_d = 1.557 hr / E·L·g(α₀))</span>
             <span><span class="leg-dot" style="background:#00ccff"></span>Plasmasphere (Carpenter-Anderson model)</span>
             <span><span class="leg-dot" style="background:#5fb8ff"></span>Slow solar wind (ambient, ~350-500 km/s)</span>
             <span><span class="leg-dot" style="background:#ffd28a"></span>Active-region stream (171 Å plage, simple AR)</span>
@@ -2403,6 +2595,7 @@ import { EphemerisService }    from './js/horizons.js';
 import { SolarWindState }      from './js/solar-wind-state.js';
 import WindPipelineFeed         from './js/wind-pipeline-feed.js';
 import { SpaceWeatherGlobe }   from './js/space-weather-globe.js';
+import { SpaceWeatherHud }     from './js/space-weather-hud.js';
 import { earthOrbitFull }       from './js/earth-orbit.js';
 import { akasofuEpsilon, substormIndex } from './js/solar-wind-magnetosphere.js';
 import { CmePropagator } from './js/cme-propagation.js';
@@ -3593,12 +3786,28 @@ let _globe = null;
     if (globeCanvas) {
         _globe = new SpaceWeatherGlobe(globeCanvas).start();
 
+        // Diagnostic HUD overlay — updates at 4 Hz from globe internal state
+        const hudEl = document.getElementById('sw-hud');
+        if (hudEl) new SpaceWeatherHud(hudEl, _globe).start();
+
         // Layer toggle buttons
         document.getElementById('globe-layers')?.addEventListener('click', ev => {
             const btn = ev.target.closest('.layer-btn');
             if (!btn) return;
             btn.classList.toggle('active');
             _globe.setLayerVisible(btn.dataset.layer, btn.classList.contains('active'));
+        });
+
+        // SDO/AIA EUV channel selector — radio-style (only one active at a time)
+        document.getElementById('euv-channel-btns')?.addEventListener('click', ev => {
+            const btn = ev.target.closest('.euv-btn');
+            if (!btn) return;
+            const channel = btn.dataset.euv;
+            // Mark this button active, deactivate siblings
+            for (const sib of btn.parentElement.querySelectorAll('.euv-btn')) {
+                sib.classList.toggle('active', sib === btn);
+            }
+            _globe.setEuvMode(channel);
         });
     }
 }

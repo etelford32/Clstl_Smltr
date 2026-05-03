@@ -294,8 +294,23 @@
                     <button type="submit" class="btn-submit" id="btn-submit">Sign In →</button>
                 </form>
 
-                <!-- Social auth will be added when OAuth providers are configured -->
+                <!-- Social auth — buttons render only for providers in
+                     js/config.js SOCIAL_PROVIDERS, so an unconfigured
+                     provider stays hidden instead of throwing. The
+                     divider above sits ABOVE the mount point so we
+                     don't render an orphan "or" line when the array
+                     is empty. -->
+                <div class="divider" id="oauth-divider" style="display:none">or</div>
+                <div id="oauth-mount"></div>
             </div>
+            <script type="module">
+                import { mountOAuthButtons } from './js/oauth-buttons.js';
+                import { SOCIAL_PROVIDERS } from './js/config.js';
+                if (SOCIAL_PROVIDERS?.length) {
+                    document.getElementById('oauth-divider').style.display = '';
+                    mountOAuthButtons('#oauth-mount', { source: 'signin' });
+                }
+            </script>
 
             <!-- ── Forgot password view ── -->
             <div class="reset-view" id="reset-view">
@@ -406,13 +421,30 @@
                 }
                 // Failed-signin counter — survives the page lifetime so the
                 // eventual successful signin can stamp how many retries it
-                // took. RLS on activation_events forbids unauth writes, so
-                // we can't log signin_failed directly; tracking attempts
-                // here and reporting them on success captures the same
-                // "auth friction" signal without an edge function.
+                // took. Local sessionStorage proxy is the fallback signal
+                // even if the edge endpoint below is unavailable.
                 try {
                     const cur = +(sessionStorage.getItem('pp_signin_attempts') || 0);
                     sessionStorage.setItem('pp_signin_attempts', String(cur + 1));
+                } catch {}
+                // Server-side telemetry: log the failure so the admin
+                // Onboarding > Auth flow card can show real failure
+                // counts. Edge endpoint hashes the email server-side
+                // with a pepper before persisting, so plaintext never
+                // leaves this device EXCEPT in the edge function's
+                // memory for the duration of the request. Fire-and-
+                // forget — a network error on the telemetry path
+                // shouldn't punish the user further than the failed
+                // signin already does.
+                try {
+                    fetch('/api/auth/log-failure', {
+                        method:  'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body:    JSON.stringify({
+                            email:  email.value,
+                            reason: result.error || 'unknown',
+                        }),
+                    }).catch(() => { /* swallow */ });
                 } catch {}
                 return;
             }
