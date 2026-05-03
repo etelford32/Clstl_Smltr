@@ -60,6 +60,22 @@ nav {
     margin-left: 3px; vertical-align: middle; line-height: 1.4;
 }
 
+/* NEW badge — rendered as a small superscript pill so it reads as a
+   typographic mark next to the menu label, not a separate chip. */
+.nav-badge-new {
+    display: inline-block;
+    font-size: .48rem; font-weight: 800; letter-spacing: .10em;
+    color: #cba9ff;
+    background: rgba(180,140,255,.14);
+    border: 1px solid rgba(180,140,255,.40);
+    border-radius: 3px;
+    padding: 0 4px;
+    margin-left: 3px;
+    vertical-align: super;
+    line-height: 1;
+    text-shadow: 0 0 6px rgba(180,140,255,.35);
+}
+
 /* ── Dropdown menus ──────────────────────────────────────────────────────── */
 .nav-drop { position: relative; flex-shrink: 0; }
 .nav-drop-btn {
