@@ -177,6 +177,11 @@
     <div class="admin-header">
         <h1>Admin Dashboard</h1>
         <p id="admin-sub">Loading...</p>
+        <p id="admin-superadmin-link" style="display:none;margin-top:6px;font-size:.78rem">
+            <a href="superadmin.html" style="color:#ffd700;text-decoration:none;border-bottom:1px dashed rgba(255,215,0,.4);padding-bottom:1px">
+                ★ Superadmin tools (audit log, plan overrides) →
+            </a>
+        </p>
     </div>
 
     <div class="tabs" id="tabs">
@@ -303,8 +308,37 @@
     <!-- ═══════════════════ USERS TAB ═══════════════════ -->
     <div class="tab-panel" id="panel-users">
         <div class="card">
-            <h3>All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span></h3>
+            <h3>
+                All Users <span id="user-count" style="font-size:.78rem;color:#555;font-weight:400"></span>
+                <span style="font-size:.7rem;color:#666;font-weight:400;margin-left:auto;margin-left:14px">
+                    Admins may promote users between <code style="color:#9ad36f">user</code> and <code style="color:#ffb74d">tester</code>.
+                    Admin/superadmin role changes happen on the
+                    <a href="superadmin.html" style="color:#ffd700">superadmin page</a>.
+                </span>
+            </h3>
             <div id="users-container"><div class="empty">Loading...</div></div>
+        </div>
+    </div>
+
+    <!-- ── Inline role-promotion modal (used by Users tab) ───────────── -->
+    <div id="modal-promote-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);align-items:center;justify-content:center;z-index:50;padding:20px">
+        <div style="background:linear-gradient(135deg,#1a0e2e,#0e0820);border:1px solid rgba(255,140,0,.3);border-radius:14px;padding:22px;max-width:480px;width:100%;box-shadow:0 30px 80px rgba(0,0,0,.6)">
+            <h3 style="color:#fff;margin-bottom:12px">Change user role</h3>
+            <div style="margin-bottom:14px"><label style="display:block;font-size:.74rem;color:#888;margin-bottom:5px;text-transform:uppercase">User</label>
+                <input id="promote-target-email" readonly style="width:100%;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);color:#fff;padding:7px 10px;border-radius:8px;font-size:.84rem"></div>
+            <div style="margin-bottom:14px"><label style="display:block;font-size:.74rem;color:#888;margin-bottom:5px;text-transform:uppercase">New role</label>
+                <select id="promote-new-role" style="width:100%;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);color:#fff;padding:7px 10px;border-radius:8px;font-size:.84rem">
+                    <option value="user">user</option>
+                    <option value="tester">tester</option>
+                </select></div>
+            <div style="margin-bottom:14px"><label style="display:block;font-size:.74rem;color:#888;margin-bottom:5px;text-transform:uppercase">Reason (optional, recorded in audit log)</label>
+                <textarea id="promote-reason" placeholder="Why are you making this change?"
+                    style="width:100%;min-height:60px;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.12);color:#fff;padding:7px 10px;border-radius:8px;font-size:.84rem;resize:vertical;font-family:inherit"></textarea></div>
+            <div id="promote-err" style="color:#ff8b8b;font-size:.82rem;margin:6px 0 0;min-height:0"></div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px">
+                <button class="btn" id="promote-cancel">Cancel</button>
+                <button class="btn" id="promote-apply" style="background:linear-gradient(45deg,#ffb74d,#ff8c00);color:#000;border-color:transparent;font-weight:700">Apply role change</button>
+            </div>
         </div>
     </div>
 
@@ -785,6 +819,13 @@ if (!adminCheck.verified) {
 document.getElementById('auth-gate').style.display = 'none';
 document.getElementById('admin-main').style.display = 'block';
 document.getElementById('admin-sub').textContent = `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
+
+// Superadmin link — only render for superadmins. Admin-level users see
+// the user-management UI on this page; the audit log + plan overrides
+// are gated to /superadmin.html.
+if (auth.isSuperadmin?.()) {
+    document.getElementById('admin-superadmin-link').style.display = '';
+}
 
 // ── KPI Cards ────────────────────────────────────────────────────────────────
 async function loadKPIs() {
@@ -1534,18 +1575,69 @@ async function loadUsers() {
     if (!res.data.length) { el.innerHTML = '<div class="empty">No users found.</div>'; countEl.textContent = '(0)'; return; }
 
     countEl.textContent = `(${res.data.length})`;
-    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th></tr></thead><tbody>';
+    const callerIsSuper = auth.isSuperadmin?.() === true;
+    let html = '<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Plan</th><th>Joined</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
     for (const u of res.data) {
-        const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : 'b-user';
+        const rc = u.role === 'superadmin' ? 'b-super' : u.role === 'admin' ? 'b-admin' : u.role === 'tester' ? 'b-tester' : 'b-user';
         // intro is a legacy alias for basic — both render with the b-basic class.
         const pc = ({tester:'b-tester', advanced:'b-advanced', basic:'b-basic', intro:'b-basic', educator:'b-educator', institution:'b-institution', enterprise:'b-enterprise'}[u.plan] || 'b-free');
         const joined = u.created_at ? new Date(u.created_at).toLocaleDateString() : '--';
-        html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td></tr>`;
+        // Admin-scope: only show "Change role" for non-admin/superadmin
+        // targets, AND let admins flip between user ↔ tester only.
+        // Superadmins get full management on /superadmin.html instead.
+        const targetIsPrivileged = u.role === 'admin' || u.role === 'superadmin';
+        const canPromote = !targetIsPrivileged && !callerIsSuper;  // superadmins use /superadmin.html
+        const actionCell = canPromote
+            ? `<button class="btn btn-sm" data-promote-uid="${_esc(u.id)}" data-promote-email="${_esc(u.email||'')}" data-promote-role="${_esc(u.role||'user')}">Change role</button>`
+            : (callerIsSuper
+                ? `<a href="superadmin.html" class="btn btn-sm" style="text-decoration:none;color:#ffd700">Manage →</a>`
+                : `<span style="color:#444;font-size:.74rem">—</span>`);
+        html += `<tr><td>${_esc(u.display_name||'--')}</td><td style="font-family:monospace;font-size:.78rem">${_esc(u.email||'--')}</td><td><span class="badge ${rc}">${_esc((u.role||'user').toUpperCase())}</span></td><td><span class="badge ${pc}">${_esc(u.plan||'free')}</span></td><td style="color:#555;font-size:.78rem">${_esc(joined)}</td><td style="text-align:right">${actionCell}</td></tr>`;
     }
     html += '</tbody></table>';
     el.innerHTML = html;
+
+    // Wire the inline promotion buttons.
+    el.querySelectorAll('button[data-promote-uid]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById('promote-target-email').value = btn.dataset.promoteEmail;
+            // Default the dropdown to the OPPOSITE of the current role so
+            // the click is a one-tap promote/demote in the common case.
+            document.getElementById('promote-new-role').value =
+                (btn.dataset.promoteRole === 'tester') ? 'user' : 'tester';
+            document.getElementById('promote-reason').value = '';
+            document.getElementById('promote-err').textContent = '';
+            const applyBtn = document.getElementById('promote-apply');
+            applyBtn.dataset.uid = btn.dataset.promoteUid;
+            applyBtn.disabled = false;
+            applyBtn.textContent = 'Apply role change';
+            document.getElementById('modal-promote-bg').style.display = 'flex';
+        });
+    });
 }
 loadUsers();
+
+// Modal handlers — closed once at startup, opened by per-row buttons above.
+document.getElementById('promote-cancel')?.addEventListener('click', () => {
+    document.getElementById('modal-promote-bg').style.display = 'none';
+});
+document.getElementById('promote-apply')?.addEventListener('click', async (e) => {
+    const btn   = e.currentTarget;
+    const uid   = btn.dataset.uid;
+    const role  = document.getElementById('promote-new-role').value;
+    const reason = document.getElementById('promote-reason').value.trim() || null;
+    const errEl = document.getElementById('promote-err');
+    errEl.textContent = '';
+    btn.disabled = true; btn.textContent = 'Applying…';
+    const res = await auth.promoteUser(uid, role, reason);
+    btn.disabled = false; btn.textContent = 'Apply role change';
+    if (!res.success) {
+        errEl.textContent = res.error || 'Unknown error';
+        return;
+    }
+    document.getElementById('modal-promote-bg').style.display = 'none';
+    loadUsers();
+});
 
 // ── Analytics Tab ────────────────────────────────────────────────────────────
 // GA4 status

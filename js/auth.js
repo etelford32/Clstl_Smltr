@@ -227,6 +227,14 @@ class AuthManager {
         return this._user?.role === 'superadmin';
     }
 
+    /**
+     * Lowercase-canonical alias matching the DB role literal `superadmin`.
+     * Prefer this in new code; isSuperAdmin() kept for back-compat.
+     */
+    isSuperadmin() {
+        return this._user?.role === 'superadmin';
+    }
+
     /** Get user's role. */
     getRole() {
         return this._user?.role || 'user';
@@ -576,6 +584,107 @@ class AuthManager {
             return { verified: isAdmin, role };
         } catch (err) {
             return { verified: false, error: err.message };
+        }
+    }
+
+    /**
+     * Server-side superadmin verification. Same shape as
+     * verifyAdminServerSide() but only passes for role === 'superadmin'.
+     * Used by /superadmin.html to gate role-management + audit log.
+     * @returns {{ verified: boolean, role?: string, error?: string }}
+     */
+    async verifySuperadminServerSide() {
+        const res = await this.verifyAdminServerSide();
+        if (!res || res.error || !res.role) {
+            return { verified: false, role: res?.role, error: res?.error || 'No role' };
+        }
+        return { verified: res.role === 'superadmin', role: res.role };
+    }
+
+    /**
+     * Promote a user to a new role via the audited promote_user RPC.
+     * Caller permissions are enforced server-side:
+     *   - admin     → may set role IN ('user', 'tester'); cannot touch admins
+     *   - superadmin → may set role IN ('user', 'tester', 'admin')
+     * Superadmin minting is SQL-Editor-only (no UI path).
+     *
+     * @param {string} userId
+     * @param {'user'|'tester'|'admin'} newRole
+     * @param {string} [reason]  Free-form note attached to the audit row.
+     * @returns {{ success: boolean, role?: string, error?: string }}
+     */
+    async promoteUser(userId, newRole, reason = null) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured' };
+        try {
+            const { data, error } = await this._supabase.rpc('promote_user', {
+                p_user_id:  userId,
+                p_new_role: newRole,
+                p_reason:   reason,
+            });
+            if (error) return { success: false, error: error.message, code: error.code };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, role: row?.role || newRole };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Superadmin-only: manually override a user's plan, bypassing Stripe.
+     * Used for comp accounts that didn't go through the invite flow.
+     * Reason required (10–500 characters); recorded to user_profiles_audit.
+     *
+     * @param {string} userId
+     * @param {'free'|'basic'|'educator'|'advanced'|'institution'|'enterprise'} newPlan
+     * @param {string} reason
+     */
+    async setUserPlanOverride(userId, newPlan, reason) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured' };
+        try {
+            const { data, error } = await this._supabase.rpc('set_user_plan_override', {
+                p_user_id:  userId,
+                p_new_plan: newPlan,
+                p_reason:   reason,
+            });
+            if (error) return { success: false, error: error.message, code: error.code };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, plan: row?.plan || newPlan };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
+     * Superadmin-only: fetch recent role/plan/Stripe-link audit rows.
+     * @param {number} [limit=100]  Server clamps to 1–1000.
+     */
+    async getRecentRoleAudit(limit = 100) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('recent_role_audit', { p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (err) {
+            return { success: false, error: err.message, rows: [] };
+        }
+    }
+
+    /**
+     * Admin/superadmin: list users for the management table.
+     * @param {{ limit?: number, offset?: number, search?: string }} [opts]
+     */
+    async listUsersForAdmin(opts = {}) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('list_users_for_admin', {
+                p_limit:  opts.limit  ?? 200,
+                p_offset: opts.offset ?? 0,
+                p_search: opts.search ?? null,
+            });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (err) {
+            return { success: false, error: err.message, rows: [] };
         }
     }
 
