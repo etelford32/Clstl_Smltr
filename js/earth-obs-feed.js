@@ -105,17 +105,30 @@ const CRS           = 'EPSG:4326';
 export const EARTH_OBS_LAYERS = [
     {
         id:          'precip-rate',
-        gibs:        'IMERG_Precipitation_Rate',
+        // GIBS identifier for the daily-aggregated IMERG Late Run product.
+        // The legacy 'IMERG_Precipitation_Rate' alias was retired in
+        // 2024; both the snapshot and WMS endpoints now 404 for it,
+        // which is why the layer was rendering as broken.
+        // 'GPM_3IMERGDL_Precipitation_Rate' is the current daily Late
+        // Run identifier (≈1-day latency, global coverage). For a
+        // half-hourly product see the optional 'precip-imerg-30min'
+        // entry below — that one needs a sub-day TIME parameter so
+        // the snapshot URL builder isn't a clean fit yet.
+        gibs:        'GPM_3IMERGDL_Precipitation_Rate',
         name:        'Precipitation Rate',
         category:    'atmosphere',
-        description: 'GPM IMERG near-real-time precipitation rate (rain + snow)',
+        description: 'GPM IMERG Late Run daily precipitation rate (rain + snow)',
         unit:        'mm/hr',
         resolution:  { w: 2048, h: 1024 },
-        cadence:     30 * 60_000,   // 30 min
-        latency:     '~4-6 hours (IMERG Late Run)',
+        cadence:     6 * 60 * 60_000,   // 6 hr — daily product, no point hammering
+        latency:     '~1 day (IMERG Late Run, daily composite)',
         colorRamp:   'Blue (light) → green → yellow → red → magenta (extreme)',
         format:      'image/png',
-        timeOffset:  0,    // IMERG has near-real-time products
+        // Daily product is dated by the prior day; using `1` yesterday
+        // gives the most recent fully-published composite. `0` for "today"
+        // 404'd until the daily roll-up finished, which manifested as a
+        // silently empty overlay on the globe.
+        timeOffset:  1,
         opacity:     0.65, // storm cells — stand out without burying land
         defaultOn:   true,
     },
