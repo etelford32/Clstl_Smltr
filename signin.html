@@ -446,6 +446,17 @@
                         }),
                     }).catch(() => { /* swallow */ });
                 } catch {}
+                // Mirror to the unified telemetry pipeline so the
+                // superadmin Telemetry tab's "Top auth failures" card
+                // reflects this without joining auth_failures + the
+                // new client_telemetry table at query time.
+                try {
+                    const { telemetry } = await import('./js/telemetry.js');
+                    telemetry.recordAuthFailure(result.error || 'unknown', {
+                        source: 'signin_form',
+                        provider: 'email',
+                    });
+                } catch {}
                 return;
             }
 

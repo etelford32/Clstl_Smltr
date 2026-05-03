@@ -132,10 +132,16 @@ const spinRow  = document.getElementById('cb-spinner-row');
 const errRow   = document.getElementById('cb-error-row');
 const errMsg   = document.getElementById('cb-error-msg');
 
-function showError(msg) {
+function showError(msg, source = 'oauth_callback') {
     if (spinRow) spinRow.style.display = 'none';
     if (errRow)  errRow.style.display = '';
     if (errMsg)  errMsg.textContent = msg || 'An unknown error occurred.';
+    // Telemetry: log every OAuth-callback error so the superadmin
+    // Telemetry tab surfaces a top-N of provider failure reasons.
+    // Lazy import — telemetry.js is optional from this page's POV.
+    import('./js/telemetry.js')
+        .then(({ telemetry }) => telemetry.recordAuthFailure(msg || 'unknown', { source }))
+        .catch(() => { /* fire-and-forget */ });
 }
 
 // Provider failures come back as ?error=<code>&error_description=<text>
