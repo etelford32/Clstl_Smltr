@@ -1457,6 +1457,8 @@ export async function fetchAuthFlowMetrics(days = 30) {
         const confirmed = byEvent.signup_confirmed?.users || 0;
         const welcomes  = byEvent.welcome_email_sent?.users || 0;
         const nudges    = byEvent.nudge_sent?.users || 0;
+        const magicReqs = byEvent.signin_magic_link_requested?.users || 0;
+        const magicEvts = byEvent.signin_magic_link_requested?.events || 0;
         const failUsers   = byEvent.signin_failed?.users  || 0;
         const failEvents  = byEvent.signin_failed?.events || 0;
         return {
@@ -1497,6 +1499,17 @@ export async function fetchAuthFlowMetrics(days = 30) {
                 nudgeRate:         signups ? +(nudges / signups).toFixed(3) : 0,
                 avgRetries:        succUsers ? +(totalRetries / succUsers).toFixed(2) : 0,
                 pctNeedingRetry:   succUsers ? +(withRetry / succUsers).toFixed(3) : 0,
+                // Magic-link funnel: how many distinct users requested
+                // a sign-in link, how many total requests fired (some
+                // users hit "Resend"), and what fraction of all sign-in
+                // successes appear to come from the magic-link flow.
+                // The denominator is signins-in-window, not magic-link
+                // requests, because some links are clicked outside the
+                // window. Sanity-cap at 100% in case of clock skew.
+                magicLinkRequests:     magicReqs,
+                magicLinkRequestEvents: magicEvts,
+                magicLinkShare:        succUsers ? Math.min(1,
+                    +(magicReqs / succUsers).toFixed(3)) : 0,
             },
         };
     } catch (err) {

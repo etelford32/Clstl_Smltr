@@ -857,6 +857,49 @@ class AuthManager {
     }
 
     /**
+     * Sign in via emailed magic link. Sends a one-time link to the
+     * user's inbox; clicking it lands on /auth-callback.html where the
+     * Supabase client picks the session up via detectSessionInUrl
+     * (same code path as the OAuth callback, no extra wiring needed).
+     *
+     * Anti-enumeration: Supabase returns success regardless of
+     * whether the email maps to an existing user. The UI shows
+     * "Check your email" either way; only an actual user with that
+     * address gets a delivered email.
+     *
+     * shouldCreateUser is FALSE — magic links are intentionally a
+     * sign-IN flow, not a sign-UP flow. New accounts go through the
+     * password form so a recoverable credential exists. A request for
+     * an unknown email is silently ignored on Supabase's side.
+     *
+     * @param {string} email
+     * @param {{ redirectTo?: string }} [options]
+     * @returns {{ success: boolean, error?: string, code?: string }}
+     */
+    async signInWithMagicLink(email, options = {}) {
+        if (!this._supabase) {
+            return { success: false, error: 'Supabase client not configured' };
+        }
+        try {
+            const redirectTo = options.redirectTo
+                || `${window.location.origin}/auth-callback.html?from=magic_link`;
+            const { error } = await this._supabase.auth.signInWithOtp({
+                email,
+                options: {
+                    emailRedirectTo:  redirectTo,
+                    shouldCreateUser: false,
+                },
+            });
+            if (error) {
+                return { success: false, error: error.message, code: error.status };
+            }
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    }
+
+    /**
      * Request password reset email.
      * @returns {{ success: boolean, message: string }}
      */
