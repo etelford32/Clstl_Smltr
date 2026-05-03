@@ -41,7 +41,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     width:100%; max-width:1280px;
     margin:18px auto 0;
     padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
 }
+@media (max-width:900px) { #tm-stage { grid-template-columns:1fr; } }
 #tm-canvas-wrap {
     position:relative;
     width:100%; height:540px;
@@ -52,6 +56,86 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(80,40,160,.08);
 }
 #tm-canvas-wrap canvas { display:block; width:100%; height:100%; }
+
+/* ── Side panel: body picker + osculating elements ─────────────────── */
+#tm-side {
+    background:rgba(12,8,30,.82);
+    border:1px solid rgba(180,140,255,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:540px; overflow:hidden;
+}
+@media (max-width:900px) { #tm-side { height:auto; max-height:none; } }
+.tm-side-title {
+    font-size:.66rem; color:#776; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.tm-body-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.tm-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(180,140,255,.18);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#998;
+}
+.tm-body-btn:hover { border-color:rgba(180,140,255,.50); color:#eef; }
+.tm-body-btn.sel {
+    background:rgba(120,80,255,.18);
+    border-color:#b78cff;
+    color:#fff;
+    box-shadow:0 0 10px rgba(180,140,255,.30);
+}
+.tm-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.tm-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+
+.tm-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(180,140,255,.16);
+    margin-bottom:10px;
+}
+.tm-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.tm-sel-name { font-size:1.05rem; font-weight:700; color:#eef; }
+.tm-sel-sub  { font-size:.66rem; color:#776; font-family:monospace; margin-left:auto; }
+
+.tm-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.tm-el-k {
+    color:#aa9;
+    display:flex; align-items:baseline; gap:6px;
+}
+.tm-el-k .sym { color:#cba9ff; font-weight:700; min-width:18px; display:inline-block; }
+.tm-el-k .nm  { font-size:.66rem; color:#665; }
+.tm-el-v {
+    color:#fff; font-variant-numeric:tabular-nums; text-align:right;
+    font-weight:600;
+}
+.tm-el-v .un { color:#665; font-weight:400; margin-left:4px; font-size:.7rem; }
+.tm-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(180,140,255,.12);
+    font-family:monospace; font-size:.62rem; color:#665;
+    line-height:1.55;
+}
 
 #tm-hud {
     position:absolute; top:12px; left:14px; right:14px;
@@ -308,6 +392,102 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     font-size:.74rem; color:#998; font-style:italic;
     border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
 }
+
+/* ── Apsidal precession plot ────────────────────────────────────────── */
+.tm-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.tm-plot-head h2 { margin-bottom:0; }
+.tm-plot-legend {
+    display:flex; gap:14px; font-family:monospace; font-size:.72rem;
+}
+.tm-plot-legend .lg { display:flex; align-items:center; gap:6px; color:#aa9; }
+.tm-plot-legend .swatch {
+    width:14px; height:3px; border-radius:2px;
+}
+.tm-plot-wrap {
+    position:relative;
+    width:100%; height:260px;
+    border:1px solid rgba(180,140,255,.14);
+    border-radius:8px;
+    background:linear-gradient(180deg, rgba(0,0,0,.30), rgba(8,4,24,.50));
+    overflow:hidden;
+}
+#tm-plot-canvas { display:block; width:100%; height:100%; }
+.tm-plot-readout {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;
+    margin-top:10px;
+    font-family:monospace; font-size:.72rem;
+}
+.tm-plot-readout .cell {
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(180,140,255,.12);
+    border-radius:6px;
+    padding:6px 9px;
+}
+.tm-plot-readout .cell .k { color:#776; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase; display:block; }
+.tm-plot-readout .cell .v { color:#eef; font-weight:700; font-size:.86rem; }
+
+/* ── N-body validation controls ─────────────────────────────────────── */
+.tm-plot-actions {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-bottom:10px;
+}
+.tm-progress-wrap {
+    flex:1; min-width:160px; height:6px;
+    background:rgba(0,0,0,.35);
+    border-radius:3px; overflow:hidden;
+    border:1px solid rgba(180,140,255,.18);
+}
+.tm-progress-bar {
+    height:100%; width:0%;
+    background:linear-gradient(90deg, #4fc97f, #b78cff);
+    transition:width .15s ease;
+}
+.tm-progress-lbl {
+    font-family:monospace; font-size:.7rem; color:#998;
+    min-width:130px; text-align:right;
+}
+.tm-nbody-info {
+    font-family:monospace; font-size:.7rem; color:#776;
+    margin-top:8px; line-height:1.55;
+}
+.tm-nbody-info .ok { color:#4fc97f; }
+.tm-nbody-info .warn { color:#fc7; }
+
+/* ── Residual table ─────────────────────────────────────────────────── */
+.tm-resid-empty {
+    color:#665; font-style:italic; font-size:.82rem;
+}
+.tm-resid-table {
+    width:100%;
+    border-collapse:collapse;
+    font-family:monospace; font-size:.78rem;
+    font-variant-numeric:tabular-nums;
+}
+.tm-resid-table th,
+.tm-resid-table td {
+    padding:6px 10px;
+    text-align:right;
+    border-bottom:1px solid rgba(180,140,255,.10);
+}
+.tm-resid-table th {
+    color:#b78cff;
+    font-weight:700;
+    text-transform:uppercase;
+    font-size:.68rem;
+    letter-spacing:.06em;
+    background:rgba(120,80,255,.06);
+    border-bottom:1px solid rgba(180,140,255,.25);
+}
+.tm-resid-table th:first-child,
+.tm-resid-table td:first-child { text-align:left; color:#aa9; }
+.tm-resid-table tr.now td { background:rgba(79,201,127,.06); color:#cfd; }
+.tm-resid-table tr.now td:first-child { color:#7fdb9a; font-weight:700; }
+.tm-resid-magn-low  { color:#7fdb9a; }
+.tm-resid-magn-mid  { color:#cba9ff; }
+.tm-resid-magn-high { color:#fc7; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -331,7 +511,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <p>A deep-time workbench for solar-system orbital mechanics. Wind the planets thousands of years forward or millions of years back, watch perihelia precess, and study chaos in the inner system. The orrery below runs on the live VSOP87D / Meeus ephemeris stack — drag the time slider, jump to a historical event, or let it play forward at hours-per-second.</p>
 </div>
 
-<!-- ═══ ORRERY ═══ -->
+<!-- ═══ ORRERY + SIDE PANEL ═══ -->
 <div id="tm-stage">
     <div id="tm-canvas-wrap">
         <div id="tm-hud">
@@ -349,6 +529,25 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div id="tm-mode-pill">● Live</div>
         <div id="tm-legend"></div>
     </div>
+
+    <aside id="tm-side">
+        <div class="tm-side-title">Body Picker</div>
+        <div class="tm-body-grid" id="tm-body-grid"></div>
+
+        <div class="tm-sel-head">
+            <span class="tm-sel-dot" id="tm-sel-dot"></span>
+            <span class="tm-sel-name" id="tm-sel-name">Earth</span>
+            <span class="tm-sel-sub" id="tm-sel-period">365.26 d</span>
+        </div>
+
+        <div class="tm-el-table" id="tm-el-table"></div>
+
+        <div class="tm-el-foot">
+            Mean Keplerian elements with Standish (1992) linear secular
+            rates. Position (r, x/y/z) uses VSOP87D for Earth + outer
+            planets and the 3-term Meeus series for the inner planets.
+        </div>
+    </aside>
 </div>
 
 <!-- ═══ TIME CONTROLS ═══ -->
@@ -408,6 +607,60 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 </div>
 
 <div id="tm-app">
+
+    <section class="tm-panel">
+        <div class="tm-plot-head">
+            <h2 style="flex:0 0 auto"><span id="tm-plot-title">Earth</span> Apsidal Precession <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— ±10,000 yr · selected body</span></h2>
+            <div class="tm-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>e — linear secular</span>
+                <span class="lg"><span class="swatch" style="background:#fc7"></span>ω̄ — linear secular</span>
+                <span class="lg"><span class="swatch" style="background:repeating-linear-gradient(90deg,#b78cff 0 4px, transparent 4px 8px); height:2px"></span>e — N-body</span>
+                <span class="lg"><span class="swatch" style="background:repeating-linear-gradient(90deg,#fc7 0 4px, transparent 4px 8px); height:2px"></span>ω̄ — N-body</span>
+                <span class="lg"><span class="swatch" style="background:#4fc97f; height:1px; border-bottom:1px dashed #4fc97f"></span>current epoch</span>
+            </div>
+        </div>
+        <div class="tm-plot-actions">
+            <button class="tm-btn primary" id="tm-run-nbody">▶ Run N-body Validation</button>
+            <div class="tm-progress-wrap"><div class="tm-progress-bar" id="tm-prog-bar"></div></div>
+            <span class="tm-progress-lbl" id="tm-prog-lbl">idle</span>
+        </div>
+        <div class="tm-plot-wrap">
+            <canvas id="tm-plot-canvas"></canvas>
+        </div>
+        <div class="tm-plot-readout">
+            <div class="cell"><span class="k">e at epoch</span><span class="v" id="pl-e">—</span></div>
+            <div class="cell"><span class="k">ω̄ at epoch</span><span class="v" id="pl-w">—</span></div>
+            <div class="cell"><span class="k">e cycle (linear)</span><span class="v" id="pl-de">—</span></div>
+            <div class="cell"><span class="k">ω̄ rate</span><span class="v" id="pl-dw">—</span></div>
+        </div>
+        <div class="tm-nbody-info" id="tm-nbody-info">
+            N-body integrator idle. Click <em>Run N-body Validation</em> to launch a Yoshida-4
+            symplectic integration of Sun + 8 planets + Ceres, Vesta, Pallas, Hygiea over ±2,000 yr
+            from the current epoch (dt = 1 d, ~3 s in a Web Worker). The integrated Earth e and ω̄
+            curves will overlay this plot for direct comparison with the linear secular model.
+        </div>
+        <p class="tm-warn">First-order linear extrapolation of Standish (1992) secular rates.
+        Reproduces the modern apsidal-precession trend (~11.45″/yr in ω̄ inertial → ~21,000-yr
+        climatic-precession period when combined with axial precession), but does not capture
+        the ~100-kyr Milankovitch eccentricity cycle, which arises from second-order
+        gravitational coupling with Venus and Jupiter and requires the full Wisdom-Holman tier.</p>
+    </section>
+
+    <section class="tm-panel">
+        <h2><span id="tm-resid-title">Earth</span> N-body − Linear-Secular Residuals
+            <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— follows body picker</span></h2>
+        <div id="tm-resid-table-wrap">
+            <p class="tm-resid-empty">Run the N-body validation above, then pick a planet from
+            the body picker beside the orrery to populate this table.</p>
+        </div>
+        <p class="tm-warn">Residuals are computed at fixed sample epochs as Δ = (full N-body
+        osculating element) − (Standish linear-secular value). Initial state is seeded from
+        Standish at the centre epoch so all residuals start at zero — values then evolve as
+        Yoshida-4 captures higher-order perturbative coupling that the linear model omits.
+        Mercury and Neptune residuals are inflated by integrator phase error at dt = 1 d
+        (Mercury's 88-day period is under-resolved; Neptune's near-circular orbit amplifies
+        element noise).</p>
+    </section>
 
     <section class="tm-panel tm-construct">
         <div class="tm-status">Phase 1 — Validated Window Live</div>
@@ -481,6 +734,7 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     jdNow, dateFromJD, jdFromDate,
+    planetElementsAt, PLANET_ELEMENTS,
     mercuryHeliocentric, venusHeliocentric, earthHeliocentric, marsHeliocentric,
     jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
 } from './js/horizons.js';
@@ -641,6 +895,552 @@ legend.innerHTML = BODIES.map(b =>
     `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
 ).join('');
 
+// ── Body picker + element table ──────────────────────────────────────
+const elBodyGrid = document.getElementById('tm-body-grid');
+const elSelDot   = document.getElementById('tm-sel-dot');
+const elSelName  = document.getElementById('tm-sel-name');
+const elSelPer   = document.getElementById('tm-sel-period');
+const elElTbl    = document.getElementById('tm-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'AU',  fmt:v => v.toFixed(7) },
+    { sym:'e',  nm:'eccentricity',        unit:'',    fmt:v => v.toFixed(7) },
+    { sym:'i',  nm:'inclination',         unit:'°',   fmt:v => v.toFixed(5) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',   fmt:v => normDeg(v).toFixed(4) },
+    { sym:'ω̄', nm:'long. of perihelion', unit:'°',   fmt:v => normDeg(v).toFixed(4) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',   fmt:v => v.toFixed(4) },
+    { sym:'L',  nm:'mean longitude',      unit:'°',   fmt:v => v.toFixed(4) },
+    { sym:'r',  nm:'heliocentric dist.',  unit:'AU',  fmt:v => v.toFixed(7) },
+];
+
+function normDeg(d) { const x = d % 360; return x < 0 ? x + 360 : x; }
+
+let selected = BODIES.find(b => b.key === 'earth');
+
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const b of BODIES) {
+        const btn = document.createElement('button');
+        btn.className = 'tm-body-btn' + (b.key === selected.key ? ' sel' : '');
+        btn.dataset.key = b.key;
+        const hex = '#' + b.color.toString(16).padStart(6, '0');
+        btn.innerHTML =
+            `<div class="tm-body-dot" style="background:${hex};color:${hex}"></div>` +
+            `<div class="tm-body-name">${b.name}</div>`;
+        btn.addEventListener('click', () => selectBody(b.key));
+        elBodyGrid.appendChild(btn);
+    }
+    // Pre-render rows so updateSidePanel only needs to update <span class="tm-el-v">
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="tm-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="tm-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+
+function selectBody(key) {
+    selected = BODIES.find(b => b.key === key) || selected;
+    elBodyGrid.querySelectorAll('.tm-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex;
+    elSelDot.style.color      = hex;
+    elSelName.textContent = selected.name;
+    elSelPer.textContent  = `${formatPeriod(PERIOD_D[selected.key])}`;
+    updateSidePanel();
+    if (typeof refreshPlot === 'function') refreshPlot();
+    if (typeof renderResidualTable === 'function') renderResidualTable();
+}
+
+function formatPeriod(days) {
+    if (days < 365)        return `${days.toFixed(2)} d`;
+    if (days < 365 * 100)  return `${(days/365.25).toFixed(2)} yr`;
+    return `${(days/365.25).toFixed(0)} yr`;
+}
+
+function updateSidePanel() {
+    const el = planetElementsAt(selected.key, state.jd);
+    const p  = selected.fn(state.jd);
+    const r  = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+    const vals = { a:el.a, e:el.e, i:el.i, 'Ω':el.node, 'ω̄':el.omegaBar, M:el.M, L:el.L, r };
+    for (const d of ELEM_DEFS) {
+        const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+        if (!node) continue;
+        node.innerHTML = d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : '');
+    }
+}
+
+// ── Earth apsidal-precession plot ────────────────────────────────────
+const plot = document.getElementById('tm-plot-canvas');
+const pctx = plot.getContext('2d');
+const elPlE  = document.getElementById('pl-e');
+const elPlW  = document.getElementById('pl-w');
+const elPlDe = document.getElementById('pl-de');
+const elPlDw = document.getElementById('pl-dw');
+
+// Sample buffers — recomputed when center JD shifts > 100 yr
+const PLOT_N = 240;
+let plotCenterJd  = -1e12;
+let plotBodyKey   = 'earth';                 // body the linear-secular curves represent
+const plotJds = new Float64Array(PLOT_N);
+const plotEs  = new Float64Array(PLOT_N);
+const plotWs  = new Float64Array(PLOT_N);   // ω̄ in degrees (unwrapped)
+const PLOT_HALF_DAYS = 10000 * 365.25;     // ±10 kyr
+
+function rebuildPlotSamples(centerJd, key) {
+    let prev = null;
+    let unwrapOff = 0;
+    for (let i = 0; i < PLOT_N; i++) {
+        const f  = i / (PLOT_N - 1) * 2 - 1;       // [-1, +1]
+        const jd = centerJd + f * PLOT_HALF_DAYS;
+        const el = planetElementsAt(key, jd);
+        plotJds[i] = jd;
+        plotEs[i]  = el.e;
+        let w = normDeg(el.omegaBar);
+        if (prev !== null) {
+            const d = w - prev;
+            if (d >  180) unwrapOff -= 360;
+            else if (d < -180) unwrapOff += 360;
+        }
+        prev = w;
+        plotWs[i] = w + unwrapOff;
+    }
+    plotCenterJd = centerJd;
+    plotBodyKey  = key;
+}
+
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizePlot();
+new ResizeObserver(resizePlot).observe(plot);
+
+function drawPlot() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+
+    // Layout
+    const padL = 56, padR = 56, padT = 14, padB = 28;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    // y-axis ranges — include N-body samples for the selected body if loaded
+    let eMin = Infinity, eMax = -Infinity, wMin = Infinity, wMax = -Infinity;
+    for (let i = 0; i < PLOT_N; i++) {
+        if (plotEs[i] < eMin) eMin = plotEs[i];
+        if (plotEs[i] > eMax) eMax = plotEs[i];
+        if (plotWs[i] < wMin) wMin = plotWs[i];
+        if (plotWs[i] > wMax) wMax = plotWs[i];
+    }
+    const nbBody  = nbody.bodyKey === plotBodyKey ? plotBodyKey : null;
+    const nbEs    = nbody.samples && nbBody && nbody.bodyTraces ? nbody.bodyTraces[plotBodyKey].e : null;
+    const nbWs    = nbody.samples && nbBody && nbody.bodyTraces ? nbody.bodyTraces[plotBodyKey].w : null;
+    if (nbEs && nbWs) {
+        for (let i = 0; i < nbEs.length; i++) {
+            if (nbEs[i] < eMin) eMin = nbEs[i];
+            if (nbEs[i] > eMax) eMax = nbEs[i];
+            if (nbWs[i] < wMin) wMin = nbWs[i];
+            if (nbWs[i] > wMax) wMax = nbWs[i];
+        }
+    }
+    // Pad ranges 8%
+    const ePad = (eMax - eMin) * 0.08 || 0.001;
+    const wPad = (wMax - wMin) * 0.08 || 1;
+    eMin -= ePad; eMax += ePad;
+    wMin -= wPad; wMax += wPad;
+
+    // ── grid + axis labels
+    pctx.strokeStyle = 'rgba(180,140,255,.10)';
+    pctx.lineWidth   = 1;
+    pctx.font        = '10px ui-monospace, Menlo, monospace';
+    pctx.textBaseline= 'middle';
+
+    const yEarthYr = dateFromJD(plotCenterJd).getUTCFullYear();
+    // 5 vertical grid lines: -10kyr, -5kyr, 0, +5kyr, +10kyr
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const x = padL + f * pw;
+        pctx.beginPath();
+        pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph);
+        pctx.stroke();
+        const yr = yEarthYr + Math.round((f * 2 - 1) * 10000);
+        const lbl = yr < 0 ? `${-yr} BCE` : `${yr}`;
+        pctx.fillStyle = '#665';
+        pctx.textAlign = 'center';
+        pctx.fillText(lbl, x, H - padB + 12);
+    }
+    // 5 horizontal grid lines
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const y = padT + f * ph;
+        pctx.beginPath();
+        pctx.moveTo(padL, y); pctx.lineTo(W - padR, y);
+        pctx.stroke();
+    }
+    // Left axis: e values
+    pctx.fillStyle = '#b78cff';
+    pctx.textAlign = 'right';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = eMax - f * (eMax - eMin);
+        pctx.fillText(v.toFixed(4), padL - 6, padT + f * ph);
+    }
+    // Right axis: ω̄ values
+    pctx.fillStyle = '#fc7';
+    pctx.textAlign = 'left';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = wMax - f * (wMax - wMin);
+        pctx.fillText(v.toFixed(1) + '°', W - padR + 6, padT + f * ph);
+    }
+    // Axis titles
+    pctx.fillStyle = 'rgba(180,140,255,.55)';
+    pctx.textAlign = 'center';
+    pctx.save();
+    pctx.translate(14, padT + ph / 2);
+    pctx.rotate(-Math.PI / 2);
+    pctx.fillText('eccentricity e', 0, 0);
+    pctx.restore();
+    pctx.fillStyle = 'rgba(255,184,48,.55)';
+    pctx.save();
+    pctx.translate(W - 14, padT + ph / 2);
+    pctx.rotate(Math.PI / 2);
+    pctx.fillText('long. perihelion ω̄', 0, 0);
+    pctx.restore();
+
+    // ── data traces
+    const xOf = i => padL + (i / (PLOT_N - 1)) * pw;
+    const yE  = v => padT + (1 - (v - eMin) / (eMax - eMin)) * ph;
+    const yW  = v => padT + (1 - (v - wMin) / (wMax - wMin)) * ph;
+
+    // Eccentricity (purple)
+    pctx.lineWidth = 1.8;
+    pctx.strokeStyle = '#b78cff';
+    pctx.beginPath();
+    for (let i = 0; i < PLOT_N; i++) {
+        const x = xOf(i), y = yE(plotEs[i]);
+        if (i === 0) pctx.moveTo(x, y); else pctx.lineTo(x, y);
+    }
+    pctx.stroke();
+
+    // ω̄ (orange)
+    pctx.strokeStyle = '#fc7';
+    pctx.beginPath();
+    for (let i = 0; i < PLOT_N; i++) {
+        const x = xOf(i), y = yW(plotWs[i]);
+        if (i === 0) pctx.moveTo(x, y); else pctx.lineTo(x, y);
+    }
+    pctx.stroke();
+
+    // ── N-body overlay for the selected body (dashed traces + dots) ──
+    if (nbEs && nbWs && nbody.samples.length > 1) {
+        const jdL = plotJds[0], jdR = plotJds[PLOT_N - 1];
+        const xOfJd = jd => padL + ((jd - jdL) / (jdR - jdL)) * pw;
+        pctx.lineWidth = 1.6;
+        pctx.setLineDash([5, 4]);
+
+        pctx.strokeStyle = '#b78cff';
+        pctx.beginPath();
+        let started = false;
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
+            const x = xOfJd(s.jd), y = yE(nbEs[i]);
+            if (!started) { pctx.moveTo(x, y); started = true; }
+            else          pctx.lineTo(x, y);
+        }
+        pctx.stroke();
+
+        pctx.strokeStyle = '#fc7';
+        pctx.beginPath();
+        started = false;
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
+            const x = xOfJd(s.jd), y = yW(nbWs[i]);
+            if (!started) { pctx.moveTo(x, y); started = true; }
+            else          pctx.lineTo(x, y);
+        }
+        pctx.stroke();
+        pctx.setLineDash([]);
+
+        pctx.fillStyle = 'rgba(180,140,255,.35)';
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) continue;
+            const x = xOfJd(s.jd);
+            pctx.beginPath(); pctx.arc(x, yE(nbEs[i]), 1.6, 0, Math.PI * 2); pctx.fill();
+        }
+        pctx.fillStyle = 'rgba(255,184,48,.35)';
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) continue;
+            const x = xOfJd(s.jd);
+            pctx.beginPath(); pctx.arc(x, yW(nbWs[i]), 1.6, 0, Math.PI * 2); pctx.fill();
+        }
+    }
+
+    // ── current-epoch cursor
+    const f0 = (state.jd - plotJds[0]) / (plotJds[PLOT_N - 1] - plotJds[0]);
+    if (f0 >= 0 && f0 <= 1) {
+        const x = padL + f0 * pw;
+        pctx.strokeStyle = 'rgba(79,201,127,.55)';
+        pctx.setLineDash([4, 3]);
+        pctx.lineWidth = 1.2;
+        pctx.beginPath();
+        pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph);
+        pctx.stroke();
+        pctx.setLineDash([]);
+
+        const elNow = planetElementsAt(plotBodyKey, state.jd);
+        const idxF = f0 * (PLOT_N - 1);
+        const i0 = Math.floor(idxF), i1 = Math.min(PLOT_N - 1, i0 + 1);
+        const tt = idxF - i0;
+        const wInterp = plotWs[i0] * (1 - tt) + plotWs[i1] * tt;
+
+        pctx.fillStyle = '#b78cff';
+        pctx.beginPath(); pctx.arc(x, yE(elNow.e), 4, 0, Math.PI * 2); pctx.fill();
+        pctx.fillStyle = '#fc7';
+        pctx.beginPath(); pctx.arc(x, yW(wInterp), 4, 0, Math.PI * 2); pctx.fill();
+    }
+}
+
+const elPlotTitle  = document.getElementById('tm-plot-title');
+const elResidTitle = document.getElementById('tm-resid-title');
+const elResidWrap  = document.getElementById('tm-resid-table-wrap');
+
+function refreshPlot() {
+    const key = (selected && selected.key) || 'earth';
+    const needRebuild =
+        plotBodyKey !== key ||
+        plotCenterJd < -1e10 ||
+        Math.abs(state.jd - plotCenterJd) > 100 * 365.25;
+    if (needRebuild) rebuildPlotSamples(state.jd, key);
+    drawPlot();
+
+    // Title + readouts follow selected body
+    const cap = key.charAt(0).toUpperCase() + key.slice(1);
+    if (elPlotTitle)  elPlotTitle.textContent  = cap;
+    if (elResidTitle) elResidTitle.textContent = cap;
+
+    const el = planetElementsAt(key, state.jd);
+    elPlE.textContent  = el.e.toFixed(7);
+    elPlW.textContent  = normDeg(el.omegaBar).toFixed(4) + '°';
+    const EL = PLANET_ELEMENTS[key];
+    elPlDe.textContent = ((EL.edot     ?? 0) * 100).toFixed(6) + ' /10kyr';
+    elPlDw.textContent = ((EL.omegadot ?? 0) * 100).toFixed(3) + '°/10kyr';
+}
+
+// ── Residual table renderer ──────────────────────────────────────────
+function renderResidualTable() {
+    const key = (selected && selected.key) || 'earth';
+    if (!nbody.samples) {
+        elResidWrap.innerHTML =
+            '<p class="tm-resid-empty">Run the N-body validation above, then pick a planet from ' +
+            'the body picker beside the orrery to populate this table.</p>';
+        return;
+    }
+
+    // Pick samples nearest to fixed offsets from the integration centre.
+    const center  = nbody.centerJd;
+    const targets = [-2000, -1000, -500, -100, 0, 100, 500, 1000, 2000]
+        .map(yr => ({ yr, jd: center + yr * 365.25 }));
+
+    const wrapAng = d => { let x = ((d + 180) % 360 + 360) % 360 - 180; return x; };
+    const fmtSig  = (v, k) => {
+        const a = Math.abs(v);
+        if (a < 1e-12) return '0';
+        if (a >= 100)   return v.toFixed(2);
+        if (a >= 1)     return v.toFixed(4);
+        if (a >= 1e-3)  return v.toFixed(5);
+        return v.toExponential(2);
+    };
+    const magClass = (v, low, high) => {
+        const a = Math.abs(v);
+        if (a < low) return 'tm-resid-magn-low';
+        if (a < high) return 'tm-resid-magn-mid';
+        return 'tm-resid-magn-high';
+    };
+
+    let rows = '';
+    for (const { yr, jd } of targets) {
+        // Find nearest N-body sample to jd
+        let best = null, bestD = Infinity;
+        for (const s of nbody.samples) {
+            const d = Math.abs(s.jd - jd);
+            if (d < bestD) { bestD = d; best = s; }
+        }
+        if (!best || !best.bodies || !best.bodies[key]) continue;
+        const std  = planetElementsAt(key, best.jd);
+        const nb   = best.bodies[key];
+        const dA   = nb.a - std.a;
+        const dE   = nb.e - std.e;
+        const dI   = nb.i - std.i;
+        const dW   = wrapAng(nb.omegaBar - ((std.omegaBar % 360 + 360) % 360));
+
+        const isNow = Math.abs(yr) < 1;
+        const yrLbl = yr === 0 ? 'centre' : (yr > 0 ? `+${yr} yr` : `${yr} yr`);
+        rows += '<tr' + (isNow ? ' class="now"' : '') + '>'
+              + '<td>' + yrLbl + '</td>'
+              + '<td class="' + magClass(dA, 1e-4, 1e-2)   + '">' + fmtSig(dA) + ' AU</td>'
+              + '<td class="' + magClass(dE, 1e-5, 1e-3)   + '">' + fmtSig(dE) + '</td>'
+              + '<td class="' + magClass(dI, 1e-3, 1e-1)   + '">' + fmtSig(dI) + '°</td>'
+              + '<td class="' + magClass(dW, 0.5, 5)       + '">' + fmtSig(dW) + '°</td>'
+              + '</tr>';
+    }
+
+    elResidWrap.innerHTML =
+        '<table class="tm-resid-table">' +
+            '<thead><tr><th>Epoch</th><th>Δa</th><th>Δe</th><th>Δi</th><th>Δω̄</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+        '</table>';
+}
+
+// ── N-body validation worker ─────────────────────────────────────────
+// Stores per-planet integrated samples and overlays the selected body's
+// e, ω̄ traces on the plot + the residual table.
+const nbody = {
+    worker:     null,
+    running:    false,
+    samples:    null,    // Array<{ jd, residualAU, bodies:{ key:{a,e,i,node,omegaBar} } }>
+    centerJd:   null,
+    info:       null,
+    bodyKey:    null,    // last body for which traces were built
+    bodyTraces: null,    // { key: { e:Float64Array, w:Float64Array (unwrapped deg) } }
+};
+
+function buildBodyTraces(samples, planetKeys) {
+    const traces = {};
+    for (const key of planetKeys) {
+        const N = samples.length;
+        const e = new Float64Array(N);
+        const w = new Float64Array(N);
+        let prev = null, off = 0;
+        for (let i = 0; i < N; i++) {
+            const b = samples[i].bodies[key];
+            e[i] = b.e;
+            const v = ((b.omegaBar % 360) + 360) % 360;
+            if (prev !== null) {
+                const d = v - prev;
+                if (d >  180) off -= 360;
+                else if (d < -180) off += 360;
+            }
+            prev = v;
+            w[i] = v + off;
+        }
+        traces[key] = { e, w };
+    }
+    return traces;
+}
+
+const elRunNbody = document.getElementById('tm-run-nbody');
+const elProgBar  = document.getElementById('tm-prog-bar');
+const elProgLbl  = document.getElementById('tm-prog-lbl');
+const elNbInfo   = document.getElementById('tm-nbody-info');
+
+function unwrapDeg(arr) {
+    const out = new Float64Array(arr.length);
+    let off = 0;
+    for (let i = 0; i < arr.length; i++) {
+        const v = normDeg(arr[i]);
+        if (i > 0) {
+            const d = v - normDeg(arr[i - 1]);
+            if (d >  180) off -= 360;
+            else if (d < -180) off += 360;
+        }
+        out[i] = v + off;
+    }
+    return out;
+}
+
+function startNbody() {
+    if (nbody.running) return;
+    nbody.running  = true;
+    nbody.samples  = null;
+    nbody.centerJd = state.jd;
+    elRunNbody.disabled = true;
+    elRunNbody.textContent = '⏱ Running…';
+    elProgBar.style.width = '0%';
+    elProgLbl.textContent = 'building initial state…';
+    elNbInfo.innerHTML = 'Spawning Yoshida-4 worker — Sun + 8 planets + 4 major asteroids, ' +
+        'centred on JD ' + nbody.centerJd.toFixed(1) + '.';
+
+    // Lazy-spawn the worker on first run.
+    if (!nbody.worker) {
+        try {
+            nbody.worker = new Worker('./js/orbital-mechanics/nbody-worker.js', { type:'module' });
+        } catch (err) {
+            elProgLbl.textContent = 'worker error';
+            elNbInfo.innerHTML = '<span class="warn">Failed to start worker: ' + err.message + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+            return;
+        }
+        nbody.worker.onmessage = onWorkerMessage;
+        nbody.worker.onerror = ev => {
+            elProgLbl.textContent = 'worker crashed';
+            elNbInfo.innerHTML = '<span class="warn">Worker crash: ' + (ev.message || ev) + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+        };
+    }
+
+    nbody.worker.postMessage({
+        type:        'run',
+        centerJd:    nbody.centerJd,
+        startYear:   -2000,
+        endYear:     +2000,
+        dtDays:      1,
+        sampleYears: 25,
+    });
+}
+
+function onWorkerMessage(ev) {
+    const m = ev.data;
+    switch (m.type) {
+        case 'progress':
+            elProgBar.style.width = (m.frac * 100).toFixed(1) + '%';
+            elProgLbl.textContent = `${(m.frac * 100).toFixed(0)}% — ${m.samplesSoFar} samples`;
+            break;
+        case 'sample':
+            // streamed sample — we'll collect them all in 'done', no per-sample redraw
+            break;
+        case 'done':
+            nbody.samples    = m.samples;
+            nbody.info       = m;
+            nbody.bodyKey    = (selected && selected.key) || 'earth';
+            nbody.bodyTraces = buildBodyTraces(m.samples, m.planetKeys);
+            elProgBar.style.width = '100%';
+            elProgLbl.textContent = `done — ${m.samples.length} samples in ${(m.runtimeMs/1000).toFixed(2)} s`;
+            const driftCls = m.energyDriftRel < 1e-6 ? 'ok' : 'warn';
+            const resCls   = m.maxResidualAU  < 1.0  ? 'ok' : 'warn';
+            elNbInfo.innerHTML =
+                `<strong>${m.nBodies} bodies · dt = ${m.dtDays} d · ${m.samples.length} samples · ${(m.runtimeMs/1000).toFixed(2)} s</strong><br>` +
+                `Energy drift &nbsp;<span class="${driftCls}">|ΔE/E| = ${m.energyDriftRel.toExponential(2)}</span>&nbsp; (symplectic — bounded long-term).<br>` +
+                `Position residual vs VSOP87D &nbsp;<span class="${resCls}">max ${m.maxResidualAU.toExponential(2)} AU</span>&nbsp; — dominated by mean-longitude phase drift from finite-difference velocity seeding; <em>orbital element evolution is the meaningful comparison</em>.`;
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Re-run at current epoch';
+            nbody.running = false;
+            refreshPlot();
+            renderResidualTable();
+            break;
+        case 'error':
+            elProgLbl.textContent = 'error';
+            elNbInfo.innerHTML = '<span class="warn">Integrator error: ' + m.message + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+            break;
+    }
+}
+
+elRunNbody.addEventListener('click', startNbody);
+
 // ── Time state ───────────────────────────────────────────────────────
 const state = {
     jd:        jdNow(),
@@ -755,6 +1555,8 @@ function setJd(jd, { fromLive = false } = {}) {
     updatePositions(jd);
     updateHud();
     syncInputsFromJd();
+    updateSidePanel();
+    refreshPlot();
 }
 
 // ── Play loop ────────────────────────────────────────────────────────
@@ -767,6 +1569,8 @@ function tick(now) {
         updatePositions(state.jd);
         updateHud();
         syncInputsFromJd();
+        updateSidePanel();
+        refreshPlot();
     } else if (state.playing && state.speedSec > 0) {
         const newJd = state.jd + (state.speedSec * dt) / 86400;
         setJd(newJd);
@@ -873,6 +1677,8 @@ elNow.addEventListener('click', () => {
     updatePositions(state.jd);
     updateHud();
     syncInputsFromJd();
+    updateSidePanel();
+    refreshPlot();
 });
 
 elStepF.addEventListener('click', () => {
@@ -923,10 +1729,13 @@ elJdIn.addEventListener('change', () => {
 
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBookmarks();
+buildBodyPicker();
+selectBody('earth');     // also calls updateSidePanel()
 recenterTo(state.jd);
 updatePositions(state.jd);
 updateHud();
 syncInputsFromJd();
+refreshPlot();
 </script>
 
 </body>
