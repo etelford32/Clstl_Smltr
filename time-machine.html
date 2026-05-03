@@ -428,6 +428,33 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 }
 .tm-plot-readout .cell .k { color:#776; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase; display:block; }
 .tm-plot-readout .cell .v { color:#eef; font-weight:700; font-size:.86rem; }
+
+/* ── N-body validation controls ─────────────────────────────────────── */
+.tm-plot-actions {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    margin-bottom:10px;
+}
+.tm-progress-wrap {
+    flex:1; min-width:160px; height:6px;
+    background:rgba(0,0,0,.35);
+    border-radius:3px; overflow:hidden;
+    border:1px solid rgba(180,140,255,.18);
+}
+.tm-progress-bar {
+    height:100%; width:0%;
+    background:linear-gradient(90deg, #4fc97f, #b78cff);
+    transition:width .15s ease;
+}
+.tm-progress-lbl {
+    font-family:monospace; font-size:.7rem; color:#998;
+    min-width:130px; text-align:right;
+}
+.tm-nbody-info {
+    font-family:monospace; font-size:.7rem; color:#776;
+    margin-top:8px; line-height:1.55;
+}
+.tm-nbody-info .ok { color:#4fc97f; }
+.tm-nbody-info .warn { color:#fc7; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -552,10 +579,17 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div class="tm-plot-head">
             <h2 style="flex:0 0 auto">Earth Apsidal Precession <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— ±10,000 yr</span></h2>
             <div class="tm-plot-legend">
-                <span class="lg"><span class="swatch" style="background:#b78cff"></span>eccentricity (e)</span>
-                <span class="lg"><span class="swatch" style="background:#fc7"></span>longitude of perihelion (ω̄)</span>
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>e — linear secular</span>
+                <span class="lg"><span class="swatch" style="background:#fc7"></span>ω̄ — linear secular</span>
+                <span class="lg"><span class="swatch" style="background:repeating-linear-gradient(90deg,#b78cff 0 4px, transparent 4px 8px); height:2px"></span>e — N-body</span>
+                <span class="lg"><span class="swatch" style="background:repeating-linear-gradient(90deg,#fc7 0 4px, transparent 4px 8px); height:2px"></span>ω̄ — N-body</span>
                 <span class="lg"><span class="swatch" style="background:#4fc97f; height:1px; border-bottom:1px dashed #4fc97f"></span>current epoch</span>
             </div>
+        </div>
+        <div class="tm-plot-actions">
+            <button class="tm-btn primary" id="tm-run-nbody">▶ Run N-body Validation</button>
+            <div class="tm-progress-wrap"><div class="tm-progress-bar" id="tm-prog-bar"></div></div>
+            <span class="tm-progress-lbl" id="tm-prog-lbl">idle</span>
         </div>
         <div class="tm-plot-wrap">
             <canvas id="tm-plot-canvas"></canvas>
@@ -565,6 +599,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <div class="cell"><span class="k">ω̄ at epoch</span><span class="v" id="pl-w">—</span></div>
             <div class="cell"><span class="k">e cycle (linear)</span><span class="v" id="pl-de">—</span></div>
             <div class="cell"><span class="k">ω̄ rate</span><span class="v" id="pl-dw">—</span></div>
+        </div>
+        <div class="tm-nbody-info" id="tm-nbody-info">
+            N-body integrator idle. Click <em>Run N-body Validation</em> to launch a Yoshida-4
+            symplectic integration of Sun + 8 planets + Ceres, Vesta, Pallas, Hygiea over ±2,000 yr
+            from the current epoch (dt = 1 d, ~3 s in a Web Worker). The integrated Earth e and ω̄
+            curves will overlay this plot for direct comparison with the linear secular model.
         </div>
         <p class="tm-warn">First-order linear extrapolation of Standish (1992) secular rates.
         Reproduces the modern apsidal-precession trend (~11.45″/yr in ω̄ inertial → ~21,000-yr
@@ -934,13 +974,23 @@ function drawPlot() {
     const padL = 56, padR = 56, padT = 14, padB = 28;
     const pw = W - padL - padR, ph = H - padT - padB;
 
-    // y-axis ranges
+    // y-axis ranges — include N-body samples if loaded so axes auto-fit both
     let eMin = Infinity, eMax = -Infinity, wMin = Infinity, wMax = -Infinity;
     for (let i = 0; i < PLOT_N; i++) {
         if (plotEs[i] < eMin) eMin = plotEs[i];
         if (plotEs[i] > eMax) eMax = plotEs[i];
         if (plotWs[i] < wMin) wMin = plotWs[i];
         if (plotWs[i] > wMax) wMax = plotWs[i];
+    }
+    if (nbody.samples) {
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const e = nbody.samples[i].e;
+            const w = nbody.wsUnwrap[i];
+            if (e < eMin) eMin = e;
+            if (e > eMax) eMax = e;
+            if (w < wMin) wMin = w;
+            if (w > wMax) wMax = w;
+        }
     }
     // Pad ranges 8%
     const ePad = (eMax - eMin) * 0.08 || 0.001;
@@ -1031,6 +1081,57 @@ function drawPlot() {
     }
     pctx.stroke();
 
+    // ── N-body overlay (dashed traces + dots) ────────────────────────
+    if (nbody.samples && nbody.samples.length > 1) {
+        const jdL = plotJds[0], jdR = plotJds[PLOT_N - 1];
+        const xOfJd = jd => padL + ((jd - jdL) / (jdR - jdL)) * pw;
+        pctx.lineWidth = 1.6;
+        pctx.setLineDash([5, 4]);
+
+        // e overlay
+        pctx.strokeStyle = '#b78cff';
+        pctx.beginPath();
+        let started = false;
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
+            const x = xOfJd(s.jd), y = yE(s.e);
+            if (!started) { pctx.moveTo(x, y); started = true; }
+            else          pctx.lineTo(x, y);
+        }
+        pctx.stroke();
+
+        // ω̄ overlay
+        pctx.strokeStyle = '#fc7';
+        pctx.beginPath();
+        started = false;
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) { started = false; continue; }
+            const x = xOfJd(s.jd), y = yW(nbody.wsUnwrap[i]);
+            if (!started) { pctx.moveTo(x, y); started = true; }
+            else          pctx.lineTo(x, y);
+        }
+        pctx.stroke();
+        pctx.setLineDash([]);
+
+        // Light sample dots
+        pctx.fillStyle = 'rgba(180,140,255,.35)';
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) continue;
+            const x = xOfJd(s.jd);
+            pctx.beginPath(); pctx.arc(x, yE(s.e), 1.6, 0, Math.PI * 2); pctx.fill();
+        }
+        pctx.fillStyle = 'rgba(255,184,48,.35)';
+        for (let i = 0; i < nbody.samples.length; i++) {
+            const s = nbody.samples[i];
+            if (s.jd < jdL || s.jd > jdR) continue;
+            const x = xOfJd(s.jd);
+            pctx.beginPath(); pctx.arc(x, yW(nbody.wsUnwrap[i]), 1.6, 0, Math.PI * 2); pctx.fill();
+        }
+    }
+
     // ── current-epoch cursor
     const f0 = (state.jd - plotJds[0]) / (plotJds[PLOT_N - 1] - plotJds[0]);
     if (f0 >= 0 && f0 <= 1) {
@@ -1072,6 +1173,121 @@ function refreshPlot() {
     elPlDe.textContent = (E.edot * 100).toFixed(6) + ' /10kyr';
     elPlDw.textContent = (E.omegadot * 100).toFixed(3) + '°/10kyr';
 }
+
+// ── N-body validation worker ─────────────────────────────────────────
+// Stores integrated Earth samples and overlays them on the plot.
+const nbody = {
+    worker:   null,
+    running:  false,
+    samples:  null,        // Array<{ jd, e, omegaBar, residualAU }>
+    centerJd: null,
+    info:     null,        // { maxResidualAU, energyDriftRel, runtimeMs, nBodies, dtDays }
+    wsUnwrap: null,        // unwrapped ω̄ array, parallel to samples, in deg
+};
+
+const elRunNbody = document.getElementById('tm-run-nbody');
+const elProgBar  = document.getElementById('tm-prog-bar');
+const elProgLbl  = document.getElementById('tm-prog-lbl');
+const elNbInfo   = document.getElementById('tm-nbody-info');
+
+function unwrapDeg(arr) {
+    const out = new Float64Array(arr.length);
+    let off = 0;
+    for (let i = 0; i < arr.length; i++) {
+        const v = normDeg(arr[i]);
+        if (i > 0) {
+            const d = v - normDeg(arr[i - 1]);
+            if (d >  180) off -= 360;
+            else if (d < -180) off += 360;
+        }
+        out[i] = v + off;
+    }
+    return out;
+}
+
+function startNbody() {
+    if (nbody.running) return;
+    nbody.running  = true;
+    nbody.samples  = null;
+    nbody.centerJd = state.jd;
+    elRunNbody.disabled = true;
+    elRunNbody.textContent = '⏱ Running…';
+    elProgBar.style.width = '0%';
+    elProgLbl.textContent = 'building initial state…';
+    elNbInfo.innerHTML = 'Spawning Yoshida-4 worker — Sun + 8 planets + 4 major asteroids, ' +
+        'centred on JD ' + nbody.centerJd.toFixed(1) + '.';
+
+    // Lazy-spawn the worker on first run.
+    if (!nbody.worker) {
+        try {
+            nbody.worker = new Worker('./js/orbital-mechanics/nbody-worker.js', { type:'module' });
+        } catch (err) {
+            elProgLbl.textContent = 'worker error';
+            elNbInfo.innerHTML = '<span class="warn">Failed to start worker: ' + err.message + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+            return;
+        }
+        nbody.worker.onmessage = onWorkerMessage;
+        nbody.worker.onerror = ev => {
+            elProgLbl.textContent = 'worker crashed';
+            elNbInfo.innerHTML = '<span class="warn">Worker crash: ' + (ev.message || ev) + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+        };
+    }
+
+    nbody.worker.postMessage({
+        type:        'run',
+        centerJd:    nbody.centerJd,
+        startYear:   -2000,
+        endYear:     +2000,
+        dtDays:      1,
+        sampleYears: 25,
+    });
+}
+
+function onWorkerMessage(ev) {
+    const m = ev.data;
+    switch (m.type) {
+        case 'progress':
+            elProgBar.style.width = (m.frac * 100).toFixed(1) + '%';
+            elProgLbl.textContent = `${(m.frac * 100).toFixed(0)}% — ${m.samplesSoFar} samples`;
+            break;
+        case 'sample':
+            // streamed sample — we'll collect them all in 'done', no per-sample redraw
+            break;
+        case 'done':
+            nbody.samples = m.samples;
+            nbody.info    = m;
+            // Build unwrapped ω̄ array for plotting
+            nbody.wsUnwrap = unwrapDeg(nbody.samples.map(s => s.omegaBar));
+            elProgBar.style.width = '100%';
+            elProgLbl.textContent = `done — ${m.samples.length} samples in ${(m.runtimeMs/1000).toFixed(2)} s`;
+            const driftCls = m.energyDriftRel < 1e-6 ? 'ok' : 'warn';
+            const resCls   = m.maxResidualAU  < 1.0  ? 'ok' : 'warn';
+            elNbInfo.innerHTML =
+                `<strong>${m.nBodies} bodies · dt = ${m.dtDays} d · ${m.samples.length} samples · ${(m.runtimeMs/1000).toFixed(2)} s</strong><br>` +
+                `Energy drift &nbsp;<span class="${driftCls}">|ΔE/E| = ${m.energyDriftRel.toExponential(2)}</span>&nbsp; (symplectic — bounded long-term).<br>` +
+                `Position residual vs VSOP87D &nbsp;<span class="${resCls}">max ${m.maxResidualAU.toExponential(2)} AU</span>&nbsp; — dominated by mean-longitude phase drift from finite-difference velocity seeding; <em>orbital element evolution is the meaningful comparison</em>.`;
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Re-run at current epoch';
+            nbody.running = false;
+            refreshPlot();
+            break;
+        case 'error':
+            elProgLbl.textContent = 'error';
+            elNbInfo.innerHTML = '<span class="warn">Integrator error: ' + m.message + '</span>';
+            elRunNbody.disabled = false;
+            elRunNbody.textContent = '▶ Run N-body Validation';
+            nbody.running = false;
+            break;
+    }
+}
+
+elRunNbody.addEventListener('click', startNbody);
 
 // ── Time state ───────────────────────────────────────────────────────
 const state = {
