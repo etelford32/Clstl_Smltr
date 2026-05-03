@@ -119,6 +119,28 @@ supabase-client-telemetry-migration.sql   # client_telemetry table (errors,
                                           # Surfaces on /superadmin → Telemetry tab.
                                           # Requires the /api/telemetry/log edge
                                           # endpoint deployed to Vercel.
+
+# Perf alerts (May 2026)
+supabase-perf-alerts-migration.sql        # perf_alert_state + 5 RPCs that wire
+                                          # /api/cron/pipeline-watchdog into the
+                                          # client_telemetry pipeline. LCP p95
+                                          # > 4 s (configurable) on any route
+                                          # fires a Slack/email alert, with
+                                          # 6 h cooldown + auto-resolve after 3
+                                          # consecutive healthy ticks.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
+
+# Per-user timeline (May 2026)
+supabase-user-timeline-migration.sql      # telemetry_user_timeline + _summary
+                                          # RPCs that merge client_telemetry +
+                                          # activation_events for a single user
+                                          # into one chronological view. Powers
+                                          # the "Timeline" action on each row of
+                                          # /superadmin → User Management. Read-
+                                          # only; superadmin-gated.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
@@ -182,6 +204,8 @@ Environment Variables, scope = Production):
 | `CRON_SECRET` | `/api/cron/*` Bearer token (recommended over `x-vercel-cron` fallback) | **yes** |
 | `METNO_USER_AGENT` | optional; identifies us to MET Norway | no |
 | `ALERT_OPS_EMAIL` | required for `/api/cron/pipeline-watchdog` to actually send (without it the watchdog logs candidates but skips email) | **yes** |
+| `SLACK_WEBHOOK_URL` | optional; Slack incoming-webhook URL. Watchdog uses Slack as the preferred channel for perf-regression + recovery alerts and falls back to email if unset | **yes** |
+| `PERF_ALERT_METRIC` / `PERF_ALERT_THRESHOLD_MS` / `PERF_ALERT_WINDOW_HOURS` / `PERF_ALERT_MIN_SAMPLES` / `PERF_ALERT_COOLDOWN_HOURS` / `PERF_ALERT_RESOLVE_STREAK` | optional; per-knob overrides for the perf-regression alert (defaults: `LCP` / `4000` / `6` / `30` / `6` / `3`) | no |
 
 **3. Promote the first admin** — after you've signed up your own
 account through `/signup`, run this in the Supabase SQL Editor (one

@@ -472,6 +472,7 @@ export class SatelliteTracker {
      */
     async loadGroup(group = 'stations') {
         if (this._groups.has(group)) return this._groups.get(group).count;
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?group=${group}`);
             const data = await res.json().catch(() => ({}));
@@ -481,6 +482,15 @@ export class SatelliteTracker {
                     : `HTTP ${res.status}`;
                 throw new Error(reason);
             }
+            // Telemetry: record the TLE-load latency for the superadmin
+            // perf summary. Surfaces as `tle_load_ms` per route. Slow
+            // p95 here is a CelesTrak / edge proxy issue, not a client
+            // one. Lazy import keeps satellite-tracker free of a
+            // hard dep on telemetry.
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf(`tle_load_${group}`, performance.now() - _t0);
+            } catch {}
 
             const tles = data.satellites ?? [];
             const added = this._addSatellites(tles, group);
@@ -546,6 +556,7 @@ export class SatelliteTracker {
      * @param {number} noradId  NORAD catalog number
      */
     async loadNorad(noradId) {
+        const _t0 = performance.now();
         try {
             const res = await fetch(`/api/celestrak/tle?norad=${noradId}`);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -554,6 +565,10 @@ export class SatelliteTracker {
 
             const sats = data.satellites ?? [];
             this._addSatellites(sats, 'search');
+            try {
+                const { telemetry } = await import('./telemetry.js');
+                telemetry.recordPerf('tle_load_norad', performance.now() - _t0);
+            } catch {}
             return sats[0] ?? null;
         } catch (err) {
             console.warn(`[SatTracker] Failed to load NORAD ${noradId}:`, err.message);
