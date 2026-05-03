@@ -875,6 +875,238 @@ export async function fetchCohortRetention(weeks = 6) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Visitor flow — derived from analytics_events page_view rows. One round trip
+// per call; everything (entry/exit pages, transitions, bounce rate, anon vs
+// signed split, referrers) is computed client-side from the same dataset to
+// keep this cheap on Supabase. No schema change required.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Headline visitor-flow stats for the window. Returns:
+ *   {
+ *     sessions, anonSessions, signedSessions,
+ *     pageviews, avgPagesPerSession, bounceRate,
+ *     avgSessionDurationSec,
+ *     entryPages:   [{ name, count, share }],
+ *     exitPages:    [{ name, count, share }],
+ *     transitions:  [{ from, to, count }],
+ *     referrers:    [{ origin, count, share }],
+ *     anonConverted: # of sessions that started anonymous and ended signed-in
+ *   }
+ *
+ * Capped at 30k events to keep payload sane on long windows. Beyond that
+ * the dashboard hint suggests narrowing the window.
+ */
+export async function fetchVisitorFlow(days = 7) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+
+    const HARD_CAP = 30000;
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, page_path, session_id, user_id, referrer, created_at')
+            .eq('event_type', 'page_view')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true })
+            .limit(HARD_CAP);
+        if (error) throw error;
+
+        const rows = data || [];
+        const truncated = rows.length >= HARD_CAP;
+
+        // Group by session — each session becomes a chronological page
+        // sequence. We collapse adjacent duplicates (A → A) because those
+        // are reloads / SPA-route-noise, not navigation.
+        const sessions = new Map();   // sid -> { pages:[name], firstTs, lastTs, hadUser }
+        for (const r of rows) {
+            const sid = r.session_id;
+            if (!sid) continue;
+            const name = r.event_name || _pageNameFromPath(r.page_path);
+            const ts = Date.parse(r.created_at);
+            let s = sessions.get(sid);
+            if (!s) {
+                s = {
+                    pages: [], firstTs: ts, lastTs: ts,
+                    hadUser: !!r.user_id,
+                    firstHadNoUser: !r.user_id,
+                    firstReferrer: r.referrer || null,
+                };
+                sessions.set(sid, s);
+            }
+            // Drop consecutive duplicates.
+            if (s.pages[s.pages.length - 1] !== name) s.pages.push(name);
+            if (ts > s.lastTs) s.lastTs = ts;
+            if (r.user_id) s.hadUser = true;
+        }
+
+        // ── Aggregate ─────────────────────────────────────────────────
+        const entryCount = new Map();
+        const exitCount  = new Map();
+        const transition = new Map();   // 'from→to' -> count
+        const refCount   = new Map();
+        let totalPages = 0;
+        let bounces    = 0;
+        let totalDurationMs = 0;
+        let withDuration    = 0;
+        let anonSessions    = 0;
+        let signedSessions  = 0;
+        let anonConverted   = 0;
+
+        for (const [sid, s] of sessions) {
+            const pages = s.pages;
+            if (!pages.length) continue;
+            entryCount.set(pages[0], (entryCount.get(pages[0]) || 0) + 1);
+            exitCount.set(pages[pages.length - 1], (exitCount.get(pages[pages.length - 1]) || 0) + 1);
+            totalPages += pages.length;
+            if (pages.length === 1) bounces++;
+            for (let i = 0; i < pages.length - 1; i++) {
+                const key = pages[i] + '→' + pages[i + 1];
+                transition.set(key, (transition.get(key) || 0) + 1);
+            }
+            // Duration = last_seen - first_seen for this session. Sessions
+            // with only one page_view have duration 0 by definition; skip
+            // them so the average isn't dragged toward zero by bounces.
+            if (s.lastTs > s.firstTs) {
+                totalDurationMs += (s.lastTs - s.firstTs);
+                withDuration++;
+            }
+            if (s.hadUser) signedSessions++;
+            else           anonSessions++;
+            // "Converted" = session has signed-in events but landing was anon.
+            // Heuristic: hadUser is true but the FIRST event had no user_id.
+            // We can't perfectly tell from the cap-limited dataset, but the
+            // session row was inserted in chronological order — if hadUser
+            // is true and the first row's user_id was null, we treat that
+            // as a conversion within the visit.
+            if (s.hadUser && s.firstHadNoUser) anonConverted++;
+            // Referrers — only the first referrer per session matters.
+            if (s.firstReferrer) {
+                refCount.set(s.firstReferrer, (refCount.get(s.firstReferrer) || 0) + 1);
+            }
+        }
+
+        const sessionCount = sessions.size;
+        const sortTop = (m, n = 10) => Array.from(m, ([name, count]) => ({ name, count }))
+            .sort((a, b) => b.count - a.count).slice(0, n)
+            .map(x => ({ ...x, share: sessionCount ? +(x.count / sessionCount).toFixed(3) : 0 }));
+
+        const topTransitions = Array.from(transition, ([k, count]) => {
+            const [from, to] = k.split('→');
+            return { from, to, count };
+        }).sort((a, b) => b.count - a.count).slice(0, 15);
+
+        const topReferrers = Array.from(refCount, ([origin, count]) => ({ origin, count }))
+            .sort((a, b) => b.count - a.count).slice(0, 10)
+            .map(r => ({ ...r, share: sessionCount ? +(r.count / sessionCount).toFixed(3) : 0 }));
+
+        return {
+            ok: true,
+            data: {
+                windowDays:            days,
+                sessions:              sessionCount,
+                anonSessions,
+                signedSessions,
+                anonConverted,
+                pageviews:             totalPages,
+                avgPagesPerSession:    sessionCount ? +(totalPages / sessionCount).toFixed(2) : 0,
+                bounceRate:            sessionCount ? +(bounces / sessionCount).toFixed(3) : 0,
+                avgSessionDurationSec: withDuration ? Math.round(totalDurationMs / withDuration / 1000) : 0,
+                entryPages:            sortTop(entryCount, 10),
+                exitPages:             sortTop(exitCount, 10),
+                transitions:           topTransitions,
+                referrers:             topReferrers,
+                truncated,
+            },
+        };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+/**
+ * Last-page-of-session distribution, but bucketed by whether the visitor
+ * ever signed in. Lets the dashboard show "of anonymous visitors who
+ * landed on /pricing, X% bounced and Y% navigated to /signup".
+ *
+ * Returns: { ok, data: [{ entry, anonNext: [{ to, count }], signedNext: [...] }] }
+ */
+export async function fetchEntryDestinations(days = 7, topN = 6) {
+    const client = await sb();
+    if (!client) return { ok: false, error: 'Supabase not configured' };
+    if (!await requireAdmin()) return { ok: false, error: 'Admin verification failed' };
+    try {
+        const { data, error } = await client
+            .from('analytics_events')
+            .select('event_name, session_id, user_id, created_at')
+            .eq('event_type', 'page_view')
+            .gte('created_at', daysAgo(days))
+            .order('created_at', { ascending: true })
+            .limit(30000);
+        if (error) throw error;
+
+        const sessions = new Map();
+        for (const r of data || []) {
+            const sid = r.session_id;
+            if (!sid) continue;
+            let s = sessions.get(sid);
+            if (!s) { s = { pages: [], hadUser: !!r.user_id }; sessions.set(sid, s); }
+            const name = r.event_name;
+            if (s.pages[s.pages.length - 1] !== name) s.pages.push(name);
+            if (r.user_id) s.hadUser = true;
+        }
+
+        // entry -> { anonNext: Map(to,count), signedNext: Map(to,count), bouncesAnon, bouncesSigned }
+        const buckets = new Map();
+        for (const s of sessions.values()) {
+            if (!s.pages.length) continue;
+            const entry = s.pages[0];
+            if (!buckets.has(entry)) buckets.set(entry, {
+                anonNext: new Map(), signedNext: new Map(),
+                bouncesAnon: 0, bouncesSigned: 0,
+                totalAnon: 0, totalSigned: 0,
+            });
+            const b = buckets.get(entry);
+            if (s.hadUser) b.totalSigned++; else b.totalAnon++;
+            if (s.pages.length === 1) {
+                if (s.hadUser) b.bouncesSigned++; else b.bouncesAnon++;
+            } else {
+                const next = s.pages[1];
+                const m = s.hadUser ? b.signedNext : b.anonNext;
+                m.set(next, (m.get(next) || 0) + 1);
+            }
+        }
+
+        const out = Array.from(buckets, ([entry, b]) => {
+            const total = b.totalAnon + b.totalSigned;
+            const top = (m, n = 5) => Array.from(m, ([to, count]) => ({ to, count }))
+                .sort((a, b) => b.count - a.count).slice(0, n);
+            return {
+                entry,
+                total,
+                totalAnon:    b.totalAnon,
+                totalSigned:  b.totalSigned,
+                bouncesAnon:  b.bouncesAnon,
+                bouncesSigned:b.bouncesSigned,
+                anonNext:     top(b.anonNext),
+                signedNext:   top(b.signedNext),
+            };
+        }).sort((a, b) => b.total - a.total).slice(0, topN);
+
+        return { ok: true, data: out };
+    } catch (err) {
+        return { ok: false, error: err.message };
+    }
+}
+
+function _pageNameFromPath(p) {
+    if (!p) return '(none)';
+    return String(p).split('?')[0].split('#')[0]
+        .replace(/^\/+/, '').replace(/\.html?$/i, '') || 'index';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Conversion: free → paid funnel rate, by week.
 // ─────────────────────────────────────────────────────────────────────────────
 
