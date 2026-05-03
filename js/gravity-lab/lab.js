@@ -12,6 +12,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     yoshida4Step,
     totalEnergy,
+    totalJ2PotentialEnergy,
     totalAngularMomentum,
     stateToElements,
     G_SI,
@@ -47,6 +48,9 @@ const state = {
     // Camera focus state — null = free orbit; integer = index into bodies[].
     focusIdx:       null,
     focusOffset:    new THREE.Vector3(),  // camera position relative to focus target
+    // Central-body J2 perturbation. Toggleable per system.
+    j2Enabled:      false,
+    j2Opts:         null,    // {centerIdx, J2, R_eq, mu} consumed by integrator
 };
 
 // Three.js singletons — initialised once in init().
@@ -84,6 +88,10 @@ const hud = {
     bodyChips:  null,    // container for body focus chips
     fitBtn:     null,    // reset camera to system overview
     focusLabel: null,    // small status text for current focus
+    // Perturbation toggles
+    j2Toggle:    null,    // checkbox / button for central-body J2
+    j2Wrap:      null,    // wrapper that hides the toggle when system has no J2
+    j2Note:      null,    // small descriptor of what J2 does for the active system
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -266,7 +274,24 @@ export function loadSystem(systemId) {
     state.paused        = false;
     state.direction     = +1;
     state.framesSinceTrail = 0;
-    state.energy0       = totalEnergy(state.bodies).total;
+    // J2 perturbation setup. When the system declares oblateness, build
+    // the integrator's J2 opts object and seed the toggle from the
+    // system's preferred default. The actual application happens in
+    // _stepWithOpts() below — flipping the toggle is hot-swappable.
+    if (src.oblateness) {
+        const parentIdx = state.bodies.findIndex(b => b.is_parent);
+        state.j2Opts = {
+            centerIdx: Math.max(0, parentIdx),
+            J2:        src.oblateness.J2,
+            R_eq:      src.oblateness.R_eq_m,
+            mu:        src.mu_parent,
+        };
+        state.j2Enabled = !!src.j2_default;
+    } else {
+        state.j2Opts    = null;
+        state.j2Enabled = false;
+    }
+    state.energy0 = _currentTotalEnergy();
     const L0 = totalAngularMomentum(state.bodies);
     state.L0_mag = Math.hypot(L0[0], L0[1], L0[2]) || 1;
 
@@ -332,7 +357,32 @@ export function loadSystem(systemId) {
     _updateMeshes();
     _renderHUDChrome();
     _renderBodyChips();
+    _renderJ2Widget();
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
+}
+
+// Energy diagnostic that includes the J2 contribution when active so the
+// readout reports true Hamiltonian drift rather than the oscillation of
+// the unaccounted J2 PE.
+function _currentTotalEnergy() {
+    let E = totalEnergy(state.bodies).total;
+    if (state.j2Enabled && state.j2Opts) {
+        E += totalJ2PotentialEnergy(state.bodies, state.j2Opts);
+    }
+    return E;
+}
+
+function _renderJ2Widget() {
+    if (!hud.j2Wrap) return;
+    const has = !!state.j2Opts;
+    hud.j2Wrap.style.display = has ? '' : 'none';
+    if (!has) return;
+    if (hud.j2Toggle) hud.j2Toggle.checked = !!state.j2Enabled;
+    if (hud.j2Note) {
+        const J2 = state.j2Opts.J2;
+        const R  = state.j2Opts.R_eq / 1000;
+        hud.j2Note.innerHTML = `Central body J₂ = <strong>${J2.toExponential(2)}</strong>, R_eq = ${R.toFixed(0)} km. Toggle to compare a precessing orbit against a Keplerian one.`;
+    }
 }
 
 function _frameSystem() {
@@ -433,8 +483,9 @@ function _tick(t) {
         const target = state.targetStep;
         const nSub = Math.max(1, Math.ceil(Math.abs(dt_sim) / target));
         const sub  = dt_sim / nSub;
+        const opts = (state.j2Enabled && state.j2Opts) ? { J2: state.j2Opts } : undefined;
         for (let k = 0; k < nSub; k++) {
-            yoshida4Step(state.bodies, sub);
+            yoshida4Step(state.bodies, sub, opts);
         }
         state.elapsedSec += dt_sim;
         _updateMeshes();
@@ -511,8 +562,9 @@ function _renderTabs() {
 }
 
 function _renderHUDLive() {
-    // Energy & angular-momentum drift.
-    const E = totalEnergy(state.bodies).total;
+    // Energy & angular-momentum drift. With J2 on, total energy includes
+    // the J2 potential so the diagnostic still reports the full drift.
+    const E = _currentTotalEnergy();
     const L = totalAngularMomentum(state.bodies);
     const dE = state.energy0 ? Math.abs((E - state.energy0) / state.energy0) : 0;
     const Lm = Math.hypot(L[0], L[1], L[2]);
@@ -673,6 +725,17 @@ export function attachUI(refs) {
         hud.fitBtn.addEventListener('click', () => {
             setFocus(null);
             _frameSystem();
+        });
+    }
+
+    if (hud.j2Toggle) {
+        hud.j2Toggle.addEventListener('change', () => {
+            state.j2Enabled = !!hud.j2Toggle.checked;
+            // Re-baseline conserved quantities so the drift readout reflects
+            // post-toggle behaviour rather than the discontinuity.
+            state.energy0 = _currentTotalEnergy();
+            const L = totalAngularMomentum(state.bodies);
+            state.L0_mag = Math.hypot(L[0], L[1], L[2]) || 1;
         });
     }
 }
