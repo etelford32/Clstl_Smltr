@@ -28,13 +28,23 @@ import { elementsToState, shiftToBarycenter, G_SI } from './physics.js';
 
 // Standard gravitational parameters (m^3 s^-2).
 const MU = {
-    earth:    3.986004418e14,
-    moon:     4.9028000e12,
-    jupiter:  1.26686534e17,
-    io:       5.959916e12,
-    europa:   3.202739e12,
-    ganymede: 9.887834e12,
-    callisto: 7.179289e12,
+    earth:      3.986004418e14,
+    moon:       4.9028000e12,
+    jupiter:    1.26686534e17,
+    io:         5.959916e12,
+    europa:     3.202739e12,
+    ganymede:   9.887834e12,
+    callisto:   7.179289e12,
+    saturn:     3.7931187e16,
+    mimas:      2.503489e9,
+    enceladus:  7.211454e9,
+    tethys:     4.121352e10,
+    dione:      7.311562e10,
+    rhea:       1.539416e11,
+    titan:      8.978139e12,
+    iapetus:    1.205075e11,
+    janus:      1.265765e8,    // 1.8975e18 kg * G
+    epimetheus: 3.515060e7,    // 5.266e17 kg * G
 };
 
 // Masses (kg) derived from MU, used by the integrator.
@@ -222,12 +232,179 @@ const JUPITER_GALILEANS = _build({
     suggested_warp:    86400 * 0.5,      // half day per real second
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Saturn + Major Moons
+// ─────────────────────────────────────────────────────────────────────────────
+// Mean orbital elements at J2000.0 referenced to Saturn's mean equator of
+// J2000.  Source: JPL satellite ephemerides (SAT375 / Vienne-Duriez TASS).
+// Includes the seven principal moons.  Hyperion (chaotic rotator) and the
+// dozens of irregular moons are deliberately omitted.
+
+const SATURN_MAJOR = _build({
+    id:    'saturn-major',
+    name:  'Saturn + Major Moons',
+    blurb: 'Seven worlds tracing icy paths around the ringed giant — and a 2:1 mean-motion resonance hidden in the middle.',
+    marketing: {
+        headline: 'Saturn\'s family, from Mimas to Iapetus',
+        callout:  'Mimas and Tethys lock in a 4:2 inclination resonance · Enceladus and Dione in a 2:1 mean-motion resonance. Run forward 80 days and watch Iapetus pull a slow lap around Titan.',
+        physics:  'Pure pairwise gravity. Resonant lockings emerge from the integrator with no scripting — they\'re consequences of Newtonian dynamics.',
+    },
+    parent: {
+        name: 'saturn',
+        m: M.saturn,
+        radius_km: 60_268,
+        color: 0xe4c98a,
+        glow:  0xfff1bb,
+    },
+    satellites: [
+        {
+            name: 'mimas',
+            m: M.mimas,
+            radius_km: 198.2,
+            color: 0xc8c8c8,
+            highlight: 'Death-Star moon · 4:2 resonance with Tethys',
+            elements: { a: 185_539_000, e: 0.0202, i_deg: 1.574,
+                        raan_deg: 173.027, argp_deg: 332.499, M_deg:  14.848 },
+        },
+        {
+            name: 'enceladus',
+            m: M.enceladus,
+            radius_km: 252.1,
+            color: 0xeef0f5,
+            highlight: 'cryovolcanic plumes · 2:1 with Dione',
+            elements: { a: 237_948_000, e: 0.0047, i_deg: 0.009,
+                        raan_deg: 342.487, argp_deg:   0.000, M_deg: 199.000 },
+        },
+        {
+            name: 'tethys',
+            m: M.tethys,
+            radius_km: 533.0,
+            color: 0xd6d4cc,
+            highlight: 'icy crust · trojans Telesto + Calypso',
+            elements: { a: 294_672_000, e: 0.0001, i_deg: 1.091,
+                        raan_deg: 259.842, argp_deg:  45.202, M_deg: 285.327 },
+        },
+        {
+            name: 'dione',
+            m: M.dione,
+            radius_km: 561.4,
+            color: 0xcfcdc6,
+            highlight: 'wispy bright cliffs',
+            elements: { a: 377_415_000, e: 0.0022, i_deg: 0.028,
+                        raan_deg: 290.415, argp_deg: 284.300, M_deg: 322.232 },
+        },
+        {
+            name: 'rhea',
+            m: M.rhea,
+            radius_km: 763.8,
+            color: 0xbdb9af,
+            highlight: '2nd largest Saturn moon',
+            elements: { a: 527_068_000, e: 0.0010, i_deg: 0.331,
+                        raan_deg: 351.042, argp_deg: 241.619, M_deg: 184.522 },
+        },
+        {
+            name: 'titan',
+            m: M.titan,
+            radius_km: 2574.7,
+            color: 0xd9a256,
+            highlight: 'thick atmosphere · methane lakes',
+            elements: { a: 1_221_870_000, e: 0.0288, i_deg: 0.280,
+                        raan_deg:  28.058, argp_deg: 184.461, M_deg:  14.299 },
+        },
+        {
+            name: 'iapetus',
+            m: M.iapetus,
+            radius_km: 734.5,
+            color: 0x6e5c4a,
+            highlight: 'two-tone hemispheres · 15.5° inclined orbit',
+            elements: { a: 3_560_820_000, e: 0.0286, i_deg: 15.470,
+                        raan_deg:  81.105, argp_deg: 271.606, M_deg:  79.000 },
+        },
+    ],
+    scale_km_per_unit: 60_268,           // 1 scene unit = Saturn radius
+    suggested_dt_s:    1200,             // 20-minute step
+    suggested_warp:    86400 * 0.7,
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Saturn co-orbitals — Janus & Epimetheus
+// ─────────────────────────────────────────────────────────────────────────────
+// Janus and Epimetheus share a horseshoe-orbit configuration: their
+// semi-major axes differ by only ~50 km (vs. orbit radius 151,000 km), so
+// every ~4 years they swap which one is inner and which is outer.  In the
+// rotating frame this looks like a horseshoe; in the inertial frame the
+// integrator just produces it from gravity alone.
+//
+// IC tuned for visible swap on a watchable timescale: bodies start in the
+// just-pre-encounter phase so the first swap completes within the first
+// integration second of warp time.
+
+const SATURN_COORBITALS = _build({
+    id:    'saturn-coorbitals',
+    name:  'Saturn — Janus & Epimetheus',
+    blurb: 'Two co-orbital moons that swap orbits every four years. The integrator reproduces it from gravity alone.',
+    marketing: {
+        headline: 'The 4-year orbit swap, on demand',
+        callout:  'Janus and Epimetheus share a single orbital lane. Their semi-major axes differ by only 50 km — close enough that gravity makes them trade lanes every 4 years. Run the warp; the swap unfolds in seconds of wall time.',
+        physics:  'A horseshoe orbit in the rotating frame. The lower moon catches up to the upper, gravity exchanges energy, and the inner becomes the outer. Nothing scripted — pure two-body-plus-perturbation Newton.',
+    },
+    parent: {
+        name: 'saturn',
+        m: M.saturn,
+        radius_km: 60_268,
+        color: 0xe4c98a,
+        glow:  0xfff1bb,
+    },
+    satellites: [
+        {
+            name: 'janus',
+            m: M.janus,
+            radius_km: 89.5,
+            color: 0xd0c8b8,
+            highlight: 'co-orbital · ~4 yr swap with Epimetheus',
+            elements: {
+                a:        151_461_000,
+                e:        0.0068,
+                i_deg:    0.163,
+                raan_deg:   8.000,
+                argp_deg: 145.000,
+                M_deg:      0.000,
+            },
+        },
+        {
+            name: 'epimetheus',
+            m: M.epimetheus,
+            radius_km: 58.1,
+            color: 0xa89a82,
+            highlight: 'co-orbital · ~4 yr swap with Janus',
+            elements: {
+                a:        151_411_000,
+                e:        0.0098,
+                i_deg:    0.351,
+                raan_deg:  38.000,
+                argp_deg:  36.000,
+                M_deg:     90.000,    // 90 deg ahead of Janus mean longitude
+            },
+        },
+    ],
+    scale_km_per_unit: 60_268,
+    suggested_dt_s:    300,              // 5-minute step (close-encounter dynamics)
+    suggested_warp:    86400 * 30,       // 30 days per real second — swap visible
+});
+
 export const SYSTEMS = {
     'earth-moon':        EARTH_MOON,
     'jupiter-galileans': JUPITER_GALILEANS,
+    'saturn-major':      SATURN_MAJOR,
+    'saturn-coorbitals': SATURN_COORBITALS,
 };
 
-export const SYSTEM_ORDER = ['earth-moon', 'jupiter-galileans'];
+export const SYSTEM_ORDER = [
+    'earth-moon',
+    'jupiter-galileans',
+    'saturn-major',
+    'saturn-coorbitals',
+];
 
 // J2000.0 epoch (TT ~= TDB) as Julian Date.
 export const J2000_JD = 2451545.0;
