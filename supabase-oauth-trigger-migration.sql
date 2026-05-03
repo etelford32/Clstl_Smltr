@@ -54,8 +54,13 @@ BEGIN
         NEW.id,
         NEW.email,
         v_name,
-        COALESCE(v_meta->>'plan', 'free'),
-        'user'
+        'free',   -- HARD-CODED. Stripe webhook is the only path to a paid plan.
+                  -- Earlier drafts of this migration coalesced from
+                  -- raw_user_meta_data, which silently re-opened the
+                  -- signup-metadata injection that
+                  -- supabase-plan-lockdown-migration.sql had closed.
+                  -- See supabase-schema-hardening-followup-migration.sql.
+        'user'    -- HARD-CODED. Admin grants happen post-signup via SQL editor.
     )
     ON CONFLICT (id) DO NOTHING;
     -- ON CONFLICT guard: re-running this trigger on a user that

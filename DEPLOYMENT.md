@@ -93,6 +93,20 @@ supabase-signup-confirmed-migration.sql   # AFTER trigger on auth.users.confirme
                                           # logs signup + signup_confirmed events;
                                           # closes the email-gate funnel hole and
                                           # extends auth_flow_metrics
+
+# Schema-hardening follow-up (May 2026)
+supabase-schema-hardening-followup-migration.sql
+                                          # CRITICAL — closes a regression where
+                                          # supabase-oauth-trigger-migration.sql
+                                          # accidentally re-introduced
+                                          # COALESCE(v_meta->>'plan', 'free') in
+                                          # handle_new_user(), silently re-opening
+                                          # the metadata-injection path closed by
+                                          # supabase-plan-lockdown-migration.sql.
+                                          # MUST run after both. Includes a
+                                          # verification query to detect any
+                                          # accounts minted while the regression
+                                          # was live.
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
