@@ -158,6 +158,14 @@ export class SpaceWeatherHud {
                 </div>
             </div>
 
+            <div class="hud-block hud-perf" id="hud-perf">
+                <div class="hud-section-title" title="Per-section frame-time profiler — informs optimisation priorities">Performance</div>
+                <div class="hud-row"><span class="hud-k">fps</span><span id="hud-fps" class="hud-v">—</span></div>
+                <div class="hud-row"><span class="hud-k">frame</span><span id="hud-frame-ms" class="hud-v">—</span></div>
+                <div class="hud-row"><span class="hud-k">draws · tris</span><span id="hud-draws" class="hud-v">—</span></div>
+                <div id="hud-perf-sections" class="hud-perf-sections"></div>
+            </div>
+
             <div class="hud-block hud-timeline">
                 <div class="hud-section-title">Last 60 min</div>
                 <canvas id="hud-tl-canvas" class="hud-tl-canvas"
@@ -182,6 +190,10 @@ export class SpaceWeatherHud {
             transit:      this._root.querySelector('#hud-transit'),
             l0:           this._root.querySelector('#hud-l0'),
             flareList:    this._root.querySelector('#hud-flare-list'),
+            fps:          this._root.querySelector('#hud-fps'),
+            frameMs:      this._root.querySelector('#hud-frame-ms'),
+            draws:        this._root.querySelector('#hud-draws'),
+            perfSections: this._root.querySelector('#hud-perf-sections'),
             stormBar:     this._root.querySelector('#hud-storm-bar'),
             stormVal:     this._root.querySelector('#hud-storm-val'),
             trapped:      this._root.querySelector('#hud-trapped'),
@@ -315,6 +327,44 @@ export class SpaceWeatherHud {
         // ── NOAA flare ticker (drives EUV emission boost on matching AR) ──
         const flares = g.recentFlares ?? [];
         this._renderNoaaFlareList(flares);
+
+        // ── Performance snapshot (top-N hot sections, fps, draws/tris) ─────
+        if (g.profiler && e.fps) {
+            const snap = g.profiler.snapshot();
+            const fps = snap.fps || 0;
+            e.fps.textContent = fps > 0 ? fps.toFixed(0) : '—';
+            // Hue-shift fps so dropouts are obvious at a glance
+            //   60 fps → green (120°), 30 fps → yellow (60°), 15 fps → red (0°)
+            const hue = Math.max(0, Math.min(120, fps * 2));
+            e.fps.style.color = `hsl(${hue}, 80%, 60%)`;
+            const frame = snap.sections.find(s => s.name === 'frame');
+            e.frameMs.textContent = frame ? `${frame.ema.toFixed(1)} ms` : '—';
+            if (snap.renderer) {
+                const r = snap.renderer;
+                e.draws.textContent = `${r.calls ?? 0} · ${(r.triangles ?? 0).toLocaleString()}`;
+            }
+            // Render top hot sections (excluding 'frame' which is the total)
+            const top = snap.sections
+                .filter(s => s.name !== 'frame')
+                .slice(0, 6);
+            if (e.perfSections) {
+                e.perfSections.innerHTML = top.map(s => {
+                    const pct = frame && frame.ema > 0
+                        ? ((s.ema / frame.ema) * 100).toFixed(0)
+                        : '–';
+                    const pctW = Math.max(2, Math.min(100, pct === '–' ? 0 : Number(pct)));
+                    return `
+                        <div class="hud-perf-row">
+                            <span class="hud-perf-name">${s.name}</span>
+                            <div class="hud-bar hud-perf-bar">
+                                <div class="hud-bar-fill" style="width:${pctW}%; background:hsl(${30 + (100 - pctW) * 0.8}, 70%, 55%)"></div>
+                            </div>
+                            <span class="hud-perf-ms">${s.ema.toFixed(2)} ms</span>
+                        </div>
+                    `;
+                }).join('');
+            }
+        }
 
         // ── 60-minute timeline ──────────────────────────────────────────────
         // Sample at 1 Hz regardless of HUD tick rate so the trace doesn't
