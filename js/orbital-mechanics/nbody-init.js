@@ -75,7 +75,7 @@ export const SUN_INDEX   = 0;
 
 // ── Asteroid Keplerian elements at MPC epoch JD 2459600.5 (2022-01-21) ─
 // Source: JPL SBDB osculating elements.  argp is ω (NOT ω̄ = Ω + ω).
-const ASTEROID_EL = {
+export const ASTEROID_EL = {
     ceres:  { a:2.7691651, e:0.0789126, i:10.587740, node:80.305531,
               argp:73.621287, M0:291.428878, epochJd:2459600.5 },
     vesta:  { a:2.3614032, e:0.0894077, i: 7.142175, node:103.810804,
