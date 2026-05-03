@@ -737,6 +737,35 @@ class AuthManager {
     }
 
     /**
+     * Superadmin: full per-user telemetry timeline. Merges
+     * client_telemetry + activation_events for one user, sorted
+     * newest-first. Used by the User Management modal "View timeline"
+     * action so a superadmin can see what a single user actually
+     * experienced without joining tables in the SQL editor.
+     */
+    async getUserTimeline(userId, days = 30, limit = 250) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', rows: [] };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_user_timeline',
+                { p_user_id: userId, p_days: days, p_limit: limit });
+            if (error) return { success: false, error: error.message, rows: [] };
+            return { success: true, rows: data || [] };
+        } catch (e) { return { success: false, error: e.message, rows: [] }; }
+    }
+
+    /** Superadmin: aggregate counts for the timeline header strip. */
+    async getUserTelemetrySummary(userId, days = 30) {
+        if (!this._supabase) return { success: false, error: 'Supabase not configured', summary: null };
+        try {
+            const { data, error } = await this._supabase.rpc('telemetry_user_summary',
+                { p_user_id: userId, p_days: days });
+            if (error) return { success: false, error: error.message, summary: null };
+            const row = Array.isArray(data) ? data[0] : data;
+            return { success: true, summary: row || null };
+        } catch (e) { return { success: false, error: e.message, summary: null }; }
+    }
+
+    /**
      * Admin/superadmin: list users for the management table.
      * @param {{ limit?: number, offset?: number, search?: string }} [opts]
      */

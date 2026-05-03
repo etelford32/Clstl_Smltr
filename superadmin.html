@@ -410,6 +410,33 @@
     </div>
 </div>
 
+<!-- Timeline modal — wider than the others; the table needs room. -->
+<div class="modal-bg" id="modal-timeline">
+    <div class="modal" style="max-width:920px">
+        <h3 style="display:flex;align-items:center;gap:10px">
+            <span>User timeline</span>
+            <span id="tl-target" style="font-size:.78rem;color:#888;font-weight:400;font-family:'SFMono-Regular',Consolas,monospace"></span>
+        </h3>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+            <select id="tl-window" class="btn btn-sm" style="max-width:180px">
+                <option value="1">Last 24 hours</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Last 365 days</option>
+            </select>
+            <button class="btn btn-sm" id="tl-refresh">Refresh</button>
+            <span id="tl-summary" style="font-size:.74rem;color:#888;margin-left:auto"></span>
+        </div>
+        <div id="tl-body" style="max-height:60vh;overflow:auto;border:1px solid rgba(255,255,255,.06);border-radius:8px;background:rgba(0,0,0,.2);padding:6px 0">
+            <div class="empty">Loading…</div>
+        </div>
+        <div class="actions">
+            <button class="btn" data-close-modal="modal-timeline">Close</button>
+        </div>
+    </div>
+</div>
+
 <footer>
     <p>© 2026 Parker Physics App &nbsp;·&nbsp; <a href="admin.html">Admin</a> &nbsp;·&nbsp; <a href="dashboard.html">Dashboard</a></p>
 </footer>
@@ -534,6 +561,10 @@
                 <td style="font-size:.76rem;color:#666">${fmtDate(u.created_at)}</td>
                 <td>
                     <div class="row-actions">
+                        <button class="btn btn-sm" data-act="timeline"
+                            data-uid="${u.id}" data-email="${escape(u.email || '')}">
+                            Timeline
+                        </button>
                         <button class="btn btn-sm" data-act="role"
                             data-uid="${u.id}" data-email="${escape(u.email || '')}" data-role="${u.role}">
                             Change role
@@ -568,6 +599,8 @@
                             : 'Reason required (10–500 characters). Recorded in audit log.';
                     document.getElementById('plan-confirm').dataset.uid = btn.dataset.uid;
                     openModal('modal-plan');
+                } else if (act === 'timeline') {
+                    openTimeline(btn.dataset.uid, btn.dataset.email);
                 }
             });
         });
@@ -786,6 +819,130 @@
 
     document.getElementById('tel-refresh').addEventListener('click', loadTelemetryAll);
     document.getElementById('tel-window').addEventListener('change', loadTelemetryAll);
+
+    // ── User Timeline modal ───────────────────────────────────────────
+    // Opens from the "Timeline" action button on each user-management
+    // row. Shows the chronological merged stream of client_telemetry
+    // (errors, auth failures, redirects, vitals) + activation_events
+    // (signup, signin, wizard steps, etc.) for one user.
+    let _tlUid = null;
+
+    // Color tag per (source, kind) pair so the timeline scans visually.
+    // Errors are red, auth failures amber, redirects/404 grey, vitals
+    // green/amber/red by rating, activation events purple.
+    function tlTagClass(source, kind, severity, payload) {
+        if (source === 'activation_event') return 'b-advanced';
+        if (kind === 'error')              return 'b-admin';
+        if (kind === 'auth_failure')       return 'b-tester';
+        if (kind === 'not_found')          return 'b-user';
+        if (kind === 'redirect')           return 'b-user';
+        if (kind === 'web_vital' || kind === 'app_perf') {
+            const r = payload?.rating;
+            if (r === 'good') return 'b-free';
+            if (r === 'ni')   return 'b-tester';
+            if (r === 'poor') return 'b-admin';
+            return 'b-basic';
+        }
+        return 'b-user';
+    }
+
+    function tlSummaryLine(payload, kind) {
+        if (!payload) return '';
+        if (kind === 'error') {
+            const fp  = payload.fingerprint || '';
+            const msg = payload.message || '';
+            return msg ? `${escape(msg)}` + (fp ? ` <span style="color:#666">[${escape(fp)}]</span>` : '')
+                       : escape(fp);
+        }
+        if (kind === 'auth_failure') {
+            const r = payload.reason || '(no reason)';
+            const s = payload.source ? ` · ${payload.source}` : '';
+            return `${escape(r)}${escape(s)}`;
+        }
+        if (kind === 'redirect') {
+            return `${escape(payload.from || '')} → ${escape(payload.to || '')}`;
+        }
+        if (kind === 'web_vital' || kind === 'app_perf') {
+            const n = payload.name || '?';
+            const v = payload.value;
+            const u = (n === 'CLS') ? '' : ' ms';
+            return `<strong>${escape(n)}</strong> = ${escape(String(v))}${u}` +
+                   (payload.rating ? ` <span style="color:#666">(${escape(payload.rating)})</span>` : '');
+        }
+        if (kind === 'not_found') {
+            return payload.referrer ? `referrer: ${escape(payload.referrer)}` : '';
+        }
+        // activation_event payload — show the most useful fields
+        const bits = [];
+        if (payload.plan)       bits.push(`plan=${escape(payload.plan)}`);
+        if (payload.source)     bits.push(`source=${escape(payload.source)}`);
+        if (payload.path)       bits.push(`path=${escape(payload.path)}`);
+        if (payload.provider)   bits.push(`provider=${escape(payload.provider)}`);
+        if (payload.retry_count !== undefined) bits.push(`retries=${escape(String(payload.retry_count))}`);
+        return bits.join(' · ');
+    }
+
+    async function loadTimeline() {
+        if (!_tlUid) return;
+        const days = parseInt(document.getElementById('tl-window').value, 10) || 7;
+        const body = document.getElementById('tl-body');
+        const sumEl = document.getElementById('tl-summary');
+        body.innerHTML = '<div class="empty">Loading…</div>';
+        sumEl.textContent = '';
+        const [tl, sm] = await Promise.all([
+            auth.getUserTimeline(_tlUid, days, 250),
+            auth.getUserTelemetrySummary(_tlUid, days),
+        ]);
+        if (sm.success && sm.summary) {
+            const s = sm.summary;
+            sumEl.innerHTML =
+                `errors: <span style="color:#ff8b8b">${Number(s.errors||0).toLocaleString()}</span> · ` +
+                `auth-fails: <span style="color:#ffb74d">${Number(s.auth_failures||0).toLocaleString()}</span> · ` +
+                `404: ${Number(s.not_founds||0).toLocaleString()} · ` +
+                `redirects: ${Number(s.redirects||0).toLocaleString()} · ` +
+                `vitals: ${Number(s.web_vitals||0).toLocaleString()} · ` +
+                `events: <span style="color:#c080ff">${Number(s.activation_events||0).toLocaleString()}</span>`;
+        }
+        if (!tl.success) {
+            body.innerHTML = `<div class="empty">Error: ${escape(tl.error)}</div>`;
+            return;
+        }
+        if (!tl.rows.length) {
+            body.innerHTML = `<div class="empty">No timeline events for this user in the last ${days} day${days===1?'':'s'}.</div>`;
+            return;
+        }
+        body.innerHTML = tl.rows.map(r => {
+            const cls = tlTagClass(r.source, r.kind, r.severity, r.payload);
+            const summary = tlSummaryLine(r.payload, r.kind);
+            const t = new Date(r.created_at);
+            return `
+                <div style="display:flex;gap:10px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.04);font-size:.84rem;line-height:1.4">
+                    <span style="font-size:.7rem;color:#666;font-family:monospace;white-space:nowrap;min-width:140px">
+                        ${escape(t.toLocaleString())}
+                    </span>
+                    <span class="badge ${cls}" style="min-width:90px;text-align:center">${escape(r.kind)}</span>
+                    <span style="flex:1;min-width:0">
+                        ${r.route ? `<div style="font-size:.74rem;color:#888;font-family:monospace;word-break:break-all">${escape(r.route)}</div>` : ''}
+                        <div style="word-break:break-word">${summary || '<span style="color:#555">—</span>'}</div>
+                    </span>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function openTimeline(uid, email) {
+        _tlUid = uid;
+        document.getElementById('tl-target').textContent = email || uid.slice(0, 8);
+        // Reset the window selector to a sensible default each open;
+        // sticky values felt confusing across users with very different
+        // activity profiles.
+        document.getElementById('tl-window').value = '7';
+        openModal('modal-timeline');
+        loadTimeline();
+    }
+
+    document.getElementById('tl-window').addEventListener('change', loadTimeline);
+    document.getElementById('tl-refresh').addEventListener('click', loadTimeline);
 
     // Initial load
     loadUsers();

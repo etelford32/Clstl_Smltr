@@ -130,6 +130,17 @@ supabase-perf-alerts-migration.sql        # perf_alert_state + 5 RPCs that wire
                                           # consecutive healthy ticks.
                                           # MUST be applied AFTER
                                           # supabase-client-telemetry-migration.sql.
+
+# Per-user timeline (May 2026)
+supabase-user-timeline-migration.sql      # telemetry_user_timeline + _summary
+                                          # RPCs that merge client_telemetry +
+                                          # activation_events for a single user
+                                          # into one chronological view. Powers
+                                          # the "Timeline" action on each row of
+                                          # /superadmin → User Management. Read-
+                                          # only; superadmin-gated.
+                                          # MUST be applied AFTER
+                                          # supabase-client-telemetry-migration.sql.
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
