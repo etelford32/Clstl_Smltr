@@ -3,10 +3,12 @@
  *
  * Generates a full navigation bar with:
  *   - Logo + brand
- *   - Dropdown menus: Space Weather, Earth, Stars, Tools
+ *   - Dropdown menus: Earth, Space Weather, Stars, Black Holes, Simulators
  *   - Tier-gated items (public, free, advanced) where 'advanced' ≡ PRO
  *     (Advanced + Institution + Enterprise). See auth.isPro().
  *   - Auth state (Sign In / Dashboard / Admin badge)
+ *   - Compact utility text-links in the auth area (Dashboard · Account ·
+ *     Pricing) plus an inline PRO promo for non-pro users.
  *   - Mobile burger with full menu expansion + accordion dropdowns
  *   - Robust hover with delay for desktop, touch-aware for hybrid devices
  *   - Keyboard support (Escape, Tab focus management)
@@ -23,26 +25,6 @@ const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 
 const NAV_DROPDOWNS = [
     {
-        label: 'Space Weather',
-        id: 'space-weather',
-        items: [
-            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
-            { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',           tier: 'public', icon: '🪐', id: 'solar' },
-            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
-            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
-            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
-        ],
-    },
-    {
-        label: 'Black Holes',
-        id: 'black-holes',
-        items: [
-            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
-            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
-            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
-        ],
-    },
-    {
         label: 'Earth',
         id: 'earth-menu',
         items: [
@@ -52,6 +34,17 @@ const NAV_DROPDOWNS = [
             { href: 'satellites.html',        label: 'Satellites',          sub: 'Real-time orbital tracking',           tier: 'advanced', icon: '🛰️', badge: 'PRO' },
             { href: 'launch-planner.html',    label: 'Launch Planner',      sub: 'SpaceX/Blue Origin launches + weather', tier: 'advanced', icon: '🚀', badge: 'PRO', id: 'launch-planner' },
             { href: 'upper-atmosphere.html',  label: 'Upper Atmosphere',    sub: 'Thermosphere + exosphere simulator',    tier: 'advanced', icon: '🌡️', badge: 'PRO', id: 'upper-atmosphere' },
+        ],
+    },
+    {
+        label: 'Space Weather',
+        id: 'space-weather',
+        items: [
+            { href: 'space-weather.html', label: 'Space Weather',  sub: 'Live solar & geomagnetic data',   tier: 'public', icon: '🌤️', id: 'weather' },
+            { href: 'threejs.html',       label: 'Solar System',   sub: 'Interactive 3D orrery',           tier: 'public', icon: '🪐', id: 'solar' },
+            { href: 'sun.html',           label: 'The Sun',        sub: 'Real-time solar surface view',    tier: 'public', icon: '☀️' },
+            { href: 'missions.html',      label: 'Space Missions', sub: 'Inner solar system fleet roster', tier: 'public', icon: '🛸', id: 'missions' },
+            { href: 'galactic-map.html',  label: 'Galaxy',         sub: '3D Milky Way star map',           tier: 'free',   icon: '🌌' },
         ],
     },
     {
@@ -67,20 +60,24 @@ const NAV_DROPDOWNS = [
         ],
     },
     {
-        label: 'Tools',
-        id: 'tools',
+        label: 'Black Holes',
+        id: 'black-holes',
         items: [
-            { section: 'Simulations' },
+            { href: 'ton618.html',           label: 'TON 618',             sub: 'Research observatory · 6.6×10¹⁰ M☉', tier: 'public', icon: '🕳️', id: 'ton618' },
+            { href: 'sagittarius.html',      label: 'Sagittarius A*',      sub: 'Galactic center · live',              tier: 'public', icon: '🕳️', id: 'sagittarius' },
+            { href: 'black-hole-fluid.html', label: 'Black Hole Accretion', sub: 'Fluid dynamics simulation',          tier: 'public', icon: '🕳️' },
+        ],
+    },
+    {
+        label: 'Simulators',
+        id: 'simulators',
+        items: [
             { href: 'solar-fluid.html',       label: 'Solar Fluid',          sub: 'Navier-Stokes MHD solver',        tier: 'public', icon: '🌊' },
             { href: 'stellar-wind.html',      label: 'Stellar Wind',         sub: 'Parker spiral + wind stream',     tier: 'public', icon: '💨' },
             { href: 'star2d.html',            label: '2D Stellar Modeler',   sub: 'HR diagram + classification',     tier: 'public', icon: '📊' },
             { href: 'star2d-advanced.html',   label: 'Advanced 2D Solar',    sub: 'CME, Parker spirals, fluid',      tier: 'free',   icon: '🔬' },
             { href: 'gravity-lab.html',       label: 'Gravity Lab',          sub: 'Live N-body · moons & resonances', tier: 'public', icon: '🪐', badge: 'NEW', id: 'gravity-lab' },
             { href: 'time-machine.html',      label: 'Orbital Time Machine', sub: 'N-body propagation · ±10 kyr to ±1 Myr', tier: 'public', icon: '⏳', badge: 'IN DEV', id: 'time-machine' },
-            { section: 'Utilities' },
-            { href: 'dashboard.html',         label: 'Dashboard',            sub: 'Your space weather report',       tier: 'free',   icon: '📋' },
-            { href: 'account.html',           label: 'Account',              sub: 'Profile, alerts, API keys, billing', tier: 'free', icon: '⚙️', id: 'account' },
-            { href: 'pricing.html',           label: 'Pricing',              sub: 'Free, Basic, Educator, Advanced, Institution, Enterprise', tier: 'public', icon: '💰' },
             { href: 'rust.html',              label: 'Rust/WASM Engine',     sub: 'WebAssembly compute module',      tier: 'free',   icon: '⚙️' },
         ],
     },
@@ -249,6 +246,25 @@ export function initNav(activeId = '') {
 
     // Spacer + auth
     html += '<span class="nav-spacer"></span>';
+
+    // Utility text-links (Dashboard · Account · Pricing) + PRO promo.
+    // Signed-out users only get Pricing (Dashboard/Account require auth).
+    // The PRO promo nudges Free/Basic users toward the simulations
+    // unlocked by Advanced: Satellites, Launch Planner, Upper Atmosphere.
+    const isPro = userTier >= 3;
+    html += `<div class="nav-utility-links">`;
+    if (isSignedIn) {
+        html += `<a href="dashboard.html" class="nav-util-link">Dashboard</a>`;
+        html += `<a href="account.html" class="nav-util-link">Account</a>`;
+    }
+    html += `<a href="pricing.html" class="nav-util-link">Pricing</a>`;
+    if (!isPro) {
+        html += `<a href="pricing.html" class="nav-pro-promo" title="Unlock Satellites, Launch Planner & Upper Atmosphere with PRO">
+            <span class="nav-pro-spark">✨</span><span class="nav-pro-text">PRO unlocks Satellites · Launch Planner · Upper Atmosphere</span><span class="nav-pro-arrow" aria-hidden="true">→</span>
+        </a>`;
+    }
+    html += `</div>`;
+
     html += '<span class="nav-auth-sep"></span>';
 
     if (isSignedIn) {
@@ -281,7 +297,6 @@ export function initNav(activeId = '') {
         if (isAdmin) {
             html += `<a href="admin.html" class="nav-item nav-admin-link">${auth.role === 'superadmin' ? 'SUPER' : 'ADMIN'}</a>`;
         }
-        html += `<a href="dashboard.html" class="nav-item nav-dash">Dashboard</a>`;
         html += `<button class="nav-item nav-signout" id="nav-signout-btn">Sign Out</button>`;
     } else {
         html += `<a href="signin.html" class="nav-item nav-login">Sign In</a>`;

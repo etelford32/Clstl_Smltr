@@ -1,19 +1,18 @@
 /**
  * explore-tour.js — Cross-page guided tour for new visitors
  *
- * Drives a multi-stop walkthrough that hops the visitor through each headline
- * surface of the app — Earth, Sun, Operations, Space Weather, TON 618, Sirius,
- * Moon — and lands on Pricing with a special one-month free-trial offer.
+ * Three-stop walkthrough designed to be simple and accessible:
+ *   1. Galaxy map — zoomed-out Milky Way; copy guides them to find the Sun
+ *      and Earth.
+ *   2. Solar System (threejs.html) — real-time orrery; emphasizes that
+ *      every planet is at its actual position right now.
+ *   3. Sign-up — promotes the simulations available to signed-up users
+ *      (free) and the PRO-tier sims (Satellites, Launch Planner, Upper
+ *      Atmosphere).
  *
  * Persistence:  localStorage 'ppx_explore_tour' = { active:true, step:<idx> }
  * Activation:   anchor with [data-explore-tour-start] (hero CTA on index.html)
  *               or query string ?tour=1 (deep-link / share)
- *
- * Design philosophy — agile, continuous improvement:
- *   - Tiny single-file controller, zero deps, lazy-loads on every page.
- *   - Each "stop" is a data row; adding a stop = one entry, no page edits.
- *   - Final pricing stop reveals a tour-only special offer (one month free
- *     with credit card on file) — the hook that brings users back in 30 days.
  */
 
 const LS_KEY = 'ppx_explore_tour';
@@ -23,61 +22,26 @@ const LS_KEY = 'ppx_explore_tour';
 // matches the *current* step, the banner appears with that stop's copy.
 const STOPS = [
     {
-        page:  'earth.html',
-        icon:  '🌍',
-        title: 'Stop 1 / 8 — Real-Time Earth',
-        body:  'You\'re standing inside Earth\'s magnetosphere right now. Live solar wind from NOAA SWPC drives the bow shock you see — Kp index, IMF Bz, and aurora ovals all update every 60 seconds. Pan and zoom; nothing here is canned.',
-        cta:   'Next stop: the Sun →',
+        page:  'galactic-map.html',
+        icon:  '🌌',
+        title: 'Stop 1 / 3 — The Milky Way',
+        body:  'Start zoomed all the way out — that\'s our galaxy. Now scroll to zoom in until you find our Sun, then keep going to spot Earth. Everything in this map is a real star catalogued from Gaia data. Drag to rotate.',
+        cta:   'Next: the Real-Time Solar System →',
     },
     {
-        page:  'sun.html',
-        icon:  '☀️',
-        title: 'Stop 2 / 8 — Real-Time Sun',
-        body:  'GOES X-ray flux, active regions, and the Parker spiral in 3D. When an X-class flare fires, you see it within 60 seconds. Look for sunspots — solar maximum is happening now.',
-        cta:   'Next: the Operator console →',
+        page:  'threejs.html',
+        icon:  '🪐',
+        title: 'Stop 2 / 3 — Real-Time Solar System',
+        body:  'This is where the planets are right now. Every orbit, every position — live, updated continuously from NASA ephemerides. No animation loop pretending. Drag to orbit, scroll to zoom.',
+        cta:   'Next: Sign up free →',
     },
     {
-        page:  'operations.html',
-        icon:  '🛰️',
-        title: 'Stop 3 / 8 — Operator Console',
-        body:  'This is the working surface for fleet operators: collision screens, debris tracks, conjunction alerts. A taste of what the Pro tier unlocks for satellite teams.',
-        cta:   'Next: Space Weather →',
-    },
-    {
-        page:  'space-weather.html',
-        icon:  '🌤️',
-        title: 'Stop 4 / 8 — Space Weather Dashboard',
-        body:  'Mission control for space weather. Heliosphere 3D, storm escalation mode (refresh drops to 20s when Kp ≥ 6), aurora forecast, flare history. Same data NASA and NOAA operators use.',
-        cta:   'Next: TON 618 →',
-    },
-    {
-        page:  'ton618.html',
-        icon:  '🕳️',
-        title: 'Stop 5 / 8 — TON 618',
-        body:  'A 6.6 × 10¹⁰ M☉ ultramassive black hole — among the largest ever observed. Ray-marched Kerr spacetime, accretion disk physics, gravitational lensing. Drag to orbit.',
-        cta:   'Next: Sirius →',
-    },
-    {
-        page:  'sirius.html',
-        icon:  '⭐',
-        title: 'Stop 6 / 8 — Sirius Planetary Fantasy',
-        body:  'Imagine planets around the Sirius A / B binary. Kepler integration with the real stellar parameters — a sandbox for stellar-system "what-ifs" grounded in physics.',
-        cta:   'Next: the Moon →',
-    },
-    {
-        page:  'moon.html',
-        icon:  '🌙',
-        title: 'Stop 7 / 8 — The Moon',
-        body:  'The lunar radiation environment, landing-site map, and the long-form view of how solar weather shapes deep-space missions.',
-        cta:   'Final stop: pricing →',
-    },
-    {
-        page:  'pricing.html',
-        icon:  '🎁',
-        title: 'Stop 8 / 8 — Your free month',
-        body:  'You\'ve toured the app. Drop a card on file today and your first month is on us — full Basic tier, every simulation unlocked. We\'ll email you the day before the trial ends; cancel anytime in the dashboard, no questions.',
-        cta:   'Claim my free month →',
-        ctaHref: 'signup.html?plan=basic&trial=tour-30day',
+        page:  'signup.html',
+        icon:  '✨',
+        title: 'Stop 3 / 3 — Unlock the simulations',
+        body:  'Sign up free to keep exploring. Free tier opens the galaxy map, advanced solar tools, and stellar simulations. PRO adds Satellites, Launch Planner, and Upper Atmosphere.',
+        cta:   'Create my free account →',
+        ctaHref: 'signup.html',
         final: true,
     },
 ];
@@ -107,13 +71,31 @@ function pageStopIndex() {
 
 // ── Activation: hero CTA & ?tour=1 deep-link ────────────────────────────────
 function wireStartTriggers() {
-    // Anchor with data-explore-tour-start (the hero "Explore the App" button)
+    // Anchor with data-explore-tour-start (the hero "Explore the App" button).
+    // Drives the user to STOPS[0] regardless of the anchor's href, so the
+    // tour entry-point is decoupled from the markup.
     document.querySelectorAll('[data-explore-tour-start]').forEach(el => {
         el.addEventListener('click', e => {
-            // Initialize state and let the navigation proceed naturally.
+            e.preventDefault();
             saveState({ active: true, step: 0, startedAt: Date.now() });
-            // Optional: nice visual handoff
             try { document.body.style.transition = 'opacity .25s'; document.body.style.opacity = '.6'; } catch {}
+            location.href = STOPS[0].page;
+        });
+    });
+
+    // Anchor with data-launch-wizard (the hero "Explore Live Demo" button).
+    // Lazy-loads the welcome-wizard module so unauthenticated visitors can
+    // run through the same onboarding flow signed-in users see post-signup.
+    document.querySelectorAll('[data-launch-wizard]').forEach(el => {
+        el.addEventListener('click', async e => {
+            e.preventDefault();
+            try {
+                const mod = await import('./welcome-wizard.js');
+                mod.showWizard?.();
+            } catch (err) {
+                console.warn('[explore-tour] wizard launch failed:', err);
+                location.href = el.getAttribute('data-fallback-href') || 'earth.html';
+            }
         });
     });
 
@@ -289,41 +271,29 @@ function showBanner(stepIdx) {
     }
 }
 
-// Pricing-page-only enhancement: a full-width "tour exclusive" offer card.
+// Signup-page-only enhancement: a "what you unlock" promo card that
+// highlights the simulations available on Free and PRO tiers.
 function injectFinalOffer(stop) {
-    if (currentPage() !== 'pricing.html') return;
+    if (currentPage() !== 'signup.html') return;
     if (document.querySelector('.explore-tour-offer')) return;
-
-    // Stamp ?trial=tour-30day onto the URL so the pricing page's existing
-    // data-checkout handlers forward the promo to /api/stripe/checkout
-    // even when the user clicks a regular pricing card (Basic / Educator)
-    // instead of the offer card. The server allow-lists which (plan, code)
-    // pairs are honored — Advanced/Institution silently ignore the code.
-    try {
-        const params = new URLSearchParams(location.search);
-        if (params.get('trial') !== 'tour-30day') {
-            params.set('trial', 'tour-30day');
-            history.replaceState(null, '', location.pathname + '?' + params.toString() + location.hash);
-        }
-    } catch {}
 
     const card = document.createElement('div');
     card.className = 'explore-tour-offer';
     card.innerHTML = `
-      <h3>🎁 Tour-exclusive offer · 30 days free</h3>
-      <p>You walked the full app — here's the deal: drop a card on file and we'll
-         unlock the <strong>full Basic tier</strong> ($10/mo value) free for 30 days.
-         Every simulation, every live feed, full 3D WebGL. We email you the day
-         before the trial ends; cancel anytime in your dashboard.</p>
-      <a class="et-btn" href="${stop.ctaHref}">${stop.cta}</a>
-      <p class="et-fine">Card required for trial · Cancel before day 30 to avoid the $10/mo charge ·
-        Continuous-improvement promise: every simulation ships updates on a 2-week sprint cadence.</p>`;
-    // Slot it right under the hero's persona strip if we can find it.
-    const anchor = document.querySelector('.pricing-hero') || document.querySelector('main') || document.body;
+      <h3>🎁 What you unlock by signing up</h3>
+      <p><strong>Free, with an account:</strong> Galaxy map (Milky Way star catalog),
+         Advanced 2D Solar (CME + Parker spirals), the Sirius Planetary system,
+         and the WR-102 Wolf-Rayet simulation.</p>
+      <p><strong>PRO adds:</strong> Satellites (real-time orbital tracking),
+         Launch Planner (live SpaceX/Blue Origin launches with weather), and
+         Upper Atmosphere (thermosphere &amp; exosphere simulator).</p>
+      <p class="et-fine">Already got the form below? Just fill it out — your account is ready in seconds.</p>`;
+    // Slot it above the form so it's the first thing the user reads.
+    const anchor = document.querySelector('main') || document.body;
     if (anchor === document.body) {
         document.body.insertBefore(card, document.body.firstChild);
     } else {
-        anchor.parentNode.insertBefore(card, anchor.nextSibling);
+        anchor.insertBefore(card, anchor.firstChild);
     }
 }
 
