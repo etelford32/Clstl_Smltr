@@ -81,7 +81,24 @@ supabase-class-seats-migration.sql        # class-seat invite RPCs + activation_
 
 # Linter follow-up (April 2026)
 supabase-analytics-views-rls-fix.sql      # security_invoker on analytics_daily / user_analytics
+
+# Superadmin role/plan audit (May 2026)
+supabase-role-plan-audit-migration.sql    # is_superadmin(), user_profiles_audit table,
+                                          # promote_user / set_user_plan_override RPCs,
+                                          # AFTER trigger capturing role/plan/Stripe-link
+                                          # changes for forensic review
 ```
+
+> **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
+> `supabase-plan-lockdown-migration.sql` (it patches the lockdown trigger to
+> honour an opt-in flag set by the new audited RPCs). The migration is
+> idempotent and starts the audit table empty by design — no historical
+> backfill of pre-migration role/plan changes. Once applied, admins can
+> promote between `user`↔`tester` from `/admin` (Users tab → Change role),
+> superadmins get the full management surface at `/superadmin` (role
+> changes up to admin, plan overrides with required reason, audit log).
+> Superadmin minting stays SQL-Editor-only — there is no UI path to mint
+> a new superadmin, by design.
 
 > **Prerequisites for `supabase-class-seats-migration.sql`** — the migration
 > performs a preflight check and aborts with the missing items if any are

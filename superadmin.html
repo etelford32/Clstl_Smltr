@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex,nofollow">
+    <title>Superadmin — Parker Physics App</title>
+    <link rel="stylesheet" href="js/nav-styles.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1a0a2e 100%);
+            color: #fff; min-height: 100vh; display: flex; flex-direction: column;
+        }
+        .auth-gate {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            text-align: center; padding: 3rem;
+        }
+        .auth-gate h2 { color: #ff6060; margin-bottom: .8rem; }
+        .auth-gate p  { color: #888; margin-bottom: 1.5rem; }
+        .auth-gate a {
+            display: inline-block; padding: 10px 28px; border-radius: 8px;
+            background: linear-gradient(45deg, #ffd700, #ff8c00); color: #000;
+            text-decoration: none; font-weight: 700; font-size: .9rem;
+        }
+        main { flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 24px 20px 48px; }
+
+        .sa-header { margin-bottom: 8px; }
+        .sa-header h1 {
+            font-size: 1.5rem; font-weight: 800;
+            background: linear-gradient(45deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .sa-header p { color: #555; font-size: .85rem; margin-top: 2px; }
+        .sa-warning {
+            background: rgba(255,200,0,.06); border: 1px solid rgba(255,200,0,.18);
+            color: #ffd58a; border-radius: 10px; padding: 10px 14px;
+            font-size: .82rem; margin: 14px 0 22px;
+        }
+
+        .tabs { display: flex; gap: 4px; margin: 18px 0 20px; border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 0; }
+        .tab {
+            padding: 9px 18px; border-radius: 8px 8px 0 0; border: 1px solid transparent;
+            border-bottom: none; background: transparent; color: #666; font-family: inherit;
+            font-size: .85rem; cursor: pointer; font-weight: 600; transition: all .15s;
+        }
+        .tab:hover { color: #aaa; background: rgba(255,255,255,.03); }
+        .tab.active { color: #fff; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1); }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        .card {
+            background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px; padding: 22px; margin-bottom: 18px;
+        }
+        .card h3 {
+            font-size: .95rem; font-weight: 700; margin-bottom: 14px; color: #ccc;
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 8px 10px; font-size: .72rem; color: #555; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid rgba(255,255,255,.07); }
+        td { padding: 9px 10px; font-size: .84rem; color: #bbb; border-bottom: 1px solid rgba(255,255,255,.03); vertical-align: middle; }
+        tr:hover td { background: rgba(255,255,255,.02); }
+
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 4px;
+            font-size: .7rem; font-weight: 600;
+        }
+        .b-superadmin { background: rgba(255,215,0,.12); color: #ffd700; border: 1px solid rgba(255,215,0,.3); }
+        .b-admin      { background: rgba(255,60,60,.12); color: #f66; border: 1px solid rgba(255,60,60,.25); }
+        .b-tester     { background: rgba(255,140,0,.1); color: #ffb74d; border: 1px solid rgba(255,140,0,.28); }
+        .b-user       { background: rgba(255,255,255,.06); color: #aaa; border: 1px solid rgba(255,255,255,.08); }
+        .b-free       { background: rgba(78,255,145,.08); color: #4eff91; border: 1px solid rgba(78,255,145,.2); }
+        .b-basic      { background: rgba(0,198,255,.08); color: #00c6ff; border: 1px solid rgba(0,198,255,.2); }
+        .b-educator   { background: rgba(154,211,111,.1); color: #9ad36f; border: 1px solid rgba(154,211,111,.25); }
+        .b-advanced   { background: rgba(192,128,255,.08); color: #c080ff; border: 1px solid rgba(192,128,255,.2); }
+        .b-institution{ background: rgba(255,140,200,.1); color: #ff8cc8; border: 1px solid rgba(255,140,200,.25); }
+        .b-enterprise { background: rgba(255,215,0,.1); color: #ffd700; border: 1px solid rgba(255,215,0,.25); }
+
+        .btn {
+            padding: 7px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12);
+            background: rgba(255,255,255,.06); color: #ccc; font-family: inherit;
+            font-size: .8rem; cursor: pointer; transition: all .15s;
+        }
+        .btn:hover  { background: rgba(255,255,255,.12); color: #fff; }
+        .btn:disabled { opacity: .45; cursor: not-allowed; }
+        .btn-sm { padding: 4px 10px; font-size: .74rem; }
+        .btn-primary {
+            background: linear-gradient(45deg, #ffd700, #ff8c00); color: #000;
+            border-color: transparent; font-weight: 700;
+        }
+        .btn-primary:hover { filter: brightness(1.08); color: #000; }
+        .btn-danger {
+            background: rgba(255,60,60,.12); color: #ff8b8b;
+            border-color: rgba(255,60,60,.3);
+        }
+
+        .toolbar {
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        input[type="text"], input[type="search"], select, textarea {
+            background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.12);
+            color: #fff; padding: 7px 10px; border-radius: 8px; font: inherit;
+            font-size: .84rem;
+        }
+        input:focus, select:focus, textarea:focus {
+            outline: none; border-color: rgba(255,215,0,.5);
+        }
+        textarea { width: 100%; min-height: 70px; resize: vertical; }
+
+        .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+        .empty {
+            text-align: center; padding: 28px; color: #444; font-size: .88rem;
+        }
+
+        /* Audit log specific */
+        .audit-row { display: flex; flex-direction: column; gap: 4px; }
+        .audit-meta { font-size: .72rem; color: #555; }
+        .audit-diff {
+            font-family: 'SFMono-Regular', Consolas, monospace;
+            font-size: .76rem; color: #ccc;
+            background: rgba(0,0,0,.25); border-radius: 6px;
+            padding: 6px 8px; white-space: pre-wrap; word-break: break-word;
+        }
+        .audit-diff .k { color: #888; }
+        .audit-diff .ov { color: #ff8b8b; }
+        .audit-diff .nv { color: #9ad36f; }
+
+        /* Modal */
+        .modal-bg {
+            position: fixed; inset: 0; background: rgba(0,0,0,.7);
+            display: none; align-items: center; justify-content: center;
+            z-index: 50; padding: 20px;
+        }
+        .modal-bg.show { display: flex; }
+        .modal {
+            background: linear-gradient(135deg, #1a0e2e, #0e0820);
+            border: 1px solid rgba(255,215,0,.25);
+            border-radius: 14px; padding: 22px; max-width: 520px; width: 100%;
+            box-shadow: 0 30px 80px rgba(0,0,0,.6);
+        }
+        .modal h3 { color: #fff; margin-bottom: 12px; }
+        .modal .field { margin-bottom: 14px; }
+        .modal .field label { display: block; font-size: .76rem; color: #888; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .05em; }
+        .modal .field input, .modal .field select, .modal .field textarea { width: 100%; }
+        .modal .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+        .modal-err { color: #ff8b8b; font-size: .82rem; margin: 6px 0 0; min-height: 0; }
+
+        footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
+        footer a { color: #555; text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">
+    import { initNav } from "./js/nav.js?v=20260424";
+    initNav("superadmin");
+</script>
+
+<div class="auth-gate" id="auth-gate">
+    <div style="max-width:560px">
+        <h2>Superadmin Access Required</h2>
+        <p>This page is restricted to superadmin accounts. Admins should use <a href="admin.html" style="color:#ffd700">/admin</a> instead.</p>
+        <pre id="auth-gate-diag" style="display:none;text-align:left;font-size:.72rem;color:#888;background:rgba(0,0,0,.25);border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;margin-bottom:14px;white-space:pre-wrap;word-break:break-word;font-family:'SFMono-Regular',Consolas,monospace"></pre>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+            <a href="signin.html">Sign In</a>
+            <button class="btn" id="auth-gate-retry" style="display:none">Refresh session &amp; retry</button>
+            <button class="btn" id="auth-gate-signout" style="display:none">Sign out</button>
+        </div>
+    </div>
+</div>
+
+<main style="display:none" id="sa-main">
+    <div class="sa-header">
+        <h1>Superadmin</h1>
+        <p id="sa-sub">Loading…</p>
+    </div>
+
+    <div class="sa-warning">
+        Actions on this page are <strong>audited and irreversible from the UI</strong>. Every role/plan change writes an immutable row to <code>user_profiles_audit</code>. Superadmin minting is SQL-only — there is no UI path to create another superadmin.
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" data-tab="users">User Management</button>
+        <button class="tab" data-tab="audit">Audit Log</button>
+    </div>
+
+    <!-- ═══════════════════ USER MANAGEMENT ═══════════════════ -->
+    <div class="tab-panel active" id="panel-users">
+        <div class="card">
+            <h3>Users</h3>
+            <div class="toolbar">
+                <input type="search" id="user-search" placeholder="Search by email or display name…" style="flex:1;min-width:220px">
+                <button class="btn btn-sm" id="user-refresh">Refresh</button>
+            </div>
+            <div style="overflow-x:auto">
+                <table id="user-table">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Display Name</th>
+                            <th>Role</th>
+                            <th>Plan</th>
+                            <th>Sub. Status</th>
+                            <th>Created</th>
+                            <th style="text-align:right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="user-tbody">
+                        <tr><td colspan="7" class="empty">Loading users…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════ AUDIT LOG ═══════════════════ -->
+    <div class="tab-panel" id="panel-audit">
+        <div class="card">
+            <h3>Recent role / plan / Stripe changes</h3>
+            <div class="toolbar">
+                <select id="audit-limit" class="btn btn-sm">
+                    <option value="50">50 most recent</option>
+                    <option value="100" selected>100 most recent</option>
+                    <option value="250">250 most recent</option>
+                    <option value="500">500 most recent</option>
+                </select>
+                <button class="btn btn-sm" id="audit-refresh">Refresh</button>
+            </div>
+            <div style="overflow-x:auto">
+                <table id="audit-table">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Target</th>
+                            <th>Actor</th>
+                            <th>Source</th>
+                            <th>Op</th>
+                            <th>Change</th>
+                        </tr>
+                    </thead>
+                    <tbody id="audit-tbody">
+                        <tr><td colspan="6" class="empty">Loading audit log…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</main>
+
+<!-- ═══════════════════ MODALS ═══════════════════ -->
+<div class="modal-bg" id="modal-promote">
+    <div class="modal">
+        <h3>Change user role</h3>
+        <div class="field">
+            <label>User</label>
+            <input type="text" id="promote-target" readonly>
+        </div>
+        <div class="field">
+            <label>New role</label>
+            <select id="promote-role">
+                <option value="user">user</option>
+                <option value="tester">tester</option>
+                <option value="admin">admin</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Reason (optional, recorded in audit log)</label>
+            <textarea id="promote-reason" placeholder="Why are you making this change?"></textarea>
+        </div>
+        <div class="modal-err" id="promote-err"></div>
+        <div class="actions">
+            <button class="btn" data-close-modal="modal-promote">Cancel</button>
+            <button class="btn btn-primary" id="promote-confirm">Apply role change</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal-bg" id="modal-plan">
+    <div class="modal">
+        <h3>Override user plan (manual comp)</h3>
+        <div class="field">
+            <label>User</label>
+            <input type="text" id="plan-target" readonly>
+        </div>
+        <div class="field">
+            <label>New plan</label>
+            <select id="plan-new">
+                <option value="free">free</option>
+                <option value="basic">basic</option>
+                <option value="educator">educator</option>
+                <option value="advanced">advanced</option>
+                <option value="institution">institution</option>
+                <option value="enterprise">enterprise</option>
+            </select>
+        </div>
+        <div class="field">
+            <label>Reason (required, 10–500 chars, recorded in audit log)</label>
+            <textarea id="plan-reason" placeholder="e.g. partnership comp account approved by ET on 2026-04-30"></textarea>
+        </div>
+        <div class="modal-err" id="plan-err">
+            Refused if the target has an active Stripe subscription — cancel in Stripe first.
+        </div>
+        <div class="actions">
+            <button class="btn" data-close-modal="modal-plan">Cancel</button>
+            <button class="btn btn-primary" id="plan-confirm">Apply plan override</button>
+        </div>
+    </div>
+</div>
+
+<footer>
+    <p>© 2026 Parker Physics App &nbsp;·&nbsp; <a href="admin.html">Admin</a> &nbsp;·&nbsp; <a href="dashboard.html">Dashboard</a></p>
+</footer>
+
+<!-- ═══════════════════ SCRIPT ═══════════════════ -->
+<script type="module">
+    import { auth } from './js/auth.js';
+    import { getSupabase } from './js/supabase-config.js';
+
+    function showGate(title, msg, diag) {
+        document.querySelector('#auth-gate h2').textContent = title;
+        document.querySelector('#auth-gate p').textContent  = msg;
+        if (diag) {
+            const d = document.getElementById('auth-gate-diag');
+            d.textContent = diag;
+            d.style.display = '';
+        }
+        document.getElementById('auth-gate').style.display = 'flex';
+        document.getElementById('sa-main').style.display = 'none';
+        document.getElementById('auth-gate-retry').style.display = '';
+        document.getElementById('auth-gate-signout').style.display = '';
+    }
+
+    document.getElementById('auth-gate-retry').addEventListener('click', () => location.reload());
+    document.getElementById('auth-gate-signout').addEventListener('click', async () => {
+        try { const sb = await getSupabase(); await sb.auth.signOut(); } catch {}
+        try { localStorage.removeItem('pp_auth'); sessionStorage.removeItem('pp_auth'); } catch {}
+        location.href = 'signin.html';
+    });
+
+    await auth.ready();
+    if (!auth.isSignedIn()) {
+        showGate('Superadmin Access Required',
+                 'You must be signed in with a superadmin account to view this page.');
+        throw '';
+    }
+
+    // Server-side superadmin verification — same retry + fallback shape as admin.html.
+    let check = await auth.verifySuperadminServerSide();
+    if (!check.verified) {
+        try { const sb = await getSupabase(); await sb.auth.refreshSession(); } catch {}
+        check = await auth.verifySuperadminServerSide();
+    }
+    if (!check.verified) {
+        await auth.fetchProfile();
+        if (!auth.isSuperadmin()) {
+            const u = auth.getUser?.() || {};
+            const diag = [
+                `Local role:    ${auth.getRole?.() || '(none)'}`,
+                `Email:         ${u.email || '(none)'}`,
+                `User id:       ${u.id || '(none)'}`,
+                `Server check:  ${check.error || 'verified=false'}`,
+                ``,
+                `Recovery:`,
+                ` 1. Sign out + sign back in (fresh JWT).`,
+                ` 2. Confirm role='superadmin' on your user_profiles row.`,
+                ` 3. Admin-level access? Use /admin instead.`,
+            ].join('\n');
+            showGate('Insufficient Permissions',
+                     'Server superadmin verification failed.', diag);
+            throw '';
+        }
+    }
+
+    document.getElementById('auth-gate').style.display = 'none';
+    document.getElementById('sa-main').style.display  = 'block';
+    document.getElementById('sa-sub').textContent =
+        `Signed in as ${auth.getUser()?.email} · ${auth.getRole()}`;
+
+    // ── Tabs ─────────────────────────────────────────────────────────
+    document.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+            if (btn.dataset.tab === 'audit') loadAudit();
+        });
+    });
+
+    // ── Modal helpers ────────────────────────────────────────────────
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.getElementById(btn.dataset.closeModal).classList.remove('show');
+        });
+    });
+
+    function openModal(id)  { document.getElementById(id).classList.add('show'); }
+    function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+    // ── User list ────────────────────────────────────────────────────
+    const planLabel = (p) => `<span class="badge b-${p || 'free'}">${p || 'free'}</span>`;
+    const roleLabel = (r) => `<span class="badge b-${r || 'user'}">${r || 'user'}</span>`;
+    const subLabel  = (s) => s && s !== 'none' ? s : '<span style="color:#444">—</span>';
+    const fmtDate   = (d) => d ? new Date(d).toLocaleDateString() : '—';
+    const escape    = (s) => String(s ?? '')
+        .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+
+    let _users = [];
+
+    async function loadUsers(search = null) {
+        const tbody = document.getElementById('user-tbody');
+        tbody.innerHTML = `<tr><td colspan="7" class="empty">Loading users…</td></tr>`;
+        const res = await auth.listUsersForAdmin({ limit: 200, search });
+        if (!res.success) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty">Error: ${escape(res.error)}</td></tr>`;
+            return;
+        }
+        _users = res.rows;
+        if (!_users.length) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty">No users found.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = _users.map(u => `
+            <tr data-uid="${u.id}">
+                <td style="word-break:break-all">${escape(u.email || '—')}</td>
+                <td>${escape(u.display_name || '—')}</td>
+                <td>${roleLabel(u.role)}</td>
+                <td>${planLabel(u.plan)}</td>
+                <td style="font-size:.76rem">${subLabel(u.subscription_status)}</td>
+                <td style="font-size:.76rem;color:#666">${fmtDate(u.created_at)}</td>
+                <td>
+                    <div class="row-actions">
+                        <button class="btn btn-sm" data-act="role"
+                            data-uid="${u.id}" data-email="${escape(u.email || '')}" data-role="${u.role}">
+                            Change role
+                        </button>
+                        <button class="btn btn-sm" data-act="plan"
+                            data-uid="${u.id}" data-email="${escape(u.email || '')}" data-plan="${u.plan}"
+                            data-substatus="${u.subscription_status || 'none'}">
+                            Override plan
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        tbody.querySelectorAll('button[data-act]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const act = btn.dataset.act;
+                if (act === 'role') {
+                    document.getElementById('promote-target').value = btn.dataset.email;
+                    document.getElementById('promote-role').value   = btn.dataset.role;
+                    document.getElementById('promote-reason').value = '';
+                    document.getElementById('promote-err').textContent = '';
+                    document.getElementById('promote-confirm').dataset.uid = btn.dataset.uid;
+                    openModal('modal-promote');
+                } else if (act === 'plan') {
+                    document.getElementById('plan-target').value = btn.dataset.email;
+                    document.getElementById('plan-new').value    = btn.dataset.plan;
+                    document.getElementById('plan-reason').value = '';
+                    document.getElementById('plan-err').textContent =
+                        btn.dataset.substatus && ['active','trialing','past_due'].includes(btn.dataset.substatus)
+                            ? `Refused: target has ${btn.dataset.substatus} Stripe subscription. Cancel in Stripe first.`
+                            : 'Reason required (10–500 characters). Recorded in audit log.';
+                    document.getElementById('plan-confirm').dataset.uid = btn.dataset.uid;
+                    openModal('modal-plan');
+                }
+            });
+        });
+    }
+
+    document.getElementById('user-refresh').addEventListener('click',
+        () => loadUsers(document.getElementById('user-search').value.trim() || null));
+
+    let _searchTimer = null;
+    document.getElementById('user-search').addEventListener('input', (e) => {
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(
+            () => loadUsers(e.target.value.trim() || null), 250);
+    });
+
+    // ── Promote-user confirm ─────────────────────────────────────────
+    document.getElementById('promote-confirm').addEventListener('click', async (e) => {
+        const btn      = e.currentTarget;
+        const uid      = btn.dataset.uid;
+        const newRole  = document.getElementById('promote-role').value;
+        const reason   = document.getElementById('promote-reason').value.trim() || null;
+        const errEl    = document.getElementById('promote-err');
+        errEl.textContent = '';
+        btn.disabled = true; btn.textContent = 'Applying…';
+        const res = await auth.promoteUser(uid, newRole, reason);
+        btn.disabled = false; btn.textContent = 'Apply role change';
+        if (!res.success) {
+            errEl.textContent = res.error || 'Unknown error';
+            return;
+        }
+        closeModal('modal-promote');
+        loadUsers(document.getElementById('user-search').value.trim() || null);
+    });
+
+    // ── Plan-override confirm ────────────────────────────────────────
+    document.getElementById('plan-confirm').addEventListener('click', async (e) => {
+        const btn     = e.currentTarget;
+        const uid     = btn.dataset.uid;
+        const newPlan = document.getElementById('plan-new').value;
+        const reason  = document.getElementById('plan-reason').value.trim();
+        const errEl   = document.getElementById('plan-err');
+        if (reason.length < 10 || reason.length > 500) {
+            errEl.textContent = 'Reason required (10–500 characters).';
+            return;
+        }
+        errEl.textContent = '';
+        btn.disabled = true; btn.textContent = 'Applying…';
+        const res = await auth.setUserPlanOverride(uid, newPlan, reason);
+        btn.disabled = false; btn.textContent = 'Apply plan override';
+        if (!res.success) {
+            errEl.textContent = res.error || 'Unknown error';
+            return;
+        }
+        closeModal('modal-plan');
+        loadUsers(document.getElementById('user-search').value.trim() || null);
+    });
+
+    // ── Audit log ────────────────────────────────────────────────────
+    function renderDiff(row) {
+        if (row.operation === 'INSERT') {
+            const v = row.new_values || {};
+            return `<span class="audit-diff"><span class="k">created</span> role=<span class="nv">${escape(v.role)}</span> plan=<span class="nv">${escape(v.plan)}</span></span>`;
+        }
+        if (row.operation === 'DELETE') {
+            const v = row.old_values || {};
+            return `<span class="audit-diff"><span class="k">deleted</span> role=<span class="ov">${escape(v.role)}</span> plan=<span class="ov">${escape(v.plan)}</span></span>`;
+        }
+        const cols = row.changed_columns || [];
+        const parts = cols.map(c => {
+            const ov = row.old_values?.[c];
+            const nv = row.new_values?.[c];
+            return `<span class="k">${escape(c)}:</span> <span class="ov">${escape(ov)}</span> → <span class="nv">${escape(nv)}</span>`;
+        });
+        const reason = row.reason
+            ? `<div style="color:#999;font-size:.74rem;margin-top:3px">"${escape(row.reason)}"</div>`
+            : '';
+        return `<div class="audit-diff">${parts.join('<br>')}</div>${reason}`;
+    }
+
+    async function loadAudit() {
+        const tbody = document.getElementById('audit-tbody');
+        const limit = parseInt(document.getElementById('audit-limit').value, 10) || 100;
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">Loading audit log…</td></tr>`;
+        const res = await auth.getRecentRoleAudit(limit);
+        if (!res.success) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty">Error: ${escape(res.error)}</td></tr>`;
+            return;
+        }
+        if (!res.rows.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty">No changes recorded yet.</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = res.rows.map(r => `
+            <tr>
+                <td style="font-size:.76rem;color:#666;white-space:nowrap">
+                    ${new Date(r.created_at).toLocaleString()}
+                </td>
+                <td style="word-break:break-all">${escape(r.target_email || r.target_user_id?.slice(0,8))}</td>
+                <td style="word-break:break-all">
+                    ${escape(r.changed_by_email || (r.changed_by_uid ? r.changed_by_uid.slice(0,8) : '—'))}
+                    <div class="audit-meta">${escape(r.changed_by_role || '—')}</div>
+                </td>
+                <td style="font-size:.76rem;color:#888">${escape(r.source)}</td>
+                <td><span class="badge b-${r.operation === 'INSERT' ? 'free' : r.operation === 'DELETE' ? 'admin' : 'tester'}">${r.operation}</span></td>
+                <td>${renderDiff(r)}</td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('audit-refresh').addEventListener('click', loadAudit);
+    document.getElementById('audit-limit').addEventListener('change', loadAudit);
+
+    // Initial load
+    loadUsers();
+</script>
+</body>
+</html>
