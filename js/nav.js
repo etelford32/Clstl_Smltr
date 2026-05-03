@@ -16,6 +16,11 @@
 // on the home page and renders a progress banner on each tour stop.
 import './explore-tour.js';
 import { tierLevel as _cfgTierLevel, PAID_PLAN_IDS } from './tier-config.js';
+// Side-effect import: boots the telemetry singleton (window.onerror,
+// unhandledrejection, Web-Vitals observers). Every page that mounts
+// the nav gets autocapture for free; pages without the nav (rare,
+// embedded simulators) opt-in by importing js/telemetry.js directly.
+import './telemetry.js';
 
 const LOGO_IMG = 'ParkersPhysics_logo2.jpg';
 

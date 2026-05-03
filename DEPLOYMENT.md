@@ -109,6 +109,16 @@ supabase-schema-hardening-followup-migration.sql
                                           # verification query to detect any
                                           # accounts minted while the regression
                                           # was live.
+
+# Client telemetry (May 2026)
+supabase-client-telemetry-migration.sql   # client_telemetry table (errors,
+                                          # auth_failures, 404s, redirects,
+                                          # web_vitals, app_perf) + log RPC +
+                                          # 4 superadmin-only top-N read RPCs
+                                          # + pg_cron pruner (14d perf, 30d rest).
+                                          # Surfaces on /superadmin → Telemetry tab.
+                                          # Requires the /api/telemetry/log edge
+                                          # endpoint deployed to Vercel.
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
