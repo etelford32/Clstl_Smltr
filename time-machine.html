@@ -41,7 +41,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     width:100%; max-width:1280px;
     margin:18px auto 0;
     padding:0 18px;
+    display:grid;
+    grid-template-columns:1fr 320px;
+    gap:14px;
 }
+@media (max-width:900px) { #tm-stage { grid-template-columns:1fr; } }
 #tm-canvas-wrap {
     position:relative;
     width:100%; height:540px;
@@ -52,6 +56,86 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(80,40,160,.08);
 }
 #tm-canvas-wrap canvas { display:block; width:100%; height:100%; }
+
+/* ── Side panel: body picker + osculating elements ─────────────────── */
+#tm-side {
+    background:rgba(12,8,30,.82);
+    border:1px solid rgba(180,140,255,.22);
+    border-radius:14px;
+    padding:14px 14px 16px;
+    backdrop-filter:blur(14px);
+    display:flex; flex-direction:column;
+    height:540px; overflow:hidden;
+}
+@media (max-width:900px) { #tm-side { height:auto; max-height:none; } }
+.tm-side-title {
+    font-size:.66rem; color:#776; letter-spacing:.12em;
+    text-transform:uppercase; font-weight:700; margin-bottom:8px;
+}
+.tm-body-grid {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:5px;
+    margin-bottom:14px;
+}
+.tm-body-btn {
+    background:rgba(0,0,0,.30);
+    border:1px solid rgba(180,140,255,.18);
+    border-radius:5px;
+    padding:6px 4px 4px;
+    cursor:pointer;
+    text-align:center;
+    transition:all .15s;
+    font-family:inherit;
+    color:#998;
+}
+.tm-body-btn:hover { border-color:rgba(180,140,255,.50); color:#eef; }
+.tm-body-btn.sel {
+    background:rgba(120,80,255,.18);
+    border-color:#b78cff;
+    color:#fff;
+    box-shadow:0 0 10px rgba(180,140,255,.30);
+}
+.tm-body-dot {
+    width:14px; height:14px; border-radius:50%;
+    margin:0 auto 3px;
+    box-shadow:0 0 6px currentColor;
+}
+.tm-body-name { font-size:.62rem; font-weight:600; letter-spacing:.04em; }
+
+.tm-sel-head {
+    display:flex; align-items:center; gap:8px;
+    padding:6px 0 10px;
+    border-bottom:1px solid rgba(180,140,255,.16);
+    margin-bottom:10px;
+}
+.tm-sel-dot { width:18px; height:18px; border-radius:50%; box-shadow:0 0 8px currentColor; }
+.tm-sel-name { font-size:1.05rem; font-weight:700; color:#eef; }
+.tm-sel-sub  { font-size:.66rem; color:#776; font-family:monospace; margin-left:auto; }
+
+.tm-el-table {
+    flex:1;
+    display:grid; grid-template-columns:1fr auto;
+    column-gap:10px; row-gap:6px;
+    align-content:start;
+    font-family:monospace; font-size:.78rem;
+    overflow-y:auto;
+}
+.tm-el-k {
+    color:#aa9;
+    display:flex; align-items:baseline; gap:6px;
+}
+.tm-el-k .sym { color:#cba9ff; font-weight:700; min-width:18px; display:inline-block; }
+.tm-el-k .nm  { font-size:.66rem; color:#665; }
+.tm-el-v {
+    color:#fff; font-variant-numeric:tabular-nums; text-align:right;
+    font-weight:600;
+}
+.tm-el-v .un { color:#665; font-weight:400; margin-left:4px; font-size:.7rem; }
+.tm-el-foot {
+    margin-top:10px; padding-top:8px;
+    border-top:1px solid rgba(180,140,255,.12);
+    font-family:monospace; font-size:.62rem; color:#665;
+    line-height:1.55;
+}
 
 #tm-hud {
     position:absolute; top:12px; left:14px; right:14px;
@@ -308,6 +392,42 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     font-size:.74rem; color:#998; font-style:italic;
     border-left:2px solid rgba(255,184,48,.4); padding-left:10px; margin-top:10px;
 }
+
+/* ── Apsidal precession plot ────────────────────────────────────────── */
+.tm-plot-head {
+    display:flex; align-items:baseline; gap:14px;
+    margin-bottom:8px; flex-wrap:wrap;
+}
+.tm-plot-head h2 { margin-bottom:0; }
+.tm-plot-legend {
+    display:flex; gap:14px; font-family:monospace; font-size:.72rem;
+}
+.tm-plot-legend .lg { display:flex; align-items:center; gap:6px; color:#aa9; }
+.tm-plot-legend .swatch {
+    width:14px; height:3px; border-radius:2px;
+}
+.tm-plot-wrap {
+    position:relative;
+    width:100%; height:260px;
+    border:1px solid rgba(180,140,255,.14);
+    border-radius:8px;
+    background:linear-gradient(180deg, rgba(0,0,0,.30), rgba(8,4,24,.50));
+    overflow:hidden;
+}
+#tm-plot-canvas { display:block; width:100%; height:100%; }
+.tm-plot-readout {
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:10px;
+    margin-top:10px;
+    font-family:monospace; font-size:.72rem;
+}
+.tm-plot-readout .cell {
+    background:rgba(0,0,0,.25);
+    border:1px solid rgba(180,140,255,.12);
+    border-radius:6px;
+    padding:6px 9px;
+}
+.tm-plot-readout .cell .k { color:#776; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase; display:block; }
+.tm-plot-readout .cell .v { color:#eef; font-weight:700; font-size:.86rem; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -331,7 +451,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     <p>A deep-time workbench for solar-system orbital mechanics. Wind the planets thousands of years forward or millions of years back, watch perihelia precess, and study chaos in the inner system. The orrery below runs on the live VSOP87D / Meeus ephemeris stack — drag the time slider, jump to a historical event, or let it play forward at hours-per-second.</p>
 </div>
 
-<!-- ═══ ORRERY ═══ -->
+<!-- ═══ ORRERY + SIDE PANEL ═══ -->
 <div id="tm-stage">
     <div id="tm-canvas-wrap">
         <div id="tm-hud">
@@ -349,6 +469,25 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div id="tm-mode-pill">● Live</div>
         <div id="tm-legend"></div>
     </div>
+
+    <aside id="tm-side">
+        <div class="tm-side-title">Body Picker</div>
+        <div class="tm-body-grid" id="tm-body-grid"></div>
+
+        <div class="tm-sel-head">
+            <span class="tm-sel-dot" id="tm-sel-dot"></span>
+            <span class="tm-sel-name" id="tm-sel-name">Earth</span>
+            <span class="tm-sel-sub" id="tm-sel-period">365.26 d</span>
+        </div>
+
+        <div class="tm-el-table" id="tm-el-table"></div>
+
+        <div class="tm-el-foot">
+            Mean Keplerian elements with Standish (1992) linear secular
+            rates. Position (r, x/y/z) uses VSOP87D for Earth + outer
+            planets and the 3-term Meeus series for the inner planets.
+        </div>
+    </aside>
 </div>
 
 <!-- ═══ TIME CONTROLS ═══ -->
@@ -408,6 +547,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 </div>
 
 <div id="tm-app">
+
+    <section class="tm-panel">
+        <div class="tm-plot-head">
+            <h2 style="flex:0 0 auto">Earth Apsidal Precession <span style="color:#776; text-transform:none; letter-spacing:0; font-weight:400; font-size:.7rem">— ±10,000 yr</span></h2>
+            <div class="tm-plot-legend">
+                <span class="lg"><span class="swatch" style="background:#b78cff"></span>eccentricity (e)</span>
+                <span class="lg"><span class="swatch" style="background:#fc7"></span>longitude of perihelion (ω̄)</span>
+                <span class="lg"><span class="swatch" style="background:#4fc97f; height:1px; border-bottom:1px dashed #4fc97f"></span>current epoch</span>
+            </div>
+        </div>
+        <div class="tm-plot-wrap">
+            <canvas id="tm-plot-canvas"></canvas>
+        </div>
+        <div class="tm-plot-readout">
+            <div class="cell"><span class="k">e at epoch</span><span class="v" id="pl-e">—</span></div>
+            <div class="cell"><span class="k">ω̄ at epoch</span><span class="v" id="pl-w">—</span></div>
+            <div class="cell"><span class="k">e cycle (linear)</span><span class="v" id="pl-de">—</span></div>
+            <div class="cell"><span class="k">ω̄ rate</span><span class="v" id="pl-dw">—</span></div>
+        </div>
+        <p class="tm-warn">First-order linear extrapolation of Standish (1992) secular rates.
+        Reproduces the modern apsidal-precession trend (~11.45″/yr in ω̄ inertial → ~21,000-yr
+        climatic-precession period when combined with axial precession), but does not capture
+        the ~100-kyr Milankovitch eccentricity cycle, which arises from second-order
+        gravitational coupling with Venus and Jupiter and requires the full Wisdom-Holman tier.</p>
+    </section>
 
     <section class="tm-panel tm-construct">
         <div class="tm-status">Phase 1 — Validated Window Live</div>
@@ -481,6 +645,7 @@ import * as THREE        from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
     jdNow, dateFromJD, jdFromDate,
+    planetElementsAt, PLANET_ELEMENTS,
     mercuryHeliocentric, venusHeliocentric, earthHeliocentric, marsHeliocentric,
     jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
 } from './js/horizons.js';
@@ -641,6 +806,273 @@ legend.innerHTML = BODIES.map(b =>
     `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
 ).join('');
 
+// ── Body picker + element table ──────────────────────────────────────
+const elBodyGrid = document.getElementById('tm-body-grid');
+const elSelDot   = document.getElementById('tm-sel-dot');
+const elSelName  = document.getElementById('tm-sel-name');
+const elSelPer   = document.getElementById('tm-sel-period');
+const elElTbl    = document.getElementById('tm-el-table');
+
+const ELEM_DEFS = [
+    { sym:'a',  nm:'semi-major axis',     unit:'AU',  fmt:v => v.toFixed(7) },
+    { sym:'e',  nm:'eccentricity',        unit:'',    fmt:v => v.toFixed(7) },
+    { sym:'i',  nm:'inclination',         unit:'°',   fmt:v => v.toFixed(5) },
+    { sym:'Ω',  nm:'long. asc. node',     unit:'°',   fmt:v => normDeg(v).toFixed(4) },
+    { sym:'ω̄', nm:'long. of perihelion', unit:'°',   fmt:v => normDeg(v).toFixed(4) },
+    { sym:'M',  nm:'mean anomaly',        unit:'°',   fmt:v => v.toFixed(4) },
+    { sym:'L',  nm:'mean longitude',      unit:'°',   fmt:v => v.toFixed(4) },
+    { sym:'r',  nm:'heliocentric dist.',  unit:'AU',  fmt:v => v.toFixed(7) },
+];
+
+function normDeg(d) { const x = d % 360; return x < 0 ? x + 360 : x; }
+
+let selected = BODIES.find(b => b.key === 'earth');
+
+function buildBodyPicker() {
+    elBodyGrid.innerHTML = '';
+    for (const b of BODIES) {
+        const btn = document.createElement('button');
+        btn.className = 'tm-body-btn' + (b.key === selected.key ? ' sel' : '');
+        btn.dataset.key = b.key;
+        const hex = '#' + b.color.toString(16).padStart(6, '0');
+        btn.innerHTML =
+            `<div class="tm-body-dot" style="background:${hex};color:${hex}"></div>` +
+            `<div class="tm-body-name">${b.name}</div>`;
+        btn.addEventListener('click', () => selectBody(b.key));
+        elBodyGrid.appendChild(btn);
+    }
+    // Pre-render rows so updateSidePanel only needs to update <span class="tm-el-v">
+    elElTbl.innerHTML = ELEM_DEFS.map(d =>
+        `<div class="tm-el-k"><span class="sym">${d.sym}</span><span class="nm">${d.nm}</span></div>` +
+        `<div class="tm-el-v" data-sym="${d.sym}">—</div>`
+    ).join('');
+}
+
+function selectBody(key) {
+    selected = BODIES.find(b => b.key === key) || selected;
+    elBodyGrid.querySelectorAll('.tm-body-btn').forEach(b =>
+        b.classList.toggle('sel', b.dataset.key === key));
+    const hex = '#' + selected.color.toString(16).padStart(6, '0');
+    elSelDot.style.background = hex;
+    elSelDot.style.color      = hex;
+    elSelName.textContent = selected.name;
+    elSelPer.textContent  = `${formatPeriod(PERIOD_D[selected.key])}`;
+    updateSidePanel();
+}
+
+function formatPeriod(days) {
+    if (days < 365)        return `${days.toFixed(2)} d`;
+    if (days < 365 * 100)  return `${(days/365.25).toFixed(2)} yr`;
+    return `${(days/365.25).toFixed(0)} yr`;
+}
+
+function updateSidePanel() {
+    const el = planetElementsAt(selected.key, state.jd);
+    const p  = selected.fn(state.jd);
+    const r  = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+    const vals = { a:el.a, e:el.e, i:el.i, 'Ω':el.node, 'ω̄':el.omegaBar, M:el.M, L:el.L, r };
+    for (const d of ELEM_DEFS) {
+        const node = elElTbl.querySelector(`[data-sym="${d.sym}"]`);
+        if (!node) continue;
+        node.innerHTML = d.fmt(vals[d.sym]) + (d.unit ? `<span class="un">${d.unit}</span>` : '');
+    }
+}
+
+// ── Earth apsidal-precession plot ────────────────────────────────────
+const plot = document.getElementById('tm-plot-canvas');
+const pctx = plot.getContext('2d');
+const elPlE  = document.getElementById('pl-e');
+const elPlW  = document.getElementById('pl-w');
+const elPlDe = document.getElementById('pl-de');
+const elPlDw = document.getElementById('pl-dw');
+
+// Sample buffers — recomputed when center JD shifts > 100 yr
+const PLOT_N = 240;
+let plotCenterJd = -1e12;
+const plotJds = new Float64Array(PLOT_N);
+const plotEs  = new Float64Array(PLOT_N);
+const plotWs  = new Float64Array(PLOT_N);   // ω̄ in degrees (unwrapped)
+const PLOT_HALF_DAYS = 10000 * 365.25;     // ±10 kyr
+
+function rebuildPlotSamples(centerJd) {
+    let prev = null;
+    let unwrapOff = 0;
+    for (let i = 0; i < PLOT_N; i++) {
+        const f  = i / (PLOT_N - 1) * 2 - 1;       // [-1, +1]
+        const jd = centerJd + f * PLOT_HALF_DAYS;
+        const el = planetElementsAt('earth', jd);
+        plotJds[i] = jd;
+        plotEs[i]  = el.e;
+        let w = normDeg(el.omegaBar);
+        if (prev !== null) {
+            const d = w - prev;
+            if (d >  180) unwrapOff -= 360;
+            else if (d < -180) unwrapOff += 360;
+        }
+        prev = w;
+        plotWs[i] = w + unwrapOff;
+    }
+    plotCenterJd = centerJd;
+}
+
+function resizePlot() {
+    const rect = plot.getBoundingClientRect();
+    const dpr  = Math.min(devicePixelRatio, 2);
+    plot.width  = Math.max(1, Math.floor(rect.width  * dpr));
+    plot.height = Math.max(1, Math.floor(rect.height * dpr));
+    pctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizePlot();
+new ResizeObserver(resizePlot).observe(plot);
+
+function drawPlot() {
+    const W = plot.clientWidth, H = plot.clientHeight;
+    if (W < 8 || H < 8) return;
+    pctx.clearRect(0, 0, W, H);
+
+    // Layout
+    const padL = 56, padR = 56, padT = 14, padB = 28;
+    const pw = W - padL - padR, ph = H - padT - padB;
+
+    // y-axis ranges
+    let eMin = Infinity, eMax = -Infinity, wMin = Infinity, wMax = -Infinity;
+    for (let i = 0; i < PLOT_N; i++) {
+        if (plotEs[i] < eMin) eMin = plotEs[i];
+        if (plotEs[i] > eMax) eMax = plotEs[i];
+        if (plotWs[i] < wMin) wMin = plotWs[i];
+        if (plotWs[i] > wMax) wMax = plotWs[i];
+    }
+    // Pad ranges 8%
+    const ePad = (eMax - eMin) * 0.08 || 0.001;
+    const wPad = (wMax - wMin) * 0.08 || 1;
+    eMin -= ePad; eMax += ePad;
+    wMin -= wPad; wMax += wPad;
+
+    // ── grid + axis labels
+    pctx.strokeStyle = 'rgba(180,140,255,.10)';
+    pctx.lineWidth   = 1;
+    pctx.font        = '10px ui-monospace, Menlo, monospace';
+    pctx.textBaseline= 'middle';
+
+    const yEarthYr = dateFromJD(plotCenterJd).getUTCFullYear();
+    // 5 vertical grid lines: -10kyr, -5kyr, 0, +5kyr, +10kyr
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const x = padL + f * pw;
+        pctx.beginPath();
+        pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph);
+        pctx.stroke();
+        const yr = yEarthYr + Math.round((f * 2 - 1) * 10000);
+        const lbl = yr < 0 ? `${-yr} BCE` : `${yr}`;
+        pctx.fillStyle = '#665';
+        pctx.textAlign = 'center';
+        pctx.fillText(lbl, x, H - padB + 12);
+    }
+    // 5 horizontal grid lines
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const y = padT + f * ph;
+        pctx.beginPath();
+        pctx.moveTo(padL, y); pctx.lineTo(W - padR, y);
+        pctx.stroke();
+    }
+    // Left axis: e values
+    pctx.fillStyle = '#b78cff';
+    pctx.textAlign = 'right';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = eMax - f * (eMax - eMin);
+        pctx.fillText(v.toFixed(4), padL - 6, padT + f * ph);
+    }
+    // Right axis: ω̄ values
+    pctx.fillStyle = '#fc7';
+    pctx.textAlign = 'left';
+    for (let k = 0; k <= 4; k++) {
+        const f = k / 4;
+        const v = wMax - f * (wMax - wMin);
+        pctx.fillText(v.toFixed(1) + '°', W - padR + 6, padT + f * ph);
+    }
+    // Axis titles
+    pctx.fillStyle = 'rgba(180,140,255,.55)';
+    pctx.textAlign = 'center';
+    pctx.save();
+    pctx.translate(14, padT + ph / 2);
+    pctx.rotate(-Math.PI / 2);
+    pctx.fillText('eccentricity e', 0, 0);
+    pctx.restore();
+    pctx.fillStyle = 'rgba(255,184,48,.55)';
+    pctx.save();
+    pctx.translate(W - 14, padT + ph / 2);
+    pctx.rotate(Math.PI / 2);
+    pctx.fillText('long. perihelion ω̄', 0, 0);
+    pctx.restore();
+
+    // ── data traces
+    const xOf = i => padL + (i / (PLOT_N - 1)) * pw;
+    const yE  = v => padT + (1 - (v - eMin) / (eMax - eMin)) * ph;
+    const yW  = v => padT + (1 - (v - wMin) / (wMax - wMin)) * ph;
+
+    // Eccentricity (purple)
+    pctx.lineWidth = 1.8;
+    pctx.strokeStyle = '#b78cff';
+    pctx.beginPath();
+    for (let i = 0; i < PLOT_N; i++) {
+        const x = xOf(i), y = yE(plotEs[i]);
+        if (i === 0) pctx.moveTo(x, y); else pctx.lineTo(x, y);
+    }
+    pctx.stroke();
+
+    // ω̄ (orange)
+    pctx.strokeStyle = '#fc7';
+    pctx.beginPath();
+    for (let i = 0; i < PLOT_N; i++) {
+        const x = xOf(i), y = yW(plotWs[i]);
+        if (i === 0) pctx.moveTo(x, y); else pctx.lineTo(x, y);
+    }
+    pctx.stroke();
+
+    // ── current-epoch cursor
+    const f0 = (state.jd - plotJds[0]) / (plotJds[PLOT_N - 1] - plotJds[0]);
+    if (f0 >= 0 && f0 <= 1) {
+        const x = padL + f0 * pw;
+        pctx.strokeStyle = 'rgba(79,201,127,.55)';
+        pctx.setLineDash([4, 3]);
+        pctx.lineWidth = 1.2;
+        pctx.beginPath();
+        pctx.moveTo(x, padT); pctx.lineTo(x, padT + ph);
+        pctx.stroke();
+        pctx.setLineDash([]);
+
+        const elNow = planetElementsAt('earth', state.jd);
+        const wNow  = elNow.omegaBar;   // raw, before unwrap — but for marker just use normDeg
+        // Find unwrapped ω̄ at current JD by interpolating samples
+        const idxF = f0 * (PLOT_N - 1);
+        const i0 = Math.floor(idxF), i1 = Math.min(PLOT_N - 1, i0 + 1);
+        const tt = idxF - i0;
+        const wInterp = plotWs[i0] * (1 - tt) + plotWs[i1] * tt;
+
+        pctx.fillStyle = '#b78cff';
+        pctx.beginPath(); pctx.arc(x, yE(elNow.e), 4, 0, Math.PI * 2); pctx.fill();
+        pctx.fillStyle = '#fc7';
+        pctx.beginPath(); pctx.arc(x, yW(wInterp), 4, 0, Math.PI * 2); pctx.fill();
+    }
+}
+
+function refreshPlot() {
+    if (Math.abs(state.jd - plotCenterJd) > 100 * 365.25 || plotCenterJd < -1e10) {
+        rebuildPlotSamples(state.jd);
+    }
+    drawPlot();
+    // Readouts
+    const el = planetElementsAt('earth', state.jd);
+    elPlE.textContent  = el.e.toFixed(7);
+    elPlW.textContent  = normDeg(el.omegaBar).toFixed(4) + '°';
+    // edot, ωdot per century
+    const E = PLANET_ELEMENTS.earth;
+    elPlDe.textContent = (E.edot * 100).toFixed(6) + ' /10kyr';
+    elPlDw.textContent = (E.omegadot * 100).toFixed(3) + '°/10kyr';
+}
+
 // ── Time state ───────────────────────────────────────────────────────
 const state = {
     jd:        jdNow(),
@@ -755,6 +1187,8 @@ function setJd(jd, { fromLive = false } = {}) {
     updatePositions(jd);
     updateHud();
     syncInputsFromJd();
+    updateSidePanel();
+    refreshPlot();
 }
 
 // ── Play loop ────────────────────────────────────────────────────────
@@ -767,6 +1201,8 @@ function tick(now) {
         updatePositions(state.jd);
         updateHud();
         syncInputsFromJd();
+        updateSidePanel();
+        refreshPlot();
     } else if (state.playing && state.speedSec > 0) {
         const newJd = state.jd + (state.speedSec * dt) / 86400;
         setJd(newJd);
@@ -873,6 +1309,8 @@ elNow.addEventListener('click', () => {
     updatePositions(state.jd);
     updateHud();
     syncInputsFromJd();
+    updateSidePanel();
+    refreshPlot();
 });
 
 elStepF.addEventListener('click', () => {
@@ -923,10 +1361,13 @@ elJdIn.addEventListener('change', () => {
 
 // ── Boot ─────────────────────────────────────────────────────────────
 buildBookmarks();
+buildBodyPicker();
+selectBody('earth');     // also calls updateSidePanel()
 recenterTo(state.jd);
 updatePositions(state.jd);
 updateHud();
 syncInputsFromJd();
+refreshPlot();
 </script>
 
 </body>
