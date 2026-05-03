@@ -555,6 +555,47 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     background:rgba(120,80,255,.22); color:#fff;
 }
 .tm-toggle-pill button:hover:not(.on) { background:rgba(180,140,255,.08); color:#eef; }
+
+/* ── Field-grid colorbar overlay ────────────────────────────────────── */
+#tm-fieldbar {
+    position:absolute;
+    right:14px; bottom:14px;
+    width:180px;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(180,140,255,.24);
+    border-radius:6px;
+    padding:8px 10px;
+    font-family:ui-monospace, Menlo, monospace;
+    font-size:.62rem;
+    color:#cba9ff;
+    backdrop-filter:blur(8px);
+    z-index:5;
+    transition:opacity .2s;
+    opacity:0;
+    pointer-events:none;
+}
+#tm-fieldbar.show { opacity:1; }
+#tm-fieldbar .fb-title {
+    font-weight:700; color:#cba9ff;
+    text-transform:uppercase; letter-spacing:.04em;
+    font-size:.62rem; margin-bottom:5px;
+}
+#tm-fieldbar .fb-bar {
+    height:10px; border-radius:2px; margin:4px 0 3px;
+    background:linear-gradient(90deg,
+        #440154 0%, #482878 12%, #3e4a89 25%, #31688e 37%,
+        #26828e 50%, #1f9d8a 62%, #6cce5a 75%, #b6de2b 87%, #fde725 100%);
+    border:1px solid rgba(0,0,0,.4);
+}
+#tm-fieldbar .fb-tags {
+    display:flex; justify-content:space-between;
+    color:#776; font-size:.58rem;
+}
+#tm-fieldbar .fb-info {
+    color:#665; font-size:.58rem; margin-top:4px;
+    line-height:1.4;
+}
+#tm-fieldbar .fb-info b { color:#998; font-weight:600; }
 </style>
 <link rel="stylesheet" href="js/nav-styles.css">
 </head>
@@ -596,6 +637,12 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div id="tm-mode-pill">● Live</div>
         <div id="tm-legend"></div>
         <div id="tm-tooltip" role="tooltip" aria-hidden="true"></div>
+        <div id="tm-fieldbar">
+            <div class="fb-title" id="fb-title">Planetary |g| (Sun excluded)</div>
+            <div class="fb-bar"></div>
+            <div class="fb-tags"><span id="fb-min">—</span><span id="fb-max">—</span></div>
+            <div class="fb-info" id="fb-info">—</div>
+        </div>
     </div>
 
     <aside id="tm-side">
@@ -683,6 +730,62 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             </span>
             <span style="flex:1"></span>
             <button class="tm-btn" id="tm-grav-toggle">Hover gravity: ON</button>
+        </div>
+
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Field grid</span>
+            <button class="tm-btn" id="tm-field-toggle">Field grid: OFF</button>
+            <span class="tm-label" style="width:auto">Mode</span>
+            <span class="tm-toggle-pill" role="group">
+                <button class="on" id="tm-field-noSun">Planetary</button>
+                <button id="tm-field-total">Total</button>
+                <button id="tm-field-jacobi">Jacobi (rot)</button>
+            </span>
+            <span class="tm-label" style="width:auto">Resolution</span>
+            <select class="tm-select" id="tm-field-res">
+                <option value="64">64 × 64 (fast)</option>
+                <option value="128" selected>128 × 128 (default)</option>
+                <option value="256">256 × 256 (heavy)</option>
+            </select>
+            <span style="flex:1"></span>
+            <span class="tm-grav-val" id="tm-field-stats">—</span>
+        </div>
+
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Vectors</span>
+            <button class="tm-btn" id="tm-arrows-toggle">Arrows: OFF</button>
+            <span class="tm-label" style="width:auto">Density</span>
+            <select class="tm-select" id="tm-arrows-res">
+                <option value="16">16 × 16</option>
+                <option value="24" selected>24 × 24</option>
+                <option value="36">36 × 36</option>
+            </select>
+            <span class="tm-label" style="width:auto">Style</span>
+            <select class="tm-select" id="tm-arrows-style">
+                <option value="logmag" selected>length ∝ log|g|</option>
+                <option value="uniform">uniform length</option>
+            </select>
+            <span style="flex:1"></span>
+            <span class="tm-grav-val" id="tm-arrows-stats">—</span>
+        </div>
+
+        <div class="tm-grav-row">
+            <span class="tm-label" style="width:64px">Streamlines</span>
+            <button class="tm-btn" id="tm-stream-toggle">Streamlines: OFF</button>
+            <span class="tm-label" style="width:auto">Seeds</span>
+            <select class="tm-select" id="tm-stream-seeds">
+                <option value="36">36 (sparse)</option>
+                <option value="60" selected>60 (default)</option>
+                <option value="96">96 (dense)</option>
+            </select>
+            <span class="tm-label" style="width:auto">Length</span>
+            <select class="tm-select" id="tm-stream-len">
+                <option value="160">short</option>
+                <option value="240" selected>medium</option>
+                <option value="360">long</option>
+            </select>
+            <span style="flex:1"></span>
+            <span class="tm-grav-val" id="tm-stream-stats">—</span>
         </div>
 
     </div>
@@ -1267,6 +1370,13 @@ function selectBody(key) {
     updateSidePanel();
     if (typeof refreshPlot === 'function') refreshPlot();
     if (typeof renderResidualTable === 'function') renderResidualTable();
+    // Jacobi secondary follows the body picker — re-fire the field/streams.
+    if (typeof field !== 'undefined' && field.enabled && field.mode === 'jacobi') {
+        postFieldRequest(state.jd);
+    }
+    if (typeof streams !== 'undefined' && streams.enabled && field.mode === 'jacobi') {
+        postStreamRequest(state.jd);
+    }
 }
 
 function formatPeriod(days) {
@@ -2166,6 +2276,703 @@ function updateHoverGravity() {
     elTooltip.classList.add('show');
 }
 
+// ── Field-grid colormap (off-thread compute) ────────────────────────
+// 2-D grid of |g| over the visible ecliptic, evaluated in a Web Worker
+// so the main thread stays smooth while the field updates in real time.
+//
+// The plane sits at scene-Y = 0 with renderOrder = -1 + transparent
+// material, so orbits and bodies render on top. Texture is a DataTexture
+// generated each worker reply via a viridis lookup with log-stretched
+// auto-fit bounds.
+
+const FIELD_GRID_HALF = 42;        // covers Neptune (~38.9 in render space) + margin
+const VIRIDIS_STOPS = [
+    [ 68,   1,  84], [ 71,  19,  97], [ 72,  35, 116], [ 64,  67, 135],
+    [ 52,  94, 141], [ 41, 120, 142], [ 32, 144, 140], [ 34, 167, 132],
+    [ 68, 190, 112], [121, 209,  81], [189, 222,  38], [253, 231,  37],
+];
+function viridis(t) {
+    if (!isFinite(t) || t <= 0) return VIRIDIS_STOPS[0];
+    if (t >= 1) return VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1];
+    const f  = t * (VIRIDIS_STOPS.length - 1);
+    const i0 = Math.floor(f);
+    const i1 = Math.min(i0 + 1, VIRIDIS_STOPS.length - 1);
+    const w  = f - i0;
+    const a = VIRIDIS_STOPS[i0], b = VIRIDIS_STOPS[i1];
+    return [
+        a[0] + (b[0] - a[0]) * w,
+        a[1] + (b[1] - a[1]) * w,
+        a[2] + (b[2] - a[2]) * w,
+    ];
+}
+
+const field = {
+    enabled:      false,
+    mode:         'noSun',          // 'noSun' | 'total'
+    resolution:   128,
+    worker:       null,
+    inFlight:     false,
+    pendingJd:    null,             // latest jd we want to compute, queued
+    lastSentJd:   -1e12,
+    lastSentMs:   0,
+    minIntervalMs: 90,              // throttle worker requests
+    texture:      null,             // THREE.DataTexture
+    plane:        null,             // THREE.Mesh
+    rgba:         null,             // Uint8Array(R*R*4) reused
+    last: { gMin:0, gMax:0, gMean:0, runtimeMs:0, jd:0 },
+};
+
+const elFieldToggle = document.getElementById('tm-field-toggle');
+const elFieldNoSun  = document.getElementById('tm-field-noSun');
+const elFieldTotal  = document.getElementById('tm-field-total');
+const elFieldJacobi = document.getElementById('tm-field-jacobi');
+const elFieldRes    = document.getElementById('tm-field-res');
+const elFieldStats  = document.getElementById('tm-field-stats');
+const elFieldBar    = document.getElementById('tm-fieldbar');
+const elFbMin       = document.getElementById('fb-min');
+const elFbMax       = document.getElementById('fb-max');
+const elFbTitle     = document.getElementById('fb-title');
+const elFbInfo      = document.getElementById('fb-info');
+
+function ensureFieldPlane(R) {
+    if (!field.plane) {
+        const geom = new THREE.PlaneGeometry(FIELD_GRID_HALF * 2, FIELD_GRID_HALF * 2, 1, 1);
+        const mat  = new THREE.MeshBasicMaterial({
+            transparent: true,
+            opacity:     0.65,
+            depthWrite:  false,
+            depthTest:   true,
+            side:        THREE.DoubleSide,
+        });
+        field.plane = new THREE.Mesh(geom, mat);
+        field.plane.rotation.x = -Math.PI / 2;
+        field.plane.position.y = -0.02;       // just below the orbit rings
+        field.plane.renderOrder = -10;
+        field.plane.visible = false;
+        scene.add(field.plane);
+    }
+    if (!field.texture || field.texture.image.width !== R) {
+        if (field.texture) field.texture.dispose();
+        field.rgba    = new Uint8Array(R * R * 4);
+        field.texture = new THREE.DataTexture(field.rgba, R, R, THREE.RGBAFormat);
+        field.texture.minFilter = THREE.LinearFilter;
+        field.texture.magFilter = THREE.LinearFilter;
+        field.texture.needsUpdate = true;
+        field.plane.material.map = field.texture;
+        field.plane.material.needsUpdate = true;
+    }
+}
+
+function fmtSiAccel(g) {
+    const si = g * ACCEL_AUday2_TO_mps2;
+    if (!isFinite(si) || si <= 0) return '0';
+    return si.toExponential(2) + ' m/s²';
+}
+
+function bakeColormap(gMag, R, gMin, gMax) {
+    // Log-stretch: t = (log(g) - log(min)) / (log(max) - log(min))
+    const logMin = Math.log(Math.max(gMin, 1e-30));
+    const logMax = Math.log(Math.max(gMax, gMin * 1.001));
+    const span   = logMax - logMin;
+    const rgba   = field.rgba;
+    for (let i = 0; i < gMag.length; i++) {
+        const g = gMag[i];
+        let t;
+        if (g <= 0)  t = 0;
+        else         t = Math.max(0, Math.min(1, (Math.log(g) - logMin) / span));
+        const c = viridis(t);
+        const j = i * 4;
+        rgba[j  ] = c[0] | 0;
+        rgba[j+1] = c[1] | 0;
+        rgba[j+2] = c[2] | 0;
+        // Lower alpha at the very-faint extreme so empty regions fade out
+        rgba[j+3] = (130 + 90 * t) | 0;
+    }
+    field.texture.needsUpdate = true;
+}
+
+function maybePostFieldRequest(now) {
+    if (!field.enabled || field.inFlight) return;
+    const jd = state.jd;
+    const dueByTime = (now - field.lastSentMs) > field.minIntervalMs;
+    const dueByJd   = Math.abs(jd - field.lastSentJd) > 1e-6;
+    if (!dueByTime || !dueByJd) return;
+    postFieldRequest(jd);
+}
+
+function postFieldRequest(jd) {
+    if (!field.worker) {
+        try {
+            field.worker = new Worker('./js/orbital-mechanics/field-worker.js', { type:'module' });
+        } catch (err) {
+            elFieldStats.textContent = 'worker error';
+            console.error('[field-worker] spawn failed:', err);
+            return;
+        }
+        field.worker.onmessage = onFieldMessage;
+        field.worker.onerror = ev => {
+            elFieldStats.textContent = 'worker crash';
+            console.error('[field-worker]', ev);
+            field.inFlight = false;
+        };
+    }
+
+    // Pack body table: [ x, y, z, gm ] per body. Layout:
+    //   index 0 sun, 1..8 planets, 9..12 asteroids
+    const bodyKeys = [
+        ['sun', 0, 0, 0, GM_SUN_AU],
+    ];
+    for (const b of BODIES) {
+        const p = b.fn(jd);
+        bodyKeys.push([b.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * PLANET_MR[b.key]]);
+    }
+    for (const a of ASTEROIDS) {
+        const p = asteroidHelio(a.key, jd);
+        bodyKeys.push([a.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * ASTEROID_MR[a.key]]);
+    }
+    const bodies = new Float32Array(bodyKeys.length * 4);
+    for (let i = 0; i < bodyKeys.length; i++) {
+        bodies[i*4 + 0] = bodyKeys[i][1];
+        bodies[i*4 + 1] = bodyKeys[i][2];
+        bodies[i*4 + 2] = bodyKeys[i][3];
+        bodies[i*4 + 3] = bodyKeys[i][4];
+    }
+
+    field.lastSentJd = jd;
+    field.lastSentMs = performance.now();
+    field.inFlight   = true;
+
+    // Jacobi extras: pick the currently selected planet as secondary,
+    // compute n² from its instantaneous heliocentric distance.
+    let secondaryIndex = -1, meanMotion2 = 0, jacobiSecondaryKey = null;
+    if (field.mode === 'jacobi' && selected && selected.key) {
+        const planetIdx = BODIES.findIndex(b => b.key === selected.key);
+        if (planetIdx >= 0) {
+            secondaryIndex = planetIdx + 1;   // worker layout: 0=sun, 1..8=planets
+            const p = BODIES[planetIdx].fn(jd);
+            const r_p = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+            const muTotal = GM_SUN_AU * (1 + PLANET_MR[selected.key]);
+            // n² = GM_total / r_p³  (instantaneous circular-orbit mean motion)
+            meanMotion2 = muTotal / (r_p * r_p * r_p);
+            jacobiSecondaryKey = selected.key;
+        }
+    }
+    field.lastJacobiSecondary = jacobiSecondaryKey;
+
+    field.worker.postMessage(
+        {
+            type:           'compute',
+            jd, resolution: field.resolution,
+            gridHalfRender: FIELD_GRID_HALF,
+            RADIAL_K, RADIAL_P,
+            mode:           field.mode,
+            sunIndex:       0,
+            secondaryIndex, meanMotion2,
+            bodies,
+        },
+        [bodies.buffer],
+    );
+}
+
+function onFieldMessage(ev) {
+    const m = ev.data;
+    if (m.type === 'error') {
+        elFieldStats.textContent = 'error: ' + m.message;
+        field.inFlight = false;
+        return;
+    }
+    if (m.type !== 'field') return;
+    const R = m.resolution;
+    ensureFieldPlane(R);
+
+    bakeColormap(m.gMag, R, m.gMin, m.gMax);
+    field.last = { gMin:m.gMin, gMax:m.gMax, gMean:m.gMean,
+                   runtimeMs:m.runtimeMs, jd:m.jd };
+    field.inFlight = false;
+
+    // Update HUD bar
+    elFbMin.textContent = fmtSiAccel(m.gMin);
+    elFbMax.textContent = fmtSiAccel(m.gMax);
+    if (field.mode === 'noSun') {
+        elFbTitle.textContent = 'Planetary |g| · Sun excluded';
+    } else if (field.mode === 'jacobi') {
+        const sec = field.lastJacobiSecondary || 'earth';
+        const cap = sec.charAt(0).toUpperCase() + sec.slice(1);
+        elFbTitle.textContent = `Rotating-frame |g_eff| · Sun + ${cap}`;
+    } else {
+        elFbTitle.textContent = 'Total |g| (Sun + planets + asteroids)';
+    }
+    elFbInfo.innerHTML =
+        `<b>median</b> ${fmtSiAccel(m.gMean)} · <b>Δt</b> ${m.runtimeMs.toFixed(0)} ms · ` +
+        `<b>${R}×${R}</b> · jd ${m.jd.toFixed(1)}`;
+    elFieldStats.textContent = `${R}×${R} · ${m.runtimeMs.toFixed(0)} ms`;
+}
+
+elFieldToggle.addEventListener('click', () => {
+    field.enabled = !field.enabled;
+    elFieldToggle.textContent = 'Field grid: ' + (field.enabled ? 'ON' : 'OFF');
+    if (field.plane) field.plane.visible = field.enabled;
+    elFieldBar.classList.toggle('show', field.enabled);
+    if (field.enabled) postFieldRequest(state.jd);
+});
+
+function setFieldMode(mode) {
+    field.mode = mode;
+    elFieldNoSun .classList.toggle('on', mode === 'noSun');
+    elFieldTotal .classList.toggle('on', mode === 'total');
+    elFieldJacobi.classList.toggle('on', mode === 'jacobi');
+    if (field.enabled) postFieldRequest(state.jd);
+    if (typeof streams !== 'undefined' && streams.enabled) postStreamRequest(state.jd);
+}
+elFieldNoSun .addEventListener('click', () => setFieldMode('noSun'));
+elFieldTotal .addEventListener('click', () => setFieldMode('total'));
+elFieldJacobi.addEventListener('click', () => setFieldMode('jacobi'));
+
+elFieldRes.addEventListener('change', () => {
+    field.resolution = parseInt(elFieldRes.value, 10) || 128;
+    if (field.enabled) postFieldRequest(state.jd);
+});
+
+// ── g-vector glyphs (InstancedMesh of small cones) ──────────────────
+// Sparse direction field on top of the colormap: each cone points along
+// g_eff at its grid cell, scaled by log|g|. Same mode as the colormap
+// pill (Total / Planetary / Jacobi). Computed on the main thread —
+// 24×24 = 576 cells × ≤13 force evals per frame is negligible.
+//
+// In Jacobi mode, arrows visualise the rotating-frame net force, so
+// L4/L5/L1/L2/L3 appear as zero-length arrows (cones vanish to dots)
+// and the Hill sphere of the chosen secondary shows up as a clean
+// flip in arrow direction (toward Sun outside, toward planet inside).
+const arrowsState = {
+    enabled:  false,
+    mesh:     null,
+    res:      24,
+    style:    'logmag',     // 'logmag' | 'uniform'
+    dummy:    new THREE.Object3D(),
+    upY:      new THREE.Vector3(0, 1, 0),
+    dirVec:   new THREE.Vector3(),
+    quat:     new THREE.Quaternion(),
+    lastT:    -1,
+    minMs:    32,            // ~30 fps update throttle
+};
+
+const elArrowsToggle = document.getElementById('tm-arrows-toggle');
+const elArrowsRes    = document.getElementById('tm-arrows-res');
+const elArrowsStyle  = document.getElementById('tm-arrows-style');
+const elArrowsStats  = document.getElementById('tm-arrows-stats');
+
+const ARROWS_MAX = 36 * 36;              // upper bound for instance allocation
+const ARROW_GEOM = (() => {
+    // cone of unit length along +Y, base at origin
+    const g = new THREE.ConeGeometry(0.07, 1.0, 7);
+    g.translate(0, 0.5, 0);
+    return g;
+})();
+
+function ensureArrowsMesh() {
+    if (arrowsState.mesh) return;
+    const mat = new THREE.MeshBasicMaterial({
+        color: 0xffe070, transparent: true, opacity: 0.85,
+    });
+    arrowsState.mesh = new THREE.InstancedMesh(ARROW_GEOM, mat, ARROWS_MAX);
+    arrowsState.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    arrowsState.mesh.frustumCulled = false;
+    arrowsState.mesh.visible = false;
+    arrowsState.mesh.count   = 0;
+    scene.add(arrowsState.mesh);
+}
+
+/**
+ * Compute the heliocentric ecliptic g vector at a point — picks the
+ * field mode (matches the colormap mode) so arrows always agree with
+ * the colour underneath them. Returns AU/day² components.
+ */
+function gVectorAt(au_x, au_y, jd, mode, jacobiCtx) {
+    let gx = 0, gy = 0;
+    if (mode === 'jacobi' && jacobiCtx) {
+        const { sx, sy, sgm, n2 } = jacobiCtx;
+        // Sun at origin
+        {
+            const dx = -au_x, dy = -au_y;
+            const r2 = dx*dx + dy*dy;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            gx += GM_SUN_AU * dx * inv;
+            gy += GM_SUN_AU * dy * inv;
+        }
+        // Secondary
+        {
+            const dx = sx - au_x, dy = sy - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 > 1e-12) {
+                const r1 = Math.sqrt(r2);
+                const inv = 1 / (r2 * r1);
+                gx += sgm * dx * inv;
+                gy += sgm * dy * inv;
+            }
+        }
+        // Centrifugal
+        gx += n2 * au_x;
+        gy += n2 * au_y;
+    } else {
+        const skipSun = mode === 'noSun';
+        if (!skipSun) {
+            const dx = -au_x, dy = -au_y;
+            const r2 = dx*dx + dy*dy;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            gx += GM_SUN_AU * dx * inv;
+            gy += GM_SUN_AU * dy * inv;
+        }
+        for (const b of BODIES) {
+            const p = b.fn(jd);
+            const dx = p.x_AU - au_x, dy = p.y_AU - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 < 1e-10) continue;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            const gm = GM_SUN_AU * PLANET_MR[b.key];
+            gx += gm * dx * inv;
+            gy += gm * dy * inv;
+        }
+        for (const a of ASTEROIDS) {
+            const p = asteroidHelio(a.key, jd);
+            const dx = p.x_AU - au_x, dy = p.y_AU - au_y;
+            const r2 = dx*dx + dy*dy;
+            if (r2 < 1e-10) continue;
+            const r1 = Math.sqrt(r2);
+            const inv = 1 / (r2 * r1);
+            const gm = GM_SUN_AU * ASTEROID_MR[a.key];
+            gx += gm * dx * inv;
+            gy += gm * dy * inv;
+        }
+    }
+    return { gx, gy };
+}
+
+function updateArrows(now) {
+    if (!arrowsState.enabled || !arrowsState.mesh) return;
+    if (now - arrowsState.lastT < arrowsState.minMs) return;
+    arrowsState.lastT = now;
+
+    const R     = arrowsState.res;
+    const half  = FIELD_GRID_HALF;
+    const step  = (half * 2) / R;
+    const start = -half + step / 2;
+    const baseLen = step * 0.55;          // visual length ceiling per cell
+
+    const mode = field.mode || 'noSun';
+    let jacobiCtx = null;
+    if (mode === 'jacobi' && selected) {
+        const planetIdx = BODIES.findIndex(b => b.key === selected.key);
+        if (planetIdx >= 0) {
+            const p = BODIES[planetIdx].fn(state.jd);
+            const r_p = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+            const muTotal = GM_SUN_AU * (1 + PLANET_MR[selected.key]);
+            jacobiCtx = {
+                sx: p.x_AU, sy: p.y_AU,
+                sgm: GM_SUN_AU * PLANET_MR[selected.key],
+                n2: muTotal / (r_p * r_p * r_p),
+            };
+        }
+    }
+
+    const dummy = arrowsState.dummy;
+    const upY   = arrowsState.upY;
+    const dir   = arrowsState.dirVec;
+    let count = 0;
+    let gMin = Infinity, gMax = -Infinity;
+
+    for (let iy = 0; iy < R; iy++) {
+        const sZ = start + iy * step;
+        for (let ix = 0; ix < R; ix++) {
+            const sX = start + ix * step;
+            const rr2 = sX * sX + sZ * sZ;
+            if (rr2 < 0.7) continue;        // skip Sun-overlap
+            const rr   = Math.sqrt(rr2);
+            const r_AU = Math.pow(rr / RADIAL_K, 1 / RADIAL_P);
+            const k    = rr / r_AU;
+            const auX  =  sX / k;
+            const auY  = -sZ / k;
+
+            const { gx, gy } = gVectorAt(auX, auY, state.jd, mode, jacobiCtx);
+            const gMag = Math.sqrt(gx*gx + gy*gy);
+            if (gMag < 1e-14) continue;
+            if (gMag < gMin) gMin = gMag;
+            if (gMag > gMax) gMax = gMag;
+
+            // Map AU direction → scene direction (isotropic at this radius).
+            // auToScene swaps Y↔Z and flips Y; for direction we apply the
+            // same swap (no scale needed since we'll normalise).
+            dir.set(gx, 0, -gy);
+            const dn = Math.hypot(dir.x, dir.z);
+            if (dn < 1e-20) continue;
+            dir.x /= dn; dir.z /= dn;       // y already 0 (ecliptic)
+
+            // Length: log scale across ~6 decades, clamped to [0.15, 1.0]·baseLen
+            let lenFrac;
+            if (arrowsState.style === 'uniform') {
+                lenFrac = 0.7;
+            } else {
+                // log10(g_si) typically in [-9, -2] for our scenes
+                const gSi = gMag * ACCEL_AUday2_TO_mps2;
+                const t = Math.max(0, Math.min(1,
+                    (Math.log10(gSi) + 9) / 7));    // [-9 .. -2] → [0..1]
+                lenFrac = 0.18 + 0.82 * t;
+            }
+            const arrowLen = baseLen * lenFrac;
+
+            arrowsState.quat.setFromUnitVectors(upY, dir);
+            dummy.position.set(sX, 0.04, sZ);   // slightly above colormap plane
+            dummy.quaternion.copy(arrowsState.quat);
+            dummy.scale.set(0.18, arrowLen, 0.18);
+            dummy.updateMatrix();
+            arrowsState.mesh.setMatrixAt(count, dummy.matrix);
+            count++;
+            if (count >= ARROWS_MAX) break;
+        }
+        if (count >= ARROWS_MAX) break;
+    }
+
+    arrowsState.mesh.count = count;
+    arrowsState.mesh.instanceMatrix.needsUpdate = true;
+
+    if (count > 0) {
+        const gMinSi = gMin * ACCEL_AUday2_TO_mps2;
+        const gMaxSi = gMax * ACCEL_AUday2_TO_mps2;
+        elArrowsStats.textContent =
+            `${count} arrows · |g| ${gMinSi.toExponential(1)}…${gMaxSi.toExponential(1)} m/s²`;
+    } else {
+        elArrowsStats.textContent = '0 arrows';
+    }
+}
+
+elArrowsToggle.addEventListener('click', () => {
+    arrowsState.enabled = !arrowsState.enabled;
+    elArrowsToggle.textContent = 'Arrows: ' + (arrowsState.enabled ? 'ON' : 'OFF');
+    if (arrowsState.enabled) {
+        ensureArrowsMesh();
+        arrowsState.mesh.visible = true;
+        arrowsState.lastT = -1;        // force immediate update next tick
+    } else if (arrowsState.mesh) {
+        arrowsState.mesh.visible = false;
+    }
+});
+
+elArrowsRes.addEventListener('change', () => {
+    arrowsState.res = parseInt(elArrowsRes.value, 10) || 24;
+    arrowsState.lastT = -1;
+});
+
+elArrowsStyle.addEventListener('change', () => {
+    arrowsState.style = elArrowsStyle.value;
+    arrowsState.lastT = -1;
+});
+
+// ── Streamlines (RK4 in worker) ──────────────────────────────────────
+// Polylines tracing the unit-normalised g_eff field. Mode follows the
+// field-grid pill. Seeds are placed on three concentric rings so that
+// outer-edge seeds run inward to attractors (Sun in Total mode, planets
+// in Planetary mode), and inner seeds reveal the saddle/curl structure
+// near the Sun. Forward + backward integration from each seed gives a
+// continuous arc through repellers, attractors and saddles.
+const streams = {
+    enabled:    false,
+    worker:     null,
+    inFlight:   false,
+    seedCount:  60,
+    maxSteps:   240,
+    lastSentMs: 0,
+    minIntervalMs: 110,
+    geo:        null,
+    line:       null,
+    mat:        null,
+    capacity:   0,                // current vertex array length in floats
+    last: { jd:0, mode:'', segCount:0, runtimeMs:0 },
+};
+
+const elStreamToggle = document.getElementById('tm-stream-toggle');
+const elStreamSeeds  = document.getElementById('tm-stream-seeds');
+const elStreamLen    = document.getElementById('tm-stream-len');
+const elStreamStats  = document.getElementById('tm-stream-stats');
+
+/** Build seed positions on a few concentric rings in scene-space. */
+function buildSeeds(count) {
+    // Distribute ~50 % outer, 25 % middle, 25 % inner rings.
+    const outerN = Math.round(count * 0.50);
+    const midN   = Math.round(count * 0.25);
+    const innerN = count - outerN - midN;
+    const out = new Float32Array(count * 2);
+    let i = 0;
+    const ring = (n, r, phase) => {
+        for (let k = 0; k < n; k++) {
+            const t = (k / n + phase) * Math.PI * 2;
+            out[i*2 + 0] = Math.cos(t) * r;
+            out[i*2 + 1] = Math.sin(t) * r;
+            i++;
+        }
+    };
+    ring(outerN, FIELD_GRID_HALF * 0.85, 0.0);     // r ≈ 35.7
+    ring(midN,   FIELD_GRID_HALF * 0.45, 0.31);    // r ≈ 18.9
+    ring(innerN, FIELD_GRID_HALF * 0.18, 0.62);    // r ≈ 7.6
+    return out;
+}
+
+function ensureStreamGeometry(maxFloats) {
+    if (!streams.line) {
+        streams.geo = new THREE.BufferGeometry();
+        streams.geo.setAttribute('position',
+            new THREE.Float32BufferAttribute(new Float32Array(maxFloats), 3));
+        streams.geo.setDrawRange(0, 0);
+        streams.mat = new THREE.LineBasicMaterial({
+            color:      0xb6e0ff,
+            transparent: true,
+            opacity:     0.42,
+            depthWrite:  false,
+        });
+        streams.line = new THREE.LineSegments(streams.geo, streams.mat);
+        streams.line.frustumCulled = false;
+        streams.line.renderOrder   = -5;
+        streams.line.visible       = false;
+        scene.add(streams.line);
+        streams.capacity = maxFloats;
+        return;
+    }
+    if (maxFloats > streams.capacity) {
+        streams.geo.dispose();
+        streams.geo = new THREE.BufferGeometry();
+        streams.geo.setAttribute('position',
+            new THREE.Float32BufferAttribute(new Float32Array(maxFloats), 3));
+        streams.geo.setDrawRange(0, 0);
+        streams.line.geometry = streams.geo;
+        streams.capacity = maxFloats;
+    }
+}
+
+function postStreamRequest(jd) {
+    if (!streams.worker) {
+        try {
+            streams.worker = new Worker('./js/orbital-mechanics/streamlines-worker.js', { type:'module' });
+        } catch (err) {
+            elStreamStats.textContent = 'worker error';
+            console.error('[streamlines-worker] spawn failed:', err);
+            return;
+        }
+        streams.worker.onmessage = onStreamMessage;
+        streams.worker.onerror = ev => {
+            elStreamStats.textContent = 'worker crash';
+            console.error('[streamlines-worker]', ev);
+            streams.inFlight = false;
+        };
+    }
+
+    // Pack body table — same layout as field worker.
+    const bodyKeys = [['sun', 0, 0, 0, GM_SUN_AU]];
+    for (const b of BODIES) {
+        const p = b.fn(jd);
+        bodyKeys.push([b.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * PLANET_MR[b.key]]);
+    }
+    for (const a of ASTEROIDS) {
+        const p = asteroidHelio(a.key, jd);
+        bodyKeys.push([a.key, p.x_AU, p.y_AU, p.z_AU, GM_SUN_AU * ASTEROID_MR[a.key]]);
+    }
+    const bodies = new Float32Array(bodyKeys.length * 4);
+    for (let i = 0; i < bodyKeys.length; i++) {
+        bodies[i*4 + 0] = bodyKeys[i][1];
+        bodies[i*4 + 1] = bodyKeys[i][2];
+        bodies[i*4 + 2] = bodyKeys[i][3];
+        bodies[i*4 + 3] = bodyKeys[i][4];
+    }
+
+    // Jacobi extras.
+    let secondaryIndex = -1, meanMotion2 = 0;
+    if (field.mode === 'jacobi' && selected) {
+        const planetIdx = BODIES.findIndex(b => b.key === selected.key);
+        if (planetIdx >= 0) {
+            secondaryIndex = planetIdx + 1;
+            const p = BODIES[planetIdx].fn(jd);
+            const r_p = Math.hypot(p.x_AU, p.y_AU, p.z_AU);
+            const muTotal = GM_SUN_AU * (1 + PLANET_MR[selected.key]);
+            meanMotion2 = muTotal / (r_p * r_p * r_p);
+        }
+    }
+
+    const seeds = buildSeeds(streams.seedCount);
+
+    streams.inFlight   = true;
+    streams.lastSentMs = performance.now();
+    streams.worker.postMessage(
+        {
+            type:           'compute',
+            jd, mode:        field.mode,
+            sunIndex:        0,
+            secondaryIndex,  meanMotion2,
+            bodies,          seeds,
+            hStep:           0.45,
+            maxSteps:        streams.maxSteps,
+            RADIAL_K, RADIAL_P,
+            boundsR:         FIELD_GRID_HALF + 6,
+            proximity:       0.55,
+        },
+        [bodies.buffer, seeds.buffer],
+    );
+}
+
+function maybePostStreamRequest(now) {
+    if (!streams.enabled || streams.inFlight) return;
+    const dueByTime = (now - streams.lastSentMs) > streams.minIntervalMs;
+    if (!dueByTime) return;
+    postStreamRequest(state.jd);
+}
+
+function onStreamMessage(ev) {
+    const m = ev.data;
+    if (m.type === 'error') {
+        elStreamStats.textContent = 'error: ' + m.message;
+        streams.inFlight = false;
+        return;
+    }
+    if (m.type !== 'streamlines') return;
+
+    const verts = m.vertices;
+    ensureStreamGeometry(Math.max(verts.length, 6));
+    const arr = streams.geo.attributes.position.array;
+    arr.set(verts);
+    // Zero out trailing cells so old segments don't ghost in
+    if (verts.length < streams.capacity) arr.fill(0, verts.length);
+    streams.geo.attributes.position.needsUpdate = true;
+    streams.geo.setDrawRange(0, verts.length / 3);
+    streams.geo.computeBoundingSphere();
+    streams.last = m;
+    streams.inFlight = false;
+
+    elStreamStats.textContent =
+        `${m.segCount} segs · ${m.runtimeMs.toFixed(0)} ms`;
+}
+
+elStreamToggle.addEventListener('click', () => {
+    streams.enabled = !streams.enabled;
+    elStreamToggle.textContent = 'Streamlines: ' + (streams.enabled ? 'ON' : 'OFF');
+    if (streams.enabled) {
+        // Pre-allocate enough room for the largest seed/length combo.
+        ensureStreamGeometry(96 * 2 * 360 * 6);
+        streams.line.visible = true;
+        postStreamRequest(state.jd);
+    } else if (streams.line) {
+        streams.line.visible = false;
+    }
+});
+
+elStreamSeeds.addEventListener('change', () => {
+    streams.seedCount = parseInt(elStreamSeeds.value, 10) || 60;
+    if (streams.enabled) postStreamRequest(state.jd);
+});
+
+elStreamLen.addEventListener('change', () => {
+    streams.maxSteps = parseInt(elStreamLen.value, 10) || 240;
+    if (streams.enabled) postStreamRequest(state.jd);
+});
+
 let lastT = performance.now();
 function tick(now) {
     const dt = (now - lastT) / 1000;
@@ -2182,6 +2989,9 @@ function tick(now) {
         setJd(newJd);
     }
     updateHoverGravity();
+    maybePostFieldRequest(now);
+    updateArrows(now);
+    maybePostStreamRequest(now);
     controls.update();
     renderer.render(scene, camera);
     requestAnimationFrame(tick);
