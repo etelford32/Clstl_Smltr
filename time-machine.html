@@ -820,6 +820,8 @@ import {
     mercuryHeliocentric, venusHeliocentric, earthHeliocentric, marsHeliocentric,
     jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
 } from './js/horizons.js';
+import { ASTEROID_EL } from './js/orbital-mechanics/nbody-init.js';
+import { elementsToState } from './js/orbital-mechanics/yoshida4.js';
 
 // ── Body table ───────────────────────────────────────────────────────
 const BODIES = [
@@ -832,6 +834,34 @@ const BODIES = [
     { key:'uranus',  name:'Uranus',  color:0x9fdfe6, size:0.26, fn:uranusHeliocentric  },
     { key:'neptune', name:'Neptune', color:0x4060d0, size:0.26, fn:neptuneHeliocentric },
 ];
+
+// ── Major-asteroid catalog ───────────────────────────────────────────
+// Mass ratios (m_i / M_sun) — tiny perturbers, included for visual + tooltip.
+const ASTEROID_MR = {
+    ceres:  4.70e-10, vesta:  1.30e-10,
+    pallas: 1.03e-10, hygiea: 4.20e-11,
+};
+const ASTEROIDS = [
+    { key:'ceres',  name:'Ceres',  color:0xc0c0c0, size:0.06 },
+    { key:'vesta',  name:'Vesta',  color:0xb09060, size:0.05 },
+    { key:'pallas', name:'Pallas', color:0xa0a0c0, size:0.05 },
+    { key:'hygiea', name:'Hygiea', color:0x808890, size:0.04 },
+];
+// Heliocentric position of an asteroid at any JD via two-body Kepler.
+const _astStateScratch = { a:0, e:0, i:0, node:0, argp:0, M0:0, epochJd:0, mu_eff:0 };
+function asteroidHelio(key, jd) {
+    const el = ASTEROID_EL[key];
+    _astStateScratch.a       = el.a;
+    _astStateScratch.e       = el.e;
+    _astStateScratch.i       = el.i;
+    _astStateScratch.node    = el.node;
+    _astStateScratch.argp    = el.argp;
+    _astStateScratch.M0      = el.M0;
+    _astStateScratch.epochJd = el.epochJd;
+    _astStateScratch.mu_eff  = GM_SUN_AU * (1 + ASTEROID_MR[key]);
+    const s = elementsToState(_astStateScratch, jd);
+    return { x_AU:s.rx, y_AU:s.ry, z_AU:s.rz };
+}
 
 // Compress radial scale so all 8 planets fit in one viewport.
 // r_AU=0.39 (Mercury) -> ~3.6,  Earth=1 -> 6,  Jupiter=5.2 -> ~14.7,  Neptune=30 -> ~38.9
@@ -890,14 +920,17 @@ const POT_AU2day2_TO_J_KG  = (1.495978707e11 * 1.495978707e11) / (86400 * 86400)
  *   dominant: string,  // body whose |g_i| is largest at P
  *   contributions: { key:string, gMag:number, share:number }[]
  * }}
+ *
+ * `excludeKey` lets the caller suppress one body's contribution — used
+ * when the cursor is pinned to that body's centre (where 1/r² diverges).
  */
-function computeGravity(au_x, au_y, au_z, jd) {
+function computeGravity(au_x, au_y, au_z, jd, excludeKey = null) {
     let Phi = 0, gx = 0, gy = 0, gz = 0;
     const contribs = [];
     let domKey = 'sun', domMag = 0;
 
     // Sun at heliocentric origin
-    {
+    if (excludeKey !== 'sun') {
         const dx = -au_x, dy = -au_y, dz = -au_z;
         const r2 = dx*dx + dy*dy + dz*dz;
         const r1 = Math.sqrt(r2);
@@ -913,6 +946,7 @@ function computeGravity(au_x, au_y, au_z, jd) {
     }
 
     for (const b of BODIES) {
+        if (b.key === excludeKey) continue;
         const p   = b.fn(jd);
         const dx  = p.x_AU - au_x, dy = p.y_AU - au_y, dz = p.z_AU - au_z;
         const r2  = dx*dx + dy*dy + dz*dz;
@@ -927,6 +961,26 @@ function computeGravity(au_x, au_y, au_z, jd) {
         const mag = Math.sqrt(ax*ax + ay*ay + az*az);
         contribs.push({ key:b.key, gMag:mag });
         if (mag > domMag) { domMag = mag; domKey = b.key; }
+    }
+
+    // Major asteroids (Ceres, Vesta, Pallas, Hygiea) — tiny perturbers
+    // but visible in the contribution list when the cursor is in the belt.
+    for (const ast of ASTEROIDS) {
+        if (ast.key === excludeKey) continue;
+        const p = asteroidHelio(ast.key, jd);
+        const dx = p.x_AU - au_x, dy = p.y_AU - au_y, dz = p.z_AU - au_z;
+        const r2 = dx*dx + dy*dy + dz*dz;
+        const r1 = Math.sqrt(r2);
+        const inv_r3 = 1 / (r2 * r1);
+        const gm = GM_SUN_AU * ASTEROID_MR[ast.key];
+        Phi -= gm / r1;
+        const ax = gm * dx * inv_r3;
+        const ay = gm * dy * inv_r3;
+        const az = gm * dz * inv_r3;
+        gx += ax; gy += ay; gz += az;
+        const mag = Math.sqrt(ax*ax + ay*ay + az*az);
+        contribs.push({ key:ast.key, gMag:mag });
+        if (mag > domMag) { domMag = mag; domKey = ast.key; }
     }
 
     const gMag = Math.sqrt(gx*gx + gy*gy + gz*gz);
@@ -1032,6 +1086,7 @@ function buildOrbitRing(fn, color) {
 const PERIOD_D = {
     mercury:  87.969, venus:  224.701, earth:  365.256, mars:  686.971,
     jupiter:4332.589, saturn:10759.22,  uranus:30688.5,  neptune:60182.0,
+    ceres:   1683.145, vesta:  1325.4,  pallas:  1686.0, hygiea:  2034.0,
 };
 
 function refreshOrbitRing(body, jdCenter) {
@@ -1061,11 +1116,102 @@ for (const body of BODIES) {
     orbits[body.key] = buildOrbitRing(body.fn, body.color);
 }
 
+// ── Asteroid meshes + thin orbit rings ───────────────────────────────
+// Wired into the same `meshes`/`orbits` maps so refreshOrbitRing /
+// updatePositions handle them uniformly. They render as small glowing
+// dots so they're visible against the planets without dominating.
+const ASTEROID_FN = {};   // populated for use by gravity sum + orbit rings
+for (const ast of ASTEROIDS) {
+    ASTEROID_FN[ast.key] = (jd) => asteroidHelio(ast.key, jd);
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(ast.size, 14, 14),
+        new THREE.MeshBasicMaterial({ color:ast.color, transparent:true, opacity:0.92 }),
+    );
+    m.userData = { kind:'asteroid', key:ast.key, label:ast.name };
+    scene.add(m);
+    meshes[ast.key] = m;
+    // Thin, semi-transparent orbit ring (different style from planets)
+    const N = 192;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(N*3), 3));
+    const mat = new THREE.LineBasicMaterial({ color:ast.color, transparent:true, opacity:0.18 });
+    const line = new THREE.LineLoop(geo, mat);
+    scene.add(line);
+    orbits[ast.key] = { line, geo, N };
+}
+
+// Combined list — used by orbit-ring refresh + position update + gravity.
+const ALL_BODIES = [
+    ...BODIES,
+    ...ASTEROIDS.map(a => ({ ...a, fn: ASTEROID_FN[a.key] })),
+];
+
+// ── Lagrange L4/L5 markers ───────────────────────────────────────────
+// Visible only when a non-Sun body is selected. Each marker is a small
+// equilateral-triangle prism rotated to point along the orbital plane
+// 60° ahead (L4) or behind (L5) the selected body.  Position is updated
+// every frame; user can click them to pin the gravity tooltip.
+function makeLagrangeMarker(color) {
+    // Tetrahedron-like glyph using a small TriangleGeometry-equivalent
+    const geom = new THREE.BufferGeometry();
+    // 3 vertices of a triangle (in XZ plane), small
+    const s = 0.18;
+    const verts = new Float32Array([
+        0,    0.04,  s,
+       -s*0.866, 0.04, -s*0.5,
+        s*0.866, 0.04, -s*0.5,
+        0,    -0.04, 0,                  // apex below
+    ]);
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geom.setIndex([0,1,2,  0,1,3,  1,2,3,  2,0,3]);
+    geom.computeVertexNormals();
+    const mat = new THREE.MeshBasicMaterial({
+        color, transparent:true, opacity:0.78, side:THREE.DoubleSide,
+    });
+    return new THREE.Mesh(geom, mat);
+}
+const lagMarkers = {
+    l4: makeLagrangeMarker(0x6affc8),
+    l5: makeLagrangeMarker(0xffae6a),
+};
+lagMarkers.l4.userData = { kind:'lagrange', point:'L4' };
+lagMarkers.l5.userData = { kind:'lagrange', point:'L5' };
+lagMarkers.l4.visible = false;
+lagMarkers.l5.visible = false;
+scene.add(lagMarkers.l4);
+scene.add(lagMarkers.l5);
+
+/**
+ * Heliocentric ecliptic position of L4/L5 for a given primary, computed
+ * from the primary's instantaneous Sun-relative position by rotating
+ * ±60° about the ecliptic-z axis. Exact for circular ecliptic orbits
+ * and good to a few degrees in-plane for the major planets (e ≲ 0.2).
+ */
+function lagrangePos(primaryKey, jd, sign /* +1 = L4, -1 = L5 */) {
+    const fn = (PLANET_FN_LOOKUP[primaryKey] || ASTEROID_FN[primaryKey]);
+    if (!fn) return null;
+    const p = fn(jd);
+    const cos60 =  0.5;
+    const sin60 = (sign > 0 ? +1 : -1) * 0.8660254037844387;
+    return {
+        x_AU: p.x_AU * cos60 - p.y_AU * sin60,
+        y_AU: p.x_AU * sin60 + p.y_AU * cos60,
+        z_AU: p.z_AU,
+    };
+}
+const PLANET_FN_LOOKUP = Object.fromEntries(BODIES.map(b => [b.key, b.fn]));
+
 // ── Legend ───────────────────────────────────────────────────────────
 const legend = document.getElementById('tm-legend');
-legend.innerHTML = BODIES.map(b =>
-    `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
-).join('');
+legend.innerHTML =
+    BODIES.map(b =>
+        `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
+    ).join('') +
+    ASTEROIDS.map(a =>
+        `<span class="lg" style="opacity:.75"><span class="dt" style="background:#${a.color.toString(16).padStart(6,'0')}; width:6px; height:6px"></span>${a.name}</span>`
+    ).join('') +
+    '<span class="lg" style="opacity:.75; margin-left:6px;"><span class="dt" style="background:#6affc8; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L4</span>' +
+    '<span class="lg" style="opacity:.75"><span class="dt" style="background:#ffae6a; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L5</span>';
 
 // ── Body picker + element table ──────────────────────────────────────
 const elBodyGrid = document.getElementById('tm-body-grid');
@@ -1674,15 +1820,31 @@ function formatDate(jd) {
 // ── Update positions ─────────────────────────────────────────────────
 let lastRingRefreshJd = -1e12;
 function updatePositions(jd) {
-    for (const body of BODIES) {
+    for (const body of ALL_BODIES) {
         const p = body.fn(jd);
         const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
         meshes[body.key].position.set(x, y, z);
     }
+    // Lagrange L4/L5 follow the selected planet (ecliptic ±60° rotation).
+    if (selected && selected.key && selected.key !== 'sun') {
+        for (const sign of [+1, -1]) {
+            const lp = lagrangePos(selected.key, jd, sign);
+            if (!lp) continue;
+            const [x, y, z] = auToScene(lp.x_AU, lp.y_AU, lp.z_AU);
+            const m = sign > 0 ? lagMarkers.l4 : lagMarkers.l5;
+            m.position.set(x, y, z);
+            m.visible = true;
+            m.userData.primary  = selected.key;
+            m.userData.label    = `${selected.name} ${m.userData.point}`;
+        }
+    } else {
+        lagMarkers.l4.visible = false;
+        lagMarkers.l5.visible = false;
+    }
     // Rebuild orbit rings if center has shifted significantly
-    // (cheap — eight 256-point lines).  Throttle to once per ~30 d sim.
+    // (cheap — twelve 192–256-point lines).  Throttle to once per ~30 d sim.
     if (Math.abs(jd - lastRingRefreshJd) > 30) {
-        for (const body of BODIES) refreshOrbitRing(body, jd);
+        for (const body of ALL_BODIES) refreshOrbitRing(body, jd);
         lastRingRefreshJd = jd;
     }
 }
@@ -1743,6 +1905,7 @@ const grav = {
     rayHit:     null,           // { x, y, z (scene), au:{x,y,z,r_AU,r_render} }
     zSlider:    0,              // au_z target (AU above ecliptic)
     units:      'si',           // 'si' | 'cgs'  (cgs = Gaussian AU/day units)
+    pinned:     null,           // { kind, key|primary, point?, label, getAuPos(jd) }
 };
 const HOVER_PLANE_Y_PER_AU = 6;   // visual Y per 1 AU of intended au_z
 
@@ -1790,10 +1953,64 @@ renderer.domElement.addEventListener('mousemove', ev => {
 });
 renderer.domElement.addEventListener('mouseleave', () => {
     grav.hovering = false;
-    cursorMarker.visible = false;
-    arrowLine.visible    = false;
-    arrowHead.visible    = false;
-    elTooltip.classList.remove('show');
+    if (!grav.pinned) {
+        cursorMarker.visible = false;
+        arrowLine.visible    = false;
+        arrowHead.visible    = false;
+        elTooltip.classList.remove('show');
+    }
+});
+
+// ── Click → pin a clickable marker (asteroid or L4/L5) as gravity sample
+const pickables = () => {
+    const list = [];
+    for (const a of ASTEROIDS) list.push(meshes[a.key]);
+    if (lagMarkers.l4.visible) list.push(lagMarkers.l4);
+    if (lagMarkers.l5.visible) list.push(lagMarkers.l5);
+    return list;
+};
+
+renderer.domElement.addEventListener('click', ev => {
+    if (!grav.enabled) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouseNDC.x =  ((ev.clientX - rect.left) / rect.width)  * 2 - 1;
+    mouseNDC.y = -((ev.clientY - rect.top)  / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouseNDC, camera);
+    raycaster.params.Mesh = raycaster.params.Mesh || {};
+    const hits = raycaster.intersectObjects(pickables(), false);
+    if (!hits.length) {
+        // Click on empty space clears the pin (keeps live hover working).
+        if (grav.pinned) {
+            grav.pinned = null;
+            elTooltip.classList.remove('show');
+        }
+        return;
+    }
+    const obj = hits[0].object;
+    const ud  = obj.userData || {};
+    if (ud.kind === 'asteroid') {
+        grav.pinned = {
+            kind:  'asteroid',
+            key:   ud.key,
+            label: ud.label,
+            getAuPos: jd => {
+                const p = asteroidHelio(ud.key, jd);
+                return { x:p.x_AU, y:p.y_AU, z:p.z_AU };
+            },
+        };
+    } else if (ud.kind === 'lagrange') {
+        const sign = ud.point === 'L4' ? +1 : -1;
+        const primary = ud.primary;
+        grav.pinned = {
+            kind:    'lagrange',
+            primary, point: ud.point,
+            label:   `${BODY_LABEL[primary]} ${ud.point}`,
+            getAuPos: jd => {
+                const p = lagrangePos(primary, jd, sign);
+                return { x:p.x_AU, y:p.y_AU, z:p.z_AU };
+            },
+        };
+    }
 });
 
 elGravZ.addEventListener('input', () => {
@@ -1825,8 +2042,10 @@ elGravTog.addEventListener('click', () => {
 
 const BODY_COLOR = Object.fromEntries(BODIES.map(b => [b.key, '#' + b.color.toString(16).padStart(6,'0')]));
 BODY_COLOR.sun = '#ffd27a';
+for (const a of ASTEROIDS) BODY_COLOR[a.key] = '#' + a.color.toString(16).padStart(6,'0');
 const BODY_LABEL = Object.fromEntries(BODIES.map(b => [b.key, b.name]));
 BODY_LABEL.sun = 'Sun';
+for (const a of ASTEROIDS) BODY_LABEL[a.key] = a.name;
 
 function fmtSci(x, sig = 3) {
     if (!isFinite(x)) return '—';
@@ -1835,25 +2054,39 @@ function fmtSci(x, sig = 3) {
 }
 
 function updateHoverGravity() {
-    if (!grav.enabled || !grav.hovering) return;
+    if (!grav.enabled) return;
+    if (!grav.hovering && !grav.pinned) return;
 
-    const rect = renderer.domElement.getBoundingClientRect();
-    mouseNDC.x =  (grav.screenX / rect.width)  * 2 - 1;
-    mouseNDC.y = -(grav.screenY / rect.height) * 2 + 1;
-    raycaster.setFromCamera(mouseNDC, camera);
-    const hit = raycaster.ray.intersectPlane(hoverPlane, hoverHitTmp);
-    if (!hit) {
-        cursorMarker.visible = false;
-        arrowLine.visible    = false;
-        arrowHead.visible    = false;
-        elTooltip.classList.remove('show');
-        return;
+    let hit, au, pinLabel = null;
+    if (grav.pinned) {
+        // Sample the dynamic pin position at current JD.
+        const ap = grav.pinned.getAuPos(state.jd);
+        au = { x:ap.x, y:ap.y, z:ap.z,
+               r_AU: Math.hypot(ap.x, ap.y, ap.z),
+               r_render: 0 };
+        const [sx, sy, sz] = auToScene(ap.x, ap.y, ap.z);
+        hit = { x:sx, y:sy, z:sz };
+        au.r_render = Math.hypot(sx, sy, sz);
+        pinLabel = grav.pinned.label;
+    } else {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouseNDC.x =  (grav.screenX / rect.width)  * 2 - 1;
+        mouseNDC.y = -(grav.screenY / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouseNDC, camera);
+        hit = raycaster.ray.intersectPlane(hoverPlane, hoverHitTmp);
+        if (!hit) {
+            cursorMarker.visible = false;
+            arrowLine.visible    = false;
+            arrowHead.visible    = false;
+            elTooltip.classList.remove('show');
+            return;
+        }
+        au = sceneToAu(hit.x, hit.y, hit.z);
     }
-
-    const au = sceneToAu(hit.x, hit.y, hit.z);
     grav.rayHit = { x:hit.x, y:hit.y, z:hit.z, au };
 
-    const G = computeGravity(au.x, au.y, au.z, state.jd);
+    const excludeKey = (grav.pinned && grav.pinned.kind === 'asteroid') ? grav.pinned.key : null;
+    const G = computeGravity(au.x, au.y, au.z, state.jd, excludeKey);
 
     // ── Marker
     cursorMarker.position.copy(hit);
@@ -1894,7 +2127,11 @@ function updateHoverGravity() {
         ? `<div class="tt-row"><span class="tt-k">2nd contrib.</span><span class="tt-v">${BODY_LABEL[second.key]} (${(second.share*100).toFixed(1)}%)</span></div>`
         : '';
 
-    let html = `<div class="tt-hdr"><span class="dot" style="background:${domHex};color:${domHex}"></span>${domNm}-dominated</div>`;
+    let html = '';
+    if (pinLabel) {
+        html += `<div class="tt-hdr" style="color:#7fdb9a; border-bottom:1px solid rgba(127,219,154,.25); padding-bottom:4px; margin-bottom:6px;">📌 ${pinLabel} <span style="margin-left:auto; font-weight:400; font-size:.62rem; color:#776">click empty space to unpin</span></div>`;
+    }
+    html += `<div class="tt-hdr"><span class="dot" style="background:${domHex};color:${domHex}"></span>${domNm}-dominated</div>`;
     if (useSi) {
         html += `<div class="tt-row"><span class="tt-k">|g|</span><span class="tt-v">${fmtSci(gSi)} m/s²</span></div>`;
         html += `<div class="tt-row"><span class="tt-k">Φ</span><span class="tt-v">${fmtSci(PhiSi)} J/kg</span></div>`;
@@ -1914,8 +2151,18 @@ function updateHoverGravity() {
     html += `<div class="tt-row"><span class="tt-k">epoch</span><span class="tt-v">JD ${state.jd.toFixed(3)}</span></div>`;
 
     elTooltip.innerHTML = html;
-    elTooltip.style.left = grav.screenX + 'px';
-    elTooltip.style.top  = grav.screenY + 'px';
+    if (grav.pinned) {
+        // Project the pin's 3D position into screen pixels.
+        const v = new THREE.Vector3(hit.x, hit.y, hit.z).project(camera);
+        const rect = renderer.domElement.getBoundingClientRect();
+        const px = ( v.x * 0.5 + 0.5) * rect.width;
+        const py = (-v.y * 0.5 + 0.5) * rect.height;
+        elTooltip.style.left = px + 'px';
+        elTooltip.style.top  = py + 'px';
+    } else {
+        elTooltip.style.left = grav.screenX + 'px';
+        elTooltip.style.top  = grav.screenY + 'px';
+    }
     elTooltip.classList.add('show');
 }
 
