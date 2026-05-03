@@ -9,7 +9,7 @@
 <link rel="manifest" href="/manifest.json">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Orbital Time Machine — Deep-Time N-Body Propagation · Parker Physics</title>
-<meta name="description" content="Long-horizon orbital mechanics workbench: ±10 kyr Yoshida-4 propagation and ±1 Myr Wisdom-Holman mapping for the major bodies of the solar system.">
+<meta name="description" content="Live solar system orrery with deep-time scrubbing: ±10 kyr Yoshida-4 propagation and ±1 Myr Wisdom-Holman mapping for the major bodies of the solar system.">
 <style>
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 html { height:auto; overflow-y:auto; }
@@ -17,7 +17,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     font-family:'Segoe UI', system-ui, sans-serif; }
 
 #tm-hero {
-    padding:32px 24px 22px;
+    padding:28px 24px 18px;
     background:linear-gradient(180deg, rgba(120,80,255,.10), rgba(4,2,16,0));
     border-bottom:1px solid rgba(180,140,255,.14);
 }
@@ -35,12 +35,211 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     padding:3px 8px; margin-bottom:10px; text-transform:uppercase;
 }
 
+/* ── Orrery viewport ───────────────────────────────────────────────── */
+#tm-stage {
+    position:relative;
+    width:100%; max-width:1280px;
+    margin:18px auto 0;
+    padding:0 18px;
+}
+#tm-canvas-wrap {
+    position:relative;
+    width:100%; height:540px;
+    border:1px solid rgba(180,140,255,.22);
+    border-radius:14px;
+    overflow:hidden;
+    background:radial-gradient(ellipse at center, #0a0820 0%, #02010a 80%);
+    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(80,40,160,.08);
+}
+#tm-canvas-wrap canvas { display:block; width:100%; height:100%; }
+
+#tm-hud {
+    position:absolute; top:12px; left:14px; right:14px;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap:12px; pointer-events:none;
+    font-family:monospace; font-size:.74rem;
+}
+.tm-hud-card {
+    background:rgba(8,4,24,.72);
+    border:1px solid rgba(180,140,255,.22);
+    border-radius:6px;
+    padding:8px 11px;
+    color:#cba9ff;
+    backdrop-filter:blur(6px);
+    pointer-events:auto;
+    line-height:1.55;
+}
+.tm-hud-card .lbl { color:#776; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
+.tm-hud-card .val { color:#eee; font-size:.85rem; font-weight:700; }
+.tm-hud-card .sub { color:#998; font-size:.66rem; margin-top:2px; }
+
+#tm-legend {
+    position:absolute; bottom:10px; left:14px;
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-family:monospace; font-size:.66rem;
+    background:rgba(8,4,24,.60);
+    border:1px solid rgba(180,140,255,.18);
+    border-radius:6px;
+    padding:6px 10px;
+    color:#998;
+    backdrop-filter:blur(6px);
+}
+#tm-legend .lg { display:flex; align-items:center; gap:5px; }
+#tm-legend .dt { width:8px; height:8px; border-radius:50%; }
+
+#tm-mode-pill {
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
+    text-transform:uppercase;
+    background:rgba(8,4,24,.78);
+    border:1px solid rgba(79,201,127,.45);
+    color:#4fc97f;
+    padding:5px 12px;
+    border-radius:14px;
+    backdrop-filter:blur(6px);
+    pointer-events:none;
+    transition:all .25s ease;
+}
+#tm-mode-pill.scrub { border-color:rgba(255,184,48,.45); color:#fc7; }
+#tm-mode-pill.play  { border-color:rgba(120,80,255,.55); color:#b78cff; }
+
+/* ── Time slider panel ─────────────────────────────────────────────── */
+#tm-time {
+    width:100%; max-width:1280px;
+    margin:14px auto 0;
+    padding:0 18px;
+}
+.tm-time-card {
+    background:rgba(12,8,30,.78); backdrop-filter:blur(14px);
+    border:1px solid rgba(180,140,255,.20);
+    border-radius:12px;
+    padding:16px 18px;
+}
+
+.tm-row {
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    margin-bottom:12px;
+}
+.tm-row:last-child { margin-bottom:0; }
+
+.tm-btn {
+    background:rgba(180,140,255,.10);
+    color:#cba9ff;
+    border:1px solid rgba(180,140,255,.30);
+    border-radius:6px;
+    padding:7px 13px;
+    font-family:inherit; font-size:.78rem; font-weight:600;
+    cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s;
+}
+.tm-btn:hover { background:rgba(180,140,255,.22); color:#fff; }
+.tm-btn.primary {
+    background:rgba(79,201,127,.16); color:#7fdb9a; border-color:rgba(79,201,127,.45);
+}
+.tm-btn.primary:hover { background:rgba(79,201,127,.30); color:#fff; }
+.tm-btn.warn {
+    background:rgba(255,184,48,.14); color:#fc7; border-color:rgba(255,184,48,.40);
+}
+.tm-btn.warn:hover { background:rgba(255,184,48,.28); color:#fff; }
+.tm-btn.live { background:rgba(120,80,255,.20); color:#fff; border-color:rgba(180,140,255,.55); }
+
+.tm-input {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(180,140,255,.30);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.82rem;
+    width:100px;
+}
+.tm-input:focus { outline:none; border-color:#b78cff; }
+
+.tm-label {
+    font-family:monospace; font-size:.7rem; letter-spacing:.06em;
+    text-transform:uppercase; color:#998;
+}
+
+.tm-slider {
+    flex:1; min-width:240px;
+    -webkit-appearance:none; appearance:none;
+    height:6px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(180,140,255,.35), rgba(120,80,255,.6), rgba(180,140,255,.35));
+    outline:none; cursor:pointer;
+}
+.tm-slider::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none;
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #b78cff;
+    box-shadow:0 0 8px rgba(180,140,255,.6);
+    cursor:grab;
+}
+.tm-slider::-moz-range-thumb {
+    width:18px; height:18px; border-radius:50%;
+    background:#fff; border:2px solid #b78cff;
+    box-shadow:0 0 8px rgba(180,140,255,.6);
+    cursor:grab;
+}
+
+.tm-select {
+    background:rgba(0,0,0,.30);
+    color:#eef;
+    border:1px solid rgba(180,140,255,.30);
+    border-radius:5px;
+    padding:6px 9px;
+    font-family:monospace; font-size:.78rem;
+    cursor:pointer;
+}
+
+.tm-tick-bar {
+    position:relative;
+    height:24px;
+    margin:0 8px;
+    border-top:1px dashed rgba(180,140,255,.18);
+}
+.tm-tick {
+    position:absolute;
+    transform:translateX(-50%);
+    font-family:monospace; font-size:.62rem;
+    color:#776;
+    padding-top:4px;
+    cursor:pointer;
+    user-select:none;
+    transition:color .15s;
+}
+.tm-tick:hover { color:#fc7; }
+.tm-tick::before {
+    content:""; position:absolute;
+    top:-1px; left:50%; transform:translateX(-50%);
+    width:1px; height:5px;
+    background:rgba(180,140,255,.45);
+}
+
+.tm-bookmarks {
+    display:flex; gap:6px; flex-wrap:wrap;
+}
+.tm-bm {
+    background:rgba(0,0,0,.30);
+    color:#998;
+    border:1px solid rgba(180,140,255,.18);
+    border-radius:14px;
+    padding:4px 10px;
+    font-family:monospace; font-size:.7rem;
+    cursor:pointer;
+    transition:all .15s;
+}
+.tm-bm:hover {
+    color:#fc7; border-color:rgba(255,184,48,.45);
+    background:rgba(255,184,48,.10);
+}
+.tm-bm-yr { color:#665; margin-right:4px; }
+
+/* ── Lower panels ──────────────────────────────────────────────────── */
 #tm-app {
     max-width:1100px; margin:0 auto;
     padding:24px 24px 64px;
     display:grid; gap:18px;
 }
-@media (max-width:780px) { #tm-app { padding:16px; } }
+@media (max-width:780px) { #tm-app { padding:16px; } #tm-canvas-wrap { height:400px; } }
 
 .tm-panel {
     background:rgba(12,8,30,.72); backdrop-filter:blur(14px);
@@ -114,20 +313,105 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 </head>
 <body>
 
+<script type="importmap">
+{
+    "imports": {
+        "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+}
+</script>
+
 <nav></nav>
-<script type="module">import { initNav } from "./js/nav.js?v=20260502"; initNav("time-machine");</script>
+<script type="module">import { initNav } from "./js/nav.js?v=20260503"; initNav("time-machine");</script>
 
 <div id="tm-hero">
-    <span class="tm-tag">In Development</span>
+    <span class="tm-tag">Live Preview · ±2 kyr Validated Window</span>
     <h1>Orbital Time Machine</h1>
-    <p>A deep-time workbench for solar-system orbital mechanics. Wind the planets thousands of years forward or millions of years back, watch perihelia precess, and study chaos in the inner system. This page is a placeholder while the underlying N-body engine is built — the live ±2,000 yr propagator on the <a href="threejs.html" style="color:#b78cff;">Solar System</a> and <a href="space-weather.html" style="color:#b78cff;">Space Weather</a> pages comes first.</p>
+    <p>A deep-time workbench for solar-system orbital mechanics. Wind the planets thousands of years forward or millions of years back, watch perihelia precess, and study chaos in the inner system. The orrery below runs on the live VSOP87D / Meeus ephemeris stack — drag the time slider, jump to a historical event, or let it play forward at hours-per-second.</p>
+</div>
+
+<!-- ═══ ORRERY ═══ -->
+<div id="tm-stage">
+    <div id="tm-canvas-wrap">
+        <div id="tm-hud">
+            <div class="tm-hud-card">
+                <span class="lbl">UTC Date</span>
+                <div class="val" id="tm-date">—</div>
+                <div class="sub" id="tm-jd">JD —</div>
+            </div>
+            <div class="tm-hud-card" style="text-align:right;">
+                <span class="lbl">Time Speed</span>
+                <div class="val" id="tm-speed-display">paused</div>
+                <div class="sub" id="tm-offset">Δ = 0 d</div>
+            </div>
+        </div>
+        <div id="tm-mode-pill">● Live</div>
+        <div id="tm-legend"></div>
+    </div>
+</div>
+
+<!-- ═══ TIME CONTROLS ═══ -->
+<div id="tm-time">
+    <div class="tm-time-card">
+
+        <div class="tm-row">
+            <button class="tm-btn primary" id="tm-play">▶ Play</button>
+            <select class="tm-select" id="tm-speed">
+                <option value="0">Paused</option>
+                <option value="3600">1 hr / s</option>
+                <option value="86400" selected>1 day / s</option>
+                <option value="604800">1 week / s</option>
+                <option value="2629800">1 month / s</option>
+                <option value="31557600">1 year / s</option>
+                <option value="315576000">10 yr / s</option>
+                <option value="3155760000">100 yr / s</option>
+                <option value="31557600000">1000 yr / s</option>
+            </select>
+            <button class="tm-btn" id="tm-step-back">◄◄ −1 d</button>
+            <button class="tm-btn" id="tm-step-fwd">+1 d ►►</button>
+            <span style="flex:1"></span>
+            <button class="tm-btn live" id="tm-now">⟲ Now (Live)</button>
+        </div>
+
+        <div class="tm-row">
+            <span class="tm-label">Year</span>
+            <input class="tm-input" type="number" id="tm-year" min="-10000" max="10000" step="1" style="width:90px">
+            <span class="tm-label">Day</span>
+            <input class="tm-input" type="number" id="tm-day" min="1" max="366" step="1" style="width:70px">
+            <span class="tm-label">Hr</span>
+            <input class="tm-input" type="number" id="tm-hour" min="0" max="23" step="1" style="width:60px">
+            <span class="tm-label">JD</span>
+            <input class="tm-input" type="number" id="tm-jd-input" step="0.5" style="width:130px">
+        </div>
+
+        <div class="tm-row">
+            <span class="tm-label" style="width:64px">Range</span>
+            <select class="tm-select" id="tm-range">
+                <option value="365">±1 year</option>
+                <option value="3650" selected>±10 years</option>
+                <option value="36525">±100 years</option>
+                <option value="365250">±1,000 years</option>
+                <option value="3652500">±10,000 years</option>
+            </select>
+            <input class="tm-slider" type="range" id="tm-scrub" min="-1" max="1" step="0.0001" value="0">
+        </div>
+
+        <div class="tm-tick-bar" id="tm-ticks"></div>
+
+        <div class="tm-row" style="margin-top:6px">
+            <span class="tm-label" style="width:64px">Jump to</span>
+            <div class="tm-bookmarks" id="tm-bookmarks"></div>
+        </div>
+
+    </div>
 </div>
 
 <div id="tm-app">
 
     <section class="tm-panel tm-construct">
-        <div class="tm-status">Under Construction</div>
-        <p>The orbital time machine will sit on top of the unified ephemeris engine being built for the Earth and Solar-System pages. Phase 1 ships a live ±2,000 yr Yoshida-4 symplectic integrator validated against VSOP87D and JPL Horizons. Once that baseline is stable and instrumented for collision search, this page becomes the long-horizon harness on top of it.</p>
+        <div class="tm-status">Phase 1 — Validated Window Live</div>
+        <p>The orrery above is driven by the unified ephemeris engine that powers the <a href="threejs.html" style="color:#b78cff;">Solar System</a> and <a href="space-weather.html" style="color:#b78cff;">Space Weather</a> pages. Inner planets use Meeus three-term Kepler with Standish secular rates; outer planets use VSOP87D truncated series. Sub-arcminute residuals across ±200 yr; degraded but useful out to ±2,000 yr. Beyond that band, results drift — the long-horizon Yoshida-4 and Wisdom-Holman tiers below are still in development.</p>
         <p class="tm-warn">Predictions over kyr–Myr scales are inherently uncertain — the inner solar system is chaotic with a Lyapunov time of ~5 Myr (Laskar 1989). Anything past ~60 Myr is statistical, not deterministic.</p>
     </section>
 
@@ -138,11 +422,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             <div class="tm-stage tm-stage--now">
                 <div>
                     <div class="tm-stage-horizon">±2,000 yr</div>
-                    <div class="tm-stage-method">VSOP87D + Yoshida-4</div>
+                    <div class="tm-stage-method">VSOP87D + Meeus</div>
                 </div>
                 <div>
-                    <div class="tm-stage-name">Live propagation (current focus)</div>
-                    <div class="tm-stage-desc">Symplectic integrator seeded from VSOP87D state vectors at J2000. Sub-arcminute residuals across the working window. Powers the 3D orrery, collision search, and the Earth orbit panel. Lives in the existing <code>js/ephemeris/</code> module — not on this page yet.</div>
+                    <div class="tm-stage-name">Live propagation (current)</div>
+                    <div class="tm-stage-desc">Closed-form analytical ephemeris seeded from J2000. Sub-arcminute residuals across the working window. Powers the orrery above as well as the 3D solar system, collision search, and the Earth orbit panel. Lives in <code>js/horizons.js</code> + <code>js/earth-orbit.js</code> + <code>js/outer-planets.js</code>.</div>
                 </div>
             </div>
 
@@ -152,8 +436,8 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                     <div class="tm-stage-method">Yoshida-4 / Yoshida-8 N-body</div>
                 </div>
                 <div>
-                    <div class="tm-stage-name">Holocene & near-future</div>
-                    <div class="tm-stage-desc">Same integrator as Phase 1 with a longer step and the major asteroids (Ceres, Vesta, Pallas, Hygiea) added as perturbers. Visualises Earth's apsidal precession (≈21,000 yr cycle) and the Jupiter-Saturn great inequality (~883 yr beat).</div>
+                    <div class="tm-stage-name">Holocene &amp; near-future</div>
+                    <div class="tm-stage-desc">Symplectic integrator with longer step and the major asteroids (Ceres, Vesta, Pallas, Hygiea) added as perturbers. Visualises Earth's apsidal precession (≈21,000 yr cycle) and the Jupiter-Saturn great inequality (~883 yr beat).</div>
                 </div>
             </div>
 
@@ -164,7 +448,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                 </div>
                 <div>
                     <div class="tm-stage-name">Milankovitch &amp; chaos</div>
-                    <div class="tm-stage-desc">Mixed-variable symplectic mapping for million-year integrations. Runs Earth-orbit eccentricity and obliquity cycles tied to climate forcing. Beyond the Lyapunov horizon results are presented as ensembles, not single trajectories.</div>
+                    <div class="tm-stage-desc">Mixed-variable symplectic mapping for million-year integrations. Earth-orbit eccentricity and obliquity cycles tied to climate forcing. Beyond the Lyapunov horizon results are presented as ensembles, not single trajectories.</div>
                 </div>
             </div>
 
@@ -190,6 +474,460 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     </section>
 
 </div>
+
+<!-- ═══ SIMULATION ═══ -->
+<script type="module">
+import * as THREE        from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+    jdNow, dateFromJD, jdFromDate,
+    mercuryHeliocentric, venusHeliocentric, earthHeliocentric, marsHeliocentric,
+    jupiterHeliocentric, saturnHeliocentric, uranusHeliocentric, neptuneHeliocentric,
+} from './js/horizons.js';
+
+// ── Body table ───────────────────────────────────────────────────────
+const BODIES = [
+    { key:'mercury', name:'Mercury', color:0xb1a7a0, size:0.10, fn:mercuryHeliocentric },
+    { key:'venus',   name:'Venus',   color:0xe6c98b, size:0.16, fn:venusHeliocentric   },
+    { key:'earth',   name:'Earth',   color:0x4fa3ff, size:0.17, fn:earthHeliocentric   },
+    { key:'mars',    name:'Mars',    color:0xd4583a, size:0.13, fn:marsHeliocentric    },
+    { key:'jupiter', name:'Jupiter', color:0xc9a36a, size:0.40, fn:jupiterHeliocentric },
+    { key:'saturn',  name:'Saturn',  color:0xead9a8, size:0.34, fn:saturnHeliocentric  },
+    { key:'uranus',  name:'Uranus',  color:0x9fdfe6, size:0.26, fn:uranusHeliocentric  },
+    { key:'neptune', name:'Neptune', color:0x4060d0, size:0.26, fn:neptuneHeliocentric },
+];
+
+// Compress radial scale so all 8 planets fit in one viewport.
+// r_AU=0.39 (Mercury) -> ~3.6,  Earth=1 -> 6,  Jupiter=5.2 -> ~14.7,  Neptune=30 -> ~38.9
+const RADIAL_K = 6.0;
+const RADIAL_P = 0.55;
+const auToScene = (auX, auY, auZ) => {
+    const r = Math.hypot(auX, auY, auZ);
+    if (r < 1e-9) return [0, 0, 0];
+    const r2 = Math.pow(r, RADIAL_P) * RADIAL_K;
+    const k  = r2 / r;
+    return [auX * k, auZ * k, -auY * k];   // ecliptic (XY) -> three.js (XZ), invert Y for handedness
+};
+
+// ── Three.js setup ───────────────────────────────────────────────────
+const wrap = document.getElementById('tm-canvas-wrap');
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(48, 1, 0.05, 4000);
+camera.position.set(0, 65, 22);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+wrap.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance   = 4;
+controls.maxDistance   = 220;
+
+function resize() {
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+}
+resize();
+new ResizeObserver(resize).observe(wrap);
+
+// ── Background stars ─────────────────────────────────────────────────
+{
+    const n = 2400, p = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+        const r  = 600 + Math.random() * 400;
+        const th = Math.random() * Math.PI * 2;
+        const ph = Math.acos(2 * Math.random() - 1);
+        p[i*3]   = r * Math.sin(ph) * Math.cos(th);
+        p[i*3+1] = r * Math.sin(ph) * Math.sin(th);
+        p[i*3+2] = r * Math.cos(ph);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
+    scene.add(new THREE.Points(g, new THREE.PointsMaterial({
+        color:0xffffff, size:1.0, sizeAttenuation:false, transparent:true, opacity:0.85,
+    })));
+}
+
+// ── Sun ──────────────────────────────────────────────────────────────
+{
+    const sun = new THREE.Mesh(
+        new THREE.SphereGeometry(0.95, 48, 48),
+        new THREE.MeshBasicMaterial({ color:0xffd27a }),
+    );
+    scene.add(sun);
+
+    // Glow halo
+    const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(1.6, 48, 48),
+        new THREE.ShaderMaterial({
+            transparent:true, depthWrite:false, side:THREE.BackSide,
+            blending:THREE.AdditiveBlending,
+            uniforms:{},
+            vertexShader:`varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal);
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`varying vec3 vN;
+                void main(){ float r=pow(1.-abs(vN.z),3.); gl_FragColor=vec4(1.,.85,.5,r*.55); }`,
+        }),
+    );
+    scene.add(halo);
+
+    scene.add(new THREE.PointLight(0xfff4c8, 2.0, 0));
+    scene.add(new THREE.AmbientLight(0x222244, 0.8));
+}
+
+// ── Planet meshes + orbit rings ──────────────────────────────────────
+const meshes = {};
+const orbits = {};
+
+function buildOrbitRing(fn, color) {
+    // Sample 360 points across one full orbit, evaluated at JD intervals
+    // sized to the planet's roughly known period (we just use ±200 yr fan).
+    // We sample across ±1 period at the current epoch — done lazily below.
+    const N = 256;
+    const positions = new Float32Array(N * 3);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color, transparent:true, opacity:0.35,
+    });
+    const line = new THREE.LineLoop(geo, mat);
+    scene.add(line);
+    return { line, geo, N };
+}
+
+// Approximate orbital periods (days) for sampling rings
+const PERIOD_D = {
+    mercury:  87.969, venus:  224.701, earth:  365.256, mars:  686.971,
+    jupiter:4332.589, saturn:10759.22,  uranus:30688.5,  neptune:60182.0,
+};
+
+function refreshOrbitRing(body, jdCenter) {
+    const ring = orbits[body.key];
+    const T    = PERIOD_D[body.key];
+    const arr  = ring.geo.attributes.position.array;
+    for (let i = 0; i < ring.N; i++) {
+        const jd = jdCenter + (i / ring.N - 0.5) * T;
+        const p  = body.fn(jd);
+        const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
+        arr[i*3] = x; arr[i*3+1] = y; arr[i*3+2] = z;
+    }
+    ring.geo.attributes.position.needsUpdate = true;
+    ring.geo.computeBoundingSphere();
+}
+
+for (const body of BODIES) {
+    const m = new THREE.Mesh(
+        new THREE.SphereGeometry(body.size, 24, 24),
+        new THREE.MeshStandardMaterial({
+            color:body.color, emissive:body.color, emissiveIntensity:0.35,
+            roughness:0.6, metalness:0.05,
+        }),
+    );
+    scene.add(m);
+    meshes[body.key] = m;
+    orbits[body.key] = buildOrbitRing(body.fn, body.color);
+}
+
+// ── Legend ───────────────────────────────────────────────────────────
+const legend = document.getElementById('tm-legend');
+legend.innerHTML = BODIES.map(b =>
+    `<span class="lg"><span class="dt" style="background:#${b.color.toString(16).padStart(6,'0')}"></span>${b.name}</span>`
+).join('');
+
+// ── Time state ───────────────────────────────────────────────────────
+const state = {
+    jd:        jdNow(),
+    speedSec:  86400,     // simulation seconds per real second
+    playing:   false,
+    live:      true,
+    range:     3650,      // half-window of scrub slider in days
+    centerJd:  jdNow(),   // anchor for scrub slider
+};
+
+// ── DOM refs ─────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const elDate    = $('tm-date');
+const elJd      = $('tm-jd');
+const elSpdLbl  = $('tm-speed-display');
+const elOffset  = $('tm-offset');
+const elPill    = $('tm-mode-pill');
+const elPlay    = $('tm-play');
+const elSpeed   = $('tm-speed');
+const elNow     = $('tm-now');
+const elYear    = $('tm-year');
+const elDay     = $('tm-day');
+const elHour    = $('tm-hour');
+const elJdIn    = $('tm-jd-input');
+const elRange   = $('tm-range');
+const elScrub   = $('tm-scrub');
+const elTicks   = $('tm-ticks');
+const elBkm     = $('tm-bookmarks');
+const elStepF   = $('tm-step-fwd');
+const elStepB   = $('tm-step-back');
+
+// ── Helpers ──────────────────────────────────────────────────────────
+function formatSpeed(sec) {
+    if (sec === 0)               return 'paused';
+    if (sec <  60)               return `${sec} s/s`;
+    if (sec <  3600)             return `${(sec/60).toFixed(0)} min/s`;
+    if (sec <  86400)            return `${(sec/3600).toFixed(0)} hr/s`;
+    if (sec <  86400 * 30)       return `${(sec/86400).toFixed(1)} d/s`;
+    if (sec <  86400 * 365)      return `${(sec/(86400*30)).toFixed(1)} mo/s`;
+    if (sec <  86400 * 365 * 50) return `${(sec/(86400*365.25)).toFixed(1)} yr/s`;
+    return `${(sec/(86400*365.25)).toFixed(0)} yr/s`;
+}
+
+function formatJD(jd) {
+    return jd.toFixed(4);
+}
+
+function formatDate(jd) {
+    const d = dateFromJD(jd);
+    const y = d.getUTCFullYear();
+    const yStr = y < 0 ? `${-y} BCE` : (y < 1000 ? `${y} CE` : `${y}`);
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mi = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${yStr}-${mm}-${dd} ${hh}:${mi}Z`;
+}
+
+// ── Update positions ─────────────────────────────────────────────────
+let lastRingRefreshJd = -1e12;
+function updatePositions(jd) {
+    for (const body of BODIES) {
+        const p = body.fn(jd);
+        const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
+        meshes[body.key].position.set(x, y, z);
+    }
+    // Rebuild orbit rings if center has shifted significantly
+    // (cheap — eight 256-point lines).  Throttle to once per ~30 d sim.
+    if (Math.abs(jd - lastRingRefreshJd) > 30) {
+        for (const body of BODIES) refreshOrbitRing(body, jd);
+        lastRingRefreshJd = jd;
+    }
+}
+
+// ── HUD update ───────────────────────────────────────────────────────
+function updateHud() {
+    elDate.textContent = formatDate(state.jd);
+    elJd.textContent   = `JD ${formatJD(state.jd)}`;
+    elSpdLbl.textContent = state.playing ? formatSpeed(state.speedSec) : 'paused';
+    const dDays = state.jd - jdNow();
+    let off;
+    if (Math.abs(dDays) < 1)         off = `Δ = ${(dDays*24).toFixed(1)} h`;
+    else if (Math.abs(dDays) < 365)  off = `Δ = ${dDays.toFixed(1)} d`;
+    else if (Math.abs(dDays) < 36500) off = `Δ = ${(dDays/365.25).toFixed(2)} yr`;
+    else                              off = `Δ = ${(dDays/365.25/1000).toFixed(2)} kyr`;
+    elOffset.textContent = off;
+
+    // Mode pill
+    if (state.live)         { elPill.textContent = '● Live';   elPill.className = ''; }
+    else if (state.playing) { elPill.textContent = '▶ Playing'; elPill.className = 'play'; }
+    else                    { elPill.textContent = '⏸ Scrub';   elPill.className = 'scrub'; }
+}
+
+// ── Sync inputs from JD ──────────────────────────────────────────────
+function syncInputsFromJd() {
+    const d = dateFromJD(state.jd);
+    elYear.value  = d.getUTCFullYear();
+    const start = Date.UTC(d.getUTCFullYear(), 0, 1);
+    const doy   = Math.floor((d.getTime() - start) / 86400000) + 1;
+    elDay.value   = doy;
+    elHour.value  = d.getUTCHours();
+    elJdIn.value  = formatJD(state.jd);
+    // Slider position relative to center
+    const rel = (state.jd - state.centerJd) / state.range;
+    elScrub.value = Math.max(-1, Math.min(1, rel));
+}
+
+// ── Set JD (single chokepoint) ───────────────────────────────────────
+function setJd(jd, { fromLive = false } = {}) {
+    state.jd = jd;
+    if (!fromLive) state.live = false;
+    updatePositions(jd);
+    updateHud();
+    syncInputsFromJd();
+}
+
+// ── Play loop ────────────────────────────────────────────────────────
+let lastT = performance.now();
+function tick(now) {
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+    if (state.live) {
+        state.jd = jdNow();
+        updatePositions(state.jd);
+        updateHud();
+        syncInputsFromJd();
+    } else if (state.playing && state.speedSec > 0) {
+        const newJd = state.jd + (state.speedSec * dt) / 86400;
+        setJd(newJd);
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    requestAnimationFrame(tick);
+}
+requestAnimationFrame(t => { lastT = t; tick(t); });
+
+// ── Ticks under slider ───────────────────────────────────────────────
+function rebuildTicks() {
+    const r = state.range;
+    elTicks.innerHTML = '';
+    // Show 5 ticks: -r, -r/2, 0, +r/2, +r
+    const fracs = [-1, -0.5, 0, 0.5, 1];
+    const cy    = dateFromJD(state.centerJd).getUTCFullYear();
+    for (const f of fracs) {
+        const jd = state.centerJd + f * r;
+        const yr = dateFromJD(jd).getUTCFullYear();
+        const span = document.createElement('span');
+        span.className = 'tm-tick';
+        span.style.left = `${50 + f * 50}%`;
+        span.textContent = yr < 0 ? `${-yr} BCE` : `${yr}`;
+        span.title = `Jump to ${formatDate(jd)}`;
+        span.addEventListener('click', () => {
+            state.live = false;
+            setJd(jd);
+        });
+        elTicks.appendChild(span);
+    }
+}
+
+// ── Bookmarks (historic & predicted events) ──────────────────────────
+const BOOKMARKS = [
+    { y:-2000, label:'Stonehenge',           desc:'Wessex bronze-age construction' },
+    { y:-44,   label:'Caesar / Halley −2',   desc:'Halley apparition near Caesar\'s death' },
+    { y:1066,  label:'Halley 1066',          desc:'Bayeux comet apparition' },
+    { y:1577,  label:'Tycho Comet',          desc:'Great Comet observed by Tycho Brahe' },
+    { y:1610,  label:'Galileo / Jupiter',    desc:'Galilean moons discovery' },
+    { y:1769,  label:'Venus Transit',        desc:'Cook\'s Tahiti expedition' },
+    { y:1859,  label:'Carrington',           desc:'Largest recorded geomagnetic storm' },
+    { y:1910,  label:'Halley 1910',          desc:'Earth passes through comet\'s tail' },
+    { y:1969,  label:'Apollo 11',            desc:'First lunar landing' },
+    { y:2024, m:4, d:8, label:'Apr 8 2024',  desc:'North American total solar eclipse' },
+    { y:2061,  label:'Halley 2061',          desc:'Next predicted Halley return' },
+    { y:2178,  label:'Triple Junction',      desc:'Pluto–Neptune conjunction era' },
+    { y:3000,  label:'Year 3000',            desc:'Far-future Earth orbit' },
+    { y:-5000, label:'5,000 BCE',            desc:'Holocene maximum' },
+];
+
+function buildBookmarks() {
+    elBkm.innerHTML = '';
+    for (const bm of BOOKMARKS) {
+        const btn = document.createElement('button');
+        btn.className = 'tm-bm';
+        const yLbl = bm.y < 0 ? `${-bm.y} BCE` : `${bm.y}`;
+        btn.innerHTML = `<span class="tm-bm-yr">${yLbl}</span>${bm.label}`;
+        btn.title = bm.desc;
+        btn.addEventListener('click', () => {
+            const d = new Date(Date.UTC(bm.y, (bm.m || 6) - 1, bm.d || 21));
+            // Date.UTC handles years 0–99 oddly; force using setUTCFullYear
+            d.setUTCFullYear(bm.y);
+            const jd = jdFromDate(d);
+            // Recenter scrub slider on the bookmark with nearest containing range
+            recenterTo(jd);
+            state.live = false;
+            state.playing = false;
+            elPlay.textContent = '▶ Play';
+            setJd(jd);
+        });
+        elBkm.appendChild(btn);
+    }
+}
+
+function recenterTo(jd) {
+    state.centerJd = jd;
+    rebuildTicks();
+}
+
+// ── Wire up controls ─────────────────────────────────────────────────
+elPlay.addEventListener('click', () => {
+    state.playing = !state.playing;
+    if (state.playing) state.live = false;
+    elPlay.textContent = state.playing ? '⏸ Pause' : '▶ Play';
+    updateHud();
+});
+
+elSpeed.addEventListener('change', () => {
+    state.speedSec = parseFloat(elSpeed.value);
+    if (state.speedSec === 0) {
+        state.playing = false;
+        elPlay.textContent = '▶ Play';
+    }
+    updateHud();
+});
+
+elNow.addEventListener('click', () => {
+    state.live    = true;
+    state.playing = false;
+    elPlay.textContent = '▶ Play';
+    state.jd = jdNow();
+    recenterTo(state.jd);
+    updatePositions(state.jd);
+    updateHud();
+    syncInputsFromJd();
+});
+
+elStepF.addEventListener('click', () => {
+    state.live = false;
+    setJd(state.jd + 1);
+});
+elStepB.addEventListener('click', () => {
+    state.live = false;
+    setJd(state.jd - 1);
+});
+
+elScrub.addEventListener('input', () => {
+    const rel = parseFloat(elScrub.value);
+    const jd  = state.centerJd + rel * state.range;
+    state.live = false;
+    setJd(jd);
+});
+
+elRange.addEventListener('change', () => {
+    state.range = parseFloat(elRange.value);
+    recenterTo(state.jd);   // center on current epoch
+    syncInputsFromJd();
+});
+
+function commitDateInputs() {
+    const y  = parseInt(elYear.value, 10);
+    const dy = Math.max(1, Math.min(366, parseInt(elDay.value, 10) || 1));
+    const hr = Math.max(0, Math.min(23, parseInt(elHour.value, 10) || 0));
+    if (!Number.isFinite(y)) return;
+    const d = new Date(Date.UTC(2000, 0, dy, hr));
+    d.setUTCFullYear(y);
+    const jd = jdFromDate(d);
+    state.live = false;
+    recenterTo(jd);
+    setJd(jd);
+}
+elYear.addEventListener('change', commitDateInputs);
+elDay .addEventListener('change', commitDateInputs);
+elHour.addEventListener('change', commitDateInputs);
+
+elJdIn.addEventListener('change', () => {
+    const jd = parseFloat(elJdIn.value);
+    if (!Number.isFinite(jd)) return;
+    state.live = false;
+    recenterTo(jd);
+    setJd(jd);
+});
+
+// ── Boot ─────────────────────────────────────────────────────────────
+buildBookmarks();
+recenterTo(state.jd);
+updatePositions(state.jd);
+updateHud();
+syncInputsFromJd();
+</script>
 
 </body>
 </html>
