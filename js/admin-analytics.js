@@ -1222,6 +1222,7 @@ export async function fetchAuthFlowMetrics(days = 30) {
         }
         const succUsers = byEvent.signin_succeeded?.users || 0;
         const signups   = byEvent.signup?.users || 0;
+        const confirmed = byEvent.signup_confirmed?.users || 0;
         const welcomes  = byEvent.welcome_email_sent?.users || 0;
         const nudges    = byEvent.nudge_sent?.users || 0;
         const failUsers   = byEvent.signin_failed?.users  || 0;
@@ -1230,6 +1231,16 @@ export async function fetchAuthFlowMetrics(days = 30) {
             ok: true,
             data: {
                 signups,
+                signupsConfirmed:  confirmed,
+                // Confirmation rate = confirmed / total signups in the
+                // window. Lower than 1.0 means email-gated users dropped
+                // off before clicking the confirmation link OR the
+                // trigger isn't applied (apply
+                // supabase-signup-confirmed-migration.sql). Higher than
+                // 1.0 means the window saw confirmations for accounts
+                // that signed up earlier — catch-up is normal in the
+                // first weeks after the trigger ships.
+                confirmationRate:  signups ? +(confirmed / signups).toFixed(3) : 0,
                 signinSuccesses:   succUsers,
                 signinFailures:    failUsers,
                 signinFailEvents:  failEvents,

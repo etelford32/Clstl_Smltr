@@ -87,6 +87,12 @@ supabase-role-plan-audit-migration.sql    # is_superadmin(), user_profiles_audit
                                           # promote_user / set_user_plan_override RPCs,
                                           # AFTER trigger capturing role/plan/Stripe-link
                                           # changes for forensic review
+
+# Email-confirmation telemetry (May 2026)
+supabase-signup-confirmed-migration.sql   # AFTER trigger on auth.users.confirmed_at
+                                          # logs signup + signup_confirmed events;
+                                          # closes the email-gate funnel hole and
+                                          # extends auth_flow_metrics
 ```
 
 > **Apply order — `supabase-role-plan-audit-migration.sql`** must run AFTER
