@@ -30,6 +30,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildStarship } from './launch-vehicle-starship.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -723,16 +724,26 @@ function buildStarfield() {
 }
 
 // ── Camera presets ───────────────────────────────────────────────────────────
-// Each preset is a (position, target) pair. setView() lerps over ~0.8s.
-// Distances are tuned so the full 56 m stack frames nicely.
+// Presets are *ratios* of the current vehicle's stack height, so the same
+// preset frames a 56 m shuttle and a 150 m starship equally well. setView()
+// re-evaluates these for the active vehicle each call.
 
-const VIEWS = {
-    threequarter: { pos: [55, 28, 70],  target: [0, 5, 0] },
-    front:        { pos: [0,  18, 110], target: [0, 5, 0] },
-    side:         { pos: [110, 18, 0],  target: [0, 5, 0] },
-    top:          { pos: [0,  140, 0.1], target: [0, 0, 0] },
-    closeup:      { pos: [22, 12, 30],  target: [0, 8, DIM.ET_R + DIM.ORBITER_FUSE_R] },
+const VIEW_RATIOS = {
+    threequarter: { pos: [0.95, 0.50, 1.20], targetY: 0.10 },
+    front:        { pos: [0.0,  0.32, 1.95], targetY: 0.10 },
+    side:         { pos: [1.95, 0.32, 0.0],  targetY: 0.10 },
+    top:          { pos: [0.0,  2.40, 0.001], targetY: 0.0  },
+    closeup:      { pos: [0.40, 0.22, 0.55], targetY: 0.18 },
 };
+
+function viewForHeight(name, height) {
+    const v = VIEW_RATIOS[name];
+    if (!v) return null;
+    return {
+        pos:    v.pos.map(r => r * height),
+        target: [0, v.targetY * height, 0],
+    };
+}
 
 function tween(from, to, ms, onUpdate, onDone) {
     const start = performance.now();
@@ -746,6 +757,49 @@ function tween(from, to, ms, onUpdate, onDone) {
     }
     requestAnimationFrame(step);
 }
+
+// ── Vehicle registry ─────────────────────────────────────────────────────────
+// Each vehicle id maps to a builder that returns:
+//   { root, plumes, height, info }
+// `info` is metadata for the side panel; framework forwards it via the
+// `onVehicleChange` callback so the host page can update its stats card.
+
+function buildShuttleVehicle() {
+    const root = buildShuttleStack();
+    // Recenter so base sits at y ≈ 0.
+    root.position.y = -DIM.ET_LEN * 0.5 + 4;
+    const height = DIM.ET_LEN;     // ~47 m; slightly under 56 m stack but
+                                   // close enough for camera framing.
+    return {
+        root,
+        plumes: root.userData.plumes,
+        height,
+        info: {
+            name:           'Space Shuttle (STS)',
+            years:          '1981 — 2011',
+            height_m:       '56.1',
+            diameter_m:     '8.4 (ET)',
+            booster_engines:'2 SRBs',
+            ship_engines:   '3 SSMEs',
+            liftoff_mass_t: '2,030',
+            leo_payload_t:  '27.5',
+            notes:          '135 missions, ISS construction, Hubble servicing.',
+        },
+    };
+}
+
+function buildStarshipVehicle(variant = 'v2') {
+    const built = buildStarship({ variant });
+    // Starship base sits at y=0 already; pad-frame the stack so the
+    // booster engines sit just above the pad deck.
+    built.root.position.y = 0;
+    return built;
+}
+
+const VEHICLE_BUILDERS = {
+    shuttle:   () => buildShuttleVehicle(),
+    starship:  (variant) => buildStarshipVehicle(variant || 'v2'),
+};
 
 // ── Main entry point ─────────────────────────────────────────────────────────
 
@@ -768,7 +822,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     // Ground horizon disc — large, faintly glowing edge to suggest atmosphere.
     const horizon = new THREE.Mesh(
-        new THREE.RingGeometry(150, 800, 96, 1),
+        new THREE.RingGeometry(150, 1600, 96, 1),
         new THREE.MeshBasicMaterial({
             color: 0x3a2a4c, transparent: true, opacity: 0.35,
             side: THREE.DoubleSide, depthWrite: false,
@@ -778,11 +832,9 @@ export function initVehicleCanvas(canvas, opts = {}) {
     horizon.position.y = -25;
     scene.add(horizon);
 
-    const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 5000);
-    camera.position.set(...VIEWS.threequarter.pos);
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.5, 8000);
 
     // ── Lighting ────────────────────────────────────────────────────────────
-    // 3-point setup + hemisphere fill. Key (sun) casts soft shadows.
     scene.add(new THREE.HemisphereLight(0x6688aa, 0x2a1830, 0.55));
     scene.add(new THREE.AmbientLight(0xffffff, 0.18));
 
@@ -790,14 +842,8 @@ export function initVehicleCanvas(canvas, opts = {}) {
     key.position.set(60, 90, 50);
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
-    key.shadow.camera.left   = -50;
-    key.shadow.camera.right  =  50;
-    key.shadow.camera.top    =  60;
-    key.shadow.camera.bottom = -10;
-    key.shadow.camera.near   = 30;
-    key.shadow.camera.far    = 220;
-    key.shadow.bias          = -0.0008;
-    key.shadow.normalBias    = 0.04;
+    key.shadow.bias        = -0.0008;
+    key.shadow.normalBias  = 0.04;
     scene.add(key);
 
     const fill = new THREE.DirectionalLight(0xffaa66, 0.55);
@@ -808,27 +854,87 @@ export function initVehicleCanvas(canvas, opts = {}) {
     rim.position.set(0, 30, -80);
     scene.add(rim);
 
-    // ── Stack ──────────────────────────────────────────────────────────────
-    const stack = buildShuttleStack();
-    // Recenter so the stack sits with its base around y=0 in scene space.
-    stack.position.y = -DIM.ET_LEN * 0.5 + 4;
-    scene.add(stack);
-
+    // ── Pad ────────────────────────────────────────────────────────────────
     const pad = buildPad();
-    pad.position.y = -DIM.ET_LEN * 0.5 + 4 - 1.0;
     scene.add(pad);
 
     // ── OrbitControls ──────────────────────────────────────────────────────
-    const target = new THREE.Vector3(...VIEWS.threequarter.target);
     const controls = new OrbitControls(camera, canvas);
-    controls.target.copy(target);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
-    controls.minDistance = 22;
-    controls.maxDistance = 260;
     controls.maxPolarAngle = Math.PI * 0.95;
     controls.autoRotate = opts.autoRotate ?? true;
     controls.autoRotateSpeed = 0.45;
+
+    // ── Vehicle state (mutable — replaced by setVehicle) ───────────────────
+    let current = {
+        id: null,
+        variant: null,
+        root: null,
+        plumes: [],
+        height: 1,
+        info: null,
+    };
+
+    function disposeMeshes(obj) {
+        obj.traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) {
+                const mats = Array.isArray(o.material) ? o.material : [o.material];
+                mats.forEach(m => m.dispose());
+            }
+        });
+    }
+
+    function fitShadowCameraToVehicle(h) {
+        // Wrap the directional shadow camera around the current vehicle so
+        // it actually casts useful shadows on a 50 m or 150 m stack.
+        const r = h * 1.2;
+        key.shadow.camera.left   = -r;
+        key.shadow.camera.right  =  r;
+        key.shadow.camera.top    =  h * 1.4;
+        key.shadow.camera.bottom = -h * 0.3;
+        key.shadow.camera.near   = 30;
+        key.shadow.camera.far    = h * 5;
+        key.shadow.camera.updateProjectionMatrix();
+        // Aim the key light at the middle of the stack.
+        key.target.position.set(0, h * 0.4, 0);
+        key.target.updateMatrixWorld();
+        scene.add(key.target);
+    }
+
+    function setVehicle(id, variant) {
+        const builder = VEHICLE_BUILDERS[id];
+        if (!builder) { console.warn(`Unknown vehicle: ${id}`); return; }
+
+        // Tear down previous vehicle.
+        if (current.root) {
+            scene.remove(current.root);
+            disposeMeshes(current.root);
+        }
+
+        const v = builder(variant);
+        current = { id, variant, ...v };
+        scene.add(v.root);
+
+        // Re-fit camera + shadow camera to the new height.
+        const view = viewForHeight('threequarter', v.height);
+        camera.position.set(...view.pos);
+        controls.target.set(...view.target);
+        controls.minDistance = v.height * 0.45;
+        controls.maxDistance = v.height * 4.0;
+        fitShadowCameraToVehicle(v.height);
+
+        // Pad sits just below stack base regardless of vehicle.
+        pad.position.y = v.root.position.y - 1.0;
+
+        if (typeof opts.onVehicleChange === 'function') {
+            opts.onVehicleChange({ id, variant, info: v.info });
+        }
+    }
+
+    // Initial vehicle.
+    setVehicle(opts.vehicle || 'shuttle', opts.variant);
 
     // ── Resize handling ────────────────────────────────────────────────────
     function resize() {
@@ -854,11 +960,11 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     function tick() {
         if (!running) { rafId = 0; return; }
-        const dt = clock.getDelta();
-        const t  = clock.elapsedTime;
+        clock.getDelta();
+        const t = clock.elapsedTime;
         controls.update();
         stars.material.uniforms.uTime.value = t;
-        for (const p of stack.userData.plumes) tickPlume(p, t);
+        for (const p of current.plumes) tickPlume(p, t);
         renderer.render(scene, camera);
         rafId = requestAnimationFrame(tick);
     }
@@ -866,19 +972,19 @@ export function initVehicleCanvas(canvas, opts = {}) {
 
     // ── Public API ─────────────────────────────────────────────────────────
     function setView(name) {
-        const v = VIEWS[name];
-        if (!v) return;
+        const view = viewForHeight(name, current.height);
+        if (!view) return;
         const fromPos = camera.position.toArray();
         const fromTgt = controls.target.toArray();
         const wasAuto = controls.autoRotate;
         controls.autoRotate = false;
-        tween(fromPos, v.pos, 800, p => camera.position.set(p[0], p[1], p[2]));
-        tween(fromTgt, v.target, 800, p => controls.target.set(p[0], p[1], p[2]),
+        tween(fromPos, view.pos, 800, p => camera.position.set(p[0], p[1], p[2]));
+        tween(fromTgt, view.target, 800, p => controls.target.set(p[0], p[1], p[2]),
               () => { controls.autoRotate = wasAuto; });
     }
 
     function setPlume(on) {
-        for (const p of stack.userData.plumes) p.visible = !!on;
+        for (const p of current.plumes) p.visible = !!on;
     }
     function setPad(on)        { pad.visible = !!on; }
     function setAutoRotate(on) { controls.autoRotate = !!on; }
@@ -903,6 +1009,7 @@ export function initVehicleCanvas(canvas, opts = {}) {
         setAutoRotate,
         setPlume,
         setPad,
-        setVehicle(_id) { /* reserved — only shuttle implemented */ },
+        setVehicle,
+        get currentInfo() { return current.info; },
     };
 }
