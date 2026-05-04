@@ -571,6 +571,152 @@ body {
     white-space:nowrap;
 }
 
+/* ─── Toasts (bottom-center stack) ────────────────────── */
+.op-toast-stack {
+    position: fixed;
+    left: 50%;
+    bottom: 100px;
+    transform: translateX(-50%);
+    z-index: 4500;
+    display: flex; flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+    max-width: 92vw;
+}
+.op-toast {
+    pointer-events: auto;
+    background: rgba(8, 14, 20, 0.95);
+    border: 1px solid rgba(0, 200, 200, 0.3);
+    border-radius: 6px;
+    color: #cef;
+    padding: 8px 14px;
+    font-size: .76rem;
+    line-height: 1.35;
+    max-width: min(560px, 92vw);
+    box-shadow: 0 10px 28px rgba(0,0,0,.55);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity .18s ease, transform .18s ease;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+}
+.op-toast--in  { opacity: 1; transform: translateY(0); }
+.op-toast--out { opacity: 0; transform: translateY(-8px); }
+.op-toast--info  { border-color: rgba(0, 200, 200, 0.35); }
+.op-toast--ok    { border-color: rgba(0, 220, 140, 0.55); color: #cfe; }
+.op-toast--warn  { border-color: rgba(255, 180, 60, 0.55); color: #fda; }
+.op-toast--error { border-color: rgba(255, 90, 120, 0.6); color: #fbd; }
+
+/* ─── Mobile responsive pass ──────────────────────────── */
+/* Touch-targets: anything tap-driven gets at least 32px tall.
+   Time-strip cursor doubles to 22px so it can be grabbed; speed +
+   jump groups stack onto their own row, dropping the dividers that
+   only make sense in a wide layout. The b-plane / density insets
+   shrink and dock to the corner so they stop covering the globe. */
+@media (max-width: 760px), (pointer: coarse) {
+    /* Globe wrap: keep aspect-friendly height even when the page
+       collapses to a single column. */
+    #op-globe-wrap { min-height: 360px; }
+
+    /* Time-strip — biggest touch-friendliness win on the page. */
+    #op-scrub { padding: 8px 10px; }
+    #op-scrub-row { gap: 6px; row-gap: 8px; }
+    .op-scrub-btn {
+        padding: 8px 12px;
+        font-size: .75rem;
+        min-height: 34px;
+    }
+    .op-scrub-speed,
+    .op-scrub-jump { min-width: 44px; }
+    #op-scrub-speeds,
+    #op-scrub-jumps {
+        border-left: 0;
+        padding-left: 0;
+        margin-left: 0;
+        gap: 4px;
+        flex-basis: 100%;
+        order: 4;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+    #op-scrub-track {
+        flex-basis: 100%;
+        order: 3;
+        height: 10px;
+        margin: 4px 0;
+        min-width: 0;
+    }
+    #op-scrub-cursor {
+        top: -7px;
+        width: 22px; height: 22px;
+        border-width: 3px;
+    }
+    #op-tc-readout {
+        margin-left: 0;
+        flex-basis: 100%;
+        order: 5;
+        text-align: center;
+        font-size: .68rem;
+    }
+
+    /* Conjunctions toolbar wraps naturally — make sure the status
+       text drops to a fresh line so it doesn't get squeezed. */
+    .op-conj-toolbar { row-gap: 6px; }
+    .op-conj-toolbar-status {
+        flex-basis: 100%;
+        text-align: left;
+        margin-left: 0;
+    }
+    .op-conj-chip { padding: 6px 10px; font-size: .72rem; min-height: 30px; }
+    .op-conj-row {
+        grid-template-columns: 1fr auto auto;
+        column-gap: 6px;
+        font-size: .76rem;
+    }
+    .op-conj-row .op-conj-dv { display: none; }
+    .op-conj-sub {
+        grid-template-columns: 1fr auto;
+        row-gap: 2px;
+    }
+    .op-conj-sub .op-conj-spark,
+    .op-conj-sub .op-conj-sub-tca {
+        grid-column: 1 / -1;
+        text-align: left;
+    }
+
+    /* Hero copy stays readable on a narrow screen. */
+    #op-hero { padding: 14px 16px; }
+    #op-hero h1 { font-size: 1.18rem; }
+    #op-hero-sub { font-size: .76rem; }
+
+    /* Persona switch — stack-friendly. */
+    #op-personas { flex-direction: column; align-items: stretch; padding: 4px; gap: 2px; }
+    .op-persona-btn { justify-content: flex-start; padding: 8px 12px; }
+
+    /* B-plane / density insets shrink + sit lower on the globe so
+       they don't eat the limited vertical space. */
+    #op-bplane { width: 168px; bottom: 8px; right: 8px; }
+    #op-bplane svg { width: 168px; height: 168px; }
+
+    /* Picker tooltip + menu sized for touch readability. */
+    .op-pick-tooltip { font-size: .76rem; max-width: 80vw; }
+    .op-pick-menu {
+        min-width: 240px;
+        font-size: .82rem;
+    }
+    .op-pick-menu-item { padding: 12px 14px; }
+
+    /* Toast stack rises above the time strip. */
+    .op-toast-stack { bottom: 130px; }
+}
+
+/* On really tight screens drop the b-plane entirely — the deck rows
+   already carry miss/Δv numbers, and the inset overlay has no good
+   home below ~420px wide. */
+@media (max-width: 420px) {
+    #op-bplane { display: none; }
+}
+
 /* ─── PRO Upgrade gate (modal) ────────────────────────────
    Replaces the legacy soft ribbon. Renders a full-screen overlay
    the first time a non-PRO user lands here; primary CTA is the
@@ -1703,6 +1849,7 @@ import {
 } from './js/operations/decision-deck.js';
 import { OperationsVisuals }  from './js/operations/visuals.js';
 import { mountGlobePicker }   from './js/operations/globe-picker.js';
+import { showToast }          from './js/operations/toast.js';
 import * as bPlane            from './js/operations/b-plane.js';
 import * as densityMap        from './js/operations/density-map.js';
 import { mountAristotle }     from './js/operations/aristotle.js';
@@ -1953,21 +2100,32 @@ const conjDeck = mountConjunctions(myFleet, fleet.tracker, {
 
 bPlane.mountBPlane();
 
-/* ─── Mouse picking on the globe ──────────────────────── */
-// Hover for satellite info, click to select, right-click for the
-// add-to-fleet / screen / TCA-pin context menu. The picker is the
-// only thing in this file that touches every other operations module
-// — visuals (selection), myFleet (add/remove), conjDeck (rescreen).
+/* ─── Mouse / touch picking on the globe ──────────────── */
+// Hover (mouse) or long-press (touch) for the action menu, tap /
+// click to select. The picker is the only thing in this file that
+// touches every other operations module — visuals (selection),
+// myFleet (add/remove), conjDeck (rescreen / screenOne), toast
+// (user feedback).
 mountGlobePicker({
     canvas:        document.getElementById('op-globe'),
     camera:        globe.camera,
+    controls:      globe.controls,
     tracker:       fleet.tracker,
     onSelect:      (id) => visuals.setSelectedAsset(id),
     onAddFleet:    (id) => myFleet.add(id),
     onRemoveFleet: (id) => myFleet.remove(id),
     isInFleet:     (id) => myFleet.has(id),
     onScreen:      ()   => conjDeck?.rescreen?.(),
-    onPinTca:      ()   => visuals.toggleTcaGlyph?.(),
+    onScreenOne:   (id) => conjDeck?.screenOne?.(id),
+    onPinTca:      ()   => {
+        const visible = visuals.toggleTcaGlyph?.();
+        if (typeof visible === 'boolean') {
+            showToast(`TCA pin ${visible ? 'on' : 'off'}.`, 'info', { duration: 1500 });
+        } else {
+            showToast('Click a conjunction first to enable TCA pin.', 'info');
+        }
+    },
+    onMessage:     (msg, kind, opts) => showToast(msg, kind, opts),
 });
 densityMap.mountDensityMap(fleet.tracker);
 

@@ -590,10 +590,13 @@ export class OperationsVisuals {
     /**
      * Public toggle. Hides the glyph group without dropping the
      * active conjunction so the b-plane / covariance tubes survive.
-     * Returns the new visibility state.
+     * Returns the new visibility state when a conjunction is active,
+     * or null when there's nothing to pin yet — callers use that to
+     * surface a "click a conjunction first" hint instead of an
+     * unhelpful "off" toast.
      */
     toggleTcaGlyph() {
-        if (!this._activeConj) return false;
+        if (!this._activeConj) return null;
         this._tcaGroup.visible = !this._tcaGroup.visible;
         return this._tcaGroup.visible;
     }

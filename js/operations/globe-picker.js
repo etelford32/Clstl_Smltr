@@ -1,28 +1,40 @@
 /**
- * globe-picker.js — Mouse interaction layer for the Operations globe.
+ * globe-picker.js — Pointer interaction layer for the Operations globe.
  *
  * Three.js raycaster against the satellite Points mesh, throttled to
  * roughly 30 Hz. Drives:
- *   - hover  → tooltip with name, NORAD, group, alt;
- *   - click  → onSelect(noradId) (visuals.setSelectedAsset elsewhere);
- *   - right  → context menu: "Add to fleet" / "Screen against fleet"
- *              / "Pin TCA marker" / "Remove from fleet"
- *              actions.
+ *   - hover  (mouse only) → tooltip with name, NORAD, group, alt;
+ *   - click / tap        → onSelect(noradId);
+ *   - right-click / long-press → context menu: Select / Add to fleet
+ *                                (or Remove) / Screen this object /
+ *                                Toggle TCA pin.
+ *
+ * Touch model: hover doesn't exist on touch devices, so we treat
+ * pointerType === 'touch' specially:
+ *   - quick tap (<250 ms, no drag) on a sat → onSelect;
+ *   - long-press (>500 ms, no drag) on a sat → context menu at the
+ *     touch point;
+ *   - drags pass through to OrbitControls untouched.
+ *
+ * While the menu is open we disable OrbitControls so a stray drag
+ * doesn't slide the camera out from under the menu the user is
+ * about to tap.
  *
  * Pointer logic intentionally lives outside OperationsGlobe so the
  * globe module stays "scene plumbing only" and the picker can be
- * mounted independently (or swapped for a richer GPU-picking
- * implementation later).
+ * swapped for a richer GPU-picking implementation later.
  *
  * Usage:
  *   const picker = mountGlobePicker({
- *     canvas, camera, tracker,
- *     onSelect:    id => visuals.setSelectedAsset(id),
- *     onAddFleet:  id => myFleet.add(id),
+ *     canvas, camera, controls, tracker,
+ *     onSelect:      id => visuals.setSelectedAsset(id),
+ *     onAddFleet:    id => myFleet.add(id),
  *     onRemoveFleet: id => myFleet.remove(id),
- *     isInFleet:   id => myFleet.has(id),
- *     onScreen:    () => deck.rescreen(),
- *     onPinTca:    id => visuals.toggleTcaPin(id),
+ *     isInFleet:     id => myFleet.has(id),
+ *     onScreen:      ()   => deck.rescreen(),
+ *     onScreenOne:   id   => deck.screenOne(id),
+ *     onPinTca:      ()   => visuals.toggleTcaGlyph(),
+ *     onMessage:     (text, kind) => showToast(text, kind),
  *   });
  *
  * Returns a small handle `{ dispose() }`.
@@ -31,6 +43,10 @@
 const HOVER_FPS_HZ      = 30;
 const HOVER_THROTTLE_MS = 1000 / HOVER_FPS_HZ;
 const PICK_THRESHOLD    = 0.025;   // scene units (Earth radius = 1)
+const TOUCH_PICK_THR    = 0.05;    // looser on touch — fingers cover more sky
+const LONG_PRESS_MS     = 500;
+const TAP_MAX_MS        = 350;
+const TAP_MAX_DIST      = 6;       // px — touch is sloppier than a mouse
 
 function fmtAlt(altKm) {
     if (!Number.isFinite(altKm)) return '— km';
@@ -45,19 +61,30 @@ function escapeHtml(s) {
 
 export function mountGlobePicker(opts = {}) {
     const {
-        canvas, camera, tracker,
+        canvas, camera, tracker, controls,
         onSelect      = () => {},
         onAddFleet    = () => {},
         onRemoveFleet = () => {},
         isInFleet     = () => false,
         onScreen      = () => {},
+        onScreenOne   = null,
         onPinTca      = null,
+        onMessage     = () => {},
     } = opts;
 
     if (!canvas || !camera || !tracker) {
         console.warn('[globePicker] missing canvas / camera / tracker; aborting mount');
         return { dispose() {} };
     }
+
+    // Coarse-pointer environments (touch / pen) skip the hover
+    // tooltip and use long-press for the context menu. matchMedia is
+    // a reasonable proxy; we still check pointerType per-event so a
+    // hybrid laptop with both works.
+    const coarsePointerOnly =
+        typeof matchMedia === 'function'
+            ? matchMedia('(hover: none) and (pointer: coarse)').matches
+            : false;
 
     const wrap = canvas.parentElement || document.body;
     if (getComputedStyle(wrap).position === 'static') {
@@ -86,8 +113,10 @@ export function mountGlobePicker(opts = {}) {
     let lastClient    = { x: 0, y: 0 };
     let menuOpen      = false;
     let menuTarget    = null;     // norad id the menu is acting on
-    let menuStarted   = false;    // remembers a contextmenu pointerdown
     let downAt        = null;     // for click vs. drag discrimination
+    let longPressId   = null;     // setTimeout handle for touch long-press
+    let longPressFired = false;   // suppresses the synthesized click
+    let controlsWasEnabled = null; // remembered while menu is open
 
     function clientToNdc(clientX, clientY) {
         const r = canvas.getBoundingClientRect();
@@ -97,9 +126,33 @@ export function mountGlobePicker(opts = {}) {
         };
     }
 
-    function pickFromClient(clientX, clientY) {
+    function pickFromClient(clientX, clientY, isTouch = false) {
         const ndc = clientToNdc(clientX, clientY);
-        return tracker.pickAtNDC?.(ndc, camera, { threshold: PICK_THRESHOLD }) ?? null;
+        const threshold = isTouch ? TOUCH_PICK_THR : PICK_THRESHOLD;
+        return tracker.pickAtNDC?.(ndc, camera, { threshold }) ?? null;
+    }
+
+    function suppressControls() {
+        if (!controls) return;
+        if (controlsWasEnabled == null) {
+            controlsWasEnabled = controls.enabled !== false;
+        }
+        controls.enabled = false;
+    }
+
+    function restoreControls() {
+        if (!controls) return;
+        if (controlsWasEnabled != null) {
+            controls.enabled = controlsWasEnabled;
+        }
+        controlsWasEnabled = null;
+    }
+
+    function cancelLongPress() {
+        if (longPressId != null) {
+            clearTimeout(longPressId);
+            longPressId = null;
+        }
     }
 
     function placeOver(el, clientX, clientY) {
@@ -162,12 +215,24 @@ export function mountGlobePicker(opts = {}) {
             items.push({
                 id:    'fleet-add',
                 label: 'Add to fleet',
-                run:   () => onAddFleet(noradId),
+                run:   () => handleAddFleet(noradId),
+            });
+        }
+        // "Screen against my fleet" runs a one-shot fleet × {this}
+        // screen and toasts the closest pass found. Useful when the
+        // user spots something interesting and wants to know if it
+        // threatens any of their primaries — without needing to add
+        // it to the fleet first.
+        if (typeof onScreenOne === 'function' && !inFleet) {
+            items.push({
+                id:    'screen-one',
+                label: 'Screen against my fleet',
+                run:   () => handleScreenOne(noradId),
             });
         }
         items.push({
             id:    'screen',
-            label: 'Screen fleet conjunctions',
+            label: 'Re-screen fleet now',
             run:   () => onScreen(),
         });
         if (typeof onPinTca === 'function') {
@@ -180,11 +245,58 @@ export function mountGlobePicker(opts = {}) {
         return items;
     }
 
+    async function handleAddFleet(noradId) {
+        const sat = tracker.getSatellite?.(noradId);
+        const label = sat?.name || `#${noradId}`;
+        try {
+            const result = await onAddFleet(noradId);
+            // myFleet.add resolves to { ok, reason?, id? }. Older
+            // call sites may return undefined — treat that as "ok"
+            // since we have no information to the contrary.
+            if (!result || result.ok) {
+                onMessage(`Added ${label} to fleet.`, 'ok');
+                return;
+            }
+            const reason = result.reason;
+            if (reason === 'already-added') onMessage(`${label} is already in your fleet.`,    'info');
+            else if (reason === 'fleet-full')  onMessage(`Fleet is full (max 10). Remove one to add.`, 'warn');
+            else if (reason === 'invalid-id')  onMessage(`#${noradId} isn't a valid NORAD ID.`, 'error');
+            else if (reason === 'fetch-failed') onMessage(`Couldn't load TLE for ${label}.`,    'error');
+            else                                onMessage(`Couldn't add ${label}: ${reason}`, 'error');
+        } catch (err) {
+            onMessage(`Add failed: ${err?.message ?? err}`, 'error');
+        }
+    }
+
+    async function handleScreenOne(noradId) {
+        const sat = tracker.getSatellite?.(noradId);
+        const label = sat?.name || `#${noradId}`;
+        onMessage(`Screening ${label} against your fleet…`, 'info', { duration: 1500 });
+        try {
+            const hit = await onScreenOne(noradId);
+            if (!hit) {
+                onMessage(`${label}: no fleet conjunction below 50 km in horizon.`, 'ok');
+                return;
+            }
+            const dv = Number.isFinite(hit.dvKms) ? ` · ${hit.dvKms.toFixed(2)} km/s` : '';
+            onMessage(
+                `${label} → ${hit.primaryName}: ${hit.missKm.toFixed(2)} km, ${hit.ahead}${dv}`,
+                hit.missKm < 5 ? 'error' : hit.missKm < 15 ? 'warn' : 'info',
+                { duration: 6000 },
+            );
+        } catch (err) {
+            if (err?.code === 'superseded' || err?.code === 'disposed') return;
+            onMessage(`Screen failed: ${err?.message ?? err}`, 'error');
+        }
+    }
+
     function showMenu(noradId, clientX, clientY) {
         const items = buildMenuItems(noradId);
         if (items.length === 0) return;
         menuTarget = noradId;
         menuOpen   = true;
+        suppressControls();
+        hideTooltip();
 
         const sat = tracker.getSatellite?.(noradId);
         menu.innerHTML = `
@@ -233,14 +345,27 @@ export function mountGlobePicker(opts = {}) {
         menu.style.display = 'none';
         menuOpen   = false;
         menuTarget = null;
+        restoreControls();
     }
 
     function onPointerMove(ev) {
         if (menuOpen) return;
         lastClient = { x: ev.clientX, y: ev.clientY };
-        // OrbitControls swallows pointer events for camera moves; our
-        // hit-test still wants those positions, so we throttle and
-        // pick regardless.
+
+        // Touch + pen: cancel a pending long-press if the finger has
+        // moved far enough that the user is clearly dragging the
+        // camera.
+        if (downAt && downAt.pointerType !== 'mouse' && longPressId != null) {
+            const moved = Math.hypot(ev.clientX - downAt.x, ev.clientY - downAt.y);
+            if (moved > TAP_MAX_DIST) cancelLongPress();
+        }
+
+        // Hover tooltip: mouse only. Coarse pointers don't have a
+        // hover state, and a pen's "hover" is rarely intentional.
+        if (coarsePointerOnly || (ev.pointerType && ev.pointerType !== 'mouse')) {
+            return;
+        }
+
         const now = performance.now();
         if (now - lastHoverAt < HOVER_THROTTLE_MS) {
             // Coalesce — if we've got a pending hover skip; else
@@ -248,7 +373,7 @@ export function mountGlobePicker(opts = {}) {
             if (!pendingHover) {
                 pendingHover = setTimeout(() => {
                     pendingHover = null;
-                    onPointerMove({ clientX: lastClient.x, clientY: lastClient.y });
+                    onPointerMove({ clientX: lastClient.x, clientY: lastClient.y, pointerType: 'mouse' });
                 }, HOVER_THROTTLE_MS);
             }
             return;
@@ -265,22 +390,55 @@ export function mountGlobePicker(opts = {}) {
     }
 
     function onPointerDown(ev) {
-        downAt = { x: ev.clientX, y: ev.clientY, t: performance.now(), button: ev.button };
+        downAt = {
+            x: ev.clientX, y: ev.clientY,
+            t: performance.now(),
+            button: ev.button,
+            pointerType: ev.pointerType || 'mouse',
+        };
+        longPressFired = false;
+
         if (menuOpen && !menu.contains(ev.target)) {
             hideMenu();
+        }
+
+        // Long-press to open the context menu on touch (and pen). We
+        // pre-check that there's a sat under the touch — if not, the
+        // long-press becomes a no-op and the user can keep dragging
+        // the camera without surprise.
+        if (downAt.pointerType !== 'mouse') {
+            const startX = ev.clientX, startY = ev.clientY;
+            cancelLongPress();
+            longPressId = setTimeout(() => {
+                longPressId = null;
+                if (!downAt) return;
+                const moved = Math.hypot(downAt.x - startX, downAt.y - startY);
+                if (moved > TAP_MAX_DIST) return;
+                const hit = pickFromClient(startX, startY, true);
+                if (!hit) return;
+                longPressFired = true;
+                showMenu(hit.noradId, startX, startY);
+            }, LONG_PRESS_MS);
         }
     }
 
     function onPointerUp(ev) {
+        cancelLongPress();
         if (!downAt) return;
         const dx = ev.clientX - downAt.x;
         const dy = ev.clientY - downAt.y;
         const dt = performance.now() - downAt.t;
-        const isLeftClick = downAt.button === 0 && Math.hypot(dx, dy) < 4 && dt < 400;
+        const isTouch = downAt.pointerType !== 'mouse';
+        const tapDist = isTouch ? TAP_MAX_DIST : 4;
+        const tapTime = isTouch ? TAP_MAX_MS    : 400;
+        const isTap   = downAt.button === 0 && Math.hypot(dx, dy) < tapDist && dt < tapTime;
         downAt = null;
-        if (!isLeftClick) return;
 
-        const hit = pickFromClient(ev.clientX, ev.clientY);
+        // If the long-press already fired, don't double-fire a tap.
+        if (longPressFired) { longPressFired = false; return; }
+        if (!isTap) return;
+
+        const hit = pickFromClient(ev.clientX, ev.clientY, isTouch);
         if (hit) onSelect(hit.noradId);
     }
 
@@ -293,12 +451,12 @@ export function mountGlobePicker(opts = {}) {
             return;
         }
         ev.preventDefault();
-        hideTooltip();
         showMenu(hit.noradId, ev.clientX, ev.clientY);
     }
 
     function onPointerLeave() {
         hideTooltip();
+        cancelLongPress();
     }
 
     function onWindowKeydown(ev) {
@@ -329,6 +487,8 @@ export function mountGlobePicker(opts = {}) {
             tooltip.remove();
             menu.remove();
             if (pendingHover) clearTimeout(pendingHover);
+            cancelLongPress();
+            restoreControls();
         },
     };
 }
