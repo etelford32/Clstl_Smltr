@@ -255,6 +255,23 @@ export class SatelliteTracker {
         this._batchSyncedTo  = 0;          // index up to which the registry is in sync
         this._batchAvailable = false;      // true once WASM exposes registry_*
 
+        // Off-thread propagation. When a Worker spawns and reports
+        // ready, the live tick stops calling WASM in-line and instead
+        // ping-pongs a single ArrayBuffer with the worker (transferable
+        // — no copy across the postMessage boundary). The main thread
+        // never blocks on SGP4 again. Buffer ownership is tracked via
+        // `_workerBuf`: when non-null the main thread holds it and
+        // can post a tick; when null a tick is in flight.
+        this._worker          = null;
+        this._workerReady     = false;
+        this._workerSyncedTo  = 0;          // sats already shipped to the worker
+        this._workerBuf       = null;       // Float32Array, our half of the ping-pong
+        this._workerInFlight  = false;
+        this._workerFrameId   = 0;
+        this._workerLastFrame = 0;          // most recent frameId that landed
+        this._workerEnabled   = (typeof Worker !== 'undefined');
+        if (this._workerEnabled) this._spawnWorker();
+
         // Shell visualization group
         this._shellGroup = new THREE.Group();
         this._shellGroup.name = 'orbital-shells';
@@ -751,6 +768,150 @@ export class SatelliteTracker {
         this._colors.needsUpdate = true;
     }
 
+    /* ─── Off-thread propagation ────────────────────────────── */
+
+    _spawnWorker() {
+        try {
+            const url = new URL('./operations/propagation-worker.js', import.meta.url);
+            this._worker = new Worker(url, { type: 'module' });
+            this._worker.onerror = (ev) => {
+                console.warn('[SatTracker] propagation worker errored, falling back:', ev.message);
+                this._teardownWorker();
+            };
+            this._worker.onmessage = (ev) => this._onWorkerMessage(ev.data);
+            this._worker.postMessage({ type: 'init' });
+            // Initial buffer for the ping-pong. Sized to maxSats so we
+            // never need to reallocate even after the catalog grows.
+            this._workerBuf = new Float32Array(this._maxSats * 3);
+        } catch (err) {
+            console.debug('[SatTracker] worker unavailable, staying on main thread:', err.message);
+            this._worker        = null;
+            this._workerEnabled = false;
+        }
+    }
+
+    _teardownWorker() {
+        if (!this._worker) return;
+        try { this._worker.terminate(); } catch (_) {}
+        this._worker         = null;
+        this._workerEnabled  = false;
+        this._workerReady    = false;
+        this._workerInFlight = false;
+        // _workerBuf is whatever's lying around; main-batch path will
+        // allocate its own.
+    }
+
+    _onWorkerMessage(msg) {
+        if (msg.type === 'ready') {
+            if (msg.ok && msg.hasRegistry) {
+                this._workerReady = true;
+                // Ship every sat we already know about.
+                this._workerSync();
+            } else {
+                // WASM didn't load in the worker — fall back permanently.
+                console.debug('[SatTracker] worker WASM init failed:', msg.error || 'no registry');
+                this._teardownWorker();
+            }
+            return;
+        }
+        if (msg.type === 'add-ack' || msg.type === 'clear-ack') {
+            return;
+        }
+        if (msg.type === 'positions') {
+            this._workerInFlight = false;
+            this._workerLastFrame = msg.frameId;
+            const buf = new Float32Array(msg.buffer);
+            this._workerBuf = buf;
+
+            if (msg.mismatch) {
+                // Slot count drifted — re-ship everything and skip
+                // this frame's upload (positions would be NaN).
+                this._workerSyncedTo = 0;
+                this._worker.postMessage({ type: 'clear' });
+                this._workerSync();
+                return;
+            }
+            this._uploadPositionsFromBuffer(buf, msg.slots);
+            return;
+        }
+        if (msg.type === 'error') {
+            console.warn('[SatTracker] worker error:', msg.error);
+            return;
+        }
+    }
+
+    /**
+     * Send any new sats since the last sync to the worker registry.
+     * Chunked so a 30 k-row catalog landing in one shot doesn't park
+     * the worker on TLE parsing for ~1 s while tick messages queue
+     * behind it. The next tick fires `_workerSync` again, so the
+     * remainder lands on subsequent frames — first frames render the
+     * already-shipped slots and the new ones come online a frame or
+     * two later.
+     */
+    _workerSync(maxThisCall = 5000) {
+        if (!this._worker || !this._workerReady) return;
+        const n = this._satellites.length;
+        if (n <= this._workerSyncedTo) return;
+        const upTo = Math.min(n, this._workerSyncedTo + maxThisCall);
+        const tles = [];
+        for (let i = this._workerSyncedTo; i < upTo; i++) {
+            const t = this._satellites[i].tle;
+            tles.push({
+                line1: t.line1 || null,
+                line2: t.line2 || null,
+            });
+        }
+        this._workerSyncedTo = upTo;
+        this._worker.postMessage({ type: 'add-sats', tles });
+    }
+
+    /**
+     * Copy worker-returned positions into the THREE position attribute
+     * and refresh lat/lon/alt for tooltip / cohort consumers. NaN
+     * triplets indicate parse-failed or decayed slots; we leave them
+     * at their last known position so the dot doesn't snap to origin.
+     */
+    _uploadPositionsFromBuffer(buf, slotCount) {
+        if (!this._positions) return;
+        const posArr = this._positions.array;
+        const n = Math.min(slotCount, this._satellites.length);
+        const kmToScene = this._earthR / RE_KM;
+
+        let dirty = false;
+        for (let i = 0; i < n; i++) {
+            const off = i * 3;
+            const x = buf[off];
+            const y = buf[off + 1];
+            const z = buf[off + 2];
+            if (x !== x) continue;   // NaN — keep last known position
+
+            posArr[off]     = x;
+            posArr[off + 1] = y;
+            posArr[off + 2] = z;
+            dirty = true;
+
+            const sat = this._satellites[i];
+            const sx = x / kmToScene;
+            const sy = y / kmToScene;
+            const sz = z / kmToScene;
+            const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+            if (r > 1e-9) {
+                const cy = sy / r;
+                sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                sat.lon = Math.atan2(-sz, sx) * RAD;
+                sat.alt = r - RE_KM;
+            }
+
+            if (this._highlightNoradId != null
+                && sat.tle.norad_id === this._highlightNoradId
+                && this._highlightSprite) {
+                this._highlightSprite.position.set(x, y, z);
+            }
+        }
+        if (dirty) this._positions.needsUpdate = true;
+    }
+
     /**
      * Lazy-register any not-yet-batched sats with the WASM registry.
      * Idempotent — safe to call every frame; usually a no-op once
@@ -792,6 +953,34 @@ export class SatelliteTracker {
         const gmstRad = geo.greenwichSiderealTimeFromJD(jd);
         const kmToScene = this._earthR / RE_KM;
         const posArr  = this._positions.array;
+
+        // Worker path (preferred). The worker has its own WASM
+        // registry; the main thread keeps it in sync via add-sats
+        // messages and ping-pongs a single transferable buffer for
+        // positions. We never block on the worker — if it's still
+        // busy when this frame fires, positions stay one frame stale
+        // (visually invisible at 60 fps).
+        if (this._workerReady && this._workerEnabled) {
+            this._workerSync();
+            if (this._workerBuf && !this._workerInFlight) {
+                const buf = this._workerBuf;
+                this._workerBuf       = null;
+                this._workerInFlight  = true;
+                const frameId         = ++this._workerFrameId;
+                this._worker.postMessage(
+                    {
+                        type:           'tick',
+                        jd, gmst:        gmstRad,
+                        scale:           kmToScene,
+                        buffer:          buf.buffer,
+                        frameId,
+                        expectedSlots:   this._workerSyncedTo,
+                    },
+                    [buf.buffer],
+                );
+            }
+            return;
+        }
 
         const useBatch = this._syncRegistry();
 
