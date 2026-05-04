@@ -51,7 +51,7 @@ export const NASA_KEY = 'DEMO_KEY';   // ← replace with your key for local dev
 // "provider not enabled" error.
 //
 // See OAUTH_SETUP.md for the full operator runbook.
-export const SOCIAL_PROVIDERS = Object.freeze(['google']);
+export const SOCIAL_PROVIDERS = Object.freeze(['google', 'apple']);
 
 // ── Plan tier constants ───────────────────────────────────────────────────────
 export const TIER = Object.freeze({
