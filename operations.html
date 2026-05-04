@@ -742,6 +742,43 @@ body {
 }
 
 /* ─── Conjunctions ─────────────────────────────────────── */
+.op-conj-toolbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 0 8px 0;
+    flex-wrap: wrap;
+}
+.op-conj-toolbar-label {
+    font-size: .65rem; color: #889;
+    letter-spacing: .05em; text-transform: uppercase;
+}
+.op-conj-chip {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.12);
+    color: #aab;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: .68rem; font-family: monospace;
+    cursor: pointer;
+}
+.op-conj-chip:hover { color: #fff; border-color: rgba(255,255,255,.25); }
+.op-conj-chip--on {
+    background: rgba(0,200,200,.18);
+    border-color: #0cc;
+    color: #0ff;
+}
+.op-conj-toolbar-status {
+    margin-left: auto;
+    font-size: .65rem; color: #9bd;
+    font-family: monospace;
+    text-align: right;
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.op-conj-toolbar-status[data-kind="busy"]  { color: #fc8; }
+.op-conj-toolbar-status[data-kind="error"] { color: #f88; }
+.op-conj-toolbar-status[data-kind="stale"] { color: #fa6; }
+.op-conj-toolbar-status[data-kind="clear"] { color: #0fa; }
+.op-conj-rows { min-height: 1px; }
 .op-conj-list {
     list-style: none; padding: 0; margin: 0;
     display: flex; flex-direction: column;
@@ -749,7 +786,7 @@ body {
 }
 .op-conj-row {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: 1fr auto auto auto auto;
     align-items: baseline;
     gap: 8px;
     padding: 6px 8px;
@@ -765,7 +802,8 @@ body {
 .op-conj-row[data-tca-ms] { cursor: pointer; transition: background .12s; }
 .op-conj-row[data-tca-ms]:hover { background: rgba(0,200,200,.08); }
 .op-conj-row:focus-visible { outline: 1px solid rgba(0,200,200,.6); outline-offset: -1px; }
-.op-conj-name { color: #cef; }
+.op-conj-row--open { background: rgba(0,200,200,.06); }
+.op-conj-name { color: #cef; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .op-conj-count {
     font-family: monospace;
     font-weight: 700; color: #0ff;
@@ -777,6 +815,54 @@ body {
     text-align: right;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+.op-conj-dv {
+    font-family: monospace; font-size: .65rem;
+    color: #fc8;
+    padding: 0 4px;
+    border-left: 1px solid rgba(255,255,255,.08);
+}
+.op-conj-caret {
+    color: #678;
+    font-size: .7rem;
+    width: 10px;
+    text-align: right;
+}
+.op-conj-row--open .op-conj-caret { color: #0cc; }
+.op-conj-sublist {
+    list-style: none;
+    padding: 4px 0 6px 18px;
+    margin: 0 0 4px 0;
+    display: flex; flex-direction: column; gap: 2px;
+    border-left: 1px solid rgba(0,200,200,.18);
+    margin-left: 9px;
+}
+.op-conj-sub {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 6px;
+    padding: 4px 8px;
+    font-size: .65rem;
+    border-radius: 3px;
+    cursor: pointer;
+    color: #9ab;
+}
+.op-conj-sub:hover { background: rgba(0,200,200,.07); color: #def; }
+.op-conj-sub:focus-visible { outline: 1px solid rgba(0,200,200,.5); outline-offset: -1px; }
+.op-conj-sub-high { color: #fbc; }
+.op-conj-sub-med  { color: #fdb; }
+.op-conj-sub-low  { color: #adc; }
+.op-conj-sub-name { font-family: inherit; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-conj-sub-id   { color: #678; font-family: monospace; font-size: .6rem; }
+.op-conj-sub-group {
+    font-family: monospace; font-size: .6rem;
+    color: #9bd;
+    background: rgba(0,200,200,.08);
+    padding: 0 5px; border-radius: 2px;
+    align-self: center;
+}
+.op-conj-sub-miss { font-family: monospace; color: #fc8; text-align: right; }
+.op-conj-sub-tca  { font-family: monospace; color: #79b; text-align: right; white-space: nowrap; }
+.op-conj-sub-more { color: #678; font-size: .62rem; padding: 4px 8px; cursor: default; }
 
 /* ─── Prop Budget ──────────────────────────────────────── */
 .op-prop-headline {
@@ -1414,14 +1500,14 @@ body {
         </div>
         <div class="op-panel">
             <h2 style="display:flex;align-items:baseline;gap:8px">
-                Conjunctions · 7 days
+                Conjunctions
                 <button id="op-conj-btn" class="op-deck-btn" type="button"
-                        title="Run a 7-day SGP4 conjunction screen against the loaded debris catalog (50 km threshold).">
-                    Screen 7 d
+                        title="Screen the fleet against every loaded layer over the selected horizon. Anchors at the current sim time, refines TCA via parabolic fit, reports |Δv| at closest approach.">
+                    Screen
                 </button>
             </h2>
             <div id="op-conj-body">
-                <div class="op-deck-empty">Add assets and toggle <b>Tracked Debris</b>, then click <b>Screen 7 d</b>.</div>
+                <div class="op-deck-empty">Add fleet assets, toggle a layer (debris, Starlink…), pick a horizon, then click <b>Screen</b>.</div>
             </div>
         </div>
         <div class="op-panel">
