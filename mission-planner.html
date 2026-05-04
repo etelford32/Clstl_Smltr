@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Planner — Launch & Trajectory Simulator · Parker Physics</title>
+<meta name="description" content="Interactive mock mission planner. Launch a rocket, deploy a payload into orbit, then plan transfers to the Moon and Mars with live Δv and time-of-flight readouts.">
+<style>
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+html { height:auto; overflow-y:auto; }
+body { width:100%; min-height:100vh; overflow-x:hidden;
+    background:#040210; color:#d0cce8;
+    font-family:'Segoe UI', system-ui, sans-serif; }
+
+/* ─── Hero ──────────────────────────────────────────────── */
+#mp-hero {
+    padding:22px 24px 14px;
+    background:linear-gradient(180deg, rgba(102,255,170,.07), rgba(4,2,16,0));
+    border-bottom:1px solid rgba(102,255,170,.14);
+}
+#mp-hero h1 {
+    font-size:1.55rem; font-weight:800;
+    background:linear-gradient(100deg,#fff 28%, #66ffaa);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:6px;
+}
+#mp-hero p { font-size:.88rem; color:#aab; line-height:1.55; max-width:780px; }
+#mp-hero-stats { margin-top:12px; display:flex; gap:10px; flex-wrap:wrap; }
+.mp-stat {
+    font-size:.72rem; color:#aab; font-family:monospace;
+    background:rgba(255,255,255,.03);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:6px; padding:6px 12px;
+}
+.mp-stat strong { color:#66ffaa; font-weight:800; margin-right:6px; }
+
+/* ─── Layout ────────────────────────────────────────────── */
+#mp-app {
+    display:grid; grid-template-columns: 320px 1fr; gap:16px;
+    padding:16px 24px 48px; max-width:1500px; margin:0 auto;
+}
+@media (max-width:980px) {
+    #mp-app { grid-template-columns:1fr; padding:12px; gap:12px; }
+}
+.mp-panel {
+    background:rgba(10,6,28,.72); backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px; padding:14px 16px;
+}
+.mp-label {
+    font-size:.66rem; color:#778; text-transform:uppercase;
+    letter-spacing:.1em; font-weight:700; margin-bottom:8px; margin-top:14px;
+}
+.mp-label:first-child { margin-top:0; }
+
+.mp-input, .mp-select {
+    width:100%;
+    background:rgba(255,255,255,.04);
+    border:1px solid rgba(255,255,255,.12);
+    color:#e6e6f0;
+    border-radius:6px;
+    padding:8px 10px;
+    font-size:.82rem; font-family:inherit;
+}
+.mp-input:focus, .mp-select:focus {
+    border-color:#66ffaa; outline:none;
+    box-shadow:0 0 0 2px rgba(102,255,170,.18);
+}
+
+.mp-launch-btn {
+    margin-top:18px;
+    width:100%;
+    background:linear-gradient(180deg, #1aa66b, #0d8a55);
+    color:#fff; border:none;
+    border-radius:8px;
+    padding:12px;
+    font-size:.92rem; font-weight:800;
+    letter-spacing:.04em; text-transform:uppercase;
+    cursor:pointer;
+    box-shadow:0 4px 12px rgba(26,166,107,.3);
+    transition:transform .12s, box-shadow .12s;
+}
+.mp-launch-btn:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(26,166,107,.45); }
+.mp-launch-btn:active { transform:translateY(0); }
+
+.mp-secondary-btn {
+    margin-top:8px; width:100%;
+    background:rgba(255,255,255,.05);
+    border:1px solid rgba(255,255,255,.14);
+    color:#cfd0e0;
+    border-radius:6px; padding:8px;
+    font-size:.78rem; font-weight:600; cursor:pointer;
+    transition:all .15s;
+}
+.mp-secondary-btn:hover { border-color:rgba(102,255,170,.45); color:#fff; }
+
+.mp-row { display:flex; gap:8px; align-items:center; }
+.mp-row > .mp-input { flex:1; }
+.mp-row .mp-time {
+    font-family:monospace; font-size:.76rem; color:#88a;
+    min-width:48px; text-align:right;
+}
+
+/* ─── 3D Viewport ───────────────────────────────────────── */
+#mp-3d-wrap {
+    background:rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px; overflow:hidden;
+    position:relative;
+}
+#mp-3d {
+    width:100%; height:560px;
+    background:radial-gradient(circle at 50% 35%, #0a0820, #02010a 70%);
+}
+@media (max-width:980px) { #mp-3d { height:420px; } }
+
+#mp-3d-help {
+    padding:8px 14px;
+    font-size:.68rem; color:#778; font-family:monospace; letter-spacing:.04em;
+    border-top:1px solid rgba(255,255,255,.06);
+}
+#mp-3d-help strong { color:#66ffaa; font-weight:700; }
+
+/* ─── HUD overlay ──────────────────────────────────────── */
+#mp-hud {
+    position:absolute; top:12px; right:12px;
+    background:rgba(6,4,18,.85); backdrop-filter:blur(8px);
+    border:1px solid rgba(102,255,170,.2);
+    border-radius:8px; padding:10px 12px;
+    font-family:monospace; font-size:.72rem; color:#cfd;
+    min-width:200px;
+    pointer-events:none;
+}
+#mp-hud .hud-title {
+    color:#66ffaa; font-weight:800; font-size:.66rem;
+    letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px;
+}
+#mp-hud .hud-row { display:flex; justify-content:space-between; gap:10px; padding:1px 0; }
+#mp-hud .hud-row .k { color:#88a; }
+#mp-hud .hud-row .v { color:#fff; font-weight:700; }
+
+/* ─── Event log ────────────────────────────────────────── */
+.mp-log {
+    margin-top:14px;
+    max-height:240px; overflow-y:auto;
+    background:rgba(0,0,0,.35);
+    border:1px solid rgba(255,255,255,.06);
+    border-radius:8px;
+    padding:8px 10px;
+    font-family:monospace; font-size:.7rem;
+    color:#bcd;
+}
+.mp-log-row { padding:3px 0; border-bottom:1px dashed rgba(255,255,255,.04); }
+.mp-log-row:last-child { border-bottom:0; }
+.mp-log-row .t { color:#66ffaa; margin-right:6px; }
+.mp-log-row .lvl-launch  { color:#ffcc66; }
+.mp-log-row .lvl-deploy  { color:#66ffaa; }
+.mp-log-row .lvl-transfer{ color:#ff99dd; }
+
+.mp-section-divider {
+    margin:16px -16px;
+    border-top:1px solid rgba(255,255,255,.06);
+}
+</style>
+<link rel="stylesheet" href="js/nav-styles.css">
+<script type="importmap">
+{"imports":{
+    "three":         "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+</head>
+<body>
+
+<nav></nav>
+<script type="module">import { initNav } from "./js/nav.js?v=20260424"; initNav("mission-planner");</script>
+
+<div id="mp-hero">
+    <h1>🎯 Mission Planner — Visual Launch Simulator</h1>
+    <p>Pick a launch site, choose a target orbit, and watch a rocket lift off, deliver its payload, and circularize. Then preview transfer trajectories to the Moon and Mars with first-order Δv and time-of-flight readouts. (Mock physics — visual planner only.)</p>
+    <div id="mp-hero-stats"></div>
+</div>
+
+<div id="mp-app">
+
+    <aside class="mp-panel" id="mp-controls">
+        <div class="mp-label">Launch Site</div>
+        <select id="mp-site" class="mp-select"></select>
+
+        <div class="mp-label">Target Orbit / Destination</div>
+        <select id="mp-target" class="mp-select"></select>
+
+        <div class="mp-label">Payload Name</div>
+        <input id="mp-payload" class="mp-input" type="text" maxlength="32" value="PayloadSat-1">
+
+        <button id="mp-launch" class="mp-launch-btn" type="button">🚀 Launch</button>
+
+        <div class="mp-section-divider"></div>
+
+        <div class="mp-label">Time Scale</div>
+        <div class="mp-row">
+            <input id="mp-timescale" class="mp-input" type="range" min="0.25" max="8" step="0.25" value="1">
+            <span class="mp-time" id="mp-timescale-val">1.0×</span>
+        </div>
+
+        <button id="mp-focus-earth" class="mp-secondary-btn" type="button">Focus: Earth</button>
+        <button id="mp-focus-moon"  class="mp-secondary-btn" type="button">Focus: Moon</button>
+        <button id="mp-clear"       class="mp-secondary-btn" type="button" style="border-color:rgba(255,120,120,.4); color:#ffaaaa;">Clear All Vehicles</button>
+
+        <div class="mp-label">Mission Log</div>
+        <div id="mp-log" class="mp-log"><div class="mp-log-row"><span class="t">--:--</span>Ready for launch.</div></div>
+    </aside>
+
+    <main>
+        <div id="mp-3d-wrap">
+            <div id="mp-3d" aria-label="3D mission planner viewport"></div>
+            <div id="mp-hud">
+                <div class="hud-title">Mission Status</div>
+                <div class="hud-row"><span class="k">Rockets in flight</span><span class="v" id="hud-rockets">0</span></div>
+                <div class="hud-row"><span class="k">Payloads on orbit</span><span class="v" id="hud-payloads">0</span></div>
+                <div class="hud-row"><span class="k">Last Δv₁</span><span class="v" id="hud-dv1">—</span></div>
+                <div class="hud-row"><span class="k">Last Δv₂</span><span class="v" id="hud-dv2">—</span></div>
+                <div class="hud-row"><span class="k">Last TOF</span><span class="v" id="hud-tof">—</span></div>
+            </div>
+        </div>
+        <p id="mp-3d-help"><strong>Drag</strong> to orbit · <strong>Scroll</strong> to zoom · <strong>Right-drag</strong> to pan · Earth radius = 1 unit · Moon ring shown to scale</p>
+    </main>
+
+</div>
+
+<script type="module">
+import { initMissionPlanner, LAUNCH_SITES, TARGET_ORBITS } from './js/mission-planner-3d.js';
+
+// ── Populate dropdowns ──────────────────────────────────────────────
+const siteSel   = document.getElementById('mp-site');
+const targetSel = document.getElementById('mp-target');
+const payloadIn = document.getElementById('mp-payload');
+siteSel.innerHTML   = LAUNCH_SITES.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+targetSel.innerHTML = TARGET_ORBITS.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+
+// ── Hero stats ──────────────────────────────────────────────────────
+document.getElementById('mp-hero-stats').innerHTML = `
+    <span class="mp-stat"><strong>${LAUNCH_SITES.length}</strong>launch sites</span>
+    <span class="mp-stat"><strong>${TARGET_ORBITS.length}</strong>target orbits</span>
+    <span class="mp-stat"><strong>2</strong>interplanetary transfers</span>
+    <span class="mp-stat"><strong>μ⊕ = 398 600</strong>km³/s²</span>
+`;
+
+// ── Mount the 3D scene ──────────────────────────────────────────────
+const log = document.getElementById('mp-log');
+function pushLog(text, lvl='') {
+    const t = new Date();
+    const stamp = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+    const row = document.createElement('div');
+    row.className = 'mp-log-row';
+    row.innerHTML = `<span class="t">${stamp}</span><span class="lvl-${lvl}">${text}</span>`;
+    log.prepend(row);
+    while (log.children.length > 80) log.removeChild(log.lastChild);
+}
+
+const planner = initMissionPlanner({
+    container: document.getElementById('mp-3d'),
+    onEvent: (ev) => {
+        if (ev.type === 'launched') {
+            pushLog(`🚀 Launch · ${ev.payloadName} from ${ev.site.name} → ${ev.target.name}`, 'launch');
+        } else if (ev.type === 'deployed') {
+            const o = ev.orbit;
+            pushLog(`✅ Deploy · ${ev.payloadName} on ${o.alt_km.toFixed(0)} km / ${o.inc_deg.toFixed(1)}° · v=${o.v_circ_kms.toFixed(2)} km/s · T=${o.period_min.toFixed(1)} min`, 'deploy');
+        } else if (ev.type === 'transfer') {
+            pushLog(`🛰️ ${ev.target.name} · Δv₁=${ev.dv1_kms.toFixed(2)}, Δv₂=${ev.dv2_kms.toFixed(2)} km/s · TOF=${ev.tof_days.toFixed(1)} d`, 'transfer');
+            document.getElementById('hud-dv1').textContent = `${ev.dv1_kms.toFixed(2)} km/s`;
+            document.getElementById('hud-dv2').textContent = `${ev.dv2_kms.toFixed(2)} km/s`;
+            document.getElementById('hud-tof').textContent = `${ev.tof_days.toFixed(1)} days`;
+        }
+        const stats = planner.getStats();
+        document.getElementById('hud-rockets').textContent  = stats.rockets;
+        document.getElementById('hud-payloads').textContent = stats.payloads;
+    },
+});
+
+// ── Wire controls ───────────────────────────────────────────────────
+document.getElementById('mp-launch').addEventListener('click', () => {
+    planner.launch({
+        siteId:   siteSel.value,
+        targetId: targetSel.value,
+        payloadName: (payloadIn.value || 'Payload').trim(),
+    });
+});
+document.getElementById('mp-focus-earth').addEventListener('click', () => planner.focusEarth());
+document.getElementById('mp-focus-moon').addEventListener('click',  () => planner.focusMoon());
+document.getElementById('mp-clear').addEventListener('click', () => {
+    planner.clear();
+    pushLog('🧹 Cleared all vehicles.', '');
+    document.getElementById('hud-rockets').textContent  = '0';
+    document.getElementById('hud-payloads').textContent = '0';
+});
+
+const tsRange = document.getElementById('mp-timescale');
+const tsVal   = document.getElementById('mp-timescale-val');
+tsRange.addEventListener('input', () => {
+    const v = parseFloat(tsRange.value);
+    planner.setTimeScale(v);
+    tsVal.textContent = `${v.toFixed(2)}×`;
+});
+
+// ── Auto-launch a starter payload so the page never looks empty ─────
+setTimeout(() => {
+    payloadIn.value = 'Demo-LEO-1';
+    planner.launch({ siteId: 'ksc', targetId: 'leo', payloadName: 'Demo-LEO-1' });
+}, 800);
+</script>
+
+</body>
+</html>
