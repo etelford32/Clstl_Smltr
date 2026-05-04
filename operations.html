@@ -233,6 +233,12 @@ body {
     font-family: monospace;
     font-size: 9px;
 }
+#op-bplane .op-bplane-axis-label {
+    fill: rgba(180,220,255,.55);
+    font-family: monospace;
+    font-size: 10px;
+    font-weight: 700;
+}
 #op-bplane .op-bplane-miss-vec {
     stroke: rgba(255,140,200,.55);
     stroke-width: 1;
@@ -863,6 +869,28 @@ body {
 .op-conj-sub-miss { font-family: monospace; color: #fc8; text-align: right; }
 .op-conj-sub-tca  { font-family: monospace; color: #79b; text-align: right; white-space: nowrap; }
 .op-conj-sub-more { color: #678; font-size: .62rem; padding: 4px 8px; cursor: default; }
+.op-conj-sub { grid-template-columns: 1fr auto auto auto auto; }
+.op-conj-spark {
+    align-self: center;
+    overflow: visible;
+}
+.op-conj-spark-line {
+    fill: none;
+    stroke: rgba(0,255,200,.7);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.op-conj-spark-tca {
+    stroke: rgba(255,140,180,.45);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+.op-conj-spark-min {
+    fill: rgba(255,180,80,.95);
+    stroke: rgba(0,0,0,.4);
+    stroke-width: 0.5;
+}
 
 /* ─── Prop Budget ──────────────────────────────────────── */
 .op-prop-headline {

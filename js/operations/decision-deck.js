@@ -376,6 +376,54 @@ function fmtAhead(simMs, tcaMs) {
     return `+${(diff / (24 * 3_600_000)).toFixed(1)} d`;
 }
 
+// Inline SVG sparkline of dist(t) around closest approach. Width is
+// fixed; height tight enough to slot into a sub-row without expanding
+// it. The TCA marker is drawn at center_index. Returns '' when the
+// input is missing or has fewer than 3 valid samples — the row just
+// drops the column rather than rendering a degenerate plot.
+const SPARK_W = 64;
+const SPARK_H = 18;
+function renderSparkSvg(spark, missKm) {
+    if (!spark || !Array.isArray(spark.km)) return '';
+    const km = spark.km;
+    const valid = km.filter(v => Number.isFinite(v));
+    if (valid.length < 3) return '';
+
+    const lo = Math.min(...valid);
+    const hi = Math.max(...valid, missKm ?? 0, 1);
+    const range = Math.max(hi - lo, 1e-3);
+
+    const dx = SPARK_W / Math.max(km.length - 1, 1);
+    const yOf = (v) => SPARK_H - 2 - ((v - lo) / range) * (SPARK_H - 4);
+
+    let d = '';
+    let prevValid = false;
+    for (let i = 0; i < km.length; i++) {
+        const v = km[i];
+        if (!Number.isFinite(v)) { prevValid = false; continue; }
+        const x = i * dx;
+        const y = yOf(v);
+        d += (prevValid ? `L${x.toFixed(1)},${y.toFixed(1)}` : `M${x.toFixed(1)},${y.toFixed(1)}`);
+        prevValid = true;
+    }
+
+    const ci = Number.isFinite(spark.center_index)
+        ? Math.max(0, Math.min(km.length - 1, spark.center_index))
+        : Math.floor(km.length / 2);
+    const cx = ci * dx;
+    const cy = Number.isFinite(km[ci]) ? yOf(km[ci]) : SPARK_H / 2;
+
+    const minutes = (km.length - 1) * (spark.step_min ?? 0);
+    const titleAttr = `dist(t) over ±${Math.round(minutes / 2)} min around TCA · ${valid[0].toFixed(1)} – ${valid[valid.length - 1].toFixed(1)} km`;
+
+    return `<svg class="op-conj-spark" viewBox="0 0 ${SPARK_W} ${SPARK_H}" width="${SPARK_W}" height="${SPARK_H}" aria-hidden="true">
+        <title>${escapeHtml(titleAttr)}</title>
+        <line x1="${cx.toFixed(1)}" x2="${cx.toFixed(1)}" y1="0" y2="${SPARK_H}" class="op-conj-spark-tca"/>
+        <path d="${d}" class="op-conj-spark-line"/>
+        <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2" class="op-conj-spark-min"/>
+    </svg>`;
+}
+
 export function mountConjunctions(fleet, tracker, opts = {}) {
     const root = document.getElementById('op-conj-body');
     const btn  = document.getElementById('op-conj-btn');
@@ -392,7 +440,17 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
     let stale  = true;
     let lastRows = [];     // cached so re-renders are cheap (e.g. expand/collapse)
     let lastEpochMs = null;
-    const expanded = new Set();   // primary norad IDs that are expanded
+    let autoRescreen = true;             // anchor follows the time cursor
+    let autoTimer    = null;             // debounce handle
+    const expanded   = new Set();        // primary norad IDs that are expanded
+
+    // How far the cursor can drift from the anchor before the panel
+    // is considered "stale". The auto-rescreen path triggers a fresh
+    // run after the cursor has been quiet for AUTO_DEBOUNCE_MS past
+    // the threshold; this keeps a casual scrub from spamming the
+    // worker.
+    const AUTO_THRESHOLD_MS = 5 * 60 * 1000;
+    const AUTO_DEBOUNCE_MS  = 750;
 
     function horizonHours() {
         const h = CONJ_HORIZONS.find(x => x.id === horizonId);
@@ -431,6 +489,8 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
             <div class="op-conj-toolbar">
                 <span class="op-conj-toolbar-label">Horizon</span>
                 ${horizonChips}
+                <button type="button" id="op-conj-auto" class="op-conj-chip${autoRescreen ? ' op-conj-chip--on' : ''}"
+                    title="Auto-rescreen when the time cursor moves more than ${Math.round(AUTO_THRESHOLD_MS / 60_000)} min from the screen anchor">Auto</button>
                 <span id="op-conj-status" class="op-conj-toolbar-status">—</span>
             </div>
             <div id="op-conj-rows" class="op-conj-rows"></div>
@@ -452,6 +512,19 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 stale = true;
                 screen();
             });
+        });
+
+        const autoBtn = root.querySelector('#op-conj-auto');
+        autoBtn?.addEventListener('click', () => {
+            autoRescreen = !autoRescreen;
+            autoBtn.classList.toggle('op-conj-chip--on', autoRescreen);
+            // If the user enables auto AND the panel is already
+            // stale, rescreen immediately rather than waiting for the
+            // next time-bus tick.
+            if (autoRescreen && lastEpochMs != null) {
+                const drift = Math.abs(timeBus.getState().simTimeMs - lastEpochMs);
+                if (drift > AUTO_THRESHOLD_MS) screen();
+            }
         });
     }
 
@@ -571,11 +644,13 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 const subAhead = fmtAhead(simNow, c.tca_ms);
                 const subDv = c.dv_kms != null ? ` · ${c.dv_kms.toFixed(2)} km/s` : '';
                 const groupBit = c.group ? `<span class="op-conj-sub-group">${escapeHtml(c.group)}</span>` : '';
+                const sparkSvg = renderSparkSvg(c.spark, c.dist_km);
                 html += `<li class="op-conj-sub op-conj-sub-${sub}" data-norad="${asset.noradId}" data-secondary="${c.norad_id}" data-tca-ms="${c.tca_ms}" tabindex="0" role="button"
                     title="${escapeHtml(c.name)} · click to scrub to TCA and load encounter">
                     <span class="op-conj-sub-name">${escapeHtml(c.name)} <span class="op-conj-sub-id">#${c.norad_id}</span></span>
                     ${groupBit}
                     <span class="op-conj-sub-miss">${c.dist_km.toFixed(2)} km</span>
+                    ${sparkSvg}
                     <span class="op-conj-sub-tca">${fmtUtc(c.tca_ms)} (${subAhead})${subDv}</span>
                 </li>`;
             }
@@ -613,6 +688,8 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 missKm:        conj.dist_km,
                 dvKms:         conj.dv_kms,
                 missUnit:      conj.miss_unit,
+                missVec:       conj.miss_vec,
+                vRel:          conj.v_rel,
             });
         };
 
@@ -665,16 +742,33 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
 
     btn?.addEventListener('click', () => screen());
 
-    // Re-screening when the time anchor moves is a Tier 2 enhancement
-    // — for now, mark the panel stale and surface it in the status
-    // line so operators know the numbers are anchored to the previous
-    // sim time. Auto-rescreen would need debouncing AND a worker that
-    // can be cancelled mid-run.
+    // Time-bus integration. Two modes:
+    //   - autoRescreen on  → debounce, then re-run when the cursor
+    //     drifts > AUTO_THRESHOLD_MS from the last anchor. The worker
+    //     supersedes any in-flight run so spamming the cursor is
+    //     safe.
+    //   - autoRescreen off → just mark the panel stale and tell the
+    //     user a manual click is needed.
     timeBus.subscribe(({ simTimeMs }) => {
-        if (lastEpochMs == null || busy) return;
-        if (Math.abs(simTimeMs - lastEpochMs) < 60_000) return;
+        if (lastEpochMs == null) return;
+        const drift = Math.abs(simTimeMs - lastEpochMs);
+        if (drift < 60_000) return;
+
         const status = root.querySelector('#op-conj-status');
-        if (status && status.dataset.kind !== 'busy') {
+
+        if (autoRescreen) {
+            if (drift < AUTO_THRESHOLD_MS) return;
+            if (status && status.dataset.kind !== 'busy') {
+                status.dataset.kind = 'stale';
+                status.textContent = `Cursor drifted · auto-rescreen pending`;
+            }
+            if (autoTimer != null) clearTimeout(autoTimer);
+            autoTimer = setTimeout(() => {
+                autoTimer = null;
+                if (busy) return;     // wait for the previous run; subscriber will fire again on the next tick
+                screen();
+            }, AUTO_DEBOUNCE_MS);
+        } else if (status && status.dataset.kind !== 'busy') {
             status.dataset.kind = 'stale';
             status.textContent = `Anchor moved · click Screen to refresh from ${fmtUtc(simTimeMs)}`;
         }
@@ -699,9 +793,6 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
 
     fleet.onChange(() => {
         if (busy) return;
-        // Don't auto-rescreen on every fleet edit — that would fire
-        // mid-typing. Just refresh the resting status so the operator
-        // can see how many assets the next click will cover.
         const n = fleet.list().length;
         if (n === 0) {
             lastRows = [];
@@ -714,11 +805,29 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
                 'idle',
             );
         }
+        // Auto-rescreen on fleet edits when auto is on AND we already
+        // have a baseline screen — adding a new asset means the user
+        // wants its conjunctions populated. Debounced through the
+        // same timer the cursor-drift path uses so back-to-back edits
+        // (e.g. paste-then-paste) collapse into one run.
+        if (autoRescreen && lastEpochMs != null && n > 0) {
+            if (autoTimer != null) clearTimeout(autoTimer);
+            autoTimer = setTimeout(() => {
+                autoTimer = null;
+                if (!busy) screen();
+            }, AUTO_DEBOUNCE_MS);
+        }
     });
 
     return {
         rescreen: screen,
-        dispose() { screener.dispose(); },
+        dispose() {
+            if (autoTimer != null) {
+                clearTimeout(autoTimer);
+                autoTimer = null;
+            }
+            screener.dispose();
+        },
     };
 }
 
