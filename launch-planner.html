@@ -786,15 +786,22 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div class="lh-vehicle-picker">
             <div class="lh-vp-group">
                 <span class="lh-vp-label">Vehicle</span>
-                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle" data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle"  data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9"  data-variant="block5">Falcon 9</button>
                 <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
             </div>
-            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants" hidden>
-                <span class="lh-vp-label">Variant</span>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-starship" hidden>
+                <span class="lh-vp-label">Starship</span>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
                 <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-falcon9" hidden>
+                <span class="lh-vp-label">Falcon</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="falcon9" data-variant="block5">Block 5</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="block5-crew">Crew Dragon</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="heavy">Heavy</button>
             </div>
         </div>
 
@@ -880,6 +887,13 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         const metEl      = document.getElementById('lh-met');
         const metV       = document.getElementById('lh-met-v');
         const metPhase   = document.getElementById('lh-met-phase');
+        const variantsStarship = document.getElementById('lh-vp-variants-starship');
+        const variantsFalcon9  = document.getElementById('lh-vp-variants-falcon9');
+
+        function showVariantRow(vehicleId) {
+            variantsStarship.hidden = (vehicleId !== 'starship');
+            variantsFalcon9.hidden  = (vehicleId !== 'falcon9');
+        }
 
         function fmtMET(T) {
             const sign = T < 0 ? 'T-' : 'T+';
@@ -903,13 +917,76 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
                 autoRotate: true,
                 onVehicleChange: ({ id, info }) => {
                     renderMeta(info);
-                    variants.hidden = (id !== 'starship');
+                    showVariantRow(id);
                 },
                 onLiftoffEnd: () => {
                     liftoffBtn.classList.remove('lh-liftoff--ascending');
                     liftoffBtn.textContent = '▶ Liftoff';
                     metEl.hidden = true;
                 },
+            });
+
+            // ── Roster → 3D auto-bind ─────────────────────────────────────
+            // launch-planner.js dispatches `lp:launch-selected` whenever a
+            // user clicks a launch card or the page deep-links into one.
+            // We translate the launch's vehicle metadata into a (vehicle,
+            // variant) tuple the 3D canvas understands and update the
+            // picker buttons + canvas in lockstep.
+            function vehicleForLaunch(l) {
+                const rid = (l._vehicle?.ruleset?.id || '').toLowerCase();
+                const v   = (l.vehicle || '').toLowerCase();
+                const n   = (l.name    || '').toLowerCase();
+                const year = l.net_iso ? new Date(l.net_iso).getUTCFullYear() : 0;
+
+                if (rid === 'starship' || /starship|super heavy/.test(v)) {
+                    // Pick variant by NET year (Block 1 retired late 2024;
+                    // Block 2 currently flying; V3 expected ~2026).
+                    if (year && year <= 2024) return ['starship', 'v1'];
+                    if (year && year <= 2026) return ['starship', 'v2'];
+                    return ['starship', 'v3'];
+                }
+                if (rid === 'falcon-heavy' || /falcon\s*heavy/.test(v)) {
+                    return ['falcon9', 'heavy'];
+                }
+                if (rid.startsWith('falcon-9') || /falcon\s*9/.test(v)) {
+                    if (rid === 'falcon-9-crew' || /crew\s*dragon|crew-?\d/.test(n) || /dragon/.test(v)) {
+                        return ['falcon9', 'block5-crew'];
+                    }
+                    return ['falcon9', 'block5'];
+                }
+                if (/space\s*shuttle|sts/i.test(v)) return ['shuttle', null];
+                return null;     // unknown — leave the canvas alone
+            }
+
+            document.addEventListener('lp:launch-selected', (e) => {
+                const l = e.detail?.launch;
+                if (!l) return;
+                const tuple = vehicleForLaunch(l);
+                if (!tuple) return;
+                const [vehicleId, variantId] = tuple;
+                // Bail if we're already showing this exact configuration —
+                // avoids a needless dispose+rebuild cycle on roster re-clicks.
+                if (api.currentInfo) {
+                    const matchingPickerBtn = document.querySelector(
+                        `.lh-vp-btn--on[data-vehicle="${vehicleId}"]` +
+                        (variantId ? `[data-variant="${variantId}"]` : '')
+                    );
+                    if (matchingPickerBtn) return;
+                }
+                // Update vehicle-row highlight (top row picks vehicle)
+                document.querySelectorAll('.lh-vehicle-picker .lh-vp-group').forEach(group => {
+                    group.querySelectorAll('.lh-vp-btn').forEach(b => {
+                        const isVehicleRow = group === group.parentNode.firstElementChild ||
+                                             !group.classList.contains('lh-vp-variants');
+                        if (isVehicleRow) {
+                            b.classList.toggle('lh-vp-btn--on', b.dataset.vehicle === vehicleId);
+                        } else if (group.id === `lh-vp-variants-${vehicleId}`) {
+                            b.classList.toggle('lh-vp-btn--on',
+                                b.dataset.vehicle === vehicleId && b.dataset.variant === variantId);
+                        }
+                    });
+                });
+                api.setVehicle(vehicleId, variantId || undefined);
             });
 
             // Liftoff button

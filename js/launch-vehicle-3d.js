@@ -31,6 +31,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildStarship } from './launch-vehicle-starship.js';
+import { buildFalcon9 } from './launch-vehicle-falcon9.js';
 import { buildPad as buildPadInfra, tickBeacons } from './launch-pad-3d.js';
 import { createMissionClock } from './launch-mission-clock.js';
 
@@ -782,9 +783,19 @@ function buildStarshipVehicle(variant = 'v2') {
     return built;
 }
 
+function buildFalcon9Vehicle(variant = 'block5') {
+    const built = buildFalcon9({ variant });
+    // Falcon 9 sits on a TEL (transporter-erector-launcher) at LC-39A /
+    // SLC-40 — pad-deck top is at world y = 4.2 (matches MLP top).
+    built.root.position.y = 4.2;
+    if (built.info) built.info.pad = 'KSC LC-39A / CCSFS SLC-40';
+    return built;
+}
+
 const VEHICLE_BUILDERS = {
     shuttle:   () => buildShuttleVehicle(),
     starship:  (variant) => buildStarshipVehicle(variant || 'v2'),
+    falcon9:   (variant) => buildFalcon9Vehicle(variant || 'block5'),
 };
 
 // ── Main entry point ─────────────────────────────────────────────────────────
