@@ -14,16 +14,22 @@
  * subscribers doing real work (satellite propagation, decision-deck
  * recomputes) where 60 Hz would burn CPU for no perceptible gain.
  *
- * Range is a moving ±7 day window around real-now, recomputed each
- * tick so the cursor's relative position stays meaningful as wall
- * time advances. Replay auto-pauses when it walks past the +7d edge
- * (per design: noticeable beats wrap-around).
+ * Range is a moving asymmetric window around real-now (−1d / +14d),
+ * recomputed each tick so the cursor's relative position stays
+ * meaningful as wall time advances. The console is predictions-first,
+ * hence the long forward horizon. Replay auto-pauses when it walks
+ * past the +14d edge (per design: noticeable beats wrap-around).
  */
 
-const RANGE_MS    = 7 * 24 * 60 * 60 * 1000;
+// Asymmetric window: a short slice of the recent past for context, but
+// a long forward horizon — Operations is a predictions console, so the
+// scrub strip is heavily future-weighted (out to +14 days).
+const PAST_MS     = 1 * 24 * 60 * 60 * 1000;
+const FUTURE_MS   = 14 * 24 * 60 * 60 * 1000;
+const RANGE_MS    = PAST_MS + FUTURE_MS;
 const EMIT_HZ     = 10;
 const EMIT_PERIOD = 1000 / EMIT_HZ;
-const SPEEDS      = Object.freeze([1, 60, 600, 3600]);
+const SPEEDS      = Object.freeze([1, 10, 100, 600, 3600]);
 
 const state = {
     mode:       'live',
@@ -42,8 +48,8 @@ let started  = false;
 
 function recomputeRange() {
     const now = Date.now();
-    state.rangeMs.start = now - RANGE_MS;
-    state.rangeMs.end   = now + RANGE_MS;
+    state.rangeMs.start = now - PAST_MS;
+    state.rangeMs.end   = now + FUTURE_MS;
 }
 
 // Seed the range so subscribers that mount before start() (the normal
@@ -204,4 +210,6 @@ export const timeBus = {
 
     SPEEDS,
     RANGE_MS,
+    PAST_MS,
+    FUTURE_MS,
 };

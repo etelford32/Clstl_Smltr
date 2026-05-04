@@ -14,8 +14,10 @@
 
 import { timeBus } from './time-bus.js';
 
-const HOUR_MS = 60 * 60 * 1000;
+const MIN_MS  = 60 * 1000;
+const HOUR_MS = 60 * MIN_MS;
 const DAY_MS  = 24 * HOUR_MS;
+const WEEK_MS = 7 * DAY_MS;
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 
@@ -56,7 +58,7 @@ export function mountTimeStrip(opts) {
         track, cursor, nowTick,
         modeChip, modeLabel,
         btnHome, btnBack, btnPlay, btnFwd, btnEnd, btnNow,
-        speedBtns, readout,
+        speedBtns, jumpBtns, readout,
     } = opts;
 
     if (!track || !cursor) {
@@ -118,6 +120,17 @@ export function mountTimeStrip(opts) {
             const speed = Number(btn.dataset.speed);
             timeBus.setSpeed(speed);
             if (timeBus.getState().mode !== 'replay') timeBus.setMode('replay');
+        });
+    });
+
+    // Forward-jump buttons: each carries a millisecond delta in
+    // data-jump-ms. Predictions-first UX, so jumps are positive by
+    // default — a negative delta still works if a button declares one.
+    jumpBtns?.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const deltaMs = Number(btn.dataset.jumpMs);
+            if (!Number.isFinite(deltaMs) || deltaMs === 0) return;
+            timeBus.step(deltaMs);
         });
     });
 
