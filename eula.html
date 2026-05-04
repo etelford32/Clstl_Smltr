@@ -100,10 +100,20 @@
             border-bottom: 1px solid rgba(255,200,0,.18);
             padding-bottom: .4rem; margin-bottom: 1rem;
         }
+        .legal-section h3 {
+            font-size: 1rem; color: #e8e0c0;
+            margin-top: 1.6rem; margin-bottom: .55rem;
+            letter-spacing: .01em;
+        }
         .legal-section p, .legal-section li { color: #b0b0c8; font-size: .92rem; line-height: 1.75; }
         .legal-section ul, .legal-section ol { padding-left: 1.4rem; margin: .6rem 0; }
         .legal-section li { margin-bottom: .3rem; }
         .legal-section strong { color: #ddd; }
+        .legal-section code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+            font-size: .85em; background: rgba(255,255,255,.06);
+            padding: .12em .4em; border-radius: 3px; color: #e8e0c0;
+        }
         .legal-section a { color: #a080ff; }
         .legal-section a:hover { color: #ffd700; }
         .highlight-box {
@@ -152,7 +162,7 @@
 <!-- ═══════════════════════════════════════════════════ HERO ═══ -->
 <div class="legal-hero">
     <h1>End User License Agreement</h1>
-    <p class="legal-meta"><strong>Effective Date:</strong> March 20, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 1.0</p>
+    <p class="legal-meta"><strong>Effective Date:</strong> May 4, 2026 &nbsp;·&nbsp; <strong>Version:</strong> 1.2</p>
 </div>
 
 <!-- ═══════════════════════════════════════════════════ BODY ═══ -->
@@ -170,7 +180,8 @@
             <li><a href="#permitted">Permitted Uses</a></li>
             <li><a href="#prohibited">Prohibited Uses</a></li>
             <li><a href="#subscription">Subscription &amp; Billing</a></li>
-            <li><a href="#sim-data">Simulation Data Disclaimer</a></li>
+            <li><a href="#sim-data">Simulation Data, Accuracy &amp; Best Intent</a></li>
+            <li><a href="#api-use">API Use</a></li>
             <li><a href="#ip">Intellectual Property</a></li>
             <li><a href="#ugc">User-Generated Content</a></li>
             <li><a href="#termination">Termination</a></li>
@@ -179,13 +190,15 @@
             <li><a href="#indemnity">Indemnification</a></li>
             <li><a href="#governing">Governing Law &amp; Disputes</a></li>
             <li><a href="#updates">Updates to This EULA</a></li>
+            <li><a href="#ai-automated">AI &amp; Automated Agents</a></li>
             <li><a href="#contact">Contact</a></li>
         </ol>
     </nav>
 
     <section class="legal-section" id="parties">
         <h2>1. Parties</h2>
-        <p>This EULA is a legal agreement between <strong>you</strong> (the individual or entity using the service, "User") and <strong>Parker Physics App</strong> ("Company," "we," "us"). By using any part of the service — including visiting the website, running simulations, or accessing live data feeds — you confirm you are at least 13 years of age and legally capable of entering into this agreement.</p>
+        <p>This EULA is a legal agreement between <strong>you</strong> (the individual or entity using the service, "User") and <strong>Telford Projects LLC</strong>, a United States limited liability company doing business as <strong>Parker Physics App</strong> ("Company," "we," "us," or "our"). All references to "Parker Physics App" in this EULA refer to the service operated by Telford Projects LLC.</p>
+        <p>By using any part of the service — including visiting the website, running simulations, accessing live data feeds, or installing the application as a Progressive Web App — you confirm that you are at least 13 years of age (or 16 if you reside in the European Economic Area or United Kingdom) and that you are legally capable of entering into this agreement. If you are using the service on behalf of an organization, you represent that you are authorized to bind that organization to these terms.</p>
     </section>
 
     <section class="legal-section" id="license">
@@ -202,10 +215,11 @@
     <section class="legal-section" id="permitted">
         <h2>3. Permitted Uses</h2>
         <ul>
-            <li>Personal exploration and education about astrophysics and space weather phenomena</li>
-            <li>Academic research and classroom demonstrations (with attribution)</li>
+            <li>Personal exploration and education about astrophysics and space-weather phenomena</li>
+            <li>Academic research and classroom demonstrations, with attribution</li>
             <li>Non-commercial science communication, including screenshots or videos with clear attribution to Parker Physics App</li>
-            <li>Integration with your own private tools via our API (Advanced plan only, subject to the <a href="api-policy.html">API Policy</a>)</li>
+            <li>Integration with your own internal tools via our HTTP API and WebSocket endpoints, subject to Section 7 (API Use) and the <a href="api-policy.html">API &amp; Data Policy</a></li>
+            <li>Reading published documentation and example code we provide for the API and embeddable widgets</li>
         </ul>
     </section>
 
@@ -213,85 +227,195 @@
         <h2>4. Prohibited Uses</h2>
         <div class="warning-box">The following uses are strictly prohibited and may result in immediate account termination.</div>
         <ul>
-            <li>Reverse engineering, decompiling, or disassembling any part of the application or its WebAssembly/WASM modules</li>
-            <li>Scraping, crawling, or automated bulk downloading of data feeds, simulation outputs, or any site content</li>
-            <li>Redistributing, reselling, or sublicensing the service or any simulation data commercially without written consent</li>
-            <li>Using the service to build a competing product or to train AI/ML models without a separate written agreement</li>
-            <li>Sharing account credentials with unauthorized users or circumventing subscription tier limits</li>
-            <li>Uploading or transmitting malicious code, interfering with service infrastructure, or conducting denial-of-service attacks</li>
-            <li>Misrepresenting simulation outputs as official NASA, NOAA, or ESA data or analysis</li>
-            <li>Using the service in any manner that violates applicable laws or regulations</li>
+            <li>Reverse engineering, decompiling, or disassembling any part of the application, its WebAssembly/WASM modules, or our API binaries and protocols</li>
+            <li>Scraping, crawling, or automated bulk downloading of data feeds, simulation outputs, page content, or API responses outside of documented rate limits</li>
+            <li>Redistributing, reselling, sublicensing, or republishing the service, simulation data, or API responses commercially without written consent</li>
+            <li>Using the service or API to build a competing product or to train, fine-tune, or evaluate AI/ML models without a separate written agreement</li>
+            <li>Sharing account credentials, API keys, or session tokens with unauthorized users, or circumventing subscription tier or API rate limits</li>
+            <li>Uploading or transmitting malicious code, interfering with service infrastructure, or conducting denial-of-service attacks against the website or API endpoints</li>
+            <li>Misrepresenting simulation outputs or API data as official NASA, NOAA, ESA, JPL, or NWS data or analysis</li>
+            <li>Removing, obscuring, or altering attribution, copyright notices, or freshness/uncertainty indicators in API responses or exported outputs</li>
+            <li>Using the service in any manner that violates applicable laws or regulations, including U.S. export-control laws (EAR / ITAR) and economic-sanctions regimes</li>
         </ul>
     </section>
 
     <section class="legal-section" id="subscription">
         <h2>5. Subscription &amp; Billing</h2>
         <ul>
-            <li><strong>Free Tier:</strong> Access to core simulations with no payment required. Feature set may be limited at our discretion.</li>
-            <li><strong>Paid Plans:</strong> Monthly subscriptions processed by Stripe. You authorize us to charge your payment method on a recurring basis until cancellation.</li>
-            <li><strong>Cancellation:</strong> You may cancel at any time from your account dashboard. Access continues through the end of the paid billing period; no prorated refunds are issued for partial months except where required by law.</li>
-            <li><strong>Price Changes:</strong> We will provide at least 30 days' notice by email before changing subscription prices. Continued use after the effective date constitutes acceptance.</li>
+            <li><strong>Free Tier:</strong> Access to core simulations with no payment required. Feature set, refresh cadence, and API access (if any) may be limited at our discretion.</li>
+            <li><strong>Paid Plans:</strong> Monthly subscriptions processed by Stripe. You authorize us to charge your payment method on a recurring basis until cancellation. Higher tiers include progressively higher API quotas as published on our <a href="pricing.html">Pricing</a> page.</li>
+            <li><strong>Cancellation:</strong> You may cancel at any time from your account dashboard. Access — including API access — continues through the end of the paid billing period; no prorated refunds are issued for partial months except where required by law.</li>
+            <li><strong>Price Changes:</strong> We will provide at least 30 days' notice by email before changing subscription prices or materially reducing included quotas. Continued use after the effective date constitutes acceptance.</li>
             <li><strong>Refunds:</strong> Refund requests within 7 days of initial purchase may be considered on a case-by-case basis. Contact <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a>.</li>
         </ul>
     </section>
 
     <section class="legal-section" id="sim-data">
-        <h2>6. Simulation Data Disclaimer</h2>
-        <p>Parker Physics App provides physics simulations and live data visualizations for <strong>educational and informational purposes only.</strong></p>
-        <div class="warning-box">Simulation outputs are not certified scientific products. Do not use Parker Physics App data for professional aerospace, aviation, emergency management, or safety-critical decision-making. Always consult official sources (NOAA SWPC, NASA, ESA) for operational space weather data.</div>
-        <p>Live data feeds (solar wind, Kp index, X-ray flux, etc.) are sourced from third-party public APIs and are subject to gaps, delays, or inaccuracies. We make no guarantees about data availability or precision.</p>
+        <h2>6. Simulation Data, Accuracy &amp; Best Intent</h2>
+        <p>Parker Physics App provides physics simulations and live space-weather data visualizations for <strong>educational, research, and informational purposes</strong>. We take the scientific integrity of our outputs seriously and apply the commitments in this section in good faith.</p>
+
+        <div class="warning-box">Simulation outputs are not certified scientific products. Do not use Parker Physics App data for professional aerospace, aviation, emergency management, satellite operations, navigation, life-safety, or other safety-critical decision-making. Always consult official sources (NOAA SWPC, NASA, ESA, ICAO) for operational space-weather data.</div>
+
+        <h3>6a. Data Provenance &amp; Freshness</h3>
+        <p>Live data feeds are sourced from publicly available scientific and government APIs. The primary upstream sources we rely on, together with their typical refresh cadence, are:</p>
+        <ul>
+            <li><strong>NOAA SWPC</strong> — solar wind plasma &amp; magnetic field, Kp / planetary indices, GOES X-ray flux (1–5 minute cadence)</li>
+            <li><strong>NASA DONKI</strong> — CME catalogs, geomagnetic storm and solar flare events (event-driven)</li>
+            <li><strong>NASA / ESA SOHO, STEREO, SDO</strong> — coronagraph and solar imager frames (15–60 minute cadence)</li>
+            <li><strong>JPL Horizons</strong> — planetary and small-body ephemerides (on-demand)</li>
+            <li><strong>National Weather Service (NWS) &amp; api.weather.gov</strong> — terrestrial space-weather alerts</li>
+            <li><strong>CelesTrak</strong> and equivalent public TLE catalogs — orbital elements for satellite tracking</li>
+        </ul>
+        <p>When upstream data is delayed, missing, or appears anomalous in ways we can detect, we will indicate that condition in the user interface (for example, a "stale data" or "feed unavailable" badge) on a best-effort basis. We do not modify upstream values; if a value is shown without such a badge, it represents the most recent observation we received from the named source.</p>
+
+        <h3>6b. Best-Effort Accuracy Commitment</h3>
+        <p>We use commercially reasonable efforts to ensure that:</p>
+        <ul>
+            <li>Live data values displayed to you are transmitted unmodified from the authoritative upstream source identified above, except for unit conversions and standard interpolations clearly disclosed in the user interface or documentation.</li>
+            <li>Simulations are implemented to follow published, peer-reviewed physics models and standards (for example, SGP4/SDP4 for orbital propagation, ideal-MHD formulations for solar-wind simulations, blackbody and Planck-function approximations for stellar models).</li>
+            <li>Numerical methods and approximations used by our simulators are documented to a level sufficient for an informed reader to evaluate their fitness for purpose.</li>
+        </ul>
+        <p>This is a good-faith commitment, not a warranty. It does not modify the disclaimers in Sections 11 and 12.</p>
+
+        <h3>6c. Model Limitations &amp; Known Approximations</h3>
+        <p>All numerical simulations are approximations. You acknowledge and accept the following well-known limitations of the models used by Parker Physics App, among others:</p>
+        <ul>
+            <li><strong>SGP4/SDP4 orbital propagation</strong> accumulates error over time and degrades for objects with rapidly changing drag, recently maneuvered satellites, and decaying orbits. TLEs may be hours to days old.</li>
+            <li><strong>MHD solar-wind simulations</strong> use simplified geometries, finite grid resolution, and idealized boundary conditions; they do not resolve kinetic-scale physics.</li>
+            <li><strong>Stellar models</strong> use simplified opacity tables, parameterized convection, and one-dimensional approximations.</li>
+            <li><strong>CME propagation models</strong> typically have arrival-time uncertainties on the order of several hours.</li>
+            <li><strong>Image and field overlays</strong> may use reprojection or color mappings chosen for legibility rather than scientific quantitative analysis.</li>
+        </ul>
+
+        <h3>6d. Corrections &amp; Errata</h3>
+        <p>If we identify a material error in a simulator, data pipeline, or data display — or if such an error is reported to us and confirmed — we will endeavor in good faith to (i) correct the error in a reasonable timeframe; (ii) note the correction in a public changelog or release-notes page; and (iii) where the error materially affected paid users, notify affected account holders by email. To report a suspected data-quality issue, contact <a href="mailto:accuracy@parkerphysics.app">accuracy@parkerphysics.app</a>.</p>
+
+        <h3>6e. Good-Faith Use by Users</h3>
+        <p>In exchange for the commitments above, you agree to use the service in good faith. Specifically, you agree:</p>
+        <ul>
+            <li>Not to misrepresent Parker Physics App outputs as official data products of NASA, NOAA, ESA, JPL, the U.S. National Weather Service, or any other government agency.</li>
+            <li>To preserve attribution to upstream data providers when you reproduce or share outputs publicly, where attribution is provided in the user interface or our <a href="api-policy.html">API &amp; Data Policy</a>.</li>
+            <li>To clearly label simulator outputs as "simulation," "model output," "illustrative," or equivalent when used in public-facing communications, lectures, or publications.</li>
+            <li>To report suspected data-quality issues to us rather than relying on potentially inaccurate output for time-sensitive decisions.</li>
+        </ul>
+    </section>
+
+    <section class="legal-section" id="api-use">
+        <h2>7. API Use</h2>
+        <p>This Section 7 applies to all access to our HTTP REST API, WebSocket streams, embeddable widgets, and any other programmatic interfaces we publish (collectively, the "API"). Use of the API is also governed by our <a href="api-policy.html">API &amp; Data Policy</a>; in case of conflict, this EULA controls.</p>
+
+        <h3>7a. Eligibility &amp; Provisioning</h3>
+        <p>API access is available to users on plans that include it. To obtain an API key, you must (i) hold an account in good standing; (ii) accept this EULA and the API &amp; Data Policy; and (iii) provide an accurate contact email and intended use description. We may approve, decline, or revoke API access at our discretion, including where intended use raises export-control, sanctions, security, or accuracy concerns.</p>
+
+        <h3>7b. API Keys &amp; Account Security</h3>
+        <ul>
+            <li>API keys are issued to a single account and may not be transferred or shared between organizations without our written approval.</li>
+            <li>You are responsible for keeping API keys confidential — do not embed them in client-side code, public repositories, mobile-app binaries, or screenshots. Use environment variables, secret managers, or server-side proxies.</li>
+            <li>You must rotate any key you believe has been exposed and notify us at <a href="mailto:security@parkerphysics.app">security@parkerphysics.app</a> within 72 hours of suspected compromise.</li>
+            <li>All activity performed with your API key is your responsibility, including activity by your employees, contractors, and any AI agents acting on your behalf.</li>
+        </ul>
+
+        <h3>7c. Rate Limits &amp; Fair Use</h3>
+        <p>We publish per-tier rate limits (requests per minute, concurrent connections, and monthly request budgets) in the <a href="api-policy.html">API &amp; Data Policy</a>. You agree:</p>
+        <ul>
+            <li>Not to exceed the published limits or attempt to evade them by rotating keys, IPs, or accounts.</li>
+            <li>To implement client-side caching and exponential backoff on <code>429</code> and <code>5xx</code> responses.</li>
+            <li>That we may throttle, queue, or temporarily suspend keys that materially impact service stability for other users; we will use reasonable efforts to notify you before terminating access for capacity reasons.</li>
+            <li>That batched, bulk, or research workloads requiring sustained traffic above published limits require a separate written agreement and may incur additional fees.</li>
+        </ul>
+
+        <h3>7d. Permitted &amp; Prohibited API Use</h3>
+        <p>You may use API responses to power your own internal tooling, classroom or research dashboards, embedded visualizations, and lightweight derivative analyses, provided you comply with this Section and Section 4. You may <strong>not</strong>:</p>
+        <ul>
+            <li>Re-host, syndicate, or sell API responses as a substitute data feed, or operate a service whose primary value is re-distributing our outputs.</li>
+            <li>Use the API to populate training, fine-tuning, evaluation, or benchmark datasets for any machine-learning or generative AI system without a separate written agreement signed by Telford Projects LLC.</li>
+            <li>Use the API for life-safety, navigation, satellite-operations, aviation, emergency-management, or other safety-critical decision-making (see Section 6 disclaimer).</li>
+            <li>Misrepresent, edit, or selectively crop API responses in a manner likely to mislead users about provenance, freshness, uncertainty, or upstream attribution.</li>
+            <li>Use the API in or for the benefit of any country, person, or entity subject to U.S. comprehensive sanctions or denied-party restrictions.</li>
+        </ul>
+
+        <h3>7e. Attribution &amp; Branding</h3>
+        <p>Where you display values obtained through the API to a human audience, you must (i) attribute "Parker Physics App" with a link to <a href="https://parkerphysics.app">parkerphysics.app</a>; and (ii) preserve any upstream-source attribution carried in the response (for example, <code>"source": "NOAA SWPC"</code>). For embeddable widgets you may not remove or visually obscure our branding, freshness indicators, or "model output" / "illustrative" markers.</p>
+
+        <h3>7f. Logging &amp; Telemetry</h3>
+        <p>We log API requests for security, billing, debugging, and capacity-planning purposes. Logged fields include the API key identifier, timestamp, source IP, endpoint, status code, response size, and a coarse client identifier. We do not log full request bodies by default, but may sample requests for debugging with appropriate access controls. Logging windows are described in our <a href="privacy.html">Privacy Policy</a>.</p>
+
+        <h3>7g. Versioning, Deprecation &amp; Beta Endpoints</h3>
+        <ul>
+            <li>Stable endpoints are versioned (for example, <code>/api/v1/...</code>). Backwards-incompatible changes will be released as a new version and the prior version supported for a minimum of 90 days.</li>
+            <li>Endpoints marked "beta," "experimental," or "preview" may change or be removed at any time, may have lower uptime targets, and are excluded from any service-level commitments.</li>
+            <li>We will announce deprecations on our changelog page and (where we have your email on file) by email at least 30 days before removing a stable endpoint.</li>
+        </ul>
+
+        <h3>7h. Service Levels</h3>
+        <p>We use commercially reasonable efforts to maintain API availability and accuracy, but except where a separate written service-level agreement (SLA) is signed, the API is provided on the same "AS IS / AS AVAILABLE" basis as the rest of the service (see Section 11). API outages, upstream provider outages, scheduled maintenance, and security-related shutdowns do not entitle you to refunds or credits absent a written SLA.</p>
     </section>
 
     <section class="legal-section" id="ip">
-        <h2>7. Intellectual Property</h2>
+        <h2>8. Intellectual Property</h2>
         <p>All original software, source code (including WebAssembly/Rust modules), user interface designs, branding, logos, and documentation are the intellectual property of Parker Physics App, protected under applicable copyright and trademark law.</p>
         <p>Open-source components are used under their respective licenses (MIT, Apache 2.0, etc.) and are acknowledged in our repository. The Parker Physics App codebase is available on <a href="https://github.com/etelford32/Clstl_Smltr" target="_blank" rel="noopener">GitHub</a> under the applicable repository license.</p>
         <p>NASA, NOAA, JPL, and ESA data and imagery remain the property of those respective agencies, subject to their public use policies. We do not claim ownership of any government-produced scientific data.</p>
     </section>
 
     <section class="legal-section" id="ugc">
-        <h2>8. User-Generated Content</h2>
+        <h2>9. User-Generated Content</h2>
         <p>If you share simulation screenshots, parameter configurations, or other content in connection with our service (e.g., in community discussions or feedback forms), you grant us a non-exclusive, royalty-free license to use such content to improve and promote the service, with attribution where feasible. You retain ownership of your original contributions.</p>
     </section>
 
     <section class="legal-section" id="termination">
-        <h2>9. Termination</h2>
-        <p>We may suspend or terminate your account at any time if you violate this EULA, engage in fraudulent activity, or pose a security risk. You may terminate your account at any time by contacting support. Upon termination, your license to use the service immediately ceases. Sections 7, 10, 11, 12, and 13 survive termination.</p>
+        <h2>10. Termination</h2>
+        <p>We may suspend or terminate your account or API access at any time if you violate this EULA, engage in fraudulent activity, or pose a security risk. You may terminate your account at any time by contacting support. Upon termination, your license to use the service and any API keys immediately cease. Sections 8, 11, 12, 13, and 14 survive termination.</p>
     </section>
 
     <section class="legal-section" id="warranty">
-        <h2>10. Disclaimer of Warranties</h2>
-        <p>THE SERVICE IS PROVIDED <strong>"AS IS"</strong> AND <strong>"AS AVAILABLE"</strong> WITHOUT WARRANTY OF ANY KIND. TO THE FULLEST EXTENT PERMITTED BY LAW, PARKER PHYSICS APP DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE WILL BE UNINTERRUPTED, ERROR-FREE, OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.</p>
+        <h2>11. Disclaimer of Warranties</h2>
+        <p>THE SERVICE AND API ARE PROVIDED <strong>"AS IS"</strong> AND <strong>"AS AVAILABLE"</strong> WITHOUT WARRANTY OF ANY KIND. TO THE FULLEST EXTENT PERMITTED BY LAW, TELFORD PROJECTS LLC DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICE OR API WILL BE UNINTERRUPTED, ERROR-FREE, ACCURATE, OR FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.</p>
     </section>
 
     <section class="legal-section" id="liability">
-        <h2>11. Limitation of Liability</h2>
-        <p>TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL PARKER PHYSICS APP, ITS OFFICERS, EMPLOYEES, OR AFFILIATES BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES — INCLUDING LOSS OF PROFITS, DATA, OR GOODWILL — ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF THE SERVICE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
-        <p>OUR TOTAL CUMULATIVE LIABILITY TO YOU FOR ANY CLAIM ARISING FROM OR RELATED TO THIS EULA OR THE SERVICE SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID US IN THE 12 MONTHS PRECEDING THE CLAIM OR (B) USD $50.</p>
+        <h2>12. Limitation of Liability</h2>
+        <p>TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL TELFORD PROJECTS LLC, ITS OFFICERS, EMPLOYEES, OR AFFILIATES BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES — INCLUDING LOSS OF PROFITS, DATA, OR GOODWILL — ARISING OUT OF OR IN CONNECTION WITH YOUR USE OF THE SERVICE OR API, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
+        <p>OUR TOTAL CUMULATIVE LIABILITY TO YOU FOR ANY CLAIM ARISING FROM OR RELATED TO THIS EULA, THE SERVICE, OR THE API SHALL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID US IN THE 12 MONTHS PRECEDING THE CLAIM OR (B) USD $50.</p>
     </section>
 
     <section class="legal-section" id="indemnity">
-        <h2>12. Indemnification</h2>
-        <p>You agree to indemnify, defend, and hold harmless Parker Physics App and its affiliates from and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising out of or in connection with your violation of this EULA, your use of the service, or your infringement of any third-party rights.</p>
+        <h2>13. Indemnification</h2>
+        <p>You agree to indemnify, defend, and hold harmless Telford Projects LLC and its affiliates from and against any claims, liabilities, damages, losses, and expenses (including reasonable legal fees) arising out of or in connection with your violation of this EULA, your use of the service or API, your distribution of API responses or derivative outputs, or your infringement of any third-party rights.</p>
     </section>
 
     <section class="legal-section" id="governing">
-        <h2>13. Governing Law &amp; Disputes</h2>
+        <h2>14. Governing Law &amp; Disputes</h2>
         <p>This EULA is governed by the laws of the <strong>State of Delaware, United States</strong>, without regard to conflict of law provisions. Any dispute arising under this EULA shall first be attempted to be resolved through good-faith negotiation. If unresolved within 60 days, disputes shall be submitted to binding arbitration administered by the American Arbitration Association (AAA) under its Commercial Arbitration Rules, with proceedings conducted in English. Class action waivers apply to the extent permitted by law.</p>
         <p>Nothing in this section prevents either party from seeking injunctive or other equitable relief in a court of competent jurisdiction.</p>
     </section>
 
     <section class="legal-section" id="updates">
-        <h2>14. Updates to This EULA</h2>
-        <p>We reserve the right to modify this EULA at any time. Material changes will be communicated by email at least 14 days before they take effect. Continued use of the service after the effective date constitutes your acceptance of the revised EULA. The current version is always available at <a href="https://parkerphysics.app/eula">parkerphysics.app/eula</a>.</p>
+        <h2>15. Updates to This EULA</h2>
+        <p>We reserve the right to modify this EULA at any time. Material changes will be communicated by email at least 14 days before they take effect. Continued use of the service or API after the effective date constitutes your acceptance of the revised EULA. The current version is always available at <a href="https://parkerphysics.app/eula">parkerphysics.app/eula</a>.</p>
+    </section>
+
+    <section class="legal-section" id="ai-automated">
+        <h2>16. AI &amp; Automated Agents</h2>
+        <p>Parker Physics App is a service for human users. The following rules apply to automated systems (including web crawlers, scraping tools, AI assistants, and "agentic" browsers acting on behalf of a user). These rules apply in addition to, and do not narrow, Section 7 (API Use):</p>
+        <ul>
+            <li><strong>No training-data use.</strong> Content, simulation outputs, source code, documentation, and live data displays provided through the service or API may not be used to train, fine-tune, or evaluate any machine-learning or generative-AI model without a separate written agreement signed by Telford Projects LLC. This restriction applies regardless of whether access occurs through the public website, the API, or an authenticated session.</li>
+            <li><strong>Crawlers must respect <code>robots.txt</code>.</strong> We publish a <code>robots.txt</code> file at the site root. Crawlers, including AI-related crawlers, must obey its directives. We may add additional disallow rules at any time.</li>
+            <li><strong>No high-volume scraping.</strong> Bulk downloading of feeds, simulation results, or page content outside of the documented API rate limits is prohibited and may result in IP-level blocking.</li>
+            <li><strong>AI assistants acting on a user's behalf</strong> may use the service or API only within the limits of the human user's plan tier and only for purposes that the human user could perform directly under this EULA. The human user remains responsible for the agent's actions, including any rate-limit or attribution violations.</li>
+            <li><strong>Output attribution.</strong> If you use an AI system to summarize or transform Parker Physics App content for public distribution, you must preserve attribution to Parker Physics App and to the upstream data providers identified in Section 6a.</li>
+        </ul>
+        <p>We may detect and block automated activity that we reasonably believe violates this Section or Section 7, or otherwise threatens service availability or security.</p>
     </section>
 
     <section class="legal-section" id="contact">
-        <h2>15. Contact</h2>
+        <h2>17. Contact</h2>
         <p>Questions about this EULA:</p>
         <ul>
-            <li><strong>Email:</strong> <a href="mailto:legal@parkerphysics.app">legal@parkerphysics.app</a></li>
+            <li><strong>Legal Entity:</strong> Telford Projects LLC (operating Parker Physics App)</li>
+            <li><strong>Legal:</strong> <a href="mailto:legal@parkerphysics.app">legal@parkerphysics.app</a></li>
             <li><strong>Support:</strong> <a href="mailto:support@parkerphysics.app">support@parkerphysics.app</a></li>
+            <li><strong>Data accuracy reports:</strong> <a href="mailto:accuracy@parkerphysics.app">accuracy@parkerphysics.app</a></li>
         </ul>
     </section>
 
