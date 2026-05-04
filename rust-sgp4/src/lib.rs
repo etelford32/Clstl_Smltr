@@ -443,6 +443,128 @@ pub fn parse_tle_info(line1: &str, line2: &str) -> Result<JsValue, JsValue> {
     Ok(obj)
 }
 
+// ── Persistent registry — batch propagation hot path ─────────────────────
+//
+// `propagate_tle` re-parses + re-inits per call, so the live tracker
+// (which propagates ~20 k sats × 60 Hz) was paying the parse cost on
+// every frame for every sat. The registry caches the parsed Sgp4State
+// in WASM linear memory and exposes a single batch entrypoint that
+// propagates every registered sat to one wall-clock JD, applies the
+// TEME → scene-frame transform inline (so JS doesn't loop in cold
+// JS code at all), and writes [x, y, z] f32 triplets into a caller-
+// provided Float32Array. JS just allocates the buffer once and uploads
+// to GPU.
+//
+// Slots are stable: removing leaves a None placeholder so subsequent
+// indices don't shift, which keeps JS's parallel `_satellites[]` array
+// in lockstep without index remapping.
+
+use std::cell::RefCell;
+
+thread_local! {
+    static REGISTRY: RefCell<Vec<Option<Sgp4State>>> = RefCell::new(Vec::new());
+}
+
+#[wasm_bindgen]
+pub fn registry_clear() {
+    REGISTRY.with(|r| r.borrow_mut().clear());
+}
+
+#[wasm_bindgen]
+pub fn registry_len() -> usize {
+    REGISTRY.with(|r| r.borrow().len())
+}
+
+/// Append a sat to the registry. Returns the slot index (0-based).
+/// Parse / init failures bubble up as JsValue strings — JS marks the
+/// slot as un-batched and falls back to its own propagator for that
+/// entry.
+#[wasm_bindgen]
+pub fn registry_add(line1: &str, line2: &str) -> Result<u32, JsValue> {
+    let tle = parse_tle(line1, line2)
+        .map_err(|e| JsValue::from_str(&e))?;
+    let state = sgp4_init(&tle)
+        .map_err(|e| JsValue::from_str(&e))?;
+    let idx = REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        let i = reg.len();
+        reg.push(Some(state));
+        i as u32
+    });
+    Ok(idx)
+}
+
+/// Reserve a slot without an associated state (e.g. JS-fallback sat).
+/// The slot propagates as (0, 0, 0); JS overwrites that triplet with
+/// its own values after the batch returns. Keeps the WASM registry
+/// in lockstep with JS `_satellites[]` so indices line up.
+#[wasm_bindgen]
+pub fn registry_reserve_blank() -> u32 {
+    REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        let i = reg.len();
+        reg.push(None);
+        i as u32
+    })
+}
+
+/// Mark a slot as removed. The slot is kept (so subsequent indices
+/// don't shift) but propagation skips it.
+#[wasm_bindgen]
+pub fn registry_remove(idx: u32) {
+    REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        let i = idx as usize;
+        if i < reg.len() { reg[i] = None; }
+    });
+}
+
+/// Propagate every registered sat to JD = `now_jd`, rotate TEME →
+/// scene-frame using `gmst_rad` (matching js/geo/coords.js
+/// eciToEcef + the Y=north flip), scale by `scale` (= km_to_scene),
+/// and return a flat Float32Array of [x, y, z] triplets — one per
+/// registered slot, in slot order.
+///
+/// Returning the buffer (rather than taking a JS-owned `&mut` slice)
+/// is the wasm-bindgen pattern that actually writes back to JS:
+/// `&mut [f32]` is treated as a pure input by wasm-bindgen
+/// (passArrayF32ToWasm0 copies INTO WASM and never copies out), so
+/// using that signature would silently drop every position update.
+///
+/// On per-sat propagate failure (decay / numerical blowup) and on
+/// blank slots the triplet is NaN so JS can detect it and fall back
+/// without confusing it with a valid origin sample.
+#[wasm_bindgen]
+pub fn registry_propagate(now_jd: f64, gmst_rad: f64, scale: f64) -> Vec<f32> {
+    let cos_g = gmst_rad.cos();
+    let sin_g = gmst_rad.sin();
+    let scl   = scale as f32;
+
+    REGISTRY.with(|r| {
+        let reg = r.borrow();
+        let n = reg.len();
+        let mut out = vec![f32::NAN; n * 3];
+
+        for (i, slot) in reg.iter().enumerate() {
+            let Some(state) = slot else { continue; };
+            let tsince = (now_jd - state.tle.epoch_jd) * MIN_PER_DAY;
+            let Ok((p, _v)) = sgp4_propagate(state, tsince) else { continue; };
+
+            // ECI/TEME → astronomical ECEF: rotate −GMST about Z.
+            let x_ecef =  cos_g * p[0] + sin_g * p[1];
+            let y_ecef = -sin_g * p[0] + cos_g * p[1];
+            let z_ecef =  p[2];
+            // Astronomical ECEF (Z = north) → Three.js scene frame
+            // (Y = north): xS = xE, yS = zE, zS = -yE.
+            let off = i * 3;
+            out[off]     = (x_ecef as f32) * scl;
+            out[off + 1] = (z_ecef as f32) * scl;
+            out[off + 2] = (-y_ecef as f32) * scl;
+        }
+        out
+    })
+}
+
 #[derive(serde::Serialize)]
 struct TleInfo {
     norad_id: u32,

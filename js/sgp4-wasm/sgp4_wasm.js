@@ -89,13 +89,109 @@ export function propagate_tle(line1, line2, tsince_min) {
     }
 }
 
+/**
+ * Append a sat to the registry. Returns the slot index (0-based).
+ * Parse / init failures bubble up as JsValue strings — JS marks the
+ * slot as un-batched and falls back to its own propagator for that
+ * entry.
+ * @param {string} line1
+ * @param {string} line2
+ * @returns {number}
+ */
+export function registry_add(line1, line2) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(line1, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(line2, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        wasm.registry_add(retptr, ptr0, len0, ptr1, len1);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return r0 >>> 0;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+export function registry_clear() {
+    wasm.registry_clear();
+}
+
+/**
+ * @returns {number}
+ */
+export function registry_len() {
+    const ret = wasm.registry_len();
+    return ret >>> 0;
+}
+
+/**
+ * Propagate every registered sat to JD = `now_jd`, rotate TEME →
+ * scene-frame using `gmst_rad` (matching js/geo/coords.js
+ * eciToEcef + the Y=north flip), scale by `scale` (= km_to_scene),
+ * and return a flat Float32Array of [x, y, z] triplets — one per
+ * registered slot, in slot order.
+ *
+ * Returning the buffer (rather than taking a JS-owned `&mut` slice)
+ * is the wasm-bindgen pattern that actually writes back to JS:
+ * `&mut [f32]` is treated as a pure input by wasm-bindgen
+ * (passArrayF32ToWasm0 copies INTO WASM and never copies out), so
+ * using that signature would silently drop every position update.
+ *
+ * On per-sat propagate failure (decay / numerical blowup) and on
+ * blank slots the triplet is NaN so JS can detect it and fall back
+ * without confusing it with a valid origin sample.
+ * @param {number} now_jd
+ * @param {number} gmst_rad
+ * @param {number} scale
+ * @returns {Float32Array}
+ */
+export function registry_propagate(now_jd, gmst_rad, scale) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.registry_propagate(retptr, now_jd, gmst_rad, scale);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var v1 = getArrayF32FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_export3(r0, r1 * 4, 4);
+        return v1;
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+
+/**
+ * Mark a slot as removed. The slot is kept (so subsequent indices
+ * don't shift) but propagation skips it.
+ * @param {number} idx
+ */
+export function registry_remove(idx) {
+    wasm.registry_remove(idx);
+}
+
+/**
+ * Reserve a slot without an associated state (e.g. JS-fallback sat).
+ * The slot propagates as (0, 0, 0); JS overwrites that triplet with
+ * its own values after the batch returns. Keeps the WASM registry
+ * in lockstep with JS `_satellites[]` so indices line up.
+ * @returns {number}
+ */
+export function registry_reserve_blank() {
+    const ret = wasm.registry_reserve_blank();
+    return ret >>> 0;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_throw_81fc77679af83bc6: function(arg0, arg1) {
+        __wbg___wbindgen_throw_9c75d47bf9e7731e: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_new_4f9fafbb3909af72: function() {
+        __wbg_new_2fad8ca02fd00684: function() {
             const ret = new Object();
             return addHeapObject(ret);
         },
@@ -138,6 +234,11 @@ function dropObject(idx) {
     heap_next = idx;
 }
 
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayF64FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
@@ -151,6 +252,14 @@ function getDataViewMemory0() {
     return cachedDataViewMemory0;
 }
 
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
+}
+
 let cachedFloat64ArrayMemory0 = null;
 function getFloat64ArrayMemory0() {
     if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
@@ -160,8 +269,7 @@ function getFloat64ArrayMemory0() {
 }
 
 function getStringFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return decodeText(ptr, len);
+    return decodeText(ptr >>> 0, len);
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -258,11 +366,13 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-let wasmModule, wasm;
+let wasmModule, wasmInstance, wasm;
 function __wbg_finalize_init(instance, module) {
+    wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat32ArrayMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     return wasm;

@@ -821,6 +821,80 @@ export function mountConjunctions(fleet, tracker, opts = {}) {
 
     return {
         rescreen: screen,
+        /**
+         * One-shot screen: the current fleet vs. a single secondary
+         * (the user's right-clicked target). Doesn't disturb the
+         * deck's stored rows or status — caller is expected to surface
+         * the result via toast or other transient UI.
+         *
+         * Resolves with { primaryName, missKm, tcaMs, dvKms,
+         *                 secondaryName, secondaryNoradId } for the
+         * tightest pass found across the fleet, or null when no
+         * conjunction is below 50 km in the current horizon.
+         */
+        async screenOne(secondaryNoradId) {
+            const secondaryTle = tracker.getSatellite?.(secondaryNoradId)?.tle;
+            if (!secondaryTle) return null;
+            const list = fleet.list().filter(a => a.status === 'ready' && a.tle);
+            if (list.length === 0) return null;
+
+            const groupMap = buildGroupMap();
+            const targets  = list.map(a => ({ tle: a.tle, group: 'fleet' }));
+            const secondaries = [{
+                tle: secondaryTle,
+                group: groupMap.get(secondaryNoradId) ?? null,
+            }];
+
+            const simTimeMs = timeBus.getState().simTimeMs;
+            const results = await screener.run({
+                targets, secondaries,
+                epochMs: simTimeMs,
+                params:  {
+                    horizonH:    horizonHours(),
+                    stepMin:     10,
+                    thresholdKm: 50,
+                    refine:      true,
+                    withDv:      true,
+                },
+            });
+
+            // Best pass across fleet for this secondary.
+            let best = null;
+            let bestPrimary = null;
+            for (const a of list) {
+                const hit = results[a.noradId]?.[0];
+                if (!hit) continue;
+                if (!best || hit.dist_km < best.dist_km) {
+                    best = hit;
+                    bestPrimary = a;
+                }
+            }
+            if (!best) return null;
+
+            const secondary = tracker.getSatellite?.(secondaryNoradId);
+            return {
+                primaryName:        bestPrimary.name,
+                primaryNoradId:     bestPrimary.noradId,
+                secondaryName:      secondary?.name || best.name || `#${secondaryNoradId}`,
+                secondaryNoradId,
+                missKm:             best.dist_km,
+                tcaMs:              best.tca_ms,
+                dvKms:              best.dv_kms,
+                ahead:              fmtAhead(simTimeMs, best.tca_ms),
+                conjForBPlane: {
+                    assetName:     bestPrimary.name,
+                    assetTle:      bestPrimary.tle,
+                    secondaryName: secondary?.name || best.name || `#${secondaryNoradId}`,
+                    secondaryTle:  secondaryTle,
+                    tcaMs:         best.tca_ms,
+                    missKm:        best.dist_km,
+                    dvKms:         best.dv_kms,
+                    missUnit:      best.miss_unit,
+                    missVec:       best.miss_vec,
+                    vRel:          best.v_rel,
+                },
+            };
+        },
         dispose() {
             if (autoTimer != null) {
                 clearTimeout(autoTimer);

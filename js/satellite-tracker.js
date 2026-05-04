@@ -243,6 +243,18 @@ export class SatelliteTracker {
         this._colors = null;
         this._pointsMesh = null;
 
+        // Batch propagation hot-path. WASM keeps a parallel registry
+        // of parsed Sgp4State so the per-frame tick can call one
+        // function instead of N (parse + init + propagate)s. The
+        // registry is append-only and indices line up with
+        // `_satellites[i]`. `_batchSyncedTo` tracks how many slots
+        // have been registered; new sats get registered lazily at
+        // the next tick or via _syncRegistry() so add-at-load and
+        // WASM-ready-after-load both converge on a consistent state.
+        this._batchOut       = null;       // Float32Array of length 3·maxSats
+        this._batchSyncedTo  = 0;          // index up to which the registry is in sync
+        this._batchAvailable = false;      // true once WASM exposes registry_*
+
         // Shell visualization group
         this._shellGroup = new THREE.Group();
         this._shellGroup.name = 'orbital-shells';
@@ -739,6 +751,39 @@ export class SatelliteTracker {
         this._colors.needsUpdate = true;
     }
 
+    /**
+     * Lazy-register any not-yet-batched sats with the WASM registry.
+     * Idempotent — safe to call every frame; usually a no-op once
+     * the load has settled. Slot indices line up with `_satellites[i]`,
+     * so a JS→WASM mismatch (parse failure, decay) reserves a blank
+     * slot to keep the alignment stable.
+     */
+    _syncRegistry() {
+        if (!_wasmSgp4 || !_wasmSgp4.registry_propagate) return false;
+        this._batchAvailable = true;
+
+        const n = this._satellites.length;
+        for (let i = this._batchSyncedTo; i < n; i++) {
+            const sat = this._satellites[i];
+            let registered = false;
+            if (sat.tle.line1 && sat.tle.line2) {
+                try {
+                    _wasmSgp4.registry_add(sat.tle.line1, sat.tle.line2);
+                    sat._batchOk = true;
+                    registered = true;
+                } catch (_) {
+                    // Parse / init failed — fall through to blank slot.
+                }
+            }
+            if (!registered) {
+                _wasmSgp4.registry_reserve_blank();
+                sat._batchOk = false;
+            }
+        }
+        this._batchSyncedTo = n;
+        return true;
+    }
+
     /** Update satellite positions to current time. Call every frame. */
     tick(nowMs = Date.now()) {
         if (!this._positions || this._satellites.length === 0) return;
@@ -748,38 +793,98 @@ export class SatelliteTracker {
         const kmToScene = this._earthR / RE_KM;
         const posArr  = this._positions.array;
 
-        for (let i = 0; i < this._satellites.length; i++) {
-            const sat    = this._satellites[i];
-            const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+        const useBatch = this._syncRegistry();
 
-            const teme = propagate(sat.tle, tsince);
-            _temeScratch.set(teme.x, teme.y, teme.z);
+        if (useBatch) {
+            // One WASM call propagates every sat AND folds in the
+            // TEME → scene-frame transform (matches geo.eciToEcef +
+            // the Y=north scene flip). Returns NaN per slot for
+            // un-batched / decayed sats — those drop to the JS
+            // fallback below. Note we re-receive the buffer each
+            // frame because wasm-bindgen passes &mut [f32] as
+            // input-only; a returned Vec<f32> is the path that
+            // actually carries data back to JS.
+            const out = _wasmSgp4.registry_propagate(jd, gmstRad, kmToScene);
+            this._batchOut = out;
 
-            // TEME → ECEF (GMST rotation) → scene frame, in one call.
-            geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+            const n = this._satellites.length;
+            for (let i = 0; i < n; i++) {
+                const off = i * 3;
+                const sat = this._satellites[i];
 
-            const x = _sceneScratch.x * kmToScene;
-            const y = _sceneScratch.y * kmToScene;
-            const z = _sceneScratch.z * kmToScene;
-            posArr[i * 3]     = x;
-            posArr[i * 3 + 1] = y;
-            posArr[i * 3 + 2] = z;
+                let x = out[off];
+                let y = out[off + 1];
+                let z = out[off + 2];
 
-            // Recover geographic coords for tooltip / API use. `positionToLatLon`
-            // returns radians and the scene-frame magnitude (here in km since
-            // we haven't scaled yet); convert to degrees + altitude.
-            const ll = geo.positionToLatLon(_sceneScratch);
-            sat.lat = ll.lat * RAD;
-            sat.lon = ll.lon * RAD;
-            sat.alt = ll.radiusUnits - RE_KM;
+                if (sat._batchOk === false || x !== x /* NaN */) {
+                    // Per-sat fallback: parse-failed slots and decayed
+                    // sats land here. propagate() will pick its own
+                    // best path (WASM single-call → JS Kepler).
+                    const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+                    const teme = propagate(sat.tle, tsince);
+                    _temeScratch.set(teme.x, teme.y, teme.z);
+                    geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+                    x = _sceneScratch.x * kmToScene;
+                    y = _sceneScratch.y * kmToScene;
+                    z = _sceneScratch.z * kmToScene;
+                }
 
-            // Park the highlight sprite on the matching sat. O(1) hit test
-            // folded into the main loop so we don't have to re-find the
-            // satellite after the fact.
-            if (this._highlightNoradId != null
-                && sat.tle.norad_id === this._highlightNoradId
-                && this._highlightSprite) {
-                this._highlightSprite.position.set(x, y, z);
+                posArr[off]     = x;
+                posArr[off + 1] = y;
+                posArr[off + 2] = z;
+
+                // Lat/lon/alt — keep the legacy fields in sync. Use
+                // the (already-computed) scene-frame coords directly
+                // instead of round-tripping through positionToLatLon
+                // so we save a Vector3 + a few extra trig calls per
+                // sat. positionToLatLon's mapping is:
+                //   lat = asin(y/r); lon = atan2(-z, x); r in km.
+                const sx = x / kmToScene;
+                const sy = y / kmToScene;
+                const sz = z / kmToScene;
+                const r  = Math.sqrt(sx * sx + sy * sy + sz * sz);
+                if (r > 1e-9) {
+                    const cy = sy / r;
+                    sat.lat = Math.asin(cy < -1 ? -1 : cy > 1 ? 1 : cy) * RAD;
+                    sat.lon = Math.atan2(-sz, sx) * RAD;
+                    sat.alt = r - RE_KM;
+                }
+
+                if (this._highlightNoradId != null
+                    && sat.tle.norad_id === this._highlightNoradId
+                    && this._highlightSprite) {
+                    this._highlightSprite.position.set(x, y, z);
+                }
+            }
+        } else {
+            // No registry API (older WASM build, or WASM not loaded
+            // yet). Original per-sat path; same numerics.
+            for (let i = 0; i < this._satellites.length; i++) {
+                const sat    = this._satellites[i];
+                const tsince = (jd - sat.epochJd) * MIN_PER_DAY;
+
+                const teme = propagate(sat.tle, tsince);
+                _temeScratch.set(teme.x, teme.y, teme.z);
+
+                geo.eciToEcef(_temeScratch, gmstRad, _sceneScratch);
+
+                const x = _sceneScratch.x * kmToScene;
+                const y = _sceneScratch.y * kmToScene;
+                const z = _sceneScratch.z * kmToScene;
+                posArr[i * 3]     = x;
+                posArr[i * 3 + 1] = y;
+                posArr[i * 3 + 2] = z;
+
+                const ll = geo.positionToLatLon(_sceneScratch);
+                sat.lat = ll.lat * RAD;
+                sat.lon = ll.lon * RAD;
+                sat.alt = ll.radiusUnits - RE_KM;
+
+                if (this._highlightNoradId != null
+                    && sat.tle.norad_id === this._highlightNoradId
+                    && this._highlightSprite) {
+                    this._highlightSprite.position.set(x, y, z);
+                }
             }
         }
 
