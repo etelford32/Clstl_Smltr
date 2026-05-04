@@ -32,8 +32,11 @@ import {
 import {
     KM_PER_AU, R_EARTH, R_MOON, SOI_MOON, SOI_MARS, SECONDS_PER_DAY,
     R_EARTH_HELIO, R_MARS_HELIO,
-    planLunarTransfer, planMarsTransfer, planMarsLambert,
+    planLunarTransfer, planLunarLambert,
+    planMarsTransfer, planMarsLambert,
     findLunarLaunchWindow, findMarsLaunchWindow, porkchopMars,
+    planTour, optimizeTour, TOUR_PRESETS,
+    flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
     hohmannPositionAt,
 } from './mission-planner-trajectory.js';
 import { sampleKeplerArc } from './mission-planner-lambert.js';
@@ -117,6 +120,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         payloads:   [],   // deployed near-Earth orbiters (geo frame)
         lunarMissions: [],// active lunar transfers (geo frame)
         marsMissions:  [],// active Mars transfers (helio frame)
+        tours:         [],// active multi-leg tours (helio frame)
         clock:      new THREE.Clock(),
         elapsed:    0,
         timeScale:  1,
@@ -152,6 +156,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         windowJD        = null,
         arriveJD        = null,                // Mars only — Lambert TOF
         parking_inc_deg = null,                // overrides launch-site latitude
+        lunar_tof_d     = null,                // lunar Lambert TOF override
     }) {
         const site   = LAUNCH_SITES.find(s => s.id === siteId)   || state.site;
         const target = TARGET_ORBITS.find(t => t.id === targetId) || state.target;
@@ -161,7 +166,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         if (target.frame !== state.mode) setMode(target.frame);
 
         if (target.id === 'moon') {
-            return launchLunar({ site, target, payloadName, windowJD, parking_inc_deg });
+            return launchLunar({ site, target, payloadName, windowJD, parking_inc_deg, lunar_tof_d });
         }
         if (target.id === 'mars') {
             return launchMars({ site, target, payloadName, windowJD, arriveJD, parking_inc_deg });
@@ -197,40 +202,72 @@ export function initMissionPlanner({ container, onEvent } = {}) {
     }
 
     // ── Lunar transfer (geo frame, real patched conic) ──────────────────────
-    function launchLunar({ site, target, payloadName, windowJD }) {
+    // If lunar_tof_d is supplied, use the Lambert solver (Apollo-fast = 3 d,
+    // Hohmann ≈ 5.4 d, lazy = 7 d). Otherwise default to Hohmann.
+    function launchLunar({ site, target, payloadName, windowJD, parking_inc_deg, lunar_tof_d }) {
         const jd_depart = windowJD ?? state.scenarioJD ?? jdNow();
-        const plan = planLunarTransfer({ jd_depart });
+        const inc       = parking_inc_deg ?? Math.abs(site.lat);
+        const useLambert = lunar_tof_d != null;
+        const plan = useLambert
+            ? planLunarLambert({ jd_depart, tof_d: lunar_tof_d, parking_inc_deg: inc })
+            : planLunarTransfer({ jd_depart });
 
-        // Geometry: place the transfer ellipse in the Earth-Moon orbital plane.
-        // For visual simplicity we use the ecliptic plane (Y-up, ellipse in XZ).
-        // Periapsis direction = opposite of where the Moon will be at arrival.
-        const moonArrPos = eclipticToVec3(
-            plan.moon_at_arrival.lon_rad,
-            plan.moon_at_arrival.lat_rad,
-            plan.r_moon_km / GEO_UNIT_KM,
+        // Geometry: place the transfer in the Earth-Moon orbital plane. For
+        // Hohmann we use the apoapsis direction; for Lambert we use the
+        // pre-sampled polyline (which already captures the real geometry).
+        let moonArrKm;
+        if (useLambert) {
+            moonArrKm = plan.r2;
+        } else {
+            const m = plan.moon_at_arrival;
+            const c = Math.cos(m.lat_rad);
+            moonArrKm = [
+                m.dist_km * c * Math.cos(m.lon_rad),
+                m.dist_km * c * Math.sin(m.lon_rad),
+                m.dist_km * Math.sin(m.lat_rad),
+            ];
+        }
+        const moonArrPos = new THREE.Vector3(
+            moonArrKm[0]/GEO_UNIT_KM,  moonArrKm[2]/GEO_UNIT_KM,  -moonArrKm[1]/GEO_UNIT_KM,
         );
         const apoDir   = moonArrPos.clone().normalize();
         const periDir  = apoDir.clone().multiplyScalar(-1);
-        // Plane normal = approx ecliptic normal +Y (Moon's orbit is ~5° off
-        // ecliptic, fine for a visual planner).
         const planeNormal = new THREE.Vector3(0, 1, 0);
         const inPlaneSide = planeNormal.clone().cross(periDir).normalize();
 
-        // Parking orbit (small ring tangent to the transfer at periapsis).
+        // Parking orbit ring at periapsis direction (only meaningful for Hohmann).
         const r_park_scene = plan.r_park_km / GEO_UNIT_KM;
         const parkRing = makeOrbitRingFromBasis(
             r_park_scene, periDir, inPlaneSide, 0xffcc66, 0.55,
         );
         geo.scene.add(parkRing);
 
-        // Transfer ellipse (full 360° for visual reference, but we only fly
-        // periapsis → apoapsis = 0..π in true anomaly).
-        const ellLine = makeEllipseFromBasis(
-            plan.ellipse.a_km / GEO_UNIT_KM,
-            plan.ellipse.e,
-            periDir, inPlaneSide,
-            0x66ddff, 0.85, /* dashed */ true,
-        );
+        // Transfer arc — Hohmann ellipse OR Lambert polyline.
+        let ellLine, arcPos = null, N_arc = 0;
+        if (useLambert) {
+            const samples_km = plan.sample();
+            N_arc = samples_km.length;
+            arcPos = new Float32Array(N_arc * 3);
+            for (let i = 0; i < N_arc; i++) {
+                const r = samples_km[i];
+                // ecliptic km → scene units (1 R⊕), with horizons.js axis
+                // convention (x,y,z)_ecl → scene (x, z, -y).
+                arcPos[i*3+0] =  r[0] / GEO_UNIT_KM;
+                arcPos[i*3+1] =  r[2] / GEO_UNIT_KM;
+                arcPos[i*3+2] = -r[1] / GEO_UNIT_KM;
+            }
+            const arcGeom = new THREE.BufferGeometry();
+            arcGeom.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+            ellLine = new THREE.Line(arcGeom, new THREE.LineBasicMaterial({
+                color: 0x66ddff, transparent: true, opacity: 0.9,
+            }));
+        } else {
+            ellLine = makeEllipseFromBasis(
+                plan.ellipse.a_km / GEO_UNIT_KM, plan.ellipse.e,
+                periDir, inPlaneSide,
+                0x66ddff, 0.85, /* dashed */ true,
+            );
+        }
         geo.scene.add(ellLine);
 
         // Lunar SOI sphere (wireframe at arrival point).
@@ -240,7 +277,7 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 color: 0x66ffaa, wireframe: true, transparent: true, opacity: 0.18,
             }),
         );
-        soiMesh.position.copy(apoDir.clone().multiplyScalar(plan.r_moon_km / GEO_UNIT_KM));
+        soiMesh.position.copy(apoDir.clone().multiplyScalar(moonArrPos.length()));
         geo.scene.add(soiMesh);
 
         // Spacecraft + trail.
@@ -258,14 +295,16 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             ...trail,
             periDir, inPlaneSide, apoDir, planeNormal,
             startedAt:  state.elapsed,
-            // Compress TOF: real ~5 days → 8 s of wall time at 1×.
-            durSec:     8,
+            // Compress TOF: real 3-7 days → 6-10 s of wall time at 1×.
+            durSec:     useLambert ? Math.max(5, plan.tof_d * 1.6) : 8,
             phase:      'ascent',
             ascentDur:  3,
             payloadName,
             site, target,
             captureRing: null,   // built when we cross SOI
             crashCheck:  false,
+            // Lambert polyline (if present, used instead of Hohmann ellipse for motion)
+            arcPos, N_arc,
         };
         state.lunarMissions.push(m);
 
@@ -341,6 +380,91 @@ export function initMissionPlanner({ container, onEvent } = {}) {
         state.marsMissions.push(m);
 
         onEvent?.({ type: 'launched-mars', site, target, payloadName, plan });
+        return m;
+    }
+
+    // ── Tour (multi-leg Lambert chain, helio frame) ─────────────────────────
+    // Renders each leg as its own polyline (color-coded by leg index) and
+    // walks the spacecraft through the legs sequentially. Planet markers at
+    // each encounter pulse briefly to show the flyby moment.
+    function launchTour({ plan, payloadName = 'Tour-1' }) {
+        if (state.mode !== 'helio') setMode('helio');
+
+        const auMul = HELIO_UNIT_AU / KM_PER_AU;
+        const LEG_COLORS = [0x66ccff, 0x66ffaa, 0xff8855, 0xffcc66, 0xff66cc];
+
+        const legGeoms = [];
+        for (let i = 0; i < plan.legs.length; i++) {
+            const leg = plan.legs[i];
+            const samples_km = leg.sample();
+            const N = samples_km.length;
+            const arcPos = new Float32Array(N * 3);
+            for (let k = 0; k < N; k++) {
+                const r = samples_km[k];
+                arcPos[k*3+0] =  r[0] * auMul;
+                arcPos[k*3+1] =  r[2] * auMul;
+                arcPos[k*3+2] = -r[1] * auMul;
+            }
+            const g = new THREE.BufferGeometry();
+            g.setAttribute('position', new THREE.BufferAttribute(arcPos, 3));
+            const line = new THREE.Line(g, new THREE.LineBasicMaterial({
+                color: LEG_COLORS[i % LEG_COLORS.length],
+                transparent: true, opacity: 0.9,
+            }));
+            hel.scene.add(line);
+
+            // Encounter markers — color/size encode flyby physics:
+            //   • intermediate body with ballistic flyby   → cyan, large radius
+            //   • intermediate body with powered flyby     → orange, small (tight)
+            //   • final body (capture)                     → green, large
+            const isFinal = i === plan.legs.length - 1;
+            const f = leg.flyby_at_arrival;
+            let mColor, mSize;
+            if (isFinal) {
+                mColor = 0x66ffaa; mSize = 0.16;
+            } else if (f && f.ballistic) {
+                mColor = 0x66ddff;
+                // Bigger sphere = "looser" (higher) flyby altitude
+                mSize = 0.08 + 0.06 * Math.min(1, f.altitude_km / 20000);
+            } else {
+                mColor = 0xff8855;
+                mSize = 0.10;
+            }
+            const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(mSize, 16, 12),
+                new THREE.MeshBasicMaterial({
+                    color: mColor, wireframe: true,
+                    transparent: true, opacity: 0.65,
+                }),
+            );
+            marker.position.set(arcPos[(N-1)*3+0], arcPos[(N-1)*3+1], arcPos[(N-1)*3+2]);
+            hel.scene.add(marker);
+
+            legGeoms.push({ line, arcPos, N, marker, leg });
+        }
+
+        const craft = new THREE.Mesh(
+            new THREE.SphereGeometry(0.06, 12, 8),
+            new THREE.MeshBasicMaterial({ color: 0xffffff }),
+        );
+        hel.scene.add(craft);
+        const trail = makeTrail(hel.scene, 1500, 0xffeecc, 0.7);
+
+        // Wall-clock seconds for the entire tour at 1× timeScale.
+        const totalDur = Math.max(15, plan.tof_total_d * (45 / 800));   // ~45 s for an 800-d tour
+
+        const m = {
+            kind: 'tour',
+            plan, legGeoms, craft, ...trail,
+            startedAt: state.elapsed,
+            totalDur,
+            phase: 'cruise',
+            payloadName,
+            currentLeg: 0,
+        };
+        state.tours.push(m);
+
+        onEvent?.({ type: 'launched-tour', payloadName, plan });
         return m;
     }
 
@@ -427,18 +551,25 @@ export function initMissionPlanner({ container, onEvent } = {}) {
 
             if (m.phase === 'transfer') {
                 const u = Math.min(1, (state.elapsed - m.transferStart) / m.durSec);
-                // Kepler position on the ellipse.
-                const a_scene = m.plan.ellipse.a_km / GEO_UNIT_KM;
-                const e       = m.plan.ellipse.e;
-                const p2d     = hohmannPositionAt(u, a_scene, e);
-                // Convert (x, y) in periDir/inPlaneSide basis to scene XYZ.
-                // x along +periDir, y along +inPlaneSide.
-                // BUT focus is at Sun/Earth = origin; periDir points OUT to
-                // periapsis. The Hohmann formula above puts periapsis at +x,
-                // apoapsis at -x. Spacecraft starts at periapsis and ends at
-                // -2a + rp ≈ apoapsis. So position = periDir·x + side·y.
-                const pos = m.periDir.clone().multiplyScalar(p2d.x)
-                    .add(m.inPlaneSide.clone().multiplyScalar(p2d.y));
+                let pos;
+                if (m.arcPos) {
+                    // Lambert polyline: linear interp between samples.
+                    const fi = u * (m.N_arc - 1);
+                    const i0 = Math.floor(fi), i1 = Math.min(m.N_arc - 1, i0 + 1);
+                    const t  = fi - i0;
+                    const ax = m.arcPos;
+                    pos = new THREE.Vector3(
+                        ax[i0*3+0]*(1-t) + ax[i1*3+0]*t,
+                        ax[i0*3+1]*(1-t) + ax[i1*3+1]*t,
+                        ax[i0*3+2]*(1-t) + ax[i1*3+2]*t,
+                    );
+                } else {
+                    const a_scene = m.plan.ellipse.a_km / GEO_UNIT_KM;
+                    const e       = m.plan.ellipse.e;
+                    const p2d     = hohmannPositionAt(u, a_scene, e);
+                    pos = m.periDir.clone().multiplyScalar(p2d.x)
+                        .add(m.inPlaneSide.clone().multiplyScalar(p2d.y));
+                }
                 m.craft.position.copy(pos);
                 pushTrail(m, pos);
 
@@ -524,6 +655,53 @@ export function initMissionPlanner({ container, onEvent } = {}) {
                 m.phase = 'arrived';
                 onEvent?.({ type: 'mars-captured', payloadName: m.payloadName, plan: m.plan });
             }
+        }
+
+        // Tour spacecraft — sequential walk through legs. Each leg gets a
+        // fraction of total wall-clock time proportional to its TOF.
+        for (const t of state.tours) {
+            if (t.phase !== 'cruise') continue;
+            const u = Math.min(1, (state.elapsed - t.startedAt) / t.totalDur);
+
+            // Find current leg by accumulating TOF fractions.
+            const totalTof = t.plan.tof_total_d;
+            const sTotal = u * totalTof;
+            let acc = 0, legIdx = 0;
+            for (let i = 0; i < t.legGeoms.length; i++) {
+                const tofI = t.legGeoms[i].leg.tof_d;
+                if (sTotal <= acc + tofI) { legIdx = i; break; }
+                acc += tofI;
+                legIdx = i + 1;
+            }
+            if (legIdx >= t.legGeoms.length) {
+                t.phase = 'arrived';
+                onEvent?.({ type: 'tour-arrived', payloadName: t.payloadName, plan: t.plan });
+                continue;
+            }
+
+            // Notify on leg transitions.
+            if (legIdx !== t.currentLeg) {
+                t.currentLeg = legIdx;
+                onEvent?.({
+                    type: 'tour-leg', payloadName: t.payloadName,
+                    legIndex: legIdx,
+                    leg: t.legGeoms[legIdx].leg,
+                    tour: t.plan,
+                });
+            }
+
+            const leg = t.legGeoms[legIdx];
+            const uLeg = (sTotal - acc) / leg.leg.tof_d;
+            const fi = Math.min(1, uLeg) * (leg.N - 1);
+            const i0 = Math.floor(fi), i1 = Math.min(leg.N - 1, i0 + 1);
+            const tau = fi - i0;
+            const ax = leg.arcPos;
+            t.craft.position.set(
+                ax[i0*3+0]*(1-tau) + ax[i1*3+0]*tau,
+                ax[i0*3+1]*(1-tau) + ax[i1*3+1]*tau,
+                ax[i0*3+2]*(1-tau) + ax[i1*3+2]*tau,
+            );
+            pushTrail(t, t.craft.position);
         }
     }
 
@@ -645,16 +823,23 @@ export function initMissionPlanner({ container, onEvent } = {}) {
             payloads:       state.payloads.length,
             lunarMissions:  state.lunarMissions.length,
             marsMissions:   state.marsMissions.length,
+            tours:          state.tours.length,
         }),
         getScenarioJD: () => state.scenarioJD,
         setScenarioJD: (jd) => { state.scenarioJD = jd; },
         // Trajectory planners — also useful from the UI for read-only previews.
         planLunar:        planLunarTransfer,
+        planLunarLambert,
         planMars:         planMarsTransfer,
         planMarsLambert,
         findLunarWindow:  findLunarLaunchWindow,
         findMarsWindow:   findMarsLaunchWindow,
         porkchopMars,
+        // Tour planning
+        planTour, optimizeTour, TOUR_PRESETS,
+        launchTour: (opts) => launchTour(opts),
+        // Gravity-assist primitives (exposed for didactic UI uses)
+        flybyAssessment, flybyMaxTurnAngle, flybyPeriapsisForTurn,
     };
 }
 
@@ -873,8 +1058,15 @@ function clearAll(state, geo, hel) {
         if (m.arcLine) hel.scene.remove(m.arcLine);
         if (m.soiMesh) hel.scene.remove(m.soiMesh);
     }
+    for (const t of state.tours || []) {
+        hel.scene.remove(t.craft); hel.scene.remove(t.trail);
+        for (const lg of t.legGeoms) {
+            hel.scene.remove(lg.line); hel.scene.remove(lg.marker);
+        }
+    }
     state.rockets.length        = 0;
     state.payloads.length       = 0;
     state.lunarMissions.length  = 0;
     state.marsMissions.length   = 0;
+    if (state.tours) state.tours.length = 0;
 }
