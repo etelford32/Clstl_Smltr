@@ -1115,6 +1115,7 @@ import {
 } from './js/horizons.js';
 import { ASTEROID_EL } from './js/orbital-mechanics/nbody-init.js';
 import { elementsToState } from './js/orbital-mechanics/yoshida4.js';
+import { makeOrreryPlanet, updateOrreryPlanet } from './js/orrery-skins.js';
 import { SATURN_MOONS, SATURN_R_KM, JUPITER_MOONS, JUPITER_R_KM } from './js/planet-moons.js';
 
 // ── Body table ───────────────────────────────────────────────────────
@@ -2695,11 +2696,17 @@ function formatDate(jd) {
 
 // ── Update positions ─────────────────────────────────────────────────
 let lastRingRefreshJd = -1e12;
+const _sunScenePos = new THREE.Vector3(0, 0, 0);    // Sun is at origin
 function updatePositions(jd) {
     for (const body of ALL_BODIES) {
         const p = body.fn(jd);
         const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
         meshes[body.key].position.set(x, y, z);
+    }
+    // Advance each planet's axial rotation + per-shader sun direction.
+    for (const body of BODIES) {
+        const skin = planetSkins[body.key];
+        if (skin) updateOrreryPlanet(skin, jd, _sunScenePos);
     }
     // Lagrange L4/L5 follow the selected planet (ecliptic ±60° rotation).
     if (selected && selected.key && selected.key !== 'sun') {
