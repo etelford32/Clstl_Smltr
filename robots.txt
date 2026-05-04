@@ -1,7 +1,124 @@
+# Parker Physics App — robots policy
+# Telford Projects LLC, see https://parkerphysics.app/eula §16
+
+# ── Default policy: allow general-purpose search crawlers ────────────────────
 User-agent: *
 Allow: /
 Disallow: /dashboard
 Disallow: /dashboard.html
+Disallow: /admin
+Disallow: /admin.html
+Disallow: /api/cron/
+Disallow: /api/stripe/
+Disallow: /api/invites/
+Disallow: /api/alerts/
+Disallow: /reset-password
+Disallow: /reset-password.html
 Disallow: /rust/
 
-Sitemap: https://parkersphysics.com/sitemap.xml
+# ── AI training crawlers: blocked per EULA §16 ───────────────────────────────
+# These bots scrape pages to build training corpora for ML/LLMs.
+# Use of Parker Physics App content for training requires a separate
+# written agreement signed by Telford Projects LLC.
+
+User-agent: GPTBot
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: PerplexityBot
+Disallow: /
+
+User-agent: cohere-ai
+Disallow: /
+
+User-agent: Bytespider
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: FacebookBot
+Disallow: /
+
+User-agent: Meta-ExternalAgent
+Disallow: /
+
+User-agent: meta-externalfetcher
+Disallow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+User-agent: Amazonbot
+Disallow: /
+
+User-agent: Diffbot
+Disallow: /
+
+User-agent: Omgilibot
+Disallow: /
+
+User-agent: Omgili
+Disallow: /
+
+User-agent: ImagesiftBot
+Disallow: /
+
+User-agent: YouBot
+Disallow: /
+
+User-agent: AwarioBot
+Disallow: /
+
+User-agent: AwarioRssBot
+Disallow: /
+
+User-agent: AwarioSmartBot
+Disallow: /
+
+User-agent: TimpiBot
+Disallow: /
+
+User-agent: SemrushBot-OCOB
+Disallow: /
+
+User-agent: PetalBot
+Disallow: /
+
+User-agent: ICC-Crawler
+Disallow: /
+
+User-agent: ISSCyberRiskCrawler
+Disallow: /
+
+User-agent: NovaAct
+Disallow: /
+
+User-agent: PanguBot
+Disallow: /
+
+User-agent: Webzio-Extended
+Disallow: /
+
+User-agent: img2dataset
+Disallow: /
+
+# ── User-initiated browse agents (not crawlers): allowed within rate limits ──
+# ChatGPT-User, Claude-Web, Perplexity-User, etc. fetch a page on behalf of
+# a specific human user. They are not training crawlers and fall under the
+# default User-agent: * rules above. They must obey our rate limits per
+# EULA §7c and §16.
+
+# ── Sitemap ──────────────────────────────────────────────────────────────────
+Sitemap: https://parkerphysics.app/sitemap.xml
