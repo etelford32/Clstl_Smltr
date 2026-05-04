@@ -253,9 +253,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
             <span class="mp-time" id="mp-park-inc-val">28.5°</span>
         </div>
 
+        <div class="mp-label" id="mp-lunar-tof-label" style="display:none;">Lunar Transfer TOF</div>
+        <div class="mp-row" id="mp-lunar-tof-row" style="display:none;">
+            <input id="mp-lunar-tof" class="mp-input" type="range" min="3" max="7" step="0.25" value="5.4">
+            <span class="mp-time" id="mp-lunar-tof-val">5.4 d</span>
+        </div>
+
         <button id="mp-find-window" class="mp-secondary-btn" type="button" style="margin-top:10px;">🔍 Find Next Launch Window</button>
         <button id="mp-porkchop"    class="mp-secondary-btn" type="button" style="margin-top:6px;">🗺️ Run Pork-Chop Scan (Mars)</button>
         <button id="mp-launch"      class="mp-launch-btn"    type="button">🚀 Launch</button>
+
+        <div class="mp-section-divider"></div>
+
+        <div class="mp-label">Multi-leg Tour (chained Lambert)</div>
+        <select id="mp-tour-preset" class="mp-select">
+            <option value="veem">V-E-E-M · Earth → Venus → Earth → Mars</option>
+            <option value="evvm">V-V-M · Earth → Venus → Venus → Mars</option>
+            <option value="eve">V-E · Earth → Venus → Earth (BepiColombo-like)</option>
+            <option value="em">Direct · Earth → Mars (reference)</option>
+        </select>
+        <button id="mp-tour-optimize" class="mp-secondary-btn" type="button" style="margin-top:6px;">🌌 Optimize + Run Tour</button>
 
         <div id="mp-plan" class="mp-plan">
             <div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>
@@ -306,6 +323,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden;
                 <div class="hud-row"><span class="k">Near-Earth payloads</span><span class="v" id="hud-payloads">0</span></div>
                 <div class="hud-row"><span class="k">Lunar missions</span><span class="v" id="hud-lunar">0</span></div>
                 <div class="hud-row"><span class="k">Mars missions</span><span class="v" id="hud-mars">0</span></div>
+                <div class="hud-row"><span class="k">Tours active</span><span class="v" id="hud-tours">0</span></div>
                 <div class="hud-row"><span class="k">Scenario JD</span><span class="v" id="hud-jd">—</span></div>
             </div>
         </div>
@@ -353,6 +371,7 @@ function refreshHUD() {
     document.getElementById('hud-payloads').textContent = s.payloads;
     document.getElementById('hud-lunar').textContent    = s.lunarMissions;
     document.getElementById('hud-mars').textContent     = s.marsMissions;
+    document.getElementById('hud-tours').textContent    = s.tours ?? 0;
     document.getElementById('hud-jd').textContent       = planner.getScenarioJD().toFixed(2);
 }
 
@@ -366,19 +385,60 @@ function jdToISO(jd) {
 function renderPlan(plan) {
     if (!plan) { planEl.innerHTML = `<div class="mp-plan-empty">Plan readout appears after Find Window or Launch.</div>`; return; }
 
-    if (plan.kind === 'lunar') {
+    if (plan.kind === 'lunar' && plan.method === 'lambert') {
         planEl.innerHTML = `
-            <div class="mp-plan-title">🌙 Lunar Transfer Plan</div>
-            <div class="mp-plan-row"><span class="k">Depart JD</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
-            <div class="mp-plan-row"><span class="k">Arrive JD</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
-            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(2)} days</span></div>
-            <div class="mp-plan-row"><span class="k">Parking r</span><span class="v">${(plan.r_park_km - 6378).toFixed(0)} km LEO</span></div>
-            <div class="mp-plan-row"><span class="k">Lunar dist</span><span class="v">${(plan.r_moon_km/1000).toFixed(0)}×10³ km</span></div>
+            <div class="mp-plan-title">🌙 Lunar Transfer (Lambert · ${plan.tof_d.toFixed(2)} d)</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">Burn θ</span><span class="v">${plan.burn_angle_deg.toFixed(1)}°</span></div>
             <div class="mp-plan-row"><span class="k">Δv (TLI)</span><span class="v">${plan.dv_tli_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">v∞ at Moon</span><span class="v">${plan.v_inf_moon_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Δv (LOI)</span><span class="v">${plan.dv_loi_kms.toFixed(3)} km/s</span></div>
             <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
-            <div class="mp-plan-row"><span class="k">Lead angle</span><span class="v">${plan.lead_angle_deg.toFixed(1)}°</span></div>
+            <div class="mp-plan-row" style="opacity:.7"><span class="k">Apollo 11 actual</span><span class="v">~3.96 km/s</span></div>
+        `;
+    } else if (plan.kind === 'lunar') {
+        planEl.innerHTML = `
+            <div class="mp-plan-title">🌙 Lunar Transfer (Hohmann)</div>
+            <div class="mp-plan-row"><span class="k">Depart JD</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive JD</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">TOF</span><span class="v">${plan.tof_d.toFixed(2)} days</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TLI)</span><span class="v">${plan.dv_tli_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">v∞ at Moon</span><span class="v">${plan.v_inf_moon_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (LOI)</span><span class="v">${plan.dv_loi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+        `;
+    } else if (plan.kind === 'tour') {
+        const legsHtml = plan.legs.map((leg, i) => {
+            const mismatchHtml = leg.flyby_mismatch_kms != null
+                ? `<div class="mp-plan-row" style="opacity:.85">
+                       <span class="k">  ↳ flyby Δ|v∞|</span>
+                       <span class="v ${leg.flyby_mismatch_kms > 2 ? 'warn' : ''}">${leg.flyby_mismatch_kms.toFixed(2)} km/s</span>
+                   </div>` : '';
+            return `
+                <div class="mp-plan-row" style="margin-top:6px;">
+                    <span class="k">Leg ${i+1}: ${leg.from} → ${leg.to}</span>
+                    <span class="v">${leg.tof_d.toFixed(0)} d</span>
+                </div>
+                <div class="mp-plan-row" style="opacity:.8">
+                    <span class="k">  v∞ depart / arrive</span>
+                    <span class="v">${leg.v_inf_depart_kms.toFixed(2)} / ${leg.v_inf_arrive_kms.toFixed(2)}</span>
+                </div>
+                ${mismatchHtml}`;
+        }).join('');
+        planEl.innerHTML = `
+            <div class="mp-plan-title">🌌 Tour · ${plan.name}${plan._optimized ? ' (optimized)' : ''}</div>
+            <div class="mp-plan-row"><span class="k">Depart</span><span class="v">${jdToISO(plan.jd_depart)}</span></div>
+            <div class="mp-plan-row"><span class="k">Arrive (${plan.last_body})</span><span class="v">${jdToISO(plan.jd_arrive)}</span></div>
+            <div class="mp-plan-row"><span class="k">Total tour TOF</span><span class="v">${plan.tof_total_d.toFixed(0)} days (${(plan.tof_total_d/365).toFixed(2)} yr)</span></div>
+            <div class="mp-plan-row"><span class="k">Departure C3</span><span class="v">${plan.c3_earth_km2s2.toFixed(2)} km²/s²</span></div>
+            <div class="mp-plan-row"><span class="k">DLA</span><span class="v">${plan.dla_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Plane tilt</span><span class="v ${plan.plane_change_dep_deg > 10 ? 'warn' : ''}">${plan.plane_change_dep_deg.toFixed(2)}°</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (TMI)</span><span class="v">${plan.dv_tmi_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Δv (capture)</span><span class="v">${plan.dv_capture_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Total Δv</span><span class="v">${plan.dv_total_kms.toFixed(3)} km/s</span></div>
+            <div class="mp-plan-row"><span class="k">Max flyby Δ|v∞|</span><span class="v ${plan.max_flyby_mismatch_kms > 2 ? 'warn' : ''}">${plan.max_flyby_mismatch_kms.toFixed(2)} km/s</span></div>
+            ${legsHtml}
         `;
     } else if (plan.kind === 'mars' && plan.method === 'lambert') {
         const tilt = plan.plane_change_dep_deg;
@@ -442,6 +502,12 @@ const planner = initMissionPlanner({
             pushLog(`🛰️ LOI · ${ev.payloadName} captured into ${(ev.plan.r_capt_km - 1737).toFixed(0)} km lunar orbit`, 'capture');
         } else if (ev.type === 'mars-captured') {
             pushLog(`🛰️ MOI · ${ev.payloadName} arrived at Mars`, 'capture');
+        } else if (ev.type === 'launched-tour') {
+            pushLog(`🌌 Tour ${ev.payloadName} launched · ${ev.plan.legs.length} legs · ${ev.plan.tof_total_d.toFixed(0)}d total`, 'transfer');
+        } else if (ev.type === 'tour-leg') {
+            pushLog(`  → Leg ${ev.legIndex + 1}: ${ev.leg.from} → ${ev.leg.to} (v∞ ${ev.leg.v_inf_depart_kms.toFixed(2)} → ${ev.leg.v_inf_arrive_kms.toFixed(2)} km/s)`, 'transfer');
+        } else if (ev.type === 'tour-arrived') {
+            pushLog(`🛰️ Tour complete · captured at ${ev.plan.last_body}`, 'capture');
         } else if (ev.type === 'mode') {
             setModeUI(ev.mode);
         }
@@ -476,6 +542,41 @@ siteSel.addEventListener('change', () => {
     parkIncVal.textContent = `${Math.abs(s.lat).toFixed(1)}°`;
 });
 
+// Lunar TOF slider — show only when "Lunar transfer" is the selected target.
+const lunarTofRow   = document.getElementById('mp-lunar-tof-row');
+const lunarTofLabel = document.getElementById('mp-lunar-tof-label');
+const lunarTofRange = document.getElementById('mp-lunar-tof');
+const lunarTofVal   = document.getElementById('mp-lunar-tof-val');
+
+function updateTargetUI() {
+    const isMoon = targetSel.value === 'moon';
+    lunarTofRow.style.display   = isMoon ? '' : 'none';
+    lunarTofLabel.style.display = isMoon ? '' : 'none';
+    if (isMoon) {
+        // Re-cost on target change.
+        const tof = parseFloat(lunarTofRange.value);
+        const plan = planner.planLunarLambert({
+            jd_depart: planner.getScenarioJD(),
+            tof_d: tof,
+            parking_inc_deg: parseFloat(parkIncRange.value),
+        });
+        renderPlan(plan);
+    }
+}
+targetSel.addEventListener('change', updateTargetUI);
+lunarTofRange.addEventListener('input', () => {
+    const v = parseFloat(lunarTofRange.value);
+    lunarTofVal.textContent = `${v.toFixed(2)} d`;
+    if (targetSel.value === 'moon') {
+        const plan = planner.planLunarLambert({
+            jd_depart: planner.getScenarioJD(),
+            tof_d: v,
+            parking_inc_deg: parseFloat(parkIncRange.value),
+        });
+        renderPlan(plan);
+    }
+});
+
 // ── Wire controls ───────────────────────────────────────────────────
 document.getElementById('mp-launch').addEventListener('click', () => {
     const opts = {
@@ -488,7 +589,30 @@ document.getElementById('mp-launch').addEventListener('click', () => {
         opts.windowJD = marsWindow.jd_depart;
         opts.arriveJD = marsWindow.jd_arrive;
     }
+    if (targetSel.value === 'moon') {
+        opts.lunar_tof_d = parseFloat(lunarTofRange.value);
+    }
     planner.launch(opts);
+});
+
+// ── Tour: optimize + run ────────────────────────────────────────────
+document.getElementById('mp-tour-optimize').addEventListener('click', () => {
+    const presetId = document.getElementById('mp-tour-preset').value;
+    const preset   = planner.TOUR_PRESETS[presetId];
+    if (!preset) return;
+    pushLog(`⏳ Optimizing ${preset.name} — coarse search over depart × per-leg TOFs…`, 'window');
+    setTimeout(() => {
+        const inc = parseFloat(parkIncRange.value);
+        const t0 = performance.now();
+        const plan = planner.optimizeTour({
+            sequence: preset,
+            parking_inc_deg: inc,
+        });
+        const t1 = performance.now();
+        renderPlan(plan);
+        pushLog(`🌌 Tour optimized in ${(t1-t0).toFixed(0)}ms · Δv ${plan.dv_total_kms.toFixed(2)} km/s · ${plan.tof_total_d.toFixed(0)}d · max flyby Δv∞ ${plan.max_flyby_mismatch_kms.toFixed(2)} km/s`, 'window');
+        planner.launchTour({ plan, payloadName: `Tour-${presetId.toUpperCase()}` });
+    }, 30);
 });
 
 document.getElementById('mp-find-window').addEventListener('click', () => {

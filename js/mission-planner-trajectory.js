@@ -20,8 +20,14 @@
  *     the departure hyperbola; real missions optimise this differently.
  */
 
-import { jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric } from './horizons.js';
-import { lambert, vSub, vNorm, vScale, vCross, vDot, sampleKeplerArc } from './mission-planner-lambert.js';
+import {
+    jdNow, moonGeocentric, earthHeliocentric, marsHeliocentric,
+    mercuryHeliocentric, venusHeliocentric,
+} from './horizons.js';
+import {
+    lambert, lambertAll,
+    vSub, vNorm, vScale, vCross, vDot, sampleKeplerArc,
+} from './mission-planner-lambert.js';
 
 // ── Physical constants ───────────────────────────────────────────────────────
 export const KM_PER_AU       = 149597870.7;
@@ -598,3 +604,364 @@ export function porkchopMars({
     };
 }
 
+
+// ── Lunar Lambert (geocentric, with TOF as a knob) ──────────────────────────
+//
+// Replaces the Hohmann lunar transfer with a Lambert solve so the user can
+// pick any TOF — Apollo-fast (~3 d) all the way out to a lazy 7-day glide.
+// For each TOF we sweep the burn-point angle θ around the parking orbit and
+// pick the geometry that minimises total Δv.  This captures the real Apollo
+// trade-off (faster = burn off-tangent = more Δv) without forcing the user
+// to specify a phase angle.
+//
+// The Moon's geocentric inertial state at arrival comes from a centered
+// finite-difference on moonGeocentric().
+
+function _moonGeoCart(m) {
+    const c = Math.cos(m.lat_rad);
+    return [
+        m.dist_km * c * Math.cos(m.lon_rad),
+        m.dist_km * c * Math.sin(m.lon_rad),
+        m.dist_km * Math.sin(m.lat_rad),
+    ];
+}
+
+export function moonGeoState(jd, dt = 0.001) {
+    const r  = _moonGeoCart(moonGeocentric(jd));
+    const rp = _moonGeoCart(moonGeocentric(jd + dt));
+    const rm = _moonGeoCart(moonGeocentric(jd - dt));
+    const inv = 1 / (2 * dt * SECONDS_PER_DAY);
+    return {
+        r,
+        v: [(rp[0] - rm[0]) * inv, (rp[1] - rm[1]) * inv, (rp[2] - rm[2]) * inv],
+    };
+}
+
+export function planLunarLambert({
+    jd_depart           = jdNow(),
+    tof_d               = 5.0,
+    parking_alt_km      = 300,
+    target_alt_moon_km  = 100,
+    parking_inc_deg     = 28.5,
+    n_theta             = 30,           // burn-angle samples
+} = {}) {
+    const jd     = jd_depart;
+    const tof_s  = tof_d * SECONDS_PER_DAY;
+    const r_park = R_EARTH + parking_alt_km;
+    const r_capt = R_MOON  + target_alt_moon_km;
+
+    const moonState  = moonGeoState(jd + tof_d);
+    const r2         = moonState.r;
+    const r2_mag     = Math.hypot(r2[0], r2[1], r2[2]);
+    const r2_unit    = [r2[0]/r2_mag, r2[1]/r2_mag, r2[2]/r2_mag];
+
+    // Build an in-plane perpendicular by crossing r2 with +Z (north). For
+    // |r2 × Z| ≈ 0 (Moon at the pole — never happens in practice) we'd
+    // need a fallback; ignore for now.
+    const z = [0, 0, 1];
+    const cross = vCross(r2_unit, z);
+    const cm = vNorm(cross);
+    const perp = [cross[0]/cm, cross[1]/cm, cross[2]/cm];
+
+    let best = null;
+    for (let i = 0; i < n_theta; i++) {
+        // θ ∈ [60°, 200°]: angular distance from r2 direction along which
+        // the parking-orbit antipode sits. 180° = classical Hohmann burn.
+        const theta = (60 + (200 - 60) * (i / (n_theta - 1))) * D2R;
+        const c = Math.cos(theta), s = Math.sin(theta);
+        const r1 = [
+            r_park * (c * r2_unit[0] + s * perp[0]),
+            r_park * (c * r2_unit[1] + s * perp[1]),
+            r_park * (c * r2_unit[2] + s * perp[2]),
+        ];
+
+        let sol;
+        try {
+            sol = lambert(r1, r2, tof_s, MU_EARTH);
+        } catch (_) { continue; }
+
+        // Parking-orbit prograde tangent at r1, derived from the transfer
+        // plane's actual angular-momentum direction (not from our θ
+        // parameterization, which can run opposite to Lambert's prograde
+        // branch depending on the Moon's geometry).
+        const h_xfer = vCross(r1, sol.v1);
+        const h_mag  = vNorm(h_xfer);
+        const h_unit = [h_xfer[0]/h_mag, h_xfer[1]/h_mag, h_xfer[2]/h_mag];
+        const r1_mag = vNorm(r1);
+        const r1_unit_v = [r1[0]/r1_mag, r1[1]/r1_mag, r1[2]/r1_mag];
+        const tangent = vCross(h_unit, r1_unit_v);   // prograde tangent at r1
+        const v_park = Math.sqrt(MU_EARTH / r_park);
+        const v_park_vec = [tangent[0]*v_park, tangent[1]*v_park, tangent[2]*v_park];
+
+        const dv_burn_vec = vSub(sol.v1, v_park_vec);
+        const dv_tli      = vNorm(dv_burn_vec);
+
+        const v_inf_vec = vSub(sol.v2, moonState.v);
+        const v_inf     = vNorm(v_inf_vec);
+
+        // LOI: capture into circular lunar orbit (tangential, no plane change).
+        const v_perilune_hyp = Math.sqrt(v_inf*v_inf + 2 * MU_MOON / r_capt);
+        const v_circ_moon    = Math.sqrt(MU_MOON / r_capt);
+        const dv_loi         = v_perilune_hyp - v_circ_moon;
+
+        const total = dv_tli + dv_loi;
+        if (!best || total < best.dv_total_kms) {
+            best = {
+                kind: 'lunar', method: 'lambert',
+                jd_depart: jd, jd_arrive: jd + tof_d,
+                tof_d, tof_s,
+                burn_angle_deg: theta * R2D,
+                r1, r2, r_park_km: r_park, r_capt_km: r_capt,
+                lambert: sol,
+                dv_tli_kms: dv_tli,
+                dv_loi_kms: dv_loi,
+                dv_total_kms: total,
+                v_inf_moon_kms: v_inf,
+                parking_inc_deg,
+                moon_at_arrival: moonGeocentric(jd + tof_d),
+                sample: () => sampleKeplerArc(r1, sol.v1, tof_s, MU_EARTH, 96),
+            };
+        }
+    }
+    if (!best) throw new Error(`planLunarLambert: no feasible Lambert at TOF=${tof_d}d`);
+    return best;
+}
+
+// ── Tour planner: chained Lambert legs ──────────────────────────────────────
+//
+// Sequence is an array of {from, to, tof_d} hops. Each hop solves Lambert
+// in the heliocentric frame between the two body positions at the segment
+// endpoints. Flybys are "free" if the magnitude of v∞ matches between the
+// incoming and outgoing legs (within a few hundred m/s); we report the
+// mismatch so the user can see how off the chosen dates are.
+//
+// Initial implementation: caller supplies the per-leg TOF. A future
+// upgrade would optimise the leg TOFs via gradient descent on the total
+// flyby mismatch.
+
+const _BODY_FNS = {
+    mercury: mercuryHeliocentric,
+    venus:   venusHeliocentric,
+    earth:   earthHeliocentric,
+    mars:    marsHeliocentric,
+};
+
+export const TOUR_PRESETS = {
+    veem: {
+        name: 'V-E-E-M Earth → Venus → Earth → Mars (Galileo-style)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus', tof_d: 130 },
+            { to: 'earth', tof_d: 350 },
+            { to: 'mars',  tof_d: 280 },
+        ],
+    },
+    em: {
+        name: 'Direct Earth → Mars (Hohmann reference)',
+        depart: 'earth',
+        legs: [{ to: 'mars', tof_d: 258 }],
+    },
+    eve: {
+        name: 'V-E Earth → Venus → Earth (BepiColombo-like first leg)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus', tof_d: 150 },
+            { to: 'earth', tof_d: 360 },
+        ],
+    },
+    evvm: {
+        name: 'V-V-M Earth → Venus → Venus → Mars (deep flyby)',
+        depart: 'earth',
+        legs: [
+            { to: 'venus', tof_d: 150 },
+            { to: 'venus', tof_d: 225 },     // ~Venus year
+            { to: 'mars',  tof_d: 320 },
+        ],
+    },
+};
+
+export function planTour({
+    jd_depart           = jdNow(),
+    sequence            = TOUR_PRESETS.veem,
+    parking_alt_km      = 300,
+    target_alt_capt_km  = 400,
+    parking_inc_deg     = 28.5,
+} = {}) {
+    const fromKey = sequence.depart;
+    const fromFn  = _BODY_FNS[fromKey];
+    if (!fromFn) throw new Error(`planTour: unknown depart body "${fromKey}"`);
+
+    const legs = [];
+    let jd_curr     = jd_depart;
+    let from_key    = fromKey;
+    let v_inf_in    = null;        // |v∞| arriving at current body (for flyby check)
+
+    for (let i = 0; i < sequence.legs.length; i++) {
+        const seg     = sequence.legs[i];
+        const from_fn = _BODY_FNS[from_key];
+        const to_fn   = _BODY_FNS[seg.to];
+        if (!to_fn) throw new Error(`planTour: unknown body "${seg.to}" in leg ${i}`);
+
+        const jd_a = jd_curr;
+        const jd_b = jd_a + seg.tof_d;
+
+        const stateA = planetState(from_fn, jd_a);
+        const stateB = planetState(to_fn,   jd_b);
+
+        // Try multi-rev too; pick the cheapest (smallest |v1 − v_planet_a|).
+        const candidates = lambertAll(stateA.r, stateB.r, seg.tof_d * SECONDS_PER_DAY, MU_SUN, { maxM: 1 });
+        let best = null;
+        for (const sol of candidates) {
+            const dv = vNorm(vSub(sol.v1, stateA.v));
+            if (!best || dv < best.dv) best = { sol, dv };
+        }
+        if (!best) throw new Error(`planTour: no Lambert solution for leg ${i} (${from_key}→${seg.to})`);
+        const sol = best.sol;
+
+        const v_inf_dep = vSub(sol.v1, stateA.v);
+        const v_inf_arr = vSub(sol.v2, stateB.v);
+
+        legs.push({
+            from: from_key, to: seg.to,
+            jd_depart: jd_a, jd_arrive: jd_b,
+            tof_d: seg.tof_d,
+            r_depart: stateA.r, r_arrive: stateB.r,
+            v_depart: sol.v1,   v_arrive: sol.v2,
+            v_inf_depart_vec: v_inf_dep, v_inf_depart_kms: vNorm(v_inf_dep),
+            v_inf_arrive_vec: v_inf_arr, v_inf_arrive_kms: vNorm(v_inf_arr),
+            // Flyby mismatch: how close the incoming v∞ matches the
+            // outgoing v∞ at the departure body of this leg.
+            flyby_mismatch_kms: v_inf_in == null ? null
+                : Math.abs(v_inf_in - vNorm(v_inf_dep)),
+            lambert: sol,
+            sample: () => sampleKeplerArc(stateA.r, sol.v1, seg.tof_d * SECONDS_PER_DAY, MU_SUN, 96),
+        });
+
+        v_inf_in = vNorm(v_inf_arr);
+        from_key = seg.to;
+        jd_curr  = jd_b;
+    }
+
+    // Departure burn: from parking orbit at the first body (assume Earth).
+    const first = legs[0];
+    let dv_dep = NaN, c3_dep = NaN, dla_dep = NaN, tilt_dep = NaN;
+    if (first.from === 'earth') {
+        const r_park = R_EARTH + parking_alt_km;
+        const v_park = Math.sqrt(MU_EARTH / r_park);
+        const v_inf  = first.v_inf_depart_kms;
+        const v_hyp  = Math.sqrt(v_inf*v_inf + 2 * MU_EARTH / r_park);
+        const dec    = declination(first.v_inf_depart_vec);
+        const tilt   = Math.abs(Math.abs(dec) - parking_inc_deg * D2R);
+        dv_dep = combinedBurnDV(v_park, v_hyp, tilt);
+        c3_dep = v_inf * v_inf;
+        dla_dep = dec * R2D;
+        tilt_dep = tilt * R2D;
+    }
+
+    // Arrival burn: capture at the last body.
+    const last = legs[legs.length - 1];
+    const lastBodyMu = last.to === 'mars'    ? MU_MARS
+                    : last.to === 'venus'   ? 324859.0     // VENUS μ
+                    : last.to === 'mercury' ? 22032.1      // MERCURY μ
+                    : last.to === 'earth'   ? MU_EARTH    : MU_EARTH;
+    const lastBodyR  = last.to === 'mars'    ? R_MARS
+                    : last.to === 'venus'   ? 6051.8
+                    : last.to === 'mercury' ? 2439.7
+                    : last.to === 'earth'   ? R_EARTH    : R_EARTH;
+    const r_capt   = lastBodyR + target_alt_capt_km;
+    const v_circ   = Math.sqrt(lastBodyMu / r_capt);
+    const v_hyp_c  = Math.sqrt(last.v_inf_arrive_kms ** 2 + 2 * lastBodyMu / r_capt);
+    const dv_capt  = v_hyp_c - v_circ;
+
+    return {
+        kind: 'tour',
+        name: sequence.name,
+        sequence_id: Object.keys(TOUR_PRESETS).find(k => TOUR_PRESETS[k] === sequence) || 'custom',
+        jd_depart, jd_arrive: jd_curr,
+        tof_total_d: jd_curr - jd_depart,
+        legs,
+        // Δv breakdown
+        dv_tmi_kms:           dv_dep,
+        dv_capture_kms:       dv_capt,
+        dv_total_kms:         dv_dep + dv_capt,
+        c3_earth_km2s2:       c3_dep,
+        dla_deg:              dla_dep,
+        plane_change_dep_deg: tilt_dep,
+        // Flyby quality: max |v∞_in − v∞_out| across intermediate bodies.
+        max_flyby_mismatch_kms: Math.max(0,
+            ...legs.slice(1).map(l => l.flyby_mismatch_kms || 0)),
+        last_body: last.to,
+        last_body_capture_alt_km: target_alt_capt_km,
+    };
+}
+
+/**
+ * Coarse local search that finds a good (jd_depart, per-leg TOF) combination
+ * for a given tour preset. Cost = total Δv + 0.5 × Σ flyby mismatches.
+ *
+ * Search budget: ~1500–4000 evaluations depending on grid density. Runs in
+ * ~30–80 ms for a 3-leg tour at default density. The result is *good*, not
+ * *optimal* — production tour design uses gradient descent or evolutionary
+ * algorithms on top of Lambert. This is enough to make the pre-canned
+ * preset tours feasible (sub-15 km/s flyby mismatch instead of 20+).
+ */
+export function optimizeTour({
+    jd_start             = jdNow(),
+    sequence             = TOUR_PRESETS.veem,
+    jd_depart_range_days = 540,        // search ± half this around jd_start
+    jd_depart_steps      = 12,
+    tof_range_days       = 80,         // search ± half this around the preset TOF
+    tof_steps            = 5,
+    parking_alt_km       = 300,
+    parking_inc_deg      = 28.5,
+    target_alt_capt_km   = 400,
+} = {}) {
+    const baseTofs = sequence.legs.map(l => l.tof_d);
+    const tofChoices = baseTofs.map(t => {
+        const out = [];
+        for (let s = 0; s < tof_steps; s++) {
+            out.push(t + (-tof_range_days/2) + (tof_range_days * s / (tof_steps - 1)));
+        }
+        return out;
+    });
+
+    let best = null;
+    const total = jd_depart_steps * tofChoices.reduce((a, b) => a * b.length, 1);
+
+    // Cartesian product of leg-TOF choices via index counter.
+    const dims = tofChoices.map(c => c.length);
+    const totalCombos = dims.reduce((a, b) => a*b, 1);
+
+    for (let dep_i = 0; dep_i < jd_depart_steps; dep_i++) {
+        const jd_depart = jd_start
+            + (-jd_depart_range_days/2)
+            + (jd_depart_range_days * dep_i / (jd_depart_steps - 1));
+
+        for (let combo = 0; combo < totalCombos; combo++) {
+            // Decode combo → leg TOFs
+            let rem = combo;
+            const legs = [];
+            for (let k = 0; k < tofChoices.length; k++) {
+                const idx = rem % dims[k];
+                rem = Math.floor(rem / dims[k]);
+                legs.push({ to: sequence.legs[k].to, tof_d: tofChoices[k][idx] });
+            }
+            try {
+                const plan = planTour({
+                    jd_depart,
+                    sequence: { name: sequence.name, depart: sequence.depart, legs },
+                    parking_alt_km, parking_inc_deg, target_alt_capt_km,
+                });
+                const cost = plan.dv_total_kms + 0.5 * plan.max_flyby_mismatch_kms;
+                if (!best || cost < best.cost) {
+                    best = { cost, plan, jd_depart, tofs: legs.map(l => l.tof_d) };
+                }
+            } catch (_) {}
+        }
+    }
+
+    if (!best) throw new Error('optimizeTour: no feasible solution found in search space');
+    best.plan._optimized = true;
+    best.plan._search_evals = total;
+    return best.plan;
+}
