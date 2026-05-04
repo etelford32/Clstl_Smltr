@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     location_lat DOUBLE PRECISION,
     location_lon DOUBLE PRECISION,
     location_city TEXT,
+    -- Account-level display timezone (IANA name); falls back to the
+    -- browser zone when null. Per-location overrides live on
+    -- user_locations.timezone.
+    timezone TEXT,
     -- Notification preferences (basic tier)
     notify_aurora BOOLEAN DEFAULT false,
     notify_conjunction BOOLEAN DEFAULT false,
