@@ -482,6 +482,75 @@ export function flybyPeriapsisForTurn(mu, v_inf_kms, turn_rad) {
  * @param {number[3]} v_inf_in   Incoming v∞ vector (km/s).
  * @param {number[3]} v_inf_out  Required outgoing v∞ vector (km/s).
  */
+/**
+ * B-plane parameters for a hyperbolic flyby.
+ *
+ * The B-plane is the plane perpendicular to the incoming v∞ asymptote ŝ,
+ * located at the target body. Two orthonormal axes (T̂, R̂) span this plane:
+ *
+ *     T̂ = ŝ × K̂ / |ŝ × K̂|     (K̂ = ecliptic north for solar-system work)
+ *     R̂ = ŝ × T̂                (right-handed completion)
+ *
+ * The B-vector points from the body to where the incoming asymptote
+ * pierces the B-plane — it lies in the (T̂, R̂) plane, perpendicular to ŝ
+ * by construction. Its magnitude is the impact parameter:
+ *
+ *     |B|² = r_p · (r_p + 2μ/v∞²)
+ *
+ * The flyby plane (containing v∞_in and v∞_out) is determined by the
+ * rotation axis ĥ = (v∞_in × v∞_out)/|…|, which must be perpendicular to
+ * v∞_in by construction. The B vector points along ĥ × ŝ, lying in the
+ * flyby plane and in the B-plane simultaneously.
+ *
+ * Components B·T and B·R fully parameterize the flyby geometry — JPL
+ * mission designers target specific (B·T, B·R) values to set up arrival
+ * conditions at the next body in a tour.
+ */
+export function bPlaneParameters(v_inf_in, v_inf_out, mu, r_p_km) {
+    const v_in_mag = vNorm(v_inf_in);
+    const s_hat = [v_inf_in[0]/v_in_mag, v_inf_in[1]/v_in_mag, v_inf_in[2]/v_in_mag];
+
+    // T̂ = ŝ × K̂ where K̂ is ecliptic north. Fall back to X if degenerate.
+    const K = [0, 0, 1];
+    let T = vCross(s_hat, K);
+    let T_mag = vNorm(T);
+    if (T_mag < 1e-9) {
+        T = vCross(s_hat, [1, 0, 0]);
+        T_mag = vNorm(T);
+    }
+    const T_hat = [T[0]/T_mag, T[1]/T_mag, T[2]/T_mag];
+    const R_hat = vCross(s_hat, T_hat);    // already unit (ŝ ⊥ T̂)
+
+    // Rotation axis from the actual Lambert legs.
+    const h_vec = vCross(v_inf_in, v_inf_out);
+    const h_mag = vNorm(h_vec);
+    let h_hat, B_hat;
+    if (h_mag < 1e-9) {
+        // Co-linear v∞ vectors → no deflection. B is degenerate; pick T̂.
+        h_hat = [...R_hat];
+        B_hat = [...T_hat];
+    } else {
+        h_hat = [h_vec[0]/h_mag, h_vec[1]/h_mag, h_vec[2]/h_mag];
+        // B̂ = ĥ × ŝ — perpendicular to ŝ, in the flyby plane.
+        const B = vCross(h_hat, s_hat);
+        const Bm = vNorm(B);
+        B_hat = [B[0]/Bm, B[1]/Bm, B[2]/Bm];
+    }
+
+    // |B| from impact-parameter formula.
+    const B_mag = Math.sqrt(r_p_km * (r_p_km + 2 * mu / (v_in_mag * v_in_mag)));
+    const B_vec = [B_hat[0]*B_mag, B_hat[1]*B_mag, B_hat[2]*B_mag];
+
+    return {
+        s_hat, T_hat, R_hat, h_hat, B_hat,
+        B_vec, B_mag,
+        B_dot_T: vDot(B_vec, T_hat),
+        B_dot_R: vDot(B_vec, R_hat),
+        // Verify rotation-axis constraint: ĥ ⊥ ŝ (should be ~0 always).
+        rotation_axis_residual: Math.abs(vDot(h_hat, s_hat)),
+    };
+}
+
 export function flybyAssessment(body_key, v_inf_in, v_inf_out) {
     const body = FLYBY_BODIES[body_key];
     if (!body) throw new Error(`flybyAssessment: unknown body "${body_key}"`);
@@ -521,6 +590,9 @@ export function flybyAssessment(body_key, v_inf_in, v_inf_out) {
         dv_mag_kms:        dv_mag,
         dv_dir_kms:        dv_dir,
         dv_powered_kms:    dv_mag + dv_dir,
+        b_plane:           bPlaneParameters(v_inf_in, v_inf_out, body.mu, r_p),
+        body_radius_km:    body.r_km,
+        body_mu:           body.mu,
     };
 }
 
