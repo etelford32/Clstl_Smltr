@@ -77,11 +77,17 @@ export const PLANET_SPIN = {
 // vis_scale: visual radius scale factor (moons are tiny at solar system scale)
 
 export const JUPITER_MOONS = {
-    io:       { a_km:  421_800, period_d:  1.769,  L0_deg: 106.1, incl_deg: 0.04, color: 0xccbb44, vis_scale: 0.18 },
-    europa:   { a_km:  671_100, period_d:  3.551,  L0_deg: 176.6, incl_deg: 0.47, color: 0xc8bba0, vis_scale: 0.15 },
-    ganymede: { a_km: 1_070_400, period_d:  7.155, L0_deg:  43.6, incl_deg: 0.21, color: 0xaa9988, vis_scale: 0.22 },
-    callisto: { a_km: 1_882_700, period_d: 16.689, L0_deg: 260.0, incl_deg: 0.51, color: 0x776655, vis_scale: 0.20 },
+    io:       { a_km:   421_800, period_d:  1.7691, L0_deg: 106.1, incl_deg: 0.04, color: 0xe8d65f, vis_scale: 0.10, r_km: 1821,
+                desc: 'Most volcanically active body in the solar system · sulphur surface' },
+    europa:   { a_km:   671_100, period_d:  3.5512, L0_deg: 176.6, incl_deg: 0.47, color: 0xd9c8a5, vis_scale: 0.09, r_km: 1561,
+                desc: 'Smooth ice shell over a global subsurface ocean · prime astrobiology target' },
+    ganymede: { a_km: 1_070_400, period_d:  7.1546, L0_deg:  43.6, incl_deg: 0.21, color: 0x9b8a78, vis_scale: 0.13, r_km: 2634,
+                desc: 'Largest moon in the solar system · only moon with a magnetic field' },
+    callisto: { a_km: 1_882_700, period_d: 16.6890, L0_deg: 260.0, incl_deg: 0.51, color: 0x6e5a48, vis_scale: 0.12, r_km: 2410,
+                desc: 'Most cratered body in the solar system · old, dark, icy crust' },
 };
+// Jupiter equatorial radius (km) — used for the moon orbit-scale conversion.
+export const JUPITER_R_KM = 71_492;
 
 export const SATURN_MOONS = {
     mimas:     { a_km:   185_539, period_d:  0.9424, L0_deg:  14.0, incl_deg: 1.57, color: 0xc8c2b8, vis_scale: 0.05, r_km: 198,

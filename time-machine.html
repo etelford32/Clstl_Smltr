@@ -1115,7 +1115,7 @@ import {
 } from './js/horizons.js';
 import { ASTEROID_EL } from './js/orbital-mechanics/nbody-init.js';
 import { elementsToState } from './js/orbital-mechanics/yoshida4.js';
-import { SATURN_MOONS, SATURN_R_KM } from './js/planet-moons.js';
+import { SATURN_MOONS, SATURN_R_KM, JUPITER_MOONS, JUPITER_R_KM } from './js/planet-moons.js';
 
 // ── Body table ───────────────────────────────────────────────────────
 const BODIES = [
@@ -1157,6 +1157,11 @@ const BODY_INFO = {
     vesta:   { mass:'2.59×10²⁰ kg',  radius:'263 km',     rot:'5.34 h',    tilt:'29°',     desc:'Bright differentiated asteroid.' },
     pallas:  { mass:'2.04×10²⁰ kg',  radius:'256 km',     rot:'7.81 h',    tilt:'84°',     desc:'Highly inclined main-belt body.' },
     hygiea:  { mass:'8.67×10¹⁹ kg',  radius:'215 km',     rot:'13.83 h',   tilt:'—',       desc:'Carbonaceous outer main-belt body.' },
+    // ── Jupiter Galilean moons (Laplace 1:2:4 resonance for Io:Europa:Ganymede) ─
+    io:        { mass:'8.93×10²² kg', radius:'1,821 km',   rot:'1.77 d',     tilt:'0°',      desc:'Most volcanically active body in the solar system · sulphur plumes.' },
+    europa:    { mass:'4.80×10²² kg', radius:'1,561 km',   rot:'3.55 d',     tilt:'0°',      desc:'Smooth ice shell over a global subsurface ocean · astrobiology target.' },
+    ganymede:  { mass:'1.482×10²³ kg', radius:'2,634 km',   rot:'7.15 d',     tilt:'0°',      desc:'Largest moon in the solar system · only moon with a magnetic field.' },
+    callisto:  { mass:'1.076×10²³ kg', radius:'2,410 km',   rot:'16.69 d',    tilt:'0°',      desc:'Most heavily cratered body in the solar system · ancient icy crust.' },
     // ── Saturn major moons ────────────────────────────────────────────
     mimas:     { mass:'3.75×10¹⁹ kg', radius:'198 km',     rot:'0.94 d',     tilt:'0°',      desc:'Innermost large moon · Herschel "Death Star" crater.' },
     enceladus: { mass:'1.08×10²⁰ kg', radius:'252 km',     rot:'1.37 d',     tilt:'0°',      desc:'Cryovolcanic plumes from south-polar tiger stripes.' },
@@ -2074,7 +2079,8 @@ legend.innerHTML =
     ).join('') +
     '<span class="lg" style="opacity:.75; margin-left:6px;"><span class="dt" style="background:#6affc8; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L4</span>' +
     '<span class="lg" style="opacity:.75"><span class="dt" style="background:#ffae6a; width:7px; height:7px; clip-path:polygon(50% 0,100% 100%,0 100%)"></span>L5</span>' +
-    '<span class="lg" style="opacity:.65; margin-left:6px;"><span class="dt" style="background:#d9aa55; width:5px; height:5px; box-shadow:0 0 4px #d9aa55"></span>Saturn moons (zoom in)</span>';
+    '<span class="lg" style="opacity:.65; margin-left:6px;"><span class="dt" style="background:#d9c8a5; width:5px; height:5px; box-shadow:0 0 4px #d9c8a5"></span>Galilean moons (zoom in)</span>' +
+    '<span class="lg" style="opacity:.65;"><span class="dt" style="background:#d9aa55; width:5px; height:5px; box-shadow:0 0 4px #d9aa55"></span>Saturn moons (zoom in)</span>';
 
 // ── Body picker + element table ──────────────────────────────────────
 const elBodyGrid = document.getElementById('tm-body-grid');
@@ -2992,10 +2998,11 @@ const BODY_LABEL = Object.fromEntries(BODIES.map(b => [b.key, b.name]));
 BODY_LABEL.sun = 'Sun';
 for (const a of ASTEROIDS) BODY_LABEL[a.key] = a.name;
 
-// Build Saturn's moon system now that the lookup tables exist. Moons
-// are children of the Saturn mesh — they inherit Saturn's axial tilt
-// and orbit in its equatorial plane.
-buildMoonSystem(meshes.saturn, BODY_SIZE_BY_KEY.saturn, SATURN_MOONS, SATURN_R_KM, 'saturn');
+// Build outer-planet moon systems now that the lookup tables exist.
+// Moons are children of their primary's mesh, so they inherit that
+// planet's axial tilt and orbit in its equatorial plane.
+buildMoonSystem(meshes.jupiter, BODY_SIZE_BY_KEY.jupiter, JUPITER_MOONS, JUPITER_R_KM, 'jupiter');
+buildMoonSystem(meshes.saturn,  BODY_SIZE_BY_KEY.saturn,  SATURN_MOONS,  SATURN_R_KM,  'saturn');
 for (const moonKey in moonMeshes) {
     const cfg = moonMeshes[moonKey].cfg;
     const lbl = moonMeshes[moonKey].mesh.userData.label;
