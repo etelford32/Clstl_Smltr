@@ -1898,6 +1898,13 @@ import { WeatherHistory }       from './js/weather-history.js';
 import { WeatherFrameResolver } from './js/weather-frame-resolver.js';
 import { ForecastRegistry, PersistenceForecaster, CHANNEL_NAMES, FORECAST_HORIZONS_H } from './js/weather-forecast.js';
 import { WeatherForecastValidator } from './js/weather-forecast-validation.js';
+import { PrecipClimatology }        from './js/precip-climatology.js';
+import { NasaPrecipExtractor }      from './js/nasa-precip-extractor.js';
+import {
+    PrecipClimatologyForecaster,
+    PrecipAnomalyPersistenceForecaster,
+    PrecipAnomalyARForecaster,
+} from './js/precip-forecast.js';
 import { NWSAlerts, ALERT_COLORS, ALERT_CSS_COLORS, ALERT_PULSE_FREQ, SEVERITY_ORDER, classifyAlertEvent } from './js/nws-alerts.js';
 import { getAlertIconTexture, precomputeAlertIcons } from './js/alert-icons.js';
 import { IsobarLayer, geoWindMs, ISOBAR_LEVELS } from './js/isobar-engine.js';
@@ -3899,6 +3906,49 @@ wxFeed.backfill(wxGridHistory, 24).then(n => {
 const wxForecastRegistry = new ForecastRegistry({ history: wxGridHistory });
 wxForecastRegistry.register(new PersistenceForecaster());
 
+// ── Precipitation deep-dive: long-memory climatology + anomaly models ─────
+// PrecipClimatology survives reloads (IDB) and accumulates a per-cell ×
+// per-local-hour running mean of the precip channel forever. Once it has
+// material coverage (>~14 days), the anomaly forecasters below have a
+// physically meaningful prior to subtract — that's how a model beats
+// raw persistence at >12 h horizons where the diurnal cycle dominates.
+const precipClimatology = new PrecipClimatology();
+precipClimatology.open().then(() => {
+    // Backfill any frames already in the history ring (from IDB warmup)
+    // so the climatology benefits from the past 24 h immediately.
+    for (const fr of wxGridHistory.all()) {
+        precipClimatology.ingest(fr);
+    }
+    // Subscribe to live ingests for the rest of the session.
+    document.addEventListener('weather-history-ingest', (ev) => {
+        const f = ev?.detail?.frame;
+        if (f) precipClimatology.ingest(f);
+    });
+}).catch(err => {
+    console.info('[earth] precip climatology open failed:', err?.message);
+});
+
+// NASA IMERG colour-ramp inverter — gives us an *observed* precip field
+// independent of Open-Meteo's modelled one. Listens for the existing
+// earth-obs-update event; no extra fetch.
+const nasaPrecipExtractor = new NasaPrecipExtractor({ gridW: 72, gridH: 36 });
+nasaPrecipExtractor.start();
+
+// Register the three precip-specialised forecasters. Each implements the
+// same Forecaster interface as PersistenceForecaster, so the validator
+// scores them against persistence-v1 automatically and the SW-panel
+// skill table picks them up on the next render pass.
+wxForecastRegistry.register(new PrecipClimatologyForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipAnomalyPersistenceForecaster({ climatology: precipClimatology }));
+wxForecastRegistry.register(new PrecipAnomalyARForecaster({ climatology: precipClimatology }));
+
+// Flush climatology to disk on tab hide so a refresh doesn't lose the
+// last batch of in-memory updates. visibilitychange fires on backgrounding,
+// reload, and close; cheap insurance against losing forever-history data.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') precipClimatology.flushNow();
+});
+
 const wxForecastValidator = new WeatherForecastValidator({ history: wxGridHistory });
 // Best-effort: validator.start() awaits IDB open. Don't block the page.
 wxForecastValidator.start().catch(err => {
@@ -3946,6 +3996,44 @@ function _paintForecastSkill(summary) {
         }
         html += '</div>';
     }
+
+    // Precipitation deep-dive section: rank every registered model by
+    // its precip MAE so the user can watch the climatology + anomaly
+    // models warm up vs persistence over the first few days. Murphy
+    // skill (1 - MSE_model/MSE_persistence) is shown when both sides
+    // have ≥5 samples — below that threshold we just show MAE.
+    const precipModels = Object.keys(summary)
+        .filter(m => summary[m]?.precip)
+        .sort();
+    if (precipModels.length > 1) {
+        html += '<div class="skill-row skill-head" style="margin-top:6px;"><span>precip</span>';
+        for (const h of FORECAST_HORIZONS_H) html += `<span>${h}h</span>`;
+        html += '</div>';
+        for (const model of precipModels) {
+            const short = model.replace(/^precip-/, '').replace(/-v1$/, '');
+            html += `<div class="skill-row"><span class="skill-ch" title="${model}">${short}</span>`;
+            const ref = summary['persistence-v1']?.precip;
+            for (const h of FORECAST_HORIZONS_H) {
+                const m = summary[model].precip?.[h];
+                const r = ref?.[h];
+                const n = m?.n | 0;
+                let cell = '—';
+                let title = `n=${n}`;
+                if (Number.isFinite(m?.mae)) {
+                    if (model === 'persistence-v1' || !Number.isFinite(r?.mse) || (r?.n | 0) < 5 || n < 5) {
+                        cell = m.mae.toFixed(2);
+                    } else {
+                        const skill = 1 - (m.mse / r.mse);
+                        cell = (skill * 100).toFixed(0) + '%';
+                        title += ` MAE=${m.mae.toFixed(2)} skill=${skill.toFixed(2)}`;
+                    }
+                }
+                html += `<span class="skill-cell" title="${title}">${cell}</span>`;
+            }
+            html += '</div>';
+        }
+    }
+
     root.innerHTML = html;
 }
 document.addEventListener('weather-forecast-validation-update', (ev) => {
