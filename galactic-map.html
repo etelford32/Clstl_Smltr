@@ -310,6 +310,13 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <div title="Real cosmological distance from the Sun corresponding to the camera's position (inverse log-mapping beyond 60 kly)">
                 <span class="label">Cam → Sun: </span><span class="val" id="hud-view">—</span>
             </div>
+            <div class="sep"></div>
+            <div title="Time elapsed in the Sun's current orbit around Sgr A*. One full Galactic year ≈ 225 Myr.">
+                <span class="label">Galactic year: </span><span class="val" id="hud-galactic-yr">—</span>
+            </div>
+            <div title="Sun's orbital phase around Sgr A* — 0% / 100% places the Sun at the +x side of the disk (current epoch).">
+                <span class="label">Orbital phase: </span><span class="val" id="hud-galactic-phase">—</span>
+            </div>
         </div>
 
         <!-- Sidebar toggle -->
@@ -384,6 +391,10 @@ canvas { display:block; width:100% !important; height:100% !important; }
             <input type="checkbox" id="tog-plane" checked>
             <label for="tog-plane">Galactic plane</label>
         </div>
+        <div class="tog-row" title="Animated Sun marker tracing its orbit around Sgr A* (one orbit ≈ 225 Myr).">
+            <input type="checkbox" id="tog-sun-orbit" checked>
+            <label for="tog-sun-orbit">☉ Sun's orbit around Sgr A*</label>
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Spectral Type Legend</div>
         <div class="legend-item"><div class="legend-dot" style="background:#88aaff"></div>O/B — hot blue/white</div>
@@ -405,6 +416,16 @@ canvas { display:block; width:100% !important; height:100% !important; }
         <div class="legend-item"><div class="legend-dot" style="background:#554477;border:1px solid #888"></div>Cosmic void (negative space)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#3366ff"></div>Galaxy cluster (ICM glow)</div>
         <div class="legend-item"><div class="legend-dot" style="background:#ffe0a0"></div>Supergiant cD galaxy</div>
+
+        <div class="sb-hd" style="margin-top:16px">Sun's Orbit Around Sgr A*</div>
+        <div style="font-size:10px;color:#666;line-height:1.6">
+            <strong style="color:#ffcc77">Radius:</strong> 26,673 ly (8.178 kpc).<br>
+            <strong style="color:#ffcc77">Speed:</strong> ~220 km/s (LSR).<br>
+            <strong style="color:#ffcc77">Period:</strong> ~225 Myr — one Galactic year.<br>
+            <strong style="color:#ffcc77">Direction:</strong> toward galactic l = 90°.<br>
+            Animated marker advances 1 full orbit every 60&nbsp;s.<br>
+            Yellow tick marks every 25 Myr; amber trail shows the last ~80 Myr.
+        </div>
 
         <div class="sb-hd" style="margin-top:16px">Coordinate Reference</div>
         <div style="font-size:10px;color:#666;line-height:1.6">
@@ -1390,6 +1411,209 @@ const CATALOG = [
     },
 
     // ── Section header (sidebar only — no 3D object) ───────────────────────
+    { id: '__sep_local_universe', sectionHeader: 'Local Universe Galaxies', isHeader: true },
+
+    // ── Notable nearby galaxies (10–70 Mly) ────────────────────────────────
+    {
+        id: 'cen_a', name: 'Centaurus A (NGC 5128)', abbr: 'Cen A', type: 'Lenticular Galaxy + AGN',
+        l: 309.52, b: 19.42, dist: 12_400_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x665544, glowColor: 0xff8844, size: 4.0,
+        desc: 'The closest active galactic nucleus to Earth and the fifth-brightest galaxy in the sky. A peculiar lenticular galaxy bisected by a dramatic dust lane — the result of an ancient merger with a spiral galaxy. Drives a 1.4-million-light-year-long radio jet visible from Earth.',
+        props: [
+            ['Type', 'Lenticular peculiar (S0 pec) + radio AGN'],
+            ['Distance', '12.4 Mly (3.8 Mpc)'],
+            ['Galactic l / b', '309.52° / +19.42°'],
+            ['Mass', '~1 × 10¹² M☉'],
+            ['Diameter', '~60,000 ly'],
+            ['Central BH', '~5.5 × 10⁷ M☉'],
+            ['Radio jet', '~1.4 Mly (largest jets visible from Earth)'],
+            ['Notable', 'Closest AGN; merger remnant with prominent dust lane'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm82', name: 'M82 (Cigar Galaxy)', abbr: 'M82', type: 'Starburst Galaxy',
+        l: 141.41, b: 40.57, dist: 11_500_000,
+        isIntergalactic: true,
+        temp: 6000, spectral: 'G',
+        color: 0xffbb88, glowColor: 0xff7733, size: 3.5,
+        desc: 'A prototypical edge-on starburst galaxy with star-formation rates ~10× the Milky Way. Tidal interaction with M81 funnelled gas into the core, igniting a "superwind" of hot gas blowing perpendicular to the disk that is visible in Hα and X-ray imagery.',
+        props: [
+            ['Type', 'Starburst Irregular (I0)'],
+            ['Distance', '11.5 Mly (3.5 Mpc)'],
+            ['Galactic l / b', '141.41° / +40.57°'],
+            ['Mass', '~5 × 10¹⁰ M☉'],
+            ['Diameter', '~37,000 ly'],
+            ['Star formation rate', '~10 M☉/yr (10× MW)'],
+            ['Notable', 'Bipolar superwind from starburst core'],
+            ['Companion', 'Interacting with M81'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm81', name: 'M81 (Bode’s Galaxy / NGC 3031)', abbr: 'M81', type: 'Grand-design Spiral',
+        l: 142.09, b: 40.90, dist: 11_800_000,
+        isIntergalactic: true,
+        temp: 5800, spectral: 'G',
+        color: 0xaaccff, size: 4.0,
+        desc: 'A grand-design spiral and the brightest member of the M81 Group. Its sweeping symmetric arms — sharpened by interaction with M82 and NGC 3077 — make it one of the most photogenic galaxies in the northern sky. Contains a low-luminosity AGN powered by a ~7 × 10⁷ M☉ black hole.',
+        props: [
+            ['Type', 'Grand-design Spiral — SA(s)ab'],
+            ['Distance', '11.8 Mly (3.6 Mpc)'],
+            ['Galactic l / b', '142.09° / +40.90°'],
+            ['Mass', '~7 × 10¹¹ M☉'],
+            ['Diameter', '~96,000 ly'],
+            ['Central BH', '~7 × 10⁷ M☉ (LLAGN)'],
+            ['Notable', 'Brightest member of the M81 Group'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'ngc253', name: 'NGC 253 (Sculptor Galaxy)', abbr: 'NGC 253', type: 'Starburst Spiral',
+        l: 97.37, b: -87.96, dist: 11_400_000,
+        isIntergalactic: true,
+        temp: 5500, spectral: 'G',
+        color: 0xffccaa, size: 3.6,
+        desc: 'The largest member of the Sculptor Group and one of the closest starburst galaxies. An intermediate spiral seen nearly edge-on, with a vigorously star-forming nucleus and clumpy dust lanes. Notable for its galactic-scale outflow detected in X-ray and millimetre wavelengths.',
+        props: [
+            ['Type', 'Intermediate Spiral / Starburst — SAB(s)c'],
+            ['Distance', '11.4 Mly (3.5 Mpc)'],
+            ['Galactic l / b', '97.37° / −87.96°'],
+            ['Mass', '~2 × 10¹¹ M☉'],
+            ['Diameter', '~90,000 ly'],
+            ['Star formation rate', '~5 M☉/yr (nucleus dominates)'],
+            ['Group', 'Sculptor Group (south galactic pole)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm51', name: 'M51 (Whirlpool Galaxy)', abbr: 'M51', type: 'Interacting Spiral Pair',
+        l: 104.85, b: 68.56, dist: 23_000_000,
+        isIntergalactic: true,
+        temp: 5500, spectral: 'G',
+        color: 0xbbccff, size: 4.2,
+        desc: 'The first galaxy ever recognised as a spiral (Lord Rosse, 1845). Two interacting galaxies — NGC 5194 and the smaller NGC 5195 — locked in a tidal embrace that has sharpened M51’s magnificent two-arm structure. A modern textbook example of grand-design spiral morphology.',
+        props: [
+            ['Type', 'Grand-design Spiral pair — SA(s)bc + SB0pec'],
+            ['Distance', '23 Mly (7.0 Mpc)'],
+            ['Galactic l / b', '104.85° / +68.56°'],
+            ['Mass', '~1.6 × 10¹¹ M☉'],
+            ['Diameter', '~76,000 ly'],
+            ['Companion', 'NGC 5195 (currently passing through disk)'],
+            ['Notable', 'First spiral galaxy ever identified (1845)'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'm104', name: 'M104 (Sombrero Galaxy)', abbr: 'M104', type: 'Lenticular / Spiral',
+        l: 298.46, b: 51.15, dist: 29_300_000,
+        isIntergalactic: true,
+        temp: 5200, spectral: 'G',
+        color: 0xddccaa, glowColor: 0xffcc88, size: 4.1,
+        desc: 'Hat-shaped galaxy famous for its bright bulge, prominent edge-on dust lane, and unusually large supermassive black hole (~10⁹ M☉). Its halo of hundreds of globular clusters and intermediate-age stellar population suggest a complex, possibly merger-driven, formation history.',
+        props: [
+            ['Type', 'Lenticular / unbarred spiral — SA(s)a'],
+            ['Distance', '29.3 Mly (9.0 Mpc)'],
+            ['Galactic l / b', '298.46° / +51.15°'],
+            ['Mass', '~8 × 10¹¹ M☉'],
+            ['Diameter', '~50,000 ly'],
+            ['Central BH', '~1 × 10⁹ M☉ (one of the largest in the local universe)'],
+            ['Globular clusters', '~1,200–2,000'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'antennae', name: 'Antennae Galaxies (NGC 4038/4039)', abbr: 'Antennae', type: 'Galaxy Merger',
+        l: 286.4, b: 41.8, dist: 65_000_000,
+        isIntergalactic: true,
+        temp: 5500, spectral: 'G',
+        color: 0xffaa88, glowColor: 0xff7755, size: 4.4,
+        desc: 'A canonical late-stage major merger between two formerly separate spiral galaxies. Shock-compressed gas has triggered an extreme starburst — including hundreds of newly forming "super star clusters" — visible across the optical, IR and X-ray bands. The trailing tidal tails give the system its name.',
+        props: [
+            ['Type', 'Galaxy merger pair (in contact)'],
+            ['Distance', '~65 Mly (20 Mpc)'],
+            ['Galactic l / b', '286.4° / +41.8°'],
+            ['Stage', 'Late-stage major merger (~600 Myr in)'],
+            ['Star formation rate', '~20 M☉/yr (peak super-cluster era)'],
+            ['Tidal tail length', '~360,000 ly'],
+            ['Notable', 'Hundreds of young super-star clusters'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'ngc6240', name: 'NGC 6240', abbr: 'NGC 6240', type: 'Dual-AGN ULIRG',
+        l: 20.7, b: 27.3, dist: 400_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0xff5522, glowColor: 0xff3300, size: 3.8,
+        desc: 'Late-stage galaxy merger hosting two — and possibly three — supermassive black holes separated by only ~3,000 ly. An ultraluminous infrared galaxy (ULIRG) with shocked molecular gas, intense star formation, and X-ray luminous AGN signatures. A nearby analog of the merger-driven AGN activity that dominated the early universe.',
+        props: [
+            ['Type', 'ULIRG / Multiple-AGN Merger'],
+            ['Distance', '~400 Mly (123 Mpc)'],
+            ['Galactic l / b', '20.7° / +27.3°'],
+            ['BH separation', '~3,000 ly (Chandra X-ray imaging)'],
+            ['BH masses', '~10⁸ + ~10⁹ M☉ (each component)'],
+            ['IR luminosity', '~10¹² L☉ (ULIRG class)'],
+            ['Notable', 'Possibly a third lurking SMBH; merger analogue for early universe'],
+        ],
+        isCluster: true,
+    },
+    {
+        id: 'txs0506', name: 'TXS 0506+056', abbr: 'TXS 0506', type: 'Neutrino-source Blazar',
+        l: 195.4, b: -19.6, dist: 5_700_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xffdd55, size: 3.4,
+        desc: 'The first astrophysical source confidently associated with a high-energy neutrino. On 22 Sept 2017, IceCube detected a 290-TeV neutrino spatially coincident with this blazar during a multi-wavelength flare — opening multi-messenger astronomy with neutrinos and pinpointing blazars as long-suspected cosmic accelerators.',
+        props: [
+            ['Type', 'BL Lac Blazar / Cosmic-ray accelerator'],
+            ['Distance', '~5.7 Gly (lookback; z = 0.337)'],
+            ['Galactic l / b', '195.4° / −19.6°'],
+            ['Notable detection', 'IceCube IC-170922A — 290 TeV neutrino (22 Sep 2017)'],
+            ['Coincident flare', 'Fermi-LAT γ-ray flare during neutrino arrival'],
+            ['Significance', 'First non-stellar non-cosmological neutrino source'],
+            ['Discovery papers', 'IceCube + Fermi-LAT + MAGIC, Science 2018'],
+        ],
+    },
+    {
+        id: 'j0529_4351', name: 'J0529-4351 (Most Luminous Quasar)', abbr: 'J0529-4351', type: 'Hyperluminous Quasar',
+        l: 256.4, b: -45.5, dist: 12_000_000_000,
+        isIntergalactic: true,
+        temp: 0, spectral: 'SMBH',
+        color: 0x000000, glowColor: 0xff9911, size: 3.6,
+        desc: 'The most luminous object known in the universe (Onken et al., Nature Astronomy, Feb 2024). At redshift z=3.962, this quasar shines with 500 trillion times the luminosity of the Sun — fueled by a supermassive black hole accreting an entire Sun’s worth of mass per day. Its accretion disk alone is ~7 light-years across.',
+        props: [
+            ['Type', 'Hyperluminous Quasar (record holder, 2024)'],
+            ['Distance', '~12.0 Gly (z = 3.962)'],
+            ['Galactic l / b', '256.4° / −45.5°'],
+            ['BH mass', '~1.7 × 10¹⁰ M☉'],
+            ['Luminosity', '~5 × 10¹⁴ L☉ (most luminous known)'],
+            ['Accretion disk', '~7 ly diameter'],
+            ['Mass intake', '~1 M☉/day (~370 Earth masses/sec)'],
+            ['Discovery', 'Onken et al. 2024 — eROSITA + Siding Spring confirmation'],
+        ],
+    },
+    {
+        id: 'sag_dwarf', name: 'Sagittarius Dwarf Spheroidal', abbr: 'Sgr dSph', type: 'Tidally Disrupted Dwarf',
+        l: 5.6, b: -14.1, dist: 65_000,
+        isIntergalactic: true,
+        temp: 4500, spectral: 'K',
+        color: 0xddbb88, size: 2.6,
+        desc: 'A dwarf spheroidal galaxy on the opposite side of the galactic centre from us, currently being torn apart by Milky Way tides. Its stripped stars form the Sagittarius Stream — a vast tidal arc looping over our galactic poles — used as a sensitive probe of the Milky Way’s dark matter halo.',
+        props: [
+            ['Type', 'Dwarf spheroidal galaxy (in disruption)'],
+            ['Distance', '~65,000 ly (20 kpc)'],
+            ['Galactic l / b', '5.6° / −14.1°'],
+            ['Mass', '~4 × 10⁸ M☉ (luminous component)'],
+            ['Tidal stream', 'Sagittarius Stream — wraps galactic halo'],
+            ['Notable', 'Probe of MW dark matter potential'],
+        ],
+        isCluster: true,
+    },
+
+    // ── Section header (sidebar only — no 3D object) ───────────────────────
     { id: '__sep_cosmic_dawn', sectionHeader: 'Cosmic Dawn (z > 6)', isHeader: true },
 
     // ── Cosmic Dawn objects (z > 6) ────────────────────────────────────────
@@ -2087,16 +2311,28 @@ function flyToStar(s) {
 //  GALAXY PARTICLE SYSTEM
 // ══════════════════════════════════════════════════════════════════════════
 function buildGalaxy() {
-    const N = 90000;
+    const N = 120000;
     const positions = new Float32Array(N * 3);
     const colors    = new Float32Array(N * 3);
     const sizes     = new Float32Array(N);
 
     // ── Galaxy parameters ─────────────────────────────────────────────────
-    const GALAXY_R = 50000;   // disk radius (ly)
-    const BULGE_R  = 4000;    // central bulge radius (ly)
-    const DISK_H   = 700;     // vertical scale height (ly)
-    const PITCH    = Math.tan(13 * Math.PI / 180); // 13° logarithmic pitch
+    // Real MW values (Bland-Hawthorn & Gerhard 2016):
+    //   thin disk scale height ~300 pc (~1,000 ly), thick disk ~900 pc (~2,900 ly)
+    //   bulge half-light radius ~3,000 ly; bar half-length ~16,000 ly
+    //   stellar disk truncation ~50,000 ly
+    const GALAXY_R    = 50000;   // disk radius (ly)
+    const BULGE_R     = 4000;    // central bulge radius (ly)
+    const THIN_H      = 350;     // thin disk scale height (ly)  — young pop, blue arms
+    const THICK_H     = 1400;    // thick disk scale height (ly) — older pop, halo-like
+    const PITCH       = Math.tan(13 * Math.PI / 180); // 13° logarithmic pitch
+
+    // Sample exponential height ±h*scale (sign-randomised exp distribution)
+    function sampleExpH(scale) {
+        const u = Math.random();
+        const r = -scale * Math.log(1 - 0.999 * u);
+        return Math.random() < 0.5 ? r : -r;
+    }
 
     // Logarithmic spiral: r = R0 * exp(PITCH * winding)
     // R0 = 2500 ly.  To reach 50,000 ly: winding_max = ln(50000/2500)/PITCH ≈ 13.25 rad
@@ -2121,19 +2357,44 @@ function buildGalaxy() {
 
     let idx = 0;
 
+    // ── Galactic bar parameters ───────────────────────────────────────────
+    // Real MW: half-length ~16 kly, axis ratio ~3:1:1, oriented ~25–30°
+    // from the Sun-GC line in the +z direction (toward galactic l ~25°).
+    const BAR_HALF    = 16000;   // bar half-length (ly)
+    const BAR_W       = 2400;    // bar half-width (ly)
+    const BAR_H       = 1100;    // bar half-thickness (ly)
+    const BAR_ANGLE   = 27 * Math.PI / 180;  // bar rotation in scene XZ plane
+    const cosBA = Math.cos(BAR_ANGLE), sinBA = Math.sin(BAR_ANGLE);
+
     for (let i = 0; i < N; i++) {
         const t = Math.random();
         let x, y, z, bright;
+        let cTone = 0;   // 0 = neutral, +1 = blue young, -1 = red old
 
-        if (t < 0.12) {
-            // ── Central bulge (oblate spheroid) ───────────────────────
+        if (t < 0.10) {
+            // ── Central bulge (oblate spheroid, deep red-amber) ─────────
             const r   = Math.pow(Math.random(), 0.4) * BULGE_R;
             const phi = (Math.random() - 0.5) * Math.PI;
             const th  = Math.random() * Math.PI * 2;
             x = r * Math.cos(phi) * Math.cos(th);
-            y = r * Math.cos(phi) * Math.sin(th) * 0.35;
-            z = r * Math.sin(phi) * 0.6;
-            bright = 0.9 + Math.random() * 0.1;
+            z = r * Math.cos(phi) * Math.sin(th) * 0.85;
+            y = r * Math.sin(phi) * 0.55;
+            bright = 0.85 + Math.random() * 0.15;
+            cTone = -0.6;
+        } else if (t < 0.22) {
+            // ── Galactic bar (peanut/X-shaped, oriented ~27°) ─────────
+            // Sample inside a triaxial ellipsoid in bar-local coords, then rotate.
+            const u = Math.random() * 2 - 1;       // along bar
+            const v = (Math.random() - 0.5) * 2;   // across bar
+            const w = sampleExpH(BAR_H * 0.35);
+            const xb = u * BAR_HALF;
+            const zb = v * BAR_W * (1 - 0.55 * Math.abs(u));   // taper toward ends
+            // Rotate (xb, zb) by BAR_ANGLE in the XZ plane
+            x = xb * cosBA - zb * sinBA;
+            z = xb * sinBA + zb * cosBA;
+            y = w;
+            bright = 0.7 + Math.random() * 0.3;
+            cTone = -0.35;
         } else {
             // ── Logarithmic spiral arm ─────────────────────────────────
             const arm     = Math.floor(Math.random() * 4);
@@ -2151,8 +2412,14 @@ function buildGalaxy() {
             const angle = startAngle + winding + sTheta;
             x = (r + sr) * Math.cos(angle);
             z = (r + sr) * Math.sin(angle);
-            y = (Math.random() - 0.5) * DISK_H * Math.exp(-r / 28000);
+            // Two-component disk: 70% thin (young/blue), 30% thick (old/yellow)
+            const thickRoll = Math.random() < 0.30;
+            const hScale = (thickRoll ? THICK_H : THIN_H) * Math.exp(-r / 36000);
+            y = sampleExpH(hScale);
             bright = 0.55 + Math.random() * 0.45;
+            // Young blue stars hug the arm ridge (low scatter); cTone biased +
+            const onRidge = Math.abs(sr) < scatter * 0.35;
+            cTone = thickRoll ? -0.4 : (onRidge ? 0.55 : 0.15);
         }
 
         // Radial fade
@@ -2164,14 +2431,21 @@ function buildGalaxy() {
         positions[idx*3+1] = y;
         positions[idx*3+2] = z;
 
-        // Color gradient: core = warm amber, outer = cool blue-white
+        // Color: core = warm amber, outer = cool blue-white,
+        //        plus a per-particle population tone (cTone).
+        // cTone +1 → boost blue (young O/B in arm ridges)
+        // cTone −1 → boost red/yellow (bulge / thick disk)
         const nr = r2 / GALAXY_R;
-        const rc = bright * fade * (0.72 + 0.28 * (1 - nr));
-        const gc = bright * fade * (0.58 + 0.28 * (1 - nr));
-        const bc = bright * fade * (0.38 + 0.62 * nr);
-        colors[idx*3]   = rc;
-        colors[idx*3+1] = gc;
-        colors[idx*3+2] = bc;
+        const baseR = 0.72 + 0.28 * (1 - nr);
+        const baseG = 0.58 + 0.28 * (1 - nr);
+        const baseB = 0.38 + 0.62 * nr;
+        const tone  = cTone;
+        const tR = baseR + (tone < 0 ? -tone * 0.18 : -tone * 0.28);
+        const tG = baseG + (tone < 0 ? -tone * 0.05 :  tone * 0.05);
+        const tB = baseB + (tone < 0 ?  tone * 0.18 :  tone * 0.32);
+        colors[idx*3]   = bright * fade * Math.max(0, Math.min(1.4, tR));
+        colors[idx*3+1] = bright * fade * Math.max(0, Math.min(1.4, tG));
+        colors[idx*3+2] = bright * fade * Math.max(0, Math.min(1.4, tB));
         sizes[idx] = 50 + Math.random() * 160;
         idx++;
     }
@@ -2222,6 +2496,239 @@ function buildGalaxy() {
 
 const galaxyPoints = buildGalaxy();
 scene.add(galaxyPoints);
+
+// ══════════════════════════════════════════════════════════════════════════
+//  STELLAR HALO  — sparse spheroidal cloud of old yellow/red stars
+//  enveloping the disk (real MW: extends to ~150 kly with declining ρ ∝ r⁻³).
+// ══════════════════════════════════════════════════════════════════════════
+const galaxyHalo = (function buildStellarHalo() {
+    const N = 7000;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        // Hernquist-like radial density: r ∝ u^0.6 between 4k and 80k ly
+        const u = Math.random();
+        const r = 4000 + Math.pow(u, 0.55) * 76000;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const th  = Math.random() * Math.PI * 2;
+        pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+        pos[i*3+1] = r * Math.cos(phi) * 0.8;     // mildly oblate
+        pos[i*3+2] = r * Math.sin(phi) * Math.sin(th);
+        // Old metal-poor colour: yellow-orange tint, fades with r
+        const fade = Math.exp(-r / 70000);
+        col[i*3]   = (0.85 + 0.10 * Math.random()) * fade;
+        col[i*3+1] = (0.65 + 0.10 * Math.random()) * fade;
+        col[i*3+2] = (0.40 + 0.10 * Math.random()) * fade;
+        sz[i]      = 60 + Math.random() * 110;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+    const mat = new THREE.ShaderMaterial({
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 0.3, 3.5);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.4, 1.0, d);
+                gl_FragColor = vec4(vCol, a * 0.55);
+            }
+        `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+    return pts;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  HII REGIONS  — pink/magenta star-forming clumps along spiral arm ridges.
+//  Real MW has hundreds of these (Carina Nebula, Eagle, Lagoon, Heart, etc.).
+//  We sample ~140 along the same logarithmic arms as buildGalaxy().
+// ══════════════════════════════════════════════════════════════════════════
+const galaxyHII = (function buildHIIRegions() {
+    const PITCH       = Math.tan(13 * Math.PI / 180);
+    const R0          = 2500;
+    const MAX_WINDING = 13.5;
+    const ARM_STARTS  = [0.0, Math.PI/2, Math.PI, 3*Math.PI/2];
+    const ORION_OFF   = -(Math.PI + 10.252 - 2*Math.PI);
+
+    const N = 140;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        const arm = Math.floor(Math.random() * 4);
+        // Arm ridges between 4 kly (post-bar) and 35 kly (outer SF rim)
+        const winding = 1.0 + Math.random() * (MAX_WINDING - 2.5);
+        const r       = R0 * Math.exp(PITCH * winding);
+        if (r > 38000 || r < 4000) { i--; continue; }
+        let startAngle = ARM_STARTS[arm];
+        if (arm === 2) startAngle += ORION_OFF;
+        const angle = startAngle + winding + (Math.random() - 0.5) * 0.04;
+        pos[i*3]   = r * Math.cos(angle) + (Math.random() - 0.5) * 220;
+        pos[i*3+1] = (Math.random() - 0.5) * 160;     // hugs galactic plane
+        pos[i*3+2] = r * Math.sin(angle) + (Math.random() - 0.5) * 220;
+        // Magenta/pink emission tint with slight variation
+        col[i*3]   = 0.95 + Math.random() * 0.05;
+        col[i*3+1] = 0.30 + Math.random() * 0.18;
+        col[i*3+2] = 0.55 + Math.random() * 0.20;
+        sz[i]      = 600 + Math.random() * 1100;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+    const mat = new THREE.ShaderMaterial({
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 1.0, 26.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.0, 1.0, d);
+                a = pow(a, 1.7);
+                gl_FragColor = vec4(vCol, a * 0.55);
+            }
+        `,
+    });
+    const pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+    return pts;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GALACTIC DISK GLOW  — a soft additive emission halo that gives the
+//  Milky Way its "lit-from-within" cinematic appearance at galaxy zoom.
+//  Two perpendicular elliptical sprites (one face-on, one edge-on) that
+//  blend together in 3D regardless of viewing angle.
+// ══════════════════════════════════════════════════════════════════════════
+const mwInnerGlow = (function buildMilkyWayGlow() {
+    function makeDiskGlowSprite(scale, edgeOn) {
+        const C = 256;
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = C;
+        const ctx = cv.getContext('2d');
+        if (edgeOn) {
+            // Edge-on: thin lens silhouette
+            ctx.translate(C/2, C/2);
+            const g = ctx.createRadialGradient(0,0, 6, 0,0, C/2);
+            g.addColorStop(0,    'rgba(255,235,200,0.55)');
+            g.addColorStop(0.10, 'rgba(255,210,150,0.40)');
+            g.addColorStop(0.40, 'rgba(220,150,80,0.18)');
+            g.addColorStop(1,    'rgba(180,80,40,0.0)');
+            ctx.fillStyle = g;
+            ctx.scale(1.0, 0.13);  // squashed → lens shape
+            ctx.beginPath(); ctx.arc(0,0, C/2, 0, Math.PI*2); ctx.fill();
+        } else {
+            // Face-on: soft glow with brighter core
+            ctx.translate(C/2, C/2);
+            const g = ctx.createRadialGradient(0,0, 0, 0,0, C/2);
+            g.addColorStop(0,    'rgba(255,235,190,0.65)');
+            g.addColorStop(0.06, 'rgba(255,210,140,0.42)');
+            g.addColorStop(0.30, 'rgba(220,140,70,0.18)');
+            g.addColorStop(0.65, 'rgba(150,60,30,0.06)');
+            g.addColorStop(1,    'rgba(70,20,10,0.0)');
+            ctx.fillStyle = g;
+            ctx.beginPath(); ctx.arc(0,0, C/2, 0, Math.PI*2); ctx.fill();
+        }
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(cv), transparent: true,
+            depthWrite: false, blending: THREE.AdditiveBlending,
+        }));
+        sp.scale.setScalar(scale);
+        return sp;
+    }
+    const group = new THREE.Group();
+    const faceOn = makeDiskGlowSprite(110000, false);
+    group.add(faceOn);
+    scene.add(group);
+    return group;
+})();
+
+// ══════════════════════════════════════════════════════════════════════════
+//  GLOBULAR CLUSTERS (halo) — bright pinpricks scattered through the halo.
+//  Real MW: ~150 clusters orbit in the halo, mass 10⁴–10⁶ M☉ each.
+// ══════════════════════════════════════════════════════════════════════════
+(function buildGlobularClusters() {
+    const N = 80;
+    const pos = new Float32Array(N * 3);
+    const col = new Float32Array(N * 3);
+    const sz  = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        // Halo distribution — biased to inner halo (~5–60 kly)
+        const r = 5000 + Math.pow(Math.random(), 1.6) * 55000;
+        const phi = Math.acos(2 * Math.random() - 1);
+        const th  = Math.random() * Math.PI * 2;
+        pos[i*3]   = r * Math.sin(phi) * Math.cos(th);
+        pos[i*3+1] = r * Math.cos(phi);
+        pos[i*3+2] = r * Math.sin(phi) * Math.sin(th);
+        // Old metal-poor — pale yellow
+        col[i*3]   = 0.92 + Math.random() * 0.08;
+        col[i*3+1] = 0.80 + Math.random() * 0.12;
+        col[i*3+2] = 0.55 + Math.random() * 0.15;
+        sz[i]      = 220 + Math.random() * 380;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+    geo.setAttribute('size',     new THREE.BufferAttribute(sz, 1));
+    const mat = new THREE.ShaderMaterial({
+        vertexColors: true, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uScale: { value: renderer.getPixelRatio() } },
+        vertexShader: `
+            attribute float size;
+            varying vec3 vCol;
+            uniform float uScale;
+            void main() {
+                vCol = color;
+                vec4 mvp = modelViewMatrix * vec4(position, 1.0);
+                gl_PointSize = size * uScale / -mvp.z;
+                gl_PointSize = clamp(gl_PointSize, 1.5, 12.0);
+                gl_Position = projectionMatrix * mvp;
+            }
+        `,
+        fragmentShader: `
+            varying vec3 vCol;
+            void main() {
+                float d = length(gl_PointCoord - 0.5) * 2.0;
+                float a = 1.0 - smoothstep(0.05, 1.0, d);
+                a = pow(a, 1.4);
+                gl_FragColor = vec4(vCol, a * 0.85);
+            }
+        `,
+    });
+    scene.add(new THREE.Points(geo, mat));
+})();
 
 // ══════════════════════════════════════════════════════════════════════════
 //  BACKGROUND STARFIELD (distant/background stars)
@@ -2458,19 +2965,155 @@ scene.add(ringsGroup);
     ringsGroup.add(ring);
 });
 
-// Sun's exact orbital circle — thin dashed guideline
+// ══════════════════════════════════════════════════════════════════════════
+//  SUN'S ORBIT AROUND SAGITTARIUS A*
+//
+//  Real values:
+//    Galactocentric radius   R☉ = 26,673 ly  (8.178 kpc, GRAVITY 2019)
+//    Circular speed          v☉ ≈ 220 km/s   (LSR; Reid & Brunthaler 2020)
+//    Orbital period           T ≈ 225 Myr     (one "Galactic year")
+//    Direction of motion     l = 90°  (toward +z in scene; rotation direction)
+//
+//  In the scene XZ plane the Sun starts at (R☉, 20, 0) and moves toward +z,
+//  i.e. θ = 0 → +z → −x → −z → +x.  We animate one orbit every 60 wall-clock
+//  seconds (3.75 Myr per real second of viewing) so the user sees the motion.
+//  The phase reflects an arbitrary "now" reference (current epoch = θ₀).
+// ══════════════════════════════════════════════════════════════════════════
+const SUN_R = 26673;            // Sun-GC distance (ly)
+const SUN_PERIOD_MYR = 225;     // Galactic year (Myr)
+const SUN_ANIM_SECS  = 60;      // wall-clock seconds per simulated orbit
+let   sunOrbitEnabled = true;   // toggled via UI
+let   simGalacticYr   = 0;      // current Sun-orbit phase in Myr (advances each frame)
+const SUN_THETA0      = 0;      // orbital angle at simGalacticYr = 0 (current epoch)
+const sunOrbitObjects = [];     // group of meshes scaled by zoom
+
+const sunOrbitGroup = new THREE.Group();
+scene.add(sunOrbitGroup);
+
 (function buildSunOrbit() {
-    const pts = [];
+    // ── 1) Reference orbital ring — the actual Sun-GC circle ─────────────
+    const ringPts = [];
     for (let i = 0; i <= 360; i++) {
         const a = i * Math.PI / 180;
-        pts.push(new THREE.Vector3(26673 * Math.cos(a), 0, 26673 * Math.sin(a)));
+        ringPts.push(new THREE.Vector3(SUN_R * Math.cos(a), 20, SUN_R * Math.sin(a)));
     }
-    const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts),
-        new THREE.LineBasicMaterial({ color: 0x775533, transparent: true, opacity: 0.25 })
+    const ringLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(ringPts),
+        new THREE.LineBasicMaterial({ color: 0xffcc66, transparent: true, opacity: 0.55 })
     );
-    ringsGroup.add(line);
+    sunOrbitGroup.add(ringLine);
+
+    // ── 2) Outer / inner trace lines for a "track" feel ────────────────────
+    [SUN_R * 0.985, SUN_R * 1.015].forEach((r, i) => {
+        const pts = [];
+        for (let j = 0; j <= 360; j++) {
+            const a = j * Math.PI / 180;
+            pts.push(new THREE.Vector3(r * Math.cos(a), 20 + (i ? 30 : -30), r * Math.sin(a)));
+        }
+        sunOrbitGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineBasicMaterial({ color: 0xaa7733, transparent: true, opacity: 0.18 })
+        ));
+    });
+
+    // ── 3) Galactic-year tick marks every 25 Myr ───────────────────────────
+    // 1 full orbit = 225 Myr → 9 ticks at multiples of 25 Myr (every 40°).
+    for (let myr = 0; myr < SUN_PERIOD_MYR; myr += 25) {
+        const a = (myr / SUN_PERIOD_MYR) * Math.PI * 2;
+        const cx = SUN_R * Math.cos(a);
+        const cz = SUN_R * Math.sin(a);
+        const ux = Math.cos(a), uz = Math.sin(a);
+        const tickIn  = new THREE.Vector3(cx - ux * 350, 20, cz - uz * 350);
+        const tickOut = new THREE.Vector3(cx + ux * 350, 20, cz + uz * 350);
+        sunOrbitGroup.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([tickIn, tickOut]),
+            new THREE.LineBasicMaterial({
+                color: myr === 0 ? 0xffee99 : 0xddaa55,
+                transparent: true, opacity: myr === 0 ? 0.95 : 0.55,
+            })
+        ));
+    }
+
+    // ── 4) Animated Sun marker (small bright sphere) ───────────────────────
+    const sunMarker = new THREE.Mesh(
+        new THREE.SphereGeometry(60, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0xfff0a0 })
+    );
+    sunMarker.userData.isSunMarker = true;
+    sunOrbitGroup.add(sunMarker);
+    sunOrbitObjects.push({ obj: sunMarker, role: 'sun', baseSize: 60 });
+
+    // ── 5) Sun glow halo sprite (additive) ────────────────────────────────
+    const glowCv = document.createElement('canvas');
+    glowCv.width = glowCv.height = 128;
+    const gctx = glowCv.getContext('2d');
+    const gg = gctx.createRadialGradient(64,64,0, 64,64,64);
+    gg.addColorStop(0,    'rgba(255,250,200,1.0)');
+    gg.addColorStop(0.25, 'rgba(255,220,140,0.6)');
+    gg.addColorStop(0.7,  'rgba(255,180,80,0.18)');
+    gg.addColorStop(1,    'rgba(255,140,40,0.0)');
+    gctx.fillStyle = gg; gctx.fillRect(0,0,128,128);
+    const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(glowCv), transparent: true,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+    }));
+    sunGlow.scale.setScalar(700);
+    sunOrbitGroup.add(sunGlow);
+    sunOrbitObjects.push({ obj: sunGlow, role: 'glow', baseSize: 700 });
+
+    // ── 6) Velocity arrow (direction of motion, length ~ 1.5 kly) ─────────
+    const velLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,0),
+        ]),
+        new THREE.LineBasicMaterial({ color: 0xffdd66, transparent: true, opacity: 0.95 })
+    );
+    sunOrbitGroup.add(velLine);
+    sunOrbitObjects.push({ obj: velLine, role: 'velLine' });
+
+    // Cone arrowhead at tip of velocity vector
+    const velArrow = new THREE.Mesh(
+        new THREE.ConeGeometry(120, 320, 12),
+        new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, opacity: 0.9 })
+    );
+    sunOrbitGroup.add(velArrow);
+    sunOrbitObjects.push({ obj: velArrow, role: 'velArrow', baseSize: 320 });
+
+    // ── 7) Past trail — last ~80 Myr of trajectory (faint amber ribbon) ───
+    const trailPts = [];
+    for (let i = 0; i <= 60; i++) trailPts.push(new THREE.Vector3());
+    const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPts);
+    const trail = new THREE.Line(trailGeo,
+        new THREE.LineBasicMaterial({ color: 0xff9944, transparent: true, opacity: 0.55 }));
+    sunOrbitGroup.add(trail);
+    sunOrbitObjects.push({ obj: trail, role: 'trail' });
+
+    // ── 8) "Sol" label sprite that follows the marker ─────────────────────
+    const lblCv = document.createElement('canvas');
+    lblCv.width = 256; lblCv.height = 64;
+    const lctx = lblCv.getContext('2d');
+    lctx.font = 'bold 28px Segoe UI, sans-serif';
+    lctx.fillStyle = 'rgba(255,235,150,0.95)';
+    lctx.textBaseline = 'middle'; lctx.textAlign = 'left';
+    lctx.fillText('☉ Sol', 8, 32);
+    const sunLabel = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(lblCv), transparent: true, depthWrite: false,
+    }));
+    sunLabel.scale.set(2200, 550, 1);
+    sunOrbitGroup.add(sunLabel);
+    sunOrbitObjects.push({ obj: sunLabel, role: 'label', baseW: 2200, baseH: 550 });
 })();
+
+// Returns Sun's orbital position and velocity unit vector for a given galactic
+// year offset (Myr from the current epoch; 0 = now, +ve = future, -ve = past).
+function sunOrbitState(galacticYr) {
+    const theta = SUN_THETA0 + (galacticYr / SUN_PERIOD_MYR) * Math.PI * 2;
+    const cs = Math.cos(theta), sn = Math.sin(theta);
+    const pos = new THREE.Vector3(SUN_R * cs, 20, SUN_R * sn);
+    // Velocity direction: tangent to circle in the prograde sense (+z at θ=0)
+    const vel = new THREE.Vector3(-sn, 0, cs).normalize();
+    return { pos, vel, theta };
+}
 
 // ── Scale-break boundary ─────────────────────────────────────────────────
 // Marks where 1:1 linear scale ends and log compression begins (60 kly from Sun).
@@ -3119,6 +3762,18 @@ function buildGalaxySprite(s, pos) {
         coma_cluster:     'galaxy_cluster',
         ic1101:           'giant_galaxy',
         stephans_quintet: 'compact_group',
+        // Local Universe Galaxies (newly added)
+        cen_a:            'elliptical',
+        m82:              'irregular',
+        m81:              'spiral',
+        ngc253:           'spiral',
+        m51:              'spiral',
+        m104:             'spiral',
+        antennae:         'compact_group',
+        ngc6240:          'galaxy_cluster',
+        txs0506:          'quasar',
+        j0529_4351:       'quasar',
+        sag_dwarf:        'irregular',
     };
     const spriteType = typeMap[s.id] || 'elliptical';
     const colorHex = s.glowColor ?? s.color;
@@ -4184,7 +4839,11 @@ renderer.domElement.addEventListener('pointerup', e => {
 //  DISPLAY TOGGLES
 // ══════════════════════════════════════════════════════════════════════════
 document.getElementById('tog-galaxy').addEventListener('change', e => {
-    galaxyPoints.visible = e.target.checked;
+    const v = e.target.checked;
+    galaxyPoints.visible = v;
+    galaxyHalo.visible   = v;
+    galaxyHII.visible    = v;
+    mwInnerGlow.visible  = v;
 });
 document.getElementById('tog-grid').addEventListener('change', e => {
     ringsGroup.visible = e.target.checked;
@@ -4197,6 +4856,10 @@ document.getElementById('tog-labels').addEventListener('change', e => {
 });
 document.getElementById('tog-plane').addEventListener('change', e => {
     galPlane.visible = e.target.checked;
+});
+document.getElementById('tog-sun-orbit').addEventListener('change', e => {
+    sunOrbitEnabled = e.target.checked;
+    if (!sunOrbitEnabled) sunOrbitGroup.visible = false;
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -4483,9 +5146,102 @@ function animate() {
         scaleBreakLabelSprite.visible = camDistFromOrigin > 40000 && camDistFromOrigin < 700000;
     }
 
+    // ── Sun's orbit around Sgr A* — animated marker, trail, vel arrow ──
+    updateSunOrbit(dt, camDistFromOrigin);
+
     updateLabelScales();
     updateCoordDisplay();
     renderer.render(scene, camera);
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  SUN-ORBIT ANIMATION
+//  One simulated Galactic year (225 Myr) every SUN_ANIM_SECS wall-clock seconds.
+//  Updates Sun marker, glow, velocity arrow, label, and trail ribbon.
+//  Visible only at galaxy zoom and inward (would clutter universe view).
+// ══════════════════════════════════════════════════════════════════════════
+function updateSunOrbit(dt, camDistFromOrigin) {
+    // Hide entire orbit visualization beyond galaxy zoom or if user disabled
+    const showOrbit = sunOrbitEnabled
+                   && camDistFromOrigin > 1500       // hide at local/hood zoom
+                   && camDistFromOrigin < 140000;    // hide at universe zoom
+    sunOrbitGroup.visible = showOrbit;
+    if (!showOrbit) return;
+
+    // Advance galactic-year clock
+    simGalacticYr += (SUN_PERIOD_MYR / SUN_ANIM_SECS) * dt;
+    if (simGalacticYr >= SUN_PERIOD_MYR) simGalacticYr -= SUN_PERIOD_MYR;
+
+    const { pos, vel } = sunOrbitState(simGalacticYr);
+    const camDist = camera.position.distanceTo(pos);
+    const sizeBoost = Math.max(1, camDist / 8000);  // scale-up at galaxy zoom
+
+    // Pulse for organic feel
+    const pulse = 1 + 0.10 * Math.sin(t * 2.7);
+
+    sunOrbitObjects.forEach(item => {
+        const { obj, role, baseSize } = item;
+        switch (role) {
+            case 'sun': {
+                obj.position.copy(pos);
+                obj.scale.setScalar(sizeBoost * pulse);
+                break;
+            }
+            case 'glow': {
+                obj.position.copy(pos);
+                obj.scale.setScalar(baseSize * sizeBoost * pulse);
+                break;
+            }
+            case 'velLine': {
+                const tip = pos.clone().add(vel.clone().multiplyScalar(1800 * sizeBoost));
+                const arr = obj.geometry.attributes.position.array;
+                arr[0] = pos.x; arr[1] = pos.y; arr[2] = pos.z;
+                arr[3] = tip.x; arr[4] = tip.y; arr[5] = tip.z;
+                obj.geometry.attributes.position.needsUpdate = true;
+                obj.geometry.computeBoundingSphere();
+                break;
+            }
+            case 'velArrow': {
+                // Cone (height 320) is centered on its origin with tip at +Y.
+                // Place cone center at line-end + vel*(height/2)*scale so its
+                // base sits flush with the line tip and tip extends beyond.
+                const lineEnd = pos.clone().add(vel.clone().multiplyScalar(1800 * sizeBoost));
+                const halfH   = 160 * sizeBoost;
+                obj.position.copy(lineEnd.clone().add(vel.clone().multiplyScalar(halfH)));
+                obj.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vel);
+                obj.scale.setScalar(sizeBoost);
+                break;
+            }
+            case 'label': {
+                obj.position.set(pos.x, pos.y + 700 * sizeBoost, pos.z);
+                obj.scale.set(item.baseW * sizeBoost, item.baseH * sizeBoost, 1);
+                break;
+            }
+            case 'trail': {
+                // Past trail: 60 segments covering last 80 Myr
+                const arr = obj.geometry.attributes.position.array;
+                const SEG = 60, BACK = 80;  // Myr
+                for (let i = 0; i <= SEG; i++) {
+                    const off = -BACK * (i / SEG);
+                    const { pos: tp } = sunOrbitState(simGalacticYr + off);
+                    arr[i*3]   = tp.x;
+                    arr[i*3+1] = tp.y;
+                    arr[i*3+2] = tp.z;
+                }
+                obj.geometry.attributes.position.needsUpdate = true;
+                obj.geometry.computeBoundingSphere();
+                break;
+            }
+        }
+    });
+
+    // Update HUD readouts (computed lazily — only the fields we maintain)
+    const phasePct = (simGalacticYr / SUN_PERIOD_MYR) * 100;
+    const phaseDeg = (simGalacticYr / SUN_PERIOD_MYR) * 360;
+    const elGY = document.getElementById('hud-galactic-yr');
+    const elGP = document.getElementById('hud-galactic-phase');
+    if (elGY) elGY.textContent = simGalacticYr.toFixed(1) + ' Myr  /  225 Myr';
+    if (elGP) elGP.textContent = phasePct.toFixed(1) + '%  (θ = ' + phaseDeg.toFixed(0) + '°)';
 }
 
 // ── Start at galaxy view so the full context is visible immediately ───────
