@@ -156,6 +156,80 @@
 
         footer { text-align: center; padding: 2rem; color: #333; font-size: .78rem; }
         footer a { color: #555; text-decoration: none; }
+
+        /* ── Mobile ──────────────────────────────────────────────────────
+           Phones lose the desktop comfort budget: tighten gutters, let
+           tabs wrap cleanly without a broken bottom border, collapse the
+           telemetry 2-col grid, and force iOS to render inputs at ≥16px
+           (anything smaller triggers auto-zoom on focus). Tables stay
+           wrapped in overflow-x:auto so they scroll horizontally on touch
+           — the inset shadow on .table-scroll provides the affordance. */
+        @media (max-width: 720px) {
+            main { padding: 16px 12px 36px; }
+            .sa-header h1 { font-size: 1.3rem; }
+            .sa-warning { padding: 9px 11px; font-size: .76rem; margin: 12px 0 16px; }
+
+            .tabs {
+                flex-wrap: wrap; row-gap: 4px;
+                border-bottom: none; padding-bottom: 0; margin: 14px 0 14px;
+            }
+            .tab {
+                flex: 1 1 auto; padding: 8px 10px; font-size: .8rem;
+                border-radius: 8px; border: 1px solid rgba(255,255,255,.08);
+                text-align: center;
+            }
+            .tab.active { border-color: rgba(255,215,0,.3); }
+
+            .card { padding: 14px 12px; border-radius: 12px; margin-bottom: 12px; }
+            .card h3 { font-size: .88rem; flex-wrap: wrap; gap: 6px; }
+            .card h3 > span { font-size: .68rem !important; }
+
+            .toolbar { gap: 8px; }
+            input[type="text"], input[type="search"], select, textarea, .btn {
+                font-size: 16px; /* iOS no-zoom threshold */
+            }
+            .btn-sm { font-size: .78rem; padding: 5px 10px; }
+
+            th { font-size: .66rem; padding: 6px 8px; }
+            td { font-size: .78rem; padding: 7px 8px; }
+
+            .row-actions { justify-content: flex-start; }
+
+            /* Telemetry tab — selector + refresh share row, not 2 fixed cols */
+            #panel-telemetry > div[style*="grid-template-columns"] {
+                display: flex !important; flex-wrap: wrap; gap: 8px;
+            }
+            #tel-window, #tel-refresh { max-width: none !important; flex: 1 1 140px; }
+
+            /* Modals: full width minus a thin gutter, scroll body if long */
+            .modal-bg { padding: 12px; align-items: flex-start; }
+            .modal {
+                padding: 16px 14px; border-radius: 12px;
+                max-height: calc(100vh - 24px); overflow-y: auto;
+            }
+            .modal h3 { font-size: 1rem; }
+            .modal .actions { flex-wrap: wrap; }
+            .modal .actions .btn { flex: 1 1 auto; }
+
+            /* Timeline rows: stack timestamp above content, drop fixed widths */
+            #tl-body > div[style*="display:flex"] {
+                flex-direction: column !important; gap: 4px !important;
+                padding: 8px 10px !important;
+            }
+            #tl-body span[style*="min-width:140px"],
+            #tl-body span[style*="min-width:90px"] {
+                min-width: 0 !important;
+            }
+            #tl-summary { width: 100%; margin-left: 0 !important; }
+        }
+
+        /* Smaller phones: nudge font scale + drop one more layer of padding. */
+        @media (max-width: 380px) {
+            main { padding: 14px 10px 32px; }
+            .card { padding: 12px 10px; }
+            .tab { font-size: .76rem; padding: 7px 8px; }
+            td { font-size: .76rem; padding: 6px 6px; }
+        }
     </style>
 </head>
 <body>
