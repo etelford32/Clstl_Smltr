@@ -396,6 +396,52 @@ export function loadSystem(systemId) {
     if (hud.focusLabel) hud.focusLabel.textContent = 'Free orbit · click a body to focus';
 }
 
+/**
+ * Build a subtle reticle (ring + cross) at the scene origin to mark the
+ * barycenter for true-binary systems. The integrator runs in barycentric
+ * coordinates so the COM is exactly at (0,0,0) — this is just the visual
+ * affordance.
+ */
+function _buildBarycenterMarker(show) {
+    if (barycenterGroup) {
+        overlayRoot.remove(barycenterGroup);
+        barycenterGroup.traverse(o => {
+            if (o.geometry) o.geometry.dispose();
+            if (o.material) o.material.dispose();
+        });
+        barycenterGroup = null;
+    }
+    if (!show) return;
+
+    const g = new THREE.Group();
+    g.name = 'barycenter';
+
+    // Inner reticle ring lying in the XZ plane (matches our ecliptic).
+    const ringGeo = new THREE.RingGeometry(0.10, 0.14, 48);
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.55,
+        side: THREE.DoubleSide, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;
+    g.add(ring);
+
+    // Tiny cross of two perpendicular lines.
+    const crossPos = new Float32Array([
+        -0.28, 0, 0,   0.28, 0, 0,
+         0, 0, -0.28,  0, 0,  0.28,
+    ]);
+    const crossGeo = new THREE.BufferGeometry();
+    crossGeo.setAttribute('position', new THREE.BufferAttribute(crossPos, 3));
+    const crossMat = new THREE.LineBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false,
+    });
+    g.add(new THREE.LineSegments(crossGeo, crossMat));
+
+    overlayRoot.add(g);
+    barycenterGroup = g;
+}
+
 function _systemExtentUnits() {
     let r = 0;
     for (const b of state.bodies) {
