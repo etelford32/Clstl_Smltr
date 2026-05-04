@@ -573,8 +573,69 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     border-color:rgba(255,140,40,.45);
     color:#fc7;
 }
+
+/* Liftoff button — sits in the toggle bar but visually distinct (red) */
+.lh-liftoff {
+    background:rgba(255,40,40,.16);
+    border:1px solid rgba(255,80,80,.55);
+    color:#ff7766;
+    font-size:.7rem; font-weight:800;
+    font-family:inherit;
+    letter-spacing:.06em; text-transform:uppercase;
+    padding:5px 11px;
+    border-radius:5px;
+    cursor:pointer;
+    transition:all .15s;
+    margin-right:6px;
+    white-space:nowrap;
+}
+.lh-liftoff:hover {
+    background:rgba(255,40,40,.28);
+    border-color:#f55;
+    color:#fff;
+    box-shadow:0 0 12px rgba(255,80,40,.35);
+}
+.lh-liftoff--ascending {
+    background:rgba(255,80,40,.32);
+    border-color:#f73;
+    color:#fff;
+    animation:lh-liftoff-pulse 1.1s ease-in-out infinite;
+}
+@keyframes lh-liftoff-pulse {
+    0%, 100% { box-shadow:0 0 0 0 rgba(255,120,40,.5); }
+    50%      { box-shadow:0 0 16px 4px rgba(255,120,40,.35); }
+}
+
+/* Mission Elapsed Time HUD — bottom-left during liftoff */
+.lh-met {
+    position:absolute; bottom:36px; left:12px;
+    z-index:2;
+    display:flex; align-items:center; gap:8px;
+    padding:6px 12px;
+    background:rgba(8,4,20,.7);
+    backdrop-filter:blur(8px);
+    border:1px solid rgba(255,80,40,.35);
+    border-radius:6px;
+    font-family:'Consolas', 'Monaco', monospace;
+    pointer-events:none;
+}
+.lh-met-k {
+    font-size:.58rem; color:#778; letter-spacing:.12em; font-weight:700;
+}
+.lh-met-v {
+    font-size:.95rem; color:#ff7766; font-weight:800; letter-spacing:.04em;
+    min-width:62px;
+}
+.lh-met-phase {
+    font-size:.65rem; color:#cde;
+    text-transform:uppercase; letter-spacing:.08em;
+    border-left:1px solid rgba(255,255,255,.12);
+    padding-left:8px;
+}
+
 @media (max-width:520px) {
-    .lh-view, .lh-toggle { font-size:.6rem; padding:4px 6px; }
+    .lh-view, .lh-toggle, .lh-liftoff { font-size:.6rem; padding:4px 6px; }
+    .lh-met { font-size:.7em; bottom:30px; }
 }
 .lh-vehicle-meta {
     background:rgba(15,10,35,.6);
@@ -725,15 +786,22 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
         <div class="lh-vehicle-picker">
             <div class="lh-vp-group">
                 <span class="lh-vp-label">Vehicle</span>
-                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle" data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="shuttle"  data-variant="">Space Shuttle</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9"  data-variant="block5">Falcon 9</button>
                 <button type="button" class="lh-vp-btn"               data-vehicle="starship" data-variant="v2">Starship</button>
             </div>
-            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants" hidden>
-                <span class="lh-vp-label">Variant</span>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-starship" hidden>
+                <span class="lh-vp-label">Starship</span>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v1">V1</button>
                 <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="starship" data-variant="v2">V2</button>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="v3">V3</button>
                 <button type="button" class="lh-vp-btn" data-vehicle="starship" data-variant="future">Future ✱</button>
+            </div>
+            <div class="lh-vp-group lh-vp-variants" id="lh-vp-variants-falcon9" hidden>
+                <span class="lh-vp-label">Falcon</span>
+                <button type="button" class="lh-vp-btn lh-vp-btn--on" data-vehicle="falcon9" data-variant="block5">Block 5</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="block5-crew">Crew Dragon</button>
+                <button type="button" class="lh-vp-btn"               data-vehicle="falcon9" data-variant="heavy">Heavy</button>
             </div>
         </div>
 
@@ -752,9 +820,17 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
                 <!-- Toggles — overlay top-right -->
                 <div class="lh-vehicle-toggles" role="group" aria-label="Display toggles">
+                    <button type="button" class="lh-liftoff" id="lh-liftoff" title="Liftoff animation">▶ Liftoff</button>
                     <button type="button" class="lh-toggle lh-toggle--on" data-toggle="autoRotate" title="Auto-rotate camera">⟳ Auto</button>
                     <button type="button" class="lh-toggle"               data-toggle="plume"      title="Engine plume">▲ Plume</button>
                     <button type="button" class="lh-toggle lh-toggle--on" data-toggle="pad"        title="Launch pad + tower">⌂ Pad</button>
+                </div>
+
+                <!-- Mission Elapsed Time HUD — bottom-left, only shown during liftoff -->
+                <div class="lh-met" id="lh-met" hidden>
+                    <span class="lh-met-k">MET</span>
+                    <span class="lh-met-v" id="lh-met-v">T-03.0</span>
+                    <span class="lh-met-phase" id="lh-met-phase">Standby</span>
                 </div>
 
                 <div class="lh-vehicle-watermark">Procedural · For illustration only</div>
@@ -807,14 +883,130 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
             `;
         }
 
+        const liftoffBtn = document.getElementById('lh-liftoff');
+        const metEl      = document.getElementById('lh-met');
+        const metV       = document.getElementById('lh-met-v');
+        const metPhase   = document.getElementById('lh-met-phase');
+        const variantsStarship = document.getElementById('lh-vp-variants-starship');
+        const variantsFalcon9  = document.getElementById('lh-vp-variants-falcon9');
+
+        function showVariantRow(vehicleId) {
+            variantsStarship.hidden = (vehicleId !== 'starship');
+            variantsFalcon9.hidden  = (vehicleId !== 'falcon9');
+        }
+
+        function fmtMET(T) {
+            const sign = T < 0 ? 'T-' : 'T+';
+            const v = Math.abs(T);
+            return sign + (v < 10 ? '0' : '') + v.toFixed(1);
+        }
+        function phaseFor(T) {
+            if (T < -0.2) return 'Engine Startup';
+            if (T < 0)    return 'Hold-Down Release';
+            if (T < 10)   return 'Liftoff';
+            if (T < 18)   return 'Roll Program';
+            if (T < 25)   return 'Vertical Ascent';
+            if (T < 45)   return 'Pitch Program';
+            if (T < 55)   return 'Max-Q · Throttle Down';
+            return 'Throttle Up';
+        }
+
         try {
             const api = initVehicleCanvas(canvas, {
                 vehicle: 'shuttle',
                 autoRotate: true,
                 onVehicleChange: ({ id, info }) => {
                     renderMeta(info);
-                    variants.hidden = (id !== 'starship');
+                    showVariantRow(id);
                 },
+                onLiftoffEnd: () => {
+                    liftoffBtn.classList.remove('lh-liftoff--ascending');
+                    liftoffBtn.textContent = '▶ Liftoff';
+                    metEl.hidden = true;
+                },
+            });
+
+            // ── Roster → 3D auto-bind ─────────────────────────────────────
+            // launch-planner.js dispatches `lp:launch-selected` whenever a
+            // user clicks a launch card or the page deep-links into one.
+            // We translate the launch's vehicle metadata into a (vehicle,
+            // variant) tuple the 3D canvas understands and update the
+            // picker buttons + canvas in lockstep.
+            function vehicleForLaunch(l) {
+                const rid = (l._vehicle?.ruleset?.id || '').toLowerCase();
+                const v   = (l.vehicle || '').toLowerCase();
+                const n   = (l.name    || '').toLowerCase();
+                const year = l.net_iso ? new Date(l.net_iso).getUTCFullYear() : 0;
+
+                if (rid === 'starship' || /starship|super heavy/.test(v)) {
+                    // Pick variant by NET year (Block 1 retired late 2024;
+                    // Block 2 currently flying; V3 expected ~2026).
+                    if (year && year <= 2024) return ['starship', 'v1'];
+                    if (year && year <= 2026) return ['starship', 'v2'];
+                    return ['starship', 'v3'];
+                }
+                if (rid === 'falcon-heavy' || /falcon\s*heavy/.test(v)) {
+                    return ['falcon9', 'heavy'];
+                }
+                if (rid.startsWith('falcon-9') || /falcon\s*9/.test(v)) {
+                    if (rid === 'falcon-9-crew' || /crew\s*dragon|crew-?\d/.test(n) || /dragon/.test(v)) {
+                        return ['falcon9', 'block5-crew'];
+                    }
+                    return ['falcon9', 'block5'];
+                }
+                if (/space\s*shuttle|sts/i.test(v)) return ['shuttle', null];
+                return null;     // unknown — leave the canvas alone
+            }
+
+            document.addEventListener('lp:launch-selected', (e) => {
+                const l = e.detail?.launch;
+                if (!l) return;
+                const tuple = vehicleForLaunch(l);
+                if (!tuple) return;
+                const [vehicleId, variantId] = tuple;
+                // Bail if we're already showing this exact configuration —
+                // avoids a needless dispose+rebuild cycle on roster re-clicks.
+                if (api.currentInfo) {
+                    const matchingPickerBtn = document.querySelector(
+                        `.lh-vp-btn--on[data-vehicle="${vehicleId}"]` +
+                        (variantId ? `[data-variant="${variantId}"]` : '')
+                    );
+                    if (matchingPickerBtn) return;
+                }
+                // Update vehicle-row highlight (top row picks vehicle)
+                document.querySelectorAll('.lh-vehicle-picker .lh-vp-group').forEach(group => {
+                    group.querySelectorAll('.lh-vp-btn').forEach(b => {
+                        const isVehicleRow = group === group.parentNode.firstElementChild ||
+                                             !group.classList.contains('lh-vp-variants');
+                        if (isVehicleRow) {
+                            b.classList.toggle('lh-vp-btn--on', b.dataset.vehicle === vehicleId);
+                        } else if (group.id === `lh-vp-variants-${vehicleId}`) {
+                            b.classList.toggle('lh-vp-btn--on',
+                                b.dataset.vehicle === vehicleId && b.dataset.variant === variantId);
+                        }
+                    });
+                });
+                api.setVehicle(vehicleId, variantId || undefined);
+            });
+
+            // Liftoff button
+            liftoffBtn.addEventListener('click', () => {
+                if (api.isAscending) {
+                    api.cancelLiftoff();
+                    // onLiftoffEnd resets button + HUD
+                } else {
+                    api.liftoff();
+                    liftoffBtn.classList.add('lh-liftoff--ascending');
+                    liftoffBtn.textContent = '■ Abort';
+                    metEl.hidden = false;
+                    // Drive HUD on a separate ~10 Hz interval — cheaper than
+                    // updating the DOM every frame.
+                    const hudTick = setInterval(() => {
+                        if (!api.isAscending) { clearInterval(hudTick); return; }
+                        metV.textContent = fmtMET(api.missionT);
+                        metPhase.textContent = phaseFor(api.missionT);
+                    }, 100);
+                }
             });
 
             // Vehicle/variant selector buttons

@@ -1267,6 +1267,15 @@ async function selectLaunch(id) {
     renderRoster();
     renderDetailPane();
     updateUrl();
+
+    // Roster → 3D canvas bridge. The vehicle's resolved ruleset id (set by
+    // ensureWeather) is the most reliable handle; fall back to the raw
+    // vehicle name string for launches without a ruleset match. The 3D
+    // canvas's inline-script listener decodes this into a (vehicle, variant)
+    // tuple and calls api.setVehicle(...).
+    document.dispatchEvent(new CustomEvent('lp:launch-selected', {
+        detail: { launch: l },
+    }));
 }
 
 function updateUrl() {
