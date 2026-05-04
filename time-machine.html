@@ -49,13 +49,31 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 #tm-canvas-wrap {
     position:relative;
     width:100%; height:540px;
-    border:1px solid rgba(180,140,255,.22);
+    border:1px solid rgba(120,180,255,.28);
     border-radius:14px;
     overflow:hidden;
     background:radial-gradient(ellipse at center, #0a0820 0%, #02010a 80%);
-    box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 0 80px rgba(80,40,160,.08);
+    box-shadow:0 12px 40px rgba(0,0,0,.5),
+               inset 0 0 80px rgba(80,40,160,.08),
+               inset 0 0 1px rgba(120,200,255,.18);
 }
 #tm-canvas-wrap canvas { display:block; width:100%; height:100%; }
+/* Holographic frame chrome */
+#tm-canvas-wrap::before, #tm-canvas-wrap::after {
+    content:""; position:absolute; pointer-events:none; z-index:4;
+    border:1px solid rgba(120,200,255,.55);
+    width:22px; height:22px;
+}
+#tm-canvas-wrap::before { top:8px; left:8px;  border-right:none; border-bottom:none; }
+#tm-canvas-wrap::after  { bottom:8px; right:8px; border-left:none;  border-top:none;    }
+/* Subtle CRT scanlines + radial vignette over the canvas */
+#tm-canvas-wrap > .tm-fx-overlay {
+    position:absolute; inset:0; pointer-events:none; z-index:3;
+    background:
+        radial-gradient(ellipse at center, transparent 55%, rgba(0,0,8,.55) 100%),
+        repeating-linear-gradient(0deg, rgba(120,200,255,.025) 0 1px, transparent 1px 3px);
+    mix-blend-mode:screen;
+}
 
 /* ── Side panel: body picker + osculating elements ─────────────────── */
 #tm-side {
@@ -144,18 +162,26 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
     font-family:monospace; font-size:.74rem;
 }
 .tm-hud-card {
-    background:rgba(8,4,24,.72);
-    border:1px solid rgba(180,140,255,.22);
-    border-radius:6px;
-    padding:8px 11px;
+    position:relative;
+    background:linear-gradient(180deg, rgba(8,18,38,.85), rgba(6,10,24,.72));
+    border:1px solid rgba(120,200,255,.30);
+    border-radius:3px;
+    padding:8px 12px;
     color:#cba9ff;
     backdrop-filter:blur(6px);
     pointer-events:auto;
     line-height:1.55;
+    box-shadow:0 0 18px rgba(60,120,200,.12), inset 0 0 8px rgba(120,200,255,.06);
+    clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
 }
-.tm-hud-card .lbl { color:#776; font-size:.62rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:1px; }
-.tm-hud-card .val { color:#eee; font-size:.85rem; font-weight:700; }
-.tm-hud-card .sub { color:#998; font-size:.66rem; margin-top:2px; }
+.tm-hud-card::before {
+    content:""; position:absolute; left:0; top:0; bottom:0; width:2px;
+    background:linear-gradient(180deg, transparent, #6cd0ff 50%, transparent);
+    opacity:.85;
+}
+.tm-hud-card .lbl { color:#7c98b8; font-size:.62rem; letter-spacing:.14em; text-transform:uppercase; display:block; margin-bottom:1px; font-weight:700; }
+.tm-hud-card .val { color:#eaf6ff; font-size:.92rem; font-weight:700; text-shadow:0 0 6px rgba(120,200,255,.35); font-variant-numeric:tabular-nums; }
+.tm-hud-card .sub { color:#7892b0; font-size:.66rem; margin-top:2px; font-variant-numeric:tabular-nums; }
 
 #tm-legend {
     position:absolute; bottom:10px; left:14px;
@@ -173,19 +199,32 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 
 #tm-mode-pill {
     position:absolute; top:12px; left:50%; transform:translateX(-50%);
-    font-family:monospace; font-size:.68rem; letter-spacing:.08em;
-    text-transform:uppercase;
-    background:rgba(8,4,24,.78);
-    border:1px solid rgba(79,201,127,.45);
+    font-family:'JetBrains Mono', ui-monospace, monospace; font-size:.68rem; letter-spacing:.18em;
+    text-transform:uppercase; font-weight:700;
+    background:linear-gradient(180deg, rgba(8,16,32,.92), rgba(4,8,18,.78));
+    border:1px solid rgba(79,201,127,.55);
     color:#4fc97f;
-    padding:5px 12px;
-    border-radius:14px;
-    backdrop-filter:blur(6px);
+    padding:5px 14px;
+    border-radius:2px;
+    backdrop-filter:blur(8px);
     pointer-events:none;
     transition:all .25s ease;
+    text-shadow:0 0 8px currentColor;
+    box-shadow:0 0 12px rgba(79,201,127,.25), inset 0 0 8px rgba(79,201,127,.10);
+    overflow:hidden;
+    z-index:5;
 }
-#tm-mode-pill.scrub { border-color:rgba(255,184,48,.45); color:#fc7; }
-#tm-mode-pill.play  { border-color:rgba(120,80,255,.55); color:#b78cff; }
+#tm-mode-pill::before {
+    content:""; position:absolute; inset:0;
+    background:linear-gradient(90deg, transparent, currentColor, transparent);
+    opacity:.18; transform:translateX(-100%);
+    animation:tm-pill-sweep 3.2s linear infinite;
+}
+@keyframes tm-pill-sweep { to { transform:translateX(100%); } }
+#tm-mode-pill.scrub { border-color:rgba(255,184,48,.55); color:#fc7;
+                      box-shadow:0 0 12px rgba(255,184,48,.30), inset 0 0 8px rgba(255,184,48,.12); }
+#tm-mode-pill.play  { border-color:rgba(180,140,255,.65); color:#b78cff;
+                      box-shadow:0 0 14px rgba(180,140,255,.40), inset 0 0 10px rgba(180,140,255,.16); }
 
 /* ── Time slider panel ─────────────────────────────────────────────── */
 #tm-time {
@@ -748,6 +787,7 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <!-- ═══ ORRERY + SIDE PANEL ═══ -->
 <div id="tm-stage">
     <div id="tm-canvas-wrap">
+        <div class="tm-fx-overlay"></div>
         <div id="tm-hud">
             <div class="tm-hud-card">
                 <span class="lbl">UTC Date</span>
@@ -1106,7 +1146,11 @@ body { width:100%; min-height:100vh; overflow-x:hidden; background:#040210; colo
 <!-- ═══ SIMULATION ═══ -->
 <script type="module">
 import * as THREE        from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { OrbitControls }    from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer }   from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }       from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass }  from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }       from 'three/addons/postprocessing/OutputPass.js';
 import {
     jdNow, dateFromJD, jdFromDate,
     planetElementsAt, PLANET_ELEMENTS,
@@ -1325,7 +1369,7 @@ camera.lookAt(0, 0, 0);
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.18;
 wrap.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -1334,9 +1378,20 @@ controls.dampingFactor = 0.08;
 controls.minDistance   = 4;
 controls.maxDistance   = 220;
 
+// ── Postprocessing (bloom for sun + bright bodies) ───────────────────
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, camera);
+const bloomPass  = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.85, 0.55, 0.55);
+const outputPass = new OutputPass();
+composer.addPass(renderPass);
+composer.addPass(bloomPass);
+composer.addPass(outputPass);
+
 function resize() {
     const w = wrap.clientWidth, h = wrap.clientHeight;
     renderer.setSize(w, h, false);
+    composer.setSize(w, h);
+    bloomPass.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
 }
@@ -2022,17 +2077,8 @@ for (const a of ASTEROIDS) BODY_SIZE_BY_KEY[a.key] = a.size;
 
 const _ringWP = new THREE.Vector3();
 function updateSelectionRing() {
-    if (!selected || !meshes[selected.key]) {
-        selectionRing.visible = false;
-        return;
-    }
-    const m = meshes[selected.key];
-    const s = (BODY_SIZE_BY_KEY[selected.key] || 0.18) * 1.95;
-    selectionRing.scale.setScalar(s);
-    m.getWorldPosition(_ringWP);
-    selectionRing.position.copy(_ringWP);
-    selectionRing.lookAt(camera.position);
-    selectionRing.visible = true;
+    // Replaced by the futuristic animated reticle in updateFuturisticFX().
+    selectionRing.visible = false;
 }
 
 function updateHoverRing(key) {
@@ -2068,6 +2114,325 @@ function lagrangePos(primaryKey, jd, sign /* +1 = L4, -1 = L5 */) {
     };
 }
 const PLANET_FN_LOOKUP = Object.fromEntries(BODIES.map(b => [b.key, b.fn]));
+
+// ════════════════════════════════════════════════════════════════════
+// Futuristic simulation FX — holographic grid, motion trails, reticle,
+// velocity vector, sun lens streak. All driven once per frame from
+// updateFuturisticFX() which is called inside tick().
+// ════════════════════════════════════════════════════════════════════
+
+// ── Holographic ecliptic grid ────────────────────────────────────────
+// A flat shader plane on the ecliptic (XZ in scene space) with concentric
+// rings + radial spokes that fade with distance from origin. Provides a
+// futuristic "targeting deck" reference frame without competing with the
+// orbit lines visually.
+const fxGridUniforms = {
+    uTime:    { value: 0 },
+    uColor:   { value: new THREE.Color(0x6cd0ff) },
+    uPulse:   { value: 0 },
+};
+{
+    const R = 220;
+    const grid = new THREE.Mesh(
+        new THREE.PlaneGeometry(R * 2, R * 2, 1, 1),
+        new THREE.ShaderMaterial({
+            uniforms: fxGridUniforms,
+            transparent:true, depthWrite:false, side:THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            vertexShader: `
+                varying vec2 vXZ;
+                void main() {
+                    vXZ = position.xy;
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }`,
+            fragmentShader: `
+                uniform float uTime;
+                uniform vec3  uColor;
+                uniform float uPulse;
+                varying vec2 vXZ;
+                void main() {
+                    float r   = length(vXZ);
+                    float ang = atan(vXZ.y, vXZ.x);
+                    // Concentric rings every 6 scene units (~Earth orbit).
+                    float ring = abs(fract(r / 6.0 - 0.5) - 0.5) * 2.0;
+                    float ringLine = smoothstep(0.94, 1.0, 1.0 - ring);
+                    // Radial spokes every 30°.
+                    float spoke = abs(fract(ang * (12.0 / 6.2831853) - 0.5) - 0.5) * 2.0;
+                    float spokeLine = smoothstep(0.96, 1.0, 1.0 - spoke);
+                    // Sweeping radar arm.
+                    float sweepAng = mod(uTime * 0.18, 6.2831853);
+                    float dAng = mod(ang - sweepAng + 6.2831853, 6.2831853);
+                    float sweep = exp(-dAng * 4.5) * 0.55;
+                    // Distance falloff so the grid recedes into the dark.
+                    float falloff = 1.0 - smoothstep(12.0, 180.0, r);
+                    float core    = (1.0 - smoothstep(0.0, 40.0, r)) * 0.18;
+                    float pulse   = uPulse * smoothstep(0.5, 1.0, ringLine);
+                    float a = (ringLine * 0.45 + spokeLine * 0.30 + sweep + core + pulse) * falloff;
+                    gl_FragColor = vec4(uColor, a * 0.85);
+                }`,
+        }),
+    );
+    grid.rotation.x = -Math.PI / 2;          // lay flat on the ecliptic
+    grid.position.y = -0.001;                // hairline below origin
+    grid.renderOrder = -1;                   // draw behind everything else
+    scene.add(grid);
+}
+
+// ── Per-body motion trails ───────────────────────────────────────────
+// Deterministic comet-like arc traces sampled backward from the current
+// JD over a fraction of each body's orbital period. Recomputed on every
+// JD change (cheap: 8 planets × 80 samples ≈ 640 fn() calls). Uses a
+// shader with vertex-attribute alpha so the tail fades to zero behind
+// the body, with the leading-edge tip pulled toward white for a hot tip.
+const TRAIL_N = 80;
+const TRAIL_FRAC = 0.20;      // fraction of orbital period covered
+const trails = {};            // key → { line, geo, mat, color }
+{
+    const trailVS = `
+        attribute float aLife;     // 0 (tail) -> 1 (head)
+        varying float vLife;
+        void main() {
+            vLife = aLife;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`;
+    const trailFS = `
+        uniform vec3 uColor;
+        varying float vLife;
+        void main() {
+            float a = pow(vLife, 1.4);
+            vec3 col = mix(uColor * 0.55, mix(uColor, vec3(1.0), 0.65), vLife);
+            gl_FragColor = vec4(col, a * 0.78);
+        }`;
+    for (const body of BODIES) {
+        const positions = new Float32Array(TRAIL_N * 3);
+        const lives     = new Float32Array(TRAIL_N);
+        for (let i = 0; i < TRAIL_N; i++) lives[i] = i / (TRAIL_N - 1);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geo.setAttribute('aLife',    new THREE.Float32BufferAttribute(lives,     1));
+        const mat = new THREE.ShaderMaterial({
+            uniforms: { uColor: { value: new THREE.Color(body.color) } },
+            vertexShader: trailVS, fragmentShader: trailFS,
+            transparent:true, depthWrite:false,
+            blending:THREE.AdditiveBlending,
+        });
+        const line = new THREE.Line(geo, mat);
+        line.frustumCulled = false;
+        scene.add(line);
+        trails[body.key] = { line, geo, mat, body };
+    }
+}
+let lastTrailJd = -1e12;
+function refreshTrails(jd) {
+    for (const body of BODIES) {
+        const t = trails[body.key];
+        if (!t) continue;
+        const T = PERIOD_D[body.key] || 365.25;
+        const span = T * TRAIL_FRAC;
+        const arr = t.geo.attributes.position.array;
+        for (let i = 0; i < TRAIL_N; i++) {
+            const f = i / (TRAIL_N - 1);          // 0 (oldest) -> 1 (now)
+            const sampleJd = jd - (1 - f) * span;
+            const p = body.fn(sampleJd);
+            const [x, y, z] = auToScene(p.x_AU, p.y_AU, p.z_AU);
+            arr[i*3] = x; arr[i*3+1] = y; arr[i*3+2] = z;
+        }
+        t.geo.attributes.position.needsUpdate = true;
+        t.geo.computeBoundingSphere();
+    }
+    lastTrailJd = jd;
+}
+
+// ── Animated targeting reticle for the selected body ─────────────────
+// Two counter-rotating dashed arc rings + a crosshair, billboarded to
+// face the camera. Replaces the static selection ring effect with
+// something that reads as "locked target" in a sci-fi UI.
+function makeReticleArcs(color, segments, gapDeg = 18) {
+    // Build a ring with periodic alpha gaps via vertex attribute.
+    const N = segments * 60;
+    const positions = new Float32Array(N * 3);
+    const alphas    = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+        const a = (i / N) * Math.PI * 2;
+        positions[i*3]     = Math.cos(a);
+        positions[i*3 + 1] = Math.sin(a);
+        positions[i*3 + 2] = 0;
+        // Periodic alpha — gapDeg of every (360/segments)°.
+        const seg = (i / N) * segments;
+        const frac = seg - Math.floor(seg);
+        alphas[i] = (frac < 1.0 - gapDeg / (360 / segments)) ? 1.0 : 0.0;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('aAlpha',   new THREE.Float32BufferAttribute(alphas,    1));
+    const mat = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color(color) } },
+        vertexShader: `
+            attribute float aAlpha;
+            varying float vA;
+            void main() {
+                vA = aAlpha;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }`,
+        fragmentShader: `
+            uniform vec3 uColor;
+            varying float vA;
+            void main() {
+                if (vA < 0.5) discard;
+                gl_FragColor = vec4(uColor, 0.92);
+            }`,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    });
+    const line = new THREE.LineLoop(geo, mat);
+    line.renderOrder = 11;
+    return line;
+}
+function makeReticleCross(color, len = 0.25) {
+    const positions = new Float32Array([
+        -1 - len, 0, 0,   -1, 0, 0,
+         1, 0, 0,    1 + len, 0, 0,
+        0, -1 - len, 0,   0, -1, 0,
+        0,  1, 0,    0,  1 + len, 0,
+    ]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    const mat = new THREE.LineBasicMaterial({
+        color, transparent:true, opacity:0.85, depthWrite:false,
+        blending:THREE.AdditiveBlending,
+    });
+    const seg = new THREE.LineSegments(geo, mat);
+    seg.renderOrder = 11;
+    return seg;
+}
+const reticle = new THREE.Group();
+reticle.userData.outer = makeReticleArcs(0xb78cff, 4, 18);
+reticle.userData.inner = makeReticleArcs(0xeaf6ff, 6, 12);
+reticle.userData.inner.scale.setScalar(0.78);
+reticle.userData.cross = makeReticleCross(0xb78cff, 0.30);
+reticle.add(reticle.userData.outer);
+reticle.add(reticle.userData.inner);
+reticle.add(reticle.userData.cross);
+reticle.visible = false;
+scene.add(reticle);
+
+// ── Velocity vector for the selected body ────────────────────────────
+// A short bright arrow in the body's instantaneous direction of travel,
+// computed via finite-difference of the ephemeris at ±0.5 d.
+const velArrow = new THREE.ArrowHelper(
+    new THREE.Vector3(1, 0, 0),
+    new THREE.Vector3(0, 0, 0),
+    1.0,
+    0xb78cff, 0.30, 0.18,
+);
+velArrow.line.material = new THREE.LineBasicMaterial({
+    color:0xb78cff, transparent:true, opacity:0.9,
+    blending:THREE.AdditiveBlending, depthWrite:false,
+});
+velArrow.cone.material = new THREE.MeshBasicMaterial({
+    color:0xb78cff, transparent:true, opacity:0.9,
+    blending:THREE.AdditiveBlending, depthWrite:false,
+});
+velArrow.visible = false;
+scene.add(velArrow);
+
+// ── Sun lens streak ──────────────────────────────────────────────────
+// Horizontal additive streak billboard at the Sun. With UnrealBloomPass
+// active this blooms into a wide cinematic flare without requiring an
+// extra pass.
+const sunStreakUniforms = { uTime: { value: 0 } };
+{
+    const streak = new THREE.Mesh(
+        new THREE.PlaneGeometry(7.5, 0.40),
+        new THREE.ShaderMaterial({
+            uniforms: sunStreakUniforms,
+            transparent:true, depthWrite:false,
+            blending:THREE.AdditiveBlending,
+            vertexShader:`varying vec2 vUv; void main(){ vUv=uv;
+                gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }`,
+            fragmentShader:`
+                uniform float uTime;
+                varying vec2 vUv;
+                void main() {
+                    vec2 d = vUv - vec2(0.5);
+                    float sx = exp(-pow(d.x * 2.6, 2.0));
+                    float sy = exp(-pow(d.y * 22.0, 2.0));
+                    float core = sx * sy;
+                    float pulse = 0.85 + 0.15 * sin(uTime * 1.7);
+                    gl_FragColor = vec4(vec3(1.0, 0.92, 0.62) * core * pulse * 1.6, core);
+                }`,
+        }),
+    );
+    scene.add(streak);
+    fxGridUniforms.streak = streak;        // stash for billboarding in updateFX
+}
+
+// ── FX update tick ───────────────────────────────────────────────────
+const _fxTmp = new THREE.Vector3();
+const _fxTmp2 = new THREE.Vector3();
+function updateFuturisticFX(now) {
+    const tSec = now * 0.001;
+    fxGridUniforms.uTime.value  = tSec;
+    sunStreakUniforms.uTime.value = tSec;
+
+    // Pulse the grid stronger while playing/scrubbing.
+    const playing = (typeof state !== 'undefined') && (state.playing || !state.live);
+    fxGridUniforms.uPulse.value += ((playing ? 0.18 : 0.04) - fxGridUniforms.uPulse.value) * 0.06;
+
+    // Rebuild deterministic motion trails when the simulation epoch
+    // changes appreciably (≥ 0.4 d for live tick, instant on scrub).
+    if (typeof state !== 'undefined' && Math.abs(state.jd - lastTrailJd) > 0.4) {
+        refreshTrails(state.jd);
+    }
+
+    // Sun lens streak — billboard to camera so the streak stays
+    // horizontal in screen space (plane local XY = screen X/Y).
+    if (fxGridUniforms.streak) {
+        const streak = fxGridUniforms.streak;
+        streak.position.set(0, 0, 0);
+        streak.quaternion.copy(camera.quaternion);
+    }
+
+    // Targeting reticle on selected body.
+    if (selected && selected.key && selected.key !== 'sun' && meshes[selected.key]) {
+        const m = meshes[selected.key];
+        m.getWorldPosition(_fxTmp);
+        reticle.position.copy(_fxTmp);
+        const r = (BODY_SIZE_BY_KEY[selected.key] || 0.18) * 2.6;
+        reticle.scale.setScalar(r);
+        reticle.lookAt(camera.position);
+        // Counter-rotation around the camera-facing axis.
+        reticle.userData.outer.rotation.z =  tSec * 0.35;
+        reticle.userData.inner.rotation.z = -tSec * 0.55;
+        reticle.userData.cross.rotation.z =  Math.sin(tSec * 0.6) * 0.10;
+        reticle.visible = true;
+    } else {
+        reticle.visible = false;
+    }
+
+    // Velocity arrow on selected body — finite-difference ephemeris.
+    if (selected && selected.key && selected.key !== 'sun' && typeof state !== 'undefined' && selected.fn) {
+        const dt = 0.5;       // days
+        const a = selected.fn(state.jd - dt);
+        const b = selected.fn(state.jd + dt);
+        const [ax, ay, az] = auToScene(a.x_AU, a.y_AU, a.z_AU);
+        const [bx, by, bz] = auToScene(b.x_AU, b.y_AU, b.z_AU);
+        _fxTmp.set(bx - ax, by - ay, bz - az);
+        const speed = _fxTmp.length();
+        if (speed > 1e-6) {
+            _fxTmp.normalize();
+            const m = meshes[selected.key];
+            m.getWorldPosition(_fxTmp2);
+            const r = BODY_SIZE_BY_KEY[selected.key] || 0.18;
+            const arrowLen = Math.max(r * 4.5, 0.6);
+            velArrow.position.copy(_fxTmp2);
+            velArrow.setDirection(_fxTmp);
+            velArrow.setLength(arrowLen, arrowLen * 0.32, arrowLen * 0.20);
+            velArrow.visible = true;
+        }
+    } else {
+        velArrow.visible = false;
+    }
+}
 
 // ── Legend ───────────────────────────────────────────────────────────
 const legend = document.getElementById('tm-legend');
@@ -3879,7 +4244,8 @@ function tick(now) {
     updateArrows(now);
     maybePostStreamRequest(now);
     controls.update();
-    renderer.render(scene, camera);
+    updateFuturisticFX(now);
+    composer.render();
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(t => { lastT = t; tick(t); });
